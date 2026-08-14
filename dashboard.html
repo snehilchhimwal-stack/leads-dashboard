@@ -1030,6 +1030,7 @@ const HEADER_ALIASES = {
   rm_is_active: ['rm_is_active','rm is active'],
   project: ['project'],
   region: ['region'],
+  project_region: ['project_region','project region'],
   client: ['client'],
   lead_created_at: ['lead_created_at','lead created at','created_at','created at','lead created','date created'],
   group_source: ['group_source','group source','source'],
@@ -1411,6 +1412,7 @@ async function fetchAndRender(){
           rm_is_active: getVal(c, 'rm_is_active') || '',
           project: getVal(c, 'project') || '',
           region: getVal(c, 'region') || 'Unassigned',
+          project_region: getVal(c, 'project_region') || '',
           client: getVal(c, 'client') || '',
           lead_created_at: createdDate ? createdDate.toISOString() : getVal(c, 'lead_created_at'),
           group_source: getVal(c, 'group_source'),
@@ -3069,7 +3071,7 @@ function renderRegionTable(){
   leads.forEach(l => {
     // region_parent was removed from the export, so region alone is the key.
     const key = l.region;
-    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(l.region, l.group_source) || '—', total:0, oppPlus:0, critical:0, notConn:0, noCalls:0 };
+    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(effectiveRegion(l)) || '—', total:0, oppPlus:0, critical:0, notConn:0, noCalls:0 };
     const b = byRegion[key];
     b.total++;
     if (l.oppOrAbove) b.oppPlus++;
@@ -3816,25 +3818,25 @@ Object.keys(REGION_GROUP_MAP).forEach(k => {
   _REGION_LOOKUP[normRegionKey(k)] = REGION_GROUP_MAP[k];
 });
 
-// Same override as mainRegionFor, exposed for the Region FILTER (dropdown
-// + actual matching) rather than just the email-report grouping — "Loan"
-// isn't in the region column, it's carried in group_source, so leads with
-// group_source = Loan need to surface as region "Loan" here too, or
-// selecting "Loan" in the filter would just return nothing.
+// Single source of truth for "what region does this lead actually belong
+// to" — used by both the Region FILTER (dropdown + matching) and the
+// email-report grouping (mainRegionFor below). "Loan" isn't geography, so
+// it isn't reliably in the region column itself — it's been found under
+// project_region, and possibly group_source depending on how a given row
+// was tagged. Checked in that order; first match wins. Falls back to the
+// region column for everything else.
 function effectiveRegion(l){
+  if (normRegionKey(l.project_region || '') === 'loan') return 'Loan';
   if (normRegionKey(l.group_source || '') === 'loan') return 'Loan';
   return String(l.region || '').trim();
 }
 
 // Returns null for regions outside the reporting scope, so callers can
-// filter them out rather than silently creating a report for them.
-// groupSource is optional: "Loan" isn't a geography, it's a business line
-// carried in the group_source column (alongside "Google" etc.), not the
-// region column — a lead with group_source = Loan reports as region "Loan"
-// regardless of whatever its own region column happens to say.
-function mainRegionFor(rawRegion, groupSource){
-  if (groupSource != null && normRegionKey(groupSource) === 'loan') return 'Loan';
-
+// filter them out rather than silently creating a report for them. Callers
+// should pass effectiveRegion(l), not the raw region column, so "Loan" and
+// any other non-geography override is already resolved before this ever
+// looks at REGION_GROUP_MAP.
+function mainRegionFor(rawRegion){
   const key = normRegionKey(rawRegion);
   const direct = _REGION_LOOKUP[key];
   if (direct) return direct;
@@ -3883,7 +3885,7 @@ function reportScopeNotice(){
   const seen = {};
   leads.forEach(l => {
     const raw = String(l.region || '(blank)').trim() || '(blank)';
-    if (!seen[raw]) seen[raw] = { n: 0, flagged: 0, main: mainRegionFor(raw, l.group_source) };
+    if (!seen[raw]) seen[raw] = { n: 0, flagged: 0, main: mainRegionFor(effectiveRegion(l)) };
     seen[raw].n++;
     if (ISSUE_PRIORITY.some(r => l[r.key])) seen[raw].flagged++;
   });
@@ -3962,6 +3964,55 @@ const EMAIL_SIGNATURE = 'Regards,\nSnehil Chhimwal';
 // Sub-source filter above the report controls, same as before.
 const SUBJECT_SCOPE_SUFFIX = ' - Google Search & Non-UTM only';
 
+// HTML rendering for the Gmail-sent version of a report — mailto and Copy
+// still use the plain-text body below (mailto can't carry HTML at all;
+// Copy is meant for pasting into a chat/doc, where plain text is right).
+// Every style is inline and layout is table-based, since email clients
+// (Gmail, Outlook…) strip <style> blocks and have inconsistent CSS
+// support — this is standard practice for HTML email, not a stylistic
+// choice. sections' columns/rows are plain arrays rather than a fixed
+// {lead_id, created, age} shape, so the same renderer works for both the
+// per-RM report layout and the per-issue one, which show different data.
+function renderReportEmailHTML(opts){
+  const { eyebrow, title, subtitle, kpis, sections, footerNote } = opts;
+  const FONT = "font-family:Arial,Helvetica,sans-serif;";
+
+  const kpiCells = kpis.map(k => `<td style="padding:4px;">
+      <div style="background:${k.bg}; border-radius:8px; padding:14px 10px; text-align:center;">
+        <div style="${FONT} font-size:24px; font-weight:700; color:${k.fg}; line-height:1;">${esc(String(k.value))}</div>
+        <div style="${FONT} font-size:10.5px; color:#6b7280; margin-top:5px;">${esc(k.label)}</div>
+      </div>
+    </td>`).join('');
+
+  const sectionsHTML = sections.map(sec => {
+    const headerRow = `<tr style="background:#eef2ff;">${sec.columns.map(c =>
+      `<td style="padding:7px 10px; color:#4338ca; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ${FONT}">${esc(c)}</td>`
+    ).join('')}</tr>`;
+    const bodyRows = sec.rows.map((row, i) => `<tr style="${i > 0 ? 'border-top:1px solid #f0f0f0;' : ''}">${
+      row.map(cell => `<td style="padding:6px 10px; color:#374151; ${FONT}">${esc(String(cell))}</td>`).join('')
+    }</tr>`).join('');
+    return `<div style="margin-top:16px; border-left:4px solid #4338ca; background:#f5f5ff; border-radius:0 8px 8px 0; padding:12px 16px;">
+      <div style="${FONT} font-weight:700; font-size:14px; color:#1f2937;">${esc(sec.heading)}</div>
+      ${sec.subheading ? `<div style="${FONT} font-size:11.5px; color:#6b7280; margin-bottom:8px;">${esc(sec.subheading)}</div>` : ''}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">
+        ${headerRow}${bodyRows}
+      </table>
+    </div>`;
+  }).join('');
+
+  return `<div style="${FONT} max-width:640px; margin:0 auto; background:#ffffff; color:#1f2937;">
+    <div style="background:#4338ca; padding:22px 26px;">
+      <div style="color:#c7d2fe; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; margin-bottom:6px; ${FONT}">${esc(eyebrow)}</div>
+      <div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ${FONT}">${esc(title)}</div>
+      <div style="color:#e0e7ff; font-size:12.5px; ${FONT}">${esc(subtitle)}</div>
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;"><tr>${kpiCells}</tr></table>
+    ${sectionsHTML}
+    ${footerNote ? `<div style="margin-top:18px; font-size:11px; color:#9ca3af; ${FONT}">${esc(footerNote)}</div>` : ''}
+    <div style="margin-top:16px; font-size:13px; color:#374151; white-space:pre-line; ${FONT}">${esc(EMAIL_SIGNATURE)}</div>
+  </div>`;
+}
+
 function buildRegionReports(issueKey){
   const meta = ISSUE_REPORT_META[issueKey];
   if (!meta) return [];
@@ -3989,7 +4040,7 @@ function buildRegionReports(issueKey){
 
   let outOfScopeCount = 0;
   const inScope = matching.filter(l => {
-    const main = mainRegionFor(l.region, l.group_source);
+    const main = mainRegionFor(effectiveRegion(l));
     if (main) return true;
     outOfScopeCount++;
     // Record the raw text, not just a tally. A bare count told you leads
@@ -4000,7 +4051,7 @@ function buildRegionReports(issueKey){
     _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
     return false;
   });
-  const byRegion = groupBy(inScope, l => mainRegionFor(l.region, l.group_source));
+  const byRegion = groupBy(inScope, l => mainRegionFor(effectiveRegion(l)));
   _lastReportOutOfScope = outOfScopeCount;
 
   const dateStr = todayDateLabel();
@@ -4036,7 +4087,38 @@ function buildRegionReports(issueKey){
     const subject = `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${SUBJECT_SCOPE_SUFFIX}`;
     const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${regionLeads.length}${graceNote}\n\n${EMAIL_SIGNATURE}`;
 
-    return { region, subject, body, count: regionLeads.length, regionNames: [region] };
+    const ages = regionLeads.map(l => {
+      const created = parseDate(l.lead_created_at);
+      return created ? (now - created) / 36e5 : 0;
+    });
+    const html = renderReportEmailHTML({
+      eyebrow: 'Google Search Leads · SLA Monitor',
+      title: `${region} · ${meta.label}`,
+      subtitle: `${dateStr} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      kpis: [
+        { value: regionLeads.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: (ages.length ? Math.max(...ages) : 0).toFixed(1) + 'h', label: 'Oldest Flagged', bg: '#fef3c7', fg: '#b45309' },
+      ],
+      sections: Object.values(byRM).map(group => ({
+        heading: group[0].RM || 'Unassigned',
+        subheading: `Manager: ${group[0].TL || '—'}`,
+        columns: ['Lead ID', 'Created', 'Age'],
+        rows: group.map(l => {
+          const created = parseDate(l.lead_created_at);
+          return [
+            l.lead_id,
+            created ? istStamp(l.lead_created_at) : 'unknown',
+            created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
+          ];
+        }),
+      })),
+      footerNote: enforceGrace
+        ? `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`
+        : '',
+    });
+
+    return { region, subject, body, html, count: regionLeads.length, regionNames: [region] };
   });
 }
 
@@ -4428,16 +4510,31 @@ function encodeHeaderUtf8(str){
 function toBase64Url(str){
   return utf8ToBase64(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-function buildRawEmail(to, cc, subject, body){
+// htmlBody is optional. When present, sends multipart/alternative with
+// BOTH the plain text and HTML parts — standard practice for HTML email,
+// not just belt-and-suspenders: it's what lets a plain-text-preferring
+// client (or spam filter) fall back gracefully instead of only ever
+// offering the styled version.
+function buildRawEmail(to, cc, subject, body, htmlBody){
   const headers = [
     `To: ${to}`,
     cc ? `Cc: ${cc}` : null,
     `Subject: ${encodeHeaderUtf8(subject)}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-  ].filter(Boolean).join('\r\n');
-  return toBase64Url(`${headers}\r\n\r\n${body}`);
+  ];
+
+  if (!htmlBody) {
+    headers.push('Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit');
+    return toBase64Url(`${headers.filter(Boolean).join('\r\n')}\r\n\r\n${body}`);
+  }
+
+  const boundary = 'gsl_boundary_' + Math.random().toString(36).slice(2);
+  headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+  const parts =
+    `--${boundary}\r\nContent-Type: text/plain; charset="UTF-8"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${body}` +
+    `\r\n--${boundary}\r\nContent-Type: text/html; charset="UTF-8"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${htmlBody}` +
+    `\r\n--${boundary}--`;
+  return toBase64Url(`${headers.filter(Boolean).join('\r\n')}\r\n\r\n${parts}`);
 }
 
 async function performGmailSend(pending){
@@ -4445,7 +4542,7 @@ async function performGmailSend(pending){
   const btn = btnId ? document.getElementById(btnId) : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
-    const raw = buildRawEmail(to, cc, report.subject, report.body);
+    const raw = buildRawEmail(to, cc, report.subject, report.body, report.html);
     const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       headers: { Authorization: `Bearer ${gmailAccessToken}`, 'Content-Type': 'application/json' },
@@ -4711,14 +4808,14 @@ function buildRegionWiseReports(combineAll){
       if (anyFlag) graceBlocked++;
       return;
     }
-    const main = mainRegionFor(l.region, l.group_source);
+    const main = mainRegionFor(effectiveRegion(l));
     if (!main) {
       outOfScope++;
       const raw = String(l.region || '(blank)').trim() || '(blank)';
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at });
   });
 
   _lastReportGraceBlocked = graceBlocked;
@@ -4788,7 +4885,28 @@ ${table}
 
 ${EMAIL_SIGNATURE}`;
 
-    return { region: regionLabel, subject, body, count: sorted.length, issueLabel: 'All issues', regionNames };
+    const html = renderReportEmailHTML({
+      eyebrow: 'Google Search Leads · SLA Monitor',
+      title: `${regionLabel} · All Issues`,
+      subtitle: `${dateRange} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      kpis: [
+        { value: sorted.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: regionNames.length, label: regionNames.length === 1 ? 'Region' : 'Regions', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: Object.keys(tally).length, label: Object.keys(tally).length === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
+      ],
+      sections: Object.keys(tally).sort().map(issueName => ({
+        heading: issueName,
+        subheading: `${tally[issueName].length} lead${tally[issueName].length === 1 ? '' : 's'}`,
+        columns: ['Lead ID', 'Region', 'RM', 'Age'],
+        rows: tally[issueName].map(r => {
+          const created = parseDate(r.lead_created_at);
+          return [r.lead_id, r.subRegion, r.RM, created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
+        }),
+      })),
+      footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded, except for the 10-minute first-contact check — RMs are given that window to work a fresh lead.`,
+    });
+
+    return { region: regionLabel, subject, body, html, count: sorted.length, issueLabel: 'All issues', regionNames };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
