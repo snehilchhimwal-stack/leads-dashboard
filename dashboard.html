@@ -1956,7 +1956,7 @@ function applyFiltersAndRender(){
 
   const filtered = allParsedLeads.filter(l => {
     if (projSel.size && !projSel.has(l.project)) return false;
-    if (regSel.size && !regSel.has(l.region)) return false;
+    if (regSel.size && !regSel.has(effectiveRegion(l))) return false;
     if (tlSel.size && !tlSel.has(l.TL)) return false;
     if (srcSel.size && !srcSelLower.has(String(l.group_source).trim().toLowerCase())) return false;
     if (bucketSel.size && !bucketSel.has(String(l.source_bucket).trim())) return false;
@@ -2035,14 +2035,17 @@ function clearSlaHistory(){
 }
 
 function buildFilterUI(){
-  const uniqueVals = (key) => Array.from(new Set(
-    allParsedLeads.map(l => String(l[key]).trim()).filter(v => v !== '')
+  // getter lets a field's filter options come from a DERIVED value instead
+  // of the raw column — used for Region, so "Loan" (carried in group_source,
+  // not the region column — see effectiveRegion) shows up as its own option.
+  const uniqueVals = (key, getter) => Array.from(new Set(
+    allParsedLeads.map(l => String(getter ? getter(l) : l[key]).trim()).filter(v => v !== '')
   )).sort();
 
-  const countsFor = (key) => {
+  const countsFor = (key, getter) => {
     const counts = {};
     allParsedLeads.forEach(l => {
-      const v = String(l[key]).trim();
+      const v = String(getter ? getter(l) : l[key]).trim();
       if (!v) return;
       counts[v] = (counts[v] || 0) + 1;
     });
@@ -2050,7 +2053,7 @@ function buildFilterUI(){
   };
 
   buildMultiSelect('msProject', 'Project', uniqueVals('project'), countsFor('project'), filterState.project, applyFiltersAndRender);
-  buildMultiSelect('msRegion', 'Region', uniqueVals('region'), countsFor('region'), filterState.region, applyFiltersAndRender);
+  buildMultiSelect('msRegion', 'Region', uniqueVals('region', effectiveRegion), countsFor('region', effectiveRegion), filterState.region, applyFiltersAndRender);
   buildMultiSelect('msTL', 'TL', uniqueVals('TL'), countsFor('TL'), filterState.TL, applyFiltersAndRender);
   buildMultiSelect('msSource', 'Source', uniqueVals('group_source'), countsFor('group_source'), filterState.source, applyFiltersAndRender);
   // Sub-division of the Google source. Empty selection = all buckets, so the
@@ -3066,7 +3069,7 @@ function renderRegionTable(){
   leads.forEach(l => {
     // region_parent was removed from the export, so region alone is the key.
     const key = l.region;
-    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(l.region) || '—', total:0, oppPlus:0, critical:0, notConn:0, noCalls:0 };
+    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(l.region, l.group_source) || '—', total:0, oppPlus:0, critical:0, notConn:0, noCalls:0 };
     const b = byRegion[key];
     b.total++;
     if (l.oppOrAbove) b.oppPlus++;
@@ -3813,9 +3816,25 @@ Object.keys(REGION_GROUP_MAP).forEach(k => {
   _REGION_LOOKUP[normRegionKey(k)] = REGION_GROUP_MAP[k];
 });
 
+// Same override as mainRegionFor, exposed for the Region FILTER (dropdown
+// + actual matching) rather than just the email-report grouping — "Loan"
+// isn't in the region column, it's carried in group_source, so leads with
+// group_source = Loan need to surface as region "Loan" here too, or
+// selecting "Loan" in the filter would just return nothing.
+function effectiveRegion(l){
+  if (normRegionKey(l.group_source || '') === 'loan') return 'Loan';
+  return String(l.region || '').trim();
+}
+
 // Returns null for regions outside the reporting scope, so callers can
 // filter them out rather than silently creating a report for them.
-function mainRegionFor(rawRegion){
+// groupSource is optional: "Loan" isn't a geography, it's a business line
+// carried in the group_source column (alongside "Google" etc.), not the
+// region column — a lead with group_source = Loan reports as region "Loan"
+// regardless of whatever its own region column happens to say.
+function mainRegionFor(rawRegion, groupSource){
+  if (groupSource != null && normRegionKey(groupSource) === 'loan') return 'Loan';
+
   const key = normRegionKey(rawRegion);
   const direct = _REGION_LOOKUP[key];
   if (direct) return direct;
@@ -3864,7 +3883,7 @@ function reportScopeNotice(){
   const seen = {};
   leads.forEach(l => {
     const raw = String(l.region || '(blank)').trim() || '(blank)';
-    if (!seen[raw]) seen[raw] = { n: 0, flagged: 0, main: mainRegionFor(raw) };
+    if (!seen[raw]) seen[raw] = { n: 0, flagged: 0, main: mainRegionFor(raw, l.group_source) };
     seen[raw].n++;
     if (ISSUE_PRIORITY.some(r => l[r.key])) seen[raw].flagged++;
   });
@@ -3970,7 +3989,7 @@ function buildRegionReports(issueKey){
 
   let outOfScopeCount = 0;
   const inScope = matching.filter(l => {
-    const main = mainRegionFor(l.region);
+    const main = mainRegionFor(l.region, l.group_source);
     if (main) return true;
     outOfScopeCount++;
     // Record the raw text, not just a tally. A bare count told you leads
@@ -3981,7 +4000,7 @@ function buildRegionReports(issueKey){
     _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
     return false;
   });
-  const byRegion = groupBy(inScope, l => mainRegionFor(l.region));
+  const byRegion = groupBy(inScope, l => mainRegionFor(l.region, l.group_source));
   _lastReportOutOfScope = outOfScopeCount;
 
   const dateStr = todayDateLabel();
@@ -4692,7 +4711,7 @@ function buildRegionWiseReports(combineAll){
       if (anyFlag) graceBlocked++;
       return;
     }
-    const main = mainRegionFor(l.region);
+    const main = mainRegionFor(l.region, l.group_source);
     if (!main) {
       outOfScope++;
       const raw = String(l.region || '(blank)').trim() || '(blank)';
@@ -5190,7 +5209,7 @@ function applyMovementFilters(rawRows){
 
   return rawRows.filter(r => {
     if (projSel.size && !projSel.has(r.project)) return false;
-    if (regSel.size && !regSel.has(r.region)) return false;
+    if (regSel.size && !regSel.has(effectiveRegion(r))) return false;
     if (tlSel.size && !tlSel.has(r.TL)) return false;
     if (srcSel.size && !srcSelLower.has(String(r.group_source).trim().toLowerCase())) return false;
     if (bucketSel.size && !bucketSel.has(String(r.source_bucket).trim())) return false;
