@@ -661,7 +661,7 @@
 
 
     <section id="sec-duetoday">
-      <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Any Open Lead — Behind on Today's Calls</div><div class="section-count" id="dueTodayCount"></div></div>
+      <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Behind on Today's Calls</div><div class="section-count" id="dueTodayCount"></div></div>
       <div class="filter-summary">Open leads (not closed, not Opportunity+) with fewer than 5 call attempts made TODAY (IST), past grace. For a lead created today, today's effort is the call_attempts column directly. For an older lead still open, there's no true per-day counter in the export, so this counts CRM-log entries timestamped today as the closest available proxy — undercounts if a real call wasn't logged as a comment.</div>
       <div class="section-scroll"><div class="card-list" id="dueTodayList"></div></div>
     </section>
@@ -695,7 +695,7 @@
             <option value="notUpdated">Not Updated</option>
             <option value="notConnected">Not Connected in 10 Minutes</option>
             <option value="followupOverdue">Follow-up Overdue (4h Post-Connect)</option>
-            <option value="dueToday" selected>Any Open Lead — Behind on Today's Calls</option>
+            <option value="dueToday" selected>Behind on Today's Calls</option>
             <option value="stuck">Stuck — Open 48h+, Not Yet Opportunity</option>
           </select>
         </label>
@@ -1874,7 +1874,7 @@ function enrichLead(l){
     }
   }
 
-  // Any Open Lead — Behind on Today's Calls ("5 calls/day", every day the lead stays open —
+  // Behind on Today's Calls ("5 calls/day", every day the lead stays open —
   // not just its creation day). For a lead created today, the lifetime-total
   // call_attempts IS today's effort (it didn't exist before today), so that
   // column is used directly. For a lead still open on day 2+, the export has
@@ -2507,7 +2507,7 @@ function renderAll(){
   document.getElementById('kpiStrip').innerHTML = `
     <div class="kpi"><div class="kpi-num mono">${total}</div><div class="kpi-label">Total Leads</div></div>
     <div class="kpi"><div class="kpi-num mono" style="color:var(--green)">${oppPlus}</div><div class="kpi-label">Opportunity+</div></div>
-    <div class="kpi critical"><div class="kpi-num mono">${dueTodayCount}</div><div class="kpi-label">Any Open Lead — Behind on Today's Calls</div></div>
+    <div class="kpi critical"><div class="kpi-num mono">${dueTodayCount}</div><div class="kpi-label">Behind on Today's Calls</div></div>
     <div class="kpi"><div class="kpi-num mono" style="color:var(--amber)">${notConn}</div><div class="kpi-label">Not Connected in 10 min</div></div>
     <div class="kpi"><div class="kpi-num mono">${noCalls}</div><div class="kpi-label">No Attempts Yet</div></div>
   `;
@@ -3113,7 +3113,7 @@ function renderRegionTable(){
   const table = document.getElementById('regionTable');
   table.querySelector('thead').innerHTML = `<tr>
     <th>Region</th><th>Reports as</th><th style="text-align:right">Total</th>
-    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Any Open Lead, Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right">Critical %</th>
     <th style="text-align:right">Not Conn. 10m</th><th style="text-align:right">No Attempts</th></tr>`;
 
@@ -3155,7 +3155,7 @@ function renderTLTable(){
   const table = document.getElementById('tlTable');
   table.querySelector('thead').innerHTML = `<tr>
     <th>TL</th><th style="text-align:right">RMs</th><th style="text-align:right">Total Leads</th>
-    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Any Open Lead, Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -3192,7 +3192,7 @@ function renderProjectTable(){
   table.querySelector('thead').innerHTML = `<tr>
     <th>Project</th><th style="text-align:right">Leads</th>
     <th style="text-align:right">Opp+</th><th style="text-align:right">Opp %</th>
-    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Any Open Lead, Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right" title="Payment received, paperwork pending">Soft Bk</th><th style="text-align:right">Booking</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -3261,7 +3261,7 @@ function renderRMTable(){
     <th>RM</th><th>Region</th><th style="min-width:140px">Workload</th>
     <th style="text-align:right">Total</th><th style="text-align:right">Open</th>
     <th style="text-align:right">Opp+</th>
-    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Any Open Lead, Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
+    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -3349,13 +3349,13 @@ function renderAlertCard(l, idx, prefix, requiredCalls){
 // meant the RM list disappeared exactly where a post-mortem needs it.
 function collationBadge(l){
   if (!l.collatedFrom || l.collatedFrom < 2) return '';
-  const others = (l.collatedRMs || []).filter(r => r && r !== l.RM);
+  const leadIds = (l.collatedLeadIds || []).join(', ');
+  const rms = (l.collatedRMs || []).join(', ');
 
-  const countChip = ` <span class="chip dim-chip" title="Merged from ${l.collatedFrom} copies of this customer">merged ×${l.collatedFrom}</span>`;
-  if (!others.length) return countChip;
-
-  return countChip
-    + ` <span class="chip amber" title="These RMs also hold a copy of this customer">also with: ${esc(others.join(', '))}</span>`;
+  let out = ` <span class="chip dim-chip" title="Merged from ${l.collatedFrom} copies of this customer">merged ×${l.collatedFrom}</span>`;
+  if (leadIds) out += ` <span class="chip amber" title="Every lead_id merged into this record">IDs: ${esc(leadIds)}</span>`;
+  if (rms) out += ` <span class="chip amber" title="Every RM who held a copy of this customer">RMs: ${esc(rms)}</span>`;
+  return out;
 }
 
 // Direct check #1: created today (calendar day), under 5 calls, open
@@ -3681,9 +3681,8 @@ document.getElementById('dateToInput').addEventListener('change', () => {
 // rather than duplicate rows per issue.
 
 // Priority order for the CSV export only — a lead can technically match
-// several categories at once (e.g. "Stuck" and "Any Open Lead — Behind on
-// Today's Calls" are both legitimately true for the same old, under-called
-// lead), but the
+// several categories at once (e.g. "Stuck" and "Behind on Today's Calls"
+// are both legitimately true for the same old, under-called lead), but the
 // download should show one clear primary reason per row rather than every
 // technically-true label stacked together. Dashboard sections themselves
 // are unaffected — each still independently shows everything matching its
@@ -3693,7 +3692,7 @@ const ISSUE_PRIORITY = [
   { key: 'isNotUpdated', label: 'Not Updated' },
   { key: 'firstContactBreach', label: 'Not Connected in 10 Minutes' },
   { key: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)' },
-  { key: 'underCalledToday', label: "Any Open Lead — Behind on Today's Calls" },
+  { key: 'underCalledToday', label: "Behind on Today's Calls" },
   { key: 'stageStuck48h', label: 'Stuck — Open 48h+, Not Yet Opportunity' },
 ];
 
@@ -3711,7 +3710,7 @@ const ISSUE_COLOR_MAP = {
   "Not Updated": 'var(--purple)',
   "Not Connected in 10 Minutes": 'var(--amber)',
   "Follow-up Overdue (4h Post-Connect)": 'var(--red)',
-  "Any Open Lead — Behind on Today's Calls": 'var(--blue)',
+  "Behind on Today's Calls": 'var(--blue)',
   "Stuck — Open 48h+, Not Yet Opportunity": 'var(--teal)',
 };
 const ISSUE_COLOR_FALLBACK = ['var(--blue)', 'var(--red)', 'var(--amber)', 'var(--purple)', 'var(--teal)', 'var(--green)'];
@@ -3942,7 +3941,7 @@ const ISSUE_REPORT_META = {
     intro: 'Please find below the connected {SOURCE} leads with no CRM update in the last 4 hours.',
   },
   dueToday: {
-    flag: 'underCalledToday', label: "Any Open Lead — Behind on Today's Calls",
+    flag: 'underCalledToday', label: "Behind on Today's Calls",
     intro: 'Please find below the {SOURCE} leads with fewer than 5 call attempts made today. For a lead created today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
   },
   stuck: {
