@@ -3928,6 +3928,28 @@ const ISSUE_REPORT_META = {
   },
 };
 
+// Keyed by FLAG, not label text — ISSUE_PRIORITY and ISSUE_REPORT_META use
+// slightly different label wording for the same issue (e.g. stageStuck48h
+// is "Stuck — Open 48h+, Not Yet Opportunity" in one and "Not Yet
+// Opportunity (Open 48h+)" in the other), so flag is the one identifier
+// guaranteed to match consistently between them. One professional,
+// specific recommended action per issue, shown in the email itself so the
+// recipient knows what to actually do, not just what's wrong.
+const ISSUE_ACTION_MAP = {
+  inactiveRmNewLead: "Reassign this lead to an active RM immediately — it cannot be worked as currently routed.",
+  firstContactBreach: "Attempt first contact with the customer immediately — the 10-minute response window has been missed.",
+  followupOverdue: "Reconnect with the customer without delay — the 4-hour post-connect follow-up window has lapsed.",
+  underCalledToday: "Complete the remaining call attempts for this lead today to meet the daily SOP requirement.",
+  stageStuck48h: "Review this lead and either progress it toward Opportunity or close it out — it has been open more than 48 hours with no advancement.",
+  isNotUpdated: "Update the CRM with this lead's current status — no activity has been logged since it was created.",
+};
+
+// reportableIssueFor() (used by the combined "all issues" report) returns
+// ISSUE_PRIORITY's label text, not a flag — this maps that label back to
+// its flag so ISSUE_ACTION_MAP can still be looked up from it.
+const _FLAG_BY_ISSUE_PRIORITY_LABEL = {};
+ISSUE_PRIORITY.forEach(rule => { _FLAG_BY_ISSUE_PRIORITY_LABEL[rule.label] = rule.key; });
+
 const IST_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // Email reports are read in India, so the date on them is the IST date.
@@ -3973,9 +3995,19 @@ const SUBJECT_SCOPE_SUFFIX = ' - Google Search & Non-UTM only';
 // choice. sections' columns/rows are plain arrays rather than a fixed
 // {lead_id, created, age} shape, so the same renderer works for both the
 // per-RM report layout and the per-issue one, which show different data.
+// action (top-level) renders one recommended-action callout under the
+// header — for reports where every lead shares one issue, so one action
+// covers the whole email. Sections can carry their OWN action instead
+// (sec.action) for reports that combine several issues, where each
+// section needs its own recommendation rather than one blanket one.
 function renderReportEmailHTML(opts){
-  const { eyebrow, title, subtitle, kpis, sections, footerNote } = opts;
+  const { eyebrow, title, region, subtitle, kpis, action, sections, footerNote } = opts;
   const FONT = "font-family:Arial,Helvetica,sans-serif;";
+
+  const actionBox = (text) => `<div style="margin-top:12px; border-left:4px solid #10b981; background:#ecfdf5; border-radius:0 8px 8px 0; padding:10px 14px;">
+      <div style="${FONT} font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; color:#059669;">Recommended Action</div>
+      <div style="${FONT} font-size:12.5px; color:#065f46; margin-top:3px;">${esc(text)}</div>
+    </div>`;
 
   const kpiCells = kpis.map(k => `<td style="padding:4px;">
       <div style="background:${k.bg}; border-radius:8px; padding:14px 10px; text-align:center;">
@@ -3997,6 +4029,7 @@ function renderReportEmailHTML(opts){
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">
         ${headerRow}${bodyRows}
       </table>
+      ${sec.action ? actionBox(sec.action) : ''}
     </div>`;
   }).join('');
 
@@ -4004,9 +4037,11 @@ function renderReportEmailHTML(opts){
     <div style="background:#4338ca; padding:22px 26px;">
       <div style="color:#c7d2fe; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; margin-bottom:6px; ${FONT}">${esc(eyebrow)}</div>
       <div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ${FONT}">${esc(title)}</div>
+      ${region ? `<div style="color:#ffffff; font-size:13px; font-weight:600; margin-bottom:2px; ${FONT}">Region: ${esc(region)}</div>` : ''}
       <div style="color:#e0e7ff; font-size:12.5px; ${FONT}">${esc(subtitle)}</div>
     </div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;"><tr>${kpiCells}</tr></table>
+    ${action ? actionBox(action) : ''}
     ${sectionsHTML}
     ${footerNote ? `<div style="margin-top:18px; font-size:11px; color:#9ca3af; ${FONT}">${esc(footerNote)}</div>` : ''}
     <div style="margin-top:16px; font-size:13px; color:#374151; white-space:pre-line; ${FONT}">${esc(EMAIL_SIGNATURE)}</div>
@@ -4093,8 +4128,10 @@ function buildRegionReports(issueKey){
     });
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
-      title: `${region} · ${meta.label}`,
+      title: meta.label,
+      region,
       subtitle: `${dateStr} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      action: ISSUE_ACTION_MAP[meta.flag] || '',
       kpis: [
         { value: regionLeads.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
@@ -4755,6 +4792,13 @@ function selectedRegionLabel(fallbackRegions){
 // window can only report "Not Connected in 10 Minutes" — every other issue
 // is suppressed until the lead is old enough, so the grace rule can't be
 // bypassed just by a different issue ranking higher.
+// Only considers issues ISSUE_REPORT_META actually knows how to email —
+// ISSUE_PRIORITY has entries (e.g. loggingGapBreach) deliberately excluded
+// from the report engine, and iterating the full list here would let one
+// of those slip into the combined "all issues" report by way of a lead
+// that isn't ALSO flagged for something genuinely emailable.
+const _EMAILABLE_FLAG_KEYS = new Set(Object.values(ISSUE_REPORT_META).map(m => m.flag));
+
 function reportableIssueFor(l, now){
   const created = parseDate(l.lead_created_at);
   if (!created) return null; // undatable — never email it
@@ -4762,6 +4806,7 @@ function reportableIssueFor(l, now){
   const withinGrace = ageHrs < CONFIG.LEAD_GRACE_HOURS;
 
   for (const rule of ISSUE_PRIORITY) {
+    if (!_EMAILABLE_FLAG_KEYS.has(rule.key)) continue;
     if (!l[rule.key]) continue;
     if (withinGrace && rule.key !== 'firstContactBreach') continue;
     return rule.label;
@@ -4887,7 +4932,8 @@ ${EMAIL_SIGNATURE}`;
 
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
-      title: `${regionLabel} · All Issues`,
+      title: 'All Issues',
+      region: regionLabel,
       subtitle: `${dateRange} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
       kpis: [
         { value: sorted.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
@@ -4897,6 +4943,7 @@ ${EMAIL_SIGNATURE}`;
       sections: Object.keys(tally).sort().map(issueName => ({
         heading: issueName,
         subheading: `${tally[issueName].length} lead${tally[issueName].length === 1 ? '' : 's'}`,
+        action: ISSUE_ACTION_MAP[_FLAG_BY_ISSUE_PRIORITY_LABEL[issueName]] || '',
         columns: ['Lead ID', 'Region', 'RM', 'Age'],
         rows: tally[issueName].map(r => {
           const created = parseDate(r.lead_created_at);
