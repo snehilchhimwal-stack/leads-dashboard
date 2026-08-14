@@ -3332,7 +3332,7 @@ function renderAlertCard(l, idx, prefix, requiredCalls){
     : (l.ageHours != null ? `no comment in ${l.ageHours.toFixed(1)}h` : 'no comment');
 
   return `<div class="alert-card${l.past48h ? '' : ' amber-left'}">
-    <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+    <div class="alert-id">${leadIdentityLine(l)}</div>
     <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
     <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip amber">${l.call_attempts}/${requiredCalls} attempts</span> <span class="chip ${lastAt ? 'dim-chip' : 'amber'}">${esc(commentLabel)}</span></div>
     ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
@@ -3342,11 +3342,12 @@ function renderAlertCard(l, idx, prefix, requiredCalls){
 
 // Marks records built from several RM copies of the same customer, so a
 // merged call count or stage is never mistaken for one RM's own figures.
-// The other RMs holding a copy are always named inline: on any issue card
-// the question "who else has this customer" is the actionable one, and a
-// name hidden in a tooltip can't be read off a shared screen or a
-// screenshot. Previously closed leads collapsed to just the count, which
-// meant the RM list disappeared exactly where a post-mortem needs it.
+// Every RM holding a copy, and every merged lead_id, are always named
+// inline: on any issue card the question "who else has this customer" is
+// the actionable one, and a name hidden in a tooltip can't be read off a
+// shared screen or a screenshot. Previously closed leads collapsed to just
+// the count, which meant the RM list disappeared exactly where a
+// post-mortem needs it.
 function collationBadge(l){
   if (!l.collatedFrom || l.collatedFrom < 2) return '';
   const leadIds = (l.collatedLeadIds || []).join(', ');
@@ -3356,6 +3357,16 @@ function collationBadge(l){
   if (leadIds) out += ` <span class="chip amber" title="Every lead_id merged into this record">IDs: ${esc(leadIds)}</span>`;
   if (rms) out += ` <span class="chip amber" title="Every RM who held a copy of this customer">RMs: ${esc(rms)}</span>`;
   return out;
+}
+
+// The line shown at the top of every issue card. For a collated lead, the
+// badges already list every merged lead_id and every RM in full — putting
+// the primary copy's own id/RM in front of that just repeats what the
+// badges already say. A single-copy lead has no badge, so it still needs
+// its id/RM shown directly, or the card would have no identifier at all.
+function leadIdentityLine(l){
+  const badge = collationBadge(l);
+  return badge ? badge.trim() : `${esc(l.lead_id)} · ${esc(l.RM)}`;
 }
 
 // Direct check #1: created today (calendar day), under 5 calls, open
@@ -3382,7 +3393,7 @@ function renderDueTodayList(){
   el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
     const logId = 'today_' + idx;
     return `<div class="alert-card amber-left">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — ${l.isCreatedToday ? '<span class="chip red">New today</span> ' : ''}<span class="chip amber">${l.attemptsToday}/${CONFIG.MIN_CALLS_PER_DAY} attempts today</span></div>
       ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
@@ -3418,7 +3429,7 @@ function renderInactiveRmList(){
   }
   el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map(l => {
     return `<div class="alert-card">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">RM marked inactive</span> <span class="chip amber">${esc(l.TL || 'no TL')}</span></div>
     </div>`;
@@ -3585,7 +3596,7 @@ function renderRecordingList(){
     const stateNote = l.excluded ? 'closed' : (l.oppOrAbove ? 'Opportunity+' : 'open');
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
     return `<div class="alert-card${l.closedWithNoWork ? '' : ' amber-left'}">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — ${typeChip}</div>
       ${logToggleMarkup(l, logId)}
@@ -3606,7 +3617,7 @@ function renderNotConnectedList(){
   }
   el.innerHTML = truncationNotice(missed.length, MAX_CARDS) + missed.slice(0, MAX_CARDS).map(l => {
     return `<div class="alert-card amber-left">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">${esc(fmtWorkingWait(l.businessMinsWaiting))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · created ${esc(isoStamp(l.lead_created_at))}</div>
     </div>`;
@@ -3635,7 +3646,7 @@ function renderFollowupList(){
       : 'no dated comment since connecting';
     const logId = 'followuplog_' + idx;
     return `<div class="alert-card">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${esc(clockLabel)}</span> <span class="chip amber">${l.call_attempts} attempts</span></div>
       ${logToggleMarkup(l, logId)}
@@ -3655,7 +3666,7 @@ function renderLoggingGapList(){
   el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
     const logId = 'logginggaplog_' + idx;
     return `<div class="alert-card">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${l.call_attempts} calls, ${l.call_attempts - l.unloggedCallGap} logged</span> <span class="chip amber">gap of ${l.unloggedCallGap}</span></div>
       ${logToggleMarkup(l, logId)}
@@ -5911,7 +5922,7 @@ function renderOvernightCohort(toAt){
   listEl.innerHTML = truncationNotice(sorted.length, MAX_CARDS) + sorted.slice(0, MAX_CARDS).map(l => {
     const label = overnightStatusLabel(l);
     return `<div class="alert-card">
-      <div class="alert-id">${esc(l.lead_id)} · ${esc(l.RM)}${collationBadge(l)}</div>
+      <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} — <span class="chip ${label === 'Closed' ? 'dim-chip' : 'amber'}">${esc(label)}</span></div>
     </div>`;
