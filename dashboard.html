@@ -637,12 +637,13 @@
 
       <section id="sec-notupdated">
       <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Not Updated</div><div class="section-count" id="notUpdatedCount"></div></div>
-      <div class="filter-summary">Open leads still sitting in "Not Updated", aged 3–48 hours. Deliberately narrower than the Funnel's Not Updated band, which shows every lead in that stage including closed ones, leads under the 3h grace, and leads past 48h (those appear under Stuck instead).</div>
+      <div class="filter-summary">Open leads still sitting in "Not Updated", aged 3–48 hours. Deliberately narrower than the Funnel's Not Updated band, which shows every lead in that stage including closed ones, leads under the 3h grace, and leads past 48h (those appear under Stuck instead). Also includes any open, under-48h lead that has never connected at all past the 10-minute first-contact window, regardless of its stage text — see Not Connected in 10 Minutes below for the leads that DID eventually connect, just late.</div>
       <div class="section-scroll"><div class="card-list" id="notUpdatedList"></div></div>
     </section>
 
     <section id="sec-notconn">
         <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Not Connected in 10 Minutes</div><div class="section-count" id="notConnCount"></div></div>
+        <div class="filter-summary">A retrospective SLA-miss marker: open, under-48h leads that DID connect, but only after the 10-minute first-contact window had already passed. A lead that still hasn't connected at all isn't shown here — it's filed under Not Updated above instead, since "nothing has happened yet" is a different signal from "we got there late."</div>
         <div class="section-scroll"><div class="card-list" id="notConnList"></div></div>
       </section>
 
@@ -1830,26 +1831,44 @@ function enrichLead(l){
   // that just arrived isn't immediately flagged for not having 5 calls yet.
   const isCreatedToday = istSameDay(created, now);   // IST calendar day, not the browser's
   // Grace period from lead creation. Applies to every check below EXCEPT
-  // firstContactBreach — the 10-minute first-contact rule is precisely the
-  // one that must fire inside this window, since it exists to catch leads
-  // nobody has touched at all.
+  // the 10-minute first-contact rule (firstContactBreach and its
+  // neverConnectedPastWindow counterpart below) — that rule is precisely
+  // the one that must fire inside this window, since it exists to catch
+  // leads nobody has touched at all.
   const pastGrace = ageHours !== null && ageHours >= CONFIG.LEAD_GRACE_HOURS;
 
-  // Rule 1: first attempt within 10 minutes of assignment — measured in
+  // Connection signal, hoisted up from Rule 4 below — Rule 1 needs it too
+  // now: "connected" (last_connect / last_connect_time) is a stronger
+  // signal than call_attempts, which only proves a dial was placed, not
+  // that the customer actually picked up.
+  const hasConnected = !!(String(l.last_connect || '').trim() || parseDate(l.last_connect_time));
+  const connectDate = parseDate(l.last_connect_time);
+
+  // Rule 1: first contact within 10 minutes of assignment — measured in
   // WORKING minutes only, so time outside 9 AM–7 PM doesn't count against
-  // the RM. Once any call is logged, treat it as satisfied rather than
-  // trying to reconstruct exactly when the first call happened.
+  // the RM. Two distinct outcomes, deliberately kept apart:
+  //   - Connected, but only after the 10-minute window had already
+  //     passed: flagged HERE as a retrospective SLA miss — contact did
+  //     happen, just late.
+  //   - Never connected at all, window passed: NOT flagged here anymore —
+  //     folded into Not Updated below instead, since "still nothing has
+  //     happened" is a different (and more accurate) story than "we were
+  //     late." See neverConnectedPastWindow below.
   let firstContactStatus = 'N/A';
-  let businessMinsWaiting = null;
-  if (created) {
-    if (l.call_attempts === 0) {
-      businessMinsWaiting = businessMinutesBetween(created, now);
-      firstContactStatus = businessMinsWaiting > CONFIG.FIRST_CONTACT_SLA_MINUTES ? 'BREACHED' : 'OK';
-    } else {
-      firstContactStatus = 'OK';
-    }
+  let businessMinsToConnect = null;
+  if (created && connectDate) {
+    businessMinsToConnect = businessMinutesBetween(created, connectDate);
+    firstContactStatus = businessMinsToConnect > CONFIG.FIRST_CONTACT_SLA_MINUTES ? 'BREACHED' : 'OK';
   }
   const firstContactBreach = isOpenLead && isUnder48h && firstContactStatus === 'BREACHED';
+
+  // The "otherwise" half of Rule 1 — still no connection at all once the
+  // 10-minute window has passed. Deliberately exempt from the 3-hour grace
+  // (like the old firstContactBreach was), so a silent lead doesn't sit
+  // unflagged anywhere in the 10-min–3h gap between this check and Not
+  // Updated's own grace period.
+  const neverConnectedPastWindow = isOpenLead && isUnder48h && !hasConnected &&
+    !!created && businessMinutesBetween(created, now) > CONFIG.FIRST_CONTACT_SLA_MINUTES;
 
   // Detect leads touched by more than one agent over time. The sheet's RM
   // column only shows the current assignee, but internal_status_comments
@@ -1913,19 +1932,23 @@ function enrichLead(l){
   const stageStuck48h = past48h && pastGrace;
 
   // Not Updated: currently sitting in the very first funnel stage — never
-  // progressed since import.
-  const isNotUpdated = isOpenLead && isUnder48h && pastGrace && canonicalStage(l.current_stage) === 'not updated';
+  // progressed since import. Also absorbs the "otherwise" half of Rule 1
+  // (neverConnectedPastWindow, computed above) — a lead nobody has
+  // connected with past the 10-minute window belongs here now, not under
+  // Not Connected in 10 Minutes, regardless of what its stage text happens
+  // to say.
+  const isNotUpdated = isOpenLead && isUnder48h &&
+    ((pastGrace && canonicalStage(l.current_stage) === 'not updated') || neverConnectedPastWindow);
 
   // SOP Rule 4 — Post-Connect Follow-up: once connected, CRM should be
   // reviewed every 4 hours. Deliberately independent of call count: a
   // well-called lead that has gone quiet after connecting is exactly what
   // this rule exists to catch.
-  const hasConnected = !!(String(l.last_connect || '').trim() || parseDate(l.last_connect_time));
+  // hasConnected/connectDate computed earlier now (Rule 1 needs them too).
   // When no comment has ever been logged, "hours since last comment" is
   // undefined. Treating that as automatically overdue wrongly flags a lead
   // connected 10 minutes ago, so the clock falls back to time since
   // CONNECTION — Rule 4 is about review cadence after connecting.
-  const connectDate = parseDate(l.last_connect_time);
   const hoursSinceConnect = connectDate ? (now - connectDate) / 36e5 : null;
   const followupStaleHours = hoursSinceLastComment !== null
     ? hoursSinceLastComment
@@ -1967,7 +1990,7 @@ function enrichLead(l){
 
   return Object.assign({}, l, {
     ageHours, oppOrAbove, excluded, hasClosingReason, isOpenLead, past48h, isUnder48h, stageStuck48h,
-    firstContactStatus, firstContactBreach, businessMinsWaiting,
+    firstContactStatus, firstContactBreach, businessMinsToConnect, neverConnectedPastWindow,
     agentCount, isMultiAgent,
     hoursSinceLastComment, lastCommentAt, isNotUpdated,
     followupOverdue, hasConnected, recordingNotWorking, recordingCommentsNoCalls, closedWithNoWork,
@@ -3568,13 +3591,14 @@ const isoStamp = istStamp;
 // Raw minute counts stop being readable fast — "1164 working min" is really
 // about 2.4 working days, which nobody computes in their head. Scale the
 // unit to the magnitude.
-function fmtWorkingWait(mins){
+function fmtWorkingWait(mins, suffix){
+  suffix = suffix || 'waiting';
   if (mins == null) return '';
-  if (mins < 60) return `${Math.round(mins)} min waiting`;
+  if (mins < 60) return `${Math.round(mins)} min ${suffix}`;
   const hrs = mins / 60;
-  if (hrs < 10) return `${hrs.toFixed(1)} working hrs waiting`;
+  if (hrs < 10) return `${hrs.toFixed(1)} working hrs ${suffix}`;
   const workDays = hrs / (CONFIG.WORK_END_HOUR - CONFIG.WORK_START_HOUR);
-  return `${hrs.toFixed(0)} working hrs (~${workDays.toFixed(1)} work days)`;
+  return `${hrs.toFixed(0)} working hrs (~${workDays.toFixed(1)} work days) ${suffix}`;
 }
 
 // Recording Not Working — data-integrity check, not an SLA breach.
@@ -3620,18 +3644,18 @@ function renderRecordingList(){
 function lastCommentTimestamp(l){ return l.lastCommentAt || null; }
 
 function renderNotConnectedList(){
-  const missed = leads.filter(l => l.firstContactBreach).sort((a,b)=> (b.ageHours||0) - (a.ageHours||0));
+  const missed = leads.filter(l => l.firstContactBreach).sort((a,b)=> (b.businessMinsToConnect||0) - (a.businessMinsToConnect||0));
   document.getElementById('notConnCount').textContent = missed.length + ' leads';
   const el = document.getElementById('notConnList');
   if (!missed.length){
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Everything was reached within 10 minutes</div>`;
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No connected leads missed the 10-minute first-contact window</div>`;
     return;
   }
   el.innerHTML = truncationNotice(missed.length, MAX_CARDS) + missed.slice(0, MAX_CARDS).map(l => {
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">${esc(fmtWorkingWait(l.businessMinsWaiting))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · created ${esc(isoStamp(l.lead_created_at))}</div>
+      <div class="alert-age mono">${esc(fmtWorkingWait(l.businessMinsToConnect, 'late'))}</div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · created ${esc(isoStamp(l.lead_created_at))} · connected ${esc(isoStamp(l.last_connect_time))}</div>
     </div>`;
   }).join('');
 }
@@ -3973,7 +3997,7 @@ const ISSUE_REPORT_META = {
   },
   notConnected: {
     flag: 'firstContactBreach', label: 'Not Connected in 10 Minutes',
-    intro: 'Please find below the {SOURCE} leads not connected within 10 minutes of creation.',
+    intro: 'Please find below the {SOURCE} leads that connected only after the 10-minute first-contact window had already passed. Leads that still have not connected at all are reported under Not Updated instead.',
   },
   followupOverdue: {
     flag: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)',
@@ -4002,11 +4026,11 @@ const ISSUE_REPORT_META = {
 // recipient knows what to actually do, not just what's wrong.
 const ISSUE_ACTION_MAP = {
   inactiveRmNewLead: "Reassign this lead to an active RM immediately — it cannot be worked as currently routed.",
-  firstContactBreach: "Attempt first contact with the customer immediately — the 10-minute response window has been missed.",
+  firstContactBreach: "Contact was made after the 10-minute response window had already passed — flag this with the RM as a delayed first response and confirm no further follow-up is being missed on this lead.",
   followupOverdue: "Reconnect with the customer without delay — the 4-hour post-connect follow-up window has lapsed.",
   underCalledToday: `Complete the remaining call attempts today — see the Attempts Today column below for exactly how many more each lead needs to reach the ${CONFIG.MIN_CALLS_PER_DAY}/day SOP requirement.`,
   stageStuck48h: "Review this lead and either progress it toward Opportunity or close it out — it has been open more than 48 hours with no advancement.",
-  isNotUpdated: "Update the CRM with this lead's current status — no activity has been logged since it was created.",
+  isNotUpdated: "Update the CRM with this lead's current status — no activity has been logged since it was created. If the customer has never been reached, attempt first contact immediately; the 10-minute response window has already been missed.",
 };
 
 // reportableIssueFor() (used by the combined "all issues" report) returns
@@ -4214,7 +4238,9 @@ function buildRegionReports(issueKey){
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Attempts Today'] : ['Lead ID', 'Created', 'Age'],
+        columns: issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Attempts Today']
+          : issueKey === 'notConnected' ? ['Lead ID', 'Created', 'Age', 'Connected Late By']
+          : ['Lead ID', 'Created', 'Age'],
         rows: group.map(l => {
           const created = parseDate(l.lead_created_at);
           const cells = [
@@ -4223,6 +4249,7 @@ function buildRegionReports(issueKey){
             created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
           ];
           if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.attemptsToday));
+          if (issueKey === 'notConnected') cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
           return cells;
         }),
       })),
@@ -4955,7 +4982,7 @@ function buildRegionWiseReports(combineAll){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect });
   });
 
   _lastReportGraceBlocked = graceBlocked;
@@ -5036,16 +5063,21 @@ ${EMAIL_SIGNATURE}`;
         { value: Object.keys(tally).length, label: Object.keys(tally).length === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
       ],
       sections: Object.keys(tally).sort().map(issueName => {
-        const isDueToday = _FLAG_BY_ISSUE_PRIORITY_LABEL[issueName] === 'underCalledToday';
+        const issueFlag = _FLAG_BY_ISSUE_PRIORITY_LABEL[issueName];
+        const isDueToday = issueFlag === 'underCalledToday';
+        const isNotConnected = issueFlag === 'firstContactBreach';
         return {
           heading: issueName,
           subheading: `${tally[issueName].length} lead${tally[issueName].length === 1 ? '' : 's'}`,
-          action: ISSUE_ACTION_MAP[_FLAG_BY_ISSUE_PRIORITY_LABEL[issueName]] || '',
-          columns: isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today'] : ['Lead ID', 'Region', 'RM', 'Age'],
+          action: ISSUE_ACTION_MAP[issueFlag] || '',
+          columns: isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today']
+            : isNotConnected ? ['Lead ID', 'Region', 'RM', 'Age', 'Connected Late By']
+            : ['Lead ID', 'Region', 'RM', 'Age'],
           rows: tally[issueName].map(r => {
             const created = parseDate(r.lead_created_at);
             const cells = [r.lead_id, r.subRegion, r.RM, created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
             if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
+            if (isNotConnected) cells.push(fmtWorkingWait(r.businessMinsToConnect, 'late'));
             return cells;
           }),
         };
