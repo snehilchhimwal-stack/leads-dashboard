@@ -843,6 +843,12 @@
         <div id="movementIssueBreakdown"></div>
         <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="movementList"></div></div>
+
+        <div class="stale-controls" style="margin-top:14px; margin-bottom:10px;">
+          <button class="btn ghost" id="stalledGenerateReportsBtn" style="padding:8px 12px; font-size:12.5px;">Generate Region Emails</button>
+          <span class="filter-summary" style="margin:0;">Uses the same per-region To/Cc list as Operations → Region Email Reports.</span>
+        </div>
+        <div id="stalledReportList"></div>
       </section>
 
       <section id="sec-statuschange">
@@ -874,6 +880,12 @@
         <div id="overnightBreakdown" style="margin-bottom:10px;"></div>
         <div id="overnightNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="overnightList"></div></div>
+
+        <div class="stale-controls" style="margin-top:14px; margin-bottom:10px;">
+          <button class="btn ghost" id="overnightGenerateReportsBtn" style="padding:8px 12px; font-size:12.5px;">Generate Region Emails</button>
+          <span class="filter-summary" style="margin:0;">Uses the same per-region To/Cc list as Operations → Region Email Reports.</span>
+        </div>
+        <div id="overnightReportList"></div>
       </section>
 
       <section id="sec-rmstall">
@@ -3889,6 +3901,22 @@ function mainRegionFor(rawRegion){
   return null;
 }
 
+// Groups any array of lead-shaped items (region + group_source, optionally
+// project_region) into per-region buckets using the same effectiveRegion +
+// mainRegionFor resolution the Operations tab reports use — so "Loan" and
+// REGION_GROUP_MAP aliasing behave identically for the Movement tab's own
+// report emails. Items whose region doesn't resolve to a reporting group
+// are silently excluded, same as Operations' own out-of-scope handling.
+function groupItemsByReportRegion(items){
+  const byRegion = {};
+  items.forEach(item => {
+    const main = mainRegionFor(effectiveRegion(item));
+    if (!main) return;
+    (byRegion[main] = byRegion[main] || []).push(item);
+  });
+  return byRegion;
+}
+
 // How many flagged leads fell outside the 9 reporting regions on the last
 // build — surfaced in the UI so exclusions are visible, not silent.
 let _lastReportOutOfScope = 0;
@@ -4749,6 +4777,25 @@ function copyRegionReport(idx){
   });
 }
 
+// Generic version of copyRegionReport/copyAllReport above, parameterized
+// by array + button id instead of hardcoded to one global — used by the
+// Movement tab's Stalled/Overnight report lists so they don't need their
+// own copy-pasted copies of this function.
+function copyGenericReport(reportsArray, idx, btnId){
+  const r = reportsArray && reportsArray[idx];
+  if (!r) return;
+  const text = `${r.subject}\n\n${r.body}`;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const original = btn.dataset.originalLabel || btn.textContent;
+    btn.dataset.originalLabel = original;
+    btn.textContent = 'Copied ✓';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
 /* ============ REPORT MODE DISPATCH ============ */
 function syncReportControls(){
   const mode = document.getElementById('reportModeSelect').value;
@@ -5156,6 +5203,7 @@ let _lastMovementRows = [];             // last rendered Stalled Flagged Leads r
 let _lastMovementRange = { fromAt: null, toAt: null };
 let _lastStatusChangeResult = null;     // last computeStatusChanges() result — Download CSV exports this too, alongside the stalled rows above
 let _lastStatusChangeRange = { fromAt: null, toAt: null };
+let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
 const MOVEMENT_LOG_COLUMNS = [
@@ -5487,6 +5535,59 @@ function computeMovementRows(fromAt, toAt){
 
   rows.sort((a, b) => a.RM.localeCompare(b.RM) || String(a.lead_id).localeCompare(String(b.lead_id)));
   return rows;
+}
+
+// Region-wise email reports for Stalled Flagged Leads — same shape as
+// Operations' buildRegionReports() ({region, subject, body, html, count,
+// regionNames}), so it plugs straight into the existing sendReport/
+// sendReportViaGmail/recipientsForReport pipeline and reuses the same
+// per-region To/Cc table, not a separate one. One caveat worth knowing:
+// Movement_Log doesn't carry project_region (only the live sheet does),
+// so "Loan" resolution here falls back to group_source only — slightly
+// less complete than the live-sheet-backed Overnight Leads report below.
+function buildStalledRegionReports(rows){
+  const sourceLabel = selectedSourceLabel();
+  const rangeLabel = (_lastMovementRange.fromAt && _lastMovementRange.toAt)
+    ? `${istStamp(_lastMovementRange.fromAt)} → ${istStamp(_lastMovementRange.toAt)}`
+    : '';
+  const DIVIDER = '='.repeat(50);
+  const SUBDIVIDER = '-'.repeat(50);
+  const leadLine = (r) => `${r.lead_id}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}`;
+
+  const byRegion = groupItemsByReportRegion(rows);
+  return Object.keys(byRegion).sort().map(region => {
+    const regionRows = byRegion[region];
+    const byRM = groupBy(regionRows, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+
+    const blocks = Object.values(byRM).map(group =>
+      `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
+    ).join('\n');
+
+    const subject = `${region} Stalled Flagged Leads (${todayDateLabel()}) - ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`;
+    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} that were flagged and showed zero movement between ${rangeLabel}.\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${regionRows.length}\n\n${EMAIL_SIGNATURE}`;
+
+    const html = renderReportEmailHTML({
+      eyebrow: 'Google Search Leads · SLA Monitor',
+      title: 'Stalled Flagged Leads',
+      region,
+      subtitle: `${rangeLabel} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      action: 'Review each lead and follow up immediately — nothing has changed on these since the last check.',
+      kpis: [
+        { value: regionRows.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: new Set(regionRows.map(r => r.issue)).size, label: 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
+      ],
+      sections: Object.values(byRM).map(group => ({
+        heading: group[0].RM || 'Unassigned',
+        subheading: `Manager: ${group[0].TL || '—'}`,
+        columns: ['Lead ID', 'Issue', 'Unchanged Since'],
+        rows: group.map(r => [r.lead_id, r.issue, istStamp(r.fromAt)]),
+      })),
+      footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time.',
+    });
+
+    return { region, subject, body, html, count: regionRows.length, regionNames: [region] };
+  });
 }
 
 // Between the same From/To pair as Stalled Flagged Leads: every lead open
@@ -5883,6 +5984,59 @@ function overnightStatusLabel(l){
   return String(l.current_stage || '').trim() || 'Unrecognized Stage';
 }
 
+// Region-wise email reports for Overnight Leads — same {region, subject,
+// body, html, count, regionNames} shape as the Stalled report above and
+// Operations' own buildRegionReports(), so it reuses the exact same send/
+// copy/recipients pipeline. Built from the live sheet (allParsedLeads via
+// computeOvernightCohort), which DOES carry project_region, so "Loan"
+// resolution here is fully accurate — unlike the Stalled report, which is
+// limited by what Movement_Log itself stores.
+function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
+  const sourceLabel = selectedSourceLabel();
+  const rangeLabel = `${istStamp(windowStart)} → ${istStamp(windowEnd)}`;
+  const DIVIDER = '='.repeat(50);
+  const SUBDIVIDER = '-'.repeat(50);
+  const leadLine = (l) => `${l.lead_id}  |  Created: ${istStamp(l.lead_created_at)}  |  ${overnightStatusLabel(l)}`;
+
+  const byRegion = groupItemsByReportRegion(cohortLeads);
+  return Object.keys(byRegion).sort().map(region => {
+    const regionLeads = byRegion[region];
+    const byRM = groupBy(regionLeads, l => (l.RM || 'Unassigned') + '||' + (l.TL || ''));
+
+    const blocks = Object.values(byRM).map(group =>
+      `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
+    ).join('\n');
+
+    const subject = `${region} Overnight Leads (${todayDateLabel()}) - ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`;
+    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} created overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${regionLeads.length}\n\n${EMAIL_SIGNATURE}`;
+
+    const counts = {};
+    regionLeads.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
+
+    const html = renderReportEmailHTML({
+      eyebrow: 'Google Search Leads · SLA Monitor',
+      title: 'Overnight Leads',
+      region,
+      subtitle: `${rangeLabel} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+      kpis: [
+        { value: regionLeads.length, label: 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
+        { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: Object.keys(counts).length, label: Object.keys(counts).length === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
+      ],
+      sections: Object.values(byRM).map(group => ({
+        heading: group[0].RM || 'Unassigned',
+        subheading: `Manager: ${group[0].TL || '—'}`,
+        columns: ['Lead ID', 'Created', 'Status'],
+        rows: group.map(l => [l.lead_id, istStamp(l.lead_created_at), overnightStatusLabel(l)]),
+      })),
+      footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time.',
+    });
+
+    return { region, subject, body, html, count: regionLeads.length, regionNames: [region] };
+  });
+}
+
 function renderOvernightCohort(toAt){
   const countEl = document.getElementById('overnightCount');
   const breakdownEl = document.getElementById('overnightBreakdown');
@@ -5891,6 +6045,10 @@ function renderOvernightCohort(toAt){
   if (!breakdownEl || !listEl) return;
 
   const result = computeOvernightCohort(toAt);
+  // Stashed so the "Generate Region Emails" button builds reports from
+  // exactly this cohort, without recomputing (and possibly drifting from)
+  // what's currently on screen.
+  _lastOvernightCohort = result;
   if (!result) {
     if (countEl) countEl.textContent = '';
     breakdownEl.innerHTML = '';
@@ -5927,6 +6085,64 @@ function renderOvernightCohort(toAt){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} — <span class="chip ${label === 'Closed' ? 'dim-chip' : 'amber'}">${esc(label)}</span></div>
     </div>`;
   }).join('');
+}
+
+// Renders the on-screen preview list for Overnight Leads' region emails —
+// same report-card markup and Copy/Open in Mail/Send via Gmail buttons as
+// Operations' own region reports, just pointed at a different array
+// (window._overnightRegionReports) so the two report lists don't collide.
+function renderOvernightRegionReports(){
+  const el = document.getElementById('overnightReportList');
+  if (!el) return;
+  if (!_lastOvernightCohort || !_lastOvernightCohort.leads.length) {
+    el.innerHTML = '';
+    window._overnightRegionReports = [];
+    return;
+  }
+  const reports = buildOvernightRegionReports(_lastOvernightCohort.leads, _lastOvernightCohort.windowStart, _lastOvernightCohort.windowEnd);
+  window._overnightRegionReports = reports;
+  if (!reports.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No overnight leads fall inside a reporting region right now</div>`;
+    return;
+  }
+  el.innerHTML = reports.map((r, idx) => `
+    <div class="report-card">
+      <div class="report-subject">${esc(r.subject)}</div>
+      <div class="rr-meta" style="margin-bottom:8px;">${r.count} lead${r.count === 1 ? '' : 's'}</div>
+      <div class="report-body" id="overnightRptBody_${idx}">${esc(r.body)}</div>
+      <button class="report-copy-btn" onclick="copyGenericReport(window._overnightRegionReports, ${idx}, 'overnightRptCopyBtn_${idx}')" id="overnightRptCopyBtn_${idx}">Copy subject + body</button>
+      <button class="report-copy-btn" onclick="sendReport(window._overnightRegionReports[${idx}])" title="Opens your mail client with the region's To/Cc pre-filled">Open in Mail</button>
+      <button class="report-copy-btn" onclick="sendReportViaGmail(window._overnightRegionReports[${idx}], 'overnightRptGmailBtn_${idx}')" id="overnightRptGmailBtn_${idx}" title="Sends immediately via the Gmail API">Send via Gmail</button>
+    </div>
+  `).join('');
+}
+
+// Same pattern as renderOvernightRegionReports above, for Stalled Flagged
+// Leads' own region emails (window._stalledRegionReports).
+function renderStalledRegionReports(){
+  const el = document.getElementById('stalledReportList');
+  if (!el) return;
+  if (!_lastMovementRows.length) {
+    el.innerHTML = '';
+    window._stalledRegionReports = [];
+    return;
+  }
+  const reports = buildStalledRegionReports(_lastMovementRows);
+  window._stalledRegionReports = reports;
+  if (!reports.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No stalled leads fall inside a reporting region right now</div>`;
+    return;
+  }
+  el.innerHTML = reports.map((r, idx) => `
+    <div class="report-card">
+      <div class="report-subject">${esc(r.subject)}</div>
+      <div class="rr-meta" style="margin-bottom:8px;">${r.count} lead${r.count === 1 ? '' : 's'}</div>
+      <div class="report-body" id="stalledRptBody_${idx}">${esc(r.body)}</div>
+      <button class="report-copy-btn" onclick="copyGenericReport(window._stalledRegionReports, ${idx}, 'stalledRptCopyBtn_${idx}')" id="stalledRptCopyBtn_${idx}">Copy subject + body</button>
+      <button class="report-copy-btn" onclick="sendReport(window._stalledRegionReports[${idx}])" title="Opens your mail client with the region's To/Cc pre-filled">Open in Mail</button>
+      <button class="report-copy-btn" onclick="sendReportViaGmail(window._stalledRegionReports[${idx}], 'stalledRptGmailBtn_${idx}')" id="stalledRptGmailBtn_${idx}" title="Sends immediately via the Gmail API">Send via Gmail</button>
+    </div>
+  `).join('');
 }
 
 function renderMovementTab(){
@@ -6225,6 +6441,12 @@ function initMovementUI(){
 
   const csvBtn = document.getElementById('movementCsvBtn');
   if (csvBtn) csvBtn.addEventListener('click', downloadMovementCSV);
+
+  const stalledReportsBtn = document.getElementById('stalledGenerateReportsBtn');
+  if (stalledReportsBtn) stalledReportsBtn.addEventListener('click', renderStalledRegionReports);
+
+  const overnightReportsBtn = document.getElementById('overnightGenerateReportsBtn');
+  if (overnightReportsBtn) overnightReportsBtn.addEventListener('click', renderOvernightRegionReports);
 }
 
 initMovementUI();
