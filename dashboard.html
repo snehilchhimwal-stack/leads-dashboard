@@ -1555,13 +1555,15 @@ async function fetchAndRender(){
     // what the Region filter/report grouping would show for that row.
     const rowRegionLabel = (r) => mainRegionFor(effectiveRegion(r)) || String(r.region || '').trim() || '(blank)';
 
-    const dedupedLeads = Array.from(groupMap.values()).map(rows => {
+    // Merges a set of same-customer rows into ONE lead-shaped record: stage
+    // taken from whichever copy went furthest (ties broken by most recent
+    // activity), comments merged/deduped/re-sorted, attempts/calls/duration
+    // summed, earliest creation kept. Factored out so it can run twice —
+    // once across ALL of a customer's rows (the record everything outside
+    // region-reporting uses), and again scoped to just one region's rows
+    // when a customer's copies span more than one (see regionSplits below).
+    function mergeRowsIntoOneLead(rows){
       if (rows.length === 1) {
-        // Stamp the collation fields even on a single-copy record, so every
-        // record carries the same shape. The Distribution tab derives its
-        // fan-out and claim stats from these fields; when single copies were
-        // left unstamped, those stats had to be precomputed separately at
-        // fetch time and silently stopped matching the active filters.
         return Object.assign({}, rows[0], {
           collatedFrom: 1,
           collatedRMs: [rows[0].RM || 'Unassigned'],
@@ -1570,41 +1572,12 @@ async function fetchAndRender(){
         });
       }
 
-      collatedGroups++;
-      extraCopies += rows.length - 1;
-
-      // Merged customers whose copies don't all resolve to the SAME region —
-      // this is what makes a Pune-tagged row surface on a card that reads
-      // "Thane": the merge picks ONE copy as primary (furthest funnel /
-      // most recent) and that copy's region wins, silently absorbing a
-      // same-client_id (or same-lead_id) copy from a different region.
-      // Sometimes that's correct (one customer, two genuine inquiries in
-      // different regions) and sometimes it's a data problem (a shared/
-      // placeholder client_id, or a reused lead_id, gluing two unrelated
-      // customers together) — either way it's surfaced explicitly via
-      // collatedRegions/crossRegionCollations rather than silently picking
-      // a region and hiding the disagreement.
-      const regionsInGroup = Array.from(new Set(rows.map(rowRegionLabel)));
-      if (regionsInGroup.length > 1) {
-        crossRegionGroups++;
-        _lastCrossRegionCollations.push({
-          leadIds: Array.from(new Set(rows.map(r => String(r.lead_id).trim()))),
-          clientIds: Array.from(new Set(rows.map(r => String(r.client_id || '').trim()).filter(Boolean))),
-          regions: regionsInGroup,
-          rms: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
-        });
-      }
-
-      // Pick the owning copy: furthest through the funnel, then most recent.
       const primary = rows.slice().sort((a, b) => {
         const fr = funnelRankOf(b) - funnelRankOf(a);
         if (fr !== 0) return fr;
         return (activityTimeOf(b) || 0) - (activityTimeOf(a) || 0);
       })[0];
 
-      // Merge comment histories. Entries are pipe-separated; identical
-      // entries across copies collapse to one, then sort chronologically
-      // so the merged log still reads as a single timeline.
       const seen = new Set();
       const merged = [];
       rows.forEach(r => {
@@ -1642,8 +1615,44 @@ async function fetchAndRender(){
         collatedFrom: rows.length,
         collatedRMs: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
         collatedLeadIds: Array.from(new Set(rows.map(r => String(r.lead_id).trim()))),
-        collatedRegions: regionsInGroup,
+        collatedRegions: Array.from(new Set(rows.map(rowRegionLabel))),
       });
+    }
+
+    const dedupedLeads = Array.from(groupMap.values()).map(rows => {
+      const merged = mergeRowsIntoOneLead(rows);
+      if (rows.length === 1) return merged;
+
+      collatedGroups++;
+      extraCopies += rows.length - 1;
+
+      // Merged customers whose copies don't all resolve to the SAME region —
+      // this is what makes a Pune-tagged row surface on a card that reads
+      // "Thane": the merge picks ONE copy as primary (furthest funnel /
+      // most recent) and that copy's region wins, silently absorbing a
+      // same-client_id (or same-lead_id) copy from a different region.
+      // Sometimes that's correct (one customer, two genuine inquiries in
+      // different regions) and sometimes it's a data problem (a shared/
+      // placeholder client_id, or a reused lead_id, gluing two unrelated
+      // customers together) — either way it's surfaced explicitly via
+      // collatedRegions/crossRegionCollations, AND a lead can only belong to
+      // one region in an email, so regionSplits gives every region its own
+      // lead-shaped record (own primary copy, own summed attempts/comments,
+      // scoped to just that region's rows) for report builders to use
+      // instead of the whole customer.
+      if (merged.collatedRegions.length > 1) {
+        crossRegionGroups++;
+        _lastCrossRegionCollations.push({
+          leadIds: Array.from(new Set(rows.map(r => String(r.lead_id).trim()))),
+          clientIds: Array.from(new Set(rows.map(r => String(r.client_id || '').trim()).filter(Boolean))),
+          regions: merged.collatedRegions,
+          rms: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
+        });
+        const rowsByRegion = groupBy(rows, rowRegionLabel);
+        merged.regionSplits = Object.keys(rowsByRegion).map(region => mergeRowsIntoOneLead(rowsByRegion[region]));
+      }
+
+      return merged;
     });
 
     const dedupeEl = document.getElementById('dedupeNotice');
@@ -3967,6 +3976,30 @@ function mainRegionFor(rawRegion){
   return null;
 }
 
+// A collated customer can only belong to one region in an email — if its
+// copies span more than one (regionSplits, stamped during collation in
+// fetchAndRender), each region gets its OWN lead-shaped record instead of
+// the whole customer being folded into whichever region its overall
+// primary copy happened to win. A single-region item is returned as-is.
+// This is the RAW form (regionSplits entries are unenriched, same as
+// allParsedLeads) — for report builders that read raw fields directly
+// (e.g. Overnight Leads' current_stage/closing_reason check).
+function expandRegionSplits(item){
+  return (item.regionSplits && item.regionSplits.length > 1) ? item.regionSplits : [item];
+}
+
+// Same idea as expandRegionSplits, but for report builders working off the
+// ENRICHED `leads` array and filtering by computed flags (firstContactBreach,
+// isNotUpdated, etc.) — those flags have to be recomputed per region, not
+// inherited from the combined-across-regions parent, or a customer's
+// Pune-only call effort would get judged against totals that include a
+// Thane copy's calls too. l itself is already enriched, so the no-split
+// case is returned as-is with no extra work.
+function expandForRegionReporting(l){
+  if (l.regionSplits && l.regionSplits.length > 1) return l.regionSplits.map(enrichLead);
+  return [l];
+}
+
 // Groups any array of lead-shaped items (region + group_source, optionally
 // project_region) into per-region buckets using the same effectiveRegion +
 // mainRegionFor resolution the Operations tab reports use — so "Loan" and
@@ -3976,9 +4009,11 @@ function mainRegionFor(rawRegion){
 function groupItemsByReportRegion(items){
   const byRegion = {};
   items.forEach(item => {
-    const main = mainRegionFor(effectiveRegion(item));
-    if (!main) return;
-    (byRegion[main] = byRegion[main] || []).push(item);
+    expandRegionSplits(item).forEach(unit => {
+      const main = mainRegionFor(effectiveRegion(unit));
+      if (!main) return;
+      (byRegion[main] = byRegion[main] || []).push(unit);
+    });
   });
   return byRegion;
 }
@@ -4202,7 +4237,15 @@ function buildRegionReports(issueKey){
   const enforceGrace = issueKey !== 'notConnected';
   let graceBlockedCount = 0;
 
-  const matching = leads.filter(l => {
+  // Expand cross-region collated customers into their own per-region,
+  // freshly-enriched records BEFORE checking the issue flag — a customer's
+  // Pune copy needs to be judged on its OWN call effort/comments, not the
+  // combined-with-Thane totals the parent record carries. Single-region
+  // leads expand to themselves unchanged.
+  const expanded = [];
+  leads.forEach(l => expandForRegionReporting(l).forEach(u => expanded.push(u)));
+
+  const matching = expanded.filter(l => {
     if (!l[meta.flag]) return false;
     if (!enforceGrace) return true;
     const created = parseDate(l.lead_created_at);
@@ -5006,9 +5049,13 @@ function buildRegionWiseReports(combineAll){
   // behind (or nothing, if none had run yet this session).
   _lastReportOutOfScopeNames = {};
 
-  // Collect every flagged lead with its primary reportable issue.
+  // Collect every flagged lead with its primary reportable issue. Cross-
+  // region collated customers are expanded to one record per region first
+  // (see expandForRegionReporting) — a customer can only belong to one
+  // region in an email, and that region's copy needs its OWN issue flags,
+  // not ones computed against a combined-with-another-region total.
   const rows = [];
-  leads.forEach(l => {
+  leads.forEach(parent => expandForRegionReporting(parent).forEach(l => {
     const issue = reportableIssueFor(l, now);
     if (!issue) {
       // Distinguish "had an issue but grace/undatable blocked it" from
@@ -5025,7 +5072,7 @@ function buildRegionWiseReports(combineAll){
       return;
     }
     rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect });
-  });
+  }));
 
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
@@ -6072,6 +6119,14 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   const SUBDIVIDER = '-'.repeat(50);
   const leadLine = (l) => `${l.lead_id}  |  Created: ${istStamp(l.lead_created_at)}  |  ${overnightStatusLabel(l)}`;
 
+  // Expand cross-region collated customers into their own per-region
+  // records FIRST — a merged customer's overall stage (e.g. Opportunity+
+  // on the Thane copy that won primary) shouldn't decide whether the
+  // Pune copy is still emailable. Each region's own copy is judged on its
+  // own stage. A single-region lead expands to itself, unchanged.
+  const expanded = [];
+  cohortLeads.forEach(l => expandRegionSplits(l).forEach(u => expanded.push(u)));
+
   // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
   // deliberately shows every overnight-created lead, closed or not, so
   // nothing about last night is hidden from view. The email is a
@@ -6081,7 +6136,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   // comes straight from allParsedLeads (raw), not enrichLead's output, so
   // isOpenLead/oppOrAbove aren't already computed on it — same open/closed
   // logic as enrichLead, applied directly.
-  const emailableLeads = cohortLeads.filter(l => {
+  const emailableLeads = expanded.filter(l => {
     const hasClosingReason = !!String(l.closing_reason || '').trim();
     const closed = isClosedStage(l.current_stage) || hasClosingReason;
     return !closed && !isOppOrAbove(l.current_stage);
