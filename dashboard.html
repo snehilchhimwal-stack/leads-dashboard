@@ -6030,7 +6030,22 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   const SUBDIVIDER = '-'.repeat(50);
   const leadLine = (l) => `${l.lead_id}  |  Created: ${istStamp(l.lead_created_at)}  |  ${overnightStatusLabel(l)}`;
 
-  const byRegion = groupItemsByReportRegion(cohortLeads);
+  // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
+  // deliberately shows every overnight-created lead, closed or not, so
+  // nothing about last night is hidden from view. The email is a
+  // follow-up-action list, not a status report — a lead already at
+  // Opportunity+ or already closed needs no further overnight follow-up,
+  // so it's dropped here rather than cluttering the RM's inbox. cohortLeads
+  // comes straight from allParsedLeads (raw), not enrichLead's output, so
+  // isOpenLead/oppOrAbove aren't already computed on it — same open/closed
+  // logic as enrichLead, applied directly.
+  const emailableLeads = cohortLeads.filter(l => {
+    const hasClosingReason = !!String(l.closing_reason || '').trim();
+    const closed = isClosedStage(l.current_stage) || hasClosingReason;
+    return !closed && !isOppOrAbove(l.current_stage);
+  });
+
+  const byRegion = groupItemsByReportRegion(emailableLeads);
   return Object.keys(byRegion).sort().map(region => {
     const regionLeads = byRegion[region];
     const byRM = groupBy(regionLeads, l => (l.RM || 'Unassigned') + '||' + (l.TL || ''));
@@ -6062,7 +6077,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
         columns: ['Lead ID', 'Created', 'Status'],
         rows: group.map(l => [l.lead_id, istStamp(l.lead_created_at), overnightStatusLabel(l)]),
       })),
-      footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time.',
+      footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — see the Movement tab\'s on-screen Overnight Leads list for the full overnight cohort including those.',
     });
 
     return { region, subject, body, html, count: regionLeads.length, regionNames: [region] };
@@ -6134,7 +6149,7 @@ function renderOvernightRegionReports(){
   const reports = buildOvernightRegionReports(_lastOvernightCohort.leads, _lastOvernightCohort.windowStart, _lastOvernightCohort.windowEnd);
   window._overnightRegionReports = reports;
   if (!reports.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No overnight leads fall inside a reporting region right now</div>`;
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No overnight leads need a follow-up email right now — either none fall inside a reporting region, or all of last night's leads are already at Opportunity+ or closed</div>`;
     return;
   }
   el.innerHTML = reports.map((r, idx) => `
