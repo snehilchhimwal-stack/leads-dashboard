@@ -2084,16 +2084,21 @@ function enrichLead(l){
 
   // Recording Not Working — a pure data-integrity check, deliberately with
   // NO gating: no open/closed filter, no grace period, no priority ranking.
-  // Checked against call_count (connected calls) rather than call_attempts
-  // (every dial, connected or not) — a comment can only describe a
-  // conversation that actually happened, so it's the connected-call count
-  // that should be nonzero whenever a comment exists.
-  const recordingCommentsNoCalls = l.call_count === 0 && actionLogEntries.length > 0;
+  // Requires BOTH call_count (connected calls) AND call_attempts (every
+  // dial, connected or not) to be zero. call_attempts > 0 with call_count
+  // still 0 just means the RM dialed and it didn't connect — that attempt
+  // WAS recorded by the system, so recording is working fine; it's only a
+  // genuine data-integrity gap when NEITHER figure shows any call activity
+  // at all, despite a comment saying work happened.
+  const recordingCommentsNoCalls = l.call_count === 0 && l.call_attempts === 0 && actionLogEntries.length > 0;
   // Closed with No Work Recorded is its own separate issue card below —
-  // a lead CLOSED with 0 connected calls and no comments at all, i.e. no
-  // evidence any work happened before closure. Kept as its own flag here
-  // since enrichLead is the one place that computes it.
-  const closedWithNoWork = excluded && l.call_count === 0 && actionLogEntries.length === 0;
+  // a lead CLOSED with 0 connected calls, 0 recorded attempts, and no
+  // comments at all, i.e. no evidence any work happened before closure
+  // (same both-zero reasoning as recordingCommentsNoCalls above — a
+  // nonzero call_attempts is still recorded evidence of an RM's effort).
+  // Kept as its own flag here since enrichLead is the one place that
+  // computes it.
+  const closedWithNoWork = excluded && l.call_count === 0 && l.call_attempts === 0 && actionLogEntries.length === 0;
   const recordingNotWorking = recordingCommentsNoCalls;
 
   // SOP Rule 3 — CRM logging after each attempt. The mirror image of
