@@ -5258,7 +5258,7 @@ function buildRegionWiseReports(combineAll){
     const notConnectedBlock = notConnectedItems.length ? `
 
 ${DIVIDER}
-REMINDER FOR THE REGIONAL HEAD — 10-MINUTE RESPONSE SLA
+NOT CONNECTED IN 10 MINUTES (Reminder for the Regional Head)
 The following RMs did not connect with the client within the first 10 minutes of assignment. Contact did eventually happen — this is a record of how late, not an open task. Already happened and cannot be corrected.
 ${SUBDIVIDER}
 ${Object.values(notConnectedByRM).map(group =>
@@ -5303,9 +5303,8 @@ ${EMAIL_SIGNATURE}`;
     // it would alphabetize to among the actionable issue names.
     if (notConnectedItems.length) {
       sections.push({
-        heading: '10-Minute Response SLA — Reminder for the Regional Head',
+        heading: 'Not Connected in 10 Minutes',
         subheading: `${notConnectedItems.length} late connection${notConnectedItems.length === 1 ? '' : 's'} — already happened, for the record only`,
-        action: ISSUE_ACTION_MAP.firstContactBreach,
         columns: ['Lead ID', 'Region', 'RM', 'Connected Late By'],
         rows: notConnectedItems.map(r => [r.lead_id, r.subRegion, r.RM, fmtWorkingWait(r.businessMinsToConnect, 'late')]),
       });
