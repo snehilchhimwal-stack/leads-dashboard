@@ -678,7 +678,7 @@
     </section>
 
     <section id="sec-stuck">
-      <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stuck — Open 48h+, Not Yet Opportunity</div><div class="section-count" id="stuckCount"></div></div>
+      <div class="section-head"><div class="section-bar red"></div><div class="section-title">Leads Pending Beyond 48 Hours (Not Yet Opportunity)</div><div class="section-count" id="stuckCount"></div></div>
       <div class="filter-summary">Open more than 48 hours and still hasn't reached Opportunity stage — regardless of how many calls were made. A different problem than under-calling: these got worked, but haven't converted.</div>
       <div class="section-scroll"><div class="card-list" id="stuckList"></div></div>
     </section>
@@ -707,7 +707,7 @@
             <option value="notConnected">Not Connected in 10 Minutes</option>
             <option value="followupOverdue">Follow-up Overdue (4h Post-Connect)</option>
             <option value="dueToday" selected>Behind on Today's Calls</option>
-            <option value="stuck">Stuck — Open 48h+, Not Yet Opportunity</option>
+            <option value="stuck">Leads Pending Beyond 48 Hours (Not Yet Opportunity)</option>
           </select>
         </label>
         <label class="stale-label" id="combineWrap">
@@ -3989,7 +3989,7 @@ const ISSUE_PRIORITY = [
   { key: 'isNotUpdated', label: 'Not Updated' },
   { key: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)' },
   { key: 'underCalledToday', label: "Behind on Today's Calls" },
-  { key: 'stageStuck48h', label: 'Stuck — Open 48h+, Not Yet Opportunity' },
+  { key: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)' },
 ];
 
 function getPrimaryIssue(l){
@@ -4007,7 +4007,7 @@ const ISSUE_COLOR_MAP = {
   "Not Connected in 10 Minutes": 'var(--amber)',
   "Follow-up Overdue (4h Post-Connect)": 'var(--red)',
   "Behind on Today's Calls": 'var(--blue)',
-  "Stuck — Open 48h+, Not Yet Opportunity": 'var(--teal)',
+  "Leads Pending Beyond 48 Hours (Not Yet Opportunity)": 'var(--teal)',
 };
 const ISSUE_COLOR_FALLBACK = ['var(--blue)', 'var(--red)', 'var(--amber)', 'var(--purple)', 'var(--teal)', 'var(--green)'];
 function colorForIssue(issue, indexIfUnknown){
@@ -4278,7 +4278,7 @@ const ISSUE_REPORT_META = {
     intro: 'Please find below the {SOURCE} leads with fewer than 5 call attempts made today. For a lead created today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
   },
   stuck: {
-    flag: 'stageStuck48h', label: 'Not Yet Opportunity (Open 48h+)',
+    flag: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)',
     intro: "Please find below the {SOURCE} leads open for more than 48 hours that have not yet reached Opportunity stage.",
   },
   notUpdated: {
@@ -4287,13 +4287,12 @@ const ISSUE_REPORT_META = {
   },
 };
 
-// Keyed by FLAG, not label text — ISSUE_PRIORITY and ISSUE_REPORT_META use
-// slightly different label wording for the same issue (e.g. stageStuck48h
-// is "Stuck — Open 48h+, Not Yet Opportunity" in one and "Not Yet
-// Opportunity (Open 48h+)" in the other), so flag is the one identifier
-// guaranteed to match consistently between them. One professional,
-// specific recommended action per issue, shown in the email itself so the
-// recipient knows what to actually do, not just what's wrong.
+// Keyed by FLAG, not label text — ISSUE_PRIORITY and ISSUE_REPORT_META can
+// still drift to different wording for the same issue over time, so flag
+// is the one identifier guaranteed to match consistently between them.
+// One professional, specific recommended action per issue, shown in the
+// email itself so the recipient knows what to actually do, not just what's
+// wrong.
 const ISSUE_ACTION_MAP = {
   inactiveRmNewLead: "Reassign this lead to an active RM immediately — it cannot be worked as currently routed.",
   firstContactBreach: "For the record, not for action — contact already happened, just after the 10-minute response window had passed, and that can't be corrected after the fact. Use this as a response-time SLA record per RM; no follow-up is needed on these specific leads.",
