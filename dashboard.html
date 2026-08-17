@@ -5775,34 +5775,63 @@ function computeMovementRows(fromAt, toAt){
   const rows = [];
 
   byLead.forEach((history) => {
-    const toRec = history.find(r => r.snapshot_at.getTime() === toAt.getTime());
-    const fromRec = history.find(r => r.snapshot_at.getTime() === fromAt.getTime());
-    if (!toRec || !fromRec) return;
+    // A history bucket is keyed by client_id-or-lead_id (buildMovementHistories
+    // above) — the SAME customer can have multiple simultaneous RM copies
+    // in it, each its own lead_id, captured at the identical snapshot_at.
+    // A plain .find() only ever returns the first one, silently dropping
+    // every other copy from Stalled Flagged Leads entirely. Matching by
+    // lead_id within the timestamp instead catches all of them.
+    const toRecs = history.filter(r => r.snapshot_at.getTime() === toAt.getTime());
+    const fromRecs = history.filter(r => r.snapshot_at.getTime() === fromAt.getTime());
+    if (!toRecs.length || !fromRecs.length) return;
 
-    const toEnriched = enrichSnapshotCached(toRec);
-    if (!ISSUE_PRIORITY.some(rule => toEnriched[rule.key])) return; // not flagged at "to"
-    if (movementChangedBetween(fromRec, toRec)) return; // moved — not stalled
+    const flaggedUnchanged = [];
+    toRecs.forEach(toRec => {
+      const fromRec = fromRecs.find(r => String(r.lead_id).trim() === String(toRec.lead_id).trim());
+      if (!fromRec) return; // this copy didn't exist yet at the "from" checkpoint
 
-    const primaryIssue = (ISSUE_PRIORITY.find(rule => toEnriched[rule.key]) || {}).label || 'Flagged';
+      const toEnriched = enrichSnapshotCached(toRec);
+      if (!ISSUE_PRIORITY.some(rule => toEnriched[rule.key])) return; // not flagged at "to"
+      if (movementChangedBetween(fromRec, toRec)) return; // moved — not stalled
+
+      const primaryIssue = (ISSUE_PRIORITY.find(rule => toEnriched[rule.key]) || {}).label || 'Flagged';
+      flaggedUnchanged.push({ toRec, fromRec, toEnriched, primaryIssue });
+    });
+    if (!flaggedUnchanged.length) return;
+
+    // One card per customer, not per copy — same spirit as the live-sheet
+    // collation's merged records. Region/project/stage are sourced from a
+    // single representative copy (picked deterministically by lead_id, since
+    // every copy here is equally "stalled" — there's no funnel-progress
+    // signal to prefer one over another the way the live-sheet merge does),
+    // but every copy's lead_id and RM are kept via collatedLeadIds/
+    // collatedRMs so leadIdentityLine/collationBadge can show all of them,
+    // exactly like Operations tab cards do for a merged customer.
+    const rep = flaggedUnchanged.slice().sort((a, b) =>
+      String(a.toRec.lead_id).localeCompare(String(b.toRec.lead_id)))[0];
+
     rows.push({
-      lead_id: toRec.lead_id,
-      client_id: toRec.client_id,
-      RM: toRec.RM,
-      TL: toRec.TL,
-      region: toRec.region,
-      project: toRec.project,
-      current_stage: toRec.current_stage,
-      group_source: toRec.group_source,
-      source_bucket: toRec.source_bucket,
-      lead_created_at: toRec.lead_created_at,
+      lead_id: rep.toRec.lead_id,
+      client_id: rep.toRec.client_id,
+      RM: rep.toRec.RM,
+      TL: rep.toRec.TL,
+      region: rep.toRec.region,
+      project: rep.toRec.project,
+      current_stage: rep.toRec.current_stage,
+      group_source: rep.toRec.group_source,
+      source_bucket: rep.toRec.source_bucket,
+      lead_created_at: rep.toRec.lead_created_at,
       // Same "last touched" signal the Not Updated / Follow-up Overdue
       // sections use elsewhere (newest dated CRM comment) — not just the
       // snapshot check time — so this actually says when the lead itself
       // was last worked, not just when we last looked at it.
-      lastCommentAt: toEnriched.lastCommentAt || null,
-      fromAt: fromRec.snapshot_at,
-      toAt: toRec.snapshot_at,
-      issue: primaryIssue,
+      lastCommentAt: rep.toEnriched.lastCommentAt || null,
+      fromAt: rep.fromRec.snapshot_at,
+      toAt: rep.toRec.snapshot_at,
+      issue: rep.primaryIssue,
+      collatedFrom: flaggedUnchanged.length,
+      collatedLeadIds: Array.from(new Set(flaggedUnchanged.map(x => String(x.toRec.lead_id).trim()))),
+      collatedRMs: Array.from(new Set(flaggedUnchanged.map(x => x.toRec.RM).filter(Boolean))),
     });
   });
 
@@ -5825,7 +5854,13 @@ function buildStalledRegionReports(rows){
     : '';
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
-  const leadLine = (r) => `${r.lead_id}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}`;
+  // A stalled row can represent a customer collated from several RM
+  // copies (see computeMovementRows) — show every merged lead_id and every
+  // RM holding a copy, not just the one representative copy's own, same as
+  // the on-screen card's leadIdentityLine/collationBadge.
+  const idsFor = (r) => (r.collatedLeadIds && r.collatedLeadIds.length > 1) ? r.collatedLeadIds.join(', ') : r.lead_id;
+  const rmSuffix = (r) => (r.collatedRMs && r.collatedRMs.length > 1) ? `  |  RMs: ${r.collatedRMs.join(', ')}` : '';
+  const leadLine = (r) => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${rmSuffix(r)}`;
 
   const byRegion = groupItemsByReportRegion(rows);
   return Object.keys(byRegion).sort().map(region => {
@@ -5854,7 +5889,11 @@ function buildStalledRegionReports(rows){
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
         columns: ['Lead ID', 'Issue', 'Unchanged Since'],
-        rows: group.map(r => [r.lead_id, r.issue, istStamp(r.fromAt)]),
+        rows: group.map(r => [
+          idsFor(r),
+          r.issue + ((r.collatedRMs && r.collatedRMs.length > 1) ? ` (RMs: ${r.collatedRMs.join(', ')})` : ''),
+          istStamp(r.fromAt),
+        ]),
       })),
       footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time.',
     });
@@ -6533,7 +6572,7 @@ function renderMovementTab(){
   el.innerHTML = rows.map(r => {
     const hoursSpan = ((r.toAt - r.fromAt) / 36e5).toFixed(1);
     return `<div class="alert-card">
-      <div class="alert-id">${esc(r.lead_id)} · ${esc(r.RM)}</div>
+      <div class="alert-id">${leadIdentityLine(r)}</div>
       <div class="alert-age mono">unchanged ~${hoursSpan}h</div>
       <div class="alert-meta">${esc(r.region)} · ${esc(r.project)} · ${esc(r.current_stage)} — <span class="chip red">${esc(r.issue)}</span></div>
       <div class="alert-comment">${esc(istStamp(r.fromAt))} → ${esc(istStamp(r.toAt))}</div>
@@ -6558,8 +6597,8 @@ function downloadMovementCSV(){
   _lastMovementRows.forEach(r => {
     rows.push([
       'Stalled',
-      r.lead_id,
-      r.RM,
+      (r.collatedLeadIds && r.collatedLeadIds.length > 1) ? r.collatedLeadIds.join('; ') : r.lead_id,
+      (r.collatedRMs && r.collatedRMs.length > 1) ? r.collatedRMs.join('; ') : r.RM,
       r.region,
       r.project,
       r.issue,
