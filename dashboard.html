@@ -3778,17 +3778,31 @@ document.getElementById('dateToInput').addEventListener('change', () => {
 // more than one shows as a single row with all its issues joined by "; "
 // rather than duplicate rows per issue.
 
-// Priority order for the CSV export only — a lead can technically match
-// several categories at once (e.g. "Stuck" and "Behind on Today's Calls"
-// are both legitimately true for the same old, under-called lead), but the
-// download should show one clear primary reason per row rather than every
-// technically-true label stacked together. Dashboard sections themselves
-// are unaffected — each still independently shows everything matching its
-// own definition, since that's needed for real operational use.
+// Priority order for the CSV export, the combined "all issues" report,
+// Stalled Flagged Leads, and the RM stall leaderboard / time-to-remediate
+// stats — a lead can technically match several categories at once (e.g.
+// "Stuck" and "Behind on Today's Calls" are both legitimately true for the
+// same old, under-called lead), but each of those views needs one clear
+// primary/actionable reason per lead rather than every technically-true
+// label stacked together. Dashboard sections themselves are unaffected —
+// each still independently shows everything matching its own definition,
+// since that's needed for real operational use.
+//
+// firstContactBreach ("Not Connected in 10 Minutes") is deliberately NOT
+// in this list. It's a retrospective fact (first contact happened, just
+// after the 10-minute window) that already happened and can't be
+// corrected — unlike every other entry here, there is no follow-up action
+// left to take on the LEAD itself. Letting it sit in this shared priority
+// list meant it could outrank a genuinely still-actionable issue (e.g.
+// Follow-up Overdue) for the same lead in the combined report, hiding the
+// thing someone could actually still do something about, and it polluted
+// "flagged"/"stalled"/"remediate" stats built for things that DO get
+// remediated. It still has its own dedicated report — see
+// ISSUE_REPORT_META.notConnected below — which reads as a reminder to the
+// region's RH of which RMs missed the response-time SLA, not an action list.
 const ISSUE_PRIORITY = [
   { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added' },
   { key: 'isNotUpdated', label: 'Not Updated' },
-  { key: 'firstContactBreach', label: 'Not Connected in 10 Minutes' },
   { key: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)' },
   { key: 'underCalledToday', label: "Behind on Today's Calls" },
   { key: 'stageStuck48h', label: 'Stuck — Open 48h+, Not Yet Opportunity' },
@@ -4074,7 +4088,7 @@ const ISSUE_REPORT_META = {
   },
   notConnected: {
     flag: 'firstContactBreach', label: 'Not Connected in 10 Minutes',
-    intro: 'Please find below the {SOURCE} leads that connected only after the 10-minute first-contact window had already passed. Leads that still have not connected at all are reported under Not Updated instead.',
+    intro: 'Reminder for the Regional Head: the following RMs did not connect with the client within the first 10 minutes of assignment, on the {SOURCE} leads below (contact did eventually happen — this is a record of how late, not a still-open task). This has already happened and cannot be corrected, so it is for visibility only, not an action list. Leads that still have not connected at all are reported under Not Updated instead.',
   },
   followupOverdue: {
     flag: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)',
@@ -4103,7 +4117,7 @@ const ISSUE_REPORT_META = {
 // recipient knows what to actually do, not just what's wrong.
 const ISSUE_ACTION_MAP = {
   inactiveRmNewLead: "Reassign this lead to an active RM immediately — it cannot be worked as currently routed.",
-  firstContactBreach: "Contact was made after the 10-minute response window had already passed — flag this with the RM as a delayed first response and confirm no further follow-up is being missed on this lead.",
+  firstContactBreach: "For the record, not for action — contact already happened, just after the 10-minute response window had passed, and that can't be corrected after the fact. Use this as a response-time SLA record per RM; no follow-up is needed on these specific leads.",
   followupOverdue: "Reconnect with the customer without delay — the 4-hour post-connect follow-up window has lapsed.",
   underCalledToday: `Complete the remaining call attempts today — see the Attempts Today column below for exactly how many more each lead needs to reach the ${CONFIG.MIN_CALLS_PER_DAY}/day SOP requirement.`,
   stageStuck48h: "Review this lead and either progress it toward Opportunity or close it out — it has been open more than 48 hours with no advancement.",
@@ -4278,11 +4292,17 @@ function buildRegionReports(issueKey){
 
   // Each line carries the lead's creation timestamp and how long it's been
   // sitting, so the recipient can verify the flag themselves rather than
-  // taking the dashboard's word for it.
+  // taking the dashboard's word for it. notConnected shows how late the
+  // connect was instead — "how long it's been sitting" doesn't apply to a
+  // lead that's already connected, and the lateness figure is the whole
+  // point of this specific reminder.
   const leadLine = (l) => {
     const created = parseDate(l.lead_created_at);
     if (!created) return `${l.lead_id}  |  Created: unknown`;
     const stamp = istStamp(l.lead_created_at);
+    if (issueKey === 'notConnected') {
+      return `${l.lead_id}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}`;
+    }
     const hrs = ((now - created) / 36e5).toFixed(1);
     return `${l.lead_id}  |  Created: ${stamp}  |  ${hrs}h ago`;
   };
@@ -4302,8 +4322,12 @@ function buildRegionReports(issueKey){
 
     const sourceLabel = selectedSourceLabel();
     const intro = meta.intro.replace('{SOURCE}', sourceLabel);
-    const subject = `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${SUBJECT_SCOPE_SUFFIX}`;
-    const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${regionLeads.length}${graceNote}\n\n${EMAIL_SIGNATURE}`;
+    const isReminder = issueKey === 'notConnected';
+    const subject = isReminder
+      ? `${region} — 10-Minute Response SLA Reminder (${dateStr})${SUBJECT_SCOPE_SUFFIX}`
+      : `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${SUBJECT_SCOPE_SUFFIX}`;
+    const totalLabel = isReminder ? 'Total Late Connections' : 'Total Leads';
+    const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${regionLeads.length}${graceNote}\n\n${EMAIL_SIGNATURE}`;
 
     const ages = regionLeads.map(l => {
       const created = parseDate(l.lead_created_at);
@@ -4311,20 +4335,22 @@ function buildRegionReports(issueKey){
     });
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
-      title: meta.label,
+      title: isReminder ? '10-Minute Response SLA Reminder' : meta.label,
       region,
       subtitle: `${dateStr} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
       action: ISSUE_ACTION_MAP[meta.flag] || '',
       kpis: [
-        { value: regionLeads.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: regionLeads.length, label: isReminder ? 'Late Connections' : 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
-        { value: (ages.length ? Math.max(...ages) : 0).toFixed(1) + 'h', label: 'Oldest Flagged', bg: '#fef3c7', fg: '#b45309' },
+        isReminder
+          ? { value: fmtWorkingWait(Math.max(...regionLeads.map(l => l.businessMinsToConnect || 0)), 'late'), label: 'Most Delayed', bg: '#fef3c7', fg: '#b45309' }
+          : { value: (ages.length ? Math.max(...ages) : 0).toFixed(1) + 'h', label: 'Oldest Flagged', bg: '#fef3c7', fg: '#b45309' },
       ],
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
         columns: issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Attempts Today']
-          : issueKey === 'notConnected' ? ['Lead ID', 'Created', 'Age', 'Connected Late By']
+          : isReminder ? ['Lead ID', 'Created', 'Age', 'Connected Late By']
           : ['Lead ID', 'Created', 'Age'],
         rows: group.map(l => {
           const created = parseDate(l.lead_created_at);
@@ -4334,13 +4360,15 @@ function buildRegionReports(issueKey){
             created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
           ];
           if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.attemptsToday));
-          if (issueKey === 'notConnected') cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
+          if (isReminder) cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
           return cells;
         }),
       })),
-      footerNote: enforceGrace
-        ? `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`
-        : '',
+      footerNote: isReminder
+        ? 'This is a response-time SLA record, not an action list — every lead below has already connected, just after the 10-minute window. Leads that still have not connected at all are reported under Not Updated instead.'
+        : (enforceGrace
+          ? `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`
+          : ''),
     });
 
     return { region, subject, body, html, count: regionLeads.length, regionNames: [region] };
