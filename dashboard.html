@@ -1732,7 +1732,14 @@ async function fetchAndRender(){
     // must not wait on or fail because of this second fetch.
     fetchMovementLog(sheetId).then(() => {
       populateMovementSnapshotSelectors();
-      renderMovementTab();
+      // Behind on Today's Calls' attemptsToday depends on Movement_Log for
+      // a real day-over-day call_attempts delta (see buildTodayCallBaseline)
+      // — on first load this fetch resolves AFTER the initial
+      // applyFiltersAndRender() already ran with no snapshot data at all,
+      // so Operations needs a fresh pass now that a baseline actually
+      // exists. This also re-renders the Movement tab itself, so no
+      // separate renderMovementTab() call is needed here.
+      applyFiltersAndRender();
       // The sign-in gate already holds a live Sheets write token by the
       // time any data has loaded, so this can fire straight away.
       if (autoSnapshotEnabled()) browserSnapshotOpenLeads();
@@ -1890,6 +1897,19 @@ function isClosedStage(stage){
 // check inconsistently within the same view. Set once per render pass.
 let _renderNow = new Date();
 
+// customer-key -> call_attempts as of the most recent Movement_Log
+// snapshot captured before today (IST) started — the baseline
+// attemptsToday subtracts from a lead's current call_attempts to get a
+// REAL count of today's calls, instead of guessing from CRM comments.
+// Rebuilt once per applyFiltersAndRender() pass (see buildTodayCallBaseline
+// there); enrichLead only ever reads it, never rebuilds it, so enriching
+// many leads/copySplits in one pass stays cheap.
+let _todayCallBaselineByKey = new Map();
+// True only while enrichLeadAsOf is enriching a PAST Movement_Log snapshot
+// (RM stall leaderboard, time-to-remediate) — attemptsToday falls back to
+// the CRM-comment proxy in that case; see enrichLeadAsOf for why.
+let _enrichingHistorical = false;
+
 function enrichLead(l){
   const now = _renderNow;
   const created = parseDate(l.lead_created_at);
@@ -1999,20 +2019,31 @@ function enrichLead(l){
   // call_attempts IS today's effort (it didn't exist before today), so that
   // column is used directly. For a lead still open on day 2+, the export has
   // no true per-day counter — only the lifetime-cumulative call_attempts
-  // total — so this counts CRM log entries actually timestamped today (IST)
-  // as the closest available proxy. Undercounts if a real call wasn't
-  // logged as a comment; that gap is exactly what the Recording Not Working
-  // check exists to surface separately. One flag covers every open lead
-  // regardless of age — kept as a single check rather than splitting
-  // same-day and day-2+ into separate sections, since both ask exactly the
-  // same question ("has this lead had 5 touches today?") and only differ in
-  // which data source answers it.
+  // total — so today's real count comes from a day-over-day DELTA instead:
+  // today's call_attempts minus its value as of the most recent Movement_Log
+  // snapshot from before today (see buildTodayCallBaseline). That's actual
+  // call data, not a guess — unlike the old CRM-comment-count proxy, it
+  // doesn't undercount a lead that was genuinely called but never
+  // commented on (this is exactly the situation Recording Not Working
+  // flags separately as a logging problem, not a calling one). Falls back
+  // to the comment-log proxy only when no pre-today snapshot exists yet
+  // for this lead (fresh Movement_Log setup, or gaps in capture history),
+  // or while enriching a past snapshot itself (see _enrichingHistorical).
   const loggedToday = actionLogEntries.filter(e => {
     if (!e.ts) return false;
     const d = parseDate(e.ts);
     return d && istSameDay(d, now);
   }).length;
-  const attemptsToday = isCreatedToday ? l.call_attempts : loggedToday;
+  let attemptsToday;
+  if (isCreatedToday) {
+    attemptsToday = l.call_attempts;
+  } else if (!_enrichingHistorical) {
+    const baselineKey = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    const baseline = _todayCallBaselineByKey.get(baselineKey);
+    attemptsToday = baseline !== undefined ? Math.max(0, (Number(l.call_attempts) || 0) - baseline) : loggedToday;
+  } else {
+    attemptsToday = loggedToday;
+  }
   const underCalledToday = isOpenLead && pastGrace && attemptsToday < CONFIG.MIN_CALLS_PER_DAY;
 
   // Stuck: open past 48hrs and still hasn't reached Opportunity — the one
@@ -2132,6 +2163,10 @@ function applyFiltersAndRender(){
   const filtered = allParsedLeads.filter(passesFilters);
 
   _renderNow = new Date(); // one consistent clock for this entire pass
+  // Rebuilt fresh every pass (cheap — one scan of movementSnapshots) so it
+  // always reflects whatever Movement_Log data is currently loaded; see
+  // buildTodayCallBaseline and enrichLead's attemptsToday.
+  _todayCallBaselineByKey = buildTodayCallBaseline(_renderNow);
   leads = filtered.map(enrichLead);
 
   // Issue-detection view: every multi-copy customer expanded back into its
@@ -5591,6 +5626,29 @@ let _currentSheetId = ''; // set once a fetch succeeds — needed by the Sheets-
 
 const MOVEMENT_LOG_DATE_KEYS = new Set(['snapshot_at', 'lead_created_at', 'last_connect_time']);
 
+// customer-key -> call_attempts as of the LATEST Movement_Log snapshot
+// captured before the IST calendar day `asOf` falls in — the baseline
+// enrichLead subtracts a lead's current call_attempts against to get a
+// real count of today's calls (see attemptsToday there). Returns an empty
+// map when there's no snapshot history yet (fresh setup) — callers treat
+// a missing key as "no baseline available" and fall back accordingly.
+function buildTodayCallBaseline(asOf){
+  const map = new Map();
+  if (!movementSnapshots.length) return map;
+  const p = istParts(asOf);
+  const todayStart = istWallToInstant(p.y, p.mo, p.d, 0, 0, 0).getTime();
+  const latest = new Map(); // key -> {atMs, call_attempts}
+  movementSnapshots.forEach(rec => {
+    const atMs = rec.snapshot_at.getTime();
+    if (atMs >= todayStart) return; // only snapshots strictly before today count as a baseline
+    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    const cur = latest.get(key);
+    if (!cur || atMs > cur.atMs) latest.set(key, { atMs, call_attempts: Number(rec.call_attempts) || 0 });
+  });
+  latest.forEach((v, key) => map.set(key, v.call_attempts));
+  return map;
+}
+
 async function fetchMovementLog(sheetId){
   movementFetchState = 'loading';
   try {
@@ -5687,14 +5745,24 @@ function buildMovementHistories(){
 // Runs enrichLead() as if "now" were a specific past instant, restoring
 // the real _renderNow immediately after — every other render function in
 // the current pass, and any later one, must keep seeing the true current
-// time. Safe because JS is single-threaded and nothing here awaits.
+// time. Safe because JS is single-threaded and nothing here awaits. Also
+// flips _enrichingHistorical so enrichLead's attemptsToday falls back to
+// the CRM-comment proxy instead of the day-over-day call_attempts delta
+// (see buildTodayCallBaseline) — that delta is built once per live render
+// pass for "today" specifically; recomputing an equivalent baseline for
+// every distinct historical day the leaderboard/remediate-time walk
+// touches would be a real performance cost for no benefit those views
+// actually need.
 function enrichLeadAsOf(rawRecord, asOfDate){
   const saved = _renderNow;
+  const savedHistorical = _enrichingHistorical;
   _renderNow = asOfDate;
+  _enrichingHistorical = true;
   try {
     return enrichLead(rawRecord);
   } finally {
     _renderNow = saved;
+    _enrichingHistorical = savedHistorical;
   }
 }
 
