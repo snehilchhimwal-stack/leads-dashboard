@@ -5139,6 +5139,8 @@ function reportDateRange(includedLeads){
 
 function buildRegionWiseReports(combineAll){
   const now = new Date();
+  const DIVIDER = '='.repeat(50);
+  const SUBDIVIDER = '-'.repeat(50);
   let graceBlocked = 0, outOfScope = 0;
   // Fresh for this generation — this path previously never touched the
   // names dict at all, so reportScopeNotice()'s "NOT IN REPORTS" breakdown
@@ -5171,16 +5173,41 @@ function buildRegionWiseReports(combineAll){
     rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect });
   }));
 
+  // Not Connected in 10 Minutes rides along in this same email as its own
+  // trailing section, deliberately collected separately from the pass
+  // above — it's independent of reportableIssueFor/ISSUE_PRIORITY (see the
+  // note on ISSUE_PRIORITY) so it never competes for or masks a lead's
+  // actionable issue, and it can't get lost inside the alphabetically-
+  // sorted issue tally either, since it's appended after that instead of
+  // being one of its entries.
+  const notConnectedRows = [];
+  leads.forEach(parent => expandForRegionReporting(parent).forEach(l => {
+    if (!l.firstContactBreach) return;
+    const main = mainRegionFor(effectiveRegion(l));
+    if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect });
+  }));
+
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
 
-  if (!rows.length) return [];
+  if (!rows.length && !notConnectedRows.length) return [];
 
   const groups = combineAll ? { __ALL__: rows } : groupBy(rows, r => r.mainRegion);
+  const notConnectedGroups = combineAll ? { __ALL__: notConnectedRows } : groupBy(notConnectedRows, r => r.mainRegion);
+  // A region with ONLY late-connect leads and no other actionable issue
+  // still needs its own email — without this it would have no key in
+  // `groups` (built from `rows` alone) and silently drop out entirely.
+  if (!combineAll) {
+    Object.keys(notConnectedGroups).forEach(region => {
+      if (!groups[region]) groups[region] = [];
+    });
+  }
 
   return Object.keys(groups).sort().map(key => {
     const items = groups[key];
-    const regionNames = Array.from(new Set(items.map(r => r.mainRegion))).sort();
+    const notConnectedItems = notConnectedGroups[key] || [];
+    const regionNames = Array.from(new Set(items.concat(notConnectedItems).map(r => r.mainRegion))).sort();
     // In combined mode the email spans everything, so the Region filter
     // selection is the right label. In per-region mode each email covers one
     // region, so it names its own — otherwise every email would carry an
@@ -5189,7 +5216,7 @@ function buildRegionWiseReports(combineAll){
     const sourceLabel = selectedSourceLabel();
 
     const dateRange = reportDateRange(
-      items.map(r => leads.find(l => l.lead_id === r.lead_id)).filter(Boolean)
+      items.concat(notConnectedItems).map(r => leads.find(l => l.lead_id === r.lead_id)).filter(Boolean)
     );
 
     // Fixed-width columns rather than tabs — tab stops render
@@ -5213,8 +5240,32 @@ function buildRegionWiseReports(combineAll){
     ).join('\n');
 
     // Per-issue tally so the recipient sees the shape before the detail.
+    // Scoped to `sorted` only — the actionable issues — so Not Connected in
+    // 10 Minutes never becomes one of these entries; it gets its own
+    // trailing block below instead, appended after this table rather than
+    // sorted alphabetically into the middle of it.
     const tally = groupBy(sorted, r => r.issue);
     const summary = Object.keys(tally).sort().map(k => `  ${k}: ${tally[k].length}`).join('\n');
+    const mainGraceNote = `(Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.)`;
+    const mainSection = sorted.length
+      ? `Summary by issue:\n${summary}\n\n${header}\n${ruleLine}\n${table}\n\n${mainGraceNote}`
+      : `No other flagged issues right now.`;
+
+    // Not Connected in 10 Minutes, appended as its own reminder block —
+    // grouped by RM like its dedicated single-issue report, addressed to
+    // the region's RH, explicitly a record rather than an action list.
+    const notConnectedByRM = groupBy(notConnectedItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+    const notConnectedBlock = notConnectedItems.length ? `
+
+${DIVIDER}
+REMINDER FOR THE REGIONAL HEAD — 10-MINUTE RESPONSE SLA
+The following RMs did not connect with the client within the first 10 minutes of assignment. Contact did eventually happen — this is a record of how late, not an open task. Already happened and cannot be corrected.
+${SUBDIVIDER}
+${Object.values(notConnectedByRM).map(group =>
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${r.lead_id}  |  ${r.subRegion}  |  ${fmtWorkingWait(r.businessMinsToConnect, 'late')}`).join('\n')}`
+).join('\n\n')}
+
+Total Late Connections : ${notConnectedItems.length}` : '';
 
     const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${SUBJECT_SCOPE_SUFFIX}`;
     const body =
@@ -5227,16 +5278,38 @@ Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     :
 Source     : ${sourceLabel}
 Total      : ${sorted.length}
 
-Summary by issue:
-${summary}
-
-${header}
-${ruleLine}
-${table}
-
-(Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded, except for the 10-minute first-contact check — RMs are given that window to work a fresh lead.)
+${mainSection}${notConnectedBlock}
 
 ${EMAIL_SIGNATURE}`;
+
+    const sections = Object.keys(tally).sort().map(issueName => {
+      const issueFlag = _FLAG_BY_ISSUE_PRIORITY_LABEL[issueName];
+      const isDueToday = issueFlag === 'underCalledToday';
+      return {
+        heading: issueName,
+        subheading: `${tally[issueName].length} lead${tally[issueName].length === 1 ? '' : 's'}`,
+        action: ISSUE_ACTION_MAP[issueFlag] || '',
+        columns: isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today'] : ['Lead ID', 'Region', 'RM', 'Age'],
+        rows: tally[issueName].map(r => {
+          const created = parseDate(r.lead_created_at);
+          const cells = [r.lead_id, r.subRegion, r.RM, created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
+          if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
+          return cells;
+        }),
+      };
+    });
+    // Appended last, deliberately outside the alphabetical sort above —
+    // this always reads as the final, separate section regardless of what
+    // it would alphabetize to among the actionable issue names.
+    if (notConnectedItems.length) {
+      sections.push({
+        heading: '10-Minute Response SLA — Reminder for the Regional Head',
+        subheading: `${notConnectedItems.length} late connection${notConnectedItems.length === 1 ? '' : 's'} — already happened, for the record only`,
+        action: ISSUE_ACTION_MAP.firstContactBreach,
+        columns: ['Lead ID', 'Region', 'RM', 'Connected Late By'],
+        rows: notConnectedItems.map(r => [r.lead_id, r.subRegion, r.RM, fmtWorkingWait(r.businessMinsToConnect, 'late')]),
+      });
+    }
 
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
@@ -5248,30 +5321,12 @@ ${EMAIL_SIGNATURE}`;
         { value: regionNames.length, label: regionNames.length === 1 ? 'Region' : 'Regions', bg: '#e0e7ff', fg: '#4338ca' },
         { value: Object.keys(tally).length, label: Object.keys(tally).length === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
       ],
-      sections: Object.keys(tally).sort().map(issueName => {
-        const issueFlag = _FLAG_BY_ISSUE_PRIORITY_LABEL[issueName];
-        const isDueToday = issueFlag === 'underCalledToday';
-        const isNotConnected = issueFlag === 'firstContactBreach';
-        return {
-          heading: issueName,
-          subheading: `${tally[issueName].length} lead${tally[issueName].length === 1 ? '' : 's'}`,
-          action: ISSUE_ACTION_MAP[issueFlag] || '',
-          columns: isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today']
-            : isNotConnected ? ['Lead ID', 'Region', 'RM', 'Age', 'Connected Late By']
-            : ['Lead ID', 'Region', 'RM', 'Age'],
-          rows: tally[issueName].map(r => {
-            const created = parseDate(r.lead_created_at);
-            const cells = [r.lead_id, r.subRegion, r.RM, created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
-            if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
-            if (isNotConnected) cells.push(fmtWorkingWait(r.businessMinsToConnect, 'late'));
-            return cells;
-          }),
-        };
-      }),
-      footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded, except for the 10-minute first-contact check — RMs are given that window to work a fresh lead.`,
+      sections,
+      footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
+        + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : ''),
     });
 
-    return { region: regionLabel, subject, body, html, count: sorted.length, issueLabel: 'All issues', regionNames };
+    return { region: regionLabel, subject, body, html, count: sorted.length + notConnectedItems.length, issueLabel: 'All issues', regionNames };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
