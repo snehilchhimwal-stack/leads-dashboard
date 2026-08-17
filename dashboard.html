@@ -1624,11 +1624,19 @@ async function fetchAndRender(){
         .filter(Boolean)
         .sort((a, b) => b - a)[0] || null;
 
+      // call_attempts/call_count/duration are tracked per CLIENT ID by the
+      // phone system, not accumulated per RM copy — every copy of the same
+      // customer reports the SAME cumulative client-level figure, not a
+      // partial contribution. Summing across copies multiplied it by the
+      // copy count instead (3 copies each reporting 36 attempts read as
+      // 108). Max takes it "as a whole" for the customer, matching
+      // whichever copy's snapshot happens to be most complete, without
+      // the multiplication.
       return Object.assign({}, primary, {
         internal_status_comments: merged.join(' | '),
-        call_attempts: rows.reduce((sum, r) => sum + (Number(r.call_attempts) || 0), 0),
-        call_count:    rows.reduce((sum, r) => sum + (Number(r.call_count) || 0), 0),
-        duration:      rows.reduce((sum, r) => sum + (Number(r.duration) || 0), 0),
+        call_attempts: Math.max(0, ...rows.map(r => Number(r.call_attempts) || 0)),
+        call_count:    Math.max(0, ...rows.map(r => Number(r.call_count) || 0)),
+        duration:      Math.max(0, ...rows.map(r => Number(r.duration) || 0)),
         last_connect_time: latestConnect ? latestConnect.toISOString() : primary.last_connect_time,
         // Earliest creation across copies — the moment the customer actually
         // came in, not when a particular RM's copy was generated.
