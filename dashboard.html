@@ -2108,7 +2108,13 @@ function applyFiltersAndRender(){
   const fromDate = fromVal ? parseDate(fromVal + ' 00:00:00') : null;   // IST day start
   const toDate = toVal ? parseDate(toVal + ' 23:59:59') : null;         // inclusive of the whole IST "to" day
 
-  const filtered = allParsedLeads.filter(l => {
+  // Extracted so the SAME predicate can be re-applied to each individual
+  // copySplit below, not just to the merged parent record — a customer
+  // merged from a Thane copy AND a Loan copy (sharing a lead_id/client_id)
+  // passes this check as long as ITS PRIMARY copy's region is selected;
+  // without re-checking each split on its own, the Loan copy rode along
+  // into issueLeads even with Loan unchecked in the Region filter.
+  const passesFilters = (l) => {
     if (projSel.size && !projSel.has(l.project)) return false;
     if (regSel.size && !regSel.has(effectiveRegion(l))) return false;
     if (tlSel.size && !tlSel.has(l.TL)) return false;
@@ -2121,7 +2127,9 @@ function applyFiltersAndRender(){
       if (toDate && created > toDate) return false;
     }
     return true;
-  });
+  };
+
+  const filtered = allParsedLeads.filter(passesFilters);
 
   _renderNow = new Date(); // one consistent clock for this entire pass
   leads = filtered.map(enrichLead);
@@ -2133,13 +2141,21 @@ function applyFiltersAndRender(){
   // emails, and the CSV export. `leads` above (still one card per
   // customer) is untouched and keeps feeding Total Leads, Distribution,
   // RM Scorecard, and everything else that isn't about a specific issue.
+  //
+  // Built from allParsedLeads directly, NOT from `leads` above — a
+  // customer's PARENT record reflects only its primary copy's region
+  // (e.g. Thane), so filtering allParsedLeads first and expanding
+  // afterward would drop every split of a customer whose primary copy
+  // doesn't match the filter, even when a DIFFERENT one of its copies
+  // does (a Thane-primary customer with a Loan copy has to still show
+  // that Loan copy when the Region filter is set to Loan, even though
+  // the parent itself — and Thane — wouldn't pass that filter). Each
+  // unit (split, or the record itself when there's no split) is checked
+  // against passesFilters independently.
   issueLeads = [];
-  leads.forEach(l => {
-    if (l.copySplits && l.copySplits.length > 1) {
-      l.copySplits.forEach(raw => issueLeads.push(enrichLead(raw)));
-    } else {
-      issueLeads.push(l);
-    }
+  allParsedLeads.forEach(l => {
+    const units = (l.copySplits && l.copySplits.length > 1) ? l.copySplits : [l];
+    units.filter(passesFilters).forEach(raw => issueLeads.push(enrichLead(raw)));
   });
 
   const summary = document.getElementById('filterSummary');
@@ -5699,11 +5715,15 @@ function enrichSnapshotCached(rec){
 }
 
 // Same Project/Region/TL filters the rest of the dashboard uses, matched
-// against a snapshot record's own recorded fields.
+// against a snapshot record's own recorded fields. Region goes through
+// effectiveRegion, same as applyMovementFilters below and the main
+// dashboard's own filter — a raw .region check here missed "Loan" leads
+// entirely, since Loan is inferred from project_region/group_source, not
+// reliably present in the region column itself.
 function passesMovementFilters(rec){
   const projSel = filterState.project, regSel = filterState.region, tlSel = filterState.TL;
   return (!projSel.size || projSel.has(rec.project)) &&
-    (!regSel.size || regSel.has(rec.region)) &&
+    (!regSel.size || regSel.has(effectiveRegion(rec))) &&
     (!tlSel.size || tlSel.has(rec.TL));
 }
 
