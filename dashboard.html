@@ -4626,6 +4626,70 @@ let gmailTokenExpiresAt = 0;
 let gmailUserEmail = '';
 let _pendingGmailSend = null; // { report, to, cc, btnId } — sent once a token arrives
 
+// Keyed by report SUBJECT (not array index/btnId) — subjects are
+// deterministic from region + issue + date, so this survives a report list
+// being regenerated (different array order, different index) and still
+// recognizes "this exact report already went out this hour". Persisted in
+// localStorage, not just in-memory, so the "Sent" state (and the 1-hour
+// resend window) survives a page reload too.
+const GMAIL_SENT_LOG_KEY = 'gsl_gmail_sent_log';
+const GMAIL_SENT_WINDOW_MS = 60 * 60 * 1000;
+
+function loadGmailSentLog(){
+  try {
+    const v = JSON.parse(localStorage.getItem(GMAIL_SENT_LOG_KEY) || '{}');
+    return (v && typeof v === 'object') ? v : {};
+  } catch (e) { return {}; }
+}
+function markReportSent(subject){
+  const log = loadGmailSentLog();
+  log[subject] = Date.now();
+  // Prune while we're here so this doesn't grow forever across days of use.
+  const cutoff = Date.now() - GMAIL_SENT_WINDOW_MS;
+  Object.keys(log).forEach(k => { if (log[k] < cutoff) delete log[k]; });
+  try { localStorage.setItem(GMAIL_SENT_LOG_KEY, JSON.stringify(log)); } catch (e) {}
+}
+// null once past the 1-hour window, so callers don't need to re-check age.
+function gmailSentAt(subject){
+  const ts = loadGmailSentLog()[subject];
+  if (!ts || Date.now() - ts >= GMAIL_SENT_WINDOW_MS) return null;
+  return ts;
+}
+
+// Paints a Gmail-send button as either its normal "Send via Gmail" face or
+// (when this exact report subject was sent within the last hour) a
+// "Sent ✓ — click to resend" face — the button stays enabled either way,
+// so a second click always just sends again; nothing here disables it.
+// Also arms a timer to flip it back automatically once the hour is up, so
+// a tab left open on the report list doesn't need a click or refresh to
+// notice the window closed.
+function applyGmailButtonState(btn, subject){
+  if (!btn) return;
+  clearTimeout(btn._gmailRevertTimer);
+  const sentAt = gmailSentAt(subject);
+  if (sentAt) {
+    btn.textContent = 'Sent ✓ — click to resend';
+    btn.classList.add('copied');
+    btn.title = 'Sent via Gmail within the last hour — click to send again';
+    const remaining = GMAIL_SENT_WINDOW_MS - (Date.now() - sentAt);
+    btn._gmailRevertTimer = setTimeout(() => applyGmailButtonState(btn, subject), Math.max(0, remaining) + 50);
+  } else {
+    btn.textContent = 'Send via Gmail';
+    btn.classList.remove('copied');
+    btn.title = 'Sends immediately via the Gmail API — no mail client, no extra click';
+  }
+}
+// Applies applyGmailButtonState to every report row just rendered, so
+// reports sent within the last hour immediately show "Sent" on a fresh
+// render (regenerating the list, switching tabs and back, reloading the
+// page) rather than only updating after their own button is next clicked.
+function applyGmailButtonStatesFor(reports, btnIdFn){
+  (reports || []).forEach((r, i) => {
+    if (!r) return;
+    applyGmailButtonState(document.getElementById(btnIdFn(i)), r.subject);
+  });
+}
+
 function getGmailClientId(){
   try { return (localStorage.getItem(GMAIL_CLIENT_ID_KEY) || DEFAULT_CLIENT_ID).trim(); } catch (e) { return DEFAULT_CLIENT_ID; }
 }
@@ -4777,11 +4841,10 @@ async function performGmailSend(pending){
       const errBody = await resp.json().catch(() => ({}));
       throw new Error((errBody.error && errBody.error.message) || `Gmail API error ${resp.status}`);
     }
+    markReportSent(report.subject);
     if (btn) {
       btn.disabled = false;
-      btn.textContent = 'Sent ✓';
-      btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = 'Send via Gmail'; btn.classList.remove('copied'); }, 2500);
+      applyGmailButtonState(btn, report.subject);
     }
   } catch (err) {
     console.error('Gmail send failed:', err);
@@ -4789,7 +4852,11 @@ async function performGmailSend(pending){
       btn.disabled = false;
       btn.textContent = 'Failed ✗';
       btn.style.borderColor = 'var(--red)';
-      setTimeout(() => { btn.textContent = 'Send via Gmail'; btn.style.borderColor = ''; }, 3000);
+      // A failed RESEND (button was already showing "Sent" from an earlier
+      // success) should fall back to that Sent state, not a bare "Send via
+      // Gmail" — the earlier send still went through fine. applyGmailButtonState
+      // figures out which one is correct from the log rather than assuming.
+      setTimeout(() => { btn.style.borderColor = ''; applyGmailButtonState(btn, report.subject); }, 3000);
     }
   }
 }
@@ -4873,6 +4940,7 @@ function renderRegionReports(){
   `).join('');
 
   window._regionReports = reports;
+  applyGmailButtonStatesFor(reports, i => 'gmailBtn_' + i);
 }
 
 function copyRegionReport(idx){
@@ -4947,6 +5015,7 @@ function renderReports(){
   `).join('');
 
   document.getElementById('downloadAllReportsBtn').style.display = 'inline-block';
+  applyGmailButtonStatesFor(_allReports, i => 'gmailAllBtn_' + i);
 }
 
 document.getElementById('reportModeSelect').addEventListener('change', syncReportControls);
@@ -5256,6 +5325,7 @@ function renderAllRegionReports(){
     document.getElementById('downloadAllReportsBtn').style.display = 'inline-block';
     btn.disabled = false;
     btn.textContent = 'Generate all issues × regions';
+    applyGmailButtonStatesFor(_allReports, i => 'gmailAllBtn_' + i);
   }, 10);
 }
 
@@ -6259,6 +6329,7 @@ function renderOvernightRegionReports(){
       <button class="report-copy-btn" onclick="sendReportViaGmail(window._overnightRegionReports[${idx}], 'overnightRptGmailBtn_${idx}')" id="overnightRptGmailBtn_${idx}" title="Sends immediately via the Gmail API">Send via Gmail</button>
     </div>
   `).join('');
+  applyGmailButtonStatesFor(reports, i => 'overnightRptGmailBtn_' + i);
 }
 
 // Same pattern as renderOvernightRegionReports above, for Stalled Flagged
@@ -6287,6 +6358,7 @@ function renderStalledRegionReports(){
       <button class="report-copy-btn" onclick="sendReportViaGmail(window._stalledRegionReports[${idx}], 'stalledRptGmailBtn_${idx}')" id="stalledRptGmailBtn_${idx}" title="Sends immediately via the Gmail API">Send via Gmail</button>
     </div>
   `).join('');
+  applyGmailButtonStatesFor(reports, i => 'stalledRptGmailBtn_' + i);
 }
 
 function renderMovementTab(){
