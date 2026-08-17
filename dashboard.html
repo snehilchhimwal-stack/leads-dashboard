@@ -2825,10 +2825,14 @@ document.getElementById('tabBar').addEventListener('click', (e) => {
 function updateTabBadges(){
   const el = document.getElementById('tabBadgeOps');
   if (!el) return;
-  const n = issueLeads.filter(l =>
+  const matched = issueLeads.filter(l =>
     l.inactiveRmNewLead || l.firstContactBreach || l.followupOverdue ||
     l.underCalledToday || l.stageStuck48h || l.isNotUpdated
-  ).length;
+  );
+  // Distinct customers, not rows — a customer whose two RM copies are each
+  // separately flagged still counts once here, same as every other
+  // headline count in the dashboard.
+  const n = countUniqueAndCloned(matched).unique;
   el.textContent = n.toLocaleString();
   el.className = 'tab-badge' + (n > 0 ? ' urgent' : '');
 }
@@ -3587,6 +3591,54 @@ function leadIdentityLine(l){
   return `${esc(l.lead_id)} · ${esc(l.RM)}${siblingNote(l)}`;
 }
 
+// Groups a copySplit-expanded list back into families using the SAME
+// signal every copy's own siblingLeadIds already carries (every copy of
+// one customer lists every OTHER copy, so [own id, ...siblings] sorted is
+// an identical key across all of them) — a plain, unsplit entity (no
+// siblings) is its own family of one, so this works on lists that mix
+// split and non-split entities, not just fully-split ones.
+function familyKeyOf(l){
+  return [String(l.lead_id).trim(), ...((l.siblingLeadIds || []).map(String))].sort().join('|');
+}
+
+// One representative entry per family (first one encountered) — for any
+// place that needs a "how many distinct customers, and what does each
+// look like" answer without a cloned copy skewing the count or a status
+// breakdown. The full per-copy list stays exactly as-is wherever a
+// per-copy card/row still needs its own entry (issue sections, region
+// email detail rows) — this is only for count/breakdown purposes.
+function dedupeToFamilies(items){
+  const seen = new Map();
+  (items || []).forEach(l => {
+    const key = familyKeyOf(l);
+    if (!seen.has(key)) seen.set(key, l);
+  });
+  return Array.from(seen.values());
+}
+
+// A "leads created" / "leads flagged" style COUNT should say how many real
+// customers that is, not how many rows — a customer collated from 3 RM
+// copies still shows up as 3 separate entities in issue-detection lists
+// (copySplits — each RM's own copy is judged on its own data, deliberately
+// not merged for that purpose), so counting the array length directly
+// overstates volume: "12 leads created" reads as 12 distinct people even
+// when only 7 are.
+function countUniqueAndCloned(items){
+  const total = (items || []).length;
+  const unique = dedupeToFamilies(items).length;
+  return { total, unique, cloned: total - unique };
+}
+
+// Renders a countUniqueAndCloned() result as the short phrase used on
+// section/panel count badges and KPI-style stats — "7 leads" when nothing
+// was cloned, "7 leads (5 cloned)" when some entries are just another RM's
+// copy of a customer already counted.
+function uniqueCloneLabel(counts, noun){
+  const n = noun || 'lead';
+  const base = `${counts.unique} ${n}${counts.unique === 1 ? '' : 's'}`;
+  return counts.cloned > 0 ? `${base} (${counts.cloned} cloned)` : base;
+}
+
 // Direct check #1: created today (calendar day), under 5 calls, open
 // (not closed, not Opportunity+). Starts from isOpenLead as the foundation
 // — a closed or Opportunity+ lead can never appear here. Covers every open
@@ -3602,7 +3654,7 @@ function renderDueTodayList(){
   // since every lead here was already measured against the same _renderNow.
   const group = issueLeads.filter(l => l.isOpenLead && l.underCalledToday)
     .sort((a,b) => a.ageHours - b.ageHours);
-  document.getElementById('dueTodayCount').textContent = group.length + ' leads';
+  document.getElementById('dueTodayCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('dueTodayList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing is behind on today's calls</div>`;
@@ -3627,7 +3679,7 @@ function renderDueTodayList(){
 function renderStuckList(){
   const group = issueLeads.filter(l => l.isOpenLead && l.stageStuck48h)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
-  document.getElementById('stuckCount').textContent = group.length + ' leads';
+  document.getElementById('stuckCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('stuckList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck past 48h right now</div>`;
@@ -3657,7 +3709,7 @@ function renderInactiveRmList(){
 function renderNotUpdatedList(){
   const group = issueLeads.filter(l => l.isOpenLead && l.isNotUpdated)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
-  document.getElementById('notUpdatedCount').textContent = group.length + ' leads';
+  document.getElementById('notUpdatedCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('notUpdatedList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing sitting in Not Updated right now</div>`;
@@ -3828,7 +3880,7 @@ function lastCommentTimestamp(l){ return l.lastCommentAt || null; }
 
 function renderNotConnectedList(){
   const missed = issueLeads.filter(l => l.firstContactBreach).sort((a,b)=> (b.businessMinsToConnect||0) - (a.businessMinsToConnect||0));
-  document.getElementById('notConnCount').textContent = missed.length + ' leads';
+  document.getElementById('notConnCount').textContent = uniqueCloneLabel(countUniqueAndCloned(missed), 'lead');
   const el = document.getElementById('notConnList');
   if (!missed.length){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No connected leads missed the 10-minute first-contact window</div>`;
@@ -3849,7 +3901,7 @@ function renderNotConnectedList(){
 function renderFollowupList(){
   const group = issueLeads.filter(l => l.followupOverdue)
     .sort((a,b) => (b.hoursSinceLastComment||0) - (a.hoursSinceLastComment||0));
-  document.getElementById('followupCount').textContent = group.length + ' leads';
+  document.getElementById('followupCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('followupList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">All connected leads reviewed within 4 hours</div>`;
@@ -3968,7 +4020,7 @@ function colorForIssue(issue, indexIfUnknown){
 // function) rather than tied to issue labels specifically.
 function renderBreakdownCard(el, opts){
   if (!el) return;
-  const { total, totalLabel, rangeText, counts, colorFn, numColor, emptyText } = opts;
+  const { total, totalLabel, subNote, rangeText, counts, colorFn, numColor, emptyText } = opts;
   if (!total) {
     el.innerHTML = emptyText ? `<div class="stall-card-empty">${esc(emptyText)}</div>` : '';
     return;
@@ -3997,6 +4049,7 @@ function renderBreakdownCard(el, opts){
     <div class="stall-card-total">
       <div class="stall-card-num" style="color:${numColor || 'var(--red)'};">${total.toLocaleString()}</div>
       <div class="stall-card-num-label">${esc(totalLabel)}</div>
+      ${subNote ? `<div class="stall-card-range" title="Same customer, another RM's copy — counted once above, not shown twice">${esc(subNote)}</div>` : ''}
       ${rangeText ? `<div class="stall-card-range">${esc(rangeText)}</div>` : ''}
     </div>
     <div class="stall-card-body">
@@ -4446,6 +4499,18 @@ function buildRegionReports(issueKey){
       ? `\n\n(Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.)`
       : '';
 
+    // "Total Leads"/"Leads Flagged" has to mean distinct customers, not
+    // rows — a customer collated from 2 RM copies otherwise reads as 2
+    // flagged leads when it's really one. Detail rows below stay per-copy
+    // (each RM still needs their own row), only the headline/KPI dedupes.
+    const cloneCounts = countUniqueAndCloned(regionLeads);
+    const cloneCountLabel = cloneCounts.cloned > 0
+      ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(cloneCounts.unique);
+    const cloneCaveat = cloneCounts.cloned > 0
+      ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.`
+      : '';
+
     const sourceLabel = selectedSourceLabel();
     const intro = meta.intro.replace('{SOURCE}', sourceLabel);
     const isReminder = issueKey === 'notConnected';
@@ -4453,7 +4518,7 @@ function buildRegionReports(issueKey){
       ? `${region} — 10-Minute Response SLA Reminder (${dateStr})${SUBJECT_SCOPE_SUFFIX}`
       : `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${SUBJECT_SCOPE_SUFFIX}`;
     const totalLabel = isReminder ? 'Total Late Connections' : 'Total Leads';
-    const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${regionLeads.length}${graceNote}\n\n${EMAIL_SIGNATURE}`;
+    const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${cloneCountLabel}${graceNote}\n\n${EMAIL_SIGNATURE}`;
 
     const ages = regionLeads.map(l => {
       const created = parseDate(l.lead_created_at);
@@ -4464,9 +4529,9 @@ function buildRegionReports(issueKey){
       title: isReminder ? '10-Minute Response SLA Reminder' : meta.label,
       region,
       subtitle: `${dateStr} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
-      action: ISSUE_ACTION_MAP[meta.flag] || '',
+      action: (ISSUE_ACTION_MAP[meta.flag] || '') + cloneCaveat,
       kpis: [
-        { value: regionLeads.length, label: isReminder ? 'Late Connections' : 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: cloneCounts.unique, label: isReminder ? 'Late Connections' : 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
         isReminder
           ? { value: fmtWorkingWait(Math.max(...regionLeads.map(l => l.businessMinsToConnect || 0)), 'late'), label: 'Most Delayed', bg: '#fef3c7', fg: '#b45309' }
@@ -4497,7 +4562,7 @@ function buildRegionReports(issueKey){
           : ''),
     });
 
-    return { region, subject, body, html, count: regionLeads.length, regionNames: [region] };
+    return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
   });
 }
 
@@ -5375,13 +5440,28 @@ function buildRegionWiseReports(combineAll){
     // Scoped to `sorted` only — the actionable issues — so Not Connected in
     // 10 Minutes never becomes one of these entries; it gets its own
     // trailing block below instead, appended after this table rather than
-    // sorted alphabetically into the middle of it.
+    // sorted alphabetically into the middle of it. Left as real instance
+    // counts (not deduped) — a customer's two RM copies can be flagged for
+    // two DIFFERENT issues, and each is its own actionable item.
     const tally = groupBy(sorted, r => r.issue);
     const summary = Object.keys(tally).sort().map(k => `  ${k}: ${tally[k].length}`).join('\n');
     const mainGraceNote = `(Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.)`;
     const mainSection = sorted.length
       ? `Summary by issue:\n${summary}\n\n${header}\n${ruleLine}\n${table}\n\n${mainGraceNote}`
       : `No other flagged issues right now.`;
+
+    // "Total" has to mean distinct customers, not rows — a customer
+    // collated from 2 RM copies (each with their own issue) otherwise
+    // reads as 2 flagged leads when it's really one. Per-issue tallies
+    // above stay instance-based; only the headline/KPI totals dedupe.
+    const cloneCounts = countUniqueAndCloned(sorted);
+    const totalCountLabel = cloneCounts.cloned > 0
+      ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(cloneCounts.unique);
+    const notConnectedCloneCounts = countUniqueAndCloned(notConnectedItems);
+    const notConnectedTotalLabel = notConnectedCloneCounts.cloned > 0
+      ? `${notConnectedCloneCounts.unique} (+${notConnectedCloneCounts.cloned} cloned cop${notConnectedCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(notConnectedCloneCounts.unique);
 
     // Not Connected in 10 Minutes, appended as its own reminder block —
     // grouped by RM like its dedicated single-issue report, addressed to
@@ -5397,7 +5477,7 @@ ${Object.values(notConnectedByRM).map(group =>
   `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}  |  ${fmtWorkingWait(r.businessMinsToConnect, 'late')}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
 ).join('\n\n')}
 
-Total Late Connections : ${notConnectedItems.length}` : '';
+Total Late Connections : ${notConnectedTotalLabel}` : '';
 
     const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${SUBJECT_SCOPE_SUFFIX}`;
     const body =
@@ -5408,7 +5488,7 @@ Please find below the ${sourceLabel} leads with issues:
 Date range : ${dateRange}
 Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     : ${regionLabel}
 Source     : ${sourceLabel}
-Total      : ${sorted.length}
+Total      : ${totalCountLabel}
 
 ${mainSection}${notConnectedBlock}
 
@@ -5436,7 +5516,7 @@ ${EMAIL_SIGNATURE}`;
     if (notConnectedItems.length) {
       sections.push({
         heading: 'Not Connected in 10 Minutes',
-        subheading: `${notConnectedItems.length} late connection${notConnectedItems.length === 1 ? '' : 's'} — already happened, for the record only`,
+        subheading: `${notConnectedTotalLabel} late connection${notConnectedCloneCounts.unique === 1 ? '' : 's'} — already happened, for the record only`,
         columns: ['Lead ID', 'Region', 'RM', 'Connected Late By'],
         rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late')]),
       });
@@ -5448,16 +5528,17 @@ ${EMAIL_SIGNATURE}`;
       region: regionLabel,
       subtitle: `${dateRange} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
       kpis: [
-        { value: sorted.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
         { value: regionNames.length, label: regionNames.length === 1 ? 'Region' : 'Regions', bg: '#e0e7ff', fg: '#4338ca' },
         { value: Object.keys(tally).length, label: Object.keys(tally).length === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
       ],
       sections,
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
-        + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : ''),
+        + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
+        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
-    return { region: regionLabel, subject, body, html, count: sorted.length + notConnectedItems.length, issueLabel: 'All issues', regionNames };
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique, issueLabel: 'All issues', regionNames };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
@@ -6040,17 +6121,28 @@ function buildStalledRegionReports(rows){
       `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
     ).join('\n');
 
+    // "Total Leads" has to mean distinct customers, not rows — two RM
+    // copies of the same customer both stalled still reads as one customer
+    // with two open problems, not two flagged leads. Detail rows above stay
+    // per-copy (each RM still needs their own row), only the headline/KPI
+    // totals dedupe.
+    const cloneCounts = countUniqueAndCloned(regionRows);
+    const totalCountLabel = cloneCounts.cloned > 0
+      ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(cloneCounts.unique);
+
     const subject = `${region} Stalled Flagged Leads (${todayDateLabel()}) - ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`;
-    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} that were flagged and showed zero movement between ${rangeLabel}.\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${regionRows.length}\n\n${EMAIL_SIGNATURE}`;
+    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} that were flagged and showed zero movement between ${rangeLabel}.\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${totalCountLabel}\n\n${EMAIL_SIGNATURE}`;
 
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
       title: 'Stalled Flagged Leads',
       region,
       subtitle: `${rangeLabel} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
-      action: 'Review each lead and follow up immediately — nothing has changed on these since the last check.',
+      action: 'Review each lead and follow up immediately — nothing has changed on these since the last check.'
+        + (cloneCounts.cloned > 0 ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.` : ''),
       kpis: [
-        { value: regionRows.length, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
         { value: new Set(regionRows.map(r => r.issue)).size, label: 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
       ],
@@ -6067,7 +6159,7 @@ function buildStalledRegionReports(rows){
       footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time.',
     });
 
-    return { region, subject, body, html, count: regionRows.length, regionNames: [region] };
+    return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
   });
 }
 
@@ -6518,20 +6610,31 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
       `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
     ).join('\n');
 
+    // "Leads Created" has to mean distinct customers, not rows — a
+    // customer collated from 2 RM copies otherwise reads as 2 leads
+    // created when it's really one. The detail rows below stay per-copy
+    // (each RM still needs their own row to follow up on), only the
+    // headline/summary numbers dedupe.
+    const cloneCounts = countUniqueAndCloned(regionLeads);
+    const totalLabel = cloneCounts.cloned > 0
+      ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(cloneCounts.unique);
+
     const subject = `${region} Overnight Leads (${todayDateLabel()}) - ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`;
-    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} created overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${regionLeads.length}\n\n${EMAIL_SIGNATURE}`;
+    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} created overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nLeads Created : ${totalLabel}\n\n${EMAIL_SIGNATURE}`;
 
     const counts = {};
-    regionLeads.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
+    dedupeToFamilies(regionLeads).forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
 
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
       title: 'Overnight Leads',
       region,
       subtitle: `${rangeLabel} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
-      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact."
+        + (cloneCounts.cloned > 0 ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.` : ''),
       kpis: [
-        { value: regionLeads.length, label: 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
+        { value: cloneCounts.unique, label: 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
         { value: Object.keys(counts).length, label: Object.keys(counts).length === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
       ],
@@ -6548,7 +6651,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
       footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — see the Movement tab\'s on-screen Overnight Leads list for the full overnight cohort including those.',
     });
 
-    return { region, subject, body, html, count: regionLeads.length, regionNames: [region] };
+    return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
   });
 }
 
@@ -6573,15 +6676,23 @@ function renderOvernightCohort(toAt){
   }
 
   const { windowStart, windowEnd, leads: cohort } = result;
-  if (countEl) countEl.textContent = cohort.length + ' leads';
+  // cohort is expanded per RM copy (see computeOvernightCohort) so each
+  // copy still gets its own row below — a customer collated from 3 RM
+  // copies otherwise reads as "3 leads created" when it's really one.
+  // The headline count and breakdown both dedupe back to real customers;
+  // the detail list further down stays the full per-copy cohort.
+  const uniqueCohort = dedupeToFamilies(cohort);
+  const cloneCounts = countUniqueAndCloned(cohort);
+  if (countEl) countEl.textContent = uniqueCloneLabel(cloneCounts, 'lead');
   if (noticeEl) noticeEl.style.display = 'none';
 
   const rangeText = `${istStamp(windowStart)} → ${istStamp(windowEnd)}`;
   const counts = {};
-  cohort.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
+  uniqueCohort.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
   renderBreakdownCard(breakdownEl, {
-    total: cohort.length,
-    totalLabel: `lead${cohort.length === 1 ? '' : 's'} created overnight`,
+    total: uniqueCohort.length,
+    totalLabel: `lead${uniqueCohort.length === 1 ? '' : 's'} created overnight`,
+    subNote: cloneCounts.cloned > 0 ? `+ ${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
     rangeText,
     counts,
     colorFn: colorForIssue,
@@ -6720,21 +6831,32 @@ function renderMovementTab(){
   _lastMovementRows = rows;
   _lastMovementRange = { fromAt, toAt };
 
-  if (countEl) countEl.textContent = rows.length + ' leads';
+  // "How many leads" has to mean distinct customers, not rows — two RM
+  // copies of the same customer both stalled still reads as one customer
+  // with two open problems. The card list below stays per-copy (each RM's
+  // own stall is its own actionable item), only these summary numbers dedupe.
+  const rowCloneCounts = countUniqueAndCloned(rows);
+  if (countEl) countEl.textContent = uniqueCloneLabel(rowCloneCounts, 'lead');
   if (badgeEl) {
-    badgeEl.textContent = rows.length.toLocaleString();
-    badgeEl.className = 'tab-badge' + (rows.length > 0 ? ' urgent' : '');
+    badgeEl.textContent = rowCloneCounts.unique.toLocaleString();
+    badgeEl.className = 'tab-badge' + (rowCloneCounts.unique > 0 ? ' urgent' : '');
   }
 
   // Count card: total stalled between the picked pair, broken down by
   // which issue each lead is flagged for — a proportional bar + legend
   // answers "how many, and of what" at a glance instead of reading chips.
+  // Deduped to one entry per customer (like the status breakdown on
+  // Overnight Leads) so the bar's percentages stay readable against the
+  // same unique total shown above it, rather than a mix of customers and
+  // their cloned copies.
   if (breakdownEl) {
+    const uniqueRows = dedupeToFamilies(rows);
     const byIssue = {};
-    rows.forEach(r => { byIssue[r.issue] = (byIssue[r.issue] || 0) + 1; });
+    uniqueRows.forEach(r => { byIssue[r.issue] = (byIssue[r.issue] || 0) + 1; });
     renderBreakdownCard(breakdownEl, {
-      total: rows.length,
-      totalLabel: `lead${rows.length === 1 ? '' : 's'} stalled`,
+      total: uniqueRows.length,
+      totalLabel: `lead${uniqueRows.length === 1 ? '' : 's'} stalled`,
+      subNote: rowCloneCounts.cloned > 0 ? `+ ${rowCloneCounts.cloned} cloned cop${rowCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
       rangeText: `${istStamp(fromAt)} → ${istStamp(toAt)}`,
       counts: byIssue,
       colorFn: colorForIssue,
