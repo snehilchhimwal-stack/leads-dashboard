@@ -239,6 +239,16 @@
   .ms-option span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ms-option .opt-count{ margin-left:auto; color:var(--text-faint); font-size:11px; flex-shrink:0; }
   .filter-summary{ font-size:12px; color:var(--text-dim); margin-bottom:16px; }
+  /* Collapses the long section-explainer paragraphs behind a one-click
+     toggle — the text is real documentation worth keeping, but showing all
+     of it, every time, pushed the actual lead cards several screens down. */
+  .info-toggle{
+    display:inline-flex; align-items:center; gap:4px; background:none; border:none;
+    color:var(--text-faint); font-size:11px; font-family:'Inter',sans-serif; font-weight:600;
+    cursor:pointer; padding:0 0 10px; margin:-2px 0 0;
+  }
+  .info-toggle:hover{ color:var(--text-dim); }
+  .info-toggle:focus-visible{ outline:1px solid var(--blue); outline-offset:2px; }
 
   /* ---------- funnel ---------- */
   .funnel-row{ display:flex; align-items:center; gap:14px; margin-bottom:10px; }
@@ -1682,13 +1692,21 @@ async function fetchAndRender(){
     if (dedupeEl) {
       if (collatedGroups > 0) {
         dedupeEl.style.display = 'block';
-        dedupeEl.innerHTML = `<b>${collatedGroups.toLocaleString()}</b> customer${collatedGroups === 1 ? '' : 's'} `
-          + `had multiple RM copies — merged into one record each, absorbing <b>${extraCopies.toLocaleString()}</b> extra row${extraCopies === 1 ? '' : 's'}. `
-          + `Comments combined, calls and duration summed, stage taken from whichever copy went furthest. `
-          + `${dedupedLeads.length.toLocaleString()} customers from ${parsedLeads.length.toLocaleString()} rows read.`
+        // One-line summary always visible; the full explanation (what got
+        // merged/summed, and the cross-region caveat) sits behind a click
+        // instead of running as a paragraph above the fold on every load.
+        const crossRegionBit = crossRegionGroups > 0
+          ? ` · <b style="color:var(--red)">${crossRegionGroups.toLocaleString()}</b> span multiple regions`
+          : '';
+        const summary = `<b>${collatedGroups.toLocaleString()}</b> customer${collatedGroups === 1 ? '' : 's'} had multiple RM copies, merged${crossRegionBit}`;
+        const detail = `Comments combined, calls and duration summed, stage taken from whichever copy went furthest. `
+          + `${dedupedLeads.length.toLocaleString()} customers from ${parsedLeads.length.toLocaleString()} rows read, absorbing ${extraCopies.toLocaleString()} extra row${extraCopies === 1 ? '' : 's'}.`
           + (crossRegionGroups > 0
-            ? ` <b style="color:var(--red)">${crossRegionGroups.toLocaleString()}</b> of those merges span more than one region (e.g. a Pune copy and a Thane copy sharing a lead_id or client_id) — the merged card can only display one, so the others get absorbed. Flagged with a red "Regions:" chip on affected cards; full detail in the console as <span class="mono">_lastCrossRegionCollations</span>.`
+            ? ` ${crossRegionGroups.toLocaleString()} of those merges span more than one region (e.g. a Pune copy and a Thane copy sharing a lead_id or client_id) — the merged card can only display one, so the others get absorbed. Flagged with a red "Regions:" chip on affected cards; full detail in the console as <span class="mono">_lastCrossRegionCollations</span>.`
             : '');
+        dedupeEl.innerHTML = `<div>${summary} `
+          + `<button type="button" class="info-toggle" style="display:inline; padding:0;" data-label="ⓘ Details" onclick="toggleInlineDetail(this)">ⓘ Details</button></div>`
+          + `<div class="filter-summary" style="display:none; margin:6px 0 0;">${detail}</div>`;
       } else {
         dedupeEl.style.display = 'none';
       }
@@ -3483,9 +3501,13 @@ function collationBadge(l){
   const rms = (l.collatedRMs || []).join(', ');
   const regions = l.collatedRegions || [];
 
+  // Dim, not amber/red — these are identity/provenance chips (who this
+  // record is), not urgency signals. Amber and red stay reserved for the
+  // actual compliance chips (attempts remaining, staleness) elsewhere on
+  // the card, so the eye has one clear place to land on what needs action.
   let out = ` <span class="chip dim-chip" title="Merged from ${l.collatedFrom} copies of this customer">merged ×${l.collatedFrom}</span>`;
-  if (leadIds) out += ` <span class="chip amber" title="Every lead_id merged into this record">IDs: ${esc(leadIds)}</span>`;
-  if (rms) out += ` <span class="chip amber" title="Every RM who held a copy of this customer">RMs: ${esc(rms)}</span>`;
+  if (leadIds) out += ` <span class="chip dim-chip" title="Every lead_id merged into this record">IDs: ${esc(leadIds)}</span>`;
+  if (rms) out += ` <span class="chip dim-chip" title="Every RM who held a copy of this customer">RMs: ${esc(rms)}</span>`;
   if (regions.length > 1) out += ` <span class="chip red" title="These merged copies did not all resolve to the same region — this card can only show one, so the others are absorbed here">Regions: ${esc(regions.join(', '))}</span>`;
   return out;
 }
@@ -6849,6 +6871,45 @@ function initMovementUI(){
   const overnightReportsBtn = document.getElementById('overnightGenerateReportsBtn');
   if (overnightReportsBtn) overnightReportsBtn.addEventListener('click', renderOvernightRegionReports);
 }
+
+// Generic show/hide for a details block dynamically inserted right after
+// an .info-toggle button (dedupeNotice's summary line, rebuilt on every
+// fetch, rather than the static per-section explainers below which wire up
+// once via initCollapsibleSectionInfo).
+function toggleInlineDetail(btn){
+  const el = btn.parentElement && btn.parentElement.nextElementSibling;
+  if (!el) return;
+  const opening = el.style.display === 'none';
+  el.style.display = opening ? 'block' : 'none';
+  btn.textContent = opening ? '▾ Hide' : (btn.dataset.label || 'ⓘ Details');
+}
+
+// Every section-head is followed by a filter-summary paragraph explaining
+// exactly what the section does and doesn't include — genuinely useful,
+// but rendering all ~20 of them in full meant reading several screens of
+// documentation before reaching the first actual lead card. Collapsed
+// behind a one-click "Why this section exists" toggle instead; nothing
+// about the text itself changes, and no section had to be edited by hand
+// to get this — it wires up generically off the existing section-head +
+// filter-summary structure every section already has.
+function initCollapsibleSectionInfo(){
+  document.querySelectorAll('.section-head + .filter-summary').forEach(el => {
+    el.style.display = 'none';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'info-toggle';
+    toggle.textContent = 'ⓘ Why this section exists';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.addEventListener('click', () => {
+      const opening = el.style.display === 'none';
+      el.style.display = opening ? 'block' : 'none';
+      toggle.setAttribute('aria-expanded', String(opening));
+      toggle.textContent = opening ? '▾ Hide' : 'ⓘ Why this section exists';
+    });
+    el.parentNode.insertBefore(toggle, el);
+  });
+}
+initCollapsibleSectionInfo();
 
 initMovementUI();
 initAuthGate();
