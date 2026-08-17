@@ -686,8 +686,14 @@
 
     <section id="sec-recording">
       <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Recording Not Working</div><div class="section-count" id="recordingCount"></div></div>
-      <div class="filter-summary" id="recordingDesc">Call count is zero but work exists, or a lead was closed with nothing recorded at all. Deliberately unfiltered: no open/closed check, no grace period, no priority ranking.</div>
+      <div class="filter-summary" id="recordingDesc">Call count is zero but comments/work exists. Deliberately unfiltered: no open/closed check, no grace period, no priority ranking.</div>
       <div class="section-scroll"><div class="card-list" id="recordingList"></div></div>
+    </section>
+
+    <section id="sec-closednowork">
+      <div class="section-head"><div class="section-bar red"></div><div class="section-title">Closed with No Work Recorded</div><div class="section-count" id="closedNoWorkCount"></div></div>
+      <div class="filter-summary" id="closedNoWorkDesc">A lead was closed with zero connected calls and no comments at all — no evidence any work happened before closure. Deliberately unfiltered: no grace period, no priority ranking.</div>
+      <div class="section-scroll"><div class="card-list" id="closedNoWorkList"></div></div>
     </section>
 
     <section id="sec-reports">
@@ -2078,13 +2084,17 @@ function enrichLead(l){
 
   // Recording Not Working — a pure data-integrity check, deliberately with
   // NO gating: no open/closed filter, no grace period, no priority ranking.
-  // Two distinct symptoms, both pointing at logging rather than the RM:
-  //   A) comments exist but call_attempts is 0 — the call log didn't record
-  //   B) the lead was CLOSED with 0 calls and no comments at all — closed
-  //      with no evidence any work happened
-  const recordingCommentsNoCalls = l.call_attempts === 0 && actionLogEntries.length > 0;
-  const closedWithNoWork = excluded && l.call_attempts === 0 && actionLogEntries.length === 0;
-  const recordingNotWorking = recordingCommentsNoCalls || closedWithNoWork;
+  // Checked against call_count (connected calls) rather than call_attempts
+  // (every dial, connected or not) — a comment can only describe a
+  // conversation that actually happened, so it's the connected-call count
+  // that should be nonzero whenever a comment exists.
+  const recordingCommentsNoCalls = l.call_count === 0 && actionLogEntries.length > 0;
+  // Closed with No Work Recorded is its own separate issue card below —
+  // a lead CLOSED with 0 connected calls and no comments at all, i.e. no
+  // evidence any work happened before closure. Kept as its own flag here
+  // since enrichLead is the one place that computes it.
+  const closedWithNoWork = excluded && l.call_count === 0 && actionLogEntries.length === 0;
+  const recordingNotWorking = recordingCommentsNoCalls;
 
   // SOP Rule 3 — CRM logging after each attempt. The mirror image of
   // Recording Not Working above: that check catches comments with no
@@ -2724,6 +2734,7 @@ function renderAll(){
   renderDueTodayList();
   renderStuckList();
   renderRecordingList();
+  renderClosedNoWorkList();
   renderDailyTrend();
   renderRMScoreTable();
   renderFanout();
@@ -2765,6 +2776,7 @@ const OFFTAB_COUNT_SECTIONS = [
   { id: 'sec-duetoday',    countId: 'dueTodayCount',   severity: 'has-items' },
   { id: 'sec-stuck',       countId: 'stuckCount',      severity: 'urgent' },
   { id: 'sec-recording',   countId: 'recordingCount',  severity: 'has-items' },
+  { id: 'sec-closednowork', countId: 'closedNoWorkCount', severity: 'urgent' },
   { id: 'sec-reports',     countId: 'regionReportCount' },
 ];
 
@@ -3837,20 +3849,20 @@ function fmtWorkingWait(mins, suffix){
 }
 
 // Recording Not Working — data-integrity check, not an SLA breach.
-// Shows every lead where comments exist but call_attempts is 0, with no
-// filtering of any kind, so the raw scale of the logging gap is visible.
+// Shows every lead where comments exist but call_count (connected calls)
+// is 0, with no filtering of any kind, so the raw scale of the logging
+// gap is visible. Closed with No Work Recorded is its own separate card
+// below (see renderClosedNoWorkList) — a different symptom (a closed lead
+// with NO evidence of work at all) that deserves its own visibility
+// rather than being buried inside this one.
 function renderRecordingList(){
-  const group = leads.filter(l => l.recordingNotWorking)
+  const group = leads.filter(l => l.recordingCommentsNoCalls)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
 
-  const typeA = group.filter(l => l.recordingCommentsNoCalls).length;
-  const typeB = group.filter(l => l.closedWithNoWork).length;
   document.getElementById('recordingCount').textContent = group.length + ' leads';
   const desc = document.getElementById('recordingDesc');
   if (desc) {
-    desc.innerHTML = group.length
-      ? `<b>${typeA.toLocaleString()}</b> have comments but zero calls recorded · <b>${typeB.toLocaleString()}</b> were closed with zero calls and no comments at all. Deliberately unfiltered: no open/closed check, no grace period, no priority ranking.`
-      : 'Call count is zero but work exists, or a lead was closed with nothing recorded at all. Deliberately unfiltered: no open/closed check, no grace period, no priority ranking.';
+    desc.textContent = 'Call count is zero but comments/work exists. Deliberately unfiltered: no open/closed check, no grace period, no priority ranking.';
   }
 
   const el = document.getElementById('recordingList');
@@ -3861,15 +3873,43 @@ function renderRecordingList(){
   el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
     const entries = parseActionLog(l.internal_status_comments);
     const logId = 'recording_' + idx;
-    const typeChip = l.closedWithNoWork
-      ? `<span class="chip red">Closed with no work recorded</span>`
-      : `<span class="chip amber">${entries.length} comment${entries.length === 1 ? '' : 's'}, 0 calls</span>`;
     const stateNote = l.excluded ? 'closed' : (l.oppOrAbove ? 'Opportunity+' : 'open');
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
-    return `<div class="alert-card${l.closedWithNoWork ? '' : ' amber-left'}">
+    return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — ${typeChip}</div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — <span class="chip amber">${entries.length} comment${entries.length === 1 ? '' : 's'}, 0 calls</span></div>
+      ${logToggleMarkup(l, logId)}
+    </div>`;
+  }).join('');
+}
+
+// Closed with No Work Recorded — split out from Recording Not Working
+// above so it gets its own dedicated visibility instead of being one of
+// two symptoms mixed into a single card. A lead CLOSED with 0 connected
+// calls and no comments at all — no evidence any work happened before
+// closure — is a distinct, more concerning signal than a live lead with a
+// logging mismatch. Same deliberately-unfiltered approach: no grace
+// period, no priority ranking (closedWithNoWork already requires the
+// lead be closed, so an open/closed check would be redundant here).
+function renderClosedNoWorkList(){
+  const group = leads.filter(l => l.closedWithNoWork)
+    .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
+
+  document.getElementById('closedNoWorkCount').textContent = group.length + ' leads';
+
+  const el = document.getElementById('closedNoWorkList');
+  if (!group.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No closed lead is missing all work evidence</div>`;
+    return;
+  }
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+    const logId = 'closednowork_' + idx;
+    const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
+    return `<div class="alert-card">
+      <div class="alert-id">${leadIdentityLine(l)}</div>
+      <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(closed${esc(closingNote)})</span> — <span class="chip red">Closed with no work recorded</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
   }).join('');
