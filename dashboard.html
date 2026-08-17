@@ -692,7 +692,7 @@
 
     <section id="sec-closednowork">
       <div class="section-head"><div class="section-bar red"></div><div class="section-title">Closed with No Work Recorded</div><div class="section-count" id="closedNoWorkCount"></div></div>
-      <div class="filter-summary" id="closedNoWorkDesc">A lead was closed with zero connected calls and no comments at all — no evidence any work happened before closure. Deliberately unfiltered: no grace period, no priority ranking.</div>
+      <div class="filter-summary" id="closedNoWorkDesc">A lead was closed with zero comments logged at all — no evidence any work happened before closure. Deliberately unfiltered: no grace period, no priority ranking.</div>
       <div class="section-scroll"><div class="card-list" id="closedNoWorkList"></div></div>
     </section>
 
@@ -810,7 +810,7 @@
 
       <section id="sec-audit">
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">Updated Leads</div><div class="section-count" id="auditCount"></div></div>
-        <div class="filter-summary">A lead counts as updated when its <span class="mono">last_connect_time</span> falls in the window, or when a comment in <span class="mono">internal_status_comments</span> carries a timestamp in the window. Periods are combined, so Today + Yesterday returns both days. The tab respects the filters at the top of the page.</div>
+        <div class="filter-summary">A lead counts as updated when its <span class="mono">last_connect_time</span> falls in the window, or when a comment in <span class="mono">internal_status_comments</span> or <span class="mono">stage_comments</span> carries a timestamp in the window. Periods are combined, so Today + Yesterday returns both days. The tab respects the filters at the top of the page.</div>
 
         <div class="audit-controls">
           <div class="ms" id="msAuditPeriod"></div>
@@ -1050,8 +1050,10 @@ function istDateKey(date){
  * columns the code actually reads. A dead entry here produces a false alarm
  * that trains you to ignore a genuinely useful check — which is exactly what
  * happened with region_parent after it was dropped from the export.
- * Removed as unread: region_parent, stage_comments. Re-add either alongside
- * a real getVal() call if it's ever needed. */
+ * Removed as unread: region_parent. Re-add alongside a real getVal() call
+ * if it's ever needed. stage_comments was also removed for the same
+ * reason, then re-added — a lead can carry a real comment there that
+ * internal_status_comments alone misses (see combinedCommentsText). */
 const HEADER_ALIASES = {
   lead_id: ['lead_id','leadid','lead id'],
   RM: ['rm'],
@@ -1070,6 +1072,12 @@ const HEADER_ALIASES = {
   last_connect_time: ['last_connect_time','last connect time'],
   last_comment: ['last_comment','last comment'],
   internal_status_comments: ['internal_status_comments','internal status comments'],
+  // Every discrete comment logged at a stage-change event — a separate
+  // source from internal_status_comments (the running action-log history).
+  // Combined with it everywhere "has this lead been commented on" is
+  // checked (see combinedCommentsText) so a comment logged only here isn't
+  // read as silence.
+  stage_comments: ['stage_comments','stage comments'],
   closing_reason: ['closing_reason','closing reason'],
   // call_attempts is the SOP's "attempt" — every dial, connected or not.
   // call_count (connected calls only) is still read, but only for display.
@@ -1081,9 +1089,10 @@ const HEADER_ALIASES = {
 // Runtime resilience check for HEADER_ALIASES (see the comment above it):
 // getVal/getDate stamp every key they're actually called with into this set
 // on each fetch. Any HEADER_ALIASES key that never shows up here is dead
-// code — nothing reads it — which is exactly the condition that produced a
-// false "unmatched header" warning for region_parent and stage_comments
-// before they were removed. Checked once per fetch, right after parsing.
+// code — nothing reads it — which is exactly the condition that once
+// produced a false "unmatched header" warning for region_parent (and,
+// briefly, stage_comments before it gained a real reader). Checked once
+// per fetch, right after parsing.
 let _accessedHeaderKeys = new Set();
 
 let leads = [];
@@ -1464,6 +1473,7 @@ async function fetchAndRender(){
           last_connect_time: connectDate ? connectDate.toISOString() : getVal(c, 'last_connect_time'),
           last_comment: getVal(c, 'last_comment') || '',
           internal_status_comments: getVal(c, 'internal_status_comments') || '',
+          stage_comments: getVal(c, 'stage_comments') || '',
           client_id: getVal(c, 'client_id') || '',
           // SOP effort is measured in ATTEMPTS. Fall back to call_count only
           // when the column is absent, so an older sheet still reports
@@ -1602,22 +1612,32 @@ async function fetchAndRender(){
         return (activityTimeOf(b) || 0) - (activityTimeOf(a) || 0);
       })[0];
 
-      const seen = new Set();
-      const merged = [];
-      rows.forEach(r => {
-        String(r.internal_status_comments || '').split('|').forEach(part => {
-          const t = part.trim();
-          if (!t || seen.has(t)) return;
-          seen.add(t);
-          merged.push(t);
-        });
-      });
+      // Dedupe/sort a "Name: Comment - YYYY-MM-DD HH:MM | ..." field across
+      // every copy — same treatment for internal_status_comments and
+      // stage_comments below, since a customer's comment history should
+      // read as one merged timeline regardless of which RM copy (or which
+      // of the two comment columns) it was logged under.
       const tsOf = (entry) => {
         const m = entry.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
         const d = m ? parseDate(m[1]) : null;
         return d ? d.getTime() : 0;
       };
-      merged.sort((a, b) => tsOf(a) - tsOf(b));
+      const mergeCommentField = (fieldName) => {
+        const seen = new Set();
+        const out = [];
+        rows.forEach(r => {
+          String(r[fieldName] || '').split('|').forEach(part => {
+            const t = part.trim();
+            if (!t || seen.has(t)) return;
+            seen.add(t);
+            out.push(t);
+          });
+        });
+        out.sort((a, b) => tsOf(a) - tsOf(b));
+        return out.join(' | ');
+      };
+      const mergedComments = mergeCommentField('internal_status_comments');
+      const mergedStageComments = mergeCommentField('stage_comments');
 
       const latestConnect = rows
         .map(r => parseDate(r.last_connect_time))
@@ -1633,7 +1653,8 @@ async function fetchAndRender(){
       // whichever copy's snapshot happens to be most complete, without
       // the multiplication.
       return Object.assign({}, primary, {
-        internal_status_comments: merged.join(' | '),
+        internal_status_comments: mergedComments,
+        stage_comments: mergedStageComments,
         call_attempts: Math.max(0, ...rows.map(r => Number(r.call_attempts) || 0)),
         call_count:    Math.max(0, ...rows.map(r => Number(r.call_count) || 0)),
         duration:      Math.max(0, ...rows.map(r => Number(r.duration) || 0)),
@@ -2001,7 +2022,7 @@ function enrichLead(l){
   // built from several RM copies WAS held by several people. Fall back to
   // distinct names in the comment log for records that weren't collated,
   // which still catches reassignment within a single copy.
-  const actionLogEntries = parseActionLog(l.internal_status_comments);
+  const actionLogEntries = parseActionLog(combinedCommentsText(l));
   const distinctAgents = new Set(
     actionLogEntries.map(e => e.loggedBy.trim().toLowerCase()).filter(Boolean)
   );
@@ -2100,13 +2121,13 @@ function enrichLead(l){
   // at all, despite a comment saying work happened.
   const recordingCommentsNoCalls = l.call_count === 0 && l.call_attempts === 0 && actionLogEntries.length > 0;
   // Closed with No Work Recorded is its own separate issue card below —
-  // a lead CLOSED with 0 connected calls, 0 recorded attempts, and no
-  // comments at all, i.e. no evidence any work happened before closure
-  // (same both-zero reasoning as recordingCommentsNoCalls above — a
-  // nonzero call_attempts is still recorded evidence of an RM's effort).
-  // Kept as its own flag here since enrichLead is the one place that
-  // computes it.
-  const closedWithNoWork = excluded && l.call_count === 0 && l.call_attempts === 0 && actionLogEntries.length === 0;
+  // a lead CLOSED with zero comments logged at all, i.e. no evidence any
+  // work happened before closure. Deliberately just these two conditions:
+  // call_count/call_attempts are dropped from this one (unlike
+  // recordingCommentsNoCalls above, which still needs both zero) — a
+  // closed lead with literally no comment is the signal on its own,
+  // regardless of whatever number sits in the call columns.
+  const closedWithNoWork = excluded && actionLogEntries.length === 0;
   const recordingNotWorking = recordingCommentsNoCalls;
 
   // SOP Rule 3 — CRM logging after each attempt. The mirror image of
@@ -2536,7 +2557,7 @@ function updateEventsFor(l){
   const events = [];
   const connect = parseDate(l.last_connect_time);
   if (connect) events.push({ kind: 'Call connect', at: connect, by: l.RM || '', text: '' });
-  parseActionLog(l.internal_status_comments).forEach(e => {
+  parseActionLog(combinedCommentsText(l)).forEach(e => {
     const at = e.ts ? parseDate(e.ts) : null;
     if (at) events.push({ kind: 'Comment', at, by: e.loggedBy || '', text: e.comment || '' });
   });
@@ -3479,7 +3500,7 @@ function renderRMTable(){
     summaryEl.innerHTML = leads.length
       ? `<b>Total</b> counts every lead ever assigned (including closed and Opportunity+); <b>Open</b> counts only live ones — `
         + `${openTotal.toLocaleString()} of ${leads.length.toLocaleString()}. Distribution → Workload Balance ranks by the Open figure. · `
-        + `${multiAgentTotal} of ${leads.length} leads (${pct}%) have been handled by more than one agent, based on names logged in internal_status_comments.`
+        + `${multiAgentTotal} of ${leads.length} leads (${pct}%) have been handled by more than one agent, based on names logged in internal_status_comments/stage_comments.`
       : '';
   }
 
@@ -3541,9 +3562,10 @@ function toggleActionLog(logId){
 }
 
 function logToggleMarkup(l, logId){
-  const count = parseActionLog(l.internal_status_comments).length;
+  const combined = combinedCommentsText(l);
+  const count = parseActionLog(combined).length;
   if (!count) return '';
-  _logLeadRegistry.set(logId, l.internal_status_comments);
+  _logLeadRegistry.set(logId, combined);
   return `<button class="log-toggle" onclick="toggleActionLog('${logId}')">View action log (${count}) ▾</button>`
     + `<div class="action-log" id="${logId}"></div>`;
 }
@@ -3746,7 +3768,20 @@ function renderNotUpdatedList(){
   }).join('');
 }
 
-// Your internal_status_comments field stores a running history like
+// A lead's comment history lives in TWO columns — internal_status_comments
+// (the running action-log history) and stage_comments (logged at
+// stage-change events) — either can carry a genuine comment on its own, so
+// every "has this lead been commented on" check reads both combined,
+// rather than internal_status_comments alone missing a comment that only
+// ever landed in stage_comments.
+function combinedCommentsText(l){
+  return [l.internal_status_comments, l.stage_comments]
+    .filter(t => String(t || '').trim())
+    .join(' | ');
+}
+
+// Your internal_status_comments field (combined with stage_comments via
+// combinedCommentsText above) stores a running history like
 // "Name: Comment - YYYY-MM-DD HH:MM | Name: Comment - YYYY-MM-DD HH:MM | ..."
 // — this parses that into individual attempts matching the SOP's Action Log
 // columns (Date, Time, Attempt#, Outcome, CRM Comment, Logged By).
@@ -3884,7 +3919,7 @@ function renderRecordingList(){
     return;
   }
   el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
-    const entries = parseActionLog(l.internal_status_comments);
+    const entries = parseActionLog(combinedCommentsText(l));
     const logId = 'recording_' + idx;
     const stateNote = l.excluded ? 'closed' : (l.oppOrAbove ? 'Opportunity+' : 'open');
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
@@ -3899,12 +3934,13 @@ function renderRecordingList(){
 
 // Closed with No Work Recorded — split out from Recording Not Working
 // above so it gets its own dedicated visibility instead of being one of
-// two symptoms mixed into a single card. A lead CLOSED with 0 connected
-// calls and no comments at all — no evidence any work happened before
-// closure — is a distinct, more concerning signal than a live lead with a
-// logging mismatch. Same deliberately-unfiltered approach: no grace
-// period, no priority ranking (closedWithNoWork already requires the
-// lead be closed, so an open/closed check would be redundant here).
+// two symptoms mixed into a single card. A lead CLOSED with zero comments
+// logged at all — no evidence any work happened before closure — is a
+// distinct, more concerning signal than a live lead with a logging
+// mismatch. Deliberately just closed + zero comments, regardless of
+// whatever the call columns say. Same deliberately-unfiltered approach:
+// no grace period, no priority ranking (closedWithNoWork already requires
+// the lead be closed, so an open/closed check would be redundant here).
 function renderClosedNoWorkList(){
   const group = leads.filter(l => l.closedWithNoWork)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
