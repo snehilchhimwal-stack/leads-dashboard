@@ -5331,6 +5331,7 @@ function buildRegionWiseReports(combineAll){
   const now = new Date();
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
+  const STUCK_LABEL = ISSUE_PRIORITY.find(r => r.key === 'stageStuck48h').label;
   let graceBlocked = 0, outOfScope = 0;
   // Fresh for this generation — this path previously never touched the
   // names dict at all, so reportScopeNotice()'s "NOT IN REPORTS" breakdown
@@ -5378,18 +5379,39 @@ function buildRegionWiseReports(combineAll){
     notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
   });
 
+  // Leads Pending Beyond 48 Hours rides along too, as its own trailing
+  // section — reportableIssueFor picks ONE primary issue per lead, and
+  // Behind on Today's Calls has no age ceiling, so a lead that's both
+  // stuck 48h+ AND behind on today's calls reports as the latter, which
+  // silently hides the 48h+ compliance breach from this combined email
+  // (it still shows fine in its own dashboard section and single-issue
+  // email — this only affects the shared primary-issue pick here). This
+  // second pass catches every stuck lead NOT already the primary pick, so
+  // it's never fully hidden; leads that already surface under their own
+  // "Leads Pending Beyond 48 Hours" entry above aren't duplicated here.
+  const stuckRows = [];
+  issueLeads.forEach(l => {
+    if (!l.stageStuck48h) return;
+    if (reportableIssueFor(l, now) === STUCK_LABEL) return; // already the primary pick, shown above
+    const main = mainRegionFor(effectiveRegion(l));
+    if (!main) return;
+    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
+  });
+
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
 
-  if (!rows.length && !notConnectedRows.length) return [];
+  if (!rows.length && !notConnectedRows.length && !stuckRows.length) return [];
 
   const groups = combineAll ? { __ALL__: rows } : groupBy(rows, r => r.mainRegion);
   const notConnectedGroups = combineAll ? { __ALL__: notConnectedRows } : groupBy(notConnectedRows, r => r.mainRegion);
-  // A region with ONLY late-connect leads and no other actionable issue
-  // still needs its own email — without this it would have no key in
-  // `groups` (built from `rows` alone) and silently drop out entirely.
+  const stuckGroups = combineAll ? { __ALL__: stuckRows } : groupBy(stuckRows, r => r.mainRegion);
+  // A region with ONLY late-connect or ONLY additional-stuck leads and no
+  // other actionable issue still needs its own email — without this it
+  // would have no key in `groups` (built from `rows` alone) and silently
+  // drop out entirely.
   if (!combineAll) {
-    Object.keys(notConnectedGroups).forEach(region => {
+    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).forEach(region => {
       if (!groups[region]) groups[region] = [];
     });
   }
@@ -5397,7 +5419,8 @@ function buildRegionWiseReports(combineAll){
   return Object.keys(groups).sort().map(key => {
     const items = groups[key];
     const notConnectedItems = notConnectedGroups[key] || [];
-    const regionNames = Array.from(new Set(items.concat(notConnectedItems).map(r => r.mainRegion))).sort();
+    const stuckItems = stuckGroups[key] || [];
+    const regionNames = Array.from(new Set(items.concat(notConnectedItems).concat(stuckItems).map(r => r.mainRegion))).sort();
     // In combined mode the email spans everything, so the Region filter
     // selection is the right label. In per-region mode each email covers one
     // region, so it names its own — otherwise every email would carry an
@@ -5408,7 +5431,7 @@ function buildRegionWiseReports(combineAll){
     // Rows already carry their own lead_created_at directly — no need to
     // look the lead back up in `leads` (which wouldn't even find a split's
     // own id, since `leads` stays one merged record per customer).
-    const dateRange = reportDateRange(items.concat(notConnectedItems));
+    const dateRange = reportDateRange(items.concat(notConnectedItems).concat(stuckItems));
 
     // r.lead_id/r.RM are this row's OWN copy; a sibling note (not a merged
     // list) names any other RM copies of the same customer for context.
@@ -5461,6 +5484,10 @@ function buildRegionWiseReports(combineAll){
     const notConnectedTotalLabel = notConnectedCloneCounts.cloned > 0
       ? `${notConnectedCloneCounts.unique} (+${notConnectedCloneCounts.cloned} cloned cop${notConnectedCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
       : String(notConnectedCloneCounts.unique);
+    const stuckCloneCounts = countUniqueAndCloned(stuckItems);
+    const stuckTotalLabel = stuckCloneCounts.cloned > 0
+      ? `${stuckCloneCounts.unique} (+${stuckCloneCounts.cloned} cloned cop${stuckCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(stuckCloneCounts.unique);
 
     // Not Connected in 10 Minutes, appended as its own reminder block —
     // grouped by RM like its dedicated single-issue report, addressed to
@@ -5478,6 +5505,23 @@ ${Object.values(notConnectedByRM).map(group =>
 
 Total Late Connections : ${notConnectedTotalLabel}` : '';
 
+    // Leads Pending Beyond 48 Hours, appended as its own block — only the
+    // leads NOT already surfaced above under their own primary issue (see
+    // stuckRows above), so nothing is ever double-listed. Still a normal
+    // actionable item, unlike the Not Connected reminder above it.
+    const stuckByRM = groupBy(stuckItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+    const stuckBlock = stuckItems.length ? `
+
+${DIVIDER}
+LEADS PENDING BEYOND 48 HOURS (NOT YET OPPORTUNITY) — also true, listed under another issue above
+The following leads have been open more than 48 hours without reaching Opportunity, in addition to whatever issue they're already listed under above. Review and progress or close them.
+${SUBDIVIDER}
+${Object.values(stuckByRM).map(group =>
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
+).join('\n\n')}
+
+Total : ${stuckTotalLabel}` : '';
+
     const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${SUBJECT_SCOPE_SUFFIX}`;
     const body =
 `Hi,
@@ -5489,7 +5533,7 @@ Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     :
 Source     : ${sourceLabel}
 Total      : ${totalCountLabel}
 
-${mainSection}${notConnectedBlock}
+${mainSection}${notConnectedBlock}${stuckBlock}
 
 ${EMAIL_SIGNATURE}`;
 
@@ -5520,6 +5564,19 @@ ${EMAIL_SIGNATURE}`;
         rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late')]),
       });
     }
+    if (stuckItems.length) {
+      sections.push({
+        // Distinct heading from the main-tally section above (which may
+        // ALSO be titled "Leads Pending Beyond 48 Hours..." for leads where
+        // it IS the primary pick) — same base issue, so the suffix keeps
+        // the two from reading as an accidental duplicate section.
+        heading: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity) — Also Listed Above',
+        subheading: `${stuckTotalLabel} lead${stuckCloneCounts.unique === 1 ? '' : 's'} — already listed under another issue above`,
+        action: ISSUE_ACTION_MAP.stageStuck48h || '',
+        columns: ['Lead ID', 'Region', 'RM'],
+        rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r)]),
+      });
+    }
 
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
@@ -5534,10 +5591,11 @@ ${EMAIL_SIGNATURE}`;
       sections,
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
-        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
+        + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
+        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique, issueLabel: 'All issues', regionNames };
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique, issueLabel: 'All issues', regionNames };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
