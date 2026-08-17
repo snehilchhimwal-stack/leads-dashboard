@@ -1071,6 +1071,13 @@ const HEADER_ALIASES = {
 let _accessedHeaderKeys = new Set();
 
 let leads = [];
+// Same leads, but any multi-copy customer is expanded into one entity per
+// original RM copy (see copySplits in fetchAndRender) — the view every SLA
+// issue check/section/email/CSV export reads from, so one RM's closed copy
+// or higher call count never masks a DIFFERENT RM's own separate issue on
+// the same underlying customer. `leads` above stays one-card-per-customer
+// for everything that isn't about a specific issue.
+let issueLeads = [];
 let allParsedLeads = [];
 // Every collated customer whose underlying copies didn't all resolve to the
 // SAME region — e.g. a Pune row and a Thane row sharing a client_id or
@@ -1558,10 +1565,11 @@ async function fetchAndRender(){
     // Merges a set of same-customer rows into ONE lead-shaped record: stage
     // taken from whichever copy went furthest (ties broken by most recent
     // activity), comments merged/deduped/re-sorted, attempts/calls/duration
-    // summed, earliest creation kept. Factored out so it can run twice —
-    // once across ALL of a customer's rows (the record everything outside
-    // region-reporting uses), and again scoped to just one region's rows
-    // when a customer's copies span more than one (see regionSplits below).
+    // summed, earliest creation kept. Factored out so it can run both across
+    // ALL of a customer's rows (the general-purpose `merged` record below)
+    // and on a single row by itself (copySplits below — a "merge" of one
+    // row is just that row, stamped with the same collatedFrom/IDs/RMs
+    // shape every other record carries).
     function mergeRowsIntoOneLead(rows){
       if (rows.length === 1) {
         return Object.assign({}, rows[0], {
@@ -1635,11 +1643,7 @@ async function fetchAndRender(){
       // different regions) and sometimes it's a data problem (a shared/
       // placeholder client_id, or a reused lead_id, gluing two unrelated
       // customers together) — either way it's surfaced explicitly via
-      // collatedRegions/crossRegionCollations, AND a lead can only belong to
-      // one region in an email, so regionSplits gives every region its own
-      // lead-shaped record (own primary copy, own summed attempts/comments,
-      // scoped to just that region's rows) for report builders to use
-      // instead of the whole customer.
+      // collatedRegions/crossRegionCollations.
       if (merged.collatedRegions.length > 1) {
         crossRegionGroups++;
         _lastCrossRegionCollations.push({
@@ -1648,9 +1652,28 @@ async function fetchAndRender(){
           regions: merged.collatedRegions,
           rms: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
         });
-        const rowsByRegion = groupBy(rows, rowRegionLabel);
-        merged.regionSplits = Object.keys(rowsByRegion).map(region => mergeRowsIntoOneLead(rowsByRegion[region]));
       }
+
+      // copySplits: one independent, single-copy record per ORIGINAL row —
+      // used ONLY for issue detection/reporting (the 5 SLA checks, their
+      // sections/emails, Stalled Flagged Leads, Overnight Leads). X being
+      // closed shouldn't hide Y's Not Updated issue; Z's own call count
+      // shouldn't get credited from Y's calls; two RMs both stalled on
+      // "Not Updated" are two separate instances, not one. `merged` above
+      // (summed calls, comments merged, stage from whichever copy went
+      // furthest) is untouched and stays the source of truth for the Total
+      // Leads count, Distribution tab, RM Scorecard, and every other
+      // non-issue view — those still want "one customer, one card". Each
+      // split carries the OTHER copies' lead_id/RM as a lightweight
+      // sibling reference (siblingLeadIds/siblingRMs) purely for context;
+      // its own issue flags come only from its own data.
+      merged.copySplits = rows.map(row => {
+        const split = mergeRowsIntoOneLead([row]);
+        const siblings = rows.filter(r => r !== row);
+        split.siblingLeadIds = siblings.map(r => String(r.lead_id).trim());
+        split.siblingRMs = Array.from(new Set(siblings.map(r => r.RM).filter(Boolean)));
+        return split;
+      });
 
       return merged;
     });
@@ -2084,6 +2107,22 @@ function applyFiltersAndRender(){
 
   _renderNow = new Date(); // one consistent clock for this entire pass
   leads = filtered.map(enrichLead);
+
+  // Issue-detection view: every multi-copy customer expanded back into its
+  // own separately-enriched entities (see copySplits in fetchAndRender) —
+  // X being closed can't hide Y's Not Updated, and Z's own call count
+  // can't get credited from Y's calls. Feeds the 5 SLA sections, their
+  // emails, and the CSV export. `leads` above (still one card per
+  // customer) is untouched and keeps feeding Total Leads, Distribution,
+  // RM Scorecard, and everything else that isn't about a specific issue.
+  issueLeads = [];
+  leads.forEach(l => {
+    if (l.copySplits && l.copySplits.length > 1) {
+      l.copySplits.forEach(raw => issueLeads.push(enrichLead(raw)));
+    } else {
+      issueLeads.push(l);
+    }
+  });
 
   const summary = document.getElementById('filterSummary');
   summary.textContent = `Showing ${leads.length} of ${allParsedLeads.length} leads` +
@@ -2578,13 +2617,19 @@ function renderAll(){
 
   // Single pass instead of five separate .filter() traversals — on a
   // 7.5k-lead sheet this runs on every filter change, so the extra
-  // full-array walks add up with no benefit.
-  let oppPlus = 0, dueTodayCount = 0, notConn = 0, noCalls = 0;
+  // full-array walks add up with no benefit. Opportunity+/Total/No-Attempts
+  // are customer-level counts (leads, one card per customer); the two
+  // issue counts read from issueLeads instead, so a multi-copy customer
+  // with two independently-behind RM copies counts as two, not one.
+  let oppPlus = 0, noCalls = 0;
   for (const l of leads) {
     if (l.oppOrAbove) oppPlus++;
+    if (l.isOpenLead && l.call_attempts === 0) noCalls++;
+  }
+  let dueTodayCount = 0, notConn = 0;
+  for (const l of issueLeads) {
     if (l.underCalledToday) dueTodayCount++;
     if (l.firstContactBreach) notConn++;
-    if (l.isOpenLead && l.call_attempts === 0) noCalls++;
   }
   const total = leads.length;
 
@@ -2711,7 +2756,7 @@ document.getElementById('tabBar').addEventListener('click', (e) => {
 function updateTabBadges(){
   const el = document.getElementById('tabBadgeOps');
   if (!el) return;
-  const n = leads.filter(l =>
+  const n = issueLeads.filter(l =>
     l.inactiveRmNewLead || l.firstContactBreach || l.followupOverdue ||
     l.underCalledToday || l.stageStuck48h || l.isNotUpdated
   ).length;
@@ -3445,14 +3490,28 @@ function collationBadge(l){
   return out;
 }
 
-// The line shown at the top of every issue card. For a collated lead, the
+// Lightweight cross-reference for an issue-detection entity (copySplits —
+// one RM's own copy of a multi-copy customer, judged on its own issues).
+// Deliberately NOT the full IDs/RMs chip treatment collationBadge gives a
+// genuine merge: this row's issue is its own, not shared with the sibling
+// copies, so it just names them for context rather than presenting them
+// as part of the same instance.
+function siblingNote(l){
+  if (!l.siblingRMs || !l.siblingRMs.length) return '';
+  return ` <span class="chip dim-chip" title="This customer also has other RM copies (${esc((l.siblingLeadIds||[]).join(', '))}), shown separately since each is judged on its own issues">also held by: ${esc(l.siblingRMs.join(', '))}</span>`;
+}
+
+// The line shown at the top of every issue card. For a genuinely collated
+// lead (non-issue views — Total Leads, Distribution, RM Scorecard), the
 // badges already list every merged lead_id and every RM in full — putting
 // the primary copy's own id/RM in front of that just repeats what the
-// badges already say. A single-copy lead has no badge, so it still needs
-// its id/RM shown directly, or the card would have no identifier at all.
+// badges already say. Everywhere else (a plain single-copy lead, or one
+// RM's own split of a multi-copy customer) shows its own id/RM directly,
+// plus a sibling note when this is a split with other copies elsewhere.
 function leadIdentityLine(l){
   const badge = collationBadge(l);
-  return badge ? badge.trim() : `${esc(l.lead_id)} · ${esc(l.RM)}`;
+  if (badge) return badge.trim();
+  return `${esc(l.lead_id)} · ${esc(l.RM)}${siblingNote(l)}`;
 }
 
 // Direct check #1: created today (calendar day), under 5 calls, open
@@ -3468,7 +3527,7 @@ function renderDueTodayList(){
   // then progressively older ones. A fresh lead sitting uncalled is the
   // most urgent; ageHours is used rather than re-parsing lead_created_at
   // since every lead here was already measured against the same _renderNow.
-  const group = leads.filter(l => l.isOpenLead && l.underCalledToday)
+  const group = issueLeads.filter(l => l.isOpenLead && l.underCalledToday)
     .sort((a,b) => a.ageHours - b.ageHours);
   document.getElementById('dueTodayCount').textContent = group.length + ' leads';
   const el = document.getElementById('dueTodayList');
@@ -3493,7 +3552,7 @@ function renderDueTodayList(){
 // this catches leads that WERE worked (plenty of calls) but still haven't
 // converted, which is a different problem than under-calling.
 function renderStuckList(){
-  const group = leads.filter(l => l.isOpenLead && l.stageStuck48h)
+  const group = issueLeads.filter(l => l.isOpenLead && l.stageStuck48h)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
   document.getElementById('stuckCount').textContent = group.length + ' leads';
   const el = document.getElementById('stuckList');
@@ -3523,7 +3582,7 @@ function renderInactiveRmList(){
 }
 
 function renderNotUpdatedList(){
-  const group = leads.filter(l => l.isOpenLead && l.isNotUpdated)
+  const group = issueLeads.filter(l => l.isOpenLead && l.isNotUpdated)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
   document.getElementById('notUpdatedCount').textContent = group.length + ' leads';
   const el = document.getElementById('notUpdatedList');
@@ -3695,7 +3754,7 @@ function renderRecordingList(){
 function lastCommentTimestamp(l){ return l.lastCommentAt || null; }
 
 function renderNotConnectedList(){
-  const missed = leads.filter(l => l.firstContactBreach).sort((a,b)=> (b.businessMinsToConnect||0) - (a.businessMinsToConnect||0));
+  const missed = issueLeads.filter(l => l.firstContactBreach).sort((a,b)=> (b.businessMinsToConnect||0) - (a.businessMinsToConnect||0));
   document.getElementById('notConnCount').textContent = missed.length + ' leads';
   const el = document.getElementById('notConnList');
   if (!missed.length){
@@ -3715,7 +3774,7 @@ function renderNotConnectedList(){
 
 // SOP Rule 4 — connected leads with no CRM update in the last 4 hours.
 function renderFollowupList(){
-  const group = leads.filter(l => l.followupOverdue)
+  const group = issueLeads.filter(l => l.followupOverdue)
     .sort((a,b) => (b.hoursSinceLastComment||0) - (a.hoursSinceLastComment||0));
   document.getElementById('followupCount').textContent = group.length + ' leads';
   const el = document.getElementById('followupList');
@@ -3882,7 +3941,7 @@ function csvEscape(v){
 
 function downloadIssuesCSV(){
   const rows = [['lead_id', 'region', 'issue']];
-  leads.forEach(l => {
+  issueLeads.forEach(l => {
     const issue = getPrimaryIssue(l);
     if (issue) rows.push([l.lead_id, l.region, issue]);
   });
@@ -3990,28 +4049,16 @@ function mainRegionFor(rawRegion){
   return null;
 }
 
-// A collated customer can only belong to one region in an email — if its
-// copies span more than one (regionSplits, stamped during collation in
-// fetchAndRender), each region gets its OWN lead-shaped record instead of
-// the whole customer being folded into whichever region its overall
-// primary copy happened to win. A single-region item is returned as-is.
-// This is the RAW form (regionSplits entries are unenriched, same as
-// allParsedLeads) — for report builders that read raw fields directly
-// (e.g. Overnight Leads' current_stage/closing_reason check).
-function expandRegionSplits(item){
-  return (item.regionSplits && item.regionSplits.length > 1) ? item.regionSplits : [item];
-}
-
-// Same idea as expandRegionSplits, but for report builders working off the
-// ENRICHED `leads` array and filtering by computed flags (firstContactBreach,
-// isNotUpdated, etc.) — those flags have to be recomputed per region, not
-// inherited from the combined-across-regions parent, or a customer's
-// Pune-only call effort would get judged against totals that include a
-// Thane copy's calls too. l itself is already enriched, so the no-split
-// case is returned as-is with no extra work.
-function expandForRegionReporting(l){
-  if (l.regionSplits && l.regionSplits.length > 1) return l.regionSplits.map(enrichLead);
-  return [l];
+// A collated customer's copies can each need to be reported on their own
+// (different regions, or — per copySplits in fetchAndRender — different
+// RMs with different issues) rather than as one merged card. Expands to
+// copySplits when present; a single-copy item (or one not carrying
+// copySplits at all, e.g. a Movement_Log row) is returned as-is. RAW form
+// (copySplits entries are unenriched, same as allParsedLeads) — for report
+// builders that read raw fields directly (e.g. Overnight Leads'
+// current_stage/closing_reason check).
+function expandCopySplits(item){
+  return (item.copySplits && item.copySplits.length > 1) ? item.copySplits : [item];
 }
 
 // Groups any array of lead-shaped items (region + group_source, optionally
@@ -4023,7 +4070,7 @@ function expandForRegionReporting(l){
 function groupItemsByReportRegion(items){
   const byRegion = {};
   items.forEach(item => {
-    expandRegionSplits(item).forEach(unit => {
+    expandCopySplits(item).forEach(unit => {
       const main = mainRegionFor(effectiveRegion(unit));
       if (!main) return;
       (byRegion[main] = byRegion[main] || []).push(unit);
@@ -4251,15 +4298,10 @@ function buildRegionReports(issueKey){
   const enforceGrace = issueKey !== 'notConnected';
   let graceBlockedCount = 0;
 
-  // Expand cross-region collated customers into their own per-region,
-  // freshly-enriched records BEFORE checking the issue flag — a customer's
-  // Pune copy needs to be judged on its OWN call effort/comments, not the
-  // combined-with-Thane totals the parent record carries. Single-region
-  // leads expand to themselves unchanged.
-  const expanded = [];
-  leads.forEach(l => expandForRegionReporting(l).forEach(u => expanded.push(u)));
-
-  const matching = expanded.filter(l => {
+  // issueLeads is already the per-copy view (see its declaration) — each
+  // RM's own copy judged on its own call effort/comments/region, not a
+  // combined-across-copies total.
+  const matching = issueLeads.filter(l => {
     if (!l[meta.flag]) return false;
     if (!enforceGrace) return true;
     const created = parseDate(l.lead_created_at);
@@ -4290,12 +4332,10 @@ function buildRegionReports(issueKey){
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
 
-  // A lead can be collated from several RM copies (same customer pushed to
-  // multiple RMs) — show every merged lead_id and every RM holding a copy,
-  // not just the one representative copy's own, same as the on-screen
-  // card's leadIdentityLine/collationBadge.
-  const idsFor = (l) => (l.collatedLeadIds && l.collatedLeadIds.length > 1) ? l.collatedLeadIds.join(', ') : l.lead_id;
-  const rmNote = (l) => (l.collatedRMs && l.collatedRMs.length > 1) ? `  |  RMs: ${l.collatedRMs.join(', ')}` : '';
+  // l.lead_id/l.RM are this row's OWN copy (issueLeads is already per-copy —
+  // see its declaration). A lightweight note names any sibling copies for
+  // context, without folding their data into this row's own numbers.
+  const rmNote = (l) => (l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : '';
 
   // Each line carries the lead's creation timestamp and how long it's been
   // sitting, so the recipient can verify the flag themselves rather than
@@ -4305,13 +4345,13 @@ function buildRegionReports(issueKey){
   // point of this specific reminder.
   const leadLine = (l) => {
     const created = parseDate(l.lead_created_at);
-    if (!created) return `${idsFor(l)}  |  Created: unknown${rmNote(l)}`;
+    if (!created) return `${l.lead_id}  |  Created: unknown${rmNote(l)}`;
     const stamp = istStamp(l.lead_created_at);
     if (issueKey === 'notConnected') {
-      return `${idsFor(l)}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}${rmNote(l)}`;
+      return `${l.lead_id}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}${rmNote(l)}`;
     }
     const hrs = ((now - created) / 36e5).toFixed(1);
-    return `${idsFor(l)}  |  Created: ${stamp}  |  ${hrs}h ago${rmNote(l)}`;
+    return `${l.lead_id}  |  Created: ${stamp}  |  ${hrs}h ago${rmNote(l)}`;
   };
 
   return Object.keys(byRegion).sort().map(region => {
@@ -4362,7 +4402,7 @@ function buildRegionReports(issueKey){
         rows: group.map(l => {
           const created = parseDate(l.lead_created_at);
           const cells = [
-            idsFor(l) + ((l.collatedRMs && l.collatedRMs.length > 1) ? ` (RMs: ${l.collatedRMs.join(', ')})` : ''),
+            l.lead_id + ((l.siblingRMs && l.siblingRMs.length) ? ` (also held by: ${l.siblingRMs.join(', ')})` : ''),
             created ? istStamp(l.lead_created_at) : 'unknown',
             created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
           ];
@@ -5155,13 +5195,13 @@ function buildRegionWiseReports(combineAll){
   // behind (or nothing, if none had run yet this session).
   _lastReportOutOfScopeNames = {};
 
-  // Collect every flagged lead with its primary reportable issue. Cross-
-  // region collated customers are expanded to one record per region first
-  // (see expandForRegionReporting) — a customer can only belong to one
-  // region in an email, and that region's copy needs its OWN issue flags,
-  // not ones computed against a combined-with-another-region total.
+  // Collect every flagged lead with its primary reportable issue.
+  // issueLeads is already the per-copy view (see its declaration) — each
+  // RM's own copy judged on its own issue flags, not a combined-across-
+  // copies total, and a customer can only belong to one region in an
+  // email, which this view's own copy already reflects.
   const rows = [];
-  leads.forEach(parent => expandForRegionReporting(parent).forEach(l => {
+  issueLeads.forEach(l => {
     const issue = reportableIssueFor(l, now);
     if (!issue) {
       // Distinguish "had an issue but grace/undatable blocked it" from
@@ -5177,8 +5217,8 @@ function buildRegionWiseReports(combineAll){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, collatedLeadIds: l.collatedLeadIds, collatedRMs: l.collatedRMs });
-  }));
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
+  });
 
   // Not Connected in 10 Minutes rides along in this same email as its own
   // trailing section, deliberately collected separately from the pass
@@ -5188,12 +5228,12 @@ function buildRegionWiseReports(combineAll){
   // sorted issue tally either, since it's appended after that instead of
   // being one of its entries.
   const notConnectedRows = [];
-  leads.forEach(parent => expandForRegionReporting(parent).forEach(l => {
+  issueLeads.forEach(l => {
     if (!l.firstContactBreach) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, collatedLeadIds: l.collatedLeadIds, collatedRMs: l.collatedRMs });
-  }));
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
+  });
 
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
@@ -5222,16 +5262,15 @@ function buildRegionWiseReports(combineAll){
     const regionLabel = combineAll ? selectedRegionLabel(regionNames) : regionNames[0];
     const sourceLabel = selectedSourceLabel();
 
-    const dateRange = reportDateRange(
-      items.concat(notConnectedItems).map(r => leads.find(l => l.lead_id === r.lead_id)).filter(Boolean)
-    );
+    // Rows already carry their own lead_created_at directly — no need to
+    // look the lead back up in `leads` (which wouldn't even find a split's
+    // own id, since `leads` stays one merged record per customer).
+    const dateRange = reportDateRange(items.concat(notConnectedItems));
 
-    // A row can represent a customer collated from several RM copies — show
-    // every merged lead_id and every RM holding a copy, not just the one
-    // representative copy's own, same as the on-screen card's
-    // leadIdentityLine/collationBadge.
-    const idsFor = (r) => (r.collatedLeadIds && r.collatedLeadIds.length > 1) ? r.collatedLeadIds.join(', ') : r.lead_id;
-    const rmsFor = (r) => (r.collatedRMs && r.collatedRMs.length > 1) ? r.collatedRMs.join(', ') : r.RM;
+    // r.lead_id/r.RM are this row's OWN copy; a sibling note (not a merged
+    // list) names any other RM copies of the same customer for context.
+    const idsFor = (r) => r.lead_id;
+    const rmsFor = (r) => (r.siblingRMs && r.siblingRMs.length) ? `${r.RM} (also: ${r.siblingRMs.join(', ')})` : r.RM;
 
     // Fixed-width columns rather than tabs — tab stops render
     // unpredictably across email clients, padding does not.
@@ -5276,7 +5315,7 @@ NOT CONNECTED IN 10 MINUTES (Reminder for the Regional Head)
 The following RMs did not connect with the client within the first 10 minutes of assignment. Contact did eventually happen — this is a record of how late, not an open task. Already happened and cannot be corrected.
 ${SUBDIVIDER}
 ${Object.values(notConnectedByRM).map(group =>
-  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}  |  ${fmtWorkingWait(r.businessMinsToConnect, 'late')}${(r.collatedRMs && r.collatedRMs.length > 1) ? `  |  RMs: ${r.collatedRMs.join(', ')}` : ''}`).join('\n')}`
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}  |  ${fmtWorkingWait(r.businessMinsToConnect, 'late')}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
 ).join('\n\n')}
 
 Total Late Connections : ${notConnectedItems.length}` : '';
@@ -5813,39 +5852,41 @@ function computeMovementRows(fromAt, toAt){
     });
     if (!flaggedUnchanged.length) return;
 
-    // One card per customer, not per copy — same spirit as the live-sheet
-    // collation's merged records. Region/project/stage are sourced from a
-    // single representative copy (picked deterministically by lead_id, since
-    // every copy here is equally "stalled" — there's no funnel-progress
-    // signal to prefer one over another the way the live-sheet merge does),
-    // but every copy's lead_id and RM are kept via collatedLeadIds/
-    // collatedRMs so leadIdentityLine/collationBadge can show all of them,
-    // exactly like Operations tab cards do for a merged customer.
-    const rep = flaggedUnchanged.slice().sort((a, b) =>
-      String(a.toRec.lead_id).localeCompare(String(b.toRec.lead_id)))[0];
-
-    rows.push({
-      lead_id: rep.toRec.lead_id,
-      client_id: rep.toRec.client_id,
-      RM: rep.toRec.RM,
-      TL: rep.toRec.TL,
-      region: rep.toRec.region,
-      project: rep.toRec.project,
-      current_stage: rep.toRec.current_stage,
-      group_source: rep.toRec.group_source,
-      source_bucket: rep.toRec.source_bucket,
-      lead_created_at: rep.toRec.lead_created_at,
-      // Same "last touched" signal the Not Updated / Follow-up Overdue
-      // sections use elsewhere (newest dated CRM comment) — not just the
-      // snapshot check time — so this actually says when the lead itself
-      // was last worked, not just when we last looked at it.
-      lastCommentAt: rep.toEnriched.lastCommentAt || null,
-      fromAt: rep.fromRec.snapshot_at,
-      toAt: rep.toRec.snapshot_at,
-      issue: rep.primaryIssue,
-      collatedFrom: flaggedUnchanged.length,
-      collatedLeadIds: Array.from(new Set(flaggedUnchanged.map(x => String(x.toRec.lead_id).trim()))),
-      collatedRMs: Array.from(new Set(flaggedUnchanged.map(x => x.toRec.RM).filter(Boolean))),
+    // One row per RM copy, not one merged row per customer — two RMs
+    // stalled on the very same issue are still two separate instances
+    // (each accountable for their own copy), and a customer's copies can
+    // easily be stalled on DIFFERENT issues (one Not Updated, another
+    // Behind on Today's Calls); merging into one row could only ever show
+    // one issue, silently hiding whichever the representative copy wasn't.
+    // Each row still carries a lightweight sibling reference to the OTHER
+    // copies of the same customer, for context only.
+    flaggedUnchanged.forEach(cur => {
+      const siblings = flaggedUnchanged.filter(x => x !== cur);
+      rows.push({
+        lead_id: cur.toRec.lead_id,
+        client_id: cur.toRec.client_id,
+        RM: cur.toRec.RM,
+        TL: cur.toRec.TL,
+        region: cur.toRec.region,
+        project: cur.toRec.project,
+        current_stage: cur.toRec.current_stage,
+        group_source: cur.toRec.group_source,
+        source_bucket: cur.toRec.source_bucket,
+        lead_created_at: cur.toRec.lead_created_at,
+        // Same "last touched" signal the Not Updated / Follow-up Overdue
+        // sections use elsewhere (newest dated CRM comment) — not just the
+        // snapshot check time — so this actually says when the lead itself
+        // was last worked, not just when we last looked at it.
+        lastCommentAt: cur.toEnriched.lastCommentAt || null,
+        fromAt: cur.fromRec.snapshot_at,
+        toAt: cur.toRec.snapshot_at,
+        issue: cur.primaryIssue,
+        collatedFrom: 1,
+        collatedLeadIds: [String(cur.toRec.lead_id).trim()],
+        collatedRMs: [cur.toRec.RM || 'Unassigned'],
+        siblingLeadIds: siblings.map(s => String(s.toRec.lead_id).trim()),
+        siblingRMs: Array.from(new Set(siblings.map(s => s.toRec.RM).filter(Boolean))),
+      });
     });
   });
 
@@ -5868,13 +5909,11 @@ function buildStalledRegionReports(rows){
     : '';
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
-  // A stalled row can represent a customer collated from several RM
-  // copies (see computeMovementRows) — show every merged lead_id and every
-  // RM holding a copy, not just the one representative copy's own, same as
-  // the on-screen card's leadIdentityLine/collationBadge.
-  const idsFor = (r) => (r.collatedLeadIds && r.collatedLeadIds.length > 1) ? r.collatedLeadIds.join(', ') : r.lead_id;
-  const rmSuffix = (r) => (r.collatedRMs && r.collatedRMs.length > 1) ? `  |  RMs: ${r.collatedRMs.join(', ')}` : '';
-  const leadLine = (r) => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${rmSuffix(r)}`;
+  // Each row is one RM's own copy (see computeMovementRows) — a lightweight
+  // sibling note names any OTHER RM copies of the same customer for
+  // context, without folding their issue/status into this row.
+  const rmSuffix = (r) => (r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : '';
+  const leadLine = (r) => `${r.lead_id}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${rmSuffix(r)}`;
 
   const byRegion = groupItemsByReportRegion(rows);
   return Object.keys(byRegion).sort().map(region => {
@@ -5904,8 +5943,8 @@ function buildStalledRegionReports(rows){
         subheading: `Manager: ${group[0].TL || '—'}`,
         columns: ['Lead ID', 'Issue', 'Unchanged Since'],
         rows: group.map(r => [
-          idsFor(r),
-          r.issue + ((r.collatedRMs && r.collatedRMs.length > 1) ? ` (RMs: ${r.collatedRMs.join(', ')})` : ''),
+          r.lead_id,
+          r.issue + ((r.siblingRMs && r.siblingRMs.length) ? ` (also held by: ${r.siblingRMs.join(', ')})` : ''),
           istStamp(r.fromAt),
         ]),
       })),
@@ -6291,7 +6330,18 @@ function computeOvernightCohort(toAt){
     -1
   );
 
-  const inWindow = allParsedLeads.filter(l => {
+  // Expand multi-copy customers into their own copies FIRST, then test
+  // each copy's OWN creation date against the window — a merged record's
+  // lead_created_at is the EARLIEST across its copies, so testing that
+  // first could pull in a copy that individually wasn't actually created
+  // overnight (or miss one that was, if a different copy's date won).
+  const candidates = [];
+  allParsedLeads.forEach(l => {
+    if (l.copySplits && l.copySplits.length > 1) candidates.push(...l.copySplits);
+    else candidates.push(l);
+  });
+
+  const inWindow = candidates.filter(l => {
     const created = parseDate(l.lead_created_at);
     return created && created >= windowStart && created <= windowEnd;
   });
@@ -6322,15 +6372,11 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   const rangeLabel = `${istStamp(windowStart)} → ${istStamp(windowEnd)}`;
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
-  const leadLine = (l) => `${l.lead_id}  |  Created: ${istStamp(l.lead_created_at)}  |  ${overnightStatusLabel(l)}`;
-
-  // Expand cross-region collated customers into their own per-region
-  // records FIRST — a merged customer's overall stage (e.g. Opportunity+
-  // on the Thane copy that won primary) shouldn't decide whether the
-  // Pune copy is still emailable. Each region's own copy is judged on its
-  // own stage. A single-region lead expands to itself, unchanged.
-  const expanded = [];
-  cohortLeads.forEach(l => expandRegionSplits(l).forEach(u => expanded.push(u)));
+  // Each lead's own copy is judged on its own stage — a lightweight
+  // sibling note (not a merged status) names any other RM copies of the
+  // same customer for context. cohortLeads already arrives pre-expanded
+  // per copy (see computeOvernightCohort).
+  const leadLine = (l) => `${l.lead_id}  |  Created: ${istStamp(l.lead_created_at)}  |  ${overnightStatusLabel(l)}${(l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : ''}`;
 
   // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
   // deliberately shows every overnight-created lead, closed or not, so
@@ -6341,7 +6387,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   // comes straight from allParsedLeads (raw), not enrichLead's output, so
   // isOpenLead/oppOrAbove aren't already computed on it — same open/closed
   // logic as enrichLead, applied directly.
-  const emailableLeads = expanded.filter(l => {
+  const emailableLeads = cohortLeads.filter(l => {
     const hasClosingReason = !!String(l.closing_reason || '').trim();
     const closed = isClosedStage(l.current_stage) || hasClosingReason;
     return !closed && !isOppOrAbove(l.current_stage);
@@ -6377,7 +6423,11 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
         columns: ['Lead ID', 'Created', 'Status'],
-        rows: group.map(l => [l.lead_id, istStamp(l.lead_created_at), overnightStatusLabel(l)]),
+        rows: group.map(l => [
+          l.lead_id,
+          istStamp(l.lead_created_at),
+          overnightStatusLabel(l) + ((l.siblingRMs && l.siblingRMs.length) ? ` (also held by: ${l.siblingRMs.join(', ')})` : ''),
+        ]),
       })),
       footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — see the Movement tab\'s on-screen Overnight Leads list for the full overnight cohort including those.',
     });
