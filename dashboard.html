@@ -4290,6 +4290,13 @@ function buildRegionReports(issueKey){
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
 
+  // A lead can be collated from several RM copies (same customer pushed to
+  // multiple RMs) — show every merged lead_id and every RM holding a copy,
+  // not just the one representative copy's own, same as the on-screen
+  // card's leadIdentityLine/collationBadge.
+  const idsFor = (l) => (l.collatedLeadIds && l.collatedLeadIds.length > 1) ? l.collatedLeadIds.join(', ') : l.lead_id;
+  const rmNote = (l) => (l.collatedRMs && l.collatedRMs.length > 1) ? `  |  RMs: ${l.collatedRMs.join(', ')}` : '';
+
   // Each line carries the lead's creation timestamp and how long it's been
   // sitting, so the recipient can verify the flag themselves rather than
   // taking the dashboard's word for it. notConnected shows how late the
@@ -4298,13 +4305,13 @@ function buildRegionReports(issueKey){
   // point of this specific reminder.
   const leadLine = (l) => {
     const created = parseDate(l.lead_created_at);
-    if (!created) return `${l.lead_id}  |  Created: unknown`;
+    if (!created) return `${idsFor(l)}  |  Created: unknown${rmNote(l)}`;
     const stamp = istStamp(l.lead_created_at);
     if (issueKey === 'notConnected') {
-      return `${l.lead_id}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}`;
+      return `${idsFor(l)}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}${rmNote(l)}`;
     }
     const hrs = ((now - created) / 36e5).toFixed(1);
-    return `${l.lead_id}  |  Created: ${stamp}  |  ${hrs}h ago`;
+    return `${idsFor(l)}  |  Created: ${stamp}  |  ${hrs}h ago${rmNote(l)}`;
   };
 
   return Object.keys(byRegion).sort().map(region => {
@@ -4355,7 +4362,7 @@ function buildRegionReports(issueKey){
         rows: group.map(l => {
           const created = parseDate(l.lead_created_at);
           const cells = [
-            l.lead_id,
+            idsFor(l) + ((l.collatedRMs && l.collatedRMs.length > 1) ? ` (RMs: ${l.collatedRMs.join(', ')})` : ''),
             created ? istStamp(l.lead_created_at) : 'unknown',
             created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
           ];
@@ -5170,7 +5177,7 @@ function buildRegionWiseReports(combineAll){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, collatedLeadIds: l.collatedLeadIds, collatedRMs: l.collatedRMs });
   }));
 
   // Not Connected in 10 Minutes rides along in this same email as its own
@@ -5185,7 +5192,7 @@ function buildRegionWiseReports(combineAll){
     if (!l.firstContactBreach) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect });
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, collatedLeadIds: l.collatedLeadIds, collatedRMs: l.collatedRMs });
   }));
 
   _lastReportGraceBlocked = graceBlocked;
@@ -5219,12 +5226,19 @@ function buildRegionWiseReports(combineAll){
       items.concat(notConnectedItems).map(r => leads.find(l => l.lead_id === r.lead_id)).filter(Boolean)
     );
 
+    // A row can represent a customer collated from several RM copies — show
+    // every merged lead_id and every RM holding a copy, not just the one
+    // representative copy's own, same as the on-screen card's
+    // leadIdentityLine/collationBadge.
+    const idsFor = (r) => (r.collatedLeadIds && r.collatedLeadIds.length > 1) ? r.collatedLeadIds.join(', ') : r.lead_id;
+    const rmsFor = (r) => (r.collatedRMs && r.collatedRMs.length > 1) ? r.collatedRMs.join(', ') : r.RM;
+
     // Fixed-width columns rather than tabs — tab stops render
     // unpredictably across email clients, padding does not.
     const w = {
-      id: Math.max(7, ...items.map(r => String(r.lead_id).length)),
+      id: Math.max(7, ...items.map(r => idsFor(r).length)),
       region: Math.max(6, ...items.map(r => String(r.subRegion).length)),
-      rm: Math.max(2, ...items.map(r => String(r.RM).length)),
+      rm: Math.max(2, ...items.map(r => rmsFor(r).length)),
     };
     const pad = (s, n) => String(s).padEnd(n);
     const header = `${pad('lead_id', w.id)}  ${pad('region', w.region)}  ${pad('RM', w.rm)}  issue`;
@@ -5236,7 +5250,7 @@ function buildRegionWiseReports(combineAll){
       String(a.lead_id).localeCompare(String(b.lead_id)));
 
     const table = sorted.map(r =>
-      `${pad(r.lead_id, w.id)}  ${pad(r.subRegion, w.region)}  ${pad(r.RM, w.rm)}  ${r.issue}`
+      `${pad(idsFor(r), w.id)}  ${pad(r.subRegion, w.region)}  ${pad(rmsFor(r), w.rm)}  ${r.issue}`
     ).join('\n');
 
     // Per-issue tally so the recipient sees the shape before the detail.
@@ -5262,7 +5276,7 @@ NOT CONNECTED IN 10 MINUTES (Reminder for the Regional Head)
 The following RMs did not connect with the client within the first 10 minutes of assignment. Contact did eventually happen — this is a record of how late, not an open task. Already happened and cannot be corrected.
 ${SUBDIVIDER}
 ${Object.values(notConnectedByRM).map(group =>
-  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${r.lead_id}  |  ${r.subRegion}  |  ${fmtWorkingWait(r.businessMinsToConnect, 'late')}`).join('\n')}`
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}  |  ${fmtWorkingWait(r.businessMinsToConnect, 'late')}${(r.collatedRMs && r.collatedRMs.length > 1) ? `  |  RMs: ${r.collatedRMs.join(', ')}` : ''}`).join('\n')}`
 ).join('\n\n')}
 
 Total Late Connections : ${notConnectedItems.length}` : '';
@@ -5292,7 +5306,7 @@ ${EMAIL_SIGNATURE}`;
         columns: isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today'] : ['Lead ID', 'Region', 'RM', 'Age'],
         rows: tally[issueName].map(r => {
           const created = parseDate(r.lead_created_at);
-          const cells = [r.lead_id, r.subRegion, r.RM, created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
+          const cells = [idsFor(r), r.subRegion, rmsFor(r), created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
           if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
           return cells;
         }),
@@ -5306,7 +5320,7 @@ ${EMAIL_SIGNATURE}`;
         heading: 'Not Connected in 10 Minutes',
         subheading: `${notConnectedItems.length} late connection${notConnectedItems.length === 1 ? '' : 's'} — already happened, for the record only`,
         columns: ['Lead ID', 'Region', 'RM', 'Connected Late By'],
-        rows: notConnectedItems.map(r => [r.lead_id, r.subRegion, r.RM, fmtWorkingWait(r.businessMinsToConnect, 'late')]),
+        rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late')]),
       });
     }
 
