@@ -1717,6 +1717,18 @@ async function fetchAndRender(){
         const siblings = rows.filter(r => r !== row);
         split.siblingLeadIds = siblings.map(r => String(r.lead_id).trim());
         split.siblingRMs = Array.from(new Set(siblings.map(r => r.RM).filter(Boolean)));
+        // Every sibling's own four comment columns, carried alongside the
+        // lightweight id/RM references above — suggestedFollowUp reads
+        // this to assess a customer's next step from the FULL picture
+        // across every RM who's touched them, not just this one copy's
+        // own (possibly empty) comment fields.
+        split.siblingComments = siblings.map(r => ({
+          lead_id: r.lead_id, RM: r.RM,
+          internal_status_comments: r.internal_status_comments,
+          stage_comments: r.stage_comments,
+          last_comment: r.last_comment,
+          closing_reason: r.closing_reason,
+        }));
         return split;
       });
 
@@ -3940,28 +3952,36 @@ const FOLLOWUP_SUGGESTIONS = {
   'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
   'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
   'DNP': 'Client asked to be called back later — schedule the follow-up call.',
-  'Update': 'Review the latest comment and plan the next call/action manually — no clear signal to auto-suggest from.',
+  'Update': 'Manual review required — no keyword match found even after checking this customer\'s other RM copies. Read the comments above and log a specific next call/action; do not leave this one unactioned.',
 };
 
-// Suggested follow-up for a lead — checked in priority order across every
-// comment-ish column, not just internal_status_comments/stage_comments:
-//   1. The structured action log (combinedCommentsText) — its MOST RECENT
-//      entry, found by actual timestamp (not array position, since
-//      combinedCommentsText concatenates two fields one after the other,
-//      so the last-listed entry isn't necessarily the newest once both
-//      sources are involved; falls back to the last entry when nothing
-//      carries a parseable date).
-//   2. last_comment — a plain mirror of the latest touch with no
-//      timestamp of its own, but still real, often-fresher information
-//      when the structured log is thin or missing it.
-//   3. closing_reason — the only signal left on a lead closed without
-//      anything else logged; still worth surfacing even though there's
-//      no further "follow-up" to take on an already-closed lead.
-//   4. noCommentsFallback (or the generic default) once all three are
-//      genuinely empty. Lets a caller substitute its own wording (e.g.
-//      Overnight Leads' "Connect ASAP") for that last case only.
+// Suggested follow-up for a lead — mandatory best-effort: checked across
+// every comment-ish column of THIS copy AND every sibling copy of the
+// SAME customer (siblingComments — see copySplits in fetchAndRender and
+// computeMovementRows), not just this one card's own fields. A
+// customer's real next step should be assessed from the full picture
+// across every RM who's touched them — a copy with nothing logged of its
+// own can still often be answered from what a sibling copy recorded.
+// Priority order:
+//   1. The structured action log (combinedCommentsText) across every
+//      copy in the family, pooled together — the single MOST RECENT
+//      entry across the WHOLE family wins, found by actual timestamp
+//      (falls back to the last one parsed if nothing carries a date).
+//   2. last_comment, checked across every copy in the family — only once
+//      NOT ONE copy in the family has a single dated structured entry.
+//   3. closing_reason, checked across every copy — the only signal left
+//      when a copy closed without anything else logged.
+//   4. noCommentsFallback (or the generic default) once ALL of the above
+//      are genuinely empty on EVERY copy in the family. Lets a caller
+//      substitute its own wording (e.g. Overnight Leads' "Connect ASAP")
+//      for that last case only.
 function suggestedFollowUp(l, noCommentsFallback){
-  const entries = parseActionLog(combinedCommentsText(l));
+  const family = [l].concat(l.siblingComments || []);
+
+  const entries = [];
+  family.forEach(copy => {
+    parseActionLog(combinedCommentsText(copy)).forEach(e => entries.push(e));
+  });
   if (entries.length) {
     let latest = entries[entries.length - 1];
     let newestMs = -Infinity;
@@ -3973,11 +3993,15 @@ function suggestedFollowUp(l, noCommentsFallback){
     return FOLLOWUP_SUGGESTIONS[latest.outcome] || FOLLOWUP_SUGGESTIONS.Update;
   }
 
-  const lastComment = String(l.last_comment || '').trim();
-  if (lastComment) return FOLLOWUP_SUGGESTIONS[inferOutcome(lastComment)] || FOLLOWUP_SUGGESTIONS.Update;
+  for (const copy of family) {
+    const lastComment = String(copy.last_comment || '').trim();
+    if (lastComment) return FOLLOWUP_SUGGESTIONS[inferOutcome(lastComment)] || FOLLOWUP_SUGGESTIONS.Update;
+  }
 
-  const closingReason = String(l.closing_reason || '').trim();
-  if (closingReason) return `Lead closed (${closingReason}) — no further follow-up needed unless it's reopened.`;
+  for (const copy of family) {
+    const closingReason = String(copy.closing_reason || '').trim();
+    if (closingReason) return `Lead closed (${closingReason}) — no further follow-up needed unless it's reopened.`;
+  }
 
   return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
 }
@@ -5644,7 +5668,7 @@ function buildRegionWiseReports(combineAll){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
   // Not Connected in 10 Minutes rides along in this same email as its own
@@ -5659,7 +5683,7 @@ function buildRegionWiseReports(combineAll){
     if (!l.firstContactBreach) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason });
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
   // Leads Pending Beyond 48 Hours rides along too, as its own trailing
@@ -5678,7 +5702,7 @@ function buildRegionWiseReports(combineAll){
     if (reportableIssueFor(l, now) === STUCK_LABEL) return; // already the primary pick, shown above
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return;
-    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason });
+    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
   // Stalled — Not Moved Since Last Email: leads currently stalled (see
@@ -6545,6 +6569,15 @@ function computeMovementRows(fromAt, toAt){
         collatedRMs: [cur.toRec.RM || 'Unassigned'],
         siblingLeadIds: siblings.map(s => String(s.toRec.lead_id).trim()),
         siblingRMs: Array.from(new Set(siblings.map(s => s.toRec.RM).filter(Boolean))),
+        // Every sibling's own four comment columns — see the matching
+        // comment on copySplits in fetchAndRender for why.
+        siblingComments: siblings.map(s => ({
+          lead_id: s.toRec.lead_id, RM: s.toRec.RM,
+          internal_status_comments: s.toRec.internal_status_comments || '',
+          stage_comments: s.toRec.stage_comments || '',
+          last_comment: s.toRec.last_comment || '',
+          closing_reason: s.toRec.closing_reason || '',
+        })),
       });
     });
   });
