@@ -3954,10 +3954,15 @@ function fmtWorkingWait(mins, suffix){
 // with NO evidence of work at all) that deserves its own visibility
 // rather than being buried inside this one.
 function renderRecordingList(){
-  const group = leads.filter(l => l.recordingCommentsNoCalls)
+  // issueLeads (per-copy), not leads (merged) — a customer's copies are
+  // judged on their OWN call/comment data; a merged record's pooled
+  // comments (from every copy combined) against a maxed call_count could
+  // mask a genuine mismatch on the copy that actually has it, or show a
+  // false one credited to a copy that never had the calls or the comments.
+  const group = issueLeads.filter(l => l.recordingCommentsNoCalls)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
 
-  document.getElementById('recordingCount').textContent = group.length + ' leads';
+  document.getElementById('recordingCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const desc = document.getElementById('recordingDesc');
   if (desc) {
     desc.textContent = 'Call count is zero but comments/work exists. Deliberately unfiltered: no open/closed check, no grace period, no priority ranking.';
@@ -3992,10 +3997,14 @@ function renderRecordingList(){
 // no grace period, no priority ranking (closedWithNoWork already requires
 // the lead be closed, so an open/closed check would be redundant here).
 function renderClosedNoWorkList(){
-  const group = leads.filter(l => l.closedWithNoWork)
+  // issueLeads (per-copy), not leads (merged) — same reasoning as
+  // Recording Not Working above: a merged record's pooled comments can
+  // hide that ONE specific copy closed with literally nothing logged,
+  // even while a sibling copy's comments make the merged record look fine.
+  const group = issueLeads.filter(l => l.closedWithNoWork)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
 
-  document.getElementById('closedNoWorkCount').textContent = group.length + ' leads';
+  document.getElementById('closedNoWorkCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
 
   const el = document.getElementById('closedNoWorkList');
   if (!group.length) {
@@ -4065,9 +4074,12 @@ function renderFollowupList(){
 }
 
 function renderLoggingGapList(){
-  const group = leads.filter(l => l.loggingGapBreach)
+  // issueLeads (per-copy), not leads (merged) — a customer's copies are
+  // judged on their OWN call_attempts vs comment-log gap; merging would
+  // credit one copy's calls against another copy's comment log instead.
+  const group = issueLeads.filter(l => l.loggingGapBreach)
     .sort((a,b) => (b.unloggedCallGap||0) - (a.unloggedCallGap||0));
-  document.getElementById('loggingGapCount').textContent = group.length + ' leads';
+  document.getElementById('loggingGapCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('loggingGapList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No open lead has a meaningful gap between calls made and calls logged</div>`;
