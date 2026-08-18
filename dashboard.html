@@ -1481,9 +1481,12 @@ async function fetchAndRender(){
           stage_comments: getVal(c, 'stage_comments') || '',
           client_id: getVal(c, 'client_id') || '',
           // SOP effort is measured in ATTEMPTS. Fall back to call_count only
-          // when the column is absent, so an older sheet still reports
-          // something rather than showing every lead as zero-effort.
-          call_attempts: Number(getVal(c, 'call_attempts')) || Number(getVal(c, 'call_count')) || 0,
+          // when the column is genuinely ABSENT (checked via colIndex, not
+          // via the value) — `||` on the parsed number couldn't tell a real
+          // 0 call_attempts apart from a missing column, so a lead that was
+          // legitimately never dialed had its 0 silently overwritten by
+          // whatever call_count happened to hold.
+          call_attempts: colIndex.call_attempts !== -1 ? (Number(getVal(c, 'call_attempts')) || 0) : (Number(getVal(c, 'call_count')) || 0),
           call_count: Number(getVal(c, 'call_count')) || 0,
           duration: Number(getVal(c, 'duration')) || 0,
           closing_reason: getVal(c, 'closing_reason') || '',
@@ -1542,9 +1545,14 @@ async function fetchAndRender(){
     // DIFFERENT RM's copy that's actually still open, so the whole
     // customer read as closed even though someone else still had it live.
     // A collated lead should only read as closed when every copy really is.
+    // Closed and "open but unrecognised stage text" must NOT share a rank:
+    // they used to both return -1, so an open copy with stage text outside
+    // CONFIG.STAGE_ALIASES could tie with a genuinely closed copy and lose
+    // the tiebreak (activityTimeOf) to it — a more-recently-touched CLOSED
+    // copy could then win primary, making the whole merged customer read as
+    // closed even though the open copy was real and unworked.
     const funnelRankOf = (l) => {
-      const closed = isClosedStage(l.current_stage) || !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
-      if (closed) return -1;
+      if (isLeadClosed(l)) return -2;
       const canon = canonicalStage(l.current_stage);
       if (canon) return CONFIG.FUNNEL_ORDER.indexOf(canon);
       return -1; // unrecognised stage text
@@ -1763,6 +1771,11 @@ async function fetchAndRender(){
         dedupeEl.innerHTML = `<div>${summary} `
           + `<button type="button" class="info-toggle" style="display:inline; padding:0;" data-label="ⓘ Details" onclick="toggleInlineDetail(this)">ⓘ Details</button></div>`
           + `<div class="filter-summary" style="display:none; margin:6px 0 0;">${detail}</div>`;
+        // The UI text above promises "full detail in the console" — print
+        // it here rather than leaving that as a hint someone has to know
+        // to act on (typing the bare variable name into devtools) after
+        // reading past a collapsed detail panel.
+        if (crossRegionGroups > 0) console.table(_lastCrossRegionCollations);
       } else {
         dedupeEl.style.display = 'none';
       }
@@ -1946,6 +1959,20 @@ function isClosedStage(stage){
   return CONFIG.CLOSED_STAGE_STEMS.some(stem => words.some(w => w.startsWith(stem)));
 }
 
+// Single source of truth for "is this lead closed" — stage text OR a
+// filled closing_reason (RM-entered) OR lead_closing_reason (the sheet's
+// own closing disposition). Previously hand-duplicated verbatim across
+// funnelRankOf, enrichLead, computeStatusChanges, overnightStatusLabel, and
+// buildOvernightRegionReports, each site's own comment separately swearing
+// it "matches enrichLead's own definition exactly" — a future change to
+// what counts as closed had to be hunted down and edited in every one of
+// those, and missing one would silently desync it from the others. Mirror
+// any change here into MovementTracker.gs's isOpenLead_ too (see its
+// comment) — that runtime can't share this function directly.
+function isLeadClosed(l){
+  return isClosedStage(l.current_stage) || !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
+}
+
 // All leads in a single render should be evaluated against ONE timestamp.
 // Calling new Date() per lead let "now" drift across the loop, so a lead
 // near the end of a long list was measured against a slightly later clock
@@ -1984,7 +2011,7 @@ function enrichLead(l){
   // treatment, or it would read as still open and get flagged for every
   // SLA issue in the dashboard despite genuinely being done.
   const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
-  const excluded = isClosedStage(l.current_stage) || hasClosingReason;
+  const excluded = isLeadClosed(l);
   const oppOrAbove = isOppOrAbove(l.current_stage);
   const isOpenLead = !excluded && !oppOrAbove; // "open" = not closed, not already at Opportunity+
 
@@ -2032,12 +2059,17 @@ function enrichLead(l){
   }
   const firstContactBreach = isOpenLead && isUnder48h && firstContactStatus === 'BREACHED';
 
-  // The "otherwise" half of Rule 1 — still no connection at all once the
-  // 10-minute window has passed. Deliberately exempt from the 3-hour grace
-  // (like the old firstContactBreach was), so a silent lead doesn't sit
-  // unflagged anywhere in the 10-min–3h gap between this check and Not
-  // Updated's own grace period.
-  const neverConnectedPastWindow = isOpenLead && isUnder48h && !hasConnected &&
+  // The "otherwise" half of Rule 1 — still no VERIFIABLE connection once
+  // the 10-minute window has passed. Deliberately exempt from the 3-hour
+  // grace (like the old firstContactBreach was), so a silent lead doesn't
+  // sit unflagged anywhere in the 10-min–3h gap between this check and Not
+  // Updated's own grace period. Gated on !connectDate rather than
+  // !hasConnected: last_connect can hold non-empty text with
+  // last_connect_time blank/unparseable, which made hasConnected true
+  // with no way to ever compute businessMinsToConnect — that ambiguous
+  // case fell through both this AND firstContactBreach silently. connectDate
+  // specifically means "we have a timestamp we can act on."
+  const neverConnectedPastWindow = isOpenLead && isUnder48h && !connectDate &&
     !!created && businessMinutesBetween(created, now) > CONFIG.FIRST_CONTACT_SLA_MINUTES;
 
   // Detect leads touched by more than one agent over time. The sheet's RM
@@ -4376,9 +4408,14 @@ function getPrimaryIssue(l){
 // every time) rather than shuffling with whatever order Object.keys()
 // happens to sort into. Falls back to a cycling palette for anything
 // unrecognised, so a future issue type still renders instead of breaking.
+// "Not Connected in 10 Minutes" deliberately has no entry here — every
+// caller that supplies colorFn: colorForIssue sources its labels from
+// either ISSUE_PRIORITY (which excludes that issue on purpose, see its own
+// comment) or overnightStatusLabel() (stage names / "Closed" / "Unrecognized
+// Stage"), so colorForIssue never actually receives that label. An entry
+// for it used to sit here anyway, unreachable.
 const ISSUE_COLOR_MAP = {
   "Not Updated": 'var(--purple)',
-  "Not Connected in 10 Minutes": 'var(--amber)',
   "Follow-up Overdue (4h Post-Connect)": 'var(--red)',
   "Behind on Today's Calls": 'var(--blue)',
   "Leads Pending Beyond 48 Hours (Not Yet Opportunity)": 'var(--teal)',
@@ -5169,10 +5206,15 @@ function flagMissingRegionRecipients(regions){
   }
   if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
   regions.forEach(region => {
-    const input = document.getElementById('recTo_' + regionRowId(region));
-    if (input) {
-      input.style.borderColor = 'var(--red)';
-      setTimeout(() => { input.style.borderColor = ''; }, 2000);
+    // recipientCellId is the real id the table actually gives this cell
+    // (see line ~5027) — the old 'recTo_'+regionRowId(region) never
+    // matched anything, so this highlight silently never fired for any
+    // region. The "To" input itself carries no id (only data-region/
+    // data-field), so the cell is what gets outlined instead.
+    const cell = document.getElementById(recipientCellId(region, 'to'));
+    if (cell) {
+      cell.style.outline = '2px solid var(--red)';
+      setTimeout(() => { cell.style.outline = ''; }, 2000);
     }
   });
 }
@@ -5681,10 +5723,16 @@ function reportableIssueFor(l, now){
   const ageHrs = (now - created) / 36e5;
   const withinGrace = ageHrs < CONFIG.LEAD_GRACE_HOURS;
 
+  // No rule.key here is ever 'firstContactBreach' — ISSUE_PRIORITY
+  // deliberately excludes it (see the comment above ISSUE_PRIORITY's own
+  // definition), so grace applies uniformly to every rule this loop can
+  // actually reach. An exemption clause for that key used to sit here from
+  // before firstContactBreach was removed from ISSUE_PRIORITY; it was dead
+  // (always true) and read as if the exemption still existed.
   for (const rule of ISSUE_PRIORITY) {
     if (!_EMAILABLE_FLAG_KEYS.has(rule.key)) continue;
     if (!l[rule.key]) continue;
-    if (withinGrace && rule.key !== 'firstContactBreach') continue;
+    if (withinGrace) continue;
     return rule.label;
   }
   return null;
@@ -5698,8 +5746,14 @@ function reportDateRange(includedLeads){
   const fmt = istDayLabel;
 
   if (fromVal || toVal) {
-    const a = fromVal ? fmt(parseDate(fromVal)) : '…';
-    const b = toVal ? fmt(parseDate(toVal)) : '…';
+    // parseDate can return null for a value it can't parse — every other
+    // date field in this file guards that before formatting; fmt/istParts
+    // do not, so an unparseable non-empty value would otherwise throw
+    // instead of degrading to '…' like a blank value already does.
+    const fromDate = fromVal ? parseDate(fromVal) : null;
+    const toDate = toVal ? parseDate(toVal) : null;
+    const a = fromDate ? fmt(fromDate) : '…';
+    const b = toDate ? fmt(toDate) : '…';
     return a === b ? a : `${a} to ${b}`;
   }
   const times = includedLeads.map(l => parseDate(l.lead_created_at)).filter(Boolean).map(d => d.getTime());
@@ -6330,7 +6384,19 @@ async function fetchMovementLog(sheetId){
 // Groups raw snapshot records by customer (client_id, falling back to
 // lead_id — same identity rule the main collation step uses), each list
 // sorted chronologically.
+// Cached by movementSnapshots array identity — every load site reassigns
+// `movementSnapshots = [...]` wholesale rather than mutating it in place
+// (confirmed: no .push()/.splice() anywhere), so a `===` check against the
+// last-seen array is a safe, cheap invalidation signal. Called 4 times
+// (computeMovementRows, computeStatusChanges, computeRmStallLeaderboard,
+// computeTimeToRemediate) within a single render pass; without this, the
+// same grouping/sorting of the full retained history (up to 7 days of
+// snapshots) reran from scratch on every one of those, every filter change.
+let _movementHistoriesCache = null;
+let _movementHistoriesCacheSrc = null;
 function buildMovementHistories(){
+  if (_movementHistoriesCacheSrc === movementSnapshots) return _movementHistoriesCache;
+
   const byLead = new Map();
   movementSnapshots.forEach(rec => {
     const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
@@ -6338,6 +6404,9 @@ function buildMovementHistories(){
     byLead.get(key).push(rec);
   });
   byLead.forEach(list => list.sort((a, b) => a.snapshot_at - b.snapshot_at));
+
+  _movementHistoriesCacheSrc = movementSnapshots;
+  _movementHistoriesCache = byLead;
   return byLead;
 }
 
@@ -6381,17 +6450,37 @@ function enrichSnapshotCached(rec){
   return enriched;
 }
 
-// Same Project/Region/TL filters the rest of the dashboard uses, matched
-// against a snapshot record's own recorded fields. Region goes through
-// effectiveRegion, same as applyMovementFilters below and the main
-// dashboard's own filter — a raw .region check here missed "Loan" leads
-// entirely, since Loan is inferred from project_region/group_source, not
-// reliably present in the region column itself.
+// Same six-dimension filter (Project/Region/TL/Source/Sub-source/Created
+// date range) applyMovementFilters below checks, matched against a single
+// snapshot record — used by the whole-history walks (RM Stall Leaderboard,
+// Time to Remediate) that check one record at a time instead of filtering
+// a whole array up front. Previously only checked Project/Region/TL,
+// silently ignoring Source/Sub-source/date-range selections that every
+// other Movement view already respects — those two tables would keep
+// showing all-source, all-time stats while the rest of the tab had
+// narrowed down, with no indication the two had drifted apart. Region goes
+// through effectiveRegion, same as applyMovementFilters — a raw .region
+// check missed "Loan" leads entirely, since Loan is inferred from
+// project_region/group_source, not reliably present in the region column.
 function passesMovementFilters(rec){
   const projSel = filterState.project, regSel = filterState.region, tlSel = filterState.TL;
-  return (!projSel.size || projSel.has(rec.project)) &&
-    (!regSel.size || regSel.has(effectiveRegion(rec))) &&
-    (!tlSel.size || tlSel.has(rec.TL));
+  const srcSel = filterState.source, bucketSel = filterState.bucket;
+  if (projSel.size && !projSel.has(rec.project)) return false;
+  if (regSel.size && !regSel.has(effectiveRegion(rec))) return false;
+  if (tlSel.size && !tlSel.has(rec.TL)) return false;
+  if (srcSel.size && !Array.from(srcSel).some(s => s.toLowerCase() === String(rec.group_source).trim().toLowerCase())) return false;
+  if (bucketSel.size && !bucketSel.has(String(rec.source_bucket).trim())) return false;
+  const fromVal = document.getElementById('dateFromInput').value;
+  const toVal = document.getElementById('dateToInput').value;
+  if (fromVal || toVal) {
+    const fromDate = fromVal ? parseDate(fromVal + ' 00:00:00') : null;
+    const toDate = toVal ? parseDate(toVal + ' 23:59:59') : null;
+    const created = parseDate(rec.lead_created_at);
+    if (!created) return false;
+    if (fromDate && created < fromDate) return false;
+    if (toDate && created > toDate) return false;
+  }
+  return true;
 }
 
 // "Moved" = stage changed, OR call attempts increased, OR any of the four
@@ -6709,10 +6798,13 @@ function renderStalledFlaggedLeadsOps(){
   // OWN recorded fields, same as before.
   const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
 
-  const cloneCounts = countUniqueAndCloned(rows);
+  // dedupeToFamilies computed once and reused for both the count and the
+  // breakdown below — countUniqueAndCloned(rows) would silently redo the
+  // exact same grouping work a second time on the same array.
+  const uniqueRows = dedupeToFamilies(rows);
+  const cloneCounts = { total: rows.length, unique: uniqueRows.length, cloned: rows.length - uniqueRows.length };
   if (countEl) countEl.textContent = uniqueCloneLabel(cloneCounts, 'lead');
 
-  const uniqueRows = dedupeToFamilies(rows);
   const byIssue = {};
   uniqueRows.forEach(r => { byIssue[r.issue] = (byIssue[r.issue] || 0) + 1; });
   renderBreakdownCard(breakdownEl, {
@@ -6824,7 +6916,7 @@ function computeStatusChanges(fromAt, toAt, stalledRows){
       return;
     }
 
-    const closedNow = isClosedStage(live.current_stage) || !!String(live.closing_reason || '').trim() || !!String(live.lead_closing_reason || '').trim();
+    const closedNow = isLeadClosed(live);
     if (closedNow) {
       let label;
       if (isClosedStage(live.current_stage)) {
@@ -6839,7 +6931,11 @@ function computeStatusChanges(fromAt, toAt, stalledRows){
         const detail = String(live.lead_closing_comment || '').trim();
         label = reason ? (detail ? `${reason} — ${detail}` : reason) : 'Closed';
       }
-      closed.push(Object.assign({}, rowBase, { label }));
+      // lead_id/RM/region/project refreshed from the live record here too
+      // — same as the opportunities and active branches below — so a lead
+      // reassigned to a different RM between the From snapshot and now
+      // isn't attributed to whoever held it back at "From".
+      closed.push(Object.assign({}, rowBase, { lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label }));
       return;
     }
 
@@ -6952,7 +7048,11 @@ function summarizeTimeToRemediate(episodes){
   return Array.from(byRM.entries()).map(([rm, hoursList]) => {
     const sorted = hoursList.slice().sort((a, b) => a - b);
     const avg = sorted.reduce((s, x) => s + x, 0) / sorted.length;
-    const median = sorted[Math.floor(sorted.length / 2)];
+    // Even-length lists need the average of the two middle values, not
+    // just the upper-middle element — sorted[Math.floor(n/2)] alone
+    // overstates the median (e.g. [2,4,10,60] gave 10 instead of the true 7).
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
     return { RM: rm, count: sorted.length, avgHours: avg, medianHours: median, maxHours: sorted[sorted.length - 1] };
   }).sort((a, b) => b.avgHours - a.avgHours);
 }
@@ -7065,10 +7165,27 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
   // different outcomes) otherwise reads as 2 tracked leads when it's
   // really one. computeStatusChanges is per-copy now (see its own
   // comment), same reasoning as everywhere else this pattern applies.
+  //
+  // Each category's dedupeToFamilies() runs exactly ONCE below and its
+  // result is reused for both the outcome bar's per-category count and
+  // that category's own breakdown card — previously result.stalled (for
+  // example) was deduped 3 separate times (once for outcomeCounts' length,
+  // once inside countUniqueAndCloned, once again for uniqueStalled) doing
+  // the identical grouping work each time.
   const allFrom = result.active.concat(result.stalled, result.opportunities, result.closed, result.untraced);
-  const totalCloneCounts = countUniqueAndCloned(allFrom);
+  const uniqueFrom = dedupeToFamilies(allFrom);
+  const totalCloneCounts = { total: allFrom.length, unique: uniqueFrom.length, cloned: allFrom.length - uniqueFrom.length };
   if (countEl) countEl.textContent = uniqueCloneLabel(totalCloneCounts, 'lead') + ' tracked at "From"';
   const rangeText = `${istStamp(fromAt)} → ${istStamp(toAt)}`;
+
+  const uniqueStalled = dedupeToFamilies(result.stalled);
+  const uniqueActive = dedupeToFamilies(result.active);
+  const uniqueOpp = dedupeToFamilies(result.opportunities);
+  const uniqueClosed = dedupeToFamilies(result.closed);
+  const uniqueUntraced = dedupeToFamilies(result.untraced);
+  const stalledCloneCounts = { total: result.stalled.length, unique: uniqueStalled.length, cloned: result.stalled.length - uniqueStalled.length };
+  const oppCloneCounts = { total: result.opportunities.length, unique: uniqueOpp.length, cloned: result.opportunities.length - uniqueOpp.length };
+  const closedCloneCounts = { total: result.closed.length, unique: uniqueClosed.length, cloned: result.closed.length - uniqueClosed.length };
 
   // One bar reconciling the whole "From" population into its outcomes —
   // reads at a glance instead of a sentence of numbers to parse. Deduped
@@ -7076,18 +7193,12 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
   // above) so the bar's percentages stay readable against the same
   // unique total shown in countEl, rather than a mix of customers and
   // their cloned copies.
-  const uniqueFrom = dedupeToFamilies(allFrom);
   const outcomeCounts = {};
-  const stalledUnique = dedupeToFamilies(result.stalled).length;
-  const activeUnique = dedupeToFamilies(result.active).length;
-  const oppUnique = dedupeToFamilies(result.opportunities).length;
-  const closedUnique = dedupeToFamilies(result.closed).length;
-  const untracedUnique = dedupeToFamilies(result.untraced).length;
-  if (stalledUnique) outcomeCounts['Stalled'] = stalledUnique;
-  if (activeUnique) outcomeCounts['Still Active'] = activeUnique;
-  if (oppUnique) outcomeCounts['Became Opportunity+'] = oppUnique;
-  if (closedUnique) outcomeCounts['Closed'] = closedUnique;
-  if (untracedUnique) outcomeCounts['Not Found in Current Sheet'] = untracedUnique;
+  if (uniqueStalled.length) outcomeCounts['Stalled'] = uniqueStalled.length;
+  if (uniqueActive.length) outcomeCounts['Still Active'] = uniqueActive.length;
+  if (uniqueOpp.length) outcomeCounts['Became Opportunity+'] = uniqueOpp.length;
+  if (uniqueClosed.length) outcomeCounts['Closed'] = uniqueClosed.length;
+  if (uniqueUntraced.length) outcomeCounts['Not Found in Current Sheet'] = uniqueUntraced.length;
   renderBreakdownCard(outcomeEl, {
     total: uniqueFrom.length,
     totalLabel: `lead${uniqueFrom.length === 1 ? '' : 's'} open at "From"`,
@@ -7098,8 +7209,6 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
     numColor: 'var(--text)',
   });
 
-  const stalledCloneCounts = countUniqueAndCloned(result.stalled);
-  const uniqueStalled = dedupeToFamilies(result.stalled);
   const stalledCounts = {};
   uniqueStalled.forEach(s => { stalledCounts[s.label] = (stalledCounts[s.label] || 0) + 1; });
   renderBreakdownCard(stalledEl, {
@@ -7113,8 +7222,6 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
     emptyText: 'No stalled leads in this window.',
   });
 
-  const oppCloneCounts = countUniqueAndCloned(result.opportunities);
-  const uniqueOpp = dedupeToFamilies(result.opportunities);
   const oppCounts = {};
   uniqueOpp.forEach(o => { oppCounts[o.label] = (oppCounts[o.label] || 0) + 1; });
   renderBreakdownCard(oppEl, {
@@ -7128,8 +7235,6 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
     emptyText: 'No leads became Opportunity+ in this window.',
   });
 
-  const closedCloneCounts = countUniqueAndCloned(result.closed);
-  const uniqueClosed = dedupeToFamilies(result.closed);
   const closedCounts = {};
   uniqueClosed.forEach(c => { closedCounts[c.label] = (closedCounts[c.label] || 0) + 1; });
   renderBreakdownCard(closedEl, {
@@ -7183,8 +7288,7 @@ function computeOvernightCohort(toAt){
 // else the raw stage text verbatim so nothing silently disappears just
 // because it doesn't match a known funnel band.
 function overnightStatusLabel(l){
-  const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
-  if (isClosedStage(l.current_stage) || hasClosingReason) return 'Closed';
+  if (isLeadClosed(l)) return 'Closed';
   const canon = canonicalStage(l.current_stage);
   if (canon) return canon.replace(/\b\w/g, c => c.toUpperCase());
   return String(l.current_stage || '').trim() || 'Unrecognized Stage';
@@ -7223,11 +7327,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   // comes straight from allParsedLeads (raw), not enrichLead's output, so
   // isOpenLead/oppOrAbove aren't already computed on it — same open/closed
   // logic as enrichLead, applied directly.
-  const emailableLeads = cohortLeads.filter(l => {
-    const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
-    const closed = isClosedStage(l.current_stage) || hasClosingReason;
-    return !closed && !isOppOrAbove(l.current_stage);
-  });
+  const emailableLeads = cohortLeads.filter(l => !isLeadClosed(l) && !isOppOrAbove(l.current_stage));
 
   const byRegion = groupItemsByReportRegion(emailableLeads);
   return Object.keys(byRegion).sort().map(region => {
@@ -7243,7 +7343,8 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
     // created when it's really one. The detail rows below stay per-copy
     // (each RM still needs their own row to follow up on), only the
     // headline/summary numbers dedupe.
-    const cloneCounts = countUniqueAndCloned(regionLeads);
+    const uniqueRegionLeads = dedupeToFamilies(regionLeads);
+    const cloneCounts = { total: regionLeads.length, unique: uniqueRegionLeads.length, cloned: regionLeads.length - uniqueRegionLeads.length };
     const totalLabel = cloneCounts.cloned > 0
       ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
       : String(cloneCounts.unique);
@@ -7252,7 +7353,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
     const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} created overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nLeads Created : ${totalLabel}\n\n${EMAIL_SIGNATURE}`;
 
     const counts = {};
-    dedupeToFamilies(regionLeads).forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
+    uniqueRegionLeads.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
 
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
@@ -7310,7 +7411,7 @@ function renderOvernightCohort(toAt){
   // The headline count and breakdown both dedupe back to real customers;
   // the detail list further down stays the full per-copy cohort.
   const uniqueCohort = dedupeToFamilies(cohort);
-  const cloneCounts = countUniqueAndCloned(cohort);
+  const cloneCounts = { total: cohort.length, unique: uniqueCohort.length, cloned: cohort.length - uniqueCohort.length };
   if (countEl) countEl.textContent = uniqueCloneLabel(cloneCounts, 'lead');
   if (noticeEl) noticeEl.style.display = 'none';
 
@@ -7513,7 +7614,14 @@ async function browserSnapshotOpenLeads(){
   const label = 'Browser — ' + istDateTimeValue(now);
   const snapshotAtValue = istDateTimeValue(now);
 
-  const openLeads = allParsedLeads.filter(l => enrichLeadAsOf(l, now).isOpenLead);
+  // group_source === 'google' matches MovementTracker.gs's own trigger
+  // filter exactly (see snapshotOpenLeads_) — without it, this manual
+  // capture path could write a non-Google lead into Movement_Log at a
+  // timestamp the scheduled trigger would never also capture it at,
+  // corrupting that lead's before/after comparison with an inconsistent
+  // history.
+  const openLeads = allParsedLeads.filter(l =>
+    enrichLeadAsOf(l, now).isOpenLead && String(l.group_source || '').trim().toLowerCase() === 'google');
   if (!openLeads.length) {
     if (statusEl) { statusEl.textContent = 'No open leads to snapshot.'; statusEl.style.color = 'var(--text-faint)'; }
     return;
