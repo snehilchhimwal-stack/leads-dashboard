@@ -4481,24 +4481,25 @@ function csvEscape(v){
 }
 
 function downloadIssuesCSV(){
-  // One entry per lead_id, issues accumulated into a Set so a lead flagged
-  // by more than one check (e.g. Not Updated AND Recording Not Working)
-  // gets a single row listing all of them, joined by "; ", instead of
-  // separate/duplicate rows or only the first match.
-  const byLead = new Map();
-  const addIssue = (leadId, region, issue) => {
+  // Grouped BY issue — one block per issue listing every lead that has it
+  // — rather than one row per lead with its issues joined into a cell. A
+  // lead with more than one issue deliberately appears once per issue
+  // group it belongs to; "issue" is the first column so sorting/filtering
+  // on it in a spreadsheet keeps each issue's leads together too.
+  const byIssue = new Map();
+  const addIssue = (issue, leadId, region) => {
     if (!leadId) return;
-    if (!byLead.has(leadId)) byLead.set(leadId, { region, issues: new Set() });
-    byLead.get(leadId).issues.add(issue);
+    if (!byIssue.has(issue)) byIssue.set(issue, []);
+    byIssue.get(issue).push({ lead_id: leadId, region });
   };
 
   issueLeads.forEach(l => {
-    ISSUE_PRIORITY.forEach(rule => { if (l[rule.key]) addIssue(l.lead_id, l.region, rule.label); });
+    ISSUE_PRIORITY.forEach(rule => { if (l[rule.key]) addIssue(rule.label, l.lead_id, l.region); });
     // recordingCommentsNoCalls/closedWithNoWork are deliberately outside
     // ISSUE_PRIORITY (no grace period, no priority ranking — see their own
     // section descriptions) but still belong in a full issues export.
-    if (l.recordingCommentsNoCalls) addIssue(l.lead_id, l.region, 'Recording Not Working');
-    if (l.closedWithNoWork) addIssue(l.lead_id, l.region, 'Closed with No Work Recorded');
+    if (l.recordingCommentsNoCalls) addIssue('Recording Not Working', l.lead_id, l.region);
+    if (l.closedWithNoWork) addIssue('Closed with No Work Recorded', l.lead_id, l.region);
   });
 
   // Stalled Flagged Leads comes from Movement_Log via the Compare from/to
@@ -4509,12 +4510,20 @@ function downloadIssuesCSV(){
   const win = getPickedMovementWindow();
   if (win) {
     applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => {
-      addIssue(r.lead_id, r.region, 'Stalled Flagged Leads');
+      addIssue('Stalled Flagged Leads', r.lead_id, r.region);
     });
   }
 
-  const rows = [['lead_id', 'region', 'issue']];
-  byLead.forEach((v, leadId) => rows.push([leadId, v.region, Array.from(v.issues).join('; ')]));
+  const rows = [['issue', 'lead_id', 'region']];
+  // Fixed, stable order (matching ISSUE_PRIORITY's own priority order, then
+  // the three checks outside it) rather than whatever order Map insertion
+  // happened to produce.
+  const issueOrder = ISSUE_PRIORITY.map(r => r.label).concat(['Recording Not Working', 'Closed with No Work Recorded', 'Stalled Flagged Leads']);
+  issueOrder.forEach(issue => {
+    const leads = byIssue.get(issue);
+    if (!leads) return;
+    leads.forEach(l => rows.push([issue, l.lead_id, l.region]));
+  });
 
   const csvContent = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
