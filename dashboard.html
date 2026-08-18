@@ -2118,8 +2118,11 @@ function enrichLead(l){
   // still 0 just means the RM dialed and it didn't connect — that attempt
   // WAS recorded by the system, so recording is working fine; it's only a
   // genuine data-integrity gap when NEITHER figure shows any call activity
-  // at all, despite a comment saying work happened.
-  const recordingCommentsNoCalls = l.call_count === 0 && l.call_attempts === 0 && actionLogEntries.length > 0;
+  // at all, despite a comment saying work happened. "Comment" here means
+  // any of the four comment-ish columns (see hasAnyCommentField), not just
+  // the structured action log — a lead with only a last_comment or a
+  // closing_reason set is still real evidence someone touched it.
+  const recordingCommentsNoCalls = l.call_count === 0 && l.call_attempts === 0 && hasAnyCommentField(l);
   // Closed with No Work Recorded is its own separate issue card below —
   // a lead CLOSED with zero comments logged at all, i.e. no evidence any
   // work happened before closure. Deliberately just these two conditions:
@@ -2127,7 +2130,7 @@ function enrichLead(l){
   // recordingCommentsNoCalls above, which still needs both zero) — a
   // closed lead with literally no comment is the signal on its own,
   // regardless of whatever number sits in the call columns.
-  const closedWithNoWork = excluded && actionLogEntries.length === 0;
+  const closedWithNoWork = excluded && !hasAnyCommentField(l);
   const recordingNotWorking = recordingCommentsNoCalls;
 
   // SOP Rule 3 — CRM logging after each attempt. The mirror image of
@@ -3791,6 +3794,22 @@ function combinedCommentsText(l){
     .join(' | ');
 }
 
+// Broader existence check than combinedCommentsText above: true if ANY of
+// the four comment-ish columns (internal_status_comments, stage_comments,
+// last_comment, closing_reason) has real content. Used only for "has this
+// lead been commented on AT ALL" gates (Recording Not Working / Closed
+// with No Work Recorded) — deliberately NOT folded into combinedCommentsText/
+// actionLogEntries itself, since last_comment and closing_reason aren't
+// structured action-log entries (no per-attempt timestamp, no logger
+// name) and counting them as entries would understate a genuine
+// logging gap in checks that count entries, like unloggedCallGap.
+function hasAnyCommentField(l){
+  return !!(String(l.internal_status_comments || '').trim()
+    || String(l.stage_comments || '').trim()
+    || String(l.last_comment || '').trim()
+    || String(l.closing_reason || '').trim());
+}
+
 // Your internal_status_comments field (combined with stage_comments via
 // combinedCommentsText above) stores a running history like
 // "Name: Comment - YYYY-MM-DD HH:MM | Name: Comment - YYYY-MM-DD HH:MM | ..."
@@ -3830,12 +3849,25 @@ function parseActionLog(text){
 function inferOutcome(comment){
   const c = String(comment).toLowerCase();
   if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1) return 'Switched Off';
+  if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1) return 'Wrong Number';
   if (c.indexOf('busy') !== -1) return 'Busy';
   if (c.indexOf('not responding') !== -1) return 'RNR';
   if (c.indexOf('ringing') !== -1) return 'Ringing / RNR';
   if (c.indexOf('disconnected') !== -1 || c.indexOf('disc') !== -1) return 'Disconnected';
-  if (c.indexOf('whatsapp') !== -1 && c.indexOf('shared') !== -1) return 'WhatsApp Sent';
-  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1) return 'DNP';
+  if (c.indexOf('whatsapp') !== -1 && (c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1)) return 'WhatsApp Sent';
+  // Checked before the generic "shared/sent details" match below, since
+  // "shared X on whatsapp" would otherwise also satisfy that pattern.
+  if ((c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1) &&
+      (c.indexOf('detail') !== -1 || c.indexOf('brochure') !== -1 || c.indexOf('project') !== -1 || c.indexOf('info') !== -1)) return 'Details Shared';
+  if (c.indexOf('site visit') !== -1 || c.indexOf('visit scheduled') !== -1 || c.indexOf('visit arranged') !== -1 || c.indexOf('visit booked') !== -1 || c.indexOf('visit fixed') !== -1) return 'Visit Arranged';
+  if (c.indexOf('not interested') !== -1 || c.indexOf('no interest') !== -1) return 'Not Interested';
+  // "considering"/"thinking" checked before the bare "interested" match,
+  // since a comment like "will think and let us know if interested" should
+  // read as still-deciding, not a firm expression of interest.
+  if (c.indexOf('consider') !== -1 || c.indexOf('think about') !== -1 || c.indexOf('will think') !== -1 || c.indexOf('will get back') !== -1) return 'Considering';
+  if (c.indexOf('budget') !== -1) return 'Budget Concern';
+  if (c.indexOf('interested') !== -1) return 'Interested';
+  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1) return 'DNP';
   return 'Update';
 }
 
@@ -3845,37 +3877,59 @@ function inferOutcome(comment){
 // next" instead of just a bare comment count.
 const FOLLOWUP_SUGGESTIONS = {
   'Switched Off': 'Phone was switched off — retry later today; try an alternate number if one is on file.',
+  'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
   'Busy': 'Line was busy — retry within a few hours.',
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
   'Disconnected': 'Call disconnected mid-conversation — retry; flag the number if this keeps happening.',
   'WhatsApp Sent': 'WhatsApp sent but not yet followed by a call — a text may go unseen, call to confirm.',
+  'Details Shared': 'Project details were shared — follow up to gauge interest and answer any questions before it goes cold.',
+  'Visit Arranged': 'A site visit is arranged — confirm attendance close to the date, and follow up right after for feedback.',
+  'Not Interested': 'Client indicated no interest — confirm this is final, then close with a clear reason if so.',
+  'Considering': 'Client is still deciding — schedule a follow-up in a few days rather than calling again immediately.',
+  'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
+  'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
   'DNP': 'Client asked to be called back later — schedule the follow-up call.',
   'Update': 'Review the latest comment and plan the next call/action manually — no clear signal to auto-suggest from.',
 };
 
-// Suggested follow-up for a lead, derived from its MOST RECENT comment
-// (internal_status_comments + stage_comments combined — see
-// combinedCommentsText) — the freshest entry is the one that actually
-// reflects where things currently stand. Found by actual timestamp, not
-// array position: combinedCommentsText concatenates the two fields one
-// after the other, so the last-listed entry isn't necessarily the newest
-// one once both sources are involved. Falls back to the last entry when
-// nothing in the log carries a parseable date. noCommentsFallback lets a
-// caller substitute its own wording for the "nothing logged at all" case
-// (e.g. Overnight Leads' "Connect ASAP") without touching the outcome
-// mapping used whenever a comment DOES exist.
+// Suggested follow-up for a lead — checked in priority order across every
+// comment-ish column, not just internal_status_comments/stage_comments:
+//   1. The structured action log (combinedCommentsText) — its MOST RECENT
+//      entry, found by actual timestamp (not array position, since
+//      combinedCommentsText concatenates two fields one after the other,
+//      so the last-listed entry isn't necessarily the newest once both
+//      sources are involved; falls back to the last entry when nothing
+//      carries a parseable date).
+//   2. last_comment — a plain mirror of the latest touch with no
+//      timestamp of its own, but still real, often-fresher information
+//      when the structured log is thin or missing it.
+//   3. closing_reason — the only signal left on a lead closed without
+//      anything else logged; still worth surfacing even though there's
+//      no further "follow-up" to take on an already-closed lead.
+//   4. noCommentsFallback (or the generic default) once all three are
+//      genuinely empty. Lets a caller substitute its own wording (e.g.
+//      Overnight Leads' "Connect ASAP") for that last case only.
 function suggestedFollowUp(l, noCommentsFallback){
   const entries = parseActionLog(combinedCommentsText(l));
-  if (!entries.length) return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
-  let latest = entries[entries.length - 1];
-  let newestMs = -Infinity;
-  entries.forEach(e => {
-    if (!e.ts) return;
-    const d = parseDate(e.ts);
-    if (d && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
-  });
-  return FOLLOWUP_SUGGESTIONS[latest.outcome] || FOLLOWUP_SUGGESTIONS.Update;
+  if (entries.length) {
+    let latest = entries[entries.length - 1];
+    let newestMs = -Infinity;
+    entries.forEach(e => {
+      if (!e.ts) return;
+      const d = parseDate(e.ts);
+      if (d && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
+    });
+    return FOLLOWUP_SUGGESTIONS[latest.outcome] || FOLLOWUP_SUGGESTIONS.Update;
+  }
+
+  const lastComment = String(l.last_comment || '').trim();
+  if (lastComment) return FOLLOWUP_SUGGESTIONS[inferOutcome(lastComment)] || FOLLOWUP_SUGGESTIONS.Update;
+
+  const closingReason = String(l.closing_reason || '').trim();
+  if (closingReason) return `Lead closed (${closingReason}) — no further follow-up needed unless it's reopened.`;
+
+  return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
 }
 
 // Inner markup only — no wrapper div, so it can be injected into the
@@ -3978,10 +4032,18 @@ function renderRecordingList(){
     const logId = 'recording_' + idx;
     const stateNote = l.excluded ? 'closed' : (l.oppOrAbove ? 'Opportunity+' : 'open');
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
+    // The flag can fire off last_comment/closing_reason alone (see
+    // hasAnyCommentField) even when the structured action log itself is
+    // empty — "0 comments, 0 calls" would misleadingly contradict the
+    // card being shown at all in that case, so fall back to a generic
+    // "comment logged" phrasing rather than a literal zero count.
+    const commentLabel = entries.length
+      ? `${entries.length} comment${entries.length === 1 ? '' : 's'}, 0 calls`
+      : 'comment logged, 0 calls';
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — <span class="chip amber">${entries.length} comment${entries.length === 1 ? '' : 's'}, 0 calls</span></div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — <span class="chip amber">${esc(commentLabel)}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
   }).join('');
@@ -5521,7 +5583,7 @@ function buildRegionWiseReports(combineAll){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason });
   });
 
   // Not Connected in 10 Minutes rides along in this same email as its own
@@ -5536,7 +5598,7 @@ function buildRegionWiseReports(combineAll){
     if (!l.firstContactBreach) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments });
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason });
   });
 
   // Leads Pending Beyond 48 Hours rides along too, as its own trailing
@@ -5555,7 +5617,7 @@ function buildRegionWiseReports(combineAll){
     if (reportableIssueFor(l, now) === STUCK_LABEL) return; // already the primary pick, shown above
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return;
-    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments });
+    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason });
   });
 
   // Stalled — Not Moved Since Last Email: leads currently stalled (see
@@ -6172,13 +6234,20 @@ function passesMovementFilters(rec){
     (!tlSel.size || tlSel.has(rec.TL));
 }
 
-// "Moved" = stage changed, OR call attempts increased, OR either comment
-// log grew/changed — any activity at all, not specifically funnel progress.
+// "Moved" = stage changed, OR call attempts increased, OR any of the four
+// comment-ish columns changed — any activity at all, not specifically
+// funnel progress. last_comment and closing_reason are included here too
+// (unlike combinedCommentsText/actionLogEntries, which stay scoped to the
+// two structured log columns for counting purposes) since a genuine
+// change in either is still real evidence something happened, whether or
+// not it's formatted as a dated log entry.
 function movementChangedBetween(a, b){
   if (String(a.current_stage || '').trim().toLowerCase() !== String(b.current_stage || '').trim().toLowerCase()) return true;
   if (Number(a.call_attempts || 0) !== Number(b.call_attempts || 0)) return true;
   if (String(a.internal_status_comments || '') !== String(b.internal_status_comments || '')) return true;
   if (String(a.stage_comments || '') !== String(b.stage_comments || '')) return true;
+  if (String(a.last_comment || '') !== String(b.last_comment || '')) return true;
+  if (String(a.closing_reason || '') !== String(b.closing_reason || '')) return true;
   return false;
 }
 
@@ -6372,11 +6441,14 @@ function computeMovementRows(fromAt, toAt){
         // snapshot check time — so this actually says when the lead itself
         // was last worked, not just when we last looked at it.
         lastCommentAt: cur.toEnriched.lastCommentAt || null,
-        // Both comment sources, so a follow-up suggestion built from this
-        // row (see suggestedFollowUp/combinedCommentsText) reads the full
-        // comment history, not just internal_status_comments alone.
+        // All four comment-ish columns, so a follow-up suggestion built
+        // from this row (see suggestedFollowUp/combinedCommentsText/
+        // hasAnyCommentField) reads the full picture, not just
+        // internal_status_comments alone.
         internal_status_comments: cur.toRec.internal_status_comments || '',
         stage_comments: cur.toRec.stage_comments || '',
+        last_comment: cur.toRec.last_comment || '',
+        closing_reason: cur.toRec.closing_reason || '',
         fromAt: cur.fromRec.snapshot_at,
         toAt: cur.toRec.snapshot_at,
         issue: cur.primaryIssue,
