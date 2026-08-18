@@ -3877,28 +3877,47 @@ function parseActionLog(text){
   return parsed;
 }
 
+// Matches `word` as a standalone token in `c` (already-lowercased comment
+// text) rather than anywhere as a substring — needed for short telecalling
+// abbreviations (rnr, cb, ni...) that would otherwise risk matching inside
+// an unrelated word. Plain phrases below still use a bare indexOf, since
+// spelled-out phrases like "switched off" are long enough not to collide.
+function hasWord(c, word){
+  return new RegExp('\\b' + word + '\\b').test(c);
+}
+
+// RMs log outcomes as short telecalling shorthand at least as often as
+// full sentences — "RNR", "CB", "NI" — not just the spelled-out phrase.
+// Root cause of a real miss: a comment that was literally just "RNR" fell
+// through every check below (which only looked for "not responding") and
+// landed on the generic Update/"no clear signal" fallback despite RNR
+// being an completely standard, unambiguous outcome. Each bucket now
+// checks its common abbreviation(s) too, via hasWord above.
 function inferOutcome(comment){
   const c = String(comment).toLowerCase();
-  if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1) return 'Switched Off';
-  if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1) return 'Wrong Number';
+  if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1 || c.indexOf('sw off') !== -1 || hasWord(c, 'swoff')) return 'Switched Off';
+  if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1 || hasWord(c, 'wn')) return 'Wrong Number';
   if (c.indexOf('busy') !== -1) return 'Busy';
-  if (c.indexOf('not responding') !== -1) return 'RNR';
+  if (hasWord(c, 'rnr') || c.indexOf('not responding') !== -1) return 'RNR';
   if (c.indexOf('ringing') !== -1) return 'Ringing / RNR';
-  if (c.indexOf('disconnected') !== -1 || c.indexOf('disc') !== -1) return 'Disconnected';
+  // Word-boundary, not a bare substring — "disc" alone matched inside
+  // "discussed", "discount", "disclose", misclassifying any comment that
+  // merely mentioned discussing something as a dropped call.
+  if (c.indexOf('disconnected') !== -1 || c.indexOf('call disc') !== -1 || hasWord(c, 'disc')) return 'Disconnected';
   if (c.indexOf('whatsapp') !== -1 && (c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1)) return 'WhatsApp Sent';
   // Checked before the generic "shared/sent details" match below, since
   // "shared X on whatsapp" would otherwise also satisfy that pattern.
   if ((c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1) &&
       (c.indexOf('detail') !== -1 || c.indexOf('brochure') !== -1 || c.indexOf('project') !== -1 || c.indexOf('info') !== -1)) return 'Details Shared';
   if (c.indexOf('site visit') !== -1 || c.indexOf('visit scheduled') !== -1 || c.indexOf('visit arranged') !== -1 || c.indexOf('visit booked') !== -1 || c.indexOf('visit fixed') !== -1) return 'Visit Arranged';
-  if (c.indexOf('not interested') !== -1 || c.indexOf('no interest') !== -1) return 'Not Interested';
+  if (c.indexOf('not interested') !== -1 || c.indexOf('no interest') !== -1 || hasWord(c, 'ni')) return 'Not Interested';
   // "considering"/"thinking" checked before the bare "interested" match,
   // since a comment like "will think and let us know if interested" should
   // read as still-deciding, not a firm expression of interest.
   if (c.indexOf('consider') !== -1 || c.indexOf('think about') !== -1 || c.indexOf('will think') !== -1 || c.indexOf('will get back') !== -1) return 'Considering';
   if (c.indexOf('budget') !== -1) return 'Budget Concern';
   if (c.indexOf('interested') !== -1) return 'Interested';
-  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1) return 'DNP';
+  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1 || hasWord(c, 'cb')) return 'DNP';
   return 'Update';
 }
 
