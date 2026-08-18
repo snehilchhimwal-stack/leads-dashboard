@@ -4487,19 +4487,19 @@ function downloadIssuesCSV(){
   // group it belongs to; "issue" is the first column so sorting/filtering
   // on it in a spreadsheet keeps each issue's leads together too.
   const byIssue = new Map();
-  const addIssue = (issue, leadId, region) => {
+  const addIssue = (issue, leadId, region, rm) => {
     if (!leadId) return;
     if (!byIssue.has(issue)) byIssue.set(issue, []);
-    byIssue.get(issue).push({ lead_id: leadId, region });
+    byIssue.get(issue).push({ lead_id: leadId, region, rm: rm || 'Unassigned' });
   };
 
   issueLeads.forEach(l => {
-    ISSUE_PRIORITY.forEach(rule => { if (l[rule.key]) addIssue(rule.label, l.lead_id, l.region); });
+    ISSUE_PRIORITY.forEach(rule => { if (l[rule.key]) addIssue(rule.label, l.lead_id, l.region, l.RM); });
     // recordingCommentsNoCalls/closedWithNoWork are deliberately outside
     // ISSUE_PRIORITY (no grace period, no priority ranking — see their own
     // section descriptions) but still belong in a full issues export.
-    if (l.recordingCommentsNoCalls) addIssue('Recording Not Working', l.lead_id, l.region);
-    if (l.closedWithNoWork) addIssue('Closed with No Work Recorded', l.lead_id, l.region);
+    if (l.recordingCommentsNoCalls) addIssue('Recording Not Working', l.lead_id, l.region, l.RM);
+    if (l.closedWithNoWork) addIssue('Closed with No Work Recorded', l.lead_id, l.region, l.RM);
   });
 
   // Stalled Flagged Leads comes from Movement_Log via the Compare from/to
@@ -4510,11 +4510,11 @@ function downloadIssuesCSV(){
   const win = getPickedMovementWindow();
   if (win) {
     applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => {
-      addIssue('Stalled Flagged Leads', r.lead_id, r.region);
+      addIssue('Stalled Flagged Leads', r.lead_id, r.region, r.RM);
     });
   }
 
-  const rows = [['issue', 'lead_id', 'region']];
+  const rows = [['issue', 'lead_id', 'region', 'RM Name']];
   // Fixed, stable order (matching ISSUE_PRIORITY's own priority order, then
   // the three checks outside it) rather than whatever order Map insertion
   // happened to produce.
@@ -4522,7 +4522,7 @@ function downloadIssuesCSV(){
   issueOrder.forEach(issue => {
     const leads = byIssue.get(issue);
     if (!leads) return;
-    leads.forEach(l => rows.push([issue, l.lead_id, l.region]));
+    leads.forEach(l => rows.push([issue, l.lead_id, l.region, l.rm]));
   });
 
   const csvContent = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
