@@ -2739,11 +2739,17 @@ function renderAll(){
     if (l.oppOrAbove) oppPlus++;
     if (l.isOpenLead && l.call_attempts === 0) noCalls++;
   }
-  let dueTodayCount = 0, notConn = 0;
+  // Distinct customers, not rows — a customer whose two RM copies are each
+  // independently behind/not-connected still counts once here, matching
+  // the section badges below (see uniqueCloneLabel there) rather than a
+  // raw per-copy instance tally.
+  const dueTodayLeads = [], notConnLeads = [];
   for (const l of issueLeads) {
-    if (l.underCalledToday) dueTodayCount++;
-    if (l.firstContactBreach) notConn++;
+    if (l.underCalledToday) dueTodayLeads.push(l);
+    if (l.firstContactBreach) notConnLeads.push(l);
   }
+  const dueTodayCount = countUniqueAndCloned(dueTodayLeads).unique;
+  const notConn = countUniqueAndCloned(notConnLeads).unique;
   const total = leads.length;
 
   document.getElementById('kpiStrip').innerHTML = `
@@ -3736,9 +3742,14 @@ function renderStuckList(){
 }
 
 function renderInactiveRmList(){
-  const group = leads.filter(l => l.inactiveRmNewLead)
+  // issueLeads (per-copy), not leads (merged) — matches how this same
+  // issue is already judged for the Operations tab badge and its region
+  // email (both read l.inactiveRmNewLead off issueLeads) — the on-screen
+  // list was the one place still reading the merged view, which could
+  // silently miss or misattribute a copy the merge didn't pick as primary.
+  const group = issueLeads.filter(l => l.inactiveRmNewLead)
     .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
-  document.getElementById('inactiveRmCount').textContent = group.length + ' leads';
+  document.getElementById('inactiveRmCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('inactiveRmList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No new lead today landed on an inactive RM</div>`;
@@ -6536,30 +6547,44 @@ function computeStatusChanges(fromAt, toAt, stalledRows){
   if (!fromAt || !toAt) return null;
   if (fromAt.getTime() > toAt.getTime()) { const t = fromAt; fromAt = toAt; toAt = t; }
 
-  const stalledIssueByKey = new Map((stalledRows || []).map(r => [
-    String(r.client_id || '').trim() || 'l:' + String(r.lead_id).trim(),
-    r.issue,
-  ]));
+  // stalledRows (computeMovementRows) is one row per RM copy, keyed by its
+  // own lead_id — matched the same way here now that this walk is per-copy
+  // too, not the customer-level client_id it used before.
+  const stalledIssueByKey = new Map((stalledRows || []).map(r => [String(r.lead_id).trim(), r.issue]));
 
+  // One row per RM copy, not one entry per customer — a customer's two
+  // simultaneous copies can land in DIFFERENT outcomes (one stalled, the
+  // other closed), and a plain per-customer dedup silently dropped
+  // whichever copy .find() didn't happen to pick, exactly the bug already
+  // fixed in computeMovementRows above. Matching by lead_id within each
+  // history bucket catches every copy; a lightweight sibling reference to
+  // the OTHER copies of the same customer travels with each row for
+  // context (and so countUniqueAndCloned can tell a cloned pair apart from
+  // two genuinely different customers — see familyKeyOf).
   const byLead = buildMovementHistories();
-  const toKeys = new Set();
+  const toLeadIdsPresent = new Set();
   const fromRecs = [];
   byLead.forEach((history) => {
-    if (history.some(r => r.snapshot_at.getTime() === toAt.getTime())) {
-      const key = String(history[0].client_id || '').trim() || 'l:' + String(history[0].lead_id).trim();
-      toKeys.add(key);
-    }
-    const fromRec = history.find(r => r.snapshot_at.getTime() === fromAt.getTime());
-    if (fromRec) fromRecs.push(fromRec);
+    const toRecs = history.filter(r => r.snapshot_at.getTime() === toAt.getTime());
+    toRecs.forEach(r => toLeadIdsPresent.add(String(r.lead_id).trim()));
+    const fromRecsForLead = history.filter(r => r.snapshot_at.getTime() === fromAt.getTime());
+    fromRecsForLead.forEach(rec => {
+      const siblings = fromRecsForLead.filter(x => x !== rec);
+      fromRecs.push(Object.assign({}, rec, {
+        siblingLeadIds: siblings.map(s => String(s.lead_id).trim()),
+        siblingRMs: Array.from(new Set(siblings.map(s => s.RM).filter(Boolean))),
+      }));
+    });
   });
 
   const filteredFromRecs = applyMovementFilters(fromRecs);
 
-  const liveByKey = new Map();
-  allParsedLeads.forEach(l => {
-    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
-    liveByKey.set(key, l);
-  });
+  // Live sheet lookup by lead_id (this copy's own identity), not
+  // client_id — a customer's OTHER copy staying open shouldn't make THIS
+  // specific copy read as active if this lead_id itself closed or
+  // converted (or vice versa).
+  const liveByLeadId = new Map();
+  allParsedLeads.forEach(l => { liveByLeadId.set(String(l.lead_id).trim(), l); });
 
   const active = [];
   const stalled = [];
@@ -6568,24 +6593,25 @@ function computeStatusChanges(fromAt, toAt, stalledRows){
   const untraced = [];
 
   filteredFromRecs.forEach(rec => {
-    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
-    if (toKeys.has(key)) {
-      const issue = stalledIssueByKey.get(key);
+    const leadId = String(rec.lead_id).trim();
+    const rowBase = { lead_id: rec.lead_id, RM: rec.RM, region: rec.region, project: rec.project, siblingLeadIds: rec.siblingLeadIds, siblingRMs: rec.siblingRMs };
+    if (toLeadIdsPresent.has(leadId)) {
+      const issue = stalledIssueByKey.get(leadId);
       if (issue) {
-        stalled.push({ lead_id: rec.lead_id, RM: rec.RM, region: rec.region, project: rec.project, label: issue });
+        stalled.push(Object.assign({}, rowBase, { label: issue }));
       } else {
         // Current live stage where available — more useful than the
         // "From" snapshot's now-stale stage for something described as
         // active right now.
-        const liveNow = liveByKey.get(key);
-        active.push({ lead_id: rec.lead_id, RM: rec.RM, region: rec.region, project: rec.project, label: (liveNow && liveNow.current_stage) || rec.current_stage });
+        const liveNow = liveByLeadId.get(leadId);
+        active.push(Object.assign({}, rowBase, { label: (liveNow && liveNow.current_stage) || rec.current_stage }));
       }
       return;
     }
 
-    const live = liveByKey.get(key);
+    const live = liveByLeadId.get(leadId);
     if (!live) {
-      untraced.push({ lead_id: rec.lead_id, RM: rec.RM, region: rec.region, project: rec.project, label: '' });
+      untraced.push(Object.assign({}, rowBase, { label: '' }));
       return;
     }
 
@@ -6594,21 +6620,21 @@ function computeStatusChanges(fromAt, toAt, stalledRows){
       const label = isClosedStage(live.current_stage)
         ? (String(live.current_stage || '').trim() || 'Closed')
         : (String(live.closing_reason || '').trim() || 'Closed');
-      closed.push({ lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label });
+      closed.push(Object.assign({}, rowBase, { label }));
       return;
     }
 
     if (isOppOrAbove(live.current_stage)) {
       const canon = canonicalStage(live.current_stage);
       const label = canon ? canon.replace(/\b\w/g, c => c.toUpperCase()) : 'Opportunity+';
-      opportunities.push({ lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label });
+      opportunities.push(Object.assign({}, rowBase, { lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label }));
       return;
     }
 
     // Live data says it's still open and under-Opportunity — a missed
     // capture window (e.g. it dipped out and back), not a real status
     // change. Counted as active rather than guessing at a reason.
-    active.push({ lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label: live.current_stage });
+    active.push(Object.assign({}, rowBase, { lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label: live.current_stage }));
   });
 
   return { totalFrom: filteredFromRecs.length, active, stalled, opportunities, closed, untraced };
@@ -6821,31 +6847,52 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
     return;
   }
 
-  if (countEl) countEl.textContent = result.totalFrom.toLocaleString() + ' tracked at "From"';
+  // "Tracked at From" has to mean distinct customers, not rows — a
+  // customer whose two RM copies both existed at "From" (and landed in
+  // different outcomes) otherwise reads as 2 tracked leads when it's
+  // really one. computeStatusChanges is per-copy now (see its own
+  // comment), same reasoning as everywhere else this pattern applies.
+  const allFrom = result.active.concat(result.stalled, result.opportunities, result.closed, result.untraced);
+  const totalCloneCounts = countUniqueAndCloned(allFrom);
+  if (countEl) countEl.textContent = uniqueCloneLabel(totalCloneCounts, 'lead') + ' tracked at "From"';
   const rangeText = `${istStamp(fromAt)} → ${istStamp(toAt)}`;
 
   // One bar reconciling the whole "From" population into its outcomes —
-  // reads at a glance instead of a sentence of numbers to parse.
+  // reads at a glance instead of a sentence of numbers to parse. Deduped
+  // to one entry per customer (like the Stalled Flagged Leads breakdown
+  // above) so the bar's percentages stay readable against the same
+  // unique total shown in countEl, rather than a mix of customers and
+  // their cloned copies.
+  const uniqueFrom = dedupeToFamilies(allFrom);
   const outcomeCounts = {};
-  if (result.stalled.length) outcomeCounts['Stalled'] = result.stalled.length;
-  if (result.active.length) outcomeCounts['Still Active'] = result.active.length;
-  if (result.opportunities.length) outcomeCounts['Became Opportunity+'] = result.opportunities.length;
-  if (result.closed.length) outcomeCounts['Closed'] = result.closed.length;
-  if (result.untraced.length) outcomeCounts['Not Found in Current Sheet'] = result.untraced.length;
+  const stalledUnique = dedupeToFamilies(result.stalled).length;
+  const activeUnique = dedupeToFamilies(result.active).length;
+  const oppUnique = dedupeToFamilies(result.opportunities).length;
+  const closedUnique = dedupeToFamilies(result.closed).length;
+  const untracedUnique = dedupeToFamilies(result.untraced).length;
+  if (stalledUnique) outcomeCounts['Stalled'] = stalledUnique;
+  if (activeUnique) outcomeCounts['Still Active'] = activeUnique;
+  if (oppUnique) outcomeCounts['Became Opportunity+'] = oppUnique;
+  if (closedUnique) outcomeCounts['Closed'] = closedUnique;
+  if (untracedUnique) outcomeCounts['Not Found in Current Sheet'] = untracedUnique;
   renderBreakdownCard(outcomeEl, {
-    total: result.totalFrom,
-    totalLabel: `lead${result.totalFrom === 1 ? '' : 's'} open at "From"`,
+    total: uniqueFrom.length,
+    totalLabel: `lead${uniqueFrom.length === 1 ? '' : 's'} open at "From"`,
+    subNote: totalCloneCounts.cloned > 0 ? `+ ${totalCloneCounts.cloned} cloned cop${totalCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
     rangeText,
     counts: outcomeCounts,
     colorFn: (label) => STATUS_OUTCOME_COLORS[label] || 'var(--purple)',
     numColor: 'var(--text)',
   });
 
+  const stalledCloneCounts = countUniqueAndCloned(result.stalled);
+  const uniqueStalled = dedupeToFamilies(result.stalled);
   const stalledCounts = {};
-  result.stalled.forEach(s => { stalledCounts[s.label] = (stalledCounts[s.label] || 0) + 1; });
+  uniqueStalled.forEach(s => { stalledCounts[s.label] = (stalledCounts[s.label] || 0) + 1; });
   renderBreakdownCard(stalledEl, {
-    total: result.stalled.length,
-    totalLabel: `lead${result.stalled.length === 1 ? '' : 's'} stalled`,
+    total: uniqueStalled.length,
+    totalLabel: `lead${uniqueStalled.length === 1 ? '' : 's'} stalled`,
+    subNote: stalledCloneCounts.cloned > 0 ? `+ ${stalledCloneCounts.cloned} cloned cop${stalledCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
     rangeText,
     counts: stalledCounts,
     colorFn: colorForIssue,
@@ -6853,11 +6900,14 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
     emptyText: 'No stalled leads in this window.',
   });
 
+  const oppCloneCounts = countUniqueAndCloned(result.opportunities);
+  const uniqueOpp = dedupeToFamilies(result.opportunities);
   const oppCounts = {};
-  result.opportunities.forEach(o => { oppCounts[o.label] = (oppCounts[o.label] || 0) + 1; });
+  uniqueOpp.forEach(o => { oppCounts[o.label] = (oppCounts[o.label] || 0) + 1; });
   renderBreakdownCard(oppEl, {
-    total: result.opportunities.length,
-    totalLabel: `became Opportunity${result.opportunities.length === 1 ? '' : 's'}+`,
+    total: uniqueOpp.length,
+    totalLabel: `became Opportunity${uniqueOpp.length === 1 ? '' : 's'}+`,
+    subNote: oppCloneCounts.cloned > 0 ? `+ ${oppCloneCounts.cloned} cloned cop${oppCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
     rangeText,
     counts: oppCounts,
     colorFn: colorForIssue,
@@ -6865,11 +6915,14 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
     emptyText: 'No leads became Opportunity+ in this window.',
   });
 
+  const closedCloneCounts = countUniqueAndCloned(result.closed);
+  const uniqueClosed = dedupeToFamilies(result.closed);
   const closedCounts = {};
-  result.closed.forEach(c => { closedCounts[c.label] = (closedCounts[c.label] || 0) + 1; });
+  uniqueClosed.forEach(c => { closedCounts[c.label] = (closedCounts[c.label] || 0) + 1; });
   renderBreakdownCard(closedEl, {
-    total: result.closed.length,
-    totalLabel: `lead${result.closed.length === 1 ? '' : 's'} closed`,
+    total: uniqueClosed.length,
+    totalLabel: `lead${uniqueClosed.length === 1 ? '' : 's'} closed`,
+    subNote: closedCloneCounts.cloned > 0 ? `+ ${closedCloneCounts.cloned} cloned cop${closedCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
     rangeText,
     counts: closedCounts,
     colorFn: colorForIssue,
