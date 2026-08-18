@@ -647,6 +647,52 @@
         <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
       </section>
 
+      <section id="sec-statuschange">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
+        <div class="filter-summary">Compares two snapshots captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — see Stalled Flagged Leads above for the always-current 48h view of that same check. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
+
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="stale-label">Compare from
+            <select id="movementFromDateSelect" class="stale-select"></select>
+            <select id="movementFromTimeSelect" class="stale-select"></select>
+          </label>
+          <label class="stale-label">to
+            <select id="movementToDateSelect" class="stale-select"></select>
+            <select id="movementToTimeSelect" class="stale-select"></select>
+          </label>
+          <button class="btn ghost" id="movementCsvBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Status Changes' own Stalled/Active/Opportunity+/Closed/Not Found breakdown">Download CSV</button>
+        </div>
+
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="stale-label">
+            <input type="checkbox" id="autoSnapshotCheck" style="accent-color:var(--blue);" />
+            Also snapshot on refresh (this browser's clock)
+          </label>
+          <button class="btn ghost" id="snapshotNowBtn" style="padding:8px 12px; font-size:12.5px;">Snapshot now</button>
+          <span id="snapshotStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
+        </div>
+        <div class="filter-summary" style="margin-bottom:10px;">Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs — useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list). Uses the same sign-in as the rest of the dashboard (no separate connect step) — off by default, since it writes to the sheet rather than just reading it.</div>
+
+        <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
+
+        <div id="statusOutcomeBar" style="margin-bottom:14px;"></div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;" id="statusChangeGrid">
+          <div>
+            <div class="stall-group-label" style="color:var(--red)">Stalled</div>
+            <div id="statusStalledBreakdown"></div>
+          </div>
+          <div>
+            <div class="stall-group-label" style="color:var(--green)">Became Opportunity+</div>
+            <div id="statusOppBreakdown"></div>
+          </div>
+          <div>
+            <div class="stall-group-label" style="color:var(--teal)">Closed</div>
+            <div id="statusClosedBreakdown"></div>
+          </div>
+        </div>
+      </section>
+
       <section id="sec-inactivermlead">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Inactive-RM Lead Added</div><div class="section-count" id="inactiveRmCount"></div></div>
         <div class="filter-summary">New leads created today that landed on an RM currently marked inactive (<span class="mono">rm_is_active</span>) — nobody can work these until they're reassigned. Only checkable for today's leads, since rm_is_active is a current snapshot, not a historical record — this can't tell you whether an older lead was misrouted, only that a fresh one just was.</div>
@@ -837,53 +883,7 @@
 
     <!-- ============ MOVEMENT ============ -->
     <div class="tab-panel" id="tab-movement">
-      <div class="band-label">Movement <span class="band-note">flagged leads that haven't changed since the last check</span></div>
-
-      <section id="sec-statuschange">
-        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
-        <div class="filter-summary">Compares two snapshots captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — see Operations → Stalled Flagged Leads for the always-current 48h view of that same check. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
-
-        <div class="stale-controls" style="margin-bottom:10px;">
-          <label class="stale-label">Compare from
-            <select id="movementFromDateSelect" class="stale-select"></select>
-            <select id="movementFromTimeSelect" class="stale-select"></select>
-          </label>
-          <label class="stale-label">to
-            <select id="movementToDateSelect" class="stale-select"></select>
-            <select id="movementToTimeSelect" class="stale-select"></select>
-          </label>
-          <button class="btn ghost" id="movementCsvBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Status Changes' own Stalled/Active/Opportunity+/Closed/Not Found breakdown">Download CSV</button>
-        </div>
-
-        <div class="stale-controls" style="margin-bottom:10px;">
-          <label class="stale-label">
-            <input type="checkbox" id="autoSnapshotCheck" style="accent-color:var(--blue);" />
-            Also snapshot on refresh (this browser's clock)
-          </label>
-          <button class="btn ghost" id="snapshotNowBtn" style="padding:8px 12px; font-size:12.5px;">Snapshot now</button>
-          <span id="snapshotStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
-        </div>
-        <div class="filter-summary" style="margin-bottom:10px;">Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs — useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list). Uses the same sign-in as the rest of the dashboard (no separate connect step) — off by default, since it writes to the sheet rather than just reading it.</div>
-
-        <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
-
-        <div id="statusOutcomeBar" style="margin-bottom:14px;"></div>
-
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;" id="statusChangeGrid">
-          <div>
-            <div class="stall-group-label" style="color:var(--red)">Stalled</div>
-            <div id="statusStalledBreakdown"></div>
-          </div>
-          <div>
-            <div class="stall-group-label" style="color:var(--green)">Became Opportunity+</div>
-            <div id="statusOppBreakdown"></div>
-          </div>
-          <div>
-            <div class="stall-group-label" style="color:var(--teal)">Closed</div>
-            <div id="statusClosedBreakdown"></div>
-          </div>
-        </div>
-      </section>
+      <div class="band-label">Movement <span class="band-note">trend and leaderboard views built from Movement_Log capture history</span></div>
 
       <section id="sec-overnight">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Overnight Leads</div><div class="section-count" id="overnightCount"></div></div>
@@ -6591,18 +6591,22 @@ function nearestSnapshotAtOrBefore(targetMs){
   return best !== null ? new Date(best) : null;
 }
 
-// The two snapshots the region email compares: "to" is the freshest
-// Movement_Log data currently loaded (as close to right now, per the
-// browser, as the data allows); "from" is the closest snapshot at/before
-// IST midnight of the day 48 hours before now — calendar-aligned rather
-// than a rolling exact-48h instant, so "stalled" lines up with a normal
-// day boundary instead of drifting with whatever minute the report
-// happens to be generated. Returns null if there isn't enough Movement_Log
-// history yet to anchor either end.
+// The two snapshots the region email (and the Operations Stalled Flagged
+// Leads card) compare: "to" is the freshest Movement_Log data currently
+// loaded; "from" is the closest snapshot at/before a ROLLING 48 hours
+// before right now. Previously this rounded "from" down to IST midnight of
+// that calendar day — meant to line "stalled" up with a normal day
+// boundary, but its actual effect was to silently demand up to ~72 hours
+// of real captured history (whenever tracking started partway through a
+// day) before this ever showed anything, well past the "48 hours" the UI
+// promises and past what MovementTracker.gs had actually captured. A
+// straight rolling 48h needs no more history than it actually claims to.
+// Returns null if there isn't enough Movement_Log history yet to anchor
+// either end.
 function emailStalledWindow(){
   if (!movementSnapshots.length) return null;
   const toAt = new Date(Math.max(...movementSnapshots.map(r => r.snapshot_at.getTime())));
-  const fromTarget = istStartOfDay(new Date(Date.now() - 48 * 3600e3));
+  const fromTarget = new Date(Date.now() - 48 * 3600e3);
   const fromAt = nearestSnapshotAtOrBefore(fromTarget.getTime());
   if (!fromAt) return null;
   return { fromAt, toAt };
