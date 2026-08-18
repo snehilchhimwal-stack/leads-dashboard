@@ -713,7 +713,7 @@
 
     <section id="sec-logginggap">
       <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Calls Made — Not Logged in CRM</div><div class="section-count" id="loggingGapCount"></div></div>
-      <div class="filter-summary">SOP Rule 3 — CRM logging after each attempt. Open leads where call_attempts has pulled at least <span class="mono">3</span> ahead of dated CRM comments — calls are happening but the write-up isn't. The mirror case (comments with no calls at all) is covered separately under Recording Not Working below. Like Recording Not Working, this is a data-integrity view only — not part of the Issues CSV, region email reports, tab badge count, or RM SLA Score.</div>
+      <div class="filter-summary">SOP Rule 3 — CRM logging after each attempt. Open leads where call_attempts has pulled at least <span class="mono">3</span> ahead of dated CRM comments — calls are happening but the write-up isn't. The mirror case (comments with no calls at all) is covered separately under Recording Not Working below. A data-integrity view only — not part of the Issues CSV, region email reports, tab badge count, or RM SLA Score.</div>
       <div class="section-scroll"><div class="card-list" id="loggingGapList"></div></div>
     </section>
 
@@ -4371,9 +4371,11 @@ document.getElementById('dateToInput').addEventListener('change', () => {
 });
 
 /* ===================== ISSUES CSV EXPORT ===================== */
-// Covers exactly the five tracked action categories. A lead flagged under
-// more than one shows as a single row with all its issues joined by "; "
-// rather than duplicate rows per issue.
+// ISSUE_PRIORITY's five categories, plus Recording Not Working, Closed
+// with No Work Recorded, and Stalled Flagged Leads (see downloadIssuesCSV,
+// defined further down once those three checks/computations exist). A lead
+// flagged under more than one shows as a single row with all its issues
+// joined by "; " rather than duplicate rows per issue.
 
 // Priority order for the CSV export, the combined "all issues" report,
 // Stalled Flagged Leads, and the RM stall leaderboard / time-to-remediate
@@ -4479,16 +4481,40 @@ function csvEscape(v){
 }
 
 function downloadIssuesCSV(){
-  const rows = [['lead_id', 'region', 'issue']];
+  // One entry per lead_id, issues accumulated into a Set so a lead flagged
+  // by more than one check (e.g. Not Updated AND Recording Not Working)
+  // gets a single row listing all of them, joined by "; ", instead of
+  // separate/duplicate rows or only the first match.
+  const byLead = new Map();
+  const addIssue = (leadId, region, issue) => {
+    if (!leadId) return;
+    if (!byLead.has(leadId)) byLead.set(leadId, { region, issues: new Set() });
+    byLead.get(leadId).issues.add(issue);
+  };
+
   issueLeads.forEach(l => {
-    // Every matching category, not just the highest-priority one — a lead
-    // that's both Not Updated AND Behind on Today's Calls previously only
-    // showed the first match (getPrimaryIssue), silently dropping the
-    // other despite the comment above ISSUE_PRIORITY already describing
-    // "joined by ; " as the intended behavior.
-    const issues = ISSUE_PRIORITY.filter(rule => l[rule.key]).map(rule => rule.label);
-    if (issues.length) rows.push([l.lead_id, l.region, issues.join('; ')]);
+    ISSUE_PRIORITY.forEach(rule => { if (l[rule.key]) addIssue(l.lead_id, l.region, rule.label); });
+    // recordingCommentsNoCalls/closedWithNoWork are deliberately outside
+    // ISSUE_PRIORITY (no grace period, no priority ranking — see their own
+    // section descriptions) but still belong in a full issues export.
+    if (l.recordingCommentsNoCalls) addIssue(l.lead_id, l.region, 'Recording Not Working');
+    if (l.closedWithNoWork) addIssue(l.lead_id, l.region, 'Closed with No Work Recorded');
   });
+
+  // Stalled Flagged Leads comes from Movement_Log via the Compare from/to
+  // picker (see getPickedMovementWindow), not issueLeads — a completely
+  // separate per-copy row shape. Silently skipped if no pair is picked yet
+  // (same as the on-screen card's own empty state), rather than blocking
+  // the rest of the export.
+  const win = getPickedMovementWindow();
+  if (win) {
+    applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => {
+      addIssue(r.lead_id, r.region, 'Stalled Flagged Leads');
+    });
+  }
+
+  const rows = [['lead_id', 'region', 'issue']];
+  byLead.forEach((v, leadId) => rows.push([leadId, v.region, Array.from(v.issues).join('; ')]));
 
   const csvContent = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
