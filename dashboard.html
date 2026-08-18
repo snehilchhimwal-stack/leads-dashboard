@@ -4046,7 +4046,7 @@ function persistAiSuggestionCache(){
 function updateAiSuggestionStatus(state, detail){
   const el = document.getElementById('aiSuggestionStatus');
   if (!el) return;
-  if (!getClaudeApiKey()) { el.textContent = 'Not connected'; el.style.color = 'var(--text-faint)'; return; }
+  if (!getClaudeApiKey()) { el.textContent = 'Not connected — every Suggested Follow-up is using simple keyword matching until a key is added here.'; el.style.color = 'var(--amber)'; return; }
   if (state === 'reviewing') { el.textContent = 'Reviewing comments with Claude…'; el.style.color = 'var(--text-faint)'; return; }
   if (state === 'error') { el.textContent = `Claude review failed (${detail || 'unknown error'}) — showing keyword-based suggestions for now.`; el.style.color = 'var(--red)'; return; }
   el.textContent = `Connected — ${aiSuggestionCache.size.toLocaleString()} lead${aiSuggestionCache.size === 1 ? '' : 's'} reviewed so far`;
