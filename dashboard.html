@@ -5690,6 +5690,12 @@ function buildRegionWiseReports(combineAll){
   // see its placement below. Real region keys throughout (not mainRegion
   // groupings), since the baseline is recorded per real region.
   const stalledByRegion = currentStalledRowsByRegion();
+  // Cheap to compute directly rather than infer from stalledByRegion being
+  // empty — an empty stalledByRegion could also just mean zero leads are
+  // currently stalled anywhere, not that there's no history to compare
+  // against. Used below to explain an absent Stalled section instead of
+  // silently omitting it with no reason given.
+  const stalledWindowAvailable = !!emailStalledWindow();
   const lastSentStalled = loadLastSentStalled();
   const stalledRepeatsByRegion = {};
   Object.keys(stalledByRegion).forEach(region => {
@@ -5925,6 +5931,21 @@ ${EMAIL_SIGNATURE}`;
       });
     }
 
+    // An absent Stalled section previously gave no reason for its own
+    // absence — indistinguishable from "nothing is stalled twice in a row"
+    // (a good outcome, needs no explanation) versus "there's nothing to
+    // compare against yet" (the two boring setup reasons below). Only the
+    // latter get a footer line; a genuinely-empty section from an
+    // established baseline stays silent on purpose.
+    let stalledDiagnostic = '';
+    if (!stalledRepeats.length) {
+      if (!stalledWindowAvailable) {
+        stalledDiagnostic = ' Stalled — Not Moved Since Last Email needs at least 48 hours of captured Movement_Log history before it can compare two points in time — it will start appearing once there is enough.';
+      } else if (!regionNames.some(r => lastSentStalled[r] && lastSentStalled[r].leadIds && lastSentStalled[r].leadIds.length)) {
+        stalledDiagnostic = ` Stalled — Not Moved Since Last Email has nothing to compare against yet for ${regionNames.length === 1 ? 'this region' : 'these regions'} — it starts working from the next region-wise email actually sent (Send via Gmail or Copy) onward.`;
+      }
+    }
+
     const html = renderReportEmailHTML({
       eyebrow: 'Google Search Leads · SLA Monitor',
       title: 'All Issues',
@@ -5938,11 +5959,17 @@ ${EMAIL_SIGNATURE}`;
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
-        + (stalledRepeats.length ? ' Stalled — Not Moved Since Last Email is a lead already counted in the main tally above (or in a previous email if it dropped out of scope) — it is a callout, not an additional count.' : '')
+        + (stalledRepeats.length ? ' Stalled — Not Moved Since Last Email is a lead already counted in the main tally above (or in a previous email if it dropped out of scope) — it is a callout, not an additional count.' : stalledDiagnostic)
         + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledMovedCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique, issueLabel: 'All issues', regionNames };
+    // Carried on the report object (not recomputed later) so
+    // recordStalledBaselineForReport, called whenever this SPECIFIC report
+    // actually gets sent/copied, records exactly what this email showed —
+    // not a fresh recompute made minutes later that could have already
+    // drifted (a new snapshot landing, filters changing) from what the
+    // recipient actually received.
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique, issueLabel: 'All issues', regionNames, _stalledByRegionAtBuild: stalledByRegion };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
@@ -6592,10 +6619,15 @@ function currentStalledRowsByRegion(){
 // of ITS stalled leads are repeats. Deliberately keyed off issueLabel
 // (only buildRegionWiseReports sets it to 'All issues') so a single-issue
 // report or the Stalled/Overnight cards' own sends don't touch this.
+// Uses report._stalledByRegionAtBuild (stashed at build time) rather than
+// recomputing here — a fresh recompute at send time could disagree with
+// what the email actually showed if anything changed in between (a new
+// snapshot landing, filters changing), silently recording a baseline the
+// recipient never actually saw.
 function recordStalledBaselineForReport(report){
   if (!report || report.issueLabel !== 'All issues') return;
   const names = (report.regionNames && report.regionNames.length) ? report.regionNames : [report.region];
-  const stalledByRegion = currentStalledRowsByRegion();
+  const stalledByRegion = report._stalledByRegionAtBuild || currentStalledRowsByRegion();
   const store = loadLastSentStalled();
   const sentAt = new Date().toISOString();
   names.forEach(region => {
