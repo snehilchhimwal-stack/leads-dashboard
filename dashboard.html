@@ -3657,6 +3657,29 @@ function familyKeyOf(l){
   return [String(l.lead_id).trim(), ...((l.siblingLeadIds || []).map(String))].sort().join('|');
 }
 
+// Sorts a list so every copy of the same customer (see familyKeyOf) ends
+// up adjacent, instead of scattered across the list by whatever the
+// section's own sort criterion happens to do — 3 RM copies all flagged
+// in the same section should read as one connected story, not 3
+// unrelated cards. Each family is sorted internally by compareFn (so
+// within a family the ordering still means the same thing it always
+// did), and families are ordered relative to EACH OTHER by their own
+// most-urgent member (first after that internal sort) — a family
+// containing the single oldest/most-overdue lead still surfaces near
+// the top, so grouping never buries genuine urgency behind an
+// unrelated family that happens to sort earlier.
+function groupSiblingsTogether(items, compareFn){
+  const families = new Map();
+  (items || []).forEach(item => {
+    const key = familyKeyOf(item);
+    if (!families.has(key)) families.set(key, []);
+    families.get(key).push(item);
+  });
+  const groups = Array.from(families.values()).map(members => members.slice().sort(compareFn));
+  groups.sort((a, b) => compareFn(a[0], b[0]));
+  return groups.reduce((flat, g) => flat.concat(g), []);
+}
+
 // One representative entry per family (first one encountered) — for any
 // place that needs a "how many distinct customers, and what does each
 // look like" answer without a cloned copy skewing the count or a status
@@ -3708,8 +3731,10 @@ function renderDueTodayList(){
   // then progressively older ones. A fresh lead sitting uncalled is the
   // most urgent; ageHours is used rather than re-parsing lead_created_at
   // since every lead here was already measured against the same _renderNow.
-  const group = issueLeads.filter(l => l.isOpenLead && l.underCalledToday)
-    .sort((a,b) => a.ageHours - b.ageHours);
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.isOpenLead && l.underCalledToday),
+    (a,b) => a.ageHours - b.ageHours
+  );
   document.getElementById('dueTodayCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('dueTodayList');
   if (!group.length) {
@@ -3733,8 +3758,10 @@ function renderDueTodayList(){
 // this catches leads that WERE worked (plenty of calls) but still haven't
 // converted, which is a different problem than under-calling.
 function renderStuckList(){
-  const group = issueLeads.filter(l => l.isOpenLead && l.stageStuck48h)
-    .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.isOpenLead && l.stageStuck48h),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  );
   document.getElementById('stuckCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('stuckList');
   if (!group.length) {
@@ -3750,8 +3777,10 @@ function renderInactiveRmList(){
   // email (both read l.inactiveRmNewLead off issueLeads) — the on-screen
   // list was the one place still reading the merged view, which could
   // silently miss or misattribute a copy the merge didn't pick as primary.
-  const group = issueLeads.filter(l => l.inactiveRmNewLead)
-    .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.inactiveRmNewLead),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  );
   document.getElementById('inactiveRmCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('inactiveRmList');
   if (!group.length) {
@@ -3768,8 +3797,10 @@ function renderInactiveRmList(){
 }
 
 function renderNotUpdatedList(){
-  const group = issueLeads.filter(l => l.isOpenLead && l.isNotUpdated)
-    .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.isOpenLead && l.isNotUpdated),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  );
   document.getElementById('notUpdatedCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('notUpdatedList');
   if (!group.length) {
@@ -4013,8 +4044,10 @@ function renderRecordingList(){
   // comments (from every copy combined) against a maxed call_count could
   // mask a genuine mismatch on the copy that actually has it, or show a
   // false one credited to a copy that never had the calls or the comments.
-  const group = issueLeads.filter(l => l.recordingCommentsNoCalls)
-    .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.recordingCommentsNoCalls),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  );
 
   document.getElementById('recordingCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const desc = document.getElementById('recordingDesc');
@@ -4063,8 +4096,10 @@ function renderClosedNoWorkList(){
   // Recording Not Working above: a merged record's pooled comments can
   // hide that ONE specific copy closed with literally nothing logged,
   // even while a sibling copy's comments make the merged record look fine.
-  const group = issueLeads.filter(l => l.closedWithNoWork)
-    .sort((a,b) => (b.ageHours||0) - (a.ageHours||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.closedWithNoWork),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  );
 
   document.getElementById('closedNoWorkCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
 
@@ -4089,7 +4124,10 @@ function renderClosedNoWorkList(){
 function lastCommentTimestamp(l){ return l.lastCommentAt || null; }
 
 function renderNotConnectedList(){
-  const missed = issueLeads.filter(l => l.firstContactBreach).sort((a,b)=> (b.businessMinsToConnect||0) - (a.businessMinsToConnect||0));
+  const missed = groupSiblingsTogether(
+    issueLeads.filter(l => l.firstContactBreach),
+    (a,b) => (b.businessMinsToConnect||0) - (a.businessMinsToConnect||0)
+  );
   document.getElementById('notConnCount').textContent = uniqueCloneLabel(countUniqueAndCloned(missed), 'lead');
   const el = document.getElementById('notConnList');
   if (!missed.length){
@@ -4109,8 +4147,10 @@ function renderNotConnectedList(){
 
 // SOP Rule 4 — connected leads with no CRM update in the last 4 hours.
 function renderFollowupList(){
-  const group = issueLeads.filter(l => l.followupOverdue)
-    .sort((a,b) => (b.hoursSinceLastComment||0) - (a.hoursSinceLastComment||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.followupOverdue),
+    (a,b) => (b.hoursSinceLastComment||0) - (a.hoursSinceLastComment||0)
+  );
   document.getElementById('followupCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('followupList');
   if (!group.length) {
@@ -4139,8 +4179,10 @@ function renderLoggingGapList(){
   // issueLeads (per-copy), not leads (merged) — a customer's copies are
   // judged on their OWN call_attempts vs comment-log gap; merging would
   // credit one copy's calls against another copy's comment log instead.
-  const group = issueLeads.filter(l => l.loggingGapBreach)
-    .sort((a,b) => (b.unloggedCallGap||0) - (a.unloggedCallGap||0));
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.loggingGapBreach),
+    (a,b) => (b.unloggedCallGap||0) - (a.unloggedCallGap||0)
+  );
   document.getElementById('loggingGapCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
   const el = document.getElementById('loggingGapList');
   if (!group.length) {
@@ -6461,8 +6503,13 @@ function computeMovementRows(fromAt, toAt){
     });
   });
 
-  rows.sort((a, b) => a.RM.localeCompare(b.RM) || String(a.lead_id).localeCompare(String(b.lead_id)));
-  return rows;
+  // Grouped so every RM copy of the same customer ends up adjacent in the
+  // on-screen Stalled Flagged Leads list (see groupSiblingsTogether) —
+  // the plain RM-name sort below only ran within/across families before,
+  // so 3 copies held by 3 different RMs could land anywhere in the list
+  // relative to each other.
+  const sortedRows = groupSiblingsTogether(rows, (a, b) => a.RM.localeCompare(b.RM) || String(a.lead_id).localeCompare(String(b.lead_id)));
+  return sortedRows;
 }
 
 /* ===== Stalled — Not Moved Since Last Email (region-wise "All Issues" email) =====
@@ -7204,7 +7251,7 @@ function renderOvernightCohort(toAt){
 
   if (!cohort.length) { listEl.innerHTML = ''; return; }
 
-  const sorted = cohort.slice().sort((a, b) => (parseDate(b.lead_created_at) || 0) - (parseDate(a.lead_created_at) || 0));
+  const sorted = groupSiblingsTogether(cohort, (a, b) => (parseDate(b.lead_created_at) || 0) - (parseDate(a.lead_created_at) || 0));
   listEl.innerHTML = truncationNotice(sorted.length, MAX_CARDS) + sorted.slice(0, MAX_CARDS).map(l => {
     const label = overnightStatusLabel(l);
     return `<div class="alert-card">
