@@ -3828,6 +3828,42 @@ function inferOutcome(comment){
   return 'Update';
 }
 
+// One suggested next action per inferOutcome() result — same keyword-based,
+// best-effort inference (no separate Outcome column in the sheet), applied
+// to region-email issue rows so each lead carries a concrete "what to do
+// next" instead of just a bare comment count.
+const FOLLOWUP_SUGGESTIONS = {
+  'Switched Off': 'Phone was switched off — retry later today; try an alternate number if one is on file.',
+  'Busy': 'Line was busy — retry within a few hours.',
+  'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
+  'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
+  'Disconnected': 'Call disconnected mid-conversation — retry; flag the number if this keeps happening.',
+  'WhatsApp Sent': 'WhatsApp sent but not yet followed by a call — a text may go unseen, call to confirm.',
+  'DNP': 'Client asked to be called back later — schedule the follow-up call.',
+  'Update': 'Review the latest comment and plan the next call/action manually — no clear signal to auto-suggest from.',
+};
+
+// Suggested follow-up for a lead, derived from its MOST RECENT comment
+// (internal_status_comments + stage_comments combined — see
+// combinedCommentsText) — the freshest entry is the one that actually
+// reflects where things currently stand. Found by actual timestamp, not
+// array position: combinedCommentsText concatenates the two fields one
+// after the other, so the last-listed entry isn't necessarily the newest
+// one once both sources are involved. Falls back to the last entry when
+// nothing in the log carries a parseable date.
+function suggestedFollowUp(l){
+  const entries = parseActionLog(combinedCommentsText(l));
+  if (!entries.length) return 'No comments logged yet — make first contact and log the outcome.';
+  let latest = entries[entries.length - 1];
+  let newestMs = -Infinity;
+  entries.forEach(e => {
+    if (!e.ts) return;
+    const d = parseDate(e.ts);
+    if (d && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
+  });
+  return FOLLOWUP_SUGGESTIONS[latest.outcome] || FOLLOWUP_SUGGESTIONS.Update;
+}
+
 // Inner markup only — no wrapper div, so it can be injected into the
 // pre-existing .action-log container on first toggle.
 function actionLogTableMarkup(entries){
@@ -4472,14 +4508,21 @@ function renderReportEmailHTML(opts){
       </div>
     </td>`).join('');
 
+  // Every section is indigo by default; a section can override to red (or
+  // any other accent) via sec.accent — used for Stalled — Not Moved Since
+  // Last Email, so the most-important issue visually stands apart from the
+  // routine indigo tally sections rather than blending in.
   const sectionsHTML = sections.map(sec => {
-    const headerRow = `<tr style="background:#eef2ff;">${sec.columns.map(c =>
-      `<td style="padding:7px 10px; color:#4338ca; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ${FONT}">${esc(c)}</td>`
+    const accentFg = (sec.accent && sec.accent.fg) || '#4338ca';
+    const accentHeaderBg = (sec.accent && sec.accent.headerBg) || '#eef2ff';
+    const accentBg = (sec.accent && sec.accent.bg) || '#f5f5ff';
+    const headerRow = `<tr style="background:${accentHeaderBg};">${sec.columns.map(c =>
+      `<td style="padding:7px 10px; color:${accentFg}; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ${FONT}">${esc(c)}</td>`
     ).join('')}</tr>`;
     const bodyRows = sec.rows.map((row, i) => `<tr style="${i > 0 ? 'border-top:1px solid #f0f0f0;' : ''}">${
       row.map(cell => `<td style="padding:6px 10px; color:#374151; ${FONT}">${esc(String(cell))}</td>`).join('')
     }</tr>`).join('');
-    return `<div style="margin-top:16px; border-left:4px solid #4338ca; background:#f5f5ff; border-radius:0 8px 8px 0; padding:12px 16px;">
+    return `<div style="margin-top:16px; border-left:4px solid ${accentFg}; background:${accentBg}; border-radius:0 8px 8px 0; padding:12px 16px;">
       <div style="${FONT} font-weight:700; font-size:14px; color:#1f2937;">${esc(sec.heading)}</div>
       ${sec.subheading ? `<div style="${FONT} font-size:11.5px; color:#6b7280; margin-bottom:8px;">${esc(sec.subheading)}</div>` : ''}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">
@@ -4628,9 +4671,9 @@ function buildRegionReports(issueKey){
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Attempts Today']
+        columns: (issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Attempts Today']
           : isReminder ? ['Lead ID', 'Created', 'Age', 'Connected Late By']
-          : ['Lead ID', 'Created', 'Age'],
+          : ['Lead ID', 'Created', 'Age']).concat('Suggested Follow-up'),
         rows: group.map(l => {
           const created = parseDate(l.lead_created_at);
           const cells = [
@@ -4640,6 +4683,7 @@ function buildRegionReports(issueKey){
           ];
           if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.attemptsToday));
           if (isReminder) cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
+          cells.push(suggestedFollowUp(l));
           return cells;
         }),
       })),
@@ -5149,6 +5193,7 @@ async function performGmailSend(pending){
       throw new Error((errBody.error && errBody.error.message) || `Gmail API error ${resp.status}`);
     }
     markReportSent(report.subject);
+    recordStalledBaselineForReport(report);
     if (btn) {
       btn.disabled = false;
       applyGmailButtonState(btn, report.subject);
@@ -5450,7 +5495,7 @@ function buildRegionWiseReports(combineAll){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments });
   });
 
   // Not Connected in 10 Minutes rides along in this same email as its own
@@ -5465,7 +5510,7 @@ function buildRegionWiseReports(combineAll){
     if (!l.firstContactBreach) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments });
   });
 
   // Leads Pending Beyond 48 Hours rides along too, as its own trailing
@@ -5484,23 +5529,42 @@ function buildRegionWiseReports(combineAll){
     if (reportableIssueFor(l, now) === STUCK_LABEL) return; // already the primary pick, shown above
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return;
-    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs });
+    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments });
+  });
+
+  // Stalled — Not Moved Since Last Email: leads currently stalled (see
+  // currentStalledRowsByRegion) that were ALSO stalled the last time an
+  // email actually went out (Send via Gmail or Copy — see
+  // recordStalledBaselineForReport) to that same region. Zero movement
+  // across two consecutive email cycles is the most important thing in
+  // this email, so it's surfaced as its own most-important, red section —
+  // see its placement below. Real region keys throughout (not mainRegion
+  // groupings), since the baseline is recorded per real region.
+  const stalledByRegion = currentStalledRowsByRegion();
+  const lastSentStalled = loadLastSentStalled();
+  const stalledRepeatsByRegion = {};
+  Object.keys(stalledByRegion).forEach(region => {
+    const baseline = lastSentStalled[region];
+    const baselineSet = new Set((baseline && baseline.leadIds) || []);
+    if (!baselineSet.size) return;
+    const repeats = stalledByRegion[region].filter(r => baselineSet.has(String(r.lead_id).trim()));
+    if (repeats.length) stalledRepeatsByRegion[region] = repeats;
   });
 
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
 
-  if (!rows.length && !notConnectedRows.length && !stuckRows.length) return [];
+  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !Object.keys(stalledRepeatsByRegion).length) return [];
 
   const groups = combineAll ? { __ALL__: rows } : groupBy(rows, r => r.mainRegion);
   const notConnectedGroups = combineAll ? { __ALL__: notConnectedRows } : groupBy(notConnectedRows, r => r.mainRegion);
   const stuckGroups = combineAll ? { __ALL__: stuckRows } : groupBy(stuckRows, r => r.mainRegion);
-  // A region with ONLY late-connect or ONLY additional-stuck leads and no
-  // other actionable issue still needs its own email — without this it
-  // would have no key in `groups` (built from `rows` alone) and silently
-  // drop out entirely.
+  // A region with ONLY late-connect, ONLY additional-stuck, or ONLY
+  // repeat-stalled leads and no other actionable issue still needs its own
+  // email — without this it would have no key in `groups` (built from
+  // `rows` alone) and silently drop out entirely.
   if (!combineAll) {
-    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).forEach(region => {
+    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(stalledRepeatsByRegion)).forEach(region => {
       if (!groups[region]) groups[region] = [];
     });
   }
@@ -5509,7 +5573,16 @@ function buildRegionWiseReports(combineAll){
     const items = groups[key];
     const notConnectedItems = notConnectedGroups[key] || [];
     const stuckItems = stuckGroups[key] || [];
-    const regionNames = Array.from(new Set(items.concat(notConnectedItems).concat(stuckItems).map(r => r.mainRegion))).sort();
+    // Combined mode spans every region, so gather repeats from all of them;
+    // per-region mode's key IS the real region name already.
+    const stalledRepeats = combineAll
+      ? Object.keys(stalledRepeatsByRegion).reduce((acc, r) => acc.concat(stalledRepeatsByRegion[r]), [])
+      : (stalledRepeatsByRegion[key] || []);
+    const regionNames = Array.from(new Set(
+      items.concat(notConnectedItems).concat(stuckItems).map(r => r.mainRegion)
+        .concat(stalledRepeats.map(r => mainRegionFor(effectiveRegion(r))).filter(Boolean))
+        .concat(combineAll ? [] : [key])
+    )).sort();
     // In combined mode the email spans everything, so the Region filter
     // selection is the right label. In per-region mode each email covers one
     // region, so it names its own — otherwise every email would carry an
@@ -5611,6 +5684,27 @@ ${Object.values(stuckByRM).map(group =>
 
 Total : ${stuckTotalLabel}` : '';
 
+    // Stalled — Not Moved Since Last Email: placed FIRST, ahead of even the
+    // main tally, since two consecutive email cycles with zero movement is
+    // the most important thing in this email (see stalledRepeats above).
+    const stalledMovedByRM = groupBy(stalledRepeats, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+    const stalledMovedCloneCounts = countUniqueAndCloned(stalledRepeats);
+    const stalledMovedTotalLabel = stalledMovedCloneCounts.cloned > 0
+      ? `${stalledMovedCloneCounts.unique} (+${stalledMovedCloneCounts.cloned} cloned cop${stalledMovedCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(stalledMovedCloneCounts.unique);
+    const stalledMovedBlock = stalledRepeats.length ? `${DIVIDER}
+STALLED - NOT MOVED SINCE LAST EMAIL (MOST IMPORTANT)
+The following leads were already flagged as stalled in the last email sent to this region and are STILL unchanged now — zero movement across two consecutive email cycles. Review and escalate these first.
+${SUBDIVIDER}
+${Object.values(stalledMovedByRM).map(group =>
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
+).join('\n\n')}
+
+Total : ${stalledMovedTotalLabel}
+${DIVIDER}
+
+` : '';
+
     const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${SUBJECT_SCOPE_SUFFIX}`;
     const body =
 `Hi,
@@ -5622,7 +5716,7 @@ Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     :
 Source     : ${sourceLabel}
 Total      : ${totalCountLabel}
 
-${mainSection}${notConnectedBlock}${stuckBlock}
+${stalledMovedBlock}${mainSection}${notConnectedBlock}${stuckBlock}
 
 ${EMAIL_SIGNATURE}`;
 
@@ -5633,11 +5727,12 @@ ${EMAIL_SIGNATURE}`;
         heading: issueName,
         subheading: `${tally[issueName].length} lead${tally[issueName].length === 1 ? '' : 's'}`,
         action: ISSUE_ACTION_MAP[issueFlag] || '',
-        columns: isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today'] : ['Lead ID', 'Region', 'RM', 'Age'],
+        columns: (isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today'] : ['Lead ID', 'Region', 'RM', 'Age']).concat('Suggested Follow-up'),
         rows: tally[issueName].map(r => {
           const created = parseDate(r.lead_created_at);
           const cells = [idsFor(r), r.subRegion, rmsFor(r), created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
           if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
+          cells.push(suggestedFollowUp(r));
           return cells;
         }),
       };
@@ -5649,8 +5744,8 @@ ${EMAIL_SIGNATURE}`;
       sections.push({
         heading: 'Not Connected in 10 Minutes',
         subheading: `${notConnectedTotalLabel} late connection${notConnectedCloneCounts.unique === 1 ? '' : 's'} — already happened, for the record only`,
-        columns: ['Lead ID', 'Region', 'RM', 'Connected Late By'],
-        rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late')]),
+        columns: ['Lead ID', 'Region', 'RM', 'Connected Late By', 'Suggested Follow-up'],
+        rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late'), suggestedFollowUp(r)]),
       });
     }
     if (stuckItems.length) {
@@ -5662,8 +5757,22 @@ ${EMAIL_SIGNATURE}`;
         heading: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity) — Also Listed Above',
         subheading: `${stuckTotalLabel} lead${stuckCloneCounts.unique === 1 ? '' : 's'} — already listed under another issue above`,
         action: ISSUE_ACTION_MAP.stageStuck48h || '',
-        columns: ['Lead ID', 'Region', 'RM'],
-        rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r)]),
+        columns: ['Lead ID', 'Region', 'RM', 'Suggested Follow-up'],
+        rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), suggestedFollowUp(r)]),
+      });
+    }
+    // Stalled — Not Moved Since Last Email, unshifted onto the FRONT so it
+    // always renders first regardless of how the issue-name sections above
+    // alphabetize — red-accented (see renderReportEmailHTML's sec.accent)
+    // so it visually stands apart as the most important thing in the email.
+    if (stalledRepeats.length) {
+      sections.unshift({
+        heading: 'STALLED — NOT MOVED SINCE LAST EMAIL',
+        subheading: `${stalledMovedTotalLabel} lead${stalledMovedCloneCounts.unique === 1 ? '' : 's'} — zero movement across two consecutive email cycles. Review and escalate first.`,
+        action: 'These leads were already flagged as stalled in the last email sent to this region and have still not moved. Personally follow up and escalate immediately.',
+        columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Stalled Since', 'Suggested Follow-up'],
+        rows: stalledRepeats.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), suggestedFollowUp(r)]),
+        accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       });
     }
 
@@ -5674,14 +5783,14 @@ ${EMAIL_SIGNATURE}`;
       subtitle: `${dateRange} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
       kpis: [
         { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
-        { value: regionNames.length, label: regionNames.length === 1 ? 'Region' : 'Regions', bg: '#e0e7ff', fg: '#4338ca' },
         { value: Object.keys(tally).length, label: Object.keys(tally).length === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
       ],
       sections,
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
-        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
+        + (stalledRepeats.length ? ' Stalled — Not Moved Since Last Email is a lead already counted in the main tally above (or in a previous email if it dropped out of scope) — it is a callout, not an additional count.' : '')
+        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledMovedCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
     return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique, issueLabel: 'All issues', regionNames };
@@ -5785,6 +5894,7 @@ function copyAllReport(i){
   const r = _allReports[i];
   const text = `${r.subject}\n\n${r.body}`;
   navigator.clipboard.writeText(text).then(() => {
+    recordStalledBaselineForReport(r);
     const btn = document.getElementById('allCopyBtn_' + i);
     btn.textContent = 'Copied ✓';
     btn.classList.add('copied');
@@ -6221,6 +6331,11 @@ function computeMovementRows(fromAt, toAt){
         // snapshot check time — so this actually says when the lead itself
         // was last worked, not just when we last looked at it.
         lastCommentAt: cur.toEnriched.lastCommentAt || null,
+        // Movement_Log's own schema (MOVEMENT_LOG_COLUMNS) doesn't carry
+        // stage_comments yet — only internal_status_comments — so a
+        // follow-up suggestion built from this row (see suggestedFollowUp)
+        // is based on partial comment history for a stalled lead.
+        internal_status_comments: cur.toRec.internal_status_comments || '',
         fromAt: cur.fromRec.snapshot_at,
         toAt: cur.toRec.snapshot_at,
         issue: cur.primaryIssue,
@@ -6235,6 +6350,80 @@ function computeMovementRows(fromAt, toAt){
 
   rows.sort((a, b) => a.RM.localeCompare(b.RM) || String(a.lead_id).localeCompare(String(b.lead_id)));
   return rows;
+}
+
+/* ===== Stalled — Not Moved Since Last Email (region-wise "All Issues" email) =====
+ * Cross-references THIS email's currently-stalled leads against whichever
+ * leads were stalled the LAST TIME an email was actually sent (Send via
+ * Gmail or Copy — see recordStalledBaselineForReport) to that same region,
+ * so a lead flagged as stalled in two consecutive emails — genuinely zero
+ * movement across a full reporting cycle, not just "stalled right now" —
+ * gets called out as the most important thing in the email. */
+const LAST_SENT_STALLED_KEY = 'gsl_last_sent_stalled_v1';
+
+function loadLastSentStalled(){
+  try { return JSON.parse(localStorage.getItem(LAST_SENT_STALLED_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+function saveLastSentStalled(store){
+  try { localStorage.setItem(LAST_SENT_STALLED_KEY, JSON.stringify(store)); }
+  catch (e) { /* storage unavailable/full — tracking just resets next time, not fatal */ }
+}
+
+// Closest captured Movement_Log snapshot at or before targetMs, or null if
+// history doesn't go back that far yet.
+function nearestSnapshotAtOrBefore(targetMs){
+  const times = Array.from(new Set(movementSnapshots.map(r => r.snapshot_at.getTime()))).sort((a, b) => a - b);
+  let best = null;
+  for (const t of times) { if (t <= targetMs) best = t; else break; }
+  return best !== null ? new Date(best) : null;
+}
+
+// The two snapshots the region email compares: "to" is the freshest
+// Movement_Log data currently loaded (as close to right now, per the
+// browser, as the data allows); "from" is the closest snapshot at/before
+// IST midnight of the day 48 hours before now — calendar-aligned rather
+// than a rolling exact-48h instant, so "stalled" lines up with a normal
+// day boundary instead of drifting with whatever minute the report
+// happens to be generated. Returns null if there isn't enough Movement_Log
+// history yet to anchor either end.
+function emailStalledWindow(){
+  if (!movementSnapshots.length) return null;
+  const toAt = new Date(Math.max(...movementSnapshots.map(r => r.snapshot_at.getTime())));
+  const fromTarget = istStartOfDay(new Date(Date.now() - 48 * 3600e3));
+  const fromAt = nearestSnapshotAtOrBefore(fromTarget.getTime());
+  if (!fromAt) return null;
+  return { fromAt, toAt };
+}
+
+// Stalled Flagged Leads rows for the window above, grouped by region —
+// same filters (applyMovementFilters) and same per-copy row shape
+// (computeMovementRows) as the Movement tab's own Stalled Flagged Leads,
+// just with a fixed from/to instead of the tab's manually-picked pair.
+function currentStalledRowsByRegion(){
+  const win = emailStalledWindow();
+  if (!win) return {};
+  const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
+  return groupItemsByReportRegion(rows);
+}
+
+// Called once a region-wise "All Issues" email has actually gone out (Gmail
+// send succeeded, or Copy) — records EVERY lead currently stalled in each
+// region this report covers, so the NEXT region-wise email can tell which
+// of ITS stalled leads are repeats. Deliberately keyed off issueLabel
+// (only buildRegionWiseReports sets it to 'All issues') so a single-issue
+// report or the Stalled/Overnight cards' own sends don't touch this.
+function recordStalledBaselineForReport(report){
+  if (!report || report.issueLabel !== 'All issues') return;
+  const names = (report.regionNames && report.regionNames.length) ? report.regionNames : [report.region];
+  const stalledByRegion = currentStalledRowsByRegion();
+  const store = loadLastSentStalled();
+  const sentAt = new Date().toISOString();
+  names.forEach(region => {
+    const rows = stalledByRegion[region] || [];
+    store[region] = { leadIds: rows.map(r => String(r.lead_id).trim()), sentAt };
+  });
+  saveLastSentStalled(store);
 }
 
 // Region-wise email reports for Stalled Flagged Leads — same shape as
@@ -6295,14 +6484,18 @@ function buildStalledRegionReports(rows){
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: ['Lead ID', 'Issue', 'Unchanged Since'],
+        columns: ['Lead ID', 'Issue', 'Unchanged Since', 'Suggested Follow-up'],
         rows: group.map(r => [
           r.lead_id,
           r.issue + ((r.siblingRMs && r.siblingRMs.length) ? ` (also held by: ${r.siblingRMs.join(', ')})` : ''),
           istStamp(r.fromAt),
+          suggestedFollowUp(r),
         ]),
       })),
-      footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time.',
+      // Movement_Log doesn't carry stage_comments (only internal_status_
+      // comments — see computeMovementRows), so a stalled lead's Suggested
+      // Follow-up above may be based on partial comment history.
+      footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time. Suggested Follow-up is based on internal_status_comments only, since Movement_Log does not yet capture stage_comments.',
     });
 
     return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
