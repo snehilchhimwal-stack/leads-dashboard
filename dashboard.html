@@ -648,7 +648,7 @@
           <select id="movementToDateSelect" class="stale-select"></select>
           <select id="movementToTimeSelect" class="stale-select"></select>
         </label>
-        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Stalled Flagged Leads and Status Changes below, and by the region email's own Stalled Flagged Leads section when you click Generate — all three compare this exact same pair of Movement_Log snapshots.</span>
+        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Stalled Leads and Status Changes below, and by the region email's own Stalled Leads section when you click Generate — all three compare this exact same pair of Movement_Log snapshots.</span>
       </div>
 
       <div class="stale-controls" style="margin-bottom:10px;">
@@ -662,8 +662,8 @@
       <div class="filter-summary" style="margin-bottom:14px;">Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs — useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the picker above. Uses the same sign-in as the rest of the dashboard (no separate connect step) — off by default, since it writes to the sheet rather than just reading it.</div>
 
       <section id="sec-stalled">
-        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Flagged Leads</div><div class="section-count" id="stalledCount"></div></div>
-        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) between the two Movement_Log snapshots picked above — the same pair Status Changes below compares, and the same pair the region email's own Stalled Flagged Leads section will show if you click Generate right now. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
+        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Leads</div><div class="section-count" id="stalledCount"></div></div>
+        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) between the two Movement_Log snapshots picked above — the same pair Status Changes below compares, and the same pair the region email's own Stalled Leads section will show if you click Generate right now. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
         <div id="stalledBreakdown" style="margin-bottom:10px;"></div>
         <div id="stalledNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
@@ -671,7 +671,7 @@
 
       <section id="sec-statuschange">
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
-        <div class="filter-summary">Compares the two Movement_Log snapshots picked above (shared with Stalled Flagged Leads) — captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — the same check and the same leads as Stalled Flagged Leads above. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
+        <div class="filter-summary">Compares the two Movement_Log snapshots picked above (shared with Stalled Leads) — captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — the same check and the same leads as Stalled Leads above. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
 
         <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
 
@@ -1723,7 +1723,7 @@ async function fetchAndRender(){
 
       // copySplits: one independent, single-copy record per ORIGINAL row —
       // used ONLY for issue detection/reporting (the 5 SLA checks, their
-      // sections/emails, Stalled Flagged Leads, Overnight Leads). X being
+      // sections/emails, Stalled Leads, Overnight Leads). X being
       // closed shouldn't hide Y's Not Updated issue; Z's own call count
       // shouldn't get credited from Y's calls; two RMs both stalled on
       // "Not Updated" are two separate instances, not one. `merged` above
@@ -4372,13 +4372,13 @@ document.getElementById('dateToInput').addEventListener('change', () => {
 
 /* ===================== ISSUES CSV EXPORT ===================== */
 // ISSUE_PRIORITY's five categories, plus Recording Not Working, Closed
-// with No Work Recorded, and Stalled Flagged Leads (see downloadIssuesCSV,
+// with No Work Recorded, and Stalled Leads (see downloadIssuesCSV,
 // defined further down once those three checks/computations exist). A lead
 // flagged under more than one shows as a single row with all its issues
 // joined by "; " rather than duplicate rows per issue.
 
 // Priority order for the CSV export, the combined "all issues" report,
-// Stalled Flagged Leads, and the RM stall leaderboard / time-to-remediate
+// Stalled Leads, and the RM stall leaderboard / time-to-remediate
 // stats — a lead can technically match several categories at once (e.g.
 // "Stuck" and "Behind on Today's Calls" are both legitimately true for the
 // same old, under-called lead), but each of those views needs one clear
@@ -4502,7 +4502,7 @@ function downloadIssuesCSV(){
     if (l.closedWithNoWork) addIssue('Closed with No Work Recorded', l.lead_id, l.region, l.RM);
   });
 
-  // Stalled Flagged Leads comes from Movement_Log via the Compare from/to
+  // Stalled Leads comes from Movement_Log via the Compare from/to
   // picker (see getPickedMovementWindow), not issueLeads — a completely
   // separate per-copy row shape. Silently skipped if no pair is picked yet
   // (same as the on-screen card's own empty state), rather than blocking
@@ -4510,7 +4510,7 @@ function downloadIssuesCSV(){
   const win = getPickedMovementWindow();
   if (win) {
     applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => {
-      addIssue('Stalled Flagged Leads', r.lead_id, r.region, r.RM);
+      addIssue('Stalled Leads', r.lead_id, r.region, r.RM);
     });
   }
 
@@ -4518,7 +4518,7 @@ function downloadIssuesCSV(){
   // Fixed, stable order (matching ISSUE_PRIORITY's own priority order, then
   // the three checks outside it) rather than whatever order Map insertion
   // happened to produce.
-  const issueOrder = ISSUE_PRIORITY.map(r => r.label).concat(['Recording Not Working', 'Closed with No Work Recorded', 'Stalled Flagged Leads']);
+  const issueOrder = ISSUE_PRIORITY.map(r => r.label).concat(['Recording Not Working', 'Closed with No Work Recorded', 'Stalled Leads']);
   issueOrder.forEach(issue => {
     const leads = byIssue.get(issue);
     if (!leads) return;
@@ -5876,7 +5876,7 @@ function buildRegionWiseReports(combineAll){
     stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
-  // Stalled Flagged Leads: every lead currently stalled per
+  // Stalled Leads: every lead currently stalled per
   // currentStalledRowsByRegion — the SAME Compare from/to picker selection
   // as the on-screen card and Status Changes (Operations tab), read at
   // whatever it's set to right now — rides along as this email's first,
@@ -6024,7 +6024,7 @@ ${Object.values(stuckByRM).map(group =>
 
 Total : ${stuckTotalLabel}` : '';
 
-    // Stalled Flagged Leads: placed FIRST, ahead of even the main tally —
+    // Stalled Leads: placed FIRST, ahead of even the main tally —
     // zero movement between the two picked Movement_Log snapshots on an
     // already-flagged issue is the most important thing in this email (see
     // stalledItems above).
@@ -6034,8 +6034,8 @@ Total : ${stuckTotalLabel}` : '';
       ? `${stalledCloneCounts.unique} (+${stalledCloneCounts.cloned} cloned cop${stalledCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
       : String(stalledCloneCounts.unique);
     const stalledBlock = stalledItems.length ? `${DIVIDER}
-STALLED FLAGGED LEADS (MOST IMPORTANT)
-The following leads have shown zero movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard (Operations → Stalled Flagged Leads), while already flagged for an issue. Review and escalate these first.
+STALLED LEADS (MOST IMPORTANT)
+The following leads have shown zero movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard (Operations → Stalled Leads), while already flagged for an issue. Review and escalate these first.
 ${SUBDIVIDER}
 ${Object.values(stalledByRM).map(group =>
   `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
@@ -6102,13 +6102,13 @@ ${EMAIL_SIGNATURE}`;
         rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), suggestedFollowUp(r)]),
       });
     }
-    // Stalled Flagged Leads, unshifted onto the FRONT so it always renders
+    // Stalled Leads, unshifted onto the FRONT so it always renders
     // first regardless of how the issue-name sections above alphabetize —
     // red-accented (see renderReportEmailHTML's sec.accent) so it visually
     // stands apart as the most important thing in the email.
     if (stalledItems.length) {
       sections.unshift({
-        heading: 'Stalled Flagged Leads',
+        heading: 'Stalled Leads',
         subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — zero movement between the two picked Movement_Log snapshots on an already-flagged issue. Review and escalate first.`,
         action: 'These leads have shown no movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard, while already flagged for an issue. Personally follow up and escalate immediately.',
         columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Stalled Since', 'Suggested Follow-up'],
@@ -6122,7 +6122,7 @@ ${EMAIL_SIGNATURE}`;
     // "nothing is currently stalled" (a good outcome, needs no explanation).
     let stalledDiagnostic = '';
     if (!stalledItems.length && !stalledWindowAvailable) {
-      stalledDiagnostic = ' Stalled Flagged Leads needs the Compare from/to picker above Stalled Flagged Leads (Operations tab) to have two Movement_Log snapshots selected before it can compare two points in time.';
+      stalledDiagnostic = ' Stalled Leads needs the Compare from/to picker above Stalled Leads (Operations tab) to have two Movement_Log snapshots selected before it can compare two points in time.';
     }
 
     const html = renderReportEmailHTML({
@@ -6138,7 +6138,7 @@ ${EMAIL_SIGNATURE}`;
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
-        + (stalledItems.length ? ' Stalled Flagged Leads is a Movement_Log-derived callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : stalledDiagnostic)
+        + (stalledItems.length ? ' Stalled Leads is a Movement_Log-derived callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : stalledDiagnostic)
         + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
@@ -6272,7 +6272,7 @@ function downloadAllReports(){
 document.getElementById('generateAllReportsBtn').addEventListener('click', renderAllRegionReports);
 document.getElementById('downloadAllReportsBtn').addEventListener('click', downloadAllReports);
 
-/* ===================== MOVEMENT: STALLED FLAGGED LEADS =====================
+/* ===================== MOVEMENT: STALLED LEADS =====================
  * Reads a "Movement_Log" sheet tab that a separate Apps Script
  * (MovementTracker.gs) populates every 6 hours, independent of whether this
  * dashboard or the Sheet itself is open — that's the entire reason this
@@ -6686,7 +6686,7 @@ function computeMovementRows(fromAt, toAt){
     // above) — the SAME customer can have multiple simultaneous RM copies
     // in it, each its own lead_id, captured at the identical snapshot_at.
     // A plain .find() only ever returns the first one, silently dropping
-    // every other copy from Stalled Flagged Leads entirely. Matching by
+    // every other copy from Stalled Leads entirely. Matching by
     // lead_id within the timestamp instead catches all of them.
     const toRecs = history.filter(r => r.snapshot_at.getTime() === toAt.getTime());
     const fromRecs = history.filter(r => r.snapshot_at.getTime() === fromAt.getTime());
@@ -6762,7 +6762,7 @@ function computeMovementRows(fromAt, toAt){
   });
 
   // Grouped so every RM copy of the same customer ends up adjacent in the
-  // on-screen Stalled Flagged Leads list (see groupSiblingsTogether) —
+  // on-screen Stalled Leads list (see groupSiblingsTogether) —
   // the plain RM-name sort below only ran within/across families before,
   // so 3 copies held by 3 different RMs could land anywhere in the list
   // relative to each other.
@@ -6770,14 +6770,14 @@ function computeMovementRows(fromAt, toAt){
   return sortedRows;
 }
 
-// Stalled Flagged Leads rows for the SAME picked Movement_Log window the
+// Stalled Leads rows for the SAME picked Movement_Log window the
 // on-screen card and Status Changes use (see getPickedMovementWindow) —
 // same filters (applyMovementFilters) and same per-copy row shape
 // (computeMovementRows), just pre-grouped by region for the email builder
 // below instead of rendered as cards. The region email's Stalled Flagged
 // Leads section used to run its own separate, always-current rolling-48h
 // window regardless of what was on screen; it now shows exactly what the
-// picker above Stalled Flagged Leads is set to at the moment Generate is
+// picker above Stalled Leads is set to at the moment Generate is
 // clicked, so the email always matches what you were just looking at.
 function currentStalledRowsByRegion(){
   const win = getPickedMovementWindow();
@@ -6786,7 +6786,7 @@ function currentStalledRowsByRegion(){
   return groupItemsByReportRegion(rows);
 }
 
-// The picker above Stalled Flagged Leads — shared with Status Changes below
+// The picker above Stalled Leads — shared with Status Changes below
 // (same select IDs, just relocated in the DOM), so both sections always
 // compare the identical pair of Movement_Log snapshots.
 function getPickedMovementWindow(){
@@ -6796,7 +6796,7 @@ function getPickedMovementWindow(){
   return { fromAt, toAt };
 }
 
-// Operations tab's Stalled Flagged Leads section — reads the SAME picked
+// Operations tab's Stalled Leads section — reads the SAME picked
 // snapshot pair as Status Changes below (see getPickedMovementWindow), so
 // the two sections can never disagree about which leads are stalled.
 // Previously this was locked to a fixed always-current 48h window with no
@@ -7231,7 +7231,7 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
 
   // One bar reconciling the whole "From" population into its outcomes —
   // reads at a glance instead of a sentence of numbers to parse. Deduped
-  // to one entry per customer (like the Stalled Flagged Leads breakdown
+  // to one entry per customer (like the Stalled Leads breakdown
   // above) so the bar's percentages stay readable against the same
   // unique total shown in countEl, rather than a mix of customers and
   // their cloned copies.
@@ -7515,7 +7515,7 @@ function renderOvernightRegionReports(){
   applyGmailButtonStatesFor(reports, i => 'overnightRptGmailBtn_' + i);
 }
 
-// Stalled Flagged Leads itself now lives in Operations (see
+// Stalled Leads itself now lives in Operations (see
 // renderStalledFlaggedLeadsOps) — it reads the SAME picker as Status
 // Changes below (see getPickedMovementWindow), so this tab's picker drives
 // both sections together, not just this one.
