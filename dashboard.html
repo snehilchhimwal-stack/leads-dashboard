@@ -5948,12 +5948,23 @@ let _lastStatusChangeRange = { fromAt: null, toAt: null };
 let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
+// stage_comments is appended at the END, not grouped near
+// internal_status_comments — both this browser's own snapshot-append path
+// (SNAPSHOT_FIELD_KEYS below) and MovementTracker.gs's snapshotOpenLeads_
+// write values POSITIONALLY, in this array's order, into whatever columns
+// the Movement_Log sheet already has. An already-set-up sheet's header row
+// predates this field, so a value written mid-array would land under the
+// WRONG existing header (shifting every column after it) until the header
+// row itself is repaired — appending at the end keeps every pre-existing
+// column's position untouched; only the new trailing column is added
+// (see ensureMovementLogSheet_'s self-healing header check in the .gs file).
 const MOVEMENT_LOG_COLUMNS = [
   'snapshot_at', 'snapshot_label', 'lead_id', 'client_id', 'RM', 'TL', 'project', 'region', 'client',
   'lead_created_at', 'group_source', 'source_bucket', 'current_stage',
   'last_connect', 'last_connect_time', 'last_comment',
   'internal_status_comments', 'closing_reason',
   'call_attempts', 'call_count', 'duration',
+  'stage_comments',
 ];
 // Same list minus the two metadata columns — the fields read directly off
 // a live lead record when the browser writes its own snapshot.
@@ -5991,9 +6002,11 @@ async function fetchMovementLog(sheetId){
   try {
     // Movement_Log is a plain tab we control (no import-tool banner row),
     // so headers live in row 1 — unlike the main sheet's A2:Z convention.
+    // A1:Z leaves headroom past MOVEMENT_LOG_COLUMNS' current 22 columns
+    // for whatever gets appended next, same as the main sheet's own range.
     let values;
     try {
-      values = await sheetsApiValuesGet(sheetId, `${MOVEMENT_LOG_TAB_NAME}!A1:V`);
+      values = await sheetsApiValuesGet(sheetId, `${MOVEMENT_LOG_TAB_NAME}!A1:Z`);
     } catch (err) {
       // A missing tab (setup not done yet) surfaces as a 400 "Unable to
       // parse range" — same "not set up" outcome as an empty response.
@@ -6050,6 +6063,7 @@ async function fetchMovementLog(sheetId){
           last_connect_time: connectDate ? connectDate.toISOString() : getRaw(c, 'last_connect_time'),
           last_comment: getRaw(c, 'last_comment') || '',
           internal_status_comments: getRaw(c, 'internal_status_comments') || '',
+          stage_comments: getRaw(c, 'stage_comments') || '',
           closing_reason: getRaw(c, 'closing_reason') || '',
           call_attempts: Number(getRaw(c, 'call_attempts')) || 0,
           call_count: Number(getRaw(c, 'call_count')) || 0,
@@ -6132,12 +6146,13 @@ function passesMovementFilters(rec){
     (!tlSel.size || tlSel.has(rec.TL));
 }
 
-// "Moved" = stage changed, OR call attempts increased, OR the comment log
-// grew/changed — any activity at all, not specifically funnel progress.
+// "Moved" = stage changed, OR call attempts increased, OR either comment
+// log grew/changed — any activity at all, not specifically funnel progress.
 function movementChangedBetween(a, b){
   if (String(a.current_stage || '').trim().toLowerCase() !== String(b.current_stage || '').trim().toLowerCase()) return true;
   if (Number(a.call_attempts || 0) !== Number(b.call_attempts || 0)) return true;
   if (String(a.internal_status_comments || '') !== String(b.internal_status_comments || '')) return true;
+  if (String(a.stage_comments || '') !== String(b.stage_comments || '')) return true;
   return false;
 }
 
@@ -6331,11 +6346,11 @@ function computeMovementRows(fromAt, toAt){
         // snapshot check time — so this actually says when the lead itself
         // was last worked, not just when we last looked at it.
         lastCommentAt: cur.toEnriched.lastCommentAt || null,
-        // Movement_Log's own schema (MOVEMENT_LOG_COLUMNS) doesn't carry
-        // stage_comments yet — only internal_status_comments — so a
-        // follow-up suggestion built from this row (see suggestedFollowUp)
-        // is based on partial comment history for a stalled lead.
+        // Both comment sources, so a follow-up suggestion built from this
+        // row (see suggestedFollowUp/combinedCommentsText) reads the full
+        // comment history, not just internal_status_comments alone.
         internal_status_comments: cur.toRec.internal_status_comments || '',
+        stage_comments: cur.toRec.stage_comments || '',
         fromAt: cur.fromRec.snapshot_at,
         toAt: cur.toRec.snapshot_at,
         issue: cur.primaryIssue,
@@ -6492,10 +6507,12 @@ function buildStalledRegionReports(rows){
           suggestedFollowUp(r),
         ]),
       })),
-      // Movement_Log doesn't carry stage_comments (only internal_status_
-      // comments — see computeMovementRows), so a stalled lead's Suggested
-      // Follow-up above may be based on partial comment history.
-      footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time. Suggested Follow-up is based on internal_status_comments only, since Movement_Log does not yet capture stage_comments.',
+      // Movement_Log snapshots captured before stage_comments was added to
+      // MOVEMENT_LOG_COLUMNS (and the sheet's own header row self-healed —
+      // see ensureMovementLogSheet_ in MovementTracker.gs) won't have it,
+      // so a Suggested Follow-up built from an OLD snapshot may still be
+      // based on partial comment history. New snapshots carry both.
+      footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time.',
     });
 
     return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };

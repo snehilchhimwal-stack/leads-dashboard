@@ -70,6 +70,7 @@ const HEADER_ALIASES_ = {
   last_connect_time: ['last_connect_time', 'last connect time'],
   last_comment: ['last_comment', 'last comment'],
   internal_status_comments: ['internal_status_comments', 'internal status comments'],
+  stage_comments: ['stage_comments', 'stage comments'],
   closing_reason: ['closing_reason', 'closing reason'],
   call_attempts: ['call_attempts', 'call attempts', 'attempts'],
   call_count: ['call_count', 'call count'],
@@ -171,22 +172,50 @@ function getVal_(row, colIndex, key) {
 }
 
 // Column order written to Movement_Log — matches what dashboard.html's
-// enrichLead() needs to fully replay a historical flag check.
+// enrichLead() needs to fully replay a historical flag check. New fields
+// MUST be appended at the END, not inserted in the middle: this array's
+// order is exactly the order snapshotOpenLeads_ pushes values into each
+// row, positionally, against whatever columns an ALREADY-CREATED
+// Movement_Log sheet already has — inserting mid-array would shift every
+// later column's data under the wrong (unshifted) existing header until
+// that header row was also rebuilt. Appending at the end plus
+// ensureMovementLogSheet_'s self-healing header check below keeps a
+// sheet set up before this field existed correctly aligned.
 const SNAPSHOT_COLUMNS_ = [
   'lead_id', 'client_id', 'RM', 'TL', 'project', 'region', 'client',
   'lead_created_at', 'group_source', 'source_bucket', 'current_stage',
   'last_connect', 'last_connect_time', 'last_comment',
   'internal_status_comments', 'closing_reason',
   'call_attempts', 'call_count', 'duration',
+  'stage_comments',
 ];
 
 function ensureMovementLogSheet_(ss) {
   let sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  const fullHeaders = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
   if (!sheet) {
     sheet = ss.insertSheet(MOVEMENT_LOG_SHEET);
-    const headers = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, fullHeaders.length).setValues([fullHeaders]);
     sheet.setFrozenRows(1);
+  } else {
+    // Self-heal: a sheet set up before a column was added to
+    // SNAPSHOT_COLUMNS_ (e.g. stage_comments) is missing that header
+    // label entirely, even though snapshotOpenLeads_ below is about to
+    // start writing values into that trailing column position — without
+    // this, the dashboard's header-label lookup (and this script's own
+    // buildColIndex_) would never find the label and read every value in
+    // that column as blank. Appends whatever's missing at the end, which
+    // stays correctly aligned as long as new fields are always appended
+    // to SNAPSHOT_COLUMNS_ rather than inserted mid-array (see its
+    // comment). Re-checked on every call — cheap, idempotent.
+    const lastCol = sheet.getLastColumn();
+    const existingHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+    const existingSet = {};
+    existingHeaders.forEach(function (h) { existingSet[String(h || '').trim()] = true; });
+    const missing = fullHeaders.filter(function (h) { return !existingSet[h]; });
+    if (missing.length) {
+      sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+    }
   }
 
   // Force a full date+TIME display format on every date-ish column,
