@@ -1,18 +1,17 @@
 /**
- * Movement Tracker — snapshots every currently OPEN Google-source lead
- * every 6 hours into a "Movement_Log" tab in this same spreadsheet,
- * pruned to the last 7 days. Runs on Google's servers on a schedule, so
- * it keeps capturing even when the dashboard AND this Sheet are both
- * fully closed — that's the whole point of it.
+ * Movement Tracker — snapshots every lead in the current month tab (every
+ * source, open or closed — the only requirement is a non-blank lead_id)
+ * every 6 hours into a "Movement_Log" tab in this same spreadsheet, pruned
+ * to the last 7 days. Runs on Google's servers on a schedule, so it keeps
+ * capturing even when the dashboard AND this Sheet are both fully closed —
+ * that's the whole point of it.
  *
  * The dashboard's Movement tab reads Movement_Log and does the actual
  * "did this lead change" comparison client-side, replaying the same
  * enrichLead() logic dashboard.html already uses against each snapshot's
  * own timestamp. This script's only job is capturing raw data reliably —
- * it does NOT duplicate the SLA/breach rules, only the lightweight
- * open/closed stage check needed to decide what's worth snapshotting at
- * all (a closed or Opportunity+ lead can never be "flagged", so there's
- * no reason to store it here).
+ * it does not filter by source or open/closed status; that's left entirely
+ * to the dashboard's own filters at render time.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Open your Google Sheet → Extensions → Apps Script.
@@ -72,80 +71,10 @@ const HEADER_ALIASES_ = {
   internal_status_comments: ['internal_status_comments', 'internal status comments'],
   stage_comments: ['stage_comments', 'stage comments'],
   closing_reason: ['closing_reason', 'closing reason'],
-  // The sheet's own closing disposition, distinct from the RM-entered
-  // closing_reason above — see isOpenLead_. Not written to Movement_Log
-  // (not in SNAPSHOT_COLUMNS_ below): a lead closed via this field is, by
-  // definition, excluded from snapshotting before a row is ever built, so
-  // it would only ever show up blank there anyway. Read here purely to
-  // decide whether a lead still counts as open.
-  lead_closing_reason: ['lead_closing_reason', 'lead closing reason'],
   call_attempts: ['call_attempts', 'call attempts', 'attempts'],
   call_count: ['call_count', 'call count'],
   duration: ['duration'],
 };
-
-// ---- Funnel / closed-stage classification, ported verbatim from
-// dashboard.html's CONFIG so "open" means exactly the same thing here as
-// it does on the dashboard. If you ever edit STAGE_ALIASES, FUNNEL_ORDER,
-// CLOSED_STAGE_EXACT or CLOSED_STAGE_STEMS in dashboard.html, mirror the
-// change here too. ----
-const FUNNEL_ORDER_ = ['not updated', 'suspect', 'opportunity', 'visit booked', 'visit', 'pipeline', 'soft booking', 'booking'];
-const STAGE_ALIASES_ = {
-  'not updated': ['not updated'],
-  'suspect': ['suspect'],
-  'opportunity': ['opportunity'],
-  'visit booked': ['visit booked', 'visit booking', 'visit scheduled'],
-  'visit': ['visit', 'revisit', 'hpop', 'video presentation', 'video call'],
-  'pipeline': ['pipeline'],
-  'soft booking': ['soft booking', 'soft book'],
-  'booking': ['booking', 'booked'],
-};
-const OPPORTUNITY_STAGE_ = 'opportunity';
-const CLOSED_STAGE_EXACT_ = ['won', 'lost', 'junk', 'dead', 'not interested'];
-const CLOSED_STAGE_STEMS_ = ['cancel', 'close', 'reject'];
-
-function canonicalStage_(stage) {
-  const s = String(stage || '').trim().toLowerCase();
-  if (!s) return null;
-  for (let i = 0; i < FUNNEL_ORDER_.length; i++) {
-    const canon = FUNNEL_ORDER_[i];
-    const aliases = STAGE_ALIASES_[canon] || [canon];
-    for (let j = 0; j < aliases.length; j++) {
-      const a = aliases[j];
-      if (s === a || s.indexOf(a) !== -1) return canon;
-    }
-  }
-  return null;
-}
-
-function isOppOrAbove_(stage) {
-  const canon = canonicalStage_(stage);
-  if (!canon) return false;
-  return FUNNEL_ORDER_.indexOf(canon) >= FUNNEL_ORDER_.indexOf(OPPORTUNITY_STAGE_);
-}
-
-function isClosedStage_(stage) {
-  const s = String(stage || '').trim().toLowerCase();
-  if (!s) return false;
-  const words = s.split(/[^a-z']+/).filter(function (w) { return !!w; });
-  const exactHit = CLOSED_STAGE_EXACT_.some(function (kw) {
-    return kw.indexOf(' ') !== -1 ? s.indexOf(kw) !== -1 : words.indexOf(kw) !== -1;
-  });
-  if (exactHit) return true;
-  return CLOSED_STAGE_STEMS_.some(function (stem) {
-    return words.some(function (w) { return w.indexOf(stem) === 0; });
-  });
-}
-
-// closingReason is the RM-entered field; leadClosingReason is the sheet's
-// own closing disposition, added later — a lead closed via EITHER one is
-// closed, or it would keep getting snapshotted here as if still open. Kept
-// mirrored with dashboard.html's enrichLead — see the note there.
-function isOpenLead_(stage, closingReason, leadClosingReason) {
-  const hasClosingReason = !!String(closingReason || '').trim() || !!String(leadClosingReason || '').trim();
-  const excluded = isClosedStage_(stage) || hasClosingReason;
-  return !excluded && !isOppOrAbove_(stage);
-}
 
 // ---- Tab resolution: same auto-detect the dashboard's setup guide describes. ----
 function resolveTabName_(ss) {
@@ -250,10 +179,11 @@ function ensureMovementLogSheet_(ss) {
 }
 
 /**
- * Core snapshot routine — reads the current month tab, keeps only OPEN
- * Google-source leads, and appends one row per lead to Movement_Log.
- * `label` is a human-readable tag for the run ("2026-08-13 14:07 IST"),
- * shown as-is in the log for anyone reading the raw tab directly.
+ * Core snapshot routine — reads the current month tab and appends one row
+ * per lead to Movement_Log, for every lead in the tab (any source, open or
+ * closed — the only requirement is a non-blank lead_id). `label` is a
+ * human-readable tag for the run ("2026-08-13 14:07 IST"), shown as-is in
+ * the log for anyone reading the raw tab directly.
  */
 function snapshotOpenLeads_(label) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -276,13 +206,6 @@ function snapshotOpenLeads_(label) {
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
-    const groupSource = String(getVal_(row, colIndex, 'group_source') || '').trim().toLowerCase();
-    if (groupSource !== 'google') return;
-
-    const stage = getVal_(row, colIndex, 'current_stage');
-    const closingReason = getVal_(row, colIndex, 'closing_reason');
-    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed / Opportunity+ leads can never be "flagged"
 
     const record = [now, snapshotLabel];
     SNAPSHOT_COLUMNS_.forEach(function (key) {

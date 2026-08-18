@@ -4405,11 +4405,6 @@ const ISSUE_PRIORITY = [
   { key: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)' },
 ];
 
-function getPrimaryIssue(l){
-  const match = ISSUE_PRIORITY.find(rule => l[rule.key]);
-  return match ? match.label : null;
-}
-
 // Fixed color per known issue label — keeps the Movement tab's stall
 // breakdown chart visually stable across refreshes (same issue, same color
 // every time) rather than shuffling with whatever order Object.keys()
@@ -4486,8 +4481,13 @@ function csvEscape(v){
 function downloadIssuesCSV(){
   const rows = [['lead_id', 'region', 'issue']];
   issueLeads.forEach(l => {
-    const issue = getPrimaryIssue(l);
-    if (issue) rows.push([l.lead_id, l.region, issue]);
+    // Every matching category, not just the highest-priority one — a lead
+    // that's both Not Updated AND Behind on Today's Calls previously only
+    // showed the first match (getPrimaryIssue), silently dropping the
+    // other despite the comment above ISSUE_PRIORITY already describing
+    // "joined by ; " as the intended behavior.
+    const issues = ISSUE_PRIORITY.filter(rule => l[rule.key]).map(rule => rule.label);
+    if (issues.length) rows.push([l.lead_id, l.region, issues.join('; ')]);
   });
 
   const csvContent = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
@@ -7596,12 +7596,11 @@ async function appendToMovementLog(rows){
   return resp.json();
 }
 
-// The actual capture: every currently-open lead in the WHOLE fetched
-// dataset (not the filtered `leads` view — a browser snapshot should
-// reflect reality, not whatever region happens to be selected), written
-// with THIS browser's own clock as snapshot_at. Same open/closed rule
-// enrichLead already uses, so it agrees with both the live dashboard and
-// MovementTracker.gs's own filter.
+// The actual capture: every lead in the WHOLE fetched dataset (not the
+// filtered `leads` view — a browser snapshot should reflect reality, not
+// whatever region happens to be selected), written with THIS browser's own
+// clock as snapshot_at. No source/open-closed filtering — matches
+// MovementTracker.gs's own trigger exactly.
 async function browserSnapshotOpenLeads(){
   const statusEl = document.getElementById('snapshotStatus');
   if (!_currentSheetId || !allParsedLeads.length) return;
@@ -7621,20 +7620,19 @@ async function browserSnapshotOpenLeads(){
   const label = 'Browser — ' + istDateTimeValue(now);
   const snapshotAtValue = istDateTimeValue(now);
 
-  // group_source === 'google' matches MovementTracker.gs's own trigger
-  // filter exactly (see snapshotOpenLeads_) — without it, this manual
-  // capture path could write a non-Google lead into Movement_Log at a
-  // timestamp the scheduled trigger would never also capture it at,
-  // corrupting that lead's before/after comparison with an inconsistent
-  // history.
-  const openLeads = allParsedLeads.filter(l =>
-    enrichLeadAsOf(l, now).isOpenLead && String(l.group_source || '').trim().toLowerCase() === 'google');
-  if (!openLeads.length) {
-    if (statusEl) { statusEl.textContent = 'No open leads to snapshot.'; statusEl.style.color = 'var(--text-faint)'; }
+  // Every lead in the currently loaded tab, any source, open or closed —
+  // matches MovementTracker.gs's own trigger exactly (see
+  // snapshotOpenLeads_), so this manual capture path can never write a
+  // different set of leads into Movement_Log than the scheduled trigger
+  // would, which would otherwise corrupt that lead's before/after
+  // comparison with an inconsistent history.
+  const leadsToSnapshot = allParsedLeads;
+  if (!leadsToSnapshot.length) {
+    if (statusEl) { statusEl.textContent = 'No leads to snapshot.'; statusEl.style.color = 'var(--text-faint)'; }
     return;
   }
 
-  const rows = openLeads.map(l => {
+  const rows = leadsToSnapshot.map(l => {
     const row = [snapshotAtValue, label];
     SNAPSHOT_FIELD_KEYS.forEach(key => row.push(movementCellValue(l, key)));
     return row;
