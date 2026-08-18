@@ -595,7 +595,7 @@
       <button class="tab-btn" data-tab="tab-people">People</button>
       <button class="tab-btn" data-tab="tab-distribution">Distribution</button>
       <button class="tab-btn" data-tab="tab-audit">Audit</button>
-      <button class="tab-btn" data-tab="tab-movement">Movement <span class="tab-badge" id="tabBadgeMovement">0</span></button>
+      <button class="tab-btn" data-tab="tab-movement">Movement</button>
     </div>
 
     <!-- ============ OVERVIEW ============ -->
@@ -638,6 +638,14 @@
       <div class="stale-controls" style="margin-bottom:14px;">
         <button class="btn" id="downloadIssuesBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;">Download Issues CSV</button>
       </div>
+
+      <section id="sec-stalled">
+        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Flagged Leads</div><div class="section-count" id="stalledCount"></div></div>
+        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) for at least 48 hours, comparing the two Movement_Log snapshots closest to right now and to 48 hours ago. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
+        <div id="stalledBreakdown" style="margin-bottom:10px;"></div>
+        <div id="stalledNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
+      </section>
 
       <section id="sec-inactivermlead">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Inactive-RM Lead Added</div><div class="section-count" id="inactiveRmCount"></div></div>
@@ -831,9 +839,9 @@
     <div class="tab-panel" id="tab-movement">
       <div class="band-label">Movement <span class="band-note">flagged leads that haven't changed since the last check</span></div>
 
-      <section id="sec-movement">
-        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Flagged Leads</div><div class="section-count" id="movementCount"></div></div>
-        <div class="filter-summary">Compares two snapshots captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. "Moved" means stage changed, call attempts increased, or a new CRM comment was logged; a lead only appears here if it was flagged at the "To" snapshot AND nothing changed since "From". Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
+      <section id="sec-statuschange">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
+        <div class="filter-summary">Compares two snapshots captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — see Operations → Stalled Flagged Leads for the always-current 48h view of that same check. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
 
         <div class="stale-controls" style="margin-bottom:10px;">
           <label class="stale-label">Compare from
@@ -844,7 +852,7 @@
             <select id="movementToDateSelect" class="stale-select"></select>
             <select id="movementToTimeSelect" class="stale-select"></select>
           </label>
-          <button class="btn ghost" id="movementCsvBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Includes Stalled Flagged Leads and Status Changes (Still Active / Became Opportunity+ / Closed / Not Found)">Download CSV</button>
+          <button class="btn ghost" id="movementCsvBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Status Changes' own Stalled/Active/Opportunity+/Closed/Not Found breakdown">Download CSV</button>
         </div>
 
         <div class="stale-controls" style="margin-bottom:10px;">
@@ -857,20 +865,7 @@
         </div>
         <div class="filter-summary" style="margin-bottom:10px;">Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs — useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list). Uses the same sign-in as the rest of the dashboard (no separate connect step) — off by default, since it writes to the sheet rather than just reading it.</div>
 
-        <div id="movementIssueBreakdown"></div>
         <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
-        <div class="section-scroll"><div class="card-list" id="movementList"></div></div>
-
-        <div class="stale-controls" style="margin-top:14px; margin-bottom:10px;">
-          <button class="btn ghost" id="stalledGenerateReportsBtn" style="padding:8px 12px; font-size:12.5px;">Generate Region Emails</button>
-          <span class="filter-summary" style="margin:0;">Uses the same per-region To/Cc list as Operations → Region Email Reports.</span>
-        </div>
-        <div id="stalledReportList"></div>
-      </section>
-
-      <section id="sec-statuschange">
-        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
-        <div class="filter-summary">Uses the same "Compare from / to" snapshot pair as Stalled Flagged Leads above — every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
 
         <div id="statusOutcomeBar" style="margin-bottom:14px;"></div>
 
@@ -2781,6 +2776,7 @@ function renderAll(){
   renderTLTable();
   renderRMTable();
   renderProjectTable();
+  renderStalledFlaggedLeadsOps();
   renderInactiveRmList();
   renderNotUpdatedList();
   renderNotConnectedList();
@@ -2817,6 +2813,7 @@ const NAV_SECTIONS = [
 // Sections that live outside the Overview tab still need their count pills
 // and empty-state styling kept in sync, even though they aren't in the nav.
 const OFFTAB_COUNT_SECTIONS = [
+  { id: 'sec-stalled',     countId: 'stalledCount',    severity: 'urgent' },
   { id: 'sec-inactivermlead', countId: 'inactiveRmCount', severity: 'urgent' },
   { id: 'sec-tl',          countId: 'tlCount' },
   { id: 'sec-rm',          countId: 'rmCount' },
@@ -5366,7 +5363,6 @@ async function performGmailSend(pending){
       throw new Error((errBody.error && errBody.error.message) || `Gmail API error ${resp.status}`);
     }
     markReportSent(report.subject);
-    recordStalledBaselineForReport(report);
     if (btn) {
       btn.disabled = false;
       applyGmailButtonState(btn, report.subject);
@@ -5705,45 +5701,35 @@ function buildRegionWiseReports(combineAll){
     stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
-  // Stalled — Not Moved Since Last Email: leads currently stalled (see
-  // currentStalledRowsByRegion) that were ALSO stalled the last time an
-  // email actually went out (Send via Gmail or Copy — see
-  // recordStalledBaselineForReport) to that same region. Zero movement
-  // across two consecutive email cycles is the most important thing in
-  // this email, so it's surfaced as its own most-important, red section —
-  // see its placement below. Real region keys throughout (not mainRegion
-  // groupings), since the baseline is recorded per real region.
+  // Stalled Flagged Leads: every lead currently stalled per
+  // currentStalledRowsByRegion (the same Movement_Log-derived 48h-window
+  // check as the Operations tab's own always-current section — see
+  // renderStalledFlaggedLeadsOps) rides along as this email's first, most
+  // important section every time, not just on repeat. Keyed by mainRegion
+  // (groupItemsByReportRegion already resolves it that way), so it lines
+  // up directly with `key` below without a second resolution pass.
   const stalledByRegion = currentStalledRowsByRegion();
   // Cheap to compute directly rather than infer from stalledByRegion being
   // empty — an empty stalledByRegion could also just mean zero leads are
-  // currently stalled anywhere, not that there's no history to compare
-  // against. Used below to explain an absent Stalled section instead of
+  // currently stalled anywhere, not that there's no Movement_Log history
+  // yet. Used below to explain an absent Stalled section instead of
   // silently omitting it with no reason given.
   const stalledWindowAvailable = !!emailStalledWindow();
-  const lastSentStalled = loadLastSentStalled();
-  const stalledRepeatsByRegion = {};
-  Object.keys(stalledByRegion).forEach(region => {
-    const baseline = lastSentStalled[region];
-    const baselineSet = new Set((baseline && baseline.leadIds) || []);
-    if (!baselineSet.size) return;
-    const repeats = stalledByRegion[region].filter(r => baselineSet.has(String(r.lead_id).trim()));
-    if (repeats.length) stalledRepeatsByRegion[region] = repeats;
-  });
 
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
 
-  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !Object.keys(stalledRepeatsByRegion).length) return [];
+  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !Object.keys(stalledByRegion).length) return [];
 
   const groups = combineAll ? { __ALL__: rows } : groupBy(rows, r => r.mainRegion);
   const notConnectedGroups = combineAll ? { __ALL__: notConnectedRows } : groupBy(notConnectedRows, r => r.mainRegion);
   const stuckGroups = combineAll ? { __ALL__: stuckRows } : groupBy(stuckRows, r => r.mainRegion);
   // A region with ONLY late-connect, ONLY additional-stuck, or ONLY
-  // repeat-stalled leads and no other actionable issue still needs its own
-  // email — without this it would have no key in `groups` (built from
-  // `rows` alone) and silently drop out entirely.
+  // stalled leads and no other actionable issue still needs its own email
+  // — without this it would have no key in `groups` (built from `rows`
+  // alone) and silently drop out entirely.
   if (!combineAll) {
-    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(stalledRepeatsByRegion)).forEach(region => {
+    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(stalledByRegion)).forEach(region => {
       if (!groups[region]) groups[region] = [];
     });
   }
@@ -5754,12 +5740,12 @@ function buildRegionWiseReports(combineAll){
     const stuckItems = stuckGroups[key] || [];
     // Combined mode spans every region, so gather repeats from all of them;
     // per-region mode's key IS the real region name already.
-    const stalledRepeats = combineAll
-      ? Object.keys(stalledRepeatsByRegion).reduce((acc, r) => acc.concat(stalledRepeatsByRegion[r]), [])
-      : (stalledRepeatsByRegion[key] || []);
+    const stalledItems = combineAll
+      ? Object.keys(stalledByRegion).reduce((acc, r) => acc.concat(stalledByRegion[r]), [])
+      : (stalledByRegion[key] || []);
     const regionNames = Array.from(new Set(
       items.concat(notConnectedItems).concat(stuckItems).map(r => r.mainRegion)
-        .concat(stalledRepeats.map(r => mainRegionFor(effectiveRegion(r))).filter(Boolean))
+        .concat(stalledItems.map(r => mainRegionFor(effectiveRegion(r))).filter(Boolean))
         .concat(combineAll ? [] : [key])
     )).sort();
     // In combined mode the email spans everything, so the Region filter
@@ -5863,23 +5849,23 @@ ${Object.values(stuckByRM).map(group =>
 
 Total : ${stuckTotalLabel}` : '';
 
-    // Stalled — Not Moved Since Last Email: placed FIRST, ahead of even the
-    // main tally, since two consecutive email cycles with zero movement is
-    // the most important thing in this email (see stalledRepeats above).
-    const stalledMovedByRM = groupBy(stalledRepeats, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
-    const stalledMovedCloneCounts = countUniqueAndCloned(stalledRepeats);
-    const stalledMovedTotalLabel = stalledMovedCloneCounts.cloned > 0
-      ? `${stalledMovedCloneCounts.unique} (+${stalledMovedCloneCounts.cloned} cloned cop${stalledMovedCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
-      : String(stalledMovedCloneCounts.unique);
-    const stalledMovedBlock = stalledRepeats.length ? `${DIVIDER}
-STALLED - NOT MOVED SINCE LAST EMAIL (MOST IMPORTANT)
-The following leads were already flagged as stalled in the last email sent to this region and are STILL unchanged now — zero movement across two consecutive email cycles. Review and escalate these first.
+    // Stalled Flagged Leads: placed FIRST, ahead of even the main tally —
+    // zero movement for 48+ hours on an already-flagged issue is the most
+    // important thing in this email (see stalledItems above).
+    const stalledByRM = groupBy(stalledItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+    const stalledCloneCounts = countUniqueAndCloned(stalledItems);
+    const stalledTotalLabel = stalledCloneCounts.cloned > 0
+      ? `${stalledCloneCounts.unique} (+${stalledCloneCounts.cloned} cloned cop${stalledCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(stalledCloneCounts.unique);
+    const stalledBlock = stalledItems.length ? `${DIVIDER}
+STALLED FLAGGED LEADS (MOST IMPORTANT)
+The following leads have shown zero movement — no stage change, call attempt, or new comment in any of the four comment columns — for at least 48 hours while already flagged for an issue. Review and escalate these first.
 ${SUBDIVIDER}
-${Object.values(stalledMovedByRM).map(group =>
+${Object.values(stalledByRM).map(group =>
   `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
 ).join('\n\n')}
 
-Total : ${stalledMovedTotalLabel}
+Total : ${stalledTotalLabel}
 ${DIVIDER}
 
 ` : '';
@@ -5895,7 +5881,7 @@ Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     :
 Source     : ${sourceLabel}
 Total      : ${totalCountLabel}
 
-${stalledMovedBlock}${mainSection}${notConnectedBlock}${stuckBlock}
+${stalledBlock}${mainSection}${notConnectedBlock}${stuckBlock}
 
 ${EMAIL_SIGNATURE}`;
 
@@ -5940,34 +5926,27 @@ ${EMAIL_SIGNATURE}`;
         rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), suggestedFollowUp(r)]),
       });
     }
-    // Stalled — Not Moved Since Last Email, unshifted onto the FRONT so it
-    // always renders first regardless of how the issue-name sections above
-    // alphabetize — red-accented (see renderReportEmailHTML's sec.accent)
-    // so it visually stands apart as the most important thing in the email.
-    if (stalledRepeats.length) {
+    // Stalled Flagged Leads, unshifted onto the FRONT so it always renders
+    // first regardless of how the issue-name sections above alphabetize —
+    // red-accented (see renderReportEmailHTML's sec.accent) so it visually
+    // stands apart as the most important thing in the email.
+    if (stalledItems.length) {
       sections.unshift({
-        heading: 'STALLED — NOT MOVED SINCE LAST EMAIL',
-        subheading: `${stalledMovedTotalLabel} lead${stalledMovedCloneCounts.unique === 1 ? '' : 's'} — zero movement across two consecutive email cycles. Review and escalate first.`,
-        action: 'These leads were already flagged as stalled in the last email sent to this region and have still not moved. Personally follow up and escalate immediately.',
+        heading: 'Stalled Flagged Leads',
+        subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — zero movement for 48+ hours on an already-flagged issue. Review and escalate first.`,
+        action: 'These leads have shown no movement — no stage change, call attempt, or new comment in any of the four comment columns — for at least 48 hours while already flagged for an issue. Personally follow up and escalate immediately.',
         columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Stalled Since', 'Suggested Follow-up'],
-        rows: stalledRepeats.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), suggestedFollowUp(r)]),
+        rows: stalledItems.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), suggestedFollowUp(r)]),
         accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       });
     }
 
-    // An absent Stalled section previously gave no reason for its own
-    // absence — indistinguishable from "nothing is stalled twice in a row"
-    // (a good outcome, needs no explanation) versus "there's nothing to
-    // compare against yet" (the two boring setup reasons below). Only the
-    // latter get a footer line; a genuinely-empty section from an
-    // established baseline stays silent on purpose.
+    // An absent Stalled section should say why when it's a setup gap (not
+    // enough Movement_Log history yet) rather than reading identically to
+    // "nothing is currently stalled" (a good outcome, needs no explanation).
     let stalledDiagnostic = '';
-    if (!stalledRepeats.length) {
-      if (!stalledWindowAvailable) {
-        stalledDiagnostic = ' Stalled — Not Moved Since Last Email needs at least 48 hours of captured Movement_Log history before it can compare two points in time — it will start appearing once there is enough.';
-      } else if (!regionNames.some(r => lastSentStalled[r] && lastSentStalled[r].leadIds && lastSentStalled[r].leadIds.length)) {
-        stalledDiagnostic = ` Stalled — Not Moved Since Last Email has nothing to compare against yet for ${regionNames.length === 1 ? 'this region' : 'these regions'} — it starts working from the next region-wise email actually sent (Send via Gmail or Copy) onward.`;
-      }
+    if (!stalledItems.length && !stalledWindowAvailable) {
+      stalledDiagnostic = ' Stalled Flagged Leads needs at least 48 hours of captured Movement_Log history before it can compare two points in time — it will start appearing once there is enough.';
     }
 
     const html = renderReportEmailHTML({
@@ -5983,17 +5962,11 @@ ${EMAIL_SIGNATURE}`;
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
-        + (stalledRepeats.length ? ' Stalled — Not Moved Since Last Email is a lead already counted in the main tally above (or in a previous email if it dropped out of scope) — it is a callout, not an additional count.' : stalledDiagnostic)
-        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledMovedCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
+        + (stalledItems.length ? ' Stalled Flagged Leads is a Movement_Log-derived callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : stalledDiagnostic)
+        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
-    // Carried on the report object (not recomputed later) so
-    // recordStalledBaselineForReport, called whenever this SPECIFIC report
-    // actually gets sent/copied, records exactly what this email showed —
-    // not a fresh recompute made minutes later that could have already
-    // drifted (a new snapshot landing, filters changing) from what the
-    // recipient actually received.
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique, issueLabel: 'All issues', regionNames, _stalledByRegionAtBuild: stalledByRegion };
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique, issueLabel: 'All issues', regionNames };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
@@ -6094,7 +6067,6 @@ function copyAllReport(i){
   const r = _allReports[i];
   const text = `${r.subject}\n\n${r.body}`;
   navigator.clipboard.writeText(text).then(() => {
-    recordStalledBaselineForReport(r);
     const btn = document.getElementById('allCopyBtn_' + i);
     btn.textContent = 'Copied ✓';
     btn.classList.add('copied');
@@ -6591,24 +6563,6 @@ function computeMovementRows(fromAt, toAt){
   return sortedRows;
 }
 
-/* ===== Stalled — Not Moved Since Last Email (region-wise "All Issues" email) =====
- * Cross-references THIS email's currently-stalled leads against whichever
- * leads were stalled the LAST TIME an email was actually sent (Send via
- * Gmail or Copy — see recordStalledBaselineForReport) to that same region,
- * so a lead flagged as stalled in two consecutive emails — genuinely zero
- * movement across a full reporting cycle, not just "stalled right now" —
- * gets called out as the most important thing in the email. */
-const LAST_SENT_STALLED_KEY = 'gsl_last_sent_stalled_v1';
-
-function loadLastSentStalled(){
-  try { return JSON.parse(localStorage.getItem(LAST_SENT_STALLED_KEY) || '{}'); }
-  catch (e) { return {}; }
-}
-function saveLastSentStalled(store){
-  try { localStorage.setItem(LAST_SENT_STALLED_KEY, JSON.stringify(store)); }
-  catch (e) { /* storage unavailable/full — tracking just resets next time, not fatal */ }
-}
-
 // Closest captured Movement_Log snapshot at or before targetMs, or null if
 // history doesn't go back that far yet.
 function nearestSnapshotAtOrBefore(targetMs){
@@ -6637,8 +6591,9 @@ function emailStalledWindow(){
 
 // Stalled Flagged Leads rows for the window above, grouped by region —
 // same filters (applyMovementFilters) and same per-copy row shape
-// (computeMovementRows) as the Movement tab's own Stalled Flagged Leads,
-// just with a fixed from/to instead of the tab's manually-picked pair.
+// (computeMovementRows) as the Operations tab's own Stalled Flagged Leads
+// section (see renderStalledFlaggedLeadsOps), just pre-grouped by region
+// for the email builder below instead of rendered as cards.
 function currentStalledRowsByRegion(){
   const win = emailStalledWindow();
   if (!win) return {};
@@ -6646,109 +6601,72 @@ function currentStalledRowsByRegion(){
   return groupItemsByReportRegion(rows);
 }
 
-// Called once a region-wise "All Issues" email has actually gone out (Gmail
-// send succeeded, or Copy) — records EVERY lead currently stalled in each
-// region this report covers, so the NEXT region-wise email can tell which
-// of ITS stalled leads are repeats. Deliberately keyed off issueLabel
-// (only buildRegionWiseReports sets it to 'All issues') so a single-issue
-// report or the Stalled/Overnight cards' own sends don't touch this.
-// Uses report._stalledByRegionAtBuild (stashed at build time) rather than
-// recomputing here — a fresh recompute at send time could disagree with
-// what the email actually showed if anything changed in between (a new
-// snapshot landing, filters changing), silently recording a baseline the
-// recipient never actually saw.
-function recordStalledBaselineForReport(report){
-  if (!report || report.issueLabel !== 'All issues') return;
-  const names = (report.regionNames && report.regionNames.length) ? report.regionNames : [report.region];
-  const stalledByRegion = report._stalledByRegionAtBuild || currentStalledRowsByRegion();
-  const store = loadLastSentStalled();
-  const sentAt = new Date().toISOString();
-  names.forEach(region => {
-    const rows = stalledByRegion[region] || [];
-    store[region] = { leadIds: rows.map(r => String(r.lead_id).trim()), sentAt };
+// Operations tab's Stalled Flagged Leads section — same computation as
+// the region email (emailStalledWindow: the freshest Movement_Log
+// snapshot loaded, compared against the closest one at/before 48 hours
+// ago), so what's on screen here always matches what the summary email
+// would show if generated right now. No manual snapshot picker — that
+// still exists in Movement → Status Changes for ad-hoc comparisons
+// between two SPECIFIC captured runs; this section always reflects "as
+// of right now" like every other Operations issue.
+function renderStalledFlaggedLeadsOps(){
+  const countEl = document.getElementById('stalledCount');
+  const breakdownEl = document.getElementById('stalledBreakdown');
+  const noticeEl = document.getElementById('stalledNotice');
+  const listEl = document.getElementById('stalledList');
+  if (!breakdownEl || !listEl) return;
+
+  const win = emailStalledWindow();
+  if (!win) {
+    if (countEl) countEl.textContent = '';
+    breakdownEl.innerHTML = '';
+    listEl.innerHTML = '';
+    if (noticeEl) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = movementFetchState === 'ok'
+        ? 'Needs at least 48 hours of captured Movement_Log history before this can compare two points in time — check back once there is enough.'
+        : `<b>No Movement_Log data yet.</b> This section reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks spanning 48+ hours before there's anything to compare.`;
+    }
+    return;
+  }
+  if (noticeEl) noticeEl.style.display = 'none';
+
+  // Same filter bar as the rest of Operations — Project/Region/TL/Source/
+  // Sub-source plus the Created date range — matched against each row's
+  // OWN recorded fields, same as before.
+  const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
+
+  const cloneCounts = countUniqueAndCloned(rows);
+  if (countEl) countEl.textContent = uniqueCloneLabel(cloneCounts, 'lead');
+
+  const uniqueRows = dedupeToFamilies(rows);
+  const byIssue = {};
+  uniqueRows.forEach(r => { byIssue[r.issue] = (byIssue[r.issue] || 0) + 1; });
+  renderBreakdownCard(breakdownEl, {
+    total: uniqueRows.length,
+    totalLabel: `lead${uniqueRows.length === 1 ? '' : 's'} stalled`,
+    subNote: cloneCounts.cloned > 0 ? `+ ${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
+    rangeText: `${istStamp(win.fromAt)} → ${istStamp(win.toAt)}`,
+    counts: byIssue,
+    colorFn: colorForIssue,
+    numColor: 'var(--red)',
+    emptyText: 'No flagged lead has been unchanged for 48+ hours right now.',
   });
-  saveLastSentStalled(store);
+
+  if (!rows.length) { listEl.innerHTML = ''; return; }
+
+  listEl.innerHTML = truncationNotice(rows.length, MAX_CARDS) + rows.slice(0, MAX_CARDS).map(r => {
+    const hoursSpan = ((r.toAt - r.fromAt) / 36e5).toFixed(1);
+    return `<div class="alert-card">
+      <div class="alert-id">${leadIdentityLine(r)}</div>
+      <div class="alert-age mono">unchanged ~${hoursSpan}h</div>
+      <div class="alert-meta">${esc(r.region)} · ${esc(r.project)} · ${esc(r.current_stage)} — <span class="chip red">${esc(r.issue)}</span></div>
+      <div class="alert-comment">${esc(suggestedFollowUp(r))}</div>
+    </div>`;
+  }).join('');
 }
 
-// Region-wise email reports for Stalled Flagged Leads — same shape as
-// Operations' buildRegionReports() ({region, subject, body, html, count,
-// regionNames}), so it plugs straight into the existing sendReport/
-// sendReportViaGmail/recipientsForReport pipeline and reuses the same
-// per-region To/Cc table, not a separate one. One caveat worth knowing:
-// Movement_Log doesn't carry project_region (only the live sheet does),
-// so "Loan" resolution here falls back to group_source only — slightly
-// less complete than the live-sheet-backed Overnight Leads report below.
-function buildStalledRegionReports(rows){
-  const sourceLabel = selectedSourceLabel();
-  const rangeLabel = (_lastMovementRange.fromAt && _lastMovementRange.toAt)
-    ? `${istStamp(_lastMovementRange.fromAt)} → ${istStamp(_lastMovementRange.toAt)}`
-    : '';
-  const DIVIDER = '='.repeat(50);
-  const SUBDIVIDER = '-'.repeat(50);
-  // Each row is one RM's own copy (see computeMovementRows) — a lightweight
-  // sibling note names any OTHER RM copies of the same customer for
-  // context, without folding their issue/status into this row.
-  const rmSuffix = (r) => (r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : '';
-  const leadLine = (r) => `${r.lead_id}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${rmSuffix(r)}`;
-
-  const byRegion = groupItemsByReportRegion(rows);
-  return Object.keys(byRegion).sort().map(region => {
-    const regionRows = byRegion[region];
-    const byRM = groupBy(regionRows, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
-
-    const blocks = Object.values(byRM).map(group =>
-      `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
-    ).join('\n');
-
-    // "Total Leads" has to mean distinct customers, not rows — two RM
-    // copies of the same customer both stalled still reads as one customer
-    // with two open problems, not two flagged leads. Detail rows above stay
-    // per-copy (each RM still needs their own row), only the headline/KPI
-    // totals dedupe.
-    const cloneCounts = countUniqueAndCloned(regionRows);
-    const totalCountLabel = cloneCounts.cloned > 0
-      ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
-      : String(cloneCounts.unique);
-
-    const subject = `${region} Stalled Flagged Leads (${todayDateLabel()}) - ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`;
-    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} that were flagged and showed zero movement between ${rangeLabel}.\n\n${blocks}\n${DIVIDER}\n\nTotal Leads : ${totalCountLabel}\n\n${EMAIL_SIGNATURE}`;
-
-    const html = renderReportEmailHTML({
-      eyebrow: 'Google Search Leads · SLA Monitor',
-      title: 'Stalled Flagged Leads',
-      region,
-      subtitle: `${rangeLabel} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
-      action: 'Review each lead and follow up immediately — nothing has changed on these since the last check.'
-        + (cloneCounts.cloned > 0 ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.` : ''),
-      kpis: [
-        { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
-        { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
-        { value: new Set(regionRows.map(r => r.issue)).size, label: 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
-      ],
-      sections: Object.values(byRM).map(group => ({
-        heading: group[0].RM || 'Unassigned',
-        subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: ['Lead ID', 'Issue', 'Unchanged Since', 'Suggested Follow-up'],
-        rows: group.map(r => [
-          r.lead_id,
-          r.issue + ((r.siblingRMs && r.siblingRMs.length) ? ` (also held by: ${r.siblingRMs.join(', ')})` : ''),
-          istStamp(r.fromAt),
-          suggestedFollowUp(r),
-        ]),
-      })),
-      // Movement_Log snapshots captured before stage_comments was added to
-      // MOVEMENT_LOG_COLUMNS (and the sheet's own header row self-healed —
-      // see ensureMovementLogSheet_ in MovementTracker.gs) won't have it,
-      // so a Suggested Follow-up built from an OLD snapshot may still be
-      // based on partial comment history. New snapshots carry both.
-      footerNote: 'Compares the two Movement snapshots currently selected above — "unchanged since" is the "From" snapshot time.',
-    });
-
-    return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
-  });
-}
-
-// Between the same From/To pair as Stalled Flagged Leads: every lead open
+// Between the same From/To pair as Status Changes: every lead open
 // (tracked) at "From" is sorted into exactly one outcome — Stalled (still
 // open, still flagged, computeMovementRows already decided this), Active
 // (still open, not flagged/stalled), or dropped out of tracking entirely.
@@ -7377,59 +7295,25 @@ function renderOvernightRegionReports(){
   applyGmailButtonStatesFor(reports, i => 'overnightRptGmailBtn_' + i);
 }
 
-// Same pattern as renderOvernightRegionReports above, for Stalled Flagged
-// Leads' own region emails (window._stalledRegionReports).
-function renderStalledRegionReports(){
-  const el = document.getElementById('stalledReportList');
-  if (!el) return;
-  if (!_lastMovementRows.length) {
-    el.innerHTML = '';
-    window._stalledRegionReports = [];
-    return;
-  }
-  const reports = buildStalledRegionReports(_lastMovementRows);
-  window._stalledRegionReports = reports;
-  if (!reports.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No stalled leads fall inside a reporting region right now</div>`;
-    return;
-  }
-  el.innerHTML = reports.map((r, idx) => `
-    <div class="report-card">
-      <div class="report-subject">${esc(r.subject)}</div>
-      <div class="rr-meta" style="margin-bottom:8px;">${r.count} lead${r.count === 1 ? '' : 's'}</div>
-      <div class="report-body" id="stalledRptBody_${idx}">${esc(r.body)}</div>
-      <button class="report-copy-btn" onclick="copyGenericReport(window._stalledRegionReports, ${idx}, 'stalledRptCopyBtn_${idx}')" id="stalledRptCopyBtn_${idx}">Copy subject + body</button>
-      <button class="report-copy-btn" onclick="sendReport(window._stalledRegionReports[${idx}])" title="Opens your mail client with the region's To/Cc pre-filled">Open in Mail</button>
-      <button class="report-copy-btn" onclick="sendReportViaGmail(window._stalledRegionReports[${idx}], 'stalledRptGmailBtn_${idx}')" id="stalledRptGmailBtn_${idx}" title="Sends immediately via the Gmail API">Send via Gmail</button>
-    </div>
-  `).join('');
-  applyGmailButtonStatesFor(reports, i => 'stalledRptGmailBtn_' + i);
-}
-
+// Stalled Flagged Leads itself now lives in Operations (see
+// renderStalledFlaggedLeadsOps, computed from a fixed always-current 48h
+// window) — this tab keeps the manual snapshot-pair picker alive only for
+// Status Changes below, which genuinely needs two SPECIFIC user-chosen
+// captures to compare (not "as of right now").
 function renderMovementTab(){
   // Whole-history views — independent of the from/to picker below, so
   // they update on every call regardless of which pair is selected.
   renderRmStallLeaderboard();
   renderTimeToRemediate();
 
-  const el = document.getElementById('movementList');
-  if (!el) return;
-  const countEl = document.getElementById('movementCount');
-  const badgeEl = document.getElementById('tabBadgeMovement');
   const noticeEl = document.getElementById('movementNotice');
-  const breakdownEl = document.getElementById('movementIssueBreakdown');
+  if (!noticeEl) return;
 
   if (movementFetchState !== 'ok') {
-    if (countEl) countEl.textContent = '';
-    if (badgeEl) { badgeEl.textContent = '0'; badgeEl.className = 'tab-badge'; }
-    if (breakdownEl) breakdownEl.innerHTML = '';
-    el.innerHTML = '';
-    if (noticeEl) {
-      noticeEl.style.display = 'block';
-      noticeEl.innerHTML = movementFetchState === 'loading'
-        ? 'Loading movement history…'
-        : `<b>No Movement_Log data yet.</b> This tab reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks before there's anything to compare — allow ~6-12 hours after setup.`;
-    }
+    noticeEl.style.display = 'block';
+    noticeEl.innerHTML = movementFetchState === 'loading'
+      ? 'Loading movement history…'
+      : `<b>No Movement_Log data yet.</b> This reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks before there's anything to compare — allow ~6-12 hours after setup.`;
     renderStatusChanges(null, null, []);
     renderOvernightCohort(null);
     return;
@@ -7438,81 +7322,30 @@ function renderMovementTab(){
   const fromAt = getSelectedMovementSnapshot('movementFromTimeSelect');
   const toAt = getSelectedMovementSnapshot('movementToTimeSelect');
   if (!fromAt || !toAt) {
-    if (countEl) countEl.textContent = '';
-    if (badgeEl) { badgeEl.textContent = '0'; badgeEl.className = 'tab-badge'; }
-    if (breakdownEl) breakdownEl.innerHTML = '';
-    el.innerHTML = '';
-    if (noticeEl) {
-      noticeEl.style.display = 'block';
-      noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Check back after the next scheduled run.';
-    }
+    noticeEl.style.display = 'block';
+    noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Check back after the next scheduled run.';
     renderStatusChanges(null, null, []);
     renderOvernightCohort(null);
     return;
   }
-  if (noticeEl) noticeEl.style.display = 'none';
+  noticeEl.style.display = 'none';
 
   // Same filter bar as the rest of the dashboard — Project/Region/TL/
   // Source/Sub-source plus the Created date range — matched against each
   // row's OWN recorded fields — a stalled lead may since have closed and
   // dropped out of the live sheet's currently-open set, so it can't be
-  // cross-referenced against `leads`.
+  // cross-referenced against `leads`. Feeds Status Changes' own "Stalled"
+  // categorization and the Download CSV button below — the region-picked
+  // pair, not the Operations tab's fixed 48h window.
   const rows = applyMovementFilters(computeMovementRows(fromAt, toAt));
 
   // Stashed so the Download CSV button exports exactly what's currently
-  // on screen, without recomputing (and possibly drifting from) the filters.
+  // selected, without recomputing (and possibly drifting from) the filters.
   _lastMovementRows = rows;
   _lastMovementRange = { fromAt, toAt };
 
-  // "How many leads" has to mean distinct customers, not rows — two RM
-  // copies of the same customer both stalled still reads as one customer
-  // with two open problems. The card list below stays per-copy (each RM's
-  // own stall is its own actionable item), only these summary numbers dedupe.
-  const rowCloneCounts = countUniqueAndCloned(rows);
-  if (countEl) countEl.textContent = uniqueCloneLabel(rowCloneCounts, 'lead');
-  if (badgeEl) {
-    badgeEl.textContent = rowCloneCounts.unique.toLocaleString();
-    badgeEl.className = 'tab-badge' + (rowCloneCounts.unique > 0 ? ' urgent' : '');
-  }
-
-  // Count card: total stalled between the picked pair, broken down by
-  // which issue each lead is flagged for — a proportional bar + legend
-  // answers "how many, and of what" at a glance instead of reading chips.
-  // Deduped to one entry per customer (like the status breakdown on
-  // Overnight Leads) so the bar's percentages stay readable against the
-  // same unique total shown above it, rather than a mix of customers and
-  // their cloned copies.
-  if (breakdownEl) {
-    const uniqueRows = dedupeToFamilies(rows);
-    const byIssue = {};
-    uniqueRows.forEach(r => { byIssue[r.issue] = (byIssue[r.issue] || 0) + 1; });
-    renderBreakdownCard(breakdownEl, {
-      total: uniqueRows.length,
-      totalLabel: `lead${uniqueRows.length === 1 ? '' : 's'} stalled`,
-      subNote: rowCloneCounts.cloned > 0 ? `+ ${rowCloneCounts.cloned} cloned cop${rowCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
-      rangeText: `${istStamp(fromAt)} → ${istStamp(toAt)}`,
-      counts: byIssue,
-      colorFn: colorForIssue,
-    });
-  }
-
   renderStatusChanges(fromAt, toAt, rows);
   renderOvernightCohort(toAt);
-
-  if (!rows.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No flagged lead was unchanged across the selected snapshots</div>`;
-    return;
-  }
-
-  el.innerHTML = rows.map(r => {
-    const hoursSpan = ((r.toAt - r.fromAt) / 36e5).toFixed(1);
-    return `<div class="alert-card">
-      <div class="alert-id">${leadIdentityLine(r)}</div>
-      <div class="alert-age mono">unchanged ~${hoursSpan}h</div>
-      <div class="alert-meta">${esc(r.region)} · ${esc(r.project)} · ${esc(r.current_stage)} — <span class="chip red">${esc(r.issue)}</span></div>
-      <div class="alert-comment">${esc(istStamp(r.fromAt))} → ${esc(istStamp(r.toAt))}</div>
-    </div>`;
-  }).join('');
 }
 
 // Exports exactly what's currently on screen in BOTH Stalled Flagged Leads
@@ -7713,9 +7546,6 @@ function initMovementUI(){
 
   const csvBtn = document.getElementById('movementCsvBtn');
   if (csvBtn) csvBtn.addEventListener('click', downloadMovementCSV);
-
-  const stalledReportsBtn = document.getElementById('stalledGenerateReportsBtn');
-  if (stalledReportsBtn) stalledReportsBtn.addEventListener('click', renderStalledRegionReports);
 
   const overnightReportsBtn = document.getElementById('overnightGenerateReportsBtn');
   if (overnightReportsBtn) overnightReportsBtn.addEventListener('click', renderOvernightRegionReports);
