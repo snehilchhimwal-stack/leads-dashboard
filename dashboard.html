@@ -639,9 +639,21 @@
         <button class="btn" id="downloadIssuesBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;">Download Issues CSV</button>
       </div>
 
+      <div class="stale-controls" style="margin-bottom:14px;">
+        <label class="stale-label">Compare from
+          <select id="movementFromDateSelect" class="stale-select"></select>
+          <select id="movementFromTimeSelect" class="stale-select"></select>
+        </label>
+        <label class="stale-label">to
+          <select id="movementToDateSelect" class="stale-select"></select>
+          <select id="movementToTimeSelect" class="stale-select"></select>
+        </label>
+        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Stalled Flagged Leads and Status Changes below — both compare this exact same pair of Movement_Log snapshots.</span>
+      </div>
+
       <section id="sec-stalled">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Flagged Leads</div><div class="section-count" id="stalledCount"></div></div>
-        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) for at least 48 hours, comparing the two Movement_Log snapshots closest to right now and to 48 hours ago. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
+        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) between the two Movement_Log snapshots picked above — the same pair Status Changes below compares. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
         <div id="stalledBreakdown" style="margin-bottom:10px;"></div>
         <div id="stalledNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
@@ -649,18 +661,10 @@
 
       <section id="sec-statuschange">
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
-        <div class="filter-summary">Compares two snapshots captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — see Stalled Flagged Leads above for the always-current 48h view of that same check. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
+        <div class="filter-summary">Compares the two Movement_Log snapshots picked above (shared with Stalled Flagged Leads) — captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — the same check and the same leads as Stalled Flagged Leads above. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
 
         <div class="stale-controls" style="margin-bottom:10px;">
-          <label class="stale-label">Compare from
-            <select id="movementFromDateSelect" class="stale-select"></select>
-            <select id="movementFromTimeSelect" class="stale-select"></select>
-          </label>
-          <label class="stale-label">to
-            <select id="movementToDateSelect" class="stale-select"></select>
-            <select id="movementToTimeSelect" class="stale-select"></select>
-          </label>
-          <button class="btn ghost" id="movementCsvBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Status Changes' own Stalled/Active/Opportunity+/Closed/Not Found breakdown">Download CSV</button>
+          <button class="btn ghost" id="movementCsvBtn" style="padding:8px 12px; font-size:12.5px;" title="Combined Stalled/Active/Opportunity+/Closed/Not Found breakdown for the pair picked above">Download CSV</button>
         </div>
 
         <div class="stale-controls" style="margin-bottom:10px;">
@@ -4098,13 +4102,16 @@ async function callClaudeForSuggestions(batch){
 }
 
 // Every family currently shown ANYWHERE a follow-up suggestion is used —
-// Operations issue cards, the Stalled Flagged Leads 48h check, Overnight
-// Leads — deduped to one representative per customer (see dedupeToFamilies)
-// since every RM copy of the same customer gets reviewed together and
-// shares one answer. Deliberately broad (any ISSUE_PRIORITY flag or
-// firstContactBreach, not each report mode's own narrower eligibility
-// rules) — a lead pre-reviewed here that a specific report mode later
-// excludes just sits unused in cache at no extra cost, whereas UNDER-
+// Operations issue cards, the on-screen Stalled Flagged Leads card (which
+// follows the manual Compare from/to picker — see getPickedMovementWindow),
+// the email's OWN separate rolling-48h Stalled window (see
+// emailStalledWindow — not necessarily the same pair as the picker), and
+// Overnight Leads — deduped to one representative per customer (see
+// dedupeToFamilies) since every RM copy of the same customer gets reviewed
+// together and shares one answer. Deliberately broad (any ISSUE_PRIORITY
+// flag or firstContactBreach, not each report mode's own narrower
+// eligibility rules) — a lead pre-reviewed here that a specific report mode
+// later excludes just sits unused in cache at no extra cost, whereas UNDER-
 // collecting would mean a report-time cache miss and a slower, un-awaited
 // suggestion for that click.
 function collectSuggestableFamilies(){
@@ -4112,8 +4119,10 @@ function collectSuggestableFamilies(){
   issueLeads.forEach(l => {
     if (ISSUE_PRIORITY.some(rule => l[rule.key]) || l.firstContactBreach) pool.push(l);
   });
-  const win = emailStalledWindow();
-  if (win) applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => pool.push(r));
+  const emailWin = emailStalledWindow();
+  if (emailWin) applyMovementFilters(computeMovementRows(emailWin.fromAt, emailWin.toAt)).forEach(r => pool.push(r));
+  const pickedWin = getPickedMovementWindow();
+  if (pickedWin) applyMovementFilters(computeMovementRows(pickedWin.fromAt, pickedWin.toAt)).forEach(r => pool.push(r));
   if (_lastOvernightCohort && _lastOvernightCohort.leads) {
     _lastOvernightCohort.leads.forEach(l => pool.push(l));
   }
@@ -6031,10 +6040,11 @@ function buildRegionWiseReports(combineAll){
   });
 
   // Stalled Flagged Leads: every lead currently stalled per
-  // currentStalledRowsByRegion (the same Movement_Log-derived 48h-window
-  // check as the Operations tab's own always-current section — see
-  // renderStalledFlaggedLeadsOps) rides along as this email's first, most
-  // important section every time, not just on repeat. Keyed by mainRegion
+  // currentStalledRowsByRegion (a Movement_Log-derived rolling-48h window —
+  // its own, separate from the on-screen card's manually-picked one, since
+  // an email needs an "as of right now" window whether or not anyone has
+  // touched that picker) rides along as this email's first, most important
+  // section every time, not just on repeat. Keyed by mainRegion
   // (groupItemsByReportRegion already resolves it that way), so it lines
   // up directly with `key` below without a second resolution pass.
   const stalledByRegion = currentStalledRowsByRegion();
@@ -6903,18 +6913,21 @@ function nearestSnapshotAtOrBefore(targetMs){
   return best !== null ? new Date(best) : null;
 }
 
-// The two snapshots the region email (and the Operations Stalled Flagged
-// Leads card) compare: "to" is the freshest Movement_Log data currently
-// loaded; "from" is the closest snapshot at/before a ROLLING 48 hours
-// before right now. Previously this rounded "from" down to IST midnight of
-// that calendar day — meant to line "stalled" up with a normal day
-// boundary, but its actual effect was to silently demand up to ~72 hours
-// of real captured history (whenever tracking started partway through a
-// day) before this ever showed anything, well past the "48 hours" the UI
-// promises and past what MovementTracker.gs had actually captured. A
-// straight rolling 48h needs no more history than it actually claims to.
-// Returns null if there isn't enough Movement_Log history yet to anchor
-// either end.
+// The two snapshots the region email's Stalled Flagged Leads section
+// compares: "to" is the freshest Movement_Log data currently loaded; "from"
+// is the closest snapshot at/before a ROLLING 48 hours before right now.
+// The on-screen Operations card no longer uses this — it now follows the
+// manual Compare from/to picker instead (see getPickedMovementWindow), same
+// as Status Changes — but the email still needs an "always current, no
+// picker to set" window of its own, since it's often generated without
+// anyone having touched that picker at all. Previously this rounded "from"
+// down to IST midnight of that calendar day — meant to line "stalled" up
+// with a normal day boundary, but its actual effect was to silently demand
+// up to ~72 hours of real captured history (whenever tracking started
+// partway through a day) before this ever showed anything, well past the
+// "48 hours" it promises. A straight rolling 48h needs no more history than
+// it actually claims to. Returns null if there isn't enough Movement_Log
+// history yet to anchor either end.
 function emailStalledWindow(){
   if (!movementSnapshots.length) return null;
   const toAt = new Date(Math.max(...movementSnapshots.map(r => r.snapshot_at.getTime())));
@@ -6924,11 +6937,12 @@ function emailStalledWindow(){
   return { fromAt, toAt };
 }
 
-// Stalled Flagged Leads rows for the window above, grouped by region —
-// same filters (applyMovementFilters) and same per-copy row shape
-// (computeMovementRows) as the Operations tab's own Stalled Flagged Leads
-// section (see renderStalledFlaggedLeadsOps), just pre-grouped by region
-// for the email builder below instead of rendered as cards.
+// Stalled Flagged Leads rows for the rolling-48h window above, grouped by
+// region — same filters (applyMovementFilters) and same per-copy row shape
+// (computeMovementRows) the on-screen Stalled Flagged Leads card uses, just
+// over the email's own always-current window instead of the on-screen
+// card's manually-picked one, and pre-grouped by region for the email
+// builder below instead of rendered as cards.
 function currentStalledRowsByRegion(){
   const win = emailStalledWindow();
   if (!win) return {};
@@ -6936,14 +6950,22 @@ function currentStalledRowsByRegion(){
   return groupItemsByReportRegion(rows);
 }
 
-// Operations tab's Stalled Flagged Leads section — same computation as
-// the region email (emailStalledWindow: the freshest Movement_Log
-// snapshot loaded, compared against the closest one at/before 48 hours
-// ago), so what's on screen here always matches what the summary email
-// would show if generated right now. No manual snapshot picker — that
-// still exists in Movement → Status Changes for ad-hoc comparisons
-// between two SPECIFIC captured runs; this section always reflects "as
-// of right now" like every other Operations issue.
+// The picker above Stalled Flagged Leads — shared with Status Changes below
+// (same select IDs, just relocated in the DOM), so both sections always
+// compare the identical pair of Movement_Log snapshots.
+function getPickedMovementWindow(){
+  const fromAt = getSelectedMovementSnapshot('movementFromTimeSelect');
+  const toAt = getSelectedMovementSnapshot('movementToTimeSelect');
+  if (!fromAt || !toAt) return null;
+  return { fromAt, toAt };
+}
+
+// Operations tab's Stalled Flagged Leads section — reads the SAME picked
+// snapshot pair as Status Changes below (see getPickedMovementWindow), so
+// the two sections can never disagree about which leads are stalled.
+// Previously this was locked to a fixed always-current 48h window with no
+// picker of its own; now it follows whatever pair is selected, same as
+// Status Changes always has.
 function renderStalledFlaggedLeadsOps(){
   const countEl = document.getElementById('stalledCount');
   const breakdownEl = document.getElementById('stalledBreakdown');
@@ -6951,16 +6973,27 @@ function renderStalledFlaggedLeadsOps(){
   const listEl = document.getElementById('stalledList');
   if (!breakdownEl || !listEl) return;
 
-  const win = emailStalledWindow();
+  if (movementFetchState !== 'ok') {
+    if (countEl) countEl.textContent = '';
+    breakdownEl.innerHTML = '';
+    listEl.innerHTML = '';
+    if (noticeEl) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = movementFetchState === 'loading'
+        ? 'Loading movement history…'
+        : `<b>No Movement_Log data yet.</b> This section reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks before there's anything to compare — allow ~6-12 hours after setup.`;
+    }
+    return;
+  }
+
+  const win = getPickedMovementWindow();
   if (!win) {
     if (countEl) countEl.textContent = '';
     breakdownEl.innerHTML = '';
     listEl.innerHTML = '';
     if (noticeEl) {
       noticeEl.style.display = 'block';
-      noticeEl.innerHTML = movementFetchState === 'ok'
-        ? 'Needs at least 48 hours of captured Movement_Log history before this can compare two points in time — check back once there is enough.'
-        : `<b>No Movement_Log data yet.</b> This section reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks spanning 48+ hours before there's anything to compare.`;
+      noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Check back after the next scheduled run.';
     }
     return;
   }
@@ -6985,7 +7018,7 @@ function renderStalledFlaggedLeadsOps(){
     counts: byIssue,
     colorFn: colorForIssue,
     numColor: 'var(--red)',
-    emptyText: 'No flagged lead has been unchanged for 48+ hours right now.',
+    emptyText: 'No flagged lead is unchanged between the two picked snapshots right now.',
   });
 
   if (!rows.length) { listEl.innerHTML = ''; return; }
@@ -7632,10 +7665,9 @@ async function renderOvernightRegionReports(){
 }
 
 // Stalled Flagged Leads itself now lives in Operations (see
-// renderStalledFlaggedLeadsOps, computed from a fixed always-current 48h
-// window) — this tab keeps the manual snapshot-pair picker alive only for
-// Status Changes below, which genuinely needs two SPECIFIC user-chosen
-// captures to compare (not "as of right now").
+// renderStalledFlaggedLeadsOps) — it reads the SAME picker as Status
+// Changes below (see getPickedMovementWindow), so this tab's picker drives
+// both sections together, not just this one.
 function renderMovementTab(){
   // Whole-history views — independent of the from/to picker below, so
   // they update on every call regardless of which pair is selected.
@@ -7850,10 +7882,13 @@ async function browserSnapshotOpenLeads(){
     // immediately, without needing a full reconnect.
     await fetchMovementLog(_currentSheetId);
     populateMovementSnapshotSelectors();
+    // populateMovementSnapshotSelectors just moved the picker's "to" onto
+    // this new run — both sections that read it need to refresh.
+    renderStalledFlaggedLeadsOps();
     renderMovementTab();
     // A new snapshot can newly qualify leads for the Stalled Flagged Leads
-    // 48h check, and its fresh comment columns may differ from whatever
-    // was last reviewed — worth a pass. Best-effort, non-blocking.
+    // check, and its fresh comment columns may differ from whatever was
+    // last reviewed — worth a pass. Best-effort, non-blocking.
     runAiSuggestionPass();
   } catch (err) {
     console.error('Browser snapshot failed:', err);
@@ -7868,17 +7903,20 @@ function initMovementUI(){
   const toTimeSel = document.getElementById('movementToTimeSelect');
 
   // Picking a new date rebuilds that side's Time options (defaulting to
-  // the latest capture that day) before re-rendering.
+  // the latest capture that day) before re-rendering. Stalled Flagged
+  // Leads reads this same picker (see getPickedMovementWindow), so every
+  // change here refreshes both it and Status Changes together.
+  const renderBothMovementSections = () => { renderStalledFlaggedLeadsOps(); renderMovementTab(); };
   if (fromDateSel) fromDateSel.addEventListener('change', () => {
     populateMovementTimeSelect('movementFromDateSelect', 'movementFromTimeSelect', null);
-    renderMovementTab();
+    renderBothMovementSections();
   });
   if (toDateSel) toDateSel.addEventListener('change', () => {
     populateMovementTimeSelect('movementToDateSelect', 'movementToTimeSelect', null);
-    renderMovementTab();
+    renderBothMovementSections();
   });
-  if (fromTimeSel) fromTimeSel.addEventListener('change', renderMovementTab);
-  if (toTimeSel) toTimeSel.addEventListener('change', renderMovementTab);
+  if (fromTimeSel) fromTimeSel.addEventListener('change', renderBothMovementSections);
+  if (toTimeSel) toTimeSel.addEventListener('change', renderBothMovementSections);
 
   const snapshotBtn = document.getElementById('snapshotNowBtn');
   if (snapshotBtn) snapshotBtn.addEventListener('click', () => browserSnapshotOpenLeads());
