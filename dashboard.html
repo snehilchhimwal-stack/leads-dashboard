@@ -3861,10 +3861,13 @@ const FOLLOWUP_SUGGESTIONS = {
 // array position: combinedCommentsText concatenates the two fields one
 // after the other, so the last-listed entry isn't necessarily the newest
 // one once both sources are involved. Falls back to the last entry when
-// nothing in the log carries a parseable date.
-function suggestedFollowUp(l){
+// nothing in the log carries a parseable date. noCommentsFallback lets a
+// caller substitute its own wording for the "nothing logged at all" case
+// (e.g. Overnight Leads' "Connect ASAP") without touching the outcome
+// mapping used whenever a comment DOES exist.
+function suggestedFollowUp(l, noCommentsFallback){
   const entries = parseActionLog(combinedCommentsText(l));
-  if (!entries.length) return 'No comments logged yet — make first contact and log the outcome.';
+  if (!entries.length) return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
   let latest = entries[entries.length - 1];
   let newestMs = -Infinity;
   entries.forEach(e => {
@@ -6977,6 +6980,12 @@ function overnightStatusLabel(l){
   return String(l.current_stage || '').trim() || 'Unrecognized Stage';
 }
 
+// Overnight Leads' own fallback wording for suggestedFollowUp's
+// no-comments case — these came in after hours and may not have been
+// touched at all yet, so the generic "make first contact" reads weaker
+// than the urgency actually warrants here.
+const OVERNIGHT_NO_COMMENT_FALLBACK = 'Connect ASAP — no contact made yet.';
+
 // Region-wise email reports for Overnight Leads — same {region, subject,
 // body, html, count, regionNames} shape as the Stalled report above and
 // Operations' own buildRegionReports(), so it reuses the exact same send/
@@ -6993,7 +7002,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   // sibling note (not a merged status) names any other RM copies of the
   // same customer for context. cohortLeads already arrives pre-expanded
   // per copy (see computeOvernightCohort).
-  const leadLine = (l) => `${l.lead_id}  |  Created: ${istStamp(l.lead_created_at)}  |  ${overnightStatusLabel(l)}${(l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : ''}`;
+  const leadLine = (l) => `${l.lead_id}  |  ${overnightStatusLabel(l)}  |  ${suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK)}${(l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : ''}`;
 
   // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
   // deliberately shows every overnight-created lead, closed or not, so
@@ -7050,11 +7059,11 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: ['Lead ID', 'Created', 'Status'],
+        columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
         rows: group.map(l => [
           l.lead_id,
-          istStamp(l.lead_created_at),
           overnightStatusLabel(l) + ((l.siblingRMs && l.siblingRMs.length) ? ` (also held by: ${l.siblingRMs.join(', ')})` : ''),
+          suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK),
         ]),
       })),
       footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — see the Movement tab\'s on-screen Overnight Leads list for the full overnight cohort including those.',
@@ -7116,8 +7125,8 @@ function renderOvernightCohort(toAt){
     const label = overnightStatusLabel(l);
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} — <span class="chip ${label === 'Closed' ? 'dim-chip' : 'amber'}">${esc(label)}</span></div>
+      <div class="alert-comment">Next: ${esc(suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK))}</div>
     </div>`;
   }).join('');
 }
