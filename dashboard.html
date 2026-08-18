@@ -1382,7 +1382,14 @@ async function fetchAndRender(){
   try {
     let values;
     try {
-      values = await sheetsApiValuesGet(sheetId, `${tabName}!A2:Z`);
+      // Was A2:Z (26 columns) — the sheet now has 28 (region..duration,
+      // with call_count/duration landing in columns AA/AB), so that range
+      // silently dropped the last two columns entirely rather than just
+      // misreading them: they never appeared in the fetched values at all,
+      // which is why they showed as "unmatched" instead of merely blank.
+      // Widened with real headroom past the current column count, same
+      // reasoning as Movement_Log's own A1:Z range for future additions.
+      values = await sheetsApiValuesGet(sheetId, `${tabName}!A2:AZ`);
     } catch (err) {
       if (err.status === 403) throw new Error('ACCESS_DENIED');
       if (err.status === 404) throw new Error('NOT_SHARED');
