@@ -3949,8 +3949,24 @@ const FOLLOWUP_SUGGESTIONS = {
   'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
   'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
   'DNP': 'Client asked to be called back later — schedule the follow-up call.',
-  'Update': 'Manual review required — no keyword match found even after checking this customer\'s other RM copies. Read the comments above and log a specific next call/action; do not leave this one unactioned.',
 };
+
+// Fallback for when inferOutcome finds no keyword match at all (a comment
+// that's real information — e.g. "looking for 3bhk 3t, pitch tvs or
+// purvankara" — just doesn't contain any of the known outcome keywords).
+// Previously this returned a generic "read the comments above" line, which
+// is actively unhelpful: the comment itself isn't shown anywhere else in
+// most callers (email issue tables only carry Lead ID/Region/RM/Age/this
+// column), so the one thing that would let a human actually act on it was
+// being thrown away. Quoting the real latest note beats a canned message.
+function unmatchedFollowUp(comment, loggedBy, ts){
+  const text = String(comment || '').trim();
+  if (!text) return 'Manual review required — no keyword match found even after checking this customer\'s other RM copies. Read the comments above and log a specific next call/action; do not leave this one unactioned.';
+  const who = String(loggedBy || '').trim();
+  const when = ts ? istStamp(ts) : '';
+  const attribution = [who, when].filter(Boolean).join(', ');
+  return `No keyword match — latest note${attribution ? ` (${attribution})` : ''}: "${text}". Read this and log a specific next call/action.`;
+}
 
 // Suggested follow-up for a lead — mandatory best-effort: checked across
 // every comment-ish column of THIS copy AND every sibling copy of the
@@ -3987,12 +4003,15 @@ function suggestedFollowUp(l, noCommentsFallback){
       const d = parseDate(e.ts);
       if (d && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
     });
-    return FOLLOWUP_SUGGESTIONS[latest.outcome] || FOLLOWUP_SUGGESTIONS.Update;
+    return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);
   }
 
   for (const copy of family) {
     const lastComment = String(copy.last_comment || '').trim();
-    if (lastComment) return FOLLOWUP_SUGGESTIONS[inferOutcome(lastComment)] || FOLLOWUP_SUGGESTIONS.Update;
+    if (lastComment) {
+      const outcome = inferOutcome(lastComment);
+      return FOLLOWUP_SUGGESTIONS[outcome] || unmatchedFollowUp(lastComment, copy.RM, null);
+    }
   }
 
   for (const copy of family) {
