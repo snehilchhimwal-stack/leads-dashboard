@@ -1074,6 +1074,16 @@ const HEADER_ALIASES = {
   // read as silence.
   stage_comments: ['stage_comments','stage comments'],
   closing_reason: ['closing_reason','closing reason'],
+  // The sheet's OWN closing disposition — distinct from closing_reason
+  // above (an RM-entered/internal field). Deliberately kept separate from
+  // combinedCommentsText/hasAnyCommentField's "internal comment" checks
+  // (Closed with No Work Recorded, etc.): a lead auto-closed with only
+  // these filled in and nothing logged in the four internal fields is
+  // exactly the "no work recorded" case those checks exist to catch. Used
+  // instead as the preferred label wherever the dashboard shows WHY a
+  // lead closed (see computeStatusChanges, suggestedFollowUp).
+  lead_closing_reason: ['lead_closing_reason','lead closing reason'],
+  lead_closing_comment: ['lead_closing_comment','lead closing comment'],
   // call_attempts is the SOP's "attempt" — every dial, connected or not.
   // call_count (connected calls only) is still read, but only for display.
   call_attempts: ['call_attempts','call attempts','attempts'],
@@ -1477,6 +1487,8 @@ async function fetchAndRender(){
           call_count: Number(getVal(c, 'call_count')) || 0,
           duration: Number(getVal(c, 'duration')) || 0,
           closing_reason: getVal(c, 'closing_reason') || '',
+          lead_closing_reason: getVal(c, 'lead_closing_reason') || '',
+          lead_closing_comment: getVal(c, 'lead_closing_comment') || '',
         };
       });
 
@@ -1531,7 +1543,7 @@ async function fetchAndRender(){
     // customer read as closed even though someone else still had it live.
     // A collated lead should only read as closed when every copy really is.
     const funnelRankOf = (l) => {
-      const closed = isClosedStage(l.current_stage) || !!String(l.closing_reason || '').trim();
+      const closed = isClosedStage(l.current_stage) || !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
       if (closed) return -1;
       const canon = canonicalStage(l.current_stage);
       if (canon) return CONFIG.FUNNEL_ORDER.indexOf(canon);
@@ -1723,6 +1735,8 @@ async function fetchAndRender(){
           stage_comments: r.stage_comments,
           last_comment: r.last_comment,
           closing_reason: r.closing_reason,
+          lead_closing_reason: r.lead_closing_reason,
+          lead_closing_comment: r.lead_closing_comment,
         }));
         return split;
       });
@@ -1894,7 +1908,7 @@ function isOppOrAbove(stage){
 // all — not even Opportunity+.
 function isBookingLead(l){
   if (canonicalStage(l.current_stage) === 'booking') return true;
-  const reason = String(l.closing_reason || '').trim().toLowerCase();
+  const reason = String(l.lead_closing_reason || l.closing_reason || '').trim().toLowerCase();
   if (!reason) return false;
   // Exact band equality, so neither "visit booked" nor "soft booking" — both
   // of which contain booking words — can leak into the confirmed count.
@@ -1905,7 +1919,7 @@ function isBookingLead(l){
 // booking: it is real commercial progress, but it is not revenue booked.
 function isSoftBookingLead(l){
   if (canonicalStage(l.current_stage) === 'soft booking') return true;
-  const reason = String(l.closing_reason || '').trim().toLowerCase();
+  const reason = String(l.lead_closing_reason || l.closing_reason || '').trim().toLowerCase();
   if (!reason) return false;
   return canonicalStage(reason) === 'soft booking';
 }
@@ -1960,11 +1974,16 @@ function enrichLead(l){
   // leads where this is false. No alert/SLA check in this file should ever
   // fire for a closed lead — this is computed first and gates every other
   // flag directly, not as an afterthought filter layered on top.
-  // A lead is closed if its stage says so OR if closing_reason is filled.
-  // The second case matters because the CRM can leave current_stage sitting
-  // at "Not Updated" on a lead that was actually resolved — without this,
-  // those get flagged as issues forever despite being finished.
-  const hasClosingReason = !!String(l.closing_reason || '').trim();
+  // A lead is closed if its stage says so, or if EITHER closing_reason
+  // (RM-entered) or lead_closing_reason (the sheet's own closing
+  // disposition) is filled. This matters because the CRM can leave
+  // current_stage sitting at "Not Updated" on a lead that was actually
+  // resolved — without this, those get flagged as issues forever despite
+  // being finished. A lead closed via lead_closing_reason alone (the newer
+  // field, with the older closing_reason left blank) needs the same
+  // treatment, or it would read as still open and get flagged for every
+  // SLA issue in the dashboard despite genuinely being done.
+  const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
   const excluded = isClosedStage(l.current_stage) || hasClosingReason;
   const oppOrAbove = isOppOrAbove(l.current_stage);
   const isOpenLead = !excluded && !oppOrAbove; // "open" = not closed, not already at Opportunity+
@@ -2309,6 +2328,18 @@ function clearSlaHistory(){
   renderSlaTrend();
 }
 
+// "Last 7 days" default for the Created date filter — the browser's OWN
+// local calendar date, deliberately not IST-shifted like the rest of this
+// file's date handling, since this is specifically about whatever "today"
+// means on the machine looking at the dashboard.
+function defaultDateRangeValue(){
+  const now = new Date();
+  const from = new Date(now);
+  from.setDate(from.getDate() - 7);
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { from: fmt(from), to: fmt(now) };
+}
+
 function buildFilterUI(){
   // getter lets a field's filter options come from a DERIVED value instead
   // of the raw column — used for Region, so "Loan" (carried in group_source,
@@ -2335,14 +2366,27 @@ function buildFilterUI(){
   // dropdown covers one / several / all without a separate "All" entry.
   buildMultiSelect('msBucket', 'Sub-source', uniqueVals('source_bucket'), countsFor('source_bucket'), filterState.bucket, applyFiltersAndRender);
 
+  // Default the Created date range to the last 7 days whenever it isn't
+  // already set — first load, or right after Reset Filters below. Never
+  // overrides a range already in place, so a deliberately widened range
+  // survives a plain refresh instead of snapping back every time.
+  const dateFromEl = document.getElementById('dateFromInput');
+  const dateToEl = document.getElementById('dateToInput');
+  if (dateFromEl && dateToEl && !dateFromEl.value && !dateToEl.value) {
+    const def = defaultDateRangeValue();
+    dateFromEl.value = def.from;
+    dateToEl.value = def.to;
+  }
+
   document.getElementById('clearFiltersBtn').onclick = () => {
     filterState.project.clear();
     filterState.region.clear();
     filterState.source.clear();
     filterState.TL.clear();
     filterState.bucket.clear();
-    document.getElementById('dateFromInput').value = '';
-    document.getElementById('dateToInput').value = '';
+    const def = defaultDateRangeValue();
+    document.getElementById('dateFromInput').value = def.from;
+    document.getElementById('dateToInput').value = def.to;
     buildFilterUI();
     applyFiltersAndRender();
   };
@@ -4024,8 +4068,15 @@ function suggestedFollowUp(l, noCommentsFallback){
   }
 
   for (const copy of family) {
-    const closingReason = String(copy.closing_reason || '').trim();
-    if (closingReason) return `Lead closed (${closingReason}) — no further follow-up needed unless it's reopened.`;
+    // lead_closing_reason/lead_closing_comment (the sheet's own closing
+    // disposition) preferred over the RM-entered closing_reason when
+    // present — see the matching note in computeStatusChanges.
+    const reason = String(copy.lead_closing_reason || copy.closing_reason || '').trim();
+    if (reason) {
+      const detail = String(copy.lead_closing_comment || '').trim();
+      const full = detail ? `${reason} — ${detail}` : reason;
+      return `Lead closed (${full}) — no further follow-up needed unless it's reopened.`;
+    }
   }
 
   return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
@@ -6773,11 +6824,21 @@ function computeStatusChanges(fromAt, toAt, stalledRows){
       return;
     }
 
-    const closedNow = isClosedStage(live.current_stage) || !!String(live.closing_reason || '').trim();
+    const closedNow = isClosedStage(live.current_stage) || !!String(live.closing_reason || '').trim() || !!String(live.lead_closing_reason || '').trim();
     if (closedNow) {
-      const label = isClosedStage(live.current_stage)
-        ? (String(live.current_stage || '').trim() || 'Closed')
-        : (String(live.closing_reason || '').trim() || 'Closed');
+      let label;
+      if (isClosedStage(live.current_stage)) {
+        label = String(live.current_stage || '').trim() || 'Closed';
+      } else {
+        // lead_closing_reason/lead_closing_comment are the sheet's own
+        // closing disposition — preferred here over the RM-entered
+        // closing_reason when present, since it's the more authoritative
+        // "why did this close" signal. Falls back to closing_reason for
+        // leads closed before this column existed.
+        const reason = String(live.lead_closing_reason || live.closing_reason || '').trim();
+        const detail = String(live.lead_closing_comment || '').trim();
+        label = reason ? (detail ? `${reason} — ${detail}` : reason) : 'Closed';
+      }
       closed.push(Object.assign({}, rowBase, { label }));
       return;
     }
@@ -7122,7 +7183,7 @@ function computeOvernightCohort(toAt){
 // else the raw stage text verbatim so nothing silently disappears just
 // because it doesn't match a known funnel band.
 function overnightStatusLabel(l){
-  const hasClosingReason = !!String(l.closing_reason || '').trim();
+  const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
   if (isClosedStage(l.current_stage) || hasClosingReason) return 'Closed';
   const canon = canonicalStage(l.current_stage);
   if (canon) return canon.replace(/\b\w/g, c => c.toUpperCase());
@@ -7163,7 +7224,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
   // isOpenLead/oppOrAbove aren't already computed on it — same open/closed
   // logic as enrichLead, applied directly.
   const emailableLeads = cohortLeads.filter(l => {
-    const hasClosingReason = !!String(l.closing_reason || '').trim();
+    const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
     const closed = isClosedStage(l.current_stage) || hasClosingReason;
     return !closed && !isOppOrAbove(l.current_stage);
   });

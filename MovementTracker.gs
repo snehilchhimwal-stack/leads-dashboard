@@ -72,6 +72,13 @@ const HEADER_ALIASES_ = {
   internal_status_comments: ['internal_status_comments', 'internal status comments'],
   stage_comments: ['stage_comments', 'stage comments'],
   closing_reason: ['closing_reason', 'closing reason'],
+  // The sheet's own closing disposition, distinct from the RM-entered
+  // closing_reason above — see isOpenLead_. Not written to Movement_Log
+  // (not in SNAPSHOT_COLUMNS_ below): a lead closed via this field is, by
+  // definition, excluded from snapshotting before a row is ever built, so
+  // it would only ever show up blank there anyway. Read here purely to
+  // decide whether a lead still counts as open.
+  lead_closing_reason: ['lead_closing_reason', 'lead closing reason'],
   call_attempts: ['call_attempts', 'call attempts', 'attempts'],
   call_count: ['call_count', 'call count'],
   duration: ['duration'],
@@ -130,8 +137,12 @@ function isClosedStage_(stage) {
   });
 }
 
-function isOpenLead_(stage, closingReason) {
-  const hasClosingReason = !!String(closingReason || '').trim();
+// closingReason is the RM-entered field; leadClosingReason is the sheet's
+// own closing disposition, added later — a lead closed via EITHER one is
+// closed, or it would keep getting snapshotted here as if still open. Kept
+// mirrored with dashboard.html's enrichLead — see the note there.
+function isOpenLead_(stage, closingReason, leadClosingReason) {
+  const hasClosingReason = !!String(closingReason || '').trim() || !!String(leadClosingReason || '').trim();
   const excluded = isClosedStage_(stage) || hasClosingReason;
   return !excluded && !isOppOrAbove_(stage);
 }
@@ -270,7 +281,8 @@ function snapshotOpenLeads_(label) {
 
     const stage = getVal_(row, colIndex, 'current_stage');
     const closingReason = getVal_(row, colIndex, 'closing_reason');
-    if (!isOpenLead_(stage, closingReason)) return; // closed / Opportunity+ leads can never be "flagged"
+    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed / Opportunity+ leads can never be "flagged"
 
     const record = [now, snapshotLabel];
     SNAPSHOT_COLUMNS_.forEach(function (key) {
