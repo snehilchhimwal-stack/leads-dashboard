@@ -648,12 +648,12 @@
           <select id="movementToDateSelect" class="stale-select"></select>
           <select id="movementToTimeSelect" class="stale-select"></select>
         </label>
-        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Stalled Flagged Leads and Status Changes below — both compare this exact same pair of Movement_Log snapshots.</span>
+        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Stalled Flagged Leads and Status Changes below, and by the region email's own Stalled Flagged Leads section when you click Generate — all three compare this exact same pair of Movement_Log snapshots.</span>
       </div>
 
       <section id="sec-stalled">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Flagged Leads</div><div class="section-count" id="stalledCount"></div></div>
-        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) between the two Movement_Log snapshots picked above — the same pair Status Changes below compares. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
+        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) between the two Movement_Log snapshots picked above — the same pair Status Changes below compares, and the same pair the region email's own Stalled Flagged Leads section will show if you click Generate right now. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Created date range.</div>
         <div id="stalledBreakdown" style="margin-bottom:10px;"></div>
         <div id="stalledNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
@@ -4102,27 +4102,23 @@ async function callClaudeForSuggestions(batch){
 }
 
 // Every family currently shown ANYWHERE a follow-up suggestion is used —
-// Operations issue cards, the on-screen Stalled Flagged Leads card (which
-// follows the manual Compare from/to picker — see getPickedMovementWindow),
-// the email's OWN separate rolling-48h Stalled window (see
-// emailStalledWindow — not necessarily the same pair as the picker), and
-// Overnight Leads — deduped to one representative per customer (see
-// dedupeToFamilies) since every RM copy of the same customer gets reviewed
-// together and shares one answer. Deliberately broad (any ISSUE_PRIORITY
-// flag or firstContactBreach, not each report mode's own narrower
-// eligibility rules) — a lead pre-reviewed here that a specific report mode
-// later excludes just sits unused in cache at no extra cost, whereas UNDER-
-// collecting would mean a report-time cache miss and a slower, un-awaited
-// suggestion for that click.
+// Operations issue cards, the Stalled Flagged Leads card AND the region
+// email's own Stalled Flagged Leads section (both read the same Compare
+// from/to picker — see getPickedMovementWindow), and Overnight Leads —
+// deduped to one representative per customer (see dedupeToFamilies) since
+// every RM copy of the same customer gets reviewed together and shares one
+// answer. Deliberately broad (any ISSUE_PRIORITY flag or firstContactBreach,
+// not each report mode's own narrower eligibility rules) — a lead
+// pre-reviewed here that a specific report mode later excludes just sits
+// unused in cache at no extra cost, whereas UNDER-collecting would mean a
+// report-time cache miss and a slower, un-awaited suggestion for that click.
 function collectSuggestableFamilies(){
   const pool = [];
   issueLeads.forEach(l => {
     if (ISSUE_PRIORITY.some(rule => l[rule.key]) || l.firstContactBreach) pool.push(l);
   });
-  const emailWin = emailStalledWindow();
-  if (emailWin) applyMovementFilters(computeMovementRows(emailWin.fromAt, emailWin.toAt)).forEach(r => pool.push(r));
-  const pickedWin = getPickedMovementWindow();
-  if (pickedWin) applyMovementFilters(computeMovementRows(pickedWin.fromAt, pickedWin.toAt)).forEach(r => pool.push(r));
+  const win = getPickedMovementWindow();
+  if (win) applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => pool.push(r));
   if (_lastOvernightCohort && _lastOvernightCohort.leads) {
     _lastOvernightCohort.leads.forEach(l => pool.push(l));
   }
@@ -6040,20 +6036,19 @@ function buildRegionWiseReports(combineAll){
   });
 
   // Stalled Flagged Leads: every lead currently stalled per
-  // currentStalledRowsByRegion (a Movement_Log-derived rolling-48h window —
-  // its own, separate from the on-screen card's manually-picked one, since
-  // an email needs an "as of right now" window whether or not anyone has
-  // touched that picker) rides along as this email's first, most important
-  // section every time, not just on repeat. Keyed by mainRegion
-  // (groupItemsByReportRegion already resolves it that way), so it lines
-  // up directly with `key` below without a second resolution pass.
+  // currentStalledRowsByRegion — the SAME Compare from/to picker selection
+  // as the on-screen card and Status Changes (Operations tab), read at
+  // whatever it's set to right now — rides along as this email's first,
+  // most important section every time, not just on repeat. Keyed by
+  // mainRegion (groupItemsByReportRegion already resolves it that way), so
+  // it lines up directly with `key` below without a second resolution pass.
   const stalledByRegion = currentStalledRowsByRegion();
   // Cheap to compute directly rather than infer from stalledByRegion being
   // empty — an empty stalledByRegion could also just mean zero leads are
-  // currently stalled anywhere, not that there's no Movement_Log history
-  // yet. Used below to explain an absent Stalled section instead of
+  // currently stalled for the picked pair, not that no pair is picked at
+  // all. Used below to explain an absent Stalled section instead of
   // silently omitting it with no reason given.
-  const stalledWindowAvailable = !!emailStalledWindow();
+  const stalledWindowAvailable = !!getPickedMovementWindow();
 
   _lastReportGraceBlocked = graceBlocked;
   _lastReportOutOfScope = outOfScope;
@@ -6189,8 +6184,9 @@ ${Object.values(stuckByRM).map(group =>
 Total : ${stuckTotalLabel}` : '';
 
     // Stalled Flagged Leads: placed FIRST, ahead of even the main tally —
-    // zero movement for 48+ hours on an already-flagged issue is the most
-    // important thing in this email (see stalledItems above).
+    // zero movement between the two picked Movement_Log snapshots on an
+    // already-flagged issue is the most important thing in this email (see
+    // stalledItems above).
     const stalledByRM = groupBy(stalledItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
     const stalledCloneCounts = countUniqueAndCloned(stalledItems);
     const stalledTotalLabel = stalledCloneCounts.cloned > 0
@@ -6198,7 +6194,7 @@ Total : ${stuckTotalLabel}` : '';
       : String(stalledCloneCounts.unique);
     const stalledBlock = stalledItems.length ? `${DIVIDER}
 STALLED FLAGGED LEADS (MOST IMPORTANT)
-The following leads have shown zero movement — no stage change, call attempt, or new comment in any of the four comment columns — for at least 48 hours while already flagged for an issue. Review and escalate these first.
+The following leads have shown zero movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard (Operations → Stalled Flagged Leads), while already flagged for an issue. Review and escalate these first.
 ${SUBDIVIDER}
 ${Object.values(stalledByRM).map(group =>
   `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
@@ -6272,8 +6268,8 @@ ${EMAIL_SIGNATURE}`;
     if (stalledItems.length) {
       sections.unshift({
         heading: 'Stalled Flagged Leads',
-        subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — zero movement for 48+ hours on an already-flagged issue. Review and escalate first.`,
-        action: 'These leads have shown no movement — no stage change, call attempt, or new comment in any of the four comment columns — for at least 48 hours while already flagged for an issue. Personally follow up and escalate immediately.',
+        subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — zero movement between the two picked Movement_Log snapshots on an already-flagged issue. Review and escalate first.`,
+        action: 'These leads have shown no movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard, while already flagged for an issue. Personally follow up and escalate immediately.',
         columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Stalled Since', 'Suggested Follow-up'],
         rows: stalledItems.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), suggestedFollowUp(r)]),
         accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
@@ -6285,7 +6281,7 @@ ${EMAIL_SIGNATURE}`;
     // "nothing is currently stalled" (a good outcome, needs no explanation).
     let stalledDiagnostic = '';
     if (!stalledItems.length && !stalledWindowAvailable) {
-      stalledDiagnostic = ' Stalled Flagged Leads needs at least 48 hours of captured Movement_Log history before it can compare two points in time — it will start appearing once there is enough.';
+      stalledDiagnostic = ' Stalled Flagged Leads needs the Compare from/to picker above Stalled Flagged Leads (Operations tab) to have two Movement_Log snapshots selected before it can compare two points in time.';
     }
 
     const html = renderReportEmailHTML({
@@ -6904,47 +6900,17 @@ function computeMovementRows(fromAt, toAt){
   return sortedRows;
 }
 
-// Closest captured Movement_Log snapshot at or before targetMs, or null if
-// history doesn't go back that far yet.
-function nearestSnapshotAtOrBefore(targetMs){
-  const times = Array.from(new Set(movementSnapshots.map(r => r.snapshot_at.getTime()))).sort((a, b) => a - b);
-  let best = null;
-  for (const t of times) { if (t <= targetMs) best = t; else break; }
-  return best !== null ? new Date(best) : null;
-}
-
-// The two snapshots the region email's Stalled Flagged Leads section
-// compares: "to" is the freshest Movement_Log data currently loaded; "from"
-// is the closest snapshot at/before a ROLLING 48 hours before right now.
-// The on-screen Operations card no longer uses this — it now follows the
-// manual Compare from/to picker instead (see getPickedMovementWindow), same
-// as Status Changes — but the email still needs an "always current, no
-// picker to set" window of its own, since it's often generated without
-// anyone having touched that picker at all. Previously this rounded "from"
-// down to IST midnight of that calendar day — meant to line "stalled" up
-// with a normal day boundary, but its actual effect was to silently demand
-// up to ~72 hours of real captured history (whenever tracking started
-// partway through a day) before this ever showed anything, well past the
-// "48 hours" it promises. A straight rolling 48h needs no more history than
-// it actually claims to. Returns null if there isn't enough Movement_Log
-// history yet to anchor either end.
-function emailStalledWindow(){
-  if (!movementSnapshots.length) return null;
-  const toAt = new Date(Math.max(...movementSnapshots.map(r => r.snapshot_at.getTime())));
-  const fromTarget = new Date(Date.now() - 48 * 3600e3);
-  const fromAt = nearestSnapshotAtOrBefore(fromTarget.getTime());
-  if (!fromAt) return null;
-  return { fromAt, toAt };
-}
-
-// Stalled Flagged Leads rows for the rolling-48h window above, grouped by
-// region — same filters (applyMovementFilters) and same per-copy row shape
-// (computeMovementRows) the on-screen Stalled Flagged Leads card uses, just
-// over the email's own always-current window instead of the on-screen
-// card's manually-picked one, and pre-grouped by region for the email
-// builder below instead of rendered as cards.
+// Stalled Flagged Leads rows for the SAME picked Movement_Log window the
+// on-screen card and Status Changes use (see getPickedMovementWindow) —
+// same filters (applyMovementFilters) and same per-copy row shape
+// (computeMovementRows), just pre-grouped by region for the email builder
+// below instead of rendered as cards. The region email's Stalled Flagged
+// Leads section used to run its own separate, always-current rolling-48h
+// window regardless of what was on screen; it now shows exactly what the
+// picker above Stalled Flagged Leads is set to at the moment Generate is
+// clicked, so the email always matches what you were just looking at.
 function currentStalledRowsByRegion(){
-  const win = emailStalledWindow();
+  const win = getPickedMovementWindow();
   if (!win) return {};
   const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
   return groupItemsByReportRegion(rows);
