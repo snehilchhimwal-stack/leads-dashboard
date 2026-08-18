@@ -781,8 +781,6 @@
         <button class="btn ghost" id="gmailSetupToggle" style="padding:8px 12px; font-size:12.5px;">Gmail setup ▾</button>
         <button class="btn" id="gmailConnectBtn" style="padding:8px 12px; font-size:12.5px;">Connect Gmail</button>
         <span id="gmailAuthStatus" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;">Not connected</span>
-        <button class="btn ghost" id="aiSetupToggle" style="padding:8px 12px; font-size:12.5px;">AI suggestions setup ▾</button>
-        <span id="aiSuggestionStatus" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;">Not connected</span>
       </div>
 
       <div id="regionRecipientsPanel" style="display:none; margin-bottom:14px;">
@@ -803,21 +801,6 @@
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <input type="text" id="gmailClientIdInput" class="stale-select" style="flex:1; min-width:260px;" placeholder="xxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
           <button class="btn" id="gmailSaveClientIdBtn" style="padding:8px 12px; font-size:12.5px;">Save &amp; Connect</button>
-        </div>
-      </div>
-
-      <div id="aiSetupPanel" style="display:none; margin-bottom:14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px;">
-        <div class="filter-summary" style="margin-bottom:10px;">
-          Optional: when a Claude API key is set, every "Suggested Follow-up" throughout this dashboard — Operations cards, Region Email Reports, Overnight Leads, the Stalled Flagged Leads card, CSV exports — is written by Claude reading that lead's actual logged notes (pooled across every RM copy of the same customer), instead of the built-in keyword matcher. Falls back to the keyword matcher automatically if no key is set, a review fails, or a lead has no comments yet.
-          <br><br>
-          <b>This key is a secret</b> — unlike the Gmail Client ID above, anyone with devtools access to this specific browser could read it from local storage or from outgoing network requests. Only set this on your own machine, never on a shared/public one. Get a key at <span class="mono">console.anthropic.com</span> → API Keys. Stored in this browser's local storage only — never sent anywhere but Anthropic's API, and never committed to this dashboard's source.
-          <br><br>
-          Claude runs automatically after a dashboard refresh, after a Movement_Log snapshot is written, and whenever you click a Generate button — only for leads whose comments have changed since the last review, so repeat runs are cheap.
-        </div>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <input type="password" id="aiApiKeyInput" class="stale-select" style="flex:1; min-width:260px;" placeholder="sk-ant-…" autocomplete="off" />
-          <button class="btn" id="aiSaveKeyBtn" style="padding:8px 12px; font-size:12.5px;">Save</button>
-          <button class="btn ghost" id="aiClearKeyBtn" style="padding:8px 12px; font-size:12.5px;">Clear</button>
         </div>
       </div>
 
@@ -1802,11 +1785,6 @@ async function fetchAndRender(){
       // The sign-in gate already holds a live Sheets write token by the
       // time any data has loaded, so this can fire straight away.
       if (autoSnapshotEnabled()) browserSnapshotOpenLeads();
-      // Best-effort, non-blocking, same as the fetch above: a refresh just
-      // landed fresh lead + Movement_Log data, so any AI follow-up
-      // suggestions worth reviewing are reviewed now rather than waiting
-      // for the next Generate click. No-ops instantly if no API key is set.
-      runAiSuggestionPass();
     });
 
     document.getElementById('configPanel').style.display = 'none';
@@ -3952,279 +3930,14 @@ function inferOutcome(comment){
   return 'Update';
 }
 
-/* ===================== AI (CLAUDE) FOLLOW-UP SUGGESTIONS =====================
- * Optional layer on top of the keyword matcher below: when a Claude API key
- * is set, every suggestedFollowUp() call first checks a cache of
- * Claude-written suggestions (one per customer FAMILY — all RM copies of the
- * same customer share one answer, since they're reviewed together) keyed by
- * exactly what changed — the family's pooled comment text. A cache hit
- * returns the AI's line; a miss falls straight through to the existing
- * keyword logic untouched, so nothing here can ever leave a lead without a
- * suggestion. The cache is populated by runAiSuggestionPass(), NOT by
- * suggestedFollowUp() itself — it stays synchronous so every existing call
- * site (cards, emails, CSV) keeps working exactly as before with no async
- * plumbing forced through them; the async work happens as a background pass
- * that re-renders once results land. See runAiSuggestionPass for triggers. */
-
-const AI_API_KEY_STORAGE_KEY = 'gsl_claude_api_key';
-function getClaudeApiKey(){
-  try { return (localStorage.getItem(AI_API_KEY_STORAGE_KEY) || '').trim(); } catch (e) { return ''; }
-}
-function setClaudeApiKey(key){
-  try {
-    if (key) localStorage.setItem(AI_API_KEY_STORAGE_KEY, key.trim());
-    else localStorage.removeItem(AI_API_KEY_STORAGE_KEY);
-  } catch (e) {}
-}
-
-const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-
-// Tiny non-cryptographic string hash (djb2-ish) — only used to keep cache
-// keys/localStorage compact, not for anything security-sensitive.
-function simpleHash(s){
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
-
-// Every non-empty comment-ish field from every copy in the family, labelled
-// by RM — the exact same information a human reviewing "all 4 comments of
-// every cloned lead" (see suggestedFollowUp) would read. Empty string when
-// the WHOLE family has nothing logged anywhere, which callers use to skip
-// bothering the API for a lead that's genuinely uncommented so far.
-// Sorted by lead_id first — suggestedFollowUp builds `family` as
-// [thisCopy, ...itsSiblings], so the SAME family produces a DIFFERENT
-// array order depending on which sibling's perspective built it. Left
-// unsorted, that meant the same underlying customer could fingerprint
-// differently per copy, so only whichever copy happened to be reviewed
-// first ever got a cache hit — the other copies kept re-triggering (or
-// silently missing) their own "shared" answer. Sorting first makes the
-// pooled text — and the fingerprint built from it — identical no matter
-// which copy asks.
-function familyPooledText(family){
-  const sorted = (family || []).slice().sort((a, b) => String(a.lead_id).localeCompare(String(b.lead_id)));
-  return sorted.map(copy => {
-    const parts = [];
-    ['internal_status_comments', 'stage_comments', 'last_comment', 'closing_reason'].forEach(k => {
-      const v = String(copy[k] || '').trim();
-      if (v) parts.push(`${k}: ${v}`);
-    });
-    if (!parts.length) return '';
-    return `${copy.RM || copy.lead_id || 'RM'}: ${parts.join(' | ')}`;
-  }).filter(Boolean).join('\n');
-}
-
-// fingerprint = which customer + exactly what they said — changes the
-// instant a new comment lands on ANY copy, which is exactly when a cached
-// suggestion should be treated as stale and re-reviewed.
-function familyFingerprint(l, pooledText){
-  return familyKeyOf(l) + '|' + simpleHash(pooledText);
-}
-
-const AI_SUGGESTION_CACHE_KEY = 'gsl_ai_suggestion_cache_v1';
-const AI_SUGGESTION_CACHE_CAP = 1000; // oldest entries dropped past this, see persistAiSuggestionCache
-let aiSuggestionCache = new Map();
-(function loadAiSuggestionCache(){
-  try {
-    const raw = localStorage.getItem(AI_SUGGESTION_CACHE_KEY);
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    Object.keys(obj).forEach(k => aiSuggestionCache.set(k, obj[k]));
-  } catch (e) {}
-})();
-function persistAiSuggestionCache(){
-  try {
-    // Map iteration order is insertion order, so the last N entries are the
-    // most recently (re)written ones — a cheap stand-in for real LRU.
-    const entries = Array.from(aiSuggestionCache.entries()).slice(-AI_SUGGESTION_CACHE_CAP);
-    const obj = {};
-    entries.forEach(([k, v]) => { obj[k] = v; });
-    localStorage.setItem(AI_SUGGESTION_CACHE_KEY, JSON.stringify(obj));
-  } catch (e) {}
-}
-
-function updateAiSuggestionStatus(state, detail){
-  const el = document.getElementById('aiSuggestionStatus');
-  if (!el) return;
-  if (!getClaudeApiKey()) { el.textContent = 'Not connected — every Suggested Follow-up is using simple keyword matching until a key is added here.'; el.style.color = 'var(--amber)'; return; }
-  if (state === 'reviewing') { el.textContent = 'Reviewing comments with Claude…'; el.style.color = 'var(--text-faint)'; return; }
-  if (state === 'error') { el.textContent = `Claude review failed (${detail || 'unknown error'}) — showing keyword-based suggestions for now.`; el.style.color = 'var(--red)'; return; }
-  el.textContent = `Connected — ${aiSuggestionCache.size.toLocaleString()} lead${aiSuggestionCache.size === 1 ? '' : 's'} reviewed so far`;
-  el.style.color = 'var(--green)';
-}
-
-// One batched call for up to AI_BATCH_SIZE leads at once — batching (rather
-// than one request per lead) is what keeps a 100+ lead combined report fast
-// and cheap instead of triggering a hundred separate round-trips.
-const AI_BATCH_SIZE = 40;
-
-async function callClaudeForSuggestions(batch){
-  const apiKey = getClaudeApiKey();
-  if (!apiKey || !batch.length) return {};
-
-  const system = 'You are a CRM assistant for a real-estate telecalling team. For each lead below, read its logged call/CRM notes (sometimes from more than one RM who has worked the same customer) and write ONE short, specific, actionable next-step suggestion for what the RM should do next — same style as "Phone was switched off — retry later today; try an alternate number if one is on file." or "Client showed interest — move quickly to the next step (site visit, documents, or pricing)." Base it only on what the notes actually say — never invent details. If the notes are genuinely too vague or contradictory to give a specific action, say so plainly and name what needs clarifying. Respond with ONLY a JSON array, no prose, no markdown fences: [{"id":"...","suggestion":"..."}, ...], one entry per input lead.';
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 4096,
-      system,
-      messages: [{ role: 'user', content: JSON.stringify(batch.map(b => ({ id: b.id, notes: b.text }))) }],
-    }),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({}));
-    throw new Error((errBody.error && errBody.error.message) || `Claude API error ${res.status}`);
-  }
-  const data = await res.json();
-  const text = (data.content || []).map(b => b.text || '').join('');
-  const cleaned = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
-  let parsed;
-  try { parsed = JSON.parse(cleaned); } catch (e) { throw new Error('Could not parse Claude\'s response as JSON'); }
-
-  const out = {};
-  (Array.isArray(parsed) ? parsed : []).forEach(item => {
-    if (item && item.id != null && item.suggestion) out[String(item.id)] = String(item.suggestion).trim();
-  });
-  return out;
-}
-
-// Every family currently shown ANYWHERE a follow-up suggestion is used —
-// Operations issue cards, the Stalled Flagged Leads card AND the region
-// email's own Stalled Flagged Leads section (both read the same Compare
-// from/to picker — see getPickedMovementWindow), and Overnight Leads —
-// deduped to one representative per customer (see dedupeToFamilies) since
-// every RM copy of the same customer gets reviewed together and shares one
-// answer. Deliberately broad (any ISSUE_PRIORITY flag or firstContactBreach,
-// not each report mode's own narrower eligibility rules) — a lead
-// pre-reviewed here that a specific report mode later excludes just sits
-// unused in cache at no extra cost, whereas UNDER-collecting would mean a
-// report-time cache miss and a slower, un-awaited suggestion for that click.
-function collectSuggestableFamilies(){
-  const pool = [];
-  issueLeads.forEach(l => {
-    if (ISSUE_PRIORITY.some(rule => l[rule.key]) || l.firstContactBreach) pool.push(l);
-  });
-  const win = getPickedMovementWindow();
-  if (win) applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => pool.push(r));
-  if (_lastOvernightCohort && _lastOvernightCohort.leads) {
-    _lastOvernightCohort.leads.forEach(l => pool.push(l));
-  }
-  return dedupeToFamilies(pool);
-}
-
-let _aiPassRunning = false;
-
-// The background pass behind all three triggers (dashboard refresh,
-// Movement_Log snapshot written, Generate clicked — see call sites). Only
-// ever sends families whose pooled comment text isn't ALREADY cached under
-// its current fingerprint, so a re-run after nothing has changed costs
-// nothing. Re-renders once done so newly-cached suggestions replace
-// keyword-matched ones already on screen without the user re-clicking
-// anything.
-async function runAiSuggestionPass(){
-  if (_aiPassRunning) return;
-  const apiKey = getClaudeApiKey();
-  if (!apiKey) return;
-
-  _aiPassRunning = true;
-  updateAiSuggestionStatus('reviewing');
-  try {
-    const jobs = [];
-    collectSuggestableFamilies().forEach(l => {
-      const family = [l].concat(l.siblingComments || []);
-      const text = familyPooledText(family);
-      if (!text) return; // nothing logged anywhere in the family — no review needed
-      const id = familyFingerprint(l, text);
-      if (aiSuggestionCache.has(id)) return; // unchanged since last review
-      jobs.push({ id, text });
-    });
-
-    if (!jobs.length) { updateAiSuggestionStatus('idle'); return; }
-
-    let anyFailure = null;
-    for (let i = 0; i < jobs.length; i += AI_BATCH_SIZE) {
-      const batch = jobs.slice(i, i + AI_BATCH_SIZE);
-      try {
-        const results = await callClaudeForSuggestions(batch);
-        batch.forEach(j => { if (results[j.id]) aiSuggestionCache.set(j.id, results[j.id]); });
-      } catch (err) {
-        console.error('Claude suggestion batch failed:', err);
-        anyFailure = err;
-      }
-    }
-    persistAiSuggestionCache();
-
-    // Refresh whatever's currently on screen so freshly-cached suggestions
-    // replace keyword-matched placeholders immediately. Report panels are
-    // only rebuilt if the user already generated one — this pass never
-    // auto-opens the report view for leads still displayed via cards.
-    renderAll();
-    const reportList = document.getElementById('regionReportList');
-    if (reportList && reportList.innerHTML.trim() && typeof renderReports === 'function') renderReports();
-    const overnightList = document.getElementById('overnightReportList');
-    if (overnightList && overnightList.innerHTML.trim() && typeof renderOvernightRegionReports === 'function') renderOvernightRegionReports();
-
-    updateAiSuggestionStatus(anyFailure ? 'error' : 'idle', anyFailure && anyFailure.message);
-  } catch (err) {
-    console.error('AI suggestion pass failed:', err);
-    updateAiSuggestionStatus('error', err.message);
-  } finally {
-    _aiPassRunning = false;
-  }
-}
-
-// Wraps a Generate click so the button visibly shows "reviewing" while
-// runAiSuggestionPass runs (only when a key is actually set — otherwise the
-// pass returns instantly and a flash of loading text would just be noise).
-async function withAiReviewLoading(btnEl, action){
-  const hasKey = !!getClaudeApiKey();
-  const original = btnEl ? btnEl.textContent : null;
-  if (btnEl && hasKey) { btnEl.disabled = true; btnEl.textContent = 'Reviewing comments with Claude…'; }
-  try {
-    await action();
-  } finally {
-    if (btnEl && hasKey) { btnEl.disabled = false; btnEl.textContent = original; }
-  }
-}
-
-function initAiSuggestionsUI(){
-  const keyInput = document.getElementById('aiApiKeyInput');
-  if (keyInput) keyInput.value = getClaudeApiKey();
-
-  const toggleBtn = document.getElementById('aiSetupToggle');
-  const panel = document.getElementById('aiSetupPanel');
-  if (toggleBtn && panel) {
-    toggleBtn.addEventListener('click', () => {
-      const open = panel.style.display !== 'none';
-      panel.style.display = open ? 'none' : 'block';
-    });
-  }
-
-  const saveBtn = document.getElementById('aiSaveKeyBtn');
-  if (saveBtn) saveBtn.addEventListener('click', () => {
-    setClaudeApiKey(keyInput ? keyInput.value : '');
-    updateAiSuggestionStatus('idle');
-    if (getClaudeApiKey()) runAiSuggestionPass();
-  });
-
-  const clearBtn = document.getElementById('aiClearKeyBtn');
-  if (clearBtn) clearBtn.addEventListener('click', () => {
-    setClaudeApiKey('');
-    if (keyInput) keyInput.value = '';
-    updateAiSuggestionStatus('idle');
-  });
-
-  updateAiSuggestionStatus('idle');
-}
+// One-time cleanup: an earlier version of this dashboard offered optional
+// Claude-reviewed follow-up suggestions, backed by an API key and a
+// suggestion cache in local storage. That feature has been removed — this
+// clears out any leftover key/cache so nothing unused lingers behind.
+try {
+  localStorage.removeItem('gsl_claude_api_key');
+  localStorage.removeItem('gsl_ai_suggestion_cache_v1');
+} catch (e) {}
 
 // One suggested next action per inferOutcome() result — same keyword-based,
 // best-effort inference (no separate Outcome column in the sheet), applied
@@ -4286,18 +3999,6 @@ function unmatchedFollowUp(comment, loggedBy, ts){
 //      for that last case only.
 function suggestedFollowUp(l, noCommentsFallback){
   const family = [l].concat(l.siblingComments || []);
-
-  // AI review (see runAiSuggestionPass) takes priority when a cached,
-  // up-to-date suggestion exists for this exact family + comment content —
-  // stays synchronous by only ever READING the cache here; populating it
-  // is a separate background pass. Falls straight through to the keyword
-  // logic below on any cache miss (no key set, review still pending, or
-  // this family genuinely has nothing logged yet).
-  const pooledText = familyPooledText(family);
-  if (pooledText) {
-    const cached = aiSuggestionCache.get(familyFingerprint(l, pooledText));
-    if (cached) return cached;
-  }
 
   const entries = [];
   family.forEach(copy => {
@@ -5833,9 +5534,7 @@ function syncReportControls(){
   document.getElementById('generateAllReportsBtn').style.display = isRegion ? 'none' : 'inline-block';
 }
 
-async function renderReports(){
-  await withAiReviewLoading(document.getElementById('generateBtn'), runAiSuggestionPass);
-
+function renderReports(){
   const mode = document.getElementById('reportModeSelect').value;
   if (mode === 'issue') { renderRegionReports(); return; }
 
@@ -5873,7 +5572,6 @@ document.getElementById('generateBtn').addEventListener('click', renderReports);
 syncReportControls();
 initRegionRecipientsPanel();
 initGmailUI();
-initAiSuggestionsUI();
 // initMovementUI() is called at the very end of this script, not here —
 // it depends on movementFetchState, declared much further down. Calling it
 // this early throws a TDZ ReferenceError (uncaught, since nothing here is
@@ -6330,10 +6028,8 @@ function buildAllRegionReports(){
   return out;
 }
 
-async function renderAllRegionReports(){
+function renderAllRegionReports(){
   const btn = document.getElementById('generateAllReportsBtn');
-  btn.disabled = true;
-  await withAiReviewLoading(btn, runAiSuggestionPass);
   btn.disabled = true;
   btn.textContent = 'Generating…';
 
@@ -7588,10 +7284,9 @@ function renderOvernightCohort(toAt){
 // same report-card markup and Copy/Open in Mail/Send via Gmail buttons as
 // Operations' own region reports, just pointed at a different array
 // (window._overnightRegionReports) so the two report lists don't collide.
-async function renderOvernightRegionReports(){
+function renderOvernightRegionReports(){
   const el = document.getElementById('overnightReportList');
   if (!el) return;
-  await withAiReviewLoading(document.getElementById('overnightGenerateReportsBtn'), runAiSuggestionPass);
   if (!_lastOvernightCohort || !_lastOvernightCohort.leads.length) {
     el.innerHTML = '';
     window._overnightRegionReports = [];
@@ -7780,10 +7475,6 @@ async function browserSnapshotOpenLeads(){
     // this new run — both sections that read it need to refresh.
     renderStalledFlaggedLeadsOps();
     renderMovementTab();
-    // A new snapshot can newly qualify leads for the Stalled Flagged Leads
-    // check, and its fresh comment columns may differ from whatever was
-    // last reviewed — worth a pass. Best-effort, non-blocking.
-    runAiSuggestionPass();
   } catch (err) {
     console.error('Browser snapshot failed:', err);
     if (statusEl) { statusEl.textContent = 'Snapshot failed: ' + err.message; statusEl.style.color = 'var(--red)'; }
