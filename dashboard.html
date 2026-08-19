@@ -345,21 +345,17 @@
   .hour-bar-col:hover .hour-bar-seg{ opacity:.8; }
   .hour-bar-label{ font-size:9.5px; color:var(--text-faint); margin-top:6px; font-family:'IBM Plex Mono',monospace; white-space:nowrap; }
 
-  /* ---------- RM Timeline: month calendar ---------- */
-  .rmtl-cal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
-  .rmtl-cal-month{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px; }
+  /* ---------- RM Timeline: last-7-days strip ---------- */
   .rmtl-cal{
     display:grid; grid-template-columns:repeat(7,1fr); gap:4px;
     background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px;
   }
-  .rmtl-cal-dow{ font-size:9.5px; color:var(--text-faint); text-align:center; padding:2px 0 6px; text-transform:uppercase; letter-spacing:.04em; }
   .rmtl-cal-day{
     aspect-ratio:1; border-radius:6px; border:1px solid var(--border);
     padding:4px 6px; display:flex; flex-direction:column; justify-content:space-between;
     cursor:pointer; min-width:0;
   }
   .rmtl-cal-day:hover{ border-color:var(--blue); }
-  .rmtl-cal-day.out{ opacity:.35; }
   .rmtl-cal-day.today{ border-color:var(--text-dim); }
   .rmtl-cal-day.selected{ outline:2px solid var(--blue); outline-offset:-1px; }
   .rmtl-cal-day .rmtl-cal-d{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); }
@@ -811,6 +807,7 @@
           Combine all regions into one email
         </label>
         <button class="btn" id="generateBtn" style="padding:8px 12px; font-size:12.5px;">Generate</button>
+        <span id="followupsPushStatus" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;"></span>
         <button class="btn ghost" id="generateAllReportsBtn" style="padding:8px 12px; font-size:12.5px; display:none;">Generate all issues × regions</button>
         <button class="btn ghost" id="downloadAllReportsBtn" style="padding:8px 12px; font-size:12.5px; display:none;">Download all as .txt</button>
         <button class="btn ghost" id="regionRecipientsToggle" style="padding:8px 12px; font-size:12.5px; margin-left:auto;">Edit region recipients ▾</button>
@@ -996,7 +993,7 @@
 
       <section id="sec-rmtl-daily">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Leads Created, by Day</div><div class="section-count" id="rmtlDailyCount"></div></div>
-        <div class="filter-summary">Leads with <span class="mono">lead_created_at</span> on each day, currently assigned to this RM. There's no separate "assigned" date in the sheet — <span class="mono">RM</span> is a current snapshot, not a dated history — so a lead reassigned to this RM after creation still counts on its original creation day, not the day it changed hands. Click a day to load its timeline below.</div>
+        <div class="filter-summary">Leads with <span class="mono">lead_created_at</span> on each day, currently assigned to this RM. Always the last 7 days ending on the Created-date filter's "To" date at the top of the page (your browser's own today, by default) — change that "To" date and this window moves with it. There's no separate "assigned" date in the sheet — <span class="mono">RM</span> is a current snapshot, not a dated history — so a lead reassigned to this RM after creation still counts on its original creation day, not the day it changed hands. Click a day to load its timeline below.</div>
         <div id="rmtlDailyTrend"></div>
       </section>
 
@@ -3668,17 +3665,16 @@ function populateRMTimelineSelect(){
   return sel.value || null;
 }
 
-// Month currently shown (Date, always the 1st of that month at IST
-// midnight) — null means "not navigated yet, default to whatever day is
-// selected". Reset to null only when the RM selection itself changes (see
-// renderRMTimelineTab), so Prev/Next month clicks persist across unrelated
-// re-renders the same way a manually picked day does.
-let _rmtlCalMonth = null;
-
-// Replaced the earlier bar-per-day list (one visible row at a time, no
-// sense of a full week/month at a glance) with a real month calendar —
-// every day cell shows its count directly, shaded by volume, so several
-// weeks are visible together instead of one bar you have to scroll to find.
+// Always exactly 7 day-cells, anchored to the SAME "To" date the Created-
+// date filter at the top of the page uses (dateToInput) — defaults to
+// today's browser date the same way that filter's own default does (via
+// defaultDateRangeValue), and shifts with it if the user changes it. Per
+// feedback: "last 7 days browser date by default, if to date is changed
+// then from there". `leads` is already restricted to [dateFromInput,
+// dateToInput] by applyFiltersAndRender, so this window naturally lines up
+// with whatever range the rest of the page is already showing — it just
+// caps the CALENDAR to the most recent 7 of those days even if the top
+// filter's own range happens to be wider.
 function renderRMDailyCalendar(rm, selectedDay){
   const el = document.getElementById('rmtlDailyTrend');
   const countEl = document.getElementById('rmtlDailyCount');
@@ -3700,52 +3696,31 @@ function renderRMDailyCalendar(rm, selectedDay){
     return;
   }
 
-  const anchor = _rmtlCalMonth || parseDate((selectedDay || istDateKey(_renderNow)) + ' 00:00:00');
-  const mp = istParts(anchor);
-  const monthStart = istWallToInstant(mp.y, mp.mo, 1, 0, 0, 0);
-  const msp = istParts(monthStart);
-  const monthPrefix = `${msp.y}-${String(msp.mo + 1).padStart(2, '0')}`;
-  const todayKey = istDateKey(_renderNow);
+  const toVal = document.getElementById('dateToInput').value || defaultDateRangeValue().to;
+  const toDate = parseDate(toVal + ' 00:00:00');
+  const todayKey = istDateKey(new Date()); // browser-local "today", not IST — same convention defaultDateRangeValue itself uses
 
-  const monthTotal = Array.from(byDay.entries())
-    .filter(([k]) => k.startsWith(monthPrefix))
-    .reduce((sum, [, c]) => sum + c, 0);
-  if (countEl) countEl.textContent = monthTotal.toLocaleString() + ' this month';
+  const windowKeys = [];
+  for (let i = 6; i >= 0; i--) windowKeys.push(istDateKey(istAddDays(toDate, -i)));
 
-  // Grid starts on the Sunday on/before the 1st, runs 6 full weeks (42
-  // cells) — covers every month's layout including ones that span 6 rows.
-  const gridStart = istAddDays(monthStart, -msp.dow);
-  const max = Math.max(1, ...Array.from(byDay.values()));
+  const windowTotal = windowKeys.reduce((sum, k) => sum + (byDay.get(k) || 0), 0);
+  if (countEl) countEl.textContent = windowTotal.toLocaleString() + ' in the last 7 days';
 
-  const cells = [];
-  for (let i = 0; i < 42; i++) {
-    const cellDate = istAddDays(gridStart, i);
-    const cp = istParts(cellDate);
-    const key = istDateKey(cellDate);
-    const inMonth = cp.mo === msp.mo && cp.y === msp.y;
+  const max = Math.max(1, ...windowKeys.map(k => byDay.get(k) || 0));
+  const cells = windowKeys.map(key => {
+    const cellDate = parseDate(key + ' 00:00:00');
     const count = byDay.get(key) || 0;
     const opacity = count ? Math.min(0.85, 0.15 + (count / max) * 0.7) : 0;
     const classes = ['rmtl-cal-day'];
-    if (!inMonth) classes.push('out');
     if (key === todayKey) classes.push('today');
     if (key === selectedDay) classes.push('selected');
-    cells.push(`<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});" title="${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created">
-      <span class="rmtl-cal-d">${cp.d}</span>
+    return `<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});" title="${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created">
+      <span class="rmtl-cal-d">${esc(IST_WEEKDAYS[istParts(cellDate).dow])} ${istParts(cellDate).d}</span>
       ${count ? `<span class="rmtl-cal-n">${count}</span>` : ''}
-    </div>`);
-  }
-
-  const dowLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  el.innerHTML = `
-    <div class="rmtl-cal-nav">
-      <button class="btn ghost" id="rmtlCalPrev" style="padding:4px 10px; font-size:12px;">‹ Prev</button>
-      <div class="rmtl-cal-month">${IST_MONTHS[msp.mo]} ${msp.y}</div>
-      <button class="btn ghost" id="rmtlCalNext" style="padding:4px 10px; font-size:12px;">Next ›</button>
-    </div>
-    <div class="rmtl-cal">
-      ${dowLabels.map(d => `<div class="rmtl-cal-dow">${d}</div>`).join('')}
-      ${cells.join('')}
     </div>`;
+  });
+
+  el.innerHTML = `<div class="rmtl-cal">${cells.join('')}</div>`;
 }
 
 // Every dated touch (call connect + individually-dated comment log lines,
@@ -3871,13 +3846,11 @@ function renderRMTimelineTab(){
   const dayInput = document.getElementById('rmtlDayInput');
   if (!dayInput) return;
 
-  // Reset the picked day (and which month the calendar shows) to this RM's
-  // most recent activity only when the RM selection itself just changed —
-  // an unrelated re-render (filters, a fresh fetch) shouldn't yank a day or
-  // month the user deliberately navigated to.
+  // Reset the picked day to this RM's most recent activity only when the
+  // RM selection itself just changed — an unrelated re-render (filters, a
+  // fresh fetch) shouldn't yank a day the user deliberately picked.
   if (rm && rm !== _rmtlLastRM) {
     _rmtlLastRM = rm;
-    _rmtlCalMonth = null;
     const rmLeads = leads.filter(l => (l.RM || 'Unassigned') === rm);
     let latest = null;
     rmLeads.forEach(l => {
@@ -4961,6 +4934,44 @@ function latestFamilyOutcome(l){
   }
 
   return null;
+}
+
+// Same family-pooling as latestFamilyOutcome above, but returns every
+// structured entry instead of picking just the newest one — feeds the
+// Lead_Followups export (pushLeadsToFollowups), where the point is the
+// whole history, not a single best-guess line. A copy that contributed no
+// structured action-log entry at all still gets one entry here from its
+// last_comment (same fallback tier latestFamilyOutcome uses), so a copy
+// that only ever got a plain comment isn't silently missing from the
+// collated result. Sorted oldest-first — dated entries before undated
+// ones, since undated entries have no real position to sort by.
+function collateFamilyComments(row){
+  const family = [row].concat(row.siblingComments || []);
+  const entries = [];
+  family.forEach(copy => {
+    const copyEntries = parseActionLog(combinedCommentsText(copy));
+    if (copyEntries.length) {
+      // e.loggedBy is who the log line itself says wrote THIS comment —
+      // not necessarily copy.RM, the lead's CURRENT assignee, which can
+      // differ after a reassignment. Prefer the actual logger; only fall
+      // back to the current assignee when the log line didn't parse a name.
+      copyEntries.forEach(e => entries.push({ RM: e.loggedBy || copy.RM || row.RM || 'Unassigned', comment: e.comment, timestamp: e.ts, outcome: e.outcome }));
+      return;
+    }
+    const lastComment = String(copy.last_comment || '').trim();
+    if (lastComment) {
+      entries.push({ RM: copy.RM || row.RM || 'Unassigned', comment: lastComment, timestamp: null, outcome: inferOutcome(lastComment) });
+    }
+  });
+  entries.sort((a, b) => {
+    const da = a.timestamp ? parseDate(a.timestamp) : null;
+    const db = b.timestamp ? parseDate(b.timestamp) : null;
+    if (da && db) return da - db;
+    if (da) return -1;
+    if (db) return 1;
+    return 0;
+  });
+  return entries;
 }
 
 // Suggested follow-up for a lead — mandatory best-effort: checked across
@@ -6613,6 +6624,20 @@ function renderReports(){
 
   document.getElementById('downloadAllReportsBtn').style.display = 'inline-block';
   applyGmailButtonStatesFor(_allReports, i => 'gmailAllBtn_' + i);
+
+  // Fire-and-forget: the report above is already rendered and doesn't wait
+  // on this. Dedup by lead_id across regions — each customer belongs to
+  // exactly one region so `combine: false` runs shouldn't ever collide, but
+  // a plain object guard costs nothing and removes any doubt.
+  const seenLeadIds = {};
+  const leadsToPush = [];
+  _allReports.forEach(r => (r.sorted || []).forEach(row => {
+    const id = String(row.lead_id).trim();
+    if (!id || seenLeadIds[id]) return;
+    seenLeadIds[id] = true;
+    leadsToPush.push(row);
+  }));
+  pushLeadsToFollowups(leadsToPush);
 }
 
 document.getElementById('reportModeSelect').addEventListener('change', syncReportControls);
@@ -7151,7 +7176,13 @@ ${EMAIL_SIGNATURE}`;
         + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0 || warmCloseCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + warmCloseCloneCounts.unique, issueLabel: 'All issues', regionNames };
+    // `sorted` (the core issue-flagged population this report's main tally
+    // is built from — open, not Opportunity+, one of the 5 SLA issues) is
+    // exposed here so renderReports can push exactly these leads' comment
+    // history to Lead_Followups. Deliberately NOT notConnectedItems/
+    // stuckItems (neither is genuinely "in one of the issues" — see their
+    // own comments above) or warmCloseItems (those are closed leads).
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + warmCloseCloneCounts.unique, issueLabel: 'All issues', regionNames, sorted };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
@@ -7301,6 +7332,11 @@ let movementFetchState = 'idle';        // 'idle' | 'loading' | 'ok' | 'missing'
 let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
+// Comment-history export written on every "Generate" click for the
+// combined All Issues email — see pushLeadsToFollowups. A person (or a
+// later automation) reads collated_comments and fills in
+// suggested_followup by hand; nothing in this file ever writes that column.
+const LEAD_FOLLOWUPS_TAB_NAME = 'Lead_Followups';
 // stage_comments is appended at the END, not grouped near
 // internal_status_comments — both this browser's own snapshot-append path
 // (SNAPSHOT_FIELD_KEYS below) and MovementTracker.gs's snapshotOpenLeads_
@@ -8630,9 +8666,12 @@ function movementCellValue(l, key){
   return v == null ? '' : v;
 }
 
-async function appendToMovementLog(rows){
+// Generic append — used for both Movement_Log snapshots and the
+// Lead_Followups export below, parameterized by tab name rather than
+// duplicated per tab.
+async function appendSheetRows(tabName, rows){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}/values/` +
-    `${encodeURIComponent(MOVEMENT_LOG_TAB_NAME)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    `${encodeURIComponent(tabName)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
@@ -8643,6 +8682,99 @@ async function appendToMovementLog(rows){
     throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
   }
   return resp.json();
+}
+
+// Writes multiple, possibly non-contiguous ranges in one request — used by
+// pushLeadsToFollowups to update an existing lead's A:E and G columns
+// without touching F (suggested_followup) in between, which a single
+// contiguous range write couldn't do without clobbering it.
+async function sheetsApiValuesBatchUpdate(data){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}/values:batchUpdate`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+  }
+  return resp.json();
+}
+
+function setFollowupsPushStatus(text, color){
+  const el = document.getElementById('followupsPushStatus');
+  if (el) { el.textContent = text; el.style.color = color; }
+}
+
+// Writes/updates Lead_Followups with the exact leads that just appeared in
+// the combined All Issues email — see renderReports, which calls this with
+// buildRegionWiseReports's own `sorted` (open, not Opportunity+, one of the
+// 5 SLA issues; never notConnected/stuck-only/closed leads — see the
+// comment on that return statement). Column layout: A lead_id, B region,
+// C RM, D issue, E collated_comments, F suggested_followup, G updated_at.
+//
+// Upserts by lead_id rather than always appending, so a lead still flagged
+// on the next Generate updates its existing row instead of duplicating it.
+// Deliberately never writes column F — that's filled in by a person (or a
+// later automation) reading collated_comments, and this file has no way to
+// know whether a value already sitting there is still meaningful; the only
+// safe move is to leave it alone. That's also why existing rows are
+// updated as two separate ranges (A:E and G) rather than one A:G write,
+// which would silently blank out anything in F.
+async function pushLeadsToFollowups(rows){
+  if (!rows.length) return;
+  if (!_currentSheetId) return;
+
+  if (!gateTokenValid()) {
+    setFollowupsPushStatus('Re-signing in…', 'var(--text-faint)');
+    await gateSignIn();
+    if (!gateTokenValid()) {
+      setFollowupsPushStatus('Sign-in required to write Lead_Followups.', 'var(--amber)');
+      return;
+    }
+  }
+
+  setFollowupsPushStatus('Writing Lead_Followups…', 'var(--text-faint)');
+
+  try {
+    const existingValues = await sheetsApiValuesGet(_currentSheetId, `${LEAD_FOLLOWUPS_TAB_NAME}!A2:A`);
+    const rowNumberByLeadId = {};
+    existingValues.forEach((r, i) => {
+      const id = String((r && r[0]) || '').trim();
+      if (id) rowNumberByLeadId[id] = i + 2; // +2: row 1 is the header, existingValues is 0-indexed from row 2
+    });
+
+    const updatedAt = istDateTimeValue(new Date());
+    const updateData = [];
+    const appendRows = [];
+
+    rows.forEach(r => {
+      const leadId = String(r.lead_id).trim();
+      if (!leadId) return;
+      const collated = collateFamilyComments(r)
+        .map(e => `${e.RM}: ${e.comment} (${e.timestamp || 'no date'}) [${e.outcome}]`)
+        .join('\n') || '(no comments logged)';
+
+      const rowNum = rowNumberByLeadId[leadId];
+      if (rowNum) {
+        updateData.push({ range: `${LEAD_FOLLOWUPS_TAB_NAME}!A${rowNum}:E${rowNum}`, values: [[leadId, r.mainRegion || r.region || '', r.RM || '', r.issue || '', collated]] });
+        updateData.push({ range: `${LEAD_FOLLOWUPS_TAB_NAME}!G${rowNum}:G${rowNum}`, values: [[updatedAt]] });
+      } else {
+        appendRows.push([leadId, r.mainRegion || r.region || '', r.RM || '', r.issue || '', collated, '', updatedAt]);
+      }
+    });
+
+    if (updateData.length) await sheetsApiValuesBatchUpdate(updateData);
+    if (appendRows.length) await appendSheetRows(LEAD_FOLLOWUPS_TAB_NAME, appendRows);
+
+    setFollowupsPushStatus(
+      `Lead_Followups updated: ${updateData.length / 2} updated, ${appendRows.length} added.`,
+      'var(--green)'
+    );
+  } catch (err) {
+    setFollowupsPushStatus(`Lead_Followups write failed: ${err.message}`, 'var(--red)');
+  }
 }
 
 // The actual capture: every lead in the WHOLE fetched dataset (not the
@@ -8695,7 +8827,7 @@ async function browserSnapshotOpenLeads(){
   });
 
   try {
-    await appendToMovementLog(rows);
+    await appendSheetRows(MOVEMENT_LOG_TAB_NAME, rows);
     setSnapshotStatus(`Snapshot written: ${rows.length.toLocaleString()} leads at ${istStamp(now)}.`, 'var(--green)');
     // Pull the new run back in so it shows up in the Compare dropdowns
     // immediately, without needing a full reconnect.
@@ -8803,40 +8935,30 @@ function initCollapsibleSectionInfo(){
 initCollapsibleSectionInfo();
 
 // RM select change picks up renderRMTimelineTab's own default-day reset
-// (see _rmtlLastRM); the day input, calendar day clicks, and Prev/Next
-// month clicks only need a re-render, not a reset, since the user is
-// deliberately navigating. The calendar's day cells and its Prev/Next
-// buttons are both rebuilt on every render (inside #rmtlDailyTrend's own
-// innerHTML), so their clicks are handled via delegation on the container
-// — a direct listener on the buttons themselves would stop working the
-// first time the calendar re-renders and replaces them.
+// (see _rmtlLastRM); the day input and calendar day clicks only need a
+// re-render, not a reset, since the user is deliberately picking a day.
+// The window itself isn't independently navigable — it always tracks
+// dateToInput (see renderRMDailyCalendar), which already has its own
+// change listener elsewhere that re-renders the whole page. The calendar's
+// day cells are rebuilt on every render (inside #rmtlDailyTrend's own
+// innerHTML), so clicks are handled via delegation on the container rather
+// than binding to the cells directly.
 function initRMTimelineUI(){
   const rmSelect = document.getElementById('rmtlRMSelect');
   const dayInput = document.getElementById('rmtlDayInput');
   const dailyEl = document.getElementById('rmtlDailyTrend');
   if (rmSelect) rmSelect.addEventListener('change', renderRMTimelineTab);
   if (dayInput) dayInput.addEventListener('change', () => {
-    _rmtlCalMonth = null; // jump the calendar to whatever month the typed/picked date falls in
     renderRMDailyCalendar(rmSelect.value, dayInput.value);
     renderRMDayTimeline(rmSelect.value, dayInput.value);
   });
   if (dailyEl) dailyEl.addEventListener('click', (e) => {
     if (!dayInput) return;
     const dayCell = e.target.closest('.rmtl-cal-day[data-day]');
-    if (dayCell) {
-      dayInput.value = dayCell.dataset.day;
-      const dp = istParts(parseDate(dayCell.dataset.day + ' 00:00:00'));
-      _rmtlCalMonth = istWallToInstant(dp.y, dp.mo, 1, 0, 0, 0); // out-of-month cell click also switches the shown month
-      renderRMDailyCalendar(rmSelect.value, dayInput.value);
-      renderRMDayTimeline(rmSelect.value, dayInput.value);
-      return;
-    }
-    const delta = e.target.closest('#rmtlCalPrev') ? -1 : e.target.closest('#rmtlCalNext') ? 1 : 0;
-    if (delta) {
-      const mp = istParts(_rmtlCalMonth || parseDate(dayInput.value + ' 00:00:00'));
-      _rmtlCalMonth = istWallToInstant(mp.y, mp.mo + delta, 1, 0, 0, 0);
-      renderRMDailyCalendar(rmSelect.value, dayInput.value);
-    }
+    if (!dayCell) return;
+    dayInput.value = dayCell.dataset.day;
+    renderRMDailyCalendar(rmSelect.value, dayInput.value);
+    renderRMDayTimeline(rmSelect.value, dayInput.value);
   });
 }
 initRMTimelineUI();
