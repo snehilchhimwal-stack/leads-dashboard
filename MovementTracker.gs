@@ -13,6 +13,14 @@
  * it does not filter by source or open/closed status; that's left entirely
  * to the dashboard's own filters at render time.
  *
+ * Same trigger also writes one row per run to "SLA_History" — a compliance
+ * snapshot (open leads, breached leads, per-rule counts) computed with a
+ * ported copy of dashboard.html's 5 SLA rules (see writeSlaHistorySnapshot_
+ * below). The dashboard writes its own rows there too on every refresh
+ * (source='Dashboard' vs this script's 'AppsScript'); this one just means
+ * that tracking never has a gap on a day nobody opens the dashboard.
+ *
+
  * ============================== SETUP (one-time) ==============================
  *   1. Open your Google Sheet → Extensions → Apps Script.
  *   2. Delete any placeholder code in Code.gs, paste this whole file in.
@@ -71,10 +79,85 @@ const HEADER_ALIASES_ = {
   internal_status_comments: ['internal_status_comments', 'internal status comments'],
   stage_comments: ['stage_comments', 'stage comments'],
   closing_reason: ['closing_reason', 'closing reason'],
+  // The sheet's own closing disposition, distinct from the RM-entered
+  // closing_reason above — see isOpenLead_/computeSlaFlags_. Not written to
+  // Movement_Log (not in SNAPSHOT_COLUMNS_ below): read here purely to
+  // decide open/closed status for the SLA_History computation, which always
+  // runs against this freshly-read source-tab row, never against a stored
+  // Movement_Log row.
+  lead_closing_reason: ['lead_closing_reason', 'lead closing reason'],
+  // Needed for the Inactive-RM Lead Added rule (computeSlaFlags_) — also
+  // never written to Movement_Log, same reasoning as lead_closing_reason.
+  rm_is_active: ['rm_is_active', 'rm is active'],
   call_attempts: ['call_attempts', 'call attempts', 'attempts'],
   call_count: ['call_count', 'call count'],
   duration: ['duration'],
 };
+
+// ---- Funnel / closed-stage classification, ported verbatim from
+// dashboard.html's CONFIG so "open" means exactly the same thing here as
+// it does on the dashboard. If you ever edit STAGE_ALIASES, FUNNEL_ORDER,
+// CLOSED_STAGE_EXACT or CLOSED_STAGE_STEMS in dashboard.html, mirror the
+// change here too. (Previously removed in commit c97fcfc when Movement_Log
+// stopped filtering by open/closed status — restored here because
+// writeSlaHistorySnapshot_ below needs it again, for a different purpose:
+// deciding what's OPEN for SLA compliance counting, not what to snapshot.) ----
+const FUNNEL_ORDER_ = ['not updated', 'suspect', 'opportunity', 'visit booked', 'visit', 'pipeline', 'soft booking', 'booking'];
+const STAGE_ALIASES_ = {
+  'not updated': ['not updated'],
+  'suspect': ['suspect'],
+  'opportunity': ['opportunity'],
+  'visit booked': ['visit booked', 'visit booking', 'visit scheduled'],
+  'visit': ['visit', 'revisit', 'hpop', 'video presentation', 'video call'],
+  'pipeline': ['pipeline'],
+  'soft booking': ['soft booking', 'soft book'],
+  'booking': ['booking', 'booked'],
+};
+const OPPORTUNITY_STAGE_ = 'opportunity';
+const CLOSED_STAGE_EXACT_ = ['won', 'lost', 'junk', 'dead', 'not interested'];
+const CLOSED_STAGE_STEMS_ = ['cancel', 'close', 'reject'];
+
+function canonicalStage_(stage) {
+  const s = String(stage || '').trim().toLowerCase();
+  if (!s) return null;
+  for (let i = 0; i < FUNNEL_ORDER_.length; i++) {
+    const canon = FUNNEL_ORDER_[i];
+    const aliases = STAGE_ALIASES_[canon] || [canon];
+    for (let j = 0; j < aliases.length; j++) {
+      const a = aliases[j];
+      if (s === a || s.indexOf(a) !== -1) return canon;
+    }
+  }
+  return null;
+}
+
+function isOppOrAbove_(stage) {
+  const canon = canonicalStage_(stage);
+  if (!canon) return false;
+  return FUNNEL_ORDER_.indexOf(canon) >= FUNNEL_ORDER_.indexOf(OPPORTUNITY_STAGE_);
+}
+
+function isClosedStage_(stage) {
+  const s = String(stage || '').trim().toLowerCase();
+  if (!s) return false;
+  const words = s.split(/[^a-z']+/).filter(function (w) { return !!w; });
+  const exactHit = CLOSED_STAGE_EXACT_.some(function (kw) {
+    return kw.indexOf(' ') !== -1 ? s.indexOf(kw) !== -1 : words.indexOf(kw) !== -1;
+  });
+  if (exactHit) return true;
+  return CLOSED_STAGE_STEMS_.some(function (stem) {
+    return words.some(function (w) { return w.indexOf(stem) === 0; });
+  });
+}
+
+// closingReason is the RM-entered field; leadClosingReason is the sheet's
+// own closing disposition — a lead closed via EITHER one is closed. Kept
+// mirrored with dashboard.html's isLeadClosed — see the note there.
+function isOpenLead_(stage, closingReason, leadClosingReason) {
+  const hasClosingReason = !!String(closingReason || '').trim() || !!String(leadClosingReason || '').trim();
+  const excluded = isClosedStage_(stage) || hasClosingReason;
+  return !excluded && !isOppOrAbove_(stage);
+}
 
 // ---- Tab resolution: same auto-detect the dashboard's setup guide describes. ----
 function resolveTabName_(ss) {
@@ -178,6 +261,273 @@ function ensureMovementLogSheet_(ss) {
   return sheet;
 }
 
+// ==================== SLA_History (automatic, no dashboard needed) ====================
+// Computes the same 5 SLA compliance rules dashboard.html's enrichLead does
+// and writes one row per run to SLA_History — so compliance tracking never
+// has a gap on a day nobody opens the dashboard. See writeSlaHistorySnapshot_,
+// called from snapshotOpenLeads_ below, right alongside the Movement_Log
+// write it already does every 6h.
+//
+// Mirrors dashboard.html's CONFIG values these rules depend on — keep in
+// sync if either changes.
+const LEAD_GRACE_HOURS_ = 3;
+const LEAD_LIFECYCLE_HOURS_ = 48;
+const MIN_CALLS_PER_DAY_ = 5;
+const FOLLOWUP_REVIEW_HOURS_ = 4;
+const FIRST_CONTACT_SLA_MINUTES_ = 10;
+const WORK_START_HOUR_ = 9;
+const WORK_END_HOUR_ = 19;
+
+const SLA_HISTORY_SHEET_ = 'SLA_History';
+// Order matches dashboard.html's own upsertSlaHistoryRows — snapshot_at/
+// source appended at the end so either writer's rows land in the same
+// columns regardless of which one created the tab first.
+const SLA_HISTORY_COLUMNS_ = [
+  'date', 'openTotal', 'breachedTotal',
+  'inactiveRmNewLead', 'isNotUpdated', 'followupOverdue', 'underCalledToday', 'stageStuck48h',
+  'snapshot_at', 'source',
+];
+
+function istDayKeyGs_(date) {
+  return Utilities.formatDate(date, 'Asia/Kolkata', 'yyyy-MM-dd');
+}
+
+function pad2Gs_(n) { return (n < 10 ? '0' : '') + n; }
+
+// Same day-by-day working-hours walk as dashboard.html's
+// businessMinutesBetween — day boundaries come from Apps Script's own
+// timezone-aware formatting instead of hand-rolled IST math, which makes
+// this simpler than the browser version, not harder.
+function businessMinutesBetweenGs_(start, end) {
+  if (!start || !end || end <= start) return 0;
+  let totalMs = 0;
+  let cursor = new Date(start.getTime());
+
+  while (cursor < end) {
+    const dayKey = istDayKeyGs_(cursor);
+    const dayOpen = new Date(dayKey + 'T' + pad2Gs_(WORK_START_HOUR_) + ':00:00+05:30');
+    const dayClose = new Date(dayKey + 'T' + pad2Gs_(WORK_END_HOUR_) + ':00:00+05:30');
+    const midnight = new Date(dayKey + 'T00:00:00+05:30');
+
+    const segStart = cursor > dayOpen ? cursor : dayOpen;
+    const segEnd = end < dayClose ? end : dayClose;
+    if (segEnd > segStart) totalMs += (segEnd.getTime() - segStart.getTime());
+
+    cursor = new Date(midnight.getTime() + 24 * 60 * 60 * 1000); // next IST day's midnight — IST has no DST, so a fixed 24h jump is always correct
+  }
+  return totalMs / 60000;
+}
+
+// Extracts every dated entry's timestamp from the same
+// "Name: Comment - YYYY-MM-DD HH:MM" pipe-separated log format
+// dashboard.html's parseActionLog/combinedCommentsText parse. Only the
+// timestamps are needed here (for followupOverdue's staleness check and
+// underCalledToday's logged-today fallback below) — not the outcome-keyword
+// vocabulary those two exist for on the dashboard side, which nothing here
+// needs.
+function parseDatedCommentEntries_(internalComments, stageComments) {
+  const combined = [internalComments, stageComments]
+    .filter(function (t) { return String(t || '').trim(); })
+    .join(' | ');
+  if (!combined) return [];
+  const dates = [];
+  combined.split('|').forEach(function (entry) {
+    const m = entry.trim().match(/-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
+    if (!m) return;
+    const d = new Date(m[1].replace(' ', 'T') + ':00+05:30');
+    if (!isNaN(d.getTime())) dates.push(d);
+  });
+  return dates;
+}
+
+function latestCommentTimestamp_(internalComments, stageComments) {
+  const dates = parseDatedCommentEntries_(internalComments, stageComments);
+  if (!dates.length) return null;
+  return dates.reduce(function (a, b) { return b > a ? b : a; });
+}
+
+function countTodayCommentEntries_(internalComments, stageComments, now) {
+  const todayKey = istDayKeyGs_(now);
+  return parseDatedCommentEntries_(internalComments, stageComments)
+    .filter(function (d) { return istDayKeyGs_(d) === todayKey; }).length;
+}
+
+// Reads Movement_Log's EXISTING rows (this run hasn't appended its own yet)
+// to find each lead's call_attempts as of the latest snapshot strictly
+// before `beforeDate`'s IST calendar day — direct port of dashboard.html's
+// buildTodayCallBaseline.
+function buildTodayCallBaselineGs_(ss, beforeDate) {
+  const map = {};
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!sheet) return map;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return map;
+
+  const todayStart = new Date(istDayKeyGs_(beforeDate) + 'T00:00:00+05:30').getTime();
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const snapAtCol = headers.indexOf('snapshot_at');
+  const leadIdCol = headers.indexOf('lead_id');
+  const clientIdCol = headers.indexOf('client_id');
+  const callAttemptsCol = headers.indexOf('call_attempts');
+  if (snapAtCol === -1 || callAttemptsCol === -1) return map;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const latest = {}; // key -> {atMs, call_attempts}
+  values.forEach(function (row) {
+    const ts = row[snapAtCol];
+    if (!(ts instanceof Date)) return;
+    const atMs = ts.getTime();
+    if (atMs >= todayStart) return; // only snapshots strictly before today count as a baseline
+    const clientId = String(row[clientIdCol] || '').trim();
+    const leadId = String(row[leadIdCol] || '').trim();
+    const key = clientId || ('l:' + leadId);
+    const cur = latest[key];
+    if (!cur || atMs > cur.atMs) latest[key] = { atMs: atMs, call_attempts: Number(row[callAttemptsCol]) || 0 };
+  });
+  Object.keys(latest).forEach(function (key) { map[key] = latest[key].call_attempts; });
+  return map;
+}
+
+// Faithful port of the 5 SLA rules dashboard.html's enrichLead computes —
+// see that function for the canonical definitions this must stay
+// traceable back to. Only computes what SLA_History needs (isOpenLead +
+// the 5 rules), not the many other fields enrichLead also derives purely
+// for the dashboard's own UI (sibling pooling, multi-agent detection, etc.)
+function computeSlaFlags_(row, colIndex, now, baselineMap) {
+  const stage = getVal_(row, colIndex, 'current_stage');
+  const closingReason = getVal_(row, colIndex, 'closing_reason');
+  const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+  const isOpenLead = isOpenLead_(stage, closingReason, leadClosingReason);
+
+  const flags = {
+    isOpenLead: isOpenLead,
+    inactiveRmNewLead: false, isNotUpdated: false, followupOverdue: false,
+    underCalledToday: false, stageStuck48h: false,
+  };
+  if (!isOpenLead) return flags;
+
+  const createdRaw = getVal_(row, colIndex, 'lead_created_at');
+  const created = createdRaw instanceof Date ? createdRaw : null;
+  if (!created) return flags; // undatable — no rule can fire, same as enrichLead's ageHours=null path
+
+  const ageHours = (now.getTime() - created.getTime()) / 36e5;
+  const pastGrace = ageHours >= LEAD_GRACE_HOURS_;
+  const isUnder48h = ageHours <= LEAD_LIFECYCLE_HOURS_;
+  const past48h = ageHours > LEAD_LIFECYCLE_HOURS_;
+  const isCreatedToday = istDayKeyGs_(created) === istDayKeyGs_(now);
+
+  // Inactive-RM Lead Added — deliberately no grace period (the problem is
+  // the assignment, not RM speed).
+  const rmActiveRaw = String(getVal_(row, colIndex, 'rm_is_active') || '').trim().toLowerCase();
+  const rmIsInactive = ['false', 'no', 'inactive', '0', 'n'].indexOf(rmActiveRaw) !== -1;
+  flags.inactiveRmNewLead = isCreatedToday && rmIsInactive;
+
+  // Leads Pending Beyond 48 Hours.
+  flags.stageStuck48h = past48h && pastGrace;
+
+  const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
+  const connectDate = connectTimeRaw instanceof Date ? connectTimeRaw : null;
+  const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
+
+  // Deliberately grace-exempt, same as dashboard.html — see its own
+  // comment on neverConnectedPastWindow: a silent lead shouldn't sit
+  // unflagged in the 10-min-to-3h gap this exists to catch.
+  const neverConnectedPastWindow = isUnder48h && !connectDate &&
+    businessMinutesBetweenGs_(created, now) > FIRST_CONTACT_SLA_MINUTES_;
+
+  // Not Updated — canonical stage text (once past grace), OR never
+  // connected past the 10-minute window regardless of stage text.
+  flags.isNotUpdated = isUnder48h &&
+    ((pastGrace && canonicalStage_(stage) === 'not updated') || neverConnectedPastWindow);
+
+  // Follow-up Overdue (4h Post-Connect).
+  const internalComments = getVal_(row, colIndex, 'internal_status_comments');
+  const stageComments = getVal_(row, colIndex, 'stage_comments');
+  const lastCommentAt = latestCommentTimestamp_(internalComments, stageComments);
+  const hoursSinceConnect = connectDate ? (now.getTime() - connectDate.getTime()) / 36e5 : null;
+  const hoursSinceLastComment = lastCommentAt ? (now.getTime() - lastCommentAt.getTime()) / 36e5 : null;
+  const followupStaleHours = hoursSinceLastComment !== null ? hoursSinceLastComment
+    : (hoursSinceConnect !== null ? hoursSinceConnect : ageHours);
+  flags.followupOverdue = isUnder48h && pastGrace && hasConnected && followupStaleHours > FOLLOWUP_REVIEW_HOURS_;
+
+  // Behind on Today's Calls.
+  const callAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
+  let attemptsToday;
+  if (isCreatedToday) {
+    attemptsToday = callAttempts;
+  } else {
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    const baselineKey = clientId || ('l:' + leadId);
+    const baseline = baselineMap[baselineKey];
+    attemptsToday = baseline !== undefined
+      ? Math.max(0, callAttempts - baseline)
+      : countTodayCommentEntries_(internalComments, stageComments, now); // no pre-today baseline yet — same fallback as enrichLead's loggedToday
+  }
+  flags.underCalledToday = pastGrace && attemptsToday < MIN_CALLS_PER_DAY_;
+
+  return flags;
+}
+
+function ensureSlaHistorySheet_(ss) {
+  let sheet = ss.getSheetByName(SLA_HISTORY_SHEET_);
+  if (!sheet) {
+    sheet = ss.insertSheet(SLA_HISTORY_SHEET_);
+    sheet.getRange(1, 1, 1, SLA_HISTORY_COLUMNS_.length).setValues([SLA_HISTORY_COLUMNS_]);
+    sheet.setFrozenRows(1);
+    return sheet;
+  }
+  // Self-heal, same pattern as ensureMovementLogSheet_ — append whatever
+  // header columns are missing rather than requiring an exact pre-built
+  // match, so a tab created by hand (see the dashboard walkthrough) still
+  // ends up with every column this script expects.
+  const lastCol = sheet.getLastColumn();
+  const existingHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  const existingSet = {};
+  existingHeaders.forEach(function (h) { existingSet[String(h || '').trim()] = true; });
+  const missing = SLA_HISTORY_COLUMNS_.filter(function (h) { return !existingSet[h]; });
+  if (missing.length) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  }
+  return sheet;
+}
+
+// Computes SLA compliance for every lead in `dataRows` (the SAME rows
+// snapshotOpenLeads_ just read from the source tab — no separate read) and
+// appends one row to SLA_History, source='AppsScript'. Plain append, no
+// upsert-by-key check — snapshotOpenLeads_ itself doesn't guard against a
+// rare trigger double-fire either (see pruneMovementLog_), so this stays
+// consistent with that precedent rather than adding one-sided defensive
+// code for this write path only.
+function writeSlaHistorySnapshot_(ss, dataRows, colIndex, now) {
+  const baselineMap = buildTodayCallBaselineGs_(ss, now);
+  const checkKeys = ['inactiveRmNewLead', 'isNotUpdated', 'followupOverdue', 'underCalledToday', 'stageStuck48h'];
+  const byCheck = {};
+  checkKeys.forEach(function (k) { byCheck[k] = 0; });
+
+  let openTotal = 0, breachedTotal = 0;
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
+    if (!flags.isOpenLead) return;
+    openTotal++;
+    let isBreached = false;
+    checkKeys.forEach(function (k) { if (flags[k]) { byCheck[k]++; isBreached = true; } });
+    if (isBreached) breachedTotal++;
+  });
+
+  const sheet = ensureSlaHistorySheet_(ss);
+  const snapshotAtValue = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  const record = [istDayKeyGs_(now), openTotal, breachedTotal];
+  checkKeys.forEach(function (k) { record.push(byCheck[k]); });
+  record.push(snapshotAtValue, 'AppsScript');
+
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, 1, record.length).setValues([record]);
+}
+
 /**
  * Core snapshot routine — reads the current month tab and appends one row
  * per lead to Movement_Log, for every lead in the tab (any source, open or
@@ -201,6 +551,17 @@ function snapshotOpenLeads_(label) {
 
   const now = new Date();
   const snapshotLabel = label || Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') + ' IST';
+
+  // Computed from the SAME dataRows/colIndex just read above, before
+  // Movement_Log gets this run's own row appended below (so the today's-
+  // calls baseline lookup only ever sees snapshots strictly before now).
+  // Wrapped so a problem in the SLA computation can never block the core
+  // Movement_Log capture this trigger exists for.
+  try {
+    writeSlaHistorySnapshot_(ss, dataRows, colIndex, now);
+  } catch (e) {
+    Logger.log('SLA_History write failed (Movement_Log capture continues): ' + e);
+  }
 
   const out = [];
   dataRows.forEach(function (row) {
