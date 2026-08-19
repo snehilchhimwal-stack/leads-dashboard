@@ -808,6 +808,7 @@
         </label>
         <button class="btn" id="generateBtn" style="padding:8px 12px; font-size:12.5px;">Generate</button>
         <span id="followupsPushStatus" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;"></span>
+        <button class="btn ghost" id="followupsWaitCancelBtn" style="padding:6px 10px; font-size:11.5px; display:none;">Cancel wait</button>
         <button class="btn ghost" id="generateAllReportsBtn" style="padding:8px 12px; font-size:12.5px; display:none;">Generate all issues × regions</button>
         <button class="btn ghost" id="downloadAllReportsBtn" style="padding:8px 12px; font-size:12.5px; display:none;">Download all as .txt</button>
         <button class="btn ghost" id="regionRecipientsToggle" style="padding:8px 12px; font-size:12.5px; margin-left:auto;">Edit region recipients ▾</button>
@@ -6593,23 +6594,65 @@ function syncReportControls(){
   document.getElementById('generateAllReportsBtn').style.display = isRegion ? 'none' : 'inline-block';
 }
 
-function renderReports(){
+// Three phases: (1) a preliminary build just to know which leads qualify
+// and need a follow-up; (2) push their comment history to Lead_Followups
+// and wait until EVERY one of them has a filled-in suggested_followup —
+// the email must never go out with a blank follow-up for a lead it
+// actually lists; (3) build the real report using those suggestions and
+// render it. Phase 1's report output itself is thrown away — only its
+// `sorted` lead list is used — so the SLA/region logic never has to be
+// duplicated between a "preview" and a "real" pass.
+async function renderReports(){
   const mode = document.getElementById('reportModeSelect').value;
   if (mode === 'issue') { renderRegionReports(); return; }
 
   const combine = document.getElementById('combineRegionsCheck').checked;
-  _allReports = buildRegionWiseReports(combine);
-
   const el = document.getElementById('regionReportList');
-  document.getElementById('regionReportCount').textContent =
-    _allReports.length + (combine ? ' email' : ' region' + (_allReports.length === 1 ? '' : 's'));
+  const preliminary = buildRegionWiseReports(combine);
 
-  if (!_allReports.length) {
+  if (!preliminary.length) {
+    document.getElementById('regionReportCount').textContent = '0 emails';
     el.innerHTML = reportScopeNotice()
       + `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No reportable leads right now</div>`;
     document.getElementById('downloadAllReportsBtn').style.display = 'none';
     return;
   }
+
+  // Dedup by lead_id across regions — each customer belongs to exactly one
+  // region so `combine: false` runs shouldn't ever collide, but a plain
+  // object guard costs nothing and removes any doubt.
+  const seenLeadIds = {};
+  const leadsToPush = [];
+  preliminary.forEach(r => (r.sorted || []).forEach(row => {
+    const id = String(row.lead_id).trim();
+    if (!id || seenLeadIds[id]) return;
+    seenLeadIds[id] = true;
+    leadsToPush.push(row);
+  }));
+
+  const genBtn = document.getElementById('generateBtn');
+  const originalLabel = genBtn.textContent;
+  let followupLookup;
+  genBtn.disabled = true;
+  try {
+    genBtn.textContent = 'Pushing comments…';
+    const pushed = await pushLeadsToFollowups(leadsToPush);
+    if (!pushed) {
+      el.innerHTML = reportScopeNotice()
+        + `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Could not write Lead_Followups — see the status above. Nothing sent.</div>`;
+      return;
+    }
+    genBtn.textContent = 'Waiting for follow-ups…';
+    followupLookup = await waitForAllFollowups(leadsToPush.map(r => String(r.lead_id).trim()));
+  } finally {
+    genBtn.disabled = false;
+    genBtn.textContent = originalLabel;
+  }
+  if (!followupLookup) return; // cancelled — waitForAllFollowups already explained why, nothing to render
+
+  _allReports = buildRegionWiseReports(combine, followupLookup);
+  document.getElementById('regionReportCount').textContent =
+    _allReports.length + (combine ? ' email' : ' region' + (_allReports.length === 1 ? '' : 's'));
 
   el.innerHTML = reportScopeNotice() + _allReports.map((r, i) => `
     <div class="report-card">
@@ -6624,20 +6667,6 @@ function renderReports(){
 
   document.getElementById('downloadAllReportsBtn').style.display = 'inline-block';
   applyGmailButtonStatesFor(_allReports, i => 'gmailAllBtn_' + i);
-
-  // Fire-and-forget: the report above is already rendered and doesn't wait
-  // on this. Dedup by lead_id across regions — each customer belongs to
-  // exactly one region so `combine: false` runs shouldn't ever collide, but
-  // a plain object guard costs nothing and removes any doubt.
-  const seenLeadIds = {};
-  const leadsToPush = [];
-  _allReports.forEach(r => (r.sorted || []).forEach(row => {
-    const id = String(row.lead_id).trim();
-    if (!id || seenLeadIds[id]) return;
-    seenLeadIds[id] = true;
-    leadsToPush.push(row);
-  }));
-  pushLeadsToFollowups(leadsToPush);
 }
 
 document.getElementById('reportModeSelect').addEventListener('change', syncReportControls);
@@ -6745,11 +6774,19 @@ function reportDateRange(includedLeads){
   return a === b ? a : `${a} to ${b}`;
 }
 
-function buildRegionWiseReports(combineAll){
+// followupLookup is {lead_id: suggested_followup text} sourced from
+// Lead_Followups — see renderReports, which builds it from whatever a
+// person has typed into that column after reviewing collateFamilyComments'
+// export. Only lead_ids that were actually pushed there (the core
+// issue-flagged population) will ever have an entry, so this naturally
+// only overrides suggestedFollowUp for that population and falls through
+// unchanged for notConnected/stuck/stalled rows.
+function buildRegionWiseReports(combineAll, followupLookup){
   const now = new Date();
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
   const STUCK_LABEL = ISSUE_PRIORITY.find(r => r.key === 'stageStuck48h').label;
+  const followupTextFor = (r) => (followupLookup && followupLookup[String(r.lead_id).trim()]) || suggestedFollowUp(r);
   let undatableCount = 0, outOfScope = 0;
   // Fresh for this generation — this path previously never touched the
   // names dict at all, so reportScopeNotice()'s "NOT IN REPORTS" breakdown
@@ -7094,7 +7131,7 @@ ${EMAIL_SIGNATURE}`;
           const created = parseDate(r.lead_created_at);
           const cells = [idsFor(r), r.subRegion, rmsFor(r), created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
           if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
-          cells.push(suggestedFollowUp(r));
+          cells.push(followupTextFor(r));
           return cells;
         }),
       };
@@ -7107,7 +7144,7 @@ ${EMAIL_SIGNATURE}`;
         heading: 'Not Connected in 10 Minutes',
         subheading: `${notConnectedTotalLabel} late connection${notConnectedCloneCounts.unique === 1 ? '' : 's'} — already happened, for the record only`,
         columns: ['Lead ID', 'Region', 'RM', 'Connected Late By', 'Suggested Follow-up'],
-        rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late'), suggestedFollowUp(r)]),
+        rows: notConnectedItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), fmtWorkingWait(r.businessMinsToConnect, 'late'), followupTextFor(r)]),
       });
     }
     if (stuckItems.length) {
@@ -7120,7 +7157,7 @@ ${EMAIL_SIGNATURE}`;
         subheading: `${stuckTotalLabel} lead${stuckCloneCounts.unique === 1 ? '' : 's'} — already listed under another issue above`,
         action: ISSUE_ACTION_MAP.stageStuck48h || '',
         columns: ['Lead ID', 'Region', 'RM', 'Suggested Follow-up'],
-        rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), suggestedFollowUp(r)]),
+        rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), followupTextFor(r)]),
       });
     }
     if (warmCloseItems.length) {
@@ -7143,7 +7180,7 @@ ${EMAIL_SIGNATURE}`;
         subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — zero movement between the two picked Movement_Log snapshots on an already-flagged issue. Review and escalate first.`,
         action: 'These leads have shown no movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard, while already flagged for an issue. Personally follow up and escalate immediately.',
         columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Stalled Since', 'Suggested Follow-up'],
-        rows: stalledItems.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), suggestedFollowUp(r)]),
+        rows: stalledItems.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), followupTextFor(r)]),
         accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       });
     }
@@ -8723,15 +8760,15 @@ function setFollowupsPushStatus(text, color){
 // updated as two separate ranges (A:E and G) rather than one A:G write,
 // which would silently blank out anything in F.
 async function pushLeadsToFollowups(rows){
-  if (!rows.length) return;
-  if (!_currentSheetId) return;
+  if (!rows.length) return true;
+  if (!_currentSheetId) return false;
 
   if (!gateTokenValid()) {
     setFollowupsPushStatus('Re-signing in…', 'var(--text-faint)');
     await gateSignIn();
     if (!gateTokenValid()) {
       setFollowupsPushStatus('Sign-in required to write Lead_Followups.', 'var(--amber)');
-      return;
+      return false;
     }
   }
 
@@ -8772,8 +8809,78 @@ async function pushLeadsToFollowups(rows){
       `Lead_Followups updated: ${updateData.length / 2} updated, ${appendRows.length} added.`,
       'var(--green)'
     );
+    return true;
   } catch (err) {
     setFollowupsPushStatus(`Lead_Followups write failed: ${err.message}`, 'var(--red)');
+    return false;
+  }
+}
+
+// Resolves after `ms`, but wakes up early (checking every 500ms) if
+// waitForAllFollowups' Cancel button flips _followupWaitCancelled — so
+// cancelling takes effect within half a second instead of waiting out
+// however much of the current poll interval was left.
+function sleepCancelable(ms){
+  return new Promise(resolve => {
+    const start = Date.now();
+    const tick = () => {
+      if (_followupWaitCancelled || Date.now() - start >= ms) { resolve(); return; }
+      setTimeout(tick, 500);
+    };
+    tick();
+  });
+}
+
+let _followupWaitCancelled = false;
+
+function showFollowupWaitControls(show){
+  const btn = document.getElementById('followupsWaitCancelBtn');
+  if (btn) btn.style.display = show ? 'inline-block' : 'none';
+}
+
+document.getElementById('followupsWaitCancelBtn').addEventListener('click', () => {
+  _followupWaitCancelled = true;
+});
+
+// Polls Lead_Followups until every leadId in `leadIds` has a non-blank
+// suggested_followup (column F), or the user clicks Cancel. Returns
+// {lead_id: suggestion} once complete, or null if cancelled — renderReports
+// checks for null and bails out without sending anything. No timeout: a
+// person may take a while to review and type these in, and the Cancel
+// button (not a clock) is the deliberate way out of an abandoned wait.
+async function waitForAllFollowups(leadIds){
+  if (!leadIds.length) return {};
+  _followupWaitCancelled = false;
+  showFollowupWaitControls(true);
+  const POLL_MS = 20000;
+  let attempt = 0;
+  try {
+    while (true) {
+      if (_followupWaitCancelled) {
+        setFollowupsPushStatus('Cancelled — waiting for follow-ups stopped, nothing sent.', 'var(--amber)');
+        return null;
+      }
+      attempt++;
+      const rowsData = await sheetsApiValuesGet(_currentSheetId, `${LEAD_FOLLOWUPS_TAB_NAME}!A2:G`);
+      const lookup = {};
+      rowsData.forEach(r => {
+        const id = String((r && r[0]) || '').trim();
+        const suggestion = String((r && r[5]) || '').trim();
+        if (id && suggestion) lookup[id] = suggestion;
+      });
+      const missing = leadIds.filter(id => !lookup[id]);
+      if (!missing.length) {
+        setFollowupsPushStatus(`All ${leadIds.length} follow-up${leadIds.length === 1 ? '' : 's'} ready.`, 'var(--green)');
+        return lookup;
+      }
+      setFollowupsPushStatus(
+        `Waiting for follow-ups: ${leadIds.length - missing.length} of ${leadIds.length} filled in (check #${attempt})…`,
+        'var(--text-faint)'
+      );
+      await sleepCancelable(POLL_MS);
+    }
+  } finally {
+    showFollowupWaitControls(false);
   }
 }
 
