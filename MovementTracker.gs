@@ -102,7 +102,7 @@ const HEADER_ALIASES_ = {
 // stopped filtering by open/closed status — restored here because
 // writeSlaHistorySnapshot_ below needs it again, for a different purpose:
 // deciding what's OPEN for SLA compliance counting, not what to snapshot.) ----
-const FUNNEL_ORDER_ = ['not updated', 'suspect', 'opportunity', 'visit booked', 'visit', 'pipeline', 'soft booking', 'booking'];
+const FUNNEL_ORDER_ = ['not updated', 'suspect', 'opportunity', 'visit booked', 'visit', 'pipeline', 'gross eoi application', 'soft booking', 'booking'];
 const STAGE_ALIASES_ = {
   'not updated': ['not updated'],
   'suspect': ['suspect'],
@@ -110,6 +110,7 @@ const STAGE_ALIASES_ = {
   'visit booked': ['visit booked', 'visit booking', 'visit scheduled'],
   'visit': ['visit', 'revisit', 'hpop', 'video presentation', 'video call'],
   'pipeline': ['pipeline'],
+  'gross eoi application': ['gross eoi application', 'gross eoi', 'eoi application', 'eoi'],
   'soft booking': ['soft booking', 'soft book'],
   'booking': ['booking', 'booked'],
 };

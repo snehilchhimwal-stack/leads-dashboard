@@ -1062,7 +1062,7 @@ const CONFIG = {
   LEAD_GRACE_HOURS: 3,
   FOLLOWUP_REVIEW_HOURS: 4,
   GOOGLE_SOURCE_VALUE: 'google',
-  FUNNEL_ORDER: ['not updated','suspect','opportunity','visit booked','visit','pipeline','soft booking','booking'],
+  FUNNEL_ORDER: ['not updated','suspect','opportunity','visit booked','visit','pipeline','gross eoi application','soft booking','booking'],
   // Real CRM stage text doesn't always match the canonical funnel name
   // exactly (e.g. "Booked" instead of "Booking"). Each canonical stage is
   // matched against any of these substrings, case-insensitive.
@@ -1083,6 +1083,7 @@ const CONFIG = {
     // actually met, by whichever channel.
     'visit': ['visit', 'revisit', 'hpop', 'video presentation', 'video call'],
     'pipeline': ['pipeline'],
+    'gross eoi application': ['gross eoi application', 'gross eoi', 'eoi application', 'eoi'],
     'soft booking': ['soft booking', 'soft book'],
     'booking': ['booking', 'booked'],
   },
@@ -4364,7 +4365,7 @@ function renderSourceMix(){
 
 function renderFunnel(){
   const el = document.getElementById('funnelViz');
-  const stages = CONFIG.FUNNEL_ORDER; // not updated → suspect → opportunity → visit booked → visit → pipeline → soft booking → booking
+  const stages = CONFIG.FUNNEL_ORDER; // not updated → suspect → opportunity → visit booked → visit → pipeline → gross eoi application → soft booking → booking
   const oppIdx = stages.indexOf(CONFIG.OPPORTUNITY_STAGE);
 
   const stageCountsLower = {};
