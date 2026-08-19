@@ -543,7 +543,9 @@
         <span id="gateUserBadge" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;"></span>
         <button class="btn ghost" id="changeSourceBtn" style="display:none;">Change source</button>
         <button class="btn" id="refreshBtn">Connect &amp; Refresh</button>
+        <button class="btn ghost" id="snapshotNowBtn" title="Writes an on-the-spot checkpoint to Movement_Log — feeds the Movement and Tracking tabs' From/To pickers. Same sign-in as the rest of the dashboard, no separate connect step.">Snapshot now</button>
       </div>
+      <span id="snapshotStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
     </div>
   </header>
 
@@ -596,6 +598,7 @@
       <button class="tab-btn" data-tab="tab-distribution">Distribution</button>
       <button class="tab-btn" data-tab="tab-audit">Audit</button>
       <button class="tab-btn" data-tab="tab-movement">Movement</button>
+      <button class="tab-btn" data-tab="tab-tracking">Tracking</button>
     </div>
 
     <!-- ============ OVERVIEW ============ -->
@@ -656,10 +659,8 @@
           <input type="checkbox" id="autoSnapshotCheck" style="accent-color:var(--blue);" />
           Also snapshot on refresh (this browser's clock)
         </label>
-        <button class="btn ghost" id="snapshotNowBtn" style="padding:8px 12px; font-size:12.5px;">Snapshot now</button>
-        <span id="snapshotStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
       </div>
-      <div class="filter-summary" style="margin-bottom:14px;">Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs — useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the picker above. Uses the same sign-in as the rest of the dashboard (no separate connect step) — off by default, since it writes to the sheet rather than just reading it.</div>
+      <div class="filter-summary" style="margin-bottom:14px;">The Snapshot now button is up in the header, next to Refresh — one button, usable from any tab. Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs, useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the picker above. Uses the same sign-in as the rest of the dashboard (no separate connect step) — the checkbox here is off by default, since it writes to the sheet rather than just reading it.</div>
 
       <section id="sec-stalled">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Leads</div><div class="section-count" id="stalledCount"></div></div>
@@ -910,6 +911,33 @@
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">Time to Remediate</div><div class="section-count" id="remediateCount"></div></div>
         <div class="filter-summary">For leads that WERE stalled and then actually moved: how long the stall lasted before it did. Only counts stalls that resolved within the retained history — one still stalled right now isn't in here yet (it's in the leaderboard above while it's ongoing). Respects the Project/Region/TL filters above.</div>
         <div class="section-scroll"><table id="remediateTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+    </div>
+
+    <!-- ============ TRACKING ============ -->
+    <div class="tab-panel" id="tab-tracking">
+      <div class="band-label">Tracking <span class="band-note">is the dashboard actually catching what you emailed — did the numbers move?</span></div>
+
+      <section id="sec-tracking">
+        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Region Issue Trend</div><div class="section-count" id="trackingCount"></div></div>
+        <div class="filter-summary">Reads the same <span class="mono">Movement_Log</span> sheet tab as the Movement tab below — nothing here is stored in this browser, so any pair of captured snapshots reads identically for anyone who opens this Sheet. Pick a "From" snapshot (e.g. right when you sent a region's email) and a "To" snapshot (e.g. now) to see whether each issue count actually went down, grouped the same way the region emails are grouped (<span class="mono">mainRegionFor(effectiveRegion())</span>). New comparison points come from either <span class="mono">MovementTracker.gs</span>'s automatic every-6-hours capture, or the Snapshot now button up in the header.</div>
+
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="stale-label">From
+            <select id="trackingFromDateSelect" class="stale-select"></select>
+            <select id="trackingFromTimeSelect" class="stale-select"></select>
+          </label>
+          <label class="stale-label">To
+            <select id="trackingToDateSelect" class="stale-select"></select>
+            <select id="trackingToTimeSelect" class="stale-select"></select>
+          </label>
+          <label class="stale-label">Region
+            <select id="trackingRegionSelect" class="stale-select"></select>
+          </label>
+        </div>
+
+        <div id="trackingNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll"><table id="trackingTable"><thead></thead><tbody></tbody></table></div>
       </section>
     </div>
 
@@ -2855,6 +2883,7 @@ function renderAll(){
 
   renderFunnel();
   renderSlaTrend();
+  renderTrackingTab();
   renderRegionTable();
   renderTLTable();
   renderRMTable();
@@ -3079,6 +3108,158 @@ function renderSlaTrend(){
       <div class="trend-nums">${h.breachedTotal}/${h.openTotal} <span class="conv">· ${rate.toFixed(0)}%</span></div>
     </div>`;
   }).join('') + `</div>`;
+}
+
+// Tallies open-lead issue counts within ONE Movement_Log snapshot run (every
+// record sharing the exact `at` timestamp), replaying the same enrichLead()
+// logic every other issue check in this file uses (via enrichSnapshotCached,
+// which pins _renderNow to the snapshot's own instant — see enrichLeadAsOf).
+// Grouped with mainRegionFor(effectiveRegion()), the SAME logic the region
+// emails use, so a count here lines up with what an email at that same
+// moment would have shown. `regionFilter` is '__all__' or one main region
+// string; passesMovementFilters still applies the top filter bar's Project/
+// TL/Source/Sub-source/date-range (and its OWN Region multi-select, if set) —
+// this table layers its own region grouping on top of that, it doesn't
+// replace it.
+function issueTallyAt(at, regionFilter){
+  const tally = { openTotal: 0, breachedTotal: 0, byCheck: {} };
+  ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
+  if (!at) return tally;
+
+  movementSnapshots.forEach(rec => {
+    if (rec.snapshot_at.getTime() !== at.getTime()) return;
+    if (!passesMovementFilters(rec)) return;
+    if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
+
+    const enriched = enrichSnapshotCached(rec);
+    if (!enriched.isOpenLead) return;
+    tally.openTotal++;
+    let breached = false;
+    ISSUE_PRIORITY.forEach(rule => {
+      if (enriched[rule.key]) { tally.byCheck[rule.key]++; breached = true; }
+    });
+    if (breached) tally.breachedTotal++;
+  });
+  return tally;
+}
+
+// Own copy of populateMovementSnapshotSelectors' From/To defaulting logic
+// (second-most-recent run / most-recent run), kept as a separate function
+// rather than sharing IDs with the Movement tab's picker — that one is
+// deliberately a short, recent pair for Stalled Leads; this one is meant for
+// picking two points that could be weeks apart (e.g. "when I sent Tuesday's
+// email" vs "now").
+function trackingPopulateSnapshotSelectors(){
+  const fromDateSel = document.getElementById('trackingFromDateSelect');
+  const toDateSel = document.getElementById('trackingToDateSelect');
+  if (!fromDateSel || !toDateSel) return;
+
+  populateMovementDateSelect('trackingFromDateSelect');
+  populateMovementDateSelect('trackingToDateSelect');
+
+  const runs = distinctMovementSnapshotRuns();
+  const fromRun = runs.length >= 2 ? runs[runs.length - 2] : runs[0];
+  const toRun = runs[runs.length - 1];
+
+  if (fromRun) {
+    fromDateSel.value = istDateKey(fromRun.at);
+    populateMovementTimeSelect('trackingFromDateSelect', 'trackingFromTimeSelect', fromRun.at);
+  }
+  if (toRun) {
+    toDateSel.value = istDateKey(toRun.at);
+    populateMovementTimeSelect('trackingToDateSelect', 'trackingToTimeSelect', toRun.at);
+  }
+}
+
+function getPickedTrackingWindow(){
+  const fromAt = getSelectedMovementSnapshot('trackingFromTimeSelect');
+  const toAt = getSelectedMovementSnapshot('trackingToTimeSelect');
+  if (!fromAt || !toAt) return null;
+  return { fromAt, toAt };
+}
+
+// From/To comparison of issue counts across two Movement_Log snapshots —
+// lets you line up "the snapshot closest to when I sent that region's
+// email" against "now" (or any later capture) and see whether each count
+// actually dropped, instead of trusting the live number alone. Entirely
+// sheet-sourced: nothing here reads or writes browser storage.
+function renderTrackingTab(){
+  const table = document.getElementById('trackingTable');
+  const regionSelect = document.getElementById('trackingRegionSelect');
+  const countEl = document.getElementById('trackingCount');
+  const noticeEl = document.getElementById('trackingNotice');
+  if (!table || !regionSelect) return;
+
+  // Region dropdown built from the fixed region map (not from history —
+  // there's no local history anymore), preserving whatever was already
+  // selected across re-renders.
+  const regionList = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort();
+  const prevValue = regionSelect.value;
+  regionSelect.innerHTML = `<option value="__all__">All regions (combined)</option>` +
+    regionList.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  regionSelect.value = (prevValue && (prevValue === '__all__' || regionList.includes(prevValue))) ? prevValue : '__all__';
+  const selectedRegion = regionSelect.value;
+
+  const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
+
+  if (movementFetchState !== 'ok') {
+    if (countEl) countEl.textContent = '';
+    thead.innerHTML = ''; tbody.innerHTML = '';
+    if (noticeEl) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = movementFetchState === 'loading'
+        ? 'Loading movement history…'
+        : `<b>No Movement_Log data yet.</b> This tab reads the same "Movement_Log" sheet tab as the Movement tab — see <span class="mono">MovementTracker.gs</span> for the one-time setup, or click Snapshot now above once you're signed in to start capturing without it.`;
+    }
+    return;
+  }
+
+  const win = getPickedTrackingWindow();
+  if (!win) {
+    if (countEl) countEl.textContent = '';
+    thead.innerHTML = ''; tbody.innerHTML = '';
+    if (noticeEl) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Click Snapshot now above, or check back after the next scheduled run.';
+    }
+    return;
+  }
+  if (noticeEl) noticeEl.style.display = 'none';
+
+  const fromTally = issueTallyAt(win.fromAt, selectedRegion);
+  const toTally = issueTallyAt(win.toAt, selectedRegion);
+  if (countEl) countEl.textContent = `${istStamp(win.fromAt)} → ${istStamp(win.toAt)}`;
+
+  thead.innerHTML = `<tr>
+    <th>Issue</th>
+    <th style="text-align:right">From</th>
+    <th style="text-align:right">To</th>
+    <th style="text-align:right">Change</th>
+  </tr>`;
+
+  const deltaBadge = (curr, prev) => {
+    const diff = curr - prev;
+    if (diff === 0) return `<span class="dim">±0</span>`;
+    const color = diff < 0 ? 'var(--green)' : 'var(--red)';
+    const arrow = diff < 0 ? '▼' : '▲';
+    return `<span style="color:${color}; font-weight:600;">${arrow} ${Math.abs(diff)}</span>`;
+  };
+
+  const rows = ISSUE_PRIORITY.map(c => {
+    const f = fromTally.byCheck[c.key] || 0;
+    const t = toTally.byCheck[c.key] || 0;
+    return `<tr><td>${esc(c.label)}</td><td class="num">${f}</td><td class="num">${t}</td><td class="num">${deltaBadge(t, f)}</td></tr>`;
+  });
+  rows.push(`<tr style="font-weight:600;">
+    <td>Total Breaching</td><td class="num">${fromTally.breachedTotal}</td><td class="num">${toTally.breachedTotal}</td>
+    <td class="num">${deltaBadge(toTally.breachedTotal, fromTally.breachedTotal)}</td>
+  </tr>`);
+  rows.push(`<tr class="dim">
+    <td>Open Leads</td><td class="num">${fromTally.openTotal}</td><td class="num">${toTally.openTotal}</td>
+    <td class="num">${deltaBadge(toTally.openTotal, fromTally.openTotal)}</td>
+  </tr>`);
+
+  tbody.innerHTML = rows.join('');
 }
 
 /* ===================== RM PERFORMANCE & SLA SCORE ===================== */
@@ -3987,29 +4168,73 @@ function hasWord(c, word){
 // checks its common abbreviation(s) too, via hasWord above.
 function inferOutcome(comment){
   const c = String(comment).toLowerCase();
-  if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1 || c.indexOf('sw off') !== -1 || hasWord(c, 'swoff')) return 'Switched Off';
+  // Checked first and unconditionally — a request to stop calling overrides
+  // whatever else the same comment says (e.g. "not interested, don't call
+  // again" should still read as DND, not just Not Interested).
+  if (c.indexOf('do not call') !== -1 || c.indexOf("don't call") !== -1 || c.indexOf('dont call') !== -1 ||
+      c.indexOf('not to call') !== -1 || c.indexOf('stop calling') !== -1 || hasWord(c, 'dnd')) return 'Do Not Disturb';
+  if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1 || c.indexOf('sw off') !== -1 || hasWord(c, 'swoff') ||
+      c.indexOf('not reachable') !== -1 || c.indexOf('unreachable') !== -1 || c.indexOf('out of coverage') !== -1 ||
+      c.indexOf('voicemail') !== -1 || c.indexOf('voice mail') !== -1) return 'Switched Off';
   if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1 || hasWord(c, 'wn')) return 'Wrong Number';
   if (c.indexOf('busy') !== -1) return 'Busy';
-  if (hasWord(c, 'rnr') || c.indexOf('not responding') !== -1) return 'RNR';
+  // Checked before the generic Not Interested/DNP catches below, since a
+  // "booked/purchased elsewhere" comment often also says "not interested" —
+  // the more specific, more useful signal should win.
+  if (c.indexOf('booked elsewhere') !== -1 || c.indexOf('booked with another') !== -1 || c.indexOf('purchased elsewhere') !== -1 ||
+      c.indexOf('purchased another') !== -1 || c.indexOf('bought elsewhere') !== -1 || c.indexOf('bought another') !== -1 ||
+      c.indexOf('finalized another') !== -1 || c.indexOf('finalised another') !== -1 || c.indexOf('gone with another') !== -1) return 'Booked Elsewhere';
+  // Broadened beyond "not responding"/rnr to the plain phrasing RMs
+  // actually type — "no answer", "not picking up", "didn't pick" — which
+  // previously fell through to the generic Update fallback despite being
+  // the exact same outcome as RNR.
+  if (hasWord(c, 'rnr') || c.indexOf('not responding') !== -1 || c.indexOf('no answer') !== -1 ||
+      c.indexOf('not answering') !== -1 || c.indexOf('not picking') !== -1 || c.indexOf('did not pick') !== -1 ||
+      c.indexOf("didn't pick") !== -1 || c.indexOf('call not answered') !== -1) return 'RNR';
   if (c.indexOf('ringing') !== -1) return 'Ringing / RNR';
   // Word-boundary, not a bare substring — "disc" alone matched inside
   // "discussed", "discount", "disclose", misclassifying any comment that
   // merely mentioned discussing something as a dropped call.
-  if (c.indexOf('disconnected') !== -1 || c.indexOf('call disc') !== -1 || hasWord(c, 'disc')) return 'Disconnected';
+  if (c.indexOf('disconnected') !== -1 || c.indexOf('call disc') !== -1 || hasWord(c, 'disc') ||
+      c.indexOf('network issue') !== -1 || c.indexOf('network problem') !== -1 || c.indexOf('poor network') !== -1 ||
+      c.indexOf('call not connecting') !== -1 || c.indexOf('call drop') !== -1) return 'Disconnected';
+  if (c.indexOf('out of station') !== -1 || c.indexOf('out station') !== -1 || c.indexOf('out of town') !== -1 ||
+      c.indexOf('not in town') !== -1 || c.indexOf('travelling') !== -1 || c.indexOf('traveling') !== -1) return 'Out of Station';
   if (c.indexOf('whatsapp') !== -1 && (c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1)) return 'WhatsApp Sent';
   // Checked before the generic "shared/sent details" match below, since
   // "shared X on whatsapp" would otherwise also satisfy that pattern.
   if ((c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1) &&
       (c.indexOf('detail') !== -1 || c.indexOf('brochure') !== -1 || c.indexOf('project') !== -1 || c.indexOf('info') !== -1)) return 'Details Shared';
-  if (c.indexOf('site visit') !== -1 || c.indexOf('visit scheduled') !== -1 || c.indexOf('visit arranged') !== -1 || c.indexOf('visit booked') !== -1 || c.indexOf('visit fixed') !== -1) return 'Visit Arranged';
-  if (c.indexOf('not interested') !== -1 || c.indexOf('no interest') !== -1 || hasWord(c, 'ni')) return 'Not Interested';
+  // Checked before Visit Arranged below — "visit done"/"visited" is the
+  // opposite moment (post-visit) from "visit scheduled"/"visit arranged"
+  // (pre-visit), and needs its own follow-up action, not a confirm-
+  // attendance reminder for a visit that already happened.
+  if (c.indexOf('visit done') !== -1 || c.indexOf('visited site') !== -1 || c.indexOf('site visited') !== -1 ||
+      c.indexOf('visit completed') !== -1 || c.indexOf('came for visit') !== -1 || c.indexOf('visited the project') !== -1) return 'Visit Completed';
+  if (c.indexOf('site visit') !== -1 || c.indexOf('visit scheduled') !== -1 || c.indexOf('visit arranged') !== -1 ||
+      c.indexOf('visit booked') !== -1 || c.indexOf('visit fixed') !== -1 || c.indexOf('visit confirmed') !== -1 ||
+      c.indexOf('will visit') !== -1 || c.indexOf('coming for visit') !== -1 || c.indexOf('visit planned') !== -1) return 'Visit Arranged';
+  // Checked before Budget Concern — a loan/paperwork update often also
+  // mentions amounts, but "in process" is the more specific, more useful
+  // signal (keep warm and check status, not "find a cheaper option").
+  if ((c.indexOf('loan') !== -1 && (c.indexOf('process') !== -1 || c.indexOf('sanction') !== -1 || c.indexOf('approval') !== -1)) ||
+      c.indexOf('documents submitted') !== -1 || c.indexOf('document submitted') !== -1 || c.indexOf('bank process') !== -1) return 'Loan In Process';
+  if (c.indexOf('not interested') !== -1 || c.indexOf('no interest') !== -1 || c.indexOf('no longer interested') !== -1 ||
+      c.indexOf('not looking anymore') !== -1 || c.indexOf('dropped the plan') !== -1 || c.indexOf('dropped the idea') !== -1 ||
+      hasWord(c, 'ni')) return 'Not Interested';
   // "considering"/"thinking" checked before the bare "interested" match,
   // since a comment like "will think and let us know if interested" should
   // read as still-deciding, not a firm expression of interest.
-  if (c.indexOf('consider') !== -1 || c.indexOf('think about') !== -1 || c.indexOf('will think') !== -1 || c.indexOf('will get back') !== -1) return 'Considering';
-  if (c.indexOf('budget') !== -1) return 'Budget Concern';
+  if (c.indexOf('consider') !== -1 || c.indexOf('think about') !== -1 || c.indexOf('will think') !== -1 ||
+      c.indexOf('will get back') !== -1 || c.indexOf('need some time') !== -1 || c.indexOf('need time') !== -1 ||
+      c.indexOf('will discuss') !== -1) return 'Considering';
+  if (c.indexOf('budget') !== -1 || c.indexOf('expensive') !== -1 || c.indexOf('too high') !== -1 || c.indexOf('high price') !== -1 ||
+      c.indexOf('costly') !== -1 || c.indexOf("can't afford") !== -1 || c.indexOf('cannot afford') !== -1 ||
+      c.indexOf('out of budget') !== -1) return 'Budget Concern';
   if (c.indexOf('interested') !== -1) return 'Interested';
-  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1 || hasWord(c, 'cb')) return 'DNP';
+  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1 ||
+      c.indexOf('call later') !== -1 || c.indexOf('call after') !== -1 || c.indexOf('call tomorrow') !== -1 ||
+      c.indexOf('requested callback') !== -1 || c.indexOf('asked to call') !== -1 || hasWord(c, 'cb')) return 'DNP';
   return 'Update';
 }
 
@@ -4027,15 +4252,20 @@ try {
 // to region-email issue rows so each lead carries a concrete "what to do
 // next" instead of just a bare comment count.
 const FOLLOWUP_SUGGESTIONS = {
+  'Do Not Disturb': "Client asked not to be called — stop calling immediately, log as DND, and only re-engage via an approved channel (SMS/email) if policy allows.",
   'Switched Off': 'Phone was switched off — retry later today; try an alternate number if one is on file.',
   'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
   'Busy': 'Line was busy — retry within a few hours.',
+  'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
   'Disconnected': 'Call disconnected mid-conversation — retry; flag the number if this keeps happening.',
+  'Out of Station': "Client is travelling — schedule the follow-up for when they're back rather than repeat-calling now.",
   'WhatsApp Sent': 'WhatsApp sent but not yet followed by a call — a text may go unseen, call to confirm.',
   'Details Shared': 'Project details were shared — follow up to gauge interest and answer any questions before it goes cold.',
+  'Visit Completed': "Site visit already happened — call within 24 hours for feedback while it's fresh, and push toward the next concrete step.",
   'Visit Arranged': 'A site visit is arranged — confirm attendance close to the date, and follow up right after for feedback.',
+  'Loan In Process': "Loan/paperwork is in process on their end — check status periodically and keep them warm, don't let this go cold.",
   'Not Interested': 'Client indicated no interest — confirm this is final, then close with a clear reason if so.',
   'Considering': 'Client is still deciding — schedule a follow-up in a few days rather than calling again immediately.',
   'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
@@ -4060,27 +4290,21 @@ function unmatchedFollowUp(comment, loggedBy, ts){
   return `No keyword match — latest note${attribution ? ` (${attribution})` : ''}: "${text}". Read this and log a specific next call/action.`;
 }
 
-// Suggested follow-up for a lead — mandatory best-effort: checked across
-// every comment-ish column of THIS copy AND every sibling copy of the
-// SAME customer (siblingComments — see copySplits in fetchAndRender and
-// computeMovementRows), not just this one card's own fields. A
-// customer's real next step should be assessed from the full picture
-// across every RM who's touched them — a copy with nothing logged of its
-// own can still often be answered from what a sibling copy recorded.
+// Pools every comment-ish signal across a customer's full family (this copy
+// + siblingComments — see copySplits in fetchAndRender/computeMovementRows)
+// and returns the single most recent one as {outcome, comment, loggedBy, ts},
+// or null if the family has no structured action-log entry AND no
+// last_comment anywhere. Shared by suggestedFollowUp below (tiers 1-2) and
+// the Possible Premature Closes check in buildRegionWiseReports — both need
+// "what did this customer most recently say," just for different purposes.
 // Priority order:
-//   1. The structured action log (combinedCommentsText) across every
-//      copy in the family, pooled together — the single MOST RECENT
-//      entry across the WHOLE family wins, found by actual timestamp
-//      (falls back to the last one parsed if nothing carries a date).
+//   1. The structured action log (combinedCommentsText) across every copy
+//      in the family, pooled together — the single MOST RECENT entry across
+//      the WHOLE family wins, found by actual timestamp (falls back to the
+//      last one parsed if nothing carries a date).
 //   2. last_comment, checked across every copy in the family — only once
 //      NOT ONE copy in the family has a single dated structured entry.
-//   3. closing_reason, checked across every copy — the only signal left
-//      when a copy closed without anything else logged.
-//   4. noCommentsFallback (or the generic default) once ALL of the above
-//      are genuinely empty on EVERY copy in the family. Lets a caller
-//      substitute its own wording (e.g. Overnight Leads' "Connect ASAP")
-//      for that last case only.
-function suggestedFollowUp(l, noCommentsFallback){
+function latestFamilyOutcome(l){
   const family = [l].concat(l.siblingComments || []);
 
   const entries = [];
@@ -4095,17 +4319,39 @@ function suggestedFollowUp(l, noCommentsFallback){
       const d = parseDate(e.ts);
       if (d && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
     });
-    return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);
+    return { outcome: latest.outcome, comment: latest.comment, loggedBy: latest.loggedBy, ts: latest.ts };
   }
 
   for (const copy of family) {
     const lastComment = String(copy.last_comment || '').trim();
     if (lastComment) {
-      const outcome = inferOutcome(lastComment);
-      return FOLLOWUP_SUGGESTIONS[outcome] || unmatchedFollowUp(lastComment, copy.RM, null);
+      return { outcome: inferOutcome(lastComment), comment: lastComment, loggedBy: copy.RM, ts: null };
     }
   }
 
+  return null;
+}
+
+// Suggested follow-up for a lead — mandatory best-effort: checked across
+// every comment-ish column of THIS copy AND every sibling copy of the
+// SAME customer, not just this one card's own fields. A customer's real
+// next step should be assessed from the full picture across every RM who's
+// touched them — a copy with nothing logged of its own can still often be
+// answered from what a sibling copy recorded. Priority order:
+//   1-2. latestFamilyOutcome above (structured action log, then last_comment).
+//   3. closing_reason, checked across every copy — the only signal left
+//      when a copy closed without anything else logged.
+//   4. noCommentsFallback (or the generic default) once ALL of the above
+//      are genuinely empty on EVERY copy in the family. Lets a caller
+//      substitute its own wording (e.g. Overnight Leads' "Connect ASAP")
+//      for that last case only.
+function suggestedFollowUp(l, noCommentsFallback){
+  const latest = latestFamilyOutcome(l);
+  if (latest) {
+    return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);
+  }
+
+  const family = [l].concat(l.siblingComments || []);
   for (const copy of family) {
     // lead_closing_reason/lead_closing_comment (the sheet's own closing
     // disposition) preferred over the RM-entered closing_reason when
@@ -4545,8 +4791,8 @@ document.getElementById('downloadIssuesBtn').addEventListener('click', downloadI
 // confirmed rule: take the word(s) in front of a trailing number or
 // direction (East/North/South/West); if there's no such suffix, the
 // region is its own group.
-// Only these 10 main regions get email reports. Any sub-region not listed
-// here (Commercial, Goa, Gurugram, KDMC, Kolkata, Launch Pune East,
+// Only these 11 main regions get email reports. Any sub-region not listed
+// here (Goa, Gurugram, KDMC, Kolkata, Launch Pune East,
 // Mumbai-Miscellaneous, Noida) is deliberately excluded — those leads still
 // appear everywhere else in the dashboard, just not in reports.
 // "HNI" / "HNI - SoBo" fold into SoBo; "Loan" reports as its own group.
@@ -4563,6 +4809,7 @@ const REGION_GROUP_MAP = {
   'Bangalore': 'Bangalore',
   'Bangalore 1': 'Bangalore', 'Bangalore 2': 'Bangalore', 'Bangalore 3': 'Bangalore',
   'Central': 'Central', 'Central Mumbai': 'Central',
+  'Commercial': 'Commercial',
   'Harbour': 'Harbour',
   'Hyderabad': 'Hyderabad',
   'Loan': 'Loan',
@@ -4658,20 +4905,22 @@ function groupItemsByReportRegion(items){
   return byRegion;
 }
 
-// How many flagged leads fell outside the 9 reporting regions on the last
-// build — surfaced in the UI so exclusions are visible, not silent.
+// How many flagged leads fell outside the configured reporting regions on
+// the last build — surfaced in the UI so exclusions are visible, not silent.
 let _lastReportOutOfScope = 0;
 // Raw region text -> count, for every flagged lead whose region matched no
 // reporting group. Names the misses so a typo or spacing variant can be
 // spotted, rather than only reporting how many were lost.
 let _lastReportOutOfScopeNames = {};
-// How many leads the generation-time grace re-check blocked. If this is ever
-// non-zero it means a flag survived to email generation that shouldn't have —
-// worth seeing rather than silently correcting.
-let _lastReportGraceBlocked = 0;
+// How many flagged leads had no parseable lead_created_at on the last
+// build — the only remaining reason reportableIssueFor/buildRegionReports
+// silently skip a flagged lead (no more generation-time grace re-check —
+// see reportableIssueFor's own comment on why that was removed).
+let _lastReportUndatable = 0;
 
-// Reporting covers 9 regions; anything else is intentionally excluded.
-// Say so on screen so the omission is explicit rather than silent.
+// Reporting covers only the regions configured in REGION_GROUP_MAP; anything
+// else is intentionally excluded. Say so on screen so the omission is
+// explicit rather than silent.
 function reportScopeNotice(){
   const regions = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort().join(', ');
 
@@ -4682,8 +4931,8 @@ function reportScopeNotice(){
       + ` If one of those is a region you DO want reported, its sheet text differs from the configured key — send me the exact string.`
     : '';
 
-  const graceNote = _lastReportGraceBlocked > 0
-    ? ` <b style="color:var(--amber)">${_lastReportGraceBlocked.toLocaleString()}</b> held back by the ${CONFIG.LEAD_GRACE_HOURS}h grace re-check at generation time.`
+  const undatableNote = _lastReportUndatable > 0
+    ? ` <b style="color:var(--amber)">${_lastReportUndatable.toLocaleString()}</b> flagged lead${_lastReportUndatable === 1 ? '' : 's'} held back — no parseable created date, so it can't be placed in a dated report.`
     : '';
 
   // Live map of every region value present in the filtered data, so a region
@@ -4707,7 +4956,7 @@ function reportScopeNotice(){
   // collapsed behind the same toggle pattern as the collation notice above
   // \u2014 useful when a region seems to be missing, not something to read
   // every time this panel opens.
-  return `<div class="truncation-notice" style="margin-bottom:12px;">Reports cover: ${esc(regions)}.${excluded}${graceNote} `
+  return `<div class="truncation-notice" style="margin-bottom:12px;">Reports cover: ${esc(regions)}.${excluded}${undatableNote} `
     + `<button type="button" class="info-toggle" style="display:inline; padding:0;" data-label="\u24d8 Region mapping" onclick="toggleInlineDetail(this)">\u24d8 Region mapping</button></div>`
     + `<div class="filter-summary" style="display:none; margin-bottom:12px; line-height:2;">`
     + `<span class="dim">Region values in the current data, and where each one reports. A region with 0 flagged leads produces no email \u2014 that is not a fault:</span><br>${mapRows}</div>`;
@@ -4821,12 +5070,22 @@ const SUBJECT_SCOPE_SUFFIX = ' - Google Search & Non-UTM only';
 // (sec.action) for reports that combine several issues, where each
 // section needs its own recommendation rather than one blanket one.
 function renderReportEmailHTML(opts){
-  const { eyebrow, title, region, subtitle, kpis, action, sections, footerNote } = opts;
+  const { eyebrow, title, region, subtitle, kpis, action, highlights, sections, footerNote } = opts;
   const FONT = "font-family:Arial,Helvetica,sans-serif;";
 
   const actionBox = (text) => `<div style="margin-top:12px; border-left:4px solid #10b981; background:#ecfdf5; border-radius:0 8px 8px 0; padding:10px 14px;">
       <div style="${FONT} font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; color:#059669;">Recommended Action</div>
       <div style="${FONT} font-size:12.5px; color:#065f46; margin-top:3px;">${esc(text)}</div>
+    </div>`;
+
+  // Deterministic, rule-based takeaways — computed straight from the
+  // tallies the caller already built, no AI involved — so a reader gets the
+  // shape of the report before skimming every section for it themselves.
+  const highlightsBox = (items) => `<div style="margin-top:12px; border-left:4px solid #b45309; background:#fffbeb; border-radius:0 8px 8px 0; padding:10px 14px;">
+      <div style="${FONT} font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; color:#b45309;">Highlights</div>
+      <ul style="${FONT} font-size:12.5px; color:#78350f; margin:5px 0 0; padding-left:18px;">
+        ${items.map(h => `<li style="margin-top:2px;">${esc(h)}</li>`).join('')}
+      </ul>
     </div>`;
 
   const kpiCells = kpis.map(k => `<td style="padding:4px;">
@@ -4869,6 +5128,7 @@ function renderReportEmailHTML(opts){
     </div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;"><tr>${kpiCells}</tr></table>
     ${action ? actionBox(action) : ''}
+    ${(highlights && highlights.length) ? highlightsBox(highlights) : ''}
     ${sectionsHTML}
     ${footerNote ? `<div style="margin-top:18px; font-size:11px; color:#9ca3af; ${FONT}">${esc(footerNote)}</div>` : ''}
     <div style="margin-top:16px; font-size:13px; color:#374151; white-space:pre-line; ${FONT}">${esc(EMAIL_SIGNATURE)}</div>
@@ -4879,29 +5139,29 @@ function buildRegionReports(issueKey){
   const meta = ISSUE_REPORT_META[issueKey];
   if (!meta) return [];
 
-  // SAFETY RE-CHECK, independent of enrichLead.
-  // Every issue except the 10-minute first-contact rule requires the lead to
-  // be at least LEAD_GRACE_HOURS old. That's already enforced upstream, but
-  // emails go to Cluster Heads — a false flag there costs real credibility,
-  // so the age is recomputed here from lead_created_at at generation time
-  // rather than trusting a flag computed on an earlier render.
   const now = new Date();
-  const enforceGrace = issueKey !== 'notConnected';
-  let graceBlockedCount = 0;
+
+  // No grace re-check here — enrichLead's pastGrace already gates every
+  // flag except inactiveRmNewLead (deliberately never gated — the problem
+  // is a bad assignment, not RM speed) and isNotUpdated's
+  // neverConnectedPastWindow branch (deliberately exempt so a totally
+  // silent lead is never invisible for 3 hours). Re-testing age here at
+  // generation time used to re-block exactly those two, which is backwards:
+  // `created` is fixed and `now` only moves forward between data-load time
+  // and generation time, so a flag that already passed grace at load time
+  // can never fail an age check again later — the re-check was a no-op for
+  // every OTHER rule and only ever hurt these two.
+  let undatableCount = 0;
 
   // issueLeads is already the per-copy view (see its declaration) — each
   // RM's own copy judged on its own call effort/comments/region, not a
   // combined-across-copies total.
   const matching = issueLeads.filter(l => {
     if (!l[meta.flag]) return false;
-    if (!enforceGrace) return true;
-    const created = parseDate(l.lead_created_at);
-    if (!created) { graceBlockedCount++; return false; } // undatable — don't email it
-    const hrs = (now - created) / 36e5;
-    if (hrs < CONFIG.LEAD_GRACE_HOURS) { graceBlockedCount++; return false; }
+    if (!parseDate(l.lead_created_at)) { undatableCount++; return false; } // undatable — don't email it
     return true;
   });
-  _lastReportGraceBlocked = graceBlockedCount;
+  _lastReportUndatable = undatableCount;
 
   let outOfScopeCount = 0;
   const inScope = matching.filter(l => {
@@ -4954,9 +5214,18 @@ function buildRegionReports(issueKey){
       `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
     ).join('\n');
 
-    const graceNote = enforceGrace
-      ? `\n\n(Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.)`
-      : '';
+    // Only true for the issues that actually always wait for grace at the
+    // source (enrichLead) — inactiveRm never waits (see the note above
+    // `matching`) and notConnected has its own unrelated footer note below,
+    // so stating this for either would be false, not just imprecise.
+    // Shared between this plaintext note and the HTML footerNote further
+    // down, so the two can't drift to different wording per issue.
+    const graceExplainer = issueKey === 'inactiveRm' || issueKey === 'notConnected'
+      ? ''
+      : issueKey === 'notUpdated'
+      ? `Most of these leads are excluded for the first ${CONFIG.LEAD_GRACE_HOURS} hours after creation — except one that has never been connected with at all past the first 10 minutes, which reports immediately regardless of age.`
+      : `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`;
+    const graceNote = graceExplainer ? `\n\n(${graceExplainer})` : '';
 
     // "Total Leads"/"Leads Flagged" has to mean distinct customers, not
     // rows — a customer collated from 2 RM copies otherwise reads as 2
@@ -5017,9 +5286,7 @@ function buildRegionReports(issueKey){
       })),
       footerNote: isReminder
         ? 'This is a response-time SLA record, not an action list — every lead below has already connected, just after the 10-minute window. Leads that still have not connected at all are reported under Not Updated instead.'
-        : (enforceGrace
-          ? `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`
-          : ''),
+        : graceExplainer,
     });
 
     return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
@@ -5759,22 +6026,24 @@ function selectedRegionLabel(fallbackRegions){
 // that isn't ALSO flagged for something genuinely emailable.
 const _EMAILABLE_FLAG_KEYS = new Set(Object.values(ISSUE_REPORT_META).map(m => m.flag));
 
-function reportableIssueFor(l, now){
+function reportableIssueFor(l){
   const created = parseDate(l.lead_created_at);
   if (!created) return null; // undatable — never email it
-  const ageHrs = (now - created) / 36e5;
-  const withinGrace = ageHrs < CONFIG.LEAD_GRACE_HOURS;
 
-  // No rule.key here is ever 'firstContactBreach' — ISSUE_PRIORITY
-  // deliberately excludes it (see the comment above ISSUE_PRIORITY's own
-  // definition), so grace applies uniformly to every rule this loop can
-  // actually reach. An exemption clause for that key used to sit here from
-  // before firstContactBreach was removed from ISSUE_PRIORITY; it was dead
-  // (always true) and read as if the exemption still existed.
+  // No blanket grace re-check here — enrichLead's pastGrace already gates
+  // followupOverdue/underCalledToday/stageStuck48h, and since `created` is
+  // fixed while `now` only ever moves forward between data-load time and
+  // generation time, a flag that already passed grace at load time can
+  // never fail this same check again later — re-testing it here is a
+  // no-op for those three. isNotUpdated (via neverConnectedPastWindow) and
+  // inactiveRmNewLead are deliberately grace-EXEMPT by design (see their
+  // own comments in enrichLead) specifically so they fire inside the
+  // window — a blanket re-check here used to silently re-block exactly
+  // those, which is the whole bug: it could only ever suppress leads that
+  // were never supposed to wait for grace in the first place.
   for (const rule of ISSUE_PRIORITY) {
     if (!_EMAILABLE_FLAG_KEYS.has(rule.key)) continue;
     if (!l[rule.key]) continue;
-    if (withinGrace) continue;
     return rule.label;
   }
   return null;
@@ -5810,7 +6079,7 @@ function buildRegionWiseReports(combineAll){
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
   const STUCK_LABEL = ISSUE_PRIORITY.find(r => r.key === 'stageStuck48h').label;
-  let graceBlocked = 0, outOfScope = 0;
+  let undatableCount = 0, outOfScope = 0;
   // Fresh for this generation — this path previously never touched the
   // names dict at all, so reportScopeNotice()'s "NOT IN REPORTS" breakdown
   // showed whatever a completely different report mode had last left
@@ -5824,12 +6093,15 @@ function buildRegionWiseReports(combineAll){
   // email, which this view's own copy already reflects.
   const rows = [];
   issueLeads.forEach(l => {
-    const issue = reportableIssueFor(l, now);
+    const issue = reportableIssueFor(l);
     if (!issue) {
-      // Distinguish "had an issue but grace/undatable blocked it" from
-      // "simply had no issue", so the notice reports something meaningful.
+      // reportableIssueFor only returns null for an undatable lead (no
+      // parseable lead_created_at) or one whose only flag isn't one of the
+      // emailable rules (e.g. loggingGapBreach alone) — every emailable
+      // flag now reports immediately, grace-exempt or not (see
+      // reportableIssueFor's own comment).
       const anyFlag = ISSUE_PRIORITY.some(r => l[r.key]);
-      if (anyFlag) graceBlocked++;
+      if (anyFlag) undatableCount++;
       return;
     }
     const main = mainRegionFor(effectiveRegion(l));
@@ -5870,10 +6142,30 @@ function buildRegionWiseReports(combineAll){
   const stuckRows = [];
   issueLeads.forEach(l => {
     if (!l.stageStuck48h) return;
-    if (reportableIssueFor(l, now) === STUCK_LABEL) return; // already the primary pick, shown above
+    if (reportableIssueFor(l) === STUCK_LABEL) return; // already the primary pick, shown above
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return;
     stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+  });
+
+  // Possible Premature Closes rides along too, as its own trailing section —
+  // closed leads (isLeadClosed) whose most recent logged note across the
+  // whole family (latestFamilyOutcome — same pooling suggestedFollowUp uses)
+  // still reads as engaged rather than a clear no. Not proof the close was
+  // wrong, just a discrepancy worth a second look before it's gone for good.
+  // Independent of reportableIssueFor/ISSUE_PRIORITY — a closed lead never
+  // carries an open-lead SLA flag, so this population never overlaps with
+  // `rows` above.
+  const WARM_CLOSE_OUTCOMES = new Set(['Interested', 'Visit Arranged', 'Visit Completed', 'Details Shared', 'Considering', 'Budget Concern', 'Loan In Process', 'DNP']);
+  const warmCloseRows = [];
+  issueLeads.forEach(l => {
+    if (!isLeadClosed(l)) return;
+    const latest = latestFamilyOutcome(l);
+    if (!latest || !WARM_CLOSE_OUTCOMES.has(latest.outcome)) return;
+    const main = mainRegionFor(effectiveRegion(l));
+    if (!main) return;
+    const closedReason = String(l.lead_closing_reason || l.closing_reason || '').trim() || '—';
+    warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason, lastNote: latest.comment, lastOutcome: latest.outcome, siblingRMs: l.siblingRMs });
   });
 
   // Stalled Leads: every lead currently stalled per
@@ -5891,20 +6183,21 @@ function buildRegionWiseReports(combineAll){
   // silently omitting it with no reason given.
   const stalledWindowAvailable = !!getPickedMovementWindow();
 
-  _lastReportGraceBlocked = graceBlocked;
+  _lastReportUndatable = undatableCount;
   _lastReportOutOfScope = outOfScope;
 
-  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !Object.keys(stalledByRegion).length) return [];
+  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !warmCloseRows.length && !Object.keys(stalledByRegion).length) return [];
 
   const groups = combineAll ? { __ALL__: rows } : groupBy(rows, r => r.mainRegion);
   const notConnectedGroups = combineAll ? { __ALL__: notConnectedRows } : groupBy(notConnectedRows, r => r.mainRegion);
   const stuckGroups = combineAll ? { __ALL__: stuckRows } : groupBy(stuckRows, r => r.mainRegion);
-  // A region with ONLY late-connect, ONLY additional-stuck, or ONLY
-  // stalled leads and no other actionable issue still needs its own email
-  // — without this it would have no key in `groups` (built from `rows`
-  // alone) and silently drop out entirely.
+  const warmCloseGroups = combineAll ? { __ALL__: warmCloseRows } : groupBy(warmCloseRows, r => r.mainRegion);
+  // A region with ONLY late-connect, ONLY additional-stuck, ONLY premature-
+  // close, or ONLY stalled leads and no other actionable issue still needs
+  // its own email — without this it would have no key in `groups` (built
+  // from `rows` alone) and silently drop out entirely.
   if (!combineAll) {
-    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(stalledByRegion)).forEach(region => {
+    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(warmCloseGroups)).concat(Object.keys(stalledByRegion)).forEach(region => {
       if (!groups[region]) groups[region] = [];
     });
   }
@@ -5913,13 +6206,14 @@ function buildRegionWiseReports(combineAll){
     const items = groups[key];
     const notConnectedItems = notConnectedGroups[key] || [];
     const stuckItems = stuckGroups[key] || [];
+    const warmCloseItems = warmCloseGroups[key] || [];
     // Combined mode spans every region, so gather repeats from all of them;
     // per-region mode's key IS the real region name already.
     const stalledItems = combineAll
       ? Object.keys(stalledByRegion).reduce((acc, r) => acc.concat(stalledByRegion[r]), [])
       : (stalledByRegion[key] || []);
     const regionNames = Array.from(new Set(
-      items.concat(notConnectedItems).concat(stuckItems).map(r => r.mainRegion)
+      items.concat(notConnectedItems).concat(stuckItems).concat(warmCloseItems).map(r => r.mainRegion)
         .concat(stalledItems.map(r => mainRegionFor(effectiveRegion(r))).filter(Boolean))
         .concat(combineAll ? [] : [key])
     )).sort();
@@ -6046,6 +6340,62 @@ ${DIVIDER}
 
 ` : '';
 
+    // Possible Premature Closes, appended as its own block — a softer
+    // signal than Stalled/Not Connected/Stuck above: these are CLOSED
+    // leads, so nothing here is an open compliance breach, just a
+    // discrepancy (closed, but the last note still sounded engaged) worth
+    // a quick review before it's too late to revisit.
+    const warmCloseByRM = groupBy(warmCloseItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+    const warmCloseCloneCounts = countUniqueAndCloned(warmCloseItems);
+    const warmCloseTotalLabel = warmCloseCloneCounts.cloned > 0
+      ? `${warmCloseCloneCounts.unique} (+${warmCloseCloneCounts.cloned} cloned cop${warmCloseCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(warmCloseCloneCounts.unique);
+    const warmCloseBlock = warmCloseItems.length ? `
+
+${DIVIDER}
+POSSIBLE PREMATURE CLOSES (Worth a Second Look)
+The following leads were closed, but the most recent logged note across this customer's full history (this copy and any sibling RM copies) still sounded engaged — Interested, Considering, Visit Arranged, etc. — rather than a clear no. Not proof the close was wrong, just worth a quick review before it's too late to revisit.
+${SUBDIVIDER}
+${Object.values(warmCloseByRM).map(group =>
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}  |  Closed as: ${r.closedReason}  |  Last note (${r.lastOutcome}): "${r.lastNote}"${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
+).join('\n\n')}
+
+Total : ${warmCloseTotalLabel}` : '';
+
+    // Rule-based highlights: a few short, deterministic takeaways pulled
+    // straight from the tallies already computed above — no AI, just
+    // surfacing the numbers a manager would otherwise have to skim the
+    // whole email to find. Order is priority order, not discovery order.
+    const highlights = [];
+    if (stalledCloneCounts.unique > 0) {
+      highlights.push(`${stalledCloneCounts.unique} lead${stalledCloneCounts.unique === 1 ? '' : 's'} stalled with zero movement — review these first.`);
+    }
+    if (sorted.length) {
+      const byRM = groupBy(sorted, r => r.RM || 'Unassigned');
+      const rmNames = Object.keys(byRM);
+      const worstRM = rmNames.reduce((a, b) => byRM[b].length > byRM[a].length ? b : a, rmNames[0]);
+      if (byRM[worstRM].length > 1) {
+        const pct = Math.round((byRM[worstRM].length / sorted.length) * 100);
+        highlights.push(`${worstRM} holds ${byRM[worstRM].length} of ${sorted.length} flagged leads (${pct}%) — the most of any RM in this report.`);
+      }
+      if (regionNames.length > 1) {
+        const byRegion = groupBy(sorted, r => r.mainRegion);
+        const regionKeys = Object.keys(byRegion);
+        const worstRegion = regionKeys.reduce((a, b) => byRegion[b].length > byRegion[a].length ? b : a, regionKeys[0]);
+        if (byRegion[worstRegion].length > 1) {
+          const pct = Math.round((byRegion[worstRegion].length / sorted.length) * 100);
+          highlights.push(`${worstRegion} accounts for ${byRegion[worstRegion].length} of ${sorted.length} flagged leads (${pct}%).`);
+        }
+      }
+      const issueNames = Object.keys(tally);
+      const topIssue = issueNames.reduce((a, b) => tally[b].length > tally[a].length ? b : a, issueNames[0]);
+      highlights.push(`${topIssue} is the most common issue (${tally[topIssue].length} lead${tally[topIssue].length === 1 ? '' : 's'}).`);
+    }
+    if (warmCloseItems.length) {
+      highlights.push(`${warmCloseCloneCounts.unique} closed lead${warmCloseCloneCounts.unique === 1 ? '' : 's'} had a still-warm-sounding note right before closing — worth a second look.`);
+    }
+    const highlightsBlock = highlights.length ? `Highlights:\n${highlights.map(h => `  • ${h}`).join('\n')}\n\n` : '';
+
     const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${SUBJECT_SCOPE_SUFFIX}`;
     const body =
 `Hi,
@@ -6057,7 +6407,7 @@ Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     :
 Source     : ${sourceLabel}
 Total      : ${totalCountLabel}
 
-${stalledBlock}${mainSection}${notConnectedBlock}${stuckBlock}
+${highlightsBlock}${stalledBlock}${mainSection}${notConnectedBlock}${stuckBlock}${warmCloseBlock}
 
 ${EMAIL_SIGNATURE}`;
 
@@ -6102,6 +6452,16 @@ ${EMAIL_SIGNATURE}`;
         rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), suggestedFollowUp(r)]),
       });
     }
+    if (warmCloseItems.length) {
+      sections.push({
+        heading: 'Possible Premature Closes',
+        subheading: `${warmCloseTotalLabel} closed lead${warmCloseCloneCounts.unique === 1 ? '' : 's'} — most recent logged note still sounded engaged, worth a second look`,
+        action: `These leads were closed, but the most recent logged note across the full customer history (this copy and any sibling RM copies) still read as engaged — Interested, Considering, Visit Arranged, etc. — rather than a clear no. Confirm the close was intentional before it's too late to revisit.`,
+        columns: ['Lead ID', 'Region', 'RM', 'Closed As', 'Last Note'],
+        rows: warmCloseItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), r.closedReason, `(${r.lastOutcome}) "${r.lastNote}"`]),
+        accent: { fg: '#b45309', headerBg: '#fef3c7', bg: '#fffbeb' },
+      });
+    }
     // Stalled Leads, unshifted onto the FRONT so it always renders
     // first regardless of how the issue-name sections above alphabetize —
     // red-accented (see renderReportEmailHTML's sec.accent) so it visually
@@ -6131,18 +6491,21 @@ ${EMAIL_SIGNATURE}`;
       region: regionLabel,
       subtitle: `${dateRange} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
       kpis: [
-        { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
-        { value: Object.keys(tally).length, label: Object.keys(tally).length === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
+        { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: stalledCloneCounts.unique, label: stalledCloneCounts.unique === 1 ? 'Stalled Lead' : 'Stalled Leads', bg: '#fee2e2', fg: '#dc2626' },
+        { value: warmCloseCloneCounts.unique, label: warmCloseCloneCounts.unique === 1 ? 'Premature Close?' : 'Premature Closes?', bg: '#fef3c7', fg: '#b45309' },
       ],
+      highlights,
       sections,
       footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
         + (stalledItems.length ? ' Stalled Leads is a Movement_Log-derived callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : stalledDiagnostic)
-        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
+        + (warmCloseItems.length ? ' Possible Premature Closes is a discrepancy flag on CLOSED leads, not a compliance count — it does not overlap with or add to the open-issue Total above.' : '')
+        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0 || warmCloseCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique, issueLabel: 'All issues', regionNames };
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + warmCloseCloneCounts.unique, issueLabel: 'All issues', regionNames };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
@@ -6158,7 +6521,7 @@ let _allReports = [];
 function buildAllRegionReports(){
   const out = [];
   let totalOutOfScope = 0;
-  let totalGraceBlocked = 0;
+  let totalUndatable = 0;
   _lastReportOutOfScopeNames = {}; // accumulated across all issues below
   Object.keys(ISSUE_REPORT_META).forEach(issueKey => {
     const meta = ISSUE_REPORT_META[issueKey];
@@ -6168,10 +6531,10 @@ function buildAllRegionReports(){
     // buildRegionReports overwrites the trackers per call — accumulate here
     // so the notice reflects every issue, not just the last one built.
     totalOutOfScope += _lastReportOutOfScope;
-    totalGraceBlocked += _lastReportGraceBlocked;
+    totalUndatable += _lastReportUndatable;
   });
   _lastReportOutOfScope = totalOutOfScope;
-  _lastReportGraceBlocked = totalGraceBlocked;
+  _lastReportUndatable = totalUndatable;
   return out;
 }
 
@@ -6631,6 +6994,11 @@ function populateMovementSnapshotSelectors(){
     toDateSel.value = istDateKey(toRun.at);
     populateMovementTimeSelect('movementToDateSelect', 'movementToTimeSelect', toRun.at);
   }
+
+  // Same fresh-fetch data backs the Tracking tab's own From/To pickers —
+  // keeping this one call site means every caller of this function (initial
+  // load, and a browser-triggered snapshot write) picks both up for free.
+  trackingPopulateSnapshotSelectors();
 }
 
 function getSelectedMovementSnapshot(timeSelectId){
@@ -7636,20 +8004,27 @@ async function appendToMovementLog(rows){
 // whatever region happens to be selected), written with THIS browser's own
 // clock as snapshot_at. No source/open-closed filtering — matches
 // MovementTracker.gs's own trigger exactly.
+// One button in the header (beside Refresh) feeds both the Movement and
+// Tracking tabs' pickers — status is written to its one status span
+// regardless of which tab happens to be open when it finishes.
+function setSnapshotStatus(text, color){
+  const el = document.getElementById('snapshotStatus');
+  if (el) { el.textContent = text; el.style.color = color; }
+}
+
 async function browserSnapshotOpenLeads(){
-  const statusEl = document.getElementById('snapshotStatus');
   if (!_currentSheetId || !allParsedLeads.length) return;
 
   if (!gateTokenValid()) {
-    if (statusEl) { statusEl.textContent = 'Re-signing in…'; statusEl.style.color = 'var(--text-faint)'; }
+    setSnapshotStatus('Re-signing in…', 'var(--text-faint)');
     await gateSignIn();
     if (!gateTokenValid()) {
-      if (statusEl) { statusEl.textContent = 'Sign-in required to write a snapshot.'; statusEl.style.color = 'var(--amber)'; }
+      setSnapshotStatus('Sign-in required to write a snapshot.', 'var(--amber)');
       return;
     }
   }
 
-  if (statusEl) { statusEl.textContent = 'Writing snapshot…'; statusEl.style.color = 'var(--text-faint)'; }
+  setSnapshotStatus('Writing snapshot…', 'var(--text-faint)');
 
   const now = new Date();
   const label = 'Browser — ' + istDateTimeValue(now);
@@ -7663,7 +8038,7 @@ async function browserSnapshotOpenLeads(){
   // comparison with an inconsistent history.
   const leadsToSnapshot = allParsedLeads;
   if (!leadsToSnapshot.length) {
-    if (statusEl) { statusEl.textContent = 'No leads to snapshot.'; statusEl.style.color = 'var(--text-faint)'; }
+    setSnapshotStatus('No leads to snapshot.', 'var(--text-faint)');
     return;
   }
 
@@ -7675,18 +8050,19 @@ async function browserSnapshotOpenLeads(){
 
   try {
     await appendToMovementLog(rows);
-    if (statusEl) { statusEl.textContent = `Snapshot written: ${rows.length.toLocaleString()} leads at ${istStamp(now)}.`; statusEl.style.color = 'var(--green)'; }
+    setSnapshotStatus(`Snapshot written: ${rows.length.toLocaleString()} leads at ${istStamp(now)}.`, 'var(--green)');
     // Pull the new run back in so it shows up in the Compare dropdowns
     // immediately, without needing a full reconnect.
     await fetchMovementLog(_currentSheetId);
-    populateMovementSnapshotSelectors();
+    populateMovementSnapshotSelectors(); // also repopulates the Tracking tab's own pickers
     // populateMovementSnapshotSelectors just moved the picker's "to" onto
-    // this new run — both sections that read it need to refresh.
+    // this new run — every section that reads it needs to refresh.
     renderStalledFlaggedLeadsOps();
     renderMovementTab();
+    renderTrackingTab();
   } catch (err) {
     console.error('Browser snapshot failed:', err);
-    if (statusEl) { statusEl.textContent = 'Snapshot failed: ' + err.message; statusEl.style.color = 'var(--red)'; }
+    setSnapshotStatus('Snapshot failed: ' + err.message, 'var(--red)');
   }
 }
 
@@ -7718,6 +8094,25 @@ function initMovementUI(){
 
   const overnightReportsBtn = document.getElementById('overnightGenerateReportsBtn');
   if (overnightReportsBtn) overnightReportsBtn.addEventListener('click', renderOvernightRegionReports);
+
+  // Tracking tab's own From/To picker + region select — independent of the
+  // pair above (see trackingPopulateSnapshotSelectors).
+  const trFromDateSel = document.getElementById('trackingFromDateSelect');
+  const trToDateSel = document.getElementById('trackingToDateSelect');
+  const trFromTimeSel = document.getElementById('trackingFromTimeSelect');
+  const trToTimeSel = document.getElementById('trackingToTimeSelect');
+  const trRegionSel = document.getElementById('trackingRegionSelect');
+  if (trFromDateSel) trFromDateSel.addEventListener('change', () => {
+    populateMovementTimeSelect('trackingFromDateSelect', 'trackingFromTimeSelect', null);
+    renderTrackingTab();
+  });
+  if (trToDateSel) trToDateSel.addEventListener('change', () => {
+    populateMovementTimeSelect('trackingToDateSelect', 'trackingToTimeSelect', null);
+    renderTrackingTab();
+  });
+  if (trFromTimeSel) trFromTimeSel.addEventListener('change', renderTrackingTab);
+  if (trToTimeSel) trToTimeSel.addEventListener('change', renderTrackingTab);
+  if (trRegionSel) trRegionSel.addEventListener('change', renderTrackingTab);
 }
 
 // Generic show/hide for a details block dynamically inserted right after
