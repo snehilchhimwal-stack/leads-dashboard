@@ -3271,17 +3271,43 @@ function findRunTally(runs, at){
   return empty;
 }
 
+// One point per IST calendar day for the chart's main connected line — a
+// day with several captures (the every-6-hours trigger, plus any manual
+// Snapshot now clicks) used to plot every single one, making the line as
+// dense and noisy as the capture cadence rather than showing the day-over-
+// day shape. Picks each day's LATEST run as that day's representative
+// (the most complete/final count for the day), same convention as a
+// candlestick chart's daily close. Returns { daily, scatter } — scatter is
+// every OTHER run that day, kept for the background-only dots in
+// buildTrackingChartSvg so nothing captured is actually hidden, it's just
+// not part of the connected trend.
+function splitDailyAndScatter(runs){
+  const byDay = new Map(); // dayKey -> run
+  runs.forEach(r => {
+    const key = istDateKey(r.at);
+    const existing = byDay.get(key);
+    if (!existing || r.at.getTime() > existing.at.getTime()) byDay.set(key, r);
+  });
+  const daily = Array.from(byDay.values()).sort((a, b) => a.at - b.at);
+  const dailyAtSet = new Set(daily.map(r => r.at.getTime()));
+  const scatter = runs.filter(r => !dailyAtSet.has(r.at.getTime()));
+  return { daily, scatter };
+}
+
 // Builds the Region Issue Trend chart as an SVG string, as TWO stacked
 // panels sharing one X (time) axis rather than one chart with two Y scales
 // — total lead volume runs in the thousands while issue counts run in the
 // tens/hundreds, so one shared axis would flatten every issue line to
-// noise near the bottom. X axis is a real linear time scale spanning the
-// WHOLE captured history for this region/filter combo (so a gap in capture
-// shows as a gap, not a squeeze); the picked From→To window is drawn at
-// full color/opacity over a faint highlight band spanning both panels,
-// everything outside it (the rest of history) is drawn in the SAME colors
-// but dimmed — "in the background" — so the selected comparison stands out
-// while the full trend is still visible.
+// noise near the bottom. The connected line/dots plot one point per
+// calendar day (see splitDailyAndScatter) — every OTHER captured snapshot
+// that day still renders as a small, always-dim, unconnected dot, so
+// nothing captured is hidden, it's just not part of the daily trend line.
+// X axis is a real linear time scale spanning the WHOLE captured history
+// for this region/filter combo (so a gap in capture shows as a gap, not a
+// squeeze); the picked From→To window is drawn at full color/opacity over
+// a faint highlight band spanning both panels, everything outside it (the
+// rest of the daily history) is drawn in the SAME colors but dimmed — so
+// the selected comparison stands out while the full trend is still visible.
 function buildTrackingChartSvg(runs, fromAt, toAt){
   const W = 900;
   const marginL = 46, marginR = 14, marginT = 16, marginB = 28, panelGap = 18;
@@ -3291,22 +3317,28 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
   const H = bottomY1 + marginB;
   const plotW = W - marginL - marginR;
 
+  const { daily, scatter } = splitDailyAndScatter(runs);
+
   const minAt = Math.min(runs[0].at.getTime(), fromAt.getTime());
   const maxAt = Math.max(runs[runs.length - 1].at.getTime(), toAt.getTime());
   const span = Math.max(1, maxAt - minAt);
   const scaleX = (t) => marginL + ((t - minAt) / span) * plotW;
-  const points = runs.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
+  const points = daily.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
+  const scatterPoints = scatter.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
   const inWindow = (at) => at.getTime() >= fromAt.getTime() && at.getTime() <= toAt.getTime();
-  const drawBgDots = points.length <= 200; // caps DOM size on a long history
+  const drawBgDots = points.length <= 200; // caps DOM size on a long daily history
+  const drawScatterDots = scatter.length <= 800; // separate cap — intraday captures can outnumber days by a lot
 
-  // Draws one series (background pass over the whole history, dimmed, plus
-  // a full-opacity foreground pass + hoverable dots for the picked window
-  // only) against a given panel's own y0/y1/maxVal — shared by both panels
-  // below so the two don't duplicate this logic with two different scales.
+  // Draws one series against a given panel's own y0/y1/maxVal — shared by
+  // both panels below so the two don't duplicate this logic with two
+  // different scales. `s.get(run)` reads this series' value off a run
+  // object (works for both a daily and a scatter run, same shape).
   function drawSeries(s, y0, y1, maxVal){
     const scaleY = (v) => y0 + (y1 - y0) - (v / maxVal) * (y1 - y0);
-    const pts = s.values.map((v, i) => ({ x: points[i].x, y: scaleY(v), at: points[i].at, v }));
+    const pts = daily.map((r, i) => ({ x: points[i].x, y: scaleY(s.get(r)), at: r.at, v: s.get(r) }));
     let out = '';
+
+    // Background: the dimmed daily line, spanning the WHOLE history.
     const bgPoly = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
     out += `<polyline points="${bgPoly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.32" />`;
     if (drawBgDots) {
@@ -3315,6 +3347,20 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
         out += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${Math.max(1.5, s.dot - 1.5)}" fill="${s.color}" opacity="0.32" />`;
       });
     }
+
+    // Background: every non-daily-representative snapshot — small, always
+    // dim, never connected — "in the background" regardless of the picked
+    // window, since these were never part of the daily trend to begin with.
+    if (drawScatterDots) {
+      scatter.forEach((r, i) => {
+        const v = s.get(r);
+        const y = scaleY(v);
+        out += `<circle cx="${scatterPoints[i].x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(1, s.dot - 2)}" fill="${s.color}" opacity="0.22"><title>${esc(s.label)} — ${esc(istDayLabel(r.at))} ${esc(istTimeLabel(r.at))}: ${v}</title></circle>`;
+      });
+    }
+
+    // Foreground: only the picked From→To window's daily points, full
+    // opacity + a hoverable dot with an exact value on every point.
     const within = pts.filter(p => inWindow(p.at));
     if (within.length >= 2) {
       const fgPoly = within.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
@@ -3340,10 +3386,12 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
   // Top panel: total Google leads in the system at each snapshot — every
   // matching lead regardless of stage (see computeIssueTalliesByRun's
   // totalAll), drawn bright green so it reads as the headline volume figure
-  // rather than one more issue color.
+  // rather than one more issue color. Y-axis max is taken over ALL runs
+  // (daily + scatter), not just the daily ones, so a scatter dot never
+  // clips off the top of its own panel.
   const totalLeadsSeries = {
     key: '__totalLeads__', label: 'Total Leads in System', color: 'var(--green)', width: 2.5, dot: 3.5,
-    values: runs.map(r => r.totalAll),
+    get: (r) => r.totalAll,
   };
   const topMax = Math.ceil(Math.max(1, ...runs.map(r => r.totalAll)) * 1.15) || 1;
   const topGridSvg = gridFor(topY0, topY1, topMax, 2);
@@ -3360,11 +3408,11 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
   const issueSeries = ISSUE_PRIORITY.map(c => ({
     key: c.key, label: TRACKING_SHORT_LABEL[c.key] || c.label,
     color: colorForIssue(c.label, 0), width: 1.75, dot: 3,
-    values: runs.map(r => r.byCheck[c.key] || 0),
+    get: (r) => r.byCheck[c.key] || 0,
   }));
   issueSeries.push({
     key: '__total__', label: 'Total Breaching', color: 'var(--text)', width: 2.75, dot: 4,
-    values: runs.map(r => r.breachedTotal),
+    get: (r) => r.breachedTotal,
   });
   const bottomGridSvg = gridFor(bottomY0, bottomY1, bottomMax, 4);
   const bottomLinesSvg = issueSeries.map(s => drawSeries(s, bottomY0, bottomY1, bottomMax)).join('');
