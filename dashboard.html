@@ -345,6 +345,26 @@
   .hour-bar-col:hover .hour-bar-seg{ opacity:.8; }
   .hour-bar-label{ font-size:9.5px; color:var(--text-faint); margin-top:6px; font-family:'IBM Plex Mono',monospace; white-space:nowrap; }
 
+  /* ---------- RM Timeline: month calendar ---------- */
+  .rmtl-cal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .rmtl-cal-month{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px; }
+  .rmtl-cal{
+    display:grid; grid-template-columns:repeat(7,1fr); gap:4px;
+    background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px;
+  }
+  .rmtl-cal-dow{ font-size:9.5px; color:var(--text-faint); text-align:center; padding:2px 0 6px; text-transform:uppercase; letter-spacing:.04em; }
+  .rmtl-cal-day{
+    aspect-ratio:1; border-radius:6px; border:1px solid var(--border);
+    padding:4px 6px; display:flex; flex-direction:column; justify-content:space-between;
+    cursor:pointer; min-width:0;
+  }
+  .rmtl-cal-day:hover{ border-color:var(--blue); }
+  .rmtl-cal-day.out{ opacity:.35; }
+  .rmtl-cal-day.today{ border-color:var(--text-dim); }
+  .rmtl-cal-day.selected{ outline:2px solid var(--blue); outline-offset:-1px; }
+  .rmtl-cal-day .rmtl-cal-d{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); }
+  .rmtl-cal-day .rmtl-cal-n{ font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:14px; align-self:flex-end; color:var(--text); }
+
   /* ---------- sections ---------- */
   section{ margin-bottom:34px; scroll-margin-top:72px; }
   .section-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
@@ -975,8 +995,8 @@
       </div>
 
       <section id="sec-rmtl-daily">
-        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Leads Created &amp; Assigned, by Day</div><div class="section-count" id="rmtlDailyCount"></div></div>
-        <div class="filter-summary">Leads with <span class="mono">lead_created_at</span> on each day, currently assigned to this RM. Click a day to load its timeline below.</div>
+        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Leads Created, by Day</div><div class="section-count" id="rmtlDailyCount"></div></div>
+        <div class="filter-summary">Leads with <span class="mono">lead_created_at</span> on each day, currently assigned to this RM. There's no separate "assigned" date in the sheet — <span class="mono">RM</span> is a current snapshot, not a dated history — so a lead reassigned to this RM after creation still counts on its original creation day, not the day it changed hands. Click a day to load its timeline below.</div>
         <div id="rmtlDailyTrend"></div>
       </section>
 
@@ -3632,17 +3652,34 @@ function renderTrackingTab(){
 // moment the RM selection itself changes.
 let _rmtlLastRM = '';
 
+// Built from `leads` (the top filter bar's OWN filtered set), not
+// allParsedLeads — every other RM-scoped view in this file (RM Score Table,
+// Region-Wise Summary's RM grouping, etc.) reads off `leads`, so this
+// dropdown following the same filters keeps it consistent: filter to a
+// region/TL/project up top and only the RMs actually present under that
+// filter show up here, instead of every RM in the whole sheet.
 function populateRMTimelineSelect(){
   const sel = document.getElementById('rmtlRMSelect');
   if (!sel) return null;
-  const rmList = Array.from(new Set(allParsedLeads.map(l => l.RM || 'Unassigned').filter(Boolean))).sort();
+  const rmList = Array.from(new Set(leads.map(l => l.RM || 'Unassigned').filter(Boolean))).sort();
   const prevValue = sel.value;
   sel.innerHTML = rmList.map(rm => `<option value="${esc(rm)}">${esc(rm)}</option>`).join('');
   if (prevValue && rmList.includes(prevValue)) sel.value = prevValue;
   return sel.value || null;
 }
 
-function renderRMDailyTrend(rm, selectedDay){
+// Month currently shown (Date, always the 1st of that month at IST
+// midnight) — null means "not navigated yet, default to whatever day is
+// selected". Reset to null only when the RM selection itself changes (see
+// renderRMTimelineTab), so Prev/Next month clicks persist across unrelated
+// re-renders the same way a manually picked day does.
+let _rmtlCalMonth = null;
+
+// Replaced the earlier bar-per-day list (one visible row at a time, no
+// sense of a full week/month at a glance) with a real month calendar —
+// every day cell shows its count directly, shaded by volume, so several
+// weeks are visible together instead of one bar you have to scroll to find.
+function renderRMDailyCalendar(rm, selectedDay){
   const el = document.getElementById('rmtlDailyTrend');
   const countEl = document.getElementById('rmtlDailyCount');
   if (!el) return;
@@ -3657,26 +3694,58 @@ function renderRMDailyTrend(rm, selectedDay){
     byDay.set(key, (byDay.get(key) || 0) + 1);
   });
 
-  const days = Array.from(byDay.keys()).sort().slice(-30); // most recent 30 days present
-  if (countEl) countEl.textContent = days.length + ' day' + (days.length === 1 ? '' : 's');
-
-  if (!days.length) {
+  if (!byDay.size) {
+    if (countEl) countEl.textContent = '';
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No dated leads for this RM in the current filters</div>`;
     return;
   }
 
-  const max = Math.max(...days.map(d => byDay.get(d)));
-  el.innerHTML = `<div class="trend-chart">` + days.slice().reverse().map(d => {
-    const count = byDay.get(d);
-    const w = Math.max(1.5, (count / max) * 100);
-    const label = istDayLabelWithDow(parseDate(d + ' 00:00:00'));
-    const isSelected = d === selectedDay;
-    return `<div class="trend-row" data-day="${d}" style="cursor:pointer; ${isSelected ? 'outline:1px solid var(--blue); border-radius:4px;' : ''}" title="${esc(label)}: ${count} lead${count === 1 ? '' : 's'} created — click to load this day's timeline">
-      <div class="trend-date">${esc(label)}</div>
-      <div class="trend-track"><div class="trend-fill" style="width:${w}%"></div></div>
-      <div class="trend-nums">${count}</div>
+  const anchor = _rmtlCalMonth || parseDate((selectedDay || istDateKey(_renderNow)) + ' 00:00:00');
+  const mp = istParts(anchor);
+  const monthStart = istWallToInstant(mp.y, mp.mo, 1, 0, 0, 0);
+  const msp = istParts(monthStart);
+  const monthPrefix = `${msp.y}-${String(msp.mo + 1).padStart(2, '0')}`;
+  const todayKey = istDateKey(_renderNow);
+
+  const monthTotal = Array.from(byDay.entries())
+    .filter(([k]) => k.startsWith(monthPrefix))
+    .reduce((sum, [, c]) => sum + c, 0);
+  if (countEl) countEl.textContent = monthTotal.toLocaleString() + ' this month';
+
+  // Grid starts on the Sunday on/before the 1st, runs 6 full weeks (42
+  // cells) — covers every month's layout including ones that span 6 rows.
+  const gridStart = istAddDays(monthStart, -msp.dow);
+  const max = Math.max(1, ...Array.from(byDay.values()));
+
+  const cells = [];
+  for (let i = 0; i < 42; i++) {
+    const cellDate = istAddDays(gridStart, i);
+    const cp = istParts(cellDate);
+    const key = istDateKey(cellDate);
+    const inMonth = cp.mo === msp.mo && cp.y === msp.y;
+    const count = byDay.get(key) || 0;
+    const opacity = count ? Math.min(0.85, 0.15 + (count / max) * 0.7) : 0;
+    const classes = ['rmtl-cal-day'];
+    if (!inMonth) classes.push('out');
+    if (key === todayKey) classes.push('today');
+    if (key === selectedDay) classes.push('selected');
+    cells.push(`<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});" title="${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created">
+      <span class="rmtl-cal-d">${cp.d}</span>
+      ${count ? `<span class="rmtl-cal-n">${count}</span>` : ''}
+    </div>`);
+  }
+
+  const dowLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  el.innerHTML = `
+    <div class="rmtl-cal-nav">
+      <button class="btn ghost" id="rmtlCalPrev" style="padding:4px 10px; font-size:12px;">‹ Prev</button>
+      <div class="rmtl-cal-month">${IST_MONTHS[msp.mo]} ${msp.y}</div>
+      <button class="btn ghost" id="rmtlCalNext" style="padding:4px 10px; font-size:12px;">Next ›</button>
+    </div>
+    <div class="rmtl-cal">
+      ${dowLabels.map(d => `<div class="rmtl-cal-dow">${d}</div>`).join('')}
+      ${cells.join('')}
     </div>`;
-  }).join('') + `</div>`;
 }
 
 // Every dated touch (call connect + individually-dated comment log lines,
@@ -3802,11 +3871,13 @@ function renderRMTimelineTab(){
   const dayInput = document.getElementById('rmtlDayInput');
   if (!dayInput) return;
 
-  // Reset the picked day to this RM's most recent activity only when the
-  // RM selection itself just changed — an unrelated re-render (filters,
-  // a fresh fetch) shouldn't yank a day the user deliberately picked.
+  // Reset the picked day (and which month the calendar shows) to this RM's
+  // most recent activity only when the RM selection itself just changed —
+  // an unrelated re-render (filters, a fresh fetch) shouldn't yank a day or
+  // month the user deliberately navigated to.
   if (rm && rm !== _rmtlLastRM) {
     _rmtlLastRM = rm;
+    _rmtlCalMonth = null;
     const rmLeads = leads.filter(l => (l.RM || 'Unassigned') === rm);
     let latest = null;
     rmLeads.forEach(l => {
@@ -3816,7 +3887,7 @@ function renderRMTimelineTab(){
     dayInput.value = istDateKey(latest || _renderNow);
   }
 
-  renderRMDailyTrend(rm, dayInput.value);
+  renderRMDailyCalendar(rm, dayInput.value);
   renderRMDayTimeline(rm, dayInput.value);
   renderRMIssueList(rm);
   renderRMIssueHistory(rm);
@@ -8732,23 +8803,40 @@ function initCollapsibleSectionInfo(){
 initCollapsibleSectionInfo();
 
 // RM select change picks up renderRMTimelineTab's own default-day reset
-// (see _rmtlLastRM); the day input and daily-trend row clicks only need a
-// re-render, not a reset, since the user is deliberately picking a day.
+// (see _rmtlLastRM); the day input, calendar day clicks, and Prev/Next
+// month clicks only need a re-render, not a reset, since the user is
+// deliberately navigating. The calendar's day cells and its Prev/Next
+// buttons are both rebuilt on every render (inside #rmtlDailyTrend's own
+// innerHTML), so their clicks are handled via delegation on the container
+// — a direct listener on the buttons themselves would stop working the
+// first time the calendar re-renders and replaces them.
 function initRMTimelineUI(){
   const rmSelect = document.getElementById('rmtlRMSelect');
   const dayInput = document.getElementById('rmtlDayInput');
-  const dailyTrendEl = document.getElementById('rmtlDailyTrend');
+  const dailyEl = document.getElementById('rmtlDailyTrend');
   if (rmSelect) rmSelect.addEventListener('change', renderRMTimelineTab);
   if (dayInput) dayInput.addEventListener('change', () => {
-    renderRMDailyTrend(rmSelect.value, dayInput.value); // updates the highlighted row
+    _rmtlCalMonth = null; // jump the calendar to whatever month the typed/picked date falls in
+    renderRMDailyCalendar(rmSelect.value, dayInput.value);
     renderRMDayTimeline(rmSelect.value, dayInput.value);
   });
-  if (dailyTrendEl) dailyTrendEl.addEventListener('click', (e) => {
-    const row = e.target.closest('.trend-row[data-day]');
-    if (!row || !dayInput) return;
-    dayInput.value = row.dataset.day;
-    renderRMDailyTrend(rmSelect.value, dayInput.value);
-    renderRMDayTimeline(rmSelect.value, dayInput.value);
+  if (dailyEl) dailyEl.addEventListener('click', (e) => {
+    if (!dayInput) return;
+    const dayCell = e.target.closest('.rmtl-cal-day[data-day]');
+    if (dayCell) {
+      dayInput.value = dayCell.dataset.day;
+      const dp = istParts(parseDate(dayCell.dataset.day + ' 00:00:00'));
+      _rmtlCalMonth = istWallToInstant(dp.y, dp.mo, 1, 0, 0, 0); // out-of-month cell click also switches the shown month
+      renderRMDailyCalendar(rmSelect.value, dayInput.value);
+      renderRMDayTimeline(rmSelect.value, dayInput.value);
+      return;
+    }
+    const delta = e.target.closest('#rmtlCalPrev') ? -1 : e.target.closest('#rmtlCalNext') ? 1 : 0;
+    if (delta) {
+      const mp = istParts(_rmtlCalMonth || parseDate(dayInput.value + ' 00:00:00'));
+      _rmtlCalMonth = istWallToInstant(mp.y, mp.mo + delta, 1, 0, 0, 0);
+      renderRMDailyCalendar(rmSelect.value, dayInput.value);
+    }
   });
 }
 initRMTimelineUI();
