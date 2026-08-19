@@ -8982,6 +8982,45 @@ async function upsertSlaHistoryRows(entries){
 
   if (updateData.length) await sheetsApiValuesBatchUpdate(updateData);
   if (appendRows.length) await appendSheetRows(SLA_HISTORY_TAB_NAME, appendRows);
+
+  // Appends land at the bottom regardless of their own snapshot_at, and a
+  // backfill batch's internal order doesn't reflect whatever was already
+  // in the sheet from earlier live/backfill runs — sort once at the end so
+  // the tab always reads chronologically no matter which write path or
+  // combination of them produced it.
+  if (updateData.length || appendRows.length) {
+    try { await sortSlaHistorySheet_(); } catch (e) { /* rows are still correct, just not reordered this time */ }
+  }
+}
+
+// Sorts SLA_History's data rows (everything below the header) ascending by
+// snapshot_at (column I) — called once at the end of every
+// upsertSlaHistoryRows batch, not after each individual write.
+async function sortSlaHistorySheet_(){
+  const sheetId = await getSheetIdByTabName(SLA_HISTORY_TAB_NAME);
+  if (sheetId == null) return;
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{
+        sortRange: {
+          // startRowIndex is the only bound set — GridRange with no
+          // endRowIndex/endColumnIndex means "to the sheet's actual
+          // extent," so this doesn't need a fresh row-count read after
+          // the writes above.
+          range: { sheetId, startRowIndex: 1, startColumnIndex: 0 },
+          sortSpecs: [{ dimensionIndex: 8, sortOrder: 'ASCENDING' }], // column I = snapshot_at
+        },
+      }],
+    }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+  }
 }
 
 // ONE-TIME MIGRATION — run manually from the browser console once, after
