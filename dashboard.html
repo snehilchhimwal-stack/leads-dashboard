@@ -331,6 +331,20 @@
   .stall-group-label{ font-family:'Space Grotesk',sans-serif; font-size:12.5px; font-weight:700; margin-bottom:8px; letter-spacing:.01em; }
   .stall-card-empty{ font-size:12px; color:var(--text-faint); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 20px; }
 
+  /* ---------- hour-of-day activity chart ---------- */
+  .hour-chart{
+    display:flex; align-items:flex-end; gap:3px; height:140px;
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:14px 10px 0;
+  }
+  .hour-bar-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0; }
+  .hour-bar-stack{ width:100%; max-width:22px; display:flex; flex-direction:column; justify-content:flex-end; border-radius:3px 3px 0 0; overflow:hidden; }
+  .hour-bar-seg{ width:100%; }
+  .hour-bar-seg.comments{ background:var(--blue); }
+  .hour-bar-seg.connects{ background:var(--teal); }
+  .hour-bar-col:hover .hour-bar-seg{ opacity:.8; }
+  .hour-bar-label{ font-size:9.5px; color:var(--text-faint); margin-top:6px; font-family:'IBM Plex Mono',monospace; white-space:nowrap; }
+
   /* ---------- sections ---------- */
   section{ margin-bottom:34px; scroll-margin-top:72px; }
   .section-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
@@ -879,6 +893,12 @@
 
         <div class="filter-summary" id="auditSummary"></div>
         <div class="section-scroll" style="max-height:560px;"><table id="auditTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="sec-activity-hour">
+        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Activity by Hour of Day</div><div class="section-count" id="hourActivityCount"></div></div>
+        <div class="filter-summary">Same period picker as Updated Leads above (and the same filters at the top of the page) — every logged touch in that window, bucketed by hour of day in IST, so you can see when leads are actually being worked: morning, afternoon, or evening. <span class="mono">Comments</span> are individual dated log lines (one per call attempt/note, from the same parsing Updated Leads uses); <span class="mono">Call connect</span> is each lead's single most recent connect timestamp, so it's a thin top layer, not a full call log — Comments carry the real volume.</div>
+        <div id="hourActivityChart"></div>
       </section>
     </div>
 
@@ -2787,6 +2807,74 @@ function renderAudit(){
       : '');
 }
 
+const HOUR_LABELS = ['12 AM','1 AM','2 AM','3 AM','4 AM','5 AM','6 AM','7 AM','8 AM','9 AM','10 AM','11 AM',
+  '12 PM','1 PM','2 PM','3 PM','4 PM','5 PM','6 PM','7 PM','8 PM','9 PM','10 PM','11 PM'];
+
+// Vertical stacked bar chart of every touch event (Comments + Call connect,
+// see updateEventsFor) in the SAME period Updated Leads above is showing,
+// bucketed by IST hour of day — reuses auditMatches() rather than
+// recomputing it, so the two sections can never disagree about which
+// events are "in the window". Comments dominate the volume (one per logged
+// call attempt/note); Call connect is one timestamp per lead, so it's
+// drawn as a thin top layer rather than a real per-call log.
+function renderActivityByHour(){
+  const el = document.getElementById('hourActivityChart');
+  const countEl = document.getElementById('hourActivityCount');
+  if (!el) return;
+
+  const { ranges, rows } = auditMatches();
+  if (!ranges.length) {
+    if (countEl) countEl.textContent = '';
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Select at least one period above</div>`;
+    return;
+  }
+
+  const events = rows.flatMap(r => r.hits);
+  if (!events.length) {
+    if (countEl) countEl.textContent = '';
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No logged activity in this window</div>`;
+    return;
+  }
+
+  const comments = new Array(24).fill(0);
+  const connects = new Array(24).fill(0);
+  events.forEach(ev => {
+    const h = istParts(ev.at).h;
+    if (ev.kind === 'Call connect') connects[h]++; else comments[h]++;
+  });
+
+  if (countEl) countEl.textContent = events.length.toLocaleString() + ' events';
+
+  const totals = comments.map((c, i) => c + connects[i]);
+  const max = Math.max(1, ...totals);
+
+  // Label every 3rd hour only — 24 labels side by side on a narrow chart
+  // collide into an unreadable smear. Segment presence/proportion is driven
+  // off the RAW counts (not a rounded intermediate %), with a 2% minimum
+  // bar height applied only at the whole-stack level — otherwise an hour
+  // with a real but small count (e.g. 1 event against a busy 200-event max)
+  // could round to a stack that's tall enough to see but whose two
+  // segments each round to 0% and render as an invisible gap.
+  el.innerHTML = `<div class="hour-chart">` + totals.map((total, h) => {
+    const stackPct = total ? Math.max(2, (total / max) * 100) : 0;
+    const connectShare = total ? (connects[h] / total) * 100 : 0;
+    const commentShare = total ? (comments[h] / total) * 100 : 0;
+    const label = h % 3 === 0 ? HOUR_LABELS[h] : '';
+    const title = `${HOUR_LABELS[h]}: ${total} event${total === 1 ? '' : 's'} (${comments[h]} comment${comments[h] === 1 ? '' : 's'}, ${connects[h]} connect${connects[h] === 1 ? '' : 's'})`;
+    return `<div class="hour-bar-col" title="${esc(title)}">
+      <div class="hour-bar-stack" style="height:${stackPct.toFixed(1)}%;">
+        ${connects[h] ? `<div class="hour-bar-seg connects" style="height:${connectShare.toFixed(1)}%;"></div>` : ''}
+        ${comments[h] ? `<div class="hour-bar-seg comments" style="height:${commentShare.toFixed(1)}%;"></div>` : ''}
+      </div>
+      <div class="hour-bar-label">${esc(label)}</div>
+    </div>`;
+  }).join('') + `</div>
+  <div class="stall-legend" style="margin-top:10px;">
+    <span class="stall-legend-item"><span class="stall-legend-dot" style="background:var(--blue);"></span>Comments (logged calls/notes)</span>
+    <span class="stall-legend-item"><span class="stall-legend-dot" style="background:var(--teal);"></span>Call connect (most recent per lead)</span>
+  </div>`;
+}
+
 function copyAuditIds(){
   const { rows } = auditMatches();
   const ids = auditLeadIds(rows);
@@ -2833,13 +2921,13 @@ function buildAuditControls(){
     counts[name] = r ? leads.filter(l => updateEventsFor(l).some(ev => ev.at >= r.from && ev.at <= r.to)).length : 0;
   });
   buildMultiSelect('msAuditPeriod', 'Period', Object.keys(AUDIT_PRESETS), counts,
-                   auditState.periods, () => { buildAuditControls(); renderAudit(); });
+                   auditState.periods, () => { buildAuditControls(); renderAudit(); renderActivityByHour(); });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   ['auditFrom', 'auditTo'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', renderAudit);
+    if (el) el.addEventListener('change', () => { renderAudit(); renderActivityByHour(); });
   });
   const c = document.getElementById('auditCopyBtn');
   if (c) c.addEventListener('click', copyAuditIds);
@@ -2907,6 +2995,7 @@ function renderAll(){
   renderSourceMix();
   buildAuditControls();
   renderAudit();
+  renderActivityByHour();
   renderMovementTab();
   renderJumpNav();
   updateTabBadges();
