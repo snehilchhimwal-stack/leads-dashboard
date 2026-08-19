@@ -979,6 +979,13 @@
         <div id="trackingChart" style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 10px 8px; margin-bottom:14px;"></div>
         <div class="section-scroll"><table id="trackingTable"><thead></thead><tbody></tbody></table></div>
       </section>
+
+      <section id="sec-tracking-cohort">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Same-Cohort Progress</div><div class="section-count" id="trackingCohortCount"></div></div>
+        <div class="filter-summary">The table above compares raw totals at From vs. To — as new leads keep getting added, "Total Leads in System" keeps growing, so a rising or flat issue count doesn't necessarily mean nothing got worked on. This table answers a narrower question instead: of the leads that existed at BOTH the From and To snapshots (matched by lead_id, brand-new leads excluded entirely), how many that were flagged for each issue at From are still flagged for that SAME issue at To? That isolates genuine progress on leads you were already tracking from the effect of new volume.</div>
+        <div id="trackingCohortNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll"><table id="trackingCohortTable"><thead></thead><tbody></tbody></table></div>
+      </section>
     </div>
 
     <!-- ============ RM TIMELINE ============ -->
@@ -3388,6 +3395,55 @@ function findRunTally(runs, at){
   return empty;
 }
 
+// Companion to computeIssueTalliesByRun/findRunTally above, answering a
+// different question: those two compare raw totals at From and To
+// independently, which drift apart as new leads keep getting added between
+// the two snapshots — a flat or rising count there doesn't distinguish
+// "nothing got worked on" from "new volume offset real progress." This
+// instead matches leads by lead_id present at BOTH From and To (a
+// brand-new lead that didn't exist yet at From is excluded entirely, same
+// principle computeMovementRows already uses for Stalled Leads), then asks
+// of that fixed cohort: how many flagged for each issue at From are STILL
+// flagged for that SAME issue at To?
+function computeCohortComparison(regionFilter, fromAt, toAt){
+  const fromMs = fromAt.getTime(), toMs = toAt.getTime();
+  const byLead = new Map(); // lead_id -> {fromRec, toRec}
+  movementSnapshots.forEach(rec => {
+    const atMs = rec.snapshot_at.getTime();
+    if (atMs !== fromMs && atMs !== toMs) return;
+    if (!passesMovementFilters(rec)) return;
+    if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
+    const leadId = String(rec.lead_id || '').trim();
+    if (!leadId) return;
+    if (!byLead.has(leadId)) byLead.set(leadId, {});
+    const entry = byLead.get(leadId);
+    if (atMs === fromMs) entry.fromRec = rec; else entry.toRec = rec;
+  });
+
+  const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
+  const byCheck = {};
+  checkKeys.forEach(k => { byCheck[k] = { flaggedAtFrom: 0, stillFlaggedAtTo: 0 }; });
+  let matchedCount = 0, breachedAtFromCount = 0, stillBreachedCount = 0;
+
+  byLead.forEach(({ fromRec, toRec }) => {
+    if (!fromRec || !toRec) return; // present at only one side — not part of this fixed cohort
+    matchedCount++;
+    const fromEnriched = enrichSnapshotCached(fromRec);
+    const toEnriched = enrichSnapshotCached(toRec);
+    let breachedAtFrom = false, stillBreached = false;
+    checkKeys.forEach(k => {
+      if (!fromEnriched[k]) return;
+      byCheck[k].flaggedAtFrom++;
+      breachedAtFrom = true;
+      if (toEnriched[k]) { byCheck[k].stillFlaggedAtTo++; stillBreached = true; }
+    });
+    if (breachedAtFrom) breachedAtFromCount++;
+    if (breachedAtFrom && stillBreached) stillBreachedCount++;
+  });
+
+  return { matchedCount, breachedAtFromCount, stillBreachedCount, byCheck };
+}
+
 // One point per IST calendar day for the chart's main connected line — a
 // day with several captures (the every-6-hours trigger, plus any manual
 // Snapshot now clicks) used to plot every single one, making the line as
@@ -3596,7 +3652,21 @@ function renderTrackingTab(){
   const regionSelect = document.getElementById('trackingRegionSelect');
   const countEl = document.getElementById('trackingCount');
   const noticeEl = document.getElementById('trackingNotice');
+  const cohortTable = document.getElementById('trackingCohortTable');
+  const cohortCountEl = document.getElementById('trackingCohortCount');
+  const cohortNoticeEl = document.getElementById('trackingCohortNotice');
   if (!table || !regionSelect || !chartEl) return;
+
+  const cohortThead = cohortTable ? cohortTable.querySelector('thead') : null;
+  const cohortTbody = cohortTable ? cohortTable.querySelector('tbody') : null;
+  // Shared by every early-return below — the cohort table has nothing
+  // meaningful to show whenever the main table doesn't either.
+  const clearCohort = (message) => {
+    if (cohortCountEl) cohortCountEl.textContent = '';
+    if (cohortThead) cohortThead.innerHTML = '';
+    if (cohortTbody) cohortTbody.innerHTML = '';
+    if (cohortNoticeEl) { cohortNoticeEl.style.display = 'block'; cohortNoticeEl.innerHTML = message; }
+  };
 
   // Region dropdown built from the fixed region map, preserving whatever
   // was already selected across re-renders.
@@ -3618,6 +3688,7 @@ function renderTrackingTab(){
         ? 'Loading movement history…'
         : `<b>No Movement_Log data yet.</b> This tab reads the same "Movement_Log" sheet tab as the Movement tab — see <span class="mono">MovementTracker.gs</span> for the one-time setup, or click Snapshot now above once you're signed in to start capturing without it.`;
     }
+    clearCohort('Same as above.');
     return;
   }
 
@@ -3629,6 +3700,7 @@ function renderTrackingTab(){
       noticeEl.style.display = 'block';
       noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Click Snapshot now above, or check back after the next scheduled run.';
     }
+    clearCohort('Same as above.');
     return;
   }
 
@@ -3640,6 +3712,7 @@ function renderTrackingTab(){
       noticeEl.style.display = 'block';
       noticeEl.innerHTML = `No leads matched ${esc(selectedRegion === '__all__' ? 'the current filters' : selectedRegion)} in any captured snapshot.`;
     }
+    clearCohort('Same as above.');
     return;
   }
   if (noticeEl) noticeEl.style.display = 'none';
@@ -3699,6 +3772,45 @@ function renderTrackingTab(){
   </tr>`);
 
   tbody.innerHTML = rows.join('');
+
+  if (cohortTable) {
+    const cohort = computeCohortComparison(selectedRegion, win.fromAt, win.toAt);
+    if (!cohort.matchedCount) {
+      clearCohort('No lead was present in both the From and To snapshots for this region/filter combination — every lead in range is either new since From or gone by To, so there is no fixed cohort to compare.');
+    } else {
+      if (cohortNoticeEl) cohortNoticeEl.style.display = 'none';
+      if (cohortCountEl) cohortCountEl.textContent = `${cohort.matchedCount} lead${cohort.matchedCount === 1 ? '' : 's'} present at both points`;
+
+      cohortThead.innerHTML = `<tr>
+        <th>Issue</th>
+        <th style="text-align:right" title="Of the matched cohort, flagged for this issue at the From snapshot">Flagged at From</th>
+        <th style="text-align:right" title="Of those, STILL flagged for the same issue at the To snapshot">Still Flagged at To</th>
+        <th style="text-align:right">Resolved</th>
+        <th style="text-align:right" title="Resolved ÷ Flagged at From">Resolved %</th>
+      </tr>`;
+
+      const resolvedPctCell = (flaggedAtFrom, stillFlaggedAtTo) => {
+        const resolved = flaggedAtFrom - stillFlaggedAtTo;
+        const pct = flaggedAtFrom ? `${(resolved / flaggedAtFrom * 100).toFixed(1)}%` : '—';
+        return { resolved, pct };
+      };
+
+      const cohortRows = ISSUE_PRIORITY.map(c => {
+        const stats = cohort.byCheck[c.key] || { flaggedAtFrom: 0, stillFlaggedAtTo: 0 };
+        const { resolved, pct } = resolvedPctCell(stats.flaggedAtFrom, stats.stillFlaggedAtTo);
+        return `<tr>
+          <td>${esc(c.label)}</td><td class="num">${stats.flaggedAtFrom}</td><td class="num">${stats.stillFlaggedAtTo}</td>
+          <td class="num" style="color:${resolved > 0 ? 'var(--green)' : 'inherit'};">${resolved}</td><td class="num dim">${pct}</td>
+        </tr>`;
+      });
+      const { resolved: totalResolved, pct: totalPct } = resolvedPctCell(cohort.breachedAtFromCount, cohort.stillBreachedCount);
+      cohortRows.push(`<tr style="font-weight:600;">
+        <td>Breaching Any Issue</td><td class="num">${cohort.breachedAtFromCount}</td><td class="num">${cohort.stillBreachedCount}</td>
+        <td class="num" style="color:${totalResolved > 0 ? 'var(--green)' : 'inherit'};">${totalResolved}</td><td class="num dim">${totalPct}</td>
+      </tr>`);
+      cohortTbody.innerHTML = cohortRows.join('');
+    }
+  }
 }
 
 /* ===================== RM TIMELINE ===================== */
