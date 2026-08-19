@@ -3295,21 +3295,16 @@ function splitDailyAndScatter(runs){
 }
 
 // Builds the Region Issue Trend chart as an SVG string, as TWO stacked
-// panels sharing one X axis rather than one chart with two Y scales — total
-// lead volume runs in the thousands while issue counts run in the tens/
-// hundreds, so one shared axis would flatten every issue line to noise near
-// the bottom. Scoped to ONLY the picked From→To window — an earlier
-// version also drew the rest of the captured history dimmed in the
+// panels sharing one X (time) axis rather than one chart with two Y scales
+// — total lead volume runs in the thousands while issue counts run in the
+// tens/hundreds, so one shared axis would flatten every issue line to
+// noise near the bottom. Scoped to ONLY the picked From→To window — an
+// earlier version also drew the rest of the captured history dimmed in the
 // background, which was dropped per feedback in favor of a chart that just
-// shows the selected range. X is ORDINAL by calendar day, not a continuous
-// time scale — each day gets one evenly-spaced column regardless of what
-// time its capture happened. An earlier time-scaled version placed a day's
-// point at its exact capture timestamp, which meant a 00:25 AM capture sat
-// near the LEFT edge of "that date" while a 10 PM capture on another day
-// sat near the RIGHT edge — accurate, but confusing for a chart whose whole
-// point is one column per day. Every OTHER same-day capture (the 6-hourly
-// trigger plus any manual Snapshot now clicks) still renders — stacked at
-// that SAME day's column, as a small, always-dim, unconnected dot — so
+// shows the selected range. The connected line/dots still plot one point
+// per calendar day within that range (see splitDailyAndScatter); every
+// OTHER same-day capture (the 6-hourly trigger plus any manual Snapshot
+// now clicks) still renders as a small, always-dim, unconnected dot, so
 // nothing captured in the window is hidden, it's just not part of the
 // daily trend line. Both the line and every dot carry a hover title naming
 // the series, so hovering anywhere on a line (not just a dot) says which
@@ -3327,14 +3322,10 @@ function buildTrackingChartSvg(allRuns, fromAt, toAt){
   const runs = allRuns.filter(r => r.at.getTime() >= fromMs && r.at.getTime() <= toMs);
   const { daily, scatter } = splitDailyAndScatter(runs);
 
-  const scaleXByIndex = (i) => daily.length > 1 ? marginL + (i / (daily.length - 1)) * plotW : marginL + plotW / 2;
-  const points = daily.map((r, i) => ({ at: r.at, x: scaleXByIndex(i) }));
-  // Every scatter run shares its day's exact column — it's the SAME day as
-  // one of the `daily` points by construction (splitDailyAndScatter only
-  // ever pulls "other captures on an already-represented day"), so it maps
-  // to that day's index, not its own precise timestamp.
-  const dayIndex = new Map(daily.map((r, i) => [istDateKey(r.at), i]));
-  const scatterPoints = scatter.map(r => ({ at: r.at, x: scaleXByIndex(dayIndex.get(istDateKey(r.at))) }));
+  const span = Math.max(1, toMs - fromMs);
+  const scaleX = (t) => marginL + ((t - fromMs) / span) * plotW;
+  const points = daily.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
+  const scatterPoints = scatter.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
   const drawScatterDots = scatter.length <= 800; // caps DOM size — intraday captures can outnumber days by a lot
 
   // Draws one series against a given panel's own y0/y1/maxVal — shared by
