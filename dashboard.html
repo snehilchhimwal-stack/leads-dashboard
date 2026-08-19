@@ -937,6 +937,7 @@
         </div>
 
         <div id="trackingNotice" class="truncation-notice" style="display:none;"></div>
+        <div id="trackingChart" style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 10px 8px; margin-bottom:14px;"></div>
         <div class="section-scroll"><table id="trackingTable"><thead></thead><tbody></tbody></table></div>
       </section>
     </div>
@@ -3110,29 +3111,46 @@ function renderSlaTrend(){
   }).join('') + `</div>`;
 }
 
-// Tallies open-lead issue counts within ONE Movement_Log snapshot run (every
-// record sharing the exact `at` timestamp), replaying the same enrichLead()
-// logic every other issue check in this file uses (via enrichSnapshotCached,
-// which pins _renderNow to the snapshot's own instant — see enrichLeadAsOf).
-// Grouped with mainRegionFor(effectiveRegion()), the SAME logic the region
-// emails use, so a count here lines up with what an email at that same
-// moment would have shown. `regionFilter` is '__all__' or one main region
-// string; passesMovementFilters still applies the top filter bar's Project/
-// TL/Source/Sub-source/date-range (and its OWN Region multi-select, if set) —
-// this table layers its own region grouping on top of that, it doesn't
-// replace it.
-function issueTallyAt(at, regionFilter){
-  const tally = { openTotal: 0, breachedTotal: 0, byCheck: {} };
-  ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
-  if (!at) return tally;
+// Short column headers / legend captions — ISSUE_PRIORITY's labels are full
+// sentences (right for an email/legend title, too wide for a chart legend
+// or axis tick). Falls back to the full label for anything not listed here.
+const TRACKING_SHORT_LABEL = {
+  inactiveRmNewLead: 'Inactive RM',
+  isNotUpdated: 'Not Updated',
+  followupOverdue: 'Follow-up Overdue',
+  underCalledToday: 'Behind on Calls',
+  stageStuck48h: 'Stuck 48h+',
+};
 
+// One tally per distinct Movement_Log snapshot run, across the WHOLE
+// captured history (not just the picked From/To pair) — a single pass over
+// movementSnapshots rather than calling a per-run tally function once per
+// run, which would be O(runs × rows) instead of O(rows). Replays the same
+// enrichLead() logic every other issue check in this file uses (via
+// enrichSnapshotCached, which pins _renderNow to the snapshot's own
+// instant), grouped with mainRegionFor(effectiveRegion()) — the SAME logic
+// the region emails use, so a count here lines up with what an email at
+// that same moment would have shown. `regionFilter` is '__all__' or one
+// main region string; passesMovementFilters still applies the top filter
+// bar's Project/TL/Source/Sub-source/date-range — this layers its own
+// region grouping on top of that, it doesn't replace it. Returns runs
+// sorted oldest to newest; a run with zero matching open leads for the
+// current region/filters is simply absent (not a zero-value entry).
+function computeIssueTalliesByRun(regionFilter){
+  const byRun = new Map(); // at(ms) -> tally
   movementSnapshots.forEach(rec => {
-    if (rec.snapshot_at.getTime() !== at.getTime()) return;
     if (!passesMovementFilters(rec)) return;
     if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
-
     const enriched = enrichSnapshotCached(rec);
     if (!enriched.isOpenLead) return;
+
+    const atMs = rec.snapshot_at.getTime();
+    let tally = byRun.get(atMs);
+    if (!tally) {
+      tally = { at: rec.snapshot_at, openTotal: 0, breachedTotal: 0, byCheck: {} };
+      ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
+      byRun.set(atMs, tally);
+    }
     tally.openTotal++;
     let breached = false;
     ISSUE_PRIORITY.forEach(rule => {
@@ -3140,7 +3158,133 @@ function issueTallyAt(at, regionFilter){
     });
     if (breached) tally.breachedTotal++;
   });
-  return tally;
+  return Array.from(byRun.values()).sort((a, b) => a.at - b.at);
+}
+
+// Nearest thing to "the tally at exactly this instant" — used for the
+// summary table under the chart, which reads the two runs the From/To
+// pickers point at. A zero-tally fallback covers the (rare) case where
+// this region had no matching open leads at that exact run — a legitimate
+// zero, not a lookup failure, since fromAt/toAt come from the picker built
+// off ALL regions combined.
+function findRunTally(runs, at){
+  const found = runs.find(r => r.at.getTime() === at.getTime());
+  if (found) return found;
+  const empty = { at, openTotal: 0, breachedTotal: 0, byCheck: {} };
+  ISSUE_PRIORITY.forEach(rule => { empty.byCheck[rule.key] = 0; });
+  return empty;
+}
+
+// Builds the Region Issue Trend line chart as an SVG string. X axis is a
+// real linear time scale spanning the WHOLE captured history for this
+// region/filter combo (so a gap in capture shows as a gap, not a squeeze);
+// the picked From→To window is drawn at full color/opacity over a faint
+// highlight band, everything outside it (the rest of history) is drawn in
+// the SAME per-issue colors but dimmed — "in the background" — so the
+// selected comparison stands out while the full trend is still visible.
+function buildTrackingChartSvg(runs, fromAt, toAt){
+  const W = 900, H = 280;
+  const marginL = 46, marginR = 14, marginT = 16, marginB = 28;
+  const plotW = W - marginL - marginR, plotH = H - marginT - marginB;
+
+  const minAt = Math.min(runs[0].at.getTime(), fromAt.getTime());
+  const maxAt = Math.max(runs[runs.length - 1].at.getTime(), toAt.getTime());
+  const span = Math.max(1, maxAt - minAt);
+  const scaleX = (t) => marginL + ((t - minAt) / span) * plotW;
+
+  let maxVal = 1;
+  runs.forEach(r => {
+    maxVal = Math.max(maxVal, r.breachedTotal, ...ISSUE_PRIORITY.map(c => r.byCheck[c.key] || 0));
+  });
+  maxVal = Math.ceil(maxVal * 1.15) || 1;
+  const scaleY = (v) => marginT + plotH - (v / maxVal) * plotH;
+
+  // Series: Total Breaching drawn neutral/bold so it reads as "the
+  // aggregate" rather than competing with the five colored components for
+  // a categorical hue; each issue keeps the exact color it uses everywhere
+  // else in this file (ISSUE_COLOR_MAP via colorForIssue).
+  const series = ISSUE_PRIORITY.map(c => ({
+    key: c.key, label: TRACKING_SHORT_LABEL[c.key] || c.label,
+    color: colorForIssue(c.label, 0), width: 1.75, dot: 3,
+    values: runs.map(r => r.byCheck[c.key] || 0),
+  }));
+  series.push({
+    key: '__total__', label: 'Total Breaching', color: 'var(--text)', width: 2.75, dot: 4,
+    values: runs.map(r => r.breachedTotal),
+  });
+
+  const points = runs.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
+  const inWindow = (at) => at.getTime() >= fromAt.getTime() && at.getTime() <= toAt.getTime();
+
+  // Background gridlines + Y labels, 4 even steps.
+  let gridSvg = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = Math.round((maxVal / 4) * i);
+    const y = scaleY(v);
+    gridSvg += `<line x1="${marginL}" y1="${y.toFixed(1)}" x2="${W - marginR}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1" />`;
+    gridSvg += `<text x="${marginL - 8}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--text-faint)">${v}</text>`;
+  }
+
+  // Highlighted From→To band, drawn first so every line sits on top of it.
+  const bandX1 = scaleX(fromAt.getTime()), bandX2 = scaleX(toAt.getTime());
+  const bandSvg = `<rect x="${bandX1.toFixed(1)}" y="${marginT}" width="${Math.max(0, bandX2 - bandX1).toFixed(1)}" height="${plotH}" fill="var(--blue)" opacity="0.08" />` +
+    [['From', bandX1], ['To', bandX2]].map(([label, x]) =>
+      `<line x1="${x.toFixed(1)}" y1="${marginT}" x2="${x.toFixed(1)}" y2="${marginT + plotH}" stroke="var(--text-dim)" stroke-width="1" stroke-dasharray="3,3" />` +
+      `<text x="${x.toFixed(1)}" y="${marginT - 4}" text-anchor="middle" font-size="10" fill="var(--text-dim)">${label}</text>`
+    ).join('');
+
+  // X-axis date ticks — up to 7, always including the last point.
+  const tickStep = Math.max(1, Math.ceil(points.length / 7));
+  let axisSvg = '';
+  for (let i = 0; i < points.length; i += tickStep) {
+    axisSvg += `<text x="${points[i].x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${esc(istDayLabel(points[i].at))}</text>`;
+  }
+  const last = points[points.length - 1];
+  if ((points.length - 1) % tickStep !== 0) {
+    axisSvg += `<text x="${last.x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${esc(istDayLabel(last.at))}</text>`;
+  }
+
+  // Skip individual out-of-window dots past a size threshold — still draws
+  // the dimmed background LINE either way, just without a dot per point, so
+  // a long history doesn't balloon the DOM into thousands of circles.
+  const drawBgDots = points.length <= 200;
+
+  let linesSvg = '';
+  series.forEach(s => {
+    const pts = s.values.map((v, i) => ({ x: points[i].x, y: scaleY(v), at: points[i].at, v }));
+
+    // Background pass: the WHOLE history, dimmed — "in lighter color, all
+    // snapshots visible in the background".
+    const bgPoly = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    linesSvg += `<polyline points="${bgPoly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.32" />`;
+    if (drawBgDots) {
+      pts.forEach(p => {
+        if (inWindow(p.at)) return; // full-opacity dot drawn in the foreground pass below
+        linesSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${Math.max(1.5, s.dot - 1.5)}" fill="${s.color}" opacity="0.32" />`;
+      });
+    }
+
+    // Foreground pass: only the picked From→To window, full opacity + a
+    // hoverable dot with an exact value on every point.
+    const within = pts.filter(p => inWindow(p.at));
+    if (within.length >= 2) {
+      const fgPoly = within.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      linesSvg += `<polyline points="${fgPoly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" />`;
+    }
+    within.forEach(p => {
+      linesSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${s.dot}" fill="${s.color}"><title>${esc(s.label)} — ${esc(istDayLabel(p.at))} ${esc(istTimeLabel(p.at))}: ${p.v}</title></circle>`;
+    });
+  });
+
+  // Reuses the Movement tab's own breakdown-card legend classes rather than
+  // introducing new ones — same dot-plus-label look throughout the file.
+  const legendSvg = `<div class="stall-legend" style="margin-top:8px;">` + series.map(s =>
+    `<span class="stall-legend-item"><span class="stall-legend-dot" style="background:${s.color}; border-radius:50%;"></span>${esc(s.label)}</span>`
+  ).join('') + `</div>`;
+
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:280px; display:block;">` +
+    gridSvg + bandSvg + linesSvg + axisSvg +
+    `</svg>` + legendSvg;
 }
 
 // Own copy of populateMovementSnapshotSelectors' From/To defaulting logic
@@ -3178,21 +3322,23 @@ function getPickedTrackingWindow(){
   return { fromAt, toAt };
 }
 
-// From/To comparison of issue counts across two Movement_Log snapshots —
-// lets you line up "the snapshot closest to when I sent that region's
-// email" against "now" (or any later capture) and see whether each count
-// actually dropped, instead of trusting the live number alone. Entirely
-// sheet-sourced: nothing here reads or writes browser storage.
+// Region Issue Trend: a chart spanning the WHOLE captured history (dimmed)
+// with the picked From→To window highlighted at full color, plus a compact
+// From/To/Change table underneath for the two exact picked points — lets
+// you line up "the snapshot closest to when I sent that region's email"
+// against "now" and see whether each count actually dropped, both as a
+// trend shape and as exact numbers. Entirely sheet-sourced: nothing here
+// reads or writes browser storage.
 function renderTrackingTab(){
+  const chartEl = document.getElementById('trackingChart');
   const table = document.getElementById('trackingTable');
   const regionSelect = document.getElementById('trackingRegionSelect');
   const countEl = document.getElementById('trackingCount');
   const noticeEl = document.getElementById('trackingNotice');
-  if (!table || !regionSelect) return;
+  if (!table || !regionSelect || !chartEl) return;
 
-  // Region dropdown built from the fixed region map (not from history —
-  // there's no local history anymore), preserving whatever was already
-  // selected across re-renders.
+  // Region dropdown built from the fixed region map, preserving whatever
+  // was already selected across re-renders.
   const regionList = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort();
   const prevValue = regionSelect.value;
   regionSelect.innerHTML = `<option value="__all__">All regions (combined)</option>` +
@@ -3204,7 +3350,7 @@ function renderTrackingTab(){
 
   if (movementFetchState !== 'ok') {
     if (countEl) countEl.textContent = '';
-    thead.innerHTML = ''; tbody.innerHTML = '';
+    chartEl.innerHTML = ''; thead.innerHTML = ''; tbody.innerHTML = '';
     if (noticeEl) {
       noticeEl.style.display = 'block';
       noticeEl.innerHTML = movementFetchState === 'loading'
@@ -3217,18 +3363,34 @@ function renderTrackingTab(){
   const win = getPickedTrackingWindow();
   if (!win) {
     if (countEl) countEl.textContent = '';
-    thead.innerHTML = ''; tbody.innerHTML = '';
+    chartEl.innerHTML = ''; thead.innerHTML = ''; tbody.innerHTML = '';
     if (noticeEl) {
       noticeEl.style.display = 'block';
       noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Click Snapshot now above, or check back after the next scheduled run.';
     }
     return;
   }
+
+  const runs = computeIssueTalliesByRun(selectedRegion);
+  if (!runs.length) {
+    if (countEl) countEl.textContent = '';
+    chartEl.innerHTML = ''; thead.innerHTML = ''; tbody.innerHTML = '';
+    if (noticeEl) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = `No open leads matched ${esc(selectedRegion === '__all__' ? 'the current filters' : selectedRegion)} in any captured snapshot.`;
+    }
+    return;
+  }
   if (noticeEl) noticeEl.style.display = 'none';
 
-  const fromTally = issueTallyAt(win.fromAt, selectedRegion);
-  const toTally = issueTallyAt(win.toAt, selectedRegion);
-  if (countEl) countEl.textContent = `${istStamp(win.fromAt)} → ${istStamp(win.toAt)}`;
+  if (countEl) countEl.textContent = runs.length + ' snapshot' + (runs.length === 1 ? '' : 's') + ' captured — highlighted: ' + istStamp(win.fromAt) + ' → ' + istStamp(win.toAt);
+
+  chartEl.innerHTML = runs.length >= 2
+    ? buildTrackingChartSvg(runs, win.fromAt, win.toAt)
+    : `<div class="empty-row">Only one snapshot has data for this region — need at least two to draw a trend.</div>`;
+
+  const fromTally = findRunTally(runs, win.fromAt);
+  const toTally = findRunTally(runs, win.toAt);
 
   thead.innerHTML = `<tr>
     <th>Issue</th>
@@ -4669,6 +4831,11 @@ const ISSUE_COLOR_MAP = {
   "Follow-up Overdue (4h Post-Connect)": 'var(--red)',
   "Behind on Today's Calls": 'var(--blue)',
   "Leads Pending Beyond 48 Hours (Not Yet Opportunity)": 'var(--teal)',
+  // Added for the Tracking tab's multi-series chart, the first place all
+  // five ISSUE_PRIORITY checks are plotted together at once — without a
+  // fixed entry this one would fall to the cycling fallback below and could
+  // collide with whichever hue Behind on Today's Calls already claims.
+  "Inactive-RM Lead Added": 'var(--amber)',
 };
 const ISSUE_COLOR_FALLBACK = ['var(--blue)', 'var(--red)', 'var(--amber)', 'var(--purple)', 'var(--teal)', 'var(--green)'];
 function colorForIssue(issue, indexIfUnknown){
