@@ -8799,12 +8799,18 @@ function movementCellValue(l, key){
   return v == null ? '' : v;
 }
 
-// Generic append — used for both Movement_Log snapshots and the
-// Lead_Followups export below, parameterized by tab name rather than
-// duplicated per tab.
-async function appendSheetRows(tabName, rows){
+// Generic append — used for Movement_Log snapshots, the Lead_Followups
+// export, and SLA_History, parameterized by tab name rather than
+// duplicated per tab. valueInputOption defaults to USER_ENTERED (Sheets
+// parses the value the way typing it into the UI would) since
+// Movement_Log's Date objects need that to land as real, sortable date
+// cells — pass 'RAW' for a tab where nothing should ever be
+// reinterpreted (see upsertSlaHistoryRows: a "2026-08-19" TEXT date-key
+// getting silently auto-converted to a bare date-serial number was
+// exactly this kind of unwanted interpretation).
+async function appendSheetRows(tabName, rows, valueInputOption){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}/values/` +
-    `${encodeURIComponent(tabName)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    `${encodeURIComponent(tabName)}:append?valueInputOption=${valueInputOption || 'USER_ENTERED'}&insertDataOption=INSERT_ROWS`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
@@ -8820,13 +8826,14 @@ async function appendSheetRows(tabName, rows){
 // Writes multiple, possibly non-contiguous ranges in one request — used by
 // pushLeadsToFollowups to update an existing lead's A:E and G columns
 // without touching F (suggested_followup) in between, which a single
-// contiguous range write couldn't do without clobbering it.
-async function sheetsApiValuesBatchUpdate(data){
+// contiguous range write couldn't do without clobbering it. Same
+// valueInputOption override as appendSheetRows above, same reason.
+async function sheetsApiValuesBatchUpdate(data, valueInputOption){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}/values:batchUpdate`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
+    body: JSON.stringify({ valueInputOption: valueInputOption || 'USER_ENTERED', data }),
   });
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
@@ -8999,8 +9006,12 @@ async function upsertSlaHistoryRows(entries){
     }
   });
 
-  if (updateData.length) await sheetsApiValuesBatchUpdate(updateData);
-  if (appendRows.length) await appendSheetRows(SLA_HISTORY_TAB_NAME, appendRows);
+  // RAW, not the default USER_ENTERED — none of these columns need Sheets'
+  // own type interpretation, and USER_ENTERED is exactly what silently
+  // turned the "2026-08-19" date TEXT into a bare date-serial number in
+  // some rows but not others.
+  if (updateData.length) await sheetsApiValuesBatchUpdate(updateData, 'RAW');
+  if (appendRows.length) await appendSheetRows(SLA_HISTORY_TAB_NAME, appendRows, 'RAW');
 
   // Appends land at the bottom regardless of their own snapshot_at, and a
   // backfill batch's internal order doesn't reflect whatever was already
