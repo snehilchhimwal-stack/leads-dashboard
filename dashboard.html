@@ -650,7 +650,7 @@
 
       <section id="sec-slatrend">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">SLA Compliance Trend</div><div class="section-count" id="slaTrendCount"></div></div>
-        <div class="filter-summary">Share of open leads breaching at least one SLA check, one snapshot per day this dashboard was connected. Captured locally in this browser only — not a server-side log, so it won't reflect days nobody opened the page, and it resets if browser data is cleared. <button class="report-copy-btn" style="padding:3px 9px; font-size:11px;" onclick="clearSlaHistory()">Clear local history</button></div>
+        <div class="filter-summary">Share of open leads breaching at least one SLA check, one snapshot per day, written to the SLA_History sheet tab on every refresh — shared across every browser and machine that connects to this sheet. <button class="report-copy-btn" style="padding:3px 9px; font-size:11px;" onclick="clearSlaHistory()">Clear SLA_History</button></div>
         <div id="slaTrendViz"></div>
       </section>
 
@@ -1090,11 +1090,6 @@ const CONFIG = {
   // your real stage values got matched here.
   CLOSED_STAGE_EXACT: ['won', 'lost', 'junk', 'dead', 'not interested'],
   CLOSED_STAGE_STEMS: ['cancel', 'close', 'reject'],
-  // Local-only compliance history (see snapshotSlaHistory). Not a substitute
-  // for a server-side log: it only accumulates on days this dashboard is
-  // actually opened, in this one browser.
-  SLA_HISTORY_KEY: 'gsl_sla_history_v1',
-  SLA_HISTORY_MAX_DAYS: 90,
 };
 
 /* ========================= IST TIME CORE =========================
@@ -1907,8 +1902,8 @@ async function fetchAndRender(){
 
     buildFilterUI();
     applyFiltersAndRender();
+    _currentSheetId = sheetId; // must be set before snapshotSlaHistory — it writes to SLA_History via this
     snapshotSlaHistory();
-    _currentSheetId = sheetId;
     // Best-effort, non-blocking: Movement_Log is a separate tab a helper
     // script writes to, and might not exist yet (setup not done) or the
     // caller might have no data in it yet. Either way the main dashboard
@@ -2424,16 +2419,16 @@ function applyFiltersAndRender(){
   renderAll();
 }
 
-// Persists one compliance snapshot per IST calendar day to localStorage, so
-// the SLA Compliance Trend chart has real history to draw instead of just
-// today's number. Deliberately computed over the WHOLE dataset
-// (allParsedLeads), not the currently filtered `leads` — otherwise browsing
-// with a region filter active would silently overwrite today's snapshot
-// with a partial-data view. This is local-only: it accumulates only on days
-// this dashboard was opened, from this one browser, and is not a substitute
-// for a server-side log (see the note on CONFIG.SLA_HISTORY_KEY).
-function snapshotSlaHistory(){
+// Persists one compliance snapshot per IST calendar day into the
+// SLA_History sheet tab, so the SLA Compliance Trend chart has real,
+// shared history instead of just today's number or one browser's own
+// localStorage cache (see renderSlaTrend/upsertSlaHistoryRows). Deliberately
+// computed over the WHOLE dataset (allParsedLeads), not the currently
+// filtered `leads` — otherwise browsing with a region filter active would
+// silently overwrite today's snapshot with a partial-data view.
+async function snapshotSlaHistory(){
   if (!allParsedLeads.length) return;
+  if (!_currentSheetId) return;
 
   const enriched = allParsedLeads.map(enrichLead); // reuses the _renderNow just set above
   const byCheck = {};
@@ -2451,26 +2446,37 @@ function snapshotSlaHistory(){
   });
 
   const dayKey = istDateKey(_renderNow);
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(CONFIG.SLA_HISTORY_KEY) || '[]'); } catch (e) { history = []; }
-  if (!Array.isArray(history)) history = [];
-
-  // Replace any existing entry for today — the day isn't over, so each
-  // refresh should overwrite with the latest read rather than accumulate
-  // duplicate rows for the same date.
-  history = history.filter(h => h && h.date !== dayKey);
-  history.push({ date: dayKey, openTotal, breachedTotal, byCheck });
-  history.sort((a, b) => a.date.localeCompare(b.date));
-  if (history.length > CONFIG.SLA_HISTORY_MAX_DAYS) {
-    history = history.slice(history.length - CONFIG.SLA_HISTORY_MAX_DAYS);
-  }
-
-  try { localStorage.setItem(CONFIG.SLA_HISTORY_KEY, JSON.stringify(history)); }
-  catch (e) { /* storage full or unavailable — trend just won't accumulate this run */ }
+  // Upserting by date IS the "replace today's entry" behavior the old
+  // localStorage version had (the day isn't over, so each refresh should
+  // overwrite with the latest read rather than accumulate duplicate rows
+  // for the same date) — see upsertSlaHistoryRows.
+  try {
+    await upsertSlaHistoryRows([{ date: dayKey, openTotal, breachedTotal, byCheck }]);
+  } catch (e) { /* sheet write failed — trend just won't pick up this run */ }
 }
 
-function clearSlaHistory(){
-  try { localStorage.removeItem(CONFIG.SLA_HISTORY_KEY); } catch (e) {}
+async function clearSlaHistory(){
+  if (!_currentSheetId) return;
+  try {
+    const sheetId = await getSheetIdByTabName(SLA_HISTORY_TAB_NAME);
+    if (sheetId != null) {
+      const existingValues = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:A`);
+      if (existingValues.length) {
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + existingValues.length } } }],
+          }),
+        });
+        if (!resp.ok) {
+          const errBody = await resp.json().catch(() => ({}));
+          throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+        }
+      }
+    }
+  } catch (e) { console.error('Clear SLA_History failed:', e); }
   renderSlaTrend();
 }
 
@@ -3221,25 +3227,48 @@ function renderDailyTrend(){
   </div>`;
 }
 
-/* ===================== SLA COMPLIANCE TREND (local history) ===================== */
-// Reads what snapshotSlaHistory wrote. Unlike Daily Lead Volume above, this
-// is NOT derived from the sheet on every render — it's whatever this
-// browser has captured across past connects, so it survives filter changes
-// within a session but resets if localStorage is cleared or a different
-// machine opens the dashboard.
-function renderSlaTrend(){
+/* ===================== SLA COMPLIANCE TREND (SLA_History tab) ===================== */
+// Reads what snapshotSlaHistory (and, for older days, the one-time
+// backfillSlaHistoryFromMovementLog) wrote into the SLA_History sheet
+// tab — real, shared history rather than one browser's own localStorage
+// cache. Async (a Sheets API read), so this fires without being awaited
+// at its call site (same as renderTrackingTab's own sheet reads) and
+// paints the chart once the fetch resolves rather than blocking the rest
+// of the render.
+async function renderSlaTrend(){
   const el = document.getElementById('slaTrendViz');
   if (!el) return;
-
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(CONFIG.SLA_HISTORY_KEY) || '[]'); } catch (e) { history = []; }
-  if (!Array.isArray(history)) history = [];
-
   const countEl = document.getElementById('slaTrendCount');
+
+  if (!_currentSheetId) {
+    if (countEl) countEl.textContent = '';
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Connect to a sheet to see history</div>`;
+    return;
+  }
+
+  const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
+  let history;
+  try {
+    const rawRows = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:H`);
+    history = rawRows
+      .filter(r => r && String(r[0] || '').trim())
+      .map(r => ({
+        date: String(r[0]).trim(),
+        openTotal: Number(r[1]) || 0,
+        breachedTotal: Number(r[2]) || 0,
+        byCheck: Object.fromEntries(checkKeys.map((k, i) => [k, Number(r[3 + i]) || 0])),
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch (e) {
+    if (countEl) countEl.textContent = '';
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Could not load SLA_History: ${esc(e.message)}</div>`;
+    return;
+  }
+
   if (countEl) countEl.textContent = history.length + ' day' + (history.length === 1 ? '' : 's');
 
   if (!history.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No local history yet — captured automatically each time you connect/refresh</div>`;
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No history yet — captured automatically each time you connect/refresh</div>`;
     return;
   }
 
@@ -7408,6 +7437,10 @@ const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
 // later automation) reads collated_comments and fills in
 // suggested_followup by hand; nothing in this file ever writes that column.
 const LEAD_FOLLOWUPS_TAB_NAME = 'Lead_Followups';
+// Day-wise SLA compliance history — see snapshotSlaHistory and
+// renderSlaTrend. Replaces the old localStorage-only version: this is a
+// real, shared, durable log instead of one browser's own cache.
+const SLA_HISTORY_TAB_NAME = 'SLA_History';
 // stage_comments is appended at the END, not grouped near
 // internal_status_comments — both this browser's own snapshot-append path
 // (SNAPSHOT_FIELD_KEYS below) and MovementTracker.gs's snapshotOpenLeads_
@@ -8898,6 +8931,101 @@ async function clearLeadFollowupsTab(){
     const errBody = await resp.json().catch(() => ({}));
     throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
   }
+}
+
+// Upserts one row per {date, openTotal, breachedTotal, byCheck} entry into
+// SLA_History, keyed by date (column A) — shared by the live daily
+// snapshot (snapshotSlaHistory, always a single-entry array) and the
+// one-time backfillSlaHistoryFromMovementLog below (many entries at once).
+// Column layout: A date, B openTotal, C breachedTotal, then one column per
+// ISSUE_PRIORITY key in that order (D-H, 5 rules today).
+async function upsertSlaHistoryRows(entries){
+  if (!entries.length) return;
+  if (!_currentSheetId) return;
+
+  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:A`);
+  const rowNumberByDate = {};
+  existingValues.forEach((r, i) => {
+    const d = String((r && r[0]) || '').trim();
+    if (d) rowNumberByDate[d] = i + 2; // +2: row 1 is the header, existingValues is 0-indexed from row 2
+  });
+
+  const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
+  const lastCol = String.fromCharCode('A'.charCodeAt(0) + 2 + checkKeys.length); // date,openTotal,breachedTotal + N checks
+  const updateData = [];
+  const appendRows = [];
+
+  entries.forEach(({ date, openTotal, breachedTotal, byCheck }) => {
+    const rowValues = [date, openTotal, breachedTotal, ...checkKeys.map(k => byCheck[k] || 0)];
+    const rowNum = rowNumberByDate[date];
+    if (rowNum) {
+      updateData.push({ range: `${SLA_HISTORY_TAB_NAME}!A${rowNum}:${lastCol}${rowNum}`, values: [rowValues] });
+    } else {
+      appendRows.push(rowValues);
+    }
+  });
+
+  if (updateData.length) await sheetsApiValuesBatchUpdate(updateData);
+  if (appendRows.length) await appendSheetRows(SLA_HISTORY_TAB_NAME, appendRows);
+}
+
+// ONE-TIME MIGRATION — run manually from the browser console once, after
+// Movement_Log has real history and the SLA_History tab exists (see the
+// walkthrough). Not wired to any button: this is a single backfill, not a
+// recurring action, so it doesn't need permanent UI real estate.
+//
+// Reconstructs a day-wise SLA_History row for every IST calendar day
+// Movement_Log has at least one snapshot for, filling in the history
+// snapshotSlaHistory alone would otherwise only start accumulating from
+// today. movementSnapshots is flat — one row per (lead, capture instant) —
+// so this first regroups by exact snapshot_at instant, then keeps the
+// LATEST instant per day as that day's representative (closest to
+// end-of-day, the most "final" state for that date), then enriches each of
+// that instant's leads exactly like a live snapshot (enrichSnapshotCached
+// applies every SLA rule AS OF that snapshot's own timestamp, not now).
+// Safe to re-run — upserts by date, same as the live daily snapshot — but
+// note it WILL overwrite today's entry with a possibly-stale (up to ~6h
+// old) Movement_Log-derived number if run after today's live snapshot
+// already ran; a subsequent refresh corrects it again.
+async function backfillSlaHistoryFromMovementLog(){
+  if (!movementSnapshots.length) { console.warn('No Movement_Log data loaded — refresh first.'); return; }
+
+  const byInstant = new Map(); // snapshot_at ms -> records[]
+  movementSnapshots.forEach(rec => {
+    const ms = rec.snapshot_at.getTime();
+    if (!byInstant.has(ms)) byInstant.set(ms, []);
+    byInstant.get(ms).push(rec);
+  });
+
+  const latestInstantByDay = new Map(); // dayKey -> ms
+  byInstant.forEach((_, ms) => {
+    const dayKey = istDateKey(new Date(ms));
+    const cur = latestInstantByDay.get(dayKey);
+    if (cur === undefined || ms > cur) latestInstantByDay.set(dayKey, ms);
+  });
+
+  const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
+  const entries = [];
+  latestInstantByDay.forEach((ms, dayKey) => {
+    const byCheck = {};
+    checkKeys.forEach(k => { byCheck[k] = 0; });
+    let openTotal = 0, breachedTotal = 0;
+    byInstant.get(ms).forEach(rec => {
+      const enriched = enrichSnapshotCached(rec);
+      if (!enriched.isOpenLead) return;
+      openTotal++;
+      let isBreached = false;
+      checkKeys.forEach(k => { if (enriched[k]) { byCheck[k]++; isBreached = true; } });
+      if (isBreached) breachedTotal++;
+    });
+    entries.push({ date: dayKey, openTotal, breachedTotal, byCheck });
+  });
+  entries.sort((a, b) => a.date.localeCompare(b.date));
+
+  console.log(`Backfilling ${entries.length} day(s) into ${SLA_HISTORY_TAB_NAME}…`);
+  await upsertSlaHistoryRows(entries);
+  console.log('Done — refreshing the SLA Compliance Trend chart.');
+  renderSlaTrend();
 }
 
 // Resolves after `ms`, but wakes up early (checking every 500ms) if
