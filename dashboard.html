@@ -940,7 +940,7 @@
 
       <section id="sec-tracking">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Region Issue Trend</div><div class="section-count" id="trackingCount"></div></div>
-        <div class="filter-summary">Reads the same <span class="mono">Movement_Log</span> sheet tab as the Movement tab below — nothing here is stored in this browser, so any pair of captured snapshots reads identically for anyone who opens this Sheet. Pick a "From" snapshot (e.g. right when you sent a region's email) and a "To" snapshot (e.g. now) to see whether each issue count actually went down, grouped the same way the region emails are grouped (<span class="mono">mainRegionFor(effectiveRegion())</span>). New comparison points come from either <span class="mono">MovementTracker.gs</span>'s automatic every-6-hours capture, or the Snapshot now button up in the header. The top mini-chart (bright green) is Total Leads in System — every matching lead at that snapshot, any stage, not just open ones — so you can tell whether an issue count dropped because it was actually worked down or just because overall volume shrank; the table's % columns divide each row by that same total.</div>
+        <div class="filter-summary">Reads the same <span class="mono">Movement_Log</span> sheet tab as the Movement tab below — nothing here is stored in this browser, so any pair of captured snapshots reads identically for anyone who opens this Sheet. Pick a "From" snapshot (e.g. right when you sent a region's email) and a "To" snapshot (e.g. now); the chart and table below show ONLY that range, grouped the same way the region emails are grouped (<span class="mono">mainRegionFor(effectiveRegion())</span>). If a day has several captures (the 6-hourly trigger plus any manual Snapshot now clicks), the connected line plots that day's latest one — every other same-day capture still shows, but only as a small dim dot in the background. Hover a line or dot to see which issue it is and its exact value; date labels include the day of week. New comparison points come from either <span class="mono">MovementTracker.gs</span>'s automatic every-6-hours capture, or the Snapshot now button up in the header. The top mini-chart (bright green) is Total Leads in System — every matching lead at that snapshot, any stage, not just open ones — so you can tell whether an issue count dropped because it was actually worked down or just because overall volume shrank; the table's % columns divide each row by that same total.</div>
 
         <div class="stale-controls" style="margin-bottom:10px;">
           <label class="stale-label">From
@@ -3298,17 +3298,18 @@ function splitDailyAndScatter(runs){
 // panels sharing one X (time) axis rather than one chart with two Y scales
 // — total lead volume runs in the thousands while issue counts run in the
 // tens/hundreds, so one shared axis would flatten every issue line to
-// noise near the bottom. The connected line/dots plot one point per
-// calendar day (see splitDailyAndScatter) — every OTHER captured snapshot
-// that day still renders as a small, always-dim, unconnected dot, so
-// nothing captured is hidden, it's just not part of the daily trend line.
-// X axis is a real linear time scale spanning the WHOLE captured history
-// for this region/filter combo (so a gap in capture shows as a gap, not a
-// squeeze); the picked From→To window is drawn at full color/opacity over
-// a faint highlight band spanning both panels, everything outside it (the
-// rest of the daily history) is drawn in the SAME colors but dimmed — so
-// the selected comparison stands out while the full trend is still visible.
-function buildTrackingChartSvg(runs, fromAt, toAt){
+// noise near the bottom. Scoped to ONLY the picked From→To window — an
+// earlier version also drew the rest of the captured history dimmed in the
+// background, which was dropped per feedback in favor of a chart that just
+// shows the selected range. The connected line/dots still plot one point
+// per calendar day within that range (see splitDailyAndScatter); every
+// OTHER same-day capture (the 6-hourly trigger plus any manual Snapshot
+// now clicks) still renders as a small, always-dim, unconnected dot, so
+// nothing captured in the window is hidden, it's just not part of the
+// daily trend line. Both the line and every dot carry a hover title naming
+// the series, so hovering anywhere on a line (not just a dot) says which
+// issue it is.
+function buildTrackingChartSvg(allRuns, fromAt, toAt){
   const W = 900;
   const marginL = 46, marginR = 14, marginT = 16, marginB = 28, panelGap = 18;
   const topPanelH = 66, bottomPanelH = 210;
@@ -3317,17 +3318,15 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
   const H = bottomY1 + marginB;
   const plotW = W - marginL - marginR;
 
+  const fromMs = fromAt.getTime(), toMs = toAt.getTime();
+  const runs = allRuns.filter(r => r.at.getTime() >= fromMs && r.at.getTime() <= toMs);
   const { daily, scatter } = splitDailyAndScatter(runs);
 
-  const minAt = Math.min(runs[0].at.getTime(), fromAt.getTime());
-  const maxAt = Math.max(runs[runs.length - 1].at.getTime(), toAt.getTime());
-  const span = Math.max(1, maxAt - minAt);
-  const scaleX = (t) => marginL + ((t - minAt) / span) * plotW;
+  const span = Math.max(1, toMs - fromMs);
+  const scaleX = (t) => marginL + ((t - fromMs) / span) * plotW;
   const points = daily.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
   const scatterPoints = scatter.map(r => ({ at: r.at, x: scaleX(r.at.getTime()) }));
-  const inWindow = (at) => at.getTime() >= fromAt.getTime() && at.getTime() <= toAt.getTime();
-  const drawBgDots = points.length <= 200; // caps DOM size on a long daily history
-  const drawScatterDots = scatter.length <= 800; // separate cap — intraday captures can outnumber days by a lot
+  const drawScatterDots = scatter.length <= 800; // caps DOM size — intraday captures can outnumber days by a lot
 
   // Draws one series against a given panel's own y0/y1/maxVal — shared by
   // both panels below so the two don't duplicate this logic with two
@@ -3338,36 +3337,24 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
     const pts = daily.map((r, i) => ({ x: points[i].x, y: scaleY(s.get(r)), at: r.at, v: s.get(r) }));
     let out = '';
 
-    // Background: the dimmed daily line, spanning the WHOLE history.
-    const bgPoly = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    out += `<polyline points="${bgPoly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.32" />`;
-    if (drawBgDots) {
-      pts.forEach(p => {
-        if (inWindow(p.at)) return; // full-opacity dot drawn below instead
-        out += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${Math.max(1.5, s.dot - 1.5)}" fill="${s.color}" opacity="0.32" />`;
-      });
-    }
-
-    // Background: every non-daily-representative snapshot — small, always
-    // dim, never connected — "in the background" regardless of the picked
-    // window, since these were never part of the daily trend to begin with.
+    // Every non-daily-representative capture in the window — small, always
+    // dim, never connected — "in the background" behind the daily trend.
     if (drawScatterDots) {
       scatter.forEach((r, i) => {
         const v = s.get(r);
         const y = scaleY(v);
-        out += `<circle cx="${scatterPoints[i].x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(1, s.dot - 2)}" fill="${s.color}" opacity="0.22"><title>${esc(s.label)} — ${esc(istDayLabel(r.at))} ${esc(istTimeLabel(r.at))}: ${v}</title></circle>`;
+        out += `<circle cx="${scatterPoints[i].x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(1, s.dot - 2)}" fill="${s.color}" opacity="0.28"><title>${esc(s.label)} — ${esc(istDayLabelWithDow(r.at))} ${esc(istTimeLabel(r.at))}: ${v}</title></circle>`;
       });
     }
 
-    // Foreground: only the picked From→To window's daily points, full
-    // opacity + a hoverable dot with an exact value on every point.
-    const within = pts.filter(p => inWindow(p.at));
-    if (within.length >= 2) {
-      const fgPoly = within.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-      out += `<polyline points="${fgPoly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" />`;
+    if (pts.length >= 2) {
+      const poly = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      // <title> on the polyline itself — without it, hovering the LINE
+      // between two dots (not exactly on a dot) showed no tooltip at all.
+      out += `<polyline points="${poly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"><title>${esc(s.label)}</title></polyline>`;
     }
-    within.forEach(p => {
-      out += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${s.dot}" fill="${s.color}"><title>${esc(s.label)} — ${esc(istDayLabel(p.at))} ${esc(istTimeLabel(p.at))}: ${p.v}</title></circle>`;
+    pts.forEach(p => {
+      out += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${s.dot}" fill="${s.color}"><title>${esc(s.label)} — ${esc(istDayLabelWithDow(p.at))} ${esc(istTimeLabel(p.at))}: ${p.v}</title></circle>`;
     });
     return out;
   }
@@ -3417,25 +3404,19 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
   const bottomGridSvg = gridFor(bottomY0, bottomY1, bottomMax, 4);
   const bottomLinesSvg = issueSeries.map(s => drawSeries(s, bottomY0, bottomY1, bottomMax)).join('');
 
-  // Highlighted From→To band + boundary lines, spanning BOTH panels so the
-  // selected window reads as one continuous strip, not two disconnected ones.
-  const bandX1 = scaleX(fromAt.getTime()), bandX2 = scaleX(toAt.getTime());
-  const bandSvg = `<rect x="${bandX1.toFixed(1)}" y="${topY0}" width="${Math.max(0, bandX2 - bandX1).toFixed(1)}" height="${bottomY1 - topY0}" fill="var(--blue)" opacity="0.08" />` +
-    [['From', bandX1], ['To', bandX2]].map(([label, x]) =>
-      `<line x1="${x.toFixed(1)}" y1="${topY0}" x2="${x.toFixed(1)}" y2="${bottomY1}" stroke="var(--text-dim)" stroke-width="1" stroke-dasharray="3,3" />` +
-      `<text x="${x.toFixed(1)}" y="${topY0 - 4}" text-anchor="middle" font-size="10" fill="var(--text-dim)">${label}</text>`
-    ).join('');
-
   // X-axis date ticks under the bottom panel only — the top panel shares
   // the same X positions, so repeating them would just be visual noise.
+  // Each label carries the weekday too (istDayLabelWithDow), not just the
+  // date, since a plain date number doesn't say whether that day was a
+  // weekday or weekend.
   const tickStep = Math.max(1, Math.ceil(points.length / 7));
   let axisSvg = '';
   for (let i = 0; i < points.length; i += tickStep) {
-    axisSvg += `<text x="${points[i].x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${esc(istDayLabel(points[i].at))}</text>`;
+    axisSvg += `<text x="${points[i].x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${esc(istDayLabelWithDow(points[i].at))}</text>`;
   }
   const last = points[points.length - 1];
-  if ((points.length - 1) % tickStep !== 0) {
-    axisSvg += `<text x="${last.x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${esc(istDayLabel(last.at))}</text>`;
+  if (points.length && (points.length - 1) % tickStep !== 0) {
+    axisSvg += `<text x="${last.x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${esc(istDayLabelWithDow(last.at))}</text>`;
   }
 
   // Reuses the Movement tab's own breakdown-card legend classes rather than
@@ -3446,7 +3427,7 @@ function buildTrackingChartSvg(runs, fromAt, toAt){
   ).join('') + `</div>`;
 
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:${H}px; display:block;">` +
-    topGridSvg + bottomGridSvg + bandSvg + topLinesSvg + bottomLinesSvg + axisSvg + topLabelSvg +
+    topGridSvg + bottomGridSvg + topLinesSvg + bottomLinesSvg + axisSvg + topLabelSvg +
     `</svg>` + legendSvg;
 }
 
@@ -3546,11 +3527,14 @@ function renderTrackingTab(){
   }
   if (noticeEl) noticeEl.style.display = 'none';
 
-  if (countEl) countEl.textContent = runs.length + ' snapshot' + (runs.length === 1 ? '' : 's') + ' captured — highlighted: ' + istStamp(win.fromAt) + ' → ' + istStamp(win.toAt);
+  const windowedRuns = runs.filter(r => r.at.getTime() >= win.fromAt.getTime() && r.at.getTime() <= win.toAt.getTime());
+  if (countEl) countEl.textContent = windowedRuns.length + ' snapshot' + (windowedRuns.length === 1 ? '' : 's') + ' in range: ' + istStamp(win.fromAt) + ' → ' + istStamp(win.toAt);
 
-  chartEl.innerHTML = runs.length >= 2
+  chartEl.innerHTML = windowedRuns.length >= 2
     ? buildTrackingChartSvg(runs, win.fromAt, win.toAt)
-    : `<div class="empty-row">Only one snapshot has data for this region — need at least two to draw a trend.</div>`;
+    : windowedRuns.length === 1
+    ? `<div class="empty-row">Only one snapshot for this region falls in the picked range — need at least two to draw a trend. Pick a wider From/To.</div>`
+    : `<div class="empty-row">No snapshots for this region fall in the picked range. Pick a wider From/To.</div>`;
 
   const fromTally = findRunTally(runs, win.fromAt);
   const toTally = findRunTally(runs, win.toAt);
@@ -5368,6 +5352,16 @@ const IST_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct',
 function istDayLabel(date){
   const p = istParts(date);
   return `${String(p.d).padStart(2, '0')}-${IST_MONTHS[p.mo]}-${p.y}`;
+}
+
+const IST_WEEKDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; // istParts().dow: getUTCDay() on the IST-shifted instant, so 0 = Sunday
+// istDayLabel plus the weekday name — used where knowing "was this a
+// weekday or weekend" matters (e.g. the Tracking tab's chart axis/hover),
+// kept separate from istDayLabel itself since most existing callers just
+// want the plain date and shouldn't have their label width grow.
+function istDayLabelWithDow(date){
+  const p = istParts(date);
+  return `${IST_WEEKDAYS[p.dow]} ${istDayLabel(date)}`;
 }
 
 function todayDateLabel(){
