@@ -2445,13 +2445,16 @@ async function snapshotSlaHistory(){
     if (isBreached) breachedTotal++;
   });
 
-  const dayKey = istDateKey(_renderNow);
-  // Upserting by date IS the "replace today's entry" behavior the old
-  // localStorage version had (the day isn't over, so each refresh should
-  // overwrite with the latest read rather than accumulate duplicate rows
-  // for the same date) — see upsertSlaHistoryRows.
+  // One row per refresh, keyed by its own exact timestamp (not by day) —
+  // see upsertSlaHistoryRows. A person actively refreshing through the day
+  // adds extra, finer-grained points on top of whatever MovementTracker.gs
+  // is (or will be) writing automatically every 6h; nothing here overwrites
+  // an earlier refresh's row, they just accumulate.
   try {
-    await upsertSlaHistoryRows([{ date: dayKey, openTotal, breachedTotal, byCheck }]);
+    await upsertSlaHistoryRows([{
+      snapshot_at: istDateTimeValue(_renderNow), date: istDateKey(_renderNow), source: 'Dashboard',
+      openTotal, breachedTotal, byCheck,
+    }]);
   } catch (e) { /* sheet write failed — trend just won't pick up this run */ }
 }
 
@@ -3249,36 +3252,43 @@ async function renderSlaTrend(){
   const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
   let history;
   try {
-    const rawRows = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:H`);
+    const rawRows = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:J`);
     history = rawRows
-      .filter(r => r && String(r[0] || '').trim())
+      .filter(r => r && String(r[8] || '').trim()) // snapshot_at (col I) is the real key now
       .map(r => ({
-        date: String(r[0]).trim(),
+        date: String(r[0] || '').trim(),
         openTotal: Number(r[1]) || 0,
         breachedTotal: Number(r[2]) || 0,
         byCheck: Object.fromEntries(checkKeys.map((k, i) => [k, Number(r[3 + i]) || 0])),
+        snapshot_at: String(r[8]).trim(),
+        source: String(r[9] || '').trim() || 'Dashboard', // rows written before the source column existed
       }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
   } catch (e) {
     if (countEl) countEl.textContent = '';
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Could not load SLA_History: ${esc(e.message)}</div>`;
     return;
   }
 
-  if (countEl) countEl.textContent = history.length + ' day' + (history.length === 1 ? '' : 's');
+  if (countEl) countEl.textContent = history.length + ' snapshot' + (history.length === 1 ? '' : 's');
 
   if (!history.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No history yet — captured automatically each time you connect/refresh</div>`;
     return;
   }
 
-  const days = history.slice(-30); // most recent 30 captured days
-  el.innerHTML = `<div class="trend-chart">` + days.slice().reverse().map(h => {
+  // One row per capture instant now, not per day, so a chart-length cap in
+  // "days" would undercount — 60 covers ~2 weeks even at the 4-6/day
+  // cadence Dashboard refreshes plus a future MovementTracker.gs writer
+  // could produce, without the list growing unbounded.
+  const recent = history.slice(-60);
+  el.innerHTML = `<div class="trend-chart">` + recent.slice().reverse().map(h => {
     const rate = h.openTotal ? (h.breachedTotal / h.openTotal) * 100 : 0;
     const w = Math.max(1.5, rate);
-    const label = new Date(h.date + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const d = parseDate(h.snapshot_at);
+    const label = d ? istStamp(h.snapshot_at) : h.date;
     const fillColor = rate >= 50 ? 'var(--red)' : rate >= 20 ? 'var(--amber)' : 'var(--green)';
-    return `<div class="trend-row" title="${esc(label)}: ${h.breachedTotal} of ${h.openTotal} open leads breaching at least one SLA check">
+    return `<div class="trend-row" title="${esc(label)} (${esc(h.source)}): ${h.breachedTotal} of ${h.openTotal} open leads breaching at least one SLA check">
       <div class="trend-date">${esc(label)}</div>
       <div class="trend-track">
         <div class="trend-fill" style="width:${w}%; background:${fillColor};"></div>
@@ -8933,33 +8943,38 @@ async function clearLeadFollowupsTab(){
   }
 }
 
-// Upserts one row per {date, openTotal, breachedTotal, byCheck} entry into
-// SLA_History, keyed by date (column A) — shared by the live daily
-// snapshot (snapshotSlaHistory, always a single-entry array) and the
-// one-time backfillSlaHistoryFromMovementLog below (many entries at once).
-// Column layout: A date, B openTotal, C breachedTotal, then one column per
-// ISSUE_PRIORITY key in that order (D-H, 5 rules today).
+// Upserts one row per {snapshot_at, date, source, openTotal, breachedTotal,
+// byCheck} entry into SLA_History, keyed by snapshot_at (column I) — one
+// row per actual capture instant, not per day, so intra-day swings survive
+// instead of collapsing to a single daily number. Shared by the live
+// snapshot (snapshotSlaHistory, one entry per refresh, source='Dashboard')
+// and the one-time backfillSlaHistoryFromMovementLog below (one entry per
+// historical Movement_Log instant, source='Backfill'). Column layout:
+// A date, B openTotal, C breachedTotal, D-H one column per ISSUE_PRIORITY
+// key, I snapshot_at, J source. date/openTotal/etc. stay in their original
+// A-H position (matching the tab as it was first set up) — snapshot_at and
+// source were added afterward, at the end, so the existing columns never
+// had to be reshuffled.
 async function upsertSlaHistoryRows(entries){
   if (!entries.length) return;
   if (!_currentSheetId) return;
 
-  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:A`);
-  const rowNumberByDate = {};
+  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!I2:I`);
+  const rowNumberBySnapshotAt = {};
   existingValues.forEach((r, i) => {
-    const d = String((r && r[0]) || '').trim();
-    if (d) rowNumberByDate[d] = i + 2; // +2: row 1 is the header, existingValues is 0-indexed from row 2
+    const s = String((r && r[0]) || '').trim();
+    if (s) rowNumberBySnapshotAt[s] = i + 2; // +2: row 1 is the header, existingValues is 0-indexed from row 2
   });
 
   const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
-  const lastCol = String.fromCharCode('A'.charCodeAt(0) + 2 + checkKeys.length); // date,openTotal,breachedTotal + N checks
   const updateData = [];
   const appendRows = [];
 
-  entries.forEach(({ date, openTotal, breachedTotal, byCheck }) => {
-    const rowValues = [date, openTotal, breachedTotal, ...checkKeys.map(k => byCheck[k] || 0)];
-    const rowNum = rowNumberByDate[date];
+  entries.forEach(({ snapshot_at, date, source, openTotal, breachedTotal, byCheck }) => {
+    const rowValues = [date, openTotal, breachedTotal, ...checkKeys.map(k => byCheck[k] || 0), snapshot_at, source];
+    const rowNum = rowNumberBySnapshotAt[snapshot_at];
     if (rowNum) {
-      updateData.push({ range: `${SLA_HISTORY_TAB_NAME}!A${rowNum}:${lastCol}${rowNum}`, values: [rowValues] });
+      updateData.push({ range: `${SLA_HISTORY_TAB_NAME}!A${rowNum}:J${rowNum}`, values: [rowValues] });
     } else {
       appendRows.push(rowValues);
     }
@@ -8974,19 +8989,15 @@ async function upsertSlaHistoryRows(entries){
 // walkthrough). Not wired to any button: this is a single backfill, not a
 // recurring action, so it doesn't need permanent UI real estate.
 //
-// Reconstructs a day-wise SLA_History row for every IST calendar day
-// Movement_Log has at least one snapshot for, filling in the history
-// snapshotSlaHistory alone would otherwise only start accumulating from
-// today. movementSnapshots is flat — one row per (lead, capture instant) —
-// so this first regroups by exact snapshot_at instant, then keeps the
-// LATEST instant per day as that day's representative (closest to
-// end-of-day, the most "final" state for that date), then enriches each of
-// that instant's leads exactly like a live snapshot (enrichSnapshotCached
-// applies every SLA rule AS OF that snapshot's own timestamp, not now).
-// Safe to re-run — upserts by date, same as the live daily snapshot — but
-// note it WILL overwrite today's entry with a possibly-stale (up to ~6h
-// old) Movement_Log-derived number if run after today's live snapshot
-// already ran; a subsequent refresh corrects it again.
+// Reconstructs one SLA_History row for EVERY Movement_Log capture instant
+// (not collapsed to one per day) — movementSnapshots is flat, one row per
+// (lead, capture instant), so this first regroups by exact snapshot_at,
+// then enriches each instant's leads exactly like a live snapshot
+// (enrichSnapshotCached applies every SLA rule AS OF that snapshot's own
+// timestamp, not now). Marked source='Backfill' so these rows stay
+// distinguishable from ones MovementTracker.gs writes automatically going
+// forward. Safe to re-run — upserts by snapshot_at, so a repeat run just
+// overwrites the same instants with the same numbers, no duplicates.
 async function backfillSlaHistoryFromMovementLog(){
   if (!movementSnapshots.length) { console.warn('No Movement_Log data loaded — refresh first.'); return; }
 
@@ -8997,20 +9008,13 @@ async function backfillSlaHistoryFromMovementLog(){
     byInstant.get(ms).push(rec);
   });
 
-  const latestInstantByDay = new Map(); // dayKey -> ms
-  byInstant.forEach((_, ms) => {
-    const dayKey = istDateKey(new Date(ms));
-    const cur = latestInstantByDay.get(dayKey);
-    if (cur === undefined || ms > cur) latestInstantByDay.set(dayKey, ms);
-  });
-
   const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
   const entries = [];
-  latestInstantByDay.forEach((ms, dayKey) => {
+  byInstant.forEach((recs, ms) => {
     const byCheck = {};
     checkKeys.forEach(k => { byCheck[k] = 0; });
     let openTotal = 0, breachedTotal = 0;
-    byInstant.get(ms).forEach(rec => {
+    recs.forEach(rec => {
       const enriched = enrichSnapshotCached(rec);
       if (!enriched.isOpenLead) return;
       openTotal++;
@@ -9018,11 +9022,12 @@ async function backfillSlaHistoryFromMovementLog(){
       checkKeys.forEach(k => { if (enriched[k]) { byCheck[k]++; isBreached = true; } });
       if (isBreached) breachedTotal++;
     });
-    entries.push({ date: dayKey, openTotal, breachedTotal, byCheck });
+    const at = new Date(ms);
+    entries.push({ snapshot_at: istDateTimeValue(at), date: istDateKey(at), source: 'Backfill', openTotal, breachedTotal, byCheck });
   });
-  entries.sort((a, b) => a.date.localeCompare(b.date));
+  entries.sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
 
-  console.log(`Backfilling ${entries.length} day(s) into ${SLA_HISTORY_TAB_NAME}…`);
+  console.log(`Backfilling ${entries.length} snapshot(s) into ${SLA_HISTORY_TAB_NAME}…`);
   await upsertSlaHistoryRows(entries);
   console.log('Done — refreshing the SLA Compliance Trend chart.');
   renderSlaTrend();
