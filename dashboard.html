@@ -648,14 +648,8 @@
 
       <section id="sec-trend">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Daily Lead Volume</div><div class="section-count" id="trendCount"></div></div>
-        <div class="filter-summary">Leads created per day, from lead_created_at. This is genuine history — unlike SLA-compliance-over-time, which would need stored snapshots the dashboard doesn't keep.</div>
+        <div class="filter-summary">Leads created per day, from lead_created_at.</div>
         <div id="trendViz"></div>
-      </section>
-
-      <section id="sec-slatrend">
-        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">SLA Compliance Trend</div><div class="section-count" id="slaTrendCount"></div></div>
-        <div class="filter-summary">Share of open leads breaching at least one SLA check, one snapshot per day, written to the SLA_History sheet tab on every refresh — shared across every browser and machine that connects to this sheet. <button class="report-copy-btn" style="padding:3px 9px; font-size:11px;" onclick="clearSlaHistory()">Clear SLA_History</button></div>
-        <div id="slaTrendViz"></div>
       </section>
 
       <section id="sec-region">
@@ -2423,13 +2417,14 @@ function applyFiltersAndRender(){
   renderAll();
 }
 
-// Persists one compliance snapshot into the SLA_History sheet tab, so the
-// SLA Compliance Trend chart has real, shared history instead of just
-// today's number or one browser's own localStorage cache (see
-// renderSlaTrend/upsertSlaHistoryRows). Deliberately computed over the
-// WHOLE dataset (allParsedLeads), not the currently filtered `leads` —
-// otherwise browsing with a region filter active would silently write a
-// partial-data snapshot.
+// Persists one compliance snapshot into the SLA_History sheet tab — real,
+// shared history rather than one browser's own localStorage cache (see
+// upsertSlaHistoryRows). Nothing in this dashboard currently displays this
+// data (the Overview tab's SLA Compliance Trend chart was removed), but it
+// keeps accumulating for direct sheet inspection or future use. Deliberately
+// computed over the WHOLE dataset (allParsedLeads), not the currently
+// filtered `leads` — otherwise browsing with a region filter active would
+// silently write a partial-data snapshot.
 //
 // asOf defaults to _renderNow (a plain refresh) but callers that need
 // their OWN precise moment — browserSnapshotOpenLeads, so its SLA_History
@@ -2478,9 +2473,12 @@ async function snapshotSlaHistory(asOf){
       snapshot_at: istDateTimeValue(at), date: istDateKey(at), source: 'Dashboard',
       openTotal, breachedTotal, byCheck,
     }]);
-  } catch (e) { /* sheet write failed — trend just won't pick up this run */ }
+  } catch (e) { /* sheet write failed — this run just won't be recorded */ }
 }
 
+// No UI wires to this anymore (the Overview tab's SLA Compliance Trend
+// section was removed) — kept as a console-callable utility: run
+// `await clearSlaHistory()` to wipe SLA_History if you ever need to.
 async function clearSlaHistory(){
   if (!_currentSheetId) return;
   try {
@@ -2503,7 +2501,6 @@ async function clearSlaHistory(){
       }
     }
   } catch (e) { console.error('Clear SLA_History failed:', e); }
-  renderSlaTrend();
 }
 
 // "Last 7 days" default for the Created date filter — the browser's OWN
@@ -3061,7 +3058,6 @@ function renderAll(){
   `;
 
   renderFunnel();
-  renderSlaTrend();
   renderTrackingTab();
   renderRMTimelineTab();
   renderRegionTable();
@@ -3097,7 +3093,6 @@ function renderAll(){
 // and know where the problems are without scrolling the whole page.
 const NAV_SECTIONS = [
   { id: 'sec-funnel',      label: 'Funnel',        countId: null },
-  { id: 'sec-slatrend',    label: 'SLA Trend',     countId: null },
   { id: 'sec-trend',       label: 'Daily Volume',  countId: null },
   { id: 'sec-region',      label: 'Regions',       countId: null },
   { id: 'sec-project',     label: 'Projects',      countId: 'projectCount' },
@@ -3251,74 +3246,6 @@ function renderDailyTrend(){
     <span style="display:inline-block;width:9px;height:9px;background:var(--blue);border-radius:2px;"></span> total created
     &nbsp;&nbsp;<span style="display:inline-block;width:9px;height:9px;background:var(--green);border-radius:2px;"></span> of which reached Opportunity+
   </div>`;
-}
-
-/* ===================== SLA COMPLIANCE TREND (SLA_History tab) ===================== */
-// Reads what snapshotSlaHistory (and, for older days, the one-time
-// backfillSlaHistoryFromMovementLog) wrote into the SLA_History sheet
-// tab — real, shared history rather than one browser's own localStorage
-// cache. Async (a Sheets API read), so this fires without being awaited
-// at its call site (same as renderTrackingTab's own sheet reads) and
-// paints the chart once the fetch resolves rather than blocking the rest
-// of the render.
-async function renderSlaTrend(){
-  const el = document.getElementById('slaTrendViz');
-  if (!el) return;
-  const countEl = document.getElementById('slaTrendCount');
-
-  if (!_currentSheetId) {
-    if (countEl) countEl.textContent = '';
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Connect to a sheet to see history</div>`;
-    return;
-  }
-
-  const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
-  let history;
-  try {
-    const rawRows = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:J`);
-    history = rawRows
-      .filter(r => r && String(r[8] || '').trim()) // snapshot_at (col I) is the real key now
-      .map(r => ({
-        date: String(r[0] || '').trim(),
-        openTotal: Number(r[1]) || 0,
-        breachedTotal: Number(r[2]) || 0,
-        byCheck: Object.fromEntries(checkKeys.map((k, i) => [k, Number(r[3 + i]) || 0])),
-        snapshot_at: String(r[8]).trim(),
-        source: String(r[9] || '').trim() || 'Dashboard', // rows written before the source column existed
-      }))
-      .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
-  } catch (e) {
-    if (countEl) countEl.textContent = '';
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Could not load SLA_History: ${esc(e.message)}</div>`;
-    return;
-  }
-
-  if (countEl) countEl.textContent = history.length + ' snapshot' + (history.length === 1 ? '' : 's');
-
-  if (!history.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No history yet — captured automatically each time you connect/refresh</div>`;
-    return;
-  }
-
-  // One row per capture instant now, not per day, so a chart-length cap in
-  // "days" would undercount — 60 covers ~2 weeks even at the 4-6/day
-  // cadence Dashboard refreshes plus a future MovementTracker.gs writer
-  // could produce, without the list growing unbounded.
-  const recent = history.slice(-60);
-  el.innerHTML = `<div class="trend-chart">` + recent.slice().reverse().map(h => {
-    const rate = h.openTotal ? (h.breachedTotal / h.openTotal) * 100 : 0;
-    const w = Math.max(1.5, rate);
-    const d = parseDate(h.snapshot_at);
-    const label = d ? istStamp(h.snapshot_at) : h.date;
-    const fillColor = rate >= 50 ? 'var(--red)' : rate >= 20 ? 'var(--amber)' : 'var(--green)';
-    return `<div class="trend-row" title="${esc(label)} (${esc(h.source)}): ${h.breachedTotal} of ${h.openTotal} open leads breaching at least one SLA check">
-      <div class="trend-date">${esc(label)}</div>
-      <div class="trend-track">
-        <div class="trend-fill" style="width:${w}%; background:${fillColor};"></div>
-      </div>
-      <div class="trend-nums">${h.breachedTotal}/${h.openTotal} <span class="conv">· ${rate.toFixed(0)}%</span></div>
-    </div>`;
-  }).join('') + `</div>`;
 }
 
 // Short column headers / legend captions — ISSUE_PRIORITY's labels are full
@@ -7575,9 +7502,12 @@ const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
 // later automation) reads collated_comments and fills in
 // suggested_followup by hand; nothing in this file ever writes that column.
 const LEAD_FOLLOWUPS_TAB_NAME = 'Lead_Followups';
-// Day-wise SLA compliance history — see snapshotSlaHistory and
-// renderSlaTrend. Replaces the old localStorage-only version: this is a
-// real, shared, durable log instead of one browser's own cache.
+// Per-snapshot SLA compliance history — see snapshotSlaHistory and
+// backfillSlaHistoryFromMovementLog. Replaces the old localStorage-only
+// version: a real, shared, durable log instead of one browser's own cache.
+// Not currently displayed anywhere in this dashboard (the Overview tab's
+// chart reading this was removed) — still written on every refresh/
+// Snapshot Now for direct sheet inspection or future use.
 const SLA_HISTORY_TAB_NAME = 'SLA_History';
 // stage_comments is appended at the END, not grouped near
 // internal_status_comments — both this browser's own snapshot-append path
@@ -9207,8 +9137,7 @@ async function backfillSlaHistoryFromMovementLog(){
 
   console.log(`Backfilling ${entries.length} snapshot(s) into ${SLA_HISTORY_TAB_NAME}…`);
   await upsertSlaHistoryRows(entries);
-  console.log('Done — refreshing the SLA Compliance Trend chart.');
-  renderSlaTrend();
+  console.log('Done.');
 }
 
 // Resolves after `ms`, but wakes up early (checking every 500ms) if
