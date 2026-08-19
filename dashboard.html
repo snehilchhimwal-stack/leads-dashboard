@@ -613,6 +613,7 @@
       <button class="tab-btn" data-tab="tab-audit">Audit</button>
       <button class="tab-btn" data-tab="tab-movement">Movement</button>
       <button class="tab-btn" data-tab="tab-tracking">Tracking</button>
+      <button class="tab-btn" data-tab="tab-rmtimeline">RM Timeline</button>
     </div>
 
     <!-- ============ OVERVIEW ============ -->
@@ -959,6 +960,45 @@
         <div id="trackingNotice" class="truncation-notice" style="display:none;"></div>
         <div id="trackingChart" style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 10px 8px; margin-bottom:14px;"></div>
         <div class="section-scroll"><table id="trackingTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+    </div>
+
+    <!-- ============ RM TIMELINE ============ -->
+    <div class="tab-panel" id="tab-rmtimeline">
+      <div class="band-label">RM Timeline <span class="band-note">one RM's day-by-day volume, activity, and issue history</span></div>
+
+      <div class="stale-controls" style="margin-bottom:14px;">
+        <label class="stale-label">RM
+          <select id="rmtlRMSelect" class="stale-select"></select>
+        </label>
+        <span style="font-size:11.5px; color:var(--text-faint);">Every section below is scoped to this one RM, plus the filters at the top of the page.</span>
+      </div>
+
+      <section id="sec-rmtl-daily">
+        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Leads Created &amp; Assigned, by Day</div><div class="section-count" id="rmtlDailyCount"></div></div>
+        <div class="filter-summary">Leads with <span class="mono">lead_created_at</span> on each day, currently assigned to this RM. Click a day to load its timeline below.</div>
+        <div id="rmtlDailyTrend"></div>
+      </section>
+
+      <section id="sec-rmtl-timeline">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Day Timeline</div><div class="section-count" id="rmtlTimelineCount"></div></div>
+        <div class="filter-summary">Every dated touch across this RM's leads on the picked day, in order — a call connect, or a logged comment in <span class="mono">internal_status_comments</span>/<span class="mono">stage_comments</span>. <span class="mono">last_comment</span> and <span class="mono">closing_reason</span> aren't individually dated (no per-attempt timestamp), so they're shown as current-state context on each event rather than as their own timeline entries.</div>
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="stale-label">Day <input type="date" id="rmtlDayInput" class="stale-select"></label>
+        </div>
+        <div class="section-scroll" style="max-height:480px;"><div id="rmtlTimelineList"></div></div>
+      </section>
+
+      <section id="sec-rmtl-issues">
+        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Leads With an Issue Right Now</div><div class="section-count" id="rmtlIssueCount"></div></div>
+        <div class="filter-summary">This RM's currently open leads breaching at least one SLA check — same five checks as Operations.</div>
+        <div class="section-scroll"><table id="rmtlIssueTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="sec-rmtl-history">
+        <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Issue Count Over Time</div><div class="section-count" id="rmtlHistoryCount"></div></div>
+        <div class="filter-summary">How many of this RM's leads were flagged for each issue at each captured <span class="mono">Movement_Log</span> snapshot — same source and chart as the Tracking tab, grouped by RM instead of region, showing this RM's whole captured history.</div>
+        <div id="rmtlHistoryChart" style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 10px 8px;"></div>
       </section>
     </div>
 
@@ -2973,6 +3013,7 @@ function renderAll(){
   renderFunnel();
   renderSlaTrend();
   renderTrackingTab();
+  renderRMTimelineTab();
   renderRegionTable();
   renderTLTable();
   renderRMTable();
@@ -3582,6 +3623,203 @@ function renderTrackingTab(){
   </tr>`);
 
   tbody.innerHTML = rows.join('');
+}
+
+/* ===================== RM TIMELINE ===================== */
+// Tracks which RM was selected the last time this tab rendered, so a Day
+// Timeline the user manually picked survives an unrelated re-render (a
+// filter change, a fresh fetch), but resets to a sensible default the
+// moment the RM selection itself changes.
+let _rmtlLastRM = '';
+
+function populateRMTimelineSelect(){
+  const sel = document.getElementById('rmtlRMSelect');
+  if (!sel) return null;
+  const rmList = Array.from(new Set(allParsedLeads.map(l => l.RM || 'Unassigned').filter(Boolean))).sort();
+  const prevValue = sel.value;
+  sel.innerHTML = rmList.map(rm => `<option value="${esc(rm)}">${esc(rm)}</option>`).join('');
+  if (prevValue && rmList.includes(prevValue)) sel.value = prevValue;
+  return sel.value || null;
+}
+
+function renderRMDailyTrend(rm, selectedDay){
+  const el = document.getElementById('rmtlDailyTrend');
+  const countEl = document.getElementById('rmtlDailyCount');
+  if (!el) return;
+  if (!rm) { el.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
+
+  const byDay = new Map();
+  leads.forEach(l => {
+    if ((l.RM || 'Unassigned') !== rm) return;
+    const d = parseDate(l.lead_created_at);
+    if (!d) return;
+    const key = istDateKey(d);
+    byDay.set(key, (byDay.get(key) || 0) + 1);
+  });
+
+  const days = Array.from(byDay.keys()).sort().slice(-30); // most recent 30 days present
+  if (countEl) countEl.textContent = days.length + ' day' + (days.length === 1 ? '' : 's');
+
+  if (!days.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No dated leads for this RM in the current filters</div>`;
+    return;
+  }
+
+  const max = Math.max(...days.map(d => byDay.get(d)));
+  el.innerHTML = `<div class="trend-chart">` + days.slice().reverse().map(d => {
+    const count = byDay.get(d);
+    const w = Math.max(1.5, (count / max) * 100);
+    const label = istDayLabelWithDow(parseDate(d + ' 00:00:00'));
+    const isSelected = d === selectedDay;
+    return `<div class="trend-row" data-day="${d}" style="cursor:pointer; ${isSelected ? 'outline:1px solid var(--blue); border-radius:4px;' : ''}" title="${esc(label)}: ${count} lead${count === 1 ? '' : 's'} created — click to load this day's timeline">
+      <div class="trend-date">${esc(label)}</div>
+      <div class="trend-track"><div class="trend-fill" style="width:${w}%"></div></div>
+      <div class="trend-nums">${count}</div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+// Every dated touch (call connect + individually-dated comment log lines,
+// via updateEventsFor — same event model the Audit tab's Updated Leads and
+// Activity by Hour use) across one RM's leads on one IST day, chronological.
+function renderRMDayTimeline(rm, dayKey){
+  const listEl = document.getElementById('rmtlTimelineList');
+  const countEl = document.getElementById('rmtlTimelineCount');
+  if (!listEl) return;
+  if (!rm || !dayKey) { listEl.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
+
+  const rmLeads = leads.filter(l => (l.RM || 'Unassigned') === rm);
+  const events = [];
+  rmLeads.forEach(l => {
+    updateEventsFor(l).forEach(ev => {
+      if (istDateKey(ev.at) === dayKey) events.push(Object.assign({ lead: l }, ev));
+    });
+  });
+  events.sort((a, b) => a.at - b.at); // chronological — a day timeline reads earliest-first
+
+  if (countEl) countEl.textContent = events.length + ' event' + (events.length === 1 ? '' : 's');
+
+  const dayLabel = istDayLabelWithDow(parseDate(dayKey + ' 00:00:00'));
+  if (!events.length) {
+    listEl.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No logged activity for this RM on ${esc(dayLabel)}</div>`;
+    return;
+  }
+
+  listEl.innerHTML = events.map(ev => {
+    const l = ev.lead;
+    return `<div class="alert-card" style="border-left-color:var(--blue); margin-bottom:8px;">
+      <div class="alert-id">${esc(istTimeLabel(ev.at))} — ${leadIdentityLine(l)}</div>
+      <div class="alert-age mono">${esc(ev.kind)}</div>
+      <div class="alert-meta">${ev.by ? 'By ' + esc(ev.by) + ' — ' : ''}${esc(ev.text || '—')}</div>
+      <div class="alert-comment">Stage: ${esc(l.current_stage || '—')} · Last comment: ${esc(l.last_comment || '—')} · Closing reason: ${esc(l.closing_reason || '—')}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderRMIssueList(rm){
+  const table = document.getElementById('rmtlIssueTable');
+  const countEl = document.getElementById('rmtlIssueCount');
+  if (!table) return;
+  const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
+  if (!rm) { thead.innerHTML = ''; tbody.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
+
+  const rows = issueLeads.filter(l => (l.RM || 'Unassigned') === rm && ISSUE_PRIORITY.some(rule => l[rule.key]));
+  if (countEl) countEl.textContent = rows.length + ' lead' + (rows.length === 1 ? '' : 's');
+
+  thead.innerHTML = `<tr><th>Lead ID</th><th>Stage</th><th>Created</th><th>Issue(s)</th></tr>`;
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-row">No current issues for this RM</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(l => {
+    const issues = ISSUE_PRIORITY.filter(rule => l[rule.key]).map(rule => rule.label);
+    return `<tr>
+      <td>${esc(l.lead_id)}</td><td class="dim">${esc(l.current_stage)}</td><td class="dim">${esc(istStamp(l.lead_created_at))}</td>
+      <td>${issues.map(i => `<span class="chip red" style="margin:0 4px 4px 0;">${esc(i)}</span>`).join('')}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Same run-tally shape computeIssueTalliesByRun produces for a region, just
+// grouped by rec.RM instead — so buildTrackingChartSvg (built generically
+// around that shape) renders this RM's history with zero changes needed.
+// totalAll here means "leads assigned to this RM at that snapshot".
+function computeIssueTalliesByRunForRM(rmName){
+  const byRun = new Map();
+  movementSnapshots.forEach(rec => {
+    if (!passesMovementFilters(rec)) return;
+    if ((rec.RM || 'Unassigned') !== rmName) return;
+
+    const atMs = rec.snapshot_at.getTime();
+    let tally = byRun.get(atMs);
+    if (!tally) {
+      tally = { at: rec.snapshot_at, totalAll: 0, openTotal: 0, breachedTotal: 0, byCheck: {} };
+      ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
+      byRun.set(atMs, tally);
+    }
+    tally.totalAll++;
+
+    const enriched = enrichSnapshotCached(rec);
+    if (!enriched.isOpenLead) return;
+    tally.openTotal++;
+    let breached = false;
+    ISSUE_PRIORITY.forEach(rule => {
+      if (enriched[rule.key]) { tally.byCheck[rule.key]++; breached = true; }
+    });
+    if (breached) tally.breachedTotal++;
+  });
+  return Array.from(byRun.values()).sort((a, b) => a.at - b.at);
+}
+
+// No separate From/To picker here (unlike the Tracking tab) — just shows
+// this RM's whole captured history automatically, since the point is a
+// quick "how has this RM trended" look rather than a specific comparison.
+function renderRMIssueHistory(rm){
+  const el = document.getElementById('rmtlHistoryChart');
+  const countEl = document.getElementById('rmtlHistoryCount');
+  if (!el) return;
+  if (!rm) { el.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
+
+  if (movementFetchState !== 'ok') {
+    if (countEl) countEl.textContent = '';
+    el.innerHTML = `<div class="empty-row">${movementFetchState === 'loading' ? 'Loading movement history…' : 'No Movement_Log data yet — see MovementTracker.gs, or the Snapshot now button up in the header.'}</div>`;
+    return;
+  }
+
+  const runs = computeIssueTalliesByRunForRM(rm);
+  if (runs.length < 2) {
+    if (countEl) countEl.textContent = '';
+    el.innerHTML = `<div class="empty-row">${runs.length === 0 ? 'No captured snapshots for this RM yet.' : 'Only one snapshot captured for this RM so far — need at least two to draw a trend.'}</div>`;
+    return;
+  }
+
+  if (countEl) countEl.textContent = runs.length + ' snapshots';
+  el.innerHTML = buildTrackingChartSvg(runs, runs[0].at, runs[runs.length - 1].at);
+}
+
+function renderRMTimelineTab(){
+  const rm = populateRMTimelineSelect();
+  const dayInput = document.getElementById('rmtlDayInput');
+  if (!dayInput) return;
+
+  // Reset the picked day to this RM's most recent activity only when the
+  // RM selection itself just changed — an unrelated re-render (filters,
+  // a fresh fetch) shouldn't yank a day the user deliberately picked.
+  if (rm && rm !== _rmtlLastRM) {
+    _rmtlLastRM = rm;
+    const rmLeads = leads.filter(l => (l.RM || 'Unassigned') === rm);
+    let latest = null;
+    rmLeads.forEach(l => {
+      const evs = updateEventsFor(l);
+      if (evs.length && (!latest || evs[0].at > latest)) latest = evs[0].at;
+    });
+    dayInput.value = istDateKey(latest || _renderNow);
+  }
+
+  renderRMDailyTrend(rm, dayInput.value);
+  renderRMDayTimeline(rm, dayInput.value);
+  renderRMIssueList(rm);
+  renderRMIssueHistory(rm);
 }
 
 /* ===================== RM PERFORMANCE & SLA SCORE ===================== */
@@ -8397,6 +8635,8 @@ async function browserSnapshotOpenLeads(){
     renderStalledFlaggedLeadsOps();
     renderMovementTab();
     renderTrackingTab();
+    const rmtlSel = document.getElementById('rmtlRMSelect');
+    if (rmtlSel) renderRMIssueHistory(rmtlSel.value); // new run also feeds RM Timeline's history chart
   } catch (err) {
     console.error('Browser snapshot failed:', err);
     setSnapshotStatus('Snapshot failed: ' + err.message, 'var(--red)');
@@ -8490,6 +8730,28 @@ function initCollapsibleSectionInfo(){
   });
 }
 initCollapsibleSectionInfo();
+
+// RM select change picks up renderRMTimelineTab's own default-day reset
+// (see _rmtlLastRM); the day input and daily-trend row clicks only need a
+// re-render, not a reset, since the user is deliberately picking a day.
+function initRMTimelineUI(){
+  const rmSelect = document.getElementById('rmtlRMSelect');
+  const dayInput = document.getElementById('rmtlDayInput');
+  const dailyTrendEl = document.getElementById('rmtlDailyTrend');
+  if (rmSelect) rmSelect.addEventListener('change', renderRMTimelineTab);
+  if (dayInput) dayInput.addEventListener('change', () => {
+    renderRMDailyTrend(rmSelect.value, dayInput.value); // updates the highlighted row
+    renderRMDayTimeline(rmSelect.value, dayInput.value);
+  });
+  if (dailyTrendEl) dailyTrendEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.trend-row[data-day]');
+    if (!row || !dayInput) return;
+    dayInput.value = row.dataset.day;
+    renderRMDailyTrend(rmSelect.value, dayInput.value);
+    renderRMDayTimeline(rmSelect.value, dayInput.value);
+  });
+}
+initRMTimelineUI();
 
 initMovementUI();
 initAuthGate();
