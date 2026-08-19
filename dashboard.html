@@ -6635,6 +6635,18 @@ async function renderReports(){
   let followupLookup;
   genBtn.disabled = true;
   try {
+    // Every Generate starts Lead_Followups clean — no lead carries a
+    // history or suggestion in from a prior run, so what's in the tab
+    // during the wait below is always exactly this run's own leads, never
+    // something stale left over (or already filled in) from before.
+    genBtn.textContent = 'Clearing old follow-ups…';
+    try {
+      await clearLeadFollowupsTab();
+    } catch (err) {
+      setFollowupsPushStatus(`Could not clear Lead_Followups: ${err.message}`, 'var(--red)');
+      return;
+    }
+
     genBtn.textContent = 'Pushing comments…';
     const pushed = await pushLeadsToFollowups(leadsToPush);
     if (!pushed) {
@@ -8813,6 +8825,56 @@ async function pushLeadsToFollowups(rows){
   } catch (err) {
     setFollowupsPushStatus(`Lead_Followups write failed: ${err.message}`, 'var(--red)');
     return false;
+  }
+}
+
+// A tab's row/column edits go through the `values` endpoints used
+// everywhere else in this file, but deleting rows outright is a sheet-
+// structure operation, which needs the tab's own internal numeric sheetId
+// (unrelated to _currentSheetId, the spreadsheet's string ID) rather than
+// its name. Returns null if no tab with that title exists.
+async function getSheetIdByTabName(tabName){
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}?fields=sheets.properties(sheetId,title)`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${gateAccessToken}` } });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+  }
+  const data = await resp.json();
+  const match = (data.sheets || []).find(s => s.properties && s.properties.title === tabName);
+  return match ? match.properties.sheetId : null;
+}
+
+// Wipes every data row (everything below the header) from Lead_Followups —
+// called once a report that went through the push/wait cycle above is
+// actually sent (see performGmailSend), so a lead's collated history and
+// suggestion never linger into a later day where they'd read as current
+// when they're actually stale. Only ever called for a CONFIRMED send (the
+// Gmail API path) — "Open in Mail" just opens a mailto draft with no way
+// to know whether the person actually hit send in their own mail client,
+// so it can't safely trigger this.
+async function clearLeadFollowupsTab(){
+  const sheetId = await getSheetIdByTabName(LEAD_FOLLOWUPS_TAB_NAME);
+  if (sheetId == null) return;
+
+  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${LEAD_FOLLOWUPS_TAB_NAME}!A2:A`);
+  if (!existingValues.length) return; // already empty
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{
+        // 0-indexed, half-open range: row 2 (first data row) is index 1;
+        // deletes through the last row this read actually found data in.
+        deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + existingValues.length } },
+      }],
+    }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
   }
 }
 
