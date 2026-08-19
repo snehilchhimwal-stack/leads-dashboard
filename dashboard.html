@@ -2419,18 +2419,37 @@ function applyFiltersAndRender(){
   renderAll();
 }
 
-// Persists one compliance snapshot per IST calendar day into the
-// SLA_History sheet tab, so the SLA Compliance Trend chart has real,
-// shared history instead of just today's number or one browser's own
-// localStorage cache (see renderSlaTrend/upsertSlaHistoryRows). Deliberately
-// computed over the WHOLE dataset (allParsedLeads), not the currently
-// filtered `leads` — otherwise browsing with a region filter active would
-// silently overwrite today's snapshot with a partial-data view.
-async function snapshotSlaHistory(){
+// Persists one compliance snapshot into the SLA_History sheet tab, so the
+// SLA Compliance Trend chart has real, shared history instead of just
+// today's number or one browser's own localStorage cache (see
+// renderSlaTrend/upsertSlaHistoryRows). Deliberately computed over the
+// WHOLE dataset (allParsedLeads), not the currently filtered `leads` —
+// otherwise browsing with a region filter active would silently write a
+// partial-data snapshot.
+//
+// asOf defaults to _renderNow (a plain refresh) but callers that need
+// their OWN precise moment — browserSnapshotOpenLeads, so its SLA_History
+// row lines up with the exact instant its Movement_Log write used, not
+// whatever _renderNow happened to be left at from an earlier refresh —
+// can pass one explicitly. Overrides _renderNow only, deliberately NOT via
+// enrichLeadAsOf: that also flips _enrichingHistorical, which forces
+// attemptsToday's cruder loggedToday fallback instead of the accurate
+// baseline-based count — right for replaying an OLD Movement_Log row, wrong
+// here, since this is a live moment close to the last real refresh where
+// the normal baseline lookup is still valid.
+async function snapshotSlaHistory(asOf){
   if (!allParsedLeads.length) return;
   if (!_currentSheetId) return;
+  const at = asOf || _renderNow;
 
-  const enriched = allParsedLeads.map(enrichLead); // reuses the _renderNow just set above
+  const savedRenderNow = _renderNow;
+  _renderNow = at;
+  let enriched;
+  try {
+    enriched = allParsedLeads.map(enrichLead);
+  } finally {
+    _renderNow = savedRenderNow;
+  }
   const byCheck = {};
   ISSUE_PRIORITY.forEach(rule => { byCheck[rule.key] = 0; });
 
@@ -2452,7 +2471,7 @@ async function snapshotSlaHistory(){
   // an earlier refresh's row, they just accumulate.
   try {
     await upsertSlaHistoryRows([{
-      snapshot_at: istDateTimeValue(_renderNow), date: istDateKey(_renderNow), source: 'Dashboard',
+      snapshot_at: istDateTimeValue(at), date: istDateKey(at), source: 'Dashboard',
       openTotal, breachedTotal, byCheck,
     }]);
   } catch (e) { /* sheet write failed — trend just won't pick up this run */ }
@@ -9192,6 +9211,11 @@ async function browserSnapshotOpenLeads(){
   try {
     await appendSheetRows(MOVEMENT_LOG_TAB_NAME, rows);
     setSnapshotStatus(`Snapshot written: ${rows.length.toLocaleString()} leads at ${istStamp(now)}.`, 'var(--green)');
+    // Same instant as the Movement_Log write above, not a separate
+    // "whenever this happens to run" timestamp — this button previously
+    // only ever wrote Movement_Log, silently never touching SLA_History
+    // at all.
+    try { await snapshotSlaHistory(now); } catch (e) { /* Movement_Log write already succeeded either way */ }
     // Pull the new run back in so it shows up in the Compare dropdowns
     // immediately, without needing a full reconnect.
     await fetchMovementLog(_currentSheetId);
