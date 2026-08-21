@@ -5822,12 +5822,20 @@ function groupBy(items, keyFn){
 // and miss the other.
 const EMAIL_SIGNATURE = 'Regards,\nSnehil Chhimwal';
 
-// Appended to every generated subject line — states the sub-division scope
-// explicitly (source_bucket "Search" and "Non UTM" only) so the recipient
-// knows without opening the email. Labeling only: doesn't filter which
-// leads the report actually includes — that's still governed by the
-// Sub-source filter above the report controls, same as before.
-const SUBJECT_SCOPE_SUFFIX = ' - Google Search & Non-UTM only';
+// Appended to every generated subject line — states the Sub-source scope
+// so the recipient knows without opening the email. Was a hardcoded
+// ' - Google Search & Non-UTM only' string that stayed on every report
+// regardless of what the Sub-source filter actually was — if nothing was
+// selected (the default: unrestricted, every sub-source included), the
+// subject line still falsely claimed a Search/Non-UTM-only scope, right
+// next to sourceLabel's own (correct) "All-source" — a self-contradictory,
+// misleading label a recipient has no way to catch without re-checking the
+// filters themselves. Now built from the actual current Sub-source
+// selection, same pattern selectedSourceLabel already uses for Source.
+function subjectScopeSuffix(){
+  const sel = Array.from(filterState.bucket);
+  return sel.length ? ` - ${joinAnd(sel.slice().sort())} only` : '';
+}
 
 // HTML rendering for the Gmail-sent version of a report — mailto and Copy
 // still use the plain-text body below (mailto can't carry HTML at all;
@@ -6017,8 +6025,8 @@ function buildRegionReports(issueKey){
     const intro = meta.intro.replace('{SOURCE}', sourceLabel);
     const isReminder = issueKey === 'notConnected';
     const subject = isReminder
-      ? `${region} — 10-Minute Response SLA Reminder (${dateStr})${SUBJECT_SCOPE_SUFFIX}`
-      : `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${SUBJECT_SCOPE_SUFFIX}`;
+      ? `${region} — 10-Minute Response SLA Reminder (${dateStr})${subjectScopeSuffix()}`
+      : `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${subjectScopeSuffix()}`;
     const totalLabel = isReminder ? 'Total Late Connections' : 'Total Leads';
     const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${cloneCountLabel}${graceNote}\n\n${EMAIL_SIGNATURE}`;
 
@@ -6030,7 +6038,7 @@ function buildRegionReports(issueKey){
       eyebrow: 'Google Search Leads · SLA Monitor',
       title: isReminder ? '10-Minute Response SLA Reminder' : meta.label,
       region,
-      subtitle: `${dateStr} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      subtitle: `${dateStr} — ${sourceLabel} leads${subjectScopeSuffix()}`,
       action: (ISSUE_ACTION_MAP[meta.flag] || '') + cloneCaveat,
       kpis: [
         { value: cloneCounts.unique, label: isReminder ? 'Late Connections' : 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
@@ -7232,7 +7240,7 @@ Total : ${warmCloseTotalLabel}` : '';
     }
     const highlightsBlock = highlights.length ? `Highlights:\n${highlights.map(h => `  • ${h}`).join('\n')}\n\n` : '';
 
-    const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${SUBJECT_SCOPE_SUFFIX}`;
+    const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${subjectScopeSuffix()}`;
     const body =
 `Hi,
 
@@ -7325,7 +7333,7 @@ ${EMAIL_SIGNATURE}`;
       eyebrow: 'Google Search Leads · SLA Monitor',
       title: 'All Issues',
       region: regionLabel,
-      subtitle: `${dateRange} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      subtitle: `${dateRange} — ${sourceLabel} leads${subjectScopeSuffix()}`,
       kpis: [
         { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#e0e7ff', fg: '#4338ca' },
         { value: stalledCloneCounts.unique, label: stalledCloneCounts.unique === 1 ? 'Stalled Lead' : 'Stalled Leads', bg: '#fee2e2', fg: '#dc2626' },
@@ -8613,7 +8621,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
       ? `${cloneCounts.unique} (+${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
       : String(cloneCounts.unique);
 
-    const subject = `${region} Overnight Leads (${todayDateLabel()}) - ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`;
+    const subject = `${region} Overnight Leads (${todayDateLabel()}) - ${sourceLabel} leads${subjectScopeSuffix()}`;
     const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} created overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nLeads Created : ${totalLabel}\n\n${EMAIL_SIGNATURE}`;
 
     const counts = {};
@@ -8623,7 +8631,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
       eyebrow: 'Google Search Leads · SLA Monitor',
       title: 'Overnight Leads',
       region,
-      subtitle: `${rangeLabel} — ${sourceLabel} leads${SUBJECT_SCOPE_SUFFIX}`,
+      subtitle: `${rangeLabel} — ${sourceLabel} leads${subjectScopeSuffix()}`,
       action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact."
         + (cloneCounts.cloned > 0 ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.` : ''),
       kpis: [
