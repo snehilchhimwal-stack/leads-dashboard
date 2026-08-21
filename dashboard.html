@@ -618,6 +618,7 @@
       <label class="date-filter">From <input type="date" id="dateFromInput" /></label>
       <label class="date-filter">To <input type="date" id="dateToInput" /></label>
       <button class="btn ghost" id="clearFiltersBtn" style="padding:8px 12px; font-size:12.5px;">Reset filters</button>
+      <button class="btn ghost" id="downloadLeadIdsBtn" style="padding:8px 12px; font-size:12.5px;" title="One lead_id per row for every customer currently passing the filters above — same population as the Total Leads KPI. A customer collated from 2 RM copies contributes both of its original lead_ids.">Download Lead IDs</button>
     </div>
     <div class="filter-summary" id="filterSummary"></div>
 
@@ -5490,6 +5491,35 @@ function csvEscape(v){
   return s;
 }
 
+// One lead_id per row for every customer currently passing the filters —
+// `leads` (not allParsedLeads), so this always matches whatever the Total
+// Leads KPI and every on-screen list are currently showing. Expands via
+// collatedLeadIds (same fallback pattern used elsewhere for a merged
+// customer — see e.g. line ~2828) rather than each record's own single
+// lead_id field, so a customer collated from 2 RM copies contributes BOTH
+// of its original lead_ids, not just whichever one happened to become the
+// merged record's primary id.
+function downloadFilteredLeadIdsCSV(){
+  const ids = [];
+  leads.forEach(l => {
+    const idList = (l.collatedLeadIds && l.collatedLeadIds.length) ? l.collatedLeadIds : [l.lead_id];
+    idList.forEach(id => { if (id) ids.push(id); });
+  });
+
+  const rows = [['lead_id']].concat(ids.map(id => [id]));
+  const csvContent = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `filtered_lead_ids_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function downloadIssuesCSV(){
   // Grouped BY issue — one block per issue listing every lead that has it
   // — rather than one row per lead with its issues joined into a cell. A
@@ -5549,6 +5579,7 @@ function downloadIssuesCSV(){
 }
 
 document.getElementById('downloadIssuesBtn').addEventListener('click', downloadIssuesCSV);
+document.getElementById('downloadLeadIdsBtn').addEventListener('click', downloadFilteredLeadIdsCSV);
 
 /* ===================== REGION EMAIL REPORTS ===================== */
 // Maps each raw sheet region value to its main region group, per the
