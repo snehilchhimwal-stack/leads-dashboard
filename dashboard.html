@@ -926,6 +926,8 @@
 
         <div class="stale-controls" style="margin-top:14px; margin-bottom:10px;">
           <button class="btn ghost" id="overnightGenerateReportsBtn" style="padding:8px 12px; font-size:12.5px;">Generate Region Emails</button>
+          <span id="overnightFollowupsPushStatus" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;"></span>
+          <button class="btn ghost" id="overnightFollowupsWaitCancelBtn" style="padding:6px 10px; font-size:11.5px; display:none;">Cancel wait</button>
           <span class="filter-summary" style="margin:0;">Uses the same per-region To/Cc list as Operations → Region Email Reports.</span>
         </div>
         <div id="overnightReportList"></div>
@@ -8819,34 +8821,47 @@ function overnightStatusLabel(l){
 // than the urgency actually warrants here.
 const OVERNIGHT_NO_COMMENT_FALLBACK = 'Connect ASAP — no contact made yet.';
 
+// Email-only exclusion: the on-screen cohort (renderOvernightCohort)
+// deliberately shows every overnight-created lead, closed or not, so
+// nothing about last night is hidden from view. The email is a
+// follow-up-action list, not a status report — a lead already at
+// Opportunity+ or already closed needs no further overnight follow-up, so
+// it's dropped here rather than cluttering the RM's inbox. cohortLeads
+// comes straight from allParsedLeads (raw), not enrichLead's output, so
+// isOpenLead/oppOrAbove aren't already computed on it — same open/closed
+// logic as enrichLead, applied directly. Factored out (not inlined in
+// buildOvernightRegionReports below) so renderOvernightRegionReports can
+// push/wait on exactly this list before the reports get built from it —
+// same "preliminary list, then real build" split renderReports uses for
+// the Summary email, just without needing a full throwaway report pass.
+function overnightEmailableLeads(cohortLeads){
+  return cohortLeads.filter(l => !isLeadClosed(l) && !isOppOrAbove(l.current_stage));
+}
+
 // Region-wise email reports for Overnight Leads — same {region, subject,
 // body, html, count, regionNames} shape as the Stalled report above and
 // Operations' own buildRegionReports(), so it reuses the exact same send/
 // copy/recipients pipeline. Built from the live sheet (allParsedLeads via
 // computeOvernightCohort), which DOES carry project_region, so "Loan"
 // resolution here is fully accurate — unlike the Stalled report, which is
-// limited by what Movement_Log itself stores.
-function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
+// limited by what Movement_Log itself stores. followupLookup (from the
+// same Lead_Followups push/wait cycle the Summary email uses — see
+// renderOvernightRegionReports) is preferred over the algorithmic
+// suggestedFollowUp fallback whenever a human has filled one in, exactly
+// like buildRegionWiseReports' own followupTextFor.
+function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, followupLookup){
   const sourceLabel = selectedSourceLabel();
   const rangeLabel = `${istStamp(windowStart)} → ${istStamp(windowEnd)}`;
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
+  const followupTextFor = (l) => (followupLookup && followupLookup[String(l.lead_id).trim()]) || suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK);
   // Each lead's own copy is judged on its own stage — a lightweight
   // sibling note (not a merged status) names any other RM copies of the
   // same customer for context. cohortLeads already arrives pre-expanded
   // per copy (see computeOvernightCohort).
-  const leadLine = (l) => `${l.lead_id}  |  ${overnightStatusLabel(l)}  |  ${suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK)}${(l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : ''}`;
+  const leadLine = (l) => `${l.lead_id}  |  ${overnightStatusLabel(l)}  |  ${followupTextFor(l)}${(l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : ''}`;
 
-  // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
-  // deliberately shows every overnight-created lead, closed or not, so
-  // nothing about last night is hidden from view. The email is a
-  // follow-up-action list, not a status report — a lead already at
-  // Opportunity+ or already closed needs no further overnight follow-up,
-  // so it's dropped here rather than cluttering the RM's inbox. cohortLeads
-  // comes straight from allParsedLeads (raw), not enrichLead's output, so
-  // isOpenLead/oppOrAbove aren't already computed on it — same open/closed
-  // logic as enrichLead, applied directly.
-  const emailableLeads = cohortLeads.filter(l => !isLeadClosed(l) && !isOppOrAbove(l.current_stage));
+  const emailableLeads = overnightEmailableLeads(cohortLeads);
 
   const byRegion = groupItemsByReportRegion(emailableLeads);
   return Object.keys(byRegion).sort().map(region => {
@@ -8893,7 +8908,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd){
         rows: group.map(l => [
           l.lead_id,
           overnightStatusLabel(l) + ((l.siblingRMs && l.siblingRMs.length) ? ` (also held by: ${l.siblingRMs.join(', ')})` : ''),
-          suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK),
+          followupTextFor(l),
         ]),
       })),
       footerNote: 'Status reflects the CURRENT live sheet as of last refresh, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — see the Movement tab\'s on-screen Overnight Leads list for the full overnight cohort including those.',
@@ -8965,7 +8980,13 @@ function renderOvernightCohort(toAt){
 // same report-card markup and Copy/Open in Mail/Send via Gmail buttons as
 // Operations' own region reports, just pointed at a different array
 // (window._overnightRegionReports) so the two report lists don't collide.
-function renderOvernightRegionReports(){
+// Goes through the exact same Lead_Followups process renderReports (the
+// Summary/All Issues email) uses: clear the tab, push these leads' comment
+// history, wait until every one has a human-filled suggested_followup,
+// THEN build the real report from that lookup — so an overnight email
+// never goes out with the generic "no comments logged" filler when someone
+// actually typed in a real suggestion for that lead.
+async function renderOvernightRegionReports(){
   const el = document.getElementById('overnightReportList');
   if (!el) return;
   if (!_lastOvernightCohort || !_lastOvernightCohort.leads.length) {
@@ -8973,7 +8994,48 @@ function renderOvernightRegionReports(){
     window._overnightRegionReports = [];
     return;
   }
-  const reports = buildOvernightRegionReports(_lastOvernightCohort.leads, _lastOvernightCohort.windowStart, _lastOvernightCohort.windowEnd);
+
+  const { leads: cohortLeads, windowStart, windowEnd } = _lastOvernightCohort;
+  const leadsToPush = overnightEmailableLeads(cohortLeads);
+  if (!leadsToPush.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No overnight leads need a follow-up email right now — either none fall inside a reporting region, or all of last night's leads are already at Opportunity+ or closed</div>`;
+    window._overnightRegionReports = [];
+    return;
+  }
+
+  const btn = document.getElementById('overnightGenerateReportsBtn');
+  const originalLabel = btn.textContent;
+  let followupLookup;
+  btn.disabled = true;
+  try {
+    // Every Generate starts Lead_Followups clean — see renderReports'
+    // identical reasoning on its own clearLeadFollowupsTab call.
+    btn.textContent = 'Clearing old follow-ups…';
+    try {
+      await clearLeadFollowupsTab();
+    } catch (err) {
+      setFollowupsPushStatus(`Could not clear Lead_Followups: ${err.message}`, 'var(--red)', 'overnightFollowupsPushStatus');
+      return;
+    }
+
+    btn.textContent = 'Pushing comments…';
+    const pushed = await pushLeadsToFollowups(leadsToPush, 'overnightFollowupsPushStatus');
+    if (!pushed) {
+      el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Could not write Lead_Followups — see the status above. Nothing sent.</div>`;
+      return;
+    }
+    btn.textContent = 'Waiting for follow-ups…';
+    followupLookup = await waitForAllFollowups(
+      leadsToPush.map(r => String(r.lead_id).trim()),
+      'overnightFollowupsPushStatus', 'overnightFollowupsWaitCancelBtn'
+    );
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+  if (!followupLookup) return; // cancelled — waitForAllFollowups already explained why, nothing to render
+
+  const reports = buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, followupLookup);
   window._overnightRegionReports = reports;
   if (!reports.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No overnight leads need a follow-up email right now — either none fall inside a reporting region, or all of last night's leads are already at Opportunity+ or closed</div>`;
@@ -9136,8 +9198,8 @@ async function sheetsApiValuesBatchUpdate(data, valueInputOption){
   return resp.json();
 }
 
-function setFollowupsPushStatus(text, color){
-  const el = document.getElementById('followupsPushStatus');
+function setFollowupsPushStatus(text, color, elId){
+  const el = document.getElementById(elId || 'followupsPushStatus');
   if (el) { el.textContent = text; el.style.color = color; }
 }
 
@@ -9156,20 +9218,20 @@ function setFollowupsPushStatus(text, color){
 // safe move is to leave it alone. That's also why existing rows are
 // updated as two separate ranges (A:E and G) rather than one A:G write,
 // which would silently blank out anything in F.
-async function pushLeadsToFollowups(rows){
+async function pushLeadsToFollowups(rows, statusElId){
   if (!rows.length) return true;
   if (!_currentSheetId) return false;
 
   if (!gateTokenValid()) {
-    setFollowupsPushStatus('Re-signing in…', 'var(--text-faint)');
+    setFollowupsPushStatus('Re-signing in…', 'var(--text-faint)', statusElId);
     await gateSignIn();
     if (!gateTokenValid()) {
-      setFollowupsPushStatus('Sign-in required to write Lead_Followups.', 'var(--amber)');
+      setFollowupsPushStatus('Sign-in required to write Lead_Followups.', 'var(--amber)', statusElId);
       return false;
     }
   }
 
-  setFollowupsPushStatus('Writing Lead_Followups…', 'var(--text-faint)');
+  setFollowupsPushStatus('Writing Lead_Followups…', 'var(--text-faint)', statusElId);
 
   try {
     const existingValues = await sheetsApiValuesGet(_currentSheetId, `${LEAD_FOLLOWUPS_TAB_NAME}!A2:A`);
@@ -9204,11 +9266,11 @@ async function pushLeadsToFollowups(rows){
 
     setFollowupsPushStatus(
       `Lead_Followups updated: ${updateData.length / 2} updated, ${appendRows.length} added.`,
-      'var(--green)'
+      'var(--green)', statusElId
     );
     return true;
   } catch (err) {
-    setFollowupsPushStatus(`Lead_Followups write failed: ${err.message}`, 'var(--red)');
+    setFollowupsPushStatus(`Lead_Followups write failed: ${err.message}`, 'var(--red)', statusElId);
     return false;
   }
 }
@@ -9412,31 +9474,40 @@ function sleepCancelable(ms){
 
 let _followupWaitCancelled = false;
 
-function showFollowupWaitControls(show){
-  const btn = document.getElementById('followupsWaitCancelBtn');
+function showFollowupWaitControls(show, btnId){
+  const btn = document.getElementById(btnId || 'followupsWaitCancelBtn');
   if (btn) btn.style.display = show ? 'inline-block' : 'none';
 }
 
 document.getElementById('followupsWaitCancelBtn').addEventListener('click', () => {
   _followupWaitCancelled = true;
 });
+document.getElementById('overnightFollowupsWaitCancelBtn').addEventListener('click', () => {
+  _followupWaitCancelled = true;
+});
 
 // Polls Lead_Followups until every leadId in `leadIds` has a non-blank
 // suggested_followup (column F), or the user clicks Cancel. Returns
-// {lead_id: suggestion} once complete, or null if cancelled — renderReports
-// checks for null and bails out without sending anything. No timeout: a
+// {lead_id: suggestion} once complete, or null if cancelled — callers
+// check for null and bail out without sending anything. No timeout: a
 // person may take a while to review and type these in, and the Cancel
 // button (not a clock) is the deliberate way out of an abandoned wait.
-async function waitForAllFollowups(leadIds){
+// statusElId/cancelBtnId let a second caller (Overnight Leads' own
+// "Generate Region Emails") drive its own on-screen status/cancel UI
+// instead of the one that lives next to the Summary email's Generate
+// button — same underlying wait, same _followupWaitCancelled flag (only
+// one such wait is ever in flight at a time — both are manual, one-person
+// button clicks), just reflected in the right place on screen.
+async function waitForAllFollowups(leadIds, statusElId, cancelBtnId){
   if (!leadIds.length) return {};
   _followupWaitCancelled = false;
-  showFollowupWaitControls(true);
+  showFollowupWaitControls(true, cancelBtnId);
   const POLL_MS = 20000;
   let attempt = 0;
   try {
     while (true) {
       if (_followupWaitCancelled) {
-        setFollowupsPushStatus('Cancelled — waiting for follow-ups stopped, nothing sent.', 'var(--amber)');
+        setFollowupsPushStatus('Cancelled — waiting for follow-ups stopped, nothing sent.', 'var(--amber)', statusElId);
         return null;
       }
       attempt++;
@@ -9449,17 +9520,17 @@ async function waitForAllFollowups(leadIds){
       });
       const missing = leadIds.filter(id => !lookup[id]);
       if (!missing.length) {
-        setFollowupsPushStatus(`All ${leadIds.length} follow-up${leadIds.length === 1 ? '' : 's'} ready.`, 'var(--green)');
+        setFollowupsPushStatus(`All ${leadIds.length} follow-up${leadIds.length === 1 ? '' : 's'} ready.`, 'var(--green)', statusElId);
         return lookup;
       }
       setFollowupsPushStatus(
         `Waiting for follow-ups: ${leadIds.length - missing.length} of ${leadIds.length} filled in (check #${attempt})…`,
-        'var(--text-faint)'
+        'var(--text-faint)', statusElId
       );
       await sleepCancelable(POLL_MS);
     }
   } finally {
-    showFollowupWaitControls(false);
+    showFollowupWaitControls(false, cancelBtnId);
   }
 }
 
