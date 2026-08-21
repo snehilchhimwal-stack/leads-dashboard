@@ -5210,8 +5210,15 @@ function _editDistance(a, b){
 // 2 from "visited"): those are different grammatical forms with different
 // meanings here, not typos of one another, and conflating them silently
 // misrouted real comments to the wrong outcome.
+// The <=4 cutoff (not <=3) was found the hard way: with a 1-edit budget,
+// "busy" (4 letters) fuzzy-matched "buy", "bus", and "buys" — genuinely
+// different, common, IMPORTANT words (a client saying "buy" is the exact
+// opposite signal from a stale line being busy) that just happen to be one
+// edit away. At 4 letters there are too many real short words within one
+// edit of each other for any of them to safely tolerate a typo; exact
+// match only up to that length, same as the 2-3 letter codes.
 function _typoBudget(targetLen){
-  if (targetLen <= 3) return 0;
+  if (targetLen <= 4) return 0;
   if (targetLen <= 8) return 1;
   return 2;
 }
@@ -5291,19 +5298,45 @@ const OUTCOME_RULES = [
     // match on the single word 'disconnect' would also swallow
     // "disconnected", which stays its own, later, pre-existing outcome.
     ], test: (c) => /^disconnect\s*-?\s*$/.test(c) },
-  { outcome: 'Busy', signals: ['busy'] },
+  // 'buzy' listed explicitly, not left to typo tolerance — see
+  // _typoBudget's comment on why 4-letter words match exactly only.
+  { outcome: 'Busy', signals: ['busy', 'buzy'] },
   { outcome: 'Booked Elsewhere', signals: [
       'booked elsewhere', 'booked with another', 'purchased elsewhere', 'purchased another',
       'bought elsewhere', 'bought another', 'already bought', 'already purchased',
       'finalized another', 'finalised another', 'gone with another',
     ] },
+  // We only sell first-sale (developer/builder to buyer) — a client
+  // wanting resale or rental was never in scope, so this is a genuine,
+  // valid reason to close, same standing as Booked Elsewhere, not a
+  // "lost interest" to chase. 'resale'/'resell'/'second hand'/'to let'
+  // name the property TYPE unambiguously, so they're safe as plain
+  // signals. "rent"/"rental"/"renting" are NOT — "on rent currently but
+  // wants own home" and "currently renting, wants to buy" both contain
+  // those words while meaning the OPPOSITE of this outcome (describing
+  // the client's PRESENT arrangement, not their ask). The test below only
+  // fires when a rent word is paired with an actual seeking verb
+  // (want/need/looking/require/search) AND there's no "current(ly)" in
+  // the same comment — that combination is what actually distinguishes
+  // "I need a place on rent" from "I currently rent".
+  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand', 'to let'],
+    test: (c, w) => {
+      if (!_anySignal(w, ['rent', 'rental', 'renting'])) return false;
+      if (_anySignal(w, ['current', 'currently'])) return false;
+      return _anySignal(w, ['want', 'wants', 'need', 'needs', 'looking', 'require', 'requires', 'searching', 'search']);
+    } },
   { outcome: 'RNR', signals: [
       'rnr', 'cnr', 'nc', 'nr', 'not responding', 'no answer', 'no response', 'not answering', 'not answered',
       'didnt answer', 'not picking', 'did not pick', 'didnt pick', 'pickup the call', 'pick up the call',
       'do not pickup', 'do not pick up', 'call not answered', 'call not received', 'call not receive',
       'not received call', 'not received', 'call not respond', 'call not pick', 'call not picked', 'not receiving',
     ] },
-  { outcome: 'Ringing / RNR', signals: ['ringing', 'ring'] },
+  // Bare "ring" is real telecalling shorthand ("Ring", "ring -") but ALSO
+  // a real word in unrelated location context ("near ring road") — a plain
+  // word signal would wrongly fire on the latter. The anchored regex only
+  // matches when "ring"/"ring -" is the WHOLE comment, the same shape the
+  // real shorthand notes actually take, not just any mention of the word.
+  { outcome: 'Ringing / RNR', signals: ['ringing'], test: (c) => /^ring\s*-?\s*$/.test(c) },
   // Word-boundary matching (not a bare substring) already keeps "disc"
   // from matching inside "discussed"/"discount"/"disclose" — see
   // _signalMatches, which only ever compares whole tokens.
@@ -5437,6 +5470,7 @@ const FOLLOWUP_SUGGESTIONS = {
   'Call Declined': "Customer saw or heard the call and actively ended/declined it — they're avoiding contact right now, so calling straight back is more likely to annoy than connect. Try a different time of day, or switch to WhatsApp/SMS first.",
   'Busy': 'Line was busy — retry within a few hours.',
   'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
+  'Resale / Rental (Out of Scope)': "Client is looking for resale or rental, not a new first-sale (developer/builder) property — we don't work that segment. Close with this as the reason rather than treating it as lost interest.",
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
   'Disconnected': "Call dropped, didn't connect, or connected with no response — retry; flag the number if this keeps happening.",
