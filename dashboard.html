@@ -63,6 +63,29 @@
     70%{ box-shadow:0 0 0 8px rgba(74,222,128,0);}
     100%{ box-shadow:0 0 0 0 rgba(74,222,128,0);}
   }
+  /* Blocks every click/scroll on the page underneath while a filter change
+     or refresh is recomputing — without this, a click made while the main
+     thread is busy just queues up and fires the moment it frees, kicking
+     off ANOTHER full recompute on top of the one that just finished. A
+     few of those stacked back to back is what reads as the page "crashing"
+     rather than just being slow for a couple of seconds. */
+  #renderLoadingOverlay{
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:rgba(10,12,16,.55); backdrop-filter:blur(1px);
+    align-items:center; justify-content:center; flex-direction:column; gap:14px;
+    cursor:wait;
+  }
+  #renderLoadingOverlay.active{ display:flex; }
+  .loading-spinner{
+    width:34px; height:34px; border-radius:50%;
+    border:3px solid rgba(255,255,255,.18); border-top-color:var(--blue);
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .loading-overlay-text{
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:600; color:var(--text);
+    background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 16px;
+  }
   .last-refreshed{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-dim); }
   .btn{
     font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
@@ -537,6 +560,7 @@
 </style>
 </head>
 <body>
+<div id="renderLoadingOverlay"><div class="loading-spinner"></div><div class="loading-overlay-text" id="renderLoadingOverlayText">Loading…</div></div>
 <div class="wrap">
 
   <div id="authGate" style="max-width:460px; margin:100px auto;">
@@ -1474,6 +1498,13 @@ async function fetchAndRender(){
     return;
   }
 
+  // Covers the whole fetch/parse/render pass, not just the Refresh button —
+  // a filter checkbox is a DIFFERENT element, so disabling only the button
+  // (below) doesn't stop a click there from queuing up while this is still
+  // reading/collating thousands of rows, which then fires the moment this
+  // frees the main thread and stacks a second heavy pass on top.
+  showLoadingOverlay('Loading your sheet…');
+
   // A manual Refresh click can land after the gate token has expired
   // (~1h) — that click is itself a real user gesture, so it's safe to use
   // to silently re-request a token before reading, rather than bouncing
@@ -2001,6 +2032,7 @@ async function fetchAndRender(){
   } finally {
     btn.disabled = false;
     btn.textContent = 'Refresh';
+    hideLoadingOverlay();
   }
 }
 
@@ -2390,7 +2422,71 @@ function esc(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Full-page blocking overlay for a heavy recompute — shown BEFORE the
+// synchronous work starts and hidden after it finishes, with pointer
+// events swallowed by #renderLoadingOverlay's own CSS (position:fixed,
+// inset:0, above everything) so a click during the freeze can't reach any
+// filter/button underneath and queue up yet another recompute.
+// Reference-counted, not a plain show/hide toggle — fetchAndRender shows
+// this, then calls applyFiltersAndRender internally (which shows/hides it
+// too) before fetchAndRender's OWN finally block hides it again. Because
+// applyFiltersAndRender's real work is deferred a couple ticks (see below),
+// fetchAndRender's finally runs — and would hide the overlay — before that
+// deferred work has even started. A plain boolean toggle would drop the
+// overlay right before the heaviest part of the pass; counting nested
+// show calls means it only actually disappears once every caller that
+// asked for it is done.
+let _loadingOverlayDepth = 0;
+function showLoadingOverlay(text){
+  _loadingOverlayDepth++;
+  const el = document.getElementById('renderLoadingOverlay');
+  if (!el) return;
+  const textEl = document.getElementById('renderLoadingOverlayText');
+  if (textEl) textEl.textContent = text || 'Loading…';
+  el.classList.add('active');
+}
+function hideLoadingOverlay(){
+  _loadingOverlayDepth = Math.max(0, _loadingOverlayDepth - 1);
+  if (_loadingOverlayDepth > 0) return; // still needed by an outer/other in-flight caller
+  const el = document.getElementById('renderLoadingOverlay');
+  if (el) el.classList.remove('active');
+}
+
+let _isApplyingFilters = false;
+// Thin wrapper around the real implementation below. Setting the overlay's
+// class and immediately calling straight into the expensive synchronous
+// work would never actually SHOW the overlay — the browser only paints a
+// DOM change on the event loop's next turn, and a long synchronous call
+// blocks that turn from ever happening. Two nested setTimeout(…, 0) calls
+// force the browser through a real paint in between "show the overlay"
+// and "start the work that would otherwise block it from ever appearing".
+// Deliberately NOT requestAnimationFrame here — rAF callbacks are tied to
+// the visible paint cycle and get throttled or fully paused for a tab
+// that isn't the focused/visible one (e.g. the user alt-tabbed away right
+// after clicking a filter), which would hang this indefinitely — exactly
+// the kind of freeze this is meant to prevent, just silent instead of
+// slow. setTimeout keeps firing (browsers only clamp its rate in a
+// background tab, never pause it outright). _isApplyingFilters is a
+// belt-and-suspenders guard — the overlay already blocks the clicks that
+// would cause this, but if a caller ever invokes this programmatically
+// while one is in flight, this still keeps two passes from stacking.
 function applyFiltersAndRender(){
+  if (_isApplyingFilters) return;
+  _isApplyingFilters = true;
+  showLoadingOverlay('Applying filters…');
+  setTimeout(() => {
+    setTimeout(() => {
+      try {
+        _applyFiltersAndRenderImpl();
+      } finally {
+        hideLoadingOverlay();
+        _isApplyingFilters = false;
+      }
+    }, 0);
+  }, 0);
+}
+
+function _applyFiltersAndRenderImpl(){
   const projSel = filterState.project;
   const regSel = filterState.region;
   const srcSel = filterState.source;
