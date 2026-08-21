@@ -3049,9 +3049,20 @@ function renderAll(){
   const dueTodayCount = countUniqueAndCloned(dueTodayLeads).unique;
   const notConn = countUniqueAndCloned(notConnLeads).unique;
   const total = leads.length;
+  // How many of THIS filtered set are collated from 2+ RM copies — the
+  // dedupeNotice banner above the filters gives this same count, but only
+  // ever for the WHOLE unfiltered dataset (computed once at fetch time),
+  // so it can't explain a narrower thing like "why does Download Lead IDs
+  // have more rows than Total Leads" once filters are applied. This is
+  // recomputed on every filter change instead, scoped to exactly what
+  // Total Leads is currently counting.
+  const collatedInView = leads.reduce((n, l) => n + ((l.collatedFrom || 1) > 1 ? 1 : 0), 0);
+  const collatedNote = collatedInView
+    ? `<div style="font-size:10.5px; color:var(--text-faint); margin-top:2px;">${collatedInView} collated from multiple RM copies</div>`
+    : '';
 
   document.getElementById('kpiStrip').innerHTML = `
-    <div class="kpi"><div class="kpi-num mono">${total}</div><div class="kpi-label">Total Leads</div></div>
+    <div class="kpi"><div class="kpi-num mono">${total}</div><div class="kpi-label">Total Leads</div>${collatedNote}</div>
     <div class="kpi"><div class="kpi-num mono" style="color:var(--green)">${oppPlus}</div><div class="kpi-label">Opportunity+</div></div>
     <div class="kpi critical"><div class="kpi-num mono">${dueTodayCount}</div><div class="kpi-label">Behind on Today's Calls</div></div>
     <div class="kpi"><div class="kpi-num mono" style="color:var(--amber)">${notConn}</div><div class="kpi-label">Not Connected in 10 min</div></div>
