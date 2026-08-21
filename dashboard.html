@@ -1892,9 +1892,11 @@ async function fetchAndRender(){
     const sourceCounts = {};
     dedupedLeads.forEach(l => {
       const key = String(l.group_source).trim() || '(blank)';
-      sourceCounts[key] = (sourceCounts[key] || 0) + 1;
+      if (!sourceCounts[key]) sourceCounts[key] = { n: 0, collated: 0 };
+      sourceCounts[key].n++;
+      if ((l.collatedFrom || 1) > 1) sourceCounts[key].collated++;
     });
-    renderSourceBreakdown(sourceCounts, dedupedLeads.length);
+    renderSourceBreakdown(sourceCounts, dedupedLeads);
 
     _actionLogCache.clear(); // fresh data — drop cached parses of old comment blobs
     allParsedLeads = dedupedLeads;
@@ -2407,7 +2409,14 @@ function applyFiltersAndRender(){
   });
 
   const summary = document.getElementById('filterSummary');
-  summary.textContent = `Showing ${leads.length} of ${allParsedLeads.length} leads` +
+  // Plain text (this element uses .textContent, not .innerHTML, so no
+  // inline styling here — the collatedCountText/Label helpers used
+  // elsewhere for HTML contexts aren't a fit for this one).
+  const shownCollated = countCollatedAmong(leads).collated;
+  const totalCollated = countCollatedAmong(allParsedLeads).collated;
+  const shownText = shownCollated > 0 ? `${leads.length} (${shownCollated} cloned)` : String(leads.length);
+  const totalText = totalCollated > 0 ? `${allParsedLeads.length} (${totalCollated} cloned)` : String(allParsedLeads.length);
+  summary.textContent = `Showing ${shownText} of ${totalText} leads` +
     (projSel.size ? ` · Project: ${Array.from(projSel).join(', ')}` : '') +
     (regSel.size ? ` · Region: ${Array.from(regSel).join(', ')}` : '') +
     (tlSel.size ? ` · TL: ${Array.from(tlSel).join(', ')}` : '') +
@@ -2687,15 +2696,17 @@ function renderStageBreakdown(){
   let unmapped = 0;
   leads.forEach(l => {
     const key = String(l.current_stage).trim() || '(blank)';
-    if (!stageCounts[key]) stageCounts[key] = { n: 0, booking: 0 };
+    if (!stageCounts[key]) stageCounts[key] = { n: 0, booking: 0, collated: 0 };
     stageCounts[key].n++;
     // Tracked per raw value because isBookingLead also reads closing_reason —
     // two leads with the same stage text can land in different funnel bands.
     if (isBookingLead(l)) stageCounts[key].booking++;
+    if ((l.collatedFrom || 1) > 1) stageCounts[key].collated++;
   });
   const entries = Object.entries(stageCounts).sort((a,b) => b[1].n - a[1].n);
   const chips = entries.map(([stage, info]) => {
     const count = info.n;
+    const countText = info.collated > 0 ? `${count} (${info.collated} cloned)` : String(count);
     let cls = 'dim-chip';
     let tag = 'Open';
     let title = 'Still active — subject to call/48hr SLA tracking';
@@ -2728,7 +2739,7 @@ function renderStageBreakdown(){
       unmapped += count;
       title = 'This stage text matches no funnel band and is not a closed stage, so these live leads are invisible in the Funnel chart. Add the wording to CONFIG.STAGE_ALIASES to fix.';
     }
-    return `<span class="chip ${cls}" title="${esc(title)}">${esc(stage)}: ${count} <span style="opacity:.72">→ ${esc(bandLabel)} · ${esc(tag)}</span></span>`;
+    return `<span class="chip ${cls}" title="${esc(title)}">${esc(stage)}: ${countText} <span style="opacity:.72">→ ${esc(bandLabel)} · ${esc(tag)}</span></span>`;
   }).join(' ');
 
   const warn = unmapped
@@ -2736,18 +2747,19 @@ function renderStageBreakdown(){
     : '';
 
   el.innerHTML = entries.length
-    ? `<span class="dim" style="margin-right:8px;">Total leads: <b style="color:var(--text)">${leads.length}</b> · Stage breakdown (current filters), with the Funnel band each maps to —</span> ${chips}${warn}`
+    ? `<span class="dim" style="margin-right:8px;">Total leads: <b style="color:var(--text)">${collatedCountText(leads)}</b> · Stage breakdown (current filters), with the Funnel band each maps to —</span> ${chips}${warn}`
     : `<span class="dim">No leads match the current filters</span>`;
 }
 
-function renderSourceBreakdown(sourceCounts, totalRows){
+function renderSourceBreakdown(sourceCounts, dedupedLeads){
   const el = document.getElementById('sourceBreakdown');
-  const entries = Object.entries(sourceCounts).sort((a,b) => b[1]-a[1]);
-  const chips = entries.map(([src, count]) => {
+  const entries = Object.entries(sourceCounts).sort((a,b) => b[1].n - a[1].n);
+  const chips = entries.map(([src, info]) => {
     const isGoogle = src.trim().toLowerCase() === CONFIG.GOOGLE_SOURCE_VALUE;
-    return `<span class="chip ${isGoogle ? 'green-chip' : 'dim-chip'}">${esc(src)}: ${count}</span>`;
+    const countText = info.collated > 0 ? `${info.n} (${info.collated} cloned)` : String(info.n);
+    return `<span class="chip ${isGoogle ? 'green-chip' : 'dim-chip'}">${esc(src)}: ${countText}</span>`;
   }).join(' ');
-  el.innerHTML = `<span class="dim" style="margin-right:8px;">Total leads: <b style="color:var(--text)">${totalRows}</b> · by group_source, whole tab (not filtered) —</span> ${chips}`;
+  el.innerHTML = `<span class="dim" style="margin-right:8px;">Total leads: <b style="color:var(--text)">${collatedCountText(dedupedLeads)}</b> · by group_source, whole tab (not filtered) —</span> ${chips}`;
 }
 
 /* ===================== AUDIT: WHEN WAS A LEAD LAST TOUCHED ===================== */
@@ -2857,12 +2869,13 @@ function renderAudit(){
 
   const ids = auditLeadIds(rows);
   const totalEvents = rows.reduce((s, r) => s + r.hits.length, 0);
-  document.getElementById('auditCount').textContent = rows.length.toLocaleString() + ' leads';
+  const auditCollated = rows.reduce((s, r) => s + (r.lead.collatedFrom > 1 ? 1 : 0), 0);
+  document.getElementById('auditCount').textContent = numWithClone(rows.length, auditCollated) + ' leads';
 
   const rangeLabel = ranges.map(r =>
     `${esc(r.name)} (${istStamp(r.from)} → ${istStamp(r.to)})`).join(' · ');
   summary.innerHTML = rows.length
-    ? `<b>${rows.length.toLocaleString()}</b> leads carrying <b>${ids.length.toLocaleString()}</b> lead IDs were updated `
+    ? `<b>${rows.length.toLocaleString()}</b> leads${auditCollated ? ` (<b>${auditCollated.toLocaleString()}</b> cloned)` : ''} carrying <b>${ids.length.toLocaleString()}</b> lead IDs were updated `
       + `across <b>${totalEvents.toLocaleString()}</b> events. Window: ${rangeLabel}`
     : `No leads were updated in this window. Window: ${rangeLabel}`;
 
@@ -3032,10 +3045,10 @@ function renderAll(){
   // are customer-level counts (leads, one card per customer); the two
   // issue counts read from issueLeads instead, so a multi-copy customer
   // with two independently-behind RM copies counts as two, not one.
-  let oppPlus = 0, noCalls = 0;
+  const oppPlusLeads = [], noCallsLeads = [];
   for (const l of leads) {
-    if (l.oppOrAbove) oppPlus++;
-    if (l.isOpenLead && l.call_attempts === 0) noCalls++;
+    if (l.oppOrAbove) oppPlusLeads.push(l);
+    if (l.isOpenLead && l.call_attempts === 0) noCallsLeads.push(l);
   }
   // Distinct customers, not rows — a customer whose two RM copies are each
   // independently behind/not-connected still counts once here, matching
@@ -3046,27 +3059,24 @@ function renderAll(){
     if (l.underCalledToday) dueTodayLeads.push(l);
     if (l.firstContactBreach) notConnLeads.push(l);
   }
-  const dueTodayCount = countUniqueAndCloned(dueTodayLeads).unique;
-  const notConn = countUniqueAndCloned(notConnLeads).unique;
-  const total = leads.length;
-  // How many of THIS filtered set are collated from 2+ RM copies — the
-  // dedupeNotice banner above the filters gives this same count, but only
-  // ever for the WHOLE unfiltered dataset (computed once at fetch time),
-  // so it can't explain a narrower thing like "why does Download Lead IDs
-  // have more rows than Total Leads" once filters are applied. This is
-  // recomputed on every filter change instead, scoped to exactly what
-  // Total Leads is currently counting.
-  const collatedInView = leads.reduce((n, l) => n + ((l.collatedFrom || 1) > 1 ? 1 : 0), 0);
-  const collatedNote = collatedInView
-    ? `<div style="font-size:10.5px; color:var(--text-faint); margin-top:2px;">${collatedInView} collated from multiple RM copies</div>`
-    : '';
+  const dueTodayCounts = countUniqueAndCloned(dueTodayLeads);
+  const notConnCounts = countUniqueAndCloned(notConnLeads);
+  const totalCounts = countCollatedAmong(leads);
+  const oppPlusCounts = countCollatedAmong(oppPlusLeads);
+  const noCallsCounts = countCollatedAmong(noCallsLeads);
+
+  // Shared by every KPI tile below: the big digit stays the primary count,
+  // with a smaller inline "(N cloned)" only when this specific population
+  // actually contains any — so a filter/subset with zero cloned customers
+  // never shows a pointless "(0 cloned)".
+  const kpiNumHtml = (n, clonedN) => `${n.toLocaleString()}${clonedN > 0 ? `<span style="font-size:12px; color:var(--text-faint); font-weight:400;"> (${clonedN} cloned)</span>` : ''}`;
 
   document.getElementById('kpiStrip').innerHTML = `
-    <div class="kpi"><div class="kpi-num mono">${total}</div><div class="kpi-label">Total Leads</div>${collatedNote}</div>
-    <div class="kpi"><div class="kpi-num mono" style="color:var(--green)">${oppPlus}</div><div class="kpi-label">Opportunity+</div></div>
-    <div class="kpi critical"><div class="kpi-num mono">${dueTodayCount}</div><div class="kpi-label">Behind on Today's Calls</div></div>
-    <div class="kpi"><div class="kpi-num mono" style="color:var(--amber)">${notConn}</div><div class="kpi-label">Not Connected in 10 min</div></div>
-    <div class="kpi"><div class="kpi-num mono">${noCalls}</div><div class="kpi-label">No Attempts Yet</div></div>
+    <div class="kpi"><div class="kpi-num mono">${kpiNumHtml(totalCounts.total, totalCounts.collated)}</div><div class="kpi-label">Total Leads</div></div>
+    <div class="kpi"><div class="kpi-num mono" style="color:var(--green)">${kpiNumHtml(oppPlusCounts.total, oppPlusCounts.collated)}</div><div class="kpi-label">Opportunity+</div></div>
+    <div class="kpi critical"><div class="kpi-num mono">${kpiNumHtml(dueTodayCounts.unique, dueTodayCounts.cloned)}</div><div class="kpi-label">Behind on Today's Calls</div></div>
+    <div class="kpi"><div class="kpi-num mono" style="color:var(--amber)">${kpiNumHtml(notConnCounts.unique, notConnCounts.cloned)}</div><div class="kpi-label">Not Connected in 10 min</div></div>
+    <div class="kpi"><div class="kpi-num mono">${kpiNumHtml(noCallsCounts.total, noCallsCounts.collated)}</div><div class="kpi-label">No Attempts Yet</div></div>
   `;
 
   renderFunnel();
@@ -3196,9 +3206,14 @@ function updateTabBadges(){
   // Distinct customers, not rows — a customer whose two RM copies are each
   // separately flagged still counts once here, same as every other
   // headline count in the dashboard.
-  const n = countUniqueAndCloned(matched).unique;
-  el.textContent = n.toLocaleString();
-  el.className = 'tab-badge' + (n > 0 ? ' urgent' : '');
+  const counts = countUniqueAndCloned(matched);
+  el.textContent = counts.unique.toLocaleString();
+  // This badge is a tight 10px pill on the tab button itself — no room for
+  // an inline "(N cloned)" without breaking the layout, so the detail goes
+  // in a hover title instead, same pattern already used elsewhere (e.g.
+  // Snapshot now's own tooltip) for space-constrained controls.
+  el.title = counts.cloned > 0 ? `${counts.cloned} of these are another RM's copy of a customer already counted` : '';
+  el.className = 'tab-badge' + (counts.unique > 0 ? ' urgent' : '');
 }
 
 /* ===================== DAILY LEAD VOLUME ===================== */
@@ -3217,9 +3232,10 @@ function renderDailyTrend(){
     // lead created between 12:00-5:29 AM IST on the WRONG (previous) day
     // here, unlike every other date-bucket in this file.
     const key = istDateKey(d);
-    if (!byDay.has(key)) byDay.set(key, { total: 0, oppPlus: 0 });
+    if (!byDay.has(key)) byDay.set(key, { total: 0, totalCollated: 0, oppPlus: 0 });
     const b = byDay.get(key);
     b.total++;
+    if (l.collatedFrom > 1) b.totalCollated++;
     if (l.oppOrAbove) b.oppPlus++;
   });
 
@@ -3244,14 +3260,15 @@ function renderDailyTrend(){
     // class of bug istDateKey above just fixed.
     const [, mo, da] = d.split('-');
     const label = `${da} ${IST_MONTHS[Number(mo) - 1]}`;
-    return `<div class="trend-row" title="${esc(label)}: ${b.total} leads, ${b.oppPlus} reached Opportunity+">
+    const cloneNote = b.totalCollated > 0 ? `, ${b.totalCollated} cloned` : '';
+    return `<div class="trend-row" title="${esc(label)}: ${b.total} leads${cloneNote}, ${b.oppPlus} reached Opportunity+">
       <div class="trend-date">${esc(label)}</div>
       <div class="trend-track">
         <div class="trend-fill" style="width:${w}%">
           <div class="trend-fill-conv" style="width:${convPct}%"></div>
         </div>
       </div>
-      <div class="trend-nums">${b.total} <span class="conv">· ${b.oppPlus} opp+</span></div>
+      <div class="trend-nums">${numWithClone(b.total, b.totalCollated)} <span class="conv">· ${b.oppPlus} opp+</span></div>
     </div>`;
   }).join('') + `</div>
   <div class="filter-summary" style="margin-top:8px;">
@@ -3286,33 +3303,53 @@ const TRACKING_SHORT_LABEL = {
 // sorted oldest to newest; a run with zero matching open leads for the
 // current region/filters is simply absent (not a zero-value entry).
 function computeIssueTalliesByRun(regionFilter){
-  const byRun = new Map(); // at(ms) -> tally
+  // Grouped first by run, then by CUSTOMER within that run (client_id,
+  // falling back to lead_id — same identity movementSnapshots' own
+  // client_id field and buildMovementHistories use) — a customer held by
+  // 2 RMs at once is 2 rows in movementSnapshots for the same instant, and
+  // counting both straight would double them into totalAll/openTotal/
+  // breachedTotal. A customer counts as open if ANY of their copies is
+  // open, and flagged for a check if ANY copy is flagged for it — each
+  // copy is still judged on its own issue data (nothing here merges the
+  // underlying records), this only decides how many DISTINCT customers
+  // that adds up to.
+  const byRunCustomers = new Map(); // atMs -> Map(customerKey -> {at, isOpenLead, flags})
   movementSnapshots.forEach(rec => {
     if (!passesMovementFilters(rec)) return;
     if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
 
     const atMs = rec.snapshot_at.getTime();
-    let tally = byRun.get(atMs);
-    if (!tally) {
-      // totalAll counts every matching lead in this run regardless of
-      // stage — "how many Google leads were in the system that day" — so
-      // it has to be created (and incremented) here, BEFORE the isOpenLead
-      // gate below, or a run with only closed leads for this region/filter
-      // would get no tally entry at all and silently vanish from the chart.
-      tally = { at: rec.snapshot_at, totalAll: 0, openTotal: 0, breachedTotal: 0, byCheck: {} };
-      ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
-      byRun.set(atMs, tally);
-    }
-    tally.totalAll++;
+    let customers = byRunCustomers.get(atMs);
+    if (!customers) { customers = new Map(); byRunCustomers.set(atMs, customers); }
+    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    let cust = customers.get(key);
+    if (!cust) { cust = { at: rec.snapshot_at, isOpenLead: false, flags: {} }; customers.set(key, cust); }
 
     const enriched = enrichSnapshotCached(rec);
-    if (!enriched.isOpenLead) return;
-    tally.openTotal++;
-    let breached = false;
-    ISSUE_PRIORITY.forEach(rule => {
-      if (enriched[rule.key]) { tally.byCheck[rule.key]++; breached = true; }
+    if (enriched.isOpenLead) cust.isOpenLead = true;
+    ISSUE_PRIORITY.forEach(rule => { if (enriched[rule.key]) cust.flags[rule.key] = true; });
+  });
+
+  const byRun = new Map(); // at(ms) -> tally
+  byRunCustomers.forEach((customers, atMs) => {
+    // totalAll counts every matching customer in this run regardless of
+    // stage — "how many Google leads were in the system that day" — so a
+    // run with only closed leads for this region/filter still gets a
+    // tally entry instead of silently vanishing from the chart.
+    const tally = { at: null, totalAll: 0, openTotal: 0, breachedTotal: 0, byCheck: {} };
+    ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
+    customers.forEach(cust => {
+      tally.at = cust.at;
+      tally.totalAll++;
+      if (!cust.isOpenLead) return;
+      tally.openTotal++;
+      let breached = false;
+      ISSUE_PRIORITY.forEach(rule => {
+        if (cust.flags[rule.key]) { tally.byCheck[rule.key]++; breached = true; }
+      });
+      if (breached) tally.breachedTotal++;
     });
-    if (breached) tally.breachedTotal++;
+    byRun.set(atMs, tally);
   });
   return Array.from(byRun.values()).sort((a, b) => a.at - b.at);
 }
@@ -3343,7 +3380,16 @@ function findRunTally(runs, at){
 // flagged for that SAME issue at To?
 function computeCohortComparison(regionFilter, fromAt, toAt){
   const fromMs = fromAt.getTime(), toMs = toAt.getTime();
-  const byLead = new Map(); // lead_id -> {fromRec, toRec}
+  // Keyed by CUSTOMER (client_id, falling back to lead_id), not by the
+  // per-copy lead_id — a customer held by 2 RMs shows up as 2
+  // movementSnapshots rows at the same instant, and matching by lead_id
+  // let both into the cohort as separate entries, double-counting one
+  // customer's issue toward flaggedAtFrom/stillFlaggedAtTo. A customer
+  // counts as flagged at a side if ANY of their copies is flagged there,
+  // and "still flagged" if ANY copy is still flagged at To — the copies
+  // themselves stay judged independently elsewhere, this only decides how
+  // many distinct customers the fixed cohort adds up to.
+  const byCustomer = new Map(); // customerKey -> {fromSeen, toSeen, fromFlags, toFlags}
   movementSnapshots.forEach(rec => {
     const atMs = rec.snapshot_at.getTime();
     if (atMs !== fromMs && atMs !== toMs) return;
@@ -3351,9 +3397,17 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
     if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
     const leadId = String(rec.lead_id || '').trim();
     if (!leadId) return;
-    if (!byLead.has(leadId)) byLead.set(leadId, {});
-    const entry = byLead.get(leadId);
-    if (atMs === fromMs) entry.fromRec = rec; else entry.toRec = rec;
+    const key = String(rec.client_id || '').trim() || 'l:' + leadId;
+    if (!byCustomer.has(key)) byCustomer.set(key, { fromSeen: false, toSeen: false, fromFlags: {}, toFlags: {} });
+    const entry = byCustomer.get(key);
+    const enriched = enrichSnapshotCached(rec);
+    if (atMs === fromMs) {
+      entry.fromSeen = true;
+      ISSUE_PRIORITY.forEach(rule => { if (enriched[rule.key]) entry.fromFlags[rule.key] = true; });
+    } else {
+      entry.toSeen = true;
+      ISSUE_PRIORITY.forEach(rule => { if (enriched[rule.key]) entry.toFlags[rule.key] = true; });
+    }
   });
 
   const checkKeys = ISSUE_PRIORITY.map(rule => rule.key);
@@ -3361,17 +3415,15 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
   checkKeys.forEach(k => { byCheck[k] = { flaggedAtFrom: 0, stillFlaggedAtTo: 0 }; });
   let matchedCount = 0, breachedAtFromCount = 0, stillBreachedCount = 0;
 
-  byLead.forEach(({ fromRec, toRec }) => {
-    if (!fromRec || !toRec) return; // present at only one side — not part of this fixed cohort
+  byCustomer.forEach(entry => {
+    if (!entry.fromSeen || !entry.toSeen) return; // present at only one side — not part of this fixed cohort
     matchedCount++;
-    const fromEnriched = enrichSnapshotCached(fromRec);
-    const toEnriched = enrichSnapshotCached(toRec);
     let breachedAtFrom = false, stillBreached = false;
     checkKeys.forEach(k => {
-      if (!fromEnriched[k]) return;
+      if (!entry.fromFlags[k]) return;
       byCheck[k].flaggedAtFrom++;
       breachedAtFrom = true;
-      if (toEnriched[k]) { byCheck[k].stillFlaggedAtTo++; stillBreached = true; }
+      if (entry.toFlags[k]) { byCheck[k].stillFlaggedAtTo++; stillBreached = true; }
     });
     if (breachedAtFrom) breachedAtFromCount++;
     if (breachedAtFrom && stillBreached) stillBreachedCount++;
@@ -3812,7 +3864,10 @@ function renderRMDailyCalendar(rm, selectedDay){
     const d = parseDate(l.lead_created_at);
     if (!d) return;
     const key = istDateKey(d);
-    byDay.set(key, (byDay.get(key) || 0) + 1);
+    if (!byDay.has(key)) byDay.set(key, { n: 0, collated: 0 });
+    const b = byDay.get(key);
+    b.n++;
+    if (l.collatedFrom > 1) b.collated++;
   });
 
   if (!byDay.size) {
@@ -3828,18 +3883,21 @@ function renderRMDailyCalendar(rm, selectedDay){
   const windowKeys = [];
   for (let i = 6; i >= 0; i--) windowKeys.push(istDateKey(istAddDays(toDate, -i)));
 
-  const windowTotal = windowKeys.reduce((sum, k) => sum + (byDay.get(k) || 0), 0);
-  if (countEl) countEl.textContent = windowTotal.toLocaleString() + ' in the last 7 days';
+  const windowTotal = windowKeys.reduce((sum, k) => sum + (byDay.get(k)?.n || 0), 0);
+  const windowCollated = windowKeys.reduce((sum, k) => sum + (byDay.get(k)?.collated || 0), 0);
+  if (countEl) countEl.textContent = numWithClone(windowTotal, windowCollated) + ' in the last 7 days';
 
-  const max = Math.max(1, ...windowKeys.map(k => byDay.get(k) || 0));
+  const max = Math.max(1, ...windowKeys.map(k => byDay.get(k)?.n || 0));
   const cells = windowKeys.map(key => {
     const cellDate = parseDate(key + ' 00:00:00');
-    const count = byDay.get(key) || 0;
+    const count = byDay.get(key)?.n || 0;
+    const collated = byDay.get(key)?.collated || 0;
     const opacity = count ? Math.min(0.85, 0.15 + (count / max) * 0.7) : 0;
     const classes = ['rmtl-cal-day'];
     if (key === todayKey) classes.push('today');
     if (key === selectedDay) classes.push('selected');
-    return `<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});" title="${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created">
+    const cloneNote = collated > 0 ? ` (${collated} cloned)` : '';
+    return `<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});" title="${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created${cloneNote}">
       <span class="rmtl-cal-d">${esc(IST_WEEKDAYS[istParts(cellDate).dow])} ${istParts(cellDate).d}</span>
       ${count ? `<span class="rmtl-cal-n">${count}</span>` : ''}
     </div>`;
@@ -3897,7 +3955,7 @@ function renderRMIssueList(rm){
   if (!rm) { thead.innerHTML = ''; tbody.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
 
   const rows = issueLeads.filter(l => (l.RM || 'Unassigned') === rm && ISSUE_PRIORITY.some(rule => l[rule.key]));
-  if (countEl) countEl.textContent = rows.length + ' lead' + (rows.length === 1 ? '' : 's');
+  if (countEl) countEl.textContent = uniqueCloneLabel(countUniqueAndCloned(rows));
 
   thead.innerHTML = `<tr><th>Lead ID</th><th>Stage</th><th>Created</th><th>Issue(s)</th></tr>`;
   if (!rows.length) {
@@ -4001,24 +4059,26 @@ function renderRMScoreTable(){
   leads.forEach(l => {
     const key = l.RM || 'Unassigned';
     if (!byRM[key]) byRM[key] = {
-      RM: key, TL: l.TL || '', total: 0, open: 0, breached: 0,
-      calls: 0, durationSec: 0, opp: 0, visit: 0, softBooking: 0, booking: 0
+      RM: key, TL: l.TL || '', total: 0, totalCollated: 0, open: 0, openCollated: 0, breached: 0,
+      calls: 0, durationSec: 0, opp: 0, oppCollated: 0, visit: 0, visitCollated: 0,
+      softBooking: 0, softBookingCollated: 0, booking: 0, bookingCollated: 0
     };
     const b = byRM[key];
-    b.total++;
+    const cloned = l.collatedFrom > 1;
+    b.total++; if (cloned) b.totalCollated++;
     b.calls += l.call_attempts;
     b.durationSec += (Number(l.duration) || 0);
 
     const stage = canonicalStage(l.current_stage);
-    if (l.oppOrAbove) b.opp++;
-    if (stage === 'visit') b.visit++;
-    if (isSoftBookingLead(l)) b.softBooking++;
-    if (isBookingLead(l)) b.booking++;
+    if (l.oppOrAbove) { b.opp++; if (cloned) b.oppCollated++; }
+    if (stage === 'visit') { b.visit++; if (cloned) b.visitCollated++; }
+    if (isSoftBookingLead(l)) { b.softBooking++; if (cloned) b.softBookingCollated++; }
+    if (isBookingLead(l)) { b.booking++; if (cloned) b.bookingCollated++; }
 
     // SLA score is computed over OPEN leads only — a closed or converted
     // lead can't breach, so counting them would just reward volume.
     if (l.isOpenLead) {
-      b.open++;
+      b.open++; if (cloned) b.openCollated++;
       const breached = l.firstContactBreach || l.followupOverdue ||
         l.underCalledToday || l.stageStuck48h || l.isNotUpdated;
       if (breached) b.breached++;
@@ -4061,13 +4121,13 @@ function renderRMScoreTable(){
     const slaTxt = sla === null ? 'n/a' : sla + '%';
     return `<tr>
       <td>${esc(b.RM)}</td><td class="dim">${esc(b.TL)}</td>
-      <td class="num">${b.total}</td><td class="num dim">${b.open}</td>
+      <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num dim">${numWithClone(b.open, b.openCollated)}</td>
       <td class="num dim">${b.calls}</td><td class="num">${b.avgCalls.toFixed(1)}</td>
       <td class="num dim">${b.avgDurationMin ? b.avgDurationMin.toFixed(1)+'m' : '—'}</td>
-      <td class="num" style="color:var(--green)">${b.opp}</td>
-      <td class="num">${b.visit}</td>
-      <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${b.softBooking}</td>
-      <td class="num" style="color:var(--green)">${b.booking}</td>
+      <td class="num" style="color:var(--green)">${numWithClone(b.opp, b.oppCollated)}</td>
+      <td class="num">${numWithClone(b.visit, b.visitCollated)}</td>
+      <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${numWithClone(b.softBooking, b.softBookingCollated)}</td>
+      <td class="num" style="color:var(--green)">${numWithClone(b.booking, b.bookingCollated)}</td>
       <td class="num">${b.convRate.toFixed(1)}%</td>
       <td class="num"><span class="heat-cell ${slaCls}">${slaTxt}</span></td>
     </tr>`;
@@ -4169,11 +4229,13 @@ function renderWorkloadBalance(){
   leads.forEach(l => {
     if (!l.isOpenLead) return; // balance is about live workload, not history
     const key = l.RM || 'Unassigned';
-    byRM[key] = (byRM[key] || 0) + 1;
+    if (!byRM[key]) byRM[key] = { n: 0, collated: 0 };
+    byRM[key].n++;
+    if (l.collatedFrom > 1) byRM[key].collated++;
   });
 
-  const entries = Object.entries(byRM).sort((a, b) => b[1] - a[1]);
-  const counts = entries.map(e => e[1]);
+  const entries = Object.entries(byRM).sort((a, b) => b[1].n - a[1].n);
+  const counts = entries.map(e => e[1].n);
   const total = counts.reduce((s, n) => s + n, 0);
   const avg = counts.length ? total / counts.length : 0;
 
@@ -4188,8 +4250,8 @@ function renderWorkloadBalance(){
     return;
   }
 
-  const overloaded = entries.filter(([, n]) => n > avg * 1.25).length;
-  const under = entries.filter(([, n]) => n < avg * 0.75).length;
+  const overloaded = entries.filter(([, e]) => e.n > avg * 1.25).length;
+  const under = entries.filter(([, e]) => e.n < avg * 0.75).length;
   summary.innerHTML = `${total.toLocaleString()} open leads across ${entries.length} RMs · average <b>${avg.toFixed(1)}</b> each · `
     + `<b style="color:var(--red)">${overloaded}</b> carrying 25%+ above average · `
     + `<b style="color:var(--amber)">${under}</b> carrying 25%+ below.`
@@ -4201,14 +4263,15 @@ function renderWorkloadBalance(){
   table.querySelector('thead').innerHTML = `<tr>
     <th>RM</th><th style="min-width:160px">Open Leads</th>
     <th style="text-align:right">Count</th><th style="text-align:right">vs Average</th></tr>`;
-  table.querySelector('tbody').innerHTML = entries.map(([rm, n]) => {
+  table.querySelector('tbody').innerHTML = entries.map(([rm, e]) => {
+    const n = e.n;
     const pct = Math.round((n / max) * 100);
     const delta = avg ? ((n - avg) / avg) * 100 : 0;
     const cls = delta > 25 ? 'heat-red' : delta < -25 ? 'heat-amber' : 'heat-green';
     return `<tr>
       <td>${esc(rm)}</td>
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div></td>
-      <td class="num">${n}</td>
+      <td class="num">${numWithClone(n, e.collated)}</td>
       <td class="num"><span class="heat-cell ${cls}">${delta >= 0 ? '+' : ''}${delta.toFixed(0)}%</span></td>
     </tr>`;
   }).join('');
@@ -4221,17 +4284,20 @@ function renderAllocationMatrix(){
     const key = [l.region || 'Unassigned', l.TL || 'Unassigned', l.RM || 'Unassigned'].join('||');
     if (!rows[key]) rows[key] = {
       region: l.region || 'Unassigned', TL: l.TL || 'Unassigned', RM: l.RM || 'Unassigned',
-      total: 0, calls: 0, ageSum: 0, aged: 0, opp: 0, visit: 0, softBooking: 0, booking: 0
+      total: 0, totalCollated: 0, calls: 0, ageSum: 0, aged: 0,
+      opp: 0, oppCollated: 0, visit: 0, visitCollated: 0,
+      softBooking: 0, softBookingCollated: 0, booking: 0, bookingCollated: 0
     };
     const b = rows[key];
-    b.total++;
+    const cloned = l.collatedFrom > 1;
+    b.total++; if (cloned) b.totalCollated++;
     b.calls += l.call_attempts;
     if (l.ageHours != null) { b.ageSum += l.ageHours; b.aged++; }
     const stage = canonicalStage(l.current_stage);
-    if (l.oppOrAbove) b.opp++;
-    if (stage === 'visit') b.visit++;
-    if (isSoftBookingLead(l)) b.softBooking++;
-    if (isBookingLead(l)) b.booking++;
+    if (l.oppOrAbove) { b.opp++; if (cloned) b.oppCollated++; }
+    if (stage === 'visit') { b.visit++; if (cloned) b.visitCollated++; }
+    if (isSoftBookingLead(l)) { b.softBooking++; if (cloned) b.softBookingCollated++; }
+    if (isBookingLead(l)) { b.booking++; if (cloned) b.bookingCollated++; }
   });
 
   const list = Object.values(rows).sort((a, b) =>
@@ -4253,13 +4319,13 @@ function renderAllocationMatrix(){
   const CAP = 300;
   tbody.innerHTML = list.slice(0, CAP).map(b => `<tr>
     <td>${esc(b.region)}</td><td class="dim">${esc(b.TL)}</td><td>${esc(b.RM)}</td>
-    <td class="num">${b.total}</td>
+    <td class="num">${numWithClone(b.total, b.totalCollated)}</td>
     <td class="num dim">${(b.total ? b.calls / b.total : 0).toFixed(1)}</td>
     <td class="num dim">${b.aged ? (b.ageSum / b.aged).toFixed(0) + 'h' : '—'}</td>
-    <td class="num" style="color:var(--green)">${b.opp}</td>
-    <td class="num">${b.visit}</td>
-    <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${b.softBooking}</td>
-    <td class="num" style="color:var(--green)">${b.booking}</td>
+    <td class="num" style="color:var(--green)">${numWithClone(b.opp, b.oppCollated)}</td>
+    <td class="num">${numWithClone(b.visit, b.visitCollated)}</td>
+    <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${numWithClone(b.softBooking, b.softBookingCollated)}</td>
+    <td class="num" style="color:var(--green)">${numWithClone(b.booking, b.bookingCollated)}</td>
   </tr>`).join('')
   + (list.length > CAP ? `<tr><td colspan="10" class="empty-row" style="padding:10px;">Showing first ${CAP} of ${list.length.toLocaleString()} rows</td></tr>` : '');
 }
@@ -4271,9 +4337,11 @@ function renderSourceMix(){
   leads.forEach(l => {
     const r = l.region || 'Unassigned';
     const s = String(l.group_source).trim() || '(blank)';
-    if (!byRegion[r]) byRegion[r] = { region: r, total: 0, counts: {} };
-    byRegion[r].total++;
+    if (!byRegion[r]) byRegion[r] = { region: r, total: 0, totalCollated: 0, counts: {}, countsCollated: {} };
+    const cloned = l.collatedFrom > 1;
+    byRegion[r].total++; if (cloned) byRegion[r].totalCollated++;
     byRegion[r].counts[s] = (byRegion[r].counts[s] || 0) + 1;
+    if (cloned) byRegion[r].countsCollated[s] = (byRegion[r].countsCollated[s] || 0) + 1;
   });
 
   const list = Object.values(byRegion).sort((a, b) => b.total - a.total);
@@ -4292,10 +4360,12 @@ function renderSourceMix(){
     <td>${esc(b.region)}</td>`
     + sources.map(s => {
         const n = b.counts[s] || 0;
+        const collated = b.countsCollated[s] || 0;
         const pct = b.total ? Math.round((n / b.total) * 100) : 0;
-        return `<td class="num ${n ? '' : 'dim'}">${n}${n ? ` <span class="dim" style="font-size:10px">${pct}%</span>` : ''}</td>`;
+        const title = collated > 0 ? ` title="${n} (${collated} cloned)"` : '';
+        return `<td class="num ${n ? '' : 'dim'}"${title}>${n}${n ? ` <span class="dim" style="font-size:10px">${pct}%</span>` : ''}</td>`;
       }).join('')
-    + `<td class="num" style="font-weight:600">${b.total}</td></tr>`).join('');
+    + `<td class="num" style="font-weight:600">${numWithClone(b.total, b.totalCollated)}</td></tr>`).join('');
 }
 
 function renderFunnel(){
@@ -4304,15 +4374,23 @@ function renderFunnel(){
   const oppIdx = stages.indexOf(CONFIG.OPPORTUNITY_STAGE);
 
   const stageCountsLower = {};
-  stages.forEach(s => stageCountsLower[s] = 0);
+  // Parallel to stageCountsLower, tracked separately rather than folded
+  // into it — every width/percentage calculation below reads
+  // stageCountsLower[s] as a bare number, and turning that into {n,
+  // collated} would mean touching every one of those reads. A bar this
+  // narrow (down to a 4% floor) has no room for an inline "(N cloned)"
+  // anyway, so it surfaces as a hover title on the row instead.
+  const stageCollated = {};
+  stages.forEach(s => { stageCountsLower[s] = 0; stageCollated[s] = 0; });
   leads.forEach(l => {
     // Bookings first: a booking closed as "Won" has a stage canonicalStage
     // can't read, and would otherwise fall out of the funnel entirely.
     // Soft booking checked before booking — its text contains "booking".
-    if (isSoftBookingLead(l)) { stageCountsLower['soft booking']++; return; }
-    if (isBookingLead(l)) { stageCountsLower['booking']++; return; }
+    const isCollated = (l.collatedFrom || 1) > 1;
+    if (isSoftBookingLead(l)) { stageCountsLower['soft booking']++; if (isCollated) stageCollated['soft booking']++; return; }
+    if (isBookingLead(l)) { stageCountsLower['booking']++; if (isCollated) stageCollated['booking']++; return; }
     const canon = canonicalStage(l.current_stage);
-    if (canon) stageCountsLower[canon]++;
+    if (canon) { stageCountsLower[canon]++; if (isCollated) stageCollated[canon]++; }
   });
 
   const total = leads.length || 1;
@@ -4331,7 +4409,8 @@ function renderFunnel(){
     const conv = (prevCount != null && prevCount > 0) ? ((count / prevCount) * 100).toFixed(1) + '% conv. from prev' : '';
     prevCount = count;
     const label = s.replace(/\b\w/g, c => c.toUpperCase());
-    return `<div class="funnel-row">
+    const rowTitle = stageCollated[s] > 0 ? ` title="${count} leads (${stageCollated[s]} collated from multiple RM copies)"` : '';
+    return `<div class="funnel-row"${rowTitle}>
       <div class="funnel-label">${esc(label)}</div>
       <div class="funnel-bar-track"><div class="funnel-bar-fill${i >= oppIdx ? ' opp-stage' : ''}" style="width:${widthPct}%">${labelOutside ? '' : `<span class="funnel-fill-label">${count}</span>`}</div>${labelOutside ? `<span class="funnel-outside-label">${count}</span>` : ''}</div>
       <div class="funnel-nums">${pctOfTotal}% of total<div class="funnel-conv">${conv}</div></div>
@@ -4345,7 +4424,10 @@ function renderFunnel(){
   const inFunnel = stages.reduce((sum, s) => sum + stageCountsLower[s], 0);
   const exited = leads.length - inFunnel;
   if (exited > 0) {
-    el.innerHTML += `<div class="funnel-row" style="margin-top:14px; padding-top:12px; border-top:1px dashed var(--border);">
+    const inFunnelCollated = stages.reduce((sum, s) => sum + stageCollated[s], 0);
+    const exitedCollated = countCollatedAmong(leads).collated - inFunnelCollated;
+    const exitedTitle = exitedCollated > 0 ? ` title="${exited} leads (${exitedCollated} collated from multiple RM copies)"` : '';
+    el.innerHTML += `<div class="funnel-row" style="margin-top:14px; padding-top:12px; border-top:1px dashed var(--border);"${exitedTitle}>
       <div class="funnel-label">Exited</div>
       <div class="funnel-bar-track" style="background:transparent; border-style:dashed;">
         <div class="funnel-bar-fill" style="width:${Math.max(4, Math.round((exited / maxCount) * 100))}%; background:var(--surface-2);"></div>
@@ -4361,16 +4443,18 @@ function renderRegionTable(){
   leads.forEach(l => {
     // region_parent was removed from the export, so region alone is the key.
     const key = l.region;
-    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(effectiveRegion(l)) || '—', total:0, oppPlus:0, critical:0, notConn:0, noCalls:0 };
+    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(effectiveRegion(l)) || '—', total:0, totalCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, notConn:0, notConnCollated:0, noCalls:0, noCallsCollated:0 };
     const b = byRegion[key];
+    const isCollated = (l.collatedFrom || 1) > 1;
     b.total++;
-    if (l.oppOrAbove) b.oppPlus++;
-    if (l.underCalledToday) b.critical++;
-    if (l.firstContactBreach) b.notConn++;
+    if (isCollated) b.totalCollated++;
+    if (l.oppOrAbove) { b.oppPlus++; if (isCollated) b.oppPlusCollated++; }
+    if (l.underCalledToday) { b.critical++; if (isCollated) b.criticalCollated++; }
+    if (l.firstContactBreach) { b.notConn++; if (isCollated) b.notConnCollated++; }
     // isOpenLead gate matches the "No Attempts Yet" KPI card. Without it this
     // column counted closed and Opportunity+ leads too, so the column summed
     // higher than the KPI showing the same thing under the same filters.
-    if (l.isOpenLead && l.call_attempts === 0) b.noCalls++;
+    if (l.isOpenLead && l.call_attempts === 0) { b.noCalls++; if (isCollated) b.noCallsCollated++; }
   });
 
   const table = document.getElementById('regionTable');
@@ -4391,11 +4475,11 @@ function renderRegionTable(){
     const heatCls = pct >= 50 ? 'heat-red' : pct >= 20 ? 'heat-amber' : 'heat-green';
     return `<tr>
     <td>${esc(b.region)}</td><td class="dim">${esc(b.group)}</td>
-    <td class="num">${b.total}</td><td class="num" style="color:var(--green)">${b.oppPlus}</td>
-    <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${b.critical}</td>
+    <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num" style="color:var(--green)">${numWithClone(b.oppPlus, b.oppPlusCollated)}</td>
+    <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${numWithClone(b.critical, b.criticalCollated)}</td>
     <td class="num"><span class="heat-cell ${heatCls}">${pct}%</span></td>
-    <td class="num" style="color:${b.notConn?'var(--amber)':'inherit'}">${b.notConn}</td>
-    <td class="num dim">${b.noCalls}</td>
+    <td class="num" style="color:${b.notConn?'var(--amber)':'inherit'}">${numWithClone(b.notConn, b.notConnCollated)}</td>
+    <td class="num dim">${numWithClone(b.noCalls, b.noCallsCollated)}</td>
   </tr>`;
   }).join('');
 }
@@ -4404,12 +4488,13 @@ function renderTLTable(){
   const byTL = {};
   leads.forEach(l => {
     const key = l.TL || 'Unassigned';
-    if (!byTL[key]) byTL[key] = { TL: key, rms: new Set(), total:0, oppPlus:0, critical:0, calls:0 };
+    if (!byTL[key]) byTL[key] = { TL: key, rms: new Set(), total:0, totalCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, calls:0 };
     const b = byTL[key];
     b.rms.add(l.RM);
     b.total++;
-    if (l.oppOrAbove) b.oppPlus++;
-    if (l.underCalledToday) b.critical++;
+    if (l.collatedFrom > 1) b.totalCollated++;
+    if (l.oppOrAbove) { b.oppPlus++; if (l.collatedFrom > 1) b.oppPlusCollated++; }
+    if (l.underCalledToday) { b.critical++; if (l.collatedFrom > 1) b.criticalCollated++; }
     b.calls += l.call_attempts;
   });
   const rows = Object.values(byTL).sort((a,b)=> b.total - a.total);
@@ -4429,8 +4514,8 @@ function renderTLTable(){
     const avg = b.total ? (b.calls / b.total) : 0;
     return `<tr>
       <td>${esc(b.TL)}</td><td class="num dim">${b.rms.size}</td>
-      <td class="num">${b.total}</td><td class="num" style="color:var(--green)">${b.oppPlus}</td>
-      <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${b.critical}</td>
+      <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num" style="color:var(--green)">${numWithClone(b.oppPlus, b.oppPlusCollated)}</td>
+      <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${numWithClone(b.critical, b.criticalCollated)}</td>
       <td class="num dim">${avg.toFixed(1)}</td>
     </tr>`;
   }).join('');
@@ -4440,13 +4525,14 @@ function renderProjectTable(){
   const byProject = {};
   leads.forEach(l => {
     const key = l.project || 'Unassigned';
-    if (!byProject[key]) byProject[key] = { project: key, total:0, oppPlus:0, critical:0, softBooking:0, booking:0 };
+    if (!byProject[key]) byProject[key] = { project: key, total:0, totalCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, softBooking:0, softBookingCollated:0, booking:0, bookingCollated:0 };
     const b = byProject[key];
-    b.total++;
-    if (l.oppOrAbove) b.oppPlus++;
-    if (l.underCalledToday) b.critical++;
-    if (isSoftBookingLead(l)) b.softBooking++;
-    if (isBookingLead(l)) b.booking++;
+    const cloned = l.collatedFrom > 1;
+    b.total++; if (cloned) b.totalCollated++;
+    if (l.oppOrAbove) { b.oppPlus++; if (cloned) b.oppPlusCollated++; }
+    if (l.underCalledToday) { b.critical++; if (cloned) b.criticalCollated++; }
+    if (isSoftBookingLead(l)) { b.softBooking++; if (cloned) b.softBookingCollated++; }
+    if (isBookingLead(l)) { b.booking++; if (cloned) b.bookingCollated++; }
   });
   const rows = Object.values(byProject).sort((a,b)=> b.total - a.total);
   document.getElementById('projectCount').textContent = rows.length + ' projects';
@@ -4469,12 +4555,12 @@ function renderProjectTable(){
     // converting under 5% is worth questioning, over 15% is doing well.
     const cls = oppPct >= 15 ? 'heat-green' : oppPct >= 5 ? 'heat-amber' : 'heat-red';
     return `<tr>
-    <td>${esc(b.project)}</td><td class="num">${b.total}</td>
-    <td class="num" style="color:var(--green)">${b.oppPlus}</td>
+    <td>${esc(b.project)}</td><td class="num">${numWithClone(b.total, b.totalCollated)}</td>
+    <td class="num" style="color:var(--green)">${numWithClone(b.oppPlus, b.oppPlusCollated)}</td>
     <td class="num"><span class="heat-cell ${cls}">${oppPct.toFixed(1)}%</span></td>
-    <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${b.critical}</td>
-    <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${b.softBooking}</td>
-    <td class="num" style="color:var(--green)">${b.booking}</td>
+    <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${numWithClone(b.critical, b.criticalCollated)}</td>
+    <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${numWithClone(b.softBooking, b.softBookingCollated)}</td>
+    <td class="num" style="color:var(--green)">${numWithClone(b.booking, b.bookingCollated)}</td>
   </tr>`;
   }).join('')
   + (rows.length > MAX_PROJECT_ROWS
@@ -4491,16 +4577,17 @@ function renderRMTable(){
     // Workload Balance filed them under "Unassigned" — the two tables then
     // disagreed on the RM list as well as the counts.
     const key = l.RM || 'Unassigned';
-    if (!byRM[key]) byRM[key] = { RM:key, region:l.region, total:0, open:0, oppPlus:0, critical:0, calls:0, multiAgent:0 };
+    if (!byRM[key]) byRM[key] = { RM:key, region:l.region, total:0, totalCollated:0, open:0, openCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, calls:0, multiAgent:0, multiAgentCollated:0 };
     const b = byRM[key];
-    b.total++;
+    const cloned = l.collatedFrom > 1;
+    b.total++; if (cloned) b.totalCollated++;
     // Counted so this table reconciles with Distribution → Workload Balance,
     // which shows OPEN leads only. Without it the same RM appears with two
     // different lead counts across two tabs and neither explains why.
-    if (l.isOpenLead) b.open++;
-    if (l.oppOrAbove) b.oppPlus++;
-    if (l.underCalledToday) b.critical++;
-    if (l.isMultiAgent) { b.multiAgent++; multiAgentTotal++; }
+    if (l.isOpenLead) { b.open++; if (cloned) b.openCollated++; }
+    if (l.oppOrAbove) { b.oppPlus++; if (cloned) b.oppPlusCollated++; }
+    if (l.underCalledToday) { b.critical++; if (cloned) b.criticalCollated++; }
+    if (l.isMultiAgent) { b.multiAgent++; multiAgentTotal++; if (cloned) b.multiAgentCollated++; }
     b.calls += l.call_attempts;
   });
   const rows = Object.values(byRM).sort((a,b)=> b.total - a.total);
@@ -4537,10 +4624,10 @@ function renderRMTable(){
     return `<tr>
       <td>${esc(b.RM)}</td><td class="dim">${esc(b.region)}</td>
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div></td>
-      <td class="num">${b.total}</td><td class="num">${b.open}</td>
-      <td class="num" style="color:var(--green)">${b.oppPlus}</td>
-      <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${b.critical}</td>
-      <td class="num" style="color:${b.multiAgent?'var(--amber)':'inherit'}">${b.multiAgent}</td>
+      <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num">${numWithClone(b.open, b.openCollated)}</td>
+      <td class="num" style="color:var(--green)">${numWithClone(b.oppPlus, b.oppPlusCollated)}</td>
+      <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${numWithClone(b.critical, b.criticalCollated)}</td>
+      <td class="num" style="color:${b.multiAgent?'var(--amber)':'inherit'}">${numWithClone(b.multiAgent, b.multiAgentCollated)}</td>
       <td class="num dim">${avg.toFixed(1)}</td>
     </tr>`;
   }).join('');
@@ -4722,6 +4809,46 @@ function uniqueCloneLabel(counts, noun){
   const n = noun || 'lead';
   const base = `${counts.unique} ${n}${counts.unique === 1 ? '' : 's'}`;
   return counts.cloned > 0 ? `${base} (${counts.cloned} cloned)` : base;
+}
+
+// Same idea as countUniqueAndCloned/uniqueCloneLabel above, but for
+// customer-deduped arrays like `leads` (or any subset/filter of it) rather
+// than per-copy arrays like issueLeads. Each `leads` record already
+// represents ONE customer — a copy collated from 2+ RM rows doesn't show up
+// as extra ARRAY ENTRIES here (unlike issueLeads), it shows up as that
+// one entry's own collatedFrom > 1 — so countUniqueAndCloned's
+// familyKeyOf-based matching (which compares DIFFERENT array entries
+// against each other) would never find anything to dedupe: every `leads`
+// record already has its own unique lead_id by construction. This instead
+// just counts how many of the N records already ARE such a merge.
+function countCollatedAmong(arr){
+  const total = (arr || []).length;
+  const collated = (arr || []).reduce((n, l) => n + ((l.collatedFrom || 1) > 1 ? 1 : 0), 0);
+  return { total, collated };
+}
+
+// Bare-number form for table cells/KPI numbers: "112" or "112 (4 cloned)".
+function collatedCountText(arr){
+  const { total, collated } = countCollatedAmong(arr);
+  return collated > 0 ? `${total.toLocaleString()} (${collated} cloned)` : total.toLocaleString();
+}
+
+// Noun-suffixed form for badges/summaries, matching uniqueCloneLabel's
+// phrasing: "112 leads" or "112 leads (4 cloned)".
+function collatedCountLabel(arr, noun){
+  const n = noun || 'lead';
+  const { total, collated } = countCollatedAmong(arr);
+  const base = `${total.toLocaleString()} ${n}${total === 1 ? '' : 's'}`;
+  return collated > 0 ? `${base} (${collated} cloned)` : base;
+}
+
+// Same idea, but for table accumulator loops that already track a running
+// count (e.g. `b.total++`) rather than building an array — a parallel
+// `b.collated++` alongside the existing counter feeds this directly at
+// render time, without needing to also collect every matching lead into
+// an array just to hand it to collatedCountText.
+function numWithClone(n, collated){
+  return collated > 0 ? `${n.toLocaleString()} (${collated} cloned)` : n.toLocaleString();
 }
 
 // Direct check #1: created today (calendar day), under 5 calls, open
@@ -8280,28 +8407,54 @@ function fmtHoursSpan(h){
 // every zero-movement gap it finds, so a lead that sat untouched for 3
 // consecutive checks counts 3 times — weighting by how long things
 // actually sat, not just whether they're stalled right now.
+// buildMovementHistories groups by CUSTOMER (client_id-or-lead_id), so a
+// customer with 2 simultaneous RM copies has both interleaved into one
+// bucket at the same snapshot_at. Walking that bucket positionally
+// (history[i-1] vs history[i]) then risks pairing up two DIFFERENT
+// copies captured at the same instant rather than one copy's own
+// sequential snapshots — movementChangedBetween would almost always read
+// "changed" (different RM/stage data) even though neither individual
+// copy actually moved, masking a real stall; or, with a same-run pairing
+// that happens to look unchanged, log a spurious 0-hour "stall" against
+// whichever RM's row sorted second. computeMovementRows hit this same
+// hazard and fixed it by matching same-lead_id rows across two fixed
+// endpoints (see its own comment) — this generalizes that to a full
+// walk by splitting each customer bucket back into one chronological
+// sequence per lead_id (copy) before scanning.
+function splitHistoryByCopy(history){
+  const byCopy = new Map();
+  history.forEach(rec => {
+    const key = String(rec.lead_id).trim();
+    if (!byCopy.has(key)) byCopy.set(key, []);
+    byCopy.get(key).push(rec);
+  });
+  return Array.from(byCopy.values());
+}
+
 function computeRmStallLeaderboard(){
   const byLead = buildMovementHistories();
   const byRM = new Map();
 
   byLead.forEach((history) => {
-    for (let i = 1; i < history.length; i++) {
-      const prev = history[i - 1], cur = history[i];
-      if (!passesMovementFilters(cur)) continue;
+    splitHistoryByCopy(history).forEach((copyHistory) => {
+      for (let i = 1; i < copyHistory.length; i++) {
+        const prev = copyHistory[i - 1], cur = copyHistory[i];
+        if (!passesMovementFilters(cur)) continue;
 
-      const curEnriched = enrichSnapshotCached(cur);
-      if (!ISSUE_PRIORITY.some(rule => curEnriched[rule.key])) continue; // not flagged at this checkpoint
-      if (movementChangedBetween(prev, cur)) continue; // moved — not a stalled gap
+        const curEnriched = enrichSnapshotCached(cur);
+        if (!ISSUE_PRIORITY.some(rule => curEnriched[rule.key])) continue; // not flagged at this checkpoint
+        if (movementChangedBetween(prev, cur)) continue; // moved — not a stalled gap
 
-      const rm = cur.RM || 'Unassigned';
-      if (!byRM.has(rm)) byRM.set(rm, { RM: rm, staleGapCount: 0, leadsWithStall: new Set(), totalStallHours: 0, longestStallHours: 0 });
-      const b = byRM.get(rm);
-      const hours = (cur.snapshot_at - prev.snapshot_at) / 36e5;
-      b.staleGapCount++;
-      b.leadsWithStall.add(String(cur.client_id || cur.lead_id));
-      b.totalStallHours += hours;
-      if (hours > b.longestStallHours) b.longestStallHours = hours;
-    }
+        const rm = cur.RM || 'Unassigned';
+        if (!byRM.has(rm)) byRM.set(rm, { RM: rm, staleGapCount: 0, leadsWithStall: new Set(), totalStallHours: 0, longestStallHours: 0 });
+        const b = byRM.get(rm);
+        const hours = (cur.snapshot_at - prev.snapshot_at) / 36e5;
+        b.staleGapCount++;
+        b.leadsWithStall.add(String(cur.client_id || cur.lead_id));
+        b.totalStallHours += hours;
+        if (hours > b.longestStallHours) b.longestStallHours = hours;
+      }
+    });
   });
 
   return Array.from(byRM.values())
@@ -8320,33 +8473,38 @@ function computeTimeToRemediate(){
   const episodes = [];
 
   byLead.forEach((history) => {
-    let stallStart = null;
+    // See splitHistoryByCopy above — walking the customer-level bucket
+    // positionally would risk pairing two different RMs' copies as if
+    // sequential; each copy needs its own chronological walk.
+    splitHistoryByCopy(history).forEach((copyHistory) => {
+      let stallStart = null;
 
-    for (let i = 1; i < history.length; i++) {
-      const prev = history[i - 1], cur = history[i];
-      if (!passesMovementFilters(cur)) { stallStart = null; continue; } // out of scope — don't bridge a stall across a filtered-out gap
+      for (let i = 1; i < copyHistory.length; i++) {
+        const prev = copyHistory[i - 1], cur = copyHistory[i];
+        if (!passesMovementFilters(cur)) { stallStart = null; continue; } // out of scope — don't bridge a stall across a filtered-out gap
 
-      const curEnriched = enrichSnapshotCached(cur);
-      const flaggedAtCur = ISSUE_PRIORITY.some(rule => curEnriched[rule.key]);
-      const changed = movementChangedBetween(prev, cur);
+        const curEnriched = enrichSnapshotCached(cur);
+        const flaggedAtCur = ISSUE_PRIORITY.some(rule => curEnriched[rule.key]);
+        const changed = movementChangedBetween(prev, cur);
 
-      if (flaggedAtCur && !changed) {
-        if (stallStart === null) stallStart = prev.snapshot_at;
-      } else {
-        if (stallStart !== null) {
-          episodes.push({
-            RM: cur.RM || 'Unassigned',
-            region: cur.region,
-            project: cur.project,
-            lead_id: cur.lead_id,
-            startAt: stallStart,
-            endAt: cur.snapshot_at,
-            hours: (cur.snapshot_at - stallStart) / 36e5,
-          });
+        if (flaggedAtCur && !changed) {
+          if (stallStart === null) stallStart = prev.snapshot_at;
+        } else {
+          if (stallStart !== null) {
+            episodes.push({
+              RM: cur.RM || 'Unassigned',
+              region: cur.region,
+              project: cur.project,
+              lead_id: cur.lead_id,
+              startAt: stallStart,
+              endAt: cur.snapshot_at,
+              hours: (cur.snapshot_at - stallStart) / 36e5,
+            });
+          }
+          stallStart = null;
         }
-        stallStart = null;
       }
-    }
+    });
   });
 
   return episodes;
