@@ -944,6 +944,14 @@
         <div class="filter-summary">For leads that WERE stalled and then actually moved: how long the stall lasted before it did. Only counts stalls that resolved within the retained history — one still stalled right now isn't in here yet (it's in the leaderboard above while it's ongoing). Respects the Project/Region/TL filters above.</div>
         <div class="section-scroll"><table id="remediateTable"><thead></thead><tbody></tbody></table></div>
       </section>
+
+      <section id="sec-unmatched-comments">
+        <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Unmatched Comments</div><div class="section-count" id="unmatchedCommentsCount"></div></div>
+        <div class="filter-summary">Every DISTINCT comment anywhere in the whole captured Movement_Log history that the keyword-based follow-up logic (inferOutcome) couldn't classify — real notes an RM wrote that fall through every known keyword and get the generic "no keyword match" fallback instead of a real suggested action. Whole history, every project/region/TL/source — not scoped to the filters above, since the point is finding phrasing worth teaching the keyword list, not listing leads needing action right now. Deduped by exact comment text, so a note repeated across many snapshot captures for the same lead only counts once.</div>
+        <div class="stale-controls" style="margin-top:4px; margin-bottom:10px;">
+          <button class="btn ghost" id="downloadUnmatchedCommentsBtn" style="padding:8px 12px; font-size:12.5px;">Download Unmatched Comments CSV</button>
+        </div>
+      </section>
     </div>
 
     <!-- ============ TRACKING ============ -->
@@ -5798,6 +5806,7 @@ function downloadIssuesCSV(){
 
 document.getElementById('downloadIssuesBtn').addEventListener('click', downloadIssuesCSV);
 document.getElementById('downloadLeadIdsBtn').addEventListener('click', downloadFilteredLeadIdsCSV);
+document.getElementById('downloadUnmatchedCommentsBtn').addEventListener('click', downloadUnmatchedCommentsCSV);
 
 /* ===================== REGION EMAIL REPORTS ===================== */
 // Maps each raw sheet region value to its main region group, per the
@@ -8676,6 +8685,78 @@ function summarizeTimeToRemediate(episodes){
   }).sort((a, b) => b.avgHours - a.avgHours);
 }
 
+// Every DISTINCT comment (by exact text) anywhere in the whole captured
+// Movement_Log history that inferOutcome() couldn't classify — it fell
+// through every known keyword and hit the generic 'Update' catch-all,
+// which has no entry in FOLLOWUP_SUGGESTIONS (see unmatchedFollowUp) — so
+// suggestedFollowUp had nothing better to offer than "read this yourself".
+// Real information an RM wrote that the keyword list just doesn't
+// recognize yet. Deliberately whole-history and unfiltered (every
+// project/region/TL/source, not gated by the top filter bar or by
+// isOpenLead) — the point is surfacing phrasing worth teaching inferOutcome,
+// not listing leads that need action right now (see
+// renderRMIssueList/issueLeads for that). Deduped by exact comment text
+// (case-insensitive) rather than kept per-occurrence: the SAME comment
+// resurfaces in every periodic snapshot for as long as it sits unchanged
+// (Movement_Log's comment columns carry the running history forward each
+// capture, not just what changed), so counting raw occurrences would
+// mostly measure how many times the trigger fired, not how many distinct
+// notes actually need attention. leadCount instead counts distinct leads
+// that comment appeared under — a phrase repeated across many different
+// customers is a stronger signal to add a keyword rule for than one that
+// only ever showed up on a single lead.
+function computeUnmatchedMovementComments(){
+  const byText = new Map(); // lowercased text -> { text, leadIds:Set, RM, region, project, timestamp }
+  movementSnapshots.forEach(rec => {
+    const entries = parseActionLog(combinedCommentsText(rec));
+    const items = entries.length
+      ? entries.map(e => ({ text: e.comment, ts: e.ts, loggedBy: e.loggedBy }))
+      : (String(rec.last_comment || '').trim() ? [{ text: String(rec.last_comment).trim(), ts: null, loggedBy: rec.RM }] : []);
+
+    items.forEach(item => {
+      const text = String(item.text || '').trim();
+      if (!text || inferOutcome(text) !== 'Update') return; // has a real keyword match — not what we're after
+
+      const key = text.toLowerCase();
+      let entry = byText.get(key);
+      if (!entry) {
+        entry = { text, leadIds: new Set(), RM: item.loggedBy || rec.RM || 'Unassigned', region: rec.region, project: rec.project, timestamp: item.ts || '' };
+        byText.set(key, entry);
+      }
+      entry.leadIds.add(String(rec.lead_id || '').trim());
+      if (item.ts && !entry.timestamp) entry.timestamp = item.ts; // prefer a dated occurrence over an earlier undated one
+    });
+  });
+  return Array.from(byText.values())
+    .map(e => ({ text: e.text, leadCount: e.leadIds.size, exampleLeadId: Array.from(e.leadIds)[0], RM: e.RM, region: e.region, project: e.project, timestamp: e.timestamp }))
+    .sort((a, b) => b.leadCount - a.leadCount || a.text.localeCompare(b.text));
+}
+
+function renderUnmatchedCommentsCount(){
+  const el = document.getElementById('unmatchedCommentsCount');
+  if (!el) return;
+  if (movementFetchState !== 'ok') { el.textContent = ''; return; }
+  const rows = computeUnmatchedMovementComments();
+  el.textContent = rows.length.toLocaleString() + ' distinct comment' + (rows.length === 1 ? '' : 's');
+}
+
+function downloadUnmatchedCommentsCSV(){
+  const rows = computeUnmatchedMovementComments();
+  const header = ['comment', 'lead_count', 'example_lead_id', 'example_rm', 'example_region', 'example_project', 'example_timestamp'];
+  const csvRows = [header].concat(rows.map(r => [r.text, r.leadCount, r.exampleLeadId, r.RM, r.region, r.project, r.timestamp]));
+  const csvContent = csvRows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `unmatched_comments_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function renderRmStallLeaderboard(){
   const table = document.getElementById('rmStallTable');
   if (!table) return;
@@ -9175,6 +9256,7 @@ function renderMovementTab(){
   // they update on every call regardless of which pair is selected.
   renderRmStallLeaderboard();
   renderTimeToRemediate();
+  renderUnmatchedCommentsCount();
 
   const noticeEl = document.getElementById('movementNotice');
   if (!noticeEl) return;
