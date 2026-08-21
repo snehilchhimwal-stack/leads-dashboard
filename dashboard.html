@@ -5079,20 +5079,28 @@ function _editDistance(a, b){
   const m = a.length, n = b.length;
   if (!m) return n;
   if (!n) return m;
-  const d = [];
-  for (let i = 0; i <= m; i++) d.push([i]);
-  for (let j = 0; j <= n; j++) d[0][j] = j;
+  // Three rolling rows (this row, one back, two back — the transposition
+  // check needs to see two rows back) instead of the full m+1 row table —
+  // this runs per word pair, per signal, per comment, across a sheet of
+  // thousands of rows, so not allocating m extra arrays per call adds up.
+  let twoBack = null;
+  let oneBack = new Array(n + 1);
+  let cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) oneBack[j] = j;
   for (let i = 1; i <= m; i++){
+    cur[0] = i;
+    const ai = a[i - 1];
     for (let j = 1; j <= n; j++){
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      let best = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        best = Math.min(best, d[i - 2][j - 2] + 1);
+      const cost = ai === b[j - 1] ? 0 : 1;
+      let best = Math.min(oneBack[j] + 1, cur[j - 1] + 1, oneBack[j - 1] + cost);
+      if (i > 1 && j > 1 && twoBack && ai === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, twoBack[j - 2] + 1);
       }
-      d[i][j] = best;
+      cur[j] = best;
     }
+    const tmp = twoBack; twoBack = oneBack; oneBack = cur; cur = (tmp || new Array(n + 1));
   }
-  return d[m][n];
+  return oneBack[n];
 }
 // How many edits a word may be off by and still count as a typo of the
 // target — scaled by the TARGET's length, not the comment word's, so a
@@ -5124,6 +5132,15 @@ function _wordsMatch(word, target){
 function _wordsOf(text){
   return String(text).toLowerCase().replace(/'/g, '').match(/[a-z0-9]+/g) || [];
 }
+// The same ~110 signal strings, across every rule, get tokenized on every
+// single comment classified — caching the split means that only happens
+// once per DISTINCT signal ever, not once per (signal, comment) pair.
+const _signalWordsCache = new Map();
+function _signalWordsOf(signal){
+  let w = _signalWordsCache.get(signal);
+  if (!w) { w = signal.split(' '); _signalWordsCache.set(signal, w); }
+  return w;
+}
 // A signal is one word, or a short space-separated phrase. A single word
 // fuzzy-matches ANY word in the comment. A multi-word phrase requires
 // that exact sequence to appear consecutively and in order, each word
@@ -5132,7 +5149,7 @@ function _wordsOf(text){
 // also fire on an unrelated sentence that happens to contain both words
 // separately ("still looking, but not sure" is not "not looking").
 function _signalMatches(commentWords, signal){
-  const target = signal.split(' ');
+  const target = _signalWordsOf(signal);
   if (target.length === 1) return commentWords.some(w => _wordsMatch(w, target[0]));
   for (let i = 0; i + target.length <= commentWords.length; i++){
     let ok = true;
@@ -5268,7 +5285,25 @@ const OUTCOME_RULES = [
   { outcome: 'Follow-up Missed', signals: ['followup missed', 'follow up missed'] },
 ];
 
+// Real telecalling shorthand repeats enormously — the same exact comment
+// text ("MSG dropped", "Interested", "Busy") gets logged under hundreds of
+// different leads (see the Movement tab's Unmatched Comments export, whose
+// whole premise is grouping by repeated exact text). Fuzzy signal matching
+// is real work per call — a comment that matches nothing sweeps every rule
+// before giving up, worst case — so re-running it on text this repetitive,
+// once per lead instead of once per DISTINCT text, is the difference
+// between a render that's instant and one that visibly freezes the tab on
+// a sheet with thousands of rows. Keyed on the untouched input, matching
+// exactly what every caller passes.
+const _inferOutcomeCache = new Map();
 function inferOutcome(comment){
+  const cached = _inferOutcomeCache.get(comment);
+  if (cached !== undefined) return cached;
+  const result = _inferOutcomeUncached(comment);
+  _inferOutcomeCache.set(comment, result);
+  return result;
+}
+function _inferOutcomeUncached(comment){
   const c = String(comment).toLowerCase();
   // A placeholder with no real content — a bare "-", ".", "/", or similar
   // punctuation-only note some RMs log when there's nothing to report (by
