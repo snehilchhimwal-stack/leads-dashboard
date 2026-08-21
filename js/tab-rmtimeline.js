@@ -258,3 +258,34 @@ function renderRMTimelineTab(){
   renderRMIssueList(rm);
   renderRMIssueHistory(rm);
 }
+
+// Relocated from dashboard.html's inline script (Phase 4 file-split) — this
+// tab's own init/wiring function, called from js/main.js after every other
+// script has loaded.
+// RM select change picks up renderRMTimelineTab's own default-day reset
+// (see _rmtlLastRM); the day input and calendar day clicks only need a
+// re-render, not a reset, since the user is deliberately picking a day.
+// The window itself isn't independently navigable — it always tracks
+// dateToInput (see renderRMDailyCalendar), which already has its own
+// change listener elsewhere that re-renders the whole page. The calendar's
+// day cells are rebuilt on every render (inside #rmtlDailyTrend's own
+// innerHTML), so clicks are handled via delegation on the container rather
+// than binding to the cells directly.
+function initRMTimelineUI(){
+  const rmSelect = document.getElementById('rmtlRMSelect');
+  const dayInput = document.getElementById('rmtlDayInput');
+  const dailyEl = document.getElementById('rmtlDailyTrend');
+  if (rmSelect) rmSelect.addEventListener('change', renderRMTimelineTab);
+  if (dayInput) dayInput.addEventListener('change', () => {
+    renderRMDailyCalendar(rmSelect.value, dayInput.value);
+    renderRMDayTimeline(rmSelect.value, dayInput.value);
+  });
+  if (dailyEl) dailyEl.addEventListener('click', (e) => {
+    if (!dayInput) return;
+    const dayCell = e.target.closest('.rmtl-cal-day[data-day]');
+    if (!dayCell) return;
+    dayInput.value = dayCell.dataset.day;
+    renderRMDailyCalendar(rmSelect.value, dayInput.value);
+    renderRMDayTimeline(rmSelect.value, dayInput.value);
+  });
+}

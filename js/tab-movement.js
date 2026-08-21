@@ -1490,3 +1490,55 @@ function renderMovementTab(){
   renderStatusChanges(fromAt, toAt, rows);
   renderOvernightCohort(toAt);
 }
+
+// Relocated from dashboard.html's inline script (Phase 4 file-split) — this
+// tab's own init/wiring function, called from js/main.js after every other
+// script has loaded.
+function initMovementUI(){
+  const fromDateSel = document.getElementById('movementFromDateSelect');
+  const toDateSel = document.getElementById('movementToDateSelect');
+  const fromTimeSel = document.getElementById('movementFromTimeSelect');
+  const toTimeSel = document.getElementById('movementToTimeSelect');
+
+  // Picking a new date rebuilds that side's Time options (defaulting to
+  // the latest capture that day) before re-rendering. Stalled Flagged
+  // Leads reads this same picker (see getPickedMovementWindow), so every
+  // change here refreshes both it and Status Changes together.
+  const renderBothMovementSections = () => { renderStalledFlaggedLeadsOps(); renderMovementTab(); };
+  if (fromDateSel) fromDateSel.addEventListener('change', () => {
+    populateMovementTimeSelect('movementFromDateSelect', 'movementFromTimeSelect', null);
+    renderBothMovementSections();
+  });
+  if (toDateSel) toDateSel.addEventListener('change', () => {
+    populateMovementTimeSelect('movementToDateSelect', 'movementToTimeSelect', null);
+    renderBothMovementSections();
+  });
+  if (fromTimeSel) fromTimeSel.addEventListener('change', renderBothMovementSections);
+  if (toTimeSel) toTimeSel.addEventListener('change', renderBothMovementSections);
+
+  const snapshotBtn = document.getElementById('snapshotNowBtn');
+  if (snapshotBtn) snapshotBtn.addEventListener('click', () => browserSnapshotOpenLeads());
+  initAutoSnapshotCheckbox();
+
+  const overnightReportsBtn = document.getElementById('overnightGenerateReportsBtn');
+  if (overnightReportsBtn) overnightReportsBtn.addEventListener('click', renderOvernightRegionReports);
+
+  // Tracking tab's own From/To picker + region select — independent of the
+  // pair above (see trackingPopulateSnapshotSelectors).
+  const trFromDateSel = document.getElementById('trackingFromDateSelect');
+  const trToDateSel = document.getElementById('trackingToDateSelect');
+  const trFromTimeSel = document.getElementById('trackingFromTimeSelect');
+  const trToTimeSel = document.getElementById('trackingToTimeSelect');
+  const trRegionSel = document.getElementById('trackingRegionSelect');
+  if (trFromDateSel) trFromDateSel.addEventListener('change', () => {
+    populateMovementTimeSelect('trackingFromDateSelect', 'trackingFromTimeSelect', null);
+    renderTrackingTab();
+  });
+  if (trToDateSel) trToDateSel.addEventListener('change', () => {
+    populateMovementTimeSelect('trackingToDateSelect', 'trackingToTimeSelect', null);
+    renderTrackingTab();
+  });
+  if (trFromTimeSel) trFromTimeSel.addEventListener('change', renderTrackingTab);
+  if (trToTimeSel) trToTimeSel.addEventListener('change', renderTrackingTab);
+  if (trRegionSel) trRegionSel.addEventListener('change', renderTrackingTab);
+}

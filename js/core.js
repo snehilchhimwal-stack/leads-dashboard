@@ -2665,3 +2665,44 @@ function fmtWorkingWait(mins, suffix){
   const workDays = hrs / (CONFIG.WORK_END_HOUR - CONFIG.WORK_START_HOUR);
   return `${hrs.toFixed(0)} working hrs (~${workDays.toFixed(1)} work days) ${suffix}`;
 }
+
+// Relocated from dashboard.html's inline script (Phase 4 file-split) — generic
+// cross-cutting UI utilities used across multiple tabs, so they live in
+// core.js rather than any one tab file.
+// Generic show/hide for a details block dynamically inserted right after
+// an .info-toggle button (dedupeNotice's summary line, rebuilt on every
+// fetch, rather than the static per-section explainers below which wire up
+// once via initCollapsibleSectionInfo).
+function toggleInlineDetail(btn){
+  const el = btn.parentElement && btn.parentElement.nextElementSibling;
+  if (!el) return;
+  const opening = el.style.display === 'none';
+  el.style.display = opening ? 'block' : 'none';
+  btn.textContent = opening ? '▾ Hide' : (btn.dataset.label || 'ⓘ Details');
+}
+
+// Every section-head is followed by a filter-summary paragraph explaining
+// exactly what the section does and doesn't include — genuinely useful,
+// but rendering all ~20 of them in full meant reading several screens of
+// documentation before reaching the first actual lead card. Collapsed
+// behind a one-click "Why this section exists" toggle instead; nothing
+// about the text itself changes, and no section had to be edited by hand
+// to get this — it wires up generically off the existing section-head +
+// filter-summary structure every section already has.
+function initCollapsibleSectionInfo(){
+  document.querySelectorAll('.section-head + .filter-summary').forEach(el => {
+    el.style.display = 'none';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'info-toggle';
+    toggle.textContent = 'ⓘ Why this section exists';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.addEventListener('click', () => {
+      const opening = el.style.display === 'none';
+      el.style.display = opening ? 'block' : 'none';
+      toggle.setAttribute('aria-expanded', String(opening));
+      toggle.textContent = opening ? '▾ Hide' : 'ⓘ Why this section exists';
+    });
+    el.parentNode.insertBefore(toggle, el);
+  });
+}
