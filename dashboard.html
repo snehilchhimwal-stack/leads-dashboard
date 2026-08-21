@@ -5059,22 +5059,215 @@ function parseActionLog(text){
   return parsed;
 }
 
-// Matches `word` as a standalone token in `c` (already-lowercased comment
-// text) rather than anywhere as a substring — needed for short telecalling
-// abbreviations (rnr, cb, ni...) that would otherwise risk matching inside
-// an unrelated word. Plain phrases below still use a bare indexOf, since
-// spelled-out phrases like "switched off" are long enough not to collide.
-function hasWord(c, word){
-  return new RegExp('\\b' + word + '\\b').test(c);
+/* ---------- Fuzzy keyword matching ---------- */
+// RMs log outcomes as short telecalling shorthand at least as often as
+// full sentences ("RNR", "CB", "NI"), and just as often with a spelling
+// mistake typed under time pressure ("buzy", "requriment", "intrested",
+// "recieved"). Hand-spelling out every misspelling anyone might type is
+// exactly backwards — it grows without bound and still misses the next
+// one. Instead, every signal below is checked with typo tolerance: a
+// comment word within a small edit distance of a signal word counts as
+// that signal, so a spelling mistake attributes to its nearest real
+// keyword automatically instead of needing its own hand-added entry.
+// Optimal-string-alignment distance — plain edit distance (insert/delete/
+// substitute) PLUS an adjacent transposition as a single edit, so the
+// "ie"/"ei" swap in "recieved" costs 1 the same way a dropped or doubled
+// letter would, not 2. Needs the full 2D table (not a rolling array) since
+// the transposition check looks back two rows; words here are always
+// short, so that's not a real cost.
+function _editDistance(a, b){
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const d = [];
+  for (let i = 0; i <= m; i++) d.push([i]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++){
+    for (let j = 1; j <= n; j++){
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let best = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = best;
+    }
+  }
+  return d[m][n];
+}
+// How many edits a word may be off by and still count as a typo of the
+// target — scaled by the TARGET's length, not the comment word's, so a
+// short telecalling code ("nc", "cb", "wn", "dnd") only ever matches
+// itself exactly (one edit away from 2-3 letters is a different word, not
+// a typo of it), while a longer word ("requirement") tolerates the single
+// dropped/swapped/extra letter an RM actually types. Capped at 2 even for
+// very long words — NOT scaled up further — because a 3-edit budget
+// turned out to blur genuinely different verb forms that happen to share
+// a long root ("disconnected" is 3 edits from "disconnecting", "visit" is
+// 2 from "visited"): those are different grammatical forms with different
+// meanings here, not typos of one another, and conflating them silently
+// misrouted real comments to the wrong outcome.
+function _typoBudget(targetLen){
+  if (targetLen <= 3) return 0;
+  if (targetLen <= 8) return 1;
+  return 2;
+}
+function _wordsMatch(word, target){
+  if (word === target) return true;
+  const budget = _typoBudget(target.length);
+  if (!budget || Math.abs(word.length - target.length) > budget) return false; // cheap pre-filter before the real (more expensive) distance check
+  return _editDistance(word, target) <= budget;
+}
+// Apostrophes are stripped before tokenizing, so "don't"/"didn't"/"can't"
+// and the unapostrophed way people actually type on a phone keyboard
+// ("dont"/"didnt"/"cant") collapse to the same token — one canonical
+// signal covers both instead of needing each spelled out twice.
+function _wordsOf(text){
+  return String(text).toLowerCase().replace(/'/g, '').match(/[a-z0-9]+/g) || [];
+}
+// A signal is one word, or a short space-separated phrase. A single word
+// fuzzy-matches ANY word in the comment. A multi-word phrase requires
+// that exact sequence to appear consecutively and in order, each word
+// individually typo-tolerant — word order is what gives a phrase like
+// "not looking" or "switched off" its meaning; a bag-of-words match would
+// also fire on an unrelated sentence that happens to contain both words
+// separately ("still looking, but not sure" is not "not looking").
+function _signalMatches(commentWords, signal){
+  const target = signal.split(' ');
+  if (target.length === 1) return commentWords.some(w => _wordsMatch(w, target[0]));
+  for (let i = 0; i + target.length <= commentWords.length; i++){
+    let ok = true;
+    for (let j = 0; j < target.length; j++){
+      if (!_wordsMatch(commentWords[i + j], target[j])) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+function _anySignal(commentWords, signals){
+  return signals.some(s => _signalMatches(commentWords, s));
 }
 
-// RMs log outcomes as short telecalling shorthand at least as often as
-// full sentences — "RNR", "CB", "NI" — not just the spelled-out phrase.
-// Root cause of a real miss: a comment that was literally just "RNR" fell
-// through every check below (which only looked for "not responding") and
-// landed on the generic Update/"no clear signal" fallback despite RNR
-// being an completely standard, unambiguous outcome. Each bucket now
-// checks its common abbreviation(s) too, via hasWord above.
+// One outcome per entry, checked IN ORDER — the first rule that matches
+// wins, same as a real telecaller reading top-to-bottom priority (e.g. a
+// request to stop calling overrides whatever else the same comment says,
+// so Do Not Disturb is checked before anything else; "booked elsewhere"
+// is checked before the generic Not Interested, since it's the more
+// specific and more useful signal when a comment mentions both).
+// `signals` is the lean list of canonical words/phrases for this outcome
+// — typo tolerance (see above) means each one only needs to be spelled
+// out ONCE in its correct form, not once per misspelling. `test` is an
+// escape hatch for the handful of rules that need independent conditions
+// to co-occur without being a single fixed phrase (e.g. "incoming" +
+// "barred" anywhere in the comment, not necessarily adjacent).
+const OUTCOME_RULES = [
+  { outcome: 'Do Not Disturb', signals: ['do not call', 'dont call', 'not to call', 'stop calling', 'dnd'] },
+  { outcome: 'Switched Off', signals: [
+      'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
+      'out of coverage', 'out of service', 'out of network', 'call forwarded', 'call forwarding',
+      'voice mail', 'voice message', 'voicemail',
+    ], test: (c, w) => _anySignal(w, ['incoming']) && _anySignal(w, ['barred', 'not available']) },
+  { outcome: 'Wrong Number', signals: ['wrong number', 'invalid number', 'invalid no', 'wn'] },
+  // Customer saw/heard the call and actively ended it — a different
+  // signal from RNR (never picked up at all) or Disconnected below (a
+  // network/connectivity drop): this one means they chose not to talk, so
+  // calling straight back is more likely to annoy than connect.
+  { outcome: 'Call Declined', signals: [
+      'hung up', 'hangup', 'disconnecting', 'disconnect the call', 'disconnect call', 'declined', 'declining', 'decline',
+      'cut the call', 'call cut',
+    // Bare "disconnect"/"disconnect -" only, anchored — a plain signal
+    // match on the single word 'disconnect' would also swallow
+    // "disconnected", which stays its own, later, pre-existing outcome.
+    ], test: (c) => /^disconnect\s*-?\s*$/.test(c) },
+  { outcome: 'Busy', signals: ['busy'] },
+  { outcome: 'Booked Elsewhere', signals: [
+      'booked elsewhere', 'booked with another', 'purchased elsewhere', 'purchased another',
+      'bought elsewhere', 'bought another', 'already bought', 'already purchased',
+      'finalized another', 'finalised another', 'gone with another',
+    ] },
+  { outcome: 'RNR', signals: [
+      'rnr', 'cnr', 'nc', 'nr', 'not responding', 'no answer', 'no response', 'not answering', 'not answered',
+      'didnt answer', 'not picking', 'did not pick', 'didnt pick', 'pickup the call', 'pick up the call',
+      'do not pickup', 'do not pick up', 'call not answered', 'call not received', 'call not receive',
+      'not received call', 'not received', 'call not respond', 'call not pick', 'call not picked', 'not receiving',
+    ] },
+  { outcome: 'Ringing / RNR', signals: ['ringing', 'ring'] },
+  // Word-boundary matching (not a bare substring) already keeps "disc"
+  // from matching inside "discussed"/"discount"/"disclose" — see
+  // _signalMatches, which only ever compares whole tokens.
+  { outcome: 'Disconnected', signals: [
+      'disconnected', 'call disc', 'disc', 'network issue', 'network problem', 'poor network',
+      'call not connecting', 'call not connected', 'call not connect', 'not getting connected',
+      'not connecting', 'not connected', 'call drop', 'blank call',
+    ] },
+  { outcome: 'Out of Station', signals: ['out of station', 'out station', 'out of town', 'not in town', 'travelling'] },
+  // Contact has no WhatsApp at all, or it's unreachable there — a
+  // different signal from WhatsApp Sent below (a text WAS sent, just not
+  // yet answered): this one means texting isn't an option for this
+  // contact, so don't keep defaulting back to WhatsApp. Checked first for
+  // exactly that reason.
+  { outcome: 'WhatsApp Unavailable', test: (c, w) => _anySignal(w, ['whatsapp', 'wp', 'wa']) && _anySignal(w, ['not on', 'not available']) },
+  // 'dwm' alone is enough — it already spells out "Dropped WhatsApp
+  // Message" as one abbreviation, nothing else needed to confirm it.
+  { outcome: 'WhatsApp Sent', signals: ['dwm', 'textedon'],
+    // Broadened past the literal word "whatsapp" — "wp"/"wa" shorthand,
+    // "whats app"/"whats up" (both common autocorrect mangles of
+    // "whatsapp"), and the many verbs RMs actually use for the same
+    // action (dropped/shared/sent/pinged/texted a message). Bare "msg"/
+    // "message"/"text" without a named channel still counts — in this
+    // telecalling shorthand it's WhatsApp by convention. Both "drop" and
+    // "dropped" are listed (not just one) deliberately — a 3-letter
+    // suffix like "-ped" isn't a typo of the base word, it's a different
+    // inflected FORM, so typo-tolerance alone (by design — see
+    // _typoBudget) won't bridge "drop" to "dropped" the way it bridges
+    // "recieved" to "received". 'textedon' (no space) is the same idea:
+    // a missing-space glue of two real words, not a misspelling of one.
+    test: (c, w) => _anySignal(w, ['whatsapp', 'whats app', 'whats up', 'wp', 'wa', 'msg', 'mesg', 'message', 'text']) &&
+      _anySignal(w, ['drop', 'dropped', 'shared', 'share', 'sent', 'pinged', 'texted']) },
+  // Checked before the generic "shared/sent details" match below, since
+  // "shared X on whatsapp" would otherwise also satisfy that pattern.
+  { outcome: 'Details Shared', test: (c, w) => _anySignal(w, ['shared', 'share', 'sent']) && _anySignal(w, ['detail', 'brochure', 'project', 'info']) },
+  // Checked before Visit Arranged below — "visit done"/"visited" is the
+  // opposite moment (post-visit) from "visit scheduled"/"visit arranged"
+  // (pre-visit), and needs its own follow-up action, not a confirm-
+  // attendance reminder for a visit that already happened.
+  { outcome: 'Visit Completed', signals: [
+      'visit done', 'visited site', 'site visited', 'visit completed', 'came for visit', 'visited the project',
+    ] },
+  { outcome: 'Visit Arranged', signals: [
+      'site visit', 'visit scheduled', 'visit arranged', 'visit booked', 'visit fixed', 'visit confirmed',
+      'will visit', 'coming for visit', 'visit planned',
+    ] },
+  // Checked before Budget Concern — a loan/paperwork update often also
+  // mentions amounts, but "in process" is the more specific, more useful
+  // signal (keep warm and check status, not "find a cheaper option").
+  { outcome: 'Loan In Process', signals: ['document submitted', 'bank process'],
+    test: (c, w) => _anySignal(w, ['loan']) && _anySignal(w, ['process', 'sanction', 'approval']) },
+  // "not looking"/"no requirement"/"not requirement" cover every "not
+  // looking for property"/"not looking any property"/etc. variant on
+  // their own (all contain "not looking" as a substring) — a real-estate
+  // lead's "not looking" is unambiguous enough in this domain not to need
+  // the fuller phrase spelled out.
+  { outcome: 'Not Interested', signals: [
+      'not interested', 'no interest', 'no longer interested', 'not looking',
+      'no requirement', 'not requirement', 'not enquired', 'dropped the plan', 'dropped the idea', 'ni',
+    ] },
+  // "considering"/"thinking" checked before the bare "interested" match,
+  // since a comment like "will think and let us know if interested" should
+  // read as still-deciding, not a firm expression of interest.
+  { outcome: 'Considering', signals: ['consider', 'think about', 'will think', 'will get back', 'need some time', 'need time', 'will discuss'] },
+  { outcome: 'Budget Concern', signals: ['budget', 'expensive', 'too high', 'high price', 'costly', 'cant afford', 'cannot afford', 'out of budget'] },
+  { outcome: 'Interested', signals: ['interested'] },
+  { outcome: 'DNP', signals: [
+      'call again', 'dnp', 'call back', 'callback', 'call later', 'call after', 'call tomorrow',
+      'requested callback', 'asked to call', 'cb',
+    ] },
+  // RM-side admin note (a scheduled follow-up wasn't done in time), not
+  // anything the client said — but frequent and unambiguous enough, with
+  // a clear next action, to earn a real outcome instead of the generic
+  // "no keyword" bucket.
+  { outcome: 'Follow-up Missed', signals: ['followup missed', 'follow up missed'] },
+];
+
 function inferOutcome(comment){
   const c = String(comment).toLowerCase();
   // A placeholder with no real content — a bare "-", ".", "/", or similar
@@ -5086,145 +5279,10 @@ function inferOutcome(comment){
   // exactly like a genuine unclassifiable comment, when really there's no
   // comment here to classify in the first place.
   if (/^[\s\-_./]+$/.test(c)) return 'No Real Update';
-  // Checked first and unconditionally — a request to stop calling overrides
-  // whatever else the same comment says (e.g. "not interested, don't call
-  // again" should still read as DND, not just Not Interested).
-  if (c.indexOf('do not call') !== -1 || c.indexOf("don't call") !== -1 || c.indexOf('dont call') !== -1 ||
-      c.indexOf('not to call') !== -1 || c.indexOf('stop calling') !== -1 || hasWord(c, 'dnd')) return 'Do Not Disturb';
-  // "out of service"/"out of network"/"barred"/"not contactable" are all
-  // the same "can't reach this line at all" signal as switched off, just
-  // worded differently — same with the "voice message"/"voicemail" typo.
-  if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1 || c.indexOf('sw off') !== -1 || hasWord(c, 'swoff') ||
-      c.indexOf('switcehd off') !== -1 || c.indexOf('swich off') !== -1 ||
-      c.indexOf('not reachable') !== -1 || c.indexOf('unreachable') !== -1 || c.indexOf('not contactable') !== -1 ||
-      c.indexOf('out of coverage') !== -1 || c.indexOf('out of service') !== -1 || c.indexOf('out of network') !== -1 ||
-      (c.indexOf('incoming') !== -1 && (c.indexOf('barred') !== -1 || c.indexOf('not available') !== -1)) ||
-      c.indexOf('call forwarded') !== -1 || c.indexOf('call forwarding') !== -1 ||
-      c.indexOf('voicemail') !== -1 || c.indexOf('voice mail') !== -1 || c.indexOf('voice message') !== -1) return 'Switched Off';
-  if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1 || c.indexOf('invalid no') !== -1 || hasWord(c, 'wn')) return 'Wrong Number';
-  // Customer saw/heard the call and actively ended it — a different signal
-  // from RNR (never picked up at all) or Disconnected below (a network/
-  // connectivity drop): this one means they chose not to talk, so calling
-  // straight back is more likely to annoy than connect. The bare-word
-  // "disconnect"/"disconnect -" regex (not a plain substring check) is
-  // deliberate — a broad indexOf('disconnect') would also swallow
-  // "disconnected", which stays its own, earlier-established outcome below.
-  if (c.indexOf('declined') !== -1 || c.indexOf('declining') !== -1 || c.indexOf('decline') !== -1 ||
-      c.indexOf('hung up') !== -1 || c.indexOf('hangup') !== -1 || c.indexOf('disconnecting') !== -1 ||
-      c.indexOf('disconnect the call') !== -1 || c.indexOf('disconnect call') !== -1 ||
-      /^disconnect\s*-?\s*$/.test(c)) return 'Call Declined';
-  if (c.indexOf('busy') !== -1 || c.indexOf('buzy') !== -1) return 'Busy';
-  // Checked before the generic Not Interested/DNP catches below, since a
-  // "booked/purchased elsewhere" comment often also says "not interested" —
-  // the more specific, more useful signal should win.
-  if (c.indexOf('booked elsewhere') !== -1 || c.indexOf('booked with another') !== -1 || c.indexOf('purchased elsewhere') !== -1 ||
-      c.indexOf('purchased another') !== -1 || c.indexOf('bought elsewhere') !== -1 || c.indexOf('bought another') !== -1 ||
-      c.indexOf('already bought') !== -1 || c.indexOf('already purchased') !== -1 ||
-      c.indexOf('finalized another') !== -1 || c.indexOf('finalised another') !== -1 || c.indexOf('gone with another') !== -1) return 'Booked Elsewhere';
-  // Broadened beyond "not responding"/rnr to the plain phrasing RMs
-  // actually type — "no answer", "not picking up", "didn't pick", every
-  // "call not X" variant of the same thing (received/respond/pick/
-  // receive), the pickup-specific phrasing, and the NC/CNR/NR shorthand —
-  // which previously fell through to the generic Update fallback despite
-  // being the exact same outcome as RNR.
-  if (hasWord(c, 'rnr') || hasWord(c, 'cnr') || hasWord(c, 'nc') || hasWord(c, 'nr') ||
-      c.indexOf('not responding') !== -1 || c.indexOf('no answer') !== -1 || c.indexOf('no response') !== -1 ||
-      c.indexOf('not answering') !== -1 || c.indexOf('not answered') !== -1 || c.indexOf("didn't answer") !== -1 ||
-      c.indexOf('not picking') !== -1 || c.indexOf('did not pick') !== -1 || c.indexOf("didn't pick") !== -1 ||
-      c.indexOf('pickup the call') !== -1 || c.indexOf('pick up the call') !== -1 ||
-      c.indexOf('do not pickup') !== -1 || c.indexOf('do not pick up') !== -1 ||
-      // 'call not rec' (not the full "received"/"receive") deliberately
-      // catches the "recieved" typo too — every real variant here starts
-      // with those same 8 letters.
-      c.indexOf('call not answered') !== -1 || c.indexOf('call not rec') !== -1 || c.indexOf('not received call') !== -1 ||
-      c.indexOf('not received') !== -1 || c.indexOf('call not respond') !== -1 || c.indexOf('call not pick') !== -1 ||
-      c.indexOf('not receiving') !== -1) return 'RNR';
-  // 'ringin' catches "ringing" AND the common typo "ringin" in one check;
-  // hasWord adds the bare word "ring"/"ring -" — rang but nobody picked up.
-  if (c.indexOf('ringin') !== -1 || hasWord(c, 'ring')) return 'Ringing / RNR';
-  // Word-boundary, not a bare substring — "disc" alone matched inside
-  // "discussed", "discount", "disclose", misclassifying any comment that
-  // merely mentioned discussing something as a dropped call. "Not
-  // connected"/"call not connected"/"not getting connected" are the same
-  // connectivity signal as the pre-existing "call not connecting", just
-  // worded differently; "blank call" (connected, but nothing happened) fits
-  // the same bucket too.
-  if (c.indexOf('disconnected') !== -1 || c.indexOf('call disc') !== -1 || hasWord(c, 'disc') ||
-      c.indexOf('network issue') !== -1 || c.indexOf('network problem') !== -1 || c.indexOf('poor network') !== -1 ||
-      c.indexOf('call not connecting') !== -1 || c.indexOf('call not connected') !== -1 || c.indexOf('call not connect') !== -1 ||
-      c.indexOf('not getting connected') !== -1 || c.indexOf('not connecting') !== -1 || c.indexOf('not connected') !== -1 ||
-      c.indexOf('call drop') !== -1 || c.indexOf('blank call') !== -1) return 'Disconnected';
-  if (c.indexOf('out of station') !== -1 || c.indexOf('out station') !== -1 || c.indexOf('out of town') !== -1 ||
-      c.indexOf('not in town') !== -1 || c.indexOf('travelling') !== -1 || c.indexOf('traveling') !== -1) return 'Out of Station';
-  // Contact has no WhatsApp at all, or it's unreachable there — a
-  // different signal from WhatsApp Sent below (which means a text WAS
-  // sent, just not yet answered): this one means texting isn't even an
-  // option for this contact, so don't keep defaulting back to WhatsApp.
-  // Checked before WhatsApp Sent for exactly that reason.
-  if ((c.indexOf('whatsapp') !== -1 || hasWord(c, 'wp') || hasWord(c, 'wa')) &&
-      (c.indexOf('not on') !== -1 || c.indexOf('not available') !== -1)) return 'WhatsApp Unavailable';
-  // hasWord(c, 'dwm') alone is enough — it already spells out "Dropped
-  // WhatsApp Message" as one abbreviation, nothing else needed to confirm it.
-  if (hasWord(c, 'dwm')) return 'WhatsApp Sent';
-  // Broadened well past the literal word "whatsapp" — "wp" shorthand,
-  // "what's up"/"what's app" (both common autocorrect mangles of
-  // "whatsapp"), common misspellings, and the many verbs RMs actually use
-  // for the same action (dropped/shared/sent/pinged/texted a message), not
-  // just "shared"/"sent". Bare "msg"/"message" without a named channel
-  // still counts — in this telecalling shorthand it's WhatsApp by
-  // convention (see the many explicitly-WhatsApp variants above).
-  if ((c.indexOf('whatsapp') !== -1 || c.indexOf('whatsaap') !== -1 || c.indexOf('watsapp') !== -1 ||
-       c.indexOf("what's app") !== -1 || c.indexOf('whats app') !== -1 || c.indexOf("what's up") !== -1 ||
-       c.indexOf('msg') !== -1 || c.indexOf('mesg') !== -1 || c.indexOf('message') !== -1 || c.indexOf('text') !== -1 || hasWord(c, 'wp')) &&
-      (c.indexOf('drop') !== -1 || c.indexOf('shared') !== -1 || c.indexOf('share') !== -1 ||
-       c.indexOf('sent') !== -1 || c.indexOf('pinged') !== -1 || c.indexOf('texted') !== -1)) return 'WhatsApp Sent';
-  // Checked before the generic "shared/sent details" match below, since
-  // "shared X on whatsapp" would otherwise also satisfy that pattern.
-  if ((c.indexOf('shared') !== -1 || c.indexOf('share') !== -1 || c.indexOf('sent') !== -1) &&
-      (c.indexOf('detail') !== -1 || c.indexOf('brochure') !== -1 || c.indexOf('project') !== -1 || c.indexOf('info') !== -1)) return 'Details Shared';
-  // Checked before Visit Arranged below — "visit done"/"visited" is the
-  // opposite moment (post-visit) from "visit scheduled"/"visit arranged"
-  // (pre-visit), and needs its own follow-up action, not a confirm-
-  // attendance reminder for a visit that already happened.
-  if (c.indexOf('visit done') !== -1 || c.indexOf('visited site') !== -1 || c.indexOf('site visited') !== -1 ||
-      c.indexOf('visit completed') !== -1 || c.indexOf('came for visit') !== -1 || c.indexOf('visited the project') !== -1) return 'Visit Completed';
-  if (c.indexOf('site visit') !== -1 || c.indexOf('visit scheduled') !== -1 || c.indexOf('visit arranged') !== -1 ||
-      c.indexOf('visit booked') !== -1 || c.indexOf('visit fixed') !== -1 || c.indexOf('visit confirmed') !== -1 ||
-      c.indexOf('will visit') !== -1 || c.indexOf('coming for visit') !== -1 || c.indexOf('visit planned') !== -1) return 'Visit Arranged';
-  // Checked before Budget Concern — a loan/paperwork update often also
-  // mentions amounts, but "in process" is the more specific, more useful
-  // signal (keep warm and check status, not "find a cheaper option").
-  if ((c.indexOf('loan') !== -1 && (c.indexOf('process') !== -1 || c.indexOf('sanction') !== -1 || c.indexOf('approval') !== -1)) ||
-      c.indexOf('documents submitted') !== -1 || c.indexOf('document submitted') !== -1 || c.indexOf('bank process') !== -1) return 'Loan In Process';
-  // "not looking"/"no requirement" cover every "not looking for
-  // property"/"not looking any property"/etc. variant by themselves (all
-  // contain "not looking" as a substring) — a real-estate lead's "not
-  // looking" is unambiguous enough in this domain not to need the fuller
-  // phrase spelled out. "intrested"/"intersted" are the two most common
-  // misspellings of "interested" actually seen in the comment log.
-  if (c.indexOf('not interested') !== -1 || c.indexOf('not intrested') !== -1 || c.indexOf('not intersted') !== -1 ||
-      c.indexOf('no interest') !== -1 || c.indexOf('no longer interested') !== -1 || c.indexOf('not looking') !== -1 ||
-      c.indexOf('no requirement') !== -1 || c.indexOf('requriment') !== -1 || c.indexOf('not enquired') !== -1 ||
-      c.indexOf('dropped the plan') !== -1 || c.indexOf('dropped the idea') !== -1 ||
-      hasWord(c, 'ni')) return 'Not Interested';
-  // "considering"/"thinking" checked before the bare "interested" match,
-  // since a comment like "will think and let us know if interested" should
-  // read as still-deciding, not a firm expression of interest.
-  if (c.indexOf('consider') !== -1 || c.indexOf('think about') !== -1 || c.indexOf('will think') !== -1 ||
-      c.indexOf('will get back') !== -1 || c.indexOf('need some time') !== -1 || c.indexOf('need time') !== -1 ||
-      c.indexOf('will discuss') !== -1) return 'Considering';
-  if (c.indexOf('budget') !== -1 || c.indexOf('expensive') !== -1 || c.indexOf('too high') !== -1 || c.indexOf('high price') !== -1 ||
-      c.indexOf('costly') !== -1 || c.indexOf("can't afford") !== -1 || c.indexOf('cannot afford') !== -1 ||
-      c.indexOf('out of budget') !== -1) return 'Budget Concern';
-  if (c.indexOf('interested') !== -1) return 'Interested';
-  if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1 ||
-      c.indexOf('call later') !== -1 || c.indexOf('call after') !== -1 || c.indexOf('call tomorrow') !== -1 ||
-      c.indexOf('requested callback') !== -1 || c.indexOf('asked to call') !== -1 || hasWord(c, 'cb')) return 'DNP';
-  // RM-side admin note (a scheduled follow-up wasn't done in time), not
-  // anything the client said — but frequent and unambiguous enough, with
-  // a clear next action, to earn a real outcome instead of the generic
-  // "no keyword" bucket.
-  if (c.indexOf('followup missed') !== -1 || c.indexOf('follow up missed') !== -1 || c.indexOf('follow-up missed') !== -1) return 'Follow-up Missed';
+  const words = _wordsOf(c);
+  for (const rule of OUTCOME_RULES) {
+    if ((rule.signals && _anySignal(words, rule.signals)) || (rule.test && rule.test(c, words))) return rule.outcome;
+  }
   return 'Update';
 }
 
