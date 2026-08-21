@@ -5638,13 +5638,21 @@ function csvEscape(v){
 // of its original lead_ids, not just whichever one happened to become the
 // merged record's primary id.
 function downloadFilteredLeadIdsCSV(){
-  const ids = [];
+  const outRows = [];
   leads.forEach(l => {
     const idList = (l.collatedLeadIds && l.collatedLeadIds.length) ? l.collatedLeadIds : [l.lead_id];
-    idList.forEach(id => { if (id) ids.push(id); });
+    const cloned = idList.length > 1;
+    idList.forEach(id => {
+      if (!id) return;
+      // "Clone id(s)" lists this row's OWN siblings — every other lead_id
+      // collated into the same customer — not the whole idList, so the id
+      // in column 1 never appears redundantly in its own clone-id column.
+      const cloneIds = cloned ? idList.filter(other => other !== id).join('; ') : '';
+      outRows.push([id, l.client || '', cloned ? 'Yes' : 'No', cloneIds]);
+    });
   });
 
-  const rows = [['lead_id']].concat(ids.map(id => [id]));
+  const rows = [['lead_id', 'client', 'cloned', 'clone_id(s)']].concat(outRows);
   const csvContent = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
