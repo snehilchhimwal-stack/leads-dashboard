@@ -1860,9 +1860,23 @@ async function fetchAndRender(){
       // split carries the OTHER copies' lead_id/RM as a lightweight
       // sibling reference (siblingLeadIds/siblingRMs) purely for context;
       // its own issue flags come only from its own data.
-      merged.copySplits = rows.map(row => {
+      // One row per distinct lead_id first — a genuinely-cloned group can
+      // still contain a literal duplicate of one of its copies (the same
+      // lead_id logged twice alongside a real second RM's copy), and that
+      // duplicate is the same copy read twice, not a third copy. Without
+      // this, it would get its own split (double-counting that RM's
+      // issues) and would list itself as its own sibling.
+      const distinctRows = [];
+      const seenSplitIds = new Set();
+      rows.forEach(r => {
+        const id = String(r.lead_id).trim();
+        if (seenSplitIds.has(id)) return;
+        seenSplitIds.add(id);
+        distinctRows.push(r);
+      });
+      merged.copySplits = distinctRows.map(row => {
         const split = mergeRowsIntoOneLead([row]);
-        const siblings = rows.filter(r => r !== row);
+        const siblings = distinctRows.filter(r => r !== row);
         split.siblingLeadIds = siblings.map(r => String(r.lead_id).trim());
         split.siblingRMs = Array.from(new Set(siblings.map(r => r.RM).filter(Boolean)));
         // Every sibling's own four comment columns, carried alongside the
