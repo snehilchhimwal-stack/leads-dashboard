@@ -70,6 +70,40 @@ const CONFIG = {
   CLOSED_STAGE_STEMS: ['cancel', 'close', 'reject'],
 };
 
+// Relocated here (from dashboard.html's "Issues CSV Export" section) because
+// js/reports.js builds a derived lookup from this array at its OWN top level
+// (see _FLAG_BY_ISSUE_PRIORITY_LABEL), which runs at script-load time — this
+// has to be defined before that runs, and core.js is the one file guaranteed
+// to load first. Read by the filter engine, Tracking, RM Timeline, Movement,
+// Reports, and Sheets write-back.
+//
+// Ordered by priority: when a lead matches more than one check (e.g. both
+// "Stuck" and "Behind on Today's Calls" are both legitimately true for the
+// same old, under-called lead), each view needing one clear primary reason
+// per lead picks the first match here. Dashboard sections themselves are
+// unaffected — each still independently shows everything matching its own
+// definition, since that's needed for real operational use.
+//
+// firstContactBreach ("Not Connected in 10 Minutes") is deliberately NOT in
+// this list. It's a retrospective fact (first contact happened, just after
+// the 10-minute window) that already happened and can't be corrected —
+// unlike every other entry here, there is no follow-up action left to take
+// on the LEAD itself. Letting it sit in this shared priority list meant it
+// could outrank a genuinely still-actionable issue (e.g. Follow-up Overdue)
+// for the same lead in the combined report, hiding the thing someone could
+// actually still do something about, and it polluted "flagged"/"stalled"/
+// "remediate" stats built for things that DO get remediated. It still has
+// its own dedicated report — see ISSUE_REPORT_META.notConnected in
+// reports.js — which reads as a reminder to the region's RH of which RMs
+// missed the response-time SLA, not an action list.
+const ISSUE_PRIORITY = [
+  { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added' },
+  { key: 'isNotUpdated', label: 'Not Updated' },
+  { key: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)' },
+  { key: 'underCalledToday', label: "Behind on Today's Calls" },
+  { key: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)' },
+];
+
 /* ========================= IST TIME CORE =========================
  * Every timestamp in the sheet is IST wall-clock (the SQL export was moved
  * from UTC to IST). Those components are converted to real instants HERE,
