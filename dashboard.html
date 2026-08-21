@@ -6808,6 +6808,10 @@ function buildRawEmail(to, cc, subject, body, htmlBody){
   return toBase64Url(`${headers.filter(Boolean).join('\r\n')}\r\n\r\n${parts}`);
 }
 
+// Returns true/false so a bulk caller (sendAllReportsGmail below) can track
+// how many of a batch actually went through — every existing call site
+// still ignores the return value, so this is additive, not a behavior
+// change for the single-report Send button.
 async function performGmailSend(pending){
   const { report, to, cc, btnId } = pending;
   const btn = btnId ? document.getElementById(btnId) : null;
@@ -6828,6 +6832,7 @@ async function performGmailSend(pending){
       btn.disabled = false;
       applyGmailButtonState(btn, report.subject);
     }
+    return true;
   } catch (err) {
     console.error('Gmail send failed:', err);
     if (btn) {
@@ -6840,6 +6845,7 @@ async function performGmailSend(pending){
       // figures out which one is correct from the log rather than assuming.
       setTimeout(() => { btn.style.borderColor = ''; applyGmailButtonState(btn, report.subject); }, 3000);
     }
+    return false;
   }
 }
 
@@ -6870,6 +6876,51 @@ function sendRegionReportGmail(idx){
 
 function sendAllReportGmail(i){
   sendReportViaGmail(_allReports[i], 'gmailAllBtn_' + i);
+}
+
+// Sends every report in `reports` via Gmail, one at a time — not
+// Promise.all, since a burst of simultaneous sends is more likely to trip
+// Gmail's own rate limiting, and going one at a time lets each card's own
+// button reflect real progress as it happens (via performGmailSend's
+// existing btnId handling). Requires Gmail to already be connected:
+// unlike the single-report Send button (which can kick off the OAuth
+// connect flow and auto-fire once a token lands, via _pendingGmailSend),
+// a bulk send has no single "this one pending send" to resume after a
+// redirect, so it asks the person to connect first and click again rather
+// than queuing N sends behind one popup.
+async function sendAllReportsGmail(reports, btnIdFn, statusElId, confirmText){
+  if (!reports || !reports.length) return;
+  if (!getGmailClientId()) {
+    const panel = document.getElementById('gmailSetupPanel');
+    if (panel) { panel.style.display = 'block'; panel.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    return;
+  }
+  if (!gmailTokenValid()) {
+    setFollowupsPushStatus('Connect Gmail first (below), then click "Send all" again.', 'var(--amber)', statusElId);
+    connectGmail();
+    return;
+  }
+  if (!confirm(confirmText || `Send all ${reports.length} emails now?`)) return;
+
+  const missingRegions = new Set();
+  let sent = 0, failed = 0;
+  for (let i = 0; i < reports.length; i++) {
+    const report = reports[i];
+    const { to, cc, missing } = recipientsForReport(report);
+    if (!to && !cc) {
+      (missing.length ? missing : (report.regionNames || [report.region])).forEach(r => missingRegions.add(r));
+      continue;
+    }
+    setFollowupsPushStatus(`Sending ${i + 1} of ${reports.length}…`, 'var(--text-faint)', statusElId);
+    const ok = await performGmailSend({ report, to, cc, btnId: btnIdFn(i) });
+    if (ok) sent++; else failed++;
+  }
+
+  if (missingRegions.size) flagMissingRegionRecipients(Array.from(missingRegions));
+  const parts = [`${sent} sent`];
+  if (failed) parts.push(`${failed} failed`);
+  if (missingRegions.size) parts.push(`${missingRegions.size} skipped (no recipients)`);
+  setFollowupsPushStatus(parts.join(', ') + '.', failed || missingRegions.size ? 'var(--amber)' : 'var(--green)', statusElId);
 }
 
 function initGmailUI(){
@@ -7033,13 +7084,29 @@ async function renderReports(){
     genBtn.disabled = false;
     genBtn.textContent = originalLabel;
   }
-  if (!followupLookup) return; // cancelled — waitForAllFollowups already explained why, nothing to render
 
-  _allReports = buildRegionWiseReports(combine, followupLookup);
+  // Cancelled: rather than leaving whatever was on screen before, fall
+  // back to `preliminary` — already built above, from the same
+  // buildRegionWiseReports call, just without a followupLookup, so every
+  // suggested follow-up is the algorithmic/keyword-inferred one
+  // (suggestedFollowUp's own fallback chain) instead of a human-reviewed
+  // one. Clearly labeled as unreviewed, with a bulk-send option for
+  // whoever decides the auto-generated wording is good enough to go out
+  // as-is rather than waiting on Lead_Followups any further.
+  const usingFallback = !followupLookup;
+  _allReports = usingFallback ? preliminary : buildRegionWiseReports(combine, followupLookup);
   document.getElementById('regionReportCount').textContent =
     _allReports.length + (combine ? ' email' : ' region' + (_allReports.length === 1 ? '' : 's'));
 
-  el.innerHTML = reportScopeNotice() + _allReports.map((r, i) => `
+  const fallbackBanner = usingFallback
+    ? `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--amber); color:var(--amber); text-align:left; padding:10px 14px;">
+        Waiting for follow-ups was cancelled. Showing ${_allReports.length} email${_allReports.length === 1 ? '' : 's'}
+        built from auto-generated (keyword-inferred) follow-up suggestions only — nobody has reviewed these.
+        <button class="report-copy-btn" style="margin-left:8px;" onclick="sendAllReportsGmail(_allReports, i => 'gmailAllBtn_' + i, 'followupsPushStatus', 'Send all ' + _allReports.length + ' region emails using UNREVIEWED auto-generated follow-up text?')">Send all via Gmail (unreviewed)</button>
+      </div>`
+    : '';
+
+  el.innerHTML = reportScopeNotice() + fallbackBanner + _allReports.map((r, i) => `
     <div class="report-card">
       <div class="report-subject">${esc(r.subject)}</div>
       <div class="rr-meta" style="margin-bottom:8px;">${r.count} lead${r.count === 1 ? '' : 's'}</div>
@@ -9064,15 +9131,29 @@ async function renderOvernightRegionReports(){
     btn.disabled = false;
     btn.textContent = originalLabel;
   }
-  if (!followupLookup) return; // cancelled — waitForAllFollowups already explained why, nothing to render
 
+  // Cancelled: fall back to the algorithmic/keyword-inferred follow-up
+  // text (buildOvernightRegionReports with no followupLookup falls back to
+  // suggestedFollowUp's own OVERNIGHT_NO_COMMENT_FALLBACK chain) instead of
+  // leaving the screen showing nothing — same "unreviewed, but here it is"
+  // fallback renderReports offers for the Summary email.
+  const usingFallback = !followupLookup;
   const reports = buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, followupLookup);
   window._overnightRegionReports = reports;
   if (!reports.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No overnight leads need a follow-up email right now — either none fall inside a reporting region, or all of last night's leads are already at Opportunity+ or closed</div>`;
     return;
   }
-  el.innerHTML = reports.map((r, idx) => `
+
+  const fallbackBanner = usingFallback
+    ? `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--amber); color:var(--amber); text-align:left; padding:10px 14px;">
+        Waiting for follow-ups was cancelled. Showing ${reports.length} email${reports.length === 1 ? '' : 's'}
+        built from auto-generated (keyword-inferred) follow-up suggestions only — nobody has reviewed these.
+        <button class="report-copy-btn" style="margin-left:8px;" onclick="sendAllReportsGmail(window._overnightRegionReports, i => 'overnightRptGmailBtn_' + i, 'overnightFollowupsPushStatus', 'Send all ' + window._overnightRegionReports.length + ' region emails using UNREVIEWED auto-generated follow-up text?')">Send all via Gmail (unreviewed)</button>
+      </div>`
+    : '';
+
+  el.innerHTML = fallbackBanner + reports.map((r, idx) => `
     <div class="report-card">
       <div class="report-subject">${esc(r.subject)}</div>
       <div class="rr-meta" style="margin-bottom:8px;">${r.count} lead${r.count === 1 ? '' : 's'}</div>
