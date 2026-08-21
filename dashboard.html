@@ -1775,6 +1775,17 @@ async function fetchAndRender(){
       // 108). Max takes it "as a whole" for the customer, matching
       // whichever copy's snapshot happens to be most complete, without
       // the multiplication.
+      // collatedFrom counts DISTINCT lead_ids, not raw rows.length — two
+      // rows unioned together (by shared client_id or lead_id) aren't
+      // necessarily two different RM copies. A literal duplicate row (the
+      // same lead_id appearing twice — a blank lead_id colliding with
+      // another blank one is the common case) unions in exactly the same
+      // way a genuine second copy would, but it's one customer's one copy
+      // read twice, not "multiple RM copies". Every "cloned"/"collated"
+      // count and badge in the app reads collatedFrom expecting it to mean
+      // distinct copies (see e.g. collationBadge, countCollatedAmong), so
+      // it has to actually measure that, not just row multiplicity.
+      const distinctLeadIds = Array.from(new Set(rows.map(r => String(r.lead_id).trim())));
       return Object.assign({}, primary, {
         internal_status_comments: mergedComments,
         stage_comments: mergedStageComments,
@@ -1788,9 +1799,9 @@ async function fetchAndRender(){
           .map(r => parseDate(r.lead_created_at))
           .filter(Boolean)
           .sort((a, b) => a - b)[0]?.toISOString() || primary.lead_created_at,
-        collatedFrom: rows.length,
+        collatedFrom: distinctLeadIds.length,
         collatedRMs: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
-        collatedLeadIds: Array.from(new Set(rows.map(r => String(r.lead_id).trim()))),
+        collatedLeadIds: distinctLeadIds,
         collatedRegions: Array.from(new Set(rows.map(rowRegionLabel))),
       });
     }
@@ -1799,8 +1810,22 @@ async function fetchAndRender(){
       const merged = mergeRowsIntoOneLead(rows);
       if (rows.length === 1) return merged;
 
-      collatedGroups++;
+      // Tallied here, before the distinct-copy gate below, so "X customers
+      // from Y rows read, absorbing Z extra rows" stays arithmetically
+      // true regardless of WHY a group had more than one row — a literal
+      // duplicate row is still one fewer row than customers, same as a
+      // genuine second RM copy is.
       extraCopies += rows.length - 1;
+
+      // A group can have more raw rows than distinct lead_ids (see
+      // collatedFrom's own comment in mergeRowsIntoOneLead) — that's still
+      // correctly absorbed above, but it isn't "multiple RM copies", so it
+      // shouldn't inflate the headline count, the cross-region check, or
+      // copySplits (which would otherwise hand issue-detection two
+      // identical-lead_id entries for what's really one copy read twice).
+      if (merged.collatedLeadIds.length <= 1) return merged;
+
+      collatedGroups++;
 
       // Merged customers whose copies don't all resolve to the SAME region —
       // this is what makes a Pune-tagged row surface on a card that reads
