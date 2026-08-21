@@ -5077,42 +5077,110 @@ function hasWord(c, word){
 // checks its common abbreviation(s) too, via hasWord above.
 function inferOutcome(comment){
   const c = String(comment).toLowerCase();
+  // A placeholder with no real content — a bare "-", ".", "/", or similar
+  // punctuation-only note some RMs log when there's nothing to report (by
+  // a wide margin the single most common "unmatched" comment in practice —
+  // see the Movement tab's Unmatched Comments export). Checked before
+  // anything else: there's no keyword TO match here, and without this it
+  // fell through to the generic Update/"no clear signal" fallback looking
+  // exactly like a genuine unclassifiable comment, when really there's no
+  // comment here to classify in the first place.
+  if (/^[\s\-_./]+$/.test(c)) return 'No Real Update';
   // Checked first and unconditionally — a request to stop calling overrides
   // whatever else the same comment says (e.g. "not interested, don't call
   // again" should still read as DND, not just Not Interested).
   if (c.indexOf('do not call') !== -1 || c.indexOf("don't call") !== -1 || c.indexOf('dont call') !== -1 ||
       c.indexOf('not to call') !== -1 || c.indexOf('stop calling') !== -1 || hasWord(c, 'dnd')) return 'Do Not Disturb';
+  // "out of service"/"out of network"/"barred"/"not contactable" are all
+  // the same "can't reach this line at all" signal as switched off, just
+  // worded differently — same with the "voice message"/"voicemail" typo.
   if (c.indexOf('switch off') !== -1 || c.indexOf('switched off') !== -1 || c.indexOf('sw off') !== -1 || hasWord(c, 'swoff') ||
-      c.indexOf('not reachable') !== -1 || c.indexOf('unreachable') !== -1 || c.indexOf('out of coverage') !== -1 ||
-      c.indexOf('voicemail') !== -1 || c.indexOf('voice mail') !== -1) return 'Switched Off';
-  if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1 || hasWord(c, 'wn')) return 'Wrong Number';
-  if (c.indexOf('busy') !== -1) return 'Busy';
+      c.indexOf('switcehd off') !== -1 || c.indexOf('swich off') !== -1 ||
+      c.indexOf('not reachable') !== -1 || c.indexOf('unreachable') !== -1 || c.indexOf('not contactable') !== -1 ||
+      c.indexOf('out of coverage') !== -1 || c.indexOf('out of service') !== -1 || c.indexOf('out of network') !== -1 ||
+      (c.indexOf('incoming') !== -1 && (c.indexOf('barred') !== -1 || c.indexOf('not available') !== -1)) ||
+      c.indexOf('call forwarded') !== -1 || c.indexOf('call forwarding') !== -1 ||
+      c.indexOf('voicemail') !== -1 || c.indexOf('voice mail') !== -1 || c.indexOf('voice message') !== -1) return 'Switched Off';
+  if (c.indexOf('wrong number') !== -1 || c.indexOf('invalid number') !== -1 || c.indexOf('invalid no') !== -1 || hasWord(c, 'wn')) return 'Wrong Number';
+  // Customer saw/heard the call and actively ended it — a different signal
+  // from RNR (never picked up at all) or Disconnected below (a network/
+  // connectivity drop): this one means they chose not to talk, so calling
+  // straight back is more likely to annoy than connect. The bare-word
+  // "disconnect"/"disconnect -" regex (not a plain substring check) is
+  // deliberate — a broad indexOf('disconnect') would also swallow
+  // "disconnected", which stays its own, earlier-established outcome below.
+  if (c.indexOf('declined') !== -1 || c.indexOf('declining') !== -1 || c.indexOf('decline') !== -1 ||
+      c.indexOf('hung up') !== -1 || c.indexOf('hangup') !== -1 || c.indexOf('disconnecting') !== -1 ||
+      c.indexOf('disconnect the call') !== -1 || c.indexOf('disconnect call') !== -1 ||
+      /^disconnect\s*-?\s*$/.test(c)) return 'Call Declined';
+  if (c.indexOf('busy') !== -1 || c.indexOf('buzy') !== -1) return 'Busy';
   // Checked before the generic Not Interested/DNP catches below, since a
   // "booked/purchased elsewhere" comment often also says "not interested" —
   // the more specific, more useful signal should win.
   if (c.indexOf('booked elsewhere') !== -1 || c.indexOf('booked with another') !== -1 || c.indexOf('purchased elsewhere') !== -1 ||
       c.indexOf('purchased another') !== -1 || c.indexOf('bought elsewhere') !== -1 || c.indexOf('bought another') !== -1 ||
+      c.indexOf('already bought') !== -1 || c.indexOf('already purchased') !== -1 ||
       c.indexOf('finalized another') !== -1 || c.indexOf('finalised another') !== -1 || c.indexOf('gone with another') !== -1) return 'Booked Elsewhere';
   // Broadened beyond "not responding"/rnr to the plain phrasing RMs
-  // actually type — "no answer", "not picking up", "didn't pick" — which
-  // previously fell through to the generic Update fallback despite being
-  // the exact same outcome as RNR.
-  if (hasWord(c, 'rnr') || c.indexOf('not responding') !== -1 || c.indexOf('no answer') !== -1 ||
-      c.indexOf('not answering') !== -1 || c.indexOf('not picking') !== -1 || c.indexOf('did not pick') !== -1 ||
-      c.indexOf("didn't pick") !== -1 || c.indexOf('call not answered') !== -1) return 'RNR';
-  if (c.indexOf('ringing') !== -1) return 'Ringing / RNR';
+  // actually type — "no answer", "not picking up", "didn't pick", every
+  // "call not X" variant of the same thing (received/respond/pick/
+  // receive), the pickup-specific phrasing, and the NC/CNR/NR shorthand —
+  // which previously fell through to the generic Update fallback despite
+  // being the exact same outcome as RNR.
+  if (hasWord(c, 'rnr') || hasWord(c, 'cnr') || hasWord(c, 'nc') || hasWord(c, 'nr') ||
+      c.indexOf('not responding') !== -1 || c.indexOf('no answer') !== -1 || c.indexOf('no response') !== -1 ||
+      c.indexOf('not answering') !== -1 || c.indexOf('not answered') !== -1 || c.indexOf("didn't answer") !== -1 ||
+      c.indexOf('not picking') !== -1 || c.indexOf('did not pick') !== -1 || c.indexOf("didn't pick") !== -1 ||
+      c.indexOf('pickup the call') !== -1 || c.indexOf('pick up the call') !== -1 ||
+      c.indexOf('do not pickup') !== -1 || c.indexOf('do not pick up') !== -1 ||
+      // 'call not rec' (not the full "received"/"receive") deliberately
+      // catches the "recieved" typo too — every real variant here starts
+      // with those same 8 letters.
+      c.indexOf('call not answered') !== -1 || c.indexOf('call not rec') !== -1 || c.indexOf('not received call') !== -1 ||
+      c.indexOf('not received') !== -1 || c.indexOf('call not respond') !== -1 || c.indexOf('call not pick') !== -1 ||
+      c.indexOf('not receiving') !== -1) return 'RNR';
+  // 'ringin' catches "ringing" AND the common typo "ringin" in one check;
+  // hasWord adds the bare word "ring"/"ring -" — rang but nobody picked up.
+  if (c.indexOf('ringin') !== -1 || hasWord(c, 'ring')) return 'Ringing / RNR';
   // Word-boundary, not a bare substring — "disc" alone matched inside
   // "discussed", "discount", "disclose", misclassifying any comment that
-  // merely mentioned discussing something as a dropped call.
+  // merely mentioned discussing something as a dropped call. "Not
+  // connected"/"call not connected"/"not getting connected" are the same
+  // connectivity signal as the pre-existing "call not connecting", just
+  // worded differently; "blank call" (connected, but nothing happened) fits
+  // the same bucket too.
   if (c.indexOf('disconnected') !== -1 || c.indexOf('call disc') !== -1 || hasWord(c, 'disc') ||
       c.indexOf('network issue') !== -1 || c.indexOf('network problem') !== -1 || c.indexOf('poor network') !== -1 ||
-      c.indexOf('call not connecting') !== -1 || c.indexOf('call drop') !== -1) return 'Disconnected';
+      c.indexOf('call not connecting') !== -1 || c.indexOf('call not connected') !== -1 || c.indexOf('call not connect') !== -1 ||
+      c.indexOf('not getting connected') !== -1 || c.indexOf('not connecting') !== -1 || c.indexOf('not connected') !== -1 ||
+      c.indexOf('call drop') !== -1 || c.indexOf('blank call') !== -1) return 'Disconnected';
   if (c.indexOf('out of station') !== -1 || c.indexOf('out station') !== -1 || c.indexOf('out of town') !== -1 ||
       c.indexOf('not in town') !== -1 || c.indexOf('travelling') !== -1 || c.indexOf('traveling') !== -1) return 'Out of Station';
-  if (c.indexOf('whatsapp') !== -1 && (c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1)) return 'WhatsApp Sent';
+  // Contact has no WhatsApp at all, or it's unreachable there — a
+  // different signal from WhatsApp Sent below (which means a text WAS
+  // sent, just not yet answered): this one means texting isn't even an
+  // option for this contact, so don't keep defaulting back to WhatsApp.
+  // Checked before WhatsApp Sent for exactly that reason.
+  if ((c.indexOf('whatsapp') !== -1 || hasWord(c, 'wp') || hasWord(c, 'wa')) &&
+      (c.indexOf('not on') !== -1 || c.indexOf('not available') !== -1)) return 'WhatsApp Unavailable';
+  // hasWord(c, 'dwm') alone is enough — it already spells out "Dropped
+  // WhatsApp Message" as one abbreviation, nothing else needed to confirm it.
+  if (hasWord(c, 'dwm')) return 'WhatsApp Sent';
+  // Broadened well past the literal word "whatsapp" — "wp" shorthand,
+  // "what's up"/"what's app" (both common autocorrect mangles of
+  // "whatsapp"), common misspellings, and the many verbs RMs actually use
+  // for the same action (dropped/shared/sent/pinged/texted a message), not
+  // just "shared"/"sent". Bare "msg"/"message" without a named channel
+  // still counts — in this telecalling shorthand it's WhatsApp by
+  // convention (see the many explicitly-WhatsApp variants above).
+  if ((c.indexOf('whatsapp') !== -1 || c.indexOf('whatsaap') !== -1 || c.indexOf('watsapp') !== -1 ||
+       c.indexOf("what's app") !== -1 || c.indexOf('whats app') !== -1 || c.indexOf("what's up") !== -1 ||
+       c.indexOf('msg') !== -1 || c.indexOf('mesg') !== -1 || c.indexOf('message') !== -1 || c.indexOf('text') !== -1 || hasWord(c, 'wp')) &&
+      (c.indexOf('drop') !== -1 || c.indexOf('shared') !== -1 || c.indexOf('share') !== -1 ||
+       c.indexOf('sent') !== -1 || c.indexOf('pinged') !== -1 || c.indexOf('texted') !== -1)) return 'WhatsApp Sent';
   // Checked before the generic "shared/sent details" match below, since
   // "shared X on whatsapp" would otherwise also satisfy that pattern.
-  if ((c.indexOf('shared') !== -1 || c.indexOf('sent') !== -1) &&
+  if ((c.indexOf('shared') !== -1 || c.indexOf('share') !== -1 || c.indexOf('sent') !== -1) &&
       (c.indexOf('detail') !== -1 || c.indexOf('brochure') !== -1 || c.indexOf('project') !== -1 || c.indexOf('info') !== -1)) return 'Details Shared';
   // Checked before Visit Arranged below — "visit done"/"visited" is the
   // opposite moment (post-visit) from "visit scheduled"/"visit arranged"
@@ -5128,8 +5196,16 @@ function inferOutcome(comment){
   // signal (keep warm and check status, not "find a cheaper option").
   if ((c.indexOf('loan') !== -1 && (c.indexOf('process') !== -1 || c.indexOf('sanction') !== -1 || c.indexOf('approval') !== -1)) ||
       c.indexOf('documents submitted') !== -1 || c.indexOf('document submitted') !== -1 || c.indexOf('bank process') !== -1) return 'Loan In Process';
-  if (c.indexOf('not interested') !== -1 || c.indexOf('no interest') !== -1 || c.indexOf('no longer interested') !== -1 ||
-      c.indexOf('not looking anymore') !== -1 || c.indexOf('dropped the plan') !== -1 || c.indexOf('dropped the idea') !== -1 ||
+  // "not looking"/"no requirement" cover every "not looking for
+  // property"/"not looking any property"/etc. variant by themselves (all
+  // contain "not looking" as a substring) — a real-estate lead's "not
+  // looking" is unambiguous enough in this domain not to need the fuller
+  // phrase spelled out. "intrested"/"intersted" are the two most common
+  // misspellings of "interested" actually seen in the comment log.
+  if (c.indexOf('not interested') !== -1 || c.indexOf('not intrested') !== -1 || c.indexOf('not intersted') !== -1 ||
+      c.indexOf('no interest') !== -1 || c.indexOf('no longer interested') !== -1 || c.indexOf('not looking') !== -1 ||
+      c.indexOf('no requirement') !== -1 || c.indexOf('requriment') !== -1 || c.indexOf('not enquired') !== -1 ||
+      c.indexOf('dropped the plan') !== -1 || c.indexOf('dropped the idea') !== -1 ||
       hasWord(c, 'ni')) return 'Not Interested';
   // "considering"/"thinking" checked before the bare "interested" match,
   // since a comment like "will think and let us know if interested" should
@@ -5144,6 +5220,11 @@ function inferOutcome(comment){
   if (c.indexOf('call again') !== -1 || c.indexOf('dnp') !== -1 || c.indexOf('call back') !== -1 || c.indexOf('callback') !== -1 ||
       c.indexOf('call later') !== -1 || c.indexOf('call after') !== -1 || c.indexOf('call tomorrow') !== -1 ||
       c.indexOf('requested callback') !== -1 || c.indexOf('asked to call') !== -1 || hasWord(c, 'cb')) return 'DNP';
+  // RM-side admin note (a scheduled follow-up wasn't done in time), not
+  // anything the client said — but frequent and unambiguous enough, with
+  // a clear next action, to earn a real outcome instead of the generic
+  // "no keyword" bucket.
+  if (c.indexOf('followup missed') !== -1 || c.indexOf('follow up missed') !== -1 || c.indexOf('follow-up missed') !== -1) return 'Follow-up Missed';
   return 'Update';
 }
 
@@ -5162,24 +5243,28 @@ try {
 // next" instead of just a bare comment count.
 const FOLLOWUP_SUGGESTIONS = {
   'Do Not Disturb': "Client asked not to be called — stop calling immediately, log as DND, and only re-engage via an approved channel (SMS/email) if policy allows.",
-  'Switched Off': 'Phone was switched off — retry later today; try an alternate number if one is on file.',
+  'Switched Off': 'Phone was switched off, out of service/network, or otherwise unreachable — retry later today; try an alternate number if one is on file.',
   'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
+  'Call Declined': "Customer saw or heard the call and actively ended/declined it — they're avoiding contact right now, so calling straight back is more likely to annoy than connect. Try a different time of day, or switch to WhatsApp/SMS first.",
   'Busy': 'Line was busy — retry within a few hours.',
   'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
-  'Disconnected': 'Call disconnected mid-conversation — retry; flag the number if this keeps happening.',
+  'Disconnected': "Call dropped, didn't connect, or connected with no response — retry; flag the number if this keeps happening.",
   'Out of Station': "Client is travelling — schedule the follow-up for when they're back rather than repeat-calling now.",
-  'WhatsApp Sent': 'WhatsApp sent but not yet followed by a call — a text may go unseen, call to confirm.',
+  'WhatsApp Unavailable': "This contact isn't reachable on WhatsApp (or doesn't have it) — stick to voice calls or SMS instead of defaulting back to a WhatsApp text.",
+  'WhatsApp Sent': 'A WhatsApp/text message was sent or dropped but not yet followed by a call — a text may go unseen, call to confirm.',
   'Details Shared': 'Project details were shared — follow up to gauge interest and answer any questions before it goes cold.',
   'Visit Completed': "Site visit already happened — call within 24 hours for feedback while it's fresh, and push toward the next concrete step.",
   'Visit Arranged': 'A site visit is arranged — confirm attendance close to the date, and follow up right after for feedback.',
   'Loan In Process': "Loan/paperwork is in process on their end — check status periodically and keep them warm, don't let this go cold.",
-  'Not Interested': 'Client indicated no interest — confirm this is final, then close with a clear reason if so.',
+  'Not Interested': 'Client indicated no interest (or no current requirement) — confirm this is final, then close with a clear reason if so.',
   'Considering': 'Client is still deciding — schedule a follow-up in a few days rather than calling again immediately.',
   'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
   'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
   'DNP': 'Client asked to be called back later — schedule the follow-up call.',
+  'Follow-up Missed': 'A scheduled follow-up was missed — reach out right away to catch up before it goes any staler.',
+  'No Real Update': "RM logged a placeholder with no real content — there's nothing here to act on from the comment alone. Call and get an actual status update, then log what was actually said.",
 };
 
 // Fallback for when inferOutcome finds no keyword match at all (a comment
