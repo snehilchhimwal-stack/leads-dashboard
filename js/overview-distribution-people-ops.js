@@ -340,7 +340,6 @@ document.getElementById('tabBar').addEventListener('click', (e) => {
   btn.classList.add('active');
   const panel = document.getElementById(btn.dataset.tab);
   if (panel) panel.classList.add('active');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
 // Operations badge shows total open breaches so you can see there's work
