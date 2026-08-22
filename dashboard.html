@@ -639,12 +639,28 @@
 
   footer{ text-align:center; font-size:11px; color:var(--text-faint); margin-top:40px; font-family:'IBM Plex Mono',monospace; }
 
+  /* Wide-but-not-full-desktop: the new hover-card grids introduced across
+     this redesign (KPI strip, and the two-up Overview/Movement/Distribution
+     card rows) reflow to fewer columns before they'd otherwise get cramped,
+     rather than only kicking in at phone width. */
+  @media (max-width:900px){
+    .kpi-strip{ grid-template-columns:repeat(3,1fr); }
+  }
   @media (max-width:760px){
     .kpi-strip{ grid-template-columns:repeat(2,1fr); }
     .config-grid{ grid-template-columns:1fr; }
     #statusChangeGrid{ grid-template-columns:1fr !important; }
     .stall-card{ flex-direction:column; align-items:stretch; }
     .stall-card-total{ border-right:none; border-bottom:1px solid var(--border); padding-right:0; padding-bottom:14px; }
+  }
+  @media (max-width:600px){
+    .kpi-strip{ grid-template-columns:1fr; }
+    .rmtl-cal{ grid-template-columns:repeat(7,1fr); gap:2px; padding:6px; }
+    .rmtl-cal-day .rmtl-cal-d{ font-size:9px; }
+    /* A popover meant to sit left-aligned under its trigger, or centered
+       over a calendar cell, can otherwise run off the right edge of a
+       narrow viewport — anchor to the right instead so it opens inward. */
+    .cell-hint .cell-hint-panel{ left:auto; right:0; }
   }
 </style>
 </head>
