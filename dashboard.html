@@ -997,7 +997,8 @@
 
     <section id="sec-stuck">
       <div class="section-head"><div class="section-bar red"></div><div class="section-title">Leads Pending Beyond 48 Hours (Not Yet Opportunity)</div><div class="section-count" id="stuckCount"></div></div>
-      <div class="filter-summary">Open more than 48 hours and still hasn't reached Opportunity stage — regardless of how many calls were made. A different problem than under-calling: these got worked, but haven't converted.</div>
+      <div class="filter-summary">Open more than 48 hours and still hasn't reached Opportunity stage — regardless of how many calls were made. A different problem than under-calling: these got worked, but haven't converted. Also includes an "Approaching deadline" band for open leads at 36&ndash;48 hours, so action can happen before the 48h mark instead of only after it. Both bands are a LIVE snapshot, evaluated against right now — not a persisted historical record of which leads ever crossed 48h unconverted. For an approximate 7-day historical read, see Tracking &rarr; Same-Cohort Progress.</div>
+      <div id="stuckBreakdown" style="margin-bottom:10px;"></div>
       <div class="section-scroll"><div class="card-list" id="stuckList"></div></div>
     </section>
 

@@ -121,6 +121,41 @@ function renderSourceBreakdown(sourceCounts, dedupedLeads){
 }
 
 
+// Hover-detail breakdowns for KPI/summary tiles — groups an array the
+// caller already built (leads/oppPlusLeads/dueTodayLeads/stuck leads/etc.),
+// so this is purely re-presenting numbers already in scope, not a new
+// business rule. groupBy is the existing helper from reports.js (loaded
+// before this file). Returns the full bar-row HTML for the hover panel AND
+// the single top entry, so a resting (non-hover) card can show one line of
+// real context instead of sitting empty until someone hovers it. Hoisted to
+// top level (not just renderAll-local) so any render function — e.g. the
+// Operations stuck-by-stage breakdown — can reuse it.
+function topBreakdown(arr, keyFn, opts){
+  const total = arr.length;
+  if (!total) {
+    return { html: `<div style="font-size:11.5px; color:var(--text-faint);">Nothing in this bucket right now.</div>`, top: null };
+  }
+  const groups = groupBy(arr, item => keyFn(item) || 'Unknown');
+  const pairs = Object.entries(groups).sort((a, b) => b[1].length - a[1].length).slice(0, opts && opts.limit || 4);
+  const color = (opts && opts.color) || 'var(--blue)';
+  const html = pairs.map(([key, items]) => {
+    const pct = Math.round(items.length / total * 100);
+    return `<div class="bar-row"><span class="k" title="${esc(key)}">${esc(key)}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${color};"></div></div><span class="v">${items.length}</span></div>`;
+  }).join('');
+  const [topKey, topItems] = pairs[0];
+  return { html, top: { key: topKey, pct: Math.round(topItems.length / total * 100) } };
+}
+
+const kpiTile = (opts) => `<div class="kpi hover-card${opts.critical ? ' critical' : ''}" style="--card-accent:${opts.accent};">
+  <div class="kpi-num mono"${opts.numColor ? ` style="color:${opts.numColor}"` : ''}>${opts.numHtml}</div>
+  <div class="kpi-label">${esc(opts.label)}</div>
+  ${opts.top ? `<div class="kpi-sub" title="${esc(opts.detailLabel)}">${opts.top.pct}% ${esc(opts.top.key)}</div>` : ''}
+  <div class="card-detail"><div class="card-detail-inner">
+    <div class="card-detail-label">${esc(opts.detailLabel)}</div>
+    ${opts.detailHtml}
+  </div></div>
+</div>`;
+
 function renderAll(){
   // Every render rebuilds every card from scratch (fresh innerHTML), so the
   // action-log registry only ever needs to hold what's rendered THIS pass —
@@ -161,40 +196,9 @@ function renderAll(){
   // never shows a pointless "(0 cloned)".
   const kpiNumHtml = (n, clonedN) => `${n.toLocaleString()}${clonedN > 0 ? `<span style="font-size:12px; color:var(--text-faint); font-weight:400;"> (${clonedN} cloned)</span>` : ''}`;
 
-  // Hover-detail breakdowns for the KPI tiles — every one of these groups an
-  // array the code above already built (leads/oppPlusLeads/dueTodayLeads/
-  // notConnLeads/noCallsLeads), so this is purely re-presenting numbers this
-  // function already has in scope, not a new business rule. groupBy is the
-  // existing helper from reports.js (loaded before this file). Returns the
-  // full bar-row HTML for the hover panel AND the single top entry, so the
-  // card's resting (non-hover) state can show one line of real context
-  // instead of sitting empty until someone hovers it.
-  function topBreakdown(arr, keyFn, opts){
-    const total = arr.length;
-    if (!total) {
-      return { html: `<div style="font-size:11.5px; color:var(--text-faint);">Nothing in this bucket right now.</div>`, top: null };
-    }
-    const groups = groupBy(arr, item => keyFn(item) || 'Unknown');
-    const pairs = Object.entries(groups).sort((a, b) => b[1].length - a[1].length).slice(0, opts && opts.limit || 4);
-    const color = (opts && opts.color) || 'var(--blue)';
-    const html = pairs.map(([key, items]) => {
-      const pct = Math.round(items.length / total * 100);
-      return `<div class="bar-row"><span class="k" title="${esc(key)}">${esc(key)}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${color};"></div></div><span class="v">${items.length}</span></div>`;
-    }).join('');
-    const [topKey, topItems] = pairs[0];
-    return { html, top: { key: topKey, pct: Math.round(topItems.length / total * 100) } };
-  }
-
-  const kpiTile = (opts) => `<div class="kpi hover-card${opts.critical ? ' critical' : ''}" style="--card-accent:${opts.accent};">
-    <div class="kpi-num mono"${opts.numColor ? ` style="color:${opts.numColor}"` : ''}>${opts.numHtml}</div>
-    <div class="kpi-label">${esc(opts.label)}</div>
-    ${opts.top ? `<div class="kpi-sub" title="${esc(opts.detailLabel)}">${opts.top.pct}% ${esc(opts.top.key)}</div>` : ''}
-    <div class="card-detail"><div class="card-detail-inner">
-      <div class="card-detail-label">${esc(opts.detailLabel)}</div>
-      ${opts.detailHtml}
-    </div></div>
-  </div>`;
-
+  // topBreakdown/kpiTile are top-level functions now (see above renderAll) —
+  // hoisted so other render functions (e.g. the Operations stuck-by-stage
+  // breakdown) can reuse them too, not just this one.
   const totalBreakdown = topBreakdown(leads, l => l.group_source, { color: 'var(--blue)' });
   const oppBreakdown = topBreakdown(oppPlusLeads, l => l.current_stage, { color: 'var(--green)' });
   const dueTodayBreakdown = topBreakdown(dueTodayLeads, l => l.region, { color: 'var(--red)' });
@@ -1044,14 +1048,25 @@ function renderDueTodayList(){
     issueLeads.filter(l => l.isOpenLead && l.underCalledToday),
     (a,b) => a.ageHours - b.ageHours
   );
-  document.getElementById('dueTodayCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
+
+  // underCalledToday itself is deliberately not age-gated (call effort is
+  // tracked for an open lead at any age) — but a 0–48h operating view needs
+  // its own honest number, not one silently blended with leads long past
+  // their 48h outcome. Split here, at render time, rather than touching the
+  // flag itself, which other surfaces (People's Call SLA column, region
+  // reports) intentionally keep age-unbounded.
+  const under48 = group.filter(l => l.isUnder48h);
+  const over48 = group.filter(l => !l.isUnder48h);
+
+  document.getElementById('dueTodayCount').textContent = uniqueCloneLabel(countUniqueAndCloned(under48), 'lead');
   const el = document.getElementById('dueTodayList');
   if (!group.length) {
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing is behind on today's calls</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
-    const logId = 'today_' + idx;
+
+  const cardHtml = (l, idx, prefix) => {
+    const logId = prefix + '_' + idx;
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
@@ -1059,25 +1074,70 @@ function renderDueTodayList(){
       ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  };
+
+  const under48Html = under48.length
+    ? truncationNotice(under48.length, MAX_CARDS) + under48.slice(0, MAX_CARDS).map((l, idx) => cardHtml(l, idx, 'today')).join('')
+    : `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing in the 0–48h window is behind on today's calls</div>`;
+
+  const over48Html = over48.length
+    ? `<div class="stall-group-label" style="color:var(--text-faint); margin:18px 0 8px;">Past 48h, still under-called today — ${uniqueCloneLabel(countUniqueAndCloned(over48), 'lead')} (tracked separately from the 0–48h window above)</div>`
+      + truncationNotice(over48.length, MAX_CARDS) + over48.slice(0, MAX_CARDS).map((l, idx) => cardHtml(l, idx, 'todayold')).join('')
+    : '';
+
+  el.innerHTML = under48Html + over48Html;
 }
 
 // Pure stage check: open past 48hrs, still not Opportunity+, regardless of
 // call count. Deliberately separate from the under-called list above —
 // this catches leads that WERE worked (plenty of calls) but still haven't
 // converted, which is a different problem than under-calling.
+//
+// Also carries a 36–48h "approaching deadline" tier ahead of the past-48h
+// group, so this reads as operational (act before the failure) rather than
+// purely descriptive (audit it after) — both bands share ageHours/isOpenLead,
+// already computed per lead, no new data. And a stuck-by-current_stage
+// breakdown above the list, since current_stage already sits on every card
+// but previously required manually scanning them to see WHERE the funnel is
+// leaking.
 function renderStuckList(){
-  const group = groupSiblingsTogether(
-    issueLeads.filter(l => l.isOpenLead && l.stageStuck48h),
-    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  const approaching = issueLeads.filter(l =>
+    l.isOpenLead && !l.stageStuck48h && l.ageHours != null && l.ageHours >= 36 && l.ageHours <= 48
   );
-  document.getElementById('stuckCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
+  const stuck = issueLeads.filter(l => l.isOpenLead && l.stageStuck48h);
+
+  const approachingGroup = groupSiblingsTogether(approaching, (a,b) => (b.ageHours||0) - (a.ageHours||0));
+  const stuckGroup = groupSiblingsTogether(stuck, (a,b) => (b.ageHours||0) - (a.ageHours||0));
+
+  document.getElementById('stuckCount').textContent = uniqueCloneLabel(countUniqueAndCloned(stuckGroup), 'lead');
+
+  const breakdownEl = document.getElementById('stuckBreakdown');
+  if (breakdownEl) {
+    if (stuckGroup.length) {
+      const b = topBreakdown(stuckGroup, l => l.current_stage, { color: 'var(--red)', limit: 6 });
+      breakdownEl.innerHTML = `<div class="filter-summary" style="margin:0 0 8px;">Past-48h leads by current stage — where the funnel is actually stuck</div>${b.html}`;
+    } else {
+      breakdownEl.innerHTML = '';
+    }
+  }
+
   const el = document.getElementById('stuckList');
-  if (!group.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck past 48h right now</div>`;
+  if (!approachingGroup.length && !stuckGroup.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck or approaching 48h right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H)).join('');
+
+  const approachingHtml = approachingGroup.length
+    ? `<div class="stall-group-label" style="color:var(--amber); margin-bottom:8px;">Approaching deadline (36–48h) — ${uniqueCloneLabel(countUniqueAndCloned(approachingGroup), 'lead')}</div>`
+      + truncationNotice(approachingGroup.length, MAX_CARDS) + approachingGroup.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'approaching', CONFIG.MIN_CALLS_AFTER_48H)).join('')
+    : '';
+
+  const stuckHtml = stuckGroup.length
+    ? `<div class="stall-group-label" style="color:var(--red); margin:${approachingGroup.length ? '18px' : '0'} 0 8px;">Past 48 hours</div>`
+      + truncationNotice(stuckGroup.length, MAX_CARDS) + stuckGroup.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H)).join('')
+    : '';
+
+  el.innerHTML = approachingHtml + stuckHtml;
 }
 
 function renderInactiveRmList(){
