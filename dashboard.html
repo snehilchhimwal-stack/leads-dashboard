@@ -1116,6 +1116,16 @@
         <div id="trackingCohortNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><table id="trackingCohortTable"><thead></thead><tbody></tbody></table></div>
       </section>
+
+      <section id="sec-slahistory-admin">
+        <div class="section-head"><div class="section-bar amber"></div><div class="section-title">SLA History Maintenance</div></div>
+        <div class="filter-summary">Two admin actions on the SLA_History sheet tab that feeds the trend chart above — both write directly to the sheet, use with care. Previously console-only (<span class="mono">await backfillSlaHistoryFromMovementLog()</span> / <span class="mono">await clearSlaHistory()</span>); still callable that way too.</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="btn ghost" id="backfillSlaHistoryBtn" title="Rebuilds SLA_History from every Movement_Log snapshot currently loaded in this tab. Safe to re-run — upserts by snapshot_at, never duplicates a row.">Backfill from Movement_Log</button>
+          <button class="btn ghost" id="clearSlaHistoryBtn" style="border-color:var(--red); color:var(--red);" title="Permanently deletes every row in SLA_History. Cannot be undone.">Clear SLA History…</button>
+          <span id="slaHistoryAdminStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
+        </div>
+      </section>
     </div>
 
     <!-- ============ RM TIMELINE ============ -->

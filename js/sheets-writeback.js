@@ -200,6 +200,30 @@ async function getSheetIdByTabName(tabName){
   return match ? match.properties.sheetId : null;
 }
 
+// A Generate cycle owns Lead_Followups from its clearLeadFollowupsTab()
+// call through to its own re-render — that whole window depends on the
+// tab containing exactly THIS run's leads and nothing else. Two Generate
+// buttons exist (Operations' own, and Movement's Overnight one), each
+// triggerable independently and each capable of running a multi-minute
+// wait (waitForAllFollowups has no timeout), so nothing stopped a second
+// Generate from clearing/rewriting the tab out from under a first one
+// still mid-wait. tryClaimGenerateCycle/releaseGenerateCycle make that a
+// hard exclusion instead: whichever Generate asks first gets the tab,
+// the other is told to wait rather than silently corrupting it.
+let _generateCycleOwner = null; // null | 'operations' | 'overnight'
+
+function tryClaimGenerateCycle(owner){
+  if (_generateCycleOwner && _generateCycleOwner !== owner) return false;
+  _generateCycleOwner = owner;
+  return true;
+}
+function releaseGenerateCycle(owner){
+  if (_generateCycleOwner === owner) _generateCycleOwner = null;
+}
+function generateCycleOwnerLabel(owner){
+  return owner === 'operations' ? "the Operations tab's Generate" : "Movement's Overnight Generate Region Emails";
+}
+
 // Wipes every data row (everything below the header) from Lead_Followups —
 // called at the START of every Generate cycle (see renderReports and
 // renderOvernightRegionReports, both call this before pushing their own
@@ -318,10 +342,12 @@ async function sortSlaHistorySheet_(){
   }
 }
 
-// ONE-TIME MIGRATION — run manually from the browser console once, after
-// Movement_Log has real history and the SLA_History tab exists (see the
-// walkthrough). Not wired to any button: this is a single backfill, not a
-// recurring action, so it doesn't need permanent UI real estate.
+// Wired to #backfillSlaHistoryBtn on the Tracking tab (see tab-tracking.js)
+// — still directly console-callable too (`await
+// backfillSlaHistoryFromMovementLog()`). Originally console-only since a
+// one-time migration doesn't need permanent UI real estate, but it's also
+// exactly the fix for "SLA_History is missing/incomplete data," which is
+// worth a real button once one exists.
 //
 // Reconstructs one SLA_History row for EVERY Movement_Log capture instant
 // (not collapsed to one per day) — movementSnapshots is flat, one row per

@@ -1380,6 +1380,13 @@ async function renderOvernightRegionReports(){
   }
 
   const btn = document.getElementById('overnightGenerateReportsBtn');
+  if (!tryClaimGenerateCycle('overnight')) {
+    setFollowupsPushStatus(
+      `${generateCycleOwnerLabel('operations')} is currently writing to Lead_Followups — wait for it to finish, then click Generate again.`,
+      'var(--amber)', 'overnightFollowupsPushStatus'
+    );
+    return;
+  }
   const originalLabel = btn.textContent;
   let followupLookup;
   btn.disabled = true;
@@ -1408,6 +1415,7 @@ async function renderOvernightRegionReports(){
   } finally {
     btn.disabled = false;
     btn.textContent = originalLabel;
+    releaseGenerateCycle('overnight');
   }
 
   // Cancelled: fall back to the algorithmic/keyword-inferred follow-up

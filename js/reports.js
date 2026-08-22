@@ -1266,6 +1266,13 @@ async function renderReports(){
   }));
 
   const genBtn = document.getElementById('generateBtn');
+  if (!tryClaimGenerateCycle('operations')) {
+    setFollowupsPushStatus(
+      `${generateCycleOwnerLabel('overnight')} is currently writing to Lead_Followups — wait for it to finish, then click Generate again.`,
+      'var(--amber)'
+    );
+    return;
+  }
   const originalLabel = genBtn.textContent;
   let followupLookup;
   genBtn.disabled = true;
@@ -1294,6 +1301,7 @@ async function renderReports(){
   } finally {
     genBtn.disabled = false;
     genBtn.textContent = originalLabel;
+    releaseGenerateCycle('operations');
   }
 
   // Cancelled: rather than leaving whatever was on screen before, fall

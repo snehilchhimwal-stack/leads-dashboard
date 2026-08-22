@@ -360,6 +360,53 @@ document.addEventListener('mouseout', (e) => {
   }
 });
 
+// SLA History Maintenance section (below) — these two actions used to be
+// console-only (see their own doc-comments in core.js/sheets-writeback.js);
+// wiring them to real buttons here rather than in initMovementUI() since
+// this section lives on the Tracking tab, which is the actual consumer of
+// SLA_History's data.
+function setSlaHistoryAdminStatus(text, color){
+  const el = document.getElementById('slaHistoryAdminStatus');
+  if (el) { el.textContent = text; el.style.color = color || 'var(--text-faint)'; }
+}
+const backfillSlaHistoryBtn = document.getElementById('backfillSlaHistoryBtn');
+if (backfillSlaHistoryBtn) backfillSlaHistoryBtn.addEventListener('click', async () => {
+  if (!movementSnapshots.length) {
+    setSlaHistoryAdminStatus('No Movement_Log data loaded yet — refresh first.', 'var(--amber)');
+    return;
+  }
+  const originalLabel = backfillSlaHistoryBtn.textContent;
+  backfillSlaHistoryBtn.disabled = true;
+  backfillSlaHistoryBtn.textContent = 'Backfilling…';
+  setSlaHistoryAdminStatus(`Backfilling from ${movementSnapshots.length.toLocaleString()} loaded Movement_Log rows…`, 'var(--text-faint)');
+  try {
+    await backfillSlaHistoryFromMovementLog();
+    setSlaHistoryAdminStatus('Backfill complete.', 'var(--green)');
+  } catch (err) {
+    setSlaHistoryAdminStatus(`Backfill failed: ${err.message}`, 'var(--red)');
+  } finally {
+    backfillSlaHistoryBtn.disabled = false;
+    backfillSlaHistoryBtn.textContent = originalLabel;
+  }
+});
+const clearSlaHistoryBtn = document.getElementById('clearSlaHistoryBtn');
+if (clearSlaHistoryBtn) clearSlaHistoryBtn.addEventListener('click', async () => {
+  if (!confirm('Permanently delete every row in SLA_History? This cannot be undone.')) return;
+  const originalLabel = clearSlaHistoryBtn.textContent;
+  clearSlaHistoryBtn.disabled = true;
+  clearSlaHistoryBtn.textContent = 'Clearing…';
+  setSlaHistoryAdminStatus('Clearing SLA_History…', 'var(--text-faint)');
+  try {
+    await clearSlaHistory();
+    setSlaHistoryAdminStatus('SLA_History cleared.', 'var(--green)');
+  } catch (err) {
+    setSlaHistoryAdminStatus(`Clear failed: ${err.message}`, 'var(--red)');
+  } finally {
+    clearSlaHistoryBtn.disabled = false;
+    clearSlaHistoryBtn.textContent = originalLabel;
+  }
+});
+
 // Own copy of populateMovementSnapshotSelectors' From/To defaulting logic
 // (second-most-recent run / most-recent run), kept as a separate function
 // rather than sharing IDs with the Movement tab's picker — that one is

@@ -1610,31 +1610,29 @@ async function snapshotSlaHistory(asOf){
   } catch (e) { /* sheet write failed — this run just won't be recorded */ }
 }
 
-// No UI wires to this anymore (the Overview tab's SLA Compliance Trend
-// section was removed) — kept as a console-callable utility: run
-// `await clearSlaHistory()` to wipe SLA_History if you ever need to.
+// Wired to #clearSlaHistoryBtn on the Tracking tab (see tab-tracking.js) —
+// still directly console-callable too (`await clearSlaHistory()`). Errors
+// propagate to the caller rather than being swallowed here: the button
+// wiring needs to know whether the write actually succeeded so it can show
+// accurate status instead of always reporting success.
 async function clearSlaHistory(){
   if (!_currentSheetId) return;
-  try {
-    const sheetId = await getSheetIdByTabName(SLA_HISTORY_TAB_NAME);
-    if (sheetId != null) {
-      const existingValues = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:A`);
-      if (existingValues.length) {
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + existingValues.length } } }],
-          }),
-        });
-        if (!resp.ok) {
-          const errBody = await resp.json().catch(() => ({}));
-          throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
-        }
-      }
-    }
-  } catch (e) { console.error('Clear SLA_History failed:', e); }
+  const sheetId = await getSheetIdByTabName(SLA_HISTORY_TAB_NAME);
+  if (sheetId == null) return;
+  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${SLA_HISTORY_TAB_NAME}!A2:A`);
+  if (!existingValues.length) return;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + existingValues.length } } }],
+    }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+  }
 }
 
 // "Last 7 days" default for the Created date filter — the browser's OWN
