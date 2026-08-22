@@ -59,9 +59,10 @@ function computeIssueTalliesByRun(regionFilter){
   const byRun = new Map(); // at(ms) -> tally
   byRunCustomers.forEach((customers, atMs) => {
     // totalAll counts every matching customer in this run regardless of
-    // stage — "how many Google leads were in the system that day" — so a
-    // run with only closed leads for this region/filter still gets a
-    // tally entry instead of silently vanishing from the chart.
+    // stage — "how many leads were in the system that day" (whatever
+    // sources/filters are currently active) — so a run with only closed
+    // leads for this region/filter still gets a tally entry instead of
+    // silently vanishing from the chart.
     const tally = { at: null, totalAll: 0, openTotal: 0, breachedTotal: 0, byCheck: {} };
     ISSUE_PRIORITY.forEach(rule => { tally.byCheck[rule.key] = 0; });
     customers.forEach(cust => {
@@ -270,8 +271,9 @@ function buildTrackingChartSvg(allRuns, fromAt, toAt){
     return out;
   }
 
-  // Top panel: total Google leads in the system at each snapshot — every
-  // matching lead regardless of stage (see computeIssueTalliesByRun's
+  // Top panel: total leads in the system at each snapshot (whatever
+  // sources/filters are currently active) — every matching lead
+  // regardless of stage (see computeIssueTalliesByRun's
   // totalAll), drawn bright green so it reads as the headline volume figure
   // rather than one more issue color. Y-axis max is taken over ALL runs
   // (daily + scatter), not just the daily ones, so a scatter dot never

@@ -1,5 +1,5 @@
 // ============================================================
-// core.js — shared foundation for the Google Leads Dashboard.
+// core.js — shared foundation for the Leads Dashboard.
 // Loaded FIRST (before every other js/*.js file) — everything
 // else in the app depends on functions/state defined here.
 // Extracted from dashboard.html's single inline <script> block
@@ -31,7 +31,6 @@ const CONFIG = {
   // so RMs get time to work a fresh lead before anything is flagged.
   LEAD_GRACE_HOURS: 3,
   FOLLOWUP_REVIEW_HOURS: 4,
-  GOOGLE_SOURCE_VALUE: 'google',
   FUNNEL_ORDER: ['not updated','suspect','opportunity','visit booked','visit','pipeline','gross eoi application','soft booking','booking'],
   // Real CRM stage text doesn't always match the canonical funnel name
   // exactly (e.g. "Booked" instead of "Booking"). Each canonical stage is
@@ -1684,8 +1683,9 @@ function buildFilterUI(){
   buildMultiSelect('msRegion', 'Region', uniqueVals('region', effectiveRegion), countsFor('region', effectiveRegion), filterState.region, applyFiltersAndRender);
   buildMultiSelect('msTL', 'TL', uniqueVals('TL'), countsFor('TL'), filterState.TL, applyFiltersAndRender);
   buildMultiSelect('msSource', 'Source', uniqueVals('group_source'), countsFor('group_source'), filterState.source, applyFiltersAndRender);
-  // Sub-division of the Google source. Empty selection = all buckets, so the
-  // dropdown covers one / several / all without a separate "All" entry.
+  // Sub-division of whichever source(s) are selected above. Empty selection
+  // = all buckets, so the dropdown covers one / several / all without a
+  // separate "All" entry.
   buildMultiSelect('msBucket', 'Sub-source', uniqueVals('source_bucket'), countsFor('source_bucket'), filterState.bucket, applyFiltersAndRender);
 
   // Default the Created date range to the last 7 days whenever it isn't

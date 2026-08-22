@@ -483,7 +483,7 @@ function buildRegionReports(issueKey){
       return created ? (now - created) / 36e5 : 0;
     });
     const html = renderReportEmailHTML({
-      eyebrow: 'Google Search Leads · SLA Monitor',
+      eyebrow: 'Lead Funnel · SLA Monitor',
       title: isReminder ? '10-Minute Response SLA Reminder' : meta.label,
       region,
       subtitle: `${dateStr} — ${sourceLabel} leads${subjectScopeSuffix()}`,
@@ -1865,7 +1865,7 @@ ${EMAIL_SIGNATURE}`;
     }
 
     const html = renderReportEmailHTML({
-      eyebrow: 'Google Search Leads · SLA Monitor',
+      eyebrow: 'Lead Funnel · SLA Monitor',
       title: 'All Issues',
       region: regionLabel,
       subtitle: `${dateRange} — ${sourceLabel} leads${subjectScopeSuffix()}`,

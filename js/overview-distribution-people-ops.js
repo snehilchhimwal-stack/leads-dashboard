@@ -92,17 +92,16 @@ function renderSourceBreakdown(sourceCounts, dedupedLeads){
   const entries = Object.entries(sourceCounts).sort((a,b) => b[1].n - a[1].n);
   const total = dedupedLeads.length;
 
-  // Only "google" gets its own accent (this is specifically the Google
-  // Search Leads dashboard, per the header eyebrow) — every other source
-  // stays one neutral tone rather than a rainbow, so the bar lengths do
-  // the differentiating, not a wall of competing colors.
+  // Every source stays one neutral tone rather than a rainbow, so the bar
+  // lengths do the differentiating, not competing colors — this dashboard
+  // covers every lead source, not just one, so no single source gets a
+  // special accent here.
   const rowHtml = ([src, info]) => {
-    const isGoogle = src.trim().toLowerCase() === CONFIG.GOOGLE_SOURCE_VALUE;
     const countText = info.collated > 0 ? `${info.n.toLocaleString()} (${info.collated} cloned)` : info.n.toLocaleString();
     const pct = total ? Math.round(info.n / total * 100) : 0;
     return `<div class="mix-row">
       <span class="mix-label" title="${esc(src)}">${esc(src)}</span>
-      <div class="mix-track"><div class="mix-fill" style="width:${pct}%; background:${isGoogle ? 'var(--green)' : 'var(--text-dim)'};"></div></div>
+      <div class="mix-track"><div class="mix-fill" style="width:${pct}%; background:var(--blue);"></div></div>
       <span class="mix-count" style="width:120px; text-align:right;">${countText} · ${pct}%</span>
     </div>`;
   };

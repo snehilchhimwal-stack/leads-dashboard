@@ -1266,7 +1266,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, follow
     uniqueRegionLeads.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
 
     const html = renderReportEmailHTML({
-      eyebrow: 'Google Search Leads · SLA Monitor',
+      eyebrow: 'Lead Funnel · SLA Monitor',
       title: 'Overnight Leads',
       region,
       subtitle: `${rangeLabel} — ${sourceLabel} leads${subjectScopeSuffix()}`,
