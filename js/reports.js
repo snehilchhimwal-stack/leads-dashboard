@@ -424,6 +424,14 @@ function buildRegionReports(issueKey){
   // connect was instead — "how long it's been sitting" doesn't apply to a
   // lead that's already connected, and the lateness figure is the whole
   // point of this specific reminder.
+  // underCalledToday (dueToday's flag) is deliberately not age-gated — see
+  // enrichLead — so this list mixes fresh leads with ones well past their
+  // 48h outcome. Operations' own UI now splits that into a 0–48h primary
+  // count and a separate "past 48h" sub-band; the same distinction is
+  // tagged per line here so a Regional Head reading the plain-text email
+  // isn't left doing that math by eye against the Age figure.
+  const ageTierTag = (l) => issueKey === 'dueToday' ? (l.isUnder48h ? '  [0–48h]' : '  [PAST 48h]') : '';
+
   const leadLine = (l) => {
     const created = parseDate(l.lead_created_at);
     if (!created) return `${l.lead_id}  |  Created: unknown${rmNote(l)}`;
@@ -432,7 +440,7 @@ function buildRegionReports(issueKey){
       return `${l.lead_id}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}${rmNote(l)}`;
     }
     const hrs = ((now - created) / 36e5).toFixed(1);
-    return `${l.lead_id}  |  Created: ${stamp}  |  ${hrs}h ago${rmNote(l)}`;
+    return `${l.lead_id}  |  Created: ${stamp}  |  ${hrs}h ago${ageTierTag(l)}${rmNote(l)}`;
   };
 
   return Object.keys(byRegion).sort().map(region => {
@@ -469,14 +477,24 @@ function buildRegionReports(issueKey){
       ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.`
       : '';
 
+    // dueToday-only split, mirroring Operations' own 0–48h/past-48h
+    // sub-band — see ageTierTag above for why this exists.
+    const isDueToday = issueKey === 'dueToday';
+    const under48Counts = isDueToday ? countUniqueAndCloned(regionLeads.filter(l => l.isUnder48h)) : null;
+    const over48Counts = isDueToday ? countUniqueAndCloned(regionLeads.filter(l => !l.isUnder48h)) : null;
+    const dueTodaySplitNote = isDueToday
+      ? `\n\nOf these, ${under48Counts.unique} are within their first 48 hours; ${over48Counts.unique} are already past 48 hours and are also tracked separately under Leads Pending Beyond 48 Hours.`
+      : '';
+
     const sourceLabel = selectedSourceLabel();
-    const intro = meta.intro.replace('{SOURCE}', sourceLabel);
+    const intro = meta.intro.replace('{SOURCE}', sourceLabel)
+      + (isDueToday ? ' Each line below is tagged [0–48h] or [PAST 48h] so the two populations aren\'t read as one.' : '');
     const isReminder = issueKey === 'notConnected';
     const subject = isReminder
       ? `${region} — 10-Minute Response SLA Reminder (${dateStr})${subjectScopeSuffix()}`
       : `${region} Daily Report (${dateStr}) - ${sourceLabel} Leads with ${meta.label}${subjectScopeSuffix()}`;
     const totalLabel = isReminder ? 'Total Late Connections' : 'Total Leads';
-    const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${cloneCountLabel}${graceNote}\n\n${EMAIL_SIGNATURE}`;
+    const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${cloneCountLabel}${dueTodaySplitNote}${graceNote}\n\n${EMAIL_SIGNATURE}`;
 
     const ages = regionLeads.map(l => {
       const created = parseDate(l.lead_created_at);
@@ -489,16 +507,19 @@ function buildRegionReports(issueKey){
       subtitle: `${dateStr} — ${sourceLabel} leads${subjectScopeSuffix()}`,
       action: (ISSUE_ACTION_MAP[meta.flag] || '') + cloneCaveat,
       kpis: [
-        { value: cloneCounts.unique, label: isReminder ? 'Late Connections' : 'Leads Flagged', bg: '#fee2e2', fg: '#dc2626' },
+        // For dueToday, "Leads Flagged" is the 0–48h count specifically —
+        // matching Operations' own badge, which stopped counting the
+        // past-48h subset as the headline number for the same reason.
+        { value: isDueToday ? under48Counts.unique : cloneCounts.unique, label: isReminder ? 'Late Connections' : (isDueToday ? 'Flagged (0–48h)' : 'Leads Flagged'), bg: '#fee2e2', fg: '#dc2626' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
         isReminder
           ? { value: fmtWorkingWait(Math.max(...regionLeads.map(l => l.businessMinsToConnect || 0)), 'late'), label: 'Most Delayed', bg: '#fef3c7', fg: '#b45309' }
           : { value: (ages.length ? Math.max(...ages) : 0).toFixed(1) + 'h', label: 'Oldest Flagged', bg: '#fef3c7', fg: '#b45309' },
-      ],
+      ].concat(isDueToday ? [{ value: over48Counts.unique, label: 'Past 48h (tracked separately)', bg: '#f3f4f6', fg: '#4b5563' }] : []),
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: (issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Attempts Today']
+        columns: (issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Window', 'Attempts Today']
           : isReminder ? ['Lead ID', 'Created', 'Age', 'Connected Late By']
           : ['Lead ID', 'Created', 'Age']).concat('Suggested Follow-up'),
         rows: group.map(l => {
@@ -508,6 +529,7 @@ function buildRegionReports(issueKey){
             created ? istStamp(l.lead_created_at) : 'unknown',
             created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
           ];
+          if (issueKey === 'dueToday') cells.push(l.isUnder48h ? '0–48h' : 'PAST 48h');
           if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.attemptsToday));
           if (isReminder) cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
           cells.push(suggestedFollowUp(l));
