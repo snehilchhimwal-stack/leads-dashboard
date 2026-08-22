@@ -40,6 +40,14 @@
     --radius-md: 10px;  /* panels, standard cards */
     --radius-lg: 14px;  /* feature cards (hover-cards) */
     --radius-pill: 999px; /* chips, badges */
+    /* Homesfy's own brand colors (from homesfy.in), scoped to the sign-in
+       gate and loading screens specifically — deliberately NOT replacing
+       --blue/--amber, which are already semantic elsewhere in the app
+       (severity, filter-active state, chart series) and would drift in
+       meaning across the whole dashboard if repointed at brand colors. */
+    --homesfy-navy: #151e2d;
+    --homesfy-navy-light: #202b3f;
+    --homesfy-gold: #f59a00;
   }
   *{box-sizing:border-box;}
   body{
@@ -150,13 +158,13 @@
   #renderLoadingOverlay.active{ display:flex; }
   .loading-spinner{
     width:34px; height:34px; border-radius:50%;
-    border:3px solid rgba(255,255,255,.18); border-top-color:var(--blue);
+    border:3px solid rgba(255,255,255,.18); border-top-color:var(--homesfy-gold);
     animation:spin .8s linear infinite;
   }
   @keyframes spin{ to{ transform:rotate(360deg); } }
   .loading-overlay-text{
     font-family:'Inter',sans-serif; font-size:13px; font-weight:600; color:var(--text);
-    background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 16px;
+    background:var(--surface); border:1px solid rgba(245,154,0,.35); border-radius:8px; padding:8px 16px;
   }
   .last-refreshed{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-dim); }
   .btn{
@@ -170,6 +178,26 @@
     background:transparent; color:var(--text-dim); border:1px solid var(--border);
   }
   .btn.ghost:hover{ color:var(--text); border-color:var(--text-dim); }
+
+  /* ---------- Homesfy brand touches (sign-in gate + loading screens) ---------- */
+  /* homesfy.in's own logo asset is built for their white header — a white
+     chip guarantees it reads correctly here regardless of the dashboard's
+     dark theme, rather than risking it disappearing or looking pasted-on
+     directly against near-black. */
+  .homesfy-logo-chip{
+    display:inline-flex; align-items:center; justify-content:center;
+    background:#fff; border-radius:var(--radius-md);
+    padding:14px 22px; margin-bottom:20px;
+  }
+  .homesfy-logo-chip img{ height:26px; width:auto; display:block; }
+  .homesfy-card{
+    border-top:2px solid var(--homesfy-gold) !important;
+    box-shadow:0 24px 60px -32px rgba(245,154,0,.22);
+  }
+  .btn-homesfy{
+    background:var(--homesfy-gold); color:var(--homesfy-navy); font-weight:700;
+  }
+  .btn-homesfy:hover{ filter:brightness(1.06); }
 
   /* ---------- header utility zone (status + actions, one aligned cluster) ---------- */
   .header-utility{ display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
@@ -724,10 +752,13 @@
 
   <div id="authGate" style="max-width:460px; margin:100px auto;">
     <div style="text-align:center; margin-bottom:22px;">
+      <div class="homesfy-logo-chip">
+        <img src="https://homesfy-portal-data.s3.ap-south-1.amazonaws.com/assets/logo/homesfy/homesfy-logo.gif" alt="Homesfy" />
+      </div>
       <div class="eyebrow">Google Search Leads · SLA Monitor</div>
       <h1>Sign in to continue</h1>
     </div>
-    <div class="config" style="margin:0;">
+    <div class="config homesfy-card" style="margin:0;">
       <div class="config-hint" style="margin-bottom:16px;">
         Data only loads for Google accounts the source sheet has been shared with directly — sign in with your work Google account to continue.
       </div>
@@ -735,7 +766,7 @@
         <label for="gateClientIdInput" style="display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px;">Google OAuth Client ID (one-time setup)</label>
         <input id="gateClientIdInput" type="text" class="stale-select" style="width:100%; box-sizing:border-box;" placeholder="xxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
       </div>
-      <button class="btn" id="gateSignInBtn" style="width:100%;">Sign in with Google</button>
+      <button class="btn btn-homesfy" id="gateSignInBtn" style="width:100%;">Sign in with Google</button>
       <div id="authGateStatus" style="margin-top:12px; font-size:12.5px; color:var(--text-faint); text-align:center;"></div>
     </div>
   </div>
