@@ -995,9 +995,15 @@
       <div class="section-scroll"><div class="card-list" id="dueTodayList"></div></div>
     </section>
 
+    <section id="sec-approaching48h">
+      <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Approaching 48h Deadline</div><div class="section-count" id="approachingDeadlineCount"></div></div>
+      <div class="filter-summary">Open leads at 36&ndash;48 hours old, not yet Opportunity — an early-warning tier so action can happen BEFORE the 48h mark instead of only after it. Not one of the five official SLA checks, so it isn't counted in the Operations tab badge, the Issues CSV, or RM SLA Score — same treatment as Recording Not Working/Closed with No Work Recorded below, which are diagnostic signals, not compliance breaches. A LIVE snapshot, evaluated against right now — not a persisted historical record.</div>
+      <div class="section-scroll"><div class="card-list" id="approachingDeadlineList"></div></div>
+    </section>
+
     <section id="sec-stuck">
       <div class="section-head"><div class="section-bar red"></div><div class="section-title">Leads Pending Beyond 48 Hours (Not Yet Opportunity)</div><div class="section-count" id="stuckCount"></div></div>
-      <div class="filter-summary">Open more than 48 hours and still hasn't reached Opportunity stage — regardless of how many calls were made. A different problem than under-calling: these got worked, but haven't converted. Also includes an "Approaching deadline" band for open leads at 36&ndash;48 hours, so action can happen before the 48h mark instead of only after it. Both bands are a LIVE snapshot, evaluated against right now — not a persisted historical record of which leads ever crossed 48h unconverted. For an approximate 7-day historical read, see Tracking &rarr; Same-Cohort Progress.</div>
+      <div class="filter-summary">Open more than 48 hours and still hasn't reached Opportunity stage — regardless of how many calls were made. A different problem than under-calling: these got worked, but haven't converted. A LIVE snapshot, evaluated against right now — not a persisted historical record of which leads ever crossed 48h unconverted. For an approximate 7-day historical read, see Tracking &rarr; 0&ndash;48h Cohort Outcome.</div>
       <div id="stuckBreakdown" style="margin-bottom:10px;"></div>
       <div class="section-scroll"><div class="card-list" id="stuckList"></div></div>
     </section>

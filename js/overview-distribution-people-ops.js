@@ -262,6 +262,7 @@ function renderAll(){
   renderLoggingGapList();
   renderFollowupList();
   renderDueTodayList();
+  renderApproachingDeadlineList();
   renderStuckList();
   renderRecordingList();
   renderClosedNoWorkList();
@@ -305,6 +306,7 @@ const OFFTAB_COUNT_SECTIONS = [
   { id: 'sec-logginggap',  countId: 'loggingGapCount', severity: 'has-items' },
   { id: 'sec-followup',    countId: 'followupCount',   severity: 'urgent' },
   { id: 'sec-duetoday',    countId: 'dueTodayCount',   severity: 'has-items' },
+  { id: 'sec-approaching48h', countId: 'approachingDeadlineCount', severity: 'has-items' },
   { id: 'sec-stuck',       countId: 'stuckCount',      severity: 'urgent' },
   { id: 'sec-recording',   countId: 'recordingCount',  severity: 'has-items' },
   { id: 'sec-closednowork', countId: 'closedNoWorkCount', severity: 'urgent' },
@@ -1137,56 +1139,59 @@ function renderDueTodayList(){
   el.innerHTML = under48Html + over48Html;
 }
 
+// Early-warning tier: open leads at 36–48h, not yet Opportunity — a preview
+// of who's about to join the Stuck list below, so action can happen BEFORE
+// the 48h mark instead of only after it. Its own section/badge (not a
+// sub-band inside Stuck's list) matches how every other issue type in this
+// tab gets its own scannable count — a shared count would hide this signal
+// behind the Stuck badge, defeating the point of an early warning. Not one
+// of the 5 official SLA checks, so — same as Recording Not Working/Closed
+// w/ No Work below — it's deliberately excluded from updateTabBadges'
+// aggregate count, the Issues CSV, and RM SLA Score.
+function renderApproachingDeadlineList(){
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.isOpenLead && !l.stageStuck48h && l.ageHours != null && l.ageHours >= 36 && l.ageHours <= 48),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
+  );
+  document.getElementById('approachingDeadlineCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
+  const el = document.getElementById('approachingDeadlineList');
+  if (!group.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing approaching the 48h deadline right now</div>`;
+    return;
+  }
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'approaching', CONFIG.MIN_CALLS_AFTER_48H)).join('');
+}
+
 // Pure stage check: open past 48hrs, still not Opportunity+, regardless of
 // call count. Deliberately separate from the under-called list above —
 // this catches leads that WERE worked (plenty of calls) but still haven't
-// converted, which is a different problem than under-calling.
-//
-// Also carries a 36–48h "approaching deadline" tier ahead of the past-48h
-// group, so this reads as operational (act before the failure) rather than
-// purely descriptive (audit it after) — both bands share ageHours/isOpenLead,
-// already computed per lead, no new data. And a stuck-by-current_stage
-// breakdown above the list, since current_stage already sits on every card
-// but previously required manually scanning them to see WHERE the funnel is
-// leaking.
+// converted, which is a different problem than under-calling. Carries a
+// stuck-by-current_stage breakdown above the list, since current_stage
+// already sits on every card but previously required manually scanning
+// them to see WHERE the funnel is leaking.
 function renderStuckList(){
-  const approaching = issueLeads.filter(l =>
-    l.isOpenLead && !l.stageStuck48h && l.ageHours != null && l.ageHours >= 36 && l.ageHours <= 48
+  const group = groupSiblingsTogether(
+    issueLeads.filter(l => l.isOpenLead && l.stageStuck48h),
+    (a,b) => (b.ageHours||0) - (a.ageHours||0)
   );
-  const stuck = issueLeads.filter(l => l.isOpenLead && l.stageStuck48h);
-
-  const approachingGroup = groupSiblingsTogether(approaching, (a,b) => (b.ageHours||0) - (a.ageHours||0));
-  const stuckGroup = groupSiblingsTogether(stuck, (a,b) => (b.ageHours||0) - (a.ageHours||0));
-
-  document.getElementById('stuckCount').textContent = uniqueCloneLabel(countUniqueAndCloned(stuckGroup), 'lead');
+  document.getElementById('stuckCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
 
   const breakdownEl = document.getElementById('stuckBreakdown');
   if (breakdownEl) {
-    if (stuckGroup.length) {
-      const b = topBreakdown(stuckGroup, l => l.current_stage, { color: 'var(--red)', limit: 6 });
-      breakdownEl.innerHTML = `<div class="filter-summary" style="margin:0 0 8px;">Past-48h leads by current stage — where the funnel is actually stuck</div>${b.html}`;
+    if (group.length) {
+      const b = topBreakdown(group, l => l.current_stage, { color: 'var(--red)', limit: 6 });
+      breakdownEl.innerHTML = `<div class="filter-summary" style="margin:0 0 8px;">Stuck leads by current stage — where the funnel is actually stuck</div>${b.html}`;
     } else {
       breakdownEl.innerHTML = '';
     }
   }
 
   const el = document.getElementById('stuckList');
-  if (!approachingGroup.length && !stuckGroup.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck or approaching 48h right now</div>`;
+  if (!group.length) {
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck past 48h right now</div>`;
     return;
   }
-
-  const approachingHtml = approachingGroup.length
-    ? `<div class="stall-group-label" style="color:var(--amber); margin-bottom:8px;">Approaching deadline (36–48h) — ${uniqueCloneLabel(countUniqueAndCloned(approachingGroup), 'lead')}</div>`
-      + truncationNotice(approachingGroup.length, MAX_CARDS) + approachingGroup.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'approaching', CONFIG.MIN_CALLS_AFTER_48H)).join('')
-    : '';
-
-  const stuckHtml = stuckGroup.length
-    ? `<div class="stall-group-label" style="color:var(--red); margin:${approachingGroup.length ? '18px' : '0'} 0 8px;">Past 48 hours</div>`
-      + truncationNotice(stuckGroup.length, MAX_CARDS) + stuckGroup.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H)).join('')
-    : '';
-
-  el.innerHTML = approachingHtml + stuckHtml;
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H)).join('');
 }
 
 function renderInactiveRmList(){
