@@ -1230,6 +1230,14 @@
         <div class="section-scroll"><table id="trackingCohortTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
+      <section id="sec-tracking-48h">
+        <div class="section-head"><div class="section-bar red"></div><div class="section-title">0&ndash;48h Cohort Outcome (approx.)</div><div class="section-count" id="tracking48hCount"></div></div>
+        <div class="filter-summary">Answers the 0&ndash;48 Hour Funnel Audit's core question with a real cohort instead of a live snapshot: of leads CREATED in the Created-date range set in the filter bar above (not the From/To snapshot pickers above), how many reached Opportunity+, closed without converting, or were still open at their OWN personal 48-hour mark — read from the closest retained Movement_Log snapshot to that moment, up to ~6h resolution either side. Leads still under 48 hours old right now are excluded from every rate shown (an incomplete cohort would understate the failure rate), and every number is approximate by construction — Movement_Log retains 7 days, so this only covers leads created recently enough for their 48h mark to fall inside that window.</div>
+        <div id="tracking48hNotice" class="truncation-notice" style="display:none;"></div>
+        <div id="tracking48hSummary" style="margin-bottom:10px;"></div>
+        <div class="section-scroll"><div class="card-list" id="tracking48hList"></div></div>
+      </section>
+
       <section id="sec-slahistory-admin">
         <div class="section-head"><div class="section-bar amber"></div><div class="section-title">SLA History Maintenance</div></div>
         <div class="filter-summary">Two admin actions on the SLA_History sheet tab that feeds the trend chart above — both write directly to the sheet, use with care. Previously console-only (<span class="mono">await backfillSlaHistoryFromMovementLog()</span> / <span class="mono">await clearSlaHistory()</span>); still callable that way too.</div>

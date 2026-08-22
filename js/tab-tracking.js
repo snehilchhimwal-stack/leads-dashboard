@@ -159,6 +159,91 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
   return { matchedCount, breachedAtFromCount, stillBreachedCount, byCheck };
 }
 
+// The 0–48h Funnel Audit's Population B/C question, answered as precisely
+// as retained data allows: of leads CREATED in the selected window (via the
+// same top-bar Created-date filter every other tab already respects — no
+// new date picker), how many had their 48h window fully elapse by now
+// (cohort-complete — population B), and of THOSE, how many reached
+// Opportunity+ / closed without converting / were still open at their own
+// personal 48h mark (not a fixed global snapshot pair — computeCohortComparison
+// above answers a related but different question with two shared instants).
+//
+// Deliberately per-lead-correct pairing, not one global From/To: population
+// D (still under 48h right now) is excluded from every rate calculated
+// here, exactly the "don't mix incomplete and completed cohorts" rule the
+// audit called for — mixing D into B/C would understate the failure rate
+// simply because young leads haven't had time to fail yet.
+//
+// Evidence for "status at the 48h mark" is read directly from this lead's
+// OWN retained Movement_Log history (current MovementTracker.gs snapshots
+// every lead each run, open or closed — see the .gs file's own comment on
+// snapshotOpenLeads_), preferring the latest snapshot AT OR BEFORE the
+// deadline and falling back to the first one after it (both carry up to
+// ~6h of resolution slack, surfaced in the UI, never hidden) — a lead can't
+// un-close or un-convert, so its most recent state that far is trustworthy.
+// Only when a lead's history has NO snapshot on either side of its deadline
+// (pruned past the 7-day retention window, or Movement_Log's older rows
+// predate the "capture closed leads too" behavior) does this fall back to
+// the live current sheet's status — same fallback computeStatusChanges
+// already relies on for a related question. A lead with neither is
+// excluded entirely rather than guessed.
+function computeZeroTo48hCohort(){
+  const fromVal = document.getElementById('dateFromInput').value;
+  const toVal = document.getElementById('dateToInput').value;
+  if (!fromVal && !toVal) return null; // unbounded creation window — no defined cohort to report
+  const fromDate = fromVal ? parseDate(fromVal + ' 00:00:00') : null;
+  const toDate = toVal ? parseDate(toVal + ' 23:59:59') : null;
+
+  const byLead = buildMovementHistories();
+  const nowMs = Date.now();
+  const liveByKey = new Map();
+  allParsedLeads.forEach(l => {
+    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    liveByKey.set(key, l);
+  });
+
+  let popA = 0, popB = 0, popC_opp = 0, popC_closed = 0, popC_stillOpen = 0, popUnresolved = 0;
+  const stillOpenLeads = [];
+
+  byLead.forEach((history, key) => {
+    if (!history.length) return;
+    if (!passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — date handled below, against created, not snapshot_at
+    const created = parseDate(history[0].lead_created_at);
+    if (!created) return;
+    if (fromDate && created < fromDate) return;
+    if (toDate && created > toDate) return;
+
+    popA++;
+    const deadlineMs = created.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000;
+    if (nowMs < deadlineMs) return; // population D — window hasn't elapsed yet, excluded from every rate below
+
+    popB++;
+    let atOrBefore = null, firstAfter = null;
+    history.forEach(rec => {
+      const atMs = rec.snapshot_at.getTime();
+      if (atMs <= deadlineMs) { if (!atOrBefore || atMs > atOrBefore.snapshot_at.getTime()) atOrBefore = rec; }
+      else if (!firstAfter || atMs < firstAfter.snapshot_at.getTime()) firstAfter = rec;
+    });
+    const evidence = atOrBefore || firstAfter;
+    let oppOrAbove, isOpenLead;
+    if (evidence) {
+      const enriched = enrichSnapshotCached(evidence);
+      oppOrAbove = enriched.oppOrAbove;
+      isOpenLead = enriched.isOpenLead;
+    } else {
+      const live = liveByKey.get(key);
+      if (!live) { popUnresolved++; return; }
+      oppOrAbove = live.oppOrAbove;
+      isOpenLead = live.isOpenLead;
+    }
+    if (oppOrAbove) popC_opp++;
+    else if (isOpenLead) { popC_stillOpen++; stillOpenLeads.push({ key, created, evidence, live: liveByKey.get(key) }); }
+    else popC_closed++;
+  });
+
+  return { popA, popB, popD: popA - popB, popC_opp, popC_closed, popC_stillOpen, popUnresolved, stillOpenLeads };
+}
+
 // One point per IST calendar day for the chart's main connected line — a
 // day with several captures (the every-6-hours trigger, plus any manual
 // Snapshot now clicks) used to plot every single one, making the line as
@@ -460,6 +545,14 @@ function renderTrackingTab(){
   const cohortTable = document.getElementById('trackingCohortTable');
   const cohortCountEl = document.getElementById('trackingCohortCount');
   const cohortNoticeEl = document.getElementById('trackingCohortNotice');
+
+  // Independent of the From/To snapshot-pair picker checked below (and of
+  // every early return that picker's absence causes) — the 0–48h Cohort
+  // Outcome section is driven entirely by the top bar's Created-date filter
+  // instead, so it must not go blank just because no snapshot pair happens
+  // to be selected.
+  render48hCohort();
+
   if (!table || !regionSelect || !chartEl) return;
 
   const cohortThead = cohortTable ? cohortTable.querySelector('thead') : null;
@@ -616,4 +709,75 @@ function renderTrackingTab(){
       cohortTbody.innerHTML = cohortRows.join('');
     }
   }
+}
+
+// Renders the 0–48h Cohort Outcome section (see computeZeroTo48hCohort's
+// own comment for the method). Independent of the From/To snapshot picker
+// above — driven by the top bar's Created-date filter instead, since this
+// answers a "what happened to leads created in a period" question, not a
+// "compare two snapshot instants" one.
+function render48hCohort(){
+  const countEl = document.getElementById('tracking48hCount');
+  const noticeEl = document.getElementById('tracking48hNotice');
+  const summaryEl = document.getElementById('tracking48hSummary');
+  const listEl = document.getElementById('tracking48hList');
+  if (!summaryEl || !listEl) return;
+
+  const clear = (message) => {
+    if (countEl) countEl.textContent = '';
+    summaryEl.innerHTML = '';
+    listEl.innerHTML = '';
+    if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
+  };
+
+  if (movementFetchState !== 'ok') { clear('Same as Region Issue Trend above — needs Movement_Log data.'); return; }
+
+  const result = computeZeroTo48hCohort();
+  if (!result) {
+    clear('Set a Created-date range in the filter bar above (From and/or To) to define which leads this cohort covers — this section reads that same global filter, not the From/To snapshot pickers above.');
+    return;
+  }
+  if (!result.popA) {
+    clear('No leads with a Movement_Log history were created in the selected date range (for the current Project/Region/TL/Source filters).');
+    return;
+  }
+  if (noticeEl) noticeEl.style.display = 'none';
+
+  const pctOfB = (n) => result.popB ? `${(n / result.popB * 100).toFixed(1)}%` : '—';
+  if (countEl) countEl.textContent = `${result.popA} lead${result.popA === 1 ? '' : 's'} created in range`;
+
+  const statCard = (label, value, sub, color) => `<div class="hover-card" style="padding:12px 14px;">
+    <div class="kpi-num mono" style="font-size:22px;${color ? ` color:${color};` : ''}">${value}</div>
+    <div class="kpi-label">${esc(label)}</div>
+    ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
+  </div>`;
+
+  summaryEl.innerHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px;">
+    ${statCard('Created in range (A)', result.popA, 'denominator for everything here')}
+    ${statCard('48h window complete (B)', result.popB, `${result.popD} still under 48h (D) — excluded below`)}
+    ${statCard('Reached Opportunity+', result.popC_opp, `${pctOfB(result.popC_opp)} of B`, 'var(--green)')}
+    ${statCard('Closed, never converted', result.popC_closed, `${pctOfB(result.popC_closed)} of B`, 'var(--text-dim)')}
+    ${statCard('Still open at 48h (failed)', result.popC_stillOpen, `${pctOfB(result.popC_stillOpen)} of B`, 'var(--red)')}
+  </div>
+  ${result.popUnresolved ? `<div class="filter-summary" style="margin-bottom:10px;">${result.popUnresolved} lead${result.popUnresolved === 1 ? '' : 's'} in B couldn't be evidenced (no Movement_Log snapshot near their 48h mark and no longer in the live sheet) — excluded rather than guessed.</div>` : ''}
+  <div class="filter-summary" style="margin-bottom:10px;">Status at each lead's OWN 48h mark, read from the closest retained Movement_Log snapshot (up to ~6h resolution either side) — not a fixed global snapshot pair. Population D (still under 48h) is excluded from every percentage above, so a rising volume of brand-new leads can't dilute the failure rate.</div>`;
+
+  const group = result.stillOpenLeads.slice().sort((a, b) => a.created - b.created);
+  listEl.innerHTML = group.length
+    ? truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((item, idx) => {
+        const l = item.live;
+        const stageTxt = l ? l.current_stage : (item.evidence ? item.evidence.current_stage : '');
+        const rm = l ? l.RM : (item.evidence ? item.evidence.RM : '');
+        const region = l ? l.region : (item.evidence ? item.evidence.region : '');
+        const evidenceNote = item.evidence
+          ? `evidence: snapshot ${istStamp(item.evidence.snapshot_at)}`
+          : 'evidence: live sheet (no snapshot near the 48h mark)';
+        return `<div class="alert-card">
+          <div class="alert-id">${esc(item.key)} · ${esc(rm || 'Unassigned')}</div>
+          <div class="alert-age mono">created ${esc(istStamp(item.created))}</div>
+          <div class="alert-meta">${esc(region || '')} · ${esc(stageTxt || '')} — <span class="chip red">Still open at 48h</span></div>
+          <div class="alert-comment mono" style="font-size:11px;">${esc(evidenceNote)}</div>
+        </div>`;
+      }).join('')
+    : `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Every cohort-complete lead in range either converted or closed by its own 48h mark.</div>`;
 }
