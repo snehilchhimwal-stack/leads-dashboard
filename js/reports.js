@@ -1238,6 +1238,12 @@ function syncReportControls(){
 // `sorted` lead list is used — so the SLA/region logic never has to be
 // duplicated between a "preview" and a "real" pass.
 async function renderReports(){
+  // Morning Brief is deliberately NOT live-updated on every filter tweak
+  // (see renderAll) — it only refreshes on an actual data refresh or here,
+  // when a report is generated, so its numbers stay a stable "as of the
+  // last real checkpoint" read rather than silently drifting with whatever
+  // filter someone happened to leave set in another tab.
+  renderMorningBrief();
   const mode = document.getElementById('reportModeSelect').value;
   if (mode === 'issue') { renderRegionReports(); return; }
 
@@ -1924,6 +1930,9 @@ function buildAllRegionReports(){
 }
 
 function renderAllRegionReports(){
+  // See the same note in renderReports above — Morning Brief refreshes at
+  // this checkpoint too, not on every filter tweak.
+  renderMorningBrief();
   const btn = document.getElementById('generateAllReportsBtn');
   btn.disabled = true;
   btn.textContent = 'Generating…';

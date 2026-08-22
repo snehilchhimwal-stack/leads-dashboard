@@ -476,6 +476,11 @@ async function fetchAndRender(){
     return;
   }
 
+  // A real refresh — the next renderAll() pass this triggers should update
+  // Morning Brief; every filter-only renderAll() pass after that shouldn't,
+  // until either another refresh happens or a report gets generated.
+  _refreshMorningBriefOnNextRender = true;
+
   // Covers the whole fetch/parse/render pass, not just the Refresh button —
   // a filter checkbox is a DIFFERENT element, so disabling only the button
   // (below) doesn't stop a click there from queuing up while this is still
@@ -1445,6 +1450,15 @@ function hideLoadingOverlay(heavy){
 }
 
 let _isApplyingFilters = false;
+
+// Morning Brief is deliberately NOT live — it should read as a stable
+// checkpoint, not something that silently drifts as someone tweaks filters
+// while exploring other tabs. renderAll() only calls renderMorningBrief()
+// when this is true, then resets it — set back to true here at the top of
+// every real fetchAndRender() (refresh), and directly re-called (bypassing
+// this flag/renderAll entirely) from each "Generate" report handler, since
+// those don't go through the filter/render pipeline at all.
+let _refreshMorningBriefOnNextRender = true;
 // Thin wrapper around the real implementation below. Setting the overlay's
 // class and immediately calling straight into the expensive synchronous
 // work would never actually SHOW the overlay — the browser only paints a

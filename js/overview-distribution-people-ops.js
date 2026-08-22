@@ -163,7 +163,16 @@ function renderAll(){
   // that no longer exist under their old (prefix + index) key.
   _logLeadRegistry.clear();
   renderStageBreakdown();
-  renderMorningBrief();
+
+  // Deliberately gated, not called on every pass — see the flag's own
+  // comment in core.js. A plain filter tweak calls renderAll() same as a
+  // real refresh does; without this check Morning Brief would recompute on
+  // every one of those too, exactly the "live update" behavior it's meant
+  // to avoid now.
+  if (_refreshMorningBriefOnNextRender) {
+    renderMorningBrief();
+    _refreshMorningBriefOnNextRender = false;
+  }
 
   // Single pass instead of five separate .filter() traversals — on a
   // 7.5k-lead sheet this runs on every filter change, so the extra

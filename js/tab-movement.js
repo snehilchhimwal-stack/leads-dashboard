@@ -1443,6 +1443,9 @@ function renderOvernightCohort(toAt){
 // never goes out with the generic "no comments logged" filler when someone
 // actually typed in a real suggestion for that lead.
 async function renderOvernightRegionReports(){
+  // See the same note in reports.js's renderReports — Morning Brief
+  // refreshes at this checkpoint too, not on every filter tweak.
+  renderMorningBrief();
   const el = document.getElementById('overnightReportList');
   if (!el) return;
   if (!_lastOvernightCohort || !_lastOvernightCohort.leads.length) {
