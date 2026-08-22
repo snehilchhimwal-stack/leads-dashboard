@@ -858,6 +858,7 @@
     <div class="filter-summary" id="filterSummary"></div>
 
     <div class="tab-bar" id="tabBar">
+      <button class="tab-btn" data-tab="tab-morning">Morning Brief</button>
       <button class="tab-btn active" data-tab="tab-overview">Overview</button>
       <button class="tab-btn" data-tab="tab-operations">Operations <span class="tab-badge" id="tabBadgeOps">0</span></button>
       <button class="tab-btn" data-tab="tab-people">People</button>
@@ -866,6 +867,13 @@
       <button class="tab-btn" data-tab="tab-movement">Movement</button>
       <button class="tab-btn" data-tab="tab-tracking">Tracking</button>
       <button class="tab-btn" data-tab="tab-rmtimeline">RM Timeline</button>
+    </div>
+
+    <!-- ============ MORNING BRIEF ============ -->
+    <div class="tab-panel" id="tab-morning">
+      <div class="band-label">Morning Brief <span class="band-note">the 10 things to check every day, from the 0&ndash;48 Hour Funnel Audit</span></div>
+      <div class="filter-summary">Every number below is computed live from the current filters — nothing here is a separate data source. Where the audit's own trigger threshold can be evaluated from data already in this sheet, it's shown as a status pill; where it can't (e.g. "vs team capacity," "since yesterday" with no persisted history), the raw number is shown honestly instead of an invented status.</div>
+      <div id="morningBriefCards"></div>
     </div>
 
     <!-- ============ OVERVIEW ============ -->
@@ -1313,6 +1321,7 @@
 <script src="js/tab-tracking.js"></script>
 <script src="js/tab-rmtimeline.js"></script>
 <script src="js/tab-movement.js"></script>
+<script src="js/tab-morning.js"></script>
 <script src="js/reports.js"></script>
 <script src="js/sheets-writeback.js"></script>
 <script src="js/overview-distribution-people-ops.js"></script>

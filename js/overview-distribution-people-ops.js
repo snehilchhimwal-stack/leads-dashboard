@@ -163,6 +163,7 @@ function renderAll(){
   // that no longer exist under their old (prefix + index) key.
   _logLeadRegistry.clear();
   renderStageBreakdown();
+  renderMorningBrief();
 
   // Single pass instead of five separate .filter() traversals — on a
   // 7.5k-lead sheet this runs on every filter change, so the extra
@@ -390,10 +391,9 @@ function updateTabBadges(){
 // Real history, derived from lead_created_at. Deliberately NOT attempting
 // SLA-compliance-over-time — that needs stored snapshots, which a browser
 // page can't reliably keep (we tried; it didn't persist).
-function renderDailyTrend(){
-  const el = document.getElementById('trendViz');
-  if (!el) return;
-
+// Shared by renderDailyTrend below and the Morning Brief tab's "leads
+// entering, last 24h vs. 7-day average" card — one grouping, two readers.
+function computeDailyLeadCounts(){
   const byDay = new Map();
   leads.forEach(l => {
     const d = parseDate(l.lead_created_at);
@@ -408,7 +408,14 @@ function renderDailyTrend(){
     if (l.collatedFrom > 1) b.totalCollated++;
     if (l.oppOrAbove) b.oppPlus++;
   });
+  return byDay;
+}
 
+function renderDailyTrend(){
+  const el = document.getElementById('trendViz');
+  if (!el) return;
+
+  const byDay = computeDailyLeadCounts();
   const days = Array.from(byDay.keys()).sort().slice(-30); // last 30 days present
   document.getElementById('trendCount').textContent = days.length + ' days';
 
@@ -465,7 +472,11 @@ function percentileOfSorted(sorted, p){
   return sorted[idx];
 }
 
-function renderRMScoreTable(){
+// Pulled out of renderRMScoreTable so the Morning Brief tab's RM heat table
+// can share the exact same per-RM computation (SLA score, breach-by-check,
+// median/p90 contact time) instead of re-deriving it — one definition of
+// "SLA score," not two that could quietly drift apart.
+function computeRMScoreRows(){
   const byRM = {};
   leads.forEach(l => {
     const key = l.RM || 'Unassigned';
@@ -514,7 +525,7 @@ function renderRMScoreTable(){
     }
   });
 
-  const rows = Object.values(byRM).map(b => {
+  return Object.values(byRM).map(b => {
     const slaScore = b.open ? Math.round(((b.open - b.breached) / b.open) * 100) : null;
     const sortedContactMins = b.contactMins.slice().sort((x, y) => x - y);
     return Object.assign({}, b, {
@@ -532,7 +543,10 @@ function renderRMScoreTable(){
     if (b.slaScore === null) return -1;
     return a.slaScore - b.slaScore;
   });
+}
 
+function renderRMScoreTable(){
+  const rows = computeRMScoreRows();
   document.getElementById('rmScoreCount').textContent = rows.length + ' RMs';
   const table = document.getElementById('rmScoreTable');
   table.querySelector('thead').innerHTML = `<tr>
