@@ -122,13 +122,62 @@ function renderAll(){
   // never shows a pointless "(0 cloned)".
   const kpiNumHtml = (n, clonedN) => `${n.toLocaleString()}${clonedN > 0 ? `<span style="font-size:12px; color:var(--text-faint); font-weight:400;"> (${clonedN} cloned)</span>` : ''}`;
 
-  document.getElementById('kpiStrip').innerHTML = `
-    <div class="kpi"><div class="kpi-num mono">${kpiNumHtml(totalCounts.total, totalCounts.collated)}</div><div class="kpi-label">Total Leads</div></div>
-    <div class="kpi"><div class="kpi-num mono" style="color:var(--green)">${kpiNumHtml(oppPlusCounts.total, oppPlusCounts.collated)}</div><div class="kpi-label">Opportunity+</div></div>
-    <div class="kpi critical"><div class="kpi-num mono">${kpiNumHtml(dueTodayCounts.unique, dueTodayCounts.cloned)}</div><div class="kpi-label">Behind on Today's Calls</div></div>
-    <div class="kpi"><div class="kpi-num mono" style="color:var(--amber)">${kpiNumHtml(notConnCounts.unique, notConnCounts.cloned)}</div><div class="kpi-label">Not Connected in 10 min</div></div>
-    <div class="kpi"><div class="kpi-num mono">${kpiNumHtml(noCallsCounts.total, noCallsCounts.collated)}</div><div class="kpi-label">No Attempts Yet</div></div>
-  `;
+  // Hover-detail breakdowns for the KPI tiles — every one of these groups an
+  // array the code above already built (leads/oppPlusLeads/dueTodayLeads/
+  // notConnLeads/noCallsLeads), so this is purely re-presenting numbers this
+  // function already has in scope, not a new business rule. groupBy is the
+  // existing helper from reports.js (loaded before this file).
+  function topBreakdownBars(arr, keyFn, opts){
+    const total = arr.length;
+    if (!total) return `<div style="font-size:11.5px; color:var(--text-faint);">Nothing in this bucket right now.</div>`;
+    const groups = groupBy(arr, item => keyFn(item) || 'Unknown');
+    const pairs = Object.entries(groups).sort((a, b) => b[1].length - a[1].length).slice(0, opts && opts.limit || 4);
+    const color = (opts && opts.color) || 'var(--blue)';
+    return pairs.map(([key, items]) => {
+      const pct = Math.round(items.length / total * 100);
+      return `<div class="bar-row"><span class="k" title="${esc(key)}">${esc(key)}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${color};"></div></div><span class="v">${items.length}</span></div>`;
+    }).join('');
+  }
+
+  const kpiTile = (opts) => `<div class="kpi hover-card${opts.critical ? ' critical' : ''}" style="--card-accent:${opts.accent};">
+    <div class="kpi-num mono"${opts.numColor ? ` style="color:${opts.numColor}"` : ''}>${opts.numHtml}</div>
+    <div class="kpi-label">${esc(opts.label)}</div>
+    <div class="card-detail"><div class="card-detail-inner">
+      <div class="card-detail-label">${esc(opts.detailLabel)}</div>
+      ${opts.detailHtml}
+    </div></div>
+  </div>`;
+
+  document.getElementById('kpiStrip').innerHTML =
+    kpiTile({
+      label: 'Total Leads', accent: 'var(--blue)', numHtml: kpiNumHtml(totalCounts.total, totalCounts.collated),
+      detailLabel: 'By source',
+      detailHtml: topBreakdownBars(leads, l => l.group_source, { color: 'var(--blue)' }),
+    }) +
+    kpiTile({
+      label: 'Opportunity+', accent: 'var(--green)', numColor: 'var(--green)',
+      numHtml: kpiNumHtml(oppPlusCounts.total, oppPlusCounts.collated),
+      detailLabel: 'By stage',
+      detailHtml: topBreakdownBars(oppPlusLeads, l => l.current_stage, { color: 'var(--green)' }),
+    }) +
+    kpiTile({
+      label: "Behind on Today's Calls", accent: 'var(--red)', critical: true,
+      numHtml: kpiNumHtml(dueTodayCounts.unique, dueTodayCounts.cloned),
+      detailLabel: 'By region',
+      detailHtml: topBreakdownBars(dueTodayLeads, l => l.region, { color: 'var(--red)' }),
+    }) +
+    kpiTile({
+      label: 'Not Connected in 10 min', accent: 'var(--amber)', numColor: 'var(--amber)',
+      numHtml: kpiNumHtml(notConnCounts.unique, notConnCounts.cloned),
+      detailLabel: 'By RM',
+      detailHtml: topBreakdownBars(notConnLeads, l => l.RM, { color: 'var(--amber)' }),
+    }) +
+    kpiTile({
+      label: 'No Attempts Yet', accent: 'var(--purple)',
+      numHtml: kpiNumHtml(noCallsCounts.total, noCallsCounts.collated),
+      detailLabel: 'By region',
+      detailHtml: topBreakdownBars(noCallsLeads, l => l.region, { color: 'var(--purple)' }),
+    });
 
   renderFunnel();
   renderTrackingTab();
@@ -719,9 +768,10 @@ function renderRegionTable(){
   leads.forEach(l => {
     // region_parent was removed from the export, so region alone is the key.
     const key = l.region;
-    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(effectiveRegion(l)) || '—', total:0, totalCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, notConn:0, notConnCollated:0, noCalls:0, noCallsCollated:0 };
+    if (!byRegion[key]) byRegion[key] = { region:l.region, group: mainRegionFor(effectiveRegion(l)) || '—', tls: new Set(), total:0, totalCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, notConn:0, notConnCollated:0, noCalls:0, noCallsCollated:0 };
     const b = byRegion[key];
     const isCollated = (l.collatedFrom || 1) > 1;
+    b.tls.add(l.TL || 'Unassigned');
     b.total++;
     if (isCollated) b.totalCollated++;
     if (l.oppOrAbove) { b.oppPlus++; if (isCollated) b.oppPlusCollated++; }
@@ -749,8 +799,9 @@ function renderRegionTable(){
   tbody.innerHTML = rows.map(b => {
     const pct = b.total ? Math.round((b.critical / b.total) * 100) : 0;
     const heatCls = pct >= 50 ? 'heat-red' : pct >= 20 ? 'heat-amber' : 'heat-green';
+    const tlList = Array.from(b.tls).sort();
     return `<tr>
-    <td>${esc(b.region)}</td><td class="dim">${esc(b.group)}</td>
+    <td><span class="cell-hint">${esc(b.region)}<span class="cell-hint-panel">TL${tlList.length === 1 ? '' : 's'}: ${esc(tlList.join(', '))}</span></span></td><td class="dim">${esc(b.group)}</td>
     <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num" style="color:var(--green)">${numWithClone(b.oppPlus, b.oppPlusCollated)}</td>
     <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${numWithClone(b.critical, b.criticalCollated)}</td>
     <td class="num"><span class="heat-cell ${heatCls}">${pct}%</span></td>

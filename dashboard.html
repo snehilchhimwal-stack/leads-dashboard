@@ -73,6 +73,28 @@
   }
   .hover-card:hover .card-detail{ max-height:240px; opacity:1; }
   .card-detail-inner{ margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:7px; }
+  .card-detail-label{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em; margin-bottom:1px; }
+  .bar-row{ display:flex; align-items:center; gap:8px; }
+  .bar-row .k{ font-size:11.5px; color:var(--text-dim); flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:88px; }
+  .bar-row .bar-track{ flex:1; height:5px; background:var(--surface-2); border-radius:3px; overflow:hidden; min-width:24px; }
+  .bar-row .bar-fill{ height:100%; }
+  .bar-row .v{ font-size:11px; color:var(--text-dim); width:26px; text-align:right; flex-shrink:0; }
+  .kv-row{ display:flex; justify-content:space-between; gap:10px; font-size:12px; color:var(--text-dim); }
+  .kv-row .v{ color:var(--text); font-family:'IBM Plex Mono',monospace; }
+  /* Small hover popover for a table cell — for revealing one extra fact a
+     row doesn't have room to show as its own column (e.g. which TLs cover
+     a region), without disturbing row height the way an in-flow reveal
+     would inside a <table>. */
+  .cell-hint{ position:relative; cursor:default; border-bottom:1px dotted var(--text-faint); }
+  .cell-hint .cell-hint-panel{
+    position:absolute; top:calc(100% + 6px); left:0; z-index:15;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm);
+    padding:8px 11px; font-size:11.5px; color:var(--text-dim); white-space:nowrap;
+    opacity:0; pointer-events:none; transform:translateY(-4px);
+    transition:opacity .16s ease, transform .16s ease;
+  }
+  .cell-hint:hover .cell-hint-panel{ opacity:1; transform:translateY(0); }
+  @media (prefers-reduced-motion: reduce){ .cell-hint .cell-hint-panel{ transition:none; } }
   /* A row (rather than a whole tile) can carry the same reveal behavior
      without the lift/shadow treatment — e.g. a table row hovering to show
      a compact detail strip beneath it. */
@@ -354,7 +376,7 @@
   .section-scroll.compact{ max-height:88px; border:none; padding:2px 0; margin-bottom:8px; }
 
   /* ---------- kpi strip ---------- */
-  .kpi-strip{ display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:28px; }
+  .kpi-strip{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:28px; align-items:start; }
   .kpi{
     background:var(--surface); border:1px solid var(--border); border-radius:10px;
     padding:16px 16px 14px;
@@ -531,8 +553,9 @@
     color:var(--text-faint); font-weight:600;
     padding:0 var(--gutter) 8px; border-bottom:1px solid var(--border);
   }
-  tbody td{ padding:10px var(--gutter); border-bottom:1px solid #1c2027; color:var(--text); }
-  tbody tr:hover{ background:var(--surface-2); }
+  tbody td{ padding:10px var(--gutter); border-bottom:1px solid #1c2027; color:var(--text); transition:background .12s ease; }
+  tbody tr:hover td{ background:var(--surface-2); }
+  @media (prefers-reduced-motion: reduce){ tbody td{ transition:none; } }
   tbody tr:last-child td{ border-bottom:none; }
   .num{ font-family:'IBM Plex Mono',monospace; text-align:right; font-variant-numeric: tabular-nums; }
   .dim{ color:var(--text-dim); }
@@ -566,9 +589,13 @@
   .critical-group-head:first-child{ padding-top:2px; }
   .alert-card{
     background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--red);
-    border-radius:8px; padding:12px 14px; display:grid; grid-template-columns:1fr auto; gap:6px 16px;
+    border-radius:var(--radius-md); padding:12px 14px; display:grid; grid-template-columns:1fr auto; gap:6px 16px;
+    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;
   }
   .alert-card.amber-left{ border-left-color:var(--amber); }
+  .alert-card:hover{ transform:translateY(-1px); box-shadow:0 10px 24px -16px rgba(0,0,0,.55); border-color:var(--red); }
+  .alert-card.amber-left:hover{ border-color:var(--amber); }
+  @media (prefers-reduced-motion: reduce){ .alert-card{ transition:none; } }
   .alert-id{ font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; }
   .alert-meta{ font-size:12px; color:var(--text-dim); grid-column:1/2; }
   .alert-age{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-dim); text-align:right; }
