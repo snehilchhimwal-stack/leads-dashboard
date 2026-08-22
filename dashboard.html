@@ -153,9 +153,23 @@
     display:none; position:fixed; inset:0; z-index:9999;
     background:rgba(10,12,16,.55); backdrop-filter:blur(1px);
     align-items:center; justify-content:center; flex-direction:column; gap:14px;
-    cursor:wait;
+    cursor:wait; transition:background .2s ease;
   }
   #renderLoadingOverlay.active{ display:flex; }
+  /* "heavy" = the actual sheet load (post-sign-in, or Refresh), as opposed
+     to a quick filter-change recompute. Behind a quick recompute, the
+     current (still-valid) dashboard should stay dimly visible — that's
+     the point of the light blur-scrim. Behind a real sheet load there's
+     nothing worth showing yet (an empty/unconnected config panel), so it
+     gets a solid, fully branded screen instead of a spinner floating over
+     something that looks unfinished. */
+  /* Compound selector (not just .loading-overlay-brand) so this "hidden by
+     default" rule beats .homesfy-logo-chip's own display:inline-flex on
+     specificity, not source order — those two rules live far apart in
+     this stylesheet and a later refactor could easily reorder them. */
+  .homesfy-logo-chip.loading-overlay-brand{ display:none; }
+  #renderLoadingOverlay.heavy{ background:var(--bg); backdrop-filter:none; }
+  #renderLoadingOverlay.heavy .loading-overlay-brand{ display:inline-flex; }
   .loading-spinner{
     width:34px; height:34px; border-radius:50%;
     border:3px solid rgba(255,255,255,.18); border-top-color:var(--homesfy-gold);
@@ -747,7 +761,11 @@
 </style>
 </head>
 <body>
-<div id="renderLoadingOverlay"><div class="loading-spinner"></div><div class="loading-overlay-text" id="renderLoadingOverlayText">Loading…</div></div>
+<div id="renderLoadingOverlay">
+  <div class="homesfy-logo-chip loading-overlay-brand"><img src="https://homesfy-portal-data.s3.ap-south-1.amazonaws.com/assets/logo/homesfy/homesfy-logo.gif" alt="Homesfy" /></div>
+  <div class="loading-spinner"></div>
+  <div class="loading-overlay-text" id="renderLoadingOverlayText">Loading…</div>
+</div>
 <div class="wrap">
 
   <div id="authGate" style="max-width:460px; margin:100px auto;">

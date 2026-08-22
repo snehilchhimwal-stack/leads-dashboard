@@ -482,7 +482,7 @@ async function fetchAndRender(){
   // (below) doesn't stop a click there from queuing up while this is still
   // reading/collating thousands of rows, which then fires the moment this
   // frees the main thread and stacks a second heavy pass on top.
-  showLoadingOverlay('Loading your sheet…');
+  showLoadingOverlay('Loading your sheet…', true);
 
   // A manual Refresh click can land after the gate token has expired
   // (~1h) — that click is itself a real user gesture, so it's safe to use
@@ -1011,7 +1011,7 @@ async function fetchAndRender(){
   } finally {
     btn.disabled = false;
     btn.textContent = 'Refresh';
-    hideLoadingOverlay();
+    hideLoadingOverlay(true);
   }
 }
 
@@ -1416,19 +1416,33 @@ function esc(s){
 // show calls means it only actually disappears once every caller that
 // asked for it is done.
 let _loadingOverlayDepth = 0;
-function showLoadingOverlay(text){
+// `heavy` marks an actual sheet load (post-sign-in, or Refresh) rather than
+// a quick filter-change recompute — the CSS uses it to swap the light
+// blur-scrim (current dashboard still dimly visible underneath) for a
+// solid, fully-branded screen (nothing worth showing yet behind a fresh
+// load). A heavy caller always wins the visual even if a lighter recompute
+// somehow overlaps it, since depth-tracking alone can't express "which of
+// several concurrent callers wanted the heavy look."
+let _loadingOverlayHeavyDepth = 0;
+function showLoadingOverlay(text, heavy){
   _loadingOverlayDepth++;
+  if (heavy) _loadingOverlayHeavyDepth++;
   const el = document.getElementById('renderLoadingOverlay');
   if (!el) return;
   const textEl = document.getElementById('renderLoadingOverlayText');
   if (textEl) textEl.textContent = text || 'Loading…';
   el.classList.add('active');
+  el.classList.toggle('heavy', _loadingOverlayHeavyDepth > 0);
 }
-function hideLoadingOverlay(){
+function hideLoadingOverlay(heavy){
   _loadingOverlayDepth = Math.max(0, _loadingOverlayDepth - 1);
-  if (_loadingOverlayDepth > 0) return; // still needed by an outer/other in-flight caller
+  if (heavy) _loadingOverlayHeavyDepth = Math.max(0, _loadingOverlayHeavyDepth - 1);
   const el = document.getElementById('renderLoadingOverlay');
-  if (el) el.classList.remove('active');
+  if (_loadingOverlayDepth > 0) {
+    if (el) el.classList.toggle('heavy', _loadingOverlayHeavyDepth > 0);
+    return; // still needed by an outer/other in-flight caller
+  }
+  if (el) { el.classList.remove('active'); el.classList.remove('heavy'); }
 }
 
 let _isApplyingFilters = false;
