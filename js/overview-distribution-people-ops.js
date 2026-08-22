@@ -205,6 +205,15 @@ function renderAll(){
   const notConnBreakdown = topBreakdown(notConnLeads, l => l.RM, { color: 'var(--amber)' });
   const noCallsBreakdown = topBreakdown(noCallsLeads, l => l.region, { color: 'var(--purple)' });
 
+  // Org-wide first-contact speed as a real distribution rather than the
+  // single MAX value ("Most Delayed") that was previously the only
+  // aggregate reading of businessMinsToConnect anywhere in the app.
+  const sortedContactMinsAll = [];
+  for (const l of leads) { if (l.businessMinsToConnect != null) sortedContactMinsAll.push(l.businessMinsToConnect); }
+  sortedContactMinsAll.sort((a, b) => a - b);
+  const medianContactAll = medianOfSorted(sortedContactMinsAll);
+  const p90ContactAll = percentileOfSorted(sortedContactMinsAll, 90);
+
   document.getElementById('kpiStrip').innerHTML =
     kpiTile({
       label: 'Total Leads', accent: 'var(--blue)', numHtml: kpiNumHtml(totalCounts.total, totalCounts.collated),
@@ -229,6 +238,14 @@ function renderAll(){
       label: 'No Attempts Yet', accent: 'var(--purple)',
       numHtml: kpiNumHtml(noCallsCounts.total, noCallsCounts.collated),
       detailLabel: 'By region', detailHtml: noCallsBreakdown.html, top: noCallsBreakdown.top,
+    }) +
+    kpiTile({
+      label: 'Median 1st Contact', accent: 'var(--teal)',
+      numHtml: medianContactAll == null ? '—' : `${medianContactAll.toFixed(0)}<span style="font-size:14px; color:var(--text-faint); font-weight:400;">m</span>`,
+      detailLabel: 'Distribution',
+      detailHtml: medianContactAll == null
+        ? `<div style="font-size:11.5px; color:var(--text-faint);">No connected leads in the current filters.</div>`
+        : `<div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;">p90: ${p90ContactAll.toFixed(0)} min &middot; n = ${sortedContactMinsAll.length} connected lead${sortedContactMinsAll.length === 1 ? '' : 's'}<br>Business-hours minutes from lead_created_at to first connect (open or closed leads).</div>`,
     });
 
   renderFunnel();
@@ -430,6 +447,22 @@ function renderDailyTrend(){
 
 
 /* ===================== RM PERFORMANCE & SLA SCORE ===================== */
+// Sorted-array median/p90 — same even-length handling already proven
+// correct in Movement's summarizeTimeToRemediate (naive sorted[mid] alone
+// overstates an even-length median). p90 uses the nearest-rank method.
+// Kept top-level since more than one table needs a real distribution
+// figure instead of an average an outlier lead can skew.
+function medianOfSorted(sorted){
+  if (!sorted.length) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+function percentileOfSorted(sorted, p){
+  if (!sorted.length) return null;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[idx];
+}
+
 function renderRMScoreTable(){
   const byRM = {};
   leads.forEach(l => {
@@ -438,6 +471,12 @@ function renderRMScoreTable(){
       RM: key, TL: l.TL || '', total: 0, totalCollated: 0, open: 0, openCollated: 0, breached: 0,
       calls: 0, durationSec: 0, opp: 0, oppCollated: 0, visit: 0, visitCollated: 0,
       softBooking: 0, softBookingCollated: 0, booking: 0, bookingCollated: 0,
+      // Every non-null businessMinsToConnect for this RM's leads (open or
+      // closed — first-contact speed is a historical fact, not a live
+      // compliance flag, so this deliberately isn't gated on isOpenLead
+      // like the breach tally below). Previously this value existed only
+      // per-lead (sort/max), with no aggregate anywhere in the app.
+      contactMins: [],
       // Tallies which of the 5 checks are actually driving this RM's SLA
       // score down — the aggregate breach count below already existed, but
       // discarded which check(s) each breach came from. A TL/RH staring at
@@ -450,6 +489,7 @@ function renderRMScoreTable(){
     b.total++; if (cloned) b.totalCollated++;
     b.calls += l.call_attempts;
     b.durationSec += (Number(l.duration) || 0);
+    if (l.businessMinsToConnect != null) b.contactMins.push(l.businessMinsToConnect);
 
     const stage = canonicalStage(l.current_stage);
     if (l.oppOrAbove) { b.opp++; if (cloned) b.oppCollated++; }
@@ -474,10 +514,14 @@ function renderRMScoreTable(){
 
   const rows = Object.values(byRM).map(b => {
     const slaScore = b.open ? Math.round(((b.open - b.breached) / b.open) * 100) : null;
+    const sortedContactMins = b.contactMins.slice().sort((x, y) => x - y);
     return Object.assign({}, b, {
       avgCalls: b.total ? b.calls / b.total : 0,
       avgDurationMin: b.calls ? (b.durationSec / b.calls) / 60 : 0,
       convRate: b.total ? (b.opp / b.total) * 100 : 0,
+      medianContactMin: medianOfSorted(sortedContactMins),
+      p90ContactMin: percentileOfSorted(sortedContactMins, 90),
+      contactSampleSize: sortedContactMins.length,
       slaScore
     });
   }).sort((a, b) => {
@@ -494,12 +538,13 @@ function renderRMScoreTable(){
     <th style="text-align:right">Leads</th><th style="text-align:right">Open</th>
     <th style="text-align:right">Attempts</th><th style="text-align:right">Avg Attempts</th>
     <th style="text-align:right">Avg Dur</th>
+    <th style="text-align:right" title="Median business-hours minutes from lead_created_at to first connect, across this RM's leads that have connected at all (open or closed) — hover a value for the p90. Preferred over an average, which one very late lead can skew.">Median 1st Contact</th>
     <th style="text-align:right">Opp+</th><th style="text-align:right">Visits</th><th style="text-align:right" title="Payment received, paperwork pending">Soft Bk</th><th style="text-align:right">Bookings</th>
     <th style="text-align:right">Conv %</th><th style="text-align:right">SLA Score</th></tr>`;
 
   const tbody = table.querySelector('tbody');
   if (!rows.length){
-    tbody.innerHTML = `<tr><td colspan="13" class="empty-row">No RM data</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="14" class="empty-row">No RM data</td></tr>`;
     return;
   }
   const BREACH_LABELS = {
@@ -514,11 +559,15 @@ function renderRMScoreTable(){
     const slaCell = sla === null
       ? `<span class="heat-cell ${slaCls}">${slaTxt}</span>`
       : `<span class="cell-hint"><span class="heat-cell ${slaCls}">${slaTxt}</span><span class="cell-hint-panel">${breachParts.length ? breachParts.join('<br>') : 'No open-lead breaches'}</span></span>`;
+    const contactCell = b.medianContactMin == null
+      ? `<span class="dim">—</span>`
+      : `<span class="cell-hint">${b.medianContactMin.toFixed(0)}m<span class="cell-hint-panel">p90: ${b.p90ContactMin.toFixed(0)}m<br>n = ${b.contactSampleSize} connected lead${b.contactSampleSize === 1 ? '' : 's'}</span></span>`;
     return `<tr>
       <td>${esc(b.RM)}</td><td class="dim">${esc(b.TL)}</td>
       <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num dim">${numWithClone(b.open, b.openCollated)}</td>
       <td class="num dim">${b.calls}</td><td class="num">${b.avgCalls.toFixed(1)}</td>
       <td class="num dim">${b.avgDurationMin ? b.avgDurationMin.toFixed(1)+'m' : '—'}</td>
+      <td class="num">${contactCell}</td>
       <td class="num" style="color:var(--green)">${numWithClone(b.opp, b.oppCollated)}</td>
       <td class="num">${numWithClone(b.visit, b.visitCollated)}</td>
       <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${numWithClone(b.softBooking, b.softBookingCollated)}</td>
