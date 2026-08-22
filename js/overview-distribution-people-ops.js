@@ -83,6 +83,11 @@ function renderSourceBreakdown(sourceCounts, dedupedLeads){
 
 
 function renderAll(){
+  // Every render rebuilds every card from scratch (fresh innerHTML), so the
+  // action-log registry only ever needs to hold what's rendered THIS pass —
+  // clearing it here keeps it from accumulating stale entries for cards
+  // that no longer exist under their old (prefix + index) key.
+  _logLeadRegistry.clear();
   renderStageBreakdown();
 
   // Single pass instead of five separate .filter() traversals — on a
@@ -974,11 +979,13 @@ function renderInactiveRmList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No new lead today landed on an inactive RM</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map(l => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+    const logId = 'inactivermlog_' + idx;
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">RM marked inactive</span> <span class="chip amber">${esc(l.TL || 'no TL')}</span></div>
+      ${logToggleMarkup(l, logId)}
     </div>`;
   }).join('');
 }
@@ -1104,11 +1111,13 @@ function renderNotConnectedList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No connected leads missed the 10-minute first-contact window</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(missed.length, MAX_CARDS) + missed.slice(0, MAX_CARDS).map(l => {
+  el.innerHTML = truncationNotice(missed.length, MAX_CARDS) + missed.slice(0, MAX_CARDS).map((l, idx) => {
+    const logId = 'notconnlog_' + idx;
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">${esc(fmtWorkingWait(l.businessMinsToConnect, 'late'))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · created ${esc(isoStamp(l.lead_created_at))} · connected ${esc(isoStamp(l.last_connect_time))}</div>
+      ${logToggleMarkup(l, logId)}
     </div>`;
   }).join('');
 }

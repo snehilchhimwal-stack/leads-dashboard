@@ -32,6 +32,14 @@
        at 4px (bar) + 10px (gap) = 14px, so table cells subtract the 1px
        container border to land on the same line. */
     --gutter: 14px;
+    /* Radius scale — existing components before this were hand-picked
+       anywhere from 3px to 12px with no system behind them. New/restyled
+       components pick from this scale; existing ones are left as-is unless
+       a later pass specifically touches them. */
+    --radius-sm: 6px;   /* buttons, inputs, small controls */
+    --radius-md: 10px;  /* panels, standard cards */
+    --radius-lg: 14px;  /* feature cards (hover-cards) */
+    --radius-pill: 999px; /* chips, badges */
   }
   *{box-sizing:border-box;}
   body{
@@ -41,6 +49,37 @@
   }
   .mono{ font-family:'IBM Plex Mono',monospace; font-variant-numeric: tabular-nums; }
   .display{ font-family:'Space Grotesk',sans-serif; }
+
+  /* ---------- hover-card component ----------
+     A card that reveals a `.card-detail` panel on hover — CSS-only reveal
+     (max-height/opacity), so a render function only has to emit the extra
+     markup once; no JS mouseenter/mouseleave wiring needed per card. The
+     detail panel shows data the render function already computed for this
+     row/tile — never a value fetched or derived just for the hover state.
+     `--card-accent` (set inline per card, e.g. style="--card-accent:var(--red)")
+     tints the hover border/glow; omit it to fall back to blue. */
+  .hover-card{
+    position:relative; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius-lg);
+    transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .hover-card:hover{
+    transform:translateY(-2px); border-color:var(--card-accent, var(--blue));
+    box-shadow:0 12px 30px -16px rgba(0,0,0,.6);
+  }
+  .card-detail{
+    max-height:0; opacity:0; overflow:hidden;
+    transition:max-height .28s ease, opacity .22s ease, margin-top .28s ease;
+  }
+  .hover-card:hover .card-detail{ max-height:240px; opacity:1; }
+  .card-detail-inner{ margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:7px; }
+  /* A row (rather than a whole tile) can carry the same reveal behavior
+     without the lift/shadow treatment — e.g. a table row hovering to show
+     a compact detail strip beneath it. */
+  .hover-row:hover .card-detail{ max-height:120px; opacity:1; }
+  @media (prefers-reduced-motion: reduce){
+    .hover-card, .card-detail{ transition:none; }
+  }
 
   .wrap{ max-width:1180px; margin:0 auto; padding:28px 24px 80px; }
 
@@ -238,7 +277,7 @@
     display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:20;
     background:var(--surface); border:1px solid var(--border); border-radius:9px;
     min-width:220px; max-width:300px; box-shadow:0 12px 28px rgba(0,0,0,.45);
-    padding:10px; max-height:340px; display:none; flex-direction:column;
+    padding:10px; max-height:340px; flex-direction:column;
   }
   .ms-panel.open{ display:flex; }
   .ms-search{

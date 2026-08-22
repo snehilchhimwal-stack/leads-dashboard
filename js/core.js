@@ -513,7 +513,7 @@ async function fetchAndRender(){
       values = await sheetsApiValuesGet(sheetId, `${tabName}!A2:AZ`);
     } catch (err) {
       if (err.status === 403) throw new Error('ACCESS_DENIED');
-      if (err.status === 404) throw new Error('NOT_SHARED');
+      if (err.status === 404) throw new Error('NOT_FOUND');
       if (err.status === 400) throw new Error('BAD_RANGE');
       throw err;
     }
@@ -996,7 +996,7 @@ async function fetchAndRender(){
     setPulse(false);
     if (err.message === 'ACCESS_DENIED') {
       showError(`<b>Access denied.</b> ${esc(gateUserEmail || 'Your signed-in Google account')} isn't shared on this sheet. Ask the sheet owner to add you under <b>Share</b> (Viewer is enough to read; Editor if you'll also take Movement snapshots), then click Refresh.`);
-    } else if (err.message === 'NOT_SHARED') {
+    } else if (err.message === 'NOT_FOUND') {
       showError(`<b>Can't find this sheet.</b> Double-check the Sheet ID/URL is correct.`);
     } else if (err.message === 'BAD_RANGE') {
       showError(`<b>Couldn't read that tab.</b> Check the tab name ("${esc(tabName)}") is spelled exactly as it appears at the bottom of your sheet (case-sensitive).`);

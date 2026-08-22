@@ -930,11 +930,16 @@ function initGmailTokenClient(clientId){
       fetchGmailUserEmail();
       updateGmailStatusUI();
       // A Send click that triggered this connect flow completes automatically
-      // once the token lands — no second click needed.
+      // once the token lands — no second click needed, for either a single
+      // report's Send button or a bulk "Send all" click.
       if (_pendingGmailSend) {
         const pending = _pendingGmailSend;
         _pendingGmailSend = null;
-        performGmailSend(pending);
+        if (pending.kind === 'bulk') {
+          _runBulkGmailSend(pending.reports, pending.btnIdFn, pending.statusElId, pending.confirmText);
+        } else {
+          performGmailSend(pending);
+        }
       }
     },
   });
@@ -1060,7 +1065,7 @@ function sendReportViaGmail(report, btnId){
     flagMissingRegionRecipients(missing.length ? missing : (report.regionNames || [report.region]));
     return;
   }
-  const pending = { report, to, cc, btnId };
+  const pending = { kind: 'single', report, to, cc, btnId };
   if (gmailTokenValid()) {
     performGmailSend(pending);
   } else {
@@ -1077,28 +1082,14 @@ function sendAllReportGmail(i){
   sendReportViaGmail(_allReports[i], 'gmailAllBtn_' + i);
 }
 
-// Sends every report in `reports` via Gmail, one at a time — not
-// Promise.all, since a burst of simultaneous sends is more likely to trip
-// Gmail's own rate limiting, and going one at a time lets each card's own
-// button reflect real progress as it happens (via performGmailSend's
-// existing btnId handling). Requires Gmail to already be connected:
-// unlike the single-report Send button (which can kick off the OAuth
-// connect flow and auto-fire once a token lands, via _pendingGmailSend),
-// a bulk send has no single "this one pending send" to resume after a
-// redirect, so it asks the person to connect first and click again rather
-// than queuing N sends behind one popup.
-async function sendAllReportsGmail(reports, btnIdFn, statusElId, confirmText){
-  if (!reports || !reports.length) return;
-  if (!getGmailClientId()) {
-    const panel = document.getElementById('gmailSetupPanel');
-    if (panel) { panel.style.display = 'block'; panel.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-    return;
-  }
-  if (!gmailTokenValid()) {
-    setFollowupsPushStatus('Connect Gmail first (below), then click "Send all" again.', 'var(--amber)', statusElId);
-    connectGmail();
-    return;
-  }
+// The actual confirm+send loop, factored out so it can run either right
+// after sendAllReportsGmail's own token-valid check, or later from the
+// OAuth token callback once a connect-then-resume completes (see
+// _pendingGmailSend below). Not Promise.all — a burst of simultaneous
+// sends is more likely to trip Gmail's own rate limiting, and going one at
+// a time lets each card's own button reflect real progress as it happens
+// (via performGmailSend's existing btnId handling).
+async function _runBulkGmailSend(reports, btnIdFn, statusElId, confirmText){
   if (!confirm(confirmText || `Send all ${reports.length} emails now?`)) return;
 
   const missingRegions = new Set();
@@ -1120,6 +1111,27 @@ async function sendAllReportsGmail(reports, btnIdFn, statusElId, confirmText){
   if (failed) parts.push(`${failed} failed`);
   if (missingRegions.size) parts.push(`${missingRegions.size} skipped (no recipients)`);
   setFollowupsPushStatus(parts.join(', ') + '.', failed || missingRegions.size ? 'var(--amber)' : 'var(--green)', statusElId);
+}
+
+// Sends every report in `reports` via Gmail. Mirrors the single-report
+// Send button's connect-then-resume behavior: a click while not yet
+// connected kicks off the OAuth popup and stashes this bulk send as the
+// pending action, so it fires automatically (confirm dialog included, same
+// as a normal click) once the token lands — no second click needed.
+async function sendAllReportsGmail(reports, btnIdFn, statusElId, confirmText){
+  if (!reports || !reports.length) return;
+  if (!getGmailClientId()) {
+    const panel = document.getElementById('gmailSetupPanel');
+    if (panel) { panel.style.display = 'block'; panel.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    return;
+  }
+  if (!gmailTokenValid()) {
+    setFollowupsPushStatus('Connecting to Gmail…', 'var(--text-faint)', statusElId);
+    _pendingGmailSend = { kind: 'bulk', reports, btnIdFn, statusElId, confirmText };
+    connectGmail(); // _runBulkGmailSend fires from the token callback once granted
+    return;
+  }
+  await _runBulkGmailSend(reports, btnIdFn, statusElId, confirmText);
 }
 
 function initGmailUI(){

@@ -201,13 +201,14 @@ async function getSheetIdByTabName(tabName){
 }
 
 // Wipes every data row (everything below the header) from Lead_Followups —
-// called once a report that went through the push/wait cycle above is
-// actually sent (see performGmailSend), so a lead's collated history and
-// suggestion never linger into a later day where they'd read as current
-// when they're actually stale. Only ever called for a CONFIRMED send (the
-// Gmail API path) — "Open in Mail" just opens a mailto draft with no way
-// to know whether the person actually hit send in their own mail client,
-// so it can't safely trigger this.
+// called at the START of every Generate cycle (see renderReports and
+// renderOvernightRegionReports, both call this before pushing their own
+// leads), so a lead's collated history and suggestion never carry over
+// from a previous run and get mistaken for something filled in for THIS
+// run. Not send-gated: it runs regardless of whether the report that
+// follows ends up going out via Gmail or mailto, or gets abandoned/
+// cancelled at the wait step — the guarantee this provides is "each
+// Generate starts from a clean tab," not "the tab reflects only sent mail."
 async function clearLeadFollowupsTab(){
   const sheetId = await getSheetIdByTabName(LEAD_FOLLOWUPS_TAB_NAME);
   if (sheetId == null) return;
@@ -366,21 +367,28 @@ async function backfillSlaHistoryFromMovementLog(){
 }
 
 // Resolves after `ms`, but wakes up early (checking every 500ms) if
-// waitForAllFollowups' Cancel button flips _followupWaitCancelled — so
-// cancelling takes effect within half a second instead of waiting out
-// however much of the current poll interval was left.
-function sleepCancelable(ms){
+// waitForAllFollowups' Cancel button flips this wait's entry in
+// _followupWaitCancelled — so cancelling takes effect within half a second
+// instead of waiting out however much of the current poll interval was left.
+function sleepCancelable(ms, cancelKey){
   return new Promise(resolve => {
     const start = Date.now();
     const tick = () => {
-      if (_followupWaitCancelled || Date.now() - start >= ms) { resolve(); return; }
+      if (_followupWaitCancelled.get(cancelKey) || Date.now() - start >= ms) { resolve(); return; }
       setTimeout(tick, 500);
     };
     tick();
   });
 }
 
-let _followupWaitCancelled = false;
+// Keyed by cancelBtnId rather than one shared flag — the Operations tab's
+// "Generate" wait and the Movement tab's Overnight "Generate Region Emails"
+// wait are two independently-triggerable flows (nothing stops a user from
+// starting one, switching tabs, and starting the other while the first is
+// still polling), and previously shared a single boolean: clicking either
+// Cancel button cancelled BOTH in-flight waits, and one flow's clean finish
+// silently left the other with stale "cancelled" state on its next check.
+const _followupWaitCancelled = new Map();
 
 function showFollowupWaitControls(show, btnId){
   const btn = document.getElementById(btnId || 'followupsWaitCancelBtn');
@@ -388,10 +396,10 @@ function showFollowupWaitControls(show, btnId){
 }
 
 document.getElementById('followupsWaitCancelBtn').addEventListener('click', () => {
-  _followupWaitCancelled = true;
+  _followupWaitCancelled.set('followupsWaitCancelBtn', true);
 });
 document.getElementById('overnightFollowupsWaitCancelBtn').addEventListener('click', () => {
-  _followupWaitCancelled = true;
+  _followupWaitCancelled.set('overnightFollowupsWaitCancelBtn', true);
 });
 
 // Polls Lead_Followups until every leadId in `leadIds` has a non-blank
@@ -403,18 +411,20 @@ document.getElementById('overnightFollowupsWaitCancelBtn').addEventListener('cli
 // statusElId/cancelBtnId let a second caller (Overnight Leads' own
 // "Generate Region Emails") drive its own on-screen status/cancel UI
 // instead of the one that lives next to the Summary email's Generate
-// button — same underlying wait, same _followupWaitCancelled flag (only
-// one such wait is ever in flight at a time — both are manual, one-person
-// button clicks), just reflected in the right place on screen.
+// button — each wait's cancellation is tracked under its own cancelBtnId
+// key in _followupWaitCancelled, so the two flows can run concurrently
+// (started from different tabs) without one's Cancel click or clean finish
+// affecting the other.
 async function waitForAllFollowups(leadIds, statusElId, cancelBtnId){
   if (!leadIds.length) return {};
-  _followupWaitCancelled = false;
+  const cancelKey = cancelBtnId || 'followupsWaitCancelBtn';
+  _followupWaitCancelled.set(cancelKey, false);
   showFollowupWaitControls(true, cancelBtnId);
   const POLL_MS = 20000;
   let attempt = 0;
   try {
     while (true) {
-      if (_followupWaitCancelled) {
+      if (_followupWaitCancelled.get(cancelKey)) {
         setFollowupsPushStatus('Cancelled — waiting for follow-ups stopped, nothing sent.', 'var(--amber)', statusElId);
         return null;
       }
@@ -435,7 +445,7 @@ async function waitForAllFollowups(leadIds, statusElId, cancelBtnId){
         `Waiting for follow-ups: ${leadIds.length - missing.length} of ${leadIds.length} filled in (check #${attempt})…`,
         'var(--text-faint)', statusElId
       );
-      await sleepCancelable(POLL_MS);
+      await sleepCancelable(POLL_MS, cancelKey);
     }
   } finally {
     showFollowupWaitControls(false, cancelBtnId);
