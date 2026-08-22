@@ -95,6 +95,17 @@
   }
   .cell-hint:hover .cell-hint-panel{ opacity:1; transform:translateY(0); }
   @media (prefers-reduced-motion: reduce){ .cell-hint .cell-hint-panel{ transition:none; } }
+  /* Real floating tooltip for tracking-chart hover points — replaces the
+     native SVG <title> the chart used to carry (see buildTrackingChartSvg). */
+  .chart-hover-tip{
+    position:fixed; z-index:60; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:7px 10px; font-size:11.5px; color:var(--text-dim);
+    white-space:nowrap; pointer-events:none; opacity:0; transform:translate(-50%, -100%);
+    transition:opacity .1s ease; box-shadow:0 8px 20px -10px rgba(0,0,0,.5);
+  }
+  .chart-hover-tip.visible{ opacity:1; }
+  .chart-hover-target [data-tt]{ cursor:default; }
+  @media (prefers-reduced-motion: reduce){ .chart-hover-tip{ transition:none; } }
   /* A row (rather than a whole tile) can carry the same reveal behavior
      without the lift/shadow treatment — e.g. a table row hovering to show
      a compact detail strip beneath it. */

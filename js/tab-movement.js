@@ -619,7 +619,7 @@ function renderStalledFlaggedLeadsOps(){
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(r)}</div>
       <div class="alert-age mono">unchanged ~${hoursSpan}h</div>
-      <div class="alert-meta">${esc(r.region)} · ${esc(r.project)} · ${esc(r.current_stage)} — <span class="chip red">${esc(r.issue)}</span></div>
+      <div class="alert-meta"><span class="cell-hint">${esc(r.region)}<span class="cell-hint-panel">TL: ${esc(r.TL || 'Unassigned')}</span></span> · ${esc(r.project)} · ${esc(r.current_stage)} — <span class="chip red">${esc(r.issue)}</span></div>
       <div class="alert-comment">${esc(suggestedFollowUp(r))}</div>
     </div>`;
   }).join('');

@@ -219,6 +219,14 @@ function buildTrackingChartSvg(allRuns, fromAt, toAt){
   // both panels below so the two don't duplicate this logic with two
   // different scales. `s.get(run)` reads this series' value off a run
   // object (works for both a daily and a scatter run, same shape).
+  //
+  // Hover used to be native SVG <title> elements on each dot/line — slow to
+  // appear, styled by the OS not the page, and unusable on touch. Real hit
+  // targets (invisible, generously-sized circles carrying a data-tt
+  // attribute) are collected into `hitCircles` and painted LAST, on top of
+  // every series, so a real floating tooltip (see chartHoverTip below) can
+  // find them via one delegated listener — same computed point data as
+  // before, just a real panel instead of a UA tooltip.
   function drawSeries(s, y0, y1, maxVal){
     const scaleY = (v) => y0 + (y1 - y0) - (v / maxVal) * (y1 - y0);
     const pts = daily.map((r, i) => ({ x: points[i].x, y: scaleY(s.get(r)), at: r.at, v: s.get(r) }));
@@ -230,21 +238,26 @@ function buildTrackingChartSvg(allRuns, fromAt, toAt){
       scatter.forEach((r, i) => {
         const v = s.get(r);
         const y = scaleY(v);
-        out += `<circle cx="${scatterPoints[i].x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(1, s.dot - 2)}" fill="${s.color}" opacity="0.28"><title>${esc(s.label)} — ${esc(istDayLabelWithDow(r.at))} ${esc(istTimeLabel(r.at))}: ${v}</title></circle>`;
+        out += `<circle cx="${scatterPoints[i].x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math.max(1, s.dot - 2)}" fill="${s.color}" opacity="0.28"></circle>`;
+        hitCircles += `<circle cx="${scatterPoints[i].x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="transparent" data-tt="${esc(s.label)} — ${esc(istDayLabelWithDow(r.at))} ${esc(istTimeLabel(r.at))}: ${v}"></circle>`;
       });
     }
 
     if (pts.length >= 2) {
       const poly = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-      // <title> on the polyline itself — without it, hovering the LINE
-      // between two dots (not exactly on a dot) showed no tooltip at all.
-      out += `<polyline points="${poly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"><title>${esc(s.label)}</title></polyline>`;
+      out += `<polyline points="${poly}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"></polyline>`;
     }
     pts.forEach(p => {
-      out += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${s.dot}" fill="${s.color}"><title>${esc(s.label)} — ${esc(istDayLabelWithDow(p.at))} ${esc(istTimeLabel(p.at))}: ${p.v}</title></circle>`;
+      out += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${s.dot}" fill="${s.color}"></circle>`;
+      // A larger invisible hit circle on top of the small visible dot —
+      // easier to hover precisely, and its radius covers most of the gap
+      // to a neighboring point along the line too (the original reason the
+      // polyline itself carried a <title>).
+      hitCircles += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9" fill="transparent" data-tt="${esc(s.label)} — ${esc(istDayLabelWithDow(p.at))} ${esc(istTimeLabel(p.at))}: ${p.v}"></circle>`;
     });
     return out;
   }
+  let hitCircles = '';
 
   function gridFor(y0, y1, maxVal, steps){
     let out = '';
@@ -313,10 +326,39 @@ function buildTrackingChartSvg(allRuns, fromAt, toAt){
     `<span class="stall-legend-item"><span class="stall-legend-dot" style="background:${s.color}; border-radius:50%;"></span>${esc(s.label)}</span>`
   ).join('') + `</div>`;
 
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:${H}px; display:block;">` +
-    topGridSvg + bottomGridSvg + topLinesSvg + bottomLinesSvg + axisSvg + topLabelSvg +
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:${H}px; display:block;" class="chart-hover-target">` +
+    topGridSvg + bottomGridSvg + topLinesSvg + bottomLinesSvg + axisSvg + topLabelSvg + hitCircles +
     `</svg>` + legendSvg;
 }
+
+// Real floating tooltip for the [data-tt] hit circles buildTrackingChartSvg
+// paints above — one shared tooltip element and one delegated listener for
+// every chart on the page (Tracking's own chart and RM Timeline's issue
+// history chart both call buildTrackingChartSvg), rather than wiring a
+// listener per chart instance re-rendered on every filter change.
+let _chartHoverTipEl = null;
+function _ensureChartHoverTip(){
+  if (_chartHoverTipEl) return _chartHoverTipEl;
+  const el = document.createElement('div');
+  el.className = 'chart-hover-tip';
+  document.body.appendChild(el);
+  _chartHoverTipEl = el;
+  return el;
+}
+document.addEventListener('mousemove', (e) => {
+  const hit = e.target.closest && e.target.closest('[data-tt]');
+  const tip = _ensureChartHoverTip();
+  if (!hit) { tip.classList.remove('visible'); return; }
+  tip.textContent = hit.getAttribute('data-tt');
+  tip.style.left = e.clientX + 'px';
+  tip.style.top = (e.clientY - 10) + 'px';
+  tip.classList.add('visible');
+});
+document.addEventListener('mouseout', (e) => {
+  if (e.target.closest && e.target.closest('[data-tt]') && !e.relatedTarget) {
+    _ensureChartHoverTip().classList.remove('visible');
+  }
+});
 
 // Own copy of populateMovementSnapshotSelectors' From/To defaulting logic
 // (second-most-recent run / most-recent run), kept as a separate function
