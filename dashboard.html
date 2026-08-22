@@ -171,6 +171,40 @@
   }
   .btn.ghost:hover{ color:var(--text); border-color:var(--text-dim); }
 
+  /* ---------- header utility zone (status + actions, one aligned cluster) ---------- */
+  .header-utility{ display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+  .status-sep{ color:var(--text-faint); }
+  .header-actions{ display:flex; gap:10px; align-items:center; }
+  /* A rare, setup-only action (re-shows the connect form) doesn't need
+     full button chrome competing with Refresh and Snapshot, which are the
+     two things actually used day to day. */
+  .btn-link{
+    background:none; border:none; padding:0; font-family:'Inter',sans-serif;
+    font-size:12.5px; color:var(--text-faint); text-decoration:underline;
+    text-underline-offset:2px; cursor:pointer;
+  }
+  .btn-link:hover{ color:var(--text-dim); }
+  /* Groups the Snapshot button with its own "also do this automatically"
+     toggle so they read as one control, not two unrelated ones. */
+  .snapshot-cluster{ display:flex; align-items:center; gap:10px; }
+  .switch{ position:relative; display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+  .switch input{ position:absolute; opacity:0; width:1px; height:1px; }
+  .switch-track{
+    width:32px; height:18px; border-radius:var(--radius-pill); flex-shrink:0;
+    background:var(--surface-2); border:1px solid var(--border); position:relative;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .switch-track::after{
+    content:''; position:absolute; top:1px; left:1px; width:14px; height:14px;
+    border-radius:50%; background:var(--text-faint);
+    transition:transform .15s ease, background .15s ease;
+  }
+  .switch input:checked + .switch-track{ background:rgba(91,141,239,.22); border-color:var(--blue); }
+  .switch input:checked + .switch-track::after{ transform:translateX(14px); background:var(--blue); }
+  .switch input:focus-visible + .switch-track{ outline:2px solid var(--blue); outline-offset:2px; }
+  .switch-label-text{ font-size:11.5px; color:var(--text-dim); white-space:nowrap; }
+  @media (prefers-reduced-motion: reduce){ .switch-track, .switch-track::after{ transition:none; } }
+
   /* ---------- config panel ---------- */
   .config{
     background:var(--surface); border:1px solid var(--border); border-radius:10px;
@@ -713,20 +747,24 @@
       <div class="eyebrow">Google Search Leads · SLA Monitor</div>
       <h1>Region Wise Leads — Live Ops</h1>
     </div>
-    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+    <div class="header-utility">
       <div class="status-row">
         <div class="pulse" id="pulseDot"></div>
+        <span id="gateUserBadge" style="font-size:11.5px; color:var(--text-dim);"></span>
+        <span class="status-sep">·</span>
         <span class="last-refreshed" id="lastRefreshed">Not connected yet</span>
       </div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <span id="gateUserBadge" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;"></span>
-        <button class="btn ghost" id="changeSourceBtn" style="display:none;">Change source</button>
+      <div class="header-actions">
+        <button class="btn-link" id="changeSourceBtn" style="display:none;">Change source</button>
         <button class="btn" id="refreshBtn">Connect &amp; Refresh</button>
-        <button class="btn ghost" id="snapshotNowBtn" title="Writes an on-the-spot checkpoint to Movement_Log — feeds the Movement and Tracking tabs' From/To pickers. Same sign-in as the rest of the dashboard, no separate connect step.">Snapshot now</button>
-        <label class="stale-label" style="white-space:nowrap;" title="Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs, useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the Compare from/to picker. Uses the same sign-in as the rest of the dashboard, no separate connect step — off by default since it writes to the sheet rather than just reading it. Uses this browser's own clock.">
-          <input type="checkbox" id="autoSnapshotCheck" style="accent-color:var(--blue);" />
-          Also snapshot on refresh
-        </label>
+        <div class="snapshot-cluster">
+          <button class="btn ghost" id="snapshotNowBtn" title="Writes an on-the-spot checkpoint to Movement_Log — feeds the Movement and Tracking tabs' From/To pickers. Same sign-in as the rest of the dashboard, no separate connect step.">Snapshot now</button>
+          <label class="switch" title="Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs, useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the Compare from/to picker. Uses the same sign-in as the rest of the dashboard, no separate connect step — off by default since it writes to the sheet rather than just reading it. Uses this browser's own clock.">
+            <input type="checkbox" id="autoSnapshotCheck" />
+            <span class="switch-track"></span>
+            <span class="switch-label-text">Auto-snapshot</span>
+          </label>
+        </div>
       </div>
       <span id="snapshotStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
     </div>
