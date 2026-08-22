@@ -809,10 +809,6 @@
     </div>
     <div class="filter-summary" id="filterSummary"></div>
 
-    <div id="sourceBreakdown"></div>
-    <div id="stageBreakdown"></div>
-    <div class="kpi-strip" id="kpiStrip"></div>
-
     <div class="tab-bar" id="tabBar">
       <button class="tab-btn active" data-tab="tab-overview">Overview</button>
       <button class="tab-btn" data-tab="tab-operations">Operations <span class="tab-badge" id="tabBadgeOps">0</span></button>
@@ -826,6 +822,16 @@
 
     <!-- ============ OVERVIEW ============ -->
     <div class="tab-panel active" id="tab-overview">
+      <!-- Source/stage mix + KPI strip live here, not globally above the tab
+           bar — they're overview-level summary content, not something every
+           one of the other 7 tabs needs repeated above its own content.
+           Filters themselves (filter-bar, filterSummary above) stay global:
+           every tab's own content is filter-driven, so the controls need to
+           stay reachable regardless of which tab is active. -->
+      <div id="sourceBreakdown"></div>
+      <div id="stageBreakdown"></div>
+      <div class="kpi-strip" id="kpiStrip"></div>
+
       <nav class="jump-nav" id="jumpNav"></nav>
 
       <section id="sec-funnel">
