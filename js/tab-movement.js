@@ -863,6 +863,81 @@ function computeTimeToRemediate(){
   return episodes;
 }
 
+// Detects a lead whose canonical funnel rank DECREASED between two
+// consecutive retained snapshots — e.g. Opportunity slipping back to
+// Suspect. current_stage only ever shows where a lead sits NOW; this is
+// the only place backward movement becomes visible at all, and only for
+// the 7-day retained window. Only compares snapshots where BOTH sides have
+// recognized, canonical stage text — a closure is an exit, not a reversal,
+// and unrecognized stage text has no rank to compare against.
+function computeReversedStageEvents(){
+  const byLead = buildMovementHistories();
+  const events = [];
+  byLead.forEach((history) => {
+    splitHistoryByCopy(history).forEach((copyHistory) => {
+      for (let i = 1; i < copyHistory.length; i++) {
+        const prev = copyHistory[i - 1], cur = copyHistory[i];
+        if (!passesMovementFilters(cur)) continue;
+        const prevCanon = canonicalStage(prev.current_stage);
+        const curCanon = canonicalStage(cur.current_stage);
+        if (!prevCanon || !curCanon) continue;
+        const prevRank = CONFIG.FUNNEL_ORDER.indexOf(prevCanon);
+        const curRank = CONFIG.FUNNEL_ORDER.indexOf(curCanon);
+        if (curRank >= prevRank) continue;
+        events.push({
+          RM: cur.RM || 'Unassigned', region: cur.region, project: cur.project,
+          lead_id: cur.lead_id, client_id: cur.client_id,
+          fromStage: prevCanon, toStage: curCanon, at: cur.snapshot_at,
+        });
+      }
+    });
+  });
+  return events;
+}
+
+// Approximates "time to Opportunity" for leads whose crossing INTO
+// Opportunity+ happened somewhere inside the retained snapshot history —
+// duration from lead_created_at (not from the first observed snapshot) to
+// the FIRST retained snapshot where the lead already reads as Opportunity+.
+// Deliberately EXCLUDES a lead that was already Opportunity+ at its own
+// earliest retained snapshot: the true crossing moment for that lead isn't
+// observable (it could have happened long before retention began), so
+// counting it at that first-seen timestamp would silently understate the
+// duration — and understate it specifically for the fastest converters,
+// which would bias the whole distribution toward looking slower than it is.
+// Returns {RM, hours} entries in the same shape computeTimeToRemediate's
+// episodes use, so summarizeTimeToRemediate below can summarize both with
+// the same median/average logic, unmodified.
+function computeTimeToOpportunity(){
+  const byLead = buildMovementHistories();
+  const results = [];
+  byLead.forEach((history) => {
+    splitHistoryByCopy(history).forEach((copyHistory) => {
+      if (!copyHistory.length) return;
+      const first = copyHistory[0];
+      if (!passesMovementFilters(first)) return;
+      if (enrichSnapshotCached(first).oppOrAbove) return; // crossing not observable — excluded, not understated
+
+      let crossing = null;
+      for (let i = 1; i < copyHistory.length; i++) {
+        if (enrichSnapshotCached(copyHistory[i]).oppOrAbove) { crossing = copyHistory[i]; break; }
+      }
+      if (!crossing) return; // never reached Opportunity+ within retained history
+
+      const created = parseDate(first.lead_created_at);
+      if (!created) return;
+      const hours = (crossing.snapshot_at.getTime() - created.getTime()) / 36e5;
+      if (hours < 0) return;
+      results.push({ RM: crossing.RM || 'Unassigned', region: crossing.region, project: crossing.project, lead_id: crossing.lead_id, hours });
+    });
+  });
+  return results;
+}
+
+// Generic {RM, hours}[] -> per-RM count/avg/median/max summarizer — also
+// used for computeTimeToOpportunity's results above, not just
+// computeTimeToRemediate's stall episodes; the name is the older, narrower
+// one since this is where the median-handling logic was first proven.
 function summarizeTimeToRemediate(episodes){
   const byRM = new Map();
   episodes.forEach(e => {
@@ -969,24 +1044,80 @@ function renderRmStallLeaderboard(){
   const rows = computeRmStallLeaderboard();
   if (countEl) countEl.textContent = rows.length + ' RMs';
 
+  // Reversed-stage counts merged in by RM — a currently-invisible signal
+  // (current_stage only ever shows where a lead sits NOW) that shares this
+  // table's whole-history, per-RM shape rather than needing its own section.
+  const reversedByRM = new Map();
+  computeReversedStageEvents().forEach(e => reversedByRM.set(e.RM, (reversedByRM.get(e.RM) || 0) + 1));
+
   thead.innerHTML = `<tr>
     <th>RM</th>
     <th style="text-align:right">Leads w/ stall</th>
     <th style="text-align:right" title="Every zero-movement gap across the whole retained history — a lead unchanged for 3 consecutive checks counts 3 times">Stall gaps</th>
     <th style="text-align:right">Total stalled</th>
     <th style="text-align:right">Longest single stall</th>
+    <th style="text-align:right" title="A lead's canonical funnel stage moved BACKWARD between two consecutive retained snapshots (e.g. Opportunity slipping back to Suspect) — invisible from current_stage alone, only observable within the 7-day retention window">Reversed stage</th>
   </tr>`;
 
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-row">No stalled gaps in the retained history</td></tr>`;
+  if (!rows.length && !reversedByRM.size) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-row">No stalled gaps in the retained history</td></tr>`;
     return;
   }
-  tbody.innerHTML = rows.map(r => `<tr>
+  // A few RMs can show up ONLY in the reversed-stage tally (no stall gaps
+  // at all) — merge both key sets so those rows aren't silently dropped.
+  const allRMs = new Set(rows.map(r => r.RM));
+  reversedByRM.forEach((_, rm) => allRMs.add(rm));
+  const byRM = new Map(rows.map(r => [r.RM, r]));
+  const merged = Array.from(allRMs).map(rm => byRM.get(rm) || { RM: rm, leadsWithStall: 0, staleGapCount: 0, totalStallHours: 0, longestStallHours: 0 })
+    .sort((a, b) => b.staleGapCount - a.staleGapCount);
+
+  tbody.innerHTML = merged.map(r => {
+    const reversed = reversedByRM.get(r.RM) || 0;
+    return `<tr>
     <td>${esc(r.RM)}</td>
     <td class="num">${r.leadsWithStall}</td>
     <td class="num" style="color:var(--red)">${r.staleGapCount}</td>
     <td class="num dim">${fmtHoursSpan(r.totalStallHours)}</td>
     <td class="num dim">${fmtHoursSpan(r.longestStallHours)}</td>
+    <td class="num" style="color:${reversed ? 'var(--amber)' : 'inherit'}">${reversed || '—'}</td>
+  </tr>`;
+  }).join('');
+}
+
+function renderTimeToOpportunity(){
+  const table = document.getElementById('opportunityTimeTable');
+  if (!table) return;
+  const countEl = document.getElementById('opportunityTimeCount');
+  const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
+
+  if (movementFetchState !== 'ok') {
+    thead.innerHTML = ''; tbody.innerHTML = '';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
+  const results = computeTimeToOpportunity();
+  const rows = summarizeTimeToRemediate(results);
+  if (countEl) countEl.textContent = results.length + ' observed crossings';
+
+  thead.innerHTML = `<tr>
+    <th>RM</th>
+    <th style="text-align:right">Observed crossings</th>
+    <th style="text-align:right">Avg time</th>
+    <th style="text-align:right">Median time</th>
+    <th style="text-align:right">Slowest</th>
+  </tr>`;
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-row">No lead's crossing into Opportunity+ was observed within the retained history yet</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `<tr>
+    <td>${esc(r.RM)}</td>
+    <td class="num">${r.count}</td>
+    <td class="num">${fmtHoursSpan(r.avgHours)}</td>
+    <td class="num dim">${fmtHoursSpan(r.medianHours)}</td>
+    <td class="num" style="color:var(--amber)">${fmtHoursSpan(r.maxHours)}</td>
   </tr>`).join('');
 }
 
@@ -1461,6 +1592,7 @@ function renderMovementTab(){
   // they update on every call regardless of which pair is selected.
   renderRmStallLeaderboard();
   renderTimeToRemediate();
+  renderTimeToOpportunity();
   renderUnmatchedCommentsCount();
 
   const noticeEl = document.getElementById('movementNotice');

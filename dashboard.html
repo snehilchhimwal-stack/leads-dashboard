@@ -1187,6 +1187,12 @@
         <div class="section-scroll"><table id="remediateTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
+      <section id="sec-opportunitytime">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Time to Opportunity (approx.)</div><div class="section-count" id="opportunityTimeCount"></div></div>
+        <div class="filter-summary">Approximates how long it takes a lead to reach Opportunity+, using the same Movement_Log snapshot history as Time to Remediate above — the schema has no stage-entry timestamp, so this is duration from lead_created_at to the first retained snapshot where the lead already reads as Opportunity+, not the true crossing instant. A lead already Opportunity+ at its own earliest retained snapshot is excluded, not counted at that first-seen time — its true crossing could have happened long before retention began, and counting it anyway would understate the fastest conversions specifically. Respects the Project/Region/TL filters above.</div>
+        <div class="section-scroll"><table id="opportunityTimeTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
       <section id="sec-unmatched-comments">
         <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Unmatched Comments</div><div class="section-count" id="unmatchedCommentsCount"></div></div>
         <div class="filter-summary">Every DISTINCT comment anywhere in the whole captured Movement_Log history that the keyword-based follow-up logic (inferOutcome) couldn't classify — real notes an RM wrote that fall through every known keyword and get the generic "no keyword match" fallback instead of a real suggested action. Whole history, every project/region/TL/source — not scoped to the filters above, since the point is finding phrasing worth teaching the keyword list, not listing leads needing action right now. Deduped by exact comment text, so a note repeated across many snapshot captures for the same lead only counts once.</div>
