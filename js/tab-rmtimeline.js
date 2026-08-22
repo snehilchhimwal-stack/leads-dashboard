@@ -103,9 +103,10 @@ function renderRMDailyCalendar(rm, selectedDay){
     if (key === todayKey) classes.push('today');
     if (key === selectedDay) classes.push('selected');
     const cloneNote = collated > 0 ? ` (${collated} cloned)` : '';
-    return `<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});" title="${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created${cloneNote}">
+    return `<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});">
       <span class="rmtl-cal-d">${esc(IST_WEEKDAYS[istParts(cellDate).dow])} ${istParts(cellDate).d}</span>
       ${count ? `<span class="rmtl-cal-n">${count}</span>` : ''}
+      <span class="day-hint">${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created${cloneNote}</span>
     </div>`;
   });
 

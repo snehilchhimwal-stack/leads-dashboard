@@ -386,7 +386,13 @@ function renderRMScoreTable(){
     if (!byRM[key]) byRM[key] = {
       RM: key, TL: l.TL || '', total: 0, totalCollated: 0, open: 0, openCollated: 0, breached: 0,
       calls: 0, durationSec: 0, opp: 0, oppCollated: 0, visit: 0, visitCollated: 0,
-      softBooking: 0, softBookingCollated: 0, booking: 0, bookingCollated: 0
+      softBooking: 0, softBookingCollated: 0, booking: 0, bookingCollated: 0,
+      // Tallies which of the 5 checks are actually driving this RM's SLA
+      // score down — the aggregate breach count below already existed, but
+      // discarded which check(s) each breach came from. A TL/RH staring at
+      // a low score has no way to tell "consistently behind on calls" from
+      // "one bad stuck lead" without this.
+      breachByCheck: { firstContactBreach: 0, followupOverdue: 0, underCalledToday: 0, stageStuck48h: 0, isNotUpdated: 0 },
     };
     const b = byRM[key];
     const cloned = l.collatedFrom > 1;
@@ -407,6 +413,11 @@ function renderRMScoreTable(){
       const breached = l.firstContactBreach || l.followupOverdue ||
         l.underCalledToday || l.stageStuck48h || l.isNotUpdated;
       if (breached) b.breached++;
+      if (l.firstContactBreach) b.breachByCheck.firstContactBreach++;
+      if (l.followupOverdue) b.breachByCheck.followupOverdue++;
+      if (l.underCalledToday) b.breachByCheck.underCalledToday++;
+      if (l.stageStuck48h) b.breachByCheck.stageStuck48h++;
+      if (l.isNotUpdated) b.breachByCheck.isNotUpdated++;
     }
   });
 
@@ -440,10 +451,18 @@ function renderRMScoreTable(){
     tbody.innerHTML = `<tr><td colspan="13" class="empty-row">No RM data</td></tr>`;
     return;
   }
+  const BREACH_LABELS = {
+    firstContactBreach: 'Not Connected in 10 min', followupOverdue: 'Follow-up Overdue',
+    underCalledToday: "Behind on Today's Calls", stageStuck48h: 'Stuck 48h+', isNotUpdated: 'Not Updated',
+  };
   tbody.innerHTML = rows.map(b => {
     const sla = b.slaScore;
     const slaCls = sla === null ? 'heat-green' : sla >= 80 ? 'heat-green' : sla >= 50 ? 'heat-amber' : 'heat-red';
     const slaTxt = sla === null ? 'n/a' : sla + '%';
+    const breachParts = Object.entries(b.breachByCheck).filter(([, n]) => n > 0).map(([k, n]) => `${BREACH_LABELS[k]}: ${n}`);
+    const slaCell = sla === null
+      ? `<span class="heat-cell ${slaCls}">${slaTxt}</span>`
+      : `<span class="cell-hint"><span class="heat-cell ${slaCls}">${slaTxt}</span><span class="cell-hint-panel">${breachParts.length ? breachParts.join('<br>') : 'No open-lead breaches'}</span></span>`;
     return `<tr>
       <td>${esc(b.RM)}</td><td class="dim">${esc(b.TL)}</td>
       <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num dim">${numWithClone(b.open, b.openCollated)}</td>
@@ -454,7 +473,7 @@ function renderRMScoreTable(){
       <td class="num" style="color:var(--amber)" title="Payment received, paperwork pending">${numWithClone(b.softBooking, b.softBookingCollated)}</td>
       <td class="num" style="color:var(--green)">${numWithClone(b.booking, b.bookingCollated)}</td>
       <td class="num">${b.convRate.toFixed(1)}%</td>
-      <td class="num"><span class="heat-cell ${slaCls}">${slaTxt}</span></td>
+      <td class="num">${slaCell}</td>
     </tr>`;
   }).join('');
 }
