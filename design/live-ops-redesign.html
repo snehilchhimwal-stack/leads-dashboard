@@ -1,0 +1,847 @@
+<title>Live Ops Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Deliberate single-theme design: matches the real dashboard's own
+     fixed dark operational theme (its :root defines only one palette,
+     no light variant) — so this redesign concept honors that rather
+     than inventing a light mode the product doesn't have. */
+  :root{
+    --bg: #0f1216;
+    --surface: #171b21;
+    --surface-2: #1d222a;
+    --border: #2a3038;
+    --text: #e7eaee;
+    --text-dim: #8b93a1;
+    --text-faint: #5b6270;
+    --blue: #5b8def;
+    --green: #4ade80;
+    --amber: #f5a623;
+    --red: #ff5d5d;
+    --purple: #a78bfa;
+    --teal: #2dd4bf;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; }
+  a { color: var(--blue); } a:hover { color: #7ba3f5; }
+  .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+  .display { font-family: 'Space Grotesk', sans-serif; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .chrome {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 14px 28px;
+    background: rgba(15,18,22,.9); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .chrome-label { font-size: 12px; color: var(--text-faint); letter-spacing: .04em; }
+  .chrome-tabs { display: flex; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
+  .chrome-tab {
+    font-family: 'Inter'; font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+    background: transparent; border: none; border-radius: 6px; padding: 7px 16px; cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+  }
+  .chrome-tab.active { background: var(--surface-2); color: var(--text); }
+  .chrome-tab:not(.active):hover { color: var(--text); }
+
+  .screen { display: none; width: 100%; overflow-x: auto; }
+  .screen.active { display: block; }
+  .screen-inner { width: 100%; max-width: 1280px; min-width: 900px; margin: 0 auto; padding: 36px 44px 64px; display: flex; flex-direction: column; gap: 26px; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .op-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+  .kpi-card, .op-card {
+    position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 20px; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .kpi-card:hover, .op-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: 0 12px 30px -16px rgba(0,0,0,.6); }
+  .detail { max-height: 0; opacity: 0; overflow: hidden; transition: max-height .28s ease, opacity .22s ease, margin-top .28s ease; }
+  .kpi-card:hover .detail { max-height: 170px; opacity: 1; }
+  .op-card:hover .detail { max-height: 210px; opacity: 1; }
+  .detail-inner { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; }
+  .detail-label { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 2px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; }
+  .bar-row .k { width: 56px; font-size: 11.5px; color: var(--text-dim); flex-shrink: 0; }
+  .bar-track { flex: 1; height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; }
+  .bar-row .v { font-size: 11px; color: var(--text-dim); width: 30px; text-align: right; flex-shrink: 0; }
+  .kv-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); }
+  .lead-row { display: flex; justify-content: space-between; align-items: center; }
+  .lead-name { font-size: 12.5px; }
+  .lead-meta { font-size: 11px; color: var(--text-faint); }
+  .more { font-size: 11px; color: var(--text-faint); }
+
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; transition: border-color .18s ease, transform .18s ease; }
+  .stat-tile:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .stat-tile .num { font-size: 30px; font-weight: 700; font-family: 'Space Grotesk'; }
+  .stat-tile .label { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; }
+  .stat-tile .sub { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+
+  .heat-strip { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
+  .heat-cell { aspect-ratio: 1; border-radius: 4px; position: relative; cursor: default; transition: outline-color .12s ease; outline: 1px solid transparent; }
+  .heat-cell:hover { outline: 1px solid var(--text-dim); }
+  .heat-cell .heat-tip {
+    position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(4px);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px;
+    font-size: 11px; white-space: nowrap; color: var(--text); opacity: 0; pointer-events: none;
+    transition: opacity .16s ease, transform .16s ease; z-index: 5;
+  }
+  .heat-cell:hover .heat-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .cal-cell { aspect-ratio: 1; border-radius: 6px; position: relative; cursor: default; display: flex; align-items: center; justify-content: center; font-size: 10.5px; color: var(--text-faint); transition: outline-color .12s ease; outline: 1px solid transparent; }
+  .cal-cell:hover { outline: 1px solid var(--text-dim); }
+  .cal-cell .cal-tip {
+    position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(4px);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 11px;
+    font-size: 11px; white-space: nowrap; color: var(--text); opacity: 0; pointer-events: none; text-align: left;
+    transition: opacity .16s ease, transform .16s ease; z-index: 5;
+  }
+  .cal-cell:hover .cal-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .matrix-grid { display: grid; gap: 4px; }
+  .matrix-cell { border-radius: 6px; padding: 9px 4px; text-align: center; font-size: 11.5px; color: var(--text); cursor: default; position: relative; transition: outline-color .12s ease; outline: 1px solid transparent; }
+  .matrix-cell:hover { outline: 1px solid var(--text-dim); }
+  .matrix-cell .matrix-tip {
+    position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(-4px);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 11px;
+    font-size: 11px; white-space: nowrap; color: var(--text-dim); opacity: 0; pointer-events: none; z-index: 5;
+    transition: opacity .16s ease, transform .16s ease;
+  }
+  .matrix-cell:hover .matrix-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 900px) {
+    .kpi-grid, .op-grid, .stat-row { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<div class="chrome">
+  <div class="chrome-label">Redesign concept &middot; live ops dashboard &middot; hover a card for detail</div>
+  <div class="chrome-tabs">
+    <button class="chrome-tab active" data-target="screen-overview" onclick="showScreen(this)">Overview</button>
+    <button class="chrome-tab" data-target="screen-operations" onclick="showScreen(this)">Operations</button>
+    <button class="chrome-tab" data-target="screen-people" onclick="showScreen(this)">People</button>
+    <button class="chrome-tab" data-target="screen-distribution" onclick="showScreen(this)">Distribution</button>
+    <button class="chrome-tab" data-target="screen-audit" onclick="showScreen(this)">Audit</button>
+    <button class="chrome-tab" data-target="screen-movement" onclick="showScreen(this)">Movement</button>
+    <button class="chrome-tab" data-target="screen-tracking" onclick="showScreen(this)">Tracking</button>
+    <button class="chrome-tab" data-target="screen-rmtimeline" onclick="showScreen(this)">RM Timeline</button>
+  </div>
+</div>
+
+<div class="screen active" id="screen-overview">
+  <div class="screen-inner" style="background:
+    radial-gradient(1100px 500px at 12% -8%, rgba(91,141,239,0.10), transparent 60%),
+    radial-gradient(900px 460px at 96% 6%, rgba(45,212,191,0.07), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">Overview</h1>
+          <div style="display:flex; align-items:center; gap:7px; padding:4px 10px 4px 8px; background:var(--surface); border:1px solid var(--border); border-radius:20px;">
+            <span style="width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 3px rgba(74,222,128,.15);"></span>
+            <span class="mono" style="font-size:11px; color:var(--text-dim);">Live &middot; synced 2m ago</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:6px; padding:8px 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; font-size:12.5px; color:var(--text-dim);">Aug 15 &ndash; Aug 22</div>
+        <button style="font-family:'Inter'; font-weight:600; font-size:13px; background:var(--blue); color:#0f1216; border:none; border-radius:8px; padding:9px 18px; cursor:pointer;">Refresh</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+
+      <div class="kpi-card" style="--accent:var(--text);">
+        <div style="font-size:34px; font-weight:700; font-family:'Space Grotesk';">1,284</div>
+        <div style="font-size:12.5px; color:var(--text-dim); margin-top:4px;">Total Leads</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="detail-label">By source</div>
+          <div class="bar-row"><span class="k">Google</span><div class="bar-track"><div class="bar-fill" style="width:62%; background:var(--blue);"></div></div><span class="v">62%</span></div>
+          <div class="bar-row"><span class="k">FB</span><div class="bar-track"><div class="bar-fill" style="width:24%; background:var(--purple);"></div></div><span class="v">24%</span></div>
+          <div class="bar-row"><span class="k">Referral</span><div class="bar-track"><div class="bar-fill" style="width:14%; background:var(--teal);"></div></div><span class="v">14%</span></div>
+        </div></div>
+      </div>
+
+      <div class="kpi-card" style="--accent:var(--green);">
+        <div style="font-size:34px; font-weight:700; font-family:'Space Grotesk'; color:var(--green);">312</div>
+        <div style="font-size:12.5px; color:var(--text-dim); margin-top:4px;">Opportunity+</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="detail-label">By stage</div>
+          <div class="kv-row"><span>Visit Booked</span><span style="color:var(--text);">140</span></div>
+          <div class="kv-row"><span>Visit Done</span><span style="color:var(--text);">96</span></div>
+          <div class="kv-row"><span>Booking</span><span style="color:var(--text);">76</span></div>
+        </div></div>
+      </div>
+
+      <div class="kpi-card" style="--accent:var(--blue);">
+        <div style="font-size:34px; font-weight:700; font-family:'Space Grotesk'; color:var(--blue);">47</div>
+        <div style="font-size:12.5px; color:var(--text-dim); margin-top:4px;">Behind on Today&rsquo;s Calls</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="detail-label">By region</div>
+          <div class="kv-row"><span>Thane</span><span style="color:var(--text);">18</span></div>
+          <div class="kv-row"><span>Pune</span><span style="color:var(--text);">14</span></div>
+          <div class="kv-row"><span>Mumbai</span><span style="color:var(--text);">9</span></div>
+        </div></div>
+      </div>
+
+      <div class="kpi-card" style="--accent:var(--red);">
+        <div style="font-size:34px; font-weight:700; font-family:'Space Grotesk'; color:var(--red);">9</div>
+        <div style="font-size:12.5px; color:var(--text-dim); margin-top:4px;">Not Connected in 10 min</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="detail-label">Missed the SLA today</div>
+          <div class="lead-meta">Rahul Mehta &middot; Pune &middot; 14 min</div>
+          <div class="lead-meta">Sneha Patil &middot; Thane &middot; 22 min</div>
+          <div class="more">+7 more RMs</div>
+        </div></div>
+      </div>
+
+      <div class="kpi-card" style="--accent:var(--amber);">
+        <div style="font-size:34px; font-weight:700; font-family:'Space Grotesk'; color:var(--amber);">23</div>
+        <div style="font-size:12.5px; color:var(--text-dim); margin-top:4px;">No Attempts Yet</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="detail-label">Age since assignment</div>
+          <div class="kv-row"><span>Under 1h</span><span style="color:var(--text);">11</span></div>
+          <div class="kv-row"><span>1&ndash;3h</span><span style="color:var(--text);">8</span></div>
+          <div class="kv-row"><span>3h+</span><span style="color:var(--amber);">4</span></div>
+        </div></div>
+      </div>
+
+    </div>
+
+    <div style="display:grid; grid-template-columns:1.35fr 1fr; gap:16px; align-items:start;">
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; min-width:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+          <div class="display" style="font-size:15px; font-weight:600;">Region Performance</div>
+          <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em;">hover a row for detail</div>
+        </div>
+        <div style="display:flex; flex-direction:column;">
+
+          <div class="region-row" style="position:relative; padding:12px 4px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <div style="width:88px; font-size:13px; font-weight:500; flex-shrink:0;">Thane</div>
+              <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:78%; height:100%; background:var(--blue);"></div></div>
+              <div class="mono" style="width:40px; text-align:right; font-size:13px; color:var(--text-dim); flex-shrink:0;">284</div>
+              <div style="width:66px; text-align:right; font-size:11.5px; color:var(--red); flex-shrink:0;">18 issues</div>
+            </div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+              <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+                <span>TL &middot; Kavya Reddy</span><span>Top issue &middot; <span style="color:var(--blue);">Behind on Today&rsquo;s Calls (7)</span></span><span>SLA score &middot; <span style="color:var(--text);">82</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="region-row" style="position:relative; padding:12px 4px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <div style="width:88px; font-size:13px; font-weight:500; flex-shrink:0;">Pune</div>
+              <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:61%; height:100%; background:var(--blue);"></div></div>
+              <div class="mono" style="width:40px; text-align:right; font-size:13px; color:var(--text-dim); flex-shrink:0;">221</div>
+              <div style="width:66px; text-align:right; font-size:11.5px; color:var(--amber); flex-shrink:0;">14 issues</div>
+            </div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+              <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+                <span>TL &middot; Arjun Nair</span><span>Top issue &middot; <span style="color:var(--amber);">Not Updated (6)</span></span><span>SLA score &middot; <span style="color:var(--text);">88</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="region-row" style="position:relative; padding:12px 4px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <div style="width:88px; font-size:13px; font-weight:500; flex-shrink:0;">Mumbai</div>
+              <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:52%; height:100%; background:var(--blue);"></div></div>
+              <div class="mono" style="width:40px; text-align:right; font-size:13px; color:var(--text-dim); flex-shrink:0;">189</div>
+              <div style="width:66px; text-align:right; font-size:11.5px; color:var(--text-dim); flex-shrink:0;">6 issues</div>
+            </div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+              <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+                <span>TL &middot; Priya Sharma</span><span>Top issue &middot; <span style="color:var(--text-dim);">Follow-up Overdue (4)</span></span><span>SLA score &middot; <span style="color:var(--green);">94</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="region-row" style="position:relative; padding:12px 4px;">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <div style="width:88px; font-size:13px; font-weight:500; flex-shrink:0;">SoBo</div>
+              <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:34%; height:100%; background:var(--blue);"></div></div>
+              <div class="mono" style="width:40px; text-align:right; font-size:13px; color:var(--text-dim); flex-shrink:0;">102</div>
+              <div style="width:66px; text-align:right; font-size:11.5px; color:var(--text-dim); flex-shrink:0;">3 issues</div>
+            </div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+              <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+                <span>TL &middot; Ishaan Kapoor</span><span>Top issue &middot; <span style="color:var(--text-dim);">Stuck 48h+ (2)</span></span><span>SLA score &middot; <span style="color:var(--green);">97</span></span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; min-width:0;">
+        <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Stage Funnel</div>
+        <div style="display:flex; flex-direction:column; gap:9px;">
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:72px; font-size:11.5px; color:var(--text-dim); flex-shrink:0;">Suspect</span><div style="flex:1; height:22px; background:var(--surface-2); border-radius:5px; overflow:hidden;"><div style="width:100%; height:100%; background:var(--blue); display:flex; align-items:center; padding-left:8px;"><span class="mono" style="font-size:11px; color:#0f1216; font-weight:600;">1,284</span></div></div></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:72px; font-size:11.5px; color:var(--text-dim); flex-shrink:0;">Opportunity</span><div style="flex:1; height:22px; background:var(--surface-2); border-radius:5px; overflow:hidden;"><div style="width:63%; height:100%; background:var(--blue); display:flex; align-items:center; padding-left:8px;"><span class="mono" style="font-size:11px; color:#0f1216; font-weight:600;">809</span></div></div></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:72px; font-size:11.5px; color:var(--text-dim); flex-shrink:0;">Visit</span><div style="flex:1; height:22px; background:var(--surface-2); border-radius:5px; overflow:hidden;"><div style="width:29%; height:100%; background:var(--teal); display:flex; align-items:center; padding-left:8px;"><span class="mono" style="font-size:11px; color:#0f1216; font-weight:600;">372</span></div></div></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:72px; font-size:11.5px; color:var(--text-dim); flex-shrink:0;">Booking</span><div style="flex:1; height:22px; background:var(--surface-2); border-radius:5px; overflow:hidden;"><div style="width:6%; height:100%; background:var(--green); display:flex; align-items:center; padding-left:8px;"><span class="mono" style="font-size:11px; color:#0f1216; font-weight:600;">76</span></div></div></div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-operations">
+  <div class="screen-inner" style="background: radial-gradient(1100px 500px at 90% -8%, rgba(255,93,93,0.06), transparent 60%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">Operations</h1>
+          <div style="padding:4px 11px; background:rgba(255,93,93,.12); border:1px solid rgba(255,93,93,.3); border-radius:20px;">
+            <span class="mono" style="font-size:11px; color:var(--red); font-weight:600;">6 sections need attention</span>
+          </div>
+        </div>
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em;">hover a card for the lead list</div>
+    </div>
+
+    <div class="op-grid">
+
+      <div class="op-card" style="--accent:var(--blue);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:30px; font-weight:700; font-family:'Space Grotesk'; color:var(--blue);">31</div>
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--blue);"></div>
+        </div>
+        <div style="font-size:13.5px; font-weight:500; margin-top:6px;">Due Today</div>
+        <div style="font-size:11.5px; color:var(--text-faint); margin-top:3px;">Follow-ups scheduled for today, not yet logged</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="lead-row"><div><div class="lead-name">Vikram Chawla</div><div class="lead-meta">Rahul Mehta &middot; Thane &middot; Prestige Heights</div></div><div class="mono" style="font-size:11px; color:var(--blue);">2h left</div></div>
+          <div class="lead-row"><div><div class="lead-name">Meera Iyer</div><div class="lead-meta">Sneha Patil &middot; Pune &middot; Lodha Bellezza</div></div><div class="mono" style="font-size:11px; color:var(--blue);">4h left</div></div>
+          <div class="more">+29 more</div>
+        </div></div>
+      </div>
+
+      <div class="op-card" style="--accent:var(--teal);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:30px; font-weight:700; font-family:'Space Grotesk'; color:var(--teal);">14</div>
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--teal);"></div>
+        </div>
+        <div style="font-size:13.5px; font-weight:500; margin-top:6px;">Stuck 48h+</div>
+        <div style="font-size:11.5px; color:var(--text-faint); margin-top:3px;">Pending beyond 48 hours, not yet Opportunity</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="lead-row"><div><div class="lead-name">Anjali Bhatt</div><div class="lead-meta">Arjun Nair &middot; Pune &middot; Godrej Emerald</div></div><div class="mono" style="font-size:11px; color:var(--teal);">61h</div></div>
+          <div class="lead-row"><div><div class="lead-name">Rohan Das</div><div class="lead-meta">Kavya Reddy &middot; Thane &middot; Prestige Heights</div></div><div class="mono" style="font-size:11px; color:var(--teal);">55h</div></div>
+          <div class="more">+12 more</div>
+        </div></div>
+      </div>
+
+      <div class="op-card" style="--accent:var(--purple);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:30px; font-weight:700; font-family:'Space Grotesk'; color:var(--purple);">19</div>
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--purple);"></div>
+        </div>
+        <div style="font-size:13.5px; font-weight:500; margin-top:6px;">Not Updated</div>
+        <div style="font-size:11.5px; color:var(--text-faint); margin-top:3px;">Sitting at stage &ldquo;Not Updated&rdquo; with no recent activity</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="lead-row"><div><div class="lead-name">Farhan Sheikh</div><div class="lead-meta">Priya Sharma &middot; Mumbai &middot; Oberoi Sky City</div></div><div class="mono" style="font-size:11px; color:var(--purple);">3d</div></div>
+          <div class="lead-row"><div><div class="lead-name">Neha Kulkarni</div><div class="lead-meta">Arjun Nair &middot; Pune &middot; Godrej Emerald</div></div><div class="mono" style="font-size:11px; color:var(--purple);">2d</div></div>
+          <div class="more">+17 more</div>
+        </div></div>
+      </div>
+
+      <div class="op-card" style="--accent:var(--amber);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:30px; font-weight:700; font-family:'Space Grotesk'; color:var(--amber);">7</div>
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--amber);"></div>
+        </div>
+        <div style="font-size:13.5px; font-weight:500; margin-top:6px;">Recording Not Working</div>
+        <div style="font-size:11.5px; color:var(--text-faint); margin-top:3px;">Comments logged with no matching call attempt</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="lead-row"><div><div class="lead-name">Divya Menon</div><div class="lead-meta">Kavya Reddy &middot; Thane &middot; Runwal Elegante</div></div><div class="mono" style="font-size:11px; color:var(--amber);">0 calls</div></div>
+          <div class="lead-row"><div><div class="lead-name">Aditya Rao</div><div class="lead-meta">Sneha Patil &middot; Pune &middot; Lodha Bellezza</div></div><div class="mono" style="font-size:11px; color:var(--amber);">0 calls</div></div>
+          <div class="more">+5 more</div>
+        </div></div>
+      </div>
+
+      <div class="op-card" style="--accent:var(--red);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:30px; font-weight:700; font-family:'Space Grotesk'; color:var(--red);">12</div>
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--red);"></div>
+        </div>
+        <div style="font-size:13.5px; font-weight:500; margin-top:6px;">Follow-up Overdue</div>
+        <div style="font-size:11.5px; color:var(--text-faint); margin-top:3px;">4+ hours past a connected call, no next step logged</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="lead-row"><div><div class="lead-name">Ritu Verma</div><div class="lead-meta">Rahul Mehta &middot; Thane &middot; Prestige Heights</div></div><div class="mono" style="font-size:11px; color:var(--red);">9h over</div></div>
+          <div class="lead-row"><div><div class="lead-name">Kabir Singh</div><div class="lead-meta">Priya Sharma &middot; Mumbai &middot; Oberoi Sky City</div></div><div class="mono" style="font-size:11px; color:var(--red);">6h over</div></div>
+          <div class="more">+10 more</div>
+        </div></div>
+      </div>
+
+      <div class="op-card" style="--accent:var(--text-dim);">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <div style="font-size:30px; font-weight:700; font-family:'Space Grotesk';">9</div>
+          <div style="width:8px; height:8px; border-radius:50%; background:var(--text-dim);"></div>
+        </div>
+        <div style="font-size:13.5px; font-weight:500; margin-top:6px;">Not Connected in 10 min</div>
+        <div style="font-size:11.5px; color:var(--text-faint); margin-top:3px;">First contact missed the response-time SLA</div>
+        <div class="detail"><div class="detail-inner">
+          <div class="lead-row"><div><div class="lead-name">Tara Joshi</div><div class="lead-meta">Sneha Patil &middot; Pune &middot; Lodha Bellezza</div></div><div class="mono" style="font-size:11px; color:var(--text-dim);">14 min</div></div>
+          <div class="lead-row"><div><div class="lead-name">Yusuf Ali</div><div class="lead-meta">Ishaan Kapoor &middot; SoBo &middot; Piramal Aranya</div></div><div class="mono" style="font-size:11px; color:var(--text-dim);">22 min</div></div>
+          <div class="more">+7 more</div>
+        </div></div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-people">
+  <div class="screen-inner" style="background: radial-gradient(1000px 480px at 8% -6%, rgba(74,222,128,0.06), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">People</h1>
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em;">hover an RM for their day</div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-tile" style="--accent:var(--green);">
+        <div class="num" style="color:var(--green);">94%</div>
+        <div class="label">Claim Rate</div>
+        <div class="sub">Leads claimed within SLA, last 7 days</div>
+      </div>
+      <div class="stat-tile" style="--accent:var(--blue);">
+        <div class="num" style="color:var(--blue);">4m</div>
+        <div class="label">Avg. Claim Time</div>
+        <div class="sub">From assignment to first attempt</div>
+      </div>
+      <div class="stat-tile" style="--accent:var(--amber);">
+        <div class="num" style="color:var(--amber);">3</div>
+        <div class="label">Over Fan-out Limit</div>
+        <div class="sub">RMs holding more than 40 active leads</div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+        <div class="display" style="font-size:15px; font-weight:600;">RM Leaderboard</div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em;">by SLA score</div>
+      </div>
+      <div style="display:flex; flex-direction:column;">
+
+        <div class="region-row" style="position:relative; padding:12px 4px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:130px; font-size:13px; font-weight:500; flex-shrink:0;">Kavya Reddy</div>
+            <div style="width:64px; font-size:11.5px; color:var(--text-faint); flex-shrink:0;">Thane</div>
+            <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:97%; height:100%; background:var(--green);"></div></div>
+            <div class="mono" style="width:34px; text-align:right; font-size:13px; color:var(--green); flex-shrink:0;">97</div>
+          </div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+            <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+              <span>28 leads assigned</span><span>41 calls today</span><span>Claimed avg. &middot; <span style="color:var(--text);">2m</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="region-row" style="position:relative; padding:12px 4px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:130px; font-size:13px; font-weight:500; flex-shrink:0;">Priya Sharma</div>
+            <div style="width:64px; font-size:11.5px; color:var(--text-faint); flex-shrink:0;">Mumbai</div>
+            <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:94%; height:100%; background:var(--green);"></div></div>
+            <div class="mono" style="width:34px; text-align:right; font-size:13px; color:var(--green); flex-shrink:0;">94</div>
+          </div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+            <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+              <span>33 leads assigned</span><span>37 calls today</span><span>Claimed avg. &middot; <span style="color:var(--text);">3m</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="region-row" style="position:relative; padding:12px 4px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:130px; font-size:13px; font-weight:500; flex-shrink:0;">Arjun Nair</div>
+            <div style="width:64px; font-size:11.5px; color:var(--text-faint); flex-shrink:0;">Pune</div>
+            <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:88%; height:100%; background:var(--blue);"></div></div>
+            <div class="mono" style="width:34px; text-align:right; font-size:13px; color:var(--text-dim); flex-shrink:0;">88</div>
+          </div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+            <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+              <span>44 leads assigned &middot; <span style="color:var(--amber);">over limit</span></span><span>29 calls today</span><span>Claimed avg. &middot; <span style="color:var(--text);">6m</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="region-row" style="position:relative; padding:12px 4px;">
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:130px; font-size:13px; font-weight:500; flex-shrink:0;">Rahul Mehta</div>
+            <div style="width:64px; font-size:11.5px; color:var(--text-faint); flex-shrink:0;">Thane</div>
+            <div style="flex:1; height:8px; background:var(--surface-2); border-radius:4px; overflow:hidden; min-width:40px;"><div style="width:82%; height:100%; background:var(--blue);"></div></div>
+            <div class="mono" style="width:34px; text-align:right; font-size:13px; color:var(--text-dim); flex-shrink:0;">82</div>
+          </div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;">
+            <div style="margin-top:10px; padding:12px 14px; background:var(--surface-2); border-radius:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-dim);">
+              <span>25 leads assigned</span><span>22 calls today</span><span>Claimed avg. &middot; <span style="color:var(--amber);">14m</span></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Workload Balance</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; align-items:center; gap:12px;"><span style="width:110px; font-size:12px; color:var(--text-dim); flex-shrink:0;">Arjun Nair</span><div style="flex:1; height:18px; background:var(--surface-2); border-radius:5px; overflow:hidden; position:relative;"><div style="width:88%; height:100%; background:var(--amber);"></div><div style="position:absolute; left:45%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.25);"></div></div><span class="mono" style="width:28px; text-align:right; font-size:11.5px; color:var(--text-dim);">44</span></div>
+        <div style="display:flex; align-items:center; gap:12px;"><span style="width:110px; font-size:12px; color:var(--text-dim); flex-shrink:0;">Priya Sharma</span><div style="flex:1; height:18px; background:var(--surface-2); border-radius:5px; overflow:hidden; position:relative;"><div style="width:66%; height:100%; background:var(--blue);"></div><div style="position:absolute; left:45%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.25);"></div></div><span class="mono" style="width:28px; text-align:right; font-size:11.5px; color:var(--text-dim);">33</span></div>
+        <div style="display:flex; align-items:center; gap:12px;"><span style="width:110px; font-size:12px; color:var(--text-dim); flex-shrink:0;">Kavya Reddy</span><div style="flex:1; height:18px; background:var(--surface-2); border-radius:5px; overflow:hidden; position:relative;"><div style="width:56%; height:100%; background:var(--blue);"></div><div style="position:absolute; left:45%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.25);"></div></div><span class="mono" style="width:28px; text-align:right; font-size:11.5px; color:var(--text-dim);">28</span></div>
+        <div style="display:flex; align-items:center; gap:12px;"><span style="width:110px; font-size:12px; color:var(--text-dim); flex-shrink:0;">Rahul Mehta</span><div style="flex:1; height:18px; background:var(--surface-2); border-radius:5px; overflow:hidden; position:relative;"><div style="width:50%; height:100%; background:var(--blue);"></div><div style="position:absolute; left:45%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.25);"></div></div><span class="mono" style="width:28px; text-align:right; font-size:11.5px; color:var(--text-dim);">25</span></div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:2px;"><div style="width:110px;"></div><div style="font-size:10.5px; color:var(--text-faint);">team average marked</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-distribution">
+  <div class="screen-inner" style="background: radial-gradient(1000px 480px at 92% -6%, rgba(167,139,250,0.07), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">Distribution</h1>
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em;">hover a cell for the count</div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start;">
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; min-width:0;">
+        <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Source Mix by Region</div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <div style="font-size:12px; color:var(--text-dim); margin-bottom:5px;">Thane</div>
+            <div style="display:flex; height:16px; border-radius:5px; overflow:hidden;"><div style="width:68%; background:var(--blue);"></div><div style="width:22%; background:var(--purple);"></div><div style="width:10%; background:var(--teal);"></div></div>
+          </div>
+          <div>
+            <div style="font-size:12px; color:var(--text-dim); margin-bottom:5px;">Pune</div>
+            <div style="display:flex; height:16px; border-radius:5px; overflow:hidden;"><div style="width:54%; background:var(--blue);"></div><div style="width:31%; background:var(--purple);"></div><div style="width:15%; background:var(--teal);"></div></div>
+          </div>
+          <div>
+            <div style="font-size:12px; color:var(--text-dim); margin-bottom:5px;">Mumbai</div>
+            <div style="display:flex; height:16px; border-radius:5px; overflow:hidden;"><div style="width:71%; background:var(--blue);"></div><div style="width:18%; background:var(--purple);"></div><div style="width:11%; background:var(--teal);"></div></div>
+          </div>
+          <div style="display:flex; gap:16px; margin-top:4px;">
+            <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);"><span style="width:9px; height:9px; border-radius:2px; background:var(--blue); display:inline-block;"></span>Google</div>
+            <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);"><span style="width:9px; height:9px; border-radius:2px; background:var(--purple); display:inline-block;"></span>Facebook</div>
+            <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);"><span style="width:9px; height:9px; border-radius:2px; background:var(--teal); display:inline-block;"></span>Referral</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; min-width:0;">
+        <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Project Distribution</div>
+        <div style="display:flex; flex-direction:column;">
+          <div class="region-row" style="position:relative; padding:10px 4px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:12px;"><div style="width:130px; font-size:12.5px; flex-shrink:0;">Prestige Heights</div><div style="flex:1; height:7px; background:var(--surface-2); border-radius:4px; overflow:hidden;"><div style="width:100%; height:100%; background:var(--purple);"></div></div><span class="mono" style="width:32px; text-align:right; font-size:12px; color:var(--text-dim);">312</span></div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Thane &middot; 88% of this project&rsquo;s leads</div></div>
+          </div>
+          <div class="region-row" style="position:relative; padding:10px 4px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:12px;"><div style="width:130px; font-size:12.5px; flex-shrink:0;">Lodha Bellezza</div><div style="flex:1; height:7px; background:var(--surface-2); border-radius:4px; overflow:hidden;"><div style="width:81%; height:100%; background:var(--purple);"></div></div><span class="mono" style="width:32px; text-align:right; font-size:12px; color:var(--text-dim);">253</span></div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Pune &middot; 95% of this project&rsquo;s leads</div></div>
+          </div>
+          <div class="region-row" style="position:relative; padding:10px 4px; border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:12px;"><div style="width:130px; font-size:12.5px; flex-shrink:0;">Godrej Emerald</div><div style="flex:1; height:7px; background:var(--surface-2); border-radius:4px; overflow:hidden;"><div style="width:64%; height:100%; background:var(--purple);"></div></div><span class="mono" style="width:32px; text-align:right; font-size:12px; color:var(--text-dim);">201</span></div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Pune &middot; 90% of this project&rsquo;s leads</div></div>
+          </div>
+          <div class="region-row" style="position:relative; padding:10px 4px;">
+            <div style="display:flex; align-items:center; gap:12px;"><div style="width:130px; font-size:12.5px; flex-shrink:0;">Oberoi Sky City</div><div style="flex:1; height:7px; background:var(--surface-2); border-radius:4px; overflow:hidden;"><div style="width:47%; height:100%; background:var(--purple);"></div></div><span class="mono" style="width:32px; text-align:right; font-size:12px; color:var(--text-dim);">148</span></div>
+            <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Mumbai &middot; 97% of this project&rsquo;s leads</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Allocation Matrix &middot; Region &times; TL</div>
+      <div class="matrix-grid" style="grid-template-columns:96px repeat(4, 1fr);">
+        <div></div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-align:center; text-transform:uppercase;">Suspect</div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-align:center; text-transform:uppercase;">Opp.</div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-align:center; text-transform:uppercase;">Visit</div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-align:center; text-transform:uppercase;">Booking</div>
+
+        <div style="font-size:12px; color:var(--text-dim); display:flex; align-items:center;">Thane &middot; Kavya</div>
+        <div class="matrix-cell" style="background:rgba(91,141,239,.32);">142<div class="matrix-tip">142 leads &middot; Thane &middot; Suspect</div></div>
+        <div class="matrix-cell" style="background:rgba(91,141,239,.5);">88<div class="matrix-tip">88 leads &middot; Thane &middot; Opportunity</div></div>
+        <div class="matrix-cell" style="background:rgba(45,212,191,.4);">41<div class="matrix-tip">41 leads &middot; Thane &middot; Visit</div></div>
+        <div class="matrix-cell" style="background:rgba(74,222,128,.35);">13<div class="matrix-tip">13 leads &middot; Thane &middot; Booking</div></div>
+
+        <div style="font-size:12px; color:var(--text-dim); display:flex; align-items:center;">Pune &middot; Arjun</div>
+        <div class="matrix-cell" style="background:rgba(91,141,239,.28);">118<div class="matrix-tip">118 leads &middot; Pune &middot; Suspect</div></div>
+        <div class="matrix-cell" style="background:rgba(91,141,239,.38);">64<div class="matrix-tip">64 leads &middot; Pune &middot; Opportunity</div></div>
+        <div class="matrix-cell" style="background:rgba(45,212,191,.28);">27<div class="matrix-tip">27 leads &middot; Pune &middot; Visit</div></div>
+        <div class="matrix-cell" style="background:rgba(74,222,128,.22);">8<div class="matrix-tip">8 leads &middot; Pune &middot; Booking</div></div>
+
+        <div style="font-size:12px; color:var(--text-dim); display:flex; align-items:center;">Mumbai &middot; Priya</div>
+        <div class="matrix-cell" style="background:rgba(91,141,239,.22);">96<div class="matrix-tip">96 leads &middot; Mumbai &middot; Suspect</div></div>
+        <div class="matrix-cell" style="background:rgba(91,141,239,.34);">59<div class="matrix-tip">59 leads &middot; Mumbai &middot; Opportunity</div></div>
+        <div class="matrix-cell" style="background:rgba(45,212,191,.24);">21<div class="matrix-tip">21 leads &middot; Mumbai &middot; Visit</div></div>
+        <div class="matrix-cell" style="background:rgba(74,222,128,.4);">14<div class="matrix-tip">14 leads &middot; Mumbai &middot; Booking</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-audit">
+  <div class="screen-inner" style="background: radial-gradient(1000px 480px at 50% -6%, rgba(139,147,161,0.05), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">Audit</h1>
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em;">hover an hour for its count</div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Activity by Hour &middot; today</div>
+      <div class="heat-strip">
+        <div class="heat-cell" style="background:rgba(91,141,239,.06);"><div class="heat-tip">12am &middot; 2 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">1am &middot; 0 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">2am &middot; 0 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">3am &middot; 1 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">4am &middot; 0 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.08);"><div class="heat-tip">5am &middot; 3 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.18);"><div class="heat-tip">6am &middot; 9 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.35);"><div class="heat-tip">7am &middot; 22 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.55);"><div class="heat-tip">8am &middot; 41 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.78);"><div class="heat-tip">9am &middot; 68 logged</div></div>
+        <div class="heat-cell" style="background:var(--blue);"><div class="heat-tip">10am &middot; 94 logged</div></div>
+        <div class="heat-cell" style="background:var(--blue);"><div class="heat-tip">11am &middot; 88 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.62);"><div class="heat-tip">12pm &middot; 52 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.45);"><div class="heat-tip">1pm &middot; 34 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.7);"><div class="heat-tip">2pm &middot; 61 logged</div></div>
+        <div class="heat-cell" style="background:var(--blue);"><div class="heat-tip">3pm &middot; 91 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.82);"><div class="heat-tip">4pm &middot; 72 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.58);"><div class="heat-tip">5pm &middot; 48 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.3);"><div class="heat-tip">6pm &middot; 19 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.12);"><div class="heat-tip">7pm &middot; 6 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.06);"><div class="heat-tip">8pm &middot; 2 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">9pm &middot; 1 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">10pm &middot; 0 logged</div></div>
+        <div class="heat-cell" style="background:rgba(91,141,239,.04);"><div class="heat-tip">11pm &middot; 0 logged</div></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-top:8px;"><span class="mono" style="font-size:10px; color:var(--text-faint);">12am</span><span class="mono" style="font-size:10px; color:var(--text-faint);">12pm</span><span class="mono" style="font-size:10px; color:var(--text-faint);">11pm</span></div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Recent Snapshots</div>
+      <div style="display:flex; flex-direction:column;">
+        <div class="region-row" style="position:relative; padding:10px 4px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; align-items:center; justify-content:space-between;"><span class="mono" style="font-size:12px; color:var(--text-dim);">Today, 2:00 PM</span><span style="font-size:12px;">Movement_Log snapshot</span><span class="mono" style="font-size:12px; color:var(--green);">1,284 rows</span></div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Scheduled trigger &middot; MovementTracker.gs &middot; every 6 hours &middot; no column mismatches</div></div>
+        </div>
+        <div class="region-row" style="position:relative; padding:10px 4px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;"><span class="mono" style="font-size:12px; color:var(--text-dim);">Today, 8:00 AM</span><span style="font-size:12px;">Movement_Log snapshot</span><span class="mono" style="font-size:12px; color:var(--green);">1,261 rows</span></div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Scheduled trigger &middot; MovementTracker.gs &middot; every 6 hours &middot; no column mismatches</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-movement">
+  <div class="screen-inner" style="background: radial-gradient(1000px 480px at 10% -6%, rgba(45,212,191,0.07), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">Movement</h1>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; padding:8px 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; font-size:12.5px; color:var(--text-dim);">Comparing 8:00 AM &rarr; 2:00 PM</div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-tile" style="--accent:var(--teal);">
+        <div class="num" style="color:var(--teal);">14</div>
+        <div class="label">Newly Stalled</div>
+        <div class="sub">Crossed an SLA between snapshots</div>
+      </div>
+      <div class="stat-tile" style="--accent:var(--purple);">
+        <div class="num" style="color:var(--purple);">61</div>
+        <div class="label">Overnight Cohort</div>
+        <div class="sub">Arrived 5 PM &ndash; 9 AM, first attempt pending</div>
+      </div>
+      <div class="stat-tile" style="--accent:var(--green);">
+        <div class="num" style="color:var(--green);">38</div>
+        <div class="label">Stage Changes</div>
+        <div class="sub">Moved forward in the funnel</div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+        <div class="display" style="font-size:15px; font-weight:600;">Status Changes</div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em;">hover a row for before &rarr; after</div>
+      </div>
+      <div style="display:flex; flex-direction:column;">
+        <div class="region-row" style="position:relative; padding:10px 4px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; align-items:center; justify-content:space-between;"><span style="font-size:12.5px;">Ananya Ghosh</span><span style="font-size:11.5px; color:var(--text-faint);">Kavya Reddy &middot; Thane</span><span class="mono" style="font-size:11.5px; color:var(--green);">Suspect &rarr; Opportunity</span></div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Prestige Heights &middot; changed at 1:42 PM, 3h 12m after assignment</div></div>
+        </div>
+        <div class="region-row" style="position:relative; padding:10px 4px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;"><span style="font-size:12.5px;">Suresh Pillai</span><span style="font-size:11.5px; color:var(--text-faint);">Arjun Nair &middot; Pune</span><span class="mono" style="font-size:11.5px; color:var(--green);">Opportunity &rarr; Visit Booked</span></div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">Godrej Emerald &middot; changed at 12:05 PM, 1d 4h after assignment</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-tracking">
+  <div class="screen-inner" style="background: radial-gradient(1000px 480px at 90% -6%, rgba(255,93,93,0.05), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">Tracking</h1>
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em;">last 7 snapshots</div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+        <div class="display" style="font-size:15px; font-weight:600;">Issue Count Over Time</div>
+        <div style="display:flex; gap:14px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);"><span style="width:9px; height:9px; border-radius:2px; background:var(--blue); display:inline-block;"></span>Behind on Calls</div>
+          <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);"><span style="width:9px; height:9px; border-radius:2px; background:var(--purple); display:inline-block;"></span>Not Updated</div>
+          <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);"><span style="width:9px; height:9px; border-radius:2px; background:var(--red); display:inline-block;"></span>Follow-up Overdue</div>
+        </div>
+      </div>
+      <svg viewBox="0 0 640 180" style="width:100%; height:200px; overflow:visible;">
+        <line x1="0" y1="40" x2="640" y2="40" stroke="var(--border)" stroke-width="1"></line>
+        <line x1="0" y1="90" x2="640" y2="90" stroke="var(--border)" stroke-width="1"></line>
+        <line x1="0" y1="140" x2="640" y2="140" stroke="var(--border)" stroke-width="1"></line>
+        <polyline points="0,110 91,102 183,88 274,95 366,70 457,60 640,47" fill="none" stroke="var(--blue)" stroke-width="2.5"></polyline>
+        <polyline points="0,140 91,132 183,138 274,120 366,124 457,108 640,96" fill="none" stroke="var(--purple)" stroke-width="2.5"></polyline>
+        <polyline points="0,150 91,148 183,144 274,146 366,132 457,126 640,118" fill="none" stroke="var(--red)" stroke-width="2.5"></polyline>
+        <circle cx="640" cy="47" r="4" fill="var(--blue)"></circle>
+        <circle cx="640" cy="96" r="4" fill="var(--purple)"></circle>
+        <circle cx="640" cy="118" r="4" fill="var(--red)"></circle>
+      </svg>
+      <div style="display:flex; justify-content:space-between; margin-top:6px;"><span class="mono" style="font-size:10.5px; color:var(--text-faint);">Aug 16</span><span class="mono" style="font-size:10.5px; color:var(--text-faint);">Aug 19</span><span class="mono" style="font-size:10.5px; color:var(--text-faint);">Aug 22</span></div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Cohort Comparison</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+        <div>
+          <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;">Aug 8 &ndash; Aug 15</div>
+          <div class="kv-row"><span>Total flagged</span><span style="color:var(--text);">312</span></div>
+          <div class="kv-row"><span>Resolved by next day</span><span style="color:var(--text);">68%</span></div>
+        </div>
+        <div>
+          <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;">Aug 15 &ndash; Aug 22</div>
+          <div class="kv-row"><span>Total flagged</span><span style="color:var(--green);">289</span></div>
+          <div class="kv-row"><span>Resolved by next day</span><span style="color:var(--green);">74%</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="screen" id="screen-rmtimeline">
+  <div class="screen-inner" style="background: radial-gradient(1000px 480px at 50% -6%, rgba(91,141,239,0.07), transparent 55%);">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; padding-bottom:22px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="mono" style="font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase;">Region Wise Leads &middot; Live Ops</div>
+        <h1 class="display" style="font-size:30px; font-weight:700; margin:0; letter-spacing:-.01em;">RM Timeline</h1>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; padding:8px 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; font-size:12.5px; color:var(--text-dim);">Kavya Reddy &middot; Thane</div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+        <div class="display" style="font-size:15px; font-weight:600;">Daily Activity &middot; last 28 days</div>
+        <div class="mono" style="font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em;">hover a day for detail</div>
+      </div>
+      <div class="cal-grid">
+        <div class="cal-cell" style="background:rgba(74,222,128,.15);">1<div class="cal-tip">Jul 26 &middot; 12 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.3);">2<div class="cal-tip">Jul 27 &middot; 18 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(245,166,35,.3);">3<div class="cal-tip">Jul 28 &middot; 9 calls &middot; 2 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.4);">4<div class="cal-tip">Jul 29 &middot; 21 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.2);">5<div class="cal-tip">Jul 30 &middot; 14 calls &middot; 1 issue</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">6<div class="cal-tip">Jul 31 &middot; weekend &middot; 3 calls</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">7<div class="cal-tip">Aug 1 &middot; weekend &middot; 1 call</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.35);">8<div class="cal-tip">Aug 2 &middot; 19 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(255,93,93,.32);">9<div class="cal-tip">Aug 3 &middot; 6 calls &middot; 4 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.42);">10<div class="cal-tip">Aug 4 &middot; 23 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.28);">11<div class="cal-tip">Aug 5 &middot; 17 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(245,166,35,.25);">12<div class="cal-tip">Aug 6 &middot; 11 calls &middot; 1 issue</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">13<div class="cal-tip">Aug 7 &middot; weekend &middot; 2 calls</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">14<div class="cal-tip">Aug 8 &middot; weekend &middot; 0 calls</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.38);">15<div class="cal-tip">Aug 9 &middot; 20 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.45);">16<div class="cal-tip">Aug 10 &middot; 24 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.3);">17<div class="cal-tip">Aug 11 &middot; 18 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(245,166,35,.28);">18<div class="cal-tip">Aug 12 &middot; 10 calls &middot; 1 issue</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.22);">19<div class="cal-tip">Aug 13 &middot; 13 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">20<div class="cal-tip">Aug 14 &middot; weekend &middot; 2 calls</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">21<div class="cal-tip">Aug 15 &middot; weekend &middot; 1 call</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.4);">22<div class="cal-tip">Aug 16 &middot; 22 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.33);">23<div class="cal-tip">Aug 17 &middot; 19 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(255,93,93,.4);">24<div class="cal-tip">Aug 18 &middot; 5 calls &middot; 5 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.36);">25<div class="cal-tip">Aug 19 &middot; 20 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:rgba(74,222,128,.25);">26<div class="cal-tip">Aug 20 &middot; 15 calls &middot; 0 issues</div></div>
+        <div class="cal-cell" style="background:var(--surface-2); color:var(--text-faint);">27<div class="cal-tip">Aug 21 &middot; weekend &middot; 1 call</div></div>
+        <div class="cal-cell" style="background:rgba(91,141,239,.45); color:var(--text); outline:1px solid var(--blue);">28<div class="cal-tip">Aug 22 &middot; today &middot; 16 calls so far</div></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px;">
+      <div class="display" style="font-size:15px; font-weight:600; margin-bottom:16px;">Today&rsquo;s Timeline &middot; Aug 22</div>
+      <div style="display:flex; flex-direction:column;">
+        <div class="region-row" style="position:relative; padding:10px 4px; border-bottom:1px solid var(--border);">
+          <div style="display:flex; align-items:center; justify-content:space-between;"><span class="mono" style="font-size:12px; color:var(--text-dim);">9:14 AM</span><span style="font-size:12.5px;">Called Ananya Ghosh</span><span class="mono" style="font-size:11.5px; color:var(--green);">Connected</span></div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">&ldquo;Interested in 2BHK, wants site visit&rdquo; &middot; moved to Opportunity</div></div>
+        </div>
+        <div class="region-row" style="position:relative; padding:10px 4px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;"><span class="mono" style="font-size:12px; color:var(--text-dim);">9:31 AM</span><span style="font-size:12.5px;">Called Vikram Chawla</span><span class="mono" style="font-size:11.5px; color:var(--text-dim);">RNR</span></div>
+          <div class="row-detail" style="max-height:0; opacity:0; overflow:hidden; transition:max-height .26s ease, opacity .2s ease;"><div style="margin-top:8px; font-size:11.5px; color:var(--text-faint);">No answer, second attempt &middot; follow-up set for 2:00 PM</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  .region-row:hover { background: rgba(255,255,255,0.015); }
+  .region-row:hover .row-detail { max-height: 80px; opacity: 1; }
+</style>
+
+<script>
+  function showScreen(btn) {
+    document.querySelectorAll('.chrome-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+  }
+</script>
