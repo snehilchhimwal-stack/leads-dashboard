@@ -935,9 +935,9 @@ async function fetchAndRender(){
           + (crossRegionGroups > 0
             ? ` ${crossRegionGroups.toLocaleString()} of those merges span more than one region (e.g. a Pune copy and a Thane copy sharing a lead_id or client_id) — the merged card can only display one, so the others get absorbed. Flagged with a red "Regions:" chip on affected cards; full detail in the console as <span class="mono">_lastCrossRegionCollations</span>.`
             : '');
-        dedupeEl.innerHTML = `<div>${summary} `
-          + `<button type="button" class="info-toggle" style="display:inline; padding:0;" data-label="ⓘ Details" onclick="toggleInlineDetail(this)">ⓘ Details</button></div>`
-          + `<div class="filter-summary" style="display:none; margin:6px 0 0;">${detail}</div>`;
+        dedupeEl.innerHTML = `<div class="notice-pill">${summary} `
+          + `<button type="button" class="info-toggle" style="display:inline; padding:0; margin:0;" data-label="ⓘ Details" onclick="toggleInlineDetail(this)">ⓘ Details</button></div>`
+          + `<div class="filter-summary" style="display:none; margin:6px 0 14px;">${detail}</div>`;
         // The UI text above promises "full detail in the console" — print
         // it here rather than leaving that as a hint someone has to know
         // to act on (typing the bare variable name into devtools) after
@@ -1533,20 +1533,21 @@ function _applyFiltersAndRenderImpl(){
   });
 
   const summary = document.getElementById('filterSummary');
-  // Plain text (this element uses .textContent, not .innerHTML, so no
-  // inline styling here — the collatedCountText/Label helpers used
-  // elsewhere for HTML contexts aren't a fit for this one).
+  // Just the count — which filters are active and what they're set to is
+  // already visible on the filter bar itself (each pill's own count badge,
+  // plus the From/To inputs showing their actual values directly), so
+  // restating every selected Project/Region/TL/Source/Sub-source value
+  // here in prose was pure duplication competing with the KPI strip right
+  // below for the same "first thing you read" attention. The shown-vs-total
+  // count is the one number that duplication used to carry — kept, in
+  // plainer form.
   const shownCollated = countCollatedAmong(leads).collated;
   const totalCollated = countCollatedAmong(allParsedLeads).collated;
   const shownText = shownCollated > 0 ? `${leads.length} (${shownCollated} cloned)` : String(leads.length);
   const totalText = totalCollated > 0 ? `${allParsedLeads.length} (${totalCollated} cloned)` : String(allParsedLeads.length);
-  summary.textContent = `Showing ${shownText} of ${totalText} leads` +
-    (projSel.size ? ` · Project: ${Array.from(projSel).join(', ')}` : '') +
-    (regSel.size ? ` · Region: ${Array.from(regSel).join(', ')}` : '') +
-    (tlSel.size ? ` · TL: ${Array.from(tlSel).join(', ')}` : '') +
-    (srcSel.size ? ` · Source: ${Array.from(srcSel).join(', ')}` : ' · Source: All') +
-    (bucketSel.size ? ` · Sub-source: ${Array.from(bucketSel).join(', ')}` : '') +
-    ((fromVal || toVal) ? ` · Created: ${fromVal || '…'} to ${toVal || '…'}` : '');
+  summary.textContent = leads.length === allParsedLeads.length
+    ? `Showing all ${totalText} leads`
+    : `Showing ${shownText} of ${totalText} leads`;
 
   renderAll();
 }

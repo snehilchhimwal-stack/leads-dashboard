@@ -8,6 +8,12 @@
 // no logic changed.
 // ============================================================
 
+// Both breakdowns below render as compact proportional-bar rows rather
+// than a wall of pill chips — same underlying numbers, far less visual
+// weight competing with the KPI strip right underneath. toggleInlineDetail
+// (core.js) is the same collapse mechanism used elsewhere in this file
+// (dedupe notice, section explainers) — it needs the toggle button
+// wrapped in its own element whose NEXT sibling is the detail block.
 function renderStageBreakdown(){
   const el = document.getElementById('stageBreakdown');
   if (!el) return;
@@ -23,17 +29,26 @@ function renderStageBreakdown(){
     if ((l.collatedFrom || 1) > 1) stageCounts[key].collated++;
   });
   const entries = Object.entries(stageCounts).sort((a,b) => b[1].n - a[1].n);
-  const chips = entries.map(([stage, info]) => {
+  const total = leads.length;
+
+  if (!entries.length) {
+    el.innerHTML = `<div class="mix-summary-head">No leads match the current filters</div>`;
+    return;
+  }
+
+  const rows = entries.map(([stage, info]) => {
     const count = info.n;
-    const countText = info.collated > 0 ? `${count} (${info.collated} cloned)` : String(count);
-    let cls = 'dim-chip';
+    const countText = info.collated > 0 ? `${count.toLocaleString()} (${info.collated} cloned)` : count.toLocaleString();
+    const pct = total ? Math.round(count / total * 100) : 0;
+
+    let barColor = 'var(--text-dim)';
     let tag = 'Open';
     let title = 'Still active — subject to call/48hr SLA tracking';
     if (isClosedStage(stage)) {
-      cls = 'red-chip'; tag = 'Closed';
+      barColor = 'var(--red)'; tag = 'Closed';
       title = 'Matched a closed-stage keyword (Won/Lost/Junk/Not Interested/etc.) — excluded from SLA tracking';
     } else if (isOppOrAbove(stage)) {
-      cls = 'green-chip'; tag = 'Opportunity+';
+      barColor = 'var(--green)'; tag = 'Opportunity+';
       title = 'At or past the Opportunity stage — excluded from SLA tracking, now sales-owned';
     }
 
@@ -54,31 +69,56 @@ function renderStageBreakdown(){
       bandLabel = 'Exits funnel';
     } else {
       bandLabel = 'NO FUNNEL BAND';
-      cls = 'amber-warn-chip';
+      barColor = 'var(--amber)'; tag = 'Unmapped';
       unmapped += count;
       title = 'This stage text matches no funnel band and is not a closed stage, so these live leads are invisible in the Funnel chart. Add the wording to CONFIG.STAGE_ALIASES to fix.';
     }
-    return `<span class="chip ${cls}" title="${esc(title)}">${esc(stage)}: ${countText} <span style="opacity:.72">→ ${esc(bandLabel)} · ${esc(tag)}</span></span>`;
-  }).join(' ');
+    return `<div class="mix-row" title="${esc(title)}">
+      <span class="mix-label">${esc(stage)}</span>
+      <div class="mix-track"><div class="mix-fill" style="width:${pct}%; background:${barColor};"></div></div>
+      <span class="mix-count">${countText} <span style="opacity:.65">→ ${esc(bandLabel)} · ${esc(tag)}</span></span>
+    </div>`;
+  }).join('');
 
   const warn = unmapped
-    ? ` <span style="color:var(--amber)"><b>${unmapped.toLocaleString()}</b> <b>live</b> lead${unmapped === 1 ? '' : 's'} sit in a stage the Funnel can't read — see the amber chips. Closed stages are excluded by design and are not counted here.</span>`
+    ? `<div style="font-size:11px; color:var(--amber); margin-top:6px;"><b>${unmapped.toLocaleString()}</b> live lead${unmapped === 1 ? '' : 's'} sit in a stage the Funnel can't read. Closed stages are excluded by design and are not counted here.</div>`
     : '';
 
-  el.innerHTML = entries.length
-    ? `<span class="dim" style="margin-right:8px;">Total leads: <b style="color:var(--text)">${collatedCountText(leads)}</b> · Stage breakdown (current filters), with the Funnel band each maps to —</span> ${chips}${warn}`
-    : `<span class="dim">No leads match the current filters</span>`;
+  el.innerHTML = `<div class="mix-summary"><div class="mix-summary-head">Total leads: <b style="color:var(--text)">${collatedCountText(leads)}</b> · Stage breakdown (current filters), with the Funnel band each maps to</div>${rows}${warn}</div>`;
 }
 
 function renderSourceBreakdown(sourceCounts, dedupedLeads){
   const el = document.getElementById('sourceBreakdown');
   const entries = Object.entries(sourceCounts).sort((a,b) => b[1].n - a[1].n);
-  const chips = entries.map(([src, info]) => {
+  const total = dedupedLeads.length;
+
+  // Only "google" gets its own accent (this is specifically the Google
+  // Search Leads dashboard, per the header eyebrow) — every other source
+  // stays one neutral tone rather than a rainbow, so the bar lengths do
+  // the differentiating, not a wall of competing colors.
+  const rowHtml = ([src, info]) => {
     const isGoogle = src.trim().toLowerCase() === CONFIG.GOOGLE_SOURCE_VALUE;
-    const countText = info.collated > 0 ? `${info.n} (${info.collated} cloned)` : String(info.n);
-    return `<span class="chip ${isGoogle ? 'green-chip' : 'dim-chip'}">${esc(src)}: ${countText}</span>`;
-  }).join(' ');
-  el.innerHTML = `<span class="dim" style="margin-right:8px;">Total leads: <b style="color:var(--text)">${collatedCountText(dedupedLeads)}</b> · by group_source, whole tab (not filtered) —</span> ${chips}`;
+    const countText = info.collated > 0 ? `${info.n.toLocaleString()} (${info.collated} cloned)` : info.n.toLocaleString();
+    const pct = total ? Math.round(info.n / total * 100) : 0;
+    return `<div class="mix-row">
+      <span class="mix-label" title="${esc(src)}">${esc(src)}</span>
+      <div class="mix-track"><div class="mix-fill" style="width:${pct}%; background:${isGoogle ? 'var(--green)' : 'var(--text-dim)'};"></div></div>
+      <span class="mix-count" style="width:120px; text-align:right;">${countText} · ${pct}%</span>
+    </div>`;
+  };
+
+  const TOP_N = 5;
+  const top = entries.slice(0, TOP_N);
+  const rest = entries.slice(TOP_N);
+  let html = `<div class="mix-summary-head">Total leads: <b style="color:var(--text)">${collatedCountText(dedupedLeads)}</b> · by group_source, whole tab (not filtered)</div>`;
+  html += top.map(rowHtml).join('');
+  if (rest.length) {
+    const restTotal = rest.reduce((s, [, info]) => s + info.n, 0);
+    const label = `ⓘ +${rest.length} more source${rest.length === 1 ? '' : 's'} (${restTotal.toLocaleString()})`;
+    html += `<div><button type="button" class="info-toggle" data-label="${esc(label)}" onclick="toggleInlineDetail(this)">${esc(label)}</button></div>`
+      + `<div style="display:none;">${rest.map(rowHtml).join('')}</div>`;
+  }
+  el.innerHTML = `<div class="mix-summary">${html}</div>`;
 }
 
 
@@ -126,57 +166,66 @@ function renderAll(){
   // array the code above already built (leads/oppPlusLeads/dueTodayLeads/
   // notConnLeads/noCallsLeads), so this is purely re-presenting numbers this
   // function already has in scope, not a new business rule. groupBy is the
-  // existing helper from reports.js (loaded before this file).
-  function topBreakdownBars(arr, keyFn, opts){
+  // existing helper from reports.js (loaded before this file). Returns the
+  // full bar-row HTML for the hover panel AND the single top entry, so the
+  // card's resting (non-hover) state can show one line of real context
+  // instead of sitting empty until someone hovers it.
+  function topBreakdown(arr, keyFn, opts){
     const total = arr.length;
-    if (!total) return `<div style="font-size:11.5px; color:var(--text-faint);">Nothing in this bucket right now.</div>`;
+    if (!total) {
+      return { html: `<div style="font-size:11.5px; color:var(--text-faint);">Nothing in this bucket right now.</div>`, top: null };
+    }
     const groups = groupBy(arr, item => keyFn(item) || 'Unknown');
     const pairs = Object.entries(groups).sort((a, b) => b[1].length - a[1].length).slice(0, opts && opts.limit || 4);
     const color = (opts && opts.color) || 'var(--blue)';
-    return pairs.map(([key, items]) => {
+    const html = pairs.map(([key, items]) => {
       const pct = Math.round(items.length / total * 100);
       return `<div class="bar-row"><span class="k" title="${esc(key)}">${esc(key)}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${color};"></div></div><span class="v">${items.length}</span></div>`;
     }).join('');
+    const [topKey, topItems] = pairs[0];
+    return { html, top: { key: topKey, pct: Math.round(topItems.length / total * 100) } };
   }
 
   const kpiTile = (opts) => `<div class="kpi hover-card${opts.critical ? ' critical' : ''}" style="--card-accent:${opts.accent};">
     <div class="kpi-num mono"${opts.numColor ? ` style="color:${opts.numColor}"` : ''}>${opts.numHtml}</div>
     <div class="kpi-label">${esc(opts.label)}</div>
+    ${opts.top ? `<div class="kpi-sub" title="${esc(opts.detailLabel)}">${opts.top.pct}% ${esc(opts.top.key)}</div>` : ''}
     <div class="card-detail"><div class="card-detail-inner">
       <div class="card-detail-label">${esc(opts.detailLabel)}</div>
       ${opts.detailHtml}
     </div></div>
   </div>`;
 
+  const totalBreakdown = topBreakdown(leads, l => l.group_source, { color: 'var(--blue)' });
+  const oppBreakdown = topBreakdown(oppPlusLeads, l => l.current_stage, { color: 'var(--green)' });
+  const dueTodayBreakdown = topBreakdown(dueTodayLeads, l => l.region, { color: 'var(--red)' });
+  const notConnBreakdown = topBreakdown(notConnLeads, l => l.RM, { color: 'var(--amber)' });
+  const noCallsBreakdown = topBreakdown(noCallsLeads, l => l.region, { color: 'var(--purple)' });
+
   document.getElementById('kpiStrip').innerHTML =
     kpiTile({
       label: 'Total Leads', accent: 'var(--blue)', numHtml: kpiNumHtml(totalCounts.total, totalCounts.collated),
-      detailLabel: 'By source',
-      detailHtml: topBreakdownBars(leads, l => l.group_source, { color: 'var(--blue)' }),
+      detailLabel: 'By source', detailHtml: totalBreakdown.html, top: totalBreakdown.top,
     }) +
     kpiTile({
       label: 'Opportunity+', accent: 'var(--green)', numColor: 'var(--green)',
       numHtml: kpiNumHtml(oppPlusCounts.total, oppPlusCounts.collated),
-      detailLabel: 'By stage',
-      detailHtml: topBreakdownBars(oppPlusLeads, l => l.current_stage, { color: 'var(--green)' }),
+      detailLabel: 'By stage', detailHtml: oppBreakdown.html, top: oppBreakdown.top,
     }) +
     kpiTile({
       label: "Behind on Today's Calls", accent: 'var(--red)', critical: true,
       numHtml: kpiNumHtml(dueTodayCounts.unique, dueTodayCounts.cloned),
-      detailLabel: 'By region',
-      detailHtml: topBreakdownBars(dueTodayLeads, l => l.region, { color: 'var(--red)' }),
+      detailLabel: 'By region', detailHtml: dueTodayBreakdown.html, top: dueTodayBreakdown.top,
     }) +
     kpiTile({
       label: 'Not Connected in 10 min', accent: 'var(--amber)', numColor: 'var(--amber)',
       numHtml: kpiNumHtml(notConnCounts.unique, notConnCounts.cloned),
-      detailLabel: 'By RM',
-      detailHtml: topBreakdownBars(notConnLeads, l => l.RM, { color: 'var(--amber)' }),
+      detailLabel: 'By RM', detailHtml: notConnBreakdown.html, top: notConnBreakdown.top,
     }) +
     kpiTile({
       label: 'No Attempts Yet', accent: 'var(--purple)',
       numHtml: kpiNumHtml(noCallsCounts.total, noCallsCounts.collated),
-      detailLabel: 'By region',
-      detailHtml: topBreakdownBars(noCallsLeads, l => l.region, { color: 'var(--purple)' }),
+      detailLabel: 'By region', detailHtml: noCallsBreakdown.html, top: noCallsBreakdown.top,
     });
 
   renderFunnel();
