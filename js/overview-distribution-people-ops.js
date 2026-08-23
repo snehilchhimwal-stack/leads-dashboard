@@ -1255,10 +1255,10 @@ function renderNotUpdatedList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing sitting in Not Updated right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
     const req = l.past48h ? CONFIG.MIN_CALLS_AFTER_48H : CONFIG.MIN_CALLS_PER_DAY;
     return renderAlertCard(l, idx, 'notupdated', req);
-  }).join('');
+  });
 }
 
 
@@ -1291,7 +1291,7 @@ function renderRecordingList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No mismatches — every lead with comments also has calls recorded</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
     const entries = parseActionLog(combinedCommentsText(l));
     const logId = 'recording_' + idx;
     const stateNote = l.excluded ? 'closed' : (l.oppOrAbove ? 'Opportunity+' : 'open');
@@ -1310,7 +1310,7 @@ function renderRecordingList(){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — <span class="chip amber">${esc(commentLabel)}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  });
 }
 
 // Closed with No Work Recorded — split out from Recording Not Working
@@ -1339,7 +1339,7 @@ function renderClosedNoWorkList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No closed lead is missing all work evidence</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
     const logId = 'closednowork_' + idx;
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
     return `<div class="alert-card">
@@ -1348,7 +1348,7 @@ function renderClosedNoWorkList(){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(closed${esc(closingNote)})</span> — <span class="chip red">Closed with no work recorded</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  });
 }
 
 // Newest internal comment timestamp, or null when none is dated.
@@ -1365,7 +1365,7 @@ function renderNotConnectedList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No connected leads missed the 10-minute first-contact window</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(missed.length, MAX_CARDS) + missed.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(missed.length, MAX_CARDS) + renderCardsByDay(missed, (l, idx) => {
     const logId = 'notconnlog_' + idx;
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
@@ -1373,7 +1373,7 @@ function renderNotConnectedList(){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · created ${esc(isoStamp(l.lead_created_at))} · connected ${esc(isoStamp(l.last_connect_time))}</div>
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  });
 }
 
 // SOP Rule 3 — attempts made but not logged in CRM.
@@ -1390,7 +1390,7 @@ function renderFollowupList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">All connected leads reviewed within 4 hours</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
     // The 4h clock runs from the last internal comment, so show that
     // timestamp explicitly rather than a relative figure — it's the value
     // the recipient needs to verify the flag themselves.
@@ -1405,7 +1405,7 @@ function renderFollowupList(){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${esc(clockLabel)}</span> <span class="chip amber">${l.call_attempts} attempts</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  });
 }
 
 function renderLoggingGapList(){
@@ -1422,7 +1422,7 @@ function renderLoggingGapList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No open lead has a meaningful gap between calls made and calls logged</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
     const logId = 'logginggaplog_' + idx;
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
@@ -1430,7 +1430,7 @@ function renderLoggingGapList(){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${l.call_attempts} calls, ${l.call_attempts - l.unloggedCallGap} logged</span> <span class="chip amber">gap of ${l.unloggedCallGap}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  });
 }
 
 

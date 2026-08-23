@@ -154,6 +154,78 @@ function istDateKey(date){
   return `${p.y}-${String(p.mo + 1).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
 }
 
+// "Today (22 Aug)" / "Yesterday (21 Aug)" / "3 days ago (19 Aug)" — the
+// relative half is what a reader scans for, the absolute date is what
+// makes the label unambiguous once it's a few days old. dayKey/todayKey
+// are both istDateKey() strings ("YYYY-MM-DD"), diffed as plain calendar
+// dates (UTC-based Date.UTC on the same y/m/d numbers) rather than real
+// elapsed time — the point is which IST calendar day, not a 24h duration.
+// IST_MONTHS is defined in reports.js, but nothing here resolves it until
+// this function actually runs (long after every script has loaded), so
+// the load-order difference doesn't matter — same reasoning applies
+// throughout this codebase's classic-script/global-function split.
+function relativeDayLabel(dayKey, todayKey){
+  const [y1, m1, d1] = dayKey.split('-').map(Number);
+  const [y2, m2, d2] = todayKey.split('-').map(Number);
+  const diffDays = Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+  const dateLabel = `${d1} ${IST_MONTHS[m1 - 1]}`;
+  if (diffDays === 0) return `Today (${dateLabel})`;
+  if (diffDays === 1) return `Yesterday (${dateLabel})`;
+  if (diffDays > 1) return `${diffDays} days ago (${dateLabel})`;
+  return dateLabel; // future-dated — shouldn't normally happen, just show the date
+}
+
+// Buckets an array of leads by lead_created_at's IST calendar day, newest
+// day first, WITHOUT re-sorting within a bucket — a leads array arriving
+// already sorted by the caller's own criterion (age, delay, whatever gap
+// metric that section cares about) keeps that order inside each day
+// bucket, since Array.forEach/push is stable. Undatable leads (no
+// parseable lead_created_at) land in one trailing "Unknown date" bucket
+// rather than being silently dropped or crashing the date math.
+function groupLeadsByCalendarDay(leadsArr, asOfDate){
+  const byDay = new Map();
+  const unknown = [];
+  leadsArr.forEach(l => {
+    const d = parseDate(l.lead_created_at);
+    if (!d) { unknown.push(l); return; }
+    const key = istDateKey(d);
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(l);
+  });
+  const todayKey = istDateKey(asOfDate || _renderNow);
+  const keys = Array.from(byDay.keys()).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)); // newest calendar day first
+  const groups = keys.map(key => ({ key, label: relativeDayLabel(key, todayKey), leads: byDay.get(key) }));
+  if (unknown.length) groups.push({ key: 'unknown', label: 'Unknown date', leads: unknown });
+  return groups;
+}
+
+// Shared card-list day-header — same visual pattern as the amber/red
+// sub-band labels already used elsewhere (Approaching Deadline vs Stuck,
+// the 0–48h/past-48h split) so a day boundary reads as the same kind of
+// thing, not a new UI element.
+function dayGroupHeaderHtml(label, isFirst){
+  return `<div class="stall-group-label" style="color:var(--text-faint); margin:${isFirst ? '0' : '16px'} 0 8px;">${esc(label)}</div>`;
+}
+
+// Renders a truncated, already-sorted lead group as day-bucketed cards —
+// MAX_CARDS applies to the whole group FIRST (so the cap means "the N
+// most relevant cards overall," not "N per day"), then what's left is
+// bucketed by calendar day. cardFn(lead, globalIdx) builds one card's
+// HTML; globalIdx is a running index across the ENTIRE shown list, not
+// reset per bucket — several render functions build a logToggle id from
+// this index (prefix + '_' + idx), and resetting per bucket would produce
+// colliding ids across buckets.
+function renderCardsByDay(group, cardFn){
+  const shown = group.slice(0, MAX_CARDS);
+  const dayGroups = groupLeadsByCalendarDay(shown, _renderNow);
+  let globalIdx = 0;
+  return dayGroups.map((dg, gi) => {
+    const header = dayGroupHeaderHtml(dg.label, gi === 0);
+    const cards = dg.leads.map(l => cardFn(l, globalIdx++)).join('');
+    return header + cards;
+  }).join('');
+}
+
 /* This list drives the "unmatched header" warning, so it must contain ONLY
  * columns the code actually reads. A dead entry here produces a false alarm
  * that trains you to ignore a genuinely useful check — which is exactly what
