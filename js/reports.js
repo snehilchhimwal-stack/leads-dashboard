@@ -448,8 +448,17 @@ function buildRegionReports(issueKey){
 
     const byRM = groupBy(regionLeads, l => (l.RM || 'Unassigned') + '||' + (l.TL || ''));
 
+    // inactiveRm leads are always created today (isCreatedToday is part of
+    // the flag itself) — day-bucketing would always produce exactly one
+    // "Today" header, so it's skipped for that issue only.
+    const rmLeadLines = (group) => issueKey === 'inactiveRm'
+      ? group.map(leadLine).join('\n')
+      : groupLeadsByCalendarDay(group, now).map(dg =>
+          `  ${dg.label}\n${dg.leads.map(leadLine).join('\n')}`
+        ).join('\n\n');
+
     const blocks = Object.values(byRM).map(group =>
-      `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
+      `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${rmLeadLines(group)}\n`
     ).join('\n');
 
     // Only true for the issues that actually always wait for grace at the
@@ -519,16 +528,27 @@ function buildRegionReports(issueKey){
       sections: Object.values(byRM).map(group => ({
         heading: group[0].RM || 'Unassigned',
         subheading: `Manager: ${group[0].TL || '—'}`,
-        columns: (issueKey === 'dueToday' ? ['Lead ID', 'Created', 'Age', 'Window', 'Attempts Today']
-          : isReminder ? ['Lead ID', 'Created', 'Age', 'Connected Late By']
-          : ['Lead ID', 'Created', 'Age']).concat('Suggested Follow-up'),
+        // "Date" gives the same calendar-day grouping the plain-text body
+        // gets as real section headers — here as a column instead, since
+        // this section is already one bordered box per RM and multiplying
+        // that into one box per RM×day would get visually heavy in an
+        // email. Skipped for inactiveRm, whose leads are always today's by
+        // definition (isCreatedToday is part of the flag itself).
+        columns: (['Lead ID', 'Created'].concat(issueKey === 'inactiveRm' ? [] : ['Date']).concat(
+          issueKey === 'dueToday' ? ['Age', 'Window', 'Attempts Today']
+          : isReminder ? ['Age', 'Connected Late By']
+          : ['Age']
+        )).concat('Suggested Follow-up'),
         rows: group.map(l => {
           const created = parseDate(l.lead_created_at);
           const cells = [
             l.lead_id + ((l.siblingRMs && l.siblingRMs.length) ? ` (also held by: ${l.siblingRMs.join(', ')})` : ''),
             created ? istStamp(l.lead_created_at) : 'unknown',
-            created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—',
           ];
+          if (issueKey !== 'inactiveRm') {
+            cells.push(created ? relativeDayLabel(istDateKey(created), istDateKey(now)) : 'unknown');
+          }
+          cells.push(created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—');
           if (issueKey === 'dueToday') cells.push(l.isUnder48h ? '0–48h' : 'PAST 48h');
           if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.attemptsToday));
           if (isReminder) cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
