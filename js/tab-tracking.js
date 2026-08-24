@@ -187,6 +187,33 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
 // the live current sheet's status — same fallback computeStatusChanges
 // already relies on for a related question. A lead with neither is
 // excluded entirely rather than guessed.
+// Status "as of" a specific deadline for one lead's retained history —
+// prefers the latest snapshot AT OR BEFORE the deadline, falls back to the
+// first one AFTER it (both carry up to ~6h resolution slack, same as
+// computeZeroTo48hCohort's own original inline version of this), and
+// finally falls back to the live current sheet when the history has
+// nothing on either side (deadline outside Movement_Log's retention
+// window). Returns null when there's truly no evidence either way
+// (unresolved AND no longer in the live sheet) — callers decide how to
+// count that, never guess. Shared by computeZeroTo48hCohort (deadline =
+// each lead's own 48h mark) and computeDailyCohortByRegion (deadline =
+// either end-of-day or the 48h mark, per lead, per metric).
+function evidenceAtDeadline(history, deadlineMs, liveLead){
+  let atOrBefore = null, firstAfter = null;
+  history.forEach(rec => {
+    const atMs = rec.snapshot_at.getTime();
+    if (atMs <= deadlineMs) { if (!atOrBefore || atMs > atOrBefore.snapshot_at.getTime()) atOrBefore = rec; }
+    else if (!firstAfter || atMs < firstAfter.snapshot_at.getTime()) firstAfter = rec;
+  });
+  const evidence = atOrBefore || firstAfter;
+  if (evidence) {
+    const enriched = enrichSnapshotCached(evidence);
+    return { oppOrAbove: enriched.oppOrAbove, isOpenLead: enriched.isOpenLead, evidence };
+  }
+  if (liveLead) return { oppOrAbove: liveLead.oppOrAbove, isOpenLead: liveLead.isOpenLead, evidence: null };
+  return null;
+}
+
 function computeZeroTo48hCohort(){
   const fromVal = document.getElementById('dateFromInput').value;
   const toVal = document.getElementById('dateToInput').value;
@@ -218,26 +245,10 @@ function computeZeroTo48hCohort(){
     if (nowMs < deadlineMs) return; // population D — window hasn't elapsed yet, excluded from every rate below
 
     popB++;
-    let atOrBefore = null, firstAfter = null;
-    history.forEach(rec => {
-      const atMs = rec.snapshot_at.getTime();
-      if (atMs <= deadlineMs) { if (!atOrBefore || atMs > atOrBefore.snapshot_at.getTime()) atOrBefore = rec; }
-      else if (!firstAfter || atMs < firstAfter.snapshot_at.getTime()) firstAfter = rec;
-    });
-    const evidence = atOrBefore || firstAfter;
-    let oppOrAbove, isOpenLead;
-    if (evidence) {
-      const enriched = enrichSnapshotCached(evidence);
-      oppOrAbove = enriched.oppOrAbove;
-      isOpenLead = enriched.isOpenLead;
-    } else {
-      const live = liveByKey.get(key);
-      if (!live) { popUnresolved++; return; }
-      oppOrAbove = live.oppOrAbove;
-      isOpenLead = live.isOpenLead;
-    }
-    if (oppOrAbove) popC_opp++;
-    else if (isOpenLead) { popC_stillOpen++; stillOpenLeads.push({ key, created, evidence, live: liveByKey.get(key) }); }
+    const result = evidenceAtDeadline(history, deadlineMs, liveByKey.get(key));
+    if (!result) { popUnresolved++; return; }
+    if (result.oppOrAbove) popC_opp++;
+    else if (result.isOpenLead) { popC_stillOpen++; stillOpenLeads.push({ key, created, evidence: result.evidence, live: liveByKey.get(key) }); }
     else popC_closed++;
   });
 
@@ -552,6 +563,7 @@ function renderTrackingTab(){
   // instead, so it must not go blank just because no snapshot pair happens
   // to be selected.
   render48hCohort();
+  renderDailyCohortByRegion();
 
   if (!table || !regionSelect || !chartEl) return;
 
@@ -780,4 +792,137 @@ function render48hCohort(){
         </div>`;
       }).join('')
     : `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Every cohort-complete lead in range either converted or closed by its own 48h mark.</div>`;
+}
+
+// One specific calendar day (not a range) of leads, broken down BY REGION,
+// answering three questions per region: of the leads CREATED that day, (1)
+// what % had already reached Opportunity+ by the END of that same day (or
+// "as of right now" if that day isn't over yet), (2) of those whose 48h
+// window has fully elapsed by now, what % reached Opportunity+ by their own
+// 48h mark, and (3) of that same 48h-complete group, what % closed without
+// ever converting. (2) and (3) share one denominator (the 48h-complete
+// subset) since both ask "what had happened by the 48h mark" — only the
+// outcome differs. Same evidence method as computeZeroTo48hCohort
+// (evidenceAtDeadline): nearest retained Movement_Log snapshot at-or-before
+// the deadline, live sheet as fallback, unresolved leads excluded rather
+// than guessed. Returns null when no date is picked.
+function computeDailyCohortByRegion(dateKey){
+  if (!dateKey) return null;
+  const dayStart = parseDate(dateKey + ' 00:00:00');
+  const dayEnd = parseDate(dateKey + ' 23:59:59');
+  if (!dayStart || !dayEnd) return null;
+
+  const byLead = buildMovementHistories();
+  const nowMs = Date.now();
+  const sameDayDeadlineMs = Math.min(dayEnd.getTime(), nowMs);
+  const liveByKey = new Map();
+  allParsedLeads.forEach(l => {
+    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    liveByKey.set(key, l);
+  });
+
+  const byRegion = new Map(); // mainRegion -> stats
+  function statsFor(region){
+    if (!byRegion.has(region)) byRegion.set(region, {
+      region, created: 0,
+      sameDayResolved: 0, sameDayOpp: 0,
+      windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0,
+    });
+    return byRegion.get(region);
+  }
+
+  let totalCreated = 0;
+  byLead.forEach((history, key) => {
+    if (!history.length) return;
+    if (!passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — region here narrows WHICH regions appear at all, same as every other Movement view
+    const created = parseDate(history[0].lead_created_at);
+    if (!created) return;
+    if (created < dayStart || created > dayEnd) return; // not created on this day
+
+    totalCreated++;
+    const region = mainRegionFor(effectiveRegion(history[0])) || 'Unmapped';
+    const stats = statsFor(region);
+    stats.created++;
+
+    const sameDay = evidenceAtDeadline(history, sameDayDeadlineMs, liveByKey.get(key));
+    if (sameDay) {
+      stats.sameDayResolved++;
+      if (sameDay.oppOrAbove) stats.sameDayOpp++;
+    }
+
+    const deadline48hMs = created.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000;
+    if (nowMs < deadline48hMs) return; // this lead's own 48h window hasn't elapsed yet
+    stats.windowComplete++;
+    const at48h = evidenceAtDeadline(history, deadline48hMs, liveByKey.get(key));
+    if (!at48h) return;
+    stats.resolved48h++;
+    if (at48h.oppOrAbove) stats.opp48h++;
+    else if (!at48h.isOpenLead) stats.closed48h++;
+  });
+
+  return { dateKey, totalCreated, byRegion };
+}
+
+// Renders computeDailyCohortByRegion as a region-wise table — one row per
+// main region (every known region, even a 0-lead one, for a stable table
+// shape) plus a combined total row. Reads its own single-day date picker
+// (trackingDailyDateInput), independent of both the From/To snapshot picker
+// above and the global Created-date range filter in the top bar.
+function renderDailyCohortByRegion(){
+  const countEl = document.getElementById('trackingDailyCount');
+  const noticeEl = document.getElementById('trackingDailyNotice');
+  const table = document.getElementById('trackingDailyTable');
+  if (!table) return;
+  const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
+
+  const clear = (message) => {
+    if (countEl) countEl.textContent = '';
+    thead.innerHTML = ''; tbody.innerHTML = '';
+    if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
+  };
+
+  if (movementFetchState !== 'ok') { clear('Same as the sections above — needs Movement_Log data.'); return; }
+
+  const dateInput = document.getElementById('trackingDailyDateInput');
+  const dateKey = dateInput ? dateInput.value : '';
+  const result = computeDailyCohortByRegion(dateKey);
+  if (!result) { clear('Pick a date above to see that day\'s leads broken down by region.'); return; }
+  if (!result.totalCreated) { clear(`No leads (for the current Project/Region/TL/Source filters) were created on ${esc(dateKey)}.`); return; }
+  if (noticeEl) noticeEl.style.display = 'none';
+  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} created ${dateKey}`;
+
+  thead.innerHTML = `<tr>
+    <th>Region</th>
+    <th style="text-align:right">Created</th>
+    <th style="text-align:right" title="Of leads created that day, reached Opportunity+ by end of that day (or as of now, if the day isn't over yet)">Same-Day Opp%</th>
+    <th style="text-align:right" title="Of leads whose 48h window has fully elapsed by now, reached Opportunity+ by their own 48h mark">48h Opp%</th>
+    <th style="text-align:right" title="Of the same 48h-complete group, closed without ever converting">48h Close%</th>
+    <th style="text-align:right" title="How many of this region's leads have had their full 48h window elapse — the denominator for the two 48h columns. Fully available ~2 days after the picked date.">48h Window Complete</th>
+  </tr>`;
+
+  const pct = (n, d) => d ? `${(n / d * 100).toFixed(1)}%` : '—';
+  const regionList = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort();
+  const rowHtml = (stats, rowStyle) => `<tr${rowStyle ? ` style="${rowStyle}"` : ''}>
+    <td>${esc(stats.region)}</td>
+    <td class="num">${stats.created}</td>
+    <td class="num">${pct(stats.sameDayOpp, stats.sameDayResolved)}</td>
+    <td class="num">${pct(stats.opp48h, stats.resolved48h)}</td>
+    <td class="num">${pct(stats.closed48h, stats.resolved48h)}</td>
+    <td class="num dim">${stats.resolved48h} of ${stats.created}${stats.windowComplete < stats.created ? ' (partial)' : ''}</td>
+  </tr>`;
+
+  const rows = regionList
+    .map(r => result.byRegion.get(r) || { region: r, created: 0, sameDayResolved: 0, sameDayOpp: 0, windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0 })
+    .filter(stats => stats.created > 0)
+    .sort((a, b) => b.created - a.created)
+    .map(stats => rowHtml(stats));
+
+  const totals = { region: 'All Regions', created: 0, sameDayResolved: 0, sameDayOpp: 0, windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0 };
+  result.byRegion.forEach(s => {
+    totals.created += s.created; totals.sameDayResolved += s.sameDayResolved; totals.sameDayOpp += s.sameDayOpp;
+    totals.windowComplete += s.windowComplete; totals.resolved48h += s.resolved48h; totals.opp48h += s.opp48h; totals.closed48h += s.closed48h;
+  });
+  rows.push(rowHtml(totals, 'font-weight:600; border-top:2px solid var(--border);'));
+
+  tbody.innerHTML = rows.join('');
 }

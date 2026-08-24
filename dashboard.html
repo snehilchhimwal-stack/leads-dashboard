@@ -572,6 +572,7 @@
   .section-bar.green{ background:var(--green); }
   .section-bar.red{ background:var(--red); }
   .section-bar.amber{ background:var(--amber); }
+  .section-bar.purple{ background:var(--purple); }
   .section-title{ font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; letter-spacing:.01em; }
 
   /* Count pill encodes severity: quiet when clear, loud when there's work. */
@@ -1256,6 +1257,16 @@
         <div id="tracking48hNotice" class="truncation-notice" style="display:none;"></div>
         <div id="tracking48hSummary" style="margin-bottom:10px;"></div>
         <div class="section-scroll"><div class="card-list" id="tracking48hList"></div></div>
+      </section>
+
+      <section id="sec-tracking-daily">
+        <div class="section-head"><div class="section-bar purple"></div><div class="section-title">Daily Cohort by Region</div><div class="section-count" id="trackingDailyCount"></div></div>
+        <div class="filter-summary">Pick one specific day (not a range): of the leads CREATED that day, per region — Same-Day Opp% (reached Opportunity+ by the end of that day, or as of right now if the day's still in progress), 48h Opp% and 48h Close% (status at each lead's own 48-hour mark, once it's elapsed — fully available for every lead roughly 2 days after the picked date), and how many of the region's leads that 48h figure is actually based on so a partial cohort is visible, not hidden. Same evidence method as 0&ndash;48h Cohort Outcome above (closest retained Movement_Log snapshot, live sheet as fallback).</div>
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="date-filter">Date <input type="date" id="trackingDailyDateInput" /></label>
+        </div>
+        <div id="trackingDailyNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll"><table id="trackingDailyTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
       <section id="sec-slahistory-admin">

@@ -1633,4 +1633,18 @@ function initMovementUI(){
   if (trFromTimeSel) trFromTimeSel.addEventListener('change', renderTrackingTab);
   if (trToTimeSel) trToTimeSel.addEventListener('change', renderTrackingTab);
   if (trRegionSel) trRegionSel.addEventListener('change', renderTrackingTab);
+
+  // Daily Cohort by Region's own single-date picker — independent of every
+  // other picker on this tab, so it only needs to re-run its own renderer,
+  // not the whole tab.
+  const trDailyDateInput = document.getElementById('trackingDailyDateInput');
+  if (trDailyDateInput) {
+    // Defaults to 2 days ago (IST) so every column has a complete number on
+    // first load instead of the 48h columns starting out empty/partial.
+    if (!trDailyDateInput.value) {
+      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000);
+      trDailyDateInput.value = istDateKey(twoDaysAgo);
+    }
+    trDailyDateInput.addEventListener('change', renderDailyCohortByRegion);
+  }
 }
