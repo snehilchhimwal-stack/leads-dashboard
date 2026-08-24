@@ -338,14 +338,98 @@ function emailTableHtml_(title, rows, color) {
     '<tr>' + headerCells + '</tr>' + bodyRows + '</table></div>';
 }
 
+// Mirrors the dashboard's own overnightStatusLabel (js/tab-movement.js) —
+// canonical funnel stage, Title Cased, or the raw stage text verbatim when
+// it doesn't match a known funnel band, so nothing silently disappears.
+// Never called for a closed lead — those are excluded before this runs.
+function overnightStatusLabelGs_(stage) {
+  const canon = canonicalStage_(stage);
+  if (canon) return canon.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  return String(stage || '').trim() || 'Unrecognized Stage';
+}
+
+// A deliberately coarser "what to do next" than the dashboard's own
+// suggestedFollowUp, which parses actual logged comment text for outcome
+// keywords across every sibling copy of a customer — that depends on the
+// dashboard's own in-browser identity-clustering over the whole fetched
+// dataset, which this unattended server-side trigger has no access to
+// (same reasoning as combinedCommentsTextGs_ above). Falls back to the
+// one signal readily available here: has this lead been connected at all,
+// and which SLA check (if any) is currently flagging it.
+function overnightFollowupHintGs_(row, colIndex, flags) {
+  const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
+  const hasConnected = (connectTimeRaw instanceof Date) || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
+  if (!hasConnected) return 'Connect ASAP — no contact made yet.';
+  if (flags.followupOverdue) return 'Follow up now — over 4h since last contact with no update logged.';
+  if (flags.isNotUpdated) return "Log a status update — this lead hasn't been updated.";
+  return 'Keep working this lead — no SLA issue flagged yet.';
+}
+
+// Apps Script port of the dashboard's renderReportEmailHTML
+// (js/reports.js) — same eyebrow/KPI-card/section visual shell, hand-built
+// here since Apps Script is a separate runtime with no access to that
+// browser-side function. Narrower than the original: no `highlights`
+// param (this email never uses one) and the eyebrow/title/signature are
+// fixed rather than parameterized, since this is the only email that
+// calls it.
+function renderOvernightReportEmailHTML_(opts) {
+  const FONT = 'font-family:Arial,Helvetica,sans-serif;';
+  const kpiCells = opts.kpis.map(function (k) {
+    return '<td style="padding:4px;"><div style="background:' + k.bg + '; border-radius:8px; padding:14px 10px; text-align:center;">' +
+      '<div style="' + FONT + ' font-size:24px; font-weight:700; color:' + k.fg + '; line-height:1;">' + esc_(String(k.value)) + '</div>' +
+      '<div style="' + FONT + ' font-size:10.5px; color:#6b7280; margin-top:5px;">' + esc_(k.label) + '</div>' +
+      '</div></td>';
+  }).join('');
+
+  const actionBox = opts.action
+    ? '<div style="margin-top:12px; border-left:4px solid #10b981; background:#ecfdf5; border-radius:0 8px 8px 0; padding:10px 14px;">' +
+      '<div style="' + FONT + ' font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; color:#059669;">Recommended Action</div>' +
+      '<div style="' + FONT + ' font-size:12.5px; color:#065f46; margin-top:3px;">' + esc_(opts.action) + '</div></div>'
+    : '';
+
+  const sectionsHtml = opts.sections.map(function (sec) {
+    const headerRow = '<tr style="background:#eef2ff;">' + sec.columns.map(function (c) {
+      return '<td style="padding:7px 10px; color:#4338ca; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ' + FONT + '">' + esc_(c) + '</td>';
+    }).join('') + '</tr>';
+    const bodyRows = sec.rows.map(function (row, i) {
+      return '<tr style="' + (i > 0 ? 'border-top:1px solid #f0f0f0;' : '') + '">' +
+        row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(String(cell)) + '</td>'; }).join('') +
+        '</tr>';
+    }).join('');
+    return '<div style="margin-top:16px; border-left:4px solid #4338ca; background:#f5f5ff; border-radius:0 8px 8px 0; padding:12px 16px;">' +
+      '<div style="' + FONT + ' font-weight:700; font-size:14px; color:#1f2937;">' + esc_(sec.heading) + '</div>' +
+      (sec.subheading ? '<div style="' + FONT + ' font-size:11.5px; color:#6b7280; margin-bottom:8px;">' + esc_(sec.subheading) + '</div>' : '') +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">' +
+      headerRow + bodyRows + '</table></div>';
+  }).join('');
+
+  return '<div style="' + FONT + ' max-width:640px; margin:0 auto; background:#ffffff; color:#1f2937;">' +
+    '<div style="background:#4338ca; padding:22px 26px;">' +
+    '<div style="color:#c7d2fe; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; margin-bottom:6px; ' + FONT + '">Lead Funnel · SLA Monitor</div>' +
+    '<div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ' + FONT + '">Overnight Leads</div>' +
+    '<div style="color:#ffffff; font-size:13px; font-weight:600; margin-bottom:2px; ' + FONT + '">Region: ' + esc_(opts.region) + '</div>' +
+    '<div style="color:#e0e7ff; font-size:12.5px; ' + FONT + '">' + esc_(opts.subtitle) + '</div>' +
+    '</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;"><tr>' + kpiCells + '</tr></table>' +
+    actionBox + sectionsHtml +
+    (opts.footerNote ? '<div style="margin-top:18px; font-size:11px; color:#9ca3af; ' + FONT + '">' + esc_(opts.footerNote) + '</div>' : '') +
+    '<div style="margin-top:16px; font-size:13px; color:#374151; white-space:pre-line; ' + FONT + '">Regards,\nHomesfy Lead Ops</div>' +
+    '</div>';
+}
+
 /**
  * 10am run: builds and sends one email per region with a configured
- * recipient and at least one overnight lead, covering every overnight lead
- * broken into three groups — created (the full list), flagged with an
- * issue, and already reached Opportunity+ — same "whole funnel, not just
- * still-open" scope as the dashboard's own Overnight Leads section. Logs
- * each region's Gmail thread ID and its issue-leads (lead_id + which issue)
- * to Overnight_Log for the 1pm follow-up to read back.
+ * recipient and at least one still-open overnight lead. ONLY leads that
+ * have NOT reached Opportunity+ and are NOT closed are shown — a lead that
+ * already converted or closed overnight needs no follow-up action, so it's
+ * dropped rather than cluttering the list (same scope as the dashboard's
+ * own Overnight Leads email, js/tab-movement.js's overnightEmailableLeads).
+ * Grouped by RM (with their manager named), each lead shown as just
+ * Lead ID / current Status / a suggested next action — nothing else.
+ * Still separately computes and logs which of these leads are flagged for
+ * an SLA issue (Overnight_Log) — that's what the 1pm follow-up re-checks;
+ * it isn't part of what this email displays, since "status" here is the
+ * lead's funnel stage, not which SLA check fired.
  */
 function sendOvernightMorningEmails() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -358,7 +442,7 @@ function sendOvernightMorningEmails() {
   // shared file, same retry reasoning as readLeadsTab_ above.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
 
-  const byRegion = {}; // mainRegion -> { created: [], issues: [], opps: [] }
+  const byRegion = {}; // mainRegion -> { openLeads: [], issueLog: [] }
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
@@ -370,26 +454,25 @@ function sendOvernightMorningEmails() {
     const main = mainRegionForGs_(rawRegion);
     if (!main) return; // not one of the 11 configured regions
 
-    if (!byRegion[main]) byRegion[main] = { created: [], issues: [], opps: [] };
     const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    const RM = String(getVal_(row, colIndex, 'RM') || '').trim();
-    const entry = { lead_id: leadId, RM: RM, stage: stage };
-
-    byRegion[main].created.push(Object.assign({}, entry, { detail: 'Created' }));
-
-    if (isOppOrAbove_(stage)) {
-      byRegion[main].opps.push(Object.assign({}, entry, { detail: 'Opportunity+' }));
-      return;
-    }
+    if (isOppOrAbove_(stage)) return; // already converted overnight — excluded, needs no follow-up
     const closingReason = getVal_(row, colIndex, 'closing_reason');
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed overnight — neither an issue nor an opp
+    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed overnight — excluded
+
+    if (!byRegion[main]) byRegion[main] = { openLeads: [], issueLog: [] };
+    const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+    const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags);
-    if (issue) {
-      byRegion[main].issues.push(Object.assign({}, entry, { detail: issue.label, issueKey: issue.key }));
-    }
+    if (issue) byRegion[main].issueLog.push({ lead_id: leadId, issueKey: issue.key, issueLabel: issue.label });
+
+    byRegion[main].openLeads.push({
+      lead_id: leadId, RM: RM, TL: TL,
+      status: overnightStatusLabelGs_(stage),
+      followup: overnightFollowupHintGs_(row, colIndex, flags),
+    });
   });
 
   const logSheet = ensureOvernightLogSheet_(ss);
@@ -398,25 +481,41 @@ function sendOvernightMorningEmails() {
 
   Object.keys(byRegion).sort().forEach(function (region) {
     const g = byRegion[region];
-    if (!g.created.length) return; // nothing overnight for this region
+    if (!g.openLeads.length) return; // nothing still-open overnight for this region
 
-    const rmNames = Array.from(new Set(g.created.map(function (r) { return r.RM; }).filter(Boolean)));
+    const rmNames = Array.from(new Set(g.openLeads.map(function (l) { return l.RM; })));
     const rec = resolveRecipientsForRegion_(ss, region, rmNames, recipients);
     if (!rec) return; // no manager email resolved AND no legacy Region_Recipients entry — silently skipped, not a fault
 
+    const byRM = {}; // RM -> { TL, leads: [] }
+    g.openLeads.forEach(function (l) {
+      if (!byRM[l.RM]) byRM[l.RM] = { TL: l.TL, leads: [] };
+      byRM[l.RM].leads.push(l);
+    });
+    const rmKeys = Object.keys(byRM).sort();
+    const statusTypeCount = Array.from(new Set(g.openLeads.map(function (l) { return l.status; }))).length;
+
     const subject = region + ' Overnight Leads - ' + dateLabel;
-    const bodyHtml =
-      '<div style="font-family:Arial,sans-serif; font-size:13px; color:#374151;">' +
-      '<p>Overnight leads for <b>' + esc_(region) + '</b> (' + Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') +
-      ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST):</p>' +
-      emailTableHtml_('Leads Created', g.created, '#374151') +
-      emailTableHtml_('Flagged With an Issue', g.issues, '#b45309') +
-      emailTableHtml_('Already Reached Opportunity+', g.opps, '#059669') +
-      '<p style="margin-top:14px; font-size:11px; color:#9ca3af;">A follow-up on this same thread will land around 1pm showing which of the issue leads above are still unresolved.</p>' +
-      '</div>';
-    const plainBody = 'Overnight leads for ' + region + ' (' + dateLabel + '). Created: ' + g.created.length +
-      ', flagged with an issue: ' + g.issues.length + ', already Opportunity+: ' + g.opps.length +
-      '. Open this email in Gmail for the full HTML breakdown.';
+    const html = renderOvernightReportEmailHTML_({
+      region: region,
+      subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
+      kpis: [
+        { value: g.openLeads.length, label: g.openLeads.length === 1 ? 'Lead Created' : 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
+        { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
+      ],
+      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+      sections: rmKeys.map(function (rm) {
+        return {
+          heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
+          columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
+          rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
+        };
+      }),
+      footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
+    });
+    const plainBody = 'Overnight leads for ' + region + ' (' + dateLabel + '): ' + g.openLeads.length +
+      ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
 
     Logger.log('Morning email recipients for ' + region + ': ' + rec.source);
     let sentMessage;
@@ -427,7 +526,7 @@ function sendOvernightMorningEmails() {
       sentMessage = withRetry_(function () {
         return GmailApp.createDraft(rec.to, subject, plainBody, {
           cc: rec.cc || undefined,
-          htmlBody: bodyHtml,
+          htmlBody: html,
           name: 'Homesfy Lead Ops',
         }).send();
       }, 'send morning email (' + region + ')');
@@ -437,9 +536,8 @@ function sendOvernightMorningEmails() {
     }
 
     const threadId = sentMessage.getThread().getId();
-    const issueLog = g.issues.map(function (r) { return { lead_id: r.lead_id, issueKey: r.issueKey, issueLabel: r.detail }; });
     withRetry_(function () {
-      logSheet.appendRow([todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
+      logSheet.appendRow([todayKey, region, threadId, JSON.stringify(g.issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
     }, 'log Overnight_Log row (' + region + ')');
   });
 }
