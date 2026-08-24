@@ -1854,7 +1854,14 @@ Total : ${warmCloseTotalLabel}` : '';
     }
     const highlightsBlock = highlights.length ? `Highlights:\n${highlights.map(h => `  • ${h}`).join('\n')}\n\n` : '';
 
-    const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue${subjectScopeSuffix()}`;
+    // Deliberately no subjectScopeSuffix() here (unlike the per-issue and
+    // combined-all-issues-x-regions subjects) — a Regional Head reading
+    // "Thane Report - Google Leads with Issue - Search, UTM only" doesn't
+    // need the sub-source breakdown spelled out in the subject line itself;
+    // Source alone (Google / All-source / etc.) is enough to scan at a
+    // glance. The sub-source filter still applies to which leads are IN
+    // the email, this only trims what the subject line says about it.
+    const subject = `${regionLabel} Report (${dateRange}) - ${sourceLabel} Leads with Issue`;
     const body =
 `Hi,
 
