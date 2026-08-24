@@ -1,0 +1,5 @@
+# Never committed: embeds real employee email addresses (Book7.xlsx HR
+# roster export). Paste it into the Apps Script project alongside
+# RmHierarchy.gs, but keep it out of this public repo. See its own header
+# comment for the full explanation.
+RmHierarchy.private.gs

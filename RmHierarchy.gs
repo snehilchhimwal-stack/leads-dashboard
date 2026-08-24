@@ -23,13 +23,21 @@
  * whichever shape actually applies to each specific person — it does not
  * force everyone through the same number of hops.
  *
- * EMAIL ADDRESSES ARE NOT IN THE SOURCE FILE. Every function below resolves
- * NAMES only. setupRmHierarchy() writes a "Manager_Directory" sheet — one
- * row per unique manager name, Email column left blank — for a human to
- * fill in by hand. Until that's done, resolveRecipientsForRegion_ in
- * OvernightEmailer.gs finds no emails to route to and falls back to the
- * legacy Region_Recipients entry for that region, so today's automation
- * keeps working unchanged while the directory gets filled in gradually.
+ * EMAIL ADDRESSES: the org-chart export above has no email column, but
+ * EMPLOYEE_EMAIL_BY_NAME_RAW_ below does — a separate one-time export of
+ * the full company HR roster (Book7.xlsx, "New E Code"/Name/Role/.../
+ * "Official Mail Id"/...), matched in by NAME (case/whitespace-normalized,
+ * see normPersonName_) since the two source files share no common ID.
+ * setupRmHierarchy() writes a "Manager_Directory" sheet — one row per
+ * unique manager name — with its Email column PRE-FILLED wherever a name
+ * match was found; still blank for the handful that weren't (mostly the
+ * same people RM_Hierarchy's Note column already flags as unresolved
+ * managers). A human can always overwrite any auto-filled email — see
+ * point 3 below for what survives a later rebuild. Until a manager has an
+ * email (auto-filled or hand-entered), resolveRecipientsForRegion_ in
+ * OvernightEmailer.gs finds no emails to route to for RMs under them and
+ * falls back to the legacy Region_Recipients entry for that region, so
+ * today's automation keeps working unchanged for anyone still uncovered.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as MovementTracker.gs and OvernightEmailer.gs.
@@ -52,9 +60,12 @@
  *          in RM_Hierarchy — one entry covers everyone who reports to them.
  *   3. Re-running setupRmHierarchy (or the standalone rebuildRmHierarchy)
  *      later — e.g. after a fresh export — refreshes both sheets from the
- *      embedded table but PRESERVES every email you've already filled in
- *      (matched by manager name) and every manual Excluded/Note edit you've
- *      made in RM_Hierarchy (matched by person name).
+ *      embedded table but PRESERVES every email already sitting in
+ *      Manager_Directory, auto-filled or hand-typed alike (matched by
+ *      manager name) — a rebuild never overwrites an email that's already
+ *      there, only adds one where the cell was blank. Manual Excluded/Note
+ *      edits in RM_Hierarchy are preserved the same way (matched by person
+ *      name).
  * ================================================================================
  */
 
@@ -335,6 +346,30 @@ const RM_HIERARCHY_RAW_ = [
   ['Western 2','RM','Radhika thakkar dummy','Minas Patel','RH'],
 ];
 
+// Case/whitespace-normalized name — used to match a person's name in
+// RM_HIERARCHY_RAW_ against RmHierarchy.private.gs's separately-exported
+// email table (two independently exported files with no shared ID, so
+// name text is the only link between them, and the two spell some names
+// slightly differently: case, extra spaces, a trailing period).
+function normPersonName_(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/\.$/, '');
+}
+
+// RmHierarchy.private.gs — a companion Apps Script file, deliberately NOT
+// committed to this PUBLIC repo (it embeds real employee email addresses;
+// see its own header) — defines EMPLOYEE_EMAIL_BY_NAME_RAW_ and builds
+// _EMPLOYEE_EMAIL_LOOKUP_ from it. Guarded with typeof so this file works
+// standalone (every email just comes back blank, nothing throws) if that
+// companion hasn't been added to the Apps Script project yet. Paste
+// RmHierarchy.private.gs in as an additional file in the SAME project to
+// get real emails — Apps Script shares one scope across every file in a
+// project, so this resolves at runtime exactly as if it were defined here.
+function lookupEmployeeEmail_(name) {
+  if (typeof _EMPLOYEE_EMAIL_LOOKUP_ === 'undefined') return '';
+  return _EMPLOYEE_EMAIL_LOOKUP_[normPersonName_(name)] || '';
+}
+
+
 // ---- Dummy / test / placeholder account detection ----
 // Pre-ticks the "Excluded" checkbox in RM_Hierarchy for accounts that are
 // clearly not real RMs — a human reviews and can un-tick any of these.
@@ -385,6 +420,7 @@ function resolveRmHierarchy_() {
     const out = {
       region: region, role: role, name: name, reportsTo: reportsTo, reportsToRole: reportsToRole,
       tl: '', rh: '', ch: '', other: '', otherRole: '', note: '',
+      email: lookupEmployeeEmail_(name),
     };
     const excludeReason = isDummyRow_(region, name, reportsTo);
 
@@ -431,9 +467,9 @@ function ensureRmHierarchySheet_(ss) {
   if (existing) return existing; // already set up — use rebuildRmHierarchy() to refresh from source
 
   const resolved = resolveRmHierarchy_();
-  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note'];
+  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note', 'email'];
   const rows = resolved.map(function (p) {
-    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, p.excluded, p.excludeReason, p.note];
+    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, p.excluded, p.excludeReason, p.note, p.email];
   });
 
   const sheet = withRetry_(function () { return ss.insertSheet(RM_HIERARCHY_SHEET_); }, 'insert RM_Hierarchy');
@@ -455,7 +491,7 @@ function ensureRmHierarchySheet_(ss) {
  */
 function rebuildRmHierarchy() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note'];
+  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note', 'email'];
 
   const priorByName = {};
   withRetry_(function () {
@@ -463,22 +499,28 @@ function rebuildRmHierarchy() {
     if (!sheet) return;
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return;
-    sheet.getRange(2, 1, lastRow - 1, headers.length).getValues().forEach(function (row) {
+    // Old sheets (before the email column existed) have 13 columns — read
+    // whatever's there rather than assuming headers.length, so row[13] just
+    // comes back undefined/blank on those instead of erroring.
+    const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+    sheet.getRange(2, 1, lastRow - 1, lastCol).getValues().forEach(function (row) {
       const name = String(row[2] || '').trim().toLowerCase();
       if (!name) return;
-      priorByName[name] = { excluded: row[10], excludeReason: String(row[11] || ''), note: String(row[12] || '') };
+      priorByName[name] = { excluded: row[10], excludeReason: String(row[11] || ''), note: String(row[12] || ''), email: String(row[13] || '') };
     });
   }, 'read existing RM_Hierarchy before rebuild');
 
   const resolved = resolveRmHierarchy_();
   const rows = resolved.map(function (p) {
     const prior = priorByName[p.name.trim().toLowerCase()];
-    // A human-entered note/exclude-reason survives untouched; only fall back
-    // to this script's own guess when there's no prior row for this person.
+    // A human-entered note/exclude-reason/email survives untouched; only
+    // fall back to this script's own guess (or the Book7 auto-lookup, for
+    // email) when there's no prior row for this person.
     const excluded = prior ? prior.excluded : p.excluded;
     const excludeReason = prior && prior.excludeReason ? prior.excludeReason : p.excludeReason;
     const note = prior && prior.note ? prior.note : p.note;
-    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, excluded, excludeReason, note];
+    const email = prior && prior.email ? prior.email : p.email;
+    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, excluded, excludeReason, note, email];
   });
 
   // Same reasoning as ensureRmHierarchySheet_ above: small independently-
@@ -545,17 +587,22 @@ function ensureManagerDirectorySheetInternal_(ss, forceRefresh) {
   const names = Object.keys(byManager).sort();
   const rows = names.map(function (key) {
     const m = byManager[key];
-    const email = priorEmails[key] || '';
-    return [m.name, Array.from(m.roles).sort().join(', '), Array.from(m.regions).sort().join(', '), email, m.reportCount];
+    // A human-entered email (however it got there) always wins over the
+    // Book7 auto-lookup — never overwrite what someone already typed in.
+    const priorEmail = priorEmails[key] || '';
+    const autoEmail = lookupEmployeeEmail_(m.name);
+    const email = priorEmail || autoEmail;
+    const emailSource = priorEmail ? 'manual' : (autoEmail ? 'Book7 auto-match' : '');
+    return [m.name, Array.from(m.roles).sort().join(', '), Array.from(m.regions).sort().join(', '), email, m.reportCount, emailSource];
   });
 
   if (existing) withRetry_(function () { ss.deleteSheet(existing); }, 'delete old Manager_Directory');
   const sheet = withRetry_(function () { return ss.insertSheet(MANAGER_DIRECTORY_SHEET_); }, 'insert Manager_Directory');
   withRetry_(function () {
-    sheet.getRange(1, 1, 1, 5).setValues([['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them']]);
+    sheet.getRange(1, 1, 1, 6).setValues([['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source']]);
     sheet.setFrozenRows(1);
   }, 'write Manager_Directory header');
-  if (rows.length) withRetry_(function () { sheet.getRange(2, 1, rows.length, 5).setValues(rows); }, 'write Manager_Directory data rows');
+  if (rows.length) withRetry_(function () { sheet.getRange(2, 1, rows.length, 6).setValues(rows); }, 'write Manager_Directory data rows');
   return sheet;
 }
 
@@ -649,8 +696,9 @@ function setupRmHierarchy() {
   ensureRmHierarchySheet_(ss);
   ensureManagerDirectorySheet_(ss);
   Logger.log(
-    'RM_Hierarchy + Manager_Directory ready. Fill in the "email" column in Manager_Directory for the ' +
-    'managers you want issue emails to actually reach — until an entry has an email, ' +
+    'RM_Hierarchy + Manager_Directory ready. Most managers already have an email auto-filled from ' +
+    'Book7.xlsx (see Manager_Directory\'s email_source column: "Book7 auto-match" vs "manual") — check ' +
+    'the ones still blank and fill those in by hand. Until a manager has an email either way, ' +
     'OvernightEmailer falls back to the legacy Region_Recipients entry for that region.'
   );
 }

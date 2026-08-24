@@ -36,24 +36,30 @@
  * see resolveRecipientsForRegion_ below.
  *
  * ============================== SETUP (one-time) ==============================
- *   1. Same Apps Script project as MovementTracker.gs AND RmHierarchy.gs
- *      (Extensions → Apps Script — all three files must be in one project).
- *      Add each as a new file, paste the contents in.
+ *   1. Same Apps Script project as MovementTracker.gs, RmHierarchy.gs, AND
+ *      RmHierarchy.private.gs (Extensions → Apps Script — all four files
+ *      must be in one project). Add each as a new file, paste the contents
+ *      in. RmHierarchy.private.gs lives only on your machine (see its own
+ *      header) — it's what makes Manager_Directory come pre-filled with
+ *      real emails instead of every cell starting blank; the rest of this
+ *      still works without it, just with more manual fill-in.
  *   2. In the function dropdown, select setupOvernightEmailer, click Run.
  *      Approve the permissions prompt (it needs Gmail send + spreadsheet
  *      read/write). This creates Region_Recipients, Overnight_Log,
  *      RM_Hierarchy and Manager_Directory, and installs the 10am/1pm
  *      triggers.
- *   3. Open Manager_Directory and fill in an email for every manager you
- *      want issue emails to actually reach — one row per person, already
- *      deduped across every RM who reports up to them. Region_Recipients
- *      still exists too, as a fallback: fill in a To (and optional Cc) for
- *      any region where you'd rather keep one fixed address than resolve
- *      per-RM for now, or leave it blank once Manager_Directory covers that
- *      region — see RmHierarchy.gs's own header for the full picture,
- *      including the ~5 people whose manager chain couldn't be fully
- *      resolved from the source export (flagged in RM_Hierarchy's Note
- *      column).
+ *   3. Open Manager_Directory — most rows already have an email auto-filled
+ *      from a separate HR roster export (see email_source: "Book7
+ *      auto-match" vs "manual") IF RmHierarchy.private.gs was added per
+ *      step 1; check the ones still blank and fill those in by hand, one
+ *      row per person, already deduped across every RM who reports up to
+ *      them. Region_Recipients still exists too, as a fallback: fill in a
+ *      To (and optional Cc) for any region where you'd rather keep one
+ *      fixed address than resolve per-RM for now, or leave it blank once
+ *      Manager_Directory covers that region — see RmHierarchy.gs's own
+ *      header for the full picture, including the handful of people whose
+ *      manager chain couldn't be fully resolved
+ *      from the source export (flagged in RM_Hierarchy's Note column).
  *   4. Test BEFORE trusting the daily trigger: run sendOvernightMorningEmailsNow
  *      from the function dropdown, confirm the email arrives correctly, then
  *      run sendOvernightFollowupEmailsNow and confirm the reply lands in the
