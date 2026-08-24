@@ -319,25 +319,6 @@ function combinedCommentsTextGs_(row, colIndex) {
   return [internal, stage].filter(function (s) { return s; }).join(' | ') || '(no comments logged)';
 }
 
-function emailTableHtml_(title, rows, color) {
-  if (!rows.length) return '<p style="font-family:Arial,sans-serif; font-size:13px; color:#6b7280;">' + esc_(title) + ': none.</p>';
-  const headerCells = ['Lead ID', 'RM', 'Stage', 'Detail'].map(function (h) {
-    return '<td style="padding:6px 10px; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#4338ca; background:#eef2ff; font-family:Arial,sans-serif;">' + esc_(h) + '</td>';
-  }).join('');
-  const bodyRows = rows.map(function (r) {
-    return '<tr style="border-top:1px solid #f0f0f0;">' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.lead_id) + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.RM || 'Unassigned') + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.stage) + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; font-weight:700; color:' + (color || '#374151') + ';">' + esc_(r.detail) + '</td>' +
-      '</tr>';
-  }).join('');
-  return '<div style="margin-top:14px;">' +
-    '<div style="font-family:Arial,sans-serif; font-weight:700; font-size:14px; color:#1f2937; margin-bottom:6px;">' + esc_(title) + ' (' + rows.length + ')</div>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:6px; border-collapse:collapse;">' +
-    '<tr>' + headerCells + '</tr>' + bodyRows + '</table></div>';
-}
-
 // Mirrors the dashboard's own overnightStatusLabel (js/tab-movement.js) —
 // canonical funnel stage, Title Cased, or the raw stage text verbatim when
 // it doesn't match a known funnel band, so nothing silently disappears.
@@ -368,10 +349,14 @@ function overnightFollowupHintGs_(row, colIndex, flags) {
 // Apps Script port of the dashboard's renderReportEmailHTML
 // (js/reports.js) — same eyebrow/KPI-card/section visual shell, hand-built
 // here since Apps Script is a separate runtime with no access to that
-// browser-side function. Narrower than the original: no `highlights`
-// param (this email never uses one) and the eyebrow/title/signature are
-// fixed rather than parameterized, since this is the only email that
-// calls it.
+// browser-side function. Shared by BOTH the 10am morning email and the
+// 1pm follow-up reply (opts.title distinguishes them) — before this, only
+// the morning email used this shell and the follow-up reply still used
+// the old plain-table layout, so every thread looked inconsistent
+// (fancy first message, plain reply). Narrower than the original: no
+// `highlights` param (neither email here uses one) and the eyebrow/
+// signature are fixed rather than parameterized, since both callers want
+// the same ones.
 function renderOvernightReportEmailHTML_(opts) {
   const FONT = 'font-family:Arial,Helvetica,sans-serif;';
   const kpiCells = opts.kpis.map(function (k) {
@@ -387,16 +372,23 @@ function renderOvernightReportEmailHTML_(opts) {
       '<div style="' + FONT + ' font-size:12.5px; color:#065f46; margin-top:3px;">' + esc_(opts.action) + '</div></div>'
     : '';
 
+  // sec.accent lets a section stand out from the default indigo (e.g. red
+  // for "still unresolved", green for "resolved") — same mechanism as the
+  // dashboard's own renderReportEmailHTML (js/reports.js) uses for its
+  // Stalled Leads section.
   const sectionsHtml = opts.sections.map(function (sec) {
-    const headerRow = '<tr style="background:#eef2ff;">' + sec.columns.map(function (c) {
-      return '<td style="padding:7px 10px; color:#4338ca; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ' + FONT + '">' + esc_(c) + '</td>';
+    const accentFg = (sec.accent && sec.accent.fg) || '#4338ca';
+    const accentHeaderBg = (sec.accent && sec.accent.headerBg) || '#eef2ff';
+    const accentBg = (sec.accent && sec.accent.bg) || '#f5f5ff';
+    const headerRow = '<tr style="background:' + accentHeaderBg + ';">' + sec.columns.map(function (c) {
+      return '<td style="padding:7px 10px; color:' + accentFg + '; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ' + FONT + '">' + esc_(c) + '</td>';
     }).join('') + '</tr>';
     const bodyRows = sec.rows.map(function (row, i) {
       return '<tr style="' + (i > 0 ? 'border-top:1px solid #f0f0f0;' : '') + '">' +
         row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(String(cell)) + '</td>'; }).join('') +
         '</tr>';
     }).join('');
-    return '<div style="margin-top:16px; border-left:4px solid #4338ca; background:#f5f5ff; border-radius:0 8px 8px 0; padding:12px 16px;">' +
+    return '<div style="margin-top:16px; border-left:4px solid ' + accentFg + '; background:' + accentBg + '; border-radius:0 8px 8px 0; padding:12px 16px;">' +
       '<div style="' + FONT + ' font-weight:700; font-size:14px; color:#1f2937;">' + esc_(sec.heading) + '</div>' +
       (sec.subheading ? '<div style="' + FONT + ' font-size:11.5px; color:#6b7280; margin-bottom:8px;">' + esc_(sec.subheading) + '</div>' : '') +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">' +
@@ -406,7 +398,7 @@ function renderOvernightReportEmailHTML_(opts) {
   return '<div style="' + FONT + ' max-width:640px; margin:0 auto; background:#ffffff; color:#1f2937;">' +
     '<div style="background:#4338ca; padding:22px 26px;">' +
     '<div style="color:#c7d2fe; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; margin-bottom:6px; ' + FONT + '">Lead Funnel · SLA Monitor</div>' +
-    '<div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ' + FONT + '">Overnight Leads</div>' +
+    '<div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ' + FONT + '">' + esc_(opts.title) + '</div>' +
     '<div style="color:#ffffff; font-size:13px; font-weight:600; margin-bottom:2px; ' + FONT + '">Region: ' + esc_(opts.region) + '</div>' +
     '<div style="color:#e0e7ff; font-size:12.5px; ' + FONT + '">' + esc_(opts.subtitle) + '</div>' +
     '</div>' +
@@ -497,6 +489,7 @@ function sendOvernightMorningEmails() {
 
     const subject = region + ' Overnight Leads - ' + dateLabel;
     const html = renderOvernightReportEmailHTML_({
+      title: 'Overnight Leads',
       region: region,
       subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
       kpis: [
@@ -540,32 +533,6 @@ function sendOvernightMorningEmails() {
       logSheet.appendRow([todayKey, region, threadId, JSON.stringify(g.issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
     }, 'log Overnight_Log row (' + region + ')');
   });
-}
-
-// Same visual shell as emailTableHtml_, plus a "Suggested Follow-up"
-// column when Lead_Followups actually contributed at least one — omitted
-// entirely when it didn't, so a run where nobody filled anything in looks
-// exactly like the follow-up email always has.
-function unresolvedTableHtml_(rows) {
-  const anySuggestion = rows.some(function (r) { return r.suggestion; });
-  if (!anySuggestion) return emailTableHtml_('Still Unresolved', rows, '#dc2626');
-  if (!rows.length) return '<p style="font-family:Arial,sans-serif; font-size:13px; color:#6b7280;">Still Unresolved: none.</p>';
-  const headerCells = ['Lead ID', 'RM', 'Stage', 'Detail', 'Suggested Follow-up'].map(function (h) {
-    return '<td style="padding:6px 10px; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#4338ca; background:#eef2ff; font-family:Arial,sans-serif;">' + esc_(h) + '</td>';
-  }).join('');
-  const bodyRows = rows.map(function (r) {
-    return '<tr style="border-top:1px solid #f0f0f0;">' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.lead_id) + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.RM || 'Unassigned') + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.stage) + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; font-weight:700; color:#dc2626;">' + esc_(r.detail) + '</td>' +
-      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.suggestion || '—') + '</td>' +
-      '</tr>';
-  }).join('');
-  return '<div style="margin-top:14px;">' +
-    '<div style="font-family:Arial,sans-serif; font-weight:700; font-size:14px; color:#1f2937; margin-bottom:6px;">Still Unresolved (' + rows.length + ')</div>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:6px; border-collapse:collapse;">' +
-    '<tr>' + headerCells + '</tr>' + bodyRows + '</table></div>';
 }
 
 const LEAD_FOLLOWUPS_SHEET_ = 'Lead_Followups';
@@ -732,15 +699,40 @@ function sendOvernightFollowupEmails() {
   }
 
   // Pass 2: send, now that suggestions (if any came back in time) are known.
+  // Same renderOvernightReportEmailHTML_ shell the 10am email uses (see its
+  // own comment) — Still Unresolved in red, Resolved in green, so the
+  // reply reads as a continuation of the same thread instead of a
+  // visually different message.
   perRegion.forEach(function (r) {
     r.unresolvedRows.forEach(function (row) { row.suggestion = suggestionByLeadId[row.lead_id] || ''; });
 
-    const bodyHtml =
-      '<div style="font-family:Arial,sans-serif; font-size:13px; color:#374151;">' +
-      '<p>1pm follow-up for <b>' + esc_(r.region) + '</b> on this morning\'s flagged leads:</p>' +
-      unresolvedTableHtml_(r.unresolvedRows) +
-      emailTableHtml_('Resolved Since the Morning Email', r.resolvedRows, '#059669') +
-      '</div>';
+    const sections = [];
+    if (r.unresolvedRows.length) {
+      sections.push({
+        heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
+        columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
+        rows: r.unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
+      });
+    }
+    if (r.resolvedRows.length) {
+      sections.push({
+        heading: 'Resolved Since the Morning Email', accent: { fg: '#059669', headerBg: '#d1fae5', bg: '#f0fdf9' },
+        columns: ['Lead ID', 'RM', 'Outcome'],
+        rows: r.resolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail]; }),
+      });
+    }
+
+    const bodyHtml = renderOvernightReportEmailHTML_({
+      title: '1pm Follow-up',
+      region: r.region,
+      subtitle: "Re-checking this morning's flagged leads",
+      kpis: [
+        { value: r.unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
+        { value: r.resolvedRows.length, label: 'Resolved', bg: '#d1fae5', fg: '#059669' },
+      ],
+      sections: sections,
+      footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) counts as resolved.',
+    });
     const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved, ' +
       r.resolvedRows.length + ' resolved since the morning email. Open in Gmail for the full breakdown.';
 
