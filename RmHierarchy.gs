@@ -419,27 +419,31 @@ function resolveRmHierarchy_() {
   });
 }
 
+// Split into small, independently-retried steps (rather than one big
+// withRetry_ around the whole create-and-fill sequence) so a transient
+// "Service Spreadsheets timed out" on, say, the checkbox insertion doesn't
+// force redoing the sheet creation and the ~270-row data write too — each
+// step pays its own retry cost, not the whole sequence's. Real production
+// hit exactly this on the heavier rebuildRmHierarchy() below; the same
+// shape applies here for the same reason.
 function ensureRmHierarchySheet_(ss) {
-  return withRetry_(function () {
-    const resolved = resolveRmHierarchy_();
-    const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note'];
-    let sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
-    const isNew = !sheet;
-    if (isNew) {
-      sheet = ss.insertSheet(RM_HIERARCHY_SHEET_);
-    } else {
-      return sheet; // already set up — use rebuildRmHierarchy() to refresh from source
-    }
+  const existing = withRetry_(function () { return ss.getSheetByName(RM_HIERARCHY_SHEET_); }, 'check for existing RM_Hierarchy');
+  if (existing) return existing; // already set up — use rebuildRmHierarchy() to refresh from source
 
+  const resolved = resolveRmHierarchy_();
+  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note'];
+  const rows = resolved.map(function (p) {
+    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, p.excluded, p.excludeReason, p.note];
+  });
+
+  const sheet = withRetry_(function () { return ss.insertSheet(RM_HIERARCHY_SHEET_); }, 'insert RM_Hierarchy');
+  withRetry_(function () {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
-    const rows = resolved.map(function (p) {
-      return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, p.excluded, p.excludeReason, p.note];
-    });
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-    sheet.getRange(2, 11, rows.length, 1).insertCheckboxes();
-    return sheet;
-  }, 'ensureRmHierarchySheet_');
+  }, 'write RM_Hierarchy header');
+  withRetry_(function () { sheet.getRange(2, 1, rows.length, headers.length).setValues(rows); }, 'write RM_Hierarchy data rows');
+  withRetry_(function () { sheet.getRange(2, 11, rows.length, 1).insertCheckboxes(); }, 'insert RM_Hierarchy checkboxes');
+  return sheet;
 }
 
 /**
@@ -477,69 +481,82 @@ function rebuildRmHierarchy() {
     return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, excluded, excludeReason, note];
   });
 
+  // Same reasoning as ensureRmHierarchySheet_ above: small independently-
+  // retried steps instead of one withRetry_ around delete+recreate+write+
+  // checkboxes, so a transient timeout on one step doesn't force redoing
+  // everything before it. This is exactly what production hit: "rewrite
+  // RM_Hierarchy" timing out on all 3 attempts because each attempt had to
+  // redo the delete, the insert, AND the full ~270-row write before even
+  // reaching the checkbox step.
   withRetry_(function () {
-    let sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
-    if (sheet) ss.deleteSheet(sheet);
-    sheet = ss.insertSheet(RM_HIERARCHY_SHEET_);
+    const existing = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+    if (existing) ss.deleteSheet(existing);
+  }, 'delete old RM_Hierarchy');
+  const sheet = withRetry_(function () { return ss.insertSheet(RM_HIERARCHY_SHEET_); }, 'insert RM_Hierarchy');
+  withRetry_(function () {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-    sheet.getRange(2, 11, rows.length, 1).insertCheckboxes();
-  }, 'rewrite RM_Hierarchy');
+  }, 'write RM_Hierarchy header');
+  withRetry_(function () { sheet.getRange(2, 1, rows.length, headers.length).setValues(rows); }, 'write RM_Hierarchy data rows');
+  withRetry_(function () { sheet.getRange(2, 11, rows.length, 1).insertCheckboxes(); }, 'insert RM_Hierarchy checkboxes');
 
   ensureManagerDirectorySheetInternal_(ss, true);
   Logger.log('RM_Hierarchy rebuilt: ' + rows.length + ' people. Manager_Directory refreshed (emails preserved).');
 }
 
+// Same small-independently-retried-steps shape as ensureRmHierarchySheet_/
+// rebuildRmHierarchy above, for the same reason — one big withRetry_ around
+// delete+recreate+write makes every retry redo the whole thing.
 function ensureManagerDirectorySheetInternal_(ss, forceRefresh) {
-  return withRetry_(function () {
-    let sheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
-    if (sheet && !forceRefresh) return sheet;
+  const existing = withRetry_(function () { return ss.getSheetByName(MANAGER_DIRECTORY_SHEET_); }, 'check for existing Manager_Directory');
+  if (existing && !forceRefresh) return existing;
 
-    const priorEmails = {};
-    if (sheet) {
-      const lastRow = sheet.getLastRow();
-      if (lastRow >= 2) {
-        sheet.getRange(2, 1, lastRow - 1, 4).getValues().forEach(function (row) {
-          const name = String(row[0] || '').trim().toLowerCase();
-          const email = String(row[3] || '').trim();
-          if (name && email) priorEmails[name] = email;
-        });
-      }
-    }
+  const priorEmails = {};
+  if (existing) {
+    withRetry_(function () {
+      const lastRow = existing.getLastRow();
+      if (lastRow < 2) return;
+      existing.getRange(2, 1, lastRow - 1, 4).getValues().forEach(function (row) {
+        const name = String(row[0] || '').trim().toLowerCase();
+        const email = String(row[3] || '').trim();
+        if (name && email) priorEmails[name] = email;
+      });
+    }, 'read existing Manager_Directory emails');
+  }
 
-    const resolved = resolveRmHierarchy_();
-    const byManager = {}; // lowercased name -> {name, roles:Set, regions:Set, reportCount}
-    function record(name, role, region) {
-      if (!name) return;
-      const key = name.trim().toLowerCase();
-      if (!byManager[key]) byManager[key] = { name: name.trim(), roles: new Set(), regions: new Set(), reportCount: 0 };
-      byManager[key].roles.add(role);
-      byManager[key].regions.add(region);
-      byManager[key].reportCount++;
-    }
-    resolved.forEach(function (p) {
-      if (p.excluded) return; // dummy/test accounts don't create a manager-directory entry on their own
-      if (p.tl) record(p.tl, 'TL', p.region);
-      if (p.rh) record(p.rh, 'RH', p.region);
-      if (p.ch) record(p.ch, 'CH', p.region);
-      if (p.other) record(p.other, p.otherRole || 'Other', p.region);
-    });
+  const resolved = resolveRmHierarchy_();
+  const byManager = {}; // lowercased name -> {name, roles:Set, regions:Set, reportCount}
+  function record(name, role, region) {
+    if (!name) return;
+    const key = name.trim().toLowerCase();
+    if (!byManager[key]) byManager[key] = { name: name.trim(), roles: new Set(), regions: new Set(), reportCount: 0 };
+    byManager[key].roles.add(role);
+    byManager[key].regions.add(region);
+    byManager[key].reportCount++;
+  }
+  resolved.forEach(function (p) {
+    if (p.excluded) return; // dummy/test accounts don't create a manager-directory entry on their own
+    if (p.tl) record(p.tl, 'TL', p.region);
+    if (p.rh) record(p.rh, 'RH', p.region);
+    if (p.ch) record(p.ch, 'CH', p.region);
+    if (p.other) record(p.other, p.otherRole || 'Other', p.region);
+  });
 
-    const names = Object.keys(byManager).sort();
-    const rows = names.map(function (key) {
-      const m = byManager[key];
-      const email = priorEmails[key] || '';
-      return [m.name, Array.from(m.roles).sort().join(', '), Array.from(m.regions).sort().join(', '), email, m.reportCount];
-    });
+  const names = Object.keys(byManager).sort();
+  const rows = names.map(function (key) {
+    const m = byManager[key];
+    const email = priorEmails[key] || '';
+    return [m.name, Array.from(m.roles).sort().join(', '), Array.from(m.regions).sort().join(', '), email, m.reportCount];
+  });
 
-    if (sheet) ss.deleteSheet(sheet);
-    sheet = ss.insertSheet(MANAGER_DIRECTORY_SHEET_);
+  if (existing) withRetry_(function () { ss.deleteSheet(existing); }, 'delete old Manager_Directory');
+  const sheet = withRetry_(function () { return ss.insertSheet(MANAGER_DIRECTORY_SHEET_); }, 'insert Manager_Directory');
+  withRetry_(function () {
     sheet.getRange(1, 1, 1, 5).setValues([['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them']]);
     sheet.setFrozenRows(1);
-    if (rows.length) sheet.getRange(2, 1, rows.length, 5).setValues(rows);
-    return sheet;
-  }, 'ensureManagerDirectorySheetInternal_');
+  }, 'write Manager_Directory header');
+  if (rows.length) withRetry_(function () { sheet.getRange(2, 1, rows.length, 5).setValues(rows); }, 'write Manager_Directory data rows');
+  return sheet;
 }
 
 function ensureManagerDirectorySheet_(ss) {
