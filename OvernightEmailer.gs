@@ -23,22 +23,37 @@
  * RECIPIENTS: Apps Script has no access to the dashboard's own "Edit region
  * recipients" panel — that list lives only in your browser's localStorage,
  * which a server-side script can never read. This script keeps its OWN
- * recipient list in a new "Region_Recipients" sheet tab instead (created
- * automatically, pre-filled with all 11 region names, To/Cc left blank for
- * you to fill in) — a genuinely separate list from the dashboard's, by
- * necessity, not an oversight.
+ * recipient list, and — as of RmHierarchy.gs — resolves it PER RM rather
+ * than a single fixed address per region: for each region's morning email,
+ * every RM who actually had overnight activity gets their real manager
+ * chain (TL/RH/CH, from RmHierarchy.gs's RM_Hierarchy + Manager_Directory
+ * sheets) resolved and deduped into that email's To/Cc — a manager with no
+ * flagged RM under them that day gets nothing. The old flat
+ * "Region_Recipients" sheet tab (created automatically, pre-filled with all
+ * 11 region names, To/Cc left blank) still exists as a FALLBACK: a region
+ * only uses it when zero of that day's RMs could be resolved to a manager
+ * email (i.e. Manager_Directory isn't filled in yet for anyone involved) —
+ * see resolveRecipientsForRegion_ below.
  *
  * ============================== SETUP (one-time) ==============================
- *   1. Same Apps Script project as MovementTracker.gs (Extensions → Apps
- *      Script). Add a new file, paste this whole thing in.
+ *   1. Same Apps Script project as MovementTracker.gs AND RmHierarchy.gs
+ *      (Extensions → Apps Script — all three files must be in one project).
+ *      Add each as a new file, paste the contents in.
  *   2. In the function dropdown, select setupOvernightEmailer, click Run.
  *      Approve the permissions prompt (it needs Gmail send + spreadsheet
- *      read/write). This creates Region_Recipients and Overnight_Log, and
- *      installs the 10am/1pm triggers.
- *   3. Open the Region_Recipients tab and fill in a To (and optional Cc)
- *      email address for every region you want an automated email for. A
- *      region left blank is silently skipped — not a fault, same convention
- *      the dashboard's own region-recipient panel uses.
+ *      read/write). This creates Region_Recipients, Overnight_Log,
+ *      RM_Hierarchy and Manager_Directory, and installs the 10am/1pm
+ *      triggers.
+ *   3. Open Manager_Directory and fill in an email for every manager you
+ *      want issue emails to actually reach — one row per person, already
+ *      deduped across every RM who reports up to them. Region_Recipients
+ *      still exists too, as a fallback: fill in a To (and optional Cc) for
+ *      any region where you'd rather keep one fixed address than resolve
+ *      per-RM for now, or leave it blank once Manager_Directory covers that
+ *      region — see RmHierarchy.gs's own header for the full picture,
+ *      including the ~5 people whose manager chain couldn't be fully
+ *      resolved from the source export (flagged in RM_Hierarchy's Note
+ *      column).
  *   4. Test BEFORE trusting the daily trigger: run sendOvernightMorningEmailsNow
  *      from the function dropdown, confirm the email arrives correctly, then
  *      run sendOvernightFollowupEmailsNow and confirm the reply lands in the
@@ -145,6 +160,21 @@ function ensureRegionRecipientsSheet_(ss) {
     sheet.getRange(2, 1, regions.length, 1).setValues(regions.map(function (r) { return [r]; }));
     return sheet;
   }, 'ensureRegionRecipientsSheet_');
+}
+
+// Per-RM-derived recipients for one region's morning email, falling back to
+// the legacy flat Region_Recipients entry when nothing could be resolved
+// (i.e. Manager_Directory has no email yet for any manager of that day's
+// RMs) — keeps the automation sending during the gradual rollout instead of
+// going silent the moment RM_Hierarchy exists but emails aren't filled in.
+function resolveRecipientsForRegion_(ss, region, rmNames, legacyRecipients) {
+  const resolved = withRetry_(function () { return resolveRecipientsForRms_(ss, rmNames); }, 'resolveRecipientsForRms_ (' + region + ')');
+  if (resolved.to.length) {
+    return { to: resolved.to.join(','), cc: resolved.cc.join(',') || undefined, source: 'RM_Hierarchy (' + resolved.resolvedCount + '/' + resolved.totalCount + ' RMs resolved)' };
+  }
+  const legacy = legacyRecipients[region];
+  if (legacy) return { to: legacy.to, cc: legacy.cc || undefined, source: 'Region_Recipients (fallback — no Manager_Directory email resolved for any of this region’s RMs yet)' };
+  return null;
 }
 
 function loadRegionRecipients_(ss) {
@@ -294,10 +324,12 @@ function sendOvernightMorningEmails() {
   const todayKey = istDayKeyGs_(now);
 
   Object.keys(byRegion).sort().forEach(function (region) {
-    const rec = recipients[region];
-    if (!rec) return; // no recipient configured for this region — silently skipped, not a fault
     const g = byRegion[region];
     if (!g.created.length) return; // nothing overnight for this region
+
+    const rmNames = Array.from(new Set(g.created.map(function (r) { return r.RM; }).filter(Boolean)));
+    const rec = resolveRecipientsForRegion_(ss, region, rmNames, recipients);
+    if (!rec) return; // no manager email resolved AND no legacy Region_Recipients entry — silently skipped, not a fault
 
     const subject = region + ' Overnight Leads - ' + dateLabel;
     const bodyHtml =
@@ -313,6 +345,7 @@ function sendOvernightMorningEmails() {
       ', flagged with an issue: ' + g.issues.length + ', already Opportunity+: ' + g.opps.length +
       '. Open this email in Gmail for the full HTML breakdown.';
 
+    Logger.log('Morning email recipients for ' + region + ': ' + rec.source);
     let sentMessage;
     try {
       // Retried: sending the actual email is the one thing here worth
@@ -420,6 +453,7 @@ function setupOvernightEmailer() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureRegionRecipientsSheet_(ss);
   ensureOvernightLogSheet_(ss);
+  setupRmHierarchy(); // RmHierarchy.gs — creates RM_Hierarchy + Manager_Directory
 
   ScriptApp.getProjectTriggers().forEach(function (t) {
     const fn = t.getHandlerFunction();
@@ -433,8 +467,8 @@ function setupOvernightEmailer() {
 
   Logger.log(
     'Overnight Emailer installed: morning email ~10am IST, follow-up reply ~1pm IST. ' +
-    'Fill in Region_Recipients (To/Cc per region) before relying on the daily trigger — ' +
-    'a region left blank there is silently skipped.'
+    'Recipients are resolved per-RM from RM_Hierarchy + Manager_Directory (fill in emails there) ' +
+    'with Region_Recipients as a fallback while that fills in — a region with neither is silently skipped.'
   );
 }
 
