@@ -586,7 +586,7 @@ function buildRegionReports(issueKey){
         : graceExplainer,
     });
 
-    return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region] };
+    return { region, subject, body, html, count: cloneCounts.unique, regionNames: [region], issueKey, issueLabel: meta.label };
   });
 }
 
@@ -1099,6 +1099,12 @@ async function performGmailSend(pending){
       throw new Error((errBody.error && errBody.error.message) || `Gmail API error ${resp.status}`);
     }
     markReportSent(report.subject);
+    // Durable, shared, issue-wise send log (Send_Log sheet tab) — separate
+    // from markReportSent's local-only "Sent ✓" button state above. Not
+    // awaited: this is best-effort logging, not part of the send itself
+    // (see logEmailSend's own comment), so it shouldn't hold up the button
+    // state update or the caller.
+    logEmailSend(report, to, cc);
     if (btn) {
       btn.disabled = false;
       applyGmailButtonState(btn, report.subject);
@@ -1963,7 +1969,7 @@ ${EMAIL_SIGNATURE}`;
     // history to Lead_Followups. Deliberately NOT notConnectedItems/
     // stuckItems (neither is genuinely "in one of the issues" — see their
     // own comments above) or warmCloseItems (those are closed leads).
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + warmCloseCloneCounts.unique, issueLabel: 'All issues', regionNames, sorted };
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + warmCloseCloneCounts.unique, issueKey: 'combined', issueLabel: 'All issues', regionNames, sorted };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19

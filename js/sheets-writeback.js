@@ -101,6 +101,68 @@ function setFollowupsPushStatus(text, color, elId){
   if (el) { el.textContent = text; el.style.color = color; }
 }
 
+/* ============ SEND LOG (one row per successful Gmail send) ============
+ * A durable, shared record of every region email actually sent — not the
+ * "Sent ✓" button state (that's a purely local, 1-hour, per-browser
+ * localStorage cache just for the resend-window UI, see markReportSent in
+ * reports.js). Every send path (a single report's "Send via Gmail" button,
+ * either bulk "Send all via Gmail" flow) funnels through performGmailSend,
+ * which is the one place logEmailSend is called from, so every issue type
+ * and every entry point is covered without needing to touch each button's
+ * own handler individually.
+ */
+const SEND_LOG_TAB_NAME = 'Send_Log';
+const SEND_LOG_COLUMNS = ['sent_at', 'issue_key', 'issue_label', 'region', 'subject', 'to', 'cc', 'lead_count', 'sent_by'];
+
+// Cached per page-load once confirmed present — avoids a metadata round
+// trip (getSheetIdByTabName) before every single send, not just the first.
+// A tab deleted mid-session would make later sends fail loudly in
+// logEmailSend's own catch (console only, per its own comment) rather than
+// silently recreating it — acceptable, since that's an unusual enough
+// action to just require a page refresh to recover from.
+let _sendLogSheetEnsured = false;
+async function ensureSendLogSheet_(){
+  if (_sendLogSheetEnsured) return;
+  const existingId = await getSheetIdByTabName(SEND_LOG_TAB_NAME);
+  if (existingId == null) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SEND_LOG_TAB_NAME } } }] }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+    }
+    await appendSheetRows(SEND_LOG_TAB_NAME, [SEND_LOG_COLUMNS], 'RAW');
+  }
+  _sendLogSheetEnsured = true;
+}
+
+// Best-effort: the email has already genuinely sent (Gmail API returned
+// success) by the time performGmailSend calls this — a logging failure here
+// must never look like the send itself failed, so every error stays local
+// to a console warning rather than propagating to the caller or the UI.
+async function logEmailSend(report, to, cc){
+  try {
+    await ensureSendLogSheet_();
+    await appendSheetRows(SEND_LOG_TAB_NAME, [[
+      istDateTimeValue(new Date()),
+      report.issueKey || '',
+      report.issueLabel || '',
+      (report.regionNames && report.regionNames.join(', ')) || report.region || '',
+      report.subject || '',
+      to || '',
+      cc || '',
+      report.count != null ? report.count : '',
+      gateUserEmail || '',
+    ]], 'RAW');
+  } catch (err) {
+    console.error('Send_Log write failed (email itself was still sent successfully):', err);
+  }
+}
+
 // Writes/updates Lead_Followups with the exact leads that just appeared in
 // the combined All Issues email — see renderReports, which calls this with
 // buildRegionWiseReports's own `sorted` (open, not Opportunity+, one of the
