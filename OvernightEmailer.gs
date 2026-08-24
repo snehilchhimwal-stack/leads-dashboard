@@ -150,10 +150,19 @@ function primaryIssueGs_(flags) {
 // service call in this file that reads/writes a real range goes through
 // this wrapper. Deliberately narrow on WHICH errors it retries: a real bug
 // (bad range, permission denied, a formula error) fails the exact same way
-// on attempt 2 and 3, so retrying it three times would only delay
-// surfacing the actual problem by ~7 seconds — not swallow it.
+// on every attempt, so retrying it only delays surfacing the actual
+// problem by the backoff budget below — not swallow it.
+//
+// 4 attempts / up to ~12s of total backoff (2s + 4s + 6s), not the
+// original 3 attempts / ~6s — real production hit this exact transient
+// class three separate times against the same spreadsheet, including on
+// a single-row, 6-cell header write, which points at that specific
+// spreadsheet needing more headroom to ride out a slow patch than a
+// generic "large sheet" assumption accounted for. Still comfortably
+// inside Apps Script's own execution-time ceiling even if several
+// withRetry_ calls in one run each hit the full budget.
 function withRetry_(fn, label) {
-  const maxAttempts = 3;
+  const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return fn();
