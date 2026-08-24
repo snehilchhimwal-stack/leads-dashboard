@@ -108,40 +108,72 @@ function primaryIssueGs_(flags) {
   return null;
 }
 
+// "Service Spreadsheets timed out..." (and its siblings — "Service error",
+// "Internal error") are Google's own transient infrastructure hiccups, not
+// a bug in this script — they happen more often against a large sheet
+// (thousands of leads) under load, and they're exactly the kind of thing
+// genuinely UNATTENDED automation has to shrug off on its own, since
+// there's no human at the trigger to just click retry. Every Spreadsheet-
+// service call in this file that reads/writes a real range goes through
+// this wrapper. Deliberately narrow on WHICH errors it retries: a real bug
+// (bad range, permission denied, a formula error) fails the exact same way
+// on attempt 2 and 3, so retrying it three times would only delay
+// surfacing the actual problem by ~7 seconds — not swallow it.
+function withRetry_(fn, label) {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return fn();
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      const isTransient = /timed out|service (spreadsheets|gmail|error)|internal error/i.test(msg);
+      if (!isTransient || attempt === maxAttempts) throw e;
+      Logger.log((label || 'Sheets operation') + ' failed transiently (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
+      Utilities.sleep(attempt * 2000);
+    }
+  }
+}
+
 function ensureRegionRecipientsSheet_(ss) {
-  let sheet = ss.getSheetByName(REGION_RECIPIENTS_SHEET_);
-  if (sheet) return sheet;
-  sheet = ss.insertSheet(REGION_RECIPIENTS_SHEET_);
-  sheet.getRange(1, 1, 1, 3).setValues([['region', 'to', 'cc']]);
-  sheet.setFrozenRows(1);
-  const regions = Array.from(new Set(Object.keys(REGION_GROUP_MAP_).map(function (k) { return REGION_GROUP_MAP_[k]; }))).sort();
-  sheet.getRange(2, 1, regions.length, 1).setValues(regions.map(function (r) { return [r]; }));
-  return sheet;
+  return withRetry_(function () {
+    let sheet = ss.getSheetByName(REGION_RECIPIENTS_SHEET_);
+    if (sheet) return sheet;
+    sheet = ss.insertSheet(REGION_RECIPIENTS_SHEET_);
+    sheet.getRange(1, 1, 1, 3).setValues([['region', 'to', 'cc']]);
+    sheet.setFrozenRows(1);
+    const regions = Array.from(new Set(Object.keys(REGION_GROUP_MAP_).map(function (k) { return REGION_GROUP_MAP_[k]; }))).sort();
+    sheet.getRange(2, 1, regions.length, 1).setValues(regions.map(function (r) { return [r]; }));
+    return sheet;
+  }, 'ensureRegionRecipientsSheet_');
 }
 
 function loadRegionRecipients_(ss) {
   const sheet = ensureRegionRecipientsSheet_(ss);
-  const lastRow = sheet.getLastRow();
-  const map = {};
-  if (lastRow < 2) return map;
-  sheet.getRange(2, 1, lastRow - 1, 3).getValues().forEach(function (row) {
-    const region = String(row[0] || '').trim();
-    const to = String(row[1] || '').trim();
-    const cc = String(row[2] || '').trim();
-    if (region && to) map[region] = { to: to, cc: cc };
-  });
-  return map;
+  return withRetry_(function () {
+    const lastRow = sheet.getLastRow();
+    const map = {};
+    if (lastRow < 2) return map;
+    sheet.getRange(2, 1, lastRow - 1, 3).getValues().forEach(function (row) {
+      const region = String(row[0] || '').trim();
+      const to = String(row[1] || '').trim();
+      const cc = String(row[2] || '').trim();
+      if (region && to) map[region] = { to: to, cc: cc };
+    });
+    return map;
+  }, 'loadRegionRecipients_');
 }
 
 function ensureOvernightLogSheet_(ss) {
-  let sheet = ss.getSheetByName(OVERNIGHT_LOG_SHEET_);
-  const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at'];
-  if (!sheet) {
-    sheet = ss.insertSheet(OVERNIGHT_LOG_SHEET_);
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
+  return withRetry_(function () {
+    let sheet = ss.getSheetByName(OVERNIGHT_LOG_SHEET_);
+    const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at'];
+    if (!sheet) {
+      sheet = ss.insertSheet(OVERNIGHT_LOG_SHEET_);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+    }
+    return sheet;
+  }, 'ensureOvernightLogSheet_');
 }
 
 // Yesterday 5 PM IST through today 9 AM IST, as real Date objects — matches
@@ -160,18 +192,23 @@ function overnightWindowGs_(asOf) {
 
 // Reads the current month tab and returns {colIndex, dataRows} — same shape
 // snapshotOpenLeads_ in MovementTracker.gs reads, factored out here so both
-// the morning and follow-up runs share one read path.
+// the morning and follow-up runs share one read path. This is the single
+// biggest read in either script (thousands of leads, every column) — by
+// far the most likely place a transient Spreadsheets timeout actually
+// shows up, hence its own retry wrapper around the real reads.
 function readLeadsTab_(ss) {
   const tabName = resolveTabName_(ss);
   const src = ss.getSheetByName(tabName);
   if (!src) throw new Error('Overnight Emailer: tab "' + tabName + '" not found.');
-  const lastRow = src.getLastRow();
-  const lastCol = src.getLastColumn();
-  if (lastRow < 3) return { colIndex: {}, dataRows: [] };
-  const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
-  const colIndex = buildColIndex_(headerRow);
-  const dataRows = src.getRange(3, 1, lastRow - 2, lastCol).getValues();
-  return { colIndex: colIndex, dataRows: dataRows };
+  return withRetry_(function () {
+    const lastRow = src.getLastRow();
+    const lastCol = src.getLastColumn();
+    if (lastRow < 3) return { colIndex: {}, dataRows: [] };
+    const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
+    const colIndex = buildColIndex_(headerRow);
+    const dataRows = src.getRange(3, 1, lastRow - 2, lastCol).getValues();
+    return { colIndex: colIndex, dataRows: dataRows };
+  }, 'readLeadsTab_');
 }
 
 function esc_(s) {
@@ -213,7 +250,10 @@ function sendOvernightMorningEmails() {
   const win = overnightWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const recipients = loadRegionRecipients_(ss);
-  const baselineMap = buildTodayCallBaselineGs_(ss, now);
+  // buildTodayCallBaselineGs_ (from MovementTracker.gs) reads the whole
+  // Movement_Log tab — wrapped at the call site rather than editing that
+  // shared file, same retry reasoning as readLeadsTab_ above.
+  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
 
   const byRegion = {}; // mainRegion -> { created: [], issues: [], opps: [] }
   dataRows.forEach(function (row) {
@@ -275,11 +315,16 @@ function sendOvernightMorningEmails() {
 
     let sentMessage;
     try {
-      sentMessage = GmailApp.createDraft(rec.to, subject, plainBody, {
-        cc: rec.cc || undefined,
-        htmlBody: bodyHtml,
-        name: 'Homesfy Lead Ops',
-      }).send();
+      // Retried: sending the actual email is the one thing here worth
+      // fighting for before giving up on a region — a transient Gmail
+      // hiccup shouldn't silently skip a whole region's morning email.
+      sentMessage = withRetry_(function () {
+        return GmailApp.createDraft(rec.to, subject, plainBody, {
+          cc: rec.cc || undefined,
+          htmlBody: bodyHtml,
+          name: 'Homesfy Lead Ops',
+        }).send();
+      }, 'send morning email (' + region + ')');
     } catch (e) {
       Logger.log('Overnight morning email failed for ' + region + ': ' + e);
       return;
@@ -287,7 +332,9 @@ function sendOvernightMorningEmails() {
 
     const threadId = sentMessage.getThread().getId();
     const issueLog = g.issues.map(function (r) { return { lead_id: r.lead_id, issueKey: r.issueKey, issueLabel: r.detail }; });
-    logSheet.appendRow([todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
+    withRetry_(function () {
+      logSheet.appendRow([todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
+    }, 'log Overnight_Log row (' + region + ')');
   });
 }
 
@@ -308,12 +355,15 @@ function sendOvernightFollowupEmails() {
   const lastRow = logSheet.getLastRow();
   if (lastRow < 2) return;
 
-  const logRows = logSheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 5).getValues(); }, 'read Overnight_Log');
   const todaysRuns = logRows.filter(function (r) { return String(r[0]) === todayKey; });
   if (!todaysRuns.length) return;
 
   const { colIndex, dataRows } = readLeadsTab_(ss);
-  const baselineMap = buildTodayCallBaselineGs_(ss, now);
+  // buildTodayCallBaselineGs_ (from MovementTracker.gs) reads the whole
+  // Movement_Log tab — wrapped at the call site rather than editing that
+  // shared file, same retry reasoning as readLeadsTab_ above.
+  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
   const byLeadId = {};
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
@@ -356,7 +406,9 @@ function sendOvernightFollowupEmails() {
       resolvedRows.length + ' resolved since the morning email. Open in Gmail for the full breakdown.';
 
     try {
-      GmailApp.getThreadById(threadId).reply(plainBody, { htmlBody: bodyHtml });
+      withRetry_(function () {
+        GmailApp.getThreadById(threadId).reply(plainBody, { htmlBody: bodyHtml });
+      }, 'send follow-up reply (' + region + ')');
     } catch (e) {
       Logger.log('Overnight follow-up reply failed for ' + region + ' (thread ' + threadId + '): ' + e);
     }
