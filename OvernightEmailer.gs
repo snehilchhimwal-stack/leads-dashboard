@@ -246,6 +246,22 @@ function esc_(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Own-comment text only (internal_status_comments + stage_comments,
+// pipe-joined) — NOT the dashboard's own richer collateFamilyComments
+// (js/core.js), which also folds in every sibling copy of the SAME
+// customer across other regions/sources. That sibling collation depends on
+// the dashboard's own in-browser identity-clustering over the WHOLE
+// fetched dataset — state that only exists in a signed-in browser tab, not
+// in an unattended server-side trigger. A human filling in Lead_Followups'
+// suggested_followup column still sees this row's real comment history;
+// they just don't get other copies' comments folded in automatically the
+// way the dashboard's own Generate flow provides.
+function combinedCommentsTextGs_(row, colIndex) {
+  const internal = String(getVal_(row, colIndex, 'internal_status_comments') || '').trim();
+  const stage = String(getVal_(row, colIndex, 'stage_comments') || '').trim();
+  return [internal, stage].filter(function (s) { return s; }).join(' | ') || '(no comments logged)';
+}
+
 function emailTableHtml_(title, rows, color) {
   if (!rows.length) return '<p style="font-family:Arial,sans-serif; font-size:13px; color:#6b7280;">' + esc_(title) + ': none.</p>';
   const headerCells = ['Lead ID', 'RM', 'Stage', 'Detail'].map(function (h) {
@@ -371,6 +387,111 @@ function sendOvernightMorningEmails() {
   });
 }
 
+// Same visual shell as emailTableHtml_, plus a "Suggested Follow-up"
+// column when Lead_Followups actually contributed at least one — omitted
+// entirely when it didn't, so a run where nobody filled anything in looks
+// exactly like the follow-up email always has.
+function unresolvedTableHtml_(rows) {
+  const anySuggestion = rows.some(function (r) { return r.suggestion; });
+  if (!anySuggestion) return emailTableHtml_('Still Unresolved', rows, '#dc2626');
+  if (!rows.length) return '<p style="font-family:Arial,sans-serif; font-size:13px; color:#6b7280;">Still Unresolved: none.</p>';
+  const headerCells = ['Lead ID', 'RM', 'Stage', 'Detail', 'Suggested Follow-up'].map(function (h) {
+    return '<td style="padding:6px 10px; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#4338ca; background:#eef2ff; font-family:Arial,sans-serif;">' + esc_(h) + '</td>';
+  }).join('');
+  const bodyRows = rows.map(function (r) {
+    return '<tr style="border-top:1px solid #f0f0f0;">' +
+      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.lead_id) + '</td>' +
+      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.RM || 'Unassigned') + '</td>' +
+      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.stage) + '</td>' +
+      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; font-weight:700; color:#dc2626;">' + esc_(r.detail) + '</td>' +
+      '<td style="padding:6px 10px; font-family:Arial,sans-serif; font-size:12.5px; color:#374151;">' + esc_(r.suggestion || '—') + '</td>' +
+      '</tr>';
+  }).join('');
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-family:Arial,sans-serif; font-weight:700; font-size:14px; color:#1f2937; margin-bottom:6px;">Still Unresolved (' + rows.length + ')</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:6px; border-collapse:collapse;">' +
+    '<tr>' + headerCells + '</tr>' + bodyRows + '</table></div>';
+}
+
+const LEAD_FOLLOWUPS_SHEET_ = 'Lead_Followups';
+const FOLLOWUP_WAIT_POLL_MS_ = 20000;
+const FOLLOWUP_WAIT_MAX_ATTEMPTS_ = 6; // ~2 minutes total, see waitForFollowupSuggestions_
+
+// Upserts by lead_id into the SAME tab/columns the dashboard's own Generate
+// flow uses (js/sheets-writeback.js's pushLeadsToFollowups): A lead_id, B
+// region, C RM, D issue, E collated_comments, G updated_at, H own_comments
+// — E and H are identical here since there's no sibling-family expansion
+// server-side (see combinedCommentsTextGs_). Deliberately does NOT create
+// the tab if it's missing (the dashboard owns creating it — its absence
+// means this feature just hasn't been set up yet, not an error) and does
+// NOT clear existing rows first: clearing is safe for the dashboard's own
+// Generate cycle because it holds an in-memory exclusivity lock
+// (_generateCycleOwner) for the whole clear-through-send window, but Apps
+// Script runs as a completely separate process with no way to see or
+// respect that lock — clearing here could wipe out rows a human is
+// actively reviewing on the dashboard at the same moment. An upsert-only
+// write can never destroy anything that was already there. Returns false
+// (nothing written) when the tab doesn't exist — the caller treats that
+// exactly like "waited and nothing came back": send without it.
+function pushUnresolvedToLeadFollowups_(ss, entries) {
+  if (!entries.length) return false;
+  const sheet = ss.getSheetByName(LEAD_FOLLOWUPS_SHEET_);
+  if (!sheet) return false;
+
+  return withRetry_(function () {
+    const lastRow = sheet.getLastRow();
+    const rowNumberByLeadId = {};
+    if (lastRow >= 2) {
+      sheet.getRange(2, 1, lastRow - 1, 1).getValues().forEach(function (r, i) {
+        const id = String((r && r[0]) || '').trim();
+        if (id) rowNumberByLeadId[id] = i + 2;
+      });
+    }
+    const updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+    entries.forEach(function (e) {
+      const rowNum = rowNumberByLeadId[e.lead_id];
+      if (rowNum) {
+        sheet.getRange(rowNum, 1, 1, 5).setValues([[e.lead_id, e.region, e.RM, e.issue, e.comments]]);
+        sheet.getRange(rowNum, 7, 1, 1).setValues([[updatedAt]]);
+        sheet.getRange(rowNum, 8, 1, 1).setValues([[e.comments]]);
+      } else {
+        sheet.appendRow([e.lead_id, e.region, e.RM, e.issue, e.comments, '', updatedAt, e.comments]);
+      }
+    });
+    return true;
+  }, 'pushUnresolvedToLeadFollowups_');
+}
+
+// Bounded version of the dashboard's own waitForAllFollowups
+// (js/sheets-writeback.js) — that one polls with NO timeout because a
+// human is sitting there and clicks Cancel when they give up. This runs
+// from an unattended trigger with nobody to click anything, and Apps
+// Script itself has a hard execution-time ceiling, so it polls a FEW times
+// (~2 minutes total) and then proceeds with whatever's there, possibly
+// partial, possibly empty — same "send without it" outcome either way.
+function waitForFollowupSuggestions_(ss, leadIds) {
+  const sheet = ss.getSheetByName(LEAD_FOLLOWUPS_SHEET_);
+  if (!sheet) return {};
+  let lookup = {};
+  for (let attempt = 1; attempt <= FOLLOWUP_WAIT_MAX_ATTEMPTS_; attempt++) {
+    lookup = withRetry_(function () {
+      const lastRow = sheet.getLastRow();
+      const out = {};
+      if (lastRow < 2) return out;
+      sheet.getRange(2, 1, lastRow - 1, 6).getValues().forEach(function (r) {
+        const id = String((r && r[0]) || '').trim();
+        const suggestion = String((r && r[5]) || '').trim();
+        if (id && suggestion) out[id] = suggestion;
+      });
+      return out;
+    }, 'read Lead_Followups suggestions (attempt ' + attempt + ')');
+    const missing = leadIds.filter(function (id) { return !lookup[id]; });
+    if (!missing.length) return lookup;
+    if (attempt < FOLLOWUP_WAIT_MAX_ATTEMPTS_) Utilities.sleep(FOLLOWUP_WAIT_POLL_MS_);
+  }
+  return lookup; // time's up — whatever's filled in, possibly partial, possibly empty
+}
+
 /**
  * 1pm run: for every region logged earlier TODAY, re-checks each of that
  * morning's issue leads against the CURRENT sheet — still flagged for the
@@ -379,6 +500,13 @@ function sendOvernightMorningEmails() {
  * can no longer be found at all) counts as resolved. Replies on the exact
  * same Gmail thread the morning email created, so this reads as one
  * conversation, not a second email.
+ *
+ * Before sending, every still-unresolved lead (across every region) is
+ * pushed to Lead_Followups and given a short, bounded wait for a human-
+ * typed suggested follow-up in column F — see pushUnresolvedToLeadFollowups_
+ * and waitForFollowupSuggestions_ above. Two regions are never worth
+ * blocking each other over, so this happens ONCE for every region's
+ * unresolved leads together, not once per region.
  */
 function sendOvernightFollowupEmails() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -403,6 +531,10 @@ function sendOvernightFollowupEmails() {
     if (leadId) byLeadId[leadId] = row;
   });
 
+  // Pass 1: classify every region's issue leads into resolved/unresolved
+  // WITHOUT sending anything yet — every region's still-unresolved leads
+  // get pushed to Lead_Followups and waited on together, once, below.
+  const perRegion = []; // { region, threadId, resolvedRows, unresolvedRows }
   todaysRuns.forEach(function (run) {
     const region = run[1];
     const threadId = run[2];
@@ -423,27 +555,46 @@ function sendOvernightFollowupEmails() {
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
-        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel });
+        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row });
       } else {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
     });
+    perRegion.push({ region: region, threadId: threadId, resolvedRows: resolvedRows, unresolvedRows: unresolvedRows });
+  });
+
+  const allUnresolved = [];
+  perRegion.forEach(function (r) { allUnresolved.push.apply(allUnresolved, r.unresolvedRows); });
+  let suggestionByLeadId = {};
+  if (allUnresolved.length) {
+    const pushEntries = allUnresolved.map(function (r) {
+      return { lead_id: r.lead_id, region: r.region, RM: r.RM, issue: r.issue, comments: combinedCommentsTextGs_(r.sourceRow, colIndex) };
+    });
+    const started = pushUnresolvedToLeadFollowups_(ss, pushEntries);
+    if (started) {
+      suggestionByLeadId = waitForFollowupSuggestions_(ss, allUnresolved.map(function (r) { return r.lead_id; }));
+    }
+  }
+
+  // Pass 2: send, now that suggestions (if any came back in time) are known.
+  perRegion.forEach(function (r) {
+    r.unresolvedRows.forEach(function (row) { row.suggestion = suggestionByLeadId[row.lead_id] || ''; });
 
     const bodyHtml =
       '<div style="font-family:Arial,sans-serif; font-size:13px; color:#374151;">' +
-      '<p>1pm follow-up for <b>' + esc_(region) + '</b> on this morning\'s flagged leads:</p>' +
-      emailTableHtml_('Still Unresolved', unresolvedRows, '#dc2626') +
-      emailTableHtml_('Resolved Since the Morning Email', resolvedRows, '#059669') +
+      '<p>1pm follow-up for <b>' + esc_(r.region) + '</b> on this morning\'s flagged leads:</p>' +
+      unresolvedTableHtml_(r.unresolvedRows) +
+      emailTableHtml_('Resolved Since the Morning Email', r.resolvedRows, '#059669') +
       '</div>';
-    const plainBody = '1pm follow-up for ' + region + ': ' + unresolvedRows.length + ' still unresolved, ' +
-      resolvedRows.length + ' resolved since the morning email. Open in Gmail for the full breakdown.';
+    const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved, ' +
+      r.resolvedRows.length + ' resolved since the morning email. Open in Gmail for the full breakdown.';
 
     try {
       withRetry_(function () {
-        GmailApp.getThreadById(threadId).reply(plainBody, { htmlBody: bodyHtml });
-      }, 'send follow-up reply (' + region + ')');
+        GmailApp.getThreadById(r.threadId).reply(plainBody, { htmlBody: bodyHtml });
+      }, 'send follow-up reply (' + r.region + ')');
     } catch (e) {
-      Logger.log('Overnight follow-up reply failed for ' + region + ' (thread ' + threadId + '): ' + e);
+      Logger.log('Overnight follow-up reply failed for ' + r.region + ' (thread ' + r.threadId + '): ' + e);
     }
   });
 }
