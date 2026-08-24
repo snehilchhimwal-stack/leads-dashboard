@@ -87,6 +87,31 @@ function mainRegionFor(rawRegion){
   return null;
 }
 
+// Two raw region values count as the "same real place" if either: (a) they
+// resolve to the same REGION_GROUP_MAP entry via mainRegionFor — already
+// covers every known sub-region variant ("Pune"/"Pune West"/"Pune East" all
+// → "Pune"), so this is a no-op for anything already mapped; or (b), as a
+// fallback for a variant NOT yet added to that map, their normalized first
+// word matches (e.g. an unmapped "Thane 2"-style suffix, or a typo) —
+// without needing a REGION_GROUP_MAP edit every time a new naming variant
+// shows up in the sheet. Blank/unresolvable values are never similar to
+// anything (including each other) — a customer with one blank-region copy
+// and one real-region copy is still a genuine mismatch worth surfacing, not
+// something to wave through as "similar" by default. Used both to decide
+// whether two same-lead_id/client_id rows should collate into one customer
+// (see the identity match in collateLeads) and to group the resulting
+// "which regions does this merged card actually span" read.
+function regionsAreSimilar(a, b){
+  const rawA = String(a || '').trim(), rawB = String(b || '').trim();
+  if (!rawA || !rawB) return false;
+  const mainA = mainRegionFor(rawA), mainB = mainRegionFor(rawB);
+  if (mainA && mainB) return mainA === mainB;
+  const keyA = normRegionKey(rawA), keyB = normRegionKey(rawB);
+  if (keyA === keyB) return true;
+  const firstA = keyA.split(' ')[0], firstB = keyB.split(' ')[0];
+  return !!firstA && firstA === firstB;
+}
+
 // A collated customer's copies can each need to be reported on their own
 // (different regions, or — per copySplits in fetchAndRender — different
 // RMs with different issues) rather than as one merged card. Expands to

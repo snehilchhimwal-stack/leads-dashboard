@@ -763,14 +763,26 @@ async function fetchAndRender(){
     };
 
     // Identity match: two rows collate together if they share the SAME
-    // lead_id OR the SAME client_id — checked independently, not client_id
-    // with lead_id only as a fallback for when it's blank. Dirty/
-    // inconsistent tagging across RM copies means the "same customer"
-    // signal can come from either column, and matches can chain — row A
-    // shares a client_id with row B, row B shares a lead_id with row C —
-    // so a simple single-field groupBy would miss that A and C are the
-    // same customer too. Union-Find merges every row transitively
-    // connected by either key into one group, however many hops apart.
+    // lead_id OR the SAME client_id AND their regions are the same real
+    // place (regionsAreSimilar — handles known sub-region variants like
+    // "Pune"/"Pune West" via REGION_GROUP_MAP, plus an unmapped-variant
+    // fallback). Two RM copies sharing an ID but tagged to genuinely
+    // different regions (e.g. Thane vs Hyderabad) are a real, separate
+    // conflict, not one customer — merging them used to pick a single
+    // region for the whole customer from whichever copy happened to reach
+    // the furthest funnel stage, which had nothing to do with which region
+    // was actually correct, and could show either region depending on
+    // funnel progress alone. Checked independently, not client_id with
+    // lead_id only as a fallback for when it's blank — dirty/inconsistent
+    // tagging across RM copies means the "same customer" signal can come
+    // from either column, and matches can chain (row A shares a client_id
+    // with row B, row B shares a lead_id with row C) — so a simple
+    // single-field groupBy would miss that A and C are the same customer
+    // too. Union-Find merges every row transitively connected by either
+    // key AND a region match into one group, however many hops apart —
+    // and because every individual union only ever happens between two
+    // rows whose regions were directly checked as similar, no chain of
+    // hops can smuggle two genuinely dissimilar regions into one group.
     const _ufParent = parsedLeads.map((_, i) => i);
     function _ufFind(x){
       while (_ufParent[x] !== x) { _ufParent[x] = _ufParent[_ufParent[x]]; x = _ufParent[x]; }
@@ -780,15 +792,24 @@ async function fetchAndRender(){
       const ra = _ufFind(a), rb = _ufFind(b);
       if (ra !== rb) _ufParent[ra] = rb;
     }
-    const _firstIndexByKey = new Map();
+    // key -> [{index, region}, ...] — one entry per distinct-region cluster
+    // seen so far under that key, not just the first row. A new row unions
+    // into whichever existing cluster has a similar region; if none match,
+    // it starts its own new cluster under the same key (so a LATER row
+    // sharing that ID AND that row's specific region can still join it).
+    const _clustersByKey = new Map();
     parsedLeads.forEach((l, i) => {
       const leadKey = 'lead:' + String(l.lead_id).trim();
       const cid = String(l.client_id || '').trim();
       const clientKey = cid ? 'client:' + cid : null;
+      const iRegion = effectiveRegion(l);
       [leadKey, clientKey].forEach(key => {
         if (!key) return;
-        if (_firstIndexByKey.has(key)) _ufUnion(i, _firstIndexByKey.get(key));
-        else _firstIndexByKey.set(key, i);
+        const clusters = _clustersByKey.get(key);
+        if (!clusters) { _clustersByKey.set(key, [{ index: i, region: iRegion }]); return; }
+        const match = clusters.find(c => regionsAreSimilar(c.region, iRegion));
+        if (match) _ufUnion(i, match.index);
+        else clusters.push({ index: i, region: iRegion });
       });
     });
 
@@ -806,6 +827,21 @@ async function fetchAndRender(){
     // mainRegionFor path everything else uses, so this reflects exactly
     // what the Region filter/report grouping would show for that row.
     const rowRegionLabel = (r) => mainRegionFor(effectiveRegion(r)) || String(r.region || '').trim() || '(blank)';
+
+    // Dedupes a group's row-region labels using the SAME regionsAreSimilar
+    // check the union-find identity match above now uses, not plain string
+    // equality — keeps this consistent with why the group merged in the
+    // first place. In practice, after that fix, a group reaching here with
+    // 2+ rows should already have directly-checked-similar regions, so this
+    // should read as one label almost always; kept as a safety net (and
+    // still informative if it ever isn't) rather than removed.
+    const dedupeSimilarRegions = (labels) => {
+      const out = [];
+      labels.forEach(label => {
+        if (!out.some(existing => regionsAreSimilar(existing, label))) out.push(label);
+      });
+      return out;
+    };
 
     // Merges a set of same-customer rows into ONE lead-shaped record: stage
     // taken from whichever copy went furthest (ties broken by most recent
@@ -898,7 +934,7 @@ async function fetchAndRender(){
         collatedFrom: distinctLeadIds.length,
         collatedRMs: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
         collatedLeadIds: distinctLeadIds,
-        collatedRegions: Array.from(new Set(rows.map(rowRegionLabel))),
+        collatedRegions: dedupeSimilarRegions(rows.map(rowRegionLabel)),
       });
     }
 
