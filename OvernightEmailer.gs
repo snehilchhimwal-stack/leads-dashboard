@@ -179,7 +179,14 @@ function resolveRecipientsForRegion_(ss, region, rmNames, legacyRecipients) {
     return { to: resolved.to.join(','), cc: resolved.cc.join(',') || undefined, source: 'RM_Hierarchy (' + resolved.resolvedCount + '/' + resolved.totalCount + ' RMs resolved)' };
   }
   const legacy = legacyRecipients[region];
-  if (legacy) return { to: legacy.to, cc: legacy.cc || undefined, source: 'Region_Recipients (fallback — no Manager_Directory email resolved for any of this region’s RMs yet)' };
+  if (legacy) {
+    // ALWAYS_CC_EMAILS_ (RmHierarchy.gs) applies even on the legacy
+    // fallback path — it's an unconditional business requirement on every
+    // overnight email, not something specific to RM_Hierarchy resolution.
+    const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
+    ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
+    return { to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, source: 'Region_Recipients (fallback — no Manager_Directory email resolved for any of this region’s RMs yet)' };
+  }
   return null;
 }
 

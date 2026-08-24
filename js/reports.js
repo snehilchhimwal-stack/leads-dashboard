@@ -770,11 +770,111 @@ function initRegionRecipientsPanel(){
   });
 }
 
-// Resolves To/Cc for a built report. report.regionNames is the list of
-// canonical regions it actually covers — one for a single-region report,
-// several for a combined-region email — and this unions their configured
-// addresses (deduped) so a combined email reaches everyone it should.
-function recipientsForReport(report){
+// Two leadership addresses that go on the combined "All Issues" email
+// regardless of region or RM — mirrors ALWAYS_CC_EMAILS_ in RmHierarchy.gs
+// (the Apps Script side of this same rule for the overnight automation).
+const ALWAYS_CC_EMAILS = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
+
+// Reads RM_Hierarchy + Manager_Directory from the CURRENT Google Sheet —
+// the SAME two tabs RmHierarchy.gs's setupRmHierarchy/rebuildRmHierarchy
+// populate for the overnight automation — so this dashboard's own combined
+// "All Issues" email can route by each RM's real TL/RH/CH instead of one
+// flat per-region address. Both tabs already carry the fully-resolved
+// chain (RmHierarchy.gs did that work once, server-side); this only reads
+// and looks things up, it does not re-derive the org chart. Returns null
+// if either tab doesn't exist yet (Apps Script setup not run in this
+// spreadsheet) — callers fall back to the old per-region panel in that case.
+async function fetchRmHierarchyRecipients(){
+  if (!_currentSheetId) return null;
+  try {
+    const [hRows, mRows] = await Promise.all([
+      sheetsApiValuesGet(_currentSheetId, 'RM_Hierarchy!A2:N'),
+      sheetsApiValuesGet(_currentSheetId, 'Manager_Directory!A2:F'),
+    ]);
+    const byRmNameLower = {};
+    hRows.forEach(row => {
+      const name = String(row[2] || '').trim();
+      if (!name) return;
+      byRmNameLower[name.toLowerCase()] = {
+        tl: String(row[5] || '').trim(), rh: String(row[6] || '').trim(),
+        ch: String(row[7] || '').trim(), other: String(row[8] || '').trim(),
+        excluded: row[10] === true || String(row[10]).trim().toUpperCase() === 'TRUE',
+      };
+    });
+    const emailByManagerNameLower = {};
+    mRows.forEach(row => {
+      const name = String(row[0] || '').trim().toLowerCase();
+      const email = String(row[3] || '').trim();
+      if (name && email) emailByManagerNameLower[name] = email;
+    });
+    return { byRmNameLower, emailByManagerNameLower };
+  } catch (err) {
+    // Tab missing (Apps Script setup not run yet) or a transient read
+    // error — either way, the caller falls back to the per-region panel
+    // rather than blocking the send.
+    console.warn('RM_Hierarchy/Manager_Directory not readable, falling back to per-region recipients:', err.message);
+    return null;
+  }
+}
+
+// Same To/Cc rule as RmHierarchy.gs's resolveRecipientsForRms_ — see that
+// function's own comment for the full reasoning. To: the RM's Team Lead
+// (A1) only, falling back to RH (then CH, then Other) when there's no TL.
+// Cc: whichever of RH/CH the chain has (mutually exclusive per person in
+// this data), plus ALWAYS_CC_EMAILS unconditionally on every email.
+function resolveRecipientsFromHierarchy(rmNames, hierarchyData){
+  const toSet = new Set(), ccSet = new Set();
+  let resolvedCount = 0;
+  rmNames.forEach(rmName => {
+    const chain = hierarchyData.byRmNameLower[String(rmName || '').trim().toLowerCase()];
+    if (!chain || chain.excluded) return;
+    const primaryName = chain.tl || chain.rh || chain.ch || chain.other || '';
+    let gotOne = false;
+    if (primaryName) {
+      const email = hierarchyData.emailByManagerNameLower[primaryName.toLowerCase()];
+      if (email) { toSet.add(email); gotOne = true; }
+    }
+    [chain.rh, chain.ch].forEach(name => {
+      if (!name) return;
+      const email = hierarchyData.emailByManagerNameLower[name.toLowerCase()];
+      if (email) { ccSet.add(email); gotOne = true; }
+    });
+    if (gotOne) resolvedCount++;
+  });
+  ALWAYS_CC_EMAILS.forEach(e => ccSet.add(e));
+  toSet.forEach(e => ccSet.delete(e));
+  return { to: Array.from(toSet), cc: Array.from(ccSet), resolvedCount, totalCount: rmNames.length };
+}
+
+// Resolves To/Cc for a built report. The combined "All Issues" email
+// (report.issueKey === 'combined') tries the RM_Hierarchy-based routing
+// above FIRST — the real per-RM TL/RH/CH chain, same rule the overnight
+// automation uses — falling back to the old per-region panel below only
+// when RM_Hierarchy/Manager_Directory aren't set up yet, or resolve to
+// nothing at all. Every other report type (single-issue, all-issues×
+// regions grid, overnight cohort) still uses the per-region panel only —
+// out of scope for this change, unchanged from before.
+async function recipientsForReport(report){
+  if (report.issueKey === 'combined' && report.sorted && report.sorted.length) {
+    const hierarchyData = await fetchRmHierarchyRecipients();
+    if (hierarchyData) {
+      const rmNames = Array.from(new Set(report.sorted.map(r => r.RM).filter(Boolean)));
+      const resolved = resolveRecipientsFromHierarchy(rmNames, hierarchyData);
+      if (resolved.to.length || resolved.cc.length) {
+        return { to: resolved.to.join(','), cc: resolved.cc.join(','), missing: [] };
+      }
+    }
+  }
+  return recipientsForReportLegacy_(report);
+}
+
+// The original per-region-panel resolution — report.regionNames is the
+// list of canonical regions it actually covers — one for a single-region
+// report, several for a combined-region email — and this unions their
+// configured addresses (deduped) so a combined email reaches everyone it
+// should. Still the ONLY resolution path for report types
+// recipientsForReport doesn't route through RM_Hierarchy (see above).
+function recipientsForReportLegacy_(report){
   const store = loadRegionRecipients();
   const names = (report.regionNames && report.regionNames.length) ? report.regionNames : [report.region];
   const toSet = new Set(), ccSet = new Set();
@@ -825,9 +925,9 @@ function flagMissingRegionRecipients(regions){
   });
 }
 
-function sendReport(report){
+async function sendReport(report){
   if (!report) return;
-  const { to, cc, missing } = recipientsForReport(report);
+  const { to, cc, missing } = await recipientsForReport(report);
   // Still opens with whatever WAS configured, so a partially-configured
   // combined email isn't blocked outright.
   if (missing.length) flagMissingRegionRecipients(missing);
@@ -1126,14 +1226,14 @@ async function performGmailSend(pending){
   }
 }
 
-function sendReportViaGmail(report, btnId){
+async function sendReportViaGmail(report, btnId){
   if (!report) return;
   if (!getGmailClientId()) {
     const panel = document.getElementById('gmailSetupPanel');
     if (panel) { panel.style.display = 'block'; panel.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     return;
   }
-  const { to, cc, missing } = recipientsForReport(report);
+  const { to, cc, missing } = await recipientsForReport(report);
   if (!to && !cc) {
     flagMissingRegionRecipients(missing.length ? missing : (report.regionNames || [report.region]));
     return;
@@ -1169,7 +1269,7 @@ async function _runBulkGmailSend(reports, btnIdFn, statusElId, confirmText){
   let sent = 0, failed = 0;
   for (let i = 0; i < reports.length; i++) {
     const report = reports[i];
-    const { to, cc, missing } = recipientsForReport(report);
+    const { to, cc, missing } = await recipientsForReport(report);
     if (!to && !cc) {
       (missing.length ? missing : (report.regionNames || [report.region])).forEach(r => missingRegions.add(r));
       continue;

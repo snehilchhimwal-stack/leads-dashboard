@@ -651,14 +651,27 @@ function loadRmHierarchyAndEmails_(ss) {
   }, 'loadRmHierarchyAndEmails_');
 }
 
+// Two leadership addresses that go on every overnight/summary issue email
+// regardless of region or RM — not derived from the hierarchy data at all,
+// just a fixed business requirement layered on top of it.
+const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
+
 /**
  * For a set of RM names (whoever had overnight activity in one region),
  * returns { to: [emails], cc: [emails], resolvedCount, totalCount } —
  * deduped so a CH shared by 10 flagged RMs appears once, not 10 times.
- * A person's immediate manager (TL if they have one, else whichever of
- * RH/CH/Other they report straight to) goes in "to"; the manager ABOVE
- * that (RH/CH, only when a TL exists in between) goes in "cc" — RH and CH
- * are parallel senior roles here, never both present for the same person.
+ *
+ * To: the RM's Team Lead (A1) ONLY — never RH/CH/Other — EXCEPT when the
+ * RM has no Team Lead at all (reports straight to RH/CH/Admin), in which
+ * case that direct manager becomes "to" instead, so there's still a real
+ * action-owner named rather than nobody.
+ *
+ * Cc: whichever of RH/CH this chain actually has (mutually exclusive per
+ * person in this data — a chain never has both) — RH is the compulsory
+ * one per the business rule, CH is the optional one, but since a chain can
+ * only ever surface one or the other here, both are simply cc'd whenever
+ * present; there's no case where CH shows up without RH being considered
+ * first. Plus ALWAYS_CC_EMAILS_ on every single email, unconditionally.
  */
 function resolveRecipientsForRms_(ss, rmNames) {
   const data = loadRmHierarchyAndEmails_(ss);
@@ -669,20 +682,23 @@ function resolveRecipientsForRms_(ss, rmNames) {
   rmNames.forEach(function (rmName) {
     const chain = data.byRmNameLower[String(rmName || '').trim().toLowerCase()];
     if (!chain || chain.excluded) return;
-    let primaryName = chain.tl || chain.rh || chain.ch || chain.other || '';
-    let secondaryName = chain.tl ? (chain.rh || chain.ch) : '';
+    // "To" is the TL only; RH is the fallback ONLY when there's no TL at
+    // all (never as a secondary alongside a TL — that's what Cc is for).
+    const primaryName = chain.tl || chain.rh || chain.ch || chain.other || '';
     let gotOne = false;
     if (primaryName) {
       const email = data.emailByManagerNameLower[primaryName.toLowerCase()];
       if (email) { toSet.add(email); gotOne = true; }
     }
-    if (secondaryName) {
-      const email = data.emailByManagerNameLower[secondaryName.toLowerCase()];
+    [chain.rh, chain.ch].forEach(function (name) {
+      if (!name) return;
+      const email = data.emailByManagerNameLower[name.toLowerCase()];
       if (email) { ccSet.add(email); gotOne = true; }
-    }
+    });
     if (gotOne) resolvedCount++;
   });
 
+  ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
   // A manager already in "to" shouldn't also clutter the "cc" line.
   toSet.forEach(function (e) { ccSet.delete(e); });
 
