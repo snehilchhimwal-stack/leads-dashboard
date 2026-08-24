@@ -357,16 +357,30 @@ function normPersonName_(name) {
 
 // RmHierarchy.private.gs — a companion Apps Script file, deliberately NOT
 // committed to this PUBLIC repo (it embeds real employee email addresses;
-// see its own header) — defines EMPLOYEE_EMAIL_BY_NAME_RAW_ and builds
-// _EMPLOYEE_EMAIL_LOOKUP_ from it. Guarded with typeof so this file works
-// standalone (every email just comes back blank, nothing throws) if that
-// companion hasn't been added to the Apps Script project yet. Paste
-// RmHierarchy.private.gs in as an additional file in the SAME project to
-// get real emails — Apps Script shares one scope across every file in a
-// project, so this resolves at runtime exactly as if it were defined here.
+// see its own header) — defines EMPLOYEE_EMAIL_BY_NAME_RAW_, nothing else.
+// Guarded with typeof so this file works standalone (every email just
+// comes back blank, nothing throws) if that companion hasn't been added
+// to the Apps Script project yet.
+//
+// The lookup table is built HERE, lazily, on first call — not at file-load
+// time in either file. Apps Script evaluates each file's top-level code
+// independently and does NOT guarantee one file's declarations exist yet
+// when another file's top-level code runs — building this eagerly at load
+// time (this file or RmHierarchy.private.gs) produced a real
+// "ReferenceError: normPersonName_ is not defined" in production the
+// first time this shipped, because RmHierarchy.private.gs's top-level
+// code ran before this file's normPersonName_ existed. Deferring
+// construction to the first actual FUNCTION CALL sidesteps that
+// entirely — by the time any real Apps Script function runs (a trigger,
+// a manual Run), every file has already finished loading.
+let _employeeEmailLookupCache_ = null;
 function lookupEmployeeEmail_(name) {
-  if (typeof _EMPLOYEE_EMAIL_LOOKUP_ === 'undefined') return '';
-  return _EMPLOYEE_EMAIL_LOOKUP_[normPersonName_(name)] || '';
+  if (typeof EMPLOYEE_EMAIL_BY_NAME_RAW_ === 'undefined') return '';
+  if (!_employeeEmailLookupCache_) {
+    _employeeEmailLookupCache_ = {};
+    EMPLOYEE_EMAIL_BY_NAME_RAW_.forEach(function (r) { _employeeEmailLookupCache_[normPersonName_(r[0])] = r[1]; });
+  }
+  return _employeeEmailLookupCache_[normPersonName_(name)] || '';
 }
 
 

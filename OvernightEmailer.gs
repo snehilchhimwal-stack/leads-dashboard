@@ -76,6 +76,18 @@
 const OVERNIGHT_START_HOUR_ = 17; // 5 PM the day before
 const OVERNIGHT_END_HOUR_ = 9;    // 9 AM on the day of
 
+// TEMPORARY TEST OVERRIDE — leave '' for real sends. Set to a single email
+// address (e.g. 'snehil.chhimwal@homesfy.in') to redirect EVERY resolved
+// To/Cc on EVERY overnight email — real recipients, RM_Hierarchy or
+// Region_Recipients fallback alike, and even the 2 always-cc leadership
+// addresses — to just that one address, so a manual test run
+// (sendOvernightMorningEmailsNow / sendOvernightFollowupEmailsNow) can
+// never reach a real TL/RH/CH by accident. Applied in
+// resolveRecipientsForRegion_, the single choke point every send path
+// already goes through. Blank this out again before trusting the daily
+// trigger — while it's set, the real automation is effectively disabled.
+const TEST_MODE_OVERRIDE_EMAIL_ = '';
+
 const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 
@@ -174,20 +186,29 @@ function ensureRegionRecipientsSheet_(ss) {
 // RMs) — keeps the automation sending during the gradual rollout instead of
 // going silent the moment RM_Hierarchy exists but emails aren't filled in.
 function resolveRecipientsForRegion_(ss, region, rmNames, legacyRecipients) {
+  let result;
   const resolved = withRetry_(function () { return resolveRecipientsForRms_(ss, rmNames); }, 'resolveRecipientsForRms_ (' + region + ')');
   if (resolved.to.length) {
-    return { to: resolved.to.join(','), cc: resolved.cc.join(',') || undefined, source: 'RM_Hierarchy (' + resolved.resolvedCount + '/' + resolved.totalCount + ' RMs resolved)' };
+    result = { to: resolved.to.join(','), cc: resolved.cc.join(',') || undefined, source: 'RM_Hierarchy (' + resolved.resolvedCount + '/' + resolved.totalCount + ' RMs resolved)' };
+  } else {
+    const legacy = legacyRecipients[region];
+    if (legacy) {
+      // ALWAYS_CC_EMAILS_ (RmHierarchy.gs) applies even on the legacy
+      // fallback path — it's an unconditional business requirement on every
+      // overnight email, not something specific to RM_Hierarchy resolution.
+      const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
+      ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
+      result = { to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, source: 'Region_Recipients (fallback — no Manager_Directory email resolved for any of this region’s RMs yet)' };
+    } else {
+      result = null;
+    }
   }
-  const legacy = legacyRecipients[region];
-  if (legacy) {
-    // ALWAYS_CC_EMAILS_ (RmHierarchy.gs) applies even on the legacy
-    // fallback path — it's an unconditional business requirement on every
-    // overnight email, not something specific to RM_Hierarchy resolution.
-    const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
-    ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
-    return { to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, source: 'Region_Recipients (fallback — no Manager_Directory email resolved for any of this region’s RMs yet)' };
+  // Single choke point every path above funnels through — see
+  // TEST_MODE_OVERRIDE_EMAIL_'s own comment.
+  if (result && TEST_MODE_OVERRIDE_EMAIL_) {
+    result = { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, source: result.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]' };
   }
-  return null;
+  return result;
 }
 
 function loadRegionRecipients_(ss) {

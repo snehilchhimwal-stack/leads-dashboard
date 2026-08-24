@@ -775,6 +775,18 @@ function initRegionRecipientsPanel(){
 // (the Apps Script side of this same rule for the overnight automation).
 const ALWAYS_CC_EMAILS = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
 
+// TEMPORARY TEST OVERRIDE — leave '' for real sends. Set from the browser
+// console (e.g. `TEST_MODE_OVERRIDE_EMAIL = 'snehil.chhimwal@homesfy.in'`)
+// to redirect EVERY resolved To/Cc for the combined "All Issues" email —
+// RM_Hierarchy-based or the legacy per-region panel, and even the 2
+// always-cc leadership addresses — to just that one address, so a manual
+// "Send via Gmail" click can never reach a real TL/RH/CH by accident.
+// Applied in recipientsForReport, the single choke point every send path
+// already goes through. Set it back to '' before sending for real —
+// while it's set, real recipients are effectively disabled for this
+// report type.
+let TEST_MODE_OVERRIDE_EMAIL = '';
+
 // Reads RM_Hierarchy + Manager_Directory from the CURRENT Google Sheet —
 // the SAME two tabs RmHierarchy.gs's setupRmHierarchy/rebuildRmHierarchy
 // populate for the overnight automation — so this dashboard's own combined
@@ -855,17 +867,24 @@ function resolveRecipientsFromHierarchy(rmNames, hierarchyData){
 // regions grid, overnight cohort) still uses the per-region panel only —
 // out of scope for this change, unchanged from before.
 async function recipientsForReport(report){
+  let result;
   if (report.issueKey === 'combined' && report.sorted && report.sorted.length) {
     const hierarchyData = await fetchRmHierarchyRecipients();
     if (hierarchyData) {
       const rmNames = Array.from(new Set(report.sorted.map(r => r.RM).filter(Boolean)));
       const resolved = resolveRecipientsFromHierarchy(rmNames, hierarchyData);
       if (resolved.to.length || resolved.cc.length) {
-        return { to: resolved.to.join(','), cc: resolved.cc.join(','), missing: [] };
+        result = { to: resolved.to.join(','), cc: resolved.cc.join(','), missing: [] };
       }
     }
   }
-  return recipientsForReportLegacy_(report);
+  if (!result) result = recipientsForReportLegacy_(report);
+  // Single choke point every path above funnels through — see
+  // TEST_MODE_OVERRIDE_EMAIL's own comment.
+  if (TEST_MODE_OVERRIDE_EMAIL) {
+    return { to: TEST_MODE_OVERRIDE_EMAIL, cc: '', missing: [] };
+  }
+  return result;
 }
 
 // The original per-region-panel resolution — report.regionNames is the
