@@ -198,17 +198,22 @@ function ensureRegionRecipientsSheet_(ss) {
   return sheet;
 }
 
-// Per-RM-derived recipients for one region's morning email, falling back to
-// the legacy flat Region_Recipients entry when nothing could be resolved
-// (i.e. Manager_Directory has no email yet for any manager of that day's
-// RMs) — keeps the automation sending during the gradual rollout instead of
-// going silent the moment RM_Hierarchy exists but emails aren't filled in.
-function resolveRecipientsForRegion_(ss, region, rmNames, legacyRecipients) {
-  let result;
-  const resolved = withRetry_(function () { return resolveRecipientsForRms_(ss, rmNames); }, 'resolveRecipientsForRms_ (' + region + ')');
-  if (resolved.to.length) {
-    result = { to: resolved.to.join(','), cc: resolved.cc.join(',') || undefined, source: 'RM_Hierarchy (' + resolved.resolvedCount + '/' + resolved.totalCount + ' RMs resolved)' };
-  } else {
+// Per-A1-bucketed recipients for one region's morning email — see
+// resolveRecipientBucketsForRms_'s own comment for the bucketing rule
+// (one email per distinct A1, never several combined into one To).
+// Whichever RMs couldn't be resolved via RM_Hierarchy at all fall back to
+// ONE combined email via the legacy Region_Recipients entry — keeps the
+// automation sending during the gradual rollout instead of going silent
+// the moment RM_Hierarchy exists but some emails aren't filled in yet.
+// Returns an array of { to, cc, rmNames, source } — one entry per email
+// that should actually be sent for this region (zero, one, or many).
+function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients) {
+  const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
+  const results = resolved.buckets.map(function (b) {
+    return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (A1: ' + b.primaryName + ')', bucketLabel: b.primaryName };
+  });
+
+  if (resolved.unresolved.length) {
     const legacy = legacyRecipients[region];
     if (legacy) {
       // ALWAYS_CC_EMAILS_ (RmHierarchy.gs) applies even on the legacy
@@ -216,17 +221,23 @@ function resolveRecipientsForRegion_(ss, region, rmNames, legacyRecipients) {
       // overnight email, not something specific to RM_Hierarchy resolution.
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
       ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
-      result = { to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, source: 'Region_Recipients (fallback — no Manager_Directory email resolved for any of this region’s RMs yet)' };
-    } else {
-      result = null;
+      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: resolved.unresolved, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + resolved.unresolved.join(', ') + ')', bucketLabel: 'Unmatched RMs' });
     }
+    // else: silently skipped for these RMs — no recipient configured, not a fault
   }
+
   // Single choke point every path above funnels through — see
-  // TEST_MODE_OVERRIDE_EMAIL_'s own comment.
-  if (result && TEST_MODE_OVERRIDE_EMAIL_) {
-    result = { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, source: result.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]' };
+  // TEST_MODE_OVERRIDE_EMAIL_'s own comment. Bucketing is preserved even in
+  // test mode (each bucket still becomes its own email, just redirected)
+  // so a test run can actually verify "does each A1 get their own email"
+  // instead of collapsing the very thing being tested into one message.
+  if (TEST_MODE_OVERRIDE_EMAIL_) {
+    return results.map(function (r) {
+      return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel };
+    });
   }
-  return result;
+
+  return results;
 }
 
 function loadRegionRecipients_(ss) {
@@ -423,6 +434,90 @@ function renderOvernightReportEmailHTML_(opts) {
  * it isn't part of what this email displays, since "status" here is the
  * lead's funnel stage, not which SLA check fired.
  */
+// Builds and sends ONE overnight email — either a real per-A1 bucket
+// (subject gets that A1's name appended, since a region can now produce
+// several of these and identical subjects would be confusing in a shared
+// inbox) or the legacy-fallback catch-all for RMs RM_Hierarchy couldn't
+// resolve (subject gets "(Unmatched RMs)" instead). Factored out of
+// sendOvernightMorningEmails so that function's per-region loop can call
+// this once per bucket instead of once per region.
+function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
+  if (!leads.length) return;
+
+  const byRM = {}; // RM -> { TL, leads: [] }
+  leads.forEach(function (l) {
+    if (!byRM[l.RM]) byRM[l.RM] = { TL: l.TL, leads: [] };
+    byRM[l.RM].leads.push(l);
+  });
+  const rmKeys = Object.keys(byRM).sort();
+  const statusTypeCount = Array.from(new Set(leads.map(function (l) { return l.status; }))).length;
+
+  const subjectSuffix = rec.bucketLabel ? ' (' + rec.bucketLabel + ')' : '';
+  const subject = region + ' Overnight Leads - ' + dateLabel + subjectSuffix;
+  const html = renderOvernightReportEmailHTML_({
+    title: 'Overnight Leads',
+    region: region,
+    subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
+    kpis: [
+      { value: leads.length, label: leads.length === 1 ? 'Lead Created' : 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
+      { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+      { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
+    ],
+    action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+    sections: rmKeys.map(function (rm) {
+      return {
+        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
+        columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
+        rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
+      };
+    }),
+    footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
+  });
+  const plainBody = 'Overnight leads for ' + region + subjectSuffix + ' (' + dateLabel + '): ' + leads.length +
+    ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
+
+  Logger.log('Morning email recipients for ' + region + subjectSuffix + ': ' + rec.source);
+  let sentMessage;
+  try {
+    // Retried: sending the actual email is the one thing here worth
+    // fighting for before giving up on a bucket — a transient Gmail
+    // hiccup shouldn't silently skip a whole A1's morning email.
+    sentMessage = withRetry_(function () {
+      return GmailApp.createDraft(rec.to, subject, plainBody, {
+        cc: rec.cc || undefined,
+        htmlBody: html,
+        name: 'Homesfy Lead Ops',
+      }).send();
+    }, 'send morning email (' + region + subjectSuffix + ')');
+  } catch (e) {
+    Logger.log('Overnight morning email failed for ' + region + subjectSuffix + ': ' + e);
+    return;
+  }
+
+  const threadId = sentMessage.getThread().getId();
+  const issueLog = [];
+  leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
+  withRetry_(function () {
+    logSheet.appendRow([todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
+  }, 'log Overnight_Log row (' + region + subjectSuffix + ')');
+}
+
+/**
+ * 10am run: builds and sends overnight emails, one PER A1 (Team Lead) —
+ * never multiple A1s combined into one "To". A region with several Team
+ * Leads produces several separate emails, each scoped to just that one
+ * A1's own RMs' leads; see resolveRecipientBucketsForRms_ for the exact
+ * bucketing rule. Only leads that have NOT reached Opportunity+ and are
+ * NOT closed are shown — a lead that already converted or closed
+ * overnight needs no follow-up action (same scope as the dashboard's own
+ * Overnight Leads email, js/tab-movement.js's overnightEmailableLeads).
+ * Each lead shown as just Lead ID / current Status / a suggested next
+ * action — nothing else. Still separately computes and logs which of
+ * these leads are flagged for an SLA issue (Overnight_Log) — that's what
+ * the 1pm follow-up re-checks; it isn't part of what this email displays,
+ * since "status" here is the lead's funnel stage, not which SLA check
+ * fired.
+ */
 function sendOvernightMorningEmails() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
@@ -434,7 +529,7 @@ function sendOvernightMorningEmails() {
   // shared file, same retry reasoning as readLeadsTab_ above.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
 
-  const byRegion = {}; // mainRegion -> { openLeads: [], issueLog: [] }
+  const byRegion = {}; // mainRegion -> openLeads[] (each carries its own .issue)
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
@@ -452,18 +547,18 @@ function sendOvernightMorningEmails() {
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed overnight — excluded
 
-    if (!byRegion[main]) byRegion[main] = { openLeads: [], issueLog: [] };
+    if (!byRegion[main]) byRegion[main] = [];
     const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
     const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
-    const issue = primaryIssueGs_(flags);
-    if (issue) byRegion[main].issueLog.push({ lead_id: leadId, issueKey: issue.key, issueLabel: issue.label });
+    const issue = primaryIssueGs_(flags); // kept on the lead for Overnight_Log — not shown in the email itself
 
-    byRegion[main].openLeads.push({
+    byRegion[main].push({
       lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),
       followup: overnightFollowupHintGs_(row, colIndex, flags),
+      issue: issue,
     });
   });
 
@@ -472,66 +567,17 @@ function sendOvernightMorningEmails() {
   const todayKey = istDayKeyGs_(now);
 
   Object.keys(byRegion).sort().forEach(function (region) {
-    const g = byRegion[region];
-    if (!g.openLeads.length) return; // nothing still-open overnight for this region
+    const openLeads = byRegion[region];
+    if (!openLeads.length) return; // nothing still-open overnight for this region
 
-    const rmNames = Array.from(new Set(g.openLeads.map(function (l) { return l.RM; })));
-    const rec = resolveRecipientsForRegion_(ss, region, rmNames, recipients);
-    if (!rec) return; // no manager email resolved AND no legacy Region_Recipients entry — silently skipped, not a fault
+    const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients);
 
-    const byRM = {}; // RM -> { TL, leads: [] }
-    g.openLeads.forEach(function (l) {
-      if (!byRM[l.RM]) byRM[l.RM] = { TL: l.TL, leads: [] };
-      byRM[l.RM].leads.push(l);
+    recEmails.forEach(function (rec) {
+      const rmSet = new Set(rec.rmNames);
+      const bucketLeads = openLeads.filter(function (l) { return rmSet.has(l.RM); });
+      sendOneOvernightEmail_(ss, logSheet, region, rec, bucketLeads, dateLabel, todayKey, now, win);
     });
-    const rmKeys = Object.keys(byRM).sort();
-    const statusTypeCount = Array.from(new Set(g.openLeads.map(function (l) { return l.status; }))).length;
-
-    const subject = region + ' Overnight Leads - ' + dateLabel;
-    const html = renderOvernightReportEmailHTML_({
-      title: 'Overnight Leads',
-      region: region,
-      subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
-      kpis: [
-        { value: g.openLeads.length, label: g.openLeads.length === 1 ? 'Lead Created' : 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
-        { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
-        { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
-      ],
-      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
-      sections: rmKeys.map(function (rm) {
-        return {
-          heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
-          columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
-          rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
-        };
-      }),
-      footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
-    });
-    const plainBody = 'Overnight leads for ' + region + ' (' + dateLabel + '): ' + g.openLeads.length +
-      ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
-
-    Logger.log('Morning email recipients for ' + region + ': ' + rec.source);
-    let sentMessage;
-    try {
-      // Retried: sending the actual email is the one thing here worth
-      // fighting for before giving up on a region — a transient Gmail
-      // hiccup shouldn't silently skip a whole region's morning email.
-      sentMessage = withRetry_(function () {
-        return GmailApp.createDraft(rec.to, subject, plainBody, {
-          cc: rec.cc || undefined,
-          htmlBody: html,
-          name: 'Homesfy Lead Ops',
-        }).send();
-      }, 'send morning email (' + region + ')');
-    } catch (e) {
-      Logger.log('Overnight morning email failed for ' + region + ': ' + e);
-      return;
-    }
-
-    const threadId = sentMessage.getThread().getId();
-    withRetry_(function () {
-      logSheet.appendRow([todayKey, region, threadId, JSON.stringify(g.issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
-    }, 'log Overnight_Log row (' + region + ')');
   });
 }
 

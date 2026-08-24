@@ -691,51 +691,56 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
 
 /**
  * For a set of RM names (whoever had overnight activity in one region),
- * returns { to: [emails], cc: [emails], resolvedCount, totalCount } —
- * deduped so a CH shared by 10 flagged RMs appears once, not 10 times.
+ * groups them into one bucket PER DISTINCT primary recipient — never
+ * combines multiple A1s into one email. "To" must always name exactly
+ * ONE manager, so a region with 4 Team Leads produces 4 buckets here, not
+ * 1 combined email with all 4 in To.
  *
- * To: the RM's Team Lead (A1) ONLY — never RH/CH/Other — EXCEPT when the
- * RM has no Team Lead at all (reports straight to RH/CH/Admin), in which
- * case that direct manager becomes "to" instead, so there's still a real
- * action-owner named rather than nobody.
+ * Each bucket's primary recipient is the RM's Team Lead (A1) — EXCEPT
+ * when the RM has no Team Lead at all (reports straight to RH/CH/Admin),
+ * in which case that direct manager becomes the primary instead, so
+ * there's still a real action-owner named rather than nobody.
  *
- * Cc: whichever of RH/CH this chain actually has (mutually exclusive per
- * person in this data — a chain never has both) — RH is the compulsory
- * one per the business rule, CH is the optional one, but since a chain can
- * only ever surface one or the other here, both are simply cc'd whenever
- * present; there's no case where CH shows up without RH being considered
- * first. Plus ALWAYS_CC_EMAILS_ on every single email, unconditionally.
+ * Each bucket's Cc is whichever of RH/CH that ONE primary's own chain
+ * actually has (mutually exclusive per person in this data — never both),
+ * plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own email
+ * (never cc someone already in To).
+ *
+ * Returns { buckets: [{ primaryName, primaryEmail, cc: [emails],
+ * rmNames: [...] }], unresolved: [rmNames with no chain, excluded, or no
+ * resolvable primary email] } — callers route `unresolved` through the
+ * legacy Region_Recipients fallback instead.
  */
-function resolveRecipientsForRms_(ss, rmNames) {
+function resolveRecipientBucketsForRms_(ss, rmNames) {
   const data = loadRmHierarchyAndEmails_(ss);
-  const toSet = new Set();
-  const ccSet = new Set();
-  let resolvedCount = 0;
+  const buckets = {}; // lowercased primaryName -> { primaryName, primaryEmail, ccSet, rmNames }
+  const unresolved = [];
 
   rmNames.forEach(function (rmName) {
     const chain = data.byRmNameLower[String(rmName || '').trim().toLowerCase()];
-    if (!chain || chain.excluded) return;
-    // "To" is the TL only; RH is the fallback ONLY when there's no TL at
-    // all (never as a secondary alongside a TL — that's what Cc is for).
+    if (!chain || chain.excluded) { unresolved.push(rmName); return; }
     const primaryName = chain.tl || chain.rh || chain.ch || chain.other || '';
-    let gotOne = false;
-    if (primaryName) {
-      const email = data.emailByManagerNameLower[primaryName.toLowerCase()];
-      if (email) { toSet.add(email); gotOne = true; }
-    }
+    const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
+    if (!primaryEmail) { unresolved.push(rmName); return; }
+
+    const key = primaryName.toLowerCase();
+    if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, ccSet: new Set(), rmNames: [] };
     [chain.rh, chain.ch].forEach(function (name) {
       if (!name) return;
       const email = data.emailByManagerNameLower[name.toLowerCase()];
-      if (email) { ccSet.add(email); gotOne = true; }
+      if (email) buckets[key].ccSet.add(email);
     });
-    if (gotOne) resolvedCount++;
+    buckets[key].rmNames.push(rmName);
   });
 
-  ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
-  // A manager already in "to" shouldn't also clutter the "cc" line.
-  toSet.forEach(function (e) { ccSet.delete(e); });
+  const bucketList = Object.keys(buckets).sort().map(function (key) {
+    const b = buckets[key];
+    ALWAYS_CC_EMAILS_.forEach(function (e) { b.ccSet.add(e); });
+    b.ccSet.delete(b.primaryEmail); // don't cc someone already in To
+    return { primaryName: b.primaryName, primaryEmail: b.primaryEmail, cc: Array.from(b.ccSet), rmNames: b.rmNames };
+  });
 
-  return { to: Array.from(toSet), cc: Array.from(ccSet), resolvedCount: resolvedCount, totalCount: rmNames.length };
+  return { buckets: bucketList, unresolved: unresolved };
 }
 
 // ---- One-time setup — run this once from the editor (also called by
