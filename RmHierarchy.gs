@@ -487,6 +487,14 @@ function ensureRmHierarchySheet_(ss) {
   });
 
   const sheet = withRetry_(function () { return ss.insertSheet(RM_HIERARCHY_SHEET_); }, 'insert RM_Hierarchy');
+  // A sheet just created by insertSheet() isn't always fully settled on
+  // Google's end the instant the call returns — writing to it immediately
+  // is exactly the pattern that kept producing "Service Spreadsheets timed
+  // out" in production even with a widened retry budget. flush() forces
+  // every pending change (including the insert itself) to actually commit
+  // before the next operation starts, which is Google's own documented fix
+  // for this class of issue.
+  SpreadsheetApp.flush();
   withRetry_(function () {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
@@ -548,7 +556,12 @@ function rebuildRmHierarchy() {
     const existing = ss.getSheetByName(RM_HIERARCHY_SHEET_);
     if (existing) ss.deleteSheet(existing);
   }, 'delete old RM_Hierarchy');
+  SpreadsheetApp.flush(); // let the delete actually commit before recreating the same-named sheet
   const sheet = withRetry_(function () { return ss.insertSheet(RM_HIERARCHY_SHEET_); }, 'insert RM_Hierarchy');
+  // See ensureRmHierarchySheet_'s identical comment — a freshly inserted
+  // sheet isn't always immediately ready for a write; this is the step
+  // that kept timing out in production even at 4 retry attempts.
+  SpreadsheetApp.flush();
   withRetry_(function () {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
@@ -610,8 +623,14 @@ function ensureManagerDirectorySheetInternal_(ss, forceRefresh) {
     return [m.name, Array.from(m.roles).sort().join(', '), Array.from(m.regions).sort().join(', '), email, m.reportCount, emailSource];
   });
 
-  if (existing) withRetry_(function () { ss.deleteSheet(existing); }, 'delete old Manager_Directory');
+  if (existing) {
+    withRetry_(function () { ss.deleteSheet(existing); }, 'delete old Manager_Directory');
+    SpreadsheetApp.flush(); // let the delete actually commit before recreating the same-named sheet
+  }
   const sheet = withRetry_(function () { return ss.insertSheet(MANAGER_DIRECTORY_SHEET_); }, 'insert Manager_Directory');
+  // See ensureRmHierarchySheet_'s identical comment — a freshly inserted
+  // sheet isn't always immediately ready for a write.
+  SpreadsheetApp.flush();
   withRetry_(function () {
     sheet.getRange(1, 1, 1, 6).setValues([['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source']]);
     sheet.setFrozenRows(1);

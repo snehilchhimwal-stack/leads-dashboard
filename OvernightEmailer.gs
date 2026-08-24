@@ -176,17 +176,26 @@ function withRetry_(fn, label) {
   }
 }
 
+// Split into small independently-retried steps, with a flush() right
+// after insertSheet — same reasoning as RmHierarchy.gs's identical
+// functions (see ensureRmHierarchySheet_'s comment): one big withRetry_
+// around insert+write makes every retry redo the whole thing, and a
+// freshly inserted sheet isn't always immediately ready for a write.
 function ensureRegionRecipientsSheet_(ss) {
-  return withRetry_(function () {
-    let sheet = ss.getSheetByName(REGION_RECIPIENTS_SHEET_);
-    if (sheet) return sheet;
-    sheet = ss.insertSheet(REGION_RECIPIENTS_SHEET_);
+  const existing = withRetry_(function () { return ss.getSheetByName(REGION_RECIPIENTS_SHEET_); }, 'check for existing Region_Recipients');
+  if (existing) return existing;
+
+  const sheet = withRetry_(function () { return ss.insertSheet(REGION_RECIPIENTS_SHEET_); }, 'insert Region_Recipients');
+  SpreadsheetApp.flush();
+  withRetry_(function () {
     sheet.getRange(1, 1, 1, 3).setValues([['region', 'to', 'cc']]);
     sheet.setFrozenRows(1);
-    const regions = Array.from(new Set(Object.keys(REGION_GROUP_MAP_).map(function (k) { return REGION_GROUP_MAP_[k]; }))).sort();
+  }, 'write Region_Recipients header');
+  const regions = Array.from(new Set(Object.keys(REGION_GROUP_MAP_).map(function (k) { return REGION_GROUP_MAP_[k]; }))).sort();
+  withRetry_(function () {
     sheet.getRange(2, 1, regions.length, 1).setValues(regions.map(function (r) { return [r]; }));
-    return sheet;
-  }, 'ensureRegionRecipientsSheet_');
+  }, 'write Region_Recipients region list');
+  return sheet;
 }
 
 // Per-RM-derived recipients for one region's morning email, falling back to
@@ -236,17 +245,22 @@ function loadRegionRecipients_(ss) {
   }, 'loadRegionRecipients_');
 }
 
+// Split into small independently-retried steps, with a flush() right
+// after insertSheet — see ensureRegionRecipientsSheet_'s identical
+// comment. This is the exact function that produced the original
+// "Service Spreadsheets timed out" error in production.
 function ensureOvernightLogSheet_(ss) {
-  return withRetry_(function () {
-    let sheet = ss.getSheetByName(OVERNIGHT_LOG_SHEET_);
-    const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at'];
-    if (!sheet) {
-      sheet = ss.insertSheet(OVERNIGHT_LOG_SHEET_);
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      sheet.setFrozenRows(1);
-    }
-    return sheet;
-  }, 'ensureOvernightLogSheet_');
+  const existing = withRetry_(function () { return ss.getSheetByName(OVERNIGHT_LOG_SHEET_); }, 'check for existing Overnight_Log');
+  if (existing) return existing;
+
+  const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at'];
+  const sheet = withRetry_(function () { return ss.insertSheet(OVERNIGHT_LOG_SHEET_); }, 'insert Overnight_Log');
+  SpreadsheetApp.flush();
+  withRetry_(function () {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }, 'write Overnight_Log header');
+  return sheet;
 }
 
 // Yesterday 5 PM IST through today 9 AM IST, as real Date objects — matches
