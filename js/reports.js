@@ -1641,14 +1641,40 @@ function buildRegionWiseReports(combineAll, followupLookup){
   // carries an open-lead SLA flag, so this population never overlaps with
   // `rows` above.
   const WARM_CLOSE_OUTCOMES = new Set(['Interested', 'Visit Arranged', 'Visit Completed', 'Details Shared', 'Considering', 'Budget Concern', 'Loan In Process', 'DNP']);
+  // Broking Advisor and Duplicate Lead are legitimate closing reasons on
+  // their own terms — this check exists to catch closes that look
+  // premature despite still sounding engaged, not to second-guess every
+  // closed lead, and neither reason has anything to do with client
+  // interest. Duplicate Lead is the one exception that still needs
+  // substantiating: without the ORIGINAL lead's id cited somewhere in the
+  // comment history, an unverified "duplicate" claim is itself exactly
+  // the kind of thing this section exists to surface, so it still flags —
+  // just with its own distinct reason, independent of the warm-outcome
+  // check below (a "duplicate" comment rarely contains an engaged-sounding
+  // keyword anyway, so relying on that check alone would silently miss it).
+  // Lead ids in this sheet are plain digit strings (e.g. 2145357) — a 6+
+  // digit run anywhere in the comment/closing-comment text is treated as
+  // "an id was cited," without requiring an exact length match.
+  const LEAD_ID_IN_TEXT_RE = /\d{6,}/;
   const warmCloseRows = [];
   issueLeads.forEach(l => {
     if (!isLeadClosed(l)) return;
+    const closingReasonRaw = String(l.lead_closing_reason || l.closing_reason || '').trim();
+    const closingReasonNorm = closingReasonRaw.toLowerCase();
+    if (closingReasonNorm === 'broking advisor') return;
+    if (closingReasonNorm === 'duplicate lead') {
+      const citedText = [combinedCommentsText(l), l.last_comment, l.lead_closing_comment].filter(Boolean).join(' ');
+      if (LEAD_ID_IN_TEXT_RE.test(citedText)) return; // legitimate — original lead id cited
+      const main = mainRegionFor(effectiveRegion(l));
+      if (!main) return;
+      warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason: closingReasonRaw, lastNote: '(no original lead id found in the comments)', lastOutcome: 'Duplicate Lead — missing original id', siblingRMs: l.siblingRMs });
+      return;
+    }
     const latest = latestFamilyOutcome(l);
     if (!latest || !WARM_CLOSE_OUTCOMES.has(latest.outcome)) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return;
-    const closedReason = String(l.lead_closing_reason || l.closing_reason || '').trim() || '—';
+    const closedReason = closingReasonRaw || '—';
     warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason, lastNote: latest.comment, lastOutcome: latest.outcome, siblingRMs: l.siblingRMs });
   });
 
@@ -1874,7 +1900,7 @@ Total : ${closedNoCommentTotalLabel}` : '';
 
 ${DIVIDER}
 POSSIBLE PREMATURE CLOSES (Worth a Second Look)
-The following leads were closed, but the most recent logged note across this customer's full history (this copy and any sibling RM copies) still sounded engaged — Interested, Considering, Visit Arranged, etc. — rather than a clear no. Not proof the close was wrong, just worth a quick review before it's too late to revisit.
+The following leads were closed, but either the most recent logged note across this customer's full history (this copy and any sibling RM copies) still sounded engaged — Interested, Considering, Visit Arranged, etc. — rather than a clear no, or the lead was closed as Duplicate Lead with no original lead id cited anywhere in the comments to back that up. Not proof the close was wrong, just worth a quick review before it's too late to revisit.
 ${SUBDIVIDER}
 ${Object.values(warmCloseByRM).map(group =>
   `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}  |  Closed as: ${r.closedReason}  |  Last note (${r.lastOutcome}): "${r.lastNote}"${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
@@ -1992,8 +2018,8 @@ ${EMAIL_SIGNATURE}`;
     if (warmCloseItems.length) {
       sections.push({
         heading: 'Possible Premature Closes',
-        subheading: `${warmCloseTotalLabel} closed lead${warmCloseCloneCounts.unique === 1 ? '' : 's'} — most recent logged note still sounded engaged, worth a second look`,
-        action: `These leads were closed, but the most recent logged note across the full customer history (this copy and any sibling RM copies) still read as engaged — Interested, Considering, Visit Arranged, etc. — rather than a clear no. Confirm the close was intentional before it's too late to revisit.`,
+        subheading: `${warmCloseTotalLabel} closed lead${warmCloseCloneCounts.unique === 1 ? '' : 's'} — engaged-sounding last note, or an unsubstantiated Duplicate Lead close, worth a second look`,
+        action: `These leads were closed, but either the most recent logged note across the full customer history (this copy and any sibling RM copies) still read as engaged — Interested, Considering, Visit Arranged, etc. — rather than a clear no, or the lead was closed as Duplicate Lead with no original lead id cited in the comments. Confirm the close was intentional (and, for a Duplicate Lead close, add the original lead id to the comment) before it's too late to revisit.`,
         columns: ['Lead ID', 'Region', 'RM', 'Closed As', 'Last Note'],
         rows: warmCloseItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), r.closedReason, `(${r.lastOutcome}) "${r.lastNote}"`]),
         accent: { fg: '#b45309', headerBg: '#fef3c7', bg: '#fffbeb' },
