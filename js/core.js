@@ -261,12 +261,12 @@ const HEADER_ALIASES = {
   closing_reason: ['closing_reason','closing reason'],
   // The sheet's OWN closing disposition — distinct from closing_reason
   // above (an RM-entered/internal field). Deliberately kept separate from
-  // combinedCommentsText/hasAnyCommentField's "internal comment" checks
-  // (Closed with No Work Recorded, etc.): a lead auto-closed with only
-  // these filled in and nothing logged in the four internal fields is
-  // exactly the "no work recorded" case those checks exist to catch. Used
-  // instead as the preferred label wherever the dashboard shows WHY a
-  // lead closed (see suggestedFollowUp).
+  // combinedCommentsText/hasAnyCommentField/hasAnyNarrativeComment's
+  // "internal comment" checks: a lead auto-closed with only this filled in
+  // and nothing logged anywhere else is exactly the "no comment" case
+  // Closed with No Comment exists to catch. Used instead as the preferred
+  // label wherever the dashboard shows WHY a lead closed (see
+  // suggestedFollowUp).
   lead_closing_reason: ['lead_closing_reason','lead closing reason'],
   lead_closing_comment: ['lead_closing_comment','lead closing comment'],
   // call_attempts is the SOP's "attempt" — every dial, connected or not.
@@ -1463,14 +1463,20 @@ function enrichLead(l){
   // the structured action log — a lead with only a last_comment or a
   // closing_reason set is still real evidence someone touched it.
   const recordingCommentsNoCalls = l.call_count === 0 && l.call_attempts === 0 && hasAnyCommentField(l);
-  // Closed with No Work Recorded is its own separate issue card below —
-  // a lead CLOSED with zero comments logged at all, i.e. no evidence any
-  // work happened before closure. Deliberately just these two conditions:
-  // call_count/call_attempts are dropped from this one (unlike
-  // recordingCommentsNoCalls above, which still needs both zero) — a
-  // closed lead with literally no comment is the signal on its own,
-  // regardless of whatever number sits in the call columns.
-  const closedWithNoWork = excluded && !hasAnyCommentField(l);
+  // Closed with No Comment is its own separate issue card below — a lead
+  // CLOSED with no real narrative ever logged (see hasAnyNarrativeComment
+  // above), i.e. no evidence any work happened before closure. Deliberately
+  // just these two conditions: call_count/call_attempts are dropped from
+  // this one (unlike recordingCommentsNoCalls above, which still needs
+  // both zero) — a closed lead with literally no comment is the signal on
+  // its own, regardless of whatever number sits in the call columns. Uses
+  // hasAnyNarrativeComment, NOT hasAnyCommentField — closing_reason is
+  // excluded from what counts as "a comment" here on purpose: it's very
+  // often the ONLY field filled on a lead closed in bulk or via a dropdown
+  // reason with current_stage never touched (still reading "Not Updated"),
+  // and that closing_reason tag alone is exactly the "no real work" case
+  // this check exists to surface, not evidence against it.
+  const closedWithNoComment = excluded && !hasAnyNarrativeComment(l);
   const recordingNotWorking = recordingCommentsNoCalls;
 
   // SOP Rule 3 — CRM logging after each attempt. The mirror image of
@@ -1500,7 +1506,7 @@ function enrichLead(l){
     firstContactStatus, firstContactBreach, businessMinsToConnect, neverConnectedPastWindow,
     agentCount, isMultiAgent,
     hoursSinceLastComment, lastCommentAt, isNotUpdated,
-    followupOverdue, hasConnected, recordingNotWorking, recordingCommentsNoCalls, closedWithNoWork,
+    followupOverdue, hasConnected, recordingNotWorking, recordingCommentsNoCalls, closedWithNoComment,
     unloggedCallGap, loggingGapBreach,
     rmIsInactive, inactiveRmNewLead,
     attemptsToday, underCalledToday,
@@ -2197,6 +2203,21 @@ function hasAnyCommentField(l){
     || String(l.stage_comments || '').trim()
     || String(l.last_comment || '').trim()
     || String(l.closing_reason || '').trim());
+}
+
+// Narrower than hasAnyCommentField above: real narrative content only
+// (internal_status_comments, stage_comments, last_comment), excluding
+// closing_reason. closing_reason is a classification tag — often the very
+// thing that makes a lead read as closed in the first place (see
+// isLeadClosed) — not evidence an RM actually worked it. Used only by
+// Closed with No Comment: a lead closed via closing_reason alone, with
+// nothing else ever logged, is exactly the case that check exists to
+// catch; hasAnyCommentField would wrongly clear it since closing_reason
+// itself satisfies that broader check.
+function hasAnyNarrativeComment(l){
+  return !!(String(l.internal_status_comments || '').trim()
+    || String(l.stage_comments || '').trim()
+    || String(l.last_comment || '').trim());
 }
 
 // Your internal_status_comments field (combined with stage_comments via

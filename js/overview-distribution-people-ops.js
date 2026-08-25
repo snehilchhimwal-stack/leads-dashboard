@@ -275,7 +275,7 @@ function renderAll(){
   renderApproachingDeadlineList();
   renderStuckList();
   renderRecordingList();
-  renderClosedNoWorkList();
+  renderClosedNoCommentList();
   renderDailyTrend();
   renderRMScoreTable();
   renderFanout();
@@ -319,7 +319,7 @@ const OFFTAB_COUNT_SECTIONS = [
   { id: 'sec-approaching48h', countId: 'approachingDeadlineCount', severity: 'has-items' },
   { id: 'sec-stuck',       countId: 'stuckCount',      severity: 'urgent' },
   { id: 'sec-recording',   countId: 'recordingCount',  severity: 'has-items' },
-  { id: 'sec-closednowork', countId: 'closedNoWorkCount', severity: 'urgent' },
+  { id: 'sec-closednocomment', countId: 'closedNoCommentCount', severity: 'urgent' },
   { id: 'sec-reports',     countId: 'regionReportCount' },
 ];
 
@@ -1265,10 +1265,10 @@ function renderNotUpdatedList(){
 // Recording Not Working — data-integrity check, not an SLA breach.
 // Shows every lead where comments exist but call_count (connected calls)
 // is 0, with no filtering of any kind, so the raw scale of the logging
-// gap is visible. Closed with No Work Recorded is its own separate card
-// below (see renderClosedNoWorkList) — a different symptom (a closed lead
-// with NO evidence of work at all) that deserves its own visibility
-// rather than being buried inside this one.
+// gap is visible. Closed with No Comment is its own separate card
+// below (see renderClosedNoCommentList) — a different symptom (a closed
+// lead with NO evidence of a real comment at all) that deserves its own
+// visibility rather than being buried inside this one.
 function renderRecordingList(){
   // issueLeads (per-copy), not leads (merged) — a customer's copies are
   // judged on their OWN call/comment data; a merged record's pooled
@@ -1313,39 +1313,42 @@ function renderRecordingList(){
   });
 }
 
-// Closed with No Work Recorded — split out from Recording Not Working
-// above so it gets its own dedicated visibility instead of being one of
-// two symptoms mixed into a single card. A lead CLOSED with zero comments
-// logged at all — no evidence any work happened before closure — is a
-// distinct, more concerning signal than a live lead with a logging
-// mismatch. Deliberately just closed + zero comments, regardless of
-// whatever the call columns say. Same deliberately-unfiltered approach:
-// no grace period, no priority ranking (closedWithNoWork already requires
-// the lead be closed, so an open/closed check would be redundant here).
-function renderClosedNoWorkList(){
+// Closed with No Comment — split out from Recording Not Working above so
+// it gets its own dedicated visibility instead of being one of two
+// symptoms mixed into a single card. A lead CLOSED with no real narrative
+// ever logged (see hasAnyNarrativeComment — deliberately excludes
+// closing_reason, since that's often the ONLY thing filled on a lead
+// closed via a dropdown reason or a bulk action, with current_stage never
+// touched) is a distinct, more concerning signal than a live lead with a
+// logging mismatch. Deliberately just closed + zero real comments,
+// regardless of whatever the call columns say. Same
+// deliberately-unfiltered approach: no grace period, no priority ranking
+// (closedWithNoComment already requires the lead be closed, so an
+// open/closed check would be redundant here).
+function renderClosedNoCommentList(){
   // issueLeads (per-copy), not leads (merged) — same reasoning as
   // Recording Not Working above: a merged record's pooled comments can
   // hide that ONE specific copy closed with literally nothing logged,
   // even while a sibling copy's comments make the merged record look fine.
   const group = groupSiblingsTogether(
-    issueLeads.filter(l => l.closedWithNoWork),
+    issueLeads.filter(l => l.closedWithNoComment),
     (a,b) => (b.ageHours||0) - (a.ageHours||0)
   );
 
-  document.getElementById('closedNoWorkCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
+  document.getElementById('closedNoCommentCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
 
-  const el = document.getElementById('closedNoWorkList');
+  const el = document.getElementById('closedNoCommentList');
   if (!group.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No closed lead is missing all work evidence</div>`;
+    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No closed lead is missing all comment evidence</div>`;
     return;
   }
   el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
-    const logId = 'closednowork_' + idx;
+    const logId = 'closednocomment_' + idx;
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(closed${esc(closingNote)})</span> — <span class="chip red">Closed with no work recorded</span></div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(closed${esc(closingNote)})</span> — <span class="chip red">Closed with no comment</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
   });
@@ -1589,11 +1592,11 @@ function downloadIssuesCSV(){
 
   issueLeads.forEach(l => {
     ISSUE_PRIORITY.forEach(rule => { if (l[rule.key]) addIssue(rule.label, l.lead_id, l.region, l.RM); });
-    // recordingCommentsNoCalls/closedWithNoWork are deliberately outside
+    // recordingCommentsNoCalls/closedWithNoComment are deliberately outside
     // ISSUE_PRIORITY (no grace period, no priority ranking — see their own
     // section descriptions) but still belong in a full issues export.
     if (l.recordingCommentsNoCalls) addIssue('Recording Not Working', l.lead_id, l.region, l.RM);
-    if (l.closedWithNoWork) addIssue('Closed with No Work Recorded', l.lead_id, l.region, l.RM);
+    if (l.closedWithNoComment) addIssue('Closed with No Comment', l.lead_id, l.region, l.RM);
   });
 
   // Stalled Leads — same computeStalledLeads() the on-screen card reads,
@@ -1606,7 +1609,7 @@ function downloadIssuesCSV(){
   // Fixed, stable order (matching ISSUE_PRIORITY's own priority order, then
   // the three checks outside it) rather than whatever order Map insertion
   // happened to produce.
-  const issueOrder = ISSUE_PRIORITY.map(r => r.label).concat(['Recording Not Working', 'Closed with No Work Recorded', 'Stalled Leads']);
+  const issueOrder = ISSUE_PRIORITY.map(r => r.label).concat(['Recording Not Working', 'Closed with No Comment', 'Stalled Leads']);
   issueOrder.forEach(issue => {
     const leads = byIssue.get(issue);
     if (!leads) return;

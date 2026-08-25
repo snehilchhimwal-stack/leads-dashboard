@@ -969,7 +969,7 @@
 
     <section id="sec-approaching48h">
       <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Approaching 48h Deadline</div><div class="section-count" id="approachingDeadlineCount"></div></div>
-      <div class="filter-summary">Open leads at 36&ndash;48 hours old, not yet Opportunity — an early-warning tier so action can happen BEFORE the 48h mark instead of only after it. Not one of the five official SLA checks, so it isn't counted in the Operations tab badge, the Issues CSV, or RM SLA Score — same treatment as Recording Not Working/Closed with No Work Recorded below, which are diagnostic signals, not compliance breaches. A LIVE snapshot, evaluated against right now — not a persisted historical record.</div>
+      <div class="filter-summary">Open leads at 36&ndash;48 hours old, not yet Opportunity — an early-warning tier so action can happen BEFORE the 48h mark instead of only after it. Not one of the five official SLA checks, so it isn't counted in the Operations tab badge, the Issues CSV, or RM SLA Score — same treatment as Recording Not Working/Closed with No Comment below, which are diagnostic signals, not compliance breaches. A LIVE snapshot, evaluated against right now — not a persisted historical record.</div>
       <div class="section-scroll"><div class="card-list" id="approachingDeadlineList"></div></div>
     </section>
 
@@ -987,10 +987,10 @@
       <div class="section-scroll"><div class="card-list" id="recordingList"></div></div>
     </section>
 
-    <section id="sec-closednowork">
-      <div class="section-head"><div class="section-bar red"></div><div class="section-title">Closed with No Work Recorded</div><div class="section-count" id="closedNoWorkCount"></div></div>
-      <div class="filter-summary" id="closedNoWorkDesc">A lead was closed with zero comments logged at all — no evidence any work happened before closure. Deliberately unfiltered: no grace period, no priority ranking.</div>
-      <div class="section-scroll"><div class="card-list" id="closedNoWorkList"></div></div>
+    <section id="sec-closednocomment">
+      <div class="section-head"><div class="section-bar red"></div><div class="section-title">Closed with No Comment</div><div class="section-count" id="closedNoCommentCount"></div></div>
+      <div class="filter-summary" id="closedNoCommentDesc">A lead was closed with zero real comments logged at all — internal status comments, stage comments, and last comment all empty — no evidence any work happened before closure. A bare <span class="mono">closing_reason</span> tag doesn't count as a comment here (it's shown for context below when present), since that's often the only field filled on a lead closed via a dropdown reason or a bulk action, with current_stage never touched. Deliberately unfiltered: no grace period, no priority ranking.</div>
+      <div class="section-scroll"><div class="card-list" id="closedNoCommentList"></div></div>
     </section>
 
     <section id="sec-reports">
