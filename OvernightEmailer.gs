@@ -758,27 +758,21 @@ function sendOvernightFollowupEmails() {
 
   // Pass 2: send, now that suggestions (if any came back in time) are known.
   // Same renderOvernightReportEmailHTML_ shell the 10am email uses (see its
-  // own comment) — Still Unresolved in red, Resolved in green, so the
-  // reply reads as a continuation of the same thread instead of a
-  // visually different message.
+  // own comment). Red "Still Unresolved" only — same scoping as the
+  // dashboard's own Stalled Leads section, which shows only what's
+  // currently outstanding, not a resolved/unresolved comparison. A region
+  // with nothing still unresolved gets no follow-up reply at all, same
+  // reasoning as the morning email dropping Opportunity+/closed leads
+  // entirely rather than showing them as a separate "already handled" list.
   perRegion.forEach(function (r) {
+    if (!r.unresolvedRows.length) return; // everything from this morning's flags is resolved — nothing to send
     r.unresolvedRows.forEach(function (row) { row.suggestion = suggestionByLeadId[row.lead_id] || ''; });
 
-    const sections = [];
-    if (r.unresolvedRows.length) {
-      sections.push({
-        heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
-        columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
-        rows: r.unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
-      });
-    }
-    if (r.resolvedRows.length) {
-      sections.push({
-        heading: 'Resolved Since the Morning Email', accent: { fg: '#059669', headerBg: '#d1fae5', bg: '#f0fdf9' },
-        columns: ['Lead ID', 'RM', 'Outcome'],
-        rows: r.resolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail]; }),
-      });
-    }
+    const sections = [{
+      heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
+      columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
+      rows: r.unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
+    }];
 
     const bodyHtml = renderOvernightReportEmailHTML_({
       title: '1pm Follow-up',
@@ -786,13 +780,11 @@ function sendOvernightFollowupEmails() {
       subtitle: "Re-checking this morning's flagged leads",
       kpis: [
         { value: r.unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
-        { value: r.resolvedRows.length, label: 'Resolved', bg: '#d1fae5', fg: '#059669' },
       ],
       sections: sections,
-      footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) counts as resolved.',
+      footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
     });
-    const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved, ' +
-      r.resolvedRows.length + ' resolved since the morning email. Open in Gmail for the full breakdown.';
+    const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
 
     try {
       withRetry_(function () {
