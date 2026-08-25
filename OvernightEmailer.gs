@@ -882,7 +882,20 @@ function backfillTodaysOvernightLogRecipientsNow() {
     let issueLog;
     try { issueLog = JSON.parse(r[3] || '[]'); } catch (e) { issueLog = []; }
     const rmNames = Array.from(new Set(issueLog.map(function (entry) { return rmByLeadId[entry.lead_id]; }).filter(Boolean)));
-    if (!rmNames.length) { skippedNoRms++; return; }
+    if (!rmNames.length) {
+      skippedNoRms++;
+      // Named explicitly rather than just counted — this means every
+      // lead_id in this row's issueLog came back "not found" in the
+      // current leads tab (rmByLeadId has no entry for it), most likely
+      // because the lead was deleted, merged, or its id changed since
+      // this morning. Since the same lookup happens in
+      // sendOvernightFollowupEmails/debugFollowupStatusNow, those leads
+      // would show as "resolved (no longer in sheet)" there too — this
+      // row very likely has nothing left to actually follow up on anyway.
+      Logger.log('Backfill for ' + region + ' row ' + (i + 2) + ' (thread ' + r[2] + '): no resolvable RM — every lead_id in this row\'s issueLog (' +
+        issueLog.map(function (e) { return e.lead_id; }).join(', ') + ') is no longer found in the current leads tab.');
+      return;
+    }
 
     const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients);
     if (!recEmails.length) { skippedUnresolved++; return; }
