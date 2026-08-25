@@ -1,7 +1,7 @@
 /**
- * RM Hierarchy — resolves each RM's real manager chain (Team Lead / RH / CH,
- * or an Admin/S2 escalation contact where that's what the org chart actually
- * says) from a one-time export of the "TL & RM by Region" sheet, so
+ * RM Hierarchy — resolves each RM's real manager chain (A1/Team Lead, TM,
+ * RH, CH) from the same official HR export Book7.xlsx that
+ * RmHierarchy.private.gs's employee-email table already comes from, so
  * OvernightEmailer.gs can route an issue email to the SPECIFIC managers of
  * whichever RMs actually had overnight activity — not a single fixed
  * per-region address that gets CC'd on everything whether or not anyone
@@ -12,50 +12,53 @@
  * OvernightEmailer.gs's send logic makes both easier to read, and makes it
  * obvious this table is data to refresh occasionally, not code to edit.
  *
- * THE REAL ORG CHART IS NOT A CLEAN 4-LEVEL LADDER. Only RM and Team Lead
- * rows have their own line in the source export — RH/CH/Admin/S2 people
- * never do, they only ever appear as someone else's "Reports To". Most RMs
- * report to a Team Lead (tagged "A1"), whose own row then shows an RH or CH
- * above them — a real 2-hop chain. But plenty of RMs skip that and report
- * STRAIGHT to an RH or CH with no Team Lead in between, a few report to
- * "Admin" or "S2" instead (doesn't fit the TL/RH/CH pattern at all), and a
- * meaningful number have no manager on file at all ("-"). This file resolves
- * whichever shape actually applies to each specific person — it does not
- * force everyone through the same number of hops.
+ * WHY THIS IS PRE-RESOLVED, NOT RAW: Book7's own export is POSITIONAL, not
+ * per-role — its "A1 - 1/S2" / "A1 - 2" / "RH" / "CH/CL" columns hold
+ * whoever the next real manager up the chain happens to be, landing in
+ * whichever column matches how many hops that specific person's chain has
+ * (e.g. an S1 reporting straight to a TM with no A1 in between has that TM
+ * in the RH-position column, not because the TM IS an RH, but because
+ * that's the next column over). Each row below was built by resolving
+ * every filled slot against THAT PERSON'S OWN role (Book7 tags everyone as
+ * S1/A1/TM/RH/Cluster Head/City Lead/Commercial Head/etc.) rather than
+ * trusting column position — the only reliable way to build clean tl/tm/
+ * rh/ch columns from this export. TM is a real tier Book7 has that the
+ * OLD org-chart source this file used to be built from did not: it sits
+ * above A1 but below RH — some regions route S1s straight to a TM with no
+ * A1 at all, others keep a real A1 with a TM one level above THEM.
  *
- * EMAIL ADDRESSES: the org-chart export above has no email column, but
- * EMPLOYEE_EMAIL_BY_NAME_RAW_ below does — a separate one-time export of
- * the full company HR roster (Book7.xlsx, "New E Code"/Name/Role/.../
- * "Official Mail Id"/...), matched in by NAME (case/whitespace-normalized,
- * see normPersonName_) since the two source files share no common ID.
+ * EMAIL ADDRESSES: EMPLOYEE_EMAIL_BY_NAME_RAW_ (RmHierarchy.private.gs) is
+ * sourced from this SAME Book7.xlsx export, matched in by NAME
+ * (case/whitespace-normalized, see normPersonName_) since Book7 and this
+ * table share no common ID column, only name text — but since both now
+ * come from the identical source rows (not two independently-exported
+ * files with different spellings, like the old org-chart source had),
+ * name matching here is far more reliable than it used to be.
  * setupRmHierarchy() writes a "Manager_Directory" sheet — one row per
  * unique manager name — with its Email column PRE-FILLED wherever a name
- * match was found; still blank for the handful that weren't (mostly the
- * same people RM_Hierarchy's Note column already flags as unresolved
- * managers). A human can always overwrite any auto-filled email — see
- * point 3 below for what survives a later rebuild. Until a manager has an
- * email (auto-filled or hand-entered), resolveRecipientsForRegion_ in
- * OvernightEmailer.gs finds no emails to route to for RMs under them and
- * falls back to the legacy Region_Recipients entry for that region, so
- * today's automation keeps working unchanged for anyone still uncovered.
+ * match was found; still blank for the handful that weren't. A human can
+ * always overwrite any auto-filled email — see point 3 below for what
+ * survives a later rebuild. Until a manager has an email (auto-filled or
+ * hand-entered), resolveRecipientEmailsForRegion_ in OvernightEmailer.gs
+ * finds no emails to route to for RMs under them and falls back to the
+ * legacy Region_Recipients entry for that region, so today's automation
+ * keeps working unchanged for anyone still uncovered.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as MovementTracker.gs and OvernightEmailer.gs.
  *      Add a new file, paste this whole thing in.
  *   2. Run setupRmHierarchy once (or it runs automatically as part of
  *      setupOvernightEmailer). This creates two sheets:
- *        - RM_Hierarchy: one row per person, showing the raw "Reports To"
- *          from the source export AND the resolved TL/RH/CH/Other columns.
- *          An "Excluded" checkbox is pre-ticked for rows this script
- *          recognised as a dummy/test/placeholder account (name patterns
- *          like "Dummy", "Test", "S 1 Account", a person reporting to
- *          themselves, or the whole "Wakanda" sandbox region) — un-tick any
- *          it got wrong. A "Note" column flags the ~5 people whose manager
- *          name never appears as its own Team Lead row in the source file,
- *          so RH/CH couldn't be resolved for them automatically — fill
- *          those in by hand if you want that chain covered.
+ *        - RM_Hierarchy: one row per person, showing the resolved
+ *          TL(A1)/TM/RH/CH columns. An "Excluded" checkbox is included for
+ *          hand-flagging any row that shouldn't route (nothing here is
+ *          auto-detected as a dummy/test account — Book7 is a real HR
+ *          export, not the messy org-chart source this used to read).
+ *          A "Note" column is blank unless a person genuinely has no
+ *          manager on file at all (fill in by hand if you want that
+ *          chain covered).
  *        - Manager_Directory: one row per unique manager name (deduped
- *          across every TL/RH/CH/Other they show up as) with the regions
+ *          across every TL/TM/RH/CH they show up as) with the regions
  *          they cover and a blank Email column. Fill in emails here, not
  *          in RM_Hierarchy — one entry covers everyone who reports to them.
  *   3. Re-running setupRmHierarchy (or the standalone rebuildRmHierarchy)
@@ -72,278 +75,216 @@
 const RM_HIERARCHY_SHEET_ = 'RM_Hierarchy';
 const MANAGER_DIRECTORY_SHEET_ = 'Manager_Directory';
 
-// One row per person: [region, role, name, reportsTo, reportsToRole].
-// Source: TL_RM_Region_wise_1.xlsx ("TL & RM by Region" tab), exported
-// 2026-08. Role is only ever 'RM' or 'Team Lead' — RH/CH/Admin/S2 people
-// never get their own row, only ever appear as a reportsTo value.
+// One row per person: [team, role, name, tl, tm, rh, ch] — ALREADY
+// resolved (see the file header above for why raw Book7 columns can't be
+// read positionally). Source: Book7.xlsx, same export
+// RmHierarchy.private.gs's EMPLOYEE_EMAIL_BY_NAME_RAW_ comes from. Every
+// person in the HR roster is included, not just Sales — a Finance/HR/
+// Marketing person simply never appears as anyone's "RM" on a real lead,
+// so their row is inert; including them costs nothing and maximizes the
+// chance any real RM name resolves.
 const RM_HIERARCHY_RAW_ = [
-  ['Bangalore 1','Team Lead','Chaithanya M','Romen Singh','RH'],
-  ['Bangalore 1','Team Lead','Krishna Murthy','Mukesh Mishra','CH'],
-  ['Bangalore 1','Team Lead','Mainuddin T','Romen Singh','RH'],
-  ['Bangalore 1','Team Lead','dummy rm','admin homesfy','Admin'],
-  ['Bangalore 1','RM','Abdur Rahim','Mainuddin T','A1'],
-  ['Bangalore 1','RM','Chaithanya M S 1 Account','Chaithanya M','A1'],
-  ['Bangalore 1','RM','Chandana n r','Chaithanya M','A1'],
-  ['Bangalore 1','RM','Divakar V','Chaithanya M','A1'],
-  ['Bangalore 1','RM','Mahesh V','Rahan Khan','A1'],
-  ['Bangalore 1','RM','Manoj M','Krishna Murthy','A1'],
-  ['Bangalore 1','RM','Md Muzamil','Mainuddin T','A1'],
-  ['Bangalore 1','RM','Mhd Haseebulla','Krishna Murthy','A1'],
-  ['Bangalore 1','RM','Mohammed Hidayathulla','Chaithanya M','A1'],
-  ['Bangalore 1','RM','Neelam Singh','Chaithanya M','A1'],
-  ['Bangalore 1','RM','Praveen R','Krishna Murthy','A1'],
-  ['Bangalore 1','RM','Rahul Singh','Krishna Murthy','A1'],
-  ['Bangalore 1','RM','Romen Singh S 1 Account','Romen Singh','RH'],
-  ['Bangalore 1','RM','Sippal Khora','Chaithanya M','A1'],
-  ['Bangalore 1','RM','Suman Das','Mainuddin T','A1'],
-  ['Bangalore 1','RM','Vishnu Vardhan S 1 Account','R G Vishnu Vardhan','A1'],
-  ['Bangalore 1','RM','Zain Ahmed','Chaithanya M','A1'],
-  ['Bangalore 2','Team Lead','Rahan Khan','Romen Singh','RH'],
-  ['Bangalore 2','RM','Kiran Kumar T','R G Vishnu Vardhan','A1'],
-  ['Bangalore 2','RM','Rahan Khan S 1','Rahan Khan','A1'],
-  ['Bangalore 2','RM','Sahil kumar s','Chaithanya M','A1'],
-  ['Bangalore 2','RM','Sangam S','Krishna Murthy','A1'],
-  ['Bangalore 2','RM','Sona V','Rahan Khan','A1'],
-  ['Bangalore 2','RM','Vijay Kumar E','Rahan Khan','A1'],
-  ['Bangalore 2','RM','Vyshnavi Singh','Rahan Khan','A1'],
-  ['Central','Team Lead','Kumar Babu','Rajkumar Ombase','RH'],
-  ['Central','Team Lead','Mukesh Yadav','Rajkumar Ombase','RH'],
-  ['Central','Team Lead','Prajwal Shetty','Akash Ugale','RH'],
-  ['Central','Team Lead','Sachin Rana','Rajkumar Ombase','RH'],
-  ['Central','RM','Fakrealam Ansari','Kumar Babu','A1'],
-  ['Central','RM','Farid Shaikh','Prajwal Shetty','A1'],
-  ['Central','RM','Karan Shinde','Mukesh Yadav','A1'],
-  ['Central','RM','Khushal Soni','Sachin Rana','A1'],
-  ['Central','RM','Kishan Patel','Akash Ugale','RH'],
-  ['Central','RM','Mayuresh Chavan','Mukesh Yadav','A1'],
-  ['Central','RM','Mihir Jivani','Sachin Rana','A1'],
-  ['Central','RM','Mustakim sayyad','Prajwal Shetty','A1'],
-  ['Central','RM','Prajwal Shetty S 1 Account','Prajwal Shetty','A1'],
-  ['Central','RM','Purvesh Ugawekar','Akash Ugale','RH'],
-  ['Central','RM','Rohit Gaud','-','-'],
-  ['Central','RM','Rohit Gupta','Kumar Babu','A1'],
-  ['Central','RM','Sanjay Gupta','Kumar Babu','A1'],
-  ['Central','RM','Saurabh Pacharne','Kumar Babu','A1'],
-  ['Central','RM','Shital Bhagwane','Mukesh Yadav','A1'],
-  ['Central','RM','Shubham Raj','Sachin Rana','A1'],
-  ['Central','RM','Sneha Upadhyay','Kumar Babu','A1'],
-  ['Central','RM','Sumeet Pal','Prajwal Shetty','A1'],
-  ['Central','RM','Vivek Yadav','Mukesh Yadav','A1'],
-  ['Central','RM','Zeya Shaikh','Mukesh Yadav','A1'],
-  ['Central','RM','gurmohit singh sandhu','Sachin Rana','A1'],
-  ['Commercial','RM','neha mishra','Neha Mishra Ch','CH'],
-  ['Delhi','Team Lead','Mayur Gera','ashish kukreja ceo','Admin'],
-  ['Godrej','RM','Dhanashree Paunikar','Anupam Mishra','CH'],
-  ['Godrej','RM','Varad Tela','Anupam Mishra','CH'],
-  ['HNI - SoBo','Team Lead','Pritesh Shankhat','Abhhijjit Gandhii','CH'],
-  ['HNI - SoBo','RM','Adil Shaikh','Pritesh Shankhat','A1'],
-  ['HNI - SoBo','RM','Hetal Gohil','Pritesh Shankhat','A1'],
-  ['HNI - SoBo','RM','Jyoti Sharma','Abhhijjit Gandhii','CH'],
-  ['HNI - SoBo','RM','Mohd Shaikh','Abhhijjit Gandhii','CH'],
-  ['HNI - SoBo','RM','Sagar Shelar','Abhhijjit Gandhii','CH'],
-  ['HNI - SoBo','RM','Sahil Gupta','Pritesh Shankhat','A1'],
-  ['HNI - SoBo','RM','Shivani Ilahabadi','Pritesh Shankhat','A1'],
-  ['HNI - SoBo','RM','Yashodeep Kubavat','Abhhijjit Gandhii','CH'],
-  ['Harbour','Team Lead','Yash Sharma','Sanjyota Bhosale','CH'],
-  ['Harbour','Team Lead','a one salestl','Sr A Test','RH'],
-  ['Harbour','RM','Aakash Dhole','Yash Sharma','A1'],
-  ['Harbour','RM','Atharva P Belose','Yash Sharma','A1'],
-  ['Harbour','RM','Dhiraj Chhoda','Yash Sharma','A1'],
-  ['Harbour','RM','Dummy Sane','a one salestl','A1'],
-  ['Harbour','RM','Nitin Devariya','Yash Sharma','A1'],
-  ['Harbour','RM','bisma Shah','Yash Sharma','A1'],
-  ['Hyderabad','Team Lead','Vemula Ajay','Mukesh Mishra','CH'],
-  ['Hyderabad','RM','Chandrashaker Gurram','r raja arun kumar','A1'],
-  ['Hyderabad','RM','Maagathoti Adilakshmi','Vemula Ajay','A1'],
-  ['Hyderabad','RM','Parusharothu vinay varma','Vemula Ajay','A1'],
-  ['Hyderabad','RM','Peddapally Shivaji','Vemula Ajay','A1'],
-  ['Hyderabad','RM','Shamakuri Goud','Vemula Ajay','A1'],
-  ['Hyderabad','RM','Vadlapudi Divya','Vemula Ajay','A1'],
-  ['Hyderabad','RM','g Kumar','Vemula Ajay','A1'],
-  ['KDMC','RM','Ayan Jamsheed','Swapnil Gowalkar','RH'],
-  ['KDMC','RM','Rahul Test','Sr A Test','RH'],
-  ['KDMC','RM','Sagar mahamuni kdmc','Bipin More','CH'],
-  ['KDMC','RM','manisha Kale','a one salestl','A1'],
-  ['Mumbai-Miscellaneous','RM','Craft Booking','-','-'],
-  ['Navi Mumbai','Team Lead','Avinash Kumar','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','Aditya Jumledaar','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','Amit Rathod','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Ashish Kadam','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Avinash Kumar S 1 Account','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Chandni Khatoon','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','Chandrakant Bhagat','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Harshith S','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Jayesh Parab','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Jitendra Phulwaria','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','Jyoti Ram','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Kartik Shirsat','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Mohd Yaqub Nawab','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Prachi Chouhan','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Rinky Bidare','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Rutuja Daule','Sampada Pawar','RH'],
-  ['Navi Mumbai','RM','Shahnavaz Shaikh','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Sharanjeet Atwal','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','Shubham Buchade','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Siddharth Sharma','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','Suman Pujari','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Tejal Nikam','Avinash Kumar','A1'],
-  ['Navi Mumbai','RM','Vidya S 1 Account','Vidya Jadhav','CH'],
-  ['Navi Mumbai','RM','joshi dhairya','Vidya Jadhav','CH'],
-  ['Pune East','Team Lead','Nishant anand','Sachindra Wadane','RH'],
-  ['Pune East','Team Lead','Omkar Ghate','Ayaz Bagwan','RH'],
-  ['Pune East','Team Lead','firoj shaikh','Ayaz Bagwan','RH'],
-  ['Pune East','RM','Aabid Khan','firoj shaikh','A1'],
-  ['Pune East','RM','Akash Jogdand','Rohit Rathod','A1'],
-  ['Pune East','RM','Arpita Varte','Ayaz Bagwan','RH'],
-  ['Pune East','RM','Chaitali Patil','Nishant anand','A1'],
-  ['Pune East','RM','Gouttam Aicha','Nishant anand','A1'],
-  ['Pune East','RM','Mahesh Mahore','Sachindra Wadane','RH'],
-  ['Pune East','RM','Nagesh Maharnavar','Ayaz Bagwan','RH'],
-  ['Pune East','RM','Nagnath Dhotre','Nishant anand','A1'],
-  ['Pune East','RM','Nikhil Sarwade','Sachindra Wadane','RH'],
-  ['Pune East','RM','Pravin Kharat','Ayaz Bagwan','RH'],
-  ['Pune East','RM','Rahul Panherkar','Sachindra Wadane','RH'],
-  ['Pune East','RM','Ramesh Kudale','Omkar Ghate','A1'],
-  ['Pune East','RM','Ritik Minekar','Nishant anand','A1'],
-  ['Pune East','RM','Sachinder Singh','Sourabh Sareen','CH'],
-  ['Pune East','RM','Sahil Gote','Sachindra Wadane','RH'],
-  ['Pune East','RM','Santosh Khandare','Sachindra Wadane','RH'],
-  ['Pune East','RM','Shailesh Tiwari','Sachindra Wadane','RH'],
-  ['Pune East','RM','Siddhesh bhagwat','Sachindra Wadane','RH'],
-  ['Pune East','RM','Somanath Sangle','Nishant anand','A1'],
-  ['Pune East','RM','Souvik Biswas','Sachindra Wadane','RH'],
-  ['Pune East','RM','Soyeb Akhtar','firoj shaikh','A1'],
-  ['Pune East','RM','Swapnil Waghmode','Nishant anand','A1'],
-  ['Pune East','RM','Vaibhav Bhadkumbe','Ayaz Bagwan','RH'],
-  ['Pune East','RM','Vishwanath Zalake','Ayaz Bagwan','RH'],
-  ['Pune East','RM','Vivek Solanke','Nishant anand','A1'],
-  ['Pune North','Team Lead','Rohit Rathod','Sachindra Wadane','RH'],
-  ['Pune North','RM','Om Potdar','Rohit Rathod','A1'],
-  ['Pune North','RM','Preeti Sah','Rohit Rathod','A1'],
-  ['Pune North','RM','Prem Chand Mishra','Rohit Rathod','A1'],
-  ['Pune North','RM','Rajdeep Jalan','Rohit Rathod','A1'],
-  ['Pune South','RM','Israr Khan','firoj shaikh','A1'],
-  ['Pune South','RM','Nagmma Mujnayak','Ayaz Bagwan','RH'],
-  ['Pune South','RM','Pramod Ghaytadak','Omkar Ghate','A1'],
-  ['Pune South','RM','Ravi Pandey','Nishant anand','A1'],
-  ['Pune South','RM','Shaikh Wasim Shaikh Harun','Omkar Ghate','A1'],
-  ['Pune West','Team Lead','Prathamesh a pande','Rahul Poudel','RH'],
-  ['Pune West','Team Lead','nayan Pabale','Rahul Poudel','RH'],
-  ['Pune West','RM','Abhikesh Kumar','Rahul Poudel','RH'],
-  ['Pune West','RM','Adinath Munde','Rahul Poudel','RH'],
-  ['Pune West','RM','Aditya Tripathi','nayan Pabale','A1'],
-  ['Pune West','RM','Akshay Dawle','nayan Pabale','A1'],
-  ['Pune West','RM','Akshay More','Prathamesh a pande','A1'],
-  ['Pune West','RM','Arbaj Shaikh','Rahul Poudel','RH'],
-  ['Pune West','RM','Buddhabhushan Wakode','Rahul Poudel','RH'],
-  ['Pune West','RM','Gaurav Gunjal','nayan Pabale','A1'],
-  ['Pune West','RM','Kapil Biyani','ranjeet kumar','A1'],
-  ['Pune West','RM','Krish Sinha','nayan Pabale','A1'],
-  ['Pune West','RM','Pranav Deshmukh','Prathamesh a pande','A1'],
-  ['Pune West','RM','Rahul Raj','nayan Pabale','A1'],
-  ['Pune West','RM','Rukhsar Nasir','arijit saha','CH'],
-  ['Pune West','RM','Tarush Dhingra','Rahul Poudel','RH'],
-  ['Pune West','RM','Yash Awade','Prathamesh a pande','A1'],
-  ['Pune West','RM','aadesh Narwade','Prathamesh a pande','A1'],
-  ['SoBo','RM','Manan Bhatt','Yash Sharma','A1'],
-  ['SoBo','RM','mohammed Khan','Pritesh Shankhat','A1'],
-  ['Thane','Team Lead','Amit Upadhyay','Bipin More','CH'],
-  ['Thane','Team Lead','Ganesh Saroj','Swapnil Gowalkar','RH'],
-  ['Thane','Team Lead','Niraj Patil','Swapnil Gowalkar','RH'],
-  ['Thane','Team Lead','Sanket Yadav','Bipin More','CH'],
-  ['Thane','RM','Akash Gaikwad','Niraj Patil','A1'],
-  ['Thane','RM','Aman Gupta','Amit Upadhyay','A1'],
-  ['Thane','RM','Amit S 1 Account','Amit Upadhyay','A1'],
-  ['Thane','RM','Arbaaz Ansari','Amit Upadhyay','A1'],
-  ['Thane','RM','Avinash Das','Ganesh Saroj','A1'],
-  ['Thane','RM','Avinash Khare','Ganesh Saroj','A1'],
-  ['Thane','RM','Bipin More S 1','Bipin More','CH'],
-  ['Thane','RM','Divya Rohela','Swapnil Gowalkar','RH'],
-  ['Thane','RM','Harshada Landge','Sanket Yadav','A1'],
-  ['Thane','RM','Hitesh Jaiswar','Amit Upadhyay','A1'],
-  ['Thane','RM','Jay Patil','Niraj Patil','A1'],
-  ['Thane','RM','Kamlesh Tawale','Swapnil Gowalkar','RH'],
-  ['Thane','RM','Kishan Lohar','Amit Upadhyay','A1'],
-  ['Thane','RM','Madhavi Pawar','Ganesh Saroj','A1'],
-  ['Thane','RM','Mahendra Demo','a one salestl','A1'],
-  ['Thane','RM','Mamtaben Sosa','Amit Upadhyay','A1'],
-  ['Thane','RM','Mohd Adnan Malik','Amit Upadhyay','A1'],
-  ['Thane','RM','Mohit Manwani','Sanket Yadav','A1'],
-  ['Thane','RM','Niraj Patil S 1 Account','Niraj Patil','A1'],
-  ['Thane','RM','Prem Sutar','Ganesh Saroj','A1'],
-  ['Thane','RM','Rahul Chauhan','Ganesh Saroj','A1'],
-  ['Thane','RM','Ranjana Dubey','Niraj Patil','A1'],
-  ['Thane','RM','Riyan Jamadar','Sanket Yadav','A1'],
-  ['Thane','RM','Roshan Pandey','Sanket Yadav','A1'],
-  ['Thane','RM','Sagar Mahamuni','Niraj Patil','A1'],
-  ['Thane','RM','Sajid Mulani','Amit Upadhyay','A1'],
-  ['Thane','RM','Sandeep V','Bipin More','CH'],
-  ['Thane','RM','Sanket Yadav','Sanket Yadav','A1'],
-  ['Thane','RM','Saurabh M S','Niraj Patil','A1'],
-  ['Thane','RM','Soham Yadav','Ganesh Saroj','A1'],
-  ['Thane','RM','Sunny Saini','Amit Upadhyay','A1'],
-  ['Thane','RM','Vishal Chavan','Swapnil Gowalkar','RH'],
-  ['Thane 2','RM','Aditya Gera','-','-'],
-  ['Thane 2','RM','Angad Yadav','-','-'],
-  ['Thane 2','RM','Caller Thane Dummy','Niraj Patil','A1'],
-  ['Thane 2','RM','Ganesh Saroj Dummy','Ganesh Saroj','A1'],
-  ['Thane 2','RM','Shivnath Dummy','Shivanath Bhairwadgi','A1'],
-  ['Thane 2','RM','Swapnil Bhosale','-','-'],
-  ['Unassigned','RM','Akhil Uniyal','-','-'],
-  ['Unassigned','RM','Harshal Kokate','anshuman kasera','CH'],
-  ['Unassigned','RM','Krishnakant Singh','Roopak Desai','A1'],
-  ['Unassigned','RM','Rohit Sharma','ashutosh mishra','RH'],
-  ['Unassigned','RM','ameya suresh sawant','rh soha','CH'],
-  ['Unassigned','RM','amit gupta','-','-'],
-  ['Unassigned','RM','annjali makwana','-','-'],
-  ['Unassigned','RM','archana bhanushali','-','-'],
-  ['Unassigned','RM','art','-','-'],
-  ['Unassigned','RM','dummy sales','-','-'],
-  ['Unassigned','RM','gauri chavan','-','-'],
-  ['Unassigned','RM','guest western 1','-','-'],
-  ['Unassigned','RM','guest western 2','-','-'],
-  ['Unassigned','RM','jay sawant','-','-'],
-  ['Unassigned','RM','kritika jhaa','anshuman kasera','CH'],
-  ['Unassigned','RM','lead dump','-','-'],
-  ['Unassigned','RM','nri crm','-','-'],
-  ['Unassigned','RM','rama gokhale','-','-'],
-  ['Unassigned','RM','resale leads','-','-'],
-  ['Unassigned','RM','sachin more','-','-'],
-  ['Unassigned','RM','samiksha yadav','-','-'],
-  ['Unassigned','RM','santosh chavan','-','-'],
-  ['Unassigned','RM','shreeyanch','-','-'],
-  ['Unassigned','RM','sneha dhangar','-','-'],
-  ['Unassigned','RM','sugesh b. doifode','-','-'],
-  ['Unassigned','RM','sumit ghorpade','-','-'],
-  ['Unassigned','RM','surajit mondal','Rachana Chandankar','A1'],
-  ['Unassigned','RM','thane user 1','Bipin More','CH'],
-  ['Unassigned','RM','thane user 2','-','-'],
-  ['Unassigned','RM','tushar salunkhe','-','-'],
-  ['Wakanda','RM','Ashish Rm','Sandeep Vadnere','Admin'],
-  ['Wakanda','RM','Futwork Test','chetan verma','RH'],
-  ['Wakanda','RM','Tech Internal A','babita tandi','S2'],
-  ['Wakanda','RM','Vaibhav Tech','-','-'],
-  ['Wakanda','RM','Vaibhav Uke','babita tandi','S2'],
-  ['Western','Team Lead','Prathmesh s pandey','Rahul Gandhi','CH'],
-  ['Western','RM','Arbaz Patel','Prathmesh s pandey','A1'],
-  ['Western','RM','Eknidhi Chabra','Minas Patel','RH'],
-  ['Western','RM','Gajanan Jadhav','Minas Patel','RH'],
-  ['Western','RM','Kundan Singh','Prathmesh s pandey','A1'],
-  ['Western','RM','Lalita Yadav','Prathmesh s pandey','A1'],
-  ['Western','RM','Lovkesh Pandey','Prathmesh s pandey','A1'],
-  ['Western','RM','Mangesh Pal','Prathmesh s pandey','A1'],
-  ['Western','RM','Prathmesh S 1','Prathmesh s pandey','A1'],
-  ['Western','RM','Rahul S 1','Rahul Gandhi','CH'],
-  ['Western','RM','Riya Yadav','Minas Patel','RH'],
-  ['Western','RM','Saravash Upadhyay','Minas Patel','RH'],
-  ['Western','RM','Saurabh Pandey','Prathmesh s pandey','A1'],
-  ['Western','RM','Shweta Shende Dummy','Minas Patel','RH'],
-  ['Western','RM','Sonam Dubey','Minas Patel','RH'],
-  ['Western','RM','Vijay Katheriya','Minas Patel','RH'],
-  ['Western','RM','Vijay Yadav','Prathmesh s pandey','A1'],
-  ['Western','RM','Yash Kandhare','Prathmesh s pandey','A1'],
-  ['Western','RM','pratapkumar Yadav','Minas Patel','RH'],
-  ['Western 2','RM','Radhika thakkar dummy','Minas Patel','RH'],
+  ['Leadership','Commercial Head','Neha Mishra','','','',''],
+  ['Navi Mumbai','Cluster Head','Vidya Jadhav','','','',''],
+  ['Thane','Cluster Head','Bipin More','','','',''],
+  ['Central','Cluster Head','Sanjyota Bhosale','','','',''],
+  ['Thane','RH','Swapnil Gowalkar','','','','Bipin More'],
+  ['Navi Mumbai','TM','Sampada Pawar','','','','Vidya Jadhav'],
+  ['Navi Mumbai','A1','Avinash Kumar','','','','Vidya Jadhav'],
+  ['Central','RH','Rajkumar Ombase','','','','Sanjyota Bhosale'],
+  ['Bangalore','A1','Chaithanya M','','','Romen Singh',''],
+  ['Bangalore','A1','Krishna Murthy','','','',''],
+  ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','A1','Akash A Ugale','','','','Sanjyota Bhosale'],
+  ['Central','S1','Prajwal Shetty','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Navi Mumbai','S1','Ashish Kadam','Avinash Kumar','','','Vidya Jadhav'],
+  ['Pune','City Lead','Sourabh Sareen','','','',''],
+  ['Bangalore','S1','Sangam S','Krishna Murthy','','',''],
+  ['Bangalore','S1','Chandana N R','','','Romen Singh',''],
+  ['Pune','RH','Sachindra Wadane','','','','Sourabh Sareen'],
+  ['Pune','A1','Nishant Anand','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Rahul Panherkar','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','TM','Ayaz Bagwan','','','','Sourabh Sareen'],
+  ['Pune','S1','Siddhesh Bhagwat','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Shailesh Tiwari','','','Sachindra wadane','Sourabh Sareen'],
+  ['Harbour','A1','Yash Sharma','','','','Sanjyota Bhosale'],
+  ['Navi Mumbai','S1','Shahnavaz Shaikh','Avinash Kumar','','','Vidya Jadhav'],
+  ['Pune','S1','Nagesh Maharnavar','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Navi Mumbai','S1','Shubham Buchade','Avinash Kumar','','','Vidya Jadhav'],
+  ['Thane','A1','Amit Upadhyay','','','','Bipin More'],
+  ['Bangalore','S1','Manoj M','Rahan Khan','','Romen Singh',''],
+  ['Pune','TM','Rahul Poudel','','','','Sourabh Sareen'],
+  ['Pune','A1','Prathamesh A Pande','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','A1','Nayan Pabale','','Rahul Poudel','','Sourabh Sareen'],
+  ['Thane','S1','Mamtaben Sosa','Amit Upadhyay','','','Bipin more'],
+  ['Pune','S1','Santosh Khandare','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Swapnil Waghmode','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Bangalore','S1','Anurag G Singh','Krishna Murthy','','',''],
+  ['Central','S1','Khushal Soni','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Pune','A1','Omkar Ghate','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Pune','S1','Akshay More','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Thane','S1','Avinash Khare','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Hyderabad','S1','Parusharothu Vinay Varma','Vemula Ajay','','',''],
+  ['Navi Mumbai','S1','Rutuja Daule','','Sampada Pawar','','Vidya Jadhav'],
+  ['Navi Mumbai','S1','Chandrakant Bhagat','','Sampada Pawar','','Vidya Jadhav'],
+  ['Navi Mumbai','S1','Prachi Chouhan','','Sampada Pawar','','Vidya Jadhav'],
+  ['Pune','A1','Firoj Shaikh','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Pune','S1','Pravin Kharat','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Thane','S1','Saurabh M S','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
+  ['Thane','A1','Niraj Patil','','','Swapnil Gowalkar','Bipin More'],
+  ['Western','S1','Pratapkumar Yadav','','Minas Patel','','Rahul Gandhi'],
+  ['Western','S1','Sonam Dubey','','Minas Patel','','Rahul Gandhi'],
+  ['Hyderabad','A1','Vemula Ajay','','','',''],
+  ['Western','S1','Saravash Upadhyay','','Minas Patel','','Rahul Gandhi'],
+  ['Harbour','S1','Nitin Devariya','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh',''],
+  ['Western','S1','Arbaz Patel','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Western','Cluster Head','Rahul Gandhi','','','',''],
+  ['Pune','S1','Nikhil Sarwade','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Western','S1','Lalita Yadav','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Thane','S1','Mohd Adnan Malik','Amit Upadhyay','','','Bipin More'],
+  ['Pune','S1','Mahesh Mahore','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Thane','S1','Akash Gaikwad','Niraj Patil','','Swapnil Gowalkar','Bipin more'],
+  ['Central','S1','Shubham Raj','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['HNI','S1','Sahil Gupta','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['Thane','S1','Mohit Manwani','','Sanket Yadav','','Bipin More'],
+  ['Thane','A1','Ganesh Saroj','','','Swapnil Gowalkar','Bipin More'],
+  ['Pune','S1','Nagmma Mujnayak','Firoj Shaikh','','','Sourabh Sareen'],
+  ['Hyderabad','S1','Maagathoti Adilakshmi','Vemula Ajay','','',''],
+  ['Navi Mumbai','S1','Jayesh Parab','Avinash Kumar','','','Vidya Jadhav'],
+  ['Bangalore','S1','Praveen R','Krishna Murthy','','',''],
+  ['Western','A1','Prathmesh S Pandey','','','','Rahul Gandhi'],
+  ['Central','S1','Shital Bhagwane','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['HNI','A1','Pritesh Shankhat','','','','Abhhijjit Gandhii'],
+  ['Western','S1','Vijay Yadav','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Western','S1','Lovkesh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Bangalore','S1','Mhd Haseebulla','Krishna Murthy','','',''],
+  ['Western','S1','Kundan Singh','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Hyderabad','S1','Vadlapudi Divya','Vemula Ajay','','',''],
+  ['Thane','S1','Avinash Das','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Central','S1','Purvesh Ugawekar','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Harbour','S1','Dhiraj Chhoda','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Central','S1','Mustakim Sayyad','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Pune','S1','Somanath Sangle','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Thane','S1','Divya Rohela','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Pune','S1','Arbaj Shaikh','','Rahul Poudel','','Sourabh Sareen'],
+  ['Thane','S1','Kamlesh Tawale','','','Swapnil Gowalkar','Bipin More'],
+  ['Thane','S1','Arbaaz Ansari','Amit Upadhyay','','','Bipin More'],
+  ['Pune','S1','Ravi Pandey','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Vaibhav Bhadkumbe','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Central','S1','Kishan Patel','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Navi Mumbai','S1','Joshi Dhairya','','','','Vidya Jadhav'],
+  ['Bangalore','RH','Romen Singh','','','',''],
+  ['Bangalore','S1','Sippal Khora','Chaithanya M','','Romen Singh',''],
+  ['Harbour','S1','Aakash Dhole','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Western','S1','Yash Kandhare','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Bangalore','S1','Suman Das','Mainuddin T','','Romen Singh',''],
+  ['Bangalore','S1','Zain Ahmed','Chaithanya M','','Romen Singh',''],
+  ['Pune','S1','Souvik Biswas','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Central','S1','Mihir Jivani','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Bangalore','S1','Divakar V','Chaithanya M','','Romen Singh',''],
+  ['Bangalore','A1','Mainuddin T','','','Romen Singh',''],
+  ['Western','S1','Saurabh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
+  ['Pune','S1','Vishwanath Zalake','Firoj Shaikh','','','Sourabh Sareen'],
+  ['Pune','S1','Ritik Minekar','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Central','S1','Sumeet Pal','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Central','S1','Gurmohit Singh Sandhu','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Bangalore','S1','Mahesh V','Rahan Khan','','Romen Singh',''],
+  ['Harbour','S1','Bisma Shah','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Bangalore','S1','Abdur Rahim','Mainuddin T','','Romen Singh',''],
+  ['Pune','S1','Nagnath Dhotre','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Aditya Tripathi','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Chaitali Patil','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Thane','S1','Sajid Mulani','Amit Upadhyay','','','Bipin More'],
+  ['Western','S1','Eknidhi Chabra','','Minas Patel','','Rahul Gandhi'],
+  ['Western','S1','Gajanan Jadhav','','Minas Patel','','Rahul Gandhi'],
+  ['Western','TM','Minas Patel','','','','Rahul Gandhi'],
+  ['Central','S1','Zeya Shaikh','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Thane','S1','Vishal Chavan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Navi Mumbai','S1','Mohd Yaqub Nawab','','Sampada Pawar','','Vidya Jadhav'],
+  ['Pune','S1','Gaurav Gunjal','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Arpita Varte','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Thane','S1','Ranjana Dubey','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
+  ['Thane','S1','Aman Gupta','Amit Upadhyay','','','Bipin More'],
+  ['Pune','S1','Pramod Ghaytadak','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Pune','S1','Gouttam Aicha','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['Thane','S1','Sagar Mahamuni','','','Swapnil Gowalkar','Bipin More'],
+  ['Central','S1','Karan Shinde','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['HNI','S1','Yashodeep Kubavat','','','','Abhhijjit Gandhii'],
+  ['Western','S1','Riya Yadav','','Minas Patel','','Rahul Gandhi'],
+  ['Central','S1','Mayuresh Chavan','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Vivek Yadav','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Hyderabad','S1','Peddapally Veera Shivaji','Vemula Ajay','','',''],
+  ['Thane','S1','Hitesh Jaiswar','Amit Upadhyay','','','Bipin More'],
+  ['Navi Mumbai','S1','Kartik Shirsat','','Sampada Pawar','','Vidya Jadhav'],
+  ['Navi Mumbai','S1','Rinky Bidare','','Sampada Pawar','','Vidya Jadhav'],
+  ['Thane','S1','Sunny Saini','Amit Upadhyay','','','Bipin More'],
+  ['Thane','S1','Kishan Lohar','Amit Upadhyay','','','Bipin More'],
+  ['Navi Mumbai','S1','Suman Pujari','Avinash Kumar','','','Vidya Jadhav'],
+  ['Navi Mumbai','S1','Tejal Nikam','Avinash Kumar','','','Vidya Jadhav'],
+  ['Hyderabad','S1','G Anand Kumar','Vemula Ajay','','',''],
+  ['Pune','S1','Aadesh Narwade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
+  ['Harbour','S1','Manan Bhatt','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Western','S1','Vijay Katheriya','','MInas Patel','','Rahul Gandhi'],
+  ['Bangalore','S1','Rahul Singh','Krishna murthy','','',''],
+  ['Pune','S1','Aabid Khan','Firoj Shaikh','','','Sourabh Sareen'],
+  ['HNI','S1','Mohammed Rafiq Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Adil Shaikh','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['Central','S1','Rohit Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','A1','Kumar Babu','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Pune','S1','Rahul Raj','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
+  ['Central','S1','Fakrealam Ansari','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Pune','S1','Sahil Gote','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','A1','Rohit Rathod','','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Yash Awade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Israr Khan','Firoj Shaikh','','','Sourabh Sareen'],
+  ['Bangalore','S1','Md Muzamil','Mainuddin T','','Romen Singh',''],
+  ['Bangalore','S1','Mohammed Hidayathulla','Chaithanya M','','Romen Singh',''],
+  ['Navi Mumbai','S1','Chandni Khatoon','','','','Vidya Jadhav'],
+  ['Pune','S1','Rajdeep Jalan','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Pranav Deshmukh','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Navi Mumbai','S1','Jitendra Phulwaria','','','','Vidya Jadhav'],
+  ['Central','S1','Sneha Upadhyay','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Thane','S1','Jay Patil','Niraj Patil','','Swapnil Gowalkar','Bipin more'],
+  ['Pune','S1','Wasim Shaikh','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'],
+  ['HNI','Cluster Head','Abhhijjit Gandhii','','','',''],
+  ['Navi Mumbai','S1','Jyoti Ram','Avinash Kumar','','','Vidya Jadhav'],
+  ['Central','S1','Sanjay Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Bangalore','A1','Rahan Khan','','','Romen Singh',''],
+  ['Central','S1','Saurabh Pacharne','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Navi Mumbai','S1','Amit Rathod','Avinash Kumar','','','Vidya Jadhav'],
+  ['Pune','S1','Ramesh Kudale','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'],
+  ['HNI','S1','Hetal Gohil','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Jyoti Sharma','','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Shivani Ilahabadi','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['Pune','S1','Tarush Dhingra','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Akash Jogdand','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
+  ['Pune','S1','Vivek Solanke','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
+  ['HNI','S1','Mohd Faizan Shaikh','','','','Abhhijjit Gandhii'],
+  ['Harbour','S1','Atharva Belose','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Hyderabad','S1','Nikhil Goud','Vemula Ajay','','',''],
+  ['Thane','TM','Sanket Yadav','','','','Bipin More'],
+  ['Pune','S1','Abhikesh Kumar','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Krish Sinha','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Akshay Dawle','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
+  ['Thane','S1','Roshan Pandey','','Sanket Yadav','','Bipin More'],
+  ['Navi Mumbai','S1','Harshith S','','Sampada Pawar','','Vidya Jadhav'],
+  ['Pune','S1','Adinath Munde','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Buddhabhushan Wakode','','Rahul Poudel','','Sourabh Sareen'],
+  ['Commercial','A1','Aarya Sadanam','','','',''],
+  ['Bangalore','S1','Vijay Kumar E','Rahan Khan','','Romen Singh',''],
+  ['Central','S1','Farid Shaikh','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Thane','S1','Riyan Jamadar','','','','Bipin more'],
+  ['Thane','S1','Rahul Chauhan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Central','S1','Shreyang Chudasama','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Central','S1','Shresth Bhuwania','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Bangalore','S1','Kavya B R','','','Romen Singh',''],
+  ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Pune','S1','Vijay Kshirsagar','','Rahul Poudel','','Sourabh Sareen'],
+  ['Sourcing - Pune','S3','Darshana Javeri','','','','Sourabh Sareen'],
+  ['Thane','S1','Pawan Motwani','','','Swapnil Gowalkar','Bipin More'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
@@ -384,88 +325,26 @@ function lookupEmployeeEmail_(name) {
 }
 
 
-// ---- Dummy / test / placeholder account detection ----
-// Pre-ticks the "Excluded" checkbox in RM_Hierarchy for accounts that are
-// clearly not real RMs — a human reviews and can un-tick any of these.
-const DUMMY_NAME_PATTERNS_ = [/\bdummy\b/i, /\btest\b/i, /\bdemo\b/i, /\bs\s?1(\s+account)?\s*$/i];
-const DUMMY_EXACT_NAMES_ = new Set([
-  'craft booking', 'lead dump', 'nri crm', 'resale leads', 'art',
-  'tech internal a', 'guest western 1', 'guest western 2',
-  'a one salestl', 'sr a test', 'dummy sales',
-]);
-// Entire region is a sandbox used for internal/QA testing, not real sales —
-// every row under it is excluded regardless of individual name.
-const DUMMY_REGIONS_ = new Set(['wakanda']);
-
-function isDummyRow_(region, name, reportsTo) {
-  const n = String(name || '').trim();
-  const nLower = n.toLowerCase();
-  if (DUMMY_REGIONS_.has(String(region || '').trim().toLowerCase())) {
-    return 'Sandbox/test region (Wakanda)';
-  }
-  if (DUMMY_EXACT_NAMES_.has(nLower)) return 'Known placeholder/system account name';
-  for (let i = 0; i < DUMMY_NAME_PATTERNS_.length; i++) {
-    if (DUMMY_NAME_PATTERNS_[i].test(n)) return 'Name pattern suggests a test/dummy sub-account';
-  }
-  if (nLower && nLower === String(reportsTo || '').trim().toLowerCase()) {
-    return 'Reports to a person with the exact same name (self-referencing test account)';
-  }
-  return '';
-}
-
 /**
- * Resolves the full RM_HIERARCHY_RAW_ table into one row per person with
- * TL/RH/CH/Other columns filled in from whatever their ACTUAL chain is —
- * not a fixed number of hops. Returns an array of row objects; does not
- * touch any sheet (pure function, easy to test in isolation).
+ * Maps RM_HIERARCHY_RAW_ into one row object per person. Unlike the old
+ * org-chart source, this table is ALREADY resolved (see the file header's
+ * "WHY THIS IS PRE-RESOLVED" section) — no chain-walking needed here, just
+ * attach each person's email and default the manual-only fields (excluded/
+ * note start blank; a human fills these in directly in the sheet, and
+ * rebuildRmHierarchy preserves them across a refresh). Returns an array of
+ * row objects; does not touch any sheet (pure function, easy to test in
+ * isolation).
  */
 function resolveRmHierarchy_() {
-  // A separate map keyed to ONLY Team Lead rows: an "A1"-tagged manager
-  // name is always looked up as a Team Lead specifically, never an RM — if
-  // this used one shared name->row map instead, a Team Lead and an RM who
-  // happen to share a name (e.g. a self-reporting dummy "Sanket Yadav" RM
-  // row alongside the real Team Lead "Sanket Yadav") would shadow each
-  // other depending on array order, silently losing the real TL's RH/CH.
-  const byTlName = {};
-  RM_HIERARCHY_RAW_.forEach(function (r) { if (r[1] === 'Team Lead') byTlName[r[2].trim().toLowerCase()] = r; });
-
   return RM_HIERARCHY_RAW_.map(function (r) {
-    const region = r[0], role = r[1], name = r[2], reportsTo = r[3], reportsToRole = r[4];
-    const out = {
-      region: region, role: role, name: name, reportsTo: reportsTo, reportsToRole: reportsToRole,
-      tl: '', rh: '', ch: '', other: '', otherRole: '', note: '',
+    const team = r[0], role = r[1], name = r[2], tl = r[3], tm = r[4], rh = r[5], ch = r[6];
+    return {
+      team: team, role: role, name: name,
+      tl: tl, tm: tm, rh: rh, ch: ch,
+      excluded: false,
+      note: (tl || tm || rh || ch) ? '' : 'No manager on file for this person.',
       email: lookupEmployeeEmail_(name),
     };
-    const excludeReason = isDummyRow_(region, name, reportsTo);
-
-    function applyDirect(mgrName, mgrRole) {
-      if (mgrRole === 'RH') out.rh = mgrName;
-      else if (mgrRole === 'CH') out.ch = mgrName;
-      else if (mgrRole === 'Admin' || mgrRole === 'S2') { out.other = mgrName; out.otherRole = mgrRole; }
-      // '-' (no manager) or anything unrecognised: leave everything blank.
-    }
-
-    if (reportsToRole === 'A1') {
-      // Immediate manager is presumed to be a Team Lead — look up THEIR row
-      // to find what's above them (RH/CH/Admin, per the source data never
-      // another A1 — Team Leads never report to another Team Lead here).
-      out.tl = reportsTo;
-      const tlRow = byTlName[String(reportsTo).trim().toLowerCase()];
-      if (tlRow) {
-        applyDirect(tlRow[3], tlRow[4]);
-        if (tlRow[4] === '-') out.note = 'Team Lead "' + reportsTo + '" has no manager on file — issue can only reach the TL.';
-      } else {
-        out.note = 'Manager "' + reportsTo + '" (tagged A1) has no Team Lead row of their own in the source file — RH/CH above them could not be resolved. Fill in manually if needed.';
-      }
-    } else {
-      // Reports directly to RH/CH/Admin/S2/nobody — no Team Lead hop.
-      applyDirect(reportsTo, reportsToRole);
-      if (reportsToRole === '-') out.note = 'No manager on file for this person.';
-    }
-
-    out.excluded = !!excludeReason;
-    out.excludeReason = excludeReason;
-    return out;
   });
 }
 
@@ -481,9 +360,9 @@ function ensureRmHierarchySheet_(ss) {
   if (existing) return existing; // already set up — use rebuildRmHierarchy() to refresh from source
 
   const resolved = resolveRmHierarchy_();
-  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note', 'email'];
+  const headers = ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'];
   const rows = resolved.map(function (p) {
-    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, p.excluded, p.excludeReason, p.note, p.email];
+    return [p.team, p.role, p.name, p.tl, p.tm, p.rh, p.ch, p.excluded, p.note, p.email];
   });
 
   const sheet = withRetry_(function () { return ss.insertSheet(RM_HIERARCHY_SHEET_); }, 'insert RM_Hierarchy');
@@ -500,7 +379,7 @@ function ensureRmHierarchySheet_(ss) {
     sheet.setFrozenRows(1);
   }, 'write RM_Hierarchy header');
   withRetry_(function () { sheet.getRange(2, 1, rows.length, headers.length).setValues(rows); }, 'write RM_Hierarchy data rows');
-  withRetry_(function () { sheet.getRange(2, 11, rows.length, 1).insertCheckboxes(); }, 'insert RM_Hierarchy checkboxes');
+  withRetry_(function () { sheet.getRange(2, 8, rows.length, 1).insertCheckboxes(); }, 'insert RM_Hierarchy checkboxes');
   return sheet;
 }
 
@@ -508,12 +387,12 @@ function ensureRmHierarchySheet_(ss) {
  * Rebuilds RM_Hierarchy from the current RM_HIERARCHY_RAW_ table (e.g.
  * after pasting in a fresh export), while PRESERVING every manual edit a
  * human made in the existing sheet — Excluded checkbox and Note, matched
- * by person name (case-insensitive). New people get this script's default
- * exclusion guess; people no longer in the source table are dropped.
+ * by person name (case-insensitive). People no longer in the source table
+ * are dropped.
  */
 function rebuildRmHierarchy() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const headers = ['region', 'role', 'name', 'reports_to', 'reports_to_role', 'tl', 'rh', 'ch', 'other_manager', 'other_manager_role', 'excluded', 'exclude_reason', 'note', 'email'];
+  const headers = ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'];
 
   const priorByName = {};
   withRetry_(function () {
@@ -521,28 +400,30 @@ function rebuildRmHierarchy() {
     if (!sheet) return;
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return;
-    // Old sheets (before the email column existed) have 13 columns — read
-    // whatever's there rather than assuming headers.length, so row[13] just
-    // comes back undefined/blank on those instead of erroring.
+    // An older sheet (pre-HR-source layout) has more/fewer columns — read
+    // whatever's there rather than assuming headers.length, so a missing
+    // column just comes back undefined/blank instead of erroring. Anyone
+    // rebuilding from that old layout loses their prior excluded/note/email
+    // (the column positions genuinely changed), same one-time cost as any
+    // schema change — not something a name-matched merge can paper over.
     const lastCol = Math.max(sheet.getLastColumn(), headers.length);
     sheet.getRange(2, 1, lastRow - 1, lastCol).getValues().forEach(function (row) {
       const name = String(row[2] || '').trim().toLowerCase();
       if (!name) return;
-      priorByName[name] = { excluded: row[10], excludeReason: String(row[11] || ''), note: String(row[12] || ''), email: String(row[13] || '') };
+      priorByName[name] = { excluded: row[7], note: String(row[8] || ''), email: String(row[9] || '') };
     });
   }, 'read existing RM_Hierarchy before rebuild');
 
   const resolved = resolveRmHierarchy_();
   const rows = resolved.map(function (p) {
     const prior = priorByName[p.name.trim().toLowerCase()];
-    // A human-entered note/exclude-reason/email survives untouched; only
-    // fall back to this script's own guess (or the Book7 auto-lookup, for
-    // email) when there's no prior row for this person.
+    // A human-entered note/email survives untouched; only fall back to
+    // this script's own guess (or the Book7 auto-lookup, for email) when
+    // there's no prior row for this person.
     const excluded = prior ? prior.excluded : p.excluded;
-    const excludeReason = prior && prior.excludeReason ? prior.excludeReason : p.excludeReason;
     const note = prior && prior.note ? prior.note : p.note;
     const email = prior && prior.email ? prior.email : p.email;
-    return [p.region, p.role, p.name, p.reportsTo, p.reportsToRole, p.tl, p.rh, p.ch, p.other, p.otherRole, excluded, excludeReason, note, email];
+    return [p.team, p.role, p.name, p.tl, p.tm, p.rh, p.ch, excluded, note, email];
   });
 
   // Same reasoning as ensureRmHierarchySheet_ above: small independently-
@@ -567,7 +448,7 @@ function rebuildRmHierarchy() {
     sheet.setFrozenRows(1);
   }, 'write RM_Hierarchy header');
   withRetry_(function () { sheet.getRange(2, 1, rows.length, headers.length).setValues(rows); }, 'write RM_Hierarchy data rows');
-  withRetry_(function () { sheet.getRange(2, 11, rows.length, 1).insertCheckboxes(); }, 'insert RM_Hierarchy checkboxes');
+  withRetry_(function () { sheet.getRange(2, 8, rows.length, 1).insertCheckboxes(); }, 'insert RM_Hierarchy checkboxes');
 
   ensureManagerDirectorySheetInternal_(ss, true);
   Logger.log('RM_Hierarchy rebuilt: ' + rows.length + ' people. Manager_Directory refreshed (emails preserved).');
@@ -604,11 +485,11 @@ function ensureManagerDirectorySheetInternal_(ss, forceRefresh) {
     byManager[key].reportCount++;
   }
   resolved.forEach(function (p) {
-    if (p.excluded) return; // dummy/test accounts don't create a manager-directory entry on their own
-    if (p.tl) record(p.tl, 'TL', p.region);
-    if (p.rh) record(p.rh, 'RH', p.region);
-    if (p.ch) record(p.ch, 'CH', p.region);
-    if (p.other) record(p.other, p.otherRole || 'Other', p.region);
+    if (p.excluded) return; // hand-flagged rows don't create a manager-directory entry on their own
+    if (p.tl) record(p.tl, 'TL', p.team);
+    if (p.tm) record(p.tm, 'TM', p.team);
+    if (p.rh) record(p.rh, 'RH', p.team);
+    if (p.ch) record(p.ch, 'CH', p.team);
   });
 
   const names = Object.keys(byManager).sort();
@@ -646,9 +527,9 @@ function ensureManagerDirectorySheet_(ss) {
 /**
  * Reads RM_Hierarchy + Manager_Directory back from the sheets (the live,
  * human-editable source of truth — not the embedded RM_HIERARCHY_RAW_
- * table directly) into: { byRmNameLower: {tl, rh, ch, other, otherRole,
- * excluded}, emailByManagerNameLower: string }. Used by
- * OvernightEmailer.gs to resolve recipients at send time.
+ * table directly) into: { byRmNameLower: {tl, tm, rh, ch, excluded},
+ * emailByManagerNameLower: string }. Used by OvernightEmailer.gs to
+ * resolve recipients at send time.
  */
 function loadRmHierarchyAndEmails_(ss) {
   ensureRmHierarchySheet_(ss);
@@ -658,13 +539,13 @@ function loadRmHierarchyAndEmails_(ss) {
     const hLastRow = hierarchySheet.getLastRow();
     const byRmNameLower = {};
     if (hLastRow >= 2) {
-      hierarchySheet.getRange(2, 1, hLastRow - 1, 13).getValues().forEach(function (row) {
+      hierarchySheet.getRange(2, 1, hLastRow - 1, 10).getValues().forEach(function (row) {
         const name = String(row[2] || '').trim();
         if (!name) return;
         byRmNameLower[name.toLowerCase()] = {
-          tl: String(row[5] || '').trim(), rh: String(row[6] || '').trim(),
-          ch: String(row[7] || '').trim(), other: String(row[8] || '').trim(),
-          otherRole: String(row[9] || '').trim(), excluded: !!row[10],
+          tl: String(row[3] || '').trim(), tm: String(row[4] || '').trim(),
+          rh: String(row[5] || '').trim(), ch: String(row[6] || '').trim(),
+          excluded: !!row[7],
         };
       });
     }
@@ -692,17 +573,19 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
 /**
  * For a set of RM names (whoever had overnight activity in one region),
  * groups them into one bucket PER DISTINCT primary recipient — never
- * combines multiple A1s into one email. "To" must always name exactly
- * ONE manager, so a region with 4 Team Leads produces 4 buckets here, not
- * 1 combined email with all 4 in To.
+ * combines multiple managers into one email. "To" must always name
+ * exactly ONE person, so a region with 4 Team Leads produces 4 buckets
+ * here, not 1 combined email with all 4 in To.
  *
- * Each bucket's primary recipient is the RM's Team Lead (A1) — EXCEPT
- * when the RM has no Team Lead at all (reports straight to RH/CH/Admin),
- * in which case that direct manager becomes the primary instead, so
- * there's still a real action-owner named rather than nobody.
+ * Each bucket's primary recipient is the RM's own immediate manager,
+ * whichever tier that actually is: their Team Lead (A1) if they have one,
+ * else the TM directly above them if THAT'S who they report straight to
+ * (some RMs skip A1 entirely), else RH, else CH — falling further up the
+ * chain only when the nearer tier doesn't exist for this specific person.
  *
- * Each bucket's Cc is whichever of RH/CH that ONE primary's own chain
- * actually has (mutually exclusive per person in this data — never both),
+ * Each bucket's Cc is whichever of TM/RH/CH exist in that ONE primary's
+ * own chain (e.g. an A1 primary still has their own TM/RH/CH cc'd, even
+ * though the RM's row only shows the A1 as their own direct manager),
  * plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own email
  * (never cc someone already in To).
  *
@@ -719,13 +602,13 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
   rmNames.forEach(function (rmName) {
     const chain = data.byRmNameLower[String(rmName || '').trim().toLowerCase()];
     if (!chain || chain.excluded) { unresolved.push(rmName); return; }
-    const primaryName = chain.tl || chain.rh || chain.ch || chain.other || '';
+    const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
     const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
     if (!primaryEmail) { unresolved.push(rmName); return; }
 
     const key = primaryName.toLowerCase();
     if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, ccSet: new Set(), rmNames: [] };
-    [chain.rh, chain.ch].forEach(function (name) {
+    [chain.tm, chain.rh, chain.ch].forEach(function (name) {
       if (!name) return;
       const email = data.emailByManagerNameLower[name.toLowerCase()];
       if (email) buckets[key].ccSet.add(email);
