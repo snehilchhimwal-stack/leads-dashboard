@@ -746,7 +746,6 @@
   @media (max-width:760px){
     .kpi-strip{ grid-template-columns:repeat(2,1fr); }
     .config-grid{ grid-template-columns:1fr; }
-    #statusChangeGrid{ grid-template-columns:1fr !important; }
     .stall-card{ flex-direction:column; align-items:stretch; }
     .stall-card-total{ border-right:none; border-bottom:1px solid var(--border); padding-right:0; padding-bottom:14px; }
   }
@@ -808,8 +807,8 @@
         <button class="btn-link" id="changeSourceBtn" style="display:none;">Change source</button>
         <button class="btn" id="refreshBtn">Connect &amp; Refresh</button>
         <div class="snapshot-cluster">
-          <button class="btn ghost" id="snapshotNowBtn" title="Writes an on-the-spot checkpoint to Movement_Log — feeds the Movement and Tracking tabs' From/To pickers. Same sign-in as the rest of the dashboard, no separate connect step.">Snapshot now</button>
-          <label class="switch" title="Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs, useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the Compare from/to picker. Uses the same sign-in as the rest of the dashboard, no separate connect step — off by default since it writes to the sheet rather than just reading it. Uses this browser's own clock.">
+          <button class="btn ghost" id="snapshotNowBtn" title="Writes an on-the-spot checkpoint to Movement_Log — feeds the Tracking tab's From/To picker and the whole-history views on the Movement tab. Same sign-in as the rest of the dashboard, no separate connect step.">Snapshot now</button>
+          <label class="switch" title="Extra capture path alongside MovementTracker.gs's automatic every-6-hours runs, useful for grabbing an on-the-spot checkpoint (e.g. right before/after a push to call a list) that then shows up as a new option in the Tracking tab's From/To picker. Uses the same sign-in as the rest of the dashboard, no separate connect step — off by default since it writes to the sheet rather than just reading it. Uses this browser's own clock.">
             <input type="checkbox" id="autoSnapshotCheck" />
             <span class="switch-track"></span>
             <span class="switch-label-text">Auto-snapshot</span>
@@ -922,48 +921,12 @@
         <button class="btn" id="downloadIssuesBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;">Download Issues CSV</button>
       </div>
 
-      <div class="stale-controls" style="margin-bottom:14px;">
-        <label class="stale-label">Compare from
-          <select id="movementFromDateSelect" class="stale-select"></select>
-          <select id="movementFromTimeSelect" class="stale-select"></select>
-        </label>
-        <label class="stale-label">to
-          <select id="movementToDateSelect" class="stale-select"></select>
-          <select id="movementToTimeSelect" class="stale-select"></select>
-        </label>
-        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Status Changes below, which compares this exact pair of Movement_Log snapshots — Stalled Leads above no longer depends on this picker (see its own note).</span>
-      </div>
-
       <section id="sec-stalled">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Leads</div><div class="section-count" id="stalledCount"></div></div>
-        <div class="filter-summary">A lead assigned 2+ days ago that's gone quiet: no comment logged in the last 6+ hours, or — for a lead with no comment history at all — no new call attempt in the last 6+ hours (checked against a Movement_Log snapshot from ~6 hours ago; needs <span class="mono">MovementTracker.gs</span> set up for that fallback case specifically, everything else works from the live sheet alone). Independent of the Compare from/to picker above — that one only drives Status Changes and Time to Remediate now. Segregated by the lead's own assigned date. Respects every filter above — Project/Region/TL/Source/Sub-source and the Assigned date range.</div>
+        <div class="filter-summary">A lead assigned 2+ days ago that's gone quiet: no comment logged in the last 6+ hours, or — for a lead with no comment history at all — no new call attempt in the last 6+ hours (checked against a Movement_Log snapshot from ~6 hours ago; needs <span class="mono">MovementTracker.gs</span> set up for that fallback case specifically, everything else works from the live sheet alone). Segregated by the lead's own assigned date. Respects every filter above — Project/Region/TL/Source/Sub-source and the Assigned date range.</div>
         <div id="stalledBreakdown" style="margin-bottom:10px;"></div>
         <div id="stalledNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
-      </section>
-
-      <section id="sec-statuschange">
-        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
-        <div class="filter-summary">Compares the two Movement_Log snapshots picked above — captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled here = still open, still flagged, nothing changed between the two picked snapshots specifically — its own check, separate from the Stalled Leads section above (which uses a different, always-current 6-hours-of-quiet definition, not tied to this picker). Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
-
-        <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
-
-        <div id="statusOutcomeBar" style="margin-bottom:14px;"></div>
-
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;" id="statusChangeGrid">
-          <div>
-            <div class="stall-group-label" style="color:var(--red)">Stalled</div>
-            <div id="statusStalledBreakdown"></div>
-          </div>
-          <div>
-            <div class="stall-group-label" style="color:var(--green)">Became Opportunity+</div>
-            <div id="statusOppBreakdown"></div>
-          </div>
-          <div>
-            <div class="stall-group-label" style="color:var(--teal)">Closed</div>
-            <div id="statusClosedBreakdown"></div>
-          </div>
-        </div>
       </section>
 
       <section id="sec-inactivermlead">
@@ -1173,9 +1136,11 @@
     <div class="tab-panel" id="tab-movement">
       <div class="band-label">Movement <span class="band-note">trend and leaderboard views built from Movement_Log capture history</span></div>
 
+      <div id="movementNotice" class="truncation-notice" style="display:none; margin-bottom:14px;"></div>
+
       <section id="sec-overnight">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Overnight Leads</div><div class="section-count" id="overnightCount"></div></div>
-        <div class="filter-summary">Every lead assigned from 5 PM the day before "To" through 9 AM on "To" — the after-hours window before the morning shift starts. Shows CURRENT status from the live sheet (not frozen at "To"), broken down across the whole funnel, not just still-open leads, so a lead that already converted or closed overnight still counts instead of silently dropping out. Respects every filter above.</div>
+        <div class="filter-summary">Every lead assigned from 5 PM the day before through 9 AM today — the after-hours window before the morning shift starts. Shows CURRENT status from the live sheet (not frozen at any snapshot), broken down across the whole funnel, not just still-open leads, so a lead that already converted or closed overnight still counts instead of silently dropping out. Respects every filter above.</div>
 
         <div id="overnightBreakdown" style="margin-bottom:10px;"></div>
         <div id="overnightNotice" class="truncation-notice" style="display:none;"></div>
@@ -1192,19 +1157,13 @@
 
       <section id="sec-rmstall">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">RM Stall Leaderboard</div><div class="section-count" id="rmStallCount"></div></div>
-        <div class="filter-summary">Every zero-movement gap across the WHOLE retained snapshot history (up to 7 days) — not just the one pair picked above — so a lead that sat untouched for 3 consecutive checks counts 3 times, weighting by how long it actually sat. Respects the Project/Region/TL filters above.</div>
+        <div class="filter-summary">Every zero-movement gap across the WHOLE retained snapshot history (up to 7 days) — so a lead that sat untouched for 3 consecutive checks counts 3 times, weighting by how long it actually sat. Respects the Project/Region/TL filters above.</div>
         <div class="section-scroll"><table id="rmStallTable"><thead></thead><tbody></tbody></table></div>
-      </section>
-
-      <section id="sec-remediate">
-        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Time to Remediate</div><div class="section-count" id="remediateCount"></div></div>
-        <div class="filter-summary">For leads that WERE stalled and then actually moved: how long the stall lasted before it did. Only counts stalls that resolved within the retained history — one still stalled right now isn't in here yet (it's in the leaderboard above while it's ongoing). Respects the Project/Region/TL filters above.</div>
-        <div class="section-scroll"><table id="remediateTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
       <section id="sec-opportunitytime">
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">Time to Opportunity (approx.)</div><div class="section-count" id="opportunityTimeCount"></div></div>
-        <div class="filter-summary">Approximates how long it takes a lead to reach Opportunity+, using the same Movement_Log snapshot history as Time to Remediate above — the schema has no stage-entry timestamp, so this is duration from lead_assigned_at to the first retained snapshot where the lead already reads as Opportunity+, not the true crossing instant. A lead already Opportunity+ at its own earliest retained snapshot is excluded, not counted at that first-seen time — its true crossing could have happened long before retention began, and counting it anyway would understate the fastest conversions specifically. Respects the Project/Region/TL filters above.</div>
+        <div class="filter-summary">Approximates how long it takes a lead to reach Opportunity+, using the same whole-history Movement_Log approach as RM Stall Leaderboard above — the schema has no stage-entry timestamp, so this is duration from lead_assigned_at to the first retained snapshot where the lead already reads as Opportunity+, not the true crossing instant. A lead already Opportunity+ at its own earliest retained snapshot is excluded, not counted at that first-seen time — its true crossing could have happened long before retention began, and counting it anyway would understate the fastest conversions specifically. Respects the Project/Region/TL filters above.</div>
         <div class="section-scroll"><table id="opportunityTimeTable"><thead></thead><tbody></tbody></table></div>
       </section>
 

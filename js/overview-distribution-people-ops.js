@@ -1596,17 +1596,11 @@ function downloadIssuesCSV(){
     if (l.closedWithNoWork) addIssue('Closed with No Work Recorded', l.lead_id, l.region, l.RM);
   });
 
-  // Stalled Leads comes from Movement_Log via the Compare from/to
-  // picker (see getPickedMovementWindow), not issueLeads — a completely
-  // separate per-copy row shape. Silently skipped if no pair is picked yet
-  // (same as the on-screen card's own empty state), rather than blocking
-  // the rest of the export.
-  const win = getPickedMovementWindow();
-  if (win) {
-    applyMovementFilters(computeMovementRows(win.fromAt, win.toAt)).forEach(r => {
-      addIssue('Stalled Leads', r.lead_id, r.region, r.RM);
-    });
-  }
+  // Stalled Leads — same computeStalledLeads() the on-screen card reads,
+  // so the export can never disagree with what's shown there.
+  applyMovementFilters(computeStalledLeads()).forEach(r => {
+    addIssue('Stalled Leads', r.lead_id, r.region, r.RM);
+  });
 
   const rows = [['issue', 'lead_id', 'region', 'RM Name']];
   // Fixed, stable order (matching ISSUE_PRIORITY's own priority order, then

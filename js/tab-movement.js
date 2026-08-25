@@ -1,7 +1,7 @@
 // ============================================================
 // tab-movement.js — Movement tab (Movement_Log fetch, stalled
-// leads, overnight cohort, status changes, RM stall leaderboard,
-// time-to-remediate). Depends on core.js (loaded first).
+// leads, overnight cohort, RM stall leaderboard, time-to-Opportunity).
+// Depends on core.js (loaded first).
 // NOTE: initMovementUI() still lives in dashboard.html's
 // remaining inline script for now, alongside the other
 // end-of-file init/bootstrap calls (see tab-rmtimeline.js).
@@ -176,11 +176,11 @@ async function fetchMovementLog(sheetId){
 // Cached by movementSnapshots array identity — every load site reassigns
 // `movementSnapshots = [...]` wholesale rather than mutating it in place
 // (confirmed: no .push()/.splice() anywhere), so a `===` check against the
-// last-seen array is a safe, cheap invalidation signal. Called 4 times
-// (computeMovementRows, computeStatusChanges, computeRmStallLeaderboard,
-// computeTimeToRemediate) within a single render pass; without this, the
-// same grouping/sorting of the full retained history (up to 7 days of
-// snapshots) reran from scratch on every one of those, every filter change.
+// last-seen array is a safe, cheap invalidation signal. Called by
+// computeStalledLeads, computeRmStallLeaderboard and computeTimeToOpportunity
+// within a single render pass; without this, the same grouping/sorting of
+// the full retained history (up to 7 days of snapshots) reran from scratch
+// on every one of those, every filter change.
 let _movementHistoriesCache = null;
 let _movementHistoriesCacheSrc = null;
 function buildMovementHistories(){
@@ -223,10 +223,9 @@ function enrichLeadAsOf(rawRecord, asOfDate){
   }
 }
 
-// The leaderboard and remediate-time metrics both walk EVERY consecutive
-// pair for EVERY lead across the whole retained history, and both need to
-// know "was this snapshot flagged" — same question computeMovementRows
-// asks about a single pair. A WeakMap keyed by the snapshot record itself
+// The stall leaderboard walks EVERY consecutive pair for EVERY lead across
+// the whole retained history, and needs to know "was this snapshot
+// flagged" for each one. A WeakMap keyed by the snapshot record itself
 // means the cache needs no manual clearing: a fresh fetchMovementLog()
 // call builds a brand new movementSnapshots array, the old record objects
 // become unreachable, and their cache entries are simply garbage
@@ -242,7 +241,7 @@ function enrichSnapshotCached(rec){
 // Same six-dimension filter (Project/Region/TL/Source/Sub-source/Assigned
 // date range) applyMovementFilters below checks, matched against a single
 // snapshot record — used by the whole-history walks (RM Stall Leaderboard,
-// Time to Remediate) that check one record at a time instead of filtering
+// Time to Opportunity) that check one record at a time instead of filtering
 // a whole array up front. Previously only checked Project/Region/TL,
 // silently ignoring Source/Sub-source/date-range selections that every
 // other Movement view already respects — those two tables would keep
@@ -354,36 +353,6 @@ function populateMovementTimeSelect(dateSelectId, timeSelectId, preferredAt){
   timeSel.value = String((preferredMatch || fallback).at.getTime());
 }
 
-// Rebuilds every dropdown's OPTIONS and picks sensible defaults (from =
-// the second-most-recent run overall, to = the most recent). Only called
-// once per fresh fetch — never from renderMovementTab(), so a filter
-// change or tab switch never resets what the user already picked.
-function populateMovementSnapshotSelectors(){
-  const fromDateSel = document.getElementById('movementFromDateSelect');
-  const toDateSel = document.getElementById('movementToDateSelect');
-  if (!fromDateSel || !toDateSel) return;
-
-  populateMovementDateSelect('movementFromDateSelect');
-  populateMovementDateSelect('movementToDateSelect');
-
-  const runs = distinctMovementSnapshotRuns();
-  const fromRun = runs.length >= 2 ? runs[runs.length - 2] : runs[0];
-  const toRun = runs[runs.length - 1];
-
-  if (fromRun) {
-    fromDateSel.value = istDateKey(fromRun.at);
-    populateMovementTimeSelect('movementFromDateSelect', 'movementFromTimeSelect', fromRun.at);
-  }
-  if (toRun) {
-    toDateSel.value = istDateKey(toRun.at);
-    populateMovementTimeSelect('movementToDateSelect', 'movementToTimeSelect', toRun.at);
-  }
-
-  // Same fresh-fetch data backs the Tracking tab's own From/To pickers —
-  // keeping this one call site means every caller of this function (initial
-  // load, and a browser-triggered snapshot write) picks both up for free.
-  trackingPopulateSnapshotSelectors();
-}
 
 function getSelectedMovementSnapshot(timeSelectId){
   const el = document.getElementById(timeSelectId);
@@ -421,107 +390,6 @@ function applyMovementFilters(rawRows){
   });
 }
 
-// Every customer flagged at the "to" snapshot that shows zero change since
-// the "from" snapshot (comparing the pair directly — needn't be adjacent
-// checks, whatever the two dropdowns point at). A lead missing from either
-// snapshot (wasn't open/didn't exist yet at one of the two checkpoints)
-// can't be compared and is skipped.
-function computeMovementRows(fromAt, toAt){
-  if (!fromAt || !toAt) return [];
-  if (fromAt.getTime() > toAt.getTime()) { const t = fromAt; fromAt = toAt; toAt = t; }
-
-  const byLead = buildMovementHistories();
-  const rows = [];
-
-  byLead.forEach((history) => {
-    // A history bucket is keyed by client_id-or-lead_id (buildMovementHistories
-    // above) — the SAME customer can have multiple simultaneous RM copies
-    // in it, each its own lead_id, captured at the identical snapshot_at.
-    // A plain .find() only ever returns the first one, silently dropping
-    // every other copy from Stalled Leads entirely. Matching by
-    // lead_id within the timestamp instead catches all of them.
-    const toRecs = history.filter(r => r.snapshot_at.getTime() === toAt.getTime());
-    const fromRecs = history.filter(r => r.snapshot_at.getTime() === fromAt.getTime());
-    if (!toRecs.length || !fromRecs.length) return;
-
-    const flaggedUnchanged = [];
-    toRecs.forEach(toRec => {
-      const fromRec = fromRecs.find(r => String(r.lead_id).trim() === String(toRec.lead_id).trim());
-      if (!fromRec) return; // this copy didn't exist yet at the "from" checkpoint
-
-      const toEnriched = enrichSnapshotCached(toRec);
-      if (!ISSUE_PRIORITY.some(rule => toEnriched[rule.key])) return; // not flagged at "to"
-      if (movementChangedBetween(fromRec, toRec)) return; // moved — not stalled
-
-      const primaryIssue = (ISSUE_PRIORITY.find(rule => toEnriched[rule.key]) || {}).label || 'Flagged';
-      flaggedUnchanged.push({ toRec, fromRec, toEnriched, primaryIssue });
-    });
-    if (!flaggedUnchanged.length) return;
-
-    // One row per RM copy, not one merged row per customer — two RMs
-    // stalled on the very same issue are still two separate instances
-    // (each accountable for their own copy), and a customer's copies can
-    // easily be stalled on DIFFERENT issues (one Not Updated, another
-    // Behind on Today's Calls); merging into one row could only ever show
-    // one issue, silently hiding whichever the representative copy wasn't.
-    // Each row still carries a lightweight sibling reference to the OTHER
-    // copies of the same customer, for context only.
-    flaggedUnchanged.forEach(cur => {
-      const siblings = flaggedUnchanged.filter(x => x !== cur);
-      rows.push({
-        lead_id: cur.toRec.lead_id,
-        client_id: cur.toRec.client_id,
-        RM: cur.toRec.RM,
-        TL: cur.toRec.TL,
-        region: cur.toRec.region,
-        project: cur.toRec.project,
-        current_stage: cur.toRec.current_stage,
-        group_source: cur.toRec.group_source,
-        source_bucket: cur.toRec.source_bucket,
-        lead_assigned_at: cur.toRec.lead_assigned_at,
-        // Same "last touched" signal the Not Updated / Follow-up Overdue
-        // sections use elsewhere (newest dated CRM comment) — not just the
-        // snapshot check time — so this actually says when the lead itself
-        // was last worked, not just when we last looked at it.
-        lastCommentAt: cur.toEnriched.lastCommentAt || null,
-        // All four comment-ish columns, so a follow-up suggestion built
-        // from this row (see suggestedFollowUp/combinedCommentsText/
-        // hasAnyCommentField) reads the full picture, not just
-        // internal_status_comments alone.
-        internal_status_comments: cur.toRec.internal_status_comments || '',
-        stage_comments: cur.toRec.stage_comments || '',
-        last_comment: cur.toRec.last_comment || '',
-        closing_reason: cur.toRec.closing_reason || '',
-        fromAt: cur.fromRec.snapshot_at,
-        toAt: cur.toRec.snapshot_at,
-        issue: cur.primaryIssue,
-        collatedFrom: 1,
-        collatedLeadIds: [String(cur.toRec.lead_id).trim()],
-        collatedRMs: [cur.toRec.RM || 'Unassigned'],
-        siblingLeadIds: siblings.map(s => String(s.toRec.lead_id).trim()),
-        siblingRMs: Array.from(new Set(siblings.map(s => s.toRec.RM).filter(Boolean))),
-        // Every sibling's own four comment columns — see the matching
-        // comment on copySplits in fetchAndRender for why.
-        siblingComments: siblings.map(s => ({
-          lead_id: s.toRec.lead_id, RM: s.toRec.RM,
-          internal_status_comments: s.toRec.internal_status_comments || '',
-          stage_comments: s.toRec.stage_comments || '',
-          last_comment: s.toRec.last_comment || '',
-          closing_reason: s.toRec.closing_reason || '',
-        })),
-      });
-    });
-  });
-
-  // Grouped so every RM copy of the same customer ends up adjacent in the
-  // on-screen Stalled Leads list (see groupSiblingsTogether) —
-  // the plain RM-name sort below only ran within/across families before,
-  // so 3 copies held by 3 different RMs could land anywhere in the list
-  // relative to each other.
-  const sortedRows = groupSiblingsTogether(rows, (a, b) => a.RM.localeCompare(b.RM) || String(a.lead_id).localeCompare(String(b.lead_id)));
-  return sortedRows;
-}
-
 // Stalled Leads — a lead counts as stalled once it's at least 2 days
 // since lead_assigned_at (too fresh otherwise — no time to judge it),
 // AND:
@@ -532,12 +400,8 @@ function computeMovementRows(fromAt, toAt){
 // The comment check always wins when the lead has any comment history —
 // the attempts check is only a fallback for a lead nobody has ever
 // commented on, not a second independent signal checked alongside it.
-// Deliberately decoupled from computeMovementRows/the picked Compare
-// from/to snapshot pair below — that pair still drives Status Changes'
-// own "Stalled" outcome and Time-to-Remediate, but this section no
-// longer needs two specific snapshots picked to have an opinion. Only
-// open, not-yet-Opportunity+ leads are considered (matches every other
-// issue check in this codebase — a closed or converted lead isn't
+// Only open, not-yet-Opportunity+ leads are considered (matches every
+// other issue check in this codebase — a closed or converted lead isn't
 // "stalled," it's just done). Built from issueLeads (already filtered,
 // already per-copy-expanded, already carrying siblingRMs/siblingComments
 // etc. — the same array every other Operations issue card reads).
@@ -594,25 +458,12 @@ function currentStalledRowsByRegion(){
   return groupItemsByReportRegion(rows);
 }
 
-// The picker above Stalled Leads — shared with Status Changes below
-// (same select IDs, just relocated in the DOM), so both sections always
-// compare the identical pair of Movement_Log snapshots.
-function getPickedMovementWindow(){
-  const fromAt = getSelectedMovementSnapshot('movementFromTimeSelect');
-  const toAt = getSelectedMovementSnapshot('movementToTimeSelect');
-  if (!fromAt || !toAt) return null;
-  return { fromAt, toAt };
-}
-
 // Operations tab's Stalled Leads section — reads computeStalledLeads
-// directly, independent of the Compare from/to picker (that pair still
-// drives Status Changes/Time-to-Remediate below, just not this section
-// anymore — see computeStalledLeads' own comment for why). The Movement_Log
-// dependency is now optional, not required: a never-commented lead needs
-// history to judge (the attempts-vs-6h-ago fallback), but a lead with any
-// comment history at all is judged from `leads`/`issueLeads` alone, so
-// this section still has something useful to say even before Movement_Log
-// has any real history yet.
+// directly. The Movement_Log dependency is optional, not required: a
+// never-commented lead needs history to judge (the attempts-vs-6h-ago
+// fallback), but a lead with any comment history at all is judged from
+// `leads`/`issueLeads` alone, so this section still has something useful
+// to say even before Movement_Log has any real history yet.
 function renderStalledFlaggedLeadsOps(){
   const countEl = document.getElementById('stalledCount');
   const breakdownEl = document.getElementById('stalledBreakdown');
@@ -662,130 +513,6 @@ function renderStalledFlaggedLeadsOps(){
   });
 }
 
-// Between the same From/To pair as Status Changes: every lead open
-// (tracked) at "From" is sorted into exactly one outcome — Stalled (still
-// open, still flagged, computeMovementRows already decided this), Active
-// (still open, not flagged/stalled), or dropped out of tracking entirely.
-// A dropped-out lead is looked up in the CURRENT live sheet to find out
-// why, since Movement_Log only ever snapshots open, under-Opportunity
-// leads (isOpenLead excludes both closed AND Opportunity+ stages — see
-// enrichLead) — a closure and an Opportunity+ conversion both look
-// IDENTICAL from inside the log alone: the lead just stops appearing
-// either way. The live sheet is the only place left holding the answer,
-// so that's what this cross-references against — meaning the result
-// reflects the lead's state as of NOW, not necessarily exactly at the
-// "To" timestamp if it moved again since.
-function computeStatusChanges(fromAt, toAt, stalledRows){
-  if (!fromAt || !toAt) return null;
-  if (fromAt.getTime() > toAt.getTime()) { const t = fromAt; fromAt = toAt; toAt = t; }
-
-  // stalledRows (computeMovementRows) is one row per RM copy, keyed by its
-  // own lead_id — matched the same way here now that this walk is per-copy
-  // too, not the customer-level client_id it used before.
-  const stalledIssueByKey = new Map((stalledRows || []).map(r => [String(r.lead_id).trim(), r.issue]));
-
-  // One row per RM copy, not one entry per customer — a customer's two
-  // simultaneous copies can land in DIFFERENT outcomes (one stalled, the
-  // other closed), and a plain per-customer dedup silently dropped
-  // whichever copy .find() didn't happen to pick, exactly the bug already
-  // fixed in computeMovementRows above. Matching by lead_id within each
-  // history bucket catches every copy; a lightweight sibling reference to
-  // the OTHER copies of the same customer travels with each row for
-  // context (and so countUniqueAndCloned can tell a cloned pair apart from
-  // two genuinely different customers — see familyKeyOf).
-  const byLead = buildMovementHistories();
-  const toLeadIdsPresent = new Set();
-  const fromRecs = [];
-  byLead.forEach((history) => {
-    const toRecs = history.filter(r => r.snapshot_at.getTime() === toAt.getTime());
-    toRecs.forEach(r => toLeadIdsPresent.add(String(r.lead_id).trim()));
-    const fromRecsForLead = history.filter(r => r.snapshot_at.getTime() === fromAt.getTime());
-    fromRecsForLead.forEach(rec => {
-      const siblings = fromRecsForLead.filter(x => x !== rec);
-      fromRecs.push(Object.assign({}, rec, {
-        siblingLeadIds: siblings.map(s => String(s.lead_id).trim()),
-        siblingRMs: Array.from(new Set(siblings.map(s => s.RM).filter(Boolean))),
-      }));
-    });
-  });
-
-  const filteredFromRecs = applyMovementFilters(fromRecs);
-
-  // Live sheet lookup by lead_id (this copy's own identity), not
-  // client_id — a customer's OTHER copy staying open shouldn't make THIS
-  // specific copy read as active if this lead_id itself closed or
-  // converted (or vice versa).
-  const liveByLeadId = new Map();
-  allParsedLeads.forEach(l => { liveByLeadId.set(String(l.lead_id).trim(), l); });
-
-  const active = [];
-  const stalled = [];
-  const opportunities = [];
-  const closed = [];
-  const untraced = [];
-
-  filteredFromRecs.forEach(rec => {
-    const leadId = String(rec.lead_id).trim();
-    const rowBase = { lead_id: rec.lead_id, RM: rec.RM, region: rec.region, project: rec.project, siblingLeadIds: rec.siblingLeadIds, siblingRMs: rec.siblingRMs };
-    if (toLeadIdsPresent.has(leadId)) {
-      const issue = stalledIssueByKey.get(leadId);
-      if (issue) {
-        stalled.push(Object.assign({}, rowBase, { label: issue }));
-      } else {
-        // Current live stage where available — more useful than the
-        // "From" snapshot's now-stale stage for something described as
-        // active right now.
-        const liveNow = liveByLeadId.get(leadId);
-        active.push(Object.assign({}, rowBase, { label: (liveNow && liveNow.current_stage) || rec.current_stage }));
-      }
-      return;
-    }
-
-    const live = liveByLeadId.get(leadId);
-    if (!live) {
-      untraced.push(Object.assign({}, rowBase, { label: '' }));
-      return;
-    }
-
-    const closedNow = isLeadClosed(live);
-    if (closedNow) {
-      let label;
-      if (isClosedStage(live.current_stage)) {
-        label = String(live.current_stage || '').trim() || 'Closed';
-      } else {
-        // lead_closing_reason/lead_closing_comment are the sheet's own
-        // closing disposition — preferred here over the RM-entered
-        // closing_reason when present, since it's the more authoritative
-        // "why did this close" signal. Falls back to closing_reason for
-        // leads closed before this column existed.
-        const reason = String(live.lead_closing_reason || live.closing_reason || '').trim();
-        const detail = String(live.lead_closing_comment || '').trim();
-        label = reason ? (detail ? `${reason} — ${detail}` : reason) : 'Closed';
-      }
-      // lead_id/RM/region/project refreshed from the live record here too
-      // — same as the opportunities and active branches below — so a lead
-      // reassigned to a different RM between the From snapshot and now
-      // isn't attributed to whoever held it back at "From".
-      closed.push(Object.assign({}, rowBase, { lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label }));
-      return;
-    }
-
-    if (isOppOrAbove(live.current_stage)) {
-      const canon = canonicalStage(live.current_stage);
-      const label = canon ? canon.replace(/\b\w/g, c => c.toUpperCase()) : 'Opportunity+';
-      opportunities.push(Object.assign({}, rowBase, { lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label }));
-      return;
-    }
-
-    // Live data says it's still open and under-Opportunity — a missed
-    // capture window (e.g. it dipped out and back), not a real status
-    // change. Counted as active rather than guessing at a reason.
-    active.push(Object.assign({}, rowBase, { lead_id: live.lead_id, RM: live.RM, region: live.region, project: live.project, label: live.current_stage }));
-  });
-
-  return { totalFrom: filteredFromRecs.length, active, stalled, opportunities, closed, untraced };
-}
-
 function fmtHoursSpan(h){
   if (!Number.isFinite(h)) return '—';
   return h < 24 ? h.toFixed(1) + 'h' : (h / 24).toFixed(1) + 'd';
@@ -806,11 +533,9 @@ function fmtHoursSpan(h){
 // "changed" (different RM/stage data) even though neither individual
 // copy actually moved, masking a real stall; or, with a same-run pairing
 // that happens to look unchanged, log a spurious 0-hour "stall" against
-// whichever RM's row sorted second. computeMovementRows hit this same
-// hazard and fixed it by matching same-lead_id rows across two fixed
-// endpoints (see its own comment) — this generalizes that to a full
-// walk by splitting each customer bucket back into one chronological
-// sequence per lead_id (copy) before scanning.
+// whichever RM's row sorted second. Fixed by splitting each customer
+// bucket back into one chronological sequence per lead_id (copy) before
+// scanning.
 function splitHistoryByCopy(history){
   const byCopy = new Map();
   history.forEach(rec => {
@@ -852,54 +577,6 @@ function computeRmStallLeaderboard(){
     .sort((a, b) => b.staleGapCount - a.staleGapCount);
 }
 
-// For leads that WERE stalled and then actually moved: how long the stall
-// ran before it did. A run of consecutive zero-movement gaps is one
-// "episode", closed off the moment movement (or the lead leaving flagged
-// status) is observed. A stall still ongoing at the end of the retained
-// history has no closing point yet, so it contributes no episode here —
-// it's still visible in the leaderboard above while it's in progress.
-function computeTimeToRemediate(){
-  const byLead = buildMovementHistories();
-  const episodes = [];
-
-  byLead.forEach((history) => {
-    // See splitHistoryByCopy above — walking the customer-level bucket
-    // positionally would risk pairing two different RMs' copies as if
-    // sequential; each copy needs its own chronological walk.
-    splitHistoryByCopy(history).forEach((copyHistory) => {
-      let stallStart = null;
-
-      for (let i = 1; i < copyHistory.length; i++) {
-        const prev = copyHistory[i - 1], cur = copyHistory[i];
-        if (!passesMovementFilters(cur)) { stallStart = null; continue; } // out of scope — don't bridge a stall across a filtered-out gap
-
-        const curEnriched = enrichSnapshotCached(cur);
-        const flaggedAtCur = ISSUE_PRIORITY.some(rule => curEnriched[rule.key]);
-        const changed = movementChangedBetween(prev, cur);
-
-        if (flaggedAtCur && !changed) {
-          if (stallStart === null) stallStart = prev.snapshot_at;
-        } else {
-          if (stallStart !== null) {
-            episodes.push({
-              RM: cur.RM || 'Unassigned',
-              region: cur.region,
-              project: cur.project,
-              lead_id: cur.lead_id,
-              startAt: stallStart,
-              endAt: cur.snapshot_at,
-              hours: (cur.snapshot_at - stallStart) / 36e5,
-            });
-          }
-          stallStart = null;
-        }
-      }
-    });
-  });
-
-  return episodes;
-}
-
 // Approximates "time to Opportunity" for leads whose crossing INTO
 // Opportunity+ happened somewhere inside the retained snapshot history —
 // duration from lead_assigned_at (not from the first observed snapshot) to
@@ -910,9 +587,8 @@ function computeTimeToRemediate(){
 // counting it at that first-seen timestamp would silently understate the
 // duration — and understate it specifically for the fastest converters,
 // which would bias the whole distribution toward looking slower than it is.
-// Returns {RM, hours} entries in the same shape computeTimeToRemediate's
-// episodes use, so summarizeTimeToRemediate below can summarize both with
-// the same median/average logic, unmodified.
+// Returns {RM, hours} entries, summarized below by summarizeTimeToRemediate
+// (name predates this being the only caller — see its own comment).
 function computeTimeToOpportunity(){
   const byLead = buildMovementHistories();
   const results = [];
@@ -939,10 +615,9 @@ function computeTimeToOpportunity(){
   return results;
 }
 
-// Generic {RM, hours}[] -> per-RM count/avg/median/max summarizer — also
-// used for computeTimeToOpportunity's results above, not just
-// computeTimeToRemediate's stall episodes; the name is the older, narrower
-// one since this is where the median-handling logic was first proven.
+// Generic {RM, hours}[] -> per-RM count/avg/median/max summarizer, used
+// by renderTimeToOpportunity below (name predates Time to Remediate's
+// removal — this is where the median-handling logic was first proven).
 function summarizeTimeToRemediate(episodes){
   const byRM = new Map();
   episodes.forEach(e => {
@@ -1107,172 +782,16 @@ function renderTimeToOpportunity(){
   </tr>`).join('');
 }
 
-function renderTimeToRemediate(){
-  const table = document.getElementById('remediateTable');
-  if (!table) return;
-  const countEl = document.getElementById('remediateCount');
-  const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
-
-  if (movementFetchState !== 'ok') {
-    thead.innerHTML = ''; tbody.innerHTML = '';
-    if (countEl) countEl.textContent = '';
-    return;
-  }
-
-  const episodes = computeTimeToRemediate();
-  const rows = summarizeTimeToRemediate(episodes);
-  if (countEl) countEl.textContent = episodes.length + ' resolved stalls';
-
-  thead.innerHTML = `<tr>
-    <th>RM</th>
-    <th style="text-align:right">Resolved stalls</th>
-    <th style="text-align:right">Avg time</th>
-    <th style="text-align:right">Median time</th>
-    <th style="text-align:right">Worst time</th>
-  </tr>`;
-
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-row">No stall has resolved within the retained history yet</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = rows.map(r => `<tr>
-    <td>${esc(r.RM)}</td>
-    <td class="num">${r.count}</td>
-    <td class="num">${fmtHoursSpan(r.avgHours)}</td>
-    <td class="num dim">${fmtHoursSpan(r.medianHours)}</td>
-    <td class="num" style="color:var(--red)">${fmtHoursSpan(r.maxHours)}</td>
-  </tr>`).join('');
-}
-
-// Fixed colors for the top-level outcome bar — every lead open at "From"
-// lands in exactly one of these, so the palette stays constant regardless
-// of which buckets happen to be non-empty this time.
-const STATUS_OUTCOME_COLORS = {
-  'Stalled': 'var(--red)',
-  'Still Active': 'var(--blue)',
-  'Became Opportunity+': 'var(--green)',
-  'Closed': 'var(--teal)',
-  'Not Found in Current Sheet': 'var(--text-faint)',
-};
-
-function renderStatusChanges(fromAt, toAt, stalledRows){
-  const countEl = document.getElementById('statusChangeCount');
-  const outcomeEl = document.getElementById('statusOutcomeBar');
-  const stalledEl = document.getElementById('statusStalledBreakdown');
-  const oppEl = document.getElementById('statusOppBreakdown');
-  const closedEl = document.getElementById('statusClosedBreakdown');
-  if (!outcomeEl || !stalledEl || !oppEl || !closedEl) return;
-
-  const result = computeStatusChanges(fromAt, toAt, stalledRows);
-
-  if (!result || !result.totalFrom) {
-    if (countEl) countEl.textContent = '';
-    outcomeEl.innerHTML = '';
-    stalledEl.innerHTML = '';
-    oppEl.innerHTML = '';
-    closedEl.innerHTML = '';
-    return;
-  }
-
-  // "Tracked at From" has to mean distinct customers, not rows — a
-  // customer whose two RM copies both existed at "From" (and landed in
-  // different outcomes) otherwise reads as 2 tracked leads when it's
-  // really one. computeStatusChanges is per-copy now (see its own
-  // comment), same reasoning as everywhere else this pattern applies.
-  //
-  // Each category's dedupeToFamilies() runs exactly ONCE below and its
-  // result is reused for both the outcome bar's per-category count and
-  // that category's own breakdown card — previously result.stalled (for
-  // example) was deduped 3 separate times (once for outcomeCounts' length,
-  // once inside countUniqueAndCloned, once again for uniqueStalled) doing
-  // the identical grouping work each time.
-  const allFrom = result.active.concat(result.stalled, result.opportunities, result.closed, result.untraced);
-  const uniqueFrom = dedupeToFamilies(allFrom);
-  const totalCloneCounts = { total: allFrom.length, unique: uniqueFrom.length, cloned: allFrom.length - uniqueFrom.length };
-  if (countEl) countEl.textContent = uniqueCloneLabel(totalCloneCounts, 'lead') + ' tracked at "From"';
-  const rangeText = `${istStamp(fromAt)} → ${istStamp(toAt)}`;
-
-  const uniqueStalled = dedupeToFamilies(result.stalled);
-  const uniqueActive = dedupeToFamilies(result.active);
-  const uniqueOpp = dedupeToFamilies(result.opportunities);
-  const uniqueClosed = dedupeToFamilies(result.closed);
-  const uniqueUntraced = dedupeToFamilies(result.untraced);
-  const stalledCloneCounts = { total: result.stalled.length, unique: uniqueStalled.length, cloned: result.stalled.length - uniqueStalled.length };
-  const oppCloneCounts = { total: result.opportunities.length, unique: uniqueOpp.length, cloned: result.opportunities.length - uniqueOpp.length };
-  const closedCloneCounts = { total: result.closed.length, unique: uniqueClosed.length, cloned: result.closed.length - uniqueClosed.length };
-
-  // One bar reconciling the whole "From" population into its outcomes —
-  // reads at a glance instead of a sentence of numbers to parse. Deduped
-  // to one entry per customer (like the Stalled Leads breakdown
-  // above) so the bar's percentages stay readable against the same
-  // unique total shown in countEl, rather than a mix of customers and
-  // their cloned copies.
-  const outcomeCounts = {};
-  if (uniqueStalled.length) outcomeCounts['Stalled'] = uniqueStalled.length;
-  if (uniqueActive.length) outcomeCounts['Still Active'] = uniqueActive.length;
-  if (uniqueOpp.length) outcomeCounts['Became Opportunity+'] = uniqueOpp.length;
-  if (uniqueClosed.length) outcomeCounts['Closed'] = uniqueClosed.length;
-  if (uniqueUntraced.length) outcomeCounts['Not Found in Current Sheet'] = uniqueUntraced.length;
-  renderBreakdownCard(outcomeEl, {
-    total: uniqueFrom.length,
-    totalLabel: `lead${uniqueFrom.length === 1 ? '' : 's'} open at "From"`,
-    subNote: totalCloneCounts.cloned > 0 ? `+ ${totalCloneCounts.cloned} cloned cop${totalCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
-    rangeText,
-    counts: outcomeCounts,
-    colorFn: (label) => STATUS_OUTCOME_COLORS[label] || 'var(--purple)',
-    numColor: 'var(--text)',
-  });
-
-  const stalledCounts = {};
-  uniqueStalled.forEach(s => { stalledCounts[s.label] = (stalledCounts[s.label] || 0) + 1; });
-  renderBreakdownCard(stalledEl, {
-    total: uniqueStalled.length,
-    totalLabel: `lead${uniqueStalled.length === 1 ? '' : 's'} stalled`,
-    subNote: stalledCloneCounts.cloned > 0 ? `+ ${stalledCloneCounts.cloned} cloned cop${stalledCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
-    rangeText,
-    counts: stalledCounts,
-    colorFn: colorForIssue,
-    numColor: 'var(--red)',
-    emptyText: 'No stalled leads in this window.',
-  });
-
-  const oppCounts = {};
-  uniqueOpp.forEach(o => { oppCounts[o.label] = (oppCounts[o.label] || 0) + 1; });
-  renderBreakdownCard(oppEl, {
-    total: uniqueOpp.length,
-    totalLabel: `became Opportunity${uniqueOpp.length === 1 ? '' : 's'}+`,
-    subNote: oppCloneCounts.cloned > 0 ? `+ ${oppCloneCounts.cloned} cloned cop${oppCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
-    rangeText,
-    counts: oppCounts,
-    colorFn: colorForIssue,
-    numColor: 'var(--green)',
-    emptyText: 'No leads became Opportunity+ in this window.',
-  });
-
-  const closedCounts = {};
-  uniqueClosed.forEach(c => { closedCounts[c.label] = (closedCounts[c.label] || 0) + 1; });
-  renderBreakdownCard(closedEl, {
-    total: uniqueClosed.length,
-    totalLabel: `lead${uniqueClosed.length === 1 ? '' : 's'} closed`,
-    subNote: closedCloneCounts.cloned > 0 ? `+ ${closedCloneCounts.cloned} cloned cop${closedCloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
-    rangeText,
-    counts: closedCounts,
-    colorFn: colorForIssue,
-    numColor: 'var(--teal)',
-    emptyText: 'No leads closed in this window.',
-  });
-}
-
-// Every lead assigned in the after-hours window before the "To" snapshot's
-// calendar day — pulled from the LIVE sheet (allParsedLeads), not
-// Movement_Log, since the log only ever tracks open/under-Opportunity
-// leads and a lead that already converted or closed overnight would
-// silently vanish from it. That also means status here is CURRENT
-// (as of last refresh), not frozen at "To" — the same honest tradeoff
-// Status Changes' Opportunity/Closed lookups make, for the same reason.
-function computeOvernightCohort(toAt){
-  if (!toAt) return null;
-  const p = istParts(toAt);
+// Every lead assigned in the after-hours window before `asOf`'s calendar
+// day — pulled from the LIVE sheet (allParsedLeads), not Movement_Log,
+// since the log only ever tracks open/under-Opportunity leads and a lead
+// that already converted or closed overnight would silently vanish from
+// it. That also means status here is CURRENT (as of last refresh), not
+// frozen at the window's end. `asOf` only ever contributes its own IST
+// calendar day (see below) — pass `_renderNow` for "as of right now".
+function computeOvernightCohort(asOf){
+  if (!asOf) return null;
+  const p = istParts(asOf);
   const windowEnd = istWallToInstant(p.y, p.mo, p.d, CONFIG.OVERNIGHT_END_HOUR, 0, 0);
   const windowStart = istAddDays(
     istWallToInstant(p.y, p.mo, p.d, CONFIG.OVERNIGHT_START_HOUR, 0, 0),
@@ -1411,14 +930,14 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, follow
   });
 }
 
-function renderOvernightCohort(toAt){
+function renderOvernightCohort(asOf){
   const countEl = document.getElementById('overnightCount');
   const breakdownEl = document.getElementById('overnightBreakdown');
   const noticeEl = document.getElementById('overnightNotice');
   const listEl = document.getElementById('overnightList');
   if (!breakdownEl || !listEl) return;
 
-  const result = computeOvernightCohort(toAt);
+  const result = computeOvernightCohort(asOf);
   // Stashed so the "Generate Region Emails" button builds reports from
   // exactly this cohort, without recomputing (and possibly drifting from)
   // what's currently on screen.
@@ -1572,79 +1091,35 @@ async function renderOvernightRegionReports(){
   applyGmailButtonStatesFor(reports, i => 'overnightRptGmailBtn_' + i);
 }
 
-// Stalled Leads itself now lives in Operations (see
-// renderStalledFlaggedLeadsOps) — it reads the SAME picker as Status
-// Changes below (see getPickedMovementWindow), so this tab's picker drives
-// both sections together, not just this one.
+// Whole-history views (RM Stall Leaderboard, Time to Opportunity, Unmatched
+// Comments) plus Overnight Leads, which needs no picker at all — its
+// window is just "the last after-hours stretch before now" (see
+// computeOvernightCohort), so it's driven off _renderNow directly and
+// works even before Movement_Log has any history yet.
 function renderMovementTab(){
-  // Whole-history views — independent of the from/to picker below, so
-  // they update on every call regardless of which pair is selected.
   renderRmStallLeaderboard();
-  renderTimeToRemediate();
   renderTimeToOpportunity();
   renderUnmatchedCommentsCount();
 
   const noticeEl = document.getElementById('movementNotice');
-  if (!noticeEl) return;
-
-  if (movementFetchState !== 'ok') {
-    noticeEl.style.display = 'block';
-    noticeEl.innerHTML = movementFetchState === 'loading'
-      ? 'Loading movement history…'
-      : `<b>No Movement_Log data yet.</b> This reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks before there's anything to compare — allow ~6-12 hours after setup.`;
-    renderStatusChanges(null, null, []);
-    renderOvernightCohort(null);
-    return;
+  if (noticeEl) {
+    if (movementFetchState !== 'ok') {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = movementFetchState === 'loading'
+        ? 'Loading movement history…'
+        : `<b>No Movement_Log data yet.</b> This reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). RM Stall Leaderboard, Time to Opportunity and Unmatched Comments above need at least two captured checks before they have anything to show — allow ~6-12 hours after setup; Overnight Leads below works from the live sheet regardless.`;
+    } else {
+      noticeEl.style.display = 'none';
+    }
   }
 
-  const fromAt = getSelectedMovementSnapshot('movementFromTimeSelect');
-  const toAt = getSelectedMovementSnapshot('movementToTimeSelect');
-  if (!fromAt || !toAt) {
-    noticeEl.style.display = 'block';
-    noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Check back after the next scheduled run.';
-    renderStatusChanges(null, null, []);
-    renderOvernightCohort(null);
-    return;
-  }
-  noticeEl.style.display = 'none';
-
-  // Same filter bar as the rest of the dashboard — Project/Region/TL/
-  // Source/Sub-source plus the Assigned date range — matched against each
-  // row's OWN recorded fields — a stalled lead may since have closed and
-  // dropped out of the live sheet's currently-open set, so it can't be
-  // cross-referenced against `leads`. Feeds Status Changes' own "Stalled"
-  // categorization below.
-  const rows = applyMovementFilters(computeMovementRows(fromAt, toAt));
-
-  renderStatusChanges(fromAt, toAt, rows);
-  renderOvernightCohort(toAt);
+  renderOvernightCohort(_renderNow);
 }
 
 // Relocated from dashboard.html's inline script (Phase 4 file-split) — this
 // tab's own init/wiring function, called from js/main.js after every other
 // script has loaded.
 function initMovementUI(){
-  const fromDateSel = document.getElementById('movementFromDateSelect');
-  const toDateSel = document.getElementById('movementToDateSelect');
-  const fromTimeSel = document.getElementById('movementFromTimeSelect');
-  const toTimeSel = document.getElementById('movementToTimeSelect');
-
-  // Picking a new date rebuilds that side's Time options (defaulting to
-  // the latest capture that day) before re-rendering. Stalled Flagged
-  // Leads reads this same picker (see getPickedMovementWindow), so every
-  // change here refreshes both it and Status Changes together.
-  const renderBothMovementSections = () => { renderStalledFlaggedLeadsOps(); renderMovementTab(); };
-  if (fromDateSel) fromDateSel.addEventListener('change', () => {
-    populateMovementTimeSelect('movementFromDateSelect', 'movementFromTimeSelect', null);
-    renderBothMovementSections();
-  });
-  if (toDateSel) toDateSel.addEventListener('change', () => {
-    populateMovementTimeSelect('movementToDateSelect', 'movementToTimeSelect', null);
-    renderBothMovementSections();
-  });
-  if (fromTimeSel) fromTimeSel.addEventListener('change', renderBothMovementSections);
-  if (toTimeSel) toTimeSel.addEventListener('change', renderBothMovementSections);
-
   const snapshotBtn = document.getElementById('snapshotNowBtn');
   if (snapshotBtn) snapshotBtn.addEventListener('click', () => browserSnapshotOpenLeads());
   initAutoSnapshotCheckbox();

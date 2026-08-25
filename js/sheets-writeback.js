@@ -600,9 +600,9 @@ async function browserSnapshotOpenLeads(){
     // Pull the new run back in so it shows up in the Compare dropdowns
     // immediately, without needing a full reconnect.
     await fetchMovementLog(_currentSheetId);
-    populateMovementSnapshotSelectors(); // also repopulates the Tracking tab's own pickers
-    // populateMovementSnapshotSelectors just moved the picker's "to" onto
-    // this new run — every section that reads it needs to refresh.
+    trackingPopulateSnapshotSelectors();
+    // The Tracking tab's picker just moved its "to" onto this new run —
+    // every section that reads Movement_Log needs to refresh.
     renderStalledFlaggedLeadsOps();
     renderMovementTab();
     renderTrackingTab();

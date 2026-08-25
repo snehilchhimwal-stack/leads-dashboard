@@ -101,9 +101,8 @@ function findRunTally(runs, at){
 // the two snapshots — a flat or rising count there doesn't distinguish
 // "nothing got worked on" from "new volume offset real progress." This
 // instead matches leads by lead_id present at BOTH From and To (a
-// brand-new lead that didn't exist yet at From is excluded entirely, same
-// principle computeMovementRows already uses for Stalled Leads), then asks
-// of that fixed cohort: how many flagged for each issue at From are STILL
+// brand-new lead that didn't exist yet at From is excluded entirely), then
+// asks of that fixed cohort: how many flagged for each issue at From are STILL
 // flagged for that SAME issue at To?
 function computeCohortComparison(regionFilter, fromAt, toAt){
   const fromMs = fromAt.getTime(), toMs = toAt.getTime();
@@ -184,9 +183,8 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
 // Only when a lead's history has NO snapshot on either side of its deadline
 // (pruned past the 7-day retention window, or Movement_Log's older rows
 // predate the "capture closed leads too" behavior) does this fall back to
-// the live current sheet's status — same fallback computeStatusChanges
-// already relies on for a related question. A lead with neither is
-// excluded entirely rather than guessed.
+// the live current sheet's status. A lead with neither is excluded
+// entirely rather than guessed.
 // Status "as of" a specific deadline for one lead's retained history —
 // prefers the latest snapshot AT OR BEFORE the deadline, falls back to the
 // first one AFTER it (both carry up to ~6h resolution slack, same as
@@ -505,12 +503,10 @@ if (clearSlaHistoryBtn) clearSlaHistoryBtn.addEventListener('click', async () =>
   }
 });
 
-// Own copy of populateMovementSnapshotSelectors' From/To defaulting logic
-// (second-most-recent run / most-recent run), kept as a separate function
-// rather than sharing IDs with the Movement tab's picker — that one is
-// deliberately a short, recent pair for Stalled Leads; this one is meant for
-// picking two points that could be weeks apart (e.g. "when I sent Tuesday's
-// email" vs "now").
+// Defaults to the second-most-recent run / most-recent run — a pair that
+// could be weeks apart (e.g. "when I sent Tuesday's email" vs "now"), so
+// this tab keeps its own From/To picker rather than sharing one meant for
+// a short, recent comparison.
 function trackingPopulateSnapshotSelectors(){
   const fromDateSel = document.getElementById('trackingFromDateSelect');
   const toDateSel = document.getElementById('trackingToDateSelect');

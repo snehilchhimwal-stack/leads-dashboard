@@ -266,7 +266,7 @@ const HEADER_ALIASES = {
   // these filled in and nothing logged in the four internal fields is
   // exactly the "no work recorded" case those checks exist to catch. Used
   // instead as the preferred label wherever the dashboard shows WHY a
-  // lead closed (see computeStatusChanges, suggestedFollowUp).
+  // lead closed (see suggestedFollowUp).
   lead_closing_reason: ['lead_closing_reason','lead closing reason'],
   lead_closing_comment: ['lead_closing_comment','lead closing comment'],
   // call_attempts is the SOP's "attempt" — every dial, connected or not.
@@ -1081,7 +1081,7 @@ async function fetchAndRender(){
     // caller might have no data in it yet. Either way the main dashboard
     // must not wait on or fail because of this second fetch.
     fetchMovementLog(sheetId).then(() => {
-      populateMovementSnapshotSelectors();
+      trackingPopulateSnapshotSelectors();
       // Behind on Today's Calls' attemptsToday depends on Movement_Log for
       // a real day-over-day call_attempts delta (see buildTodayCallBaseline)
       // — on first load this fetch resolves AFTER the initial
@@ -1244,7 +1244,7 @@ function isClosedStage(stage){
 // Single source of truth for "is this lead closed" — stage text OR a
 // filled closing_reason (RM-entered) OR lead_closing_reason (the sheet's
 // own closing disposition). Previously hand-duplicated verbatim across
-// funnelRankOf, enrichLead, computeStatusChanges, overnightStatusLabel, and
+// funnelRankOf, enrichLead, overnightStatusLabel, and
 // buildOvernightRegionReports, each site's own comment separately swearing
 // it "matches enrichLead's own definition exactly" — a future change to
 // what counts as closed had to be hunted down and edited in every one of
@@ -2588,7 +2588,7 @@ function unmatchedFollowUp(comment, loggedBy, ts){
 }
 
 // Pools every comment-ish signal across a customer's full family (this copy
-// + siblingComments — see copySplits in fetchAndRender/computeMovementRows)
+// + siblingComments — see copySplits in fetchAndRender)
 // and returns the single most recent one as {outcome, comment, loggedBy, ts},
 // or null if the family has no structured action-log entry AND no
 // last_comment anywhere. Shared by suggestedFollowUp below (tiers 1-2) and
@@ -2721,7 +2721,7 @@ function suggestedFollowUp(l, noCommentsFallback){
   for (const copy of family) {
     // lead_closing_reason/lead_closing_comment (the sheet's own closing
     // disposition) preferred over the RM-entered closing_reason when
-    // present — see the matching note in computeStatusChanges.
+    // present — the more authoritative "why did this close" signal.
     const reason = String(copy.lead_closing_reason || copy.closing_reason || '').trim();
     if (reason) {
       const detail = String(copy.lead_closing_comment || '').trim();
