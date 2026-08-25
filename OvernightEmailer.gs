@@ -997,21 +997,24 @@ function debugFollowupStatusNow() {
 
     let resolvedCount = 0, unresolvedCount = 0;
     const detail = [];
+    const rmNamesInLog = [];
     issueLog.forEach(function (entry) {
       const row = byLeadId[entry.lead_id];
       if (!row) { resolvedCount++; detail.push(entry.lead_id + ': resolved (no longer in sheet)'); return; }
+      const rm = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+      rmNamesInLog.push(rm);
       const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
       const closingReason = getVal_(row, colIndex, 'closing_reason');
       const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-      if (isOppOrAbove_(stage)) { resolvedCount++; detail.push(entry.lead_id + ': resolved (reached Opportunity+, stage="' + stage + '")'); return; }
-      if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedCount++; detail.push(entry.lead_id + ': resolved (closed, stage="' + stage + '")'); return; }
+      if (isOppOrAbove_(stage)) { resolvedCount++; detail.push(entry.lead_id + ' (RM: ' + rm + '): resolved (reached Opportunity+, stage="' + stage + '")'); return; }
+      if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedCount++; detail.push(entry.lead_id + ' (RM: ' + rm + '): resolved (closed, stage="' + stage + '")'); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
         unresolvedCount++;
-        detail.push(entry.lead_id + ': STILL UNRESOLVED (' + entry.issueLabel + ', stage="' + stage + '")');
+        detail.push(entry.lead_id + ' (RM: ' + rm + '): STILL UNRESOLVED (' + entry.issueLabel + ', stage="' + stage + '")');
       } else {
         resolvedCount++;
-        detail.push(entry.lead_id + ': resolved (issue "' + entry.issueLabel + '" no longer flagged, stage="' + stage + '")');
+        detail.push(entry.lead_id + ' (RM: ' + rm + '): resolved (issue "' + entry.issueLabel + '" no longer flagged, stage="' + stage + '")');
       }
     });
     detail.forEach(function (d) { Logger.log('    ' + d); });
@@ -1019,6 +1022,31 @@ function debugFollowupStatusNow() {
       (unresolvedCount > 0 && to ? '  -> a follow-up SHOULD send for this region' :
         unresolvedCount > 0 && !to ? '  -> would send, but SKIPPED because stored `to` is empty (see above)' :
         '  -> correctly nothing to send (everything already resolved)'));
+
+    // When `to` is empty, show EXACTLY why recipient resolution comes up
+    // short for this bucket's RM(s) — same call resolveRecipientEmailsForRegion_
+    // (and backfillTodaysOvernightLogRecipientsNow) makes, but logging the
+    // per-RM chain/email lookup instead of just a pass/fail count, so it's
+    // obvious which specific manager needs an email filled into
+    // Manager_Directory (or which region needs a Region_Recipients
+    // fallback) rather than just knowing "something's missing."
+    if (!to && rmNamesInLog.length) {
+      const uniqueRms = Array.from(new Set(rmNamesInLog));
+      const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'debug: loadRmHierarchyAndEmails_');
+      Logger.log('  Recipient resolution trace for ' + region + ' (RMs from this row\'s issueLog: ' + uniqueRms.join(', ') + '):');
+      uniqueRms.forEach(function (rmName) {
+        const chain = hierarchyData.byRmNameLower[String(rmName || '').trim().toLowerCase()];
+        if (!chain) { Logger.log('    ' + rmName + ': NOT FOUND in RM_Hierarchy at all — this RM\'s row is missing there entirely.'); return; }
+        if (chain.excluded) { Logger.log('    ' + rmName + ': found in RM_Hierarchy but marked Excluded.'); return; }
+        const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
+        if (!primaryName) { Logger.log('    ' + rmName + ': found in RM_Hierarchy, but has no TL/TM/RH/CH on record at all.'); return; }
+        const primaryEmail = hierarchyData.emailByManagerNameLower[primaryName.toLowerCase()];
+        if (!primaryEmail) { Logger.log('    ' + rmName + ': reports to "' + primaryName + '", but that manager has NO EMAIL in Manager_Directory yet — fill it in there to fix this.'); return; }
+        Logger.log('    ' + rmName + ': resolves fine (-> ' + primaryName + ' <' + primaryEmail + '>) — should NOT be the reason this row is unresolved; re-check backfillTodaysOvernightLogRecipientsNow\'s output for this region.');
+      });
+      const legacy = loadRegionRecipients_(ss)[region];
+      Logger.log('  Region_Recipients fallback for ' + region + ': ' + (legacy ? ('to="' + legacy.to + '" cc="' + legacy.cc + '"') : 'not configured (blank)'));
+    }
   });
   Logger.log('=== end debugFollowupStatusNow ===');
 }
