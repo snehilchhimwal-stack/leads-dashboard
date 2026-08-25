@@ -419,8 +419,13 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   const isCreatedToday = istDayKeyGs_(created) === istDayKeyGs_(now);
 
   // Inactive-RM Lead Added — deliberately no grace period (the problem is
-  // the assignment, not RM speed).
-  const rmActiveRaw = String(getVal_(row, colIndex, 'rm_is_active') || '').trim().toLowerCase();
+  // the assignment, not RM speed). getVal_ already returns real `false`
+  // for a checkbox-typed cell (only '' on a truly null/undefined value —
+  // see its own comment), so `|| ''` here would silently swallow that
+  // `false` into an empty string that reads as "unknown" below instead
+  // of "inactive" — same fix as dashboard.html's enrichLead().
+  const rmActiveRawVal = getVal_(row, colIndex, 'rm_is_active');
+  const rmActiveRaw = String(rmActiveRawVal != null ? rmActiveRawVal : '').trim().toLowerCase();
   const rmIsInactive = ['false', 'no', 'inactive', '0', 'n'].indexOf(rmActiveRaw) !== -1;
   flags.inactiveRmNewLead = isCreatedToday && rmIsInactive;
 

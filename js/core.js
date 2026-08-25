@@ -664,7 +664,14 @@ async function fetchAndRender(){
           lead_id: getVal(c, 'lead_id'),
           RM: getVal(c, 'RM') || 'Unassigned',
           TL: getVal(c, 'TL') || '',
-          rm_is_active: getVal(c, 'rm_is_active') || '',
+          // NOT `|| ''` — rm_is_active is often a real Sheets checkbox
+          // column, which gviz reports as a native JS boolean. `false || ''`
+          // would silently collapse a genuinely inactive RM's `false` into
+          // an empty string, which is exactly the value rmIsInactive below
+          // (built from this field) treats as "unknown/active". getVal
+          // already returns '' on its own for a truly missing/blank cell
+          // (see gvizCellRaw), so no fallback is needed here.
+          rm_is_active: getVal(c, 'rm_is_active'),
           project: getVal(c, 'project') || '',
           region: getVal(c, 'region') || 'Unassigned',
           project_region: getVal(c, 'project_region') || '',
@@ -1481,7 +1488,12 @@ function enrichLead(l){
   // only that a fresh one just was. Deliberately no grace period: the
   // problem isn't the RM being slow, it's that the assignment itself was
   // wrong and nobody can act on it until it's reassigned.
-  const rmActiveRaw = String(l.rm_is_active || '').trim().toLowerCase();
+  // `l.rm_is_active != null ? ... : ''`, NOT `l.rm_is_active || ''` — the
+  // cell is often a real checkbox (boolean `false` for an inactive RM),
+  // and `false || ''` would silently turn that into an empty string,
+  // which then reads as "unknown" below instead of "inactive" — the
+  // check would never fire for a single checkbox-driven row.
+  const rmActiveRaw = String(l.rm_is_active != null ? l.rm_is_active : '').trim().toLowerCase();
   const rmIsInactive = ['false', 'no', 'inactive', '0', 'n'].includes(rmActiveRaw);
   const inactiveRmNewLead = isOpenLead && isCreatedToday && rmIsInactive;
 
