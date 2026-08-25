@@ -1746,19 +1746,14 @@ function buildRegionWiseReports(combineAll, followupLookup){
   });
 
   // Stalled Leads: every lead currently stalled per
-  // currentStalledRowsByRegion — the SAME Compare from/to picker selection
-  // as the on-screen card and Status Changes (Operations tab), read at
-  // whatever it's set to right now — rides along as this email's first,
-  // most important section every time, not just on repeat. Keyed by
-  // mainRegion (groupItemsByReportRegion already resolves it that way), so
-  // it lines up directly with `key` below without a second resolution pass.
+  // currentStalledRowsByRegion — computeStalledLeads' own always-current
+  // check (no comment in 6h, or never-commented with attempts unchanged
+  // vs ~6h ago, for anything assigned 2+ days ago), read fresh every time
+  // this builds — rides along as this email's first, most important
+  // section every time, not just on repeat. Keyed by mainRegion
+  // (groupItemsByReportRegion already resolves it that way), so it lines
+  // up directly with `key` below without a second resolution pass.
   const stalledByRegion = currentStalledRowsByRegion();
-  // Cheap to compute directly rather than infer from stalledByRegion being
-  // empty — an empty stalledByRegion could also just mean zero leads are
-  // currently stalled for the picked pair, not that no pair is picked at
-  // all. Used below to explain an absent Stalled section instead of
-  // silently omitting it with no reason given.
-  const stalledWindowAvailable = !!getPickedMovementWindow();
 
   _lastReportUndatable = undatableCount;
   _lastReportOutOfScope = outOfScope;
@@ -1895,10 +1890,10 @@ ${Object.values(stuckByRM).map(group =>
 
 Total : ${stuckTotalLabel}` : '';
 
-    // Stalled Leads: placed FIRST, ahead of even the main tally —
-    // zero movement between the two picked Movement_Log snapshots on an
-    // already-flagged issue is the most important thing in this email (see
-    // stalledItems above).
+    // Stalled Leads: placed FIRST, ahead of even the main tally — no
+    // comment in 6+ hours (or, for a never-commented lead, no new call
+    // attempt in 6+ hours), on a lead assigned 2+ days ago, is the most
+    // important thing in this email (see stalledItems above).
     const stalledByRM = groupBy(stalledItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
     const stalledCloneCounts = countUniqueAndCloned(stalledItems);
     const stalledTotalLabel = stalledCloneCounts.cloned > 0
@@ -1906,10 +1901,10 @@ Total : ${stuckTotalLabel}` : '';
       : String(stalledCloneCounts.unique);
     const stalledBlock = stalledItems.length ? `${DIVIDER}
 STALLED LEADS (MOST IMPORTANT)
-The following leads have shown zero movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard (Operations → Stalled Leads), while already flagged for an issue. Review and escalate these first.
+The following leads were assigned 2+ days ago and have had no comment logged in the last 6+ hours (or, for a lead with no comment history at all, no new call attempt in the last 6+ hours). Review and escalate these first.
 ${SUBDIVIDER}
 ${Object.values(stalledByRM).map(group =>
-  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.issue}  |  unchanged since ${istStamp(r.fromAt)}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.issue}  |  since ${istStamp(r.stalledSinceAt)}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
 ).join('\n\n')}
 
 Total : ${stalledTotalLabel}
@@ -2053,20 +2048,12 @@ ${EMAIL_SIGNATURE}`;
     if (stalledItems.length) {
       sections.unshift({
         heading: 'Stalled Leads',
-        subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — zero movement between the two picked Movement_Log snapshots on an already-flagged issue. Review and escalate first.`,
-        action: 'These leads have shown no movement — no stage change, call attempt, or new comment in any of the four comment columns — between the two Movement_Log snapshots picked in the dashboard, while already flagged for an issue. Personally follow up and escalate immediately.',
-        columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Stalled Since', 'Suggested Follow-up'],
-        rows: stalledItems.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.fromAt), followupTextFor(r)]),
+        subheading: `${stalledTotalLabel} lead${stalledCloneCounts.unique === 1 ? '' : 's'} — assigned 2+ days ago, no comment (or, if never commented, no new call attempt) in 6+ hours. Review and escalate first.`,
+        action: 'These leads were assigned 2 or more days ago and have gone quiet for 6+ hours — no comment logged, or (for a lead with no comment history at all) no new call attempt. Personally follow up and escalate immediately.',
+        columns: ['Lead ID', 'Region', 'RM', 'Issue', 'Since', 'Suggested Follow-up'],
+        rows: stalledItems.map(r => [idsFor(r), r.region, rmsFor(r), r.issue, istStamp(r.stalledSinceAt), followupTextFor(r)]),
         accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       });
-    }
-
-    // An absent Stalled section should say why when it's a setup gap (not
-    // enough Movement_Log history yet) rather than reading identically to
-    // "nothing is currently stalled" (a good outcome, needs no explanation).
-    let stalledDiagnostic = '';
-    if (!stalledItems.length && !stalledWindowAvailable) {
-      stalledDiagnostic = ' Stalled Leads needs the Compare from/to picker above Stalled Leads (Operations tab) to have two Movement_Log snapshots selected before it can compare two points in time.';
     }
 
     const html = renderReportEmailHTML({
@@ -2084,7 +2071,7 @@ ${EMAIL_SIGNATURE}`;
       footerNote: `Leads assigned less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
-        + (stalledItems.length ? ' Stalled Leads is a Movement_Log-derived callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : stalledDiagnostic)
+        + (stalledItems.length ? ' Stalled Leads is a quiet-for-6+-hours callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : '')
         + (warmCloseItems.length ? ' Possible Premature Closes is a discrepancy flag on CLOSED leads, not a compliance count — it does not overlap with or add to the open-issue Total above.' : '')
         + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0 || warmCloseCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });

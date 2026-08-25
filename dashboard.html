@@ -931,12 +931,12 @@
           <select id="movementToDateSelect" class="stale-select"></select>
           <select id="movementToTimeSelect" class="stale-select"></select>
         </label>
-        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Stalled Leads and Status Changes below, and by the region email's own Stalled Leads section when you click Generate — all three compare this exact same pair of Movement_Log snapshots.</span>
+        <span style="font-size:11.5px; color:var(--text-faint);">Shared by Status Changes below, which compares this exact pair of Movement_Log snapshots — Stalled Leads above no longer depends on this picker (see its own note).</span>
       </div>
 
       <section id="sec-stalled">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">Stalled Leads</div><div class="section-count" id="stalledCount"></div></div>
-        <div class="filter-summary">A lead flagged for one of the issues below that has shown ZERO movement (no stage change, no call attempts, no new comment in any of the four comment columns) between the two Movement_Log snapshots picked above — the same pair Status Changes below compares, and the same pair the region email's own Stalled Leads section will show if you click Generate right now. Captured every 6 hours by a small Apps Script independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Respects every filter above — Project/Region/TL/Source/Sub-source and the Assigned date range.</div>
+        <div class="filter-summary">A lead assigned 2+ days ago that's gone quiet: no comment logged in the last 6+ hours, or — for a lead with no comment history at all — no new call attempt in the last 6+ hours (checked against a Movement_Log snapshot from ~6 hours ago; needs <span class="mono">MovementTracker.gs</span> set up for that fallback case specifically, everything else works from the live sheet alone). Independent of the Compare from/to picker above — that one only drives Status Changes and Time to Remediate now. Segregated by the lead's own assigned date. Respects every filter above — Project/Region/TL/Source/Sub-source and the Assigned date range.</div>
         <div id="stalledBreakdown" style="margin-bottom:10px;"></div>
         <div id="stalledNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><div class="card-list" id="stalledList"></div></div>
@@ -944,7 +944,7 @@
 
       <section id="sec-statuschange">
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">Status Changes</div><div class="section-count" id="statusChangeCount"></div></div>
-        <div class="filter-summary">Compares the two Movement_Log snapshots picked above (shared with Stalled Leads) — captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled = still open, still flagged, nothing changed since "From" — the same check and the same leads as Stalled Leads above. Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
+        <div class="filter-summary">Compares the two Movement_Log snapshots picked above — captured by a small Apps Script that runs every 6 hours, independently of this dashboard — see <span class="mono">MovementTracker.gs</span>. Every lead open at "From" is sorted into exactly one outcome. Stalled here = still open, still flagged, nothing changed between the two picked snapshots specifically — its own check, separate from the Stalled Leads section above (which uses a different, always-current 6-hours-of-quiet definition, not tied to this picker). Became Opportunity+ and Closed are looked up in the CURRENT live sheet, since Movement_Log only ever snapshots open, under-Opportunity leads — a closure and an Opportunity+ conversion both look identical from inside the log alone (the lead just stops appearing either way). Respects every filter above.</div>
 
         <div id="movementNotice" class="truncation-notice" style="display:none;"></div>
 

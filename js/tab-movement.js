@@ -522,19 +522,75 @@ function computeMovementRows(fromAt, toAt){
   return sortedRows;
 }
 
-// Stalled Leads rows for the SAME picked Movement_Log window the
-// on-screen card and Status Changes use (see getPickedMovementWindow) —
-// same filters (applyMovementFilters) and same per-copy row shape
-// (computeMovementRows), just pre-grouped by region for the email builder
-// below instead of rendered as cards. The region email's Stalled Flagged
-// Leads section used to run its own separate, always-current rolling-48h
-// window regardless of what was on screen; it now shows exactly what the
-// picker above Stalled Leads is set to at the moment Generate is
-// clicked, so the email always matches what you were just looking at.
+// Stalled Leads — a lead counts as stalled once it's at least 2 days
+// since lead_assigned_at (too fresh otherwise — no time to judge it),
+// AND:
+//   - it has SOME comment history at all: no comment logged in the last
+//     6 hours, OR
+//   - it has NEVER had a single comment logged: call_attempts hasn't
+//     increased from what it was ~6 hours ago (via Movement_Log history)
+// The comment check always wins when the lead has any comment history —
+// the attempts check is only a fallback for a lead nobody has ever
+// commented on, not a second independent signal checked alongside it.
+// Deliberately decoupled from computeMovementRows/the picked Compare
+// from/to snapshot pair below — that pair still drives Status Changes'
+// own "Stalled" outcome and Time-to-Remediate, but this section no
+// longer needs two specific snapshots picked to have an opinion. Only
+// open, not-yet-Opportunity+ leads are considered (matches every other
+// issue check in this codebase — a closed or converted lead isn't
+// "stalled," it's just done). Built from issueLeads (already filtered,
+// already per-copy-expanded, already carrying siblingRMs/siblingComments
+// etc. — the same array every other Operations issue card reads).
+function computeStalledLeads(){
+  const histories = buildMovementHistories();
+  const SIX_HOURS_MS = 6 * 3600 * 1000;
+  const TWO_DAYS_MS = 2 * 24 * 3600 * 1000;
+  const now = _renderNow;
+
+  const rows = [];
+  issueLeads.forEach(l => {
+    if (!l.isOpenLead) return;
+    const assignedAt = parseDate(l.lead_assigned_at);
+    if (!assignedAt) return;
+    if (now - assignedAt < TWO_DAYS_MS) return; // too fresh to judge
+
+    let sinceAt, reason;
+    if (l.lastCommentAt) {
+      const hoursSince = (now - l.lastCommentAt) / 36e5;
+      if (hoursSince <= 6) return; // commented recently — not stalled
+      sinceAt = l.lastCommentAt;
+      reason = 'No Comment in 6h+';
+    } else {
+      // Never commented — fall back to attempts vs ~6h ago. Finds the
+      // latest retained snapshot at or before that cutoff; a lead too
+      // new for Movement_Log to have a snapshot that old yet (or with no
+      // history at all) can't be judged this way — skipped, not flagged.
+      const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+      const history = histories.get(key);
+      if (!history || !history.length) return;
+      const cutoffMs = now.getTime() - SIX_HOURS_MS;
+      let baseline = null;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].snapshot_at.getTime() <= cutoffMs) { baseline = history[i]; break; }
+      }
+      if (!baseline) return;
+      if ((Number(l.call_attempts) || 0) > (Number(baseline.call_attempts) || 0)) return; // attempts DID increase — not stalled
+      sinceAt = baseline.snapshot_at;
+      reason = 'Attempts Unchanged (6h+)';
+    }
+
+    rows.push(Object.assign({}, l, { issue: reason, stalledSinceAt: sinceAt }));
+  });
+
+  return rows;
+}
+
+// Stalled Leads rows, pre-grouped by region for the email builder below
+// instead of rendered as cards — same computeStalledLeads every render
+// pass and the region email itself both read, so the two can never
+// disagree about which leads are stalled.
 function currentStalledRowsByRegion(){
-  const win = getPickedMovementWindow();
-  if (!win) return {};
-  const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
+  const rows = applyMovementFilters(computeStalledLeads());
   return groupItemsByReportRegion(rows);
 }
 
@@ -548,49 +604,27 @@ function getPickedMovementWindow(){
   return { fromAt, toAt };
 }
 
-// Operations tab's Stalled Leads section — reads the SAME picked
-// snapshot pair as Status Changes below (see getPickedMovementWindow), so
-// the two sections can never disagree about which leads are stalled.
-// Previously this was locked to a fixed always-current 48h window with no
-// picker of its own; now it follows whatever pair is selected, same as
-// Status Changes always has.
+// Operations tab's Stalled Leads section — reads computeStalledLeads
+// directly, independent of the Compare from/to picker (that pair still
+// drives Status Changes/Time-to-Remediate below, just not this section
+// anymore — see computeStalledLeads' own comment for why). The Movement_Log
+// dependency is now optional, not required: a never-commented lead needs
+// history to judge (the attempts-vs-6h-ago fallback), but a lead with any
+// comment history at all is judged from `leads`/`issueLeads` alone, so
+// this section still has something useful to say even before Movement_Log
+// has any real history yet.
 function renderStalledFlaggedLeadsOps(){
   const countEl = document.getElementById('stalledCount');
   const breakdownEl = document.getElementById('stalledBreakdown');
   const noticeEl = document.getElementById('stalledNotice');
   const listEl = document.getElementById('stalledList');
   if (!breakdownEl || !listEl) return;
-
-  if (movementFetchState !== 'ok') {
-    if (countEl) countEl.textContent = '';
-    breakdownEl.innerHTML = '';
-    listEl.innerHTML = '';
-    if (noticeEl) {
-      noticeEl.style.display = 'block';
-      noticeEl.innerHTML = movementFetchState === 'loading'
-        ? 'Loading movement history…'
-        : `<b>No Movement_Log data yet.</b> This section reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). It needs at least two captured checks before there's anything to compare — allow ~6-12 hours after setup.`;
-    }
-    return;
-  }
-
-  const win = getPickedMovementWindow();
-  if (!win) {
-    if (countEl) countEl.textContent = '';
-    breakdownEl.innerHTML = '';
-    listEl.innerHTML = '';
-    if (noticeEl) {
-      noticeEl.style.display = 'block';
-      noticeEl.innerHTML = 'Only one snapshot captured so far — need at least two before anything can be compared. Check back after the next scheduled run.';
-    }
-    return;
-  }
   if (noticeEl) noticeEl.style.display = 'none';
 
   // Same filter bar as the rest of Operations — Project/Region/TL/Source/
   // Sub-source plus the Assigned date range — matched against each row's
   // OWN recorded fields, same as before.
-  const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
+  const rows = applyMovementFilters(computeStalledLeads());
 
   // dedupeToFamilies computed once and reused for both the count and the
   // breakdown below — countUniqueAndCloned(rows) would silently redo the
@@ -605,24 +639,27 @@ function renderStalledFlaggedLeadsOps(){
     total: uniqueRows.length,
     totalLabel: `lead${uniqueRows.length === 1 ? '' : 's'} stalled`,
     subNote: cloneCounts.cloned > 0 ? `+ ${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
-    rangeText: `${istStamp(win.fromAt)} → ${istStamp(win.toAt)}`,
     counts: byIssue,
     colorFn: colorForIssue,
     numColor: 'var(--red)',
-    emptyText: 'No flagged lead is unchanged between the two picked snapshots right now.',
+    emptyText: 'No lead assigned 2+ days ago is currently stalled.',
   });
 
   if (!rows.length) { listEl.innerHTML = ''; return; }
 
-  listEl.innerHTML = truncationNotice(rows.length, MAX_CARDS) + rows.slice(0, MAX_CARDS).map(r => {
-    const hoursSpan = ((r.toAt - r.fromAt) / 36e5).toFixed(1);
+  // Segregated by lead_assigned_at's calendar day (renderCardsByDay) —
+  // same day-bucketed pattern used elsewhere, so a stalled lead assigned
+  // a week ago doesn't get lost among ones assigned yesterday.
+  const sortedRows = rows.slice().sort((a, b) => a.stalledSinceAt - b.stalledSinceAt);
+  listEl.innerHTML = truncationNotice(sortedRows.length, MAX_CARDS) + renderCardsByDay(sortedRows, (r) => {
+    const hoursSince = ((_renderNow - r.stalledSinceAt) / 36e5).toFixed(1);
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(r)}</div>
-      <div class="alert-age mono">unchanged ~${hoursSpan}h</div>
-      <div class="alert-meta"><span class="cell-hint">${esc(r.region)}<span class="cell-hint-panel">TL: ${esc(r.TL || 'Unassigned')}</span></span> · ${esc(r.project)} · ${esc(r.current_stage)} — <span class="chip red">${esc(r.issue)}</span></div>
+      <div class="alert-age mono">${esc(r.issue)} · ${hoursSince}h</div>
+      <div class="alert-meta"><span class="cell-hint">${esc(r.region)}<span class="cell-hint-panel">TL: ${esc(r.TL || 'Unassigned')}</span></span> · ${esc(r.project)} · ${esc(r.current_stage)} · assigned ${esc(istStamp(r.lead_assigned_at))}</div>
       <div class="alert-comment">${esc(suggestedFollowUp(r))}</div>
     </div>`;
-  }).join('');
+  });
 }
 
 // Between the same From/To pair as Status Changes: every lead open
