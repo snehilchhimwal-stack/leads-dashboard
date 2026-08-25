@@ -925,3 +925,87 @@ function setupOvernightEmailer() {
 // Run manually (function dropdown) to test without waiting for the trigger.
 function sendOvernightMorningEmailsNow() { sendOvernightMorningEmails(); }
 function sendOvernightFollowupEmailsNow() { sendOvernightFollowupEmails(); }
+
+// ONE-OFF DIAGNOSTIC — run this from the function dropdown, then View →
+// Logs (or Executions → click the run → View log) to see exactly why no
+// 1pm follow-up went out today. Read-only: sends nothing, writes nothing.
+// Walks the EXACT same logic sendOvernightFollowupEmails does, but logs
+// every decision point instead of silently skipping, so it's possible to
+// see which specific branch is producing "nothing to send" — no rows
+// logged for today at all, a row with no stored recipient, or a region
+// where every one of this morning's flagged leads has genuinely already
+// resolved.
+function debugFollowupStatus_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const now = new Date();
+  const todayKey = istDayKeyGs_(now);
+  Logger.log('=== debugFollowupStatus_ — today (IST) = ' + todayKey + ', run at ' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') + ' ===');
+
+  const logSheet = ensureOvernightLogSheet_(ss);
+  const lastRow = logSheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Overnight_Log has NO rows at all (lastRow=' + lastRow + '). The 10am morning email has never logged anything in this sheet — check whether sendOvernightMorningEmails has ever run (Executions log).'); return; }
+
+  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'debug: read Overnight_Log');
+  Logger.log('Overnight_Log has ' + logRows.length + ' total row(s). Last 3 rows\' date cells: ' +
+    logRows.slice(-3).map(function (r) { const c = r[0]; return c instanceof Date ? istDayKeyGs_(c) + ' (Date)' : JSON.stringify(c) + ' (' + typeof c + ')'; }).join(', '));
+
+  const todaysRuns = logRows.filter(function (r) {
+    const cell = r[0];
+    const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
+    return key === todayKey;
+  });
+  Logger.log('Rows matching TODAY (' + todayKey + '): ' + todaysRuns.length);
+  if (!todaysRuns.length) {
+    Logger.log('No row in Overnight_Log is dated today. Either sendOvernightMorningEmails has not run yet today, or it ran but every region had zero overnight leads (nothing to log). Check Executions for sendOvernightMorningEmails\' most recent run.');
+    return;
+  }
+
+  const { colIndex, dataRows } = readLeadsTab_(ss);
+  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'debug: buildTodayCallBaselineGs_');
+  const byLeadId = {};
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (leadId) byLeadId[leadId] = row;
+  });
+
+  todaysRuns.forEach(function (run, idx) {
+    const region = run[1];
+    const threadId = run[2];
+    const to = String(run[5] || '').trim();
+    const cc = String(run[6] || '').trim();
+    const subject = String(run[7] || '').trim();
+    Logger.log('--- Row ' + (idx + 1) + '/' + todaysRuns.length + ': region=' + region + ', thread=' + threadId + ' ---');
+    Logger.log('  stored to="' + to + '"  cc="' + cc + '"  subject="' + subject + '"' + (to ? '' : '  <<< EMPTY — this row predates the recipient-storing fix, or resolveRecipientEmailsForRegion_ returned nothing for it. sendOvernightFollowupEmails SKIPS this row entirely (see its own comment). Run backfillTodaysOvernightLogRecipients_ to fix today\'s rows, or wait for tomorrow\'s fresh 10am run.'));
+
+    let issueLog;
+    try { issueLog = JSON.parse(run[3] || '[]'); } catch (e) { issueLog = []; }
+    Logger.log('  issueLog: ' + issueLog.length + ' lead(s) flagged this morning: ' + issueLog.map(function (e) { return e.lead_id + '(' + e.issueLabel + ')'; }).join(', '));
+    if (!issueLog.length) { Logger.log('  Nothing flagged this morning for this region — correctly nothing to follow up on.'); return; }
+
+    let resolvedCount = 0, unresolvedCount = 0;
+    const detail = [];
+    issueLog.forEach(function (entry) {
+      const row = byLeadId[entry.lead_id];
+      if (!row) { resolvedCount++; detail.push(entry.lead_id + ': resolved (no longer in sheet)'); return; }
+      const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+      const closingReason = getVal_(row, colIndex, 'closing_reason');
+      const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+      if (isOppOrAbove_(stage)) { resolvedCount++; detail.push(entry.lead_id + ': resolved (reached Opportunity+, stage="' + stage + '")'); return; }
+      if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedCount++; detail.push(entry.lead_id + ': resolved (closed, stage="' + stage + '")'); return; }
+      const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
+      if (flags[entry.issueKey]) {
+        unresolvedCount++;
+        detail.push(entry.lead_id + ': STILL UNRESOLVED (' + entry.issueLabel + ', stage="' + stage + '")');
+      } else {
+        resolvedCount++;
+        detail.push(entry.lead_id + ': resolved (issue "' + entry.issueLabel + '" no longer flagged, stage="' + stage + '")');
+      }
+    });
+    detail.forEach(function (d) { Logger.log('    ' + d); });
+    Logger.log('  => resolved=' + resolvedCount + ', unresolved=' + unresolvedCount +
+      (unresolvedCount > 0 && to ? '  -> a follow-up SHOULD send for this region' :
+        unresolvedCount > 0 && !to ? '  -> would send, but SKIPPED because stored `to` is empty (see above)' :
+        '  -> correctly nothing to send (everything already resolved)'));
+  });
+  Logger.log('=== end debugFollowupStatus_ ===');
+}
