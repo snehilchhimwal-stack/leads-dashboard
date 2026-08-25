@@ -685,7 +685,19 @@ function sendOvernightFollowupEmails() {
   if (lastRow < 2) return;
 
   const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 5).getValues(); }, 'read Overnight_Log');
-  const todaysRuns = logRows.filter(function (r) { return String(r[0]) === todayKey; });
+  // Column A was written as a plain "yyyy-MM-dd" string (todayKey), but
+  // Sheets auto-detects strings that look like dates and silently stores
+  // the cell as a real Date instead — read back, that comes through here
+  // as a JS Date object, not the original string. A bare String(r[0]) on
+  // that Date never equals todayKey (real production symptom: this always
+  // returned zero rows, so the whole function silently no-op'd on every
+  // run). Normalize through istDayKeyGs_ for a Date cell, same as every
+  // other date-key comparison in this codebase (e.g. MovementTracker.gs).
+  const todaysRuns = logRows.filter(function (r) {
+    const cell = r[0];
+    const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
+    return key === todayKey;
+  });
   if (!todaysRuns.length) return;
 
   const { colIndex, dataRows } = readLeadsTab_(ss);
