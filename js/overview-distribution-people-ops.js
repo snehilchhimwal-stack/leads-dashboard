@@ -1149,12 +1149,12 @@ function renderDueTodayList(){
   };
 
   const under48Html = under48.length
-    ? truncationNotice(under48.length, MAX_CARDS) + under48.slice(0, MAX_CARDS).map((l, idx) => cardHtml(l, idx, 'today')).join('')
+    ? truncationNotice(under48.length, MAX_CARDS) + renderCardsByDay(under48, (l, idx) => cardHtml(l, idx, 'today'))
     : `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing in the 0–48h window is behind on today's calls</div>`;
 
   const over48Html = over48.length
     ? `<div class="stall-group-label" style="color:var(--text-faint); margin:18px 0 8px;">Past 48h, still under-called today — ${uniqueCloneLabel(countUniqueAndCloned(over48), 'lead')} (tracked separately from the 0–48h window above)</div>`
-      + truncationNotice(over48.length, MAX_CARDS) + over48.slice(0, MAX_CARDS).map((l, idx) => cardHtml(l, idx, 'todayold')).join('')
+      + truncationNotice(over48.length, MAX_CARDS) + renderCardsByDay(over48, (l, idx) => cardHtml(l, idx, 'todayold'))
     : '';
 
   el.innerHTML = under48Html + over48Html;
@@ -1180,7 +1180,7 @@ function renderApproachingDeadlineList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing approaching the 48h deadline right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'approaching', CONFIG.MIN_CALLS_AFTER_48H)).join('');
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'approaching', CONFIG.MIN_CALLS_AFTER_48H));
 }
 
 // Pure stage check: open past 48hrs, still not Opportunity+, regardless of
@@ -1212,7 +1212,7 @@ function renderStuckList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck past 48h right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H)).join('');
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H));
 }
 
 function renderInactiveRmList(){
@@ -1231,7 +1231,7 @@ function renderInactiveRmList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No new lead today landed on an inactive RM</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + group.slice(0, MAX_CARDS).map((l, idx) => {
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
     const logId = 'inactivermlog_' + idx;
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
@@ -1239,7 +1239,7 @@ function renderInactiveRmList(){
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">RM marked inactive</span> <span class="chip amber">${esc(l.TL || 'no TL')}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
-  }).join('');
+  });
 }
 
 function renderNotUpdatedList(){
