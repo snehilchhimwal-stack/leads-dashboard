@@ -269,7 +269,6 @@ function renderAll(){
   renderInactiveRmList();
   renderNotUpdatedList();
   renderNotConnectedList();
-  renderLoggingGapList();
   renderFollowupList();
   renderDueTodayList();
   renderApproachingDeadlineList();
@@ -313,7 +312,6 @@ const OFFTAB_COUNT_SECTIONS = [
   { id: 'sec-matrix',      countId: 'matrixCount' },
   { id: 'sec-notupdated',  countId: 'notUpdatedCount', severity: 'has-items' },
   { id: 'sec-notconn',     countId: 'notConnCount',    severity: 'urgent' },
-  { id: 'sec-logginggap',  countId: 'loggingGapCount', severity: 'has-items' },
   { id: 'sec-followup',    countId: 'followupCount',   severity: 'urgent' },
   { id: 'sec-duetoday',    countId: 'dueTodayCount',   severity: 'has-items' },
   { id: 'sec-approaching48h', countId: 'approachingDeadlineCount', severity: 'has-items' },
@@ -1410,32 +1408,6 @@ function renderFollowupList(){
     </div>`;
   });
 }
-
-function renderLoggingGapList(){
-  // issueLeads (per-copy), not leads (merged) — a customer's copies are
-  // judged on their OWN call_attempts vs comment-log gap; merging would
-  // credit one copy's calls against another copy's comment log instead.
-  const group = groupSiblingsTogether(
-    issueLeads.filter(l => l.loggingGapBreach),
-    (a,b) => (b.unloggedCallGap||0) - (a.unloggedCallGap||0)
-  );
-  document.getElementById('loggingGapCount').textContent = uniqueCloneLabel(countUniqueAndCloned(group), 'lead');
-  const el = document.getElementById('loggingGapList');
-  if (!group.length) {
-    el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">No open lead has a meaningful gap between calls made and calls logged</div>`;
-    return;
-  }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
-    const logId = 'logginggaplog_' + idx;
-    return `<div class="alert-card">
-      <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${l.call_attempts} calls, ${l.call_attempts - l.unloggedCallGap} logged</span> <span class="chip amber">gap of ${l.unloggedCallGap}</span></div>
-      ${logToggleMarkup(l, logId)}
-    </div>`;
-  });
-}
-
 
 document.getElementById('refreshBtn').addEventListener('click', () => fetchAndRender());
 document.getElementById('changeSourceBtn').addEventListener('click', () => {

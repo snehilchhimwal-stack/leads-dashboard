@@ -1588,11 +1588,12 @@ function selectedRegionLabel(fallbackRegions){
 // window can only report "Not Connected in 10 Minutes" — every other issue
 // is suppressed until the lead is old enough, so the grace rule can't be
 // bypassed just by a different issue ranking higher.
-// Only considers issues ISSUE_REPORT_META actually knows how to email —
-// ISSUE_PRIORITY has entries (e.g. loggingGapBreach) deliberately excluded
-// from the report engine, and iterating the full list here would let one
-// of those slip into the combined "all issues" report by way of a lead
-// that isn't ALSO flagged for something genuinely emailable.
+// Only considers issues ISSUE_REPORT_META actually knows how to email — not
+// every issue flag in the codebase is one of those (e.g. recordingCommentsNoCalls,
+// a pure data-integrity check with no report entry), and iterating the full
+// list here would let one of those slip into the combined "all issues"
+// report by way of a lead that isn't ALSO flagged for something genuinely
+// emailable.
 const _EMAILABLE_FLAG_KEYS = new Set(Object.values(ISSUE_REPORT_META).map(m => m.flag));
 
 function reportableIssueFor(l){
@@ -1674,9 +1675,8 @@ function buildRegionWiseReports(combineAll, followupLookup){
     if (!issue) {
       // reportableIssueFor only returns null for an undatable lead (no
       // parseable lead_assigned_at) or one whose only flag isn't one of the
-      // emailable rules (e.g. loggingGapBreach alone) — every emailable
-      // flag now reports immediately, grace-exempt or not (see
-      // reportableIssueFor's own comment).
+      // emailable rules — every emailable flag now reports immediately,
+      // grace-exempt or not (see reportableIssueFor's own comment).
       const anyFlag = ISSUE_PRIORITY.some(r => l[r.key]);
       if (anyFlag) undatableCount++;
       return;

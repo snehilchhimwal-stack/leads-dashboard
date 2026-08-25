@@ -11,14 +11,9 @@ const CONFIG = {
   MIN_CALLS_AFTER_48H: 10,
   LEAD_LIFECYCLE_HOURS: 48,
   FIRST_CONTACT_SLA_MINUTES: 10,
-  // SOP Rule 3 — CRM logging after each attempt. call_attempts minus dated
-  // comment-log entries is the shortfall between calls made and calls
-  // actually written up. A gap of 1-2 is normal logging lag; this is the
-  // point it becomes a real compliance problem worth surfacing.
-  MIN_UNLOGGED_CALL_GAP: 3,
   // Movement tab's Overnight Leads card — the after-hours window before
-  // the morning shift starts, anchored on the selected "To" snapshot's
-  // calendar day: 5 PM the day before through 9 AM that day.
+  // the morning shift starts, anchored on _renderNow's own calendar day:
+  // 5 PM the day before through 9 AM today.
   OVERNIGHT_START_HOUR: 17,  // 5 PM, previous day
   OVERNIGHT_END_HOUR: 9,     // 9 AM, "To" day
   // Working hours. The 10-minute first-contact clock only runs inside this
@@ -1479,17 +1474,6 @@ function enrichLead(l){
   const closedWithNoComment = excluded && !hasAnyNarrativeComment(l);
   const recordingNotWorking = recordingCommentsNoCalls;
 
-  // SOP Rule 3 — CRM logging after each attempt. The mirror image of
-  // Recording Not Working above: that check catches comments with no
-  // calls (the call counter isn't recording real work); this one catches
-  // the opposite — calls piling up with nothing written about any of
-  // them. Gated like the other day-to-day SLA checks (open, past grace,
-  // still inside the 48h lifecycle) rather than left ungated like
-  // Recording Not Working, since this is about ongoing compliance on a
-  // live lead, not a pure data-integrity symptom.
-  const unloggedCallGap = Math.max(0, (Number(l.call_attempts) || 0) - actionLogEntries.length);
-  const loggingGapBreach = isOpenLead && isUnder48h && pastGrace && unloggedCallGap >= CONFIG.MIN_UNLOGGED_CALL_GAP;
-
   // Inactive-RM Lead Added — a brand-new lead landed on an RM who's
   // currently marked inactive. rm_is_active is a CURRENT snapshot, not a
   // historical log, so "on that day" is only knowable for leads assigned
@@ -1507,7 +1491,6 @@ function enrichLead(l){
     agentCount, isMultiAgent,
     hoursSinceLastComment, lastCommentAt, isNotUpdated,
     followupOverdue, hasConnected, recordingNotWorking, recordingCommentsNoCalls, closedWithNoComment,
-    unloggedCallGap, loggingGapBreach,
     rmIsInactive, inactiveRmNewLead,
     attemptsToday, underCalledToday,
     collatedFrom: l.collatedFrom || 1, collatedRMs: l.collatedRMs || [], collatedLeadIds: l.collatedLeadIds || [],
@@ -2192,12 +2175,12 @@ function combinedCommentsText(l){
 // Broader existence check than combinedCommentsText above: true if ANY of
 // the four comment-ish columns (internal_status_comments, stage_comments,
 // last_comment, closing_reason) has real content. Used only for "has this
-// lead been commented on AT ALL" gates (Recording Not Working / Closed
-// with No Work Recorded) — deliberately NOT folded into combinedCommentsText/
-// actionLogEntries itself, since last_comment and closing_reason aren't
-// structured action-log entries (no per-attempt timestamp, no logger
-// name) and counting them as entries would understate a genuine
-// logging gap in checks that count entries, like unloggedCallGap.
+// lead been commented on AT ALL" gates (Recording Not Working) —
+// deliberately NOT folded into combinedCommentsText/actionLogEntries
+// itself, since last_comment and closing_reason aren't structured
+// action-log entries (no per-attempt timestamp, no logger name) and
+// counting them as entries would understate a genuine logging gap in
+// checks that count entries.
 function hasAnyCommentField(l){
   return !!(String(l.internal_status_comments || '').trim()
     || String(l.stage_comments || '').trim()
