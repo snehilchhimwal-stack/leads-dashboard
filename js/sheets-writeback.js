@@ -454,6 +454,184 @@ async function backfillSlaHistoryFromMovementLog(){
   console.log('Done.');
 }
 
+/* ============ DAILY COHORT HISTORY (day-wise Same-Day/48h Opp% per region) ============
+ * Tracking's "Daily Cohort by Region" section (tab-tracking.js) only ever
+ * computes live, for whichever single date is picked, from whatever's
+ * still inside Movement_Log's 7-day retention — there was no way to ask
+ * "is same-day/48h conversion actually improving over the last month"
+ * without this. Same pattern as SLA_History just above: an upsert-by-key
+ * write (persistDailyCohortHistory in tab-tracking.js calls this once per
+ * refresh), plus a manual backfill/clear pair for a one-time catch-up or
+ * reset. Unlike SLA_History (one row per exact snapshot instant), the key
+ * here is date+region — one row per region per calendar day, only ever
+ * written once that day's ENTIRE 48h window has elapsed, so a stored row
+ * is always a FINAL number, never a partial one a later run has to
+ * silently correct.
+ */
+const DAILY_COHORT_HISTORY_TAB_NAME = 'Daily_Cohort_History';
+const DAILY_COHORT_HISTORY_COLUMNS = [
+  'date_region', 'date', 'region', 'created', 'same_day_resolved', 'same_day_opp',
+  'window_complete', 'resolved_48h', 'opp_48h', 'closed_48h', 'updated_at', 'source',
+];
+
+// Same lazy-create-once pattern as ensureSendLogSheet_ above.
+let _dailyCohortHistorySheetEnsured = false;
+async function ensureDailyCohortHistorySheet_(){
+  if (_dailyCohortHistorySheetEnsured) return;
+  const existingId = await getSheetIdByTabName(DAILY_COHORT_HISTORY_TAB_NAME);
+  if (existingId == null) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: DAILY_COHORT_HISTORY_TAB_NAME } } }] }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+    }
+    await appendSheetRows(DAILY_COHORT_HISTORY_TAB_NAME, [DAILY_COHORT_HISTORY_COLUMNS], 'RAW');
+  }
+  _dailyCohortHistorySheetEnsured = true;
+}
+
+// Upserts one row per {date, region, source, stats} entry, keyed by
+// "date|region" (column A) — stats carries computeDailyCohortByRegion's
+// own {created, sameDayResolved, sameDayOpp, windowComplete, resolved48h,
+// opp48h, closed48h} shape directly, stored as raw counts (not
+// pre-computed percentages) so this stays re-sliceable later, same
+// convention as SLA_History's byCheck counts above. RAW, not
+// USER_ENTERED, same reasoning as upsertSlaHistoryRows — a "2026-08-19"
+// TEXT date-key must never get auto-converted to a bare date serial.
+async function upsertDailyCohortHistoryRows(entries){
+  if (!entries.length) return;
+  if (!_currentSheetId) return;
+  await ensureDailyCohortHistorySheet_();
+
+  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${DAILY_COHORT_HISTORY_TAB_NAME}!A2:A`);
+  const rowNumberByKey = {};
+  existingValues.forEach((r, i) => {
+    const k = String((r && r[0]) || '').trim();
+    if (k) rowNumberByKey[k] = i + 2; // +2: row 1 is the header, existingValues is 0-indexed from row 2
+  });
+
+  const updatedAt = istDateTimeValue(new Date());
+  const updateData = [];
+  const appendRows = [];
+
+  entries.forEach(({ date, region, source, stats }) => {
+    const key = `${date}|${region}`;
+    const rowValues = [
+      key, date, region, stats.created, stats.sameDayResolved, stats.sameDayOpp,
+      stats.windowComplete, stats.resolved48h, stats.opp48h, stats.closed48h, updatedAt, source,
+    ];
+    const rowNum = rowNumberByKey[key];
+    if (rowNum) {
+      updateData.push({ range: `${DAILY_COHORT_HISTORY_TAB_NAME}!A${rowNum}:L${rowNum}`, values: [rowValues] });
+    } else {
+      appendRows.push(rowValues);
+    }
+  });
+
+  if (updateData.length) await sheetsApiValuesBatchUpdate(updateData, 'RAW');
+  if (appendRows.length) await appendSheetRows(DAILY_COHORT_HISTORY_TAB_NAME, appendRows, 'RAW');
+  if (updateData.length || appendRows.length) {
+    try { await sortDailyCohortHistorySheet_(); } catch (e) { /* rows are still correct, just not reordered this time */ }
+  }
+}
+
+// Sorts Daily_Cohort_History's data rows ascending by date then region
+// (columns B, C) — called once at the end of every upsert batch, same
+// pattern as sortSlaHistorySheet_ above.
+async function sortDailyCohortHistorySheet_(){
+  const sheetId = await getSheetIdByTabName(DAILY_COHORT_HISTORY_TAB_NAME);
+  if (sheetId == null) return;
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{
+        sortRange: {
+          range: { sheetId, startRowIndex: 1, startColumnIndex: 0 },
+          sortSpecs: [{ dimensionIndex: 1, sortOrder: 'ASCENDING' }, { dimensionIndex: 2, sortOrder: 'ASCENDING' }], // B date, then C region
+        },
+      }],
+    }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+  }
+}
+
+// Wired to #backfillDailyCohortHistoryBtn on the Tracking tab (see
+// tab-tracking.js) — still directly console-callable too (`await
+// backfillDailyCohortHistoryFromMovementLog()`). Reconstructs one row per
+// fully-resolved day×region currently reachable from the Movement_Log
+// history already loaded in this tab (up to 7 days back) — same
+// eligibility rule as persistDailyCohortHistory (a day only counts once
+// its whole 48h window has elapsed), and same ignoreFilters:true reasoning
+// (a backfill must capture the true picture, not whoever's currently
+// filtered view). Safe to re-run — upserts by date+region, never
+// duplicates a row. Returns the number of day×region rows written.
+async function backfillDailyCohortHistoryFromMovementLog(){
+  if (!movementSnapshots.length) { console.warn('No Movement_Log data loaded — refresh first.'); return 0; }
+
+  const byLead = buildMovementHistories();
+  const dayKeys = new Set();
+  byLead.forEach(history => {
+    if (!history.length) return;
+    const created = parseDate(history[0].lead_assigned_at);
+    if (created) dayKeys.add(istDateKey(created));
+  });
+
+  const nowMs = Date.now();
+  const eligibleDates = Array.from(dayKeys).filter(dateKey => {
+    const dayEnd = parseDate(dateKey + ' 23:59:59');
+    return dayEnd && (dayEnd.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000) <= nowMs;
+  }).sort();
+
+  const entries = [];
+  eligibleDates.forEach(dateKey => {
+    const result = computeDailyCohortByRegion(dateKey, { ignoreFilters: true });
+    if (!result || !result.totalCreated) return;
+    result.byRegion.forEach(stats => {
+      if (!stats.created) return;
+      entries.push({ date: dateKey, region: stats.region, source: 'Backfill', stats });
+    });
+  });
+
+  console.log(`Backfilling ${entries.length} day×region row(s) into ${DAILY_COHORT_HISTORY_TAB_NAME}…`);
+  await upsertDailyCohortHistoryRows(entries);
+  console.log('Done.');
+  return entries.length;
+}
+
+// Wired to #clearDailyCohortHistoryBtn on the Tracking tab — still
+// directly console-callable too (`await clearDailyCohortHistory()`).
+// Errors propagate to the caller, same reasoning as clearSlaHistory.
+async function clearDailyCohortHistory(){
+  if (!_currentSheetId) return;
+  const sheetId = await getSheetIdByTabName(DAILY_COHORT_HISTORY_TAB_NAME);
+  if (sheetId == null) return;
+  const existingValues = await sheetsApiValuesGet(_currentSheetId, `${DAILY_COHORT_HISTORY_TAB_NAME}!A2:A`);
+  if (!existingValues.length) return;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + existingValues.length } } }],
+    }),
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+  }
+}
+
 // Resolves after `ms`, but wakes up early (checking every 500ms) if
 // waitForAllFollowups' Cancel button flips this wait's entry in
 // _followupWaitCancelled — so cancelling takes effect within half a second

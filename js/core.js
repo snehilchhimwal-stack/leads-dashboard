@@ -1095,6 +1095,11 @@ async function fetchAndRender(){
       // The sign-in gate already holds a live Sheets write token by the
       // time any data has loaded, so this can fire straight away.
       if (autoSnapshotEnabled()) browserSnapshotOpenLeads();
+      // Best-effort, same reasoning as snapshotSlaHistory above — persists
+      // Daily Cohort by Region into Daily_Cohort_History so it survives
+      // Movement_Log's 7-day retention (see persistDailyCohortHistory's
+      // own comment in tab-tracking.js).
+      persistDailyCohortHistory().catch(() => {});
     });
 
     document.getElementById('configPanel').style.display = 'none';

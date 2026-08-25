@@ -503,6 +503,52 @@ if (clearSlaHistoryBtn) clearSlaHistoryBtn.addEventListener('click', async () =>
   }
 });
 
+// Daily Cohort History section (below) — same pattern as SLA History
+// Maintenance above: persistDailyCohortHistory already auto-captures on
+// every refresh, these two buttons are just for a one-time catch-up
+// (whatever's currently loaded from Movement_Log) or a full reset.
+function setDailyCohortHistoryAdminStatus(text, color){
+  const el = document.getElementById('dailyCohortHistoryAdminStatus');
+  if (el) { el.textContent = text; el.style.color = color || 'var(--text-faint)'; }
+}
+const backfillDailyCohortHistoryBtn = document.getElementById('backfillDailyCohortHistoryBtn');
+if (backfillDailyCohortHistoryBtn) backfillDailyCohortHistoryBtn.addEventListener('click', async () => {
+  if (!movementSnapshots.length) {
+    setDailyCohortHistoryAdminStatus('No Movement_Log data loaded yet — refresh first.', 'var(--amber)');
+    return;
+  }
+  const originalLabel = backfillDailyCohortHistoryBtn.textContent;
+  backfillDailyCohortHistoryBtn.disabled = true;
+  backfillDailyCohortHistoryBtn.textContent = 'Backfilling…';
+  setDailyCohortHistoryAdminStatus(`Backfilling from ${movementSnapshots.length.toLocaleString()} loaded Movement_Log rows…`, 'var(--text-faint)');
+  try {
+    const n = await backfillDailyCohortHistoryFromMovementLog();
+    setDailyCohortHistoryAdminStatus(`Backfill complete — ${n} fully-resolved day×region row(s) written.`, 'var(--green)');
+  } catch (err) {
+    setDailyCohortHistoryAdminStatus(`Backfill failed: ${err.message}`, 'var(--red)');
+  } finally {
+    backfillDailyCohortHistoryBtn.disabled = false;
+    backfillDailyCohortHistoryBtn.textContent = originalLabel;
+  }
+});
+const clearDailyCohortHistoryBtn = document.getElementById('clearDailyCohortHistoryBtn');
+if (clearDailyCohortHistoryBtn) clearDailyCohortHistoryBtn.addEventListener('click', async () => {
+  if (!confirm('Permanently delete every row in Daily_Cohort_History? This cannot be undone.')) return;
+  const originalLabel = clearDailyCohortHistoryBtn.textContent;
+  clearDailyCohortHistoryBtn.disabled = true;
+  clearDailyCohortHistoryBtn.textContent = 'Clearing…';
+  setDailyCohortHistoryAdminStatus('Clearing Daily_Cohort_History…', 'var(--text-faint)');
+  try {
+    await clearDailyCohortHistory();
+    setDailyCohortHistoryAdminStatus('Daily_Cohort_History cleared.', 'var(--green)');
+  } catch (err) {
+    setDailyCohortHistoryAdminStatus(`Clear failed: ${err.message}`, 'var(--red)');
+  } finally {
+    clearDailyCohortHistoryBtn.disabled = false;
+    clearDailyCohortHistoryBtn.textContent = originalLabel;
+  }
+});
+
 // Defaults to the second-most-recent run / most-recent run — a pair that
 // could be weeks apart (e.g. "when I sent Tuesday's email" vs "now"), so
 // this tab keeps its own From/To picker rather than sharing one meant for
@@ -801,9 +847,16 @@ function render48hCohort(){
 // outcome differs. Same evidence method as computeZeroTo48hCohort
 // (evidenceAtDeadline): nearest retained Movement_Log snapshot at-or-before
 // the deadline, live sheet as fallback, unresolved leads excluded rather
-// than guessed. Returns null when no date is picked.
-function computeDailyCohortByRegion(dateKey){
+// than guessed. Returns null when no date is picked. `opts.ignoreFilters`
+// skips the Project/Region/TL/Source/Sub-source check below entirely —
+// used by persistDailyCohortHistory, which must always persist the TRUE,
+// unfiltered picture rather than whatever filter state the person who
+// happens to have the dashboard open right now has selected; the on-screen
+// table (renderDailyCohortByRegion) never passes this, so it keeps
+// reflecting the current filters exactly as before.
+function computeDailyCohortByRegion(dateKey, opts){
   if (!dateKey) return null;
+  const ignoreFilters = !!(opts && opts.ignoreFilters);
   const dayStart = parseDate(dateKey + ' 00:00:00');
   const dayEnd = parseDate(dateKey + ' 23:59:59');
   if (!dayStart || !dayEnd) return null;
@@ -830,7 +883,7 @@ function computeDailyCohortByRegion(dateKey){
   let totalCreated = 0;
   byLead.forEach((history, key) => {
     if (!history.length) return;
-    if (!passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — region here narrows WHICH regions appear at all, same as every other Movement view
+    if (!ignoreFilters && !passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — region here narrows WHICH regions appear at all, same as every other Movement view
     const created = parseDate(history[0].lead_assigned_at);
     if (!created) return;
     if (created < dayStart || created > dayEnd) return; // not created on this day
@@ -857,6 +910,61 @@ function computeDailyCohortByRegion(dateKey){
   });
 
   return { dateKey, totalCreated, byRegion };
+}
+
+// Auto-persists Daily Cohort by Region into the Daily_Cohort_History sheet
+// tab so trend-over-time survives Movement_Log's 7-day retention — without
+// this, "are we improving on same-day/48h conversion?" can only ever be
+// answered for whatever's still in that 7-day window. Called once per
+// dashboard refresh (see fetchMovementLog's .then() in core.js), same
+// "opportunistic capture from whoever has the dashboard open" reasoning as
+// snapshotSlaHistory there. Always computes with ignoreFilters — the
+// persisted record must reflect the TRUE picture regardless of whatever
+// Project/Region/TL/Source filters the person currently looking at the
+// dashboard happens to have selected; the on-screen table is unaffected,
+// it still reads the live filters as before.
+//
+// Only persists a date once its ENTIRE 48h window has elapsed (every lead
+// assigned that day has had its own 48h mark pass), so a stored row is
+// always final — same-day and 48h numbers land together, once, rather
+// than needing a silent follow-up correction once more data comes in.
+// Re-checked and re-upserted on every refresh (cheap: a handful of
+// eligible recent days × regions, all from data already loaded) so a run
+// missed one day still gets caught on the next, as long as it's re-run
+// before that day ages out of Movement_Log's retention — a date that goes
+// unresolved AND unretained before any refresh ever covers it is lost,
+// same limitation SLA_History already has for gaps longer than that.
+async function persistDailyCohortHistory(){
+  if (!movementSnapshots.length) return;
+  if (!_currentSheetId) return;
+
+  const byLead = buildMovementHistories();
+  const dayKeys = new Set();
+  byLead.forEach(history => {
+    if (!history.length) return;
+    const created = parseDate(history[0].lead_assigned_at);
+    if (created) dayKeys.add(istDateKey(created));
+  });
+
+  const nowMs = Date.now();
+  const eligibleDates = Array.from(dayKeys).filter(dateKey => {
+    const dayEnd = parseDate(dateKey + ' 23:59:59');
+    return dayEnd && (dayEnd.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000) <= nowMs;
+  });
+  if (!eligibleDates.length) return;
+
+  const entries = [];
+  eligibleDates.forEach(dateKey => {
+    const result = computeDailyCohortByRegion(dateKey, { ignoreFilters: true });
+    if (!result || !result.totalCreated) return;
+    result.byRegion.forEach(stats => {
+      if (!stats.created) return;
+      entries.push({ date: dateKey, region: stats.region, source: 'Dashboard', stats });
+    });
+  });
+  if (!entries.length) return;
+
+  try { await upsertDailyCohortHistoryRows(entries); } catch (e) { /* this refresh's capture just won't be recorded */ }
 }
 
 // Renders computeDailyCohortByRegion as a region-wise table — one row per
