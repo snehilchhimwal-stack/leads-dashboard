@@ -65,7 +65,7 @@ function renderMorningBrief(){
     cards.push(briefCard({
       rank: 1, numHtml: in24h.toLocaleString(), label: 'Leads entering, last 24h',
       status, statusLabel, detailHtml,
-      why: 'Baseline for everything else today — every other card below is a fraction or a rate of leads created around this window.',
+      why: 'Baseline for everything else today — every other card below is a fraction or a rate of leads assigned around this window.',
       action: 'If the swing is ±30% or more, check Overview → source breakdown for a channel spike or drop before assuming anything downstream changed.',
     }));
   }
@@ -117,7 +117,7 @@ function renderMorningBrief(){
       label: 'Median time to first action',
       status: medianContact == null ? null : (medianContact > CONFIG.FIRST_CONTACT_SLA_MINUTES ? 'bad' : 'ok'),
       statusLabel: medianContact == null ? '' : (medianContact > CONFIG.FIRST_CONTACT_SLA_MINUTES ? `> ${CONFIG.FIRST_CONTACT_SLA_MINUTES}min SLA` : 'within SLA'),
-      detailHtml: `<div style="font-size:11.5px; color:var(--text-faint); margin-top:4px;">n = ${contactN.toLocaleString()} connected lead${contactN === 1 ? '' : 's'} (open or closed) · business-hours minutes from lead_created_at to first connect</div>`,
+      detailHtml: `<div style="font-size:11.5px; color:var(--text-faint); margin-top:4px;">n = ${contactN.toLocaleString()} connected lead${contactN === 1 ? '' : 's'} (open or closed) · business-hours minutes from lead_assigned_at to first connect</div>`,
       why: 'The fastest-actionable lever in the whole 0–48h window.',
       action: `Above ${CONFIG.FIRST_CONTACT_SLA_MINUTES} minutes, check People → RM Performance's Median 1st Contact column for which RM/region is driving it.`,
     }));

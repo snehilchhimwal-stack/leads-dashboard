@@ -51,7 +51,7 @@ const SLA_HISTORY_TAB_NAME = 'SLA_History';
 // (see ensureMovementLogSheet_'s self-healing header check in the .gs file).
 const MOVEMENT_LOG_COLUMNS = [
   'snapshot_at', 'snapshot_label', 'lead_id', 'client_id', 'RM', 'TL', 'project', 'region', 'client',
-  'lead_created_at', 'group_source', 'source_bucket', 'current_stage',
+  'lead_assigned_at', 'group_source', 'source_bucket', 'current_stage',
   'last_connect', 'last_connect_time', 'last_comment',
   'internal_status_comments', 'closing_reason',
   'call_attempts', 'call_count', 'duration',
@@ -63,7 +63,7 @@ const SNAPSHOT_FIELD_KEYS = MOVEMENT_LOG_COLUMNS.slice(2);
 
 let _currentSheetId = ''; // set once a fetch succeeds — needed by the Sheets-write path, which can fire from a button click outside fetchAndRender's own scope
 
-const MOVEMENT_LOG_DATE_KEYS = new Set(['snapshot_at', 'lead_created_at', 'last_connect_time']);
+const MOVEMENT_LOG_DATE_KEYS = new Set(['snapshot_at', 'lead_assigned_at', 'last_connect_time']);
 
 // customer-key -> call_attempts as of the LATEST Movement_Log snapshot
 // captured before the IST calendar day `asOf` falls in — the baseline
@@ -134,7 +134,7 @@ async function fetchMovementLog(sheetId){
       .filter(c => String(getRaw(c, 'lead_id')).trim() !== '')
       .map(c => {
         const snapAt = getDate(c, 'snapshot_at');
-        const createdDate = getDate(c, 'lead_created_at');
+        const createdDate = getDate(c, 'lead_assigned_at');
         const connectDate = getDate(c, 'last_connect_time');
         return {
           snapshot_at: snapAt,
@@ -146,7 +146,7 @@ async function fetchMovementLog(sheetId){
           project: getRaw(c, 'project') || '',
           region: getRaw(c, 'region') || 'Unassigned',
           client: getRaw(c, 'client') || '',
-          lead_created_at: createdDate ? createdDate.toISOString() : getRaw(c, 'lead_created_at'),
+          lead_assigned_at: createdDate ? createdDate.toISOString() : getRaw(c, 'lead_assigned_at'),
           group_source: getRaw(c, 'group_source'),
           source_bucket: getRaw(c, 'source_bucket') || '',
           current_stage: getRaw(c, 'current_stage'),
@@ -239,7 +239,7 @@ function enrichSnapshotCached(rec){
   return enriched;
 }
 
-// Same six-dimension filter (Project/Region/TL/Source/Sub-source/Created
+// Same six-dimension filter (Project/Region/TL/Source/Sub-source/Assigned
 // date range) applyMovementFilters below checks, matched against a single
 // snapshot record — used by the whole-history walks (RM Stall Leaderboard,
 // Time to Remediate) that check one record at a time instead of filtering
@@ -264,7 +264,7 @@ function passesMovementFilters(rec){
   if (fromVal || toVal) {
     const fromDate = fromVal ? parseDate(fromVal + ' 00:00:00') : null;
     const toDate = toVal ? parseDate(toVal + ' 23:59:59') : null;
-    const created = parseDate(rec.lead_created_at);
+    const created = parseDate(rec.lead_assigned_at);
     if (!created) return false;
     if (fromDate && created < fromDate) return false;
     if (toDate && created > toDate) return false;
@@ -393,7 +393,7 @@ function getSelectedMovementSnapshot(timeSelectId){
 }
 
 // Same filter bar as the rest of the dashboard — Project/Region/TL/
-// Source/Sub-source plus the Created date range — matched against each
+// Source/Sub-source plus the Assigned date range — matched against each
 // row's OWN recorded fields (shared by the on-screen render and the CSV
 // export, so the two can never disagree).
 function applyMovementFilters(rawRows){
@@ -412,7 +412,7 @@ function applyMovementFilters(rawRows){
     if (srcSel.size && !srcSelLower.has(String(r.group_source).trim().toLowerCase())) return false;
     if (bucketSel.size && !bucketSel.has(String(r.source_bucket).trim())) return false;
     if (fromDate || toDate) {
-      const created = parseDate(r.lead_created_at);
+      const created = parseDate(r.lead_assigned_at);
       if (!created) return false;
       if (fromDate && created < fromDate) return false;
       if (toDate && created > toDate) return false;
@@ -478,7 +478,7 @@ function computeMovementRows(fromAt, toAt){
         current_stage: cur.toRec.current_stage,
         group_source: cur.toRec.group_source,
         source_bucket: cur.toRec.source_bucket,
-        lead_created_at: cur.toRec.lead_created_at,
+        lead_assigned_at: cur.toRec.lead_assigned_at,
         // Same "last touched" signal the Not Updated / Follow-up Overdue
         // sections use elsewhere (newest dated CRM comment) — not just the
         // snapshot check time — so this actually says when the lead itself
@@ -588,7 +588,7 @@ function renderStalledFlaggedLeadsOps(){
   if (noticeEl) noticeEl.style.display = 'none';
 
   // Same filter bar as the rest of Operations — Project/Region/TL/Source/
-  // Sub-source plus the Created date range — matched against each row's
+  // Sub-source plus the Assigned date range — matched against each row's
   // OWN recorded fields, same as before.
   const rows = applyMovementFilters(computeMovementRows(win.fromAt, win.toAt));
 
@@ -865,7 +865,7 @@ function computeTimeToRemediate(){
 
 // Approximates "time to Opportunity" for leads whose crossing INTO
 // Opportunity+ happened somewhere inside the retained snapshot history —
-// duration from lead_created_at (not from the first observed snapshot) to
+// duration from lead_assigned_at (not from the first observed snapshot) to
 // the FIRST retained snapshot where the lead already reads as Opportunity+.
 // Deliberately EXCLUDES a lead that was already Opportunity+ at its own
 // earliest retained snapshot: the true crossing moment for that lead isn't
@@ -892,7 +892,7 @@ function computeTimeToOpportunity(){
       }
       if (!crossing) return; // never reached Opportunity+ within retained history
 
-      const created = parseDate(first.lead_created_at);
+      const created = parseDate(first.lead_assigned_at);
       if (!created) return;
       const hours = (crossing.snapshot_at.getTime() - created.getTime()) / 36e5;
       if (hours < 0) return;
@@ -1226,7 +1226,7 @@ function renderStatusChanges(fromAt, toAt, stalledRows){
   });
 }
 
-// Every lead created in the after-hours window before the "To" snapshot's
+// Every lead assigned in the after-hours window before the "To" snapshot's
 // calendar day — pulled from the LIVE sheet (allParsedLeads), not
 // Movement_Log, since the log only ever tracks open/under-Opportunity
 // leads and a lead that already converted or closed overnight would
@@ -1243,9 +1243,9 @@ function computeOvernightCohort(toAt){
   );
 
   // Expand multi-copy customers into their own copies FIRST, then test
-  // each copy's OWN creation date against the window — a merged record's
-  // lead_created_at is the EARLIEST across its copies, so testing that
-  // first could pull in a copy that individually wasn't actually created
+  // each copy's OWN assignment date against the window — a merged record's
+  // lead_assigned_at is the EARLIEST across its copies, so testing that
+  // first could pull in a copy that individually wasn't actually assigned
   // overnight (or miss one that was, if a different copy's date won).
   const candidates = [];
   allParsedLeads.forEach(l => {
@@ -1254,7 +1254,7 @@ function computeOvernightCohort(toAt){
   });
 
   const inWindow = candidates.filter(l => {
-    const created = parseDate(l.lead_created_at);
+    const created = parseDate(l.lead_assigned_at);
     return created && created >= windowStart && created <= windowEnd;
   });
 
@@ -1278,7 +1278,7 @@ function overnightStatusLabel(l){
 const OVERNIGHT_NO_COMMENT_FALLBACK = 'Connect ASAP — no contact made yet.';
 
 // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
-// deliberately shows every overnight-created lead, closed or not, so
+// deliberately shows every overnight-assigned lead, closed or not, so
 // nothing about last night is hidden from view. The email is a
 // follow-up-action list, not a status report — a lead already at
 // Opportunity+ or already closed needs no further overnight follow-up, so
@@ -1328,9 +1328,9 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, follow
       `${DIVIDER}\nRM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${SUBDIVIDER}\n${group.map(leadLine).join('\n')}\n`
     ).join('\n');
 
-    // "Leads Created" has to mean distinct customers, not rows — a
+    // "Leads Assigned" has to mean distinct customers, not rows — a
     // customer collated from 2 RM copies otherwise reads as 2 leads
-    // created when it's really one. The detail rows below stay per-copy
+    // assigned when it's really one. The detail rows below stay per-copy
     // (each RM still needs their own row to follow up on), only the
     // headline/summary numbers dedupe.
     const uniqueRegionLeads = dedupeToFamilies(regionLeads);
@@ -1340,7 +1340,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, follow
       : String(cloneCounts.unique);
 
     const subject = `${region} Overnight Leads (${todayDateLabel()}) - ${sourceLabel} leads${subjectScopeSuffix()}`;
-    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} created overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nLeads Created : ${totalLabel}\n\n${EMAIL_SIGNATURE}`;
+    const body = `Hi,\n\nPlease find below the ${sourceLabel} leads in ${region} assigned overnight (${rangeLabel}).\n\n${blocks}\n${DIVIDER}\n\nLeads Assigned : ${totalLabel}\n\n${EMAIL_SIGNATURE}`;
 
     const counts = {};
     uniqueRegionLeads.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
@@ -1353,7 +1353,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, follow
       action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact."
         + (cloneCounts.cloned > 0 ? ` ${cloneCounts.cloned} of the rows below are another RM's copy of a customer already counted — real lead volume is ${cloneCounts.unique}, not ${cloneCounts.total}.` : ''),
       kpis: [
-        { value: cloneCounts.unique, label: 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
+        { value: cloneCounts.unique, label: 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
         { value: Object.keys(byRM).length, label: Object.keys(byRM).length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
         { value: Object.keys(counts).length, label: Object.keys(counts).length === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
       ],
@@ -1397,7 +1397,7 @@ function renderOvernightCohort(toAt){
   const { windowStart, windowEnd, leads: cohort } = result;
   // cohort is expanded per RM copy (see computeOvernightCohort) so each
   // copy still gets its own row below — a customer collated from 3 RM
-  // copies otherwise reads as "3 leads created" when it's really one.
+  // copies otherwise reads as "3 leads assigned" when it's really one.
   // The headline count and breakdown both dedupe back to real customers;
   // the detail list further down stays the full per-copy cohort.
   const uniqueCohort = dedupeToFamilies(cohort);
@@ -1410,18 +1410,18 @@ function renderOvernightCohort(toAt){
   uniqueCohort.forEach(l => { const k = overnightStatusLabel(l); counts[k] = (counts[k] || 0) + 1; });
   renderBreakdownCard(breakdownEl, {
     total: uniqueCohort.length,
-    totalLabel: `lead${uniqueCohort.length === 1 ? '' : 's'} created overnight`,
+    totalLabel: `lead${uniqueCohort.length === 1 ? '' : 's'} assigned overnight`,
     subNote: cloneCounts.cloned > 0 ? `+ ${cloneCounts.cloned} cloned cop${cloneCounts.cloned === 1 ? 'y' : 'ies'} (same customer, another RM) shown below` : '',
     rangeText,
     counts,
     colorFn: colorForIssue,
     numColor: 'var(--blue)',
-    emptyText: 'No leads were created in this overnight window.',
+    emptyText: 'No leads were assigned in this overnight window.',
   });
 
   if (!cohort.length) { listEl.innerHTML = ''; return; }
 
-  const sorted = groupSiblingsTogether(cohort, (a, b) => (parseDate(b.lead_created_at) || 0) - (parseDate(a.lead_created_at) || 0));
+  const sorted = groupSiblingsTogether(cohort, (a, b) => (parseDate(b.lead_assigned_at) || 0) - (parseDate(a.lead_assigned_at) || 0));
   listEl.innerHTML = truncationNotice(sorted.length, MAX_CARDS) + sorted.slice(0, MAX_CARDS).map(l => {
     const label = overnightStatusLabel(l);
     return `<div class="alert-card">
@@ -1572,7 +1572,7 @@ function renderMovementTab(){
   noticeEl.style.display = 'none';
 
   // Same filter bar as the rest of the dashboard — Project/Region/TL/
-  // Source/Sub-source plus the Created date range — matched against each
+  // Source/Sub-source plus the Assigned date range — matched against each
   // row's OWN recorded fields — a stalled lead may since have closed and
   // dropped out of the live sheet's currently-open set, so it can't be
   // cross-referenced against `leads`. Feeds Status Changes' own "Stalled"

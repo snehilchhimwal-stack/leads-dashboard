@@ -68,7 +68,7 @@ const HEADER_ALIASES_ = {
   project: ['project'],
   region: ['region'],
   client: ['client'],
-  lead_created_at: ['lead_created_at', 'lead created at', 'created_at', 'created at', 'lead created', 'date created'],
+  lead_assigned_at: ['lead_assigned_at', 'lead assigned at', 'assigned_at', 'assigned at', 'lead assigned', 'date assigned'],
   group_source: ['group_source', 'group source', 'source'],
   source_bucket: ['source_bucket', 'source bucket', 'sub_source', 'sub source'],
   current_stage: ['current_stage', 'current stage', 'stage'],
@@ -207,7 +207,7 @@ function getVal_(row, colIndex, key) {
 // sheet set up before this field existed correctly aligned.
 const SNAPSHOT_COLUMNS_ = [
   'lead_id', 'client_id', 'RM', 'TL', 'project', 'region', 'client',
-  'lead_created_at', 'group_source', 'source_bucket', 'current_stage',
+  'lead_assigned_at', 'group_source', 'source_bucket', 'current_stage',
   'last_connect', 'last_connect_time', 'last_comment',
   'internal_status_comments', 'closing_reason',
   'call_attempts', 'call_count', 'duration',
@@ -254,9 +254,9 @@ function ensureMovementLogSheet_(ss) {
   const DATETIME_FORMAT = 'yyyy-mm-dd hh:mm:ss';
   const formatRows = Math.max(sheet.getMaxRows() - 1, 1);
   sheet.getRange(2, 1, formatRows, 1).setNumberFormat(DATETIME_FORMAT); // snapshot_at
-  const leadCreatedCol = 3 + SNAPSHOT_COLUMNS_.indexOf('lead_created_at');
+  const leadAssignedCol = 3 + SNAPSHOT_COLUMNS_.indexOf('lead_assigned_at');
   const lastConnectTimeCol = 3 + SNAPSHOT_COLUMNS_.indexOf('last_connect_time');
-  sheet.getRange(2, leadCreatedCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
+  sheet.getRange(2, leadAssignedCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
   sheet.getRange(2, lastConnectTimeCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
 
   return sheet;
@@ -408,7 +408,7 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   };
   if (!isOpenLead) return flags;
 
-  const createdRaw = getVal_(row, colIndex, 'lead_created_at');
+  const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
   const created = createdRaw instanceof Date ? createdRaw : null;
   if (!created) return flags; // undatable — no rule can fire, same as enrichLead's ageHours=null path
 

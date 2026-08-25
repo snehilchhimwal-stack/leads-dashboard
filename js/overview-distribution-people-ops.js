@@ -255,7 +255,7 @@ function renderAll(){
       detailLabel: 'Distribution',
       detailHtml: medianContactAll == null
         ? `<div style="font-size:11.5px; color:var(--text-faint);">No connected leads in the current filters.</div>`
-        : `<div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;">p90: ${p90ContactAll.toFixed(0)} min &middot; n = ${sortedContactMinsAll.length} connected lead${sortedContactMinsAll.length === 1 ? '' : 's'}<br>Business-hours minutes from lead_created_at to first connect (open or closed leads).</div>`,
+        : `<div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;">p90: ${p90ContactAll.toFixed(0)} min &middot; n = ${sortedContactMinsAll.length} connected lead${sortedContactMinsAll.length === 1 ? '' : 's'}<br>Business-hours minutes from lead_assigned_at to first connect (open or closed leads).</div>`,
     });
 
   renderFunnel();
@@ -397,7 +397,7 @@ function updateTabBadges(){
 }
 
 /* ===================== DAILY LEAD VOLUME ===================== */
-// Real history, derived from lead_created_at. Deliberately NOT attempting
+// Real history, derived from lead_assigned_at. Deliberately NOT attempting
 // SLA-compliance-over-time — that needs stored snapshots, which a browser
 // page can't reliably keep (we tried; it didn't persist).
 // Shared by renderDailyTrend below and the Morning Brief tab's "leads
@@ -405,10 +405,10 @@ function updateTabBadges(){
 function computeDailyLeadCounts(){
   const byDay = new Map();
   leads.forEach(l => {
-    const d = parseDate(l.lead_created_at);
+    const d = parseDate(l.lead_assigned_at);
     if (!d) return;
     // IST calendar day, not UTC — d.toISOString() reads UTC, which put any
-    // lead created between 12:00-5:29 AM IST on the WRONG (previous) day
+    // lead assigned between 12:00-5:29 AM IST on the WRONG (previous) day
     // here, unlike every other date-bucket in this file.
     const key = istDateKey(d);
     if (!byDay.has(key)) byDay.set(key, { total: 0, totalCollated: 0, oppPlus: 0 });
@@ -458,7 +458,7 @@ function renderDailyTrend(){
     </div>`;
   }).join('') + `</div>
   <div class="filter-summary" style="margin-top:8px;">
-    <span style="display:inline-block;width:9px;height:9px;background:var(--blue);border-radius:2px;"></span> total created
+    <span style="display:inline-block;width:9px;height:9px;background:var(--blue);border-radius:2px;"></span> total assigned
     &nbsp;&nbsp;<span style="display:inline-block;width:9px;height:9px;background:var(--green);border-radius:2px;"></span> of which reached Opportunity+
   </div>`;
 }
@@ -563,7 +563,7 @@ function renderRMScoreTable(){
     <th style="text-align:right">Leads</th><th style="text-align:right">Open</th>
     <th style="text-align:right">Attempts</th><th style="text-align:right">Avg Attempts</th>
     <th style="text-align:right">Avg Dur</th>
-    <th style="text-align:right" title="Median business-hours minutes from lead_created_at to first connect, across this RM's leads that have connected at all (open or closed) — hover a value for the p90. Preferred over an average, which one very late lead can skew.">Median 1st Contact</th>
+    <th style="text-align:right" title="Median business-hours minutes from lead_assigned_at to first connect, across this RM's leads that have connected at all (open or closed) — hover a value for the p90. Preferred over an average, which one very late lead can skew.">Median 1st Contact</th>
     <th style="text-align:right">Opp+</th><th style="text-align:right">Visits</th><th style="text-align:right" title="Payment received, paperwork pending">Soft Bk</th><th style="text-align:right">Bookings</th>
     <th style="text-align:right">Conv %</th><th style="text-align:right">SLA Score</th></tr>`;
 
@@ -1105,18 +1105,18 @@ function renderRMTable(){
 }
 
 
-// Direct check #1: created today (calendar day), under 5 calls, open
+// Direct check #1: assigned today (calendar day), under 5 calls, open
 // (not closed, not Opportunity+). Starts from isOpenLead as the foundation
 // — a closed or Opportunity+ lead can never appear here. Covers every open
-// lead regardless of creation date: attemptsToday is call_attempts for a
-// lead created today (an exact reading) and CRM-log entries dated today for
+// lead regardless of assignment date: attemptsToday is call_attempts for a
+// lead assigned today (an exact reading) and CRM-log entries dated today for
 // an older lead (a proxy — the export has no true per-day counter). Custom
 // card markup rather than renderAlertCard because it must show
 // attemptsToday, not the lifetime call_attempts total, for older leads.
 function renderDueTodayList(){
-  // Ordered by creation date, newest first — today's leads lead the list,
+  // Ordered by assignment date, newest first — today's leads lead the list,
   // then progressively older ones. A fresh lead sitting uncalled is the
-  // most urgent; ageHours is used rather than re-parsing lead_created_at
+  // most urgent; ageHours is used rather than re-parsing lead_assigned_at
   // since every lead here was already measured against the same _renderNow.
   const group = groupSiblingsTogether(
     issueLeads.filter(l => l.isOpenLead && l.underCalledToday),
@@ -1143,7 +1143,7 @@ function renderDueTodayList(){
     const logId = prefix + '_' + idx;
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
+      <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — ${l.isCreatedToday ? '<span class="chip red">New today</span> ' : ''}<span class="chip amber">${l.attemptsToday}/${CONFIG.MIN_CALLS_PER_DAY} attempts today</span></div>
       ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
       ${logToggleMarkup(l, logId)}
@@ -1237,7 +1237,7 @@ function renderInactiveRmList(){
     const logId = 'inactivermlog_' + idx;
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
+      <div class="alert-age mono">assigned ${esc(istStamp(l.lead_assigned_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">RM marked inactive</span> <span class="chip amber">${esc(l.TL || 'no TL')}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
@@ -1306,7 +1306,7 @@ function renderRecordingList(){
       : 'comment logged, 0 calls';
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
+      <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(${esc(stateNote)}${esc(closingNote)})</span> — <span class="chip amber">${esc(commentLabel)}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
@@ -1344,7 +1344,7 @@ function renderClosedNoWorkList(){
     const closingNote = l.closing_reason ? ` · reason: ${l.closing_reason}` : '';
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
+      <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} <span class="dim" style="font-size:11px;">(closed${esc(closingNote)})</span> — <span class="chip red">Closed with no work recorded</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
@@ -1370,7 +1370,7 @@ function renderNotConnectedList(){
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">${esc(fmtWorkingWait(l.businessMinsToConnect, 'late'))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · created ${esc(isoStamp(l.lead_created_at))} · connected ${esc(isoStamp(l.last_connect_time))}</div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.TL)} · assigned ${esc(isoStamp(l.lead_assigned_at))} · connected ${esc(isoStamp(l.last_connect_time))}</div>
       ${logToggleMarkup(l, logId)}
     </div>`;
   });
@@ -1401,7 +1401,7 @@ function renderFollowupList(){
     const logId = 'followuplog_' + idx;
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
+      <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${esc(clockLabel)}</span> <span class="chip amber">${l.call_attempts} attempts</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;
@@ -1426,7 +1426,7 @@ function renderLoggingGapList(){
     const logId = 'logginggaplog_' + idx;
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
-      <div class="alert-age mono">created ${esc(isoStampIST(l.lead_created_at))}</div>
+      <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip red">${l.call_attempts} calls, ${l.call_attempts - l.unloggedCallGap} logged</span> <span class="chip amber">gap of ${l.unloggedCallGap}</span></div>
       ${logToggleMarkup(l, logId)}
     </div>`;

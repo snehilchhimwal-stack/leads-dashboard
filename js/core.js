@@ -26,7 +26,7 @@ const CONFIG = {
   // it has 2 minutes of that evening plus 8 the next morning.
   WORK_START_HOUR: 9,   // 9 AM
   WORK_END_HOUR: 19,    // 7 PM
-  // Universal grace period, measured from lead creation. Every check EXCEPT
+  // Universal grace period, measured from lead assignment. Every check EXCEPT
   // the 10-minute first-contact rule stays silent until a lead is this old,
   // so RMs get time to work a fresh lead before anything is flagged.
   LEAD_GRACE_HOURS: 3,
@@ -147,7 +147,7 @@ function istSameDay(a, b){
   return pa.y === pb.y && pa.mo === pb.mo && pa.d === pb.d;
 }
 
-// YYYY-MM-DD in IST — used for day bucketing, so a lead created at 11 PM IST
+// YYYY-MM-DD in IST — used for day bucketing, so a lead assigned at 11 PM IST
 // lands on the IST day, not the UTC one.
 function istDateKey(date){
   const p = istParts(date);
@@ -175,18 +175,18 @@ function relativeDayLabel(dayKey, todayKey){
   return dateLabel; // future-dated — shouldn't normally happen, just show the date
 }
 
-// Buckets an array of leads by lead_created_at's IST calendar day, newest
+// Buckets an array of leads by lead_assigned_at's IST calendar day, newest
 // day first, WITHOUT re-sorting within a bucket — a leads array arriving
 // already sorted by the caller's own criterion (age, delay, whatever gap
 // metric that section cares about) keeps that order inside each day
 // bucket, since Array.forEach/push is stable. Undatable leads (no
-// parseable lead_created_at) land in one trailing "Unknown date" bucket
+// parseable lead_assigned_at) land in one trailing "Unknown date" bucket
 // rather than being silently dropped or crashing the date math.
 function groupLeadsByCalendarDay(leadsArr, asOfDate){
   const byDay = new Map();
   const unknown = [];
   leadsArr.forEach(l => {
-    const d = parseDate(l.lead_created_at);
+    const d = parseDate(l.lead_assigned_at);
     if (!d) { unknown.push(l); return; }
     const key = istDateKey(d);
     if (!byDay.has(key)) byDay.set(key, []);
@@ -243,7 +243,7 @@ const HEADER_ALIASES = {
   region: ['region'],
   project_region: ['project_region','project region'],
   client: ['client'],
-  lead_created_at: ['lead_created_at','lead created at','created_at','created at','lead created','date created'],
+  lead_assigned_at: ['lead_assigned_at','lead assigned at','assigned_at','assigned at','lead assigned','date assigned'],
   group_source: ['group_source','group source','source'],
   source_bucket: ['source_bucket','source bucket','sub_source','sub source'],
   current_stage: ['current_stage','current stage','stage'],
@@ -595,7 +595,7 @@ async function fetchAndRender(){
     }
 
     const isDateColLabel = (label) =>
-      HEADER_ALIASES.lead_created_at.indexOf(label) !== -1 || HEADER_ALIASES.last_connect_time.indexOf(label) !== -1;
+      HEADER_ALIASES.lead_assigned_at.indexOf(label) !== -1 || HEADER_ALIASES.last_connect_time.indexOf(label) !== -1;
     const table = valuesToGvizShape(values, isDateColLabel);
     const cols = table.cols;
     const dataRowsRaw = table.rows.map(r => r.c || []);
@@ -663,7 +663,7 @@ async function fetchAndRender(){
     const parsedLeads = dataRowsRaw
       .filter(c => String(gvizCellRaw(c[colIndex.lead_id])).trim() !== '')
       .map(c => {
-        const createdDate = getDate(c, 'lead_created_at');
+        const createdDate = getDate(c, 'lead_assigned_at');
         const connectDate = getDate(c, 'last_connect_time');
         return {
           lead_id: getVal(c, 'lead_id'),
@@ -674,7 +674,7 @@ async function fetchAndRender(){
           region: getVal(c, 'region') || 'Unassigned',
           project_region: getVal(c, 'project_region') || '',
           client: getVal(c, 'client') || '',
-          lead_created_at: createdDate ? createdDate.toISOString() : getVal(c, 'lead_created_at'),
+          lead_assigned_at: createdDate ? createdDate.toISOString() : getVal(c, 'lead_assigned_at'),
           group_source: getVal(c, 'group_source'),
           source_bucket: getVal(c, 'source_bucket') || '',
           current_stage: getVal(c, 'current_stage'),
@@ -736,7 +736,7 @@ async function fetchAndRender(){
     //                 by most recent activity — i.e. whoever actually owns it
     // ---------------------------------------------------------------
     const activityTimeOf = (l) => {
-      const d = parseDate(l.last_connect_time) || parseDate(l.lead_created_at);
+      const d = parseDate(l.last_connect_time) || parseDate(l.lead_assigned_at);
       return d ? d.getTime() : null;
     };
     // Funnel rank: open stages rank above any closed stage, so a claimed
@@ -846,7 +846,7 @@ async function fetchAndRender(){
     // Merges a set of same-customer rows into ONE lead-shaped record: stage
     // taken from whichever copy went furthest (ties broken by most recent
     // activity), comments merged/deduped/re-sorted, attempts/calls/duration
-    // summed, earliest creation kept. Factored out so it can run both across
+    // summed, earliest assignment kept. Factored out so it can run both across
     // ALL of a customer's rows (the general-purpose `merged` record below)
     // and on a single row by itself (copySplits below — a "merge" of one
     // row is just that row, stamped with the same collatedFrom/IDs/RMs
@@ -925,12 +925,12 @@ async function fetchAndRender(){
         call_count:    Math.max(0, ...rows.map(r => Number(r.call_count) || 0)),
         duration:      Math.max(0, ...rows.map(r => Number(r.duration) || 0)),
         last_connect_time: latestConnect ? latestConnect.toISOString() : primary.last_connect_time,
-        // Earliest creation across copies — the moment the customer actually
-        // came in, not when a particular RM's copy was generated.
-        lead_created_at: rows
-          .map(r => parseDate(r.lead_created_at))
+        // Earliest assignment across copies — the moment this customer was
+        // actually first assigned, not when a particular RM's copy was generated.
+        lead_assigned_at: rows
+          .map(r => parseDate(r.lead_assigned_at))
           .filter(Boolean)
-          .sort((a, b) => a - b)[0]?.toISOString() || primary.lead_created_at,
+          .sort((a, b) => a - b)[0]?.toISOString() || primary.lead_assigned_at,
         collatedFrom: distinctLeadIds.length,
         collatedRMs: Array.from(new Set(rows.map(r => r.RM).filter(Boolean))),
         collatedLeadIds: distinctLeadIds,
@@ -1129,7 +1129,7 @@ async function fetchAndRender(){
 
 // Counts only the minutes that fall inside the working-hours window
 // (WORK_START_HOUR–WORK_END_HOUR), walking day by day so overnight and
-// multi-day gaps are handled correctly. A lead created at 6:58 PM has
+// multi-day gaps are handled correctly. A lead assigned at 6:58 PM has
 // accrued 2 working minutes by 7:00 PM, then resumes at 9:00 AM.
 function businessMinutesBetween(start, end){
   if (!start || !end || end <= start) return 0;
@@ -1277,7 +1277,7 @@ let _enrichingHistorical = false;
 
 function enrichLead(l){
   const now = _renderNow;
-  const created = parseDate(l.lead_created_at);
+  const created = parseDate(l.lead_assigned_at);
 
   // Foundation: is this lead closed? Everything below only ever applies to
   // leads where this is false. No alert/SLA check in this file should ever
@@ -1306,10 +1306,10 @@ function enrichLead(l){
   // be cluttering the fresh-lead checks.
   const isUnder48h = ageHours !== null && ageHours <= CONFIG.LEAD_LIFECYCLE_HOURS;
 
-  // New Today: created today AND in the system at least 3 hours, so a lead
+  // New Today: assigned today AND in the system at least 3 hours, so a lead
   // that just arrived isn't immediately flagged for not having 5 calls yet.
   const isCreatedToday = istSameDay(created, now);   // IST calendar day, not the browser's
-  // Grace period from lead creation. Applies to every check below EXCEPT
+  // Grace period from lead assignment. Applies to every check below EXCEPT
   // the 10-minute first-contact rule (firstContactBreach and its
   // neverConnectedPastWindow counterpart below) — that rule is precisely
   // the one that must fire inside this window, since it exists to catch
@@ -1390,7 +1390,7 @@ function enrichLead(l){
   }
 
   // Behind on Today's Calls ("5 calls/day", every day the lead stays open —
-  // not just its creation day). For a lead created today, the lifetime-total
+  // not just its assignment day). For a lead assigned today, the lifetime-total
   // call_attempts IS today's effort (it didn't exist before today), so that
   // column is used directly. For a lead still open on day 2+, the export has
   // no true per-day counter — only the lifetime-cumulative call_attempts
@@ -1486,7 +1486,7 @@ function enrichLead(l){
 
   // Inactive-RM Lead Added — a brand-new lead landed on an RM who's
   // currently marked inactive. rm_is_active is a CURRENT snapshot, not a
-  // historical log, so "on that day" is only knowable for leads created
+  // historical log, so "on that day" is only knowable for leads assigned
   // TODAY — this can't retroactively prove an older lead was misrouted,
   // only that a fresh one just was. Deliberately no grace period: the
   // problem isn't the RM being slow, it's that the assignment itself was
@@ -1626,7 +1626,7 @@ function _applyFiltersAndRenderImpl(){
     if (srcSel.size && !srcSelLower.has(String(l.group_source).trim().toLowerCase())) return false;
     if (bucketSel.size && !bucketSel.has(String(l.source_bucket).trim())) return false;
     if (fromDate || toDate) {
-      const created = parseDate(l.lead_created_at);
+      const created = parseDate(l.lead_assigned_at);
       if (!created) return false; // can't place an undated lead inside a date range
       if (fromDate && created < fromDate) return false;
       if (toDate && created > toDate) return false;
@@ -1771,7 +1771,7 @@ async function clearSlaHistory(){
   }
 }
 
-// "Last 7 days" default for the Created date filter — the browser's OWN
+// "Last 7 days" default for the Assigned date filter — the browser's OWN
 // local calendar date, deliberately not IST-shifted like the rest of this
 // file's date handling, since this is specifically about whatever "today"
 // means on the machine looking at the dashboard.
@@ -1810,7 +1810,7 @@ function buildFilterUI(){
   // separate "All" entry.
   buildMultiSelect('msBucket', 'Sub-source', uniqueVals('source_bucket'), countsFor('source_bucket'), filterState.bucket, applyFiltersAndRender);
 
-  // Default the Created date range to the last 7 days whenever it isn't
+  // Default the Assigned date range to the last 7 days whenever it isn't
   // already set — first load, or right after Reset Filters below. Never
   // overrides a range already in place, so a deliberately widened range
   // survives a plain refresh instead of snapping back every time.
@@ -1992,7 +1992,7 @@ function logToggleMarkup(l, logId){
 
 function renderAlertCard(l, idx, prefix, requiredCalls){
   const logId = prefix + '_' + idx;
-  // Both timestamps matter: creation says when the clock started, last
+  // Both timestamps matter: assignment says when the clock started, last
   // comment says whether anyone has touched it since. A relative figure
   // alone ("9.2h old") answers neither question usefully.
   const lastAt = l.lastCommentAt || null;
@@ -2002,7 +2002,7 @@ function renderAlertCard(l, idx, prefix, requiredCalls){
 
   return `<div class="alert-card${l.past48h ? '' : ' amber-left'}">
     <div class="alert-id">${leadIdentityLine(l)}</div>
-    <div class="alert-age mono">created ${esc(istStamp(l.lead_created_at))}</div>
+    <div class="alert-age mono">assigned ${esc(istStamp(l.lead_assigned_at))}</div>
     <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip amber">${l.call_attempts}/${requiredCalls} attempts</span> <span class="chip ${lastAt ? 'dim-chip' : 'amber'}">${esc(commentLabel)}</span></div>
     ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
     ${logToggleMarkup(l, logId)}
@@ -2106,12 +2106,12 @@ function dedupeToFamilies(items){
   return Array.from(seen.values());
 }
 
-// A "leads created" / "leads flagged" style COUNT should say how many real
+// A "leads assigned" / "leads flagged" style COUNT should say how many real
 // customers that is, not how many rows — a customer collated from 3 RM
 // copies still shows up as 3 separate entities in issue-detection lists
 // (copySplits — each RM's own copy is judged on its own data, deliberately
 // not merged for that purpose), so counting the array length directly
-// overstates volume: "12 leads created" reads as 12 distinct people even
+// overstates volume: "12 leads assigned" reads as 12 distinct people even
 // when only 7 are.
 function countUniqueAndCloned(items){
   const total = (items || []).length;

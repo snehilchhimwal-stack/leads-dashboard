@@ -160,8 +160,8 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
 }
 
 // The 0–48h Funnel Audit's Population B/C question, answered as precisely
-// as retained data allows: of leads CREATED in the selected window (via the
-// same top-bar Created-date filter every other tab already respects — no
+// as retained data allows: of leads ASSIGNED in the selected window (via the
+// same top-bar Assigned-date filter every other tab already respects — no
 // new date picker), how many had their 48h window fully elapse by now
 // (cohort-complete — population B), and of THOSE, how many reached
 // Opportunity+ / closed without converting / were still open at their own
@@ -217,7 +217,7 @@ function evidenceAtDeadline(history, deadlineMs, liveLead){
 function computeZeroTo48hCohort(){
   const fromVal = document.getElementById('dateFromInput').value;
   const toVal = document.getElementById('dateToInput').value;
-  if (!fromVal && !toVal) return null; // unbounded creation window — no defined cohort to report
+  if (!fromVal && !toVal) return null; // unbounded assignment window — no defined cohort to report
   const fromDate = fromVal ? parseDate(fromVal + ' 00:00:00') : null;
   const toDate = toVal ? parseDate(toVal + ' 23:59:59') : null;
 
@@ -235,7 +235,7 @@ function computeZeroTo48hCohort(){
   byLead.forEach((history, key) => {
     if (!history.length) return;
     if (!passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — date handled below, against created, not snapshot_at
-    const created = parseDate(history[0].lead_created_at);
+    const created = parseDate(history[0].lead_assigned_at);
     if (!created) return;
     if (fromDate && created < fromDate) return;
     if (toDate && created > toDate) return;
@@ -559,7 +559,7 @@ function renderTrackingTab(){
 
   // Independent of the From/To snapshot-pair picker checked below (and of
   // every early return that picker's absence causes) — the 0–48h Cohort
-  // Outcome section is driven entirely by the top bar's Created-date filter
+  // Outcome section is driven entirely by the top bar's Assigned-date filter
   // instead, so it must not go blank just because no snapshot pair happens
   // to be selected.
   render48hCohort();
@@ -725,8 +725,8 @@ function renderTrackingTab(){
 
 // Renders the 0–48h Cohort Outcome section (see computeZeroTo48hCohort's
 // own comment for the method). Independent of the From/To snapshot picker
-// above — driven by the top bar's Created-date filter instead, since this
-// answers a "what happened to leads created in a period" question, not a
+// above — driven by the top bar's Assigned-date filter instead, since this
+// answers a "what happened to leads assigned in a period" question, not a
 // "compare two snapshot instants" one.
 function render48hCohort(){
   const countEl = document.getElementById('tracking48hCount');
@@ -746,17 +746,17 @@ function render48hCohort(){
 
   const result = computeZeroTo48hCohort();
   if (!result) {
-    clear('Set a Created-date range in the filter bar above (From and/or To) to define which leads this cohort covers — this section reads that same global filter, not the From/To snapshot pickers above.');
+    clear('Set an Assigned-date range in the filter bar above (From and/or To) to define which leads this cohort covers — this section reads that same global filter, not the From/To snapshot pickers above.');
     return;
   }
   if (!result.popA) {
-    clear('No leads with a Movement_Log history were created in the selected date range (for the current Project/Region/TL/Source filters).');
+    clear('No leads with a Movement_Log history were assigned in the selected date range (for the current Project/Region/TL/Source filters).');
     return;
   }
   if (noticeEl) noticeEl.style.display = 'none';
 
   const pctOfB = (n) => result.popB ? `${(n / result.popB * 100).toFixed(1)}%` : '—';
-  if (countEl) countEl.textContent = `${result.popA} lead${result.popA === 1 ? '' : 's'} created in range`;
+  if (countEl) countEl.textContent = `${result.popA} lead${result.popA === 1 ? '' : 's'} assigned in range`;
 
   const statCard = (label, value, sub, color) => `<div class="hover-card" style="padding:12px 14px;">
     <div class="kpi-num mono" style="font-size:22px;${color ? ` color:${color};` : ''}">${value}</div>
@@ -765,7 +765,7 @@ function render48hCohort(){
   </div>`;
 
   summaryEl.innerHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px;">
-    ${statCard('Created in range (A)', result.popA, 'denominator for everything here')}
+    ${statCard('Assigned in range (A)', result.popA, 'denominator for everything here')}
     ${statCard('48h window complete (B)', result.popB, `${result.popD} still under 48h (D) — excluded below`)}
     ${statCard('Reached Opportunity+', result.popC_opp, `${pctOfB(result.popC_opp)} of B`, 'var(--green)')}
     ${statCard('Closed, never converted', result.popC_closed, `${pctOfB(result.popC_closed)} of B`, 'var(--text-dim)')}
@@ -786,7 +786,7 @@ function render48hCohort(){
           : 'evidence: live sheet (no snapshot near the 48h mark)';
         return `<div class="alert-card">
           <div class="alert-id">${esc(item.key)} · ${esc(rm || 'Unassigned')}</div>
-          <div class="alert-age mono">created ${esc(istStamp(item.created))}</div>
+          <div class="alert-age mono">assigned ${esc(istStamp(item.created))}</div>
           <div class="alert-meta">${esc(region || '')} · ${esc(stageTxt || '')} — <span class="chip red">Still open at 48h</span></div>
           <div class="alert-comment mono" style="font-size:11px;">${esc(evidenceNote)}</div>
         </div>`;
@@ -795,7 +795,7 @@ function render48hCohort(){
 }
 
 // One specific calendar day (not a range) of leads, broken down BY REGION,
-// answering three questions per region: of the leads CREATED that day, (1)
+// answering three questions per region: of the leads ASSIGNED that day, (1)
 // what % had already reached Opportunity+ by the END of that same day (or
 // "as of right now" if that day isn't over yet), (2) of those whose 48h
 // window has fully elapsed by now, what % reached Opportunity+ by their own
@@ -835,7 +835,7 @@ function computeDailyCohortByRegion(dateKey){
   byLead.forEach((history, key) => {
     if (!history.length) return;
     if (!passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — region here narrows WHICH regions appear at all, same as every other Movement view
-    const created = parseDate(history[0].lead_created_at);
+    const created = parseDate(history[0].lead_assigned_at);
     if (!created) return;
     if (created < dayStart || created > dayEnd) return; // not created on this day
 
@@ -867,7 +867,7 @@ function computeDailyCohortByRegion(dateKey){
 // main region (every known region, even a 0-lead one, for a stable table
 // shape) plus a combined total row. Reads its own single-day date picker
 // (trackingDailyDateInput), independent of both the From/To snapshot picker
-// above and the global Created-date range filter in the top bar.
+// above and the global Assigned-date range filter in the top bar.
 function renderDailyCohortByRegion(){
   const countEl = document.getElementById('trackingDailyCount');
   const noticeEl = document.getElementById('trackingDailyNotice');
@@ -887,14 +887,14 @@ function renderDailyCohortByRegion(){
   const dateKey = dateInput ? dateInput.value : '';
   const result = computeDailyCohortByRegion(dateKey);
   if (!result) { clear('Pick a date above to see that day\'s leads broken down by region.'); return; }
-  if (!result.totalCreated) { clear(`No leads (for the current Project/Region/TL/Source filters) were created on ${esc(dateKey)}.`); return; }
+  if (!result.totalCreated) { clear(`No leads (for the current Project/Region/TL/Source filters) were assigned on ${esc(dateKey)}.`); return; }
   if (noticeEl) noticeEl.style.display = 'none';
-  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} created ${dateKey}`;
+  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} assigned ${dateKey}`;
 
   thead.innerHTML = `<tr>
     <th>Region</th>
-    <th style="text-align:right">Created</th>
-    <th style="text-align:right" title="Of leads created that day, reached Opportunity+ by end of that day (or as of now, if the day isn't over yet)">Same-Day Opp%</th>
+    <th style="text-align:right">Assigned</th>
+    <th style="text-align:right" title="Of leads assigned that day, reached Opportunity+ by end of that day (or as of now, if the day isn't over yet)">Same-Day Opp%</th>
     <th style="text-align:right" title="Of leads whose 48h window has fully elapsed by now, reached Opportunity+ by their own 48h mark">48h Opp%</th>
     <th style="text-align:right" title="Of the same 48h-complete group, closed without ever converting">48h Close%</th>
     <th style="text-align:right" title="How many of this region's leads have had their full 48h window elapse — the denominator for the two 48h columns. Fully available ~2 days after the picked date.">48h Window Complete</th>

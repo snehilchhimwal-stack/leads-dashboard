@@ -45,7 +45,7 @@ function istDateTimeValue(date){
 // string enrichLead's source data carries internally, so this column
 // stays visually consistent with MovementTracker.gs's own writes.
 function movementCellValue(l, key){
-  if (key === 'lead_created_at' || key === 'last_connect_time') {
+  if (key === 'lead_assigned_at' || key === 'last_connect_time') {
     const d = parseDate(l[key]);
     return d ? istDateTimeValue(d) : '';
   }

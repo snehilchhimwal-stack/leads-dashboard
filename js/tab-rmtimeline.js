@@ -15,7 +15,7 @@
 let _rmtlLastRM = '';
 
 // Project/Region/TL/Source/Sub-source only — deliberately NOT the top
-// filter bar's Created-date range (dateFromInput/dateToInput), unlike
+// filter bar's Assigned-date range (dateFromInput/dateToInput), unlike
 // `leads` itself. Every section in this tab does its own date scoping
 // locally (the calendar's fixed 7-day window, the day timeline's picked
 // day), so gating the underlying lead set by that SEPARATE, arbitrary
@@ -49,7 +49,7 @@ function populateRMTimelineSelect(){
   return sel.value || null;
 }
 
-// Always exactly 7 day-cells, anchored to the SAME "To" date the Created-
+// Always exactly 7 day-cells, anchored to the SAME "To" date the Assigned-
 // date filter at the top of the page uses (dateToInput) — defaults to
 // today's browser date the same way that filter's own default does (via
 // defaultDateRangeValue), and shifts with it if the user changes it. Per
@@ -67,7 +67,7 @@ function renderRMDailyCalendar(rm, selectedDay){
   const byDay = new Map();
   rmtlScopedLeads().forEach(l => {
     if ((l.RM || 'Unassigned') !== rm) return;
-    const d = parseDate(l.lead_created_at);
+    const d = parseDate(l.lead_assigned_at);
     if (!d) return;
     const key = istDateKey(d);
     if (!byDay.has(key)) byDay.set(key, { n: 0, collated: 0 });
@@ -106,7 +106,7 @@ function renderRMDailyCalendar(rm, selectedDay){
     return `<div class="${classes.join(' ')}" data-day="${key}" style="background:rgba(91,141,239,${opacity});">
       <span class="rmtl-cal-d">${esc(IST_WEEKDAYS[istParts(cellDate).dow])} ${istParts(cellDate).d}</span>
       ${count ? `<span class="rmtl-cal-n">${count}</span>` : ''}
-      <span class="day-hint">${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} created${cloneNote}</span>
+      <span class="day-hint">${esc(istDayLabelWithDow(cellDate))}: ${count} lead${count === 1 ? '' : 's'} assigned${cloneNote}</span>
     </div>`;
   });
 
@@ -116,7 +116,7 @@ function renderRMDailyCalendar(rm, selectedDay){
 // Every dated touch (call connect + individually-dated comment log lines,
 // via updateEventsFor — same event model the Audit tab's Updated Leads and
 // Activity by Hour use) across one RM's leads on one IST day, chronological.
-// Reads rmtlScopedLeads() (Project/Region/TL/Source only, no Created-date
+// Reads rmtlScopedLeads() (Project/Region/TL/Source only, no Assigned-date
 // gate) for the same reason the calendar above does — a picked day
 // shouldn't go empty just because the top-of-page date filter's range
 // doesn't happen to cover it.
@@ -164,7 +164,7 @@ function renderRMIssueList(rm){
   const rows = issueLeads.filter(l => (l.RM || 'Unassigned') === rm && ISSUE_PRIORITY.some(rule => l[rule.key]));
   if (countEl) countEl.textContent = uniqueCloneLabel(countUniqueAndCloned(rows));
 
-  thead.innerHTML = `<tr><th>Lead ID</th><th>Stage</th><th>Created</th><th>Issue(s)</th></tr>`;
+  thead.innerHTML = `<tr><th>Lead ID</th><th>Stage</th><th>Assigned</th><th>Issue(s)</th></tr>`;
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="4" class="empty-row">No current issues for this RM</td></tr>`;
     return;
@@ -172,7 +172,7 @@ function renderRMIssueList(rm){
   tbody.innerHTML = rows.map(l => {
     const issues = ISSUE_PRIORITY.filter(rule => l[rule.key]).map(rule => rule.label);
     return `<tr>
-      <td>${esc(l.lead_id)}</td><td class="dim">${esc(l.current_stage)}</td><td class="dim">${esc(istStamp(l.lead_created_at))}</td>
+      <td>${esc(l.lead_id)}</td><td class="dim">${esc(l.current_stage)}</td><td class="dim">${esc(istStamp(l.lead_assigned_at))}</td>
       <td>${issues.map(i => `<span class="chip red" style="margin:0 4px 4px 0;">${esc(i)}</span>`).join('')}</td>
     </tr>`;
   }).join('');

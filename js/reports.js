@@ -149,7 +149,7 @@ let _lastReportOutOfScope = 0;
 // reporting group. Names the misses so a typo or spacing variant can be
 // spotted, rather than only reporting how many were lost.
 let _lastReportOutOfScopeNames = {};
-// How many flagged leads had no parseable lead_created_at on the last
+// How many flagged leads had no parseable lead_assigned_at on the last
 // build — the only remaining reason reportableIssueFor/buildRegionReports
 // silently skip a flagged lead (no more generation-time grace re-check —
 // see reportableIssueFor's own comment on why that was removed).
@@ -169,7 +169,7 @@ function reportScopeNotice(){
     : '';
 
   const undatableNote = _lastReportUndatable > 0
-    ? ` <b style="color:var(--amber)">${_lastReportUndatable.toLocaleString()}</b> flagged lead${_lastReportUndatable === 1 ? '' : 's'} held back — no parseable created date, so it can't be placed in a dated report.`
+    ? ` <b style="color:var(--amber)">${_lastReportUndatable.toLocaleString()}</b> flagged lead${_lastReportUndatable === 1 ? '' : 's'} held back — no parseable assigned date, so it can't be placed in a dated report.`
     : '';
 
   // Live map of every region value present in the filtered data, so a region
@@ -202,7 +202,7 @@ function reportScopeNotice(){
 const ISSUE_REPORT_META = {
   inactiveRm: {
     flag: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added',
-    intro: 'Please find below the {SOURCE} leads created today that were assigned to an RM currently marked inactive — these need reassignment, since no one can act on them as routed.',
+    intro: 'Please find below the {SOURCE} leads from today that were assigned to an RM currently marked inactive — these need reassignment, since no one can act on them as routed.',
   },
   notConnected: {
     flag: 'firstContactBreach', label: 'Not Connected in 10 Minutes',
@@ -214,7 +214,7 @@ const ISSUE_REPORT_META = {
   },
   dueToday: {
     flag: 'underCalledToday', label: "Behind on Today's Calls",
-    intro: 'Please find below the {SOURCE} leads with fewer than 5 call attempts made today. For a lead created today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
+    intro: 'Please find below the {SOURCE} leads with fewer than 5 call attempts made today. For a lead assigned today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
   },
   stuck: {
     flag: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)',
@@ -238,7 +238,7 @@ const ISSUE_ACTION_MAP = {
   followupOverdue: "Reconnect with the customer without delay — the 4-hour post-connect follow-up window has lapsed.",
   underCalledToday: `Complete the remaining call attempts today — see the Attempts Today column below for exactly how many more each lead needs to reach the ${CONFIG.MIN_CALLS_PER_DAY}/day SOP requirement.`,
   stageStuck48h: "Review this lead and either progress it toward Opportunity or close it out — it has been open more than 48 hours with no advancement.",
-  isNotUpdated: "Update the CRM with this lead's current status — no activity has been logged since it was created. If the customer has never been reached, attempt first contact immediately; the 10-minute response window has already been missed.",
+  isNotUpdated: "Update the CRM with this lead's current status — no activity has been logged since it was assigned. If the customer has never been reached, attempt first contact immediately; the 10-minute response window has already been missed.",
 };
 
 // reportableIssueFor() (used by the combined "all issues" report) returns
@@ -413,7 +413,7 @@ function buildRegionReports(issueKey){
   // combined-across-copies total.
   const matching = issueLeads.filter(l => {
     if (!l[meta.flag]) return false;
-    if (!parseDate(l.lead_created_at)) { undatableCount++; return false; } // undatable — don't email it
+    if (!parseDate(l.lead_assigned_at)) { undatableCount++; return false; } // undatable — don't email it
     return true;
   });
   _lastReportUndatable = undatableCount;
@@ -443,7 +443,7 @@ function buildRegionReports(issueKey){
   // context, without folding their data into this row's own numbers.
   const rmNote = (l) => (l.siblingRMs && l.siblingRMs.length) ? `  |  also held by: ${l.siblingRMs.join(', ')}` : '';
 
-  // Each line carries the lead's creation timestamp and how long it's been
+  // Each line carries the lead's assignment timestamp and how long it's been
   // sitting, so the recipient can verify the flag themselves rather than
   // taking the dashboard's word for it. notConnected shows how late the
   // connect was instead — "how long it's been sitting" doesn't apply to a
@@ -458,14 +458,14 @@ function buildRegionReports(issueKey){
   const ageTierTag = (l) => issueKey === 'dueToday' ? (l.isUnder48h ? '  [0–48h]' : '  [PAST 48h]') : '';
 
   const leadLine = (l) => {
-    const created = parseDate(l.lead_created_at);
-    if (!created) return `${l.lead_id}  |  Created: unknown${rmNote(l)}`;
-    const stamp = istStamp(l.lead_created_at);
+    const created = parseDate(l.lead_assigned_at);
+    if (!created) return `${l.lead_id}  |  Assigned: unknown${rmNote(l)}`;
+    const stamp = istStamp(l.lead_assigned_at);
     if (issueKey === 'notConnected') {
-      return `${l.lead_id}  |  Created: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}${rmNote(l)}`;
+      return `${l.lead_id}  |  Assigned: ${stamp}  |  ${fmtWorkingWait(l.businessMinsToConnect, 'late')}${rmNote(l)}`;
     }
     const hrs = ((now - created) / 36e5).toFixed(1);
-    return `${l.lead_id}  |  Created: ${stamp}  |  ${hrs}h ago${ageTierTag(l)}${rmNote(l)}`;
+    return `${l.lead_id}  |  Assigned: ${stamp}  |  ${hrs}h ago${ageTierTag(l)}${rmNote(l)}`;
   };
 
   return Object.keys(byRegion).sort().map(region => {
@@ -473,7 +473,7 @@ function buildRegionReports(issueKey){
 
     const byRM = groupBy(regionLeads, l => (l.RM || 'Unassigned') + '||' + (l.TL || ''));
 
-    // inactiveRm leads are always created today (isCreatedToday is part of
+    // inactiveRm leads are always assigned today (isCreatedToday is part of
     // the flag itself) — day-bucketing would always produce exactly one
     // "Today" header, so it's skipped for that issue only.
     const rmLeadLines = (group) => issueKey === 'inactiveRm'
@@ -495,8 +495,8 @@ function buildRegionReports(issueKey){
     const graceExplainer = issueKey === 'inactiveRm' || issueKey === 'notConnected'
       ? ''
       : issueKey === 'notUpdated'
-      ? `Most of these leads are excluded for the first ${CONFIG.LEAD_GRACE_HOURS} hours after creation — except one that has never been connected with at all past the first 10 minutes, which reports immediately regardless of age.`
-      : `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`;
+      ? `Most of these leads are excluded for the first ${CONFIG.LEAD_GRACE_HOURS} hours after assignment — except one that has never been connected with at all past the first 10 minutes, which reports immediately regardless of age.`
+      : `Leads assigned less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.`;
     const graceNote = graceExplainer ? `\n\n(${graceExplainer})` : '';
 
     // "Total Leads"/"Leads Flagged" has to mean distinct customers, not
@@ -531,7 +531,7 @@ function buildRegionReports(issueKey){
     const body = `Hi,\n\nDate: ${dateStr}\n\n${intro}\n\n${blocks}\n${DIVIDER}\n\n${totalLabel} : ${cloneCountLabel}${dueTodaySplitNote}${graceNote}\n\n${EMAIL_SIGNATURE}`;
 
     const ages = regionLeads.map(l => {
-      const created = parseDate(l.lead_created_at);
+      const created = parseDate(l.lead_assigned_at);
       return created ? (now - created) / 36e5 : 0;
     });
     const html = renderReportEmailHTML({
@@ -559,16 +559,16 @@ function buildRegionReports(issueKey){
         // that into one box per RM×day would get visually heavy in an
         // email. Skipped for inactiveRm, whose leads are always today's by
         // definition (isCreatedToday is part of the flag itself).
-        columns: (['Lead ID', 'Created'].concat(issueKey === 'inactiveRm' ? [] : ['Date']).concat(
+        columns: (['Lead ID', 'Assigned'].concat(issueKey === 'inactiveRm' ? [] : ['Date']).concat(
           issueKey === 'dueToday' ? ['Age', 'Window', 'Attempts Today']
           : isReminder ? ['Age', 'Connected Late By']
           : ['Age']
         )).concat('Suggested Follow-up'),
         rows: group.map(l => {
-          const created = parseDate(l.lead_created_at);
+          const created = parseDate(l.lead_assigned_at);
           const cells = [
             l.lead_id + ((l.siblingRMs && l.siblingRMs.length) ? ` (also held by: ${l.siblingRMs.join(', ')})` : ''),
-            created ? istStamp(l.lead_created_at) : 'unknown',
+            created ? istStamp(l.lead_assigned_at) : 'unknown',
           ];
           if (issueKey !== 'inactiveRm') {
             cells.push(created ? relativeDayLabel(istDateKey(created), istDateKey(now)) : 'unknown');
@@ -1596,7 +1596,7 @@ function selectedRegionLabel(fallbackRegions){
 const _EMAILABLE_FLAG_KEYS = new Set(Object.values(ISSUE_REPORT_META).map(m => m.flag));
 
 function reportableIssueFor(l){
-  const created = parseDate(l.lead_created_at);
+  const created = parseDate(l.lead_assigned_at);
   if (!created) return null; // undatable — never email it
 
   // No blanket grace re-check here — enrichLead's pastGrace already gates
@@ -1619,7 +1619,7 @@ function reportableIssueFor(l){
 }
 
 // Date range shown in the subject: the explicit filter range if one is set,
-// otherwise the actual span of creation dates in the included leads.
+// otherwise the actual span of assignment dates in the included leads.
 function reportDateRange(includedLeads){
   const fromVal = document.getElementById('dateFromInput').value;
   const toVal = document.getElementById('dateToInput').value;
@@ -1636,7 +1636,7 @@ function reportDateRange(includedLeads){
     const b = toDate ? fmt(toDate) : '…';
     return a === b ? a : `${a} to ${b}`;
   }
-  const times = includedLeads.map(l => parseDate(l.lead_created_at)).filter(Boolean).map(d => d.getTime());
+  const times = includedLeads.map(l => parseDate(l.lead_assigned_at)).filter(Boolean).map(d => d.getTime());
   if (!times.length) return todayDateLabel();
   const a = fmt(new Date(Math.min(...times)));
   const b = fmt(new Date(Math.max(...times)));
@@ -1673,7 +1673,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
     const issue = reportableIssueFor(l);
     if (!issue) {
       // reportableIssueFor only returns null for an undatable lead (no
-      // parseable lead_created_at) or one whose only flag isn't one of the
+      // parseable lead_assigned_at) or one whose only flag isn't one of the
       // emailable rules (e.g. loggingGapBreach alone) — every emailable
       // flag now reports immediately, grace-exempt or not (see
       // reportableIssueFor's own comment).
@@ -1688,7 +1688,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
       _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
       return;
     }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_created_at: l.lead_created_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_assigned_at: l.lead_assigned_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
   // Not Connected in 10 Minutes rides along in this same email as its own
@@ -1703,7 +1703,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
     if (!l.firstContactBreach) return;
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
   // Leads Pending Beyond 48 Hours rides along too, as its own trailing
@@ -1722,7 +1722,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
     if (reportableIssueFor(l) === STUCK_LABEL) return; // already the primary pick, shown above
     const main = mainRegionFor(effectiveRegion(l));
     if (!main) return;
-    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_created_at: l.lead_created_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
   });
 
   // Possible Premature Closes rides along too, as its own trailing section —
@@ -1801,7 +1801,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
     const regionLabel = combineAll ? selectedRegionLabel(regionNames) : regionNames[0];
     const sourceLabel = selectedSourceLabel();
 
-    // Rows already carry their own lead_created_at directly — no need to
+    // Rows already carry their own lead_assigned_at directly — no need to
     // look the lead back up in `leads` (which wouldn't even find a split's
     // own id, since `leads` stays one merged record per customer).
     const dateRange = reportDateRange(items.concat(notConnectedItems).concat(stuckItems));
@@ -1840,7 +1840,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
     // two DIFFERENT issues, and each is its own actionable item.
     const tally = groupBy(sorted, r => r.issue);
     const summary = Object.keys(tally).sort().map(k => `  ${k}: ${tally[k].length}`).join('\n');
-    const mainGraceNote = `(Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.)`;
+    const mainGraceNote = `(Leads assigned less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded — RMs are given that window to work a fresh lead.)`;
     const mainSection = sorted.length
       ? `Summary by issue:\n${summary}\n\n${header}\n${ruleLine}\n${table}\n\n${mainGraceNote}`
       : `No other flagged issues right now.`;
@@ -2004,7 +2004,7 @@ ${EMAIL_SIGNATURE}`;
         action: ISSUE_ACTION_MAP[issueFlag] || '',
         columns: (isDueToday ? ['Lead ID', 'Region', 'RM', 'Age', 'Attempts Today'] : ['Lead ID', 'Region', 'RM', 'Age']).concat('Suggested Follow-up'),
         rows: tally[issueName].map(r => {
-          const created = parseDate(r.lead_created_at);
+          const created = parseDate(r.lead_assigned_at);
           const cells = [idsFor(r), r.subRegion, rmsFor(r), created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
           if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
           cells.push(followupTextFor(r));
@@ -2081,7 +2081,7 @@ ${EMAIL_SIGNATURE}`;
       ],
       highlights,
       sections,
-      footerNote: `Leads created less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
+      footerNote: `Leads assigned less than ${CONFIG.LEAD_GRACE_HOURS} hours ago are excluded.`
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
         + (stalledItems.length ? ' Stalled Leads is a Movement_Log-derived callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : stalledDiagnostic)

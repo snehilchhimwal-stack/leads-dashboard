@@ -1,6 +1,6 @@
 /**
  * Overnight Emailer — sends a genuinely UNATTENDED daily email per region at
- * 10am IST (overnight leads: created, flagged issue, or already reached
+ * 10am IST (overnight leads: assigned, flagged issue, or already reached
  * Opportunity+), then a 1pm IST follow-up on the SAME Gmail thread showing
  * which of the morning's issue leads got resolved (still flagged = shown in
  * red).
@@ -459,7 +459,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     region: region,
     subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
     kpis: [
-      { value: leads.length, label: leads.length === 1 ? 'Lead Created' : 'Leads Created', bg: '#dbeafe', fg: '#2563eb' },
+      { value: leads.length, label: leads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
       { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
       { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
     ],
@@ -533,7 +533,7 @@ function sendOvernightMorningEmails() {
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
-    const createdRaw = getVal_(row, colIndex, 'lead_created_at');
+    const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
     const created = createdRaw instanceof Date ? createdRaw : null;
     if (!created || created < win.from || created > win.to) return; // not an overnight lead
 
