@@ -583,10 +583,17 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
  * (some RMs skip A1 entirely), else RH, else CH — falling further up the
  * chain only when the nearer tier doesn't exist for this specific person.
  *
- * Each bucket's Cc is whichever of TM/RH/CH exist in that ONE primary's
- * own chain (e.g. an A1 primary still has their own TM/RH/CH cc'd, even
- * though the RM's row only shows the A1 as their own direct manager),
- * plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own email
+ * Each bucket's Cc is whichever of TM/RH/CH exist in the PRIMARY's OWN
+ * chain — looked up by the primary's own name, not read off the reporting
+ * RM's row. This matters in Pune specifically: a TM there (e.g. Ayaz
+ * Bagwan) has real A1s under them (e.g. Firoj Shaikh), and Book7 doesn't
+ * always carry every intermediate tier on a deeply-nested S1's own row —
+ * an S1 reporting to Firoj Shaikh has A1='Firoj Shaikh' and CH='Sourabh
+ * Sareen' on their own row, but NOT the TM in between (Ayaz Bagwan) —
+ * while Firoj Shaikh's OWN row correctly has it. Using the S1's row for
+ * Cc would silently drop Ayaz Bagwan from every email to Firoj Shaikh's
+ * bucket; using the primary's own row instead picks it up correctly.
+ * Plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own email
  * (never cc someone already in To).
  *
  * Returns { buckets: [{ primaryName, primaryEmail, cc: [emails],
@@ -608,7 +615,12 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
 
     const key = primaryName.toLowerCase();
     if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, ccSet: new Set(), rmNames: [] };
-    [chain.tm, chain.rh, chain.ch].forEach(function (name) {
+    // Prefer the primary's OWN chain for Cc (see docblock above); fall
+    // back to the reporting RM's chain only if the primary has no row of
+    // their own in the hierarchy (shouldn't normally happen, since they
+    // resolved to a real email above, but stay defensive).
+    const primaryChain = data.byRmNameLower[key] || chain;
+    [primaryChain.tm, primaryChain.rh, primaryChain.ch].forEach(function (name) {
       if (!name) return;
       const email = data.emailByManagerNameLower[name.toLowerCase()];
       if (email) buckets[key].ccSet.add(email);
