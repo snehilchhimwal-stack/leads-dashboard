@@ -101,6 +101,25 @@ const TEST_MODE_OVERRIDE_EMAIL_ = '';
 const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 
+// Where to alert when this script could NOT get an automated email out at
+// all for some region/RM — no resolvable recipient, or the send itself
+// failed after retries. These failures are otherwise invisible outside
+// the Apps Script Executions log, which nobody watches proactively; see
+// notifyOpsAlertGs_'s own comment for exactly which cases trigger this.
+const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
+
+// Best-effort alert for a send that could not happen at all this run —
+// wrapped in its own try/catch so a failure to send the ALERT itself can
+// never take down the real morning/follow-up run it's reporting on. Kept
+// deliberately plain-text/no-frills — this is an ops ping, not a report.
+function notifyOpsAlertGs_(subject, bodyLines) {
+  try {
+    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'));
+  } catch (e) {
+    Logger.log('notifyOpsAlertGs_ failed to send its own alert ("' + subject + '"): ' + e);
+  }
+}
+
 // Mirrors REGION_GROUP_MAP in reports.js — keep the two in sync if either
 // changes. Only these 11 main regions get an automated email; a raw region
 // value not listed here (or a numbered/directional sub-region not covered by
@@ -232,8 +251,19 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
       ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
       results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: resolved.unresolved, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + resolved.unresolved.join(', ') + ')', bucketLabel: 'Unmatched RMs' });
+    } else {
+      // No recipient configured anywhere for these RMs — their overnight
+      // leads get no automated email at all this run, and nothing else
+      // in this script logs that fact. Alert rather than stay silent.
+      notifyOpsAlertGs_('No recipient for ' + region + ' — RM(s) skipped', [
+        'Region: ' + region,
+        'RM(s) with no resolvable recipient (not in RM_Hierarchy, or found but no manager email, or Excluded) and no Region_Recipients fallback configured for this region:',
+        resolved.unresolved.join(', '),
+        '',
+        'Their overnight leads were NOT included in any automated email this run.',
+        'Fix: add these RM(s) to RM_Hierarchy with a resolvable manager chain and a Manager_Directory email, or fill in a Region_Recipients To for ' + region + ' as a fallback.',
+      ]);
     }
-    // else: silently skipped for these RMs — no recipient configured, not a fault
   }
 
   // Single choke point every path above funnels through — see
@@ -505,6 +535,14 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     }, 'send morning email (' + region + subjectSuffix + ')');
   } catch (e) {
     Logger.log('Overnight morning email failed for ' + region + subjectSuffix + ': ' + e);
+    notifyOpsAlertGs_('Morning email failed for ' + region + subjectSuffix, [
+      'Region: ' + region + subjectSuffix,
+      'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
+      'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
+      '',
+      'These leads got no automated email this run — the window is fixed to this morning\'s run only, so tomorrow\'s run will NOT retry them.',
+      'Error: ' + e,
+    ]);
     return;
   }
 
@@ -906,6 +944,15 @@ function sendOvernightFollowupEmails() {
         }, 'send fallback follow-up (' + r.region + ')');
       } catch (fallbackErr) {
         Logger.log('Overnight follow-up reply failed entirely for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + fallbackErr);
+        notifyOpsAlertGs_('1pm follow-up failed for ' + r.region, [
+          'Region: ' + r.region,
+          'Thread: ' + r.threadId,
+          'Intended recipient: ' + r.to + (r.cc ? (' (cc: ' + r.cc + ')') : ''),
+          'Still-unresolved leads affected (' + r.unresolvedRows.length + '): ' + r.unresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
+          '',
+          'No follow-up email went out for this region this run — neither the threaded send nor the plain fallback succeeded.',
+          'Error: ' + fallbackErr,
+        ]);
       }
     }
   });
