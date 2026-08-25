@@ -1745,6 +1745,21 @@ function buildRegionWiseReports(combineAll, followupLookup){
     warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason, lastNote: latest.comment, lastOutcome: latest.outcome, siblingRMs: l.siblingRMs });
   });
 
+  // Closed with No Comment rides along too, as its own trailing section —
+  // a closed lead with no real narrative ever logged at all (see
+  // hasAnyNarrativeComment/closedWithNoComment in enrichLead — a bare
+  // closing_reason tag doesn't count). Independent of reportableIssueFor/
+  // ISSUE_PRIORITY, same reasoning as Possible Premature Closes above: a
+  // closed lead never carries an open-lead SLA flag, so this population
+  // never overlaps with `rows`.
+  const closedNoCommentRows = [];
+  issueLeads.forEach(l => {
+    if (!l.closedWithNoComment) return;
+    const main = mainRegionFor(effectiveRegion(l));
+    if (!main) return;
+    closedNoCommentRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, closing_reason: l.closing_reason, siblingRMs: l.siblingRMs });
+  });
+
   // Stalled Leads: every lead currently stalled per
   // currentStalledRowsByRegion — computeStalledLeads' own always-current
   // check (no comment in 6h, or never-commented with attempts unchanged
@@ -1758,18 +1773,20 @@ function buildRegionWiseReports(combineAll, followupLookup){
   _lastReportUndatable = undatableCount;
   _lastReportOutOfScope = outOfScope;
 
-  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !warmCloseRows.length && !Object.keys(stalledByRegion).length) return [];
+  if (!rows.length && !notConnectedRows.length && !stuckRows.length && !warmCloseRows.length && !closedNoCommentRows.length && !Object.keys(stalledByRegion).length) return [];
 
   const groups = combineAll ? { __ALL__: rows } : groupBy(rows, r => r.mainRegion);
   const notConnectedGroups = combineAll ? { __ALL__: notConnectedRows } : groupBy(notConnectedRows, r => r.mainRegion);
   const stuckGroups = combineAll ? { __ALL__: stuckRows } : groupBy(stuckRows, r => r.mainRegion);
   const warmCloseGroups = combineAll ? { __ALL__: warmCloseRows } : groupBy(warmCloseRows, r => r.mainRegion);
+  const closedNoCommentGroups = combineAll ? { __ALL__: closedNoCommentRows } : groupBy(closedNoCommentRows, r => r.mainRegion);
   // A region with ONLY late-connect, ONLY additional-stuck, ONLY premature-
-  // close, or ONLY stalled leads and no other actionable issue still needs
-  // its own email — without this it would have no key in `groups` (built
-  // from `rows` alone) and silently drop out entirely.
+  // close, ONLY closed-with-no-comment, or ONLY stalled leads and no other
+  // actionable issue still needs its own email — without this it would
+  // have no key in `groups` (built from `rows` alone) and silently drop
+  // out entirely.
   if (!combineAll) {
-    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(warmCloseGroups)).concat(Object.keys(stalledByRegion)).forEach(region => {
+    Object.keys(notConnectedGroups).concat(Object.keys(stuckGroups)).concat(Object.keys(warmCloseGroups)).concat(Object.keys(closedNoCommentGroups)).concat(Object.keys(stalledByRegion)).forEach(region => {
       if (!groups[region]) groups[region] = [];
     });
   }
@@ -1779,13 +1796,14 @@ function buildRegionWiseReports(combineAll, followupLookup){
     const notConnectedItems = notConnectedGroups[key] || [];
     const stuckItems = stuckGroups[key] || [];
     const warmCloseItems = warmCloseGroups[key] || [];
+    const closedNoCommentItems = closedNoCommentGroups[key] || [];
     // Combined mode spans every region, so gather repeats from all of them;
     // per-region mode's key IS the real region name already.
     const stalledItems = combineAll
       ? Object.keys(stalledByRegion).reduce((acc, r) => acc.concat(stalledByRegion[r]), [])
       : (stalledByRegion[key] || []);
     const regionNames = Array.from(new Set(
-      items.concat(notConnectedItems).concat(stuckItems).concat(warmCloseItems).map(r => r.mainRegion)
+      items.concat(notConnectedItems).concat(stuckItems).concat(warmCloseItems).concat(closedNoCommentItems).map(r => r.mainRegion)
         .concat(stalledItems.map(r => mainRegionFor(effectiveRegion(r))).filter(Boolean))
         .concat(combineAll ? [] : [key])
     )).sort();
@@ -1912,6 +1930,29 @@ ${DIVIDER}
 
 ` : '';
 
+    // Closed with No Comment, appended as its own block — a closed lead
+    // with zero real narrative ever logged (closing_reason alone doesn't
+    // count, see hasAnyNarrativeComment). Placed ahead of Possible
+    // Premature Closes below: no evidence any work happened before
+    // closure is a more concerning signal than a closed lead that at
+    // least sounded engaged.
+    const closedNoCommentByRM = groupBy(closedNoCommentItems, r => (r.RM || 'Unassigned') + '||' + (r.TL || ''));
+    const closedNoCommentCloneCounts = countUniqueAndCloned(closedNoCommentItems);
+    const closedNoCommentTotalLabel = closedNoCommentCloneCounts.cloned > 0
+      ? `${closedNoCommentCloneCounts.unique} (+${closedNoCommentCloneCounts.cloned} cloned cop${closedNoCommentCloneCounts.cloned === 1 ? 'y' : 'ies'} of the same customer, listed under their other RM below)`
+      : String(closedNoCommentCloneCounts.unique);
+    const closedNoCommentBlock = closedNoCommentItems.length ? `
+
+${DIVIDER}
+CLOSED WITH NO COMMENT
+The following leads were closed with no real comment ever logged — no evidence any work happened before closure. A bare closing reason tag doesn't count as a comment; it's shown below for context where present.
+${SUBDIVIDER}
+${Object.values(closedNoCommentByRM).map(group =>
+  `RM      : ${group[0].RM || 'Unassigned'}\nManager : ${group[0].TL || ''}\n${group.map(r => `${idsFor(r)}  |  ${r.subRegion}${r.closing_reason ? `  |  reason: ${r.closing_reason}` : ''}${(r.siblingRMs && r.siblingRMs.length) ? `  |  also held by: ${r.siblingRMs.join(', ')}` : ''}`).join('\n')}`
+).join('\n\n')}
+
+Total : ${closedNoCommentTotalLabel}` : '';
+
     // Possible Premature Closes, appended as its own block — a softer
     // signal than Stalled/Not Connected/Stuck above: these are CLOSED
     // leads, so nothing here is an open compliance breach, just a
@@ -1986,7 +2027,7 @@ Region${regionLabel.includes('&') || regionLabel.includes(',') ? 's' : ''}     :
 Source     : ${sourceLabel}
 Total      : ${totalCountLabel}
 
-${highlightsBlock}${stalledBlock}${mainSection}${notConnectedBlock}${stuckBlock}${warmCloseBlock}
+${highlightsBlock}${stalledBlock}${mainSection}${notConnectedBlock}${stuckBlock}${closedNoCommentBlock}${warmCloseBlock}
 
 ${EMAIL_SIGNATURE}`;
 
@@ -2031,6 +2072,16 @@ ${EMAIL_SIGNATURE}`;
         rows: stuckItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), followupTextFor(r)]),
       });
     }
+    if (closedNoCommentItems.length) {
+      sections.push({
+        heading: 'Closed with No Comment',
+        subheading: `${closedNoCommentTotalLabel} closed lead${closedNoCommentCloneCounts.unique === 1 ? '' : 's'} — no evidence any work happened before closure`,
+        action: 'These leads were closed with no real comment ever logged. Confirm nothing was missed before the lead is gone for good.',
+        columns: ['Lead ID', 'Region', 'RM', 'Closing Reason'],
+        rows: closedNoCommentItems.map(r => [idsFor(r), r.subRegion, rmsFor(r), r.closing_reason || '—']),
+        accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
+      });
+    }
     if (warmCloseItems.length) {
       sections.push({
         heading: 'Possible Premature Closes',
@@ -2064,6 +2115,7 @@ ${EMAIL_SIGNATURE}`;
       kpis: [
         { value: cloneCounts.unique, label: 'Leads Flagged', bg: '#e0e7ff', fg: '#4338ca' },
         { value: stalledCloneCounts.unique, label: stalledCloneCounts.unique === 1 ? 'Stalled Lead' : 'Stalled Leads', bg: '#fee2e2', fg: '#dc2626' },
+        { value: closedNoCommentCloneCounts.unique, label: closedNoCommentCloneCounts.unique === 1 ? 'Closed, No Comment' : 'Closed, No Comment', bg: '#fee2e2', fg: '#dc2626' },
         { value: warmCloseCloneCounts.unique, label: warmCloseCloneCounts.unique === 1 ? 'Premature Close?' : 'Premature Closes?', bg: '#fef3c7', fg: '#b45309' },
       ],
       highlights,
@@ -2072,8 +2124,9 @@ ${EMAIL_SIGNATURE}`;
         + (notConnectedItems.length ? ' The 10-Minute Response SLA reminder above is independent of that grace period and of the issue counts above — it is a separate record, not one of the tallied issues.' : '')
         + (stuckItems.length ? ' Leads Pending Beyond 48 Hours above are the ones NOT already shown under their own primary issue further up — see the main tally for the rest of that count.' : '')
         + (stalledItems.length ? ' Stalled Leads is a quiet-for-6+-hours callout and may overlap with leads already counted in the main tally above — it is not an additional count on top of Total.' : '')
+        + (closedNoCommentItems.length ? ' Closed with No Comment is a discrepancy flag on CLOSED leads, not a compliance count — it does not overlap with or add to the open-issue Total above.' : '')
         + (warmCloseItems.length ? ' Possible Premature Closes is a discrepancy flag on CLOSED leads, not a compliance count — it does not overlap with or add to the open-issue Total above.' : '')
-        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0 || warmCloseCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
+        + ((cloneCounts.cloned > 0 || notConnectedCloneCounts.cloned > 0 || stuckCloneCounts.cloned > 0 || stalledCloneCounts.cloned > 0 || closedNoCommentCloneCounts.cloned > 0 || warmCloseCloneCounts.cloned > 0) ? ' Per-issue counts above are per flagged copy, not per customer — a customer with two RM copies can be flagged twice, once for each copy\'s own issue.' : ''),
     });
 
     // `sorted` (the core issue-flagged population this report's main tally
@@ -2081,8 +2134,9 @@ ${EMAIL_SIGNATURE}`;
     // exposed here so renderReports can push exactly these leads' comment
     // history to Lead_Followups. Deliberately NOT notConnectedItems/
     // stuckItems (neither is genuinely "in one of the issues" — see their
-    // own comments above) or warmCloseItems (those are closed leads).
-    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + warmCloseCloneCounts.unique, issueKey: 'combined', issueLabel: 'All issues', regionNames, sorted };
+    // own comments above) or warmCloseItems/closedNoCommentItems (those
+    // are closed leads).
+    return { region: regionLabel, subject, body, html, count: cloneCounts.unique + notConnectedCloneCounts.unique + stuckCloneCounts.unique + stalledCloneCounts.unique + closedNoCommentCloneCounts.unique + warmCloseCloneCounts.unique, issueKey: 'combined', issueLabel: 'All issues', regionNames, sorted };
   });
 }
 // Builds every issue/region combination at once. With ~8 issues × up to ~19
