@@ -1,8 +1,9 @@
 /**
  * Movement Tracker — snapshots every lead in the current month tab (every
  * source, open or closed — the only requirement is a non-blank lead_id)
- * every 6 hours into a "Movement_Log" tab in this same spreadsheet, pruned
- * to the last 7 days. Runs on Google's servers on a schedule, so it keeps
+ * four times a day (00:00, 06:00, 12:00, 18:00 IST — see SNAPSHOT_HOURS_
+ * below) into a "Movement_Log" tab in this same spreadsheet, pruned to the
+ * last 7 days. Runs on Google's servers on a schedule, so it keeps
  * capturing even when the dashboard AND this Sheet are both fully closed —
  * that's the whole point of it.
  *
@@ -36,28 +37,37 @@
  *      setupMovementTracking, click Run. Approve the permissions prompt
  *      (it needs to read/write this spreadsheet and manage its own
  *      triggers). This creates the Movement_Log tab and installs the
- *      trigger.
- *   6. Done. Check Triggers (clock icon, left sidebar) to confirm it
- *      shows up, firing every 6 hours. From here it runs unattended.
+ *      four triggers (one per hour in SNAPSHOT_HOURS_).
+ *   6. Done. Check Triggers (clock icon, left sidebar) to confirm all
+ *      four snapshotPeriodic entries show up. From here it runs unattended.
  *
  * If your month tab isn't named like "Aug" or "Aug-2026", set
  * TAB_NAME_OVERRIDE below to the exact tab name.
  *
- * Known limitation: Apps Script time triggers fire within a window near
- * the requested cadence (commonly a few minutes, occasionally more under
- * load), and Google — not this script — picks the actual anchor times for
- * an every-N-hours trigger, so don't expect it to land on exact clock
- * hours like 00:00/06:00/12:00/18:00. And a snapshot taken right at a
- * month boundary reads whichever tab resolveTabName_ finds for TODAY's
- * date, so the very first snapshot of a new month won't retroactively
- * relabel the last one from the old month — expected, not a bug.
+ * Cadence: four separate .atHour() triggers (SNAPSHOT_HOURS_), not one
+ * .everyHours(6) trigger — deliberately, after everyHours() was observed
+ * running unreliably (drifting or skipping a cycle entirely under load,
+ * not just landing a few minutes late). atHour() triggers still land
+ * within roughly 15 minutes of their target hour, not the exact minute —
+ * so don't expect a snapshot at the literal top of the hour, just close to
+ * it, every time. And a snapshot taken right at a month boundary reads
+ * whichever tab resolveTabName_ finds for TODAY's date, so the very first
+ * snapshot of a new month won't retroactively relabel the last one from
+ * the old month — expected, not a bug.
  * ================================================================================
  */
 
 const TAB_NAME_OVERRIDE = ''; // e.g. 'Aug' — leave blank to auto-detect
 const MOVEMENT_LOG_SHEET = 'Movement_Log';
 const MOVEMENT_LOG_RETENTION_DAYS = 7;
-const SNAPSHOT_INTERVAL_HOURS = 6; // must be 1, 2, 4, 6, 8, or 12 — a divisor of 24
+// Four separate fixed-hour daily triggers (IST), not one
+// .timeBased().everyHours(6) trigger — see setupMovementTracking's own
+// comment for why: everyHours() only loosely targets its interval and can
+// silently skip or drift by hours under load, whereas atHour() triggers
+// are Google's tightest-guaranteed clock trigger type. Evenly spaced
+// across the day; edit this array (not SNAPSHOT_INTERVAL_HOURS, which no
+// longer exists) to change the cadence, then re-run setupMovementTracking.
+const SNAPSHOT_HOURS_ = [0, 6, 12, 18];
 
 // Mirrors HEADER_ALIASES in dashboard.html. Keep these two in sync if a
 // column header in your export ever changes.
@@ -626,10 +636,14 @@ function setupMovementTracking() {
   ensureMovementLogSheet_(ss);
 
   // Idempotent: safe to re-run any time you need to reinstall or reschedule
-  // the trigger — it won't create duplicates. Also cleans up the old
+  // the triggers — it won't create duplicates. Deletes EVERY existing
+  // snapshotPeriodic trigger first (there may be several — one per hour in
+  // SNAPSHOT_HOURS_ — or a single leftover .everyHours() trigger from
+  // before this switch) before installing a fresh set, so re-running this
+  // after editing SNAPSHOT_HOURS_ never leaves stale triggers at the old
+  // hours running alongside the new ones. Also cleans up the old
   // twice-a-day trigger names (snapshotEvening/snapshotMorning) from an
-  // earlier version of this script, so switching cadence doesn't leave a
-  // stale trigger pointing at a function that no longer exists.
+  // earlier version of this script.
   ScriptApp.getProjectTriggers().forEach(function (t) {
     const fn = t.getHandlerFunction();
     if (fn === 'snapshotPeriodic' || fn === 'snapshotEvening' || fn === 'snapshotMorning') {
@@ -637,10 +651,19 @@ function setupMovementTracking() {
     }
   });
 
-  ScriptApp.newTrigger('snapshotPeriodic').timeBased().everyHours(SNAPSHOT_INTERVAL_HOURS).create();
+  // One atHour() trigger per entry in SNAPSHOT_HOURS_, all firing the same
+  // handler — deliberately NOT .timeBased().everyHours(6): Apps Script
+  // does not guarantee even spacing for everyHours() and, under load, can
+  // skip a firing outright rather than just running it a few minutes late
+  // (see the file header's "Known limitation" note). atHour() is Google's
+  // tightest clock-trigger guarantee — each one independently targets its
+  // own hour, so a bad cycle for one doesn't cascade into the others.
+  SNAPSHOT_HOURS_.forEach(function (hour) {
+    ScriptApp.newTrigger('snapshotPeriodic').timeBased().atHour(hour).everyDays(1).inTimezone('Asia/Kolkata').create();
+  });
 
   Logger.log(
-    'Movement tracking installed: snapshots every ' + SNAPSHOT_INTERVAL_HOURS + ' hours, ' +
+    'Movement tracking installed: snapshots daily at ' + SNAPSHOT_HOURS_.join(':00, ') + ':00 IST, ' +
     'Movement_Log tab ready, retaining ' + MOVEMENT_LOG_RETENTION_DAYS + ' days.'
   );
 }
