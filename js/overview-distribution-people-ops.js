@@ -278,7 +278,6 @@ function renderAll(){
   renderDailyTrend();
   renderRMScoreTable();
   renderFanout();
-  renderWorkloadBalance();
   renderAllocationMatrix();
   renderSourceMix();
   buildAuditControls();
@@ -308,7 +307,6 @@ const OFFTAB_COUNT_SECTIONS = [
   { id: 'sec-rm',          countId: 'rmCount' },
   { id: 'sec-rmscore',     countId: 'rmScoreCount' },
   { id: 'sec-fanout',      countId: 'fanoutCount' },
-  { id: 'sec-balance',     countId: 'balanceCount' },
   { id: 'sec-matrix',      countId: 'matrixCount' },
   { id: 'sec-notupdated',  countId: 'notUpdatedCount', severity: 'has-items' },
   { id: 'sec-notconn',     countId: 'notConnCount',    severity: 'urgent' },
@@ -690,60 +688,6 @@ function renderFanout(){
   + (rows.length > CAP ? `<tr><td colspan="5" class="empty-row" style="padding:10px;">Showing first ${CAP} of ${rows.length}</td></tr>` : '');
 }
 
-/* ===================== WORKLOAD BALANCE ===================== */
-function renderWorkloadBalance(){
-  const byRM = {};
-  leads.forEach(l => {
-    if (!l.isOpenLead) return; // balance is about live workload, not history
-    const key = l.RM || 'Unassigned';
-    if (!byRM[key]) byRM[key] = { n: 0, collated: 0 };
-    byRM[key].n++;
-    if (l.collatedFrom > 1) byRM[key].collated++;
-  });
-
-  const entries = Object.entries(byRM).sort((a, b) => b[1].n - a[1].n);
-  const counts = entries.map(e => e[1].n);
-  const total = counts.reduce((s, n) => s + n, 0);
-  const avg = counts.length ? total / counts.length : 0;
-
-  document.getElementById('balanceCount').textContent = entries.length + ' RMs';
-  const summary = document.getElementById('balanceSummary');
-
-  if (!entries.length) {
-    summary.textContent = '';
-    document.getElementById('balanceTable').querySelector('tbody').innerHTML =
-      `<tr><td colspan="4" class="empty-row">No open leads in the current filters</td></tr>`;
-    document.getElementById('balanceTable').querySelector('thead').innerHTML = '';
-    return;
-  }
-
-  const overloaded = entries.filter(([, e]) => e.n > avg * 1.25).length;
-  const under = entries.filter(([, e]) => e.n < avg * 0.75).length;
-  summary.innerHTML = `${total.toLocaleString()} open leads across ${entries.length} RMs · average <b>${avg.toFixed(1)}</b> each · `
-    + `<b style="color:var(--red)">${overloaded}</b> carrying 25%+ above average · `
-    + `<b style="color:var(--amber)">${under}</b> carrying 25%+ below.`
-    + `<br><span class="dim">Counts OPEN leads only — closed and Opportunity+ leads are excluded, since balance is about live workload. `
-    + `For every lead ever assigned, see the Total column in People → RM Workload.</span>`;
-
-  const max = counts[0];
-  const table = document.getElementById('balanceTable');
-  table.querySelector('thead').innerHTML = `<tr>
-    <th>RM</th><th style="min-width:160px">Open Leads</th>
-    <th style="text-align:right">Count</th><th style="text-align:right">vs Average</th></tr>`;
-  table.querySelector('tbody').innerHTML = entries.map(([rm, e]) => {
-    const n = e.n;
-    const pct = Math.round((n / max) * 100);
-    const delta = avg ? ((n - avg) / avg) * 100 : 0;
-    const cls = delta > 25 ? 'heat-red' : delta < -25 ? 'heat-amber' : 'heat-green';
-    return `<tr>
-      <td>${esc(rm)}</td>
-      <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div></td>
-      <td class="num">${numWithClone(n, e.collated)}</td>
-      <td class="num"><span class="heat-cell ${cls}">${delta >= 0 ? '+' : ''}${delta.toFixed(0)}%</span></td>
-    </tr>`;
-  }).join('');
-}
-
 /* ===================== REGION → TL → RM ALLOCATION ===================== */
 function renderAllocationMatrix(){
   const rows = {};
@@ -1041,18 +985,11 @@ function renderRMTable(){
   const byRM = {};
   let multiAgentTotal = 0;
   leads.forEach(l => {
-    // Key on the same 'Unassigned' fallback Workload Balance uses. Keying on
-    // a raw blank RM put those leads under an empty-string row here while
-    // Workload Balance filed them under "Unassigned" — the two tables then
-    // disagreed on the RM list as well as the counts.
     const key = l.RM || 'Unassigned';
     if (!byRM[key]) byRM[key] = { RM:key, region:l.region, total:0, totalCollated:0, open:0, openCollated:0, oppPlus:0, oppPlusCollated:0, critical:0, criticalCollated:0, calls:0, multiAgent:0, multiAgentCollated:0 };
     const b = byRM[key];
     const cloned = l.collatedFrom > 1;
     b.total++; if (cloned) b.totalCollated++;
-    // Counted so this table reconciles with Distribution → Workload Balance,
-    // which shows OPEN leads only. Without it the same RM appears with two
-    // different lead counts across two tabs and neither explains why.
     if (l.isOpenLead) { b.open++; if (cloned) b.openCollated++; }
     if (l.oppOrAbove) { b.oppPlus++; if (cloned) b.oppPlusCollated++; }
     if (l.underCalledToday) { b.critical++; if (cloned) b.criticalCollated++; }
@@ -1062,15 +999,27 @@ function renderRMTable(){
   const rows = Object.values(byRM).sort((a,b)=> b.total - a.total);
   const maxTotal = Math.max(1, ...rows.map(r=>r.total));
 
+  // "vs Avg (Open)" — how far this RM's OPEN workload sits from the mean
+  // open count, so an imbalance (someone carrying way more/fewer live leads
+  // than their peers) is visible at a glance without a separate table.
+  // Averaged only over RMs actually carrying at least one open lead — an
+  // RM with zero open leads shouldn't pull the baseline itself down.
+  const openRows = rows.filter(r => r.open > 0);
+  const avgOpen = openRows.length ? openRows.reduce((s, r) => s + r.open, 0) / openRows.length : 0;
+
   document.getElementById('rmCount').textContent = rows.length + ' RMs';
 
   const summaryEl = document.getElementById('rmMultiAgentSummary');
   if (summaryEl) {
     const pct = leads.length ? Math.round((multiAgentTotal / leads.length) * 100) : 0;
     const openTotal = rows.reduce((s, r) => s + r.open, 0);
+    const overloaded = openRows.filter(r => r.open > avgOpen * 1.25).length;
+    const under = openRows.filter(r => r.open < avgOpen * 0.75).length;
     summaryEl.innerHTML = leads.length
       ? `<b>Total</b> counts every lead ever assigned (including closed and Opportunity+); <b>Open</b> counts only live ones — `
-        + `${openTotal.toLocaleString()} of ${leads.length.toLocaleString()}. Distribution → Workload Balance ranks by the Open figure. · `
+        + `${openTotal.toLocaleString()} of ${leads.length.toLocaleString()}, averaging <b>${avgOpen.toFixed(1)}</b> open leads per RM carrying any — `
+        + `<b style="color:var(--red)">${overloaded}</b> carrying 25%+ above that average, `
+        + `<b style="color:var(--amber)">${under}</b> carrying 25%+ below. · `
         + `${multiAgentTotal} of ${leads.length} leads (${pct}%) have been handled by more than one agent, based on names logged in internal_status_comments/stage_comments.`
       : '';
   }
@@ -1079,21 +1028,28 @@ function renderRMTable(){
   table.querySelector('thead').innerHTML = `<tr>
     <th>RM</th><th>Region</th><th style="min-width:140px">Workload</th>
     <th style="text-align:right">Total</th><th style="text-align:right">Open</th>
+    <th style="text-align:right" title="This RM's open-lead count vs the average open count across every RM carrying at least one open lead.">vs Avg (Open)</th>
     <th style="text-align:right">Opp+</th>
     <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-row">No RM data</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-row">No RM data</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(b => {
     const avg = b.total ? (b.calls / b.total) : 0;
     const pct = Math.round((b.total / maxTotal) * 100);
+    const delta = avgOpen ? ((b.open - avgOpen) / avgOpen) * 100 : 0;
+    const deltaCls = delta > 25 ? 'heat-red' : delta < -25 ? 'heat-amber' : 'heat-green';
+    const deltaCell = avgOpen
+      ? `<span class="heat-cell ${deltaCls}">${delta >= 0 ? '+' : ''}${delta.toFixed(0)}%</span>`
+      : `<span class="dim">—</span>`;
     return `<tr>
       <td>${esc(b.RM)}</td><td class="dim">${esc(b.region)}</td>
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div></td>
       <td class="num">${numWithClone(b.total, b.totalCollated)}</td><td class="num">${numWithClone(b.open, b.openCollated)}</td>
+      <td class="num">${deltaCell}</td>
       <td class="num" style="color:var(--green)">${numWithClone(b.oppPlus, b.oppPlusCollated)}</td>
       <td class="num" style="color:${b.critical?'var(--red)':'inherit'}">${numWithClone(b.critical, b.criticalCollated)}</td>
       <td class="num" style="color:${b.multiAgent?'var(--amber)':'inherit'}">${numWithClone(b.multiAgent, b.multiAgentCollated)}</td>

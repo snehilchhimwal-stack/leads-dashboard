@@ -862,11 +862,9 @@
       <button class="tab-btn active" data-tab="tab-overview">Overview</button>
       <button class="tab-btn" data-tab="tab-operations">Operations <span class="tab-badge" id="tabBadgeOps">0</span></button>
       <button class="tab-btn" data-tab="tab-people">People</button>
-      <button class="tab-btn" data-tab="tab-distribution">Distribution</button>
       <button class="tab-btn" data-tab="tab-audit">Audit</button>
       <button class="tab-btn" data-tab="tab-movement">Movement</button>
       <button class="tab-btn" data-tab="tab-tracking">Tracking</button>
-      <button class="tab-btn" data-tab="tab-rmtimeline">RM Timeline</button>
     </div>
 
     <!-- ============ MORNING BRIEF ============ -->
@@ -1049,7 +1047,7 @@
 
     <!-- ============ PEOPLE ============ -->
     <div class="tab-panel" id="tab-people">
-      <div class="band-label">People <span class="band-note">who is carrying what, and how well</span></div>
+      <div class="band-label">People <span class="band-note">who's carrying what and how well, how leads are distributed, and one RM's own history</span></div>
 
       <section id="sec-rmscore">
         <div class="section-head"><div class="section-bar green"></div><div class="section-title">RM Performance &amp; SLA Score</div><div class="section-count" id="rmScoreCount"></div></div>
@@ -1067,24 +1065,14 @@
         <div class="filter-summary" id="rmMultiAgentSummary" style="margin-bottom:10px;"></div>
         <div class="section-scroll"><table id="rmTable"><thead></thead><tbody></tbody></table></div>
       </section>
-    </div>
 
-    <!-- ============ DISTRIBUTION ============ -->
-    <div class="tab-panel" id="tab-distribution">
-      <div class="band-label">Distribution <span class="band-note">how leads are allocated across the org</span></div>
-
+      <!-- ============ DISTRIBUTION ============ -->
       <section id="sec-fanout">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Lead Fan-out &amp; Claim Rate</div><div class="section-count" id="fanoutCount"></div></div>
         <div class="filter-summary" id="fanoutSummary"></div>
         <div id="fanoutViz" style="margin-bottom:16px;"></div>
         <div class="filter-summary">Claim rate = of the copies routed to an RM, the share they ended up owning. A low rate with high volume means that RM is being routed leads others win first.</div>
         <div class="section-scroll"><table id="claimTable"><thead></thead><tbody></tbody></table></div>
-      </section>
-
-      <section id="sec-balance">
-        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Workload Balance</div><div class="section-count" id="balanceCount"></div></div>
-        <div class="filter-summary" id="balanceSummary"></div>
-        <div class="section-scroll"><table id="balanceTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
       <section id="sec-matrix">
@@ -1095,6 +1083,41 @@
       <section id="sec-sourcemix">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Source Mix by Region</div></div>
         <div class="section-scroll"><table id="sourceMixTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <!-- ============ RM TIMELINE ============ -->
+      <div class="stale-controls" style="margin-bottom:14px;">
+        <label class="stale-label">RM
+          <select id="rmtlRMSelect" class="stale-select"></select>
+        </label>
+        <span style="font-size:11.5px; color:var(--text-faint);">Every section below is scoped to this one RM, plus the filters at the top of the page.</span>
+      </div>
+
+      <section id="sec-rmtl-daily">
+        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Leads Assigned, by Day</div><div class="section-count" id="rmtlDailyCount"></div></div>
+        <div class="filter-summary">Leads with <span class="mono">lead_assigned_at</span> on each day, currently assigned to this RM. Always the last 7 days ending on the Assigned-date filter's "To" date at the top of the page (your browser's own today, by default) — change that "To" date and this window moves with it. <span class="mono">RM</span> is a current snapshot, not a dated history — so a lead reassigned to a different RM after its own lead_assigned_at still counts on its original assignment day here, not the day it changed hands. Click a day to load its timeline below.</div>
+        <div id="rmtlDailyTrend"></div>
+      </section>
+
+      <section id="sec-rmtl-timeline">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Day Timeline</div><div class="section-count" id="rmtlTimelineCount"></div></div>
+        <div class="filter-summary">Every dated touch across this RM's leads on the picked day, in order — a call connect, or a logged comment in <span class="mono">internal_status_comments</span>/<span class="mono">stage_comments</span>. <span class="mono">last_comment</span> and <span class="mono">closing_reason</span> aren't individually dated (no per-attempt timestamp), so they're shown as current-state context on each event rather than as their own timeline entries.</div>
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="stale-label">Day <input type="date" id="rmtlDayInput" class="stale-select"></label>
+        </div>
+        <div class="section-scroll" style="max-height:480px;"><div id="rmtlTimelineList"></div></div>
+      </section>
+
+      <section id="sec-rmtl-issues">
+        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Leads With an Issue Right Now</div><div class="section-count" id="rmtlIssueCount"></div></div>
+        <div class="filter-summary">This RM's currently open leads breaching at least one SLA check — same five checks as Operations.</div>
+        <div class="section-scroll"><table id="rmtlIssueTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="sec-rmtl-history">
+        <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Issue Count Over Time</div><div class="section-count" id="rmtlHistoryCount"></div></div>
+        <div class="filter-summary">How many of this RM's leads were flagged for each issue at each captured <span class="mono">Movement_Log</span> snapshot — same source and chart as the Tracking tab, grouped by RM instead of region, showing this RM's whole captured history.</div>
+        <div id="rmtlHistoryChart" style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 10px 8px;"></div>
       </section>
     </div>
 
@@ -1230,45 +1253,6 @@
           <button class="btn ghost" id="clearSlaHistoryBtn" style="border-color:var(--red); color:var(--red);" title="Permanently deletes every row in SLA_History. Cannot be undone.">Clear SLA History…</button>
           <span id="slaHistoryAdminStatus" style="font-size:11.5px; color:var(--text-faint);"></span>
         </div>
-      </section>
-    </div>
-
-    <!-- ============ RM TIMELINE ============ -->
-    <div class="tab-panel" id="tab-rmtimeline">
-      <div class="band-label">RM Timeline <span class="band-note">one RM's day-by-day volume, activity, and issue history</span></div>
-
-      <div class="stale-controls" style="margin-bottom:14px;">
-        <label class="stale-label">RM
-          <select id="rmtlRMSelect" class="stale-select"></select>
-        </label>
-        <span style="font-size:11.5px; color:var(--text-faint);">Every section below is scoped to this one RM, plus the filters at the top of the page.</span>
-      </div>
-
-      <section id="sec-rmtl-daily">
-        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Leads Assigned, by Day</div><div class="section-count" id="rmtlDailyCount"></div></div>
-        <div class="filter-summary">Leads with <span class="mono">lead_assigned_at</span> on each day, currently assigned to this RM. Always the last 7 days ending on the Assigned-date filter's "To" date at the top of the page (your browser's own today, by default) — change that "To" date and this window moves with it. <span class="mono">RM</span> is a current snapshot, not a dated history — so a lead reassigned to a different RM after its own lead_assigned_at still counts on its original assignment day here, not the day it changed hands. Click a day to load its timeline below.</div>
-        <div id="rmtlDailyTrend"></div>
-      </section>
-
-      <section id="sec-rmtl-timeline">
-        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Day Timeline</div><div class="section-count" id="rmtlTimelineCount"></div></div>
-        <div class="filter-summary">Every dated touch across this RM's leads on the picked day, in order — a call connect, or a logged comment in <span class="mono">internal_status_comments</span>/<span class="mono">stage_comments</span>. <span class="mono">last_comment</span> and <span class="mono">closing_reason</span> aren't individually dated (no per-attempt timestamp), so they're shown as current-state context on each event rather than as their own timeline entries.</div>
-        <div class="stale-controls" style="margin-bottom:10px;">
-          <label class="stale-label">Day <input type="date" id="rmtlDayInput" class="stale-select"></label>
-        </div>
-        <div class="section-scroll" style="max-height:480px;"><div id="rmtlTimelineList"></div></div>
-      </section>
-
-      <section id="sec-rmtl-issues">
-        <div class="section-head"><div class="section-bar red"></div><div class="section-title">Leads With an Issue Right Now</div><div class="section-count" id="rmtlIssueCount"></div></div>
-        <div class="filter-summary">This RM's currently open leads breaching at least one SLA check — same five checks as Operations.</div>
-        <div class="section-scroll"><table id="rmtlIssueTable"><thead></thead><tbody></tbody></table></div>
-      </section>
-
-      <section id="sec-rmtl-history">
-        <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Issue Count Over Time</div><div class="section-count" id="rmtlHistoryCount"></div></div>
-        <div class="filter-summary">How many of this RM's leads were flagged for each issue at each captured <span class="mono">Movement_Log</span> snapshot — same source and chart as the Tracking tab, grouped by RM instead of region, showing this RM's whole captured history.</div>
-        <div id="rmtlHistoryChart" style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 10px 8px;"></div>
       </section>
     </div>
 
