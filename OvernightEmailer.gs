@@ -935,11 +935,18 @@ function sendOvernightFollowupEmailsNow() { sendOvernightFollowupEmails(); }
 // logged for today at all, a row with no stored recipient, or a region
 // where every one of this morning's flagged leads has genuinely already
 // resolved.
-function debugFollowupStatus_() {
+// NAMED WITHOUT A TRAILING UNDERSCORE ON PURPOSE, unlike every other
+// helper in this file — Apps Script's editor treats a trailing underscore
+// as "private" and silently omits it from the Run/Debug function dropdown
+// (confirmed: none of this file's real _-suffixed helpers show up there
+// either). Every other function meant to be run manually from the editor
+// (setupOvernightEmailer, sendOvernightMorningEmailsNow, etc.) already
+// follows this same no-underscore convention for exactly this reason.
+function debugFollowupStatusNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const todayKey = istDayKeyGs_(now);
-  Logger.log('=== debugFollowupStatus_ — today (IST) = ' + todayKey + ', run at ' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') + ' ===');
+  Logger.log('=== debugFollowupStatusNow — today (IST) = ' + todayKey + ', run at ' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') + ' ===');
 
   const logSheet = ensureOvernightLogSheet_(ss);
   const lastRow = logSheet.getLastRow();
@@ -1007,5 +1014,5 @@ function debugFollowupStatus_() {
         unresolvedCount > 0 && !to ? '  -> would send, but SKIPPED because stored `to` is empty (see above)' :
         '  -> correctly nothing to send (everything already resolved)'));
   });
-  Logger.log('=== end debugFollowupStatus_ ===');
+  Logger.log('=== end debugFollowupStatusNow ===');
 }
