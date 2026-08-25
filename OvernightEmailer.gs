@@ -837,17 +837,23 @@ function sendOvernightFollowupEmails() {
 
 // ONE-OFF: backfills to/cc/subject into TODAY's Overnight_Log rows that
 // predate the recipient-storing fix (see sendOvernightFollowupEmails'
-// own comment) — run this ONCE, right after pasting the updated file, to
-// make today's already-sent morning emails' rows followupable without
+// own comment) — run this right after pasting an updated file, to make
+// today's already-sent morning emails' rows followupable without
 // re-sending a duplicate morning email. Reconstructs each row's RM list
 // from lead_ids_json (looking each lead_id's RM up in the current leads
 // tab) and re-resolves recipients through the SAME
 // resolveRecipientEmailsForRegion_ every real send goes through, so the
 // backfilled to/cc matches exactly what the original 10am send would
 // have produced (assuming RM_Hierarchy/Manager_Directory haven't changed
-// since). Safe to run more than once — a row that already has a stored
-// `to` is left untouched.
-function backfillTodaysOvernightLogRecipients_() {
+// since). NOTE: lead_ids_json only ever holds leads flagged for an SLA
+// issue that morning, not every overnight lead — a region whose flagged
+// lead's own RM isn't resolvable via RM_Hierarchy (and has no
+// Region_Recipients fallback) still won't get a backfilled recipient
+// here, even if the original send resolved fine from a broader RM set.
+// Safe to run more than once — a row that already has a stored `to` is
+// left untouched. NAMED WITHOUT A TRAILING UNDERSCORE, unlike its
+// original name — see debugFollowupStatusNow's own comment for why.
+function backfillTodaysOvernightLogRecipientsNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const todayKey = istDayKeyGs_(now);
@@ -982,7 +988,7 @@ function debugFollowupStatusNow() {
     const cc = String(run[6] || '').trim();
     const subject = String(run[7] || '').trim();
     Logger.log('--- Row ' + (idx + 1) + '/' + todaysRuns.length + ': region=' + region + ', thread=' + threadId + ' ---');
-    Logger.log('  stored to="' + to + '"  cc="' + cc + '"  subject="' + subject + '"' + (to ? '' : '  <<< EMPTY — this row predates the recipient-storing fix, or resolveRecipientEmailsForRegion_ returned nothing for it. sendOvernightFollowupEmails SKIPS this row entirely (see its own comment). Run backfillTodaysOvernightLogRecipients_ to fix today\'s rows, or wait for tomorrow\'s fresh 10am run.'));
+    Logger.log('  stored to="' + to + '"  cc="' + cc + '"  subject="' + subject + '"' + (to ? '' : '  <<< EMPTY — this row predates the recipient-storing fix, or resolveRecipientEmailsForRegion_ returned nothing for it. sendOvernightFollowupEmails SKIPS this row entirely (see its own comment). Run backfillTodaysOvernightLogRecipientsNow to fix today\'s rows, or wait for tomorrow\'s fresh 10am run.'));
 
     let issueLog;
     try { issueLog = JSON.parse(run[3] || '[]'); } catch (e) { issueLog = []; }
