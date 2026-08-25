@@ -454,6 +454,64 @@ function rebuildRmHierarchy() {
   Logger.log('RM_Hierarchy rebuilt: ' + rows.length + ' people. Manager_Directory refreshed (emails preserved).');
 }
 
+// ONE-OFF DIAGNOSTIC — read-only, lists every row currently checked
+// Excluded in RM_Hierarchy. resolveRmHierarchy_() itself always generates
+// excluded: false (see its own comment) — rebuildRmHierarchy only ever
+// preserves whatever was ALREADY in the sheet's Excluded column across a
+// rebuild, by design, so it can carry forward a genuine manual choice.
+// A row reading Excluded=true that nobody remembers checking is most
+// likely a stale carry-over from the OLD org-chart-based hierarchy this
+// file replaced, which used to auto-flag "dummy" rows this way — that
+// mechanism doesn't exist in the current HR-based system at all, so
+// there's no code path left that would set this to true on its own.
+// Run this to see the full list before deciding whether to clear any of
+// them (see clearAllRmHierarchyExclusionsNow below).
+function listExcludedRmsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  if (!sheet) { Logger.log('RM_Hierarchy sheet not found.'); return; }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('RM_Hierarchy is empty.'); return; }
+
+  const rows = withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, 10).getValues(); }, 'listExcludedRmsNow: read RM_Hierarchy');
+  const excludedRows = [];
+  rows.forEach(function (row, i) {
+    if (row[7]) excludedRows.push({ rowNum: i + 2, name: row[2], team: row[0], role: row[1], note: row[8] });
+  });
+
+  Logger.log('RM_Hierarchy: ' + rows.length + ' total people, ' + excludedRows.length + ' currently marked Excluded.');
+  excludedRows.forEach(function (r) {
+    Logger.log('  Row ' + r.rowNum + ': ' + r.name + ' (' + r.team + ', ' + r.role + ')' + (r.note ? ' — note: ' + r.note : ''));
+  });
+  if (excludedRows.length) {
+    Logger.log('If none of these were meant to be excluded, run clearAllRmHierarchyExclusionsNow to un-check all of them at once (or un-check individual boxes by hand in the sheet).');
+  }
+}
+
+// ONE-OFF: un-checks Excluded for EVERY row in RM_Hierarchy — run this
+// only after reviewing listExcludedRmsNow's output and confirming none of
+// those exclusions were intentional. Clears the sheet's checkboxes
+// directly; does not touch anything else (tl/tm/rh/ch/note/email are all
+// left exactly as they are). Safe to run more than once — a row that's
+// already un-excluded is simply left alone.
+function clearAllRmHierarchyExclusionsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  if (!sheet) { Logger.log('RM_Hierarchy sheet not found.'); return; }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('RM_Hierarchy is empty.'); return; }
+
+  const range = withRetry_(function () { return sheet.getRange(2, 8, lastRow - 1, 1); }, 'clearAllRmHierarchyExclusionsNow: read Excluded column');
+  const values = range.getValues();
+  let cleared = 0;
+  const next = values.map(function (row) {
+    if (row[0]) { cleared++; return [false]; }
+    return row;
+  });
+  withRetry_(function () { range.setValues(next); }, 'clearAllRmHierarchyExclusionsNow: write cleared Excluded column');
+  Logger.log('Cleared Excluded on ' + cleared + ' row(s) out of ' + values.length + ' total. Re-run listExcludedRmsNow to confirm the list is now empty, then re-run backfillTodaysOvernightLogRecipientsNow (OvernightEmailer.gs) to pick up the newly-resolvable RMs for today.');
+}
+
 // Same small-independently-retried-steps shape as ensureRmHierarchySheet_/
 // rebuildRmHierarchy above, for the same reason — one big withRetry_ around
 // delete+recreate+write makes every retry redo the whole thing.
