@@ -264,7 +264,11 @@ function ensureOvernightLogSheet_(ss) {
   const existing = withRetry_(function () { return ss.getSheetByName(OVERNIGHT_LOG_SHEET_); }, 'check for existing Overnight_Log');
   if (existing) return existing;
 
-  const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at'];
+  // to/cc/subject: the ACTUAL resolved recipients + subject line from the
+  // 10am send, needed so the 1pm follow-up can send to the same real
+  // people explicitly — see sendOvernightFollowupEmails' own comment for
+  // why it can no longer just GmailThread.reply() on thread_id.
+  const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject'];
   const sheet = withRetry_(function () { return ss.insertSheet(OVERNIGHT_LOG_SHEET_); }, 'insert Overnight_Log');
   SpreadsheetApp.flush();
   withRetry_(function () {
@@ -498,7 +502,10 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const issueLog = [];
   leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
   withRetry_(function () {
-    logSheet.appendRow([todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]);
+    logSheet.appendRow([
+      todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+      rec.to, rec.cc || '', subject,
+    ]);
   }, 'log Overnight_Log row (' + region + subjectSuffix + ')');
 }
 
@@ -665,9 +672,23 @@ function waitForFollowupSuggestions_(ss, leadIds) {
  * morning's issue leads against the CURRENT sheet — still flagged for the
  * SAME issue it had at 10am counts as unresolved (shown in red); anything
  * else (issue cleared, lead closed, lead reached Opportunity+, or the lead
- * can no longer be found at all) counts as resolved. Replies on the exact
- * same Gmail thread the morning email created, so this reads as one
- * conversation, not a second email.
+ * can no longer be found at all) is dropped from this follow-up entirely.
+ *
+ * Sends to the SAME to/cc the 10am email resolved (stored in Overnight_Log
+ * at send time), NOT via GmailThread.reply()/replyAll() on thread_id —
+ * real production bug: reply()/replyAll() target "the sender of the last
+ * message on this thread," and since every message in this thread was
+ * sent BY the script's own account (nobody has replied inbound yet), that
+ * "sender" is the SCRIPT ACCOUNT ITSELF, not the real A1 — every follow-up
+ * was silently landing back in the script owner's own inbox instead of
+ * the real hierarchy. Neither method's options support overriding "to"
+ * (confirmed against Google's own Apps Script reference), so there's no
+ * way to fix this by tweaking the reply call — sending a fresh message to
+ * the stored recipients, subject prefixed "Re: ", is the only reliable
+ * option. thread_id is still logged for manual reference, just no longer
+ * used to send. A row logged before this fix (no stored to/cc/subject)
+ * is skipped rather than silently reproducing the same wrong-recipient
+ * bug — see the skip check below.
  *
  * Before sending, every still-unresolved lead (across every region) is
  * pushed to Lead_Followups and given a short, bounded wait for a human-
@@ -684,7 +705,7 @@ function sendOvernightFollowupEmails() {
   const lastRow = logSheet.getLastRow();
   if (lastRow < 2) return;
 
-  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 5).getValues(); }, 'read Overnight_Log');
+  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'read Overnight_Log');
   // Column A was written as a plain "yyyy-MM-dd" string (todayKey), but
   // Sheets auto-detects strings that look like dates and silently stores
   // the cell as a real Date instead — read back, that comes through here
@@ -714,10 +735,13 @@ function sendOvernightFollowupEmails() {
   // Pass 1: classify every region's issue leads into resolved/unresolved
   // WITHOUT sending anything yet — every region's still-unresolved leads
   // get pushed to Lead_Followups and waited on together, once, below.
-  const perRegion = []; // { region, threadId, resolvedRows, unresolvedRows }
+  const perRegion = []; // { region, threadId, to, cc, subject, resolvedRows, unresolvedRows }
   todaysRuns.forEach(function (run) {
     const region = run[1];
     const threadId = run[2];
+    const to = String(run[5] || '').trim();
+    const cc = String(run[6] || '').trim();
+    const subject = String(run[7] || '').trim();
     let issueLog;
     try { issueLog = JSON.parse(run[3] || '[]'); } catch (e) { issueLog = []; }
     if (!issueLog.length) return; // nothing to follow up on for this region
@@ -740,7 +764,7 @@ function sendOvernightFollowupEmails() {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
     });
-    perRegion.push({ region: region, threadId: threadId, resolvedRows: resolvedRows, unresolvedRows: unresolvedRows });
+    perRegion.push({ region: region, threadId: threadId, to: to, cc: cc, subject: subject, resolvedRows: resolvedRows, unresolvedRows: unresolvedRows });
   });
 
   const allUnresolved = [];
@@ -766,6 +790,16 @@ function sendOvernightFollowupEmails() {
   // entirely rather than showing them as a separate "already handled" list.
   perRegion.forEach(function (r) {
     if (!r.unresolvedRows.length) return; // everything from this morning's flags is resolved — nothing to send
+    if (!r.to) {
+      // This row predates the recipient-storing fix (Overnight_Log only
+      // had 5 columns, no to/cc/subject) — GmailThread.reply() on
+      // threadId alone would just reproduce the wrong-recipient bug this
+      // whole rewrite exists to fix, so skip rather than silently repeat
+      // it. Resolves itself the next time sendOvernightMorningEmails runs
+      // and logs a row with the new columns filled in.
+      Logger.log('Skipping follow-up for ' + r.region + ' (thread ' + r.threadId + '): no stored recipient — this row predates the recipient-storing fix.');
+      return;
+    }
     r.unresolvedRows.forEach(function (row) { row.suggestion = suggestionByLeadId[row.lead_id] || ''; });
 
     const sections = [{
@@ -785,13 +819,18 @@ function sendOvernightFollowupEmails() {
       footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
     });
     const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
+    const subject = 'Re: ' + (r.subject || (r.region + ' Overnight Leads'));
 
     try {
       withRetry_(function () {
-        GmailApp.getThreadById(r.threadId).reply(plainBody, { htmlBody: bodyHtml });
+        return GmailApp.createDraft(r.to, subject, plainBody, {
+          cc: r.cc || undefined,
+          htmlBody: bodyHtml,
+          name: 'Homesfy Lead Ops',
+        }).send();
       }, 'send follow-up reply (' + r.region + ')');
     } catch (e) {
-      Logger.log('Overnight follow-up reply failed for ' + r.region + ' (thread ' + r.threadId + '): ' + e);
+      Logger.log('Overnight follow-up reply failed for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + e);
     }
   });
 }
