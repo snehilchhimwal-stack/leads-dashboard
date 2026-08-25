@@ -835,6 +835,69 @@ function sendOvernightFollowupEmails() {
   });
 }
 
+// ONE-OFF: backfills to/cc/subject into TODAY's Overnight_Log rows that
+// predate the recipient-storing fix (see sendOvernightFollowupEmails'
+// own comment) — run this ONCE, right after pasting the updated file, to
+// make today's already-sent morning emails' rows followupable without
+// re-sending a duplicate morning email. Reconstructs each row's RM list
+// from lead_ids_json (looking each lead_id's RM up in the current leads
+// tab) and re-resolves recipients through the SAME
+// resolveRecipientEmailsForRegion_ every real send goes through, so the
+// backfilled to/cc matches exactly what the original 10am send would
+// have produced (assuming RM_Hierarchy/Manager_Directory haven't changed
+// since). Safe to run more than once — a row that already has a stored
+// `to` is left untouched.
+function backfillTodaysOvernightLogRecipients_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const now = new Date();
+  const todayKey = istDayKeyGs_(now);
+  const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
+  const logSheet = ensureOvernightLogSheet_(ss);
+  const lastRow = logSheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Overnight_Log is empty — nothing to backfill.'); return; }
+
+  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'read Overnight_Log for backfill');
+  const { colIndex, dataRows } = readLeadsTab_(ss);
+  const rmByLeadId = {};
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (leadId) rmByLeadId[leadId] = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+  });
+  const legacyRecipients = loadRegionRecipients_(ss);
+
+  let filled = 0, skippedAlready = 0, skippedNoRms = 0, skippedUnresolved = 0;
+  logRows.forEach(function (r, i) {
+    const cell = r[0];
+    const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
+    if (key !== todayKey) return;
+    if (String(r[5] || '').trim()) { skippedAlready++; return; } // already has a stored `to`
+
+    const region = r[1];
+    let issueLog;
+    try { issueLog = JSON.parse(r[3] || '[]'); } catch (e) { issueLog = []; }
+    const rmNames = Array.from(new Set(issueLog.map(function (entry) { return rmByLeadId[entry.lead_id]; }).filter(Boolean)));
+    if (!rmNames.length) { skippedNoRms++; return; }
+
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients);
+    if (!recEmails.length) { skippedUnresolved++; return; }
+    if (recEmails.length > 1) {
+      Logger.log('Backfill for ' + region + ' row ' + (i + 2) + ' resolved to ' + recEmails.length + ' buckets instead of 1 — using the first; the RM list reconstructed from lead_ids_json may not exactly match the original bucket.');
+    }
+    const rec = recEmails[0];
+    const subjectSuffix = rec.bucketLabel ? ' (' + rec.bucketLabel + ')' : '';
+    const subject = region + ' Overnight Leads - ' + dateLabel + subjectSuffix;
+
+    const rowNum = i + 2;
+    withRetry_(function () {
+      logSheet.getRange(rowNum, 6, 1, 3).setValues([[rec.to, rec.cc || '', subject]]);
+    }, 'backfill Overnight_Log row ' + rowNum);
+    filled++;
+  });
+
+  Logger.log('Backfill done: ' + filled + ' row(s) filled, ' + skippedAlready + ' already had a recipient, ' +
+    skippedNoRms + ' had no resolvable RM, ' + skippedUnresolved + ' had no resolvable recipient at all.');
+}
+
 // ---- One-time setup — run this once from the editor ----
 function setupOvernightEmailer() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
