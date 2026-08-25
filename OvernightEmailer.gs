@@ -60,14 +60,24 @@
  *      header for the full picture, including the handful of people whose
  *      manager chain couldn't be fully resolved
  *      from the source export (flagged in RM_Hierarchy's Note column).
- *   4. Test BEFORE trusting the daily trigger: run sendOvernightMorningEmailsNow
+ *   4. For the 1pm follow-up to land in the SAME Gmail thread as the 10am
+ *      email (rather than as a separate "Re: ..." conversation), enable the
+ *      Advanced Gmail Service ONCE: in the Apps Script editor, click
+ *      Services (the + next to "Services" in the left sidebar), find
+ *      "Gmail API" in the list, click Add. No code change needed — this
+ *      just turns on the `Gmail.*` calls sendThreadedGmailReply_ already
+ *      makes. Skipping this step is NOT fatal: sendOvernightFollowupEmails
+ *      falls back automatically to a plain new message to the same
+ *      recipients (correct people, just not guaranteed to thread) and logs
+ *      why — see sendThreadedGmailReply_'s own comment.
+ *   5. Test BEFORE trusting the daily trigger: run sendOvernightMorningEmailsNow
  *      from the function dropdown, confirm the email arrives correctly, then
  *      run sendOvernightFollowupEmailsNow and confirm the reply lands in the
  *      SAME thread. I cannot execute Apps Script myself to verify this code
  *      the way the dashboard's own JS was tested this session — please run
  *      this manual check yourselves before relying on the automatic 10am/1pm
  *      firing.
- *   5. Known limitation, same as MovementTracker.gs's own trigger: Apps
+ *   6. Known limitation, same as MovementTracker.gs's own trigger: Apps
  *      Script time-of-day triggers fire within a window near the requested
  *      hour (commonly within ~15 minutes), not the exact clock minute.
  * ================================================================================
@@ -668,6 +678,62 @@ function waitForFollowupSuggestions_(ss, leadIds) {
 }
 
 /**
+ * Sends a message that lands inside an EXISTING Gmail thread while still
+ * controlling exactly who it goes to — something neither of Apps Script's
+ * two built-in options can do at once. GmailThread.reply()/replyAll()
+ * thread correctly but hard-code the recipient to "the sender of the last
+ * message on this thread" (the real wrong-recipient bug described in
+ * sendOvernightFollowupEmails' own comment below). A plain
+ * GmailApp.createDraft(to, subject, body).send() controls the recipient
+ * but sets no RFC822 threading headers, so Gmail only threads it by a
+ * subject-text heuristic that does not reliably fire for messages sent
+ * this way — confirmed live: a "Re: ..." follow-up landed as its own
+ * separate conversation instead of inside the 10am thread.
+ *
+ * This uses the Advanced Gmail Service (Apps Script editor -> Services
+ * (+) -> "Gmail API" — MUST be enabled once for this project, or every
+ * call here throws "Gmail is not defined") to send a raw MIME message
+ * carrying In-Reply-To/References headers copied from the thread's own
+ * last message, PLUS an explicit threadId — the combination Gmail
+ * documents as the reliable way to land an arbitrary-recipient message
+ * inside a specific existing thread. Throws on any failure (Advanced
+ * Service not enabled, thread lookup failure, send failure); the caller
+ * decides whether to fall back.
+ */
+function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody) {
+  const thread = Gmail.Users.Threads.get('me', threadId, { format: 'metadata', metadataHeaders: ['Message-ID'] });
+  const messages = (thread && thread.messages) || [];
+  if (!messages.length) throw new Error('Thread ' + threadId + ' has no messages to reply into.');
+  const lastMessage = messages[messages.length - 1];
+  const headers = (lastMessage.payload && lastMessage.payload.headers) || [];
+  const messageIdHeader = headers.filter(function (h) { return String(h.name || '').toLowerCase() === 'message-id'; })[0];
+  const originalMessageId = messageIdHeader ? messageIdHeader.value : null;
+
+  const boundary = 'homesfy_' + Utilities.getUuid().replace(/-/g, '');
+  const headerLines = [
+    'To: ' + to,
+    cc ? 'Cc: ' + cc : null,
+    'Subject: ' + subject,
+    'MIME-Version: 1.0',
+    originalMessageId ? 'In-Reply-To: ' + originalMessageId : null,
+    originalMessageId ? 'References: ' + originalMessageId : null,
+    'Content-Type: multipart/alternative; boundary="' + boundary + '"',
+  ].filter(function (l) { return l !== null; });
+
+  const mime = headerLines.join('\r\n') + '\r\n\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Type: text/plain; charset="UTF-8"\r\n\r\n' +
+    plainBody + '\r\n\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Type: text/html; charset="UTF-8"\r\n\r\n' +
+    htmlBody + '\r\n\r\n' +
+    '--' + boundary + '--';
+
+  const raw = Utilities.base64EncodeWebSafe(Utilities.newBlob(mime).getBytes());
+  return Gmail.Users.Messages.send({ raw: raw, threadId: threadId }, 'me');
+}
+
+/**
  * 1pm run: for every region logged earlier TODAY, re-checks each of that
  * morning's issue leads against the CURRENT sheet — still flagged for the
  * SAME issue it had at 10am counts as unresolved (shown in red); anything
@@ -675,20 +741,23 @@ function waitForFollowupSuggestions_(ss, leadIds) {
  * can no longer be found at all) is dropped from this follow-up entirely.
  *
  * Sends to the SAME to/cc the 10am email resolved (stored in Overnight_Log
- * at send time), NOT via GmailThread.reply()/replyAll() on thread_id —
- * real production bug: reply()/replyAll() target "the sender of the last
- * message on this thread," and since every message in this thread was
- * sent BY the script's own account (nobody has replied inbound yet), that
- * "sender" is the SCRIPT ACCOUNT ITSELF, not the real A1 — every follow-up
- * was silently landing back in the script owner's own inbox instead of
- * the real hierarchy. Neither method's options support overriding "to"
- * (confirmed against Google's own Apps Script reference), so there's no
- * way to fix this by tweaking the reply call — sending a fresh message to
- * the stored recipients, subject prefixed "Re: ", is the only reliable
- * option. thread_id is still logged for manual reference, just no longer
- * used to send. A row logged before this fix (no stored to/cc/subject)
- * is skipped rather than silently reproducing the same wrong-recipient
- * bug — see the skip check below.
+ * at send time), threaded into that SAME thread_id via
+ * sendThreadedGmailReply_ (see its own comment above) rather than
+ * GmailThread.reply()/replyAll() — real production bug: reply()/replyAll()
+ * target "the sender of the last message on this thread," and since every
+ * message in this thread was sent BY the script's own account (nobody has
+ * replied inbound yet), that "sender" is the SCRIPT ACCOUNT ITSELF, not
+ * the real A1 — every follow-up was silently landing back in the script
+ * owner's own inbox instead of the real hierarchy. Neither reply() nor
+ * replyAll()'s options support overriding "to" (confirmed against
+ * Google's own Apps Script reference), so there's no way to fix this by
+ * tweaking the reply call. If the Advanced Gmail Service isn't enabled
+ * (Services (+) -> "Gmail API" in the Apps Script editor), the threaded
+ * send throws and this falls back to a plain new "Re: " message to the
+ * stored recipients — correct recipients, just not guaranteed to thread.
+ * A row logged before the recipient-storing fix (no stored to/cc/subject)
+ * is skipped rather than silently reproducing the old wrong-recipient bug
+ * — see the skip check below.
  *
  * Before sending, every still-unresolved lead (across every region) is
  * pushed to Lead_Followups and given a short, bounded wait for a human-
@@ -823,14 +892,21 @@ function sendOvernightFollowupEmails() {
 
     try {
       withRetry_(function () {
-        return GmailApp.createDraft(r.to, subject, plainBody, {
-          cc: r.cc || undefined,
-          htmlBody: bodyHtml,
-          name: 'Homesfy Lead Ops',
-        }).send();
-      }, 'send follow-up reply (' + r.region + ')');
-    } catch (e) {
-      Logger.log('Overnight follow-up reply failed for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + e);
+        return sendThreadedGmailReply_(r.threadId, r.to, r.cc || '', subject, plainBody, bodyHtml);
+      }, 'send threaded follow-up reply (' + r.region + ')');
+    } catch (threadErr) {
+      Logger.log('Threaded send failed for ' + r.region + ' (thread ' + r.threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
+      try {
+        withRetry_(function () {
+          return GmailApp.createDraft(r.to, subject, plainBody, {
+            cc: r.cc || undefined,
+            htmlBody: bodyHtml,
+            name: 'Homesfy Lead Ops',
+          }).send();
+        }, 'send fallback follow-up (' + r.region + ')');
+      } catch (fallbackErr) {
+        Logger.log('Overnight follow-up reply failed entirely for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + fallbackErr);
+      }
     }
   });
 }
