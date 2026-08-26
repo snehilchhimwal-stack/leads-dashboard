@@ -252,6 +252,40 @@ function withRetry_(fn, label) {
   }
 }
 
+// Narrower cousin of withRetry_, used ONLY for the actual Gmail send
+// calls (sendOneOvernightEmail_, sendThreadedGmailReply_'s caller, and
+// the follow-up's plain fallback). withRetry_ itself is deliberately NOT
+// used there — a Sheets read/write is safe to blindly retry, but
+// retrying a SEND risks creating a genuine duplicate email if the
+// original attempt actually succeeded and only the confirmation was
+// lost (a "timed out"-class error is exactly this kind of ambiguous —
+// see sendOneOvernightEmail_'s own comment on why that stays a single
+// attempt). "Gmail operation not allowed" is different: it's Google
+// explicitly REFUSING the send, a definitive rejection with no
+// ambiguity about whether it went through — it didn't — so retrying
+// THIS specific error can't produce a duplicate. Real production case
+// this addresses: one run sent 15 emails in ~30 seconds and exactly 2
+// failed with this error, each one surrounded by successful sends
+// immediately before and after — a persistent policy block would have
+// failed every send, not 2 scattered ones, so this reads as a brief,
+// intermittent Gmail-side hiccup (plausibly a soft rate-limit reaction
+// to sending that many emails in quick succession) that a short retry
+// would very likely clear.
+function withSendRetry_(fn, label) {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return fn();
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      const isSafeToRetry = /operation not allowed/i.test(msg);
+      if (!isSafeToRetry || attempt === maxAttempts) throw e;
+      Logger.log((label || 'Gmail send') + ' failed with a definitive rejection, safe to retry (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
+      Utilities.sleep(attempt * 2000);
+    }
+  }
+}
+
 // Split into small independently-retried steps, with a flush() right
 // after insertSheet — same reasoning as RmHierarchy.gs's identical
 // functions (see ensureRmHierarchySheet_'s comment): one big withRetry_
@@ -623,20 +657,20 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   Logger.log('Morning email recipients for ' + region + bucketNote + ': ' + rec.source);
   let sentMessage;
   try {
-    // Deliberately NOT wrapped in withRetry_ — unlike a Sheets read/write,
-    // sending an email is NOT idempotent: if the send actually succeeds
-    // server-side but the confirmation back to this script is what times
-    // out, a retry would create and send a genuinely SEPARATE message,
-    // duplicating a real email to a real recipient. A single attempt here
-    // means a truly transient Gmail hiccup surfaces as the "failed" alert
-    // below (recoverable — a human can re-run manually) rather than
-    // risking a silent duplicate, which is the worse failure mode of the
-    // two for something a real person actually receives.
-    sentMessage = GmailApp.createDraft(rec.to, subject, plainBody, {
-      cc: rec.cc || undefined,
-      htmlBody: html,
-      name: 'Homesfy Lead Ops',
-    }).send();
+    // withSendRetry_, not withRetry_ — see its own comment. Only retries
+    // a definitive "operation not allowed" rejection (safe: Google
+    // explicitly refused it, no ambiguity about whether it went out);
+    // any other error (e.g. a genuine timeout, where the send might have
+    // actually succeeded and only the confirmation was lost) is a single
+    // attempt, surfacing as the "failed" alert below rather than risking
+    // a silent duplicate to a real recipient.
+    sentMessage = withSendRetry_(function () {
+      return GmailApp.createDraft(rec.to, subject, plainBody, {
+        cc: rec.cc || undefined,
+        htmlBody: html,
+        name: 'Homesfy Lead Ops',
+      }).send();
+    }, 'send morning email (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('Overnight morning email failed for ' + region + bucketNote + ': ' + e);
     // createDraft(...).send() is two steps chained together — a real
@@ -929,11 +963,11 @@ function waitForFollowupSuggestions_(ss, leadIds) {
  * Service not enabled, thread lookup failure, send failure); the caller
  * decides whether to fall back.
  *
- * The Threads.get read is retried (it's a safe, idempotent lookup) but
- * the final Messages.send is deliberately a SINGLE attempt — not
- * idempotent, so retrying it risks duplicating a send that actually
- * already succeeded if only the confirmation was what timed out. Same
- * reasoning as sendOneOvernightEmail_'s own send call.
+ * The Threads.get read is retried with withRetry_ (a safe, idempotent
+ * lookup); the final Messages.send uses the narrower withSendRetry_ —
+ * only retries a definitive "operation not allowed" rejection, never an
+ * ambiguous timeout that might mean the send already went through. See
+ * withSendRetry_'s own comment for the real production case this covers.
  */
 function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody) {
   const thread = withRetry_(function () {
@@ -967,7 +1001,9 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
     '--' + boundary + '--';
 
   const raw = Utilities.base64EncodeWebSafe(Utilities.newBlob(mime).getBytes());
-  return Gmail.Users.Messages.send({ raw: raw, threadId: threadId }, 'me');
+  return withSendRetry_(function () {
+    return Gmail.Users.Messages.send({ raw: raw, threadId: threadId }, 'me');
+  }, 'send threaded follow-up reply (' + threadId + ')');
 }
 
 /**
@@ -1145,20 +1181,22 @@ function sendOvernightFollowupEmails() {
     const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
 
-    // Neither send below is wrapped in withRetry_ — same non-idempotency
-    // reasoning as sendOneOvernightEmail_'s own send call (sendThreadedGmailReply_
-    // already retries its own internal safe read step). A single attempt
-    // at each; genuine failure of both falls through to the ops alert.
+    // sendThreadedGmailReply_ retries its own send step internally
+    // (withSendRetry_ — only a definitive rejection, never an ambiguous
+    // timeout). The plain fallback below gets the same treatment
+    // explicitly, for the same reason.
     try {
       sendThreadedGmailReply_(r.threadId, sendTo, sendCc || '', subject, plainBody, bodyHtml);
     } catch (threadErr) {
       Logger.log('Threaded send failed for ' + r.region + ' (thread ' + r.threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
       try {
-        GmailApp.createDraft(sendTo, subject, plainBody, {
-          cc: sendCc,
-          htmlBody: bodyHtml,
-          name: 'Homesfy Lead Ops',
-        }).send();
+        withSendRetry_(function () {
+          return GmailApp.createDraft(sendTo, subject, plainBody, {
+            cc: sendCc,
+            htmlBody: bodyHtml,
+            name: 'Homesfy Lead Ops',
+          }).send();
+        }, 'send fallback follow-up (' + r.region + ')');
       } catch (fallbackErr) {
         Logger.log('Overnight follow-up reply failed entirely for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + fallbackErr);
         notifyOpsAlertGs_('1pm follow-up failed for ' + r.region, [
