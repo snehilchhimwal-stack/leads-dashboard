@@ -85,6 +85,10 @@ const MANAGER_DIRECTORY_SHEET_ = 'Manager_Directory';
 // chance any real RM name resolves.
 const RM_HIERARCHY_RAW_ = [
   ['Leadership','Commercial Head','Neha Mishra','','','',''],
+  // Added as Bangalore/Hyderabad's CH per explicit request — no row for
+  // Mukesh Mishra in the original org-chart export, so added here
+  // directly rather than relying on the auto-match.
+  ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
   ['Navi Mumbai','Cluster Head','Vidya Jadhav','','','',''],
   ['Thane','Cluster Head','Bipin More','','','',''],
   ['Central','Cluster Head','Sanjyota Bhosale','','','',''],
@@ -92,8 +96,8 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','TM','Sampada Pawar','','','','Vidya Jadhav'],
   ['Navi Mumbai','A1','Avinash Kumar','','','','Vidya Jadhav'],
   ['Central','RH','Rajkumar Ombase','','','','Sanjyota Bhosale'],
-  ['Bangalore','A1','Chaithanya M','','','Romen Singh',''],
-  ['Bangalore','A1','Krishna Murthy','','','',''],
+  ['Bangalore','A1','Chaithanya M','','','Romen Singh','Mukesh Mishra'],
+  ['Bangalore','A1','Krishna Murthy','','','','Mukesh Mishra'],
   ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Akash A Ugale','','','','Sanjyota Bhosale'],
@@ -135,7 +139,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','A1','Niraj Patil','','','Swapnil Gowalkar','Bipin More'],
   ['Western','S1','Pratapkumar Yadav','','Minas Patel','','Rahul Gandhi'],
   ['Western','S1','Sonam Dubey','','Minas Patel','','Rahul Gandhi'],
-  ['Hyderabad','A1','Vemula Ajay','','','',''],
+  ['Hyderabad','A1','Vemula Ajay','','','','Mukesh Mishra'],
   ['Western','S1','Saravash Upadhyay','','Minas Patel','','Rahul Gandhi'],
   ['Harbour','S1','Nitin Devariya','Yash Sharma','','','Sanjyota Bhosale'],
   ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh',''],
@@ -184,7 +188,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Souvik Biswas','','','Sachindra Wadane','Sourabh Sareen'],
   ['Central','S1','Mihir Jivani','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Bangalore','S1','Divakar V','Chaithanya M','','Romen Singh',''],
-  ['Bangalore','A1','Mainuddin T','','','Romen Singh',''],
+  ['Bangalore','A1','Mainuddin T','','','Romen Singh','Mukesh Mishra'],
   ['Western','S1','Saurabh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Pune','S1','Vishwanath Zalake','Firoj Shaikh','','','Sourabh Sareen'],
   ['Pune','S1','Ritik Minekar','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
@@ -252,7 +256,7 @@ const RM_HIERARCHY_RAW_ = [
   ['HNI','Cluster Head','Abhhijjit Gandhii','','','',''],
   ['Navi Mumbai','S1','Jyoti Ram','Avinash Kumar','','','Vidya Jadhav'],
   ['Central','S1','Sanjay Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Bangalore','A1','Rahan Khan','','','Romen Singh',''],
+  ['Bangalore','A1','Rahan Khan','','','Romen Singh','Mukesh Mishra'],
   ['Central','S1','Saurabh Pacharne','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Amit Rathod','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','S1','Ramesh Kudale','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'],
@@ -273,7 +277,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','S1','Harshith S','','Sampada Pawar','','Vidya Jadhav'],
   ['Pune','S1','Adinath Munde','','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Buddhabhushan Wakode','','Rahul Poudel','','Sourabh Sareen'],
-  ['Commercial','A1','Aarya Sadanam','','','',''],
+  ['Commercial','A1','Aarya Sadanam','','','','Neha Mishra'],
   ['Bangalore','S1','Vijay Kumar E','Rahan Khan','','Romen Singh',''],
   ['Central','S1','Farid Shaikh','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Thane','S1','Riyan Jamadar','','','','Bipin more'],
@@ -601,6 +605,7 @@ function loadRmHierarchyAndEmails_(ss) {
         const name = String(row[2] || '').trim();
         if (!name) return;
         byRmNameLower[name.toLowerCase()] = {
+          role: String(row[1] || '').trim(),
           tl: String(row[3] || '').trim(), tm: String(row[4] || '').trim(),
           rh: String(row[5] || '').trim(), ch: String(row[6] || '').trim(),
           excluded: !!row[7],
@@ -628,6 +633,19 @@ function loadRmHierarchyAndEmails_(ss) {
 // just a fixed business requirement layered on top of it.
 const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
 
+// Role labels that sit at the very TOP of a team's chain — nothing
+// reports further up from these. Distinct from "this person's own row
+// just happens to have every field blank," which is also true of most
+// A1s (they simply have no RH/CH configured for their team) — checking
+// ROLE, not blankness, is what tells the two apart. 'City Lead' is
+// Pune's own top-of-chain label (Sourabh Sareen) — functionally the same
+// tier as 'Cluster Head'/'Commercial Head' elsewhere, just named
+// differently in the HR roster.
+const CH_TIER_ROLES_ = ['cluster head', 'commercial head', 'city lead'];
+function isChTierRole_(role) {
+  return CH_TIER_ROLES_.indexOf(String(role || '').trim().toLowerCase()) !== -1;
+}
+
 /**
  * For a set of RM names (whoever had overnight activity in one region),
  * groups them into one bucket PER DISTINCT primary recipient — never
@@ -636,73 +654,82 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
  * here, not 1 combined email with all 4 in To.
  *
  * Each bucket's primary recipient is the RM's own immediate manager,
- * whichever tier that actually is: their Team Lead (A1) if they have one,
- * else the TM directly above them if THAT'S who they report straight to
- * (some RMs skip A1 entirely). Deliberately does NOT fall through to
- * RH/CH — real production symptom this fixes: a Western RM with neither
- * tl nor tm filled on their own row (a hierarchy data gap, not a real
- * "reports straight to the CH" case) was resolving all the way up to
- * Rahul Gandhi (Western's Cluster Head), who then received his OWN
- * personal "Western Overnight Leads (Rahul Gandhi)" email addressed
- * directly to him — a CH/RH should never be a "To" on these, and (see
- * the Cc paragraph below) not even a Cc anymore either. Someone with
- * neither tl nor tm is treated as UNRESOLVED
- * instead (same as no hierarchy chain at all) and routes through the
- * legacy Region_Recipients fallback, or triggers the "no recipient" ops
- * alert if that's blank too — never silently escalated to a CH/RH's own
- * inbox. Business rule this implements explicitly: for automated email
- * purposes, every TM is ALSO treated as an A1 (gets their own bucket) —
- * EXCEPT Pune's two TMs who already have real A1s under them (Ayaz
- * Bagwan -> Omkar Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A
- * Pande/Nayan Pabale). Nothing extra to special-case for that exception:
- * anyone reporting to one of those real A1s already has `tl` filled with
- * the A1's own name on their own row (not blank), so `chain.tl` is
- * checked FIRST above and the TM is never reached for them — a TM only
- * becomes primary for someone who genuinely has no A1 above them at all.
+ * whichever tier that actually is: Team Lead (A1), else TM, else RH,
+ * else CH — falling further up the chain only when the nearer tier
+ * doesn't exist for this specific person ("19 A1s/TM/RH/CH must follow
+ * fallback to their senior"). The one exception: if the chain resolves
+ * ALL THE WAY to someone at CH_TIER_ROLES_ (a real Cluster/Commercial
+ * Head/City Lead — checked by ROLE, not by "their row happens to be
+ * blank," since a plain A1 with nothing configured above them looks
+ * identically blank), that RM is diverted to `chLevelRms` instead of
+ * getting a normal bucket — real production symptom this fixes: a
+ * Western RM with neither tl nor tm filled (a hierarchy data gap) was
+ * resolving to Rahul Gandhi, Western's Cluster Head, who then received
+ * his OWN personal "Western Overnight Leads (Rahul Gandhi)" email
+ * addressed directly to him. A CH should never receive the raw
+ * overnight-leads report as if they were an ordinary manager; see
+ * `chLevelRms` below for what happens to these instead. Business rule
+ * this implements explicitly: for automated email purposes, every TM is
+ * ALSO treated as an A1 (gets their own bucket) — EXCEPT Pune's two TMs
+ * who already have real A1s under them (Ayaz Bagwan -> Omkar
+ * Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A Pande/Nayan Pabale).
+ * Nothing extra to special-case for that exception: anyone reporting to
+ * one of those real A1s already has `tl` filled with the A1's own name
+ * on their own row (not blank), so `chain.tl` is checked FIRST above and
+ * the TM is never reached for them — a TM only becomes primary for
+ * someone who genuinely has no A1 above them at all.
  *
- * Each bucket's Cc is ALWAYS_CC_EMAILS_ plus, ONLY for Pune's two
- * exception TMs (PUNE_TM_STILL_CC_ below — Ayaz Bagwan, Rahul Poudel),
- * that TM — looked up on the PRIMARY's OWN row, not the reporting RM's
- * row (Book7 doesn't always carry every intermediate tier on a
- * deeply-nested S1's own row, but the primary's own row always does: an
- * S1 reporting to Firoj Shaikh has A1='Firoj Shaikh' on their own row but
- * NOT the TM in between, Ayaz Bagwan; only Firoj Shaikh's own row carries
- * it). RH and CH are NOT Cc'd at all, for any bucket, any region — see
- * this function's own real production example above for why a CH/RH
- * being included at all (even just as Cc) is exactly what's being
- * avoided here. Minus the primary's own email either way (never cc
- * someone already in To).
+ * Each bucket's Cc is ALWAYS_CC_EMAILS_ plus whichever of RH/CH exist on
+ * the PRIMARY's OWN row (not the reporting RM's row — Book7 doesn't
+ * always carry every intermediate tier on a deeply-nested S1's own row,
+ * but the primary's own row always does) — EXCEPT TM, which is Cc'd only
+ * for Pune's two exception TMs (PUNE_TM_STILL_CC_ below — Ayaz Bagwan,
+ * Rahul Poudel): a person's direct manager already IS the "To", so
+ * looping in their TM too is redundant UNLESS that TM has real A1s under
+ * them (the Pune case), where dropping them from Cc would lose the one
+ * TM-level person actually still relevant there. Minus the primary's own
+ * email either way (never cc someone already in To).
  *
- * Returns { buckets: [{ primaryName, primaryEmail, cc: [emails],
- * rmNames: [...] }], unresolved: [rmNames with no chain, excluded, or no
- * resolvable primary email] } — callers route `unresolved` through the
- * legacy Region_Recipients fallback instead.
+ * Returns { buckets: [{ primaryName, primaryEmail, primaryRole, cc:
+ * [emails], rmNames: [...] }], unresolved: [rmNames with no chain,
+ * excluded, or no resolvable primary email — callers route these through
+ * the legacy Region_Recipients fallback], chLevelRms: [{ rmName, chName,
+ * chEmail }] for every RM whose chain resolved all the way to a CH_TIER_
+ * ROLES_ person — callers alert a human about these instead of emailing
+ * the CH directly }.
  */
 // The only TM-level names that still appear in Cc — see this function's
 // own docblock for why (each has real A1s under them; dropping them from
 // Cc would lose the one still-relevant TM-level person on those specific
-// A1s' buckets). Everyone else at RH/CH tier is excluded from Cc entirely.
+// A1s' buckets).
 const PUNE_TM_STILL_CC_ = ['ayaz bagwan', 'rahul poudel'];
 function resolveRecipientBucketsForRms_(ss, rmNames) {
   const data = loadRmHierarchyAndEmails_(ss);
-  const buckets = {}; // lowercased primaryName -> { primaryName, primaryEmail, ccSet, rmNames }
+  const buckets = {}; // lowercased primaryName -> { primaryName, primaryEmail, primaryRole, ccSet, rmNames }
   const unresolved = [];
+  const chLevelRms = [];
 
   rmNames.forEach(function (rmName) {
     const chain = data.byRmNameLower[String(rmName || '').trim().toLowerCase()];
     if (!chain || chain.excluded) { unresolved.push(rmName); return; }
-    const primaryName = chain.tl || chain.tm || '';
+    const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
     const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
     if (!primaryEmail) { unresolved.push(rmName); return; }
 
-    const key = primaryName.toLowerCase();
-    if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, ccSet: new Set(), rmNames: [] };
-    // Prefer the primary's OWN chain for Cc (see docblock above); fall
-    // back to the reporting RM's chain only if the primary has no row of
-    // their own in the hierarchy (shouldn't normally happen, since they
+    // Prefer the primary's OWN chain (see docblock above); fall back to
+    // the reporting RM's chain only if the primary has no row of their
+    // own in the hierarchy (shouldn't normally happen, since they
     // resolved to a real email above, but stay defensive).
+    const key = primaryName.toLowerCase();
     const primaryChain = data.byRmNameLower[key] || chain;
-    const ccCandidates = [];
+
+    if (isChTierRole_(primaryChain.role)) {
+      chLevelRms.push({ rmName: rmName, chName: primaryName, chEmail: primaryEmail });
+      return;
+    }
+
+    if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, primaryRole: primaryChain.role, ccSet: new Set(), rmNames: [] };
+    const ccCandidates = [primaryChain.rh, primaryChain.ch];
     if (PUNE_TM_STILL_CC_.indexOf(String(primaryChain.tm || '').trim().toLowerCase()) !== -1) {
       ccCandidates.push(primaryChain.tm);
     }
@@ -718,10 +745,10 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     const b = buckets[key];
     ALWAYS_CC_EMAILS_.forEach(function (e) { b.ccSet.add(e); });
     b.ccSet.delete(b.primaryEmail); // don't cc someone already in To
-    return { primaryName: b.primaryName, primaryEmail: b.primaryEmail, cc: Array.from(b.ccSet), rmNames: b.rmNames };
+    return { primaryName: b.primaryName, primaryEmail: b.primaryEmail, primaryRole: b.primaryRole, cc: Array.from(b.ccSet), rmNames: b.rmNames };
   });
 
-  return { buckets: bucketList, unresolved: unresolved };
+  return { buckets: bucketList, unresolved: unresolved, chLevelRms: chLevelRms };
 }
 
 // ---- One-time setup — run this once from the editor (also called by

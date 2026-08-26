@@ -26,14 +26,20 @@
  * recipient list, and — as of RmHierarchy.gs — resolves it PER RM rather
  * than a single fixed address per region: for each region's morning email,
  * every RM who actually had overnight activity gets their real manager
- * chain (TL/RH/CH, from RmHierarchy.gs's RM_Hierarchy + Manager_Directory
- * sheets) resolved and deduped into that email's To/Cc — a manager with no
- * flagged RM under them that day gets nothing. The old flat
- * "Region_Recipients" sheet tab (created automatically, pre-filled with all
- * 11 region names, To/Cc left blank) still exists as a FALLBACK: a region
- * only uses it when zero of that day's RMs could be resolved to a manager
- * email (i.e. Manager_Directory isn't filled in yet for anyone involved) —
- * see resolveRecipientsForRegion_ below.
+ * chain (A1/TM/RH/CH, from RmHierarchy.gs's RM_Hierarchy + Manager_Directory
+ * sheets) resolved into one bucket per distinct primary — a manager with no
+ * flagged RM under them that day gets nothing. If an RM's own chain
+ * resolves ALL THE WAY to a real CH (Cluster/Commercial Head/City Lead —
+ * meaning they genuinely have no A1, TM, or RH configured above them), that
+ * RM is NOT bucketed into a normal email addressed to the CH — instead
+ * OPS_ALERT_EMAIL_ gets a plain alert (leadership Cc'd) naming the CH and
+ * the affected RM(s), so a human decides how to route them rather than the
+ * CH silently receiving the raw report (see notifyChLevelLeadsGs_). The
+ * old flat "Region_Recipients" sheet tab (created automatically, pre-filled
+ * with all 11 region names, To/Cc left blank) still exists as a FALLBACK: a
+ * region only uses it for whichever RMs had no resolvable chain at all
+ * (not in RM_Hierarchy, Excluded, or no email in Manager_Directory) — see
+ * resolveRecipientEmailsForRegion_ below.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as MovementTracker.gs, RmHierarchy.gs, AND
@@ -101,36 +107,64 @@ const TEST_MODE_OVERRIDE_EMAIL_ = '';
 const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 
-// Region-specific leadership CCs — layered on top of ALWAYS_CC_EMAILS_
-// (RmHierarchy.gs, which applies to every region unconditionally), only
-// for the regions named here. Not derived from the hierarchy data, just a
-// fixed per-region business requirement. Applied in
-// resolveRecipientEmailsForRegion_ below, on every bucket for that region
-// — RM_Hierarchy-resolved and Region_Recipients-fallback alike — same
-// single-choke-point reasoning ALWAYS_CC_EMAILS_ already uses.
-const REGION_ALWAYS_CC_EMAILS_ = {
-  'Bangalore': ['mukesh.mishra@homesfy.in'],
-  'Hyderabad': ['mukesh.mishra@homesfy.in'],
-  'Commercial': ['neha.mishra@homesfy.in'],
-};
-
 // Where to alert when this script could NOT get an automated email out at
-// all for some region/RM — no resolvable recipient, or the send itself
-// failed after retries. These failures are otherwise invisible outside
-// the Apps Script Executions log, which nobody watches proactively; see
-// notifyOpsAlertGs_'s own comment for exactly which cases trigger this.
+// all for some region/RM — no resolvable recipient, the send itself
+// failed after retries, or a chain resolved all the way to a CH (see
+// notifyChLevelLeadsGs_ below). These failures are otherwise invisible
+// outside the Apps Script Executions log, which nobody watches
+// proactively; see notifyOpsAlertGs_'s own comment for exactly which
+// cases trigger this.
 const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real morning/follow-up run it's reporting on. Kept
 // deliberately plain-text/no-frills — this is an ops ping, not a report.
-function notifyOpsAlertGs_(subject, bodyLines) {
+// `cc` is optional — used by notifyChLevelLeadsGs_ to loop leadership in
+// on the CH-level alert specifically; every other call site omits it.
+function notifyOpsAlertGs_(subject, bodyLines, cc) {
   try {
-    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'));
+    const opts = cc && cc.length ? { cc: cc.join(',') } : undefined;
+    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'), opts);
   } catch (e) {
     Logger.log('notifyOpsAlertGs_ failed to send its own alert ("' + subject + '"): ' + e);
   }
+}
+
+// Fires whenever resolveRecipientBucketsForRms_ finds an RM whose chain
+// resolves all the way up to a real CH (Cluster/Commercial Head/City
+// Lead) — see that function's own docblock for the real production bug
+// this replaces (a CH silently receiving the raw overnight-leads report
+// addressed directly to them). Instead: a plain-text alert to
+// OPS_ALERT_EMAIL_, leadership (ALWAYS_CC_EMAILS_, RmHierarchy.gs) in Cc,
+// explaining that these specific RMs' leads currently have no resolvable
+// A1/TM/RH and are sitting with this CH — a human decision (add a
+// TL/TM/RH for them in RM_Hierarchy, or handle manually), not something
+// this script should silently paper over by emailing the CH directly.
+// Grouped by CH so one region with several such gaps sends one alert per
+// CH, not one per RM.
+function notifyChLevelLeadsGs_(region, chLevelRms) {
+  if (!chLevelRms.length) return;
+  const byCh = {}; // chName -> { chEmail, rmNames: [] }
+  chLevelRms.forEach(function (r) {
+    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, rmNames: [] };
+    byCh[r.chName].rmNames.push(r.rmName);
+  });
+  Object.keys(byCh).forEach(function (chName) {
+    const entry = byCh[chName];
+    // TEST_MODE_OVERRIDE_EMAIL_'s own comment: a manual test run must
+    // never reach a real recipient by accident — that includes leadership
+    // Cc here, even though the alert itself still goes to OPS_ALERT_EMAIL_
+    // (presumably whoever's running the test) either way.
+    const cc = TEST_MODE_OVERRIDE_EMAIL_ ? [] : ALWAYS_CC_EMAILS_;
+    notifyOpsAlertGs_('Leads with ' + chName + ' (' + region + ') — no A1/TM/RH below them', [
+      'Region: ' + region,
+      'These RM(s) have no A1, TM, or RH configured above them in RM_Hierarchy, so their chain resolves all the way up to ' + chName + ' (' + entry.chEmail + ').',
+      'RM(s): ' + entry.rmNames.join(', '),
+      '',
+      'Their overnight leads are effectively with ' + chName + ' right now — no automated email was sent directly to them for this. Review and decide how to route these: add a TL/TM/RH for the RM(s) above in RM_Hierarchy, or handle manually.',
+    ], cc);
+  });
 }
 
 // Mirrors REGION_GROUP_MAP in reports.js — keep the two in sync if either
@@ -242,18 +276,24 @@ function ensureRegionRecipientsSheet_(ss) {
 
 // Per-A1-bucketed recipients for one region's morning email — see
 // resolveRecipientBucketsForRms_'s own comment for the bucketing rule
-// (one email per distinct A1, never several combined into one To).
-// Whichever RMs couldn't be resolved via RM_Hierarchy at all fall back to
-// ONE combined email via the legacy Region_Recipients entry — keeps the
-// automation sending during the gradual rollout instead of going silent
-// the moment RM_Hierarchy exists but some emails aren't filled in yet.
-// Returns an array of { to, cc, rmNames, source } — one entry per email
-// that should actually be sent for this region (zero, one, or many).
+// (one email per distinct A1, never several combined into one To) and
+// for chLevelRms (RMs whose chain resolves all the way to a real CH —
+// diverted to notifyChLevelLeadsGs_ below rather than an email addressed
+// to the CH). Whichever RMs couldn't be resolved via RM_Hierarchy at all
+// (no chain, excluded, or no email on record) fall back to ONE combined
+// email via the legacy Region_Recipients entry — keeps the automation
+// sending during the gradual rollout instead of going silent the moment
+// RM_Hierarchy exists but some emails aren't filled in yet. Returns an
+// array of { to, cc, rmNames, source, bucketLabel, primaryRole } — one
+// entry per email that should actually be sent for this region (zero,
+// one, or many).
 function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients) {
   const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
-    return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (A1: ' + b.primaryName + ')', bucketLabel: b.primaryName };
+    return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
+
+  notifyChLevelLeadsGs_(region, resolved.chLevelRms);
 
   if (resolved.unresolved.length) {
     const legacy = legacyRecipients[region];
@@ -263,7 +303,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
       // overnight email, not something specific to RM_Hierarchy resolution.
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
       ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
-      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: resolved.unresolved, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + resolved.unresolved.join(', ') + ')', bucketLabel: 'Unmatched RMs' });
+      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: resolved.unresolved, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + resolved.unresolved.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
     } else {
       // No recipient configured anywhere for these RMs — their overnight
       // leads get no automated email at all this run, and nothing else
@@ -279,20 +319,6 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
     }
   }
 
-  // Region-specific always-CC (REGION_ALWAYS_CC_EMAILS_ above) — applied
-  // to EVERY bucket for this region, RM_Hierarchy-resolved or legacy
-  // fallback alike, before the test-mode override below (test mode
-  // discards cc entirely regardless, same as it already does with
-  // ALWAYS_CC_EMAILS_).
-  const regionCcList = REGION_ALWAYS_CC_EMAILS_[region] || [];
-  if (regionCcList.length) {
-    results.forEach(function (r) {
-      const ccSet = new Set((r.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
-      regionCcList.forEach(function (e) { if (e.toLowerCase() !== String(r.to || '').trim().toLowerCase()) ccSet.add(e); });
-      r.cc = Array.from(ccSet).join(',') || undefined;
-    });
-  }
-
   // Single choke point every path above funnels through — see
   // TEST_MODE_OVERRIDE_EMAIL_'s own comment. Bucketing is preserved even in
   // test mode (each bucket still becomes its own email, just redirected)
@@ -300,7 +326,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
   // instead of collapsing the very thing being tested into one message.
   if (TEST_MODE_OVERRIDE_EMAIL_) {
     return results.map(function (r) {
-      return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel };
+      return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole };
     });
   }
 
@@ -506,12 +532,23 @@ function renderOvernightReportEmailHTML_(opts) {
  * lead's funnel stage, not which SLA check fired.
  */
 // Builds and sends ONE overnight email — either a real per-A1 bucket
-// (subject gets that A1's name appended, since a region can now produce
-// several of these and identical subjects would be confusing in a shared
-// inbox) or the legacy-fallback catch-all for RMs RM_Hierarchy couldn't
-// resolve (subject gets "(Unmatched RMs)" instead). Factored out of
-// sendOvernightMorningEmails so that function's per-region loop can call
-// this once per bucket instead of once per region.
+// (subject gets that recipient's name prefixed, since a region can now
+// produce several of these and identical subjects would be confusing in
+// a shared inbox) or the legacy-fallback catch-all for RMs RM_Hierarchy
+// couldn't resolve (prefix is "(Unmatched RMs)" instead). Factored out
+// of sendOvernightMorningEmails so that function's per-region loop can
+// call this once per bucket instead of once per region.
+//
+// Subject prefix names the recipient PLAIN when they're a genuine A1
+// (the expected/default case — "(Omkar Ghate)"), but adds an explicit
+// tier qualifier whenever the bucket's primary is something other than
+// an A1 — "(Ayaz Bagwan - TM)", "(Rajkumar Ombase - RH)" — so it's
+// immediately obvious from the subject line alone that this recipient is
+// standing in because the RM(s) below them have no A1 (or no A1/TM) of
+// their own, rather than looking like an ordinary A1's own bucket. A
+// bucket's primary is never a CH (see resolveRecipientBucketsForRms_'s
+// chLevelRms — those are diverted to notifyChLevelLeadsGs_ instead), so
+// no qualifier for that tier is needed here.
 function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
   if (!leads.length) return;
 
@@ -523,8 +560,12 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const rmKeys = Object.keys(byRM).sort();
   const statusTypeCount = Array.from(new Set(leads.map(function (l) { return l.status; }))).length;
 
-  const subjectSuffix = rec.bucketLabel ? ' (' + rec.bucketLabel + ')' : '';
-  const subject = region + ' Overnight Leads - ' + dateLabel + subjectSuffix;
+  const tierQualifier = (rec.primaryRole && rec.primaryRole !== 'A1') ? ' - ' + rec.primaryRole : '';
+  const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + tierQualifier + ') ' : '';
+  const subject = subjectPrefix + region + ' Overnight Leads - ' + dateLabel;
+  // Same bucket label + tier qualifier, just suffix-style for the plain
+  // body/log line below rather than the subject's new prefix ordering.
+  const bucketNote = rec.bucketLabel ? ' (' + rec.bucketLabel + tierQualifier + ')' : '';
   const html = renderOvernightReportEmailHTML_({
     title: 'Overnight Leads',
     region: region,
@@ -544,10 +585,10 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     }),
     footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
   });
-  const plainBody = 'Overnight leads for ' + region + subjectSuffix + ' (' + dateLabel + '): ' + leads.length +
+  const plainBody = 'Overnight leads for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
     ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
 
-  Logger.log('Morning email recipients for ' + region + subjectSuffix + ': ' + rec.source);
+  Logger.log('Morning email recipients for ' + region + bucketNote + ': ' + rec.source);
   let sentMessage;
   try {
     // Retried: sending the actual email is the one thing here worth
@@ -559,11 +600,11 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
         htmlBody: html,
         name: 'Homesfy Lead Ops',
       }).send();
-    }, 'send morning email (' + region + subjectSuffix + ')');
+    }, 'send morning email (' + region + bucketNote + ')');
   } catch (e) {
-    Logger.log('Overnight morning email failed for ' + region + subjectSuffix + ': ' + e);
-    notifyOpsAlertGs_('Morning email failed for ' + region + subjectSuffix, [
-      'Region: ' + region + subjectSuffix,
+    Logger.log('Overnight morning email failed for ' + region + bucketNote + ': ' + e);
+    notifyOpsAlertGs_('Morning email failed for ' + region + bucketNote, [
+      'Region: ' + region + bucketNote,
       'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
       'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
       '',
@@ -581,7 +622,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
       rec.to, rec.cc || '', subject,
     ]);
-  }, 'log Overnight_Log row (' + region + subjectSuffix + ')');
+  }, 'log Overnight_Log row (' + region + bucketNote + ')');
 }
 
 /**
@@ -1053,8 +1094,8 @@ function backfillTodaysOvernightLogRecipientsNow() {
       Logger.log('Backfill for ' + region + ' row ' + (i + 2) + ' resolved to ' + recEmails.length + ' buckets instead of 1 — using the first; the RM list reconstructed from lead_ids_json may not exactly match the original bucket.');
     }
     const rec = recEmails[0];
-    const subjectSuffix = rec.bucketLabel ? ' (' + rec.bucketLabel + ')' : '';
-    const subject = region + ' Overnight Leads - ' + dateLabel + subjectSuffix;
+    const bucketNote = rec.bucketLabel ? ' (' + rec.bucketLabel + ')' : '';
+    const subject = region + ' Overnight Leads - ' + dateLabel + bucketNote;
 
     const rowNum = i + 2;
     withRetry_(function () {
@@ -1201,14 +1242,16 @@ function debugFollowupStatusNow() {
         const chain = hierarchyData.byRmNameLower[String(rmName || '').trim().toLowerCase()];
         if (!chain) { Logger.log('    ' + rmName + ': NOT FOUND in RM_Hierarchy at all — this RM\'s row is missing there entirely.'); return; }
         if (chain.excluded) { Logger.log('    ' + rmName + ': found in RM_Hierarchy but marked Excluded.'); return; }
-        // Mirrors resolveRecipientBucketsForRms_ (RmHierarchy.gs) exactly
-        // — deliberately does NOT fall through to RH/CH; see that
-        // function's own docblock for why (a CH/RH must never end up as
-        // a "To").
-        const primaryName = chain.tl || chain.tm || '';
-        if (!primaryName) { Logger.log('    ' + rmName + ': found in RM_Hierarchy, but has no TL/TM on record — RH/CH deliberately don\'t count as a fallback here (see resolveRecipientBucketsForRms_), so this RM is UNRESOLVED and routes through the Region_Recipients fallback below.'); return; }
+        // Mirrors resolveRecipientBucketsForRms_ (RmHierarchy.gs) exactly.
+        const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
+        if (!primaryName) { Logger.log('    ' + rmName + ': found in RM_Hierarchy, but has no TL/TM/RH/CH on record at all.'); return; }
         const primaryEmail = hierarchyData.emailByManagerNameLower[primaryName.toLowerCase()];
         if (!primaryEmail) { Logger.log('    ' + rmName + ': reports to "' + primaryName + '", but that manager has NO EMAIL in Manager_Directory yet — fill it in there to fix this.'); return; }
+        const primaryChain = hierarchyData.byRmNameLower[primaryName.toLowerCase()];
+        if (primaryChain && isChTierRole_(primaryChain.role)) {
+          Logger.log('    ' + rmName + ': resolves to ' + primaryName + ' <' + primaryEmail + '>, a CH-tier person (' + primaryChain.role + ') — this is NOT the reason this row is unresolved; it means notifyChLevelLeadsGs_ diverted this RM to its own alert instead of a normal bucket. That\'s working as intended, not a bug.');
+          return;
+        }
         Logger.log('    ' + rmName + ': resolves fine (-> ' + primaryName + ' <' + primaryEmail + '>) — should NOT be the reason this row is unresolved; re-check backfillTodaysOvernightLogRecipientsNow\'s output for this region.');
       });
       const legacy = loadRegionRecipients_(ss)[region];
