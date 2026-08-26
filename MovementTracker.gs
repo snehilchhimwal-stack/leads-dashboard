@@ -561,18 +561,20 @@ function unmatchedFollowUpGs_(comment, loggedBy) {
   return 'No keyword match — latest note' + (who ? ' (' + who + ')' : '') + ': "' + text + '". Read this and log a specific next call/action.';
 }
 
-// Reads Movement_Log's EXISTING rows (this run hasn't appended its own yet)
-// to find each lead's call_attempts as of the latest snapshot strictly
-// before `beforeDate`'s IST calendar day — direct port of dashboard.html's
-// buildTodayCallBaseline.
-function buildTodayCallBaselineGs_(ss, beforeDate) {
-  const map = {};
+// Shared scan behind buildTodayCallBaselineGs_ and lastSnapshotBeforeGs_
+// below — reads Movement_Log's EXISTING rows (this run hasn't appended
+// its own yet) and, for every identity key (client_id, else lead_id),
+// keeps the LATEST snapshot strictly before `cutoffMs` as
+// {atMs, call_attempts}. The two callers differ only in what they pass
+// as the cutoff — see each one's own comment for why that difference
+// matters.
+function _lastMovementLogSnapshotByKeyGs_(ss, cutoffMs) {
+  const map = {}; // key -> {atMs, call_attempts}
   const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   if (!sheet) return map;
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return map;
 
-  const todayStart = new Date(istDayKeyGs_(beforeDate) + 'T00:00:00+05:30').getTime();
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const snapAtCol = headers.indexOf('snapshot_at');
@@ -582,20 +584,48 @@ function buildTodayCallBaselineGs_(ss, beforeDate) {
   if (snapAtCol === -1 || callAttemptsCol === -1) return map;
 
   const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  const latest = {}; // key -> {atMs, call_attempts}
   values.forEach(function (row) {
     const ts = row[snapAtCol];
     if (!(ts instanceof Date)) return;
     const atMs = ts.getTime();
-    if (atMs >= todayStart) return; // only snapshots strictly before today count as a baseline
+    if (atMs >= cutoffMs) return;
     const clientId = String(row[clientIdCol] || '').trim();
     const leadId = String(row[leadIdCol] || '').trim();
     const key = clientId || ('l:' + leadId);
-    const cur = latest[key];
-    if (!cur || atMs > cur.atMs) latest[key] = { atMs: atMs, call_attempts: Number(row[callAttemptsCol]) || 0 };
+    const cur = map[key];
+    if (!cur || atMs > cur.atMs) map[key] = { atMs: atMs, call_attempts: Number(row[callAttemptsCol]) || 0 };
   });
-  Object.keys(latest).forEach(function (key) { map[key] = latest[key].call_attempts; });
   return map;
+}
+
+// Each lead's call_attempts as of the latest snapshot strictly before
+// `beforeDate`'s IST calendar day (i.e. yesterday-or-earlier only) —
+// direct port of dashboard.html's buildTodayCallBaseline. Exists to
+// compute "calls made so far TODAY" (callAttempts - this baseline, see
+// computeSlaFlags_'s underCalledToday) against a fixed start-of-day
+// reference point — deliberately NOT "the most recent snapshot,
+// whenever that was", which lastSnapshotBeforeGs_ below is for.
+function buildTodayCallBaselineGs_(ss, beforeDate) {
+  const todayStart = new Date(istDayKeyGs_(beforeDate) + 'T00:00:00+05:30').getTime();
+  const detailed = _lastMovementLogSnapshotByKeyGs_(ss, todayStart);
+  const map = {};
+  Object.keys(detailed).forEach(function (key) { map[key] = detailed[key].call_attempts; });
+  return map;
+}
+
+// Each lead's LATEST snapshot strictly before `beforeDate`, whatever
+// calendar day it falls on — as {atMs, call_attempts}. Used by
+// noCommentFollowUpGs_ (OvernightEmailer.gs) to compare against the most
+// recent actually-known call_attempts count and tell "genuinely stalled"
+// from "actively being worked". Deliberately NOT
+// buildTodayCallBaselineGs_'s "yesterday or earlier only" scope: an
+// overnight lead's most recent prior snapshot is typically from EARLIER
+// TODAY (snapshots run 4x/day, see SNAPSHOT_HOURS_), and that today's
+// snapshot is exactly the "N hours ago" reference point this needs —
+// buildTodayCallBaselineGs_'s day-boundary gate would incorrectly
+// exclude it.
+function lastSnapshotBeforeGs_(ss, beforeDate) {
+  return _lastMovementLogSnapshotByKeyGs_(ss, beforeDate.getTime());
 }
 
 // Faithful port of the 5 SLA rules dashboard.html's enrichLead computes —

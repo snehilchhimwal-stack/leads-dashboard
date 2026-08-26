@@ -561,21 +561,44 @@ function overnightStatusLabelGs_(stage) {
 //      outcome mapped through FOLLOWUP_SUGGESTIONS_GS_, or a quoted "no
 //      keyword match" note when the comment has real content but
 //      nothing recognizable.
-//   2. Once there's truly no owner-logged comment on this row: the old
-//      flags-based fallback — has this lead been connected at all, and
-//      which SLA check (if any) is currently flagging it.
-function overnightFollowupHintGs_(row, colIndex, flags) {
+//   2. Once there's truly no owner-logged comment text at all (no entry,
+//      or the owner's only logged entry was a blank check-in with no
+//      text) — see noCommentFollowUpGs_ below, which reads call_attempts
+//      against the last known snapshot instead of guessing from
+//      hasConnected/SLA flags.
+// now/baselineEntry feed tier 2 only — see noCommentFollowUpGs_.
+function overnightFollowupHintGs_(row, colIndex, now, baselineEntry) {
   const latest = latestOutcomeGs_(row, colIndex);
-  if (latest) {
+  if (latest && latest.comment) {
     return FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
   }
+  return noCommentFollowUpGs_(row, colIndex, now, baselineEntry);
+}
 
-  const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
-  const hasConnected = (connectTimeRaw instanceof Date) || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
-  if (!hasConnected) return 'Connect ASAP — no contact made yet.';
-  if (flags.followupOverdue) return 'Follow up now — No update in the last 4 hours.';
-  if (flags.isNotUpdated) return "Log a status update — this lead hasn't been updated.";
-  return 'Keep working this lead — no SLA issue flagged yet.';
+// Fallback for when the lead's own assigned RM hasn't logged any usable
+// comment at all — real production case: a lead's only owner-logged
+// entry was a blank timestamp check-in ("RM: - 2026-08-25 19:08"), and
+// the old wording ("no keyword match found") read as if a real comment
+// just didn't match a keyword, when really nothing was said. Says so
+// plainly instead, then reads call_attempts against the last known
+// Movement_Log snapshot (lastSnapshotBeforeGs_,
+// MovementTracker.gs) to tell "genuinely stalled, nobody's dialing" from
+// "actively being worked, just not narrated yet" — the two need
+// different advice. Only draws that comparison once the baseline
+// snapshot is itself at least 4 hours old; a snapshot from 20 minutes
+// ago reading "unchanged" doesn't mean much on its own, the RM may
+// simply not have re-attempted that recently yet.
+function noCommentFollowUpGs_(row, colIndex, now, baselineEntry) {
+  if (!baselineEntry || (now.getTime() - baselineEntry.atMs) < 4 * 3600000) {
+    return 'No comment added — connect and log the outcome.';
+  }
+  const currentAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
+  if (currentAttempts <= baselineEntry.call_attempts) {
+    return 'No comment added — no new call attempts in over 4 hours. Connect ASAP.';
+  }
+  const newAttempts = currentAttempts - baselineEntry.call_attempts;
+  return 'No comment added — ' + newAttempts + ' more call attempt' + (newAttempts === 1 ? '' : 's') +
+    ' made since the last check. Keep trying to connect, and also send a WhatsApp message.';
 }
 
 // Single-copy, owner-filtered port of js/core.js's latestFamilyOutcome —
@@ -872,10 +895,13 @@ function sendOvernightMorningEmails() {
   const win = overnightWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const recipients = loadRegionRecipients_(ss);
-  // buildTodayCallBaselineGs_ (from MovementTracker.gs) reads the whole
-  // Movement_Log tab — wrapped at the call site rather than editing that
-  // shared file, same retry reasoning as readLeadsTab_ above.
+  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (from
+  // MovementTracker.gs) each read the whole Movement_Log tab — wrapped at
+  // the call site rather than editing that shared file, same retry
+  // reasoning as readLeadsTab_ above. Detailed (keeps each entry's
+  // snapshot timestamp) feeds noCommentFollowUpGs_ below.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
 
   // Flat candidate list first, deduped by customer identity below, THEN
   // grouped by region — a customer held by more than one RM at once
@@ -914,13 +940,14 @@ function sendOvernightMorningEmails() {
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // kept on the lead for Overnight_Log — not shown in the email itself
+    const baselineEntry = lastSnapshotMap[clientId || ('l:' + leadId)];
 
     candidateLeads.push({
       identityKey: clientId || ('l:' + leadId), // same customer-identity rule buildMovementHistories (dashboard) and RmHierarchy.gs's CC lookups already use
       stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
       region: main, lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),
-      followup: overnightFollowupHintGs_(row, colIndex, flags),
+      followup: overnightFollowupHintGs_(row, colIndex, now, baselineEntry),
       issue: issue,
     });
   });
@@ -1211,10 +1238,12 @@ function sendOvernightFollowupEmails() {
   if (!todaysRuns.length) return;
 
   const { colIndex, dataRows } = readLeadsTab_(ss);
-  // buildTodayCallBaselineGs_ (from MovementTracker.gs) reads the whole
-  // Movement_Log tab — wrapped at the call site rather than editing that
-  // shared file, same retry reasoning as readLeadsTab_ above.
+  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (from
+  // MovementTracker.gs) each read the whole Movement_Log tab — wrapped at
+  // the call site rather than editing that shared file, same retry
+  // reasoning as readLeadsTab_ above. Detailed feeds noCommentFollowUpGs_.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
   const byLeadId = {};
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
@@ -1247,7 +1276,9 @@ function sendOvernightFollowupEmails() {
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
-        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row, flags: flags });
+        const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+        const baselineEntry = lastSnapshotMap[clientId || ('l:' + entry.lead_id)];
+        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row, baselineEntry: baselineEntry });
       } else {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
@@ -1295,7 +1326,7 @@ function sendOvernightFollowupEmails() {
     // blank — previously a slow/absent dashboard response meant this
     // column just showed "—" with nothing actionable in it.
     r.unresolvedRows.forEach(function (row) {
-      row.suggestion = suggestionByLeadId[row.lead_id] || overnightFollowupHintGs_(row.sourceRow, colIndex, row.flags);
+      row.suggestion = suggestionByLeadId[row.lead_id] || overnightFollowupHintGs_(row.sourceRow, colIndex, now, row.baselineEntry);
     });
 
     const sections = [{
@@ -1485,15 +1516,15 @@ function sendOvernightMorningEmailsNow() { sendOvernightMorningEmails(); }
 function sendOvernightFollowupEmailsNow() { sendOvernightFollowupEmails(); }
 
 // ONE-OFF DIAGNOSTIC — writes one row per TODAY's overnight-eligible lead
-// whose Suggested Follow-up would be overnightFollowupHintGs_'s bottom
-// fallback ("Keep working this lead — no SLA issue flagged yet") into a
-// fresh "Debug_NoIssueLeads" sheet tab — the actual comment history
-// behind each one, so it can be reviewed (or File -> Download -> CSV'd)
-// rather than guessed at. That fallback fires whenever NONE of the 5 SLA
-// checks are currently flagging the lead — it does NOT mean something's
-// wrong; the morning email lists every still-open overnight lead
-// regardless of flag status (see sendOvernightMorningEmails' own
-// comment), so a lead that's simply being worked on with no issue yet
+// whose Suggested Follow-up would be noCommentFollowUpGs_'s "no comment
+// added" branch (owner-filtered — see latestOutcomeGs_'s own comment) —
+// i.e. no usable comment text, only whatever call_attempts/baseline
+// comparison text applies — into a fresh "Debug_NoIssueLeads" sheet tab —
+// the actual comment history behind each one, so it can be reviewed (or
+// File -> Download -> CSV'd) rather than guessed at. This does NOT mean
+// something's wrong; the morning email lists every still-open overnight
+// lead regardless of flag status (see sendOvernightMorningEmails' own
+// comment), so a lead whose owner simply hasn't logged anything yet
 // legitimately lands here. This tool exists so that can be CONFIRMED
 // against the real comment text for each one, rather than taken on
 // faith. Read-only against the leads tab; only touches its own new
@@ -1503,7 +1534,7 @@ function downloadNoIssueLeadsNow() {
   const now = new Date();
   const win = overnightWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss);
-  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
 
   const headers = [
     'lead_id', 'RM', 'TL', 'region', 'group_source', 'current_stage', 'lead_assigned_at',
@@ -1527,9 +1558,10 @@ function downloadNoIssueLeadsNow() {
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
 
-    const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
-    const hint = overnightFollowupHintGs_(row, colIndex, flags);
-    if (hint.indexOf('Keep working') !== 0) return; // only the leads landing on the fallback branch
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    const baselineEntry = lastSnapshotMap[clientId || ('l:' + leadId)];
+    const hint = overnightFollowupHintGs_(row, colIndex, now, baselineEntry);
+    if (hint.indexOf('No comment added') !== 0) return; // only the leads landing on the no-usable-comment branch
 
     rows.push([
       leadId,
@@ -1557,7 +1589,7 @@ function downloadNoIssueLeadsNow() {
   }, 'write Debug_NoIssueLeads header');
   if (rows.length) withRetry_(function () { sheet.getRange(2, 1, rows.length, headers.length).setValues(rows); }, 'write Debug_NoIssueLeads rows');
 
-  Logger.log('Wrote ' + rows.length + ' lead(s) with no SLA issue flagged (today\'s overnight window) to the "' + sheetName + '" sheet tab — open it, review the last two columns\' real comment text, then File -> Download -> CSV if you want to export it.');
+  Logger.log('Wrote ' + rows.length + ' lead(s) with no owner-logged comment (today\'s overnight window) to the "' + sheetName + '" sheet tab — open it, review the last two columns\' real comment text, then File -> Download -> CSV if you want to export it.');
 }
 
 // ONE-OFF DIAGNOSTIC — run this from the function dropdown, then View →
