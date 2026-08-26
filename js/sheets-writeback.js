@@ -570,28 +570,19 @@ async function sortDailyCohortHistorySheet_(){
 // tab-tracking.js) — still directly console-callable too (`await
 // backfillDailyCohortHistoryFromMovementLog()`). Reconstructs one row per
 // fully-resolved day×region currently reachable from the Movement_Log
-// history already loaded in this tab (up to 7 days back) — same
-// eligibility rule as persistDailyCohortHistory (a day only counts once
-// its whole 48h window has elapsed), and same ignoreFilters:true reasoning
-// (a backfill must capture the true picture, not whoever's currently
+// history already loaded in this tab — same eligibility rule as
+// persistDailyCohortHistory, via the SAME shared eligibleDailyCohortDates
+// (tab-tracking.js): bounded to dates with real nearby snapshot coverage,
+// not every lead_assigned_at ever seen (a still-open lead from months ago
+// would otherwise blow this out to one region-wise pass per day across
+// its whole open lifetime). Same ignoreFilters:true reasoning too (a
+// backfill must capture the true picture, not whoever's currently
 // filtered view). Safe to re-run — upserts by date+region, never
 // duplicates a row. Returns the number of day×region rows written.
 async function backfillDailyCohortHistoryFromMovementLog(){
   if (!movementSnapshots.length) { console.warn('No Movement_Log data loaded — refresh first.'); return 0; }
 
-  const byLead = buildMovementHistories();
-  const dayKeys = new Set();
-  byLead.forEach(history => {
-    if (!history.length) return;
-    const created = parseDate(history[0].lead_assigned_at);
-    if (created) dayKeys.add(istDateKey(created));
-  });
-
-  const nowMs = Date.now();
-  const eligibleDates = Array.from(dayKeys).filter(dateKey => {
-    const dayEnd = parseDate(dateKey + ' 23:59:59');
-    return dayEnd && (dayEnd.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000) <= nowMs;
-  }).sort();
+  const eligibleDates = eligibleDailyCohortDates();
 
   const entries = [];
   eligibleDates.forEach(dateKey => {

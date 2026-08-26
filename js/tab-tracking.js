@@ -912,6 +912,44 @@ function computeDailyCohortByRegion(dateKey, opts){
   return { dateKey, totalCreated, byRegion };
 }
 
+// Candidate dates for Daily Cohort History — every calendar day whose
+// dayEnd falls within Movement_Log's actual RETAINED snapshot coverage
+// (so there's real point-in-time evidence nearby to judge outcomes from,
+// not just a lead that happens to still be open) AND whose entire 48h
+// window has already elapsed (so every stored number is final, never
+// partial). Deliberately NOT every distinct lead_assigned_at ever seen —
+// a lead stays open, and keeps showing up in every snapshot, for however
+// long its own sales cycle runs, which can be months; without this bound
+// a handful of very old still-open leads would blow this out to scanning
+// one region-wise pass per day across that ENTIRE span. Shared by
+// persistDailyCohortHistory below and
+// backfillDailyCohortHistoryFromMovementLog (sheets-writeback.js) so the
+// bound only has to be right in one place.
+function eligibleDailyCohortDates(){
+  if (!movementSnapshots.length) return [];
+  let earliestSnapshotMs = null;
+  movementSnapshots.forEach(rec => {
+    const ms = rec.snapshot_at.getTime();
+    if (earliestSnapshotMs === null || ms < earliestSnapshotMs) earliestSnapshotMs = ms;
+  });
+
+  const byLead = buildMovementHistories();
+  const dayKeys = new Set();
+  byLead.forEach(history => {
+    if (!history.length) return;
+    const created = parseDate(history[0].lead_assigned_at);
+    if (created) dayKeys.add(istDateKey(created));
+  });
+
+  const nowMs = Date.now();
+  return Array.from(dayKeys).filter(dateKey => {
+    const dayEnd = parseDate(dateKey + ' 23:59:59');
+    if (!dayEnd) return false;
+    const dayEndMs = dayEnd.getTime();
+    return dayEndMs >= earliestSnapshotMs && (dayEndMs + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000) <= nowMs;
+  }).sort();
+}
+
 // Auto-persists Daily Cohort by Region into the Daily_Cohort_History sheet
 // tab so trend-over-time survives Movement_Log's 7-day retention — without
 // this, "are we improving on same-day/48h conversion?" can only ever be
@@ -934,23 +972,24 @@ function computeDailyCohortByRegion(dateKey, opts){
 // before that day ages out of Movement_Log's retention — a date that goes
 // unresolved AND unretained before any refresh ever covers it is lost,
 // same limitation SLA_History already has for gaps longer than that.
+//
+// Candidate dates come from eligibleDailyCohortDates below, NOT from
+// every distinct lead_assigned_at seen in history — a lead stays open
+// (and keeps showing up in every snapshot) for however long its sales
+// cycle runs, which can be months, so scanning every assignment date
+// ever observed would replay this region-wise pass once per day across
+// that whole span. Bounding to dates with real nearby snapshot coverage
+// keeps this to the small handful of recent days that are actually both
+// resolvable AND meaningful (a day outside Movement_Log's retention has
+// no real point-in-time evidence to judge same-day/48h outcomes from
+// anyway — evidenceAtDeadline would just be falling back to today's live
+// sheet state for a deadline months in the past, which isn't a real
+// historical answer).
 async function persistDailyCohortHistory(){
   if (!movementSnapshots.length) return;
   if (!_currentSheetId) return;
 
-  const byLead = buildMovementHistories();
-  const dayKeys = new Set();
-  byLead.forEach(history => {
-    if (!history.length) return;
-    const created = parseDate(history[0].lead_assigned_at);
-    if (created) dayKeys.add(istDateKey(created));
-  });
-
-  const nowMs = Date.now();
-  const eligibleDates = Array.from(dayKeys).filter(dateKey => {
-    const dayEnd = parseDate(dateKey + ' 23:59:59');
-    return dayEnd && (dayEnd.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000) <= nowMs;
-  });
+  const eligibleDates = eligibleDailyCohortDates();
   if (!eligibleDates.length) return;
 
   const entries = [];
