@@ -639,13 +639,25 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     }).send();
   } catch (e) {
     Logger.log('Overnight morning email failed for ' + region + bucketNote + ': ' + e);
+    // createDraft(...).send() is two steps chained together — a real
+    // production case showed the DRAFT succeeds (Google allows composing)
+    // while the immediately-following .send() throws "Gmail operation not
+    // allowed" (a Workspace-level send restriction, unrelated to this
+    // script's own logic — see this exact case's own postmortem). When
+    // that happens, the draft is left sitting in Drafts, unsent, and a
+    // manual Send from the Gmail UI works fine since the block is on
+    // script-driven sends specifically. Called out explicitly here so the
+    // alert is immediately actionable instead of just reporting failure.
+    const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
     notifyOpsAlertGs_('Morning email failed for ' + region + bucketNote, [
       'Region: ' + region + bucketNote,
       'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
       'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
       '',
       'These leads got no automated email this run — the window is fixed to this morning\'s run only, so tomorrow\'s run will NOT retry them.',
-      'Error: ' + e,
+      isSendBlocked
+        ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
+        : 'Error: ' + e,
     ]);
     return;
   }
