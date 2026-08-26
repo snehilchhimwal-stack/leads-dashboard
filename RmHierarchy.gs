@@ -650,24 +650,33 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
  * FIRST above and the TM is never reached for them — a TM only becomes
  * primary for someone who genuinely has no A1 above them at all.
  *
- * Each bucket's Cc is whichever of TM/RH/CH exist in the PRIMARY's OWN
- * chain — looked up by the primary's own name, not read off the reporting
- * RM's row. This matters in Pune specifically: a TM there (e.g. Ayaz
- * Bagwan) has real A1s under them (e.g. Firoj Shaikh), and Book7 doesn't
- * always carry every intermediate tier on a deeply-nested S1's own row —
- * an S1 reporting to Firoj Shaikh has A1='Firoj Shaikh' and CH='Sourabh
- * Sareen' on their own row, but NOT the TM in between (Ayaz Bagwan) —
- * while Firoj Shaikh's OWN row correctly has it. Using the S1's row for
- * Cc would silently drop Ayaz Bagwan from every email to Firoj Shaikh's
- * bucket; using the primary's own row instead picks it up correctly.
- * Plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own email
- * (never cc someone already in To).
+ * Each bucket's Cc is whichever of RH/CH exist in the PRIMARY's OWN chain
+ * — looked up by the primary's own name, not read off the reporting RM's
+ * row (matters in Pune specifically: Book7 doesn't always carry every
+ * intermediate tier on a deeply-nested S1's own row, but the primary's
+ * own row always does). TM is deliberately EXCLUDED from Cc in general —
+ * a person's direct manager already IS the "To", so their manager's
+ * manager (RH/CH) is enough extra context without also looping in the TM
+ * layer — EXCEPT PUNE_TM_STILL_CC_ below (Ayaz Bagwan, Rahul Poudel):
+ * each has real A1s under them (Omkar Ghate/Firoj Shaikh and Prathamesh A
+ * Pande/Nayan Pabale respectively), and dropping them from Cc on THOSE
+ * specific A1s' buckets would lose the one TM-level person actually still
+ * relevant there — an S1 reporting to Firoj Shaikh has A1='Firoj Shaikh'
+ * and CH='Sourabh Sareen' on their own row, but NOT the TM in between
+ * (Ayaz Bagwan); only Firoj Shaikh's OWN row (used for Cc here) carries
+ * it. Plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own
+ * email (never cc someone already in To).
  *
  * Returns { buckets: [{ primaryName, primaryEmail, cc: [emails],
  * rmNames: [...] }], unresolved: [rmNames with no chain, excluded, or no
  * resolvable primary email] } — callers route `unresolved` through the
  * legacy Region_Recipients fallback instead.
  */
+// The only two TMs whose Cc inclusion survives the general "TM excluded
+// from Cc" rule above — see resolveRecipientBucketsForRms_'s own docblock
+// for why (each has real A1s under them; dropping them from Cc would lose
+// the one still-relevant TM-level person on those specific A1s' buckets).
+const PUNE_TM_STILL_CC_ = ['ayaz bagwan', 'rahul poudel'];
 function resolveRecipientBucketsForRms_(ss, rmNames) {
   const data = loadRmHierarchyAndEmails_(ss);
   const buckets = {}; // lowercased primaryName -> { primaryName, primaryEmail, ccSet, rmNames }
@@ -687,7 +696,11 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     // their own in the hierarchy (shouldn't normally happen, since they
     // resolved to a real email above, but stay defensive).
     const primaryChain = data.byRmNameLower[key] || chain;
-    [primaryChain.tm, primaryChain.rh, primaryChain.ch].forEach(function (name) {
+    const ccCandidates = [primaryChain.rh, primaryChain.ch];
+    if (PUNE_TM_STILL_CC_.indexOf(String(primaryChain.tm || '').trim().toLowerCase()) !== -1) {
+      ccCandidates.push(primaryChain.tm);
+    }
+    ccCandidates.forEach(function (name) {
       if (!name) return;
       const email = data.emailByManagerNameLower[name.toLowerCase()];
       if (email) buckets[key].ccSet.add(email);
