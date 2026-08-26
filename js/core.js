@@ -2609,38 +2609,61 @@ const FOLLOWUP_SUGGESTIONS = {
 // being thrown away. Quoting the real latest note beats a canned message.
 function unmatchedFollowUp(comment, loggedBy, ts){
   const text = String(comment || '').trim();
-  if (!text) return 'Manual review required — no keyword match found even after checking this customer\'s other RM copies. Read the comments above and log a specific next call/action; do not leave this one unactioned.';
+  if (!text) return 'Manual review required — no keyword match found. Read the comments above and log a specific next call/action; do not leave this one unactioned.';
   const who = String(loggedBy || '').trim();
   const when = ts ? istStamp(ts) : '';
   const attribution = [who, when].filter(Boolean).join(', ');
   return `No keyword match — latest note${attribution ? ` (${attribution})` : ''}: "${text}". Read this and log a specific next call/action.`;
 }
 
-// Pools every comment-ish signal across a customer's full family (this copy
-// + siblingComments — see copySplits in fetchAndRender)
-// and returns the single most recent one as {outcome, comment, loggedBy, ts},
-// or null if the family has no structured action-log entry AND no
-// last_comment anywhere. Shared by suggestedFollowUp below (tiers 1-2) and
-// the Possible Premature Closes check in buildRegionWiseReports — both need
-// "what did this customer most recently say," just for different purposes.
+// Despite the name (kept for now to avoid touching every call site —
+// see suggestedFollowUp/the Possible Premature Closes check below),
+// this NO LONGER pools sibling RM copies of the same customer. Only
+// entries logged by THIS lead's own assigned RM ("the lead owner")
+// count — a comment logged by someone else who'd also touched this
+// lead's history (a different RM, a TL covering a call, a sibling copy
+// under a different RM) isn't the current owner's own read on the
+// customer, so it shouldn't drive what the owner is told to do next.
+// Real production case: a lead assigned to one RM had a comment blob
+// that also carried a note from a completely different person — using
+// that note to generate the owner's Suggested Follow-up would have
+// been telling them to act on someone else's read, not their own.
+// Returns {outcome, comment, loggedBy, ts}, or null if this lead has no
+// owner-logged structured action-log entry AND no last_comment. Shared
+// by suggestedFollowUp below (tiers 1-2) and the Possible Premature
+// Closes check in buildRegionWiseReports — both need "what did the
+// assigned RM most recently say," just for different purposes.
 // Priority order:
-//   1. The structured action log (combinedCommentsText) across every copy
-//      in the family, pooled together — the single MOST RECENT entry across
-//      the WHOLE family wins, found by actual timestamp (falls back to the
-//      last one parsed if nothing carries a date).
-//   2. last_comment, checked across every copy in the family — only once
-//      NOT ONE copy in the family has a single dated structured entry.
+//   1. The structured action log (combinedCommentsText), filtered to
+//      entries logged by this lead's own RM — the single MOST RECENT
+//      entry that actually has text wins, found by actual timestamp
+//      (falls back to the last one parsed if nothing carries a date). A
+//      blank entry (a timestamp logged with no comment, e.g. "RM: -
+//      2026-08-26 09:03") is skipped when picking "most recent" — real
+//      production case: a genuinely informative note ("Not enquired")
+//      from hours earlier was getting silently shadowed by a later
+//      blank check-in that happened to have a newer timestamp, purely
+//      because "latest" only compared timestamps and never looked at
+//      whether the entry said anything. Only once NOT ONE owner-logged
+//      entry has any text does this fall back to considering blank
+//      owner-logged entries too — "no keyword match, here's the
+//      (blank) latest note" is still more honest than silently
+//      reverting to an earlier stage of the fallback chain once the
+//      owner really did log multiple attempts, just without notes.
+//   2. This lead's own last_comment — only once there's not a single
+//      owner-attributed structured entry. If l.RM is blank
+//      ("Unassigned"), there's no owner to filter by, so every entry is
+//      kept rather than filtering down to nothing.
 function latestFamilyOutcome(l){
-  const family = [l].concat(l.siblingComments || []);
-
-  const entries = [];
-  family.forEach(copy => {
-    parseActionLog(combinedCommentsText(copy)).forEach(e => entries.push(e));
-  });
+  const ownerName = String(l.RM || '').trim().toLowerCase();
+  const allEntries = parseActionLog(combinedCommentsText(l));
+  const entries = ownerName ? allEntries.filter(e => String(e.loggedBy || '').trim().toLowerCase() === ownerName) : allEntries;
   if (entries.length) {
-    let latest = entries[entries.length - 1];
+    const withText = entries.filter(e => e.comment);
+    const candidates = withText.length ? withText : entries;
+    let latest = candidates[candidates.length - 1];
     let newestMs = -Infinity;
-    entries.forEach(e => {
+    candidates.forEach(e => {
       if (!e.ts) return;
       const d = parseDate(e.ts);
       if (d && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
@@ -2648,11 +2671,9 @@ function latestFamilyOutcome(l){
     return { outcome: latest.outcome, comment: latest.comment, loggedBy: latest.loggedBy, ts: latest.ts };
   }
 
-  for (const copy of family) {
-    const lastComment = String(copy.last_comment || '').trim();
-    if (lastComment) {
-      return { outcome: inferOutcome(lastComment), comment: lastComment, loggedBy: copy.RM, ts: null };
-    }
+  const lastComment = String(l.last_comment || '').trim();
+  if (lastComment) {
+    return { outcome: inferOutcome(lastComment), comment: lastComment, loggedBy: l.RM, ts: null };
   }
 
   return null;
@@ -2727,36 +2748,34 @@ function ownComments(row){
   return sortCommentEntries(commentsForCopy(row, row.RM));
 }
 
-// Suggested follow-up for a lead — mandatory best-effort: checked across
-// every comment-ish column of THIS copy AND every sibling copy of the
-// SAME customer, not just this one card's own fields. A customer's real
-// next step should be assessed from the full picture across every RM who's
-// touched them — a copy with nothing logged of its own can still often be
-// answered from what a sibling copy recorded. Priority order:
-//   1-2. latestFamilyOutcome above (structured action log, then last_comment).
-//   3. closing_reason, checked across every copy — the only signal left
-//      when a copy closed without anything else logged.
-//   4. noCommentsFallback (or the generic default) once ALL of the above
-//      are genuinely empty on EVERY copy in the family. Lets a caller
-//      substitute its own wording (e.g. Overnight Leads' "Connect ASAP")
-//      for that last case only.
+// Suggested follow-up for a lead — mandatory best-effort, scoped to THIS
+// copy's own fields only. Deliberately does NOT pool sibling copies of
+// the same customer (see latestFamilyOutcome's own comment for why) —
+// a customer's real next step, as far as THIS RM's own card is
+// concerned, should reflect what THIS RM's own record says, not what a
+// different RM logged on their own separate copy. Priority order:
+//   1-2. latestFamilyOutcome above (this lead's own structured action
+//        log entries, owner-filtered, then its own last_comment).
+//   3. This lead's own closing_reason — the only signal left when it
+//      closed without anything else logged.
+//   4. noCommentsFallback (or the generic default) once ALL of the
+//      above are genuinely empty. Lets a caller substitute its own
+//      wording (e.g. Overnight Leads' "Connect ASAP") for that last
+//      case only.
 function suggestedFollowUp(l, noCommentsFallback){
   const latest = latestFamilyOutcome(l);
   if (latest) {
     return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);
   }
 
-  const family = [l].concat(l.siblingComments || []);
-  for (const copy of family) {
-    // lead_closing_reason/lead_closing_comment (the sheet's own closing
-    // disposition) preferred over the RM-entered closing_reason when
-    // present — the more authoritative "why did this close" signal.
-    const reason = String(copy.lead_closing_reason || copy.closing_reason || '').trim();
-    if (reason) {
-      const detail = String(copy.lead_closing_comment || '').trim();
-      const full = detail ? `${reason} — ${detail}` : reason;
-      return `Lead closed (${full}) — no further follow-up needed unless it's reopened.`;
-    }
+  // lead_closing_reason/lead_closing_comment (the sheet's own closing
+  // disposition) preferred over the RM-entered closing_reason when
+  // present — the more authoritative "why did this close" signal.
+  const reason = String(l.lead_closing_reason || l.closing_reason || '').trim();
+  if (reason) {
+    const detail = String(l.lead_closing_comment || '').trim();
+    const full = detail ? `${reason} — ${detail}` : reason;
+    return `Lead closed (${full}) — no further follow-up needed unless it's reopened.`;
   }
 
   return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
