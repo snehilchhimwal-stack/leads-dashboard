@@ -287,13 +287,23 @@ function ensureRegionRecipientsSheet_(ss) {
 // array of { to, cc, rmNames, source, bucketLabel, primaryRole } — one
 // entry per email that should actually be sent for this region (zero,
 // one, or many).
-function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients) {
+//
+// opts.fireAlerts (default false) gates the two REAL side-effect emails
+// this function can send (the CH-level alert and the "no recipient"
+// alert) — only sendOvernightMorningEmails, the actual unattended send
+// path, passes true. Diagnostic/maintenance callers that just need to
+// know what a recipient WOULD be (backfillTodaysOvernightLogRecipientsNow)
+// leave it false, so re-running them repeatedly while debugging can't
+// fire the same real alert (leadership Cc'd, for the CH case) over and
+// over as an unintended side effect.
+function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
+  const fireAlerts = !!(opts && opts.fireAlerts);
   const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
     return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
 
-  notifyChLevelLeadsGs_(region, resolved.chLevelRms);
+  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms);
 
   if (resolved.unresolved.length) {
     const legacy = legacyRecipients[region];
@@ -304,7 +314,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
       ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
       results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: resolved.unresolved, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + resolved.unresolved.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
-    } else {
+    } else if (fireAlerts) {
       // No recipient configured anywhere for these RMs — their overnight
       // leads get no automated email at all this run, and nothing else
       // in this script logs that fact. Alert rather than stay silent.
@@ -324,9 +334,14 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
   // test mode (each bucket still becomes its own email, just redirected)
   // so a test run can actually verify "does each A1 get their own email"
   // instead of collapsing the very thing being tested into one message.
+  // originalTo/originalCc carry the REAL resolved recipients through
+  // (rather than discarding them) so sendOneOvernightEmail_ can print
+  // them visibly inside the test email itself — otherwise the only way
+  // to see what a real send would have targeted is digging through the
+  // Executions log rather than just reading the email you got.
   if (TEST_MODE_OVERRIDE_EMAIL_) {
     return results.map(function (r) {
-      return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole };
+      return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole, originalTo: r.to, originalCc: r.cc };
     });
   }
 
@@ -570,7 +585,20 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   // Same bucket label + tier qualifier, just suffix-style for the plain
   // body/log line below rather than the subject's new prefix ordering.
   const bucketNote = rec.bucketLabel ? ' (' + rec.bucketLabel + tierQualifier + ')' : '';
-  const html = renderOvernightReportEmailHTML_({
+  // Present only when TEST_MODE_OVERRIDE_EMAIL_ is active — the REAL
+  // resolved recipient the send is currently suppressing, printed
+  // directly in the email itself so a tester can see it without digging
+  // through the Executions log (see resolveRecipientEmailsForRegion_'s
+  // own comment on originalTo/originalCc).
+  const testModeBanner = rec.originalTo ? {
+    html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
+      '<div style="font-weight:700; color:#92400e; font-size:13px;">TEST MODE — real send suppressed</div>' +
+      '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">This would really have gone to: <b>' + esc_(rec.originalTo) + '</b>' + (rec.originalCc ? ' (cc: ' + esc_(rec.originalCc) + ')' : ' (no cc)') + '</div>' +
+      '</div>',
+    plain: 'TEST MODE — real send suppressed. This would really have gone to: ' + rec.originalTo + (rec.originalCc ? ' (cc: ' + rec.originalCc + ')' : ' (no cc)') + '\n\n',
+  } : null;
+
+  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_({
     title: 'Overnight Leads',
     region: region,
     subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
@@ -589,7 +617,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     }),
     footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
   });
-  const plainBody = 'Overnight leads for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
+  const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Overnight leads for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
     ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
 
   Logger.log('Morning email recipients for ' + region + bucketNote + ': ' + rec.source);
@@ -711,7 +739,7 @@ function sendOvernightMorningEmails() {
     if (!openLeads.length) return; // nothing still-open overnight for this region
 
     const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
-    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients);
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true });
 
     recEmails.forEach(function (rec) {
       const rmSet = new Set(rec.rmNames);
@@ -1000,7 +1028,25 @@ function sendOvernightFollowupEmails() {
       rows: r.unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
     }];
 
-    const bodyHtml = renderOvernightReportEmailHTML_({
+    // TEST_MODE_OVERRIDE_EMAIL_ redirects the morning send, but r.to/r.cc
+    // here come straight from whatever was ALREADY STORED in
+    // Overnight_Log — if that row was logged by a REAL (non-test) morning
+    // run, sending this follow-up under test mode would otherwise reach
+    // the real people, defeating the whole point of the override. Same
+    // "never reach a real recipient during a test run" guarantee as the
+    // morning path, applied here explicitly since this function reads
+    // stored recipients rather than re-resolving them.
+    const sendTo = TEST_MODE_OVERRIDE_EMAIL_ || r.to;
+    const sendCc = TEST_MODE_OVERRIDE_EMAIL_ ? undefined : (r.cc || undefined);
+    const testModeBanner = TEST_MODE_OVERRIDE_EMAIL_ ? {
+      html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
+        '<div style="font-weight:700; color:#92400e; font-size:13px;">TEST MODE — real send suppressed</div>' +
+        '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">This would really have gone to: <b>' + esc_(r.to) + '</b>' + (r.cc ? ' (cc: ' + esc_(r.cc) + ')' : ' (no cc)') + '</div>' +
+        '</div>',
+      plain: 'TEST MODE — real send suppressed. This would really have gone to: ' + r.to + (r.cc ? ' (cc: ' + r.cc + ')' : ' (no cc)') + '\n\n',
+    } : null;
+
+    const bodyHtml = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_({
       title: '1pm Follow-up',
       region: r.region,
       subtitle: "Re-checking this morning's flagged leads",
@@ -1010,19 +1056,19 @@ function sendOvernightFollowupEmails() {
       sections: sections,
       footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
     });
-    const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
+    const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
 
     try {
       withRetry_(function () {
-        return sendThreadedGmailReply_(r.threadId, r.to, r.cc || '', subject, plainBody, bodyHtml);
+        return sendThreadedGmailReply_(r.threadId, sendTo, sendCc || '', subject, plainBody, bodyHtml);
       }, 'send threaded follow-up reply (' + r.region + ')');
     } catch (threadErr) {
       Logger.log('Threaded send failed for ' + r.region + ' (thread ' + r.threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
       try {
         withRetry_(function () {
-          return GmailApp.createDraft(r.to, subject, plainBody, {
-            cc: r.cc || undefined,
+          return GmailApp.createDraft(sendTo, subject, plainBody, {
+            cc: sendCc,
             htmlBody: bodyHtml,
             name: 'Homesfy Lead Ops',
           }).send();
@@ -1105,6 +1151,9 @@ function backfillTodaysOvernightLogRecipientsNow() {
       return;
     }
 
+    // No opts passed — fireAlerts stays false, so re-running this backfill
+    // (safe/idempotent by design) can't also re-fire a real CH-level or
+    // "no recipient" alert every time.
     const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients);
     if (!recEmails.length) { skippedUnresolved++; return; }
     if (recEmails.length > 1) {
