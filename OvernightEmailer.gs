@@ -135,35 +135,82 @@ function notifyOpsAlertGs_(subject, bodyLines, cc) {
 // resolves all the way up to a real CH (Cluster/Commercial Head/City
 // Lead) — see that function's own docblock for the real production bug
 // this replaces (a CH silently receiving the raw overnight-leads report
-// addressed directly to them). Instead: a plain-text alert to
-// OPS_ALERT_EMAIL_, leadership (ALWAYS_CC_EMAILS_, RmHierarchy.gs) in Cc,
-// explaining that these specific RMs' leads currently have no resolvable
-// A1/TM/RH and are sitting with this CH — a human decision (add a
-// TL/TM/RH for them in RM_Hierarchy, or handle manually), not something
-// this script should silently paper over by emailing the CH directly.
-// Grouped by CH so one region with several such gaps sends one alert per
-// CH, not one per RM.
-function notifyChLevelLeadsGs_(region, chLevelRms) {
+// addressed directly to them). Instead: a styled alert to OPS_ALERT_EMAIL_,
+// leadership (ALWAYS_CC_EMAILS_, RmHierarchy.gs) in Cc, explaining that
+// these specific RMs' leads currently have no resolvable A1/TM/RH and are
+// sitting with this CH — a human decision (add a TL/TM/RH for them in
+// RM_Hierarchy, or handle manually), not something this script should
+// silently paper over by emailing the CH directly. Grouped by CH so one
+// region with several such gaps sends one alert per CH, not one per RM.
+// Sent directly via GmailApp.sendEmail rather than through
+// notifyOpsAlertGs_ — this one needs its own subject format (matching the
+// real overnight emails' "(name) region Google Overnight Leads - date"
+// pattern, not notifyOpsAlertGs_'s fixed "[Overnight Emailer] " prefix)
+// and its own styled HTML body (renderOvernightReportEmailHTML_, the same
+// shell every real overnight email uses), so it reads as part of the same
+// system at a glance instead of a plain-text ops ping. notifyOpsAlertGs_
+// itself is untouched — the other two alerts it sends (no-recipient,
+// send-failed) stay plain-text.
+// rmToLeadIds (RM name -> array of lead_id, optional) lets this name the
+// actual leads sitting with the CH, not just which RM(s) — see
+// resolveRecipientEmailsForRegion_'s own comment on opts.rmToLeadIds.
+function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
   if (!chLevelRms.length) return;
   const byCh = {}; // chName -> { chEmail, rmNames: [] }
   chLevelRms.forEach(function (r) {
     if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, rmNames: [] };
     byCh[r.chName].rmNames.push(r.rmName);
   });
+  const dateLabel = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   Object.keys(byCh).forEach(function (chName) {
     const entry = byCh[chName];
+    const leadIds = [];
+    entry.rmNames.forEach(function (rmName) {
+      ((rmToLeadIds && rmToLeadIds[rmName]) || []).forEach(function (id) { leadIds.push(id); });
+    });
     // TEST_MODE_OVERRIDE_EMAIL_'s own comment: a manual test run must
     // never reach a real recipient by accident — that includes leadership
     // Cc here, even though the alert itself still goes to OPS_ALERT_EMAIL_
     // (presumably whoever's running the test) either way.
     const cc = TEST_MODE_OVERRIDE_EMAIL_ ? [] : ALWAYS_CC_EMAILS_;
-    notifyOpsAlertGs_('Leads with ' + chName + ' (' + region + ') — no A1/TM/RH below them', [
-      'Region: ' + region,
-      'These RM(s) have no A1, TM, or RH configured above them in RM_Hierarchy, so their chain resolves all the way up to ' + chName + ' (' + entry.chEmail + ').',
-      'RM(s): ' + entry.rmNames.join(', '),
-      '',
-      'Their overnight leads are effectively with ' + chName + ' right now — no automated email was sent directly to them for this. Review and decide how to route these: add a TL/TM/RH for the RM(s) above in RM_Hierarchy, or handle manually.',
-    ], cc);
+    const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + dateLabel;
+
+    const html = renderOvernightReportEmailHTML_({
+      title: 'No Manager Below CH',
+      region: region,
+      subtitle: 'No A1, TM, or RH configured above ' + entry.rmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.',
+      kpis: [
+        { value: entry.rmNames.length, label: entry.rmNames.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#fef3c7', fg: '#b45309' },
+        { value: leadIds.length, label: leadIds.length === 1 ? 'Lead Affected' : 'Leads Affected', bg: '#fee2e2', fg: '#dc2626' },
+      ],
+      action: 'Review and decide how to route these: add a TL/TM/RH for ' + entry.rmNames.join(', ') + ' in RM_Hierarchy, or handle manually. No automated email was sent directly to ' + chName + ' for this.',
+      // "only say lead ID" — this table is deliberately just the lead IDs,
+      // nothing else; RM/region/CH context is already in the heading and
+      // subheading above it, not repeated per row.
+      sections: [{
+        heading: chName, subheading: 'RM(s): ' + entry.rmNames.join(', ') + (entry.chEmail ? ' · ' + entry.chEmail : ''),
+        accent: { fg: '#b45309', headerBg: '#fef3c7', bg: '#fffbeb' },
+        columns: ['Lead ID'],
+        rows: leadIds.length ? leadIds.map(function (id) { return [id]; }) : [['(none found)']],
+      }],
+      footerNote: 'This is an internal ops alert, not a message sent to ' + chName + '.',
+    });
+    const plainBody = 'Region: ' + region + '\n' +
+      'These RM(s) have no A1, TM, or RH configured above them in RM_Hierarchy, so their chain resolves all the way up to ' + chName + ' (' + entry.chEmail + ').\n' +
+      'RM(s): ' + entry.rmNames.join(', ') + '\n' +
+      'Lead ID(s): ' + (leadIds.join(', ') || '(none found)') + '\n\n' +
+      'Their overnight leads are effectively with ' + chName + ' right now — no automated email was sent directly to them for this. Review and decide how to route these: add a TL/TM/RH for the RM(s) above in RM_Hierarchy, or handle manually.';
+
+    // Wrapped in its own try/catch, same reasoning as notifyOpsAlertGs_ —
+    // a failure to send THIS alert must never take down the real
+    // morning-send loop it's reporting alongside.
+    try {
+      const opts = { htmlBody: html };
+      if (cc.length) opts.cc = cc.join(',');
+      GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, opts);
+    } catch (e) {
+      Logger.log('notifyChLevelLeadsGs_ failed to send its alert for ' + chName + ' (' + region + '): ' + e);
+    }
   });
 }
 
@@ -330,14 +377,19 @@ function ensureRegionRecipientsSheet_(ss) {
 // leave it false, so re-running them repeatedly while debugging can't
 // fire the same real alert (leadership Cc'd, for the CH case) over and
 // over as an unintended side effect.
+// opts.rmToLeadIds (optional, RM name -> array of lead_id) — only used to
+// pass through to notifyChLevelLeadsGs_ so its alert can name the actual
+// lead IDs sitting with that CH, not just which RM(s). Fine to omit —
+// notifyChLevelLeadsGs_ treats a missing entry as no leads to list.
 function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
   const fireAlerts = !!(opts && opts.fireAlerts);
+  const rmToLeadIds = (opts && opts.rmToLeadIds) || {};
   const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
     return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
 
-  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms);
+  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeadIds);
 
   if (resolved.unresolved.length) {
     const legacy = legacyRecipients[region];
@@ -914,7 +966,16 @@ function sendOvernightMorningEmails() {
     }
 
     const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
-    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true });
+    // RM -> its lead_ids this region/run — only real use today is
+    // notifyChLevelLeadsGs_ naming which leads are sitting with the CH,
+    // not just which RM(s); see resolveRecipientEmailsForRegion_'s own
+    // comment on opts.rmToLeadIds.
+    const rmToLeadIds = {};
+    openLeads.forEach(function (l) {
+      if (!rmToLeadIds[l.RM]) rmToLeadIds[l.RM] = [];
+      rmToLeadIds[l.RM].push(l.lead_id);
+    });
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeadIds: rmToLeadIds });
 
     recEmails.forEach(function (rec) {
       const rmSet = new Set(rec.rmNames);
@@ -1164,7 +1225,7 @@ function sendOvernightFollowupEmails() {
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
-        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row });
+        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row, flags: flags });
       } else {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
@@ -1205,7 +1266,15 @@ function sendOvernightFollowupEmails() {
       Logger.log('Skipping follow-up for ' + r.region + ' (thread ' + r.threadId + '): no stored recipient — this row predates the recipient-storing fix.');
       return;
     }
-    r.unresolvedRows.forEach(function (row) { row.suggestion = suggestionByLeadId[row.lead_id] || ''; });
+    // Prefer the dashboard's own richer, sibling-pooled suggestion
+    // (waitForFollowupSuggestions_ above, up to ~2 minutes) when it came
+    // back in time; otherwise fall back to the SAME keyword engine the
+    // 10am email uses (overnightFollowupHintGs_) instead of leaving this
+    // blank — previously a slow/absent dashboard response meant this
+    // column just showed "—" with nothing actionable in it.
+    r.unresolvedRows.forEach(function (row) {
+      row.suggestion = suggestionByLeadId[row.lead_id] || overnightFollowupHintGs_(row.sourceRow, colIndex, row.flags);
+    });
 
     const sections = [{
       heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
