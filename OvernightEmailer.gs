@@ -562,7 +562,11 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
 
   const tierQualifier = (rec.primaryRole && rec.primaryRole !== 'A1') ? ' - ' + rec.primaryRole : '';
   const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + tierQualifier + ') ' : '';
-  const subject = subjectPrefix + region + ' Overnight Leads - ' + dateLabel;
+  // "Google" names the scope explicitly (every lead in this email passed
+  // the group_source==="google" gate in sendOvernightMorningEmails, per
+  // explicit request) — kept alongside the region rather than replacing
+  // it, so the subject still identifies which region at a glance.
+  const subject = subjectPrefix + region + ' Google Overnight Leads - ' + dateLabel;
   // Same bucket label + tier qualifier, just suffix-style for the plain
   // body/log line below rather than the subject's new prefix ordering.
   const bucketNote = rec.bucketLabel ? ' (' + rec.bucketLabel + tierQualifier + ')' : '';
@@ -627,13 +631,18 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
 
 /**
  * 10am run: builds and sends overnight emails, one PER A1 (Team Lead) —
- * never multiple A1s combined into one "To". A region with several Team
- * Leads produces several separate emails, each scoped to just that one
- * A1's own RMs' leads; see resolveRecipientBucketsForRms_ for the exact
- * bucketing rule. Only leads that have NOT reached Opportunity+ and are
- * NOT closed are shown — a lead that already converted or closed
- * overnight needs no follow-up action (same scope as the dashboard's own
- * Overnight Leads email, js/tab-movement.js's overnightEmailableLeads).
+ * never multiple A1s combined into one "To". Scoped to group_source ===
+ * "google" ONLY (checked first, before any other filter — see the gate
+ * right at the top of the loop below) — this email is explicitly a
+ * Google-leads report, per request, and says so in its own subject line
+ * ("... Google Overnight Leads ..."). A region with several Team Leads
+ * produces several separate emails, each scoped to just that one A1's
+ * own RMs' (Google-source) leads; see resolveRecipientBucketsForRms_ for
+ * the exact bucketing rule. Only leads that have NOT reached
+ * Opportunity+ and are NOT closed are shown — a lead that already
+ * converted or closed overnight needs no follow-up action (same scope as
+ * the dashboard's own Overnight Leads email, js/tab-movement.js's
+ * overnightEmailableLeads, MINUS that one's lack of a source filter).
  * Each lead shown as just Lead ID / current Status / a suggested next
  * action — nothing else. Still separately computes and logs which of
  * these leads are flagged for an SLA issue (Overnight_Log) — that's what
@@ -656,6 +665,14 @@ function sendOvernightMorningEmails() {
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
+    // Google-only gate, checked FIRST — before the window/region/stage
+    // checks below — per explicit request: this email is scoped to
+    // group_source="Google" leads only (see the subject line, which now
+    // says "Google Overnight Leads"), so a non-Google lead is excluded
+    // before anything else runs on it, not filtered out later alongside
+    // the other criteria.
+    const groupSource = String(getVal_(row, colIndex, 'group_source') || '').trim().toLowerCase();
+    if (groupSource !== 'google') return;
     const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
     const created = createdRaw instanceof Date ? createdRaw : null;
     if (!created || created < win.from || created > win.to) return; // not an overnight lead
@@ -994,7 +1011,7 @@ function sendOvernightFollowupEmails() {
       footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
     });
     const plainBody = '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
-    const subject = 'Re: ' + (r.subject || (r.region + ' Overnight Leads'));
+    const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
 
     try {
       withRetry_(function () {
@@ -1094,8 +1111,12 @@ function backfillTodaysOvernightLogRecipientsNow() {
       Logger.log('Backfill for ' + region + ' row ' + (i + 2) + ' resolved to ' + recEmails.length + ' buckets instead of 1 — using the first; the RM list reconstructed from lead_ids_json may not exactly match the original bucket.');
     }
     const rec = recEmails[0];
-    const bucketNote = rec.bucketLabel ? ' (' + rec.bucketLabel + ')' : '';
-    const subject = region + ' Overnight Leads - ' + dateLabel + bucketNote;
+    // Mirrors sendOneOvernightEmail_'s own subject construction exactly —
+    // a backfilled row's subject must match what the real send would
+    // have produced.
+    const tierQualifier = (rec.primaryRole && rec.primaryRole !== 'A1') ? ' - ' + rec.primaryRole : '';
+    const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + tierQualifier + ') ' : '';
+    const subject = subjectPrefix + region + ' Google Overnight Leads - ' + dateLabel;
 
     const rowNum = i + 2;
     withRetry_(function () {
