@@ -101,6 +101,19 @@ const TEST_MODE_OVERRIDE_EMAIL_ = '';
 const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 
+// Region-specific leadership CCs — layered on top of ALWAYS_CC_EMAILS_
+// (RmHierarchy.gs, which applies to every region unconditionally), only
+// for the regions named here. Not derived from the hierarchy data, just a
+// fixed per-region business requirement. Applied in
+// resolveRecipientEmailsForRegion_ below, on every bucket for that region
+// — RM_Hierarchy-resolved and Region_Recipients-fallback alike — same
+// single-choke-point reasoning ALWAYS_CC_EMAILS_ already uses.
+const REGION_ALWAYS_CC_EMAILS_ = {
+  'Bangalore': ['mukesh.mishra@homesfy.in'],
+  'Hyderabad': ['mukesh.mishra@homesfy.in'],
+  'Commercial': ['neha.mishra@homesfy.in'],
+};
+
 // Where to alert when this script could NOT get an automated email out at
 // all for some region/RM — no resolvable recipient, or the send itself
 // failed after retries. These failures are otherwise invisible outside
@@ -264,6 +277,20 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients)
         'Fix: add these RM(s) to RM_Hierarchy with a resolvable manager chain and a Manager_Directory email, or fill in a Region_Recipients To for ' + region + ' as a fallback.',
       ]);
     }
+  }
+
+  // Region-specific always-CC (REGION_ALWAYS_CC_EMAILS_ above) — applied
+  // to EVERY bucket for this region, RM_Hierarchy-resolved or legacy
+  // fallback alike, before the test-mode override below (test mode
+  // discards cc entirely regardless, same as it already does with
+  // ALWAYS_CC_EMAILS_).
+  const regionCcList = REGION_ALWAYS_CC_EMAILS_[region] || [];
+  if (regionCcList.length) {
+    results.forEach(function (r) {
+      const ccSet = new Set((r.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
+      regionCcList.forEach(function (e) { if (e.toLowerCase() !== String(r.to || '').trim().toLowerCase()) ccSet.add(e); });
+      r.cc = Array.from(ccSet).join(',') || undefined;
+    });
   }
 
   // Single choke point every path above funnels through — see

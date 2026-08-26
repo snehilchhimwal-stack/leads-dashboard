@@ -640,6 +640,15 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
  * else the TM directly above them if THAT'S who they report straight to
  * (some RMs skip A1 entirely), else RH, else CH — falling further up the
  * chain only when the nearer tier doesn't exist for this specific person.
+ * Business rule this implements explicitly: for automated email purposes,
+ * every TM is ALSO treated as an A1 (gets their own bucket) — EXCEPT
+ * Pune's two TMs who already have real A1s under them (Ayaz Bagwan ->
+ * Omkar Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A Pande/Nayan
+ * Pabale). Nothing extra to special-case for that exception: anyone
+ * reporting to one of those real A1s already has `tl` filled with the
+ * A1's own name on their own row (not blank), so `chain.tl` is checked
+ * FIRST above and the TM is never reached for them — a TM only becomes
+ * primary for someone who genuinely has no A1 above them at all.
  *
  * Each bucket's Cc is whichever of TM/RH/CH exist in the PRIMARY's OWN
  * chain — looked up by the primary's own name, not read off the reporting
