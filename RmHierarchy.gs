@@ -638,44 +638,50 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
  * Each bucket's primary recipient is the RM's own immediate manager,
  * whichever tier that actually is: their Team Lead (A1) if they have one,
  * else the TM directly above them if THAT'S who they report straight to
- * (some RMs skip A1 entirely), else RH, else CH — falling further up the
- * chain only when the nearer tier doesn't exist for this specific person.
- * Business rule this implements explicitly: for automated email purposes,
- * every TM is ALSO treated as an A1 (gets their own bucket) — EXCEPT
- * Pune's two TMs who already have real A1s under them (Ayaz Bagwan ->
- * Omkar Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A Pande/Nayan
- * Pabale). Nothing extra to special-case for that exception: anyone
- * reporting to one of those real A1s already has `tl` filled with the
- * A1's own name on their own row (not blank), so `chain.tl` is checked
- * FIRST above and the TM is never reached for them — a TM only becomes
- * primary for someone who genuinely has no A1 above them at all.
+ * (some RMs skip A1 entirely). Deliberately does NOT fall through to
+ * RH/CH — real production symptom this fixes: a Western RM with neither
+ * tl nor tm filled on their own row (a hierarchy data gap, not a real
+ * "reports straight to the CH" case) was resolving all the way up to
+ * Rahul Gandhi (Western's Cluster Head), who then received his OWN
+ * personal "Western Overnight Leads (Rahul Gandhi)" email addressed
+ * directly to him — a CH/RH should never be a "To" on these, and (see
+ * the Cc paragraph below) not even a Cc anymore either. Someone with
+ * neither tl nor tm is treated as UNRESOLVED
+ * instead (same as no hierarchy chain at all) and routes through the
+ * legacy Region_Recipients fallback, or triggers the "no recipient" ops
+ * alert if that's blank too — never silently escalated to a CH/RH's own
+ * inbox. Business rule this implements explicitly: for automated email
+ * purposes, every TM is ALSO treated as an A1 (gets their own bucket) —
+ * EXCEPT Pune's two TMs who already have real A1s under them (Ayaz
+ * Bagwan -> Omkar Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A
+ * Pande/Nayan Pabale). Nothing extra to special-case for that exception:
+ * anyone reporting to one of those real A1s already has `tl` filled with
+ * the A1's own name on their own row (not blank), so `chain.tl` is
+ * checked FIRST above and the TM is never reached for them — a TM only
+ * becomes primary for someone who genuinely has no A1 above them at all.
  *
- * Each bucket's Cc is whichever of RH/CH exist in the PRIMARY's OWN chain
- * — looked up by the primary's own name, not read off the reporting RM's
- * row (matters in Pune specifically: Book7 doesn't always carry every
- * intermediate tier on a deeply-nested S1's own row, but the primary's
- * own row always does). TM is deliberately EXCLUDED from Cc in general —
- * a person's direct manager already IS the "To", so their manager's
- * manager (RH/CH) is enough extra context without also looping in the TM
- * layer — EXCEPT PUNE_TM_STILL_CC_ below (Ayaz Bagwan, Rahul Poudel):
- * each has real A1s under them (Omkar Ghate/Firoj Shaikh and Prathamesh A
- * Pande/Nayan Pabale respectively), and dropping them from Cc on THOSE
- * specific A1s' buckets would lose the one TM-level person actually still
- * relevant there — an S1 reporting to Firoj Shaikh has A1='Firoj Shaikh'
- * and CH='Sourabh Sareen' on their own row, but NOT the TM in between
- * (Ayaz Bagwan); only Firoj Shaikh's OWN row (used for Cc here) carries
- * it. Plus ALWAYS_CC_EMAILS_ unconditionally, minus the primary's own
- * email (never cc someone already in To).
+ * Each bucket's Cc is ALWAYS_CC_EMAILS_ plus, ONLY for Pune's two
+ * exception TMs (PUNE_TM_STILL_CC_ below — Ayaz Bagwan, Rahul Poudel),
+ * that TM — looked up on the PRIMARY's OWN row, not the reporting RM's
+ * row (Book7 doesn't always carry every intermediate tier on a
+ * deeply-nested S1's own row, but the primary's own row always does: an
+ * S1 reporting to Firoj Shaikh has A1='Firoj Shaikh' on their own row but
+ * NOT the TM in between, Ayaz Bagwan; only Firoj Shaikh's own row carries
+ * it). RH and CH are NOT Cc'd at all, for any bucket, any region — see
+ * this function's own real production example above for why a CH/RH
+ * being included at all (even just as Cc) is exactly what's being
+ * avoided here. Minus the primary's own email either way (never cc
+ * someone already in To).
  *
  * Returns { buckets: [{ primaryName, primaryEmail, cc: [emails],
  * rmNames: [...] }], unresolved: [rmNames with no chain, excluded, or no
  * resolvable primary email] } — callers route `unresolved` through the
  * legacy Region_Recipients fallback instead.
  */
-// The only two TMs whose Cc inclusion survives the general "TM excluded
-// from Cc" rule above — see resolveRecipientBucketsForRms_'s own docblock
-// for why (each has real A1s under them; dropping them from Cc would lose
-// the one still-relevant TM-level person on those specific A1s' buckets).
+// The only TM-level names that still appear in Cc — see this function's
+// own docblock for why (each has real A1s under them; dropping them from
+// Cc would lose the one still-relevant TM-level person on those specific
+// A1s' buckets). Everyone else at RH/CH tier is excluded from Cc entirely.
 const PUNE_TM_STILL_CC_ = ['ayaz bagwan', 'rahul poudel'];
 function resolveRecipientBucketsForRms_(ss, rmNames) {
   const data = loadRmHierarchyAndEmails_(ss);
@@ -685,7 +691,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
   rmNames.forEach(function (rmName) {
     const chain = data.byRmNameLower[String(rmName || '').trim().toLowerCase()];
     if (!chain || chain.excluded) { unresolved.push(rmName); return; }
-    const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
+    const primaryName = chain.tl || chain.tm || '';
     const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
     if (!primaryEmail) { unresolved.push(rmName); return; }
 
@@ -696,7 +702,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     // their own in the hierarchy (shouldn't normally happen, since they
     // resolved to a real email above, but stay defensive).
     const primaryChain = data.byRmNameLower[key] || chain;
-    const ccCandidates = [primaryChain.rh, primaryChain.ch];
+    const ccCandidates = [];
     if (PUNE_TM_STILL_CC_.indexOf(String(primaryChain.tm || '').trim().toLowerCase()) !== -1) {
       ccCandidates.push(primaryChain.tm);
     }

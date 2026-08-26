@@ -1201,8 +1201,12 @@ function debugFollowupStatusNow() {
         const chain = hierarchyData.byRmNameLower[String(rmName || '').trim().toLowerCase()];
         if (!chain) { Logger.log('    ' + rmName + ': NOT FOUND in RM_Hierarchy at all — this RM\'s row is missing there entirely.'); return; }
         if (chain.excluded) { Logger.log('    ' + rmName + ': found in RM_Hierarchy but marked Excluded.'); return; }
-        const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
-        if (!primaryName) { Logger.log('    ' + rmName + ': found in RM_Hierarchy, but has no TL/TM/RH/CH on record at all.'); return; }
+        // Mirrors resolveRecipientBucketsForRms_ (RmHierarchy.gs) exactly
+        // — deliberately does NOT fall through to RH/CH; see that
+        // function's own docblock for why (a CH/RH must never end up as
+        // a "To").
+        const primaryName = chain.tl || chain.tm || '';
+        if (!primaryName) { Logger.log('    ' + rmName + ': found in RM_Hierarchy, but has no TL/TM on record — RH/CH deliberately don\'t count as a fallback here (see resolveRecipientBucketsForRms_), so this RM is UNRESOLVED and routes through the Region_Recipients fallback below.'); return; }
         const primaryEmail = hierarchyData.emailByManagerNameLower[primaryName.toLowerCase()];
         if (!primaryEmail) { Logger.log('    ' + rmName + ': reports to "' + primaryName + '", but that manager has NO EMAIL in Manager_Directory yet — fill it in there to fix this.'); return; }
         Logger.log('    ' + rmName + ': resolves fine (-> ' + primaryName + ' <' + primaryEmail + '>) — should NOT be the reason this row is unresolved; re-check backfillTodaysOvernightLogRecipientsNow\'s output for this region.');
