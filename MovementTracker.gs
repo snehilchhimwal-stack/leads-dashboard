@@ -442,7 +442,10 @@ const OUTCOME_RULES_GS_ = [
       'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
       'out of coverage', 'out of service', 'out of network', 'call forwarded', 'call forwarding',
       'voice mail', 'voice message', 'voicemail',
-    ], test: function (c, w) { return _anySignalGs_(w, ['incoming']) && _anySignalGs_(w, ['barred', 'not available']); } },
+    ], test: function (c, w) {
+      return (_anySignalGs_(w, ['incoming']) && _anySignalGs_(w, ['barred', 'not available']))
+        || w.indexOf('unavailable') !== -1 || w.indexOf('ivr') !== -1;
+    } },
   { outcome: 'Wrong Number', signals: ['wrong number', 'invalid number', 'invalid no', 'wn'] },
   { outcome: 'Call Declined', signals: [
       'hung up', 'hangup', 'disconnecting', 'disconnect the call', 'disconnect call', 'declined', 'declining', 'decline',

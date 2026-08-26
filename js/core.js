@@ -2386,7 +2386,15 @@ const OUTCOME_RULES = [
       'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
       'out of coverage', 'out of service', 'out of network', 'call forwarded', 'call forwarding',
       'voice mail', 'voice message', 'voicemail',
-    ], test: (c, w) => _anySignal(w, ['incoming']) && _anySignal(w, ['barred', 'not available']) },
+    // 'unavailable' is checked as an exact word here, not a fuzzy signal —
+    // it's a real, common way RMs log this outcome ("number unavailable"),
+    // but as a fuzzy target its typo budget (2, at 11 letters) is wide
+    // enough to also match "available" (2 edits away: insert "u","n"),
+    // the literal opposite meaning. 'ivr' is the same real-world signal as
+    // voicemail/voice message above (call reached an automated system, not
+    // a person), just not phrased as "voice mail/message".
+    ], test: (c, w) => (_anySignal(w, ['incoming']) && _anySignal(w, ['barred', 'not available']))
+      || w.indexOf('unavailable') !== -1 || w.indexOf('ivr') !== -1 },
   { outcome: 'Wrong Number', signals: ['wrong number', 'invalid number', 'invalid no', 'wn'] },
   // Customer saw/heard the call and actively ended it — a different
   // signal from RNR (never picked up at all) or Disconnected below (a
