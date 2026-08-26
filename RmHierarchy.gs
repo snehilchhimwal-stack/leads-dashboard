@@ -240,6 +240,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Rahul Singh','Krishna murthy','','',''],
   ['Pune','S1','Aabid Khan','Firoj Shaikh','','','Sourabh Sareen'],
   ['HNI','S1','Mohammed Rafiq Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  // Alias row, confirmed by hand against Book7 (email mohammed.khan@homesfy.in
+  // matches the row above exactly): the leads sheet's RM column sometimes
+  // has just "Mohammed Khan" for this same person -- a real "no
+  // recipient" production case (region mapped to SoBo, since HNI is
+  // SoBo's own team label in REGION_GROUP_MAP_/OvernightEmailer.gs).
+  ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Adil Shaikh','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Central','S1','Rohit Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Kumar Babu','','','Rajkumar Ombase','Sanjyota Bhosale'],
@@ -292,7 +298,21 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Kavya B R','','','Romen Singh',''],
   ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Vijay Kshirsagar','','Rahul Poudel','','Sourabh Sareen'],
-  ['Sourcing - Pune','S3','Darshana Javeri','','','','Sourabh Sareen'],
+  // Whole "Sourcing - Pune" team corrected/added from Book7 directly
+  // (row-by-row lookup, not the pre-resolved export) after 4 of its 6
+  // people showed up as "no recipient" — Yash Kalal (their actual
+  // manager, role 'TM' here even though Book7 literally labels him
+  // 'S2'/"Supervisor": functionally identical to Sampada
+  // Pawar/Minas Patel/Sanket Yadav — reports directly to a CH with no
+  // A1 layer, with S1/S3 reports under him) was missing entirely, which
+  // also means Darshana Javeri's row below was WRONG (went straight to
+  // Sourabh Sareen with no tm at all) until this fix.
+  ['Sourcing - Pune','TM','Yash Kalal','','','','Sourabh Sareen'],
+  ['Sourcing - Pune','S3','Nikhil Jadhav','','Yash Kalal','','Sourabh Sareen'],
+  ['Sourcing - Pune','S3','Dnyaneshwari Pawar','','Yash Kalal','','Sourabh Sareen'],
+  ['Sourcing - Pune','S3','Anagha Sangole','','Yash Kalal','','Sourabh Sareen'],
+  ['Sourcing - Pune','S3','Vidisha Kakade','','Yash Kalal','','Sourabh Sareen'],
+  ['Sourcing - Pune','S3','Darshana Javeri','','Yash Kalal','','Sourabh Sareen'],
   ['Thane','S1','Pawan Motwani','','','Swapnil Gowalkar','Bipin More'],
 ];
 
