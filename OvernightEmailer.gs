@@ -538,39 +538,78 @@ function overnightStatusLabelGs_(stage) {
   return String(stage || '').trim() || 'Unrecognized Stage';
 }
 
-// Single-copy port of the dashboard's own suggestedFollowUp (js/core.js)
-// — see inferOutcomeGs_/OUTCOME_RULES_GS_/FOLLOWUP_SUGGESTIONS_GS_
+// Same customer-identity rule used throughout this project (see e.g.
+// sendOvernightMorningEmails' own identityKey/dedup) — client_id when
+// present, else lead_id. Shared key so a customer's several RM copies
+// (different RM, possibly different region/source) group together for
+// comment-pooling purposes.
+function identityKeyGs_(row, colIndex) {
+  const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+  if (clientId) return 'client:' + clientId;
+  return 'lead:' + String(getVal_(row, colIndex, 'lead_id') || '').trim();
+}
+
+// Groups the WHOLE leads tab (every row — any source, stage, or date; a
+// sibling's comment history is useful context even if that particular
+// copy is closed, non-Google, or outside today's window) by customer
+// identity — see identityKeyGs_. Call once per run and reuse the result;
+// used to pool comments across every RM copy of the same customer for
+// the keyword-based Suggested Follow-up (overnightFollowupHintGs_
+// below). Deliberately simpler than the dashboard's own sibling grouping
+// (js/core.js's union-find over lead_id/client_id, clustered further by
+// same-ish region to keep two genuinely different customers that happen
+// to share a reused/placeholder ID apart): this pools purely by identity
+// key, with no region check. That's a real, rare gap — two different
+// customers colliding on a reused ID in different regions would wrongly
+// pool here — traded for not having to port the dashboard's full
+// union-find clustering into a second runtime; the common case (one real
+// customer, several RM copies, same region) is unaffected.
+function buildSiblingFamiliesGs_(dataRows, colIndex) {
+  const map = {};
+  dataRows.forEach(function (row) {
+    const key = identityKeyGs_(row, colIndex);
+    if (!map[key]) map[key] = [];
+    map[key].push(row);
+  });
+  return map;
+}
+
+// Port of the dashboard's own suggestedFollowUp (js/core.js) — see
+// inferOutcomeGs_/OUTCOME_RULES_GS_/FOLLOWUP_SUGGESTIONS_GS_
 // (MovementTracker.gs) for the keyword engine this reads
-// combinedCommentsTextGs_ through. Real production finding: last_connect
-// (a status-text field — "Not Reachable"/"Ringing"/"Call Connected"/
-// "Call Declined") and last_connect_time both get set on every logged
-// ATTEMPT, not specifically a successful connection — so neither field
-// alone can tell a real connection from a failed one, and the old
-// hasConnected-only fallback below silently treated "Ringing"/"Not
-// Reachable"/"Call Declined" leads as no different from "Keep working,
-// no issue" once ANY attempt was logged. The keyword engine reads what
-// the comment actually SAYS instead, so each of those gets its own
-// specific, actionable suggestion (retry timing, alternate channel,
-// etc.) rather than a generic line.
+// combinedCommentsTextGs_ through, pooled across every sibling RM copy of
+// the SAME customer (see buildSiblingFamiliesGs_/latestOutcomeGs_ below)
+// — the richest signal available server-side, same idea as the
+// dashboard's own sibling-pooled suggestedFollowUp, just scoped to
+// same-tab siblings (see buildSiblingFamiliesGs_'s own comment on what
+// that leaves out). Real production finding: last_connect (a status-text
+// field — "Not Reachable"/"Ringing"/"Call Connected"/"Call Declined")
+// and last_connect_time both get set on every logged ATTEMPT, not
+// specifically a successful connection — so neither field alone can tell
+// a real connection from a failed one, and the old hasConnected-only
+// fallback below silently treated "Ringing"/"Not Reachable"/"Call
+// Declined" leads as no different from "Keep working, no issue" once ANY
+// attempt was logged. The keyword engine reads what the comment actually
+// SAYS instead, so each of those gets its own specific, actionable
+// suggestion (retry timing, alternate channel, etc.) rather than a
+// generic line.
+// siblingRows (optional) — every OTHER row sharing this lead's customer
+// identity; pass `[]` (or omit) for a single-copy-only check.
 // Priority, same tiers as suggestedFollowUp:
-//   1. This row's latest logged comment (structured action-log entry, or
-//      last_comment if there's no structured entry) — its inferred
-//      outcome mapped through FOLLOWUP_SUGGESTIONS_GS_, or a quoted
-//      "no keyword match" note when the comment has real content but
-//      nothing recognizable.
-//   2. Once there's truly no comment logged anywhere on this copy: the
-//      old flags-based fallback — has this lead been connected at all,
-//      and which SLA check (if any) is currently flagging it.
-// Deliberately NOT ported: dashboard.html's sibling-pooling (folds in
-// comments from every OTHER RM copy of the same customer) — that
-// depends on the dashboard's own in-browser identity-clustering over the
-// whole fetched dataset, which this unattended server-side trigger has
-// no access to (same reasoning as combinedCommentsTextGs_ above). A
-// human reading this still sees THIS row's own real comment history
-// classified accurately; they just don't get other copies' comments
-// folded in the way the dashboard's own Generate flow provides.
-function overnightFollowupHintGs_(row, colIndex, flags) {
-  const latest = latestOutcomeGs_(row, colIndex);
+//   1. The latest logged comment across this row AND every sibling
+//      (structured action-log entry, or last_comment if no structured
+//      entry exists anywhere in the family) — its inferred outcome
+//      mapped through FOLLOWUP_SUGGESTIONS_GS_, or a quoted "no keyword
+//      match" note when the comment has real content but nothing
+//      recognizable.
+//   2. Once there's truly no comment logged anywhere in the whole
+//      family: the old flags-based fallback — has THIS row been
+//      connected at all, and which SLA check (if any) is currently
+//      flagging it (flags are only ever computed for this row's own
+//      copy, never a sibling's).
+function overnightFollowupHintGs_(row, colIndex, flags, siblingRows) {
+  const familyRows = [row].concat(siblingRows || []);
+  const latest = latestOutcomeGs_(familyRows, colIndex);
   if (latest) {
     return FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
   }
@@ -583,38 +622,44 @@ function overnightFollowupHintGs_(row, colIndex, flags) {
   return 'Keep working this lead — no SLA issue flagged yet.';
 }
 
-// Single-copy version of js/core.js's latestFamilyOutcome: splits
-// combinedCommentsTextGs_'s "Name: Comment - timestamp | ..." blob into
-// entries and returns the most recent one (by parsed timestamp, falling
-// back to the last entry if none parsed) as
-// {outcome, comment, loggedBy, ts}. Falls back to this row's own
-// last_comment field, same as the dashboard, only once NOT ONE
-// structured entry is present. Returns null when this copy has neither —
-// the caller's cue to fall back to the flags-based hint.
-function latestOutcomeGs_(row, colIndex) {
-  const combined = combinedCommentsTextGs_(row, colIndex);
-  const text = combined === '(no comments logged)' ? '' : combined;
-  if (text) {
-    const rawEntries = text.split('|').map(function (s) { return s.trim(); }).filter(Boolean);
-    if (rawEntries.length) {
-      const parsedEntries = rawEntries.map(function (entry) {
-        const m = entry.match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
-        let loggedBy = '', comment = entry, ts = null;
-        if (m) { loggedBy = m[1].trim(); comment = m[2].trim(); ts = m[3].trim(); }
-        return { loggedBy: loggedBy, comment: comment, ts: ts, outcome: inferOutcomeGs_(comment) };
-      });
-      let latest = parsedEntries[parsedEntries.length - 1];
-      let newestMs = -Infinity;
-      parsedEntries.forEach(function (e) {
-        if (!e.ts) return;
-        const d = new Date(e.ts.replace(' ', 'T') + ':00+05:30');
-        if (!isNaN(d.getTime()) && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
-      });
-      return latest;
-    }
+// Sibling-pooled version of js/core.js's latestFamilyOutcome: pools every
+// structured action-log entry (combinedCommentsTextGs_'s "Name: Comment -
+// timestamp | ..." blob, split into entries) across EVERY row in
+// `familyRows` together, and returns whichever single entry has the most
+// recent real timestamp (falling back to the last entry parsed if none
+// carry one) as {outcome, comment, loggedBy, ts}. Falls back to
+// last_comment, checked across every row in the family (first non-blank
+// wins — there's no timestamp to compare there), only once NOT ONE row
+// has a single dated structured entry. Returns null when the whole
+// family has neither — the caller's cue to fall back to the flags-based
+// hint.
+function latestOutcomeGs_(familyRows, colIndex) {
+  const entries = [];
+  familyRows.forEach(function (row) {
+    const combined = combinedCommentsTextGs_(row, colIndex);
+    const text = combined === '(no comments logged)' ? '' : combined;
+    if (!text) return;
+    text.split('|').map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (entry) {
+      const m = entry.match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
+      let loggedBy = '', comment = entry, ts = null;
+      if (m) { loggedBy = m[1].trim(); comment = m[2].trim(); ts = m[3].trim(); }
+      entries.push({ loggedBy: loggedBy, comment: comment, ts: ts, outcome: inferOutcomeGs_(comment) });
+    });
+  });
+  if (entries.length) {
+    let latest = entries[entries.length - 1];
+    let newestMs = -Infinity;
+    entries.forEach(function (e) {
+      if (!e.ts) return;
+      const d = new Date(e.ts.replace(' ', 'T') + ':00+05:30');
+      if (!isNaN(d.getTime()) && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
+    });
+    return latest;
   }
-  const lastComment = String(getVal_(row, colIndex, 'last_comment') || '').trim();
-  if (lastComment) return { outcome: inferOutcomeGs_(lastComment), comment: lastComment, loggedBy: '', ts: null };
+  for (let i = 0; i < familyRows.length; i++) {
+    const lastComment = String(getVal_(familyRows[i], colIndex, 'last_comment') || '').trim();
+    if (lastComment) return { outcome: inferOutcomeGs_(lastComment), comment: lastComment, loggedBy: '', ts: null };
+  }
   return null;
 }
 
@@ -854,6 +899,12 @@ function sendOvernightMorningEmails() {
   // shared file, same retry reasoning as readLeadsTab_ above.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
 
+  // Built once from the FULL dataRows (every row, not just today's
+  // candidates) — see buildSiblingFamiliesGs_'s own comment. Feeds the
+  // keyword-based Suggested Follow-up below with every sibling RM copy's
+  // comments pooled in, not just this one copy's own.
+  const siblingFamilies = buildSiblingFamiliesGs_(dataRows, colIndex);
+
   // Flat candidate list first, deduped by customer identity below, THEN
   // grouped by region — a customer held by more than one RM at once
   // (sibling copies, including across DIFFERENT regions) would otherwise
@@ -891,13 +942,15 @@ function sendOvernightMorningEmails() {
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // kept on the lead for Overnight_Log — not shown in the email itself
+    const family = siblingFamilies[identityKeyGs_(row, colIndex)] || [row];
+    const siblingRows = family.filter(function (r) { return r !== row; });
 
     candidateLeads.push({
       identityKey: clientId || ('l:' + leadId), // same customer-identity rule buildMovementHistories (dashboard) and RmHierarchy.gs's CC lookups already use
       stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
       region: main, lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),
-      followup: overnightFollowupHintGs_(row, colIndex, flags),
+      followup: overnightFollowupHintGs_(row, colIndex, flags, siblingRows),
       issue: issue,
     });
   });
@@ -1197,6 +1250,11 @@ function sendOvernightFollowupEmails() {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (leadId) byLeadId[leadId] = row;
   });
+  // Same sibling-pooling as sendOvernightMorningEmails — see
+  // buildSiblingFamiliesGs_'s own comment. Feeds the keyword-engine
+  // fallback below (used when Lead_Followups doesn't produce a
+  // suggestion in time).
+  const siblingFamilies = buildSiblingFamiliesGs_(dataRows, colIndex);
 
   // Pass 1: classify every region's issue leads into resolved/unresolved
   // WITHOUT sending anything yet — every region's still-unresolved leads
@@ -1225,7 +1283,9 @@ function sendOvernightFollowupEmails() {
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
-        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row, flags: flags });
+        const family = siblingFamilies[identityKeyGs_(row, colIndex)] || [row];
+        const siblingRows = family.filter(function (r) { return r !== row; });
+        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row, flags: flags, siblingRows: siblingRows });
       } else {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
@@ -1273,7 +1333,7 @@ function sendOvernightFollowupEmails() {
     // blank — previously a slow/absent dashboard response meant this
     // column just showed "—" with nothing actionable in it.
     r.unresolvedRows.forEach(function (row) {
-      row.suggestion = suggestionByLeadId[row.lead_id] || overnightFollowupHintGs_(row.sourceRow, colIndex, row.flags);
+      row.suggestion = suggestionByLeadId[row.lead_id] || overnightFollowupHintGs_(row.sourceRow, colIndex, row.flags, row.siblingRows);
     });
 
     const sections = [{
@@ -1482,6 +1542,7 @@ function downloadNoIssueLeadsNow() {
   const win = overnightWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+  const siblingFamilies = buildSiblingFamiliesGs_(dataRows, colIndex);
 
   const headers = [
     'lead_id', 'RM', 'TL', 'region', 'group_source', 'current_stage', 'lead_assigned_at',
@@ -1506,7 +1567,9 @@ function downloadNoIssueLeadsNow() {
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
-    const hint = overnightFollowupHintGs_(row, colIndex, flags);
+    const family = siblingFamilies[identityKeyGs_(row, colIndex)] || [row];
+    const siblingRows = family.filter(function (r) { return r !== row; });
+    const hint = overnightFollowupHintGs_(row, colIndex, flags, siblingRows);
     if (hint.indexOf('Keep working') !== 0) return; // only the leads landing on the fallback branch
 
     rows.push([
