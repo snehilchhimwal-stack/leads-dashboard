@@ -1433,8 +1433,11 @@ function debugFollowupStatusNow() {
       const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'debug: loadRmHierarchyAndEmails_');
       Logger.log('  Recipient resolution trace for ' + region + ' (RMs from this row\'s issueLog: ' + uniqueRms.join(', ') + '):');
       uniqueRms.forEach(function (rmName) {
-        const chain = hierarchyData.byRmNameLower[String(rmName || '').trim().toLowerCase()];
-        if (!chain) { Logger.log('    ' + rmName + ': NOT FOUND in RM_Hierarchy at all — this RM\'s row is missing there entirely.'); return; }
+        // lookupRmChain_ (RmHierarchy.gs) — same exact-then-role-suffix-
+        // stripped fallback the real resolution uses, so this trace can
+        // never disagree with what a real send would actually do.
+        const chain = lookupRmChain_(hierarchyData.byRmNameLower, rmName);
+        if (!chain) { Logger.log('    ' + rmName + ': NOT FOUND in RM_Hierarchy at all (even after trying with a trailing role/position suffix stripped) — this RM\'s row is missing there entirely.'); return; }
         if (chain.excluded) { Logger.log('    ' + rmName + ': found in RM_Hierarchy but marked Excluded.'); return; }
         // Mirrors resolveRecipientBucketsForRms_ (RmHierarchy.gs) exactly.
         const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';

@@ -228,6 +228,11 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','S1','Suman Pujari','Avinash Kumar','','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Tejal Nikam','Avinash Kumar','','','Vidya Jadhav'],
   ['Hyderabad','S1','G Anand Kumar','Vemula Ajay','','',''],
+  // Alias row, confirmed by hand: the leads sheet's RM column sometimes
+  // has just "G Kumar" for this same person (a real "no recipient"
+  // production case) — exact-match name lookup needs a literal row for
+  // each spelling actually seen, same chain as his real row above.
+  ['Hyderabad','S1','G Kumar','Vemula Ajay','','',''],
   ['Pune','S1','Aadesh Narwade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
   ['Harbour','S1','Manan Bhatt','Yash Sharma','','','Sanjyota Bhosale'],
@@ -712,6 +717,34 @@ function isChTierRole_(role) {
 // Cc would lose the one still-relevant TM-level person on those specific
 // A1s' buckets).
 const PUNE_TM_STILL_CC_ = ['ayaz bagwan', 'rahul poudel'];
+
+// The leads sheet's own RM column sometimes has role/position text
+// appended after a person's real name — two confirmed real cases:
+// "Prajwal Shetty S 1 Account" and "Rahan Khan S 1", both really just
+// that person's plain name with " S 1[...]" tacked on (their role in
+// RM_HIERARCHY_RAW_ is "S1"). Per explicit instruction, role/position
+// text must never be treated as part of the name for matching purposes.
+// Strips a trailing "S <digits> ..." suffix — used ONLY as a fallback
+// when the exact name doesn't resolve (see its call site), so it can
+// never change the outcome for a name that already matches correctly.
+const ROLE_SUFFIX_RE_ = /\s+s\s*\d+.*$/i;
+function stripRoleSuffix_(name) {
+  return String(name || '').trim().replace(ROLE_SUFFIX_RE_, '').trim();
+}
+
+// Looks up an RM name in byRmNameLower, first exactly, then (only if
+// that fails) with a trailing role/position suffix stripped — see
+// stripRoleSuffix_'s own comment. Shared by resolveRecipientBucketsForRms_
+// below and debugFollowupStatusNow's own trace (OvernightEmailer.gs) so
+// the diagnostic never disagrees with what a real send would actually do.
+function lookupRmChain_(byRmNameLower, rmName) {
+  const exact = String(rmName || '').trim().toLowerCase();
+  if (byRmNameLower[exact]) return byRmNameLower[exact];
+  const stripped = stripRoleSuffix_(rmName).toLowerCase();
+  if (stripped && stripped !== exact) return byRmNameLower[stripped];
+  return undefined;
+}
+
 function resolveRecipientBucketsForRms_(ss, rmNames) {
   const data = loadRmHierarchyAndEmails_(ss);
   const buckets = {}; // lowercased primaryName -> { primaryName, primaryEmail, primaryRole, ccSet, rmNames }
@@ -719,7 +752,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
   const chLevelRms = [];
 
   rmNames.forEach(function (rmName) {
-    const chain = data.byRmNameLower[String(rmName || '').trim().toLowerCase()];
+    const chain = lookupRmChain_(data.byRmNameLower, rmName);
     if (!chain || chain.excluded) { unresolved.push(rmName); return; }
     const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
     const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
