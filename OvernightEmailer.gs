@@ -623,16 +623,20 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   Logger.log('Morning email recipients for ' + region + bucketNote + ': ' + rec.source);
   let sentMessage;
   try {
-    // Retried: sending the actual email is the one thing here worth
-    // fighting for before giving up on a bucket — a transient Gmail
-    // hiccup shouldn't silently skip a whole A1's morning email.
-    sentMessage = withRetry_(function () {
-      return GmailApp.createDraft(rec.to, subject, plainBody, {
-        cc: rec.cc || undefined,
-        htmlBody: html,
-        name: 'Homesfy Lead Ops',
-      }).send();
-    }, 'send morning email (' + region + bucketNote + ')');
+    // Deliberately NOT wrapped in withRetry_ — unlike a Sheets read/write,
+    // sending an email is NOT idempotent: if the send actually succeeds
+    // server-side but the confirmation back to this script is what times
+    // out, a retry would create and send a genuinely SEPARATE message,
+    // duplicating a real email to a real recipient. A single attempt here
+    // means a truly transient Gmail hiccup surfaces as the "failed" alert
+    // below (recoverable — a human can re-run manually) rather than
+    // risking a silent duplicate, which is the worse failure mode of the
+    // two for something a real person actually receives.
+    sentMessage = GmailApp.createDraft(rec.to, subject, plainBody, {
+      cc: rec.cc || undefined,
+      htmlBody: html,
+      name: 'Homesfy Lead Ops',
+    }).send();
   } catch (e) {
     Logger.log('Overnight morning email failed for ' + region + bucketNote + ': ' + e);
     notifyOpsAlertGs_('Morning email failed for ' + region + bucketNote, [
@@ -689,7 +693,12 @@ function sendOvernightMorningEmails() {
   // shared file, same retry reasoning as readLeadsTab_ above.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
 
-  const byRegion = {}; // mainRegion -> openLeads[] (each carries its own .issue)
+  // Flat candidate list first, deduped by customer identity below, THEN
+  // grouped by region — a customer held by more than one RM at once
+  // (sibling copies, including across DIFFERENT regions) would otherwise
+  // be counted and emailed as if they were unrelated separate leads, with
+  // no indication to either recipient that the other copy exists.
+  const candidateLeads = [];
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
@@ -715,18 +724,47 @@ function sendOvernightMorningEmails() {
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed overnight — excluded
 
-    if (!byRegion[main]) byRegion[main] = [];
     const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
     const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // kept on the lead for Overnight_Log — not shown in the email itself
 
-    byRegion[main].push({
-      lead_id: leadId, RM: RM, TL: TL,
+    candidateLeads.push({
+      identityKey: clientId || ('l:' + leadId), // same customer-identity rule buildMovementHistories (dashboard) and RmHierarchy.gs's CC lookups already use
+      stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
+      region: main, lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),
       followup: overnightFollowupHintGs_(row, colIndex, flags),
       issue: issue,
+    });
+  });
+
+  // Dedup by customer identity — keep whichever copy has progressed
+  // FURTHEST in the funnel, same "stage taken from whichever copy went
+  // furthest" preference the dashboard's own sibling collation uses.
+  // Deliberately narrower than that full collation (no comment/call
+  // merging across copies) — this only fixes double-counting/double-
+  // emailing, not full parity with the dashboard's richer merge.
+  const byIdentity = new Map();
+  let dupedAwayCount = 0;
+  candidateLeads.forEach(function (l) {
+    const existing = byIdentity.get(l.identityKey);
+    if (!existing) { byIdentity.set(l.identityKey, l); return; }
+    dupedAwayCount++;
+    if (l.stageRank > existing.stageRank) byIdentity.set(l.identityKey, l);
+  });
+  if (dupedAwayCount) {
+    Logger.log(dupedAwayCount + ' duplicate customer row(s) (same client_id held by more than one RM, possibly across different regions) collapsed to a single copy each for this run — kept whichever had progressed furthest.');
+  }
+
+  const byRegion = {}; // mainRegion -> openLeads[] (each carries its own .issue)
+  byIdentity.forEach(function (l) {
+    if (!byRegion[l.region]) byRegion[l.region] = [];
+    byRegion[l.region].push({
+      lead_id: l.lead_id, RM: l.RM, TL: l.TL,
+      status: l.status, followup: l.followup, issue: l.issue,
     });
   });
 
@@ -734,9 +772,37 @@ function sendOvernightMorningEmails() {
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
   const todayKey = istDayKeyGs_(now);
 
+  // Idempotency guard: a region that already has AT LEAST ONE Overnight_Log
+  // row dated today is skipped entirely — no re-resolving, no re-sending,
+  // no re-alerting. Protects against a rare Apps Script trigger double-fire
+  // (a documented platform risk — see MovementTracker.gs/RmHierarchy.gs's
+  // own comments on it) or a human manually re-running this alongside the
+  // real trigger. Without this, real recipients get duplicate emails,
+  // Overnight_Log gets duplicate rows for the same region/day, and the 1pm
+  // follow-up then replies into BOTH threads, doubling everything
+  // downstream too. Region-level, not per-bucket: a region that only
+  // PARTIALLY sent (e.g. one A1's send failed after retries, which already
+  // triggers its own "Morning email failed" alert) needs a deliberate
+  // manual decision to re-run, not an automatic silent retry of the whole
+  // region.
+  const alreadyLoggedRegionsToday = {};
+  const priorLastRow = logSheet.getLastRow();
+  if (priorLastRow >= 2) {
+    withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 2).getValues(); }, 'read Overnight_Log for idempotency check')
+      .forEach(function (r) {
+        const cell = r[0];
+        const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
+        if (key === todayKey) alreadyLoggedRegionsToday[String(r[1] || '').trim()] = true;
+      });
+  }
+
   Object.keys(byRegion).sort().forEach(function (region) {
     const openLeads = byRegion[region];
     if (!openLeads.length) return; // nothing still-open overnight for this region
+    if (alreadyLoggedRegionsToday[region]) {
+      Logger.log('Skipping ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '); not re-sending. If this region genuinely needs a fresh send today, that has to be a deliberate manual decision, not an automatic one.');
+      return;
+    }
 
     const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
     const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true });
@@ -850,9 +916,17 @@ function waitForFollowupSuggestions_(ss, leadIds) {
  * inside a specific existing thread. Throws on any failure (Advanced
  * Service not enabled, thread lookup failure, send failure); the caller
  * decides whether to fall back.
+ *
+ * The Threads.get read is retried (it's a safe, idempotent lookup) but
+ * the final Messages.send is deliberately a SINGLE attempt — not
+ * idempotent, so retrying it risks duplicating a send that actually
+ * already succeeded if only the confirmation was what timed out. Same
+ * reasoning as sendOneOvernightEmail_'s own send call.
  */
 function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody) {
-  const thread = Gmail.Users.Threads.get('me', threadId, { format: 'metadata', metadataHeaders: ['Message-ID'] });
+  const thread = withRetry_(function () {
+    return Gmail.Users.Threads.get('me', threadId, { format: 'metadata', metadataHeaders: ['Message-ID'] });
+  }, 'read thread for threaded reply (' + threadId + ')');
   const messages = (thread && thread.messages) || [];
   if (!messages.length) throw new Error('Thread ' + threadId + ' has no messages to reply into.');
   const lastMessage = messages[messages.length - 1];
@@ -1059,20 +1133,20 @@ function sendOvernightFollowupEmails() {
     const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
 
+    // Neither send below is wrapped in withRetry_ — same non-idempotency
+    // reasoning as sendOneOvernightEmail_'s own send call (sendThreadedGmailReply_
+    // already retries its own internal safe read step). A single attempt
+    // at each; genuine failure of both falls through to the ops alert.
     try {
-      withRetry_(function () {
-        return sendThreadedGmailReply_(r.threadId, sendTo, sendCc || '', subject, plainBody, bodyHtml);
-      }, 'send threaded follow-up reply (' + r.region + ')');
+      sendThreadedGmailReply_(r.threadId, sendTo, sendCc || '', subject, plainBody, bodyHtml);
     } catch (threadErr) {
       Logger.log('Threaded send failed for ' + r.region + ' (thread ' + r.threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
       try {
-        withRetry_(function () {
-          return GmailApp.createDraft(sendTo, subject, plainBody, {
-            cc: sendCc,
-            htmlBody: bodyHtml,
-            name: 'Homesfy Lead Ops',
-          }).send();
-        }, 'send fallback follow-up (' + r.region + ')');
+        GmailApp.createDraft(sendTo, subject, plainBody, {
+          cc: sendCc,
+          htmlBody: bodyHtml,
+          name: 'Homesfy Lead Ops',
+        }).send();
       } catch (fallbackErr) {
         Logger.log('Overnight follow-up reply failed entirely for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + fallbackErr);
         notifyOpsAlertGs_('1pm follow-up failed for ' + r.region, [

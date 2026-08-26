@@ -633,17 +633,24 @@ function loadRmHierarchyAndEmails_(ss) {
 // just a fixed business requirement layered on top of it.
 const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
 
-// Role labels that sit at the very TOP of a team's chain — nothing
-// reports further up from these. Distinct from "this person's own row
-// just happens to have every field blank," which is also true of most
-// A1s (they simply have no RH/CH configured for their team) — checking
-// ROLE, not blankness, is what tells the two apart. 'City Lead' is
-// Pune's own top-of-chain label (Sourabh Sareen) — functionally the same
-// tier as 'Cluster Head'/'Commercial Head' elsewhere, just named
-// differently in the HR roster.
-const CH_TIER_ROLES_ = ['cluster head', 'commercial head', 'city lead'];
+// Role labels that are KNOWN to legitimately become a bucket-owner
+// primary (their own row's tl/tm/rh/ch being blank just means "nothing
+// configured for their team," not "top of the org"). Deliberately an
+// ALLOWLIST OF SAFE roles, not a list of "CH-like" labels — the
+// distinction matters: an earlier version of this check listed the CH
+// labels directly ('cluster head'/'commercial head'/'city lead'), which
+// meant any FUTURE or misspelled top-tier role not on that list (a new
+// "Founder"/"VP Sales" row, anything not spelled exactly one of those
+// three) would silently fall through as a normal primary and reproduce
+// the exact bug this mechanism exists to prevent (a real production
+// case: an unresolved RM's chain reaching a Cluster Head, who then got
+// the raw overnight report addressed directly to them). Inverting to an
+// allowlist of what's SAFE means an unrecognized role defaults to the
+// conservative outcome — diverted to a human alert — rather than the
+// risky one.
+const PRIMARY_ELIGIBLE_ROLES_ = ['a1', 'tm', 'rh'];
 function isChTierRole_(role) {
-  return CH_TIER_ROLES_.indexOf(String(role || '').trim().toLowerCase()) !== -1;
+  return PRIMARY_ELIGIBLE_ROLES_.indexOf(String(role || '').trim().toLowerCase()) === -1;
 }
 
 /**
@@ -658,11 +665,13 @@ function isChTierRole_(role) {
  * else CH — falling further up the chain only when the nearer tier
  * doesn't exist for this specific person ("19 A1s/TM/RH/CH must follow
  * fallback to their senior"). The one exception: if the chain resolves
- * ALL THE WAY to someone at CH_TIER_ROLES_ (a real Cluster/Commercial
- * Head/City Lead — checked by ROLE, not by "their row happens to be
- * blank," since a plain A1 with nothing configured above them looks
- * identically blank), that RM is diverted to `chLevelRms` instead of
- * getting a normal bucket — real production symptom this fixes: a
+ * ALL THE WAY to someone whose role isn't in PRIMARY_ELIGIBLE_ROLES_ (a
+ * real Cluster/Commercial Head/City Lead, or any other unrecognized
+ * top-tier role — checked by ROLE via an allowlist of what's SAFE to be
+ * a primary, not by "their row happens to be blank," since a plain A1
+ * with nothing configured above them looks identically blank), that RM
+ * is diverted to `chLevelRms` instead of getting a normal bucket —
+ * real production symptom this fixes: a
  * Western RM with neither tl nor tm filled (a hierarchy data gap) was
  * resolving to Rahul Gandhi, Western's Cluster Head, who then received
  * his OWN personal "Western Overnight Leads (Rahul Gandhi)" email
