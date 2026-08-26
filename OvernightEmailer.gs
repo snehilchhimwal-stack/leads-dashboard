@@ -498,7 +498,7 @@ function overnightFollowupHintGs_(row, colIndex, flags) {
   const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
   const hasConnected = (connectTimeRaw instanceof Date) || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
   if (!hasConnected) return 'Connect ASAP — no contact made yet.';
-  if (flags.followupOverdue) return 'Follow up now — over 4h since last contact with no update logged.';
+  if (flags.followupOverdue) return 'Follow up now — No update in the last 4 hours.';
   if (flags.isNotUpdated) return "Log a status update — this lead hasn't been updated.";
   return 'Keep working this lead — no SLA issue flagged yet.';
 }
@@ -1329,6 +1329,82 @@ function setupOvernightEmailer() {
 // Run manually (function dropdown) to test without waiting for the trigger.
 function sendOvernightMorningEmailsNow() { sendOvernightMorningEmails(); }
 function sendOvernightFollowupEmailsNow() { sendOvernightFollowupEmails(); }
+
+// ONE-OFF DIAGNOSTIC — writes one row per TODAY's overnight-eligible lead
+// whose Suggested Follow-up would be overnightFollowupHintGs_'s bottom
+// fallback ("Keep working this lead — no SLA issue flagged yet") into a
+// fresh "Debug_NoIssueLeads" sheet tab — the actual comment history
+// behind each one, so it can be reviewed (or File -> Download -> CSV'd)
+// rather than guessed at. That fallback fires whenever NONE of the 5 SLA
+// checks are currently flagging the lead — it does NOT mean something's
+// wrong; the morning email lists every still-open overnight lead
+// regardless of flag status (see sendOvernightMorningEmails' own
+// comment), so a lead that's simply being worked on with no issue yet
+// legitimately lands here. This tool exists so that can be CONFIRMED
+// against the real comment text for each one, rather than taken on
+// faith. Read-only against the leads tab; only touches its own new
+// debug sheet tab, safe to re-run any time (always replaces it fresh).
+function downloadNoIssueLeadsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const now = new Date();
+  const win = overnightWindowGs_(now);
+  const { colIndex, dataRows } = readLeadsTab_(ss);
+  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+
+  const headers = [
+    'lead_id', 'RM', 'TL', 'region', 'group_source', 'current_stage', 'lead_assigned_at',
+    'last_connect', 'last_connect_time', 'internal_status_comments', 'stage_comments',
+  ];
+  const rows = [];
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const groupSource = String(getVal_(row, colIndex, 'group_source') || '').trim().toLowerCase();
+    if (groupSource !== 'google') return; // same Google-only scope as the real morning email
+    const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
+    const created = createdRaw instanceof Date ? createdRaw : null;
+    if (!created || created < win.from || created > win.to) return;
+    const rawRegion = getVal_(row, colIndex, 'region');
+    const main = mainRegionForGs_(rawRegion);
+    if (!main) return;
+    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+    if (isOppOrAbove_(stage)) return;
+    const closingReason = getVal_(row, colIndex, 'closing_reason');
+    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
+
+    const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
+    const hint = overnightFollowupHintGs_(row, colIndex, flags);
+    if (hint.indexOf('Keep working') !== 0) return; // only the leads landing on the fallback branch
+
+    rows.push([
+      leadId,
+      String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned',
+      String(getVal_(row, colIndex, 'TL') || '').trim(),
+      main,
+      String(getVal_(row, colIndex, 'group_source') || '').trim(),
+      stage,
+      created,
+      String(getVal_(row, colIndex, 'last_connect') || '').trim(),
+      getVal_(row, colIndex, 'last_connect_time'),
+      String(getVal_(row, colIndex, 'internal_status_comments') || '').trim(),
+      String(getVal_(row, colIndex, 'stage_comments') || '').trim(),
+    ]);
+  });
+
+  const sheetName = 'Debug_NoIssueLeads';
+  let sheet = ss.getSheetByName(sheetName);
+  if (sheet) { withRetry_(function () { ss.deleteSheet(sheet); }, 'delete old Debug_NoIssueLeads'); SpreadsheetApp.flush(); }
+  sheet = withRetry_(function () { return ss.insertSheet(sheetName); }, 'insert Debug_NoIssueLeads');
+  SpreadsheetApp.flush();
+  withRetry_(function () {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }, 'write Debug_NoIssueLeads header');
+  if (rows.length) withRetry_(function () { sheet.getRange(2, 1, rows.length, headers.length).setValues(rows); }, 'write Debug_NoIssueLeads rows');
+
+  Logger.log('Wrote ' + rows.length + ' lead(s) with no SLA issue flagged (today\'s overnight window) to the "' + sheetName + '" sheet tab — open it, review the last two columns\' real comment text, then File -> Download -> CSV if you want to export it.');
+}
 
 // ONE-OFF DIAGNOSTIC — run this from the function dropdown, then View →
 // Logs (or Executions → click the run → View log) to see exactly why no
