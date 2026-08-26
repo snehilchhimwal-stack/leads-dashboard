@@ -363,6 +363,196 @@ function countTodayCommentEntries_(internalComments, stageComments, now) {
     .filter(function (d) { return istDayKeyGs_(d) === todayKey; }).length;
 }
 
+// ---------------------------------------------------------------------
+// Keyword-based outcome inference — a port of dashboard.html's own
+// inferOutcome/OUTCOME_RULES/FOLLOWUP_SUGGESTIONS (js/core.js). Real RM
+// comments are short telecalling shorthand ("Ringing", "Switch off. Wp
+// msg sent.") at least as often as full sentences, and just as often
+// misspelled — every signal below is checked with typo tolerance (a
+// comment word within a small edit distance of a signal word counts as
+// that signal) so a spelling mistake attributes to its nearest real
+// keyword automatically. Kept traceable to js/core.js: OUTCOME_RULES_GS_
+// and FOLLOWUP_SUGGESTIONS_GS_ below must stay in sync with that file's
+// OUTCOME_RULES/FOLLOWUP_SUGGESTIONS — mirror any change there here too.
+// See js/core.js for the full rationale behind each rule's ordering,
+// signal choice, and typo-budget sizing.
+// ---------------------------------------------------------------------
+function _editDistanceGs_(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let twoBack = null;
+  let oneBack = new Array(n + 1);
+  let cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) oneBack[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    const ai = a[i - 1];
+    for (let j = 1; j <= n; j++) {
+      const cost = ai === b[j - 1] ? 0 : 1;
+      let best = Math.min(oneBack[j] + 1, cur[j - 1] + 1, oneBack[j - 1] + cost);
+      if (i > 1 && j > 1 && twoBack && ai === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, twoBack[j - 2] + 1);
+      }
+      cur[j] = best;
+    }
+    const tmp = twoBack; twoBack = oneBack; oneBack = cur; cur = (tmp || new Array(n + 1));
+  }
+  return oneBack[n];
+}
+function _typoBudgetGs_(targetLen) {
+  if (targetLen <= 4) return 0;
+  if (targetLen <= 8) return 1;
+  return 2;
+}
+function _wordsMatchGs_(word, target) {
+  if (word === target) return true;
+  const budget = _typoBudgetGs_(target.length);
+  if (!budget || Math.abs(word.length - target.length) > budget) return false;
+  return _editDistanceGs_(word, target) <= budget;
+}
+function _wordsOfGs_(text) {
+  return String(text).toLowerCase().replace(/'/g, '').match(/[a-z0-9]+/g) || [];
+}
+const _signalWordsCacheGs_ = {};
+function _signalWordsOfGs_(signal) {
+  let w = _signalWordsCacheGs_[signal];
+  if (!w) { w = signal.split(' '); _signalWordsCacheGs_[signal] = w; }
+  return w;
+}
+function _signalMatchesGs_(commentWords, signal) {
+  const target = _signalWordsOfGs_(signal);
+  if (target.length === 1) return commentWords.some(function (w) { return _wordsMatchGs_(w, target[0]); });
+  for (let i = 0; i + target.length <= commentWords.length; i++) {
+    let ok = true;
+    for (let j = 0; j < target.length; j++) {
+      if (!_wordsMatchGs_(commentWords[i + j], target[j])) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+function _anySignalGs_(commentWords, signals) {
+  return signals.some(function (s) { return _signalMatchesGs_(commentWords, s); });
+}
+
+const OUTCOME_RULES_GS_ = [
+  { outcome: 'Do Not Disturb', signals: ['do not call', 'dont call', 'not to call', 'stop calling', 'dnd'] },
+  { outcome: 'Switched Off', signals: [
+      'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
+      'out of coverage', 'out of service', 'out of network', 'call forwarded', 'call forwarding',
+      'voice mail', 'voice message', 'voicemail',
+    ], test: function (c, w) { return _anySignalGs_(w, ['incoming']) && _anySignalGs_(w, ['barred', 'not available']); } },
+  { outcome: 'Wrong Number', signals: ['wrong number', 'invalid number', 'invalid no', 'wn'] },
+  { outcome: 'Call Declined', signals: [
+      'hung up', 'hangup', 'disconnecting', 'disconnect the call', 'disconnect call', 'declined', 'declining', 'decline',
+      'cut the call', 'call cut',
+    ], test: function (c) { return /^disconnect\s*-?\s*$/.test(c); } },
+  { outcome: 'Busy', signals: ['busy', 'buzy'] },
+  { outcome: 'Booked Elsewhere', signals: [
+      'booked elsewhere', 'booked with another', 'purchased elsewhere', 'purchased another',
+      'bought elsewhere', 'bought another', 'already bought', 'already purchased',
+      'finalized another', 'finalised another', 'gone with another',
+    ] },
+  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand', 'to let'],
+    test: function (c, w) {
+      if (!_anySignalGs_(w, ['rent', 'rental', 'renting'])) return false;
+      if (_anySignalGs_(w, ['current', 'currently'])) return false;
+      return _anySignalGs_(w, ['want', 'wants', 'need', 'needs', 'looking', 'require', 'requires', 'searching', 'search']);
+    } },
+  { outcome: 'RNR', signals: [
+      'rnr', 'cnr', 'nc', 'nr', 'not responding', 'no answer', 'no response', 'not answering', 'not answered',
+      'didnt answer', 'not picking', 'did not pick', 'didnt pick', 'pickup the call', 'pick up the call',
+      'do not pickup', 'do not pick up', 'call not answered', 'call not received', 'call not receive',
+      'not received call', 'not received', 'call not respond', 'call not pick', 'call not picked', 'not receiving',
+    ] },
+  { outcome: 'Ringing / RNR', signals: ['ringing'], test: function (c) { return /^ring\s*-?\s*$/.test(c); } },
+  { outcome: 'Disconnected', signals: [
+      'disconnected', 'call disc', 'disc', 'network issue', 'network problem', 'poor network',
+      'call not connecting', 'call not connected', 'call not connect', 'not getting connected',
+      'not connecting', 'not connected', 'call drop', 'blank call',
+    ] },
+  { outcome: 'Out of Station', signals: ['out of station', 'out station', 'out of town', 'not in town', 'travelling'] },
+  { outcome: 'WhatsApp Unavailable', test: function (c, w) { return _anySignalGs_(w, ['whatsapp', 'wp', 'wa']) && _anySignalGs_(w, ['not on', 'not available']); } },
+  { outcome: 'WhatsApp Sent', signals: ['dwm', 'textedon'],
+    test: function (c, w) {
+      return _anySignalGs_(w, ['whatsapp', 'whats app', 'whats up', 'wp', 'wa', 'msg', 'mesg', 'message', 'text']) &&
+        _anySignalGs_(w, ['drop', 'dropped', 'shared', 'share', 'sent', 'pinged', 'texted']);
+    } },
+  { outcome: 'Details Shared', test: function (c, w) { return _anySignalGs_(w, ['shared', 'share', 'sent']) && _anySignalGs_(w, ['detail', 'brochure', 'project', 'info']); } },
+  { outcome: 'Visit Completed', signals: [
+      'visit done', 'visited site', 'site visited', 'visit completed', 'came for visit', 'visited the project',
+    ] },
+  { outcome: 'Visit Arranged', signals: [
+      'site visit', 'visit scheduled', 'visit arranged', 'visit booked', 'visit fixed', 'visit confirmed',
+      'will visit', 'coming for visit', 'visit planned',
+    ] },
+  { outcome: 'Loan In Process', signals: ['document submitted', 'bank process'],
+    test: function (c, w) { return _anySignalGs_(w, ['loan']) && _anySignalGs_(w, ['process', 'sanction', 'approval']); } },
+  { outcome: 'Not Interested', signals: [
+      'not interested', 'no interest', 'no longer interested', 'not looking',
+      'no requirement', 'not requirement', 'not enquired', 'dropped the plan', 'dropped the idea', 'ni',
+    ] },
+  { outcome: 'Considering', signals: ['consider', 'think about', 'will think', 'will get back', 'need some time', 'need time', 'will discuss'] },
+  { outcome: 'Budget Concern', signals: ['budget', 'expensive', 'too high', 'high price', 'costly', 'cant afford', 'cannot afford', 'out of budget'] },
+  { outcome: 'Interested', signals: ['interested'] },
+  { outcome: 'DNP', signals: [
+      'call again', 'dnp', 'call back', 'callback', 'call later', 'call after', 'call tomorrow',
+      'requested callback', 'asked to call', 'cb',
+    ] },
+  { outcome: 'Follow-up Missed', signals: ['followup missed', 'follow up missed'] },
+];
+
+function inferOutcomeGs_(comment) {
+  const c = String(comment).toLowerCase();
+  if (/^[\s\-_./]+$/.test(c)) return 'No Real Update';
+  const words = _wordsOfGs_(c);
+  for (let i = 0; i < OUTCOME_RULES_GS_.length; i++) {
+    const rule = OUTCOME_RULES_GS_[i];
+    if ((rule.signals && _anySignalGs_(words, rule.signals)) || (rule.test && rule.test(c, words))) return rule.outcome;
+  }
+  return 'Update';
+}
+
+const FOLLOWUP_SUGGESTIONS_GS_ = {
+  'Do Not Disturb': "Client asked not to be called — stop calling immediately, log as DND, and only re-engage via an approved channel (SMS/email) if policy allows.",
+  'Switched Off': 'Phone was switched off, out of service/network, or otherwise unreachable — retry later today; try an alternate number if one is on file.',
+  'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
+  'Call Declined': "Customer saw or heard the call and actively ended/declined it — they're avoiding contact right now, so calling straight back is more likely to annoy than connect. Try a different time of day, or switch to WhatsApp/SMS first.",
+  'Busy': 'Line was busy — retry within a few hours.',
+  'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
+  'Resale / Rental (Out of Scope)': "Client is looking for resale or rental, not a new first-sale (developer/builder) property — we don't work that segment. Close with this as the reason rather than treating it as lost interest.",
+  'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
+  'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
+  'Disconnected': "Call dropped, didn't connect, or connected with no response — retry; flag the number if this keeps happening.",
+  'Out of Station': "Client is travelling — schedule the follow-up for when they're back rather than repeat-calling now.",
+  'WhatsApp Unavailable': "This contact isn't reachable on WhatsApp (or doesn't have it) — stick to voice calls or SMS instead of defaulting back to a WhatsApp text.",
+  'WhatsApp Sent': 'A WhatsApp/text message was sent or dropped but not yet followed by a call — a text may go unseen, call to confirm.',
+  'Details Shared': 'Project details were shared — follow up to gauge interest and answer any questions before it goes cold.',
+  'Visit Completed': "Site visit already happened — call within 24 hours for feedback while it's fresh, and push toward the next concrete step.",
+  'Visit Arranged': 'A site visit is arranged — confirm attendance close to the date, and follow up right after for feedback.',
+  'Loan In Process': "Loan/paperwork is in process on their end — check status periodically and keep them warm, don't let this go cold.",
+  'Not Interested': 'Client indicated no interest (or no current requirement) — confirm this is final, then close with a clear reason if so.',
+  'Considering': 'Client is still deciding — schedule a follow-up in a few days rather than calling again immediately.',
+  'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
+  'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
+  'DNP': 'Client asked to be called back later — schedule the follow-up call.',
+  'Follow-up Missed': 'A scheduled follow-up was missed — reach out right away to catch up before it goes any staler.',
+  'No Real Update': "RM logged a placeholder with no real content — there's nothing here to act on from the comment alone. Call and get an actual status update, then log what was actually said.",
+};
+
+// Fallback for when inferOutcomeGs_ finds no keyword match at all — a
+// comment that's real information but doesn't contain any known outcome
+// keyword. Quoting the real latest note beats a canned "read the
+// comments" line, since the overnight email doesn't otherwise show
+// comment text anywhere near the Suggested Follow-up column.
+function unmatchedFollowUpGs_(comment, loggedBy) {
+  const text = String(comment || '').trim();
+  if (!text) return 'Manual review required — no keyword match found. Read the comments and log a specific next call/action.';
+  const who = String(loggedBy || '').trim();
+  return 'No keyword match — latest note' + (who ? ' (' + who + ')' : '') + ': "' + text + '". Read this and log a specific next call/action.';
+}
+
 // Reads Movement_Log's EXISTING rows (this run hasn't appended its own yet)
 // to find each lead's call_attempts as of the latest snapshot strictly
 // before `beforeDate`'s IST calendar day — direct port of dashboard.html's

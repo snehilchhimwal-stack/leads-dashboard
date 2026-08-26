@@ -486,21 +486,84 @@ function overnightStatusLabelGs_(stage) {
   return String(stage || '').trim() || 'Unrecognized Stage';
 }
 
-// A deliberately coarser "what to do next" than the dashboard's own
-// suggestedFollowUp, which parses actual logged comment text for outcome
-// keywords across every sibling copy of a customer — that depends on the
-// dashboard's own in-browser identity-clustering over the whole fetched
-// dataset, which this unattended server-side trigger has no access to
-// (same reasoning as combinedCommentsTextGs_ above). Falls back to the
-// one signal readily available here: has this lead been connected at all,
-// and which SLA check (if any) is currently flagging it.
+// Single-copy port of the dashboard's own suggestedFollowUp (js/core.js)
+// — see inferOutcomeGs_/OUTCOME_RULES_GS_/FOLLOWUP_SUGGESTIONS_GS_
+// (MovementTracker.gs) for the keyword engine this reads
+// combinedCommentsTextGs_ through. Real production finding: last_connect
+// (a status-text field — "Not Reachable"/"Ringing"/"Call Connected"/
+// "Call Declined") and last_connect_time both get set on every logged
+// ATTEMPT, not specifically a successful connection — so neither field
+// alone can tell a real connection from a failed one, and the old
+// hasConnected-only fallback below silently treated "Ringing"/"Not
+// Reachable"/"Call Declined" leads as no different from "Keep working,
+// no issue" once ANY attempt was logged. The keyword engine reads what
+// the comment actually SAYS instead, so each of those gets its own
+// specific, actionable suggestion (retry timing, alternate channel,
+// etc.) rather than a generic line.
+// Priority, same tiers as suggestedFollowUp:
+//   1. This row's latest logged comment (structured action-log entry, or
+//      last_comment if there's no structured entry) — its inferred
+//      outcome mapped through FOLLOWUP_SUGGESTIONS_GS_, or a quoted
+//      "no keyword match" note when the comment has real content but
+//      nothing recognizable.
+//   2. Once there's truly no comment logged anywhere on this copy: the
+//      old flags-based fallback — has this lead been connected at all,
+//      and which SLA check (if any) is currently flagging it.
+// Deliberately NOT ported: dashboard.html's sibling-pooling (folds in
+// comments from every OTHER RM copy of the same customer) — that
+// depends on the dashboard's own in-browser identity-clustering over the
+// whole fetched dataset, which this unattended server-side trigger has
+// no access to (same reasoning as combinedCommentsTextGs_ above). A
+// human reading this still sees THIS row's own real comment history
+// classified accurately; they just don't get other copies' comments
+// folded in the way the dashboard's own Generate flow provides.
 function overnightFollowupHintGs_(row, colIndex, flags) {
+  const latest = latestOutcomeGs_(row, colIndex);
+  if (latest) {
+    return FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
+  }
+
   const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
   const hasConnected = (connectTimeRaw instanceof Date) || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
   if (!hasConnected) return 'Connect ASAP — no contact made yet.';
   if (flags.followupOverdue) return 'Follow up now — No update in the last 4 hours.';
   if (flags.isNotUpdated) return "Log a status update — this lead hasn't been updated.";
   return 'Keep working this lead — no SLA issue flagged yet.';
+}
+
+// Single-copy version of js/core.js's latestFamilyOutcome: splits
+// combinedCommentsTextGs_'s "Name: Comment - timestamp | ..." blob into
+// entries and returns the most recent one (by parsed timestamp, falling
+// back to the last entry if none parsed) as
+// {outcome, comment, loggedBy, ts}. Falls back to this row's own
+// last_comment field, same as the dashboard, only once NOT ONE
+// structured entry is present. Returns null when this copy has neither —
+// the caller's cue to fall back to the flags-based hint.
+function latestOutcomeGs_(row, colIndex) {
+  const combined = combinedCommentsTextGs_(row, colIndex);
+  const text = combined === '(no comments logged)' ? '' : combined;
+  if (text) {
+    const rawEntries = text.split('|').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (rawEntries.length) {
+      const parsedEntries = rawEntries.map(function (entry) {
+        const m = entry.match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
+        let loggedBy = '', comment = entry, ts = null;
+        if (m) { loggedBy = m[1].trim(); comment = m[2].trim(); ts = m[3].trim(); }
+        return { loggedBy: loggedBy, comment: comment, ts: ts, outcome: inferOutcomeGs_(comment) };
+      });
+      let latest = parsedEntries[parsedEntries.length - 1];
+      let newestMs = -Infinity;
+      parsedEntries.forEach(function (e) {
+        if (!e.ts) return;
+        const d = new Date(e.ts.replace(' ', 'T') + ':00+05:30');
+        if (!isNaN(d.getTime()) && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
+      });
+      return latest;
+    }
+  }
+  const lastComment = String(getVal_(row, colIndex, 'last_comment') || '').trim();
+  if (lastComment) return { outcome: inferOutcomeGs_(lastComment), comment: lastComment, loggedBy: '', ts: null };
+  return null;
 }
 
 // Apps Script port of the dashboard's renderReportEmailHTML
