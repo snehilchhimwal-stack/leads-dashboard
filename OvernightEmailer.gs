@@ -32,8 +32,9 @@
  * resolves ALL THE WAY to a real CH (Cluster/Commercial Head/City Lead —
  * meaning they genuinely have no A1, TM, or RH configured above them), that
  * RM is NOT bucketed into a normal email addressed to the CH — instead
- * OPS_ALERT_EMAIL_ gets a plain alert (leadership Cc'd) naming the CH and
- * the affected RM(s), so a human decides how to route them rather than the
+ * OPS_ALERT_EMAIL_ gets a styled alert (to OPS_ALERT_EMAIL_ only, no Cc)
+ * naming the CH and the affected RM(s)/lead IDs, so a human decides how to
+ * route them rather than the
  * CH silently receiving the raw report (see notifyChLevelLeadsGs_). The
  * old flat "Region_Recipients" sheet tab (created automatically, pre-filled
  * with all 11 region names, To/Cc left blank) still exists as a FALLBACK: a
@@ -120,12 +121,13 @@ const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real morning/follow-up run it's reporting on. Kept
 // deliberately plain-text/no-frills — this is an ops ping, not a report.
-// `cc` is optional — used by notifyChLevelLeadsGs_ to loop leadership in
-// on the CH-level alert specifically; every other call site omits it.
-function notifyOpsAlertGs_(subject, bodyLines, cc) {
+// Always to OPS_ALERT_EMAIL_ only, no Cc — notifyChLevelLeadsGs_ used to
+// route its own alert through this with a Cc, but sends directly via
+// GmailApp.sendEmail now (its own styled HTML + subject format), so
+// every remaining caller here is Cc-less already.
+function notifyOpsAlertGs_(subject, bodyLines) {
   try {
-    const opts = cc && cc.length ? { cc: cc.join(',') } : undefined;
-    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'), opts);
+    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'));
   } catch (e) {
     Logger.log('notifyOpsAlertGs_ failed to send its own alert ("' + subject + '"): ' + e);
   }
@@ -135,8 +137,9 @@ function notifyOpsAlertGs_(subject, bodyLines, cc) {
 // resolves all the way up to a real CH (Cluster/Commercial Head/City
 // Lead) — see that function's own docblock for the real production bug
 // this replaces (a CH silently receiving the raw overnight-leads report
-// addressed directly to them). Instead: a styled alert to OPS_ALERT_EMAIL_,
-// leadership (ALWAYS_CC_EMAILS_, RmHierarchy.gs) in Cc, explaining that
+// addressed directly to them). Instead: a styled alert to OPS_ALERT_EMAIL_
+// only (no Cc — per explicit request, unlike every other alert this file
+// sends, which does Cc ALWAYS_CC_EMAILS_), explaining that
 // these specific RMs' leads currently have no resolvable A1/TM/RH and are
 // sitting with this CH — a human decision (add a TL/TM/RH for them in
 // RM_Hierarchy, or handle manually), not something this script should
@@ -168,11 +171,10 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
     entry.rmNames.forEach(function (rmName) {
       ((rmToLeadIds && rmToLeadIds[rmName]) || []).forEach(function (id) { leadIds.push(id); });
     });
-    // TEST_MODE_OVERRIDE_EMAIL_'s own comment: a manual test run must
-    // never reach a real recipient by accident — that includes leadership
-    // Cc here, even though the alert itself still goes to OPS_ALERT_EMAIL_
-    // (presumably whoever's running the test) either way.
-    const cc = TEST_MODE_OVERRIDE_EMAIL_ ? [] : ALWAYS_CC_EMAILS_;
+    // Deliberately no Cc at all on this alert — per explicit request, a
+    // CH-level gap goes to OPS_ALERT_EMAIL_ only, not leadership. (Every
+    // other alert this file sends still Cc's ALWAYS_CC_EMAILS_ — this is
+    // the one exception.)
     const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + dateLabel;
 
     const html = renderOvernightReportEmailHTML_({
@@ -205,9 +207,7 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
     // a failure to send THIS alert must never take down the real
     // morning-send loop it's reporting alongside.
     try {
-      const opts = { htmlBody: html };
-      if (cc.length) opts.cc = cc.join(',');
-      GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, opts);
+      GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, { htmlBody: html });
     } catch (e) {
       Logger.log('notifyChLevelLeadsGs_ failed to send its alert for ' + chName + ' (' + region + '): ' + e);
     }
@@ -375,7 +375,7 @@ function ensureRegionRecipientsSheet_(ss) {
 // path, passes true. Diagnostic/maintenance callers that just need to
 // know what a recipient WOULD be (backfillTodaysOvernightLogRecipientsNow)
 // leave it false, so re-running them repeatedly while debugging can't
-// fire the same real alert (leadership Cc'd, for the CH case) over and
+// fire the same real alert (for the CH case) over and
 // over as an unintended side effect.
 // opts.rmToLeadIds (optional, RM name -> array of lead_id) — only used to
 // pass through to notifyChLevelLeadsGs_ so its alert can name the actual
