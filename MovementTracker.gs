@@ -60,6 +60,11 @@
 const TAB_NAME_OVERRIDE = ''; // e.g. 'Aug' — leave blank to auto-detect
 const MOVEMENT_LOG_SHEET = 'Movement_Log';
 const MOVEMENT_LOG_RETENTION_DAYS = 7;
+// Extra rows left allocated beyond what pruneMovementLog_ actually needs,
+// so a normal run doesn't shrink the sheet down to the bone and then
+// immediately have to re-expand it for the very next snapshot's rows —
+// see pruneMovementLog_'s own comment for why the sheet gets shrunk at all.
+const MOVEMENT_LOG_ROW_HEADROOM_ = 5000;
 // Four separate fixed-hour daily triggers (IST), not one
 // .timeBased().everyHours(6) trigger — see setupMovementTracking's own
 // comment for why: everyHours() only loosely targets its interval and can
@@ -795,7 +800,9 @@ function snapshotOpenLeads_(label) {
 
 // Rewrites the whole data range with only rows newer than the retention
 // window — simpler and safer than deleting individual rows out from under
-// a range that keeps shifting.
+// a range that keeps shifting. Also shrinks the sheet's actual row
+// allocation to match, via deleteRows — see the comment further down for
+// why that step is not optional.
 function pruneMovementLog_(ss) {
   const logSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   if (!logSheet) return;
@@ -812,6 +819,41 @@ function pruneMovementLog_(ss) {
   if (kept.length) {
     logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
   }
+
+  // clearContent above only empties cell VALUES — it does not shrink the
+  // sheet's actual row allocation (getMaxRows()), and Google Sheets'
+  // 10,000,000-cell cap is on the WORKBOOK's total declared grid size
+  // (rows x columns, summed across every tab), not on cells that hold
+  // real content. Without this step the sheet's row count only ever
+  // grows — every setValues() call in snapshotOpenLeads_ that needs more
+  // rows than currently allocated auto-expands the grid, and nothing
+  // before this ever shrank it back down — which ratchets the whole
+  // workbook toward that ceiling forever even though the actual DATA here
+  // stays bounded to MOVEMENT_LOG_RETENTION_DAYS. Real production
+  // failure this fixes: snapshotOpenLeads_'s own setValues() call
+  // throwing "This action would increase the number of cells in the
+  // workbook above the limit of 10000000 cells" — and because that throw
+  // happens BEFORE this function is even reached (see
+  // snapshotOpenLeads_), pruning could never run again to self-heal once
+  // the sheet was already over the edge; see pruneMovementLogNow for the
+  // one-time manual recovery that's needed once that's already happened.
+  const neededRows = 1 + kept.length + MOVEMENT_LOG_ROW_HEADROOM_;
+  const maxRows = logSheet.getMaxRows();
+  if (maxRows > neededRows) {
+    logSheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  }
+}
+
+// ONE-OFF RECOVERY — run this manually (function dropdown -> Run) if
+// snapshotOpenLeads_/snapshotPeriodic has started failing with "This
+// action would increase the number of cells in the workbook above the
+// limit of 10000000 cells." That error fires from snapshotOpenLeads_'s
+// own append, BEFORE it ever reaches pruneMovementLog_ — so once the
+// sheet is already over the edge, the normal periodic trigger can't
+// self-heal; this runs the (now row-shrinking) prune directly, without
+// needing a successful snapshot append first. Safe to re-run any time.
+function pruneMovementLogNow() {
+  pruneMovementLog_(SpreadsheetApp.getActiveSpreadsheet());
 }
 
 // ---- Trigger entry point ----
