@@ -1277,6 +1277,11 @@ let _renderNow = new Date();
 // there); enrichLead only ever reads it, never rebuilds it, so enriching
 // many leads/copySplits in one pass stays cheap.
 let _todayCallBaselineByKey = new Map();
+// Same idea, but for noCommentFollowUp below (see lastSnapshotBefore,
+// tab-movement.js) — rebuilt alongside _todayCallBaselineByKey so a
+// customer's no-comment fallback text doesn't re-scan the whole
+// Movement_Log dataset on every single lead card.
+let _lastSnapshotByKey = new Map();
 // True only while enrichLeadAsOf is enriching a PAST Movement_Log snapshot
 // (RM stall leaderboard, time-to-remediate) — attemptsToday falls back to
 // the CRM-comment proxy in that case; see enrichLeadAsOf for why.
@@ -1647,6 +1652,7 @@ function _applyFiltersAndRenderImpl(){
   // always reflects whatever Movement_Log data is currently loaded; see
   // buildTodayCallBaseline and enrichLead's attemptsToday.
   _todayCallBaselineByKey = buildTodayCallBaseline(_renderNow);
+  _lastSnapshotByKey = lastSnapshotBefore(_renderNow);
   leads = filtered.map(enrichLead);
 
   // Issue-detection view: every multi-copy customer expanded back into its
@@ -2754,17 +2760,21 @@ function ownComments(row){
 // a customer's real next step, as far as THIS RM's own card is
 // concerned, should reflect what THIS RM's own record says, not what a
 // different RM logged on their own separate copy. Priority order:
-//   1-2. latestFamilyOutcome above (this lead's own structured action
-//        log entries, owner-filtered, then its own last_comment).
-//   3. This lead's own closing_reason — the only signal left when it
+//   1. latestFamilyOutcome above (this lead's own structured action log
+//      entries, owner-filtered, then its own last_comment) — but only
+//      when that entry actually has text. An owner-logged entry that's
+//      just a blank timestamp check-in (no text at all) is NOT treated
+//      as a real comment here — falls through to tier 3 instead of
+//      landing on the generic "no keyword match" line, which used to
+//      read as if a real comment just didn't match a keyword when
+//      really nothing was said.
+//   2. This lead's own closing_reason — the only signal left when it
 //      closed without anything else logged.
-//   4. noCommentsFallback (or the generic default) once ALL of the
-//      above are genuinely empty. Lets a caller substitute its own
-//      wording (e.g. Overnight Leads' "Connect ASAP") for that last
-//      case only.
-function suggestedFollowUp(l, noCommentsFallback){
+//   3. noCommentFollowUp below, once there's truly no usable comment or
+//      closing reason anywhere on this lead's own copy.
+function suggestedFollowUp(l){
   const latest = latestFamilyOutcome(l);
-  if (latest) {
+  if (latest && latest.comment) {
     return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);
   }
 
@@ -2778,7 +2788,37 @@ function suggestedFollowUp(l, noCommentsFallback){
     return `Lead closed (${full}) — no further follow-up needed unless it's reopened.`;
   }
 
-  return noCommentsFallback || 'No comments logged yet — make first contact and log the outcome.';
+  return noCommentFollowUp(l);
+}
+
+// Dashboard counterpart to OvernightEmailer.gs's noCommentFollowUpGs_ —
+// see that function's own comment for the full reasoning. Fired from
+// suggestedFollowUp above when the lead's own assigned RM hasn't logged
+// any usable comment (or closing reason) at all — instead of a flat
+// "no comments logged yet" line regardless of how long this has been
+// sitting untouched, reads call_attempts against the lead's last known
+// Movement_Log snapshot (lastSnapshotBefore, tab-movement.js) to tell
+// "genuinely stalled, nobody's dialing" from "actively being worked,
+// just not narrated yet" — the two need different advice. Only draws
+// that comparison once the baseline snapshot is itself at least 4 hours
+// old; a snapshot from 20 minutes ago reading "unchanged" doesn't mean
+// much on its own, the RM may simply not have re-attempted that
+// recently yet. Replaces the old per-caller noCommentsFallback override
+// (e.g. Overnight Leads' blanket "Connect ASAP") — this is strictly more
+// specific than any fixed wording could be, so every caller now gets the
+// same real signal instead of a guess.
+function noCommentFollowUp(l){
+  const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+  const baseline = _lastSnapshotByKey.get(key);
+  if (!baseline || (_renderNow.getTime() - baseline.atMs) < 4 * 3600000) {
+    return 'No comment added — connect and log the outcome.';
+  }
+  const currentAttempts = Number(l.call_attempts) || 0;
+  if (currentAttempts <= baseline.call_attempts) {
+    return 'No comment added — no new call attempts in over 4 hours. Connect ASAP.';
+  }
+  const newAttempts = currentAttempts - baseline.call_attempts;
+  return `No comment added — ${newAttempts} more call attempt${newAttempts === 1 ? '' : 's'} made since the last check. Keep trying to connect, and also send a WhatsApp message.`;
 }
 
 // Inner markup only — no wrapper div, so it can be injected into the

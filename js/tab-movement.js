@@ -88,6 +88,30 @@ function buildTodayCallBaseline(asOf){
   return map;
 }
 
+// Same scan as buildTodayCallBaseline above, but keeps each entry's own
+// snapshot timestamp instead of discarding it, and applies NO "before
+// today" gate — returns every customer's LATEST snapshot strictly
+// before `asOf`, whatever calendar day it falls on, as
+// key -> {atMs, call_attempts}. buildTodayCallBaseline's day-boundary
+// gate exists for a different purpose (today's-calls delta against a
+// fixed start-of-day baseline) and would incorrectly exclude an
+// overnight lead's most recent snapshot from earlier today — see
+// noCommentFollowUp (core.js), the one caller that needs this. Mirrors
+// OvernightEmailer.gs's lastSnapshotBeforeGs_ — keep in sync.
+function lastSnapshotBefore(asOf){
+  const map = new Map();
+  if (!movementSnapshots.length) return map;
+  const cutoffMs = asOf.getTime();
+  movementSnapshots.forEach(rec => {
+    const atMs = rec.snapshot_at.getTime();
+    if (atMs >= cutoffMs) return;
+    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    const cur = map.get(key);
+    if (!cur || atMs > cur.atMs) map.set(key, { atMs, call_attempts: Number(rec.call_attempts) || 0 });
+  });
+  return map;
+}
+
 async function fetchMovementLog(sheetId){
   movementFetchState = 'loading';
   try {
@@ -827,12 +851,6 @@ function overnightStatusLabel(l){
   return String(l.current_stage || '').trim() || 'Unrecognized Stage';
 }
 
-// Overnight Leads' own fallback wording for suggestedFollowUp's
-// no-comments case — these came in after hours and may not have been
-// touched at all yet, so the generic "make first contact" reads weaker
-// than the urgency actually warrants here.
-const OVERNIGHT_NO_COMMENT_FALLBACK = 'Connect ASAP — no contact made yet.';
-
 // Email-only exclusion: the on-screen cohort (renderOvernightCohort)
 // deliberately shows every overnight-assigned lead, closed or not, so
 // nothing about last night is hidden from view. The email is a
@@ -866,7 +884,7 @@ function buildOvernightRegionReports(cohortLeads, windowStart, windowEnd, follow
   const rangeLabel = `${istStamp(windowStart)} → ${istStamp(windowEnd)}`;
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
-  const followupTextFor = (l) => (followupLookup && followupLookup[String(l.lead_id).trim()]) || suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK);
+  const followupTextFor = (l) => (followupLookup && followupLookup[String(l.lead_id).trim()]) || suggestedFollowUp(l);
   // Each lead's own copy is judged on its own stage — a lightweight
   // sibling note (not a merged status) names any other RM copies of the
   // same customer for context. cohortLeads already arrives pre-expanded
@@ -983,7 +1001,7 @@ function renderOvernightCohort(asOf){
     return `<div class="alert-card">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} — <span class="chip ${label === 'Closed' ? 'dim-chip' : 'amber'}">${esc(label)}</span></div>
-      <div class="alert-comment">Next: ${esc(suggestedFollowUp(l, OVERNIGHT_NO_COMMENT_FALLBACK))}</div>
+      <div class="alert-comment">Next: ${esc(suggestedFollowUp(l))}</div>
     </div>`;
   }).join('');
 }
@@ -1059,7 +1077,7 @@ async function renderOvernightRegionReports(){
 
   // Cancelled: fall back to the algorithmic/keyword-inferred follow-up
   // text (buildOvernightRegionReports with no followupLookup falls back to
-  // suggestedFollowUp's own OVERNIGHT_NO_COMMENT_FALLBACK chain) instead of
+  // suggestedFollowUp's own noCommentFollowUp chain) instead of
   // leaving the screen showing nothing — same "unreviewed, but here it is"
   // fallback renderReports offers for the Summary email.
   const usingFallback = !followupLookup;
