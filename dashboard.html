@@ -1197,6 +1197,16 @@
     <div class="tab-panel" id="tab-tracking">
       <div class="band-label">Tracking <span class="band-note">is the dashboard actually catching what you emailed — did the numbers move?</span></div>
 
+      <section id="sec-tracking-daily">
+        <div class="section-head"><div class="section-bar purple"></div><div class="section-title">Daily Cohort by Region</div><div class="section-count" id="trackingDailyCount"></div></div>
+        <div class="filter-summary">Pick one specific day (not a range): of the leads ASSIGNED that day, per region — Same-Day Opp% (reached Opportunity+ by the end of that day, or as of right now if the day's still in progress), 48h Opp% and 48h Close% (status at each lead's own 48-hour mark, once it's elapsed — fully available for every lead roughly 2 days after the picked date), and how many of the region's leads that 48h figure is actually based on so a partial cohort is visible, not hidden. Same evidence method as 0&ndash;48h Cohort Outcome below (closest retained Movement_Log snapshot, live sheet as fallback).</div>
+        <div class="stale-controls" style="margin-bottom:10px;">
+          <label class="date-filter">Date <input type="date" id="trackingDailyDateInput" /></label>
+        </div>
+        <div id="trackingDailyNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll"><table id="trackingDailyTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
       <section id="sec-tracking">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Region Issue Trend</div><div class="section-count" id="trackingCount"></div></div>
         <div class="filter-summary">Reads the same <span class="mono">Movement_Log</span> sheet tab as the Movement tab below — nothing here is stored in this browser, so any pair of captured snapshots reads identically for anyone who opens this Sheet. Pick a "From" snapshot (e.g. right when you sent a region's email) and a "To" snapshot (e.g. now); the chart and table below show ONLY that range, grouped the same way the region emails are grouped (<span class="mono">mainRegionFor(effectiveRegion())</span>). If a day has several captures (the 6-hourly trigger plus any manual Snapshot now clicks), the connected line plots that day's latest one — every other same-day capture still shows, but only as a small dim dot in the background. Hover a line or dot to see which issue it is and its exact value; date labels include the day of week. New comparison points come from either <span class="mono">MovementTracker.gs</span>'s automatic every-6-hours capture, or the Snapshot now button up in the header. The top mini-chart (bright green) is Total Leads in System — every matching lead at that snapshot, any stage, not just open ones — so you can tell whether an issue count dropped because it was actually worked down or just because overall volume shrank; the table's % columns divide each row by that same total.</div>
@@ -1233,16 +1243,6 @@
         <div id="tracking48hNotice" class="truncation-notice" style="display:none;"></div>
         <div id="tracking48hSummary" style="margin-bottom:10px;"></div>
         <div class="section-scroll"><div class="card-list" id="tracking48hList"></div></div>
-      </section>
-
-      <section id="sec-tracking-daily">
-        <div class="section-head"><div class="section-bar purple"></div><div class="section-title">Daily Cohort by Region</div><div class="section-count" id="trackingDailyCount"></div></div>
-        <div class="filter-summary">Pick one specific day (not a range): of the leads ASSIGNED that day, per region — Same-Day Opp% (reached Opportunity+ by the end of that day, or as of right now if the day's still in progress), 48h Opp% and 48h Close% (status at each lead's own 48-hour mark, once it's elapsed — fully available for every lead roughly 2 days after the picked date), and how many of the region's leads that 48h figure is actually based on so a partial cohort is visible, not hidden. Same evidence method as 0&ndash;48h Cohort Outcome above (closest retained Movement_Log snapshot, live sheet as fallback).</div>
-        <div class="stale-controls" style="margin-bottom:10px;">
-          <label class="date-filter">Date <input type="date" id="trackingDailyDateInput" /></label>
-        </div>
-        <div id="trackingDailyNotice" class="truncation-notice" style="display:none;"></div>
-        <div class="section-scroll"><table id="trackingDailyTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
       <section id="sec-slahistory-admin">
