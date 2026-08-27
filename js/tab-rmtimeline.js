@@ -220,7 +220,7 @@ function renderRMIssueHistory(rm){
 
   if (movementFetchState !== 'ok') {
     if (countEl) countEl.textContent = '';
-    el.innerHTML = `<div class="empty-row">${movementFetchState === 'loading' ? 'Loading movement history…' : 'No Movement_Log data yet — see MovementTracker.gs, or the Snapshot now button up in the header.'}</div>`;
+    el.innerHTML = `<div class="empty-row">${esc(movementUnavailableReason())}</div>`;
     return;
   }
 

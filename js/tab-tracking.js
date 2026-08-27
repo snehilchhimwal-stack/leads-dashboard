@@ -636,11 +636,9 @@ function renderTrackingTab(){
     chartEl.innerHTML = ''; thead.innerHTML = ''; tbody.innerHTML = '';
     if (noticeEl) {
       noticeEl.style.display = 'block';
-      noticeEl.innerHTML = movementFetchState === 'loading'
-        ? 'Loading movement history…'
-        : `<b>No Movement_Log data yet.</b> This tab reads the same "Movement_Log" sheet tab as the Movement tab — see <span class="mono">MovementTracker.gs</span> for the one-time setup, or click Snapshot now above once you're signed in to start capturing without it.`;
+      noticeEl.innerHTML = esc(movementUnavailableReason());
     }
-    clearCohort('Same as above.');
+    clearCohort(movementUnavailableReason());
     return;
   }
 
@@ -784,7 +782,7 @@ function render48hCohort(){
     if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
   };
 
-  if (movementFetchState !== 'ok') { clear('Same as Region Issue Trend above — needs Movement_Log data.'); return; }
+  if (movementFetchState !== 'ok') { clear(esc(movementUnavailableReason())); return; }
 
   const result = computeZeroTo48hCohort();
   if (!result) {
@@ -1024,7 +1022,7 @@ function renderDailyCohortByRegion(){
     if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
   };
 
-  if (movementFetchState !== 'ok') { clear('Same as the sections above — needs Movement_Log data.'); return; }
+  if (movementFetchState !== 'ok') { clear(esc(movementUnavailableReason())); return; }
 
   const dateInput = document.getElementById('trackingDailyDateInput');
   const dateKey = dateInput ? dateInput.value : '';

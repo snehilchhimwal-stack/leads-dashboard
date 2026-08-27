@@ -24,6 +24,14 @@
  */
 let movementSnapshots = [];             // raw per-snapshot records, one per (lead, check)
 let movementFetchState = 'idle';        // 'idle' | 'loading' | 'ok' | 'missing' | 'error'
+// The actual error text behind a 'error' state — '' for every other
+// state. Exists so a genuine failure (a timeout, a permissions error, a
+// malformed row) can say WHAT went wrong instead of showing the exact
+// same "no data" placeholder as a sheet that's simply never been set
+// up — see movementUnavailableReason below, the one place every
+// Tracking-tab section and the RM Timeline calendar go to explain an
+// empty state, so this never has to be duplicated per call site.
+let movementFetchError = '';
 let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
@@ -114,18 +122,52 @@ function lastSnapshotBefore(asOf){
 
 async function fetchMovementLog(sheetId){
   movementFetchState = 'loading';
+  movementFetchError = '';
   try {
     // Movement_Log is a plain tab we control (no import-tool banner row),
     // so headers live in row 1 — unlike the main sheet's A2:Z convention.
     // A1:Z leaves headroom past MOVEMENT_LOG_COLUMNS' current 22 columns
     // for whatever gets appended next, same as the main sheet's own range.
+    //
+    // Timeboxed at 30s — Movement_Log's row ALLOCATION (not necessarily
+    // its content) can grow very large if pruneMovementLog_
+    // (MovementTracker.gs) hasn't run its row-shrinking step yet (see
+    // that function's own comment on the real 10,000,000-cell workbook
+    // ceiling this can hit), and a fetch against a sheet in that state
+    // can take far longer than a normal Sheets API call, or hang
+    // outright. Without a bound here, every Tracking-tab section just
+    // sits on "Loading movement history…" forever with nothing to tell
+    // a reader whether it's still working or has actually failed —
+    // timing out surfaces that as a real 'error' state instead, with an
+    // actual message (see movementFetchError / movementUnavailableReason).
     let values;
     try {
-      values = await sheetsApiValuesGet(sheetId, `${MOVEMENT_LOG_TAB_NAME}!A1:Z`);
+      values = await Promise.race([
+        sheetsApiValuesGet(sheetId, `${MOVEMENT_LOG_TAB_NAME}!A1:Z`),
+        new Promise((_, reject) => setTimeout(() => {
+          reject(Object.assign(new Error('Timed out after 30s waiting for Movement_Log.'), { timedOut: true }));
+        }, 30000)),
+      ]);
     } catch (err) {
-      // A missing tab (setup not done yet) surfaces as a 400 "Unable to
-      // parse range" — same "not set up" outcome as an empty response.
-      movementFetchState = err.status === 403 ? 'error' : 'missing';
+      // 'missing' is the NARROW, specific case — a missing tab (setup
+      // not done yet) surfaces as exactly HTTP 400 "Unable to parse
+      // range", the one expected shape that genuinely means "not set up
+      // yet." Everything else (403, 500, a network failure, a timeout,
+      // anything unrecognized) is a real 'error' with its message kept —
+      // the previous version of this check treated ANY non-403 error as
+      // 'missing', which silently hid a genuine failure (a real network
+      // error, a 500, a malformed response) behind the exact same "no
+      // data yet" message a legitimately-not-set-up sheet shows,
+      // discovered while fixing the timeout above.
+      if (err.status === 400) {
+        movementFetchState = 'missing';
+      } else if (err.timedOut) {
+        movementFetchState = 'error';
+        movementFetchError = err.message + ' The sheet may still need MovementTracker.gs\'s pruneMovementLogNow run once — see that function\'s own comment.';
+      } else {
+        movementFetchState = 'error';
+        movementFetchError = err.status ? ('HTTP ' + err.status + ': ' + err.message) : String((err && err.message) || err);
+      }
       movementSnapshots = [];
       return;
     }
@@ -190,8 +232,25 @@ async function fetchMovementLog(sheetId){
     movementFetchState = movementSnapshots.length ? 'ok' : 'missing';
   } catch (err) {
     movementFetchState = 'error';
+    movementFetchError = String((err && err.message) || err);
     movementSnapshots = [];
   }
+}
+
+// Single source of truth for why a Movement_Log-backed section has
+// nothing to show — every Tracking-tab section and the RM Timeline
+// calendar call this instead of hardcoding their own text, so a genuine
+// failure ('error' — a timeout, a permissions error, a malformed row)
+// never again looks identical to "this just hasn't been set up yet"
+// ('missing') the way a single generic "needs Movement_Log data" message
+// used to. Callers only reach this while movementFetchState !== 'ok', so
+// no separate check for that case here.
+function movementUnavailableReason(){
+  if (movementFetchState === 'loading') return 'Loading movement history…';
+  if (movementFetchState === 'error') {
+    return 'Movement_Log fetch failed' + (movementFetchError ? (': ' + movementFetchError) : '') + ' — try Refresh; if this keeps happening, check MovementTracker.gs.';
+  }
+  return 'No Movement_Log data yet — see MovementTracker.gs, or the Snapshot now button up in the header.';
 }
 
 // Groups raw snapshot records by customer (client_id, falling back to
@@ -1123,8 +1182,8 @@ function renderMovementTab(){
   if (noticeEl) {
     if (movementFetchState !== 'ok') {
       noticeEl.style.display = 'block';
-      noticeEl.innerHTML = movementFetchState === 'loading'
-        ? 'Loading movement history…'
+      noticeEl.innerHTML = movementFetchState === 'loading' ? 'Loading movement history…'
+        : movementFetchState === 'error' ? esc(movementUnavailableReason())
         : `<b>No Movement_Log data yet.</b> This reads a "Movement_Log" sheet tab populated every 6 hours by a small Apps Script that runs independently of this dashboard. See <span class="mono">MovementTracker.gs</span> in the project folder for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once). RM Stall Leaderboard, Time to Opportunity and Unmatched Comments above need at least two captured checks before they have anything to show — allow ~6-12 hours after setup; Overnight Leads below works from the live sheet regardless.`;
     } else {
       noticeEl.style.display = 'none';
