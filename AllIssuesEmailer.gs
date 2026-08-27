@@ -35,10 +35,8 @@
  *      file (Apps Script editor → + → Script → name it AllIssuesEmailer).
  *   2. In the function dropdown, select setupAllIssuesEmailTrigger, click
  *      Run, approve permissions. Installs ONE daily trigger at
- *      ALL_ISSUES_RUN_HOUR_ (default 10am IST — after the overnight
- *      email's own ~9am run and Movement_Log's 4x/day snapshots, so it
- *      isn't competing with either for the same execution window; edit
- *      the constant and re-run this function to change it).
+ *      ALL_ISSUES_RUN_HOUR_ (5pm IST — one run a day, per explicit
+ *      request; edit the constant and re-run this function to change it).
  *   3. To test without emailing real RMs: set TEST_MODE_OVERRIDE_EMAIL_ at
  *      the top of OvernightEmailer.gs (shared by both scripts) to your own
  *      address, then run sendAllIssuesEmailsNow from the function dropdown.
@@ -48,7 +46,7 @@
 
 const ALL_ISSUES_LOG_SHEET_ = 'AllIssues_Log';
 const ALL_ISSUES_WINDOW_HOURS_ = 48;
-const ALL_ISSUES_RUN_HOUR_ = 10; // IST — see setupAllIssuesEmailTrigger below
+const ALL_ISSUES_RUN_HOUR_ = 17; // IST (5pm) — one run a day, see setupAllIssuesEmailTrigger below
 
 // Source = google, Sub-source = Non-UTM or Search — per explicit request,
 // checked as the very FIRST gate on every row (same "checked before
@@ -65,8 +63,8 @@ function passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw) {
   return sourceBucket === 'non-utm' || sourceBucket === 'search';
 }
 
-// Rolling 48h window ending at `asOf` — e.g. run on the 27th at 10am,
-// covers leads assigned from the 25th 10am through the 27th 10am.
+// Rolling 48h window ending at `asOf` — e.g. run on the 27th at 5pm,
+// covers leads assigned from the 25th 5pm through the 27th 5pm.
 // Deliberately NOT the overnight emailer's fixed 5pm-to-9am window
 // (overnightWindowGs_) — this is a genuinely different scope (48 rolling
 // hours, every day, not "since the RM's desk closed yesterday").
