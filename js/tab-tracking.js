@@ -879,9 +879,27 @@ function computeDailyCohortByRegion(dateKey, opts){
     return byRegion.get(region);
   }
 
+  // Every lead this cohort could include: everyone with SOME Movement_Log
+  // history (byLead), PLUS any live lead assigned this day that
+  // Movement_Log never captured a single snapshot of at all —
+  // buildMovementHistories only knows about leads that appear in
+  // movementSnapshots at least once, so a lead Movement_Log's capture run
+  // happened to miss entirely (a real gap, or a lead added and resolved
+  // between two 6-hourly captures) has NO entry in byLead whatsoever, not
+  // even an empty one, and was silently invisible here even though it's
+  // sitting right there in the live sheet. evidenceAtDeadline below
+  // already falls back to the live record when history is empty — this
+  // just makes sure such a lead reaches that call at all, the same way
+  // the Daily_Cohort_History fallback (renderDailyCohortByRegion) catches
+  // a DIFFERENT reason a day can go missing (aged out of retention).
+  const entries = [];
+  byLead.forEach((history, key) => entries.push([key, history]));
+  liveByKey.forEach((liveLead, key) => { if (!byLead.has(key)) entries.push([key, []]); });
+
   let totalCreated = 0;
-  byLead.forEach((history, key) => {
-    if (!history.length) return;
+  entries.forEach(([key, history]) => {
+    const first = history.length ? history[0] : liveByKey.get(key);
+    if (!first) return;
     // skipDateFilter: this section has its OWN independent single-day
     // picker (dateKey/dayStart/dayEnd above) — the top bar's Assigned-date
     // RANGE filter must not ALSO gate it, or picking a day outside
@@ -889,13 +907,13 @@ function computeDailyCohortByRegion(dateKey, opts){
     // that genuinely has leads. Project/Region/TL/Source/Sub-source still
     // apply — region here narrows WHICH regions appear at all, same as
     // every other Movement view.
-    if (!ignoreFilters && !passesMovementFilters(history[0], { skipDateFilter: true })) return;
-    const created = parseDate(history[0].lead_assigned_at);
+    if (!ignoreFilters && !passesMovementFilters(first, { skipDateFilter: true })) return;
+    const created = parseDate(first.lead_assigned_at);
     if (!created) return;
     if (created < dayStart || created > dayEnd) return; // not created on this day
 
     totalCreated++;
-    const region = mainRegionFor(effectiveRegion(history[0])) || 'Unmapped';
+    const region = mainRegionFor(effectiveRegion(first)) || 'Unmapped';
     const stats = statsFor(region);
     stats.created++;
 
