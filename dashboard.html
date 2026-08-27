@@ -616,7 +616,17 @@
   .trend-fill-conv{ height:100%; background:var(--green); }
   .trend-nums{
     font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-dim);
-    width:92px; flex-shrink:0; white-space:nowrap;
+    /* Wide enough for the longest realistic line ("138 (9 cloned) · 12
+       opp+") — 92px only fit a bare count with no cloned/opp+ suffix, so
+       any day with cloning or a double-digit opp+ count overflowed this
+       column and dragged in a horizontal scrollbar for the whole chart
+       (.trend-chart's overflow-y:auto forces overflow-x:auto too, per the
+       CSS rule that one axis can't stay "visible" once the other scrolls).
+       Kept as a FIXED width rather than auto-sizing so every row's bar
+       track lines up at the same right edge — letting it size to content
+       would make a short-text day's track a few px wider than a
+       long-text day's, which skews day-to-day bar-length comparison. */
+    width:150px; flex-shrink:0; white-space:nowrap;
   }
   .trend-nums .conv{ color:var(--green); }
 
