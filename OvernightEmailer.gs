@@ -1042,14 +1042,21 @@ function sendOvernightMorningEmails() {
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
-    // Google-only gate, checked FIRST — before the window/region/stage
-    // checks below — per explicit request: this email is scoped to
-    // group_source="Google" leads only (see the subject line, which now
-    // says "Google Overnight Leads"), so a non-Google lead is excluded
-    // before anything else runs on it, not filtered out later alongside
-    // the other criteria.
-    const groupSource = String(getVal_(row, colIndex, 'group_source') || '').trim().toLowerCase();
-    if (groupSource !== 'google') return;
+    // Google + Sub-source gate, checked FIRST — before the window/region/
+    // stage checks below — per explicit request: this email is scoped to
+    // group_source="Google" AND source_bucket in {Non-UTM, Search} only
+    // (see the subject line, which says "Google Overnight Leads"), so a
+    // lead outside that scope is excluded before anything else runs on
+    // it, not filtered out later alongside the other criteria.
+    // Sub-source was NOT actually being checked here before — only
+    // group_source was — despite the dashboard's own generated-report
+    // subjects once claiming (falsely, until fixed — see reports.js's
+    // subjectScopeSuffix comment) a "Google Search & Non-UTM only" scope.
+    // This closes that real gap: passesGoogleNonUtmSearchGs_
+    // (AllIssuesEmailer.gs) is the single shared definition of the scope
+    // now, so this and the all-issues script can't drift apart on what
+    // "Google Non-UTM/Search" means.
+    if (!passesGoogleNonUtmSearchGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'))) return;
     const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
     const created = createdRaw instanceof Date ? createdRaw : null;
     if (!created || created < win.from || created > win.to) return; // not an overnight lead
