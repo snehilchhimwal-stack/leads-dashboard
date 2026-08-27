@@ -177,15 +177,44 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
     // the one exception.)
     const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + dateLabel;
 
+    // Two genuinely different situations can both land a name in
+    // chLevelRms (see resolveRecipientBucketsForRms_): an ordinary RM
+    // whose chain resolves UP to this CH (reportingRmNames), or the CH
+    // THEMSELVES personally holding a lead with nobody below them
+    // (selfRmNames — rmName === chName). Using the same "no A1/TM/RH
+    // configured above X — chain resolves up to X" wording for the self
+    // case reads circularly ("...above Vidya Jadhav... up to Vidya
+    // Jadhav"), so each gets its own explanation; a region can have
+    // both in the same run (e.g. an RM reporting to a CH AND that CH
+    // personally holding a separate lead), so both parts can appear
+    // together.
+    const selfRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() === chName.toLowerCase(); });
+    const reportingRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() !== chName.toLowerCase(); });
+    const subtitleParts = [];
+    if (selfRmNames.length) {
+      subtitleParts.push(chName + ' is personally holding ' + (selfRmNames.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
+    }
+    if (reportingRmNames.length) {
+      subtitleParts.push('No A1, TM, or RH configured above ' + reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
+    }
+    const actionParts = [];
+    if (selfRmNames.length) {
+      actionParts.push('Decide whether ' + chName + ' will handle ' + (selfRmNames.length === 1 ? 'this' : 'these') + ' personally, or reassign to an RM under them.');
+    }
+    if (reportingRmNames.length) {
+      actionParts.push('Add a TL/TM/RH for ' + reportingRmNames.join(', ') + ' in RM_Hierarchy, or handle manually.');
+    }
+    actionParts.push('No automated email was sent directly to ' + chName + ' for this.');
+
     const html = renderOvernightReportEmailHTML_({
       title: 'No Manager Below CH',
       region: region,
-      subtitle: 'No A1, TM, or RH configured above ' + entry.rmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.',
+      subtitle: subtitleParts.join(' '),
       kpis: [
         { value: entry.rmNames.length, label: entry.rmNames.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#fef3c7', fg: '#b45309' },
         { value: leadIds.length, label: leadIds.length === 1 ? 'Lead Affected' : 'Leads Affected', bg: '#fee2e2', fg: '#dc2626' },
       ],
-      action: 'Review and decide how to route these: add a TL/TM/RH for ' + entry.rmNames.join(', ') + ' in RM_Hierarchy, or handle manually. No automated email was sent directly to ' + chName + ' for this.',
+      action: actionParts.join(' '),
       // "only say lead ID" — this table is deliberately just the lead IDs,
       // nothing else; RM/region/CH context is already in the heading and
       // subheading above it, not repeated per row.
@@ -198,10 +227,10 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
       footerNote: 'This is an internal ops alert, not a message sent to ' + chName + '.',
     });
     const plainBody = 'Region: ' + region + '\n' +
-      'These RM(s) have no A1, TM, or RH configured above them in RM_Hierarchy, so their chain resolves all the way up to ' + chName + ' (' + entry.chEmail + ').\n' +
+      subtitleParts.join(' ') + '\n' +
       'RM(s): ' + entry.rmNames.join(', ') + '\n' +
       'Lead ID(s): ' + (leadIds.join(', ') || '(none found)') + '\n\n' +
-      'Their overnight leads are effectively with ' + chName + ' right now — no automated email was sent directly to them for this. Review and decide how to route these: add a TL/TM/RH for the RM(s) above in RM_Hierarchy, or handle manually.';
+      actionParts.join(' ');
 
     // Wrapped in its own try/catch, same reasoning as notifyOpsAlertGs_ —
     // a failure to send THIS alert must never take down the real

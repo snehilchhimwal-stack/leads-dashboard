@@ -98,6 +98,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','RH','Rajkumar Ombase','','','','Sanjyota Bhosale'],
   ['Bangalore','A1','Chaithanya M','','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','A1','Krishna Murthy','','','','Mukesh Mishra'],
+  // Added from Book7's own export (she was never included in the
+  // original hierarchy build, despite having a full chain there:
+  // TL Chaithanya M, RH Romen Singh, CH Mukesh Mishra) — real production
+  // symptom: her overnight leads got no automated email, with an
+  // "unresolved, not in RM_Hierarchy" ops alert instead.
+  ['Bangalore','S1','Neelam Singh','Chaithanya M','','Romen Singh',''],
   ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Akash A Ugale','','','','Sanjyota Bhosale'],
@@ -179,7 +185,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Vaibhav Bhadkumbe','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Central','S1','Kishan Patel','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Joshi Dhairya','','','','Vidya Jadhav'],
-  ['Bangalore','RH','Romen Singh','','','',''],
+  // ch added — his own row was missing the Mukesh Mishra reference his
+  // own Bangalore A1 subordinates (Chaithanya M, Krishna Murthy,
+  // Mainuddin T, Rahan Khan) already carry, which meant a lead assigned
+  // directly to Romen Singh himself fell to "unresolved" instead of
+  // properly routing further up like everyone below him does.
+  ['Bangalore','RH','Romen Singh','','','','Mukesh Mishra'],
   ['Bangalore','S1','Sippal Khora','Chaithanya M','','Romen Singh',''],
   ['Harbour','S1','Aakash Dhole','Yash Sharma','','','Sanjyota Bhosale'],
   ['Western','S1','Yash Kandhare','Prathmesh S Pandey','','','Rahul Gandhi'],
@@ -278,7 +289,17 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Akash Jogdand','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Vivek Solanke','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['HNI','S1','Mohd Faizan Shaikh','','','','Abhhijjit Gandhii'],
+  // Alias — leads sheet has him as the shorter "Mohd Shaikh" (no
+  // "Faizan"); do not go with any role or position in name, do not
+  // consider — same name-variant pattern as G Kumar/Mohammed Khan
+  // earlier. Real production symptom: "unresolved, not in RM_Hierarchy"
+  // ops alert for SoBo (HNI rolls up into the SoBo main-region bucket).
+  ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
   ['Harbour','S1','Atharva Belose','Yash Sharma','','','Sanjyota Bhosale'],
+  // Alias — leads sheet has his middle initial: "Atharva P Belose". Real
+  // production symptom: "unresolved, not in RM_Hierarchy" ops alert for
+  // Harbour.
+  ['Harbour','S1','Atharva P Belose','Yash Sharma','','','Sanjyota Bhosale'],
   ['Hyderabad','S1','Nikhil Goud','Vemula Ajay','','',''],
   ['Thane','TM','Sanket Yadav','','','','Bipin More'],
   ['Pune','S1','Abhikesh Kumar','','Rahul Poudel','','Sourabh Sareen'],
@@ -678,6 +699,21 @@ function isChTierRole_(role) {
   return PRIMARY_ELIGIBLE_ROLES_.indexOf(String(role || '').trim().toLowerCase()) === -1;
 }
 
+// Narrower than isChTierRole_ above (which conservatively treats ANY
+// role outside a1/tm/rh as CH-tier, including a plain S1/S2/S3 — correct
+// for judging a resolved PRIMARY's role, but wrong for judging the
+// REPORTING RM's own role, see resolveRecipientBucketsForRms_ below) —
+// this is a real allowlist of the genuine top-of-org labels actually
+// used in RM_Hierarchy today (found by auditing every row whose own
+// tl/tm/rh/ch are ALL blank). An unrecognized role does NOT match here,
+// which is the safe direction: a genuinely new top-tier label would
+// just stay unresolved (prompting a human to check it) rather than
+// silently being treated as self-CH-alertable.
+const TOP_OF_ORG_ROLES_ = ['cluster head', 'city lead', 'commercial head'];
+function isTopOfOrgRole_(role) {
+  return TOP_OF_ORG_ROLES_.indexOf(String(role || '').trim().toLowerCase()) !== -1;
+}
+
 /**
  * For a set of RM names (whoever had overnight activity in one region),
  * groups them into one bucket PER DISTINCT primary recipient — never
@@ -774,6 +810,30 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
   rmNames.forEach(function (rmName) {
     const chain = lookupRmChain_(data.byRmNameLower, rmName);
     if (!chain || chain.excluded) { unresolved.push(rmName); return; }
+
+    // This RM IS ALREADY the top of their own chain (no TL/TM/RH/CH
+    // above them at all) AND their own role is a genuine top-of-org
+    // label — they're personally holding this lead with nobody to
+    // route it to, same underlying situation as an ordinary RM's chain
+    // resolving up to a CH below (just one level shorter), so it gets
+    // the same richer CH-level alert instead of falling all the way to
+    // a bare "unresolved, no recipient" ops ping. Real production case:
+    // Vidya Jadhav (Navi Mumbai Cluster Head), Sourabh Sareen (Pune City
+    // Lead), and Bipin More (Thane Cluster Head) each personally held an
+    // overnight lead — every one landed in `unresolved` before this,
+    // since a fully-blank chain looks identical to a genuine hierarchy
+    // gap (see isTopOfOrgRole_'s own comment on why isChTierRole_ isn't
+    // safe to reuse here).
+    if (!chain.tl && !chain.tm && !chain.rh && !chain.ch && isTopOfOrgRole_(chain.role)) {
+      const selfEmail = data.emailByManagerNameLower[String(rmName).trim().toLowerCase()];
+      if (selfEmail) {
+        chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: selfEmail });
+        return;
+      }
+      // No resolvable email even for themselves — genuinely nothing to
+      // alert with; falls through to the normal unresolved path below.
+    }
+
     const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
     const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
     if (!primaryEmail) { unresolved.push(rmName); return; }
