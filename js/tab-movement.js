@@ -333,7 +333,15 @@ function enrichSnapshotCached(rec){
 // through effectiveRegion, same as applyMovementFilters — a raw .region
 // check missed "Loan" leads entirely, since Loan is inferred from
 // project_region/group_source, not reliably present in the region column.
-function passesMovementFilters(rec){
+// opts.skipDateFilter lets a caller with its OWN independent date control
+// (e.g. Daily Cohort by Region's single-day picker) opt out of the top
+// bar's Assigned-date RANGE filter while still honoring
+// Project/Region/TL/Source/Sub-source — without it, a lead genuinely
+// assigned on the picked day could still get silently excluded just
+// because the unrelated top-bar range happens to be set to a different
+// window (see computeDailyCohortByRegion's own call site).
+function passesMovementFilters(rec, opts){
+  const skipDateFilter = !!(opts && opts.skipDateFilter);
   const projSel = filterState.project, regSel = filterState.region, tlSel = filterState.TL;
   const srcSel = filterState.source, bucketSel = filterState.bucket;
   if (projSel.size && !projSel.has(rec.project)) return false;
@@ -341,6 +349,7 @@ function passesMovementFilters(rec){
   if (tlSel.size && !tlSel.has(rec.TL)) return false;
   if (srcSel.size && !Array.from(srcSel).some(s => s.toLowerCase() === String(rec.group_source).trim().toLowerCase())) return false;
   if (bucketSel.size && !bucketSel.has(String(rec.source_bucket).trim())) return false;
+  if (skipDateFilter) return true;
   const fromVal = document.getElementById('dateFromInput').value;
   const toVal = document.getElementById('dateToInput').value;
   if (fromVal || toVal) {

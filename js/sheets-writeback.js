@@ -566,6 +566,52 @@ async function sortDailyCohortHistorySheet_(){
   }
 }
 
+// Reads Daily_Cohort_History back for one specific date, returning the
+// SAME {dateKey, totalCreated, byRegion} shape computeDailyCohortByRegion
+// produces (byRegion keyed by region name, stats as raw counts) — used by
+// renderDailyCohortByRegion (tab-tracking.js) as a fallback once the live
+// Movement_Log-based computation has nothing for a picked date, which
+// happens for any day that has aged out of Movement_Log's retention.
+// Deliberately doesn't call ensureDailyCohortHistorySheet_ — a plain read
+// shouldn't have the side effect of CREATING the tab; if it doesn't exist
+// yet, sheetsApiValuesGet's own 400 is caught below and this just returns
+// null like "no archived data for that date" (both mean the same thing to
+// the caller). Rows here are always the TRUE unfiltered picture
+// (upsertDailyCohortHistoryRows is only ever fed ignoreFilters:true
+// results), so there's no Project/Region/TL/Source filtering to apply here
+// — the caller is responsible for telling the user that.
+async function fetchDailyCohortHistoryForDate(dateKey){
+  if (!_currentSheetId || !dateKey) return null;
+  let rows;
+  try {
+    rows = await sheetsApiValuesGet(_currentSheetId, `${DAILY_COHORT_HISTORY_TAB_NAME}!A2:L`);
+  } catch (e) {
+    return null; // tab doesn't exist yet, no permission, network error — all read as "nothing archived"
+  }
+
+  const byRegion = new Map();
+  let totalCreated = 0;
+  (rows || []).forEach(r => {
+    if (!r || String(r[1] || '').trim() !== dateKey) return;
+    const region = String(r[2] || '').trim();
+    if (!region) return;
+    const stats = {
+      region,
+      created: Number(r[3]) || 0,
+      sameDayResolved: Number(r[4]) || 0,
+      sameDayOpp: Number(r[5]) || 0,
+      windowComplete: Number(r[6]) || 0,
+      resolved48h: Number(r[7]) || 0,
+      opp48h: Number(r[8]) || 0,
+      closed48h: Number(r[9]) || 0,
+    };
+    byRegion.set(region, stats);
+    totalCreated += stats.created;
+  });
+  if (!byRegion.size) return null;
+  return { dateKey, totalCreated, byRegion };
+}
+
 // Wired to #backfillDailyCohortHistoryBtn on the Tracking tab (see
 // tab-tracking.js) — still directly console-callable too (`await
 // backfillDailyCohortHistoryFromMovementLog()`). Reconstructs one row per

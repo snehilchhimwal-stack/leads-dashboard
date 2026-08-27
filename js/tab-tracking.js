@@ -881,7 +881,14 @@ function computeDailyCohortByRegion(dateKey, opts){
   let totalCreated = 0;
   byLead.forEach((history, key) => {
     if (!history.length) return;
-    if (!ignoreFilters && !passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — region here narrows WHICH regions appear at all, same as every other Movement view
+    // skipDateFilter: this section has its OWN independent single-day
+    // picker (dateKey/dayStart/dayEnd above) — the top bar's Assigned-date
+    // RANGE filter must not ALSO gate it, or picking a day outside
+    // whatever range happens to be set there silently zeroes out a day
+    // that genuinely has leads. Project/Region/TL/Source/Sub-source still
+    // apply — region here narrows WHICH regions appear at all, same as
+    // every other Movement view.
+    if (!ignoreFilters && !passesMovementFilters(history[0], { skipDateFilter: true })) return;
     const created = parseDate(history[0].lead_assigned_at);
     if (!created) return;
     if (created < dayStart || created > dayEnd) return; // not created on this day
@@ -1005,11 +1012,21 @@ async function persistDailyCohortHistory(){
 }
 
 // Renders computeDailyCohortByRegion as a region-wise table — one row per
-// main region (every known region, even a 0-lead one, for a stable table
-// shape) plus a combined total row. Reads its own single-day date picker
-// (trackingDailyDateInput), independent of both the From/To snapshot picker
-// above and the global Assigned-date range filter in the top bar.
-function renderDailyCohortByRegion(){
+// region present that day (in the SAME fixed A-Z order every time — see
+// the regionList sort below, never re-sorted by count) plus a combined
+// total row. Reads its own single-day date picker (trackingDailyDateInput),
+// independent of both the From/To snapshot picker above and the global
+// Assigned-date range filter in the top bar (computeDailyCohortByRegion's
+// own passesMovementFilters call passes skipDateFilter:true to make that
+// actually true, not just documented).
+//
+// Async: Movement_Log only retains a matter of days, so a picked date
+// older than that comes back with nothing live even on a day that
+// genuinely had leads. Daily_Cohort_History (sheets-writeback.js) is
+// exactly the archive meant to survive past that window — once the live
+// computation has nothing, this falls back to fetching that sheet tab
+// before concluding there's really no data for the date.
+async function renderDailyCohortByRegion(){
   const countEl = document.getElementById('trackingDailyCount');
   const noticeEl = document.getElementById('trackingDailyNotice');
   const table = document.getElementById('trackingDailyTable');
@@ -1026,11 +1043,34 @@ function renderDailyCohortByRegion(){
 
   const dateInput = document.getElementById('trackingDailyDateInput');
   const dateKey = dateInput ? dateInput.value : '';
-  const result = computeDailyCohortByRegion(dateKey);
-  if (!result) { clear('Pick a date above to see that day\'s leads broken down by region.'); return; }
-  if (!result.totalCreated) { clear(`No leads (for the current Project/Region/TL/Source filters) were assigned on ${esc(dateKey)}.`); return; }
-  if (noticeEl) noticeEl.style.display = 'none';
-  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} assigned ${dateKey}`;
+  if (!dateKey) { clear('Pick a date above to see that day\'s leads broken down by region.'); return; }
+
+  let result = computeDailyCohortByRegion(dateKey);
+  let fromHistory = false;
+  // Daily_Cohort_History rows are always the TRUE unfiltered picture
+  // (persistDailyCohortHistory always writes with ignoreFilters:true —
+  // see its own comment), so this fallback can't honor the current
+  // Project/Region/TL/Source filters the way the live path does. Flagged
+  // in the notice below so a filter that looks like it's "not working"
+  // for an archived date isn't mistaken for a bug.
+  if (!result || !result.totalCreated) {
+    try {
+      const archived = await fetchDailyCohortHistoryForDate(dateKey);
+      if (archived && archived.totalCreated) { result = archived; fromHistory = true; }
+    } catch (e) { /* no archived data either — falls through to the empty-state message below */ }
+  }
+
+  if (!result || !result.totalCreated) { clear(`No leads (for the current Project/Region/TL/Source filters) were assigned on ${esc(dateKey)}.`); return; }
+
+  if (noticeEl) {
+    if (fromHistory) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = `Movement_Log no longer covers ${esc(dateKey)} — showing the final numbers already archived in <span class="mono">Daily_Cohort_History</span> instead. Those are always the unfiltered picture across every region, so the Project/Region/TL/Source filters above don't apply to this row set.`;
+    } else {
+      noticeEl.style.display = 'none';
+    }
+  }
+  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} assigned ${dateKey}${fromHistory ? ' (archived)' : ''}`;
 
   thead.innerHTML = `<tr>
     <th>Region</th>
@@ -1052,10 +1092,15 @@ function renderDailyCohortByRegion(){
     <td class="num dim">${stats.resolved48h} of ${stats.created}${stats.windowComplete < stats.created ? ' (partial)' : ''}</td>
   </tr>`;
 
+  // regionList is already alphabetical (sorted above) and .filter() keeps
+  // items in that same order, so no re-sort here — the old
+  // `.sort((a,b) => b.created - a.created)` sorted by that DAY's volume,
+  // which is exactly why every day's row order used to shuffle: whichever
+  // region happened to have the most leads that specific day jumped to the
+  // top. Fixed A-Z order now, every day, regardless of volume.
   const rows = regionList
     .map(r => result.byRegion.get(r) || { region: r, created: 0, sameDayResolved: 0, sameDayOpp: 0, windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0 })
     .filter(stats => stats.created > 0)
-    .sort((a, b) => b.created - a.created)
     .map(stats => rowHtml(stats));
 
   const totals = { region: 'All Regions', created: 0, sameDayResolved: 0, sameDayOpp: 0, windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0 };
