@@ -2660,10 +2660,19 @@ function unmatchedFollowUp(comment, loggedBy, ts){
 //      owner-attributed structured entry. If l.RM is blank
 //      ("Unassigned"), there's no owner to filter by, so every entry is
 //      kept rather than filtering down to nothing.
+// Entries kept by the owner filter above: logged by this row's own RM,
+// PLUS any entry with no parseable "Name:"/timestamp prefix at all
+// (unattributed — there's no name on it to prove it belongs to someone
+// ELSE, so it isn't discarded just for lacking structure). An entry
+// logged under a matched, DIFFERENT name is still excluded. Mirrors
+// OvernightEmailer.gs's latestOutcomeGs_ — keep in sync.
 function latestFamilyOutcome(l){
   const ownerName = String(l.RM || '').trim().toLowerCase();
   const allEntries = parseActionLog(combinedCommentsText(l));
-  const entries = ownerName ? allEntries.filter(e => String(e.loggedBy || '').trim().toLowerCase() === ownerName) : allEntries;
+  const entries = ownerName ? allEntries.filter(e => {
+    const logger = String(e.loggedBy || '').trim().toLowerCase();
+    return !logger || logger === ownerName;
+  }) : allEntries;
   if (entries.length) {
     const withText = entries.filter(e => e.comment);
     const candidates = withText.length ? withText : entries;

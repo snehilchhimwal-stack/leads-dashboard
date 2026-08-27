@@ -724,10 +724,14 @@ function noCommentFollowUpGs_(row, colIndex, now, baselineEntry) {
 // the current owner's own read on the customer, so it shouldn't drive
 // what the owner is told to do next.
 // Splits combinedCommentsTextGs_'s "Name: Comment - timestamp | ..."
-// blob into entries, keeps only the ones logged by this row's own RM
-// (all of them, if RM is blank — no owner to filter by), and returns
-// whichever remaining entry has the most recent real timestamp AND
-// actual text (falling back to considering blank owner-logged entries
+// blob into entries, keeps the ones logged by this row's own RM PLUS any
+// entry with no parseable "Name:"/timestamp prefix at all (unattributed —
+// there's no name on it to prove it belongs to someone ELSE, so it isn't
+// discarded just for lacking structure; a comment logged by anyone else
+// under a matched, DIFFERENT name is still excluded) — (all entries, if RM
+// is blank — no owner to filter by), and returns whichever remaining entry
+// has the most recent real timestamp AND actual text (falling back to
+// considering blank owner-logged entries
 // only once NOT ONE has any text; falling back to the last entry parsed
 // if none carry a timestamp) as {outcome, comment, loggedBy, ts}. Falls
 // back to this row's own last_comment field only once there's not a
@@ -746,7 +750,10 @@ function latestOutcomeGs_(row, colIndex) {
       allEntries.push({ loggedBy: loggedBy, comment: comment, ts: ts, outcome: inferOutcomeGs_(comment) });
     });
   }
-  const entries = ownerName ? allEntries.filter(function (e) { return String(e.loggedBy || '').trim().toLowerCase() === ownerName; }) : allEntries;
+  const entries = ownerName ? allEntries.filter(function (e) {
+    const logger = String(e.loggedBy || '').trim().toLowerCase();
+    return !logger || logger === ownerName;
+  }) : allEntries;
   if (entries.length) {
     // Prefer the most recent entry that actually SAYS something — a
     // blank entry (a timestamp logged with no comment) is skipped when
