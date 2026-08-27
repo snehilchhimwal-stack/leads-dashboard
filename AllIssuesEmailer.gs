@@ -107,6 +107,13 @@ function sendAllIssuesEmails() {
   const { colIndex, dataRows } = readLeadsTab_(ss); // OvernightEmailer.gs
   const recipients = loadRegionRecipients_(ss); // OvernightEmailer.gs — legacy fallback, same as overnight
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+  // Real per-lead baseline for the "no comment logged" Suggested Follow-up
+  // tier (noCommentFollowUpGs_) — WITHOUT this, every no-comment lead gets
+  // the same generic "connect and log the outcome" line regardless of
+  // whether the RM has actually been dialing (this was missing from the
+  // first version of this script — sendOvernightMorningEmails always
+  // computes this and passes the real per-lead entry; this now does too).
+  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
 
   // Flat candidate list first, deduped by customer identity, THEN grouped
   // by region — same reasoning as sendOvernightMorningEmails: a customer
@@ -140,6 +147,7 @@ function sendAllIssuesEmails() {
     const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
     const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
     const stageRank = FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || '');
+    const baselineEntry = lastSnapshotMap[clientId || ('l:' + leadId)];
 
     candidateLeads.push({
       identityKey: clientId || ('l:' + leadId),
@@ -147,7 +155,7 @@ function sendAllIssuesEmails() {
       region: main, lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),
       issueLabel: issue.label,
-      followup: overnightFollowupHintGs_(row, colIndex, now, null),
+      followup: overnightFollowupHintGs_(row, colIndex, now, baselineEntry),
     });
   });
 
@@ -383,17 +391,34 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     }, 'send all-issues email (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('All-issues email failed for ' + region + bucketNote + ': ' + e);
+    // Same "operation not allowed" detection sendOneOvernightEmail_ uses —
+    // createDraft(...).send() is two steps chained together, and a real
+    // production case showed the DRAFT succeeds while the immediately-
+    // following .send() throws this specific error (a Workspace-level send
+    // restriction, unrelated to either script's own logic). When that
+    // happens the draft is left sitting in Drafts, unsent, and a manual
+    // Send from the Gmail UI works fine since the block is on script-driven
+    // sends specifically — called out explicitly so the alert is
+    // immediately actionable instead of just reporting failure.
+    const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
+    const failureReason = isSendBlocked
+      ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send'
+      : 'Send error: ' + e;
     try {
       notifyOpsAlertGs_('All-issues email FAILED - ' + region + bucketNote, [
-        'Failed to send after retries for ' + region + bucketNote + '.',
-        'To: ' + rec.to + (rec.cc ? ' | Cc: ' + rec.cc : ''),
-        'Error: ' + e,
-        'Check Drafts in the sending Gmail account — createDraft succeeds independently of send, so a draft may exist even though the send itself failed.',
+        'Region: ' + region + bucketNote,
+        'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
+        'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
+        '',
+        'These leads got no automated email this run — this script only covers the trailing 48h window, so tomorrow\'s run will re-check them only if they\'re still inside that window then.',
+        isSendBlocked
+          ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
+          : 'Error: ' + e,
       ]);
     } catch (alertErr) {
       Logger.log('notifyOpsAlertGs_ itself failed: ' + alertErr);
     }
-    return { reason: 'Send failed: ' + e };
+    return { reason: failureReason };
   }
 
   try {
