@@ -678,6 +678,20 @@ function loadRmHierarchyAndEmails_(ss) {
 // regardless of region or RM — not derived from the hierarchy data at all,
 // just a fixed business requirement layered on top of it.
 const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
+// Name -> email for that same senior leadership, keyed lowercase — needed
+// separately from ALWAYS_CC_EMAILS_ (which only has the emails) because
+// resolveRecipientBucketsForRms_ below needs to recognize one of THEM
+// personally holding a lead by NAME. Deliberately NOT looked up via
+// Manager_Directory: that sheet only ever records a name that appears AS
+// someone else's tl/tm/rh/ch reference (see
+// ensureManagerDirectorySheetInternal_'s own `record()` calls) — since
+// nobody's ch/rh/tm/tl field ever names the CEO (they're above even the
+// CH tier), Ashish Kukreja can never get an entry there no matter how
+// the sheet is rebuilt. Kept in sync with ALWAYS_CC_EMAILS_.
+const LEADERSHIP_NAME_TO_EMAIL_ = {
+  'ashish kukreja': 'ashish.kukreja@homesfy.in',
+  'saurabh mishra': 'saurabh.mishra@homesfy.in',
+};
 
 // Role labels that are KNOWN to legitimately become a bucket-owner
 // primary (their own row's tl/tm/rh/ch being blank just means "nothing
@@ -809,7 +823,25 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
 
   rmNames.forEach(function (rmName) {
     const chain = lookupRmChain_(data.byRmNameLower, rmName);
-    if (!chain || chain.excluded) { unresolved.push(rmName); return; }
+    if (!chain) {
+      // Recognized senior leadership (LEADERSHIP_NAME_TO_EMAIL_)
+      // personally holding a lead, but with NO row in RM_Hierarchy at
+      // all — not a hierarchy gap to fix, they just aren't a normal
+      // RM/CH row (e.g. the CEO). Same "nobody above them" situation as
+      // the blank-chain CH case just below, reached from a different
+      // starting point. Real production case: Ashish Kukreja (confirmed
+      // CEO via Book7's own "Ashish Kukreja CEO" alias) personally held
+      // an overnight lead. Checked via LEADERSHIP_NAME_TO_EMAIL_, not
+      // Manager_Directory — see that constant's own comment for why a
+      // Manager_Directory lookup can never work for the CEO specifically.
+      const leadershipEmail = LEADERSHIP_NAME_TO_EMAIL_[String(rmName).trim().toLowerCase()];
+      if (leadershipEmail) {
+        chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: leadershipEmail });
+        return;
+      }
+      unresolved.push(rmName); return;
+    }
+    if (chain.excluded) { unresolved.push(rmName); return; }
 
     // This RM IS ALREADY the top of their own chain (no TL/TM/RH/CH
     // above them at all) AND their own role is a genuine top-of-org

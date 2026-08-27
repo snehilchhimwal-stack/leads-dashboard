@@ -30,11 +30,12 @@
  * sheets) resolved into one bucket per distinct primary — a manager with no
  * flagged RM under them that day gets nothing. If an RM's own chain
  * resolves ALL THE WAY to a real CH (Cluster/Commercial Head/City Lead —
- * meaning they genuinely have no A1, TM, or RH configured above them), that
- * RM is NOT bucketed into a normal email addressed to the CH — instead
- * OPS_ALERT_EMAIL_ gets a styled alert (to OPS_ALERT_EMAIL_ only, no Cc)
- * naming the CH and the affected RM(s)/lead IDs, so a human decides how to
- * route them rather than the
+ * meaning they genuinely have no A1, TM, or RH configured above them), OR
+ * the RM themselves already IS one (personally holding a lead), that RM's
+ * leads are NOT bucketed into a normal email addressed to the CH — instead
+ * OPS_ALERT_EMAIL_ + CH_LEVEL_EMAIL_ get the SAME full report every normal
+ * recipient gets, naming who actually holds each lead, so a human decides
+ * how to route them rather than the
  * CH silently receiving the raw report (see notifyChLevelLeadsGs_). The
  * old flat "Region_Recipients" sheet tab (created automatically, pre-filled
  * with all 11 region names, To/Cc left blank) still exists as a FALLBACK: a
@@ -117,6 +118,14 @@ const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 // cases trigger this.
 const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 
+// Second recipient specifically for CH-level overnight reports (see
+// notifyChLevelLeadsGs_) — leads held directly by the CEO or a Cluster
+// Head/City Lead, with nobody below them to route through automatically,
+// go to OPS_ALERT_EMAIL_ AND this address. Deliberately separate from
+// ALWAYS_CC_EMAILS_ (RmHierarchy.gs) — that Cc applies to every normal
+// per-RM email; this is scoped to CH-level reports only.
+const CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
+
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real morning/follow-up run it's reporting on. Kept
@@ -135,47 +144,41 @@ function notifyOpsAlertGs_(subject, bodyLines) {
 
 // Fires whenever resolveRecipientBucketsForRms_ finds an RM whose chain
 // resolves all the way up to a real CH (Cluster/Commercial Head/City
-// Lead) — see that function's own docblock for the real production bug
-// this replaces (a CH silently receiving the raw overnight-leads report
-// addressed directly to them). Instead: a styled alert to OPS_ALERT_EMAIL_
-// only (no Cc — per explicit request, unlike every other alert this file
-// sends, which does Cc ALWAYS_CC_EMAILS_), explaining that
-// these specific RMs' leads currently have no resolvable A1/TM/RH and are
-// sitting with this CH — a human decision (add a TL/TM/RH for them in
-// RM_Hierarchy, or handle manually), not something this script should
-// silently paper over by emailing the CH directly. Grouped by CH so one
-// region with several such gaps sends one alert per CH, not one per RM.
-// Sent directly via GmailApp.sendEmail rather than through
-// notifyOpsAlertGs_ — this one needs its own subject format (matching the
-// real overnight emails' "(name) region Google Overnight Leads - date"
-// pattern, not notifyOpsAlertGs_'s fixed "[Overnight Emailer] " prefix)
-// and its own styled HTML body (renderOvernightReportEmailHTML_, the same
-// shell every real overnight email uses), so it reads as part of the same
-// system at a glance instead of a plain-text ops ping. notifyOpsAlertGs_
-// itself is untouched — the other two alerts it sends (no-recipient,
-// send-failed) stay plain-text.
-// rmToLeadIds (RM name -> array of lead_id, optional) lets this name the
-// actual leads sitting with the CH, not just which RM(s) — see
-// resolveRecipientEmailsForRegion_'s own comment on opts.rmToLeadIds.
-function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
+// Lead), OR the RM themselves already IS one (personally holding a lead
+// with nobody below them, or recognized senior leadership like the CEO
+// with no RM_Hierarchy row at all) — see that function's own docblock
+// for the real production bug this replaces (a CH silently receiving
+// the raw overnight-leads report addressed directly to them). Instead:
+// sends the SAME full per-RM report every normal recipient gets
+// (renderOvernightReportEmailHTML_ — same KPI cards, same Lead ID /
+// Status / Suggested Follow-up columns, grouped by whoever ACTUALLY
+// holds each lead) to OPS_ALERT_EMAIL_ + CH_LEVEL_EMAIL_ instead of the
+// CH directly — a human decision (add a TL/TM/RH in RM_Hierarchy, or
+// handle these personally), not something this script should silently
+// paper over by emailing the CH directly. Grouped by CH so one region
+// with several such gaps sends one email per CH, not one per RM.
+// Deliberately no Cc at all — per explicit request, this goes only to
+// OPS_ALERT_EMAIL_ + CH_LEVEL_EMAIL_, not leadership (every other alert
+// this file sends still Cc's ALWAYS_CC_EMAILS_).
+// Sent via GmailApp.createDraft(...).send() wrapped in withSendRetry_ —
+// same reliability treatment as every other real per-RM send, since
+// this is now a substantive report, not a bare ops ping.
+// rmToLeads (RM name -> array of full lead objects, same shape
+// sendOneOvernightEmail_ takes) and dateLabel (the "d MMM yyyy" string
+// shared with the real per-RM emails this run) — see
+// resolveRecipientEmailsForRegion_'s own comment on both; either can be
+// omitted (empty leads, or a freshly-computed dateLabel).
+function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
   if (!chLevelRms.length) return;
   const byCh = {}; // chName -> { chEmail, rmNames: [] }
   chLevelRms.forEach(function (r) {
     if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, rmNames: [] };
     byCh[r.chName].rmNames.push(r.rmName);
   });
-  const dateLabel = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
+  const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   Object.keys(byCh).forEach(function (chName) {
     const entry = byCh[chName];
-    const leadIds = [];
-    entry.rmNames.forEach(function (rmName) {
-      ((rmToLeadIds && rmToLeadIds[rmName]) || []).forEach(function (id) { leadIds.push(id); });
-    });
-    // Deliberately no Cc at all on this alert — per explicit request, a
-    // CH-level gap goes to OPS_ALERT_EMAIL_ only, not leadership. (Every
-    // other alert this file sends still Cc's ALWAYS_CC_EMAILS_ — this is
-    // the one exception.)
-    const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + dateLabel;
+    const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
 
     // Two genuinely different situations can both land a name in
     // chLevelRms (see resolveRecipientBucketsForRms_): an ordinary RM
@@ -185,17 +188,15 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
     // configured above X — chain resolves up to X" wording for the self
     // case reads circularly ("...above Vidya Jadhav... up to Vidya
     // Jadhav"), so each gets its own explanation; a region can have
-    // both in the same run (e.g. an RM reporting to a CH AND that CH
-    // personally holding a separate lead), so both parts can appear
-    // together.
+    // both in the same run, so both parts can appear together.
     const selfRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() === chName.toLowerCase(); });
     const reportingRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() !== chName.toLowerCase(); });
-    const subtitleParts = [];
+    const noteParts = [];
     if (selfRmNames.length) {
-      subtitleParts.push(chName + ' is personally holding ' + (selfRmNames.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
+      noteParts.push(chName + ' is personally holding ' + (selfRmNames.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
     }
     if (reportingRmNames.length) {
-      subtitleParts.push('No A1, TM, or RH configured above ' + reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
+      noteParts.push('No A1, TM, or RH configured above ' + reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
     }
     const actionParts = [];
     if (selfRmNames.length) {
@@ -204,41 +205,71 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeadIds) {
     if (reportingRmNames.length) {
       actionParts.push('Add a TL/TM/RH for ' + reportingRmNames.join(', ') + ' in RM_Hierarchy, or handle manually.');
     }
-    actionParts.push('No automated email was sent directly to ' + chName + ' for this.');
 
-    const html = renderOvernightReportEmailHTML_({
-      title: 'No Manager Below CH',
-      region: region,
-      subtitle: subtitleParts.join(' '),
-      kpis: [
-        { value: entry.rmNames.length, label: entry.rmNames.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#fef3c7', fg: '#b45309' },
-        { value: leadIds.length, label: leadIds.length === 1 ? 'Lead Affected' : 'Leads Affected', bg: '#fee2e2', fg: '#dc2626' },
-      ],
-      action: actionParts.join(' '),
-      // "only say lead ID" — this table is deliberately just the lead IDs,
-      // nothing else; RM/region/CH context is already in the heading and
-      // subheading above it, not repeated per row.
-      sections: [{
-        heading: chName, subheading: 'RM(s): ' + entry.rmNames.join(', ') + (entry.chEmail ? ' · ' + entry.chEmail : ''),
-        accent: { fg: '#b45309', headerBg: '#fef3c7', bg: '#fffbeb' },
-        columns: ['Lead ID'],
-        rows: leadIds.length ? leadIds.map(function (id) { return [id]; }) : [['(none found)']],
-      }],
-      footerNote: 'This is an internal ops alert, not a message sent to ' + chName + '.',
+    // Same visual mechanism as sendOneOvernightEmail_'s TEST MODE
+    // banner — this one explains why the recipient isn't chName despite
+    // the subject naming them, since the report body below is otherwise
+    // identical to a real per-RM overnight email.
+    const noteBanner = {
+      html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
+        '<div style="font-weight:700; color:#92400e; font-size:13px;">Sent to Ops — not to ' + esc_(chName) + '</div>' +
+        '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">' + esc_(noteParts.join(' ')) + ' ' + esc_(actionParts.join(' ')) + '</div>' +
+        '</div>',
+      plain: 'NOTE: sent to Ops, not to ' + chName + ' — ' + noteParts.join(' ') + ' ' + actionParts.join(' ') + '\n\n',
+    };
+
+    // Group by whoever ACTUALLY holds each lead (the real RM — Sanket
+    // Yadav, say, not Bipin More, for a reporting-up case; the CH's own
+    // name for a self-held case) — same grouping sendOneOvernightEmail_
+    // uses, so who currently holds each lead is exactly as visible here
+    // as in every normal per-RM email.
+    const byRM = {};
+    entry.rmNames.forEach(function (rmName) {
+      const leads = (rmToLeads && rmToLeads[rmName]) || [];
+      if (leads.length) byRM[rmName] = leads;
     });
-    const plainBody = 'Region: ' + region + '\n' +
-      subtitleParts.join(' ') + '\n' +
+    const rmKeys = Object.keys(byRM).sort();
+    const allLeads = [];
+    rmKeys.forEach(function (rm) { allLeads.push.apply(allLeads, byRM[rm]); });
+    const statusTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.status; }))).length;
+
+    const html = noteBanner.html + renderOvernightReportEmailHTML_({
+      title: 'Overnight Leads',
+      region: region,
+      subtitle: 'CH-level — ' + chName,
+      kpis: [
+        { value: allLeads.length, label: allLeads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
+        { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+        { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
+      ],
+      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+      sections: rmKeys.map(function (rm) {
+        return {
+          heading: rm,
+          subheading: rm.toLowerCase() === chName.toLowerCase() ? 'Held directly by ' + chName : 'Reports up to ' + chName,
+          columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
+          rows: byRM[rm].map(function (l) { return [l.lead_id, l.status, l.followup]; }),
+        };
+      }),
+      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically.',
+    });
+    const plainBody = noteBanner.plain +
+      'Region: ' + region + '\n' +
       'RM(s): ' + entry.rmNames.join(', ') + '\n' +
-      'Lead ID(s): ' + (leadIds.join(', ') || '(none found)') + '\n\n' +
-      actionParts.join(' ');
+      allLeads.length + ' lead(s) across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
 
     // Wrapped in its own try/catch, same reasoning as notifyOpsAlertGs_ —
-    // a failure to send THIS alert must never take down the real
+    // a failure to send THIS report must never take down the real
     // morning-send loop it's reporting alongside.
     try {
-      GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, { htmlBody: html });
+      withSendRetry_(function () {
+        return GmailApp.createDraft(OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_, subject, plainBody, {
+          htmlBody: html,
+          name: 'Homesfy Lead Ops',
+        }).send();
+      }, 'send CH-level report (' + chName + ', ' + region + ')');
     } catch (e) {
-      Logger.log('notifyChLevelLeadsGs_ failed to send its alert for ' + chName + ' (' + region + '): ' + e);
+      Logger.log('notifyChLevelLeadsGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
     }
   });
 }
@@ -406,19 +437,24 @@ function ensureRegionRecipientsSheet_(ss) {
 // leave it false, so re-running them repeatedly while debugging can't
 // fire the same real alert (for the CH case) over and
 // over as an unintended side effect.
-// opts.rmToLeadIds (optional, RM name -> array of lead_id) — only used to
-// pass through to notifyChLevelLeadsGs_ so its alert can name the actual
-// lead IDs sitting with that CH, not just which RM(s). Fine to omit —
-// notifyChLevelLeadsGs_ treats a missing entry as no leads to list.
+// opts.rmToLeads (optional, RM name -> array of full lead objects, same
+// shape sendOneOvernightEmail_ takes) and opts.dateLabel (optional,
+// same "d MMM yyyy" string the real per-RM emails use in their subject)
+// — only used to pass through to notifyChLevelLeadsGs_ so it can send a
+// full per-lead report for CH-held leads, not just a bare lead-ID list.
+// Fine to omit both — notifyChLevelLeadsGs_ treats a missing rmToLeads
+// entry as no leads to list, and computes its own dateLabel if none is
+// passed.
 function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
   const fireAlerts = !!(opts && opts.fireAlerts);
-  const rmToLeadIds = (opts && opts.rmToLeadIds) || {};
+  const rmToLeads = (opts && opts.rmToLeads) || {};
+  const dateLabel = (opts && opts.dateLabel) || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
     return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
 
-  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeadIds);
+  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel);
 
   if (resolved.unresolved.length) {
     const legacy = legacyRecipients[region];
@@ -1045,16 +1081,17 @@ function sendOvernightMorningEmails() {
     }
 
     const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
-    // RM -> its lead_ids this region/run — only real use today is
-    // notifyChLevelLeadsGs_ naming which leads are sitting with the CH,
-    // not just which RM(s); see resolveRecipientEmailsForRegion_'s own
-    // comment on opts.rmToLeadIds.
-    const rmToLeadIds = {};
+    // RM -> its own full lead objects this region/run (same shape
+    // sendOneOvernightEmail_ gets) — notifyChLevelLeadsGs_ needs the
+    // real lead_id/status/followup, not just IDs, to send a full
+    // per-lead report for CH-held leads; see
+    // resolveRecipientEmailsForRegion_'s own comment on opts.rmToLeads.
+    const rmToLeads = {};
     openLeads.forEach(function (l) {
-      if (!rmToLeadIds[l.RM]) rmToLeadIds[l.RM] = [];
-      rmToLeadIds[l.RM].push(l.lead_id);
+      if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
+      rmToLeads[l.RM].push(l);
     });
-    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeadIds: rmToLeadIds });
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel });
 
     recEmails.forEach(function (rec) {
       const rmSet = new Set(rec.rmNames);
