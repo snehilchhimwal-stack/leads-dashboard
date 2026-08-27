@@ -1864,7 +1864,7 @@ function debugFollowupStatusNow() {
         // not an ordinary RM whose chain merely resolves up to one. So
         // this always resolves fine and should NOT be the reason this
         // row is unresolved.
-        Logger.log('    ' + rmName + ': resolves fine (-> ' + primaryName + ' <' + primaryEmail + '>) — should NOT be the reason this row is unresolved; re-check backfillTodaysOvernightLogRecipientsNow\'s output for this region.');
+        Logger.log('    ' + rmName + ': resolves fine (-> ' + primaryName + ' <' + primaryEmail + '>) - should NOT be the reason this row is unresolved; re-check the output of backfillTodaysOvernightLogRecipientsNow for this region.');
       });
       const legacy = loadRegionRecipients_(ss)[region];
       Logger.log('  Region_Recipients fallback for ' + region + ': ' + (legacy ? ('to="' + legacy.to + '" cc="' + legacy.cc + '"') : 'not configured (blank)'));
