@@ -477,6 +477,21 @@
   .section-scroll::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
   .section-scroll::-webkit-scrollbar-thumb:hover{ background:var(--text-faint); }
   .section-scroll.compact{ max-height:88px; border:none; padding:2px 0; margin-bottom:8px; }
+  /* Opt out of .section-scroll's vertical cap, for a table whose row count
+     is small and BOUNDED (e.g. Daily Cohort by Region: one row per
+     configured region, currently max 11, plus one totals row — never a
+     genuinely long list). At exactly the max-height boundary, a few px of
+     font-metric/zoom difference between machines was enough to trigger a
+     vertical scrollbar with almost nothing to actually scroll, and — since
+     overflow-y:auto forces overflow-x to also compute as auto rather than
+     visible (an axis can't stay "visible" once the other scrolls) — that
+     dragged in a pointless horizontal scrollbar too, on a table that was
+     otherwise already fitting its container. The whole point of a
+     side-by-side region comparison is seeing every row at once, so this
+     removes the cap entirely rather than just raising it. overflow-x:visible
+     directly (not "auto") makes the point explicit rather than relying on
+     scrollWidth staying under clientWidth by luck. */
+  .section-scroll.no-cap{ max-height:none; overflow-y:visible; overflow-x:visible; }
 
   /* ---------- kpi strip ---------- */
   .kpi-strip{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:28px; align-items:start; }
@@ -1214,7 +1229,7 @@
           <label class="date-filter">Date <input type="date" id="trackingDailyDateInput" /></label>
         </div>
         <div id="trackingDailyNotice" class="truncation-notice" style="display:none;"></div>
-        <div class="section-scroll"><table id="trackingDailyTable"><thead></thead><tbody></tbody></table></div>
+        <div class="section-scroll no-cap"><table id="trackingDailyTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
       <section id="sec-tracking">
