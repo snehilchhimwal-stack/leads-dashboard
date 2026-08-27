@@ -612,6 +612,44 @@ async function fetchDailyCohortHistoryForDate(dateKey){
   return { dateKey, totalCreated, byRegion };
 }
 
+// Bulk variant of fetchDailyCohortHistoryForDate above — reads the WHOLE
+// Daily_Cohort_History tab in one call and returns every row parsed as
+// {date, region, stats}, instead of one Sheets API round trip per date.
+// Used by computeWeekOverWeekCohort (tab-tracking.js), which may need up
+// to 14 distinct dates' archived rows — fetching those one date at a time
+// would mean re-reading the entire tab 14 times over for the same data.
+// fetchDailyCohortHistoryForDate is left as its own single-date reader
+// (already shipped for the Daily Cohort by Region fallback) rather than
+// rewriting it on top of this, so that working path stays untouched.
+async function fetchAllDailyCohortHistoryRows(){
+  if (!_currentSheetId) return [];
+  let rows;
+  try {
+    rows = await sheetsApiValuesGet(_currentSheetId, `${DAILY_COHORT_HISTORY_TAB_NAME}!A2:L`);
+  } catch (e) {
+    return []; // tab doesn't exist yet, no permission, network error — all read as "nothing archived"
+  }
+  return (rows || []).map(r => {
+    if (!r) return null;
+    const date = String(r[1] || '').trim();
+    const region = String(r[2] || '').trim();
+    if (!date || !region) return null;
+    return {
+      date, region,
+      stats: {
+        region,
+        created: Number(r[3]) || 0,
+        sameDayResolved: Number(r[4]) || 0,
+        sameDayOpp: Number(r[5]) || 0,
+        windowComplete: Number(r[6]) || 0,
+        resolved48h: Number(r[7]) || 0,
+        opp48h: Number(r[8]) || 0,
+        closed48h: Number(r[9]) || 0,
+      },
+    };
+  }).filter(Boolean);
+}
+
 // Wired to #backfillDailyCohortHistoryBtn on the Tracking tab (see
 // tab-tracking.js) — still directly console-callable too (`await
 // backfillDailyCohortHistoryFromMovementLog()`). Reconstructs one row per

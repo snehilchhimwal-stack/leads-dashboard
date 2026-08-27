@@ -606,6 +606,7 @@ function renderTrackingTab(){
   // to be selected.
   render48hCohort();
   renderDailyCohortByRegion();
+  renderWeekOverWeekCohort();
 
   if (!table || !regionSelect || !chartEl) return;
 
@@ -1111,4 +1112,234 @@ async function renderDailyCohortByRegion(){
   rows.push(rowHtml(totals, 'font-weight:600; border-top:2px solid var(--border);'));
 
   tbody.innerHTML = rows.join('');
+}
+
+/* ===================== WEEK-OVER-WEEK COHORT COMPARISON ===================== */
+// Shared bucket shape for both computeDailyCohortByRegion's live stats and
+// fetchAllDailyCohortHistoryRows' archived stats (same fields either way),
+// summed across a 7-day window.
+function emptyCohortBucket(region){
+  return { region, created: 0, sameDayResolved: 0, sameDayOpp: 0, windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0 };
+}
+function addCohortBucket(dst, src){
+  dst.created += src.created; dst.sameDayResolved += src.sameDayResolved; dst.sameDayOpp += src.sameDayOpp;
+  dst.windowComplete += src.windowComplete; dst.resolved48h += src.resolved48h; dst.opp48h += src.opp48h; dst.closed48h += src.closed48h;
+}
+
+// This week = the 7 most recent FULLY ELAPSED calendar days (yesterday
+// back through 7 days ago, IST); last week = the 7 before that. Today is
+// deliberately excluded — a half-finished day would skew a week-over-week
+// comparison, unlike the single-day picker above where "as of right now"
+// is exactly the point. Returns newest-first arrays (index 0 = yesterday).
+function weekOverWeekDateKeys(){
+  const days = [];
+  const now = _renderNow || new Date();
+  for (let i = 1; i <= 14; i++) days.push(istDateKey(new Date(now.getTime() - i * 86400000)));
+  return { thisWeek: days.slice(0, 7), lastWeek: days.slice(7, 14) };
+}
+
+// Builds the region x week matrix behind the Week-over-Week Cohort
+// Comparison section. For each of the 14 dates involved: try live
+// computeDailyCohortByRegion first (ignoreFilters:true — this section has
+// its OWN region control, see renderWeekOverWeekCohort, and no reason to
+// also inherit the top bar's Project/TL/Source/date-range filters the way
+// every OTHER Movement view does); once live has nothing for a date (aged
+// out of Movement_Log's retention), fall back to the Daily_Cohort_History
+// archive — fetched ONCE for all 14 dates via fetchAllDailyCohortHistoryRows,
+// not once per date. Returns {thisWeek, lastWeek}, each
+// {dateKeys, byRegion, daysWithData, totalDays}.
+async function computeWeekOverWeekCohort(){
+  const { thisWeek, lastWeek } = weekOverWeekDateKeys();
+  const allDates = thisWeek.concat(lastWeek);
+
+  let archiveRows = null; // lazy — only fetched if a live date comes back empty
+  async function getArchiveRows(){
+    if (archiveRows === null) archiveRows = await fetchAllDailyCohortHistoryRows();
+    return archiveRows;
+  }
+
+  const perDate = new Map(); // dateKey -> {byRegion: Map<region,stats>, ok:boolean}
+  for (const dateKey of allDates) {
+    const live = computeDailyCohortByRegion(dateKey, { ignoreFilters: true });
+    if (live && live.totalCreated) {
+      perDate.set(dateKey, { byRegion: live.byRegion, ok: true });
+      continue;
+    }
+    const archived = await getArchiveRows();
+    const byRegion = new Map();
+    let any = false;
+    archived.forEach(row => {
+      if (row.date !== dateKey) return;
+      byRegion.set(row.region, row.stats);
+      any = true;
+    });
+    perDate.set(dateKey, { byRegion, ok: any });
+  }
+
+  function aggregate(dateKeys){
+    const byRegion = new Map();
+    let daysWithData = 0;
+    dateKeys.forEach(dateKey => {
+      const entry = perDate.get(dateKey);
+      if (!entry || !entry.ok) return;
+      daysWithData++;
+      entry.byRegion.forEach((stats, region) => {
+        if (!byRegion.has(region)) byRegion.set(region, emptyCohortBucket(region));
+        addCohortBucket(byRegion.get(region), stats);
+      });
+    });
+    return { dateKeys, byRegion, daysWithData, totalDays: dateKeys.length };
+  }
+
+  return { thisWeek: aggregate(thisWeek), lastWeek: aggregate(lastWeek) };
+}
+
+// {cur, prev, delta} percentage points for one rate metric — null wherever
+// a side has no denominator (e.g. a region with zero leads last week),
+// rather than showing a nonsensical divide-by-zero result.
+function wowPctDelta(curNum, curDen, prevNum, prevDen){
+  const cur = curDen ? curNum / curDen * 100 : null;
+  const prev = prevDen ? prevNum / prevDen * 100 : null;
+  return { cur, prev, delta: (cur !== null && prev !== null) ? cur - prev : null };
+}
+
+// polarity: 1 = higher is better (up is green), -1 = higher is worse (down
+// is green) — decided by the caller per metric, never guessed from the
+// sign of delta alone (a rising 48h Close% is a WORSE trend, even though
+// the number itself went up).
+function wowDeltaBadgeHtml(delta, polarity){
+  if (delta === null) return `<span class="wow-delta flat">—</span>`;
+  if (Math.abs(delta) < 0.05) return `<span class="wow-delta flat">flat</span>`;
+  const improved = polarity > 0 ? delta > 0 : delta < 0;
+  const arrow = delta > 0 ? '▲' : '▼';
+  return `<span class="wow-delta ${improved ? 'up' : 'down'}">${arrow} ${Math.abs(delta).toFixed(1)}pp</span>`;
+}
+
+function wowPctCellHtml(curNum, curDen, prevNum, prevDen, polarity){
+  const { cur, delta } = wowPctDelta(curNum, curDen, prevNum, prevDen);
+  const curTxt = cur === null ? '—' : `${cur.toFixed(1)}%`;
+  return `<div class="wow-pct">${curTxt}</div>${wowDeltaBadgeHtml(delta, polarity)}`;
+}
+
+// Paired-bar chart (this week vs last week) for whichever single region is
+// selected in #trackingWowRegionSelect (or the All-Regions totals) — one
+// row-pair per rate metric, each with a delta badge using the SAME
+// wowDeltaBadgeHtml the table cells use, so the chart and table read as
+// one visual language.
+function renderWowChartHtml(cur, prev){
+  const metrics = [
+    { label: 'Same-Day Opp%', curNum: cur.sameDayOpp, curDen: cur.sameDayResolved, prevNum: prev.sameDayOpp, prevDen: prev.sameDayResolved, polarity: 1 },
+    { label: '48h Opp%', curNum: cur.opp48h, curDen: cur.resolved48h, prevNum: prev.opp48h, prevDen: prev.resolved48h, polarity: 1 },
+    { label: '48h Close%', curNum: cur.closed48h, curDen: cur.resolved48h, prevNum: prev.closed48h, prevDen: prev.resolved48h, polarity: -1 },
+  ];
+  return `<div class="wow-chart">` + metrics.map(m => {
+    const { cur: curPct, prev: prevPct, delta } = wowPctDelta(m.curNum, m.curDen, m.prevNum, m.prevDen);
+    const barPct = (p) => p === null ? 0 : Math.max(1.5, p);
+    const barTxt = (p) => p === null ? '—' : `${p.toFixed(1)}%`;
+    return `<div class="wow-metric">
+      <div class="wow-metric-head">
+        <span class="wow-metric-label">${esc(m.label)}</span>
+        ${wowDeltaBadgeHtml(delta, m.polarity)}
+      </div>
+      <div class="wow-bar-row">
+        <span class="wow-bar-tag">This wk</span>
+        <div class="wow-bar-track"><div class="wow-bar-fill cur" style="width:${barPct(curPct)}%"></div></div>
+        <span class="wow-bar-val">${barTxt(curPct)}</span>
+      </div>
+      <div class="wow-bar-row">
+        <span class="wow-bar-tag">Last wk</span>
+        <div class="wow-bar-track"><div class="wow-bar-fill prev" style="width:${barPct(prevPct)}%"></div></div>
+        <span class="wow-bar-val">${barTxt(prevPct)}</span>
+      </div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+// Table: one row per region present in EITHER week, fixed A-Z order (same
+// convention as Daily Cohort by Region above — never re-sorted by volume
+// or by how much a region moved), plus a combined All Regions row. The
+// chart above narrows to whatever #trackingWowRegionSelect has picked;
+// this table always shows every region so the whole picture is scannable
+// at once, per the section's own point.
+async function renderWeekOverWeekCohort(){
+  const table = document.getElementById('trackingWowTable');
+  if (!table) return;
+  const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
+  const countEl = document.getElementById('trackingWowCount');
+  const noticeEl = document.getElementById('trackingWowNotice');
+  const chartEl = document.getElementById('trackingWowChart');
+  const regionSelect = document.getElementById('trackingWowRegionSelect');
+  if (!regionSelect) return;
+
+  const clear = (message) => {
+    if (countEl) countEl.textContent = '';
+    thead.innerHTML = ''; tbody.innerHTML = '';
+    if (chartEl) chartEl.innerHTML = '';
+    if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
+  };
+
+  if (movementFetchState !== 'ok') { clear(esc(movementUnavailableReason())); return; }
+
+  // Region dropdown built from the fixed region map, preserving whatever
+  // was already selected across re-renders — same pattern as Region Issue
+  // Trend's own trackingRegionSelect above.
+  const regionList = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort();
+  const prevValue = regionSelect.value;
+  regionSelect.innerHTML = `<option value="__all__">All regions (combined)</option>` +
+    regionList.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  regionSelect.value = (prevValue && (prevValue === '__all__' || regionList.includes(prevValue))) ? prevValue : '__all__';
+  const selectedRegion = regionSelect.value;
+
+  const { thisWeek, lastWeek } = await computeWeekOverWeekCohort();
+
+  if (!thisWeek.daysWithData && !lastWeek.daysWithData) {
+    clear('No Movement_Log or Daily_Cohort_History data available yet for the last two weeks.');
+    return;
+  }
+
+  if (noticeEl) {
+    noticeEl.style.display = 'block';
+    noticeEl.innerHTML = `This week: ${esc(thisWeek.dateKeys[6])} to ${esc(thisWeek.dateKeys[0])} (${thisWeek.daysWithData} of ${thisWeek.totalDays} days have data). Last week: ${esc(lastWeek.dateKeys[6])} to ${esc(lastWeek.dateKeys[0])} (${lastWeek.daysWithData} of ${lastWeek.totalDays} days have data). Always the unfiltered picture across every Project/TL/Source — only the region picker below narrows it, and only for the chart.`;
+  }
+  if (countEl) countEl.textContent = `${regionList.length} regions`;
+
+  thead.innerHTML = `<tr>
+    <th>Region</th>
+    <th style="text-align:right">Assigned (this wk vs last wk)</th>
+    <th style="text-align:right">Same-Day Opp%</th>
+    <th style="text-align:right">48h Opp%</th>
+    <th style="text-align:right">48h Close%</th>
+  </tr>`;
+
+  const rowHtml = (region, cur, prev, rowStyle) => {
+    const assignedNote = prev.created ? `<div class="wow-sub">was ${prev.created}</div>` : (cur.created ? '<div class="wow-sub">no data last week</div>' : '');
+    return `<tr${rowStyle ? ` style="${rowStyle}"` : ''}>
+      <td>${esc(region)}</td>
+      <td class="num">${cur.created}${assignedNote}</td>
+      <td class="num">${wowPctCellHtml(cur.sameDayOpp, cur.sameDayResolved, prev.sameDayOpp, prev.sameDayResolved, 1)}</td>
+      <td class="num">${wowPctCellHtml(cur.opp48h, cur.resolved48h, prev.opp48h, prev.resolved48h, 1)}</td>
+      <td class="num">${wowPctCellHtml(cur.closed48h, cur.resolved48h, prev.closed48h, prev.resolved48h, -1)}</td>
+    </tr>`;
+  };
+
+  const rows = regionList
+    .map(r => ({
+      region: r,
+      cur: thisWeek.byRegion.get(r) || emptyCohortBucket(r),
+      prev: lastWeek.byRegion.get(r) || emptyCohortBucket(r),
+    }))
+    .filter(x => x.cur.created > 0 || x.prev.created > 0)
+    .map(x => rowHtml(x.region, x.cur, x.prev));
+
+  const curTotals = emptyCohortBucket('All Regions');
+  const prevTotals = emptyCohortBucket('All Regions');
+  thisWeek.byRegion.forEach(s => addCohortBucket(curTotals, s));
+  lastWeek.byRegion.forEach(s => addCohortBucket(prevTotals, s));
+  rows.push(rowHtml('All Regions', curTotals, prevTotals, 'font-weight:600; border-top:2px solid var(--border);'));
+
+  tbody.innerHTML = rows.join('');
+
+  const chartCur = selectedRegion === '__all__' ? curTotals : (thisWeek.byRegion.get(selectedRegion) || emptyCohortBucket(selectedRegion));
+  const chartPrev = selectedRegion === '__all__' ? prevTotals : (lastWeek.byRegion.get(selectedRegion) || emptyCohortBucket(selectedRegion));
+  if (chartEl) chartEl.innerHTML = renderWowChartHtml(chartCur, chartPrev);
 }

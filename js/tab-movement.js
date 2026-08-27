@@ -1245,4 +1245,11 @@ function initMovementUI(){
     }
     trDailyDateInput.addEventListener('change', renderDailyCohortByRegion);
   }
+
+  // Week-over-Week Cohort Comparison's own region picker — independent of
+  // every other filter on this tab (per its own design), so it only needs
+  // to re-run its own renderer. Narrows the CHART only; the table always
+  // shows every region regardless of this selection.
+  const trWowRegionSel = document.getElementById('trackingWowRegionSelect');
+  if (trWowRegionSel) trWowRegionSel.addEventListener('change', renderWeekOverWeekCohort);
 }
