@@ -274,6 +274,49 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
   });
 }
 
+// ONE consolidated report, across every region in this run, naming every
+// LEAD (not just region/RM) that got no automated overnight email at
+// all — either its RM had no resolvable recipient anywhere (not in
+// RM_Hierarchy, excluded, no manager email — and no Region_Recipients
+// fallback either) or its bucket's real send failed after retries (see
+// sendOneOvernightEmail_'s return value). Per explicit request: one row
+// per lead with the RM, the computed To/Cc chain (blank when there
+// genuinely was none to compute), and the specific reason. Sent to
+// OPS_ALERT_EMAIL_ only — this is a diagnostic audit trail for you, not
+// a report anyone else needs to see. Entries is
+// [{lead_id, RM, to, cc, reason}]. Called once, at the end of
+// sendOvernightMorningEmails, rather than per-region — one complete
+// picture of everything that didn't go out this run, instead of several
+// small alerts scattered across the run.
+function notifyLeadSendFailuresGs_(entries) {
+  if (!entries.length) return;
+  const dateLabel = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
+  const subject = 'Leads NOT sent (' + entries.length + ') - ' + dateLabel;
+  const html = renderOvernightReportEmailHTML_({
+    title: 'Leads Not Sent',
+    region: 'All regions',
+    subtitle: entries.length + ' lead(s) got no automated overnight email this run',
+    kpis: [
+      { value: entries.length, label: entries.length === 1 ? 'Lead Not Sent' : 'Leads Not Sent', bg: '#fee2e2', fg: '#dc2626' },
+    ],
+    action: 'Review each row below and either fix the underlying RM_Hierarchy/Manager_Directory gap, or follow up on these leads manually — the window is fixed to this morning\'s run, so tomorrow\'s run will NOT retry them.',
+    sections: [{
+      heading: 'Not Sent', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
+      columns: ['Lead ID', 'RM', 'To', 'Cc', 'Reason'],
+      rows: entries.map(function (e) { return [e.lead_id, e.RM, e.to || '(none)', e.cc || '(none)', e.reason]; }),
+    }],
+    footerNote: 'This is an internal ops report — not sent to any RM or manager.',
+  });
+  const plainBody = entries.map(function (e) {
+    return 'Lead ' + e.lead_id + ' (RM: ' + e.RM + ') — To: ' + (e.to || '(none)') + ', Cc: ' + (e.cc || '(none)') + ' — ' + e.reason;
+  }).join('\n');
+  try {
+    GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, { htmlBody: html });
+  } catch (e) {
+    Logger.log('notifyLeadSendFailuresGs_ failed to send its own report: ' + e);
+  }
+}
+
 // Mirrors REGION_GROUP_MAP in reports.js — keep the two in sync if either
 // changes. Only these 11 main regions get an automated email; a raw region
 // value not listed here (or a numbered/directional sub-region not covered by
@@ -445,6 +488,16 @@ function ensureRegionRecipientsSheet_(ss) {
 // Fine to omit both — notifyChLevelLeadsGs_ treats a missing rmToLeads
 // entry as no leads to list, and computes its own dateLabel if none is
 // passed.
+// Returns { results: [...] (same shape as before this comment existed —
+// callers that only ever read the array can just take .results),
+// trulyUnresolved: [{rmName, reason}] — RMs with NO resolvable recipient
+// AND no Region_Recipients fallback either, so their leads got no
+// automated email at all this run. Callers with fireAlerts on should
+// fold these into the per-lead "not sent" report (see
+// sendOvernightMorningEmails) instead of alerting here directly — this
+// function no longer sends its own "no recipient" ops alert, since that
+// was a region-level summary with no lead-level detail; the caller has
+// the actual leads to attribute each unresolved RM's reason to.
 function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
   const fireAlerts = !!(opts && opts.fireAlerts);
   const rmToLeads = (opts && opts.rmToLeads) || {};
@@ -456,6 +509,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
 
   if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel);
 
+  let trulyUnresolved = [];
   if (resolved.unresolved.length) {
     const legacy = legacyRecipients[region];
     if (legacy) {
@@ -464,19 +518,13 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       // overnight email, not something specific to RM_Hierarchy resolution.
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
       ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
-      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: resolved.unresolved, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + resolved.unresolved.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
-    } else if (fireAlerts) {
+      const unresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
+      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: unresolvedNames, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + unresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
+    } else {
       // No recipient configured anywhere for these RMs — their overnight
-      // leads get no automated email at all this run, and nothing else
-      // in this script logs that fact. Alert rather than stay silent.
-      notifyOpsAlertGs_('No recipient for ' + region + ' — RM(s) skipped', [
-        'Region: ' + region,
-        'RM(s) with no resolvable recipient (not in RM_Hierarchy, or found but no manager email, or Excluded) and no Region_Recipients fallback configured for this region:',
-        resolved.unresolved.join(', '),
-        '',
-        'Their overnight leads were NOT included in any automated email this run.',
-        'Fix: add these RM(s) to RM_Hierarchy with a resolvable manager chain and a Manager_Directory email, or fill in a Region_Recipients To for ' + region + ' as a fallback.',
-      ]);
+      // leads get no automated email at all this run. The caller folds
+      // this into the per-lead "not sent" report.
+      trulyUnresolved = resolved.unresolved;
     }
   }
 
@@ -491,12 +539,13 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   // to see what a real send would have targeted is digging through the
   // Executions log rather than just reading the email you got.
   if (TEST_MODE_OVERRIDE_EMAIL_) {
-    return results.map(function (r) {
+    const testResults = results.map(function (r) {
       return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole, originalTo: r.to, originalCc: r.cc };
     });
+    return { results: testResults, trulyUnresolved: trulyUnresolved };
   }
 
-  return results;
+  return { results: results, trulyUnresolved: trulyUnresolved };
 }
 
 function loadRegionRecipients_(ss) {
@@ -824,8 +873,13 @@ function renderOvernightReportEmailHTML_(opts) {
 // bucket's primary is never a CH (see resolveRecipientBucketsForRms_'s
 // chLevelRms — those are diverted to notifyChLevelLeadsGs_ instead), so
 // no qualifier for that tier is needed here.
+// Returns null on success, or { reason } on failure — the caller
+// (sendOvernightMorningEmails) uses that to attribute every lead in
+// this bucket to the consolidated per-lead "not sent" report (see
+// notifyLeadSendFailuresGs_) in addition to the immediate ops alert
+// this function still sends below on failure.
 function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
-  if (!leads.length) return;
+  if (!leads.length) return null;
 
   const byRM = {}; // RM -> { TL, leads: [] }
   leads.forEach(function (l) {
@@ -909,6 +963,9 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // script-driven sends specifically. Called out explicitly here so the
     // alert is immediately actionable instead of just reporting failure.
     const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
+    const failureReason = isSendBlocked
+      ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send'
+      : 'Send error: ' + e;
     notifyOpsAlertGs_('Morning email failed for ' + region + bucketNote, [
       'Region: ' + region + bucketNote,
       'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
@@ -919,7 +976,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
         ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
         : 'Error: ' + e,
     ]);
-    return;
+    return { reason: failureReason };
   }
 
   const threadId = sentMessage.getThread().getId();
@@ -931,6 +988,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       rec.to, rec.cc || '', subject,
     ]);
   }, 'log Overnight_Log row (' + region + bucketNote + ')');
+  return null;
 }
 
 /**
@@ -1072,6 +1130,11 @@ function sendOvernightMorningEmails() {
       });
   }
 
+  // Collected across every region this run, then reported ONCE at the
+  // end — see notifyLeadSendFailuresGs_'s own comment for why this is a
+  // single consolidated report rather than several small alerts.
+  const failedLeadEntries = [];
+
   Object.keys(byRegion).sort().forEach(function (region) {
     const openLeads = byRegion[region];
     if (!openLeads.length) return; // nothing still-open overnight for this region
@@ -1091,14 +1154,30 @@ function sendOvernightMorningEmails() {
       if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
       rmToLeads[l.RM].push(l);
     });
-    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel });
+    const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel });
 
-    recEmails.forEach(function (rec) {
+    // RMs with no resolvable recipient anywhere AND no Region_Recipients
+    // fallback either — their leads got no automated email at all this
+    // run. To/Cc are genuinely blank here (there was none to compute).
+    resolution.trulyUnresolved.forEach(function (u) {
+      (rmToLeads[u.rmName] || []).forEach(function (l) {
+        failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
+      });
+    });
+
+    resolution.results.forEach(function (rec) {
       const rmSet = new Set(rec.rmNames);
       const bucketLeads = openLeads.filter(function (l) { return rmSet.has(l.RM); });
-      sendOneOvernightEmail_(ss, logSheet, region, rec, bucketLeads, dateLabel, todayKey, now, win);
+      const failure = sendOneOvernightEmail_(ss, logSheet, region, rec, bucketLeads, dateLabel, todayKey, now, win);
+      if (failure) {
+        bucketLeads.forEach(function (l) {
+          failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: rec.to, cc: rec.cc || '', reason: failure.reason });
+        });
+      }
     });
   });
+
+  notifyLeadSendFailuresGs_(failedLeadEntries);
 }
 
 const LEAD_FOLLOWUPS_SHEET_ = 'Lead_Followups';
@@ -1529,7 +1608,7 @@ function backfillTodaysOvernightLogRecipientsNow() {
     // No opts passed — fireAlerts stays false, so re-running this backfill
     // (safe/idempotent by design) can't also re-fire a real CH-level or
     // "no recipient" alert every time.
-    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients);
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients).results;
     if (!recEmails.length) { skippedUnresolved++; return; }
     if (recEmails.length > 1) {
       Logger.log('Backfill for ' + region + ' row ' + (i + 2) + ' resolved to ' + recEmails.length + ' buckets instead of 1 — using the first; the RM list reconstructed from lead_ids_json may not exactly match the original bucket.');
@@ -1772,11 +1851,12 @@ function debugFollowupStatusNow() {
         if (!primaryName) { Logger.log('    ' + rmName + ': found in RM_Hierarchy, but has no TL/TM/RH/CH on record at all.'); return; }
         const primaryEmail = hierarchyData.emailByManagerNameLower[primaryName.toLowerCase()];
         if (!primaryEmail) { Logger.log('    ' + rmName + ': reports to "' + primaryName + '", but that manager has NO EMAIL in Manager_Directory yet — fill it in there to fix this.'); return; }
-        const primaryChain = hierarchyData.byRmNameLower[primaryName.toLowerCase()];
-        if (primaryChain && isChTierRole_(primaryChain.role)) {
-          Logger.log('    ' + rmName + ': resolves to ' + primaryName + ' <' + primaryEmail + '>, a CH-tier person (' + primaryChain.role + ') — this is NOT the reason this row is unresolved; it means notifyChLevelLeadsGs_ diverted this RM to its own alert instead of a normal bucket. That\'s working as intended, not a bug.');
-          return;
-        }
+        // A CH-tier primary is a NORMAL bucket recipient now (per
+        // explicit correction) — chLevelRms is reserved for someone AT
+        // leadership/CH level THEMSELVES personally holding the lead,
+        // not an ordinary RM whose chain merely resolves up to one. So
+        // this always resolves fine and should NOT be the reason this
+        // row is unresolved.
         Logger.log('    ' + rmName + ': resolves fine (-> ' + primaryName + ' <' + primaryEmail + '>) — should NOT be the reason this row is unresolved; re-check backfillTodaysOvernightLogRecipientsNow\'s output for this region.');
       });
       const legacy = loadRegionRecipients_(ss)[region];

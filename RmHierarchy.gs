@@ -350,7 +350,7 @@ const RM_HIERARCHY_RAW_ = [
   // Mayur Panjari is Loan's top (Book7 P&L = Mukesh Mishra directly,
   // nothing else above him within Loan) — same structural position as
   // Sourabh Sareen (Pune City Lead), so given the same role label for the
-  // same reason (isTopOfOrgRole_/isChTierRole_ — RmHierarchy.gs).
+  // same reason (isTopOfOrgRole_ — RmHierarchy.gs).
   ['Loan','City Lead','Mayur Panjari','','','',''],
   ['Loan','A1','Zahid Shaikh','','','Mayur Panjari',''],
   ['Loan','S1','Swapnil B Bhosale','','','Mayur Panjari',''],
@@ -727,34 +727,16 @@ const LEADERSHIP_NAME_TO_EMAIL_ = {
   'saurabh mishra': 'saurabh.mishra@homesfy.in',
 };
 
-// Role labels that are KNOWN to legitimately become a bucket-owner
-// primary (their own row's tl/tm/rh/ch being blank just means "nothing
-// configured for their team," not "top of the org"). Deliberately an
-// ALLOWLIST OF SAFE roles, not a list of "CH-like" labels — the
-// distinction matters: an earlier version of this check listed the CH
-// labels directly ('cluster head'/'commercial head'/'city lead'), which
-// meant any FUTURE or misspelled top-tier role not on that list (a new
-// "Founder"/"VP Sales" row, anything not spelled exactly one of those
-// three) would silently fall through as a normal primary and reproduce
-// the exact bug this mechanism exists to prevent (a real production
-// case: an unresolved RM's chain reaching a Cluster Head, who then got
-// the raw overnight report addressed directly to them). Inverting to an
-// allowlist of what's SAFE means an unrecognized role defaults to the
-// conservative outcome — diverted to a human alert — rather than the
-// risky one.
-const PRIMARY_ELIGIBLE_ROLES_ = ['a1', 'tm', 'rh'];
-function isChTierRole_(role) {
-  return PRIMARY_ELIGIBLE_ROLES_.indexOf(String(role || '').trim().toLowerCase()) === -1;
-}
 
-// Narrower than isChTierRole_ above (which conservatively treats ANY
-// role outside a1/tm/rh as CH-tier, including a plain S1/S2/S3 — correct
-// for judging a resolved PRIMARY's role, but wrong for judging the
-// REPORTING RM's own role, see resolveRecipientBucketsForRms_ below) —
-// this is a real allowlist of the genuine top-of-org labels actually
-// used in RM_Hierarchy today (found by auditing every row whose own
-// tl/tm/rh/ch are ALL blank). An unrecognized role does NOT match here,
-// which is the safe direction: a genuinely new top-tier label would
+// A real allowlist of the genuine top-of-org labels actually used in
+// RM_Hierarchy today (found by auditing every row whose own tl/tm/rh/ch
+// are ALL blank) — used ONLY to judge the REPORTING RM's own role (are
+// THEY personally at leadership/CH level, with nobody below them),
+// never a resolved primary's role — a resolved primary is always a
+// normal recipient regardless of tier now (see
+// resolveRecipientBucketsForRms_ below). An unrecognized role does NOT
+// match here, which is the safe direction: a genuinely new top-tier
+// label would
 // just stay unresolved (prompting a human to check it) rather than
 // silently being treated as self-CH-alertable.
 const TOP_OF_ORG_ROLES_ = ['cluster head', 'city lead', 'commercial head'];
@@ -772,22 +754,17 @@ function isTopOfOrgRole_(role) {
  * Each bucket's primary recipient is the RM's own immediate manager,
  * whichever tier that actually is: Team Lead (A1), else TM, else RH,
  * else CH — falling further up the chain only when the nearer tier
- * doesn't exist for this specific person ("19 A1s/TM/RH/CH must follow
- * fallback to their senior"). The one exception: if the chain resolves
- * ALL THE WAY to someone whose role isn't in PRIMARY_ELIGIBLE_ROLES_ (a
- * real Cluster/Commercial Head/City Lead, or any other unrecognized
- * top-tier role — checked by ROLE via an allowlist of what's SAFE to be
- * a primary, not by "their row happens to be blank," since a plain A1
- * with nothing configured above them looks identically blank), that RM
- * is diverted to `chLevelRms` instead of getting a normal bucket —
- * real production symptom this fixes: a
- * Western RM with neither tl nor tm filled (a hierarchy data gap) was
- * resolving to Rahul Gandhi, Western's Cluster Head, who then received
- * his OWN personal "Western Overnight Leads (Rahul Gandhi)" email
- * addressed directly to him. A CH should never receive the raw
- * overnight-leads report as if they were an ordinary manager; see
- * `chLevelRms` below for what happens to these instead. Business rule
- * this implements explicitly: for automated email purposes, every TM is
+ * doesn't exist for this specific person. A resolved primary landing on
+ * a genuine Cluster/Commercial Head/City Lead is a NORMAL bucket like
+ * any other now (per explicit correction) — e.g. Rahul Poudel/Ayaz
+ * Bagwan (Pune TMs) personally holding a lead routes straight to their
+ * own manager Sourabh Sareen (Pune's City Lead), the same as any other
+ * TM's lead routing to their RH would. `chLevelRms` below is reserved
+ * for a narrower, genuinely exceptional case: someone AT leadership or
+ * CH/City-Lead level THEMSELVES personally holding the lead, with
+ * nobody at all below them to route it through — see chLevelRms's own
+ * comment just below. Business rule this implements explicitly: for
+ * automated email purposes, every TM is
  * ALSO treated as an A1 (gets their own bucket) — EXCEPT Pune's two TMs
  * who already have real A1s under them (Ayaz Bagwan -> Omkar
  * Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A Pande/Nayan Pabale).
@@ -809,12 +786,13 @@ function isTopOfOrgRole_(role) {
  * email either way (never cc someone already in To).
  *
  * Returns { buckets: [{ primaryName, primaryEmail, primaryRole, cc:
- * [emails], rmNames: [...] }], unresolved: [rmNames with no chain,
- * excluded, or no resolvable primary email — callers route these through
- * the legacy Region_Recipients fallback], chLevelRms: [{ rmName, chName,
- * chEmail }] for every RM whose chain resolved all the way to a CH_TIER_
- * ROLES_ person — callers alert a human about these instead of emailing
- * the CH directly }.
+ * [emails], rmNames: [...] }], unresolved: [{rmName, reason} — no chain
+ * found, excluded, or no resolvable primary email — callers route these
+ * through the legacy Region_Recipients fallback, or report the reason if
+ * even that's blank], chLevelRms: [{ rmName, chName, chEmail }] — ONLY
+ * for an RM AT leadership or CH/City-Lead level THEMSELVES personally
+ * holding the lead, with nobody below them to route it through; callers
+ * send these to ops instead of the CH/leadership person directly }.
  */
 // The only TM-level names that still appear in Cc — see this function's
 // own docblock for why (each has real A1s under them; dropping them from
@@ -873,9 +851,9 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
         chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: leadershipEmail });
         return;
       }
-      unresolved.push(rmName); return;
+      unresolved.push({ rmName: rmName, reason: 'Not found in RM_Hierarchy (even after trying with a trailing role/position suffix stripped)' }); return;
     }
-    if (chain.excluded) { unresolved.push(rmName); return; }
+    if (chain.excluded) { unresolved.push({ rmName: rmName, reason: 'Found in RM_Hierarchy but marked Excluded' }); return; }
 
     // This RM IS ALREADY the top of their own chain (no TL/TM/RH/CH
     // above them at all) AND their own role is a genuine top-of-org
@@ -888,8 +866,8 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     // Lead), and Bipin More (Thane Cluster Head) each personally held an
     // overnight lead — every one landed in `unresolved` before this,
     // since a fully-blank chain looks identical to a genuine hierarchy
-    // gap (see isTopOfOrgRole_'s own comment on why isChTierRole_ isn't
-    // safe to reuse here).
+    // gap (see isTopOfOrgRole_'s own comment on why this is a narrow,
+    // real allowlist rather than judging by role tier broadly).
     if (!chain.tl && !chain.tm && !chain.rh && !chain.ch && isTopOfOrgRole_(chain.role)) {
       const selfEmail = data.emailByManagerNameLower[String(rmName).trim().toLowerCase()];
       if (selfEmail) {
@@ -901,8 +879,9 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     }
 
     const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
-    const primaryEmail = primaryName ? data.emailByManagerNameLower[primaryName.toLowerCase()] : '';
-    if (!primaryEmail) { unresolved.push(rmName); return; }
+    if (!primaryName) { unresolved.push({ rmName: rmName, reason: 'Found in RM_Hierarchy, but has no TL/TM/RH/CH on record at all' }); return; }
+    const primaryEmail = data.emailByManagerNameLower[primaryName.toLowerCase()];
+    if (!primaryEmail) { unresolved.push({ rmName: rmName, reason: 'Reports to "' + primaryName + '", but that manager has no email in Manager_Directory' }); return; }
 
     // Prefer the primary's OWN chain (see docblock above); fall back to
     // the reporting RM's chain only if the primary has no row of their
@@ -910,11 +889,6 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     // resolved to a real email above, but stay defensive).
     const key = primaryName.toLowerCase();
     const primaryChain = data.byRmNameLower[key] || chain;
-
-    if (isChTierRole_(primaryChain.role)) {
-      chLevelRms.push({ rmName: rmName, chName: primaryName, chEmail: primaryEmail });
-      return;
-    }
 
     if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, primaryRole: primaryChain.role, ccSet: new Set(), rmNames: [] };
     const ccCandidates = [primaryChain.rh, primaryChain.ch];
