@@ -335,6 +335,40 @@ const RM_HIERARCHY_RAW_ = [
   ['Sourcing - Pune','S3','Vidisha Kakade','','Yash Kalal','','Sourabh Sareen'],
   ['Sourcing - Pune','S3','Darshana Javeri','','Yash Kalal','','Sourabh Sareen'],
   ['Thane','S1','Pawan Motwani','','','Swapnil Gowalkar','Bipin More'],
+
+  // Whole "Loan" team added from Book7 directly — this is one of the 11
+  // configured regions (REGION_GROUP_MAP_, OvernightEmailer.gs) but had
+  // ZERO rows here before this, found via a full Book7-vs-RM_HIERARCHY_RAW_
+  // diff (315 Book7 people vs 212 rows here) run specifically to catch
+  // every gap of Neelam Singh's kind, not just the ones that happened to
+  // surface as a real "no recipient" alert yet. Every OTHER Book7 person
+  // with no row here (Marketing/Technology/Finance/HR/Customer Experience/
+  // Post Sales/Magnet/Sales Trainer/corporate Leadership) is a genuinely
+  // different business unit or corporate function — never assigned as an
+  // RM on a first-sale Google lead, so deliberately NOT added; adding them
+  // would just be noise this table was never meant to carry.
+  // Mayur Panjari is Loan's top (Book7 P&L = Mukesh Mishra directly,
+  // nothing else above him within Loan) — same structural position as
+  // Sourabh Sareen (Pune City Lead), so given the same role label for the
+  // same reason (isTopOfOrgRole_/isChTierRole_ — RmHierarchy.gs).
+  ['Loan','City Lead','Mayur Panjari','','','',''],
+  ['Loan','A1','Zahid Shaikh','','','Mayur Panjari',''],
+  ['Loan','S1','Swapnil B Bhosale','','','Mayur Panjari',''],
+  ['Loan','S1','Yogesh Choudhari','','','Mayur Panjari',''],
+  ['Loan','S1','Angad Yadav','','','Mayur Panjari',''],
+  ['Loan','S1','Akshay Kakade','','','Mayur Panjari',''],
+  ['Loan','S1','Aditya Gera','','','Mayur Panjari',''],
+  ['Loan','S1','Husen Shaikh','','','Mayur Panjari',''],
+  ['Loan','S1','Narayan Dhimar','','','Mayur Panjari',''],
+  ['Loan','S1','Krishna Nayak','','','Mayur Panjari',''],
+  ['Loan','S1','Gayatri Kukade','','','Mayur Panjari',''],
+  ['Loan','S1','Mohammad Azaz Izhar Ansari','','','Mayur Panjari',''],
+  ['Loan','S1','Sachin Kadam','Zahid Shaikh','','Mayur Panjari',''],
+  ['Loan','S1','Kanchan Hatipkar','Zahid Shaikh','','Mayur Panjari',''],
+  ['Loan','S1','Divya Dalvi','Zahid Shaikh','','Mayur Panjari',''],
+  ['Loan','S1','Priyanka Shede','Zahid Shaikh','','Mayur Panjari',''],
+  ['Loan','S1','Mohd Ali Khan','Zahid Shaikh','','Mayur Panjari',''],
+  ['Loan','S1','Siddhi Kate','Zahid Shaikh','','Mayur Panjari',''],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
