@@ -170,15 +170,22 @@ function notifyOpsAlertGs_(subject, bodyLines) {
 // omitted (empty leads, or a freshly-computed dateLabel).
 function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
   if (!chLevelRms.length) return;
-  const byCh = {}; // chName -> { chEmail, rmNames: [] }
+  const byCh = {}; // chName -> { chEmail, chRole, rmNames: [] }
   chLevelRms.forEach(function (r) {
-    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, rmNames: [] };
+    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, chRole: r.chRole, rmNames: [] };
     byCh[r.chName].rmNames.push(r.rmName);
   });
   const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   Object.keys(byCh).forEach(function (chName) {
     const entry = byCh[chName];
-    const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
+    // Real recorded role in parens (resolveRecipientBucketsForRms_ —
+    // "Cluster Head", "City Lead", "Commercial Head", or "Leadership" for
+    // someone with no RM_Hierarchy row at all) — same tierQualifier
+    // convention sendOneOvernightEmail_'s own normal-bucket subject
+    // already uses for a non-A1 primary, just applied here too; this
+    // subject previously showed no role indicator at all.
+    const roleQualifier = entry.chRole ? ' - ' + entry.chRole : '';
+    const subject = '(' + chName + roleQualifier + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
 
     // Two genuinely different situations can both land a name in
     // chLevelRms (see resolveRecipientBucketsForRms_): an ordinary RM

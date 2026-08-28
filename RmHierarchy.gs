@@ -848,7 +848,10 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
       // Manager_Directory lookup can never work for the CEO specifically.
       const leadershipEmail = LEADERSHIP_NAME_TO_EMAIL_[String(rmName).trim().toLowerCase()];
       if (leadershipEmail) {
-        chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: leadershipEmail });
+        // No RM_Hierarchy row to read a real title from (that's the whole
+        // reason this branch exists — see the comment above) — 'Leadership'
+        // is a deliberate fallback label, not a guessed title.
+        chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: leadershipEmail, chRole: 'Leadership' });
         return;
       }
       unresolved.push({ rmName: rmName, reason: 'Not found in RM_Hierarchy (even after trying with a trailing role/position suffix stripped)' }); return;
@@ -871,7 +874,14 @@ function resolveRecipientBucketsForRms_(ss, rmNames) {
     if (!chain.tl && !chain.tm && !chain.rh && !chain.ch && isTopOfOrgRole_(chain.role)) {
       const selfEmail = data.emailByManagerNameLower[String(rmName).trim().toLowerCase()];
       if (selfEmail) {
-        chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: selfEmail });
+        // Real recorded role (e.g. "Cluster Head", "City Lead", "Commercial
+        // Head") — whichever of the three isTopOfOrgRole_ matched, not a
+        // generic "CH" stand-in. Real production case: Sourabh Sareen's own
+        // RM_Hierarchy row says "City Lead", not "Cluster Head" — both are
+        // top-of-org for routing purposes, but the email should show what's
+        // actually on record for him, not a label that reads as the wrong
+        // title.
+        chLevelRms.push({ rmName: rmName, chName: rmName, chEmail: selfEmail, chRole: chain.role });
         return;
       }
       // No resolvable email even for themselves — genuinely nothing to

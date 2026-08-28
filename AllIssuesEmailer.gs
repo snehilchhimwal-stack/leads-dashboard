@@ -271,14 +271,18 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
   if (!chLevelRms.length) return;
   const byCh = {};
   chLevelRms.forEach(function (r) {
-    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, rmNames: [] };
+    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, chRole: r.chRole, rmNames: [] };
     byCh[r.chName].rmNames.push(r.rmName);
   });
   const dateRangeLabel = allIssuesDateRangeLabelGs_(win);
 
   Object.keys(byCh).forEach(function (chName) {
     const entry = byCh[chName];
-    const subject = chName + ' (CH) google Leads With Issue ' + dateRangeLabel;
+    // Real recorded role (resolveRecipientBucketsForRms_ — "Cluster Head",
+    // "City Lead", "Commercial Head", or "Leadership" for someone with no
+    // RM_Hierarchy row at all), not a generic "CH" label — matches the
+    // same "Name (real role)" shape the normal-bucket subject uses.
+    const subject = chName + ' (' + (entry.chRole || 'CH') + ') google Leads With Issue ' + dateRangeLabel;
 
     const selfRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() === chName.toLowerCase(); });
     const reportingRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() !== chName.toLowerCase(); });
