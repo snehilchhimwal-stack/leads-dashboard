@@ -20,14 +20,17 @@
  * (notifyLeadSendFailuresGs_, reused directly from OvernightEmailer.gs)
  * for anything that couldn't be routed or failed to send.
  *
- * Subject line: "<primaryRole>/<bucketLabel>/google/Leads With Issue/<date>"
- * — e.g. "A1/Omkar Ghate/google/Leads With Issue/27 Aug 2026", or
- * "TM/Ayaz Bagwan/google/Leads With Issue/27 Aug 2026" for a bucket whose
- * primary is standing in for RMs with no A1 of their own (same tier
- * variability sendOneOvernightEmail_ already documents — primaryRole is
- * never "CH" here; a CH-tier primary is always self-holding and goes
- * through notifyChLevelIssuesGs_ instead, same split as the overnight
- * script).
+ * Subject line: "<bucketLabel> (<primaryRole>) google Leads With Issue
+ * (<from> to <to>)" — e.g. "Omkar Ghate (A1) google Leads With Issue
+ * (26-Aug-2026 to 28-Aug-2026)", or "Ayaz Bagwan (TM) google Leads With
+ * Issue (26-Aug-2026 to 28-Aug-2026)" for a bucket whose primary is
+ * standing in for RMs with no A1 of their own (same tier variability
+ * sendOneOvernightEmail_ already documents — primaryRole is never "CH"
+ * here; a CH-tier primary is always self-holding and goes through
+ * notifyChLevelIssuesGs_ instead — "<chName> (CH) google Leads With Issue
+ * (<from> to <to>)" — same split as the overnight script). The date
+ * segment is always the actual 48h window this run covers
+ * (allIssuesDateRangeLabelGs_), not a single day.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Same spreadsheet/project as MovementTracker.gs, OvernightEmailer.gs,
@@ -70,6 +73,14 @@ function passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw) {
 // hours, every day, not "since the RM's desk closed yesterday").
 function allIssuesWindowGs_(asOf) {
   return { from: new Date(asOf.getTime() - ALL_ISSUES_WINDOW_HOURS_ * 3600 * 1000), to: asOf };
+}
+
+// Subject-line date segment — e.g. run on the 28th, "(26-Aug-2026 to
+// 28-Aug-2026)". Shared by both subject-building sites below (normal
+// bucket and CH-level) so the format only has to be right in one place.
+function allIssuesDateRangeLabelGs_(win) {
+  const fmt = function (d) { return Utilities.formatDate(d, 'Asia/Kolkata', 'dd-MMM-yyyy'); };
+  return '(' + fmt(win.from) + ' to ' + fmt(win.to) + ')';
 }
 
 function ensureAllIssuesLogSheet_(ss) {
@@ -220,7 +231,7 @@ function sendAllIssuesEmails() {
     // same split as the overnight script (resolveRecipientEmailsForRegion_
     // itself doesn't fire this alert when fireAlerts:false, so it's called
     // explicitly here instead).
-    notifyChLevelIssuesGs_(region, resolveRecipientBucketsForRms_(ss, rmNames).chLevelRms, rmToLeads, dateLabel);
+    notifyChLevelIssuesGs_(region, resolveRecipientBucketsForRms_(ss, rmNames).chLevelRms, rmToLeads, win);
 
     resolution.trulyUnresolved.forEach(function (u) {
       (rmToLeads[u.rmName] || []).forEach(function (l) {
@@ -256,18 +267,18 @@ function sendAllIssuesEmails() {
 // fireAlerts:false above specifically so ITS OWN overnight-flavored
 // CH alert doesn't ALSO fire; this is the one that actually sends for
 // this script).
-function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, dateLabel) {
+function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
   if (!chLevelRms.length) return;
   const byCh = {};
   chLevelRms.forEach(function (r) {
     if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, rmNames: [] };
     byCh[r.chName].rmNames.push(r.rmName);
   });
-  const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
+  const dateRangeLabel = allIssuesDateRangeLabelGs_(win);
 
   Object.keys(byCh).forEach(function (chName) {
     const entry = byCh[chName];
-    const subject = 'CH/' + chName + '/google/Leads With Issue/' + effectiveDateLabel;
+    const subject = chName + ' (CH) google Leads With Issue ' + dateRangeLabel;
 
     const selfRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() === chName.toLowerCase(); });
     const reportingRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() !== chName.toLowerCase(); });
@@ -349,7 +360,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const rmKeys = Object.keys(byRM).sort();
   const issueTypeCount = Array.from(new Set(leads.map(function (l) { return l.issueLabel; }))).length;
 
-  const subject = rec.primaryRole + '/' + rec.bucketLabel + '/google/Leads With Issue/' + dateLabel;
+  const subject = rec.bucketLabel + ' (' + rec.primaryRole + ') google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
   const bucketNote = ' (' + rec.primaryRole + '/' + rec.bucketLabel + ')';
 
   const testModeBanner = rec.originalTo ? {
