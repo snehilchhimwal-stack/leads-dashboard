@@ -4,9 +4,15 @@
  * Overdue / Behind on Today's Calls / Stuck 48h+), scoped to:
  *   - Source = google, Sub-source = Non-UTM or Search only (see
  *     passesGoogleNonUtmSearchGs_, EmailInfra.gs)
- *   - Leads ASSIGNED in the last 48 hours (a rolling window ending at
- *     whenever this runs — e.g. run on the 27th, covers leads assigned
- *     from the 25th through the 27th)
+ *   - Leads ASSIGNED in the last 3 calendar days (IST) — TODAY plus the 2
+ *     full days before it, e.g. run on the 28th, covers the 26th, 27th,
+ *     and 28th in full. NOT a rolling 48-hours-back-from-now window (see
+ *     allIssuesWindowGs_'s own comment for why that was a real bug: a
+ *     rolling window silently drops whatever was assigned before its
+ *     start CLOCK TIME on the earliest day, not the earliest CALENDAR
+ *     DAY — e.g. running at 5pm meant everything assigned before 5pm on
+ *     the earliest day was excluded, even though that day was supposed
+ *     to be fully in scope)
  *
  * Content mirrors the dashboard's own Operations tab: same 5 checks, same
  * priority order when a lead qualifies for more than one (primaryIssueGs_,
@@ -30,8 +36,9 @@
  * primaryRole is never "CH" here; a CH-tier primary is always
  * self-holding and goes through notifyChLevelIssuesGs_ instead —
  * "<chName> (CH) google Leads With Issue (<from> to <to>)" — same split
- * as the overnight script). The date segment is always the actual 48h
- * window this run covers (allIssuesDateRangeLabelGs_), not a single day.
+ * as the overnight script). The date segment is always the actual
+ * calendar-day window this run covers (allIssuesDateRangeLabelGs_), not
+ * a single day.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as every other file this project needs —
@@ -53,16 +60,33 @@
  */
 
 const ALL_ISSUES_LOG_SHEET_ = 'AllIssues_Log';
-const ALL_ISSUES_WINDOW_HOURS_ = 48;
+// Calendar-day window (IST), not a rolling number of hours — how many
+// FULL days before TODAY also get included (2 -> today + the 2 days
+// before it = 3 calendar days total). Switched from a rolling
+// hours-back-from-now window (2026-08-28) after a real reported
+// undercount: that design always missed whatever was assigned before its
+// own start CLOCK TIME on the earliest day it touched — e.g. a run at 5pm
+// meant every lead assigned that morning on the earliest day (before
+// 5pm) was silently excluded, not because it was actually meant to be
+// out of scope, just because the window's start point happened to land
+// partway through that calendar day rather than at its midnight.
+const ALL_ISSUES_WINDOW_DAYS_BACK_ = 2;
 const ALL_ISSUES_RUN_HOUR_ = 17; // IST (5pm) — one run a day, see setupAllIssuesEmailTrigger below
 
-// Rolling 48h window ending at `asOf` — e.g. run on the 27th at 5pm,
-// covers leads assigned from the 25th 5pm through the 27th 5pm.
-// Deliberately NOT the overnight emailer's fixed 5pm-to-9am window
-// (overnightWindowGs_) — this is a genuinely different scope (48 rolling
-// hours, every day, not "since the RM's desk closed yesterday").
+// TODAY (IST) plus the ALL_ISSUES_WINDOW_DAYS_BACK_ full calendar days
+// before it — e.g. run on the 28th, covers the 26th, 27th, and 28th (up
+// to whenever this actually runs) in full. Anchored to IST midnight on
+// the earliest day, not a fixed number of hours back from `asOf` — see
+// ALL_ISSUES_WINDOW_DAYS_BACK_'s own comment for exactly why that
+// distinction matters. Deliberately NOT the overnight emailer's fixed
+// 5pm-to-9am window (overnightWindowGs_) — this is a genuinely different
+// scope (full calendar days, every day, not "since the RM's desk closed
+// yesterday").
 function allIssuesWindowGs_(asOf) {
-  return { from: new Date(asOf.getTime() - ALL_ISSUES_WINDOW_HOURS_ * 3600 * 1000), to: asOf };
+  const todayKey = istDayKeyGs_(asOf);
+  const todayMidnight = new Date(todayKey + 'T00:00:00+05:30');
+  const from = new Date(todayMidnight.getTime() - ALL_ISSUES_WINDOW_DAYS_BACK_ * 24 * 3600 * 1000);
+  return { from: from, to: asOf };
 }
 
 // Subject-line date segment — e.g. run on the 28th, "(26-Aug-2026 to
@@ -318,7 +342,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
           rows: byRM[rm].map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
         };
       }),
-      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 48 hours.',
+      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).',
     });
     const plainBody = noteBanner.plain +
       'Region: ' + region + '\n' + 'RM(s): ' + entry.rmNames.join(', ') + '\n' +
@@ -381,7 +405,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
         rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
       };
     }),
-    footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 48 hours (rolling). Status/flags reflect the CURRENT live sheet as of this run.',
+    footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
   });
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
     ' across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';

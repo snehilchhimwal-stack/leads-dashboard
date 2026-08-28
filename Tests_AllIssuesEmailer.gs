@@ -1,6 +1,6 @@
 /**
  * Tests: AllIssuesEmailer.gs — the 5pm all-issues send, scoped to the
- * trailing 48h window. Run runAllIssuesEmailerTestsNow() from the
+ * last 3 calendar days (IST). Run runAllIssuesEmailerTestsNow() from the
  * function dropdown, or via runAllTests() (Tests_RunAll.gs).
  *
  * NOTE ON TIME: same as Tests_OvernightEmailer.gs — sendAllIssuesEmails
@@ -76,7 +76,16 @@ function runAllIssuesEmailerTests_() {
   TestEnv_setUp_('Tests_AllIssuesEmailer', ss);
   try {
     // ---- allIssuesWindowGs_ / allIssuesDateRangeLabelGs_ ----
-    TestAssertEqual_(win.to.getTime() - win.from.getTime(), 48 * 3600 * 1000, 'allIssuesWindowGs_: the window spans exactly 48 hours');
+    // Calendar-day anchored, not a fixed hours-back offset — asserted
+    // directly against the formula rather than a fixed span, since the
+    // actual span varies with time of day (spans MORE than 48h whenever
+    // `now` is later than midnight, by design — see
+    // ALL_ISSUES_WINDOW_DAYS_BACK_'s own comment for the real undercount
+    // bug this fixed).
+    const todayMidnightForTest = new Date(istDayKeyGs_(now) + 'T00:00:00+05:30');
+    const expectedFrom = new Date(todayMidnightForTest.getTime() - ALL_ISSUES_WINDOW_DAYS_BACK_ * 24 * 3600 * 1000);
+    TestAssertEqual_(win.from.getTime(), expectedFrom.getTime(), 'allIssuesWindowGs_: from is exactly ' + ALL_ISSUES_WINDOW_DAYS_BACK_ + ' full calendar days before today\'s IST midnight, not a fixed hours-back offset');
+    TestAssertEqual_(win.to.getTime(), now.getTime(), 'allIssuesWindowGs_: to is exactly `now`');
     const label = allIssuesDateRangeLabelGs_(win);
     TestAssert_(/^\(\d{2}-[A-Za-z]{3}-\d{4} to \d{2}-[A-Za-z]{3}-\d{4}\)$/.test(label), 'allIssuesDateRangeLabelGs_: matches the "(dd-MMM-yyyy to dd-MMM-yyyy)" format');
 
