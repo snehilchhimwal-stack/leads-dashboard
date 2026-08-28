@@ -2471,6 +2471,17 @@ const OUTCOME_RULES = [
   { outcome: 'Needs Cross-Team Routing', signals: [
       'cross call', 'cross pitch', 'need a cross', 'need to cross', 'needs a cross',
     ] },
+  // NEW outcome — "BPCL" (Budget, Possession timeline, Configuration,
+  // Location — Homesfy-internal shorthand, confirmed 2026-08-28) was left
+  // out of the initial batch review since its meaning wasn't known yet;
+  // real, recurring pattern (5+ occurrences: "not giving BPCL", "bpcl not
+  // given", "not cleared BPCL"). Every observed real instance is negative
+  // ("not sharing it"), so this requires BOTH 'bpcl' AND a nearby
+  // negation word rather than assuming every mention is negative.
+  { outcome: 'BPCL Not Shared', test: (c, w) => {
+      if (!_anySignal(w, ['bpcl'])) return false;
+      return _anySignal(w, ['not', 'nahi', 'didnt', 'doesnt', 'no']);
+    } },
   // We only sell first-sale (developer/builder to buyer) — a client
   // wanting resale or rental was never in scope, so this is a genuine,
   // valid reason to close, same standing as Booked Elsewhere, not a
@@ -2703,6 +2714,7 @@ const FOLLOWUP_SUGGESTIONS = {
   'Busy': 'Line was busy — retry within a few hours.',
   'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
   'Needs Cross-Team Routing': "RM flagged this needs a cross-call/cross-pitch handoff to another project or team — confirm that hand-off actually happened rather than letting it sit untouched.",
+  'BPCL Not Shared': "Customer hasn't shared their BPCL (Budget, Possession timeline, Configuration, Location) — keep working to pin these down; without them it's hard to pitch a relevant option.",
   'Resale / Rental (Out of Scope)': "Client is looking for resale or rental, not a new first-sale (developer/builder) property — we don't work that segment. Close with this as the reason rather than treating it as lost interest.",
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',

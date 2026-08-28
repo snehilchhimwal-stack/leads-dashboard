@@ -42,6 +42,10 @@ function runFollowupEngineTests_() {
     TestAssertEqual_(inferOutcomeGs_('He want 2bhk in sheth montana'), 'Requirement Noted (No Status)', 'inferOutcomeGs_: "want" + a BHK mention resolves to Requirement Noted');
     TestAssertEqual_(inferOutcomeGs_('1bhk in 50L'), 'Update', 'inferOutcomeGs_: a bare requirement fragment with no seeking VERB at all stays "Update" — Requirement Noted needs a seeking word, not just a property mention');
     TestAssertEqual_(inferOutcomeGs_('client is not reveling the proper requirement'), 'Update', 'inferOutcomeGs_: the word "requirement" alone (no seeking verb) does not trip Requirement Noted');
+    TestAssertEqual_(inferOutcomeGs_('Not giving BPCL'), 'BPCL Not Shared', 'inferOutcomeGs_: "not giving BPCL" resolves to the new BPCL Not Shared outcome (BPCL confirmed by the user as Budget/Possession timeline/Configuration/Location)');
+    TestAssertEqual_(inferOutcomeGs_('bpcl not given'), 'BPCL Not Shared', 'inferOutcomeGs_: "bpcl not given" resolves to BPCL Not Shared');
+    TestAssertEqual_(inferOutcomeGs_('he not cleared BPCL'), 'BPCL Not Shared', 'inferOutcomeGs_: "not cleared BPCL" resolves to BPCL Not Shared');
+    TestAssertEqual_(inferOutcomeGs_('customer confirmed BPCL yesterday'), 'Update', 'inferOutcomeGs_: "BPCL" WITHOUT a nearby negation word does not trip BPCL Not Shared');
 
     // ---- FOLLOWUP_SUGGESTIONS_GS_ completeness ----
     // Every outcome inferOutcomeGs_ can possibly return must have a
