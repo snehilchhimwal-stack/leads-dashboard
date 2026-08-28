@@ -46,6 +46,10 @@ function runFollowupEngineTests_() {
     TestAssertEqual_(inferOutcomeGs_('bpcl not given'), 'BPCL Not Shared', 'inferOutcomeGs_: "bpcl not given" resolves to BPCL Not Shared');
     TestAssertEqual_(inferOutcomeGs_('he not cleared BPCL'), 'BPCL Not Shared', 'inferOutcomeGs_: "not cleared BPCL" resolves to BPCL Not Shared');
     TestAssertEqual_(inferOutcomeGs_('customer confirmed BPCL yesterday'), 'Update', 'inferOutcomeGs_: "BPCL" WITHOUT a nearby negation word does not trip BPCL Not Shared');
+    TestAssertEqual_(inferOutcomeGs_('Already visited Springshire on 15th august and other options.'), 'Already Visited (Other Project)', 'inferOutcomeGs_: "already visited <project>" resolves to the new Already Visited outcome (deliberately without diagnosing ours vs a competitor\'s)');
+    TestAssertEqual_(inferOutcomeGs_('He has already visited Aranya, monte south, lodha park.'), 'Already Visited (Other Project)', 'inferOutcomeGs_: "has already visited" resolves to Already Visited (Other Project)');
+    TestAssertContains_(FOLLOWUP_SUGGESTIONS_GS_['Already Visited (Other Project)'], 'DIFFERENT project options', 'FOLLOWUP_SUGGESTIONS_GS_: "Already Visited" suggests sharing different options rather than diagnosing which case it is');
+    TestAssertEqual_(inferOutcomeGs_('site visit scheduled for tomorrow'), 'Visit Arranged', 'inferOutcomeGs_: "site visit" still resolves to Visit Arranged, not Already Visited — no collision from the new rule');
 
     // ---- FOLLOWUP_SUGGESTIONS_GS_ completeness ----
     // Every outcome inferOutcomeGs_ can possibly return must have a

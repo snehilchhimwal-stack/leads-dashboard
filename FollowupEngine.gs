@@ -289,6 +289,16 @@ const OUTCOME_RULES_GS_ = [
       return false;
     } },
   { outcome: 'Follow-up Missed', signals: ['followup missed', 'follow up missed'] },
+  // NEW outcome — genuinely ambiguous whether "already visited [X]" means
+  // OUR project or a COMPETITOR's from the comment text alone (originally
+  // left out of the batch review for exactly this reason). Resolved with
+  // a suggestion that's useful either way, per explicit request: sharing
+  // a few DIFFERENT project options gives the client something new to
+  // compare regardless of which case it actually is, rather than trying
+  // (and risking getting wrong) to diagnose which one it is.
+  { outcome: 'Already Visited (Other Project)', signals: [
+      'already visited', 'has already visited', 'has visited', 'visited already',
+    ] },
   // NEW outcome, deliberately LAST — only reached once nothing more
   // specific matched anywhere above. RM logged what the customer WANTS
   // (budget/BHK/location — "Looking for 2bhk in 1.5cr", "1bhk in 50L")
@@ -367,6 +377,7 @@ const FOLLOWUP_SUGGESTIONS_GS_ = {
   'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
   'DNP': 'Client asked to be called back later — schedule the follow-up call.',
   'Follow-up Missed': 'A scheduled follow-up was missed — reach out right away to catch up before it goes any staler.',
+  'Already Visited (Other Project)': "Client mentioned already visiting a project — unclear from the comment whether it's ours or a competitor's. Either way, share details on a couple of DIFFERENT project options to keep them engaged and give them something new to compare, rather than re-pushing the same one.",
   'Requirement Noted (No Status)': "RM logged the customer's stated requirement (budget/BHK/location) but no call outcome — call and pin down where this actually stands, then log a real status, not just the requirement.",
   'No Real Update': "RM logged a placeholder with no real content — there's nothing here to act on from the comment alone. Call and get an actual status update, then log what was actually said.",
 };
