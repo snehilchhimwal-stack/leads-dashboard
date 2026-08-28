@@ -21,21 +21,30 @@
  * (source='Dashboard' vs this script's 'AppsScript'); this one just means
  * that tracking never has a gap on a day nobody opens the dashboard.
  *
- * REQUIRES Core.gs and SlaEngine.gs in the SAME Apps Script project — this
- * file reuses resolveTabName_/buildColIndex_/getVal_ (Core.gs) and
- * computeSlaFlags_ (SlaEngine.gs) directly rather than duplicating them.
- * See Core.gs's own header for the full file list this project needs.
+ * Same trigger ALSO scans for open leads whose latest owner comment
+ * matches no known outcome keyword and logs those to
+ * "Unmatched_Comments_Log" for periodic human review — see
+ * UnmatchedCommentLogger.gs's own header for why it piggybacks here.
+ *
+ * REQUIRES Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs, and
+ * UnmatchedCommentLogger.gs in the SAME Apps Script project — this file
+ * reuses resolveTabName_/buildColIndex_/getVal_ (Core.gs),
+ * computeSlaFlags_ (SlaEngine.gs), withRetry_/readLeadsTab_ (EmailInfra.gs,
+ * used indirectly via scanUnmatchedCommentsGs_), and
+ * scanUnmatchedCommentsGs_ itself (UnmatchedCommentLogger.gs) directly
+ * rather than duplicating them. See Core.gs's own header for the full
+ * file list this project needs.
  *
  * ============================== SETUP (one-time) ==============================
  *   1. Open your Google Sheet → Extensions → Apps Script.
  *   2. Delete any placeholder code in Code.gs. Add every file this project
  *      needs as its own file (Core.gs, SlaEngine.gs, FollowupEngine.gs,
  *      EmailInfra.gs, MovementTracker.gs, OvernightEmailer.gs,
- *      AllIssuesEmailer.gs, RmHierarchy.gs, RmHierarchy.private.gs — see
- *      Core.gs's own header), pasting each file's contents in. File names
- *      don't matter to Apps Script, only that every file is present in one
- *      project — naming them to match just keeps the editor's file list
- *      self-explanatory.
+ *      AllIssuesEmailer.gs, RmHierarchy.gs, RmHierarchy.private.gs,
+ *      UnmatchedCommentLogger.gs — see Core.gs's own header), pasting each
+ *      file's contents in. File names don't matter to Apps Script, only
+ *      that every file is present in one project — naming them to match
+ *      just keeps the editor's file list self-explanatory.
  *   3. Project Settings (gear icon, left sidebar) → General settings →
  *      set "Time zone" to Asia/Kolkata. Triggers fire against THIS
  *      timezone setting, not the spreadsheet's.
@@ -324,6 +333,16 @@ function snapshotOpenLeads_(label) {
     writeSlaHistorySnapshot_(ss, dataRows, colIndex, now);
   } catch (e) {
     Logger.log('SLA_History write failed (Movement_Log capture continues): ' + e);
+  }
+
+  // Same dataRows/colIndex, same wrapped-so-it-can-never-block-the-real-
+  // capture treatment as the SLA_History write just above — see
+  // UnmatchedCommentLogger.gs's own header for why this lives here
+  // rather than on its own trigger.
+  try {
+    scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now);
+  } catch (e) {
+    Logger.log('Unmatched_Comments_Log scan failed (Movement_Log capture continues): ' + e);
   }
 
   const out = [];
