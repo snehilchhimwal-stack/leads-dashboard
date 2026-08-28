@@ -303,9 +303,18 @@ const FOLLOWUP_MODIFIERS_GS_ = [
         return 'They mentioned a specific time ("' + explicit[0].trim() + '") — target the callback for then, not a random slot.';
       }
       // Looser part-of-day mention with no exact hour — still worth a
-      // callback-timing nudge, just without a phrase to quote.
+      // callback-timing nudge, just without a phrase to quote. EXACT word
+      // match only, not the fuzzy _anySignalGs_ every other signal check
+      // in this file uses — found via this file's own test suite
+      // (Tests_FollowupEngine.gs): "right now" was fuzzy-matching "night"
+      // (edit distance 1, within the typo budget for a 5-letter word),
+      // producing a false "preferred time of day: night" clause on a
+      // comment that never mentioned a time at all. Ordinary short
+      // English words like these collide with real typos far more easily
+      // than the domain-specific multi-word signal phrases elsewhere in
+      // this file, so this one check stays exact.
       const words = _wordsOfGs_(c);
-      const partOfDay = ['evening', 'morning', 'afternoon', 'night'].find(function (w) { return _anySignalGs_(words, [w]); });
+      const partOfDay = ['evening', 'morning', 'afternoon', 'night'].find(function (w) { return words.indexOf(w) !== -1; });
       if (partOfDay) return 'They mentioned a preferred time of day (' + partOfDay + ') — target the callback for then, not a random slot.';
       return null;
     },

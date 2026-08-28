@@ -713,8 +713,11 @@ function loadRmHierarchyAndEmails_(ss) {
 
 // Two leadership addresses that go on every overnight/summary issue email
 // regardless of region or RM — not derived from the hierarchy data at all,
-// just a fixed business requirement layered on top of it.
-const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
+// just a fixed business requirement layered on top of it. `let`, not
+// `const` — Tests_Mocks.gs reassigns this (and restores it) for the
+// duration of a test run so tests never send a real leadership address;
+// nothing in real production code ever reassigns it.
+let ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
 // Name -> email for that same senior leadership, keyed lowercase — needed
 // separately from ALWAYS_CC_EMAILS_ (which only has the emails) because
 // resolveRecipientBucketsForRms_ below needs to recognize one of THEM
@@ -724,8 +727,9 @@ const ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.
 // ensureManagerDirectorySheetInternal_'s own `record()` calls) — since
 // nobody's ch/rh/tm/tl field ever names the CEO (they're above even the
 // CH tier), Ashish Kukreja can never get an entry there no matter how
-// the sheet is rebuilt. Kept in sync with ALWAYS_CC_EMAILS_.
-const LEADERSHIP_NAME_TO_EMAIL_ = {
+// the sheet is rebuilt. Kept in sync with ALWAYS_CC_EMAILS_. `let`, same
+// test-overridability reason as ALWAYS_CC_EMAILS_ above.
+let LEADERSHIP_NAME_TO_EMAIL_ = {
   'ashish kukreja': 'ashish.kukreja@homesfy.in',
   'saurabh mishra': 'saurabh.mishra@homesfy.in',
 };

@@ -37,8 +37,10 @@
 // send path already goes through (both OvernightEmailer.gs's own sends
 // and AllIssuesEmailer.gs's). Blank this out again before trusting the
 // daily triggers — while it's set, the real automation is effectively
-// disabled.
-const TEST_MODE_OVERRIDE_EMAIL_ = '';
+// disabled. `let`, not `const` — Tests_Mocks.gs reassigns this (and
+// restores it) for the duration of a test run so tests never need this
+// file hand-edited; nothing in real production code ever reassigns it.
+let TEST_MODE_OVERRIDE_EMAIL_ = '';
 
 const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 
@@ -46,8 +48,11 @@ const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 // all for some region/RM — no resolvable recipient, the send itself
 // failed after retries, or a chain resolved all the way to a CH. These
 // failures are otherwise invisible outside the Apps Script Executions
-// log, which nobody watches proactively.
-const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
+// log, which nobody watches proactively. `let`, not `const` — same
+// test-overridability reason as TEST_MODE_OVERRIDE_EMAIL_ above;
+// Tests_Mocks.gs reassigns this for the duration of a test run and
+// restores it afterward. Never reassigned by real production code.
+let OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 
 // Second recipient specifically for CH-level reports (OvernightEmailer.gs's
 // notifyChLevelLeadsGs_, AllIssuesEmailer.gs's notifyChLevelIssuesGs_) —
@@ -55,8 +60,9 @@ const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 // below them to route through automatically, go to OPS_ALERT_EMAIL_ AND
 // this address. Deliberately separate from ALWAYS_CC_EMAILS_
 // (RmHierarchy.gs) — that Cc applies to every normal per-RM email; this
-// is scoped to CH-level reports only.
-const CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
+// is scoped to CH-level reports only. `let`, same test-overridability
+// reason as OPS_ALERT_EMAIL_ above.
+let CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
 
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
