@@ -133,26 +133,75 @@ function _anySignalGs_(commentWords, signals) {
   return signals.some(function (s) { return _signalMatchesGs_(commentWords, s); });
 }
 
+// This array was audited against a real batch of ~400 rows pulled from
+// Unmatched_Comments_Log on 2026-08-28 — every addition/new entry below
+// (marked at its own site) traces back to a genuine, RECURRING pattern in
+// that batch, not a one-off. Two real, recurring phrases from that same
+// batch were deliberately left OUT rather than guessed at: "BPCL"
+// (appeared 5+ times — "not giving BPCL", "bpcl not given" — meaning
+// unconfirmed) and "already visited [some other project]" alone (visited
+// OUR project vs a COMPETITOR's is genuinely ambiguous from the text
+// alone, and guessing wrong here risks giving the OPPOSITE advice of
+// what's actually true) — see UnmatchedCommentLogger.gs's own review
+// workflow for how a pattern like this should get resolved.
 const OUTCOME_RULES_GS_ = [
   { outcome: 'Do Not Disturb', signals: ['do not call', 'dont call', 'not to call', 'stop calling', 'dnd'] },
   { outcome: 'Switched Off', signals: [
       'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
       'out of coverage', 'out of service', 'out of network', 'call forwarded', 'call forwarding',
       'voice mail', 'voice message', 'voicemail',
+      // 'no incoming'/'incoming not avail(able)' — a real, recurring
+      // telecom-technical complaint (line can't receive calls), same
+      // family as the other network/service signals above it.
+      'no incoming', 'incoming not avail', 'incoming not available',
     ], test: function (c, w) {
       return (_anySignalGs_(w, ['incoming']) && _anySignalGs_(w, ['barred', 'not available']))
         || w.indexOf('unavailable') !== -1 || w.indexOf('ivr') !== -1;
     } },
-  { outcome: 'Wrong Number', signals: ['wrong number', 'invalid number', 'invalid no', 'wn'] },
+  { outcome: 'Wrong Number', signals: [
+      'wrong number', 'invalid number', 'invalid no', 'wn',
+      // 'not exist'/'does not exist' — a distinct, recurring phrasing of
+      // the same underlying meaning as "invalid number" above.
+      'not exist', 'does not exist', 'number doesnt exist',
+    ] },
+  // NEW outcome — real, recurring pattern: an RM flagging the LEAD ITSELF
+  // as not genuine (fake/duplicate/accidental), not a real customer who
+  // declined. Checked early, same tier as Wrong Number, since neither is
+  // really about call OUTCOME at all — the lead isn't real to begin with.
+  { outcome: 'Junk / Duplicate Lead', signals: [
+      'fake enquiry', 'fake inquiry', 'duplicate lead', 'inquiry by mistake', 'enquiry by mistake',
+      'casual inquiry', 'casual enquiry',
+    ] },
   { outcome: 'Call Declined', signals: [
       'hung up', 'hangup', 'disconnecting', 'disconnect the call', 'disconnect call', 'declined', 'declining', 'decline',
       'cut the call', 'call cut',
+      // 'call rejected'/'rejected the call' — a very common, distinct
+      // phrasing of the same active-decline meaning; 'disconect' is an
+      // explicit typo alias (edit distance from 'disconnected' exceeds
+      // the fuzzy-match budget at that word length, so it needs a literal
+      // entry — same reasoning as 'buzy' just below).
+      'call rejected', 'rejected the call', 'disconect',
     ], test: function (c) { return /^disconnect\s*-?\s*$/.test(c); } },
   { outcome: 'Busy', signals: ['busy', 'buzy'] },
   { outcome: 'Booked Elsewhere', signals: [
       'booked elsewhere', 'booked with another', 'purchased elsewhere', 'purchased another',
       'bought elsewhere', 'bought another', 'already bought', 'already purchased',
       'finalized another', 'finalised another', 'gone with another',
+      // Broadened from requiring an explicit "elsewhere"/"another"
+      // qualifier — real comments very often just say "already booked" /
+      // "already finalized" and name the specific competing project
+      // instead (which this engine has no way to recognize as a
+      // competitor vs our own project — see this array's own top note).
+      'already booked', 'already finalized', 'already finalised',
+      'finalize the property', 'finalise the property',
+    ] },
+  // NEW outcome — real, recurring pattern: an RM flagging that this needs
+  // a hand-off to another team/project ("cross call"/"cross pitch" —
+  // Homesfy-internal shorthand). Checked at the same tier as Booked
+  // Elsewhere, since both are "this needs a different kind of handling,
+  // not another retry call" signals.
+  { outcome: 'Needs Cross-Team Routing', signals: [
+      'cross call', 'cross pitch', 'need a cross', 'need to cross', 'needs a cross',
     ] },
   { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand', 'to let'],
     test: function (c, w) {
@@ -165,6 +214,13 @@ const OUTCOME_RULES_GS_ = [
       'didnt answer', 'not picking', 'did not pick', 'didnt pick', 'pickup the call', 'pick up the call',
       'do not pickup', 'do not pick up', 'call not answered', 'call not received', 'call not receive',
       'not received call', 'not received', 'call not respond', 'call not pick', 'call not picked', 'not receiving',
+      // 'no respond'/'not respond'/'not response' — "respond"/"response"
+      // used interchangeably by RMs, but neither fuzzy-matches the other
+      // at their word lengths (edit distance 2 exceeds the budget of 1) —
+      // a real, recurring miss, confirmed 4+ times in one batch alone.
+      // 'not attending' and 'not able to connect' are distinct real
+      // phrasings of the same "couldn't reach them" meaning.
+      'no respond', 'not respond', 'not response', 'not attending', 'not able to connect',
     ] },
   { outcome: 'Ringing / RNR', signals: ['ringing'], test: function (c) { return /^ring\s*-?\s*$/.test(c); } },
   { outcome: 'Disconnected', signals: [
@@ -193,14 +249,73 @@ const OUTCOME_RULES_GS_ = [
       'not interested', 'no interest', 'no longer interested', 'not looking',
       'no requirement', 'not requirement', 'not enquired', 'dropped the plan', 'dropped the idea', 'ni',
     ] },
-  { outcome: 'Considering', signals: ['consider', 'think about', 'will think', 'will get back', 'need some time', 'need time', 'will discuss'] },
+  { outcome: 'Considering', signals: [
+      'consider', 'think about', 'will think', 'will get back', 'need some time', 'need time', 'will discuss',
+      // 'will update'/'will let you know'/'will let know'/'will check'/
+      // 'will confirm' — real, very common RM shorthand for the same
+      // "still deciding, will come back to us" meaning as 'will get
+      // back' above, just phrased differently.
+      'will update', 'will let you know', 'will let know', 'will check', 'will confirm',
+    ] },
   { outcome: 'Budget Concern', signals: ['budget', 'expensive', 'too high', 'high price', 'costly', 'cant afford', 'cannot afford', 'out of budget'] },
   { outcome: 'Interested', signals: ['interested'] },
   { outcome: 'DNP', signals: [
       'call again', 'dnp', 'call back', 'callback', 'call later', 'call after', 'call tomorrow',
       'requested callback', 'asked to call', 'cb',
-    ] },
+    ], test: function (c) {
+      // "call me <time>"/"connect <time>"/Hindi "<time> baje call karo" —
+      // the plain multi-word `signals` above only ever match CONSECUTIVE
+      // words with nothing between them, so "call me tomorrow"/"call me
+      // back" never matches "call tomorrow"/"call back" because of the
+      // inserted "me" — this was, by a wide margin, the single biggest
+      // recurring miss found in a real batch of Unmatched_Comments_Log
+      // rows (dozens of comments shaped exactly like "SHE SAID CALL ME
+      // 3.30 PM" / "asked me to connect tomorrow at 11 Am").
+      if (/\bcall\s+me\b/.test(c)) return true;
+      if (/\b(asked|told|said)\s+(me\s+)?to\s+connect\b/.test(c)) return true;
+      if (/\bconnect\s+(on|at|after|tomorrow|back|evening|later)\b/.test(c)) return true;
+      if (/\bcall\s*karo\b/.test(c)) return true; // Hindi/Hinglish "call karo" = "call [me]"
+      return false;
+    } },
   { outcome: 'Follow-up Missed', signals: ['followup missed', 'follow up missed'] },
+  // NEW outcome, deliberately LAST — only reached once nothing more
+  // specific matched anywhere above. RM logged what the customer WANTS
+  // (budget/BHK/location — "Looking for 2bhk in 1.5cr", "1bhk in 50L")
+  // but no call OUTCOME at all — every rule above describes what HAPPENED
+  // on a call; this is the one case where nothing happened, or at least
+  // nothing was said about it. This was easily the single LARGEST bucket
+  // in a real batch of Unmatched_Comments_Log rows — dozens of comments
+  // shaped exactly like this, previously all landing on the fully-generic
+  // "Update"/no-keyword-match fallback.
+  { outcome: 'Requirement Noted (No Status)', signals: ['client wants', 'customer wants'],
+    test: function (c, w) {
+      // A `signals` phrase list alone missed the MORE common real shape:
+      // "Looking 2bhk under 50 lac" (no "for"), not "Looking FOR 2bhk...".
+      // Requires BOTH a seeking word AND an actual property-shape mention
+      // (BHK count, budget unit, or property type) — same defensive
+      // pairing as the Resale/Rental rule above — so a bare "looking"
+      // elsewhere in an unrelated sentence can't misfire this; this rule
+      // is deliberately LAST anyway, so everything more specific has
+      // already had first refusal by the time it runs.
+      if (!_anySignalGs_(w, ['looking', 'want', 'wants', 'searching', 'search'])) return false;
+      // "2bhk"/"3bhk" (digit glued directly to "bhk", no space) is
+      // extremely common and can NEVER match as a fuzzy word signal — a
+      // leading digit makes the whole token "2bhk", not "bhk", and short
+      // words like "bhk" get zero typo tolerance (see _typoBudgetGs_) —
+      // checked directly against the raw comment text instead of the
+      // tokenized word list for exactly that reason.
+      if (/\d\s*bhk\b/i.test(c)) return true;
+      // Deliberately no 'rent' here — "currently on rent, wants to buy"
+      // is a real, tested case (their PRESENT situation, not what they
+      // want) that would otherwise misfire; genuine rental-seeking is
+      // already handled by the dedicated Resale/Rental rule above, which
+      // has its own currently/current exclusion for exactly this reason.
+      return _anySignalGs_(w, [
+        'cr', 'crore', 'lac', 'lacs', 'lakh', 'lakhs', 'sqft', 'carpet',
+        'plot', 'shop', 'commercial', 'office', 'flat', 'penthouse',
+        'villa', 'rowhouse', 'property',
+      ]);
+    } },
 ];
 
 function inferOutcomeGs_(comment) {
@@ -218,9 +333,11 @@ const FOLLOWUP_SUGGESTIONS_GS_ = {
   'Do Not Disturb': "Client asked not to be called — stop calling immediately, log as DND, and only re-engage via an approved channel (SMS/email) if policy allows.",
   'Switched Off': 'Phone was switched off, out of service/network, or otherwise unreachable — retry later today; try an alternate number if one is on file.',
   'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
+  'Junk / Duplicate Lead': 'RM flagged this as not a genuine lead (fake/duplicate/accidental enquiry) — verify quickly, then close with the right reason instead of continuing normal follow-up.',
   'Call Declined': "Customer saw or heard the call and actively ended/declined it — they're avoiding contact right now, so calling straight back is more likely to annoy than connect. Try a different time of day, or switch to WhatsApp/SMS first.",
   'Busy': 'Line was busy — retry within a few hours.',
   'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
+  'Needs Cross-Team Routing': "RM flagged this needs a cross-call/cross-pitch handoff to another project or team — confirm that hand-off actually happened rather than letting it sit untouched.",
   'Resale / Rental (Out of Scope)': "Client is looking for resale or rental, not a new first-sale (developer/builder) property — we don't work that segment. Close with this as the reason rather than treating it as lost interest.",
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
@@ -238,6 +355,7 @@ const FOLLOWUP_SUGGESTIONS_GS_ = {
   'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
   'DNP': 'Client asked to be called back later — schedule the follow-up call.',
   'Follow-up Missed': 'A scheduled follow-up was missed — reach out right away to catch up before it goes any staler.',
+  'Requirement Noted (No Status)': "RM logged the customer's stated requirement (budget/BHK/location) but no call outcome — call and pin down where this actually stands, then log a real status, not just the requirement.",
   'No Real Update': "RM logged a placeholder with no real content — there's nothing here to act on from the comment alone. Call and get an actual status update, then log what was actually said.",
 };
 

@@ -22,6 +22,27 @@ function runFollowupEngineTests_() {
     TestAssertEqual_(inferOutcomeGs_('looking for a place on rent'), 'Resale / Rental (Out of Scope)', 'inferOutcomeGs_: explicit rental request resolves out-of-scope');
     TestAssertEqual_(inferOutcomeGs_('currently on rent, wants to buy'), 'Update', 'inferOutcomeGs_: "currently on rent" (their present situation, not what they want) does NOT trip the rental exclusion');
 
+    // ---- New rules added 2026-08-28 from a real Unmatched_Comments_Log
+    // batch review — see OUTCOME_RULES_GS_'s own top-of-array comment. ----
+    TestAssertEqual_(inferOutcomeGs_('SHE SAID CALL ME 3.30 PM'), 'DNP', 'inferOutcomeGs_: "call me <time>" (the "me" breaks the plain "call"+time phrase match) resolves via DNP\'s own test()');
+    TestAssertEqual_(inferOutcomeGs_('asked me to connect tomorrow at 11 Am'), 'DNP', 'inferOutcomeGs_: "asked me to connect <time>" resolves to DNP');
+    TestAssertEqual_(inferOutcomeGs_('Client told to connect on evening'), 'DNP', 'inferOutcomeGs_: "told to connect <time>" resolves to DNP');
+    TestAssertEqual_(inferOutcomeGs_('Said mujhe 4 baje call karo'), 'DNP', 'inferOutcomeGs_: Hindi/Hinglish "call karo" resolves to DNP');
+    TestAssertEqual_(inferOutcomeGs_('Fake enquiry'), 'Junk / Duplicate Lead', 'inferOutcomeGs_: "fake enquiry" resolves to the new Junk / Duplicate Lead outcome');
+    TestAssertEqual_(inferOutcomeGs_('Duplicate lead of embassy'), 'Junk / Duplicate Lead', 'inferOutcomeGs_: "duplicate lead" resolves to Junk / Duplicate Lead');
+    TestAssertEqual_(inferOutcomeGs_('Already booked in kohinoor Riverdale'), 'Booked Elsewhere', 'inferOutcomeGs_: "already booked <project>" (no "elsewhere" qualifier) still resolves to Booked Elsewhere');
+    TestAssertEqual_(inferOutcomeGs_('need a cross for siddha sky today'), 'Needs Cross-Team Routing', 'inferOutcomeGs_: "need a cross" resolves to the new Needs Cross-Team Routing outcome');
+    TestAssertEqual_(inferOutcomeGs_('Does not exist number'), 'Wrong Number', 'inferOutcomeGs_: "does not exist" resolves to Wrong Number');
+    TestAssertEqual_(inferOutcomeGs_('no incoming calls'), 'Switched Off', 'inferOutcomeGs_: "no incoming calls" resolves to Switched Off');
+    TestAssertEqual_(inferOutcomeGs_('call rejected'), 'Call Declined', 'inferOutcomeGs_: "call rejected" resolves to Call Declined');
+    TestAssertEqual_(inferOutcomeGs_('tried multiple times but no respond to call and txt'), 'RNR', 'inferOutcomeGs_: "no respond" (vs "no response") still resolves to RNR');
+    TestAssertEqual_(inferOutcomeGs_('Not attending calls, even web calls'), 'RNR', 'inferOutcomeGs_: "not attending" resolves to RNR');
+    TestAssertEqual_(inferOutcomeGs_('Will update next week for visit'), 'Considering', 'inferOutcomeGs_: "will update" resolves to Considering');
+    TestAssertEqual_(inferOutcomeGs_('Looking 2 bhk under 50 lac'), 'Requirement Noted (No Status)', 'inferOutcomeGs_: bare "Looking <BHK>" (no "for") resolves to the new Requirement Noted outcome');
+    TestAssertEqual_(inferOutcomeGs_('He want 2bhk in sheth montana'), 'Requirement Noted (No Status)', 'inferOutcomeGs_: "want" + a BHK mention resolves to Requirement Noted');
+    TestAssertEqual_(inferOutcomeGs_('1bhk in 50L'), 'Update', 'inferOutcomeGs_: a bare requirement fragment with no seeking VERB at all stays "Update" — Requirement Noted needs a seeking word, not just a property mention');
+    TestAssertEqual_(inferOutcomeGs_('client is not reveling the proper requirement'), 'Update', 'inferOutcomeGs_: the word "requirement" alone (no seeking verb) does not trip Requirement Noted');
+
     // ---- FOLLOWUP_SUGGESTIONS_GS_ completeness ----
     // Every outcome inferOutcomeGs_ can possibly return must have a
     // suggestion — a missing one would silently print "undefined" in a
