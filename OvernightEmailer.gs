@@ -13,12 +13,18 @@
  * triggers are for — same reason MovementTracker.gs's 6-hourly snapshot
  * exists as a separate script rather than something the dashboard does.
  *
- * REQUIRES MovementTracker.gs in the SAME Apps Script project — this file
- * reuses its resolveTabName_/buildColIndex_/getVal_/HEADER_ALIASES_/
- * canonicalStage_/isOppOrAbove_/isOpenLead_/computeSlaFlags_/istDayKeyGs_
- * directly rather than duplicating them, so the two scripts can never
- * silently disagree about what counts as "open" or "flagged." Install both
- * files before running setupOvernightEmailer.
+ * REQUIRES every other file in this project (see Core.gs's own header for
+ * the full list) — this file reuses resolveTabName_/buildColIndex_/getVal_/
+ * canonicalStage_/isOppOrAbove_/isOpenLead_/istDayKeyGs_ (Core.gs),
+ * computeSlaFlags_/primaryIssueGs_ (SlaEngine.gs),
+ * overnightFollowupHintGs_/combinedCommentsTextGs_/overnightStatusLabelGs_
+ * (FollowupEngine.gs), and withRetry_/withSendRetry_/readLeadsTab_/
+ * resolveRecipientEmailsForRegion_/notifyOpsAlertGs_/
+ * notifyLeadSendFailuresGs_/mainRegionForGs_/renderOvernightReportEmailHTML_/
+ * passesGoogleNonUtmSearchGs_ (EmailInfra.gs) directly rather than
+ * duplicating them, so every script in this project can never silently
+ * disagree about what counts as "open," "flagged," or in scope. Install
+ * every file before running setupOvernightEmailer.
  *
  * RECIPIENTS: Apps Script has no access to the dashboard's own "Edit region
  * recipients" panel — that list lives only in your browser's localStorage,
@@ -41,12 +47,14 @@
  * with all 11 region names, To/Cc left blank) still exists as a FALLBACK: a
  * region only uses it for whichever RMs had no resolvable chain at all
  * (not in RM_Hierarchy, Excluded, or no email in Manager_Directory) — see
- * resolveRecipientEmailsForRegion_ below.
+ * resolveRecipientEmailsForRegion_ (EmailInfra.gs).
  *
  * ============================== SETUP (one-time) ==============================
- *   1. Same Apps Script project as MovementTracker.gs, RmHierarchy.gs, AND
- *      RmHierarchy.private.gs (Extensions → Apps Script — all four files
- *      must be in one project). Add each as a new file, paste the contents
+ *   1. Same Apps Script project as every other file this project needs —
+ *      Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
+ *      MovementTracker.gs, AllIssuesEmailer.gs, RmHierarchy.gs, AND
+ *      RmHierarchy.private.gs (Extensions → Apps Script — every file must
+ *      be in one project). Add each as a new file, paste the contents
  *      in. RmHierarchy.private.gs lives only on your machine (see its own
  *      header) — it's what makes Manager_Directory come pre-filled with
  *      real emails instead of every cell starting blank; the rest of this
@@ -94,53 +102,7 @@
 const OVERNIGHT_START_HOUR_ = 17; // 5 PM the day before
 const OVERNIGHT_END_HOUR_ = 9;    // 9 AM on the day of
 
-// TEMPORARY TEST OVERRIDE — leave '' for real sends. Set to a single email
-// address (e.g. 'snehil.chhimwal@homesfy.in') to redirect EVERY resolved
-// To/Cc on EVERY overnight email — real recipients, RM_Hierarchy or
-// Region_Recipients fallback alike, and even the 2 always-cc leadership
-// addresses — to just that one address, so a manual test run
-// (sendOvernightMorningEmailsNow / sendOvernightFollowupEmailsNow) can
-// never reach a real TL/RH/CH by accident. Applied in
-// resolveRecipientsForRegion_, the single choke point every send path
-// already goes through. Blank this out again before trusting the daily
-// trigger — while it's set, the real automation is effectively disabled.
-const TEST_MODE_OVERRIDE_EMAIL_ = '';
-
-const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
-
-// Where to alert when this script could NOT get an automated email out at
-// all for some region/RM — no resolvable recipient, the send itself
-// failed after retries, or a chain resolved all the way to a CH (see
-// notifyChLevelLeadsGs_ below). These failures are otherwise invisible
-// outside the Apps Script Executions log, which nobody watches
-// proactively; see notifyOpsAlertGs_'s own comment for exactly which
-// cases trigger this.
-const OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
-
-// Second recipient specifically for CH-level overnight reports (see
-// notifyChLevelLeadsGs_) — leads held directly by the CEO or a Cluster
-// Head/City Lead, with nobody below them to route through automatically,
-// go to OPS_ALERT_EMAIL_ AND this address. Deliberately separate from
-// ALWAYS_CC_EMAILS_ (RmHierarchy.gs) — that Cc applies to every normal
-// per-RM email; this is scoped to CH-level reports only.
-const CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
-
-// Best-effort alert for a send that could not happen at all this run —
-// wrapped in its own try/catch so a failure to send the ALERT itself can
-// never take down the real morning/follow-up run it's reporting on. Kept
-// deliberately plain-text/no-frills — this is an ops ping, not a report.
-// Always to OPS_ALERT_EMAIL_ only, no Cc — notifyChLevelLeadsGs_ used to
-// route its own alert through this with a Cc, but sends directly via
-// GmailApp.sendEmail now (its own styled HTML + subject format), so
-// every remaining caller here is Cc-less already.
-function notifyOpsAlertGs_(subject, bodyLines) {
-  try {
-    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'));
-  } catch (e) {
-    Logger.log('notifyOpsAlertGs_ failed to send its own alert ("' + subject + '"): ' + e);
-  }
-}
 
 // Fires whenever resolveRecipientBucketsForRms_ finds an RM whose chain
 // resolves all the way up to a real CH (Cluster/Commercial Head/City
@@ -281,300 +243,24 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
   });
 }
 
-// ONE consolidated report, across every region in this run, naming every
-// LEAD (not just region/RM) that got no automated overnight email at
-// all — either its RM had no resolvable recipient anywhere (not in
-// RM_Hierarchy, excluded, no manager email — and no Region_Recipients
-// fallback either) or its bucket's real send failed after retries (see
-// sendOneOvernightEmail_'s return value). Per explicit request: one row
-// per lead with the RM, the computed To/Cc chain (blank when there
-// genuinely was none to compute), and the specific reason. Sent to
-// OPS_ALERT_EMAIL_ only — this is a diagnostic audit trail for you, not
-// a report anyone else needs to see. Entries is
-// [{lead_id, RM, to, cc, reason}]. Called once, at the end of
-// sendOvernightMorningEmails, rather than per-region — one complete
-// picture of everything that didn't go out this run, instead of several
-// small alerts scattered across the run.
-function notifyLeadSendFailuresGs_(entries) {
-  if (!entries.length) return;
-  const dateLabel = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
-  const subject = 'Leads NOT sent (' + entries.length + ') - ' + dateLabel;
-  const html = renderOvernightReportEmailHTML_({
-    title: 'Leads Not Sent',
-    region: 'All regions',
-    subtitle: entries.length + ' lead(s) got no automated overnight email this run',
-    kpis: [
-      { value: entries.length, label: entries.length === 1 ? 'Lead Not Sent' : 'Leads Not Sent', bg: '#fee2e2', fg: '#dc2626' },
-    ],
-    action: 'Review each row below and either fix the underlying RM_Hierarchy/Manager_Directory gap, or follow up on these leads manually — the window is fixed to this morning\'s run, so tomorrow\'s run will NOT retry them.',
-    sections: [{
-      heading: 'Not Sent', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
-      columns: ['Lead ID', 'RM', 'To', 'Cc', 'Reason'],
-      rows: entries.map(function (e) { return [e.lead_id, e.RM, e.to || '(none)', e.cc || '(none)', e.reason]; }),
-    }],
-    footerNote: 'This is an internal ops report — not sent to any RM or manager.',
-  });
-  const plainBody = entries.map(function (e) {
-    return 'Lead ' + e.lead_id + ' (RM: ' + e.RM + ') — To: ' + (e.to || '(none)') + ', Cc: ' + (e.cc || '(none)') + ' — ' + e.reason;
-  }).join('\n');
-  try {
-    GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, { htmlBody: html });
-  } catch (e) {
-    Logger.log('notifyLeadSendFailuresGs_ failed to send its own report: ' + e);
-  }
-}
-
-// Mirrors REGION_GROUP_MAP in reports.js — keep the two in sync if either
-// changes. Only these 11 main regions get an automated email; a raw region
-// value not listed here (or a numbered/directional sub-region not covered by
-// the trailing-suffix fallback below) is skipped, same as the dashboard's
-// own reportScopeNotice() behavior.
-const REGION_GROUP_MAP_ = {
-  'Bangalore': 'Bangalore',
-  'Bangalore 1': 'Bangalore', 'Bangalore 2': 'Bangalore', 'Bangalore 3': 'Bangalore',
-  'Central': 'Central', 'Central Mumbai': 'Central',
-  'Commercial': 'Commercial',
-  'Harbour': 'Harbour',
-  'Hyderabad': 'Hyderabad',
-  'Loan': 'Loan',
-  'Navi Mumbai': 'Navi Mumbai', 'Navi Mumbai 2': 'Navi Mumbai',
-  'Pune': 'Pune',
-  'Pune East': 'Pune', 'Pune North': 'Pune', 'Pune South': 'Pune', 'Pune West': 'Pune',
-  'SoBo': 'SoBo', 'HNI - SoBo': 'SoBo', 'HNI': 'SoBo',
-  'Thane': 'Thane',
-  'Western': 'Western', 'Western Mumbai': 'Western',
-  'Western 1': 'Western', 'Western 2': 'Western', 'Western 3': 'Western', 'Western 4': 'Western',
-};
-function normRegionKeyGs_(s) {
-  return String(s || '').trim().toLowerCase().replace(/[\s\-_]+/g, ' ');
-}
-const _REGION_LOOKUP_ = {};
-Object.keys(REGION_GROUP_MAP_).forEach(function (k) { _REGION_LOOKUP_[normRegionKeyGs_(k)] = REGION_GROUP_MAP_[k]; });
-function mainRegionForGs_(rawRegion) {
-  const key = normRegionKeyGs_(rawRegion);
-  if (_REGION_LOOKUP_[key]) return _REGION_LOOKUP_[key];
-  const base = key.replace(/\s+\d+$/, '');
-  if (base !== key && _REGION_LOOKUP_[base]) return _REGION_LOOKUP_[base];
-  return null;
-}
-
-// Which of the 5 SLA checks to report as "the" issue when more than one
-// fires — same priority order ISSUE_PRIORITY uses on the dashboard.
-const ISSUE_PRIORITY_GS_ = [
-  { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added' },
-  { key: 'isNotUpdated', label: 'Not Updated' },
-  { key: 'followupOverdue', label: 'Follow-up Overdue' },
-  { key: 'underCalledToday', label: "Behind on Today's Calls" },
-  { key: 'stageStuck48h', label: 'Stuck 48h+' },
-];
-function primaryIssueGs_(flags) {
-  for (let i = 0; i < ISSUE_PRIORITY_GS_.length; i++) {
-    if (flags[ISSUE_PRIORITY_GS_[i].key]) return ISSUE_PRIORITY_GS_[i];
-  }
-  return null;
-}
-
-// "Service Spreadsheets timed out..." (and its siblings — "Service error",
-// "Internal error") are Google's own transient infrastructure hiccups, not
-// a bug in this script — they happen more often against a large sheet
-// (thousands of leads) under load, and they're exactly the kind of thing
-// genuinely UNATTENDED automation has to shrug off on its own, since
-// there's no human at the trigger to just click retry. Every Spreadsheet-
-// service call in this file that reads/writes a real range goes through
-// this wrapper. Deliberately narrow on WHICH errors it retries: a real bug
-// (bad range, permission denied, a formula error) fails the exact same way
-// on every attempt, so retrying it only delays surfacing the actual
-// problem by the backoff budget below — not swallow it.
-//
-// 4 attempts / up to ~12s of total backoff (2s + 4s + 6s), not the
-// original 3 attempts / ~6s — real production hit this exact transient
-// class three separate times against the same spreadsheet, including on
-// a single-row, 6-cell header write, which points at that specific
-// spreadsheet needing more headroom to ride out a slow patch than a
-// generic "large sheet" assumption accounted for. Still comfortably
-// inside Apps Script's own execution-time ceiling even if several
-// withRetry_ calls in one run each hit the full budget.
-function withRetry_(fn, label) {
-  const maxAttempts = 4;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return fn();
-    } catch (e) {
-      const msg = String((e && e.message) || e);
-      const isTransient = /timed out|service (spreadsheets|gmail|error)|internal error/i.test(msg);
-      if (!isTransient || attempt === maxAttempts) throw e;
-      Logger.log((label || 'Sheets operation') + ' failed transiently (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
-      Utilities.sleep(attempt * 2000);
-    }
-  }
-}
-
-// Narrower cousin of withRetry_, used ONLY for the actual Gmail send
-// calls (sendOneOvernightEmail_, sendThreadedGmailReply_'s caller, and
-// the follow-up's plain fallback). withRetry_ itself is deliberately NOT
-// used there — a Sheets read/write is safe to blindly retry, but
-// retrying a SEND risks creating a genuine duplicate email if the
-// original attempt actually succeeded and only the confirmation was
-// lost (a "timed out"-class error is exactly this kind of ambiguous —
-// see sendOneOvernightEmail_'s own comment on why that stays a single
-// attempt). "Gmail operation not allowed" is different: it's Google
-// explicitly REFUSING the send, a definitive rejection with no
-// ambiguity about whether it went through — it didn't — so retrying
-// THIS specific error can't produce a duplicate. Real production case
-// this addresses: one run sent 15 emails in ~30 seconds and exactly 2
-// failed with this error, each one surrounded by successful sends
-// immediately before and after — a persistent policy block would have
-// failed every send, not 2 scattered ones, so this reads as a brief,
-// intermittent Gmail-side hiccup (plausibly a soft rate-limit reaction
-// to sending that many emails in quick succession) that a short retry
-// would very likely clear.
-function withSendRetry_(fn, label) {
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return fn();
-    } catch (e) {
-      const msg = String((e && e.message) || e);
-      const isSafeToRetry = /operation not allowed/i.test(msg);
-      if (!isSafeToRetry || attempt === maxAttempts) throw e;
-      Logger.log((label || 'Gmail send') + ' failed with a definitive rejection, safe to retry (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
-      Utilities.sleep(attempt * 2000);
-    }
-  }
-}
-
-// Split into small independently-retried steps, with a flush() right
-// after insertSheet — same reasoning as RmHierarchy.gs's identical
-// functions (see ensureRmHierarchySheet_'s comment): one big withRetry_
-// around insert+write makes every retry redo the whole thing, and a
-// freshly inserted sheet isn't always immediately ready for a write.
-function ensureRegionRecipientsSheet_(ss) {
-  const existing = withRetry_(function () { return ss.getSheetByName(REGION_RECIPIENTS_SHEET_); }, 'check for existing Region_Recipients');
-  if (existing) return existing;
-
-  const sheet = withRetry_(function () { return ss.insertSheet(REGION_RECIPIENTS_SHEET_); }, 'insert Region_Recipients');
-  SpreadsheetApp.flush();
-  withRetry_(function () {
-    sheet.getRange(1, 1, 1, 3).setValues([['region', 'to', 'cc']]);
-    sheet.setFrozenRows(1);
-  }, 'write Region_Recipients header');
-  const regions = Array.from(new Set(Object.keys(REGION_GROUP_MAP_).map(function (k) { return REGION_GROUP_MAP_[k]; }))).sort();
-  withRetry_(function () {
-    sheet.getRange(2, 1, regions.length, 1).setValues(regions.map(function (r) { return [r]; }));
-  }, 'write Region_Recipients region list');
-  return sheet;
-}
-
-// Per-A1-bucketed recipients for one region's morning email — see
-// resolveRecipientBucketsForRms_'s own comment for the bucketing rule
-// (one email per distinct A1, never several combined into one To) and
-// for chLevelRms (RMs whose chain resolves all the way to a real CH —
-// diverted to notifyChLevelLeadsGs_ below rather than an email addressed
-// to the CH). Whichever RMs couldn't be resolved via RM_Hierarchy at all
-// (no chain, excluded, or no email on record) fall back to ONE combined
-// email via the legacy Region_Recipients entry — keeps the automation
-// sending during the gradual rollout instead of going silent the moment
-// RM_Hierarchy exists but some emails aren't filled in yet. Returns an
-// array of { to, cc, rmNames, source, bucketLabel, primaryRole } — one
-// entry per email that should actually be sent for this region (zero,
-// one, or many).
-//
-// opts.fireAlerts (default false) gates the two REAL side-effect emails
-// this function can send (the CH-level alert and the "no recipient"
-// alert) — only sendOvernightMorningEmails, the actual unattended send
-// path, passes true. Diagnostic/maintenance callers that just need to
-// know what a recipient WOULD be (backfillTodaysOvernightLogRecipientsNow)
-// leave it false, so re-running them repeatedly while debugging can't
-// fire the same real alert (for the CH case) over and
-// over as an unintended side effect.
-// opts.rmToLeads (optional, RM name -> array of full lead objects, same
-// shape sendOneOvernightEmail_ takes) and opts.dateLabel (optional,
-// same "d MMM yyyy" string the real per-RM emails use in their subject)
-// — only used to pass through to notifyChLevelLeadsGs_ so it can send a
-// full per-lead report for CH-held leads, not just a bare lead-ID list.
-// Fine to omit both — notifyChLevelLeadsGs_ treats a missing rmToLeads
-// entry as no leads to list, and computes its own dateLabel if none is
-// passed.
-// Returns { results: [...] (same shape as before this comment existed —
-// callers that only ever read the array can just take .results),
-// trulyUnresolved: [{rmName, reason}] — RMs with NO resolvable recipient
-// AND no Region_Recipients fallback either, so their leads got no
-// automated email at all this run. Callers with fireAlerts on should
-// fold these into the per-lead "not sent" report (see
-// sendOvernightMorningEmails) instead of alerting here directly — this
-// function no longer sends its own "no recipient" ops alert, since that
-// was a region-level summary with no lead-level detail; the caller has
-// the actual leads to attribute each unresolved RM's reason to.
-function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
-  const fireAlerts = !!(opts && opts.fireAlerts);
-  const rmToLeads = (opts && opts.rmToLeads) || {};
-  const dateLabel = (opts && opts.dateLabel) || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
-  const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
-  const results = resolved.buckets.map(function (b) {
-    return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
-  });
-
-  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel);
-
-  let trulyUnresolved = [];
-  if (resolved.unresolved.length) {
-    const legacy = legacyRecipients[region];
-    if (legacy) {
-      // ALWAYS_CC_EMAILS_ (RmHierarchy.gs) applies even on the legacy
-      // fallback path — it's an unconditional business requirement on every
-      // overnight email, not something specific to RM_Hierarchy resolution.
-      const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
-      ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
-      const unresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
-      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: unresolvedNames, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + unresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
-    } else {
-      // No recipient configured anywhere for these RMs — their overnight
-      // leads get no automated email at all this run. The caller folds
-      // this into the per-lead "not sent" report.
-      trulyUnresolved = resolved.unresolved;
-    }
-  }
-
-  // Single choke point every path above funnels through — see
-  // TEST_MODE_OVERRIDE_EMAIL_'s own comment. Bucketing is preserved even in
-  // test mode (each bucket still becomes its own email, just redirected)
-  // so a test run can actually verify "does each A1 get their own email"
-  // instead of collapsing the very thing being tested into one message.
-  // originalTo/originalCc carry the REAL resolved recipients through
-  // (rather than discarding them) so sendOneOvernightEmail_ can print
-  // them visibly inside the test email itself — otherwise the only way
-  // to see what a real send would have targeted is digging through the
-  // Executions log rather than just reading the email you got.
-  if (TEST_MODE_OVERRIDE_EMAIL_) {
-    const testResults = results.map(function (r) {
-      return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole, originalTo: r.to, originalCc: r.cc };
-    });
-    return { results: testResults, trulyUnresolved: trulyUnresolved };
-  }
-
-  return { results: results, trulyUnresolved: trulyUnresolved };
-}
-
-function loadRegionRecipients_(ss) {
-  const sheet = ensureRegionRecipientsSheet_(ss);
-  return withRetry_(function () {
-    const lastRow = sheet.getLastRow();
-    const map = {};
-    if (lastRow < 2) return map;
-    sheet.getRange(2, 1, lastRow - 1, 3).getValues().forEach(function (row) {
-      const region = String(row[0] || '').trim();
-      const to = String(row[1] || '').trim();
-      const cc = String(row[2] || '').trim();
-      if (region && to) map[region] = { to: to, cc: cc };
-    });
-    return map;
-  }, 'loadRegionRecipients_');
+// Yesterday 5 PM IST through today 9 AM IST, as real Date objects — matches
+// the dashboard's own "Overnight Leads" window (dashboard.html's
+// computeOvernightCohort). `asOf` is the moment this is computed from
+// (normally "now"), so the morning run and any manual test run both derive
+// the same window from whatever day they're actually run on.
+function overnightWindowGs_(asOf) {
+  const todayKey = istDayKeyGs_(asOf);
+  const todayNineAm = new Date(todayKey + 'T' + pad2Gs_(OVERNIGHT_END_HOUR_) + ':00:00+05:30');
+  const yesterday = new Date(asOf.getTime() - 24 * 3600 * 1000);
+  const yesterdayKey = istDayKeyGs_(yesterday);
+  const yesterdayFivePm = new Date(yesterdayKey + 'T' + pad2Gs_(OVERNIGHT_START_HOUR_) + ':00:00+05:30');
+  return { from: yesterdayFivePm, to: todayNineAm };
 }
 
 // Split into small independently-retried steps, with a flush() right
 // after insertSheet — see ensureRegionRecipientsSheet_'s identical
-// comment. This is the exact function that produced the original
-// "Service Spreadsheets timed out" error in production.
+// comment (EmailInfra.gs). This is the exact function that produced the
+// original "Service Spreadsheets timed out" error in production.
 function ensureOvernightLogSheet_(ss) {
   const existing = withRetry_(function () { return ss.getSheetByName(OVERNIGHT_LOG_SHEET_); }, 'check for existing Overnight_Log');
   if (existing) return existing;
@@ -593,295 +279,6 @@ function ensureOvernightLogSheet_(ss) {
   return sheet;
 }
 
-// Yesterday 5 PM IST through today 9 AM IST, as real Date objects — matches
-// the dashboard's own "Overnight Leads" window (dashboard.html's
-// computeOvernightCohort). `asOf` is the moment this is computed from
-// (normally "now"), so the morning run and any manual test run both derive
-// the same window from whatever day they're actually run on.
-function overnightWindowGs_(asOf) {
-  const todayKey = istDayKeyGs_(asOf);
-  const todayNineAm = new Date(todayKey + 'T' + pad2Gs_(OVERNIGHT_END_HOUR_) + ':00:00+05:30');
-  const yesterday = new Date(asOf.getTime() - 24 * 3600 * 1000);
-  const yesterdayKey = istDayKeyGs_(yesterday);
-  const yesterdayFivePm = new Date(yesterdayKey + 'T' + pad2Gs_(OVERNIGHT_START_HOUR_) + ':00:00+05:30');
-  return { from: yesterdayFivePm, to: todayNineAm };
-}
-
-// Reads the current month tab and returns {colIndex, dataRows} — same shape
-// snapshotOpenLeads_ in MovementTracker.gs reads, factored out here so both
-// the morning and follow-up runs share one read path. This is the single
-// biggest read in either script (thousands of leads, every column) — by
-// far the most likely place a transient Spreadsheets timeout actually
-// shows up, hence its own retry wrapper around the real reads.
-function readLeadsTab_(ss) {
-  const tabName = resolveTabName_(ss);
-  const src = ss.getSheetByName(tabName);
-  if (!src) throw new Error('Overnight Emailer: tab "' + tabName + '" not found.');
-  return withRetry_(function () {
-    const lastRow = src.getLastRow();
-    const lastCol = src.getLastColumn();
-    if (lastRow < 3) return { colIndex: {}, dataRows: [] };
-    const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
-    const colIndex = buildColIndex_(headerRow);
-    const dataRows = src.getRange(3, 1, lastRow - 2, lastCol).getValues();
-    return { colIndex: colIndex, dataRows: dataRows };
-  }, 'readLeadsTab_');
-}
-
-function esc_(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// Own-comment text only (internal_status_comments + stage_comments,
-// pipe-joined) — NOT the dashboard's own richer collateFamilyComments
-// (js/core.js), which also folds in every sibling copy of the SAME
-// customer across other regions/sources. That sibling collation depends on
-// the dashboard's own in-browser identity-clustering over the WHOLE
-// fetched dataset — state that only exists in a signed-in browser tab, not
-// in an unattended server-side trigger. A human filling in Lead_Followups'
-// suggested_followup column still sees this row's real comment history;
-// they just don't get other copies' comments folded in automatically the
-// way the dashboard's own Generate flow provides.
-function combinedCommentsTextGs_(row, colIndex) {
-  const internal = String(getVal_(row, colIndex, 'internal_status_comments') || '').trim();
-  const stage = String(getVal_(row, colIndex, 'stage_comments') || '').trim();
-  return [internal, stage].filter(function (s) { return s; }).join(' | ') || '(no comments logged)';
-}
-
-// Mirrors the dashboard's own overnightStatusLabel (js/tab-movement.js) —
-// canonical funnel stage, Title Cased, or the raw stage text verbatim when
-// it doesn't match a known funnel band, so nothing silently disappears.
-// Never called for a closed lead — those are excluded before this runs.
-function overnightStatusLabelGs_(stage) {
-  const canon = canonicalStage_(stage);
-  if (canon) return canon.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-  return String(stage || '').trim() || 'Unrecognized Stage';
-}
-
-// Port of the dashboard's own suggestedFollowUp (js/core.js) — see
-// inferOutcomeGs_/OUTCOME_RULES_GS_/FOLLOWUP_SUGGESTIONS_GS_
-// (MovementTracker.gs) for the keyword engine this reads
-// combinedCommentsTextGs_ through. Scoped to THIS row's own comments
-// only — see latestOutcomeGs_'s own comment for why sibling RM copies of
-// the same customer are deliberately NOT pooled in. Real production
-// finding: last_connect (a status-text field — "Not Reachable"/
-// "Ringing"/"Call Connected"/"Call Declined") and last_connect_time both
-// get set on every logged ATTEMPT, not specifically a successful
-// connection — so neither field alone can tell a real connection from a
-// failed one, and the old hasConnected-only fallback below silently
-// treated "Ringing"/"Not Reachable"/"Call Declined" leads as no
-// different from "Keep working, no issue" once ANY attempt was logged.
-// The keyword engine reads what the comment actually SAYS instead, so
-// each of those gets its own specific, actionable suggestion (retry
-// timing, alternate channel, etc.) rather than a generic line.
-// Priority, same tiers as suggestedFollowUp:
-//   1. The latest logged comment on this row's own copy, from this
-//      row's own assigned RM (structured action-log entry, or
-//      last_comment if no structured entry exists) — its inferred
-//      outcome mapped through FOLLOWUP_SUGGESTIONS_GS_, or a quoted "no
-//      keyword match" note when the comment has real content but
-//      nothing recognizable. Any FOLLOWUP_MODIFIERS_GS_ that also fire on
-//      the same comment (budget concern, a preferred callback time,
-//      preferred contact channel, decision-maker not on the call) get
-//      appended after the primary suggestion — see
-//      detectFollowupModifiersGs_ (MovementTracker.gs) for why this is a
-//      second, independent pass rather than more OUTCOME_RULES_GS_
-//      entries: the primary outcome only ever returns its FIRST matching
-//      category, so a genuinely useful second signal in the same comment
-//      (e.g. "cut the call... price too high") would otherwise never
-//      surface just because a higher-priority rule already claimed the
-//      match.
-//   2. Once there's truly no owner-logged comment text at all (no entry,
-//      or the owner's only logged entry was a blank check-in with no
-//      text) — see noCommentFollowUpGs_ below, which reads call_attempts
-//      against the last known snapshot instead of guessing from
-//      hasConnected/SLA flags. Modifiers don't apply here — there's no
-//      comment text to scan.
-// now/baselineEntry feed tier 2 only — see noCommentFollowUpGs_.
-function overnightFollowupHintGs_(row, colIndex, now, baselineEntry) {
-  const latest = latestOutcomeGs_(row, colIndex);
-  if (latest && latest.comment) {
-    const base = FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
-    const modifierClauses = detectFollowupModifiersGs_(latest.comment, latest.outcome);
-    return modifierClauses.length ? base + ' ' + modifierClauses.join(' ') : base;
-  }
-  return noCommentFollowUpGs_(row, colIndex, now, baselineEntry);
-}
-
-// Fallback for when the lead's own assigned RM hasn't logged any usable
-// comment at all — real production case: a lead's only owner-logged
-// entry was a blank timestamp check-in ("RM: - 2026-08-25 19:08"), and
-// the old wording ("no keyword match found") read as if a real comment
-// just didn't match a keyword, when really nothing was said. Says so
-// plainly instead, then reads call_attempts against the last known
-// Movement_Log snapshot (lastSnapshotBeforeGs_,
-// MovementTracker.gs) to tell "genuinely stalled, nobody's dialing" from
-// "actively being worked, just not narrated yet" — the two need
-// different advice. Only draws that comparison once the baseline
-// snapshot is itself at least 4 hours old; a snapshot from 20 minutes
-// ago reading "unchanged" doesn't mean much on its own, the RM may
-// simply not have re-attempted that recently yet.
-function noCommentFollowUpGs_(row, colIndex, now, baselineEntry) {
-  if (!baselineEntry || (now.getTime() - baselineEntry.atMs) < 4 * 3600000) {
-    return 'No comment added — connect and log the outcome.';
-  }
-  const currentAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
-  if (currentAttempts <= baselineEntry.call_attempts) {
-    return 'No comment added — no new call attempts in over 4 hours. Connect ASAP.';
-  }
-  const newAttempts = currentAttempts - baselineEntry.call_attempts;
-  return 'No comment added — ' + newAttempts + ' more call attempt' + (newAttempts === 1 ? '' : 's') +
-    ' made since the last check. Keep trying to connect, and also send a WhatsApp message.';
-}
-
-// Single-copy, owner-filtered port of js/core.js's latestFamilyOutcome —
-// see that function's own comment for the real production case this
-// filtering fixes. Sibling RM copies of the same customer are NOT pooled
-// in, and neither is any comment entry logged by someone other than
-// THIS row's own assigned RM ("the lead owner") — a note left by a
-// different person who'd also touched this row's comment history isn't
-// the current owner's own read on the customer, so it shouldn't drive
-// what the owner is told to do next.
-// Splits combinedCommentsTextGs_'s "Name: Comment - timestamp | ..."
-// blob into entries, keeps the ones logged by this row's own RM PLUS any
-// entry with no parseable "Name:"/timestamp prefix at all (unattributed —
-// there's no name on it to prove it belongs to someone ELSE, so it isn't
-// discarded just for lacking structure; a comment logged by anyone else
-// under a matched, DIFFERENT name is still excluded) — (all entries, if RM
-// is blank — no owner to filter by), and returns whichever remaining entry
-// has the most recent real timestamp AND actual text (falling back to
-// considering blank owner-logged entries
-// only once NOT ONE has any text; falling back to the last entry parsed
-// if none carry a timestamp) as {outcome, comment, loggedBy, ts}. Falls
-// back to this row's own last_comment field only once there's not a
-// single owner-attributed structured entry. Returns null when this row
-// has neither — the caller's cue to fall back to the flags-based hint.
-function latestOutcomeGs_(row, colIndex) {
-  const ownerName = String(getVal_(row, colIndex, 'RM') || '').trim().toLowerCase();
-  const combined = combinedCommentsTextGs_(row, colIndex);
-  const text = combined === '(no comments logged)' ? '' : combined;
-  const allEntries = [];
-  if (text) {
-    text.split('|').map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (entry) {
-      const m = entry.match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
-      let loggedBy = '', comment = entry, ts = null;
-      if (m) { loggedBy = m[1].trim(); comment = m[2].trim(); ts = m[3].trim(); }
-      allEntries.push({ loggedBy: loggedBy, comment: comment, ts: ts, outcome: inferOutcomeGs_(comment) });
-    });
-  }
-  const entries = ownerName ? allEntries.filter(function (e) {
-    const logger = String(e.loggedBy || '').trim().toLowerCase();
-    return !logger || logger === ownerName;
-  }) : allEntries;
-  if (entries.length) {
-    // Prefer the most recent entry that actually SAYS something — a
-    // blank entry (a timestamp logged with no comment) is skipped when
-    // picking "most recent". Real production case: "Mamtaben Sosa: Not
-    // enquired - 2026-08-25 16:44" (a clean, classifiable signal) was
-    // getting silently shadowed by a later blank "Mamtaben Sosa: -
-    // 2026-08-26 09:03" check-in, purely because it had a newer
-    // timestamp — nothing ever looked at whether the entry said
-    // anything. Only once NOT ONE owner-logged entry has any text does
-    // this fall back to considering blank entries too — "no keyword
-    // match, here's the (blank) latest note" is still more honest than
-    // silently reverting to an earlier fallback tier (e.g. "no contact
-    // made yet") once the owner really did log multiple attempts, just
-    // without notes. Mirrors js/core.js's latestFamilyOutcome — keep in
-    // sync.
-    const withText = entries.filter(function (e) { return e.comment; });
-    const candidates = withText.length ? withText : entries;
-    let latest = candidates[candidates.length - 1];
-    let newestMs = -Infinity;
-    candidates.forEach(function (e) {
-      if (!e.ts) return;
-      const d = new Date(e.ts.replace(' ', 'T') + ':00+05:30');
-      if (!isNaN(d.getTime()) && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
-    });
-    return latest;
-  }
-  const lastComment = String(getVal_(row, colIndex, 'last_comment') || '').trim();
-  if (lastComment) return { outcome: inferOutcomeGs_(lastComment), comment: lastComment, loggedBy: '', ts: null };
-  return null;
-}
-
-// Apps Script port of the dashboard's renderReportEmailHTML
-// (js/reports.js) — same eyebrow/KPI-card/section visual shell, hand-built
-// here since Apps Script is a separate runtime with no access to that
-// browser-side function. Shared by BOTH the 10am morning email and the
-// 1pm follow-up reply (opts.title distinguishes them) — before this, only
-// the morning email used this shell and the follow-up reply still used
-// the old plain-table layout, so every thread looked inconsistent
-// (fancy first message, plain reply). Narrower than the original: no
-// `highlights` param (neither email here uses one) and the eyebrow/
-// signature are fixed rather than parameterized, since both callers want
-// the same ones.
-function renderOvernightReportEmailHTML_(opts) {
-  const FONT = 'font-family:Arial,Helvetica,sans-serif;';
-  const kpiCells = opts.kpis.map(function (k) {
-    return '<td style="padding:4px;"><div style="background:' + k.bg + '; border-radius:8px; padding:14px 10px; text-align:center;">' +
-      '<div style="' + FONT + ' font-size:24px; font-weight:700; color:' + k.fg + '; line-height:1;">' + esc_(String(k.value)) + '</div>' +
-      '<div style="' + FONT + ' font-size:10.5px; color:#6b7280; margin-top:5px;">' + esc_(k.label) + '</div>' +
-      '</div></td>';
-  }).join('');
-
-  const actionBox = opts.action
-    ? '<div style="margin-top:12px; border-left:4px solid #10b981; background:#ecfdf5; border-radius:0 8px 8px 0; padding:10px 14px;">' +
-      '<div style="' + FONT + ' font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; color:#059669;">Recommended Action</div>' +
-      '<div style="' + FONT + ' font-size:12.5px; color:#065f46; margin-top:3px;">' + esc_(opts.action) + '</div></div>'
-    : '';
-
-  // sec.accent lets a section stand out from the default indigo (e.g. red
-  // for "still unresolved", green for "resolved") — same mechanism as the
-  // dashboard's own renderReportEmailHTML (js/reports.js) uses for its
-  // Stalled Leads section.
-  const sectionsHtml = opts.sections.map(function (sec) {
-    const accentFg = (sec.accent && sec.accent.fg) || '#4338ca';
-    const accentHeaderBg = (sec.accent && sec.accent.headerBg) || '#eef2ff';
-    const accentBg = (sec.accent && sec.accent.bg) || '#f5f5ff';
-    const headerRow = '<tr style="background:' + accentHeaderBg + ';">' + sec.columns.map(function (c) {
-      return '<td style="padding:7px 10px; color:' + accentFg + '; font-size:10px; text-transform:uppercase; letter-spacing:.04em; font-weight:700; ' + FONT + '">' + esc_(c) + '</td>';
-    }).join('') + '</tr>';
-    const bodyRows = sec.rows.map(function (row, i) {
-      return '<tr style="' + (i > 0 ? 'border-top:1px solid #f0f0f0;' : '') + '">' +
-        row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(String(cell)) + '</td>'; }).join('') +
-        '</tr>';
-    }).join('');
-    return '<div style="margin-top:16px; border-left:4px solid ' + accentFg + '; background:' + accentBg + '; border-radius:0 8px 8px 0; padding:12px 16px;">' +
-      '<div style="' + FONT + ' font-weight:700; font-size:14px; color:#1f2937;">' + esc_(sec.heading) + '</div>' +
-      (sec.subheading ? '<div style="' + FONT + ' font-size:11.5px; color:#6b7280; margin-bottom:8px;">' + esc_(sec.subheading) + '</div>' : '') +
-      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">' +
-      headerRow + bodyRows + '</table></div>';
-  }).join('');
-
-  return '<div style="' + FONT + ' max-width:640px; margin:0 auto; background:#ffffff; color:#1f2937;">' +
-    '<div style="background:#4338ca; padding:22px 26px;">' +
-    '<div style="color:#c7d2fe; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; margin-bottom:6px; ' + FONT + '">Lead Funnel · SLA Monitor</div>' +
-    '<div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ' + FONT + '">' + esc_(opts.title) + '</div>' +
-    '<div style="color:#ffffff; font-size:13px; font-weight:600; margin-bottom:2px; ' + FONT + '">Region: ' + esc_(opts.region) + '</div>' +
-    '<div style="color:#e0e7ff; font-size:12.5px; ' + FONT + '">' + esc_(opts.subtitle) + '</div>' +
-    '</div>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;"><tr>' + kpiCells + '</tr></table>' +
-    actionBox + sectionsHtml +
-    (opts.footerNote ? '<div style="margin-top:18px; font-size:11px; color:#9ca3af; ' + FONT + '">' + esc_(opts.footerNote) + '</div>' : '') +
-    '<div style="margin-top:16px; font-size:13px; color:#374151; white-space:pre-line; ' + FONT + '">Regards,\nHomesfy Lead Ops</div>' +
-    '</div>';
-}
-
-/**
- * 10am run: builds and sends one email per region with a configured
- * recipient and at least one still-open overnight lead. ONLY leads that
- * have NOT reached Opportunity+ and are NOT closed are shown — a lead that
- * already converted or closed overnight needs no follow-up action, so it's
- * dropped rather than cluttering the list (same scope as the dashboard's
- * own Overnight Leads email, js/tab-movement.js's overnightEmailableLeads).
- * Grouped by RM (with their manager named), each lead shown as just
- * Lead ID / current Status / a suggested next action — nothing else.
- * Still separately computes and logs which of these leads are flagged for
- * an SLA issue (Overnight_Log) — that's what the 1pm follow-up re-checks;
- * it isn't part of what this email displays, since "status" here is the
- * lead's funnel stage, not which SLA check fired.
- */
 // Builds and sends ONE overnight email — either a real per-A1 bucket
 // (subject gets that recipient's name prefixed, since a region can now
 // produce several of these and identical subjects would be confusing in
@@ -1045,11 +442,11 @@ function sendOvernightMorningEmails() {
   const win = overnightWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const recipients = loadRegionRecipients_(ss);
-  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (from
-  // MovementTracker.gs) each read the whole Movement_Log tab — wrapped at
-  // the call site rather than editing that shared file, same retry
-  // reasoning as readLeadsTab_ above. Detailed (keeps each entry's
-  // snapshot timestamp) feeds noCommentFollowUpGs_ below.
+  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (MovementTracker.gs)
+  // each read the whole Movement_Log tab — wrapped at the call site
+  // rather than editing that shared file, same retry reasoning as
+  // readLeadsTab_ above. Detailed (keeps each entry's snapshot timestamp)
+  // feeds noCommentFollowUpGs_ (FollowupEngine.gs) below.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
   const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
 
@@ -1073,8 +470,8 @@ function sendOvernightMorningEmails() {
     // subjects once claiming (falsely, until fixed — see reports.js's
     // subjectScopeSuffix comment) a "Google Search & Non-UTM only" scope.
     // This closes that real gap: passesGoogleNonUtmSearchGs_
-    // (AllIssuesEmailer.gs) is the single shared definition of the scope
-    // now, so this and the all-issues script can't drift apart on what
+    // (EmailInfra.gs) is the single shared definition of the scope now,
+    // so this and the all-issues script can't drift apart on what
     // "Google Non-UTM/Search" means.
     if (!passesGoogleNonUtmSearchGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'))) return;
     const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
@@ -1222,18 +619,19 @@ const FOLLOWUP_WAIT_MAX_ATTEMPTS_ = 6; // ~2 minutes total, see waitForFollowupS
 // flow uses (js/sheets-writeback.js's pushLeadsToFollowups): A lead_id, B
 // region, C RM, D issue, E collated_comments, G updated_at, H own_comments
 // — E and H are identical here since there's no sibling-family expansion
-// server-side (see combinedCommentsTextGs_). Deliberately does NOT create
-// the tab if it's missing (the dashboard owns creating it — its absence
-// means this feature just hasn't been set up yet, not an error) and does
-// NOT clear existing rows first: clearing is safe for the dashboard's own
-// Generate cycle because it holds an in-memory exclusivity lock
-// (_generateCycleOwner) for the whole clear-through-send window, but Apps
-// Script runs as a completely separate process with no way to see or
-// respect that lock — clearing here could wipe out rows a human is
-// actively reviewing on the dashboard at the same moment. An upsert-only
-// write can never destroy anything that was already there. Returns false
-// (nothing written) when the tab doesn't exist — the caller treats that
-// exactly like "waited and nothing came back": send without it.
+// server-side (see combinedCommentsTextGs_, FollowupEngine.gs).
+// Deliberately does NOT create the tab if it's missing (the dashboard owns
+// creating it — its absence means this feature just hasn't been set up
+// yet, not an error) and does NOT clear existing rows first: clearing is
+// safe for the dashboard's own Generate cycle because it holds an
+// in-memory exclusivity lock (_generateCycleOwner) for the whole
+// clear-through-send window, but Apps Script runs as a completely
+// separate process with no way to see or respect that lock — clearing
+// here could wipe out rows a human is actively reviewing on the
+// dashboard at the same moment. An upsert-only write can never destroy
+// anything that was already there. Returns false (nothing written) when
+// the tab doesn't exist — the caller treats that exactly like "waited
+// and nothing came back": send without it.
 function pushUnresolvedToLeadFollowups_(ss, entries) {
   if (!entries.length) return false;
   const sheet = ss.getSheetByName(LEAD_FOLLOWUPS_SHEET_);
@@ -1417,10 +815,10 @@ function sendOvernightFollowupEmails() {
   if (!todaysRuns.length) return;
 
   const { colIndex, dataRows } = readLeadsTab_(ss);
-  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (from
-  // MovementTracker.gs) each read the whole Movement_Log tab — wrapped at
-  // the call site rather than editing that shared file, same retry
-  // reasoning as readLeadsTab_ above. Detailed feeds noCommentFollowUpGs_.
+  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (MovementTracker.gs)
+  // each read the whole Movement_Log tab — wrapped at the call site
+  // rather than editing that shared file, same retry reasoning as
+  // readLeadsTab_ above. Detailed feeds noCommentFollowUpGs_.
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
   const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
   const byLeadId = {};

@@ -3,68 +3,58 @@
  * Operations SLA checks (Inactive-RM Lead Added / Not Updated / Follow-up
  * Overdue / Behind on Today's Calls / Stuck 48h+), scoped to:
  *   - Source = google, Sub-source = Non-UTM or Search only (see
- *     passesGoogleNonUtmSearchGs_ below)
+ *     passesGoogleNonUtmSearchGs_, EmailInfra.gs)
  *   - Leads ASSIGNED in the last 48 hours (a rolling window ending at
  *     whenever this runs — e.g. run on the 27th, covers leads assigned
  *     from the 25th through the 27th)
  *
  * Content mirrors the dashboard's own Operations tab: same 5 checks, same
  * priority order when a lead qualifies for more than one (primaryIssueGs_,
- * OvernightEmailer.gs — the SAME function Operations' own combined view
- * uses), same Suggested Follow-up text (overnightFollowupHintGs_). Routing
- * mirrors the overnight emailer exactly: resolveRecipientEmailsForRegion_
- * (RmHierarchy.gs) buckets each region's affected RMs by their own
- * A1/TM/RH manager chain — one email per resolved bucket, not one flat
- * email per region — with the same CH-level diversion
- * (notifyChLevelIssuesGs_ below) and the same "leads not sent" audit
- * (notifyLeadSendFailuresGs_, reused directly from OvernightEmailer.gs)
- * for anything that couldn't be routed or failed to send.
+ * SlaEngine.gs — the SAME function Operations' own combined view uses),
+ * same Suggested Follow-up text (overnightFollowupHintGs_,
+ * FollowupEngine.gs). Routing mirrors the overnight emailer exactly:
+ * resolveRecipientEmailsForRegion_ (EmailInfra.gs) buckets each region's
+ * affected RMs by their own A1/TM/RH manager chain, via
+ * resolveRecipientBucketsForRms_ (RmHierarchy.gs) — one email per
+ * resolved bucket, not one flat email per region — with the same
+ * CH-level diversion (notifyChLevelIssuesGs_ below) and the same "leads
+ * not sent" audit (notifyLeadSendFailuresGs_, reused directly from
+ * EmailInfra.gs) for anything that couldn't be routed or failed to send.
  *
  * Subject line: "<bucketLabel> (<primaryRole>) google Leads With Issue
  * (<from> to <to>)" — e.g. "Omkar Ghate (A1) google Leads With Issue
  * (26-Aug-2026 to 28-Aug-2026)", or "Ayaz Bagwan (TM) google Leads With
  * Issue (26-Aug-2026 to 28-Aug-2026)" for a bucket whose primary is
  * standing in for RMs with no A1 of their own (same tier variability
- * sendOneOvernightEmail_ already documents — primaryRole is never "CH"
- * here; a CH-tier primary is always self-holding and goes through
- * notifyChLevelIssuesGs_ instead — "<chName> (CH) google Leads With Issue
- * (<from> to <to>)" — same split as the overnight script). The date
- * segment is always the actual 48h window this run covers
- * (allIssuesDateRangeLabelGs_), not a single day.
+ * sendOneOvernightEmail_, OvernightEmailer.gs, already documents —
+ * primaryRole is never "CH" here; a CH-tier primary is always
+ * self-holding and goes through notifyChLevelIssuesGs_ instead —
+ * "<chName> (CH) google Leads With Issue (<from> to <to>)" — same split
+ * as the overnight script). The date segment is always the actual 48h
+ * window this run covers (allIssuesDateRangeLabelGs_), not a single day.
  *
  * ============================== SETUP (one-time) ==============================
- *   1. Same spreadsheet/project as MovementTracker.gs, OvernightEmailer.gs,
- *      RmHierarchy.gs and RmHierarchy.private.gs — paste this in as its own
- *      file (Apps Script editor → + → Script → name it AllIssuesEmailer).
+ *   1. Same Apps Script project as every other file this project needs —
+ *      Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
+ *      MovementTracker.gs, OvernightEmailer.gs, RmHierarchy.gs, and
+ *      RmHierarchy.private.gs (see Core.gs's own header for the full
+ *      list) — paste this in as its own file (Apps Script editor → + →
+ *      Script → name it AllIssuesEmailer).
  *   2. In the function dropdown, select setupAllIssuesEmailTrigger, click
  *      Run, approve permissions. Installs ONE daily trigger at
  *      ALL_ISSUES_RUN_HOUR_ (5pm IST — one run a day, per explicit
  *      request; edit the constant and re-run this function to change it).
  *   3. To test without emailing real RMs: set TEST_MODE_OVERRIDE_EMAIL_ at
- *      the top of OvernightEmailer.gs (shared by both scripts) to your own
- *      address, then run sendAllIssuesEmailsNow from the function dropdown.
- *      Set it back to '' before relying on the real trigger.
+ *      the top of EmailInfra.gs (shared by every script in this project)
+ *      to your own address, then run sendAllIssuesEmailsNow from the
+ *      function dropdown. Set it back to '' before relying on the real
+ *      trigger.
  * ================================================================================
  */
 
 const ALL_ISSUES_LOG_SHEET_ = 'AllIssues_Log';
 const ALL_ISSUES_WINDOW_HOURS_ = 48;
 const ALL_ISSUES_RUN_HOUR_ = 17; // IST (5pm) — one run a day, see setupAllIssuesEmailTrigger below
-
-// Source = google, Sub-source = Non-UTM or Search — per explicit request,
-// checked as the very FIRST gate on every row (same "checked before
-// anything else runs on it" ordering sendOvernightMorningEmails already
-// uses for its own group_source-only gate). Shared with
-// sendOvernightMorningEmails's own gate (see the small patch in
-// OvernightEmailer.gs) so both scripts agree on exactly what "Google
-// Non-UTM/Search" means — one place to fix if the sheet ever adds a third
-// spelling of either value.
-function passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw) {
-  const groupSource = String(groupSourceRaw || '').trim().toLowerCase();
-  if (groupSource !== 'google') return false;
-  const sourceBucket = String(sourceBucketRaw || '').trim().toLowerCase();
-  return sourceBucket === 'non-utm' || sourceBucket === 'search';
-}
 
 // Rolling 48h window ending at `asOf` — e.g. run on the 27th at 5pm,
 // covers leads assigned from the 25th 5pm through the 27th 5pm.
@@ -115,8 +105,8 @@ function sendAllIssuesEmails() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const win = allIssuesWindowGs_(now);
-  const { colIndex, dataRows } = readLeadsTab_(ss); // OvernightEmailer.gs
-  const recipients = loadRegionRecipients_(ss); // OvernightEmailer.gs — legacy fallback, same as overnight
+  const { colIndex, dataRows } = readLeadsTab_(ss); // EmailInfra.gs
+  const recipients = loadRegionRecipients_(ss); // EmailInfra.gs — legacy fallback, same as overnight
   const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
   // Real per-lead baseline for the "no comment logged" Suggested Follow-up
   // tier (noCommentFollowUpGs_) — WITHOUT this, every no-comment lead gets
@@ -251,7 +241,7 @@ function sendAllIssuesEmails() {
     });
   });
 
-  // Reused directly from OvernightEmailer.gs — same shape entries
+  // Reused directly from EmailInfra.gs — same shape entries
   // ({lead_id, RM, to, cc, reason}), same consolidated report, sent to
   // the same OPS_ALERT_EMAIL_. No need for a separate copy of this
   // function just because the run that produced the entries is different.

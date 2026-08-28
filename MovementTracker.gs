@@ -15,17 +15,27 @@
  * to the dashboard's own filters at render time.
  *
  * Same trigger also writes one row per run to "SLA_History" — a compliance
- * snapshot (open leads, breached leads, per-rule counts) computed with a
- * ported copy of dashboard.html's 5 SLA rules (see writeSlaHistorySnapshot_
- * below). The dashboard writes its own rows there too on every refresh
+ * snapshot (open leads, breached leads, per-rule counts) computed with
+ * computeSlaFlags_ (SlaEngine.gs), a ported copy of dashboard.html's 5
+ * SLA rules. The dashboard writes its own rows there too on every refresh
  * (source='Dashboard' vs this script's 'AppsScript'); this one just means
  * that tracking never has a gap on a day nobody opens the dashboard.
  *
-
+ * REQUIRES Core.gs and SlaEngine.gs in the SAME Apps Script project — this
+ * file reuses resolveTabName_/buildColIndex_/getVal_ (Core.gs) and
+ * computeSlaFlags_ (SlaEngine.gs) directly rather than duplicating them.
+ * See Core.gs's own header for the full file list this project needs.
+ *
  * ============================== SETUP (one-time) ==============================
  *   1. Open your Google Sheet → Extensions → Apps Script.
- *   2. Delete any placeholder code in Code.gs, paste this whole file in.
- *      (Rename the file to MovementTracker if you like — doesn't matter.)
+ *   2. Delete any placeholder code in Code.gs. Add every file this project
+ *      needs as its own file (Core.gs, SlaEngine.gs, FollowupEngine.gs,
+ *      EmailInfra.gs, MovementTracker.gs, OvernightEmailer.gs,
+ *      AllIssuesEmailer.gs, RmHierarchy.gs, RmHierarchy.private.gs — see
+ *      Core.gs's own header), pasting each file's contents in. File names
+ *      don't matter to Apps Script, only that every file is present in one
+ *      project — naming them to match just keeps the editor's file list
+ *      self-explanatory.
  *   3. Project Settings (gear icon, left sidebar) → General settings →
  *      set "Time zone" to Asia/Kolkata. Triggers fire against THIS
  *      timezone setting, not the spreadsheet's.
@@ -42,7 +52,7 @@
  *      four snapshotPeriodic entries show up. From here it runs unattended.
  *
  * If your month tab isn't named like "Aug" or "Aug-2026", set
- * TAB_NAME_OVERRIDE below to the exact tab name.
+ * TAB_NAME_OVERRIDE (Core.gs) to the exact tab name.
  *
  * Cadence: four separate .atHour() triggers (SNAPSHOT_HOURS_), not one
  * .everyHours(6) trigger — deliberately, after everyHours() was observed
@@ -57,7 +67,6 @@
  * ================================================================================
  */
 
-const TAB_NAME_OVERRIDE = ''; // e.g. 'Aug' — leave blank to auto-detect
 const MOVEMENT_LOG_SHEET = 'Movement_Log';
 const MOVEMENT_LOG_RETENTION_DAYS = 7;
 // Extra rows left allocated beyond what pruneMovementLog_ actually needs,
@@ -73,142 +82,6 @@ const MOVEMENT_LOG_ROW_HEADROOM_ = 5000;
 // across the day; edit this array (not SNAPSHOT_INTERVAL_HOURS, which no
 // longer exists) to change the cadence, then re-run setupMovementTracking.
 const SNAPSHOT_HOURS_ = [0, 6, 12, 18];
-
-// Mirrors HEADER_ALIASES in dashboard.html. Keep these two in sync if a
-// column header in your export ever changes.
-const HEADER_ALIASES_ = {
-  lead_id: ['lead_id', 'leadid', 'lead id'],
-  RM: ['rm'],
-  TL: ['tl'],
-  project: ['project'],
-  region: ['region'],
-  client: ['client'],
-  lead_assigned_at: ['lead_assigned_at', 'lead assigned at', 'assigned_at', 'assigned at', 'lead assigned', 'date assigned'],
-  group_source: ['group_source', 'group source', 'source'],
-  source_bucket: ['source_bucket', 'source bucket', 'sub_source', 'sub source'],
-  current_stage: ['current_stage', 'current stage', 'stage'],
-  client_id: ['client_id', 'client id'],
-  last_connect: ['last_connect', 'last connect'],
-  last_connect_time: ['last_connect_time', 'last connect time'],
-  last_comment: ['last_comment', 'last comment'],
-  internal_status_comments: ['internal_status_comments', 'internal status comments'],
-  stage_comments: ['stage_comments', 'stage comments'],
-  closing_reason: ['closing_reason', 'closing reason'],
-  // The sheet's own closing disposition, distinct from the RM-entered
-  // closing_reason above — see isOpenLead_/computeSlaFlags_. Not written to
-  // Movement_Log (not in SNAPSHOT_COLUMNS_ below): read here purely to
-  // decide open/closed status for the SLA_History computation, which always
-  // runs against this freshly-read source-tab row, never against a stored
-  // Movement_Log row.
-  lead_closing_reason: ['lead_closing_reason', 'lead closing reason'],
-  // Needed for the Inactive-RM Lead Added rule (computeSlaFlags_) — also
-  // never written to Movement_Log, same reasoning as lead_closing_reason.
-  rm_is_active: ['rm_is_active', 'rm is active'],
-  call_attempts: ['call_attempts', 'call attempts', 'attempts'],
-  call_count: ['call_count', 'call count'],
-  duration: ['duration'],
-};
-
-// ---- Funnel / closed-stage classification, ported verbatim from
-// dashboard.html's CONFIG so "open" means exactly the same thing here as
-// it does on the dashboard. If you ever edit STAGE_ALIASES, FUNNEL_ORDER,
-// CLOSED_STAGE_EXACT or CLOSED_STAGE_STEMS in dashboard.html, mirror the
-// change here too. (Previously removed in commit c97fcfc when Movement_Log
-// stopped filtering by open/closed status — restored here because
-// writeSlaHistorySnapshot_ below needs it again, for a different purpose:
-// deciding what's OPEN for SLA compliance counting, not what to snapshot.) ----
-const FUNNEL_ORDER_ = ['not updated', 'suspect', 'opportunity', 'visit booked', 'visit', 'pipeline', 'gross eoi application', 'soft booking', 'booking'];
-const STAGE_ALIASES_ = {
-  'not updated': ['not updated'],
-  'suspect': ['suspect'],
-  'opportunity': ['opportunity'],
-  'visit booked': ['visit booked', 'visit booking', 'visit scheduled'],
-  'visit': ['visit', 'revisit', 'hpop', 'video presentation', 'video call'],
-  'pipeline': ['pipeline'],
-  'gross eoi application': ['gross eoi application', 'gross eoi', 'eoi application', 'eoi'],
-  'soft booking': ['soft booking', 'soft book'],
-  'booking': ['booking', 'booked'],
-};
-const OPPORTUNITY_STAGE_ = 'opportunity';
-const CLOSED_STAGE_EXACT_ = ['won', 'lost', 'junk', 'dead', 'not interested'];
-const CLOSED_STAGE_STEMS_ = ['cancel', 'close', 'reject'];
-
-function canonicalStage_(stage) {
-  const s = String(stage || '').trim().toLowerCase();
-  if (!s) return null;
-  for (let i = 0; i < FUNNEL_ORDER_.length; i++) {
-    const canon = FUNNEL_ORDER_[i];
-    const aliases = STAGE_ALIASES_[canon] || [canon];
-    for (let j = 0; j < aliases.length; j++) {
-      const a = aliases[j];
-      if (s === a || s.indexOf(a) !== -1) return canon;
-    }
-  }
-  return null;
-}
-
-function isOppOrAbove_(stage) {
-  const canon = canonicalStage_(stage);
-  if (!canon) return false;
-  return FUNNEL_ORDER_.indexOf(canon) >= FUNNEL_ORDER_.indexOf(OPPORTUNITY_STAGE_);
-}
-
-function isClosedStage_(stage) {
-  const s = String(stage || '').trim().toLowerCase();
-  if (!s) return false;
-  const words = s.split(/[^a-z']+/).filter(function (w) { return !!w; });
-  const exactHit = CLOSED_STAGE_EXACT_.some(function (kw) {
-    return kw.indexOf(' ') !== -1 ? s.indexOf(kw) !== -1 : words.indexOf(kw) !== -1;
-  });
-  if (exactHit) return true;
-  return CLOSED_STAGE_STEMS_.some(function (stem) {
-    return words.some(function (w) { return w.indexOf(stem) === 0; });
-  });
-}
-
-// closingReason is the RM-entered field; leadClosingReason is the sheet's
-// own closing disposition — a lead closed via EITHER one is closed. Kept
-// mirrored with dashboard.html's isLeadClosed — see the note there.
-function isOpenLead_(stage, closingReason, leadClosingReason) {
-  const hasClosingReason = !!String(closingReason || '').trim() || !!String(leadClosingReason || '').trim();
-  const excluded = isClosedStage_(stage) || hasClosingReason;
-  return !excluded && !isOppOrAbove_(stage);
-}
-
-// ---- Tab resolution: same auto-detect the dashboard's setup guide describes. ----
-function resolveTabName_(ss) {
-  if (TAB_NAME_OVERRIDE) return TAB_NAME_OVERRIDE;
-  const monthShort = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'MMM'); // "Aug"
-  if (ss.getSheetByName(monthShort)) return monthShort;
-  const monthYear = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'MMM-yyyy'); // "Aug-2026"
-  if (ss.getSheetByName(monthYear)) return monthYear;
-  throw new Error('Movement Tracker: no tab named "' + monthShort + '" or "' + monthYear + '" found. Set TAB_NAME_OVERRIDE at the top of MovementTracker.gs to your exact tab name.');
-}
-
-// ---- Column mapping. Row 1 = banner/import-bar row, row 2 = real
-// headers — same convention dashboard.html reads (range=A2:Z&headers=1). ----
-function buildColIndex_(headerRow) {
-  const colIndex = {};
-  Object.keys(HEADER_ALIASES_).forEach(function (key) {
-    const aliases = HEADER_ALIASES_[key];
-    let idx = -1;
-    headerRow.forEach(function (label, i) {
-      if (idx !== -1) return;
-      const norm = String(label || '').trim().toLowerCase();
-      if (aliases.indexOf(norm) !== -1) idx = i;
-    });
-    colIndex[key] = idx;
-  });
-  if (colIndex.lead_id === -1) colIndex.lead_id = 0; // same fallback as the dashboard
-  return colIndex;
-}
-
-function getVal_(row, colIndex, key) {
-  const idx = colIndex[key];
-  if (idx === -1 || idx == null) return '';
-  const v = row[idx];
-  return v == null ? '' : v;
-}
 
 // Column order written to Movement_Log — matches what dashboard.html's
 // enrichLead() needs to fully replay a historical flag check. New fields
@@ -278,22 +151,11 @@ function ensureMovementLogSheet_(ss) {
 }
 
 // ==================== SLA_History (automatic, no dashboard needed) ====================
-// Computes the same 5 SLA compliance rules dashboard.html's enrichLead does
-// and writes one row per run to SLA_History — so compliance tracking never
-// has a gap on a day nobody opens the dashboard. See writeSlaHistorySnapshot_,
-// called from snapshotOpenLeads_ below, right alongside the Movement_Log
-// write it already does every 6h.
-//
-// Mirrors dashboard.html's CONFIG values these rules depend on — keep in
-// sync if either changes.
-const LEAD_GRACE_HOURS_ = 3;
-const LEAD_LIFECYCLE_HOURS_ = 48;
-const MIN_CALLS_PER_DAY_ = 5;
-const FOLLOWUP_REVIEW_HOURS_ = 4;
-const FIRST_CONTACT_SLA_MINUTES_ = 10;
-const WORK_START_HOUR_ = 9;
-const WORK_END_HOUR_ = 19;
-
+// Writes one row per run to SLA_History using computeSlaFlags_
+// (SlaEngine.gs) — so compliance tracking never has a gap on a day
+// nobody opens the dashboard. See writeSlaHistorySnapshot_ below, called
+// from snapshotOpenLeads_ right alongside the Movement_Log write it
+// already does every 6h.
 const SLA_HISTORY_SHEET_ = 'SLA_History';
 // Order matches dashboard.html's own upsertSlaHistoryRows — snapshot_at/
 // source appended at the end so either writer's rows land in the same
@@ -303,363 +165,6 @@ const SLA_HISTORY_COLUMNS_ = [
   'inactiveRmNewLead', 'isNotUpdated', 'followupOverdue', 'underCalledToday', 'stageStuck48h',
   'snapshot_at', 'source',
 ];
-
-function istDayKeyGs_(date) {
-  return Utilities.formatDate(date, 'Asia/Kolkata', 'yyyy-MM-dd');
-}
-
-function pad2Gs_(n) { return (n < 10 ? '0' : '') + n; }
-
-// Same day-by-day working-hours walk as dashboard.html's
-// businessMinutesBetween — day boundaries come from Apps Script's own
-// timezone-aware formatting instead of hand-rolled IST math, which makes
-// this simpler than the browser version, not harder.
-function businessMinutesBetweenGs_(start, end) {
-  if (!start || !end || end <= start) return 0;
-  let totalMs = 0;
-  let cursor = new Date(start.getTime());
-
-  while (cursor < end) {
-    const dayKey = istDayKeyGs_(cursor);
-    const dayOpen = new Date(dayKey + 'T' + pad2Gs_(WORK_START_HOUR_) + ':00:00+05:30');
-    const dayClose = new Date(dayKey + 'T' + pad2Gs_(WORK_END_HOUR_) + ':00:00+05:30');
-    const midnight = new Date(dayKey + 'T00:00:00+05:30');
-
-    const segStart = cursor > dayOpen ? cursor : dayOpen;
-    const segEnd = end < dayClose ? end : dayClose;
-    if (segEnd > segStart) totalMs += (segEnd.getTime() - segStart.getTime());
-
-    cursor = new Date(midnight.getTime() + 24 * 60 * 60 * 1000); // next IST day's midnight — IST has no DST, so a fixed 24h jump is always correct
-  }
-  return totalMs / 60000;
-}
-
-// Extracts every dated entry's timestamp from the same
-// "Name: Comment - YYYY-MM-DD HH:MM" pipe-separated log format
-// dashboard.html's parseActionLog/combinedCommentsText parse. Only the
-// timestamps are needed here (for followupOverdue's staleness check and
-// underCalledToday's logged-today fallback below) — not the outcome-keyword
-// vocabulary those two exist for on the dashboard side, which nothing here
-// needs.
-function parseDatedCommentEntries_(internalComments, stageComments) {
-  const combined = [internalComments, stageComments]
-    .filter(function (t) { return String(t || '').trim(); })
-    .join(' | ');
-  if (!combined) return [];
-  const dates = [];
-  combined.split('|').forEach(function (entry) {
-    const m = entry.trim().match(/-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
-    if (!m) return;
-    const d = new Date(m[1].replace(' ', 'T') + ':00+05:30');
-    if (!isNaN(d.getTime())) dates.push(d);
-  });
-  return dates;
-}
-
-function latestCommentTimestamp_(internalComments, stageComments) {
-  const dates = parseDatedCommentEntries_(internalComments, stageComments);
-  if (!dates.length) return null;
-  return dates.reduce(function (a, b) { return b > a ? b : a; });
-}
-
-function countTodayCommentEntries_(internalComments, stageComments, now) {
-  const todayKey = istDayKeyGs_(now);
-  return parseDatedCommentEntries_(internalComments, stageComments)
-    .filter(function (d) { return istDayKeyGs_(d) === todayKey; }).length;
-}
-
-// ---------------------------------------------------------------------
-// Keyword-based outcome inference — a port of dashboard.html's own
-// inferOutcome/OUTCOME_RULES/FOLLOWUP_SUGGESTIONS (js/core.js). Real RM
-// comments are short telecalling shorthand ("Ringing", "Switch off. Wp
-// msg sent.") at least as often as full sentences, and just as often
-// misspelled — every signal below is checked with typo tolerance (a
-// comment word within a small edit distance of a signal word counts as
-// that signal) so a spelling mistake attributes to its nearest real
-// keyword automatically. Kept traceable to js/core.js: OUTCOME_RULES_GS_
-// and FOLLOWUP_SUGGESTIONS_GS_ below must stay in sync with that file's
-// OUTCOME_RULES/FOLLOWUP_SUGGESTIONS — mirror any change there here too.
-// See js/core.js for the full rationale behind each rule's ordering,
-// signal choice, and typo-budget sizing.
-// ---------------------------------------------------------------------
-function _editDistanceGs_(a, b) {
-  const m = a.length, n = b.length;
-  if (!m) return n;
-  if (!n) return m;
-  let twoBack = null;
-  let oneBack = new Array(n + 1);
-  let cur = new Array(n + 1);
-  for (let j = 0; j <= n; j++) oneBack[j] = j;
-  for (let i = 1; i <= m; i++) {
-    cur[0] = i;
-    const ai = a[i - 1];
-    for (let j = 1; j <= n; j++) {
-      const cost = ai === b[j - 1] ? 0 : 1;
-      let best = Math.min(oneBack[j] + 1, cur[j - 1] + 1, oneBack[j - 1] + cost);
-      if (i > 1 && j > 1 && twoBack && ai === b[j - 2] && a[i - 2] === b[j - 1]) {
-        best = Math.min(best, twoBack[j - 2] + 1);
-      }
-      cur[j] = best;
-    }
-    const tmp = twoBack; twoBack = oneBack; oneBack = cur; cur = (tmp || new Array(n + 1));
-  }
-  return oneBack[n];
-}
-function _typoBudgetGs_(targetLen) {
-  if (targetLen <= 4) return 0;
-  if (targetLen <= 8) return 1;
-  return 2;
-}
-function _wordsMatchGs_(word, target) {
-  if (word === target) return true;
-  const budget = _typoBudgetGs_(target.length);
-  if (!budget || Math.abs(word.length - target.length) > budget) return false;
-  return _editDistanceGs_(word, target) <= budget;
-}
-function _wordsOfGs_(text) {
-  return String(text).toLowerCase().replace(/'/g, '').match(/[a-z0-9]+/g) || [];
-}
-const _signalWordsCacheGs_ = {};
-function _signalWordsOfGs_(signal) {
-  let w = _signalWordsCacheGs_[signal];
-  if (!w) { w = signal.split(' '); _signalWordsCacheGs_[signal] = w; }
-  return w;
-}
-function _signalMatchesGs_(commentWords, signal) {
-  const target = _signalWordsOfGs_(signal);
-  if (target.length === 1) return commentWords.some(function (w) { return _wordsMatchGs_(w, target[0]); });
-  for (let i = 0; i + target.length <= commentWords.length; i++) {
-    let ok = true;
-    for (let j = 0; j < target.length; j++) {
-      if (!_wordsMatchGs_(commentWords[i + j], target[j])) { ok = false; break; }
-    }
-    if (ok) return true;
-  }
-  return false;
-}
-function _anySignalGs_(commentWords, signals) {
-  return signals.some(function (s) { return _signalMatchesGs_(commentWords, s); });
-}
-
-const OUTCOME_RULES_GS_ = [
-  { outcome: 'Do Not Disturb', signals: ['do not call', 'dont call', 'not to call', 'stop calling', 'dnd'] },
-  { outcome: 'Switched Off', signals: [
-      'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
-      'out of coverage', 'out of service', 'out of network', 'call forwarded', 'call forwarding',
-      'voice mail', 'voice message', 'voicemail',
-    ], test: function (c, w) {
-      return (_anySignalGs_(w, ['incoming']) && _anySignalGs_(w, ['barred', 'not available']))
-        || w.indexOf('unavailable') !== -1 || w.indexOf('ivr') !== -1;
-    } },
-  { outcome: 'Wrong Number', signals: ['wrong number', 'invalid number', 'invalid no', 'wn'] },
-  { outcome: 'Call Declined', signals: [
-      'hung up', 'hangup', 'disconnecting', 'disconnect the call', 'disconnect call', 'declined', 'declining', 'decline',
-      'cut the call', 'call cut',
-    ], test: function (c) { return /^disconnect\s*-?\s*$/.test(c); } },
-  { outcome: 'Busy', signals: ['busy', 'buzy'] },
-  { outcome: 'Booked Elsewhere', signals: [
-      'booked elsewhere', 'booked with another', 'purchased elsewhere', 'purchased another',
-      'bought elsewhere', 'bought another', 'already bought', 'already purchased',
-      'finalized another', 'finalised another', 'gone with another',
-    ] },
-  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand', 'to let'],
-    test: function (c, w) {
-      if (!_anySignalGs_(w, ['rent', 'rental', 'renting'])) return false;
-      if (_anySignalGs_(w, ['current', 'currently'])) return false;
-      return _anySignalGs_(w, ['want', 'wants', 'need', 'needs', 'looking', 'require', 'requires', 'searching', 'search']);
-    } },
-  { outcome: 'RNR', signals: [
-      'rnr', 'cnr', 'nc', 'nr', 'not responding', 'no answer', 'no response', 'not answering', 'not answered',
-      'didnt answer', 'not picking', 'did not pick', 'didnt pick', 'pickup the call', 'pick up the call',
-      'do not pickup', 'do not pick up', 'call not answered', 'call not received', 'call not receive',
-      'not received call', 'not received', 'call not respond', 'call not pick', 'call not picked', 'not receiving',
-    ] },
-  { outcome: 'Ringing / RNR', signals: ['ringing'], test: function (c) { return /^ring\s*-?\s*$/.test(c); } },
-  { outcome: 'Disconnected', signals: [
-      'disconnected', 'call disc', 'disc', 'network issue', 'network problem', 'poor network',
-      'call not connecting', 'call not connected', 'call not connect', 'not getting connected',
-      'not connecting', 'not connected', 'call drop', 'blank call',
-    ] },
-  { outcome: 'Out of Station', signals: ['out of station', 'out station', 'out of town', 'not in town', 'travelling'] },
-  { outcome: 'WhatsApp Unavailable', test: function (c, w) { return _anySignalGs_(w, ['whatsapp', 'wp', 'wa']) && _anySignalGs_(w, ['not on', 'not available']); } },
-  { outcome: 'WhatsApp Sent', signals: ['dwm', 'textedon'],
-    test: function (c, w) {
-      return _anySignalGs_(w, ['whatsapp', 'whats app', 'whats up', 'wp', 'wa', 'msg', 'mesg', 'message', 'text']) &&
-        _anySignalGs_(w, ['drop', 'dropped', 'shared', 'share', 'sent', 'pinged', 'texted']);
-    } },
-  { outcome: 'Details Shared', test: function (c, w) { return _anySignalGs_(w, ['shared', 'share', 'sent']) && _anySignalGs_(w, ['detail', 'brochure', 'project', 'info']); } },
-  { outcome: 'Visit Completed', signals: [
-      'visit done', 'visited site', 'site visited', 'visit completed', 'came for visit', 'visited the project',
-    ] },
-  { outcome: 'Visit Arranged', signals: [
-      'site visit', 'visit scheduled', 'visit arranged', 'visit booked', 'visit fixed', 'visit confirmed',
-      'will visit', 'coming for visit', 'visit planned',
-    ] },
-  { outcome: 'Loan In Process', signals: ['document submitted', 'bank process'],
-    test: function (c, w) { return _anySignalGs_(w, ['loan']) && _anySignalGs_(w, ['process', 'sanction', 'approval']); } },
-  { outcome: 'Not Interested', signals: [
-      'not interested', 'no interest', 'no longer interested', 'not looking',
-      'no requirement', 'not requirement', 'not enquired', 'dropped the plan', 'dropped the idea', 'ni',
-    ] },
-  { outcome: 'Considering', signals: ['consider', 'think about', 'will think', 'will get back', 'need some time', 'need time', 'will discuss'] },
-  { outcome: 'Budget Concern', signals: ['budget', 'expensive', 'too high', 'high price', 'costly', 'cant afford', 'cannot afford', 'out of budget'] },
-  { outcome: 'Interested', signals: ['interested'] },
-  { outcome: 'DNP', signals: [
-      'call again', 'dnp', 'call back', 'callback', 'call later', 'call after', 'call tomorrow',
-      'requested callback', 'asked to call', 'cb',
-    ] },
-  { outcome: 'Follow-up Missed', signals: ['followup missed', 'follow up missed'] },
-];
-
-function inferOutcomeGs_(comment) {
-  const c = String(comment).toLowerCase();
-  if (/^[\s\-_./]+$/.test(c)) return 'No Real Update';
-  const words = _wordsOfGs_(c);
-  for (let i = 0; i < OUTCOME_RULES_GS_.length; i++) {
-    const rule = OUTCOME_RULES_GS_[i];
-    if ((rule.signals && _anySignalGs_(words, rule.signals)) || (rule.test && rule.test(c, words))) return rule.outcome;
-  }
-  return 'Update';
-}
-
-const FOLLOWUP_SUGGESTIONS_GS_ = {
-  'Do Not Disturb': "Client asked not to be called — stop calling immediately, log as DND, and only re-engage via an approved channel (SMS/email) if policy allows.",
-  'Switched Off': 'Phone was switched off, out of service/network, or otherwise unreachable — retry later today; try an alternate number if one is on file.',
-  'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
-  'Call Declined': "Customer saw or heard the call and actively ended/declined it — they're avoiding contact right now, so calling straight back is more likely to annoy than connect. Try a different time of day, or switch to WhatsApp/SMS first.",
-  'Busy': 'Line was busy — retry within a few hours.',
-  'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
-  'Resale / Rental (Out of Scope)': "Client is looking for resale or rental, not a new first-sale (developer/builder) property — we don't work that segment. Close with this as the reason rather than treating it as lost interest.",
-  'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
-  'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
-  'Disconnected': "Call dropped, didn't connect, or connected with no response — retry; flag the number if this keeps happening.",
-  'Out of Station': "Client is travelling — schedule the follow-up for when they're back rather than repeat-calling now.",
-  'WhatsApp Unavailable': "This contact isn't reachable on WhatsApp (or doesn't have it) — stick to voice calls or SMS instead of defaulting back to a WhatsApp text.",
-  'WhatsApp Sent': 'A WhatsApp/text message was sent or dropped but not yet followed by a call — a text may go unseen, call to confirm.',
-  'Details Shared': 'Project details were shared — follow up to gauge interest and answer any questions before it goes cold.',
-  'Visit Completed': "Site visit already happened — call within 24 hours for feedback while it's fresh, and push toward the next concrete step.",
-  'Visit Arranged': 'A site visit is arranged — confirm attendance close to the date, and follow up right after for feedback.',
-  'Loan In Process': "Loan/paperwork is in process on their end — check status periodically and keep them warm, don't let this go cold.",
-  'Not Interested': 'Client indicated no interest (or no current requirement) — confirm this is final, then close with a clear reason if so.',
-  'Considering': 'Client is still deciding — schedule a follow-up in a few days rather than calling again immediately.',
-  'Budget Concern': 'Budget was raised as a concern — check for a better-fit option or payment plan before the next call.',
-  'Interested': 'Client showed interest — move quickly to the next step (site visit, documents, or pricing).',
-  'DNP': 'Client asked to be called back later — schedule the follow-up call.',
-  'Follow-up Missed': 'A scheduled follow-up was missed — reach out right away to catch up before it goes any staler.',
-  'No Real Update': "RM logged a placeholder with no real content — there's nothing here to act on from the comment alone. Call and get an actual status update, then log what was actually said.",
-};
-
-// Fallback for when inferOutcomeGs_ finds no keyword match at all — a
-// comment that's real information but doesn't contain any known outcome
-// keyword. Quoting the real latest note beats a canned "read the
-// comments" line, since the overnight email doesn't otherwise show
-// comment text anywhere near the Suggested Follow-up column.
-function unmatchedFollowUpGs_(comment, loggedBy) {
-  const text = String(comment || '').trim();
-  if (!text) return 'Manual review required — no keyword match found. Read the comments and log a specific next call/action.';
-  const who = String(loggedBy || '').trim();
-  return 'No keyword match — latest note' + (who ? ' (' + who + ')' : '') + ': "' + text + '". Read this and log a specific next call/action.';
-}
-
-// ===== FOLLOW-UP MODIFIERS =====
-// A second, INDEPENDENT pass over the same comment text, run in addition
-// to (not instead of) inferOutcomeGs_/FOLLOWUP_SUGGESTIONS_GS_ above. The
-// primary outcome picks the FIRST matching category in priority order and
-// stops there — real comments often carry a second, genuinely actionable
-// signal that the primary category never gets a chance to surface (e.g. a
-// comment that reads as "Call Declined" because of "cut the call" ALSO
-// names a specific callback time, which the generic Call Declined text
-// has no way to mention). Modifiers don't compete with each other or
-// with the primary outcome — every one that fires gets appended, so a
-// comment can carry a primary label plus several stacked clauses.
-//
-// Deliberately scoped to 4 self-contained modifiers for this first pass
-// (budget, preferred time, preferred channel, decision-maker-elsewhere) —
-// each is a pure keyword/pattern check with no external data dependency.
-// Two more discussed but NOT built here (rejected-a-specific-project /
-// interested-in-an-alternative-project) need a reliable project-name list
-// to match against plus positive/negative sentiment disambiguation around
-// the name — meaningfully higher false-positive risk, left for a
-// follow-up once this simpler set has been seen against real data.
-//
-// Each entry: id (for future reference/logging), an optional `signals`
-// list checked via the same _anySignalGs_ fuzzy matching every
-// OUTCOME_RULES_GS_ entry uses, an optional `skipIf` (outcome name to
-// suppress this modifier for — avoids a clause that just restates the
-// primary suggestion), and `detect(c, words)` returning either null (no
-// match) or the clause string to append — a function rather than a
-// static string so a modifier can quote back the SPECIFIC phrase it
-// found (e.g. the actual time mentioned), not just a generic template.
-const FOLLOWUP_MODIFIERS_GS_ = [
-  {
-    id: 'budgetConcern',
-    skipIf: 'Budget Concern', // primary suggestion already covers this — don't say it twice
-    signals: ['budget', 'expensive', 'too high', 'high price', 'costly', 'costlier', 'cant afford', 'cannot afford', 'out of budget', 'beyond budget'],
-    detect: function (c, words) {
-      if (!_anySignalGs_(words, this.signals)) return null;
-      return 'They also raised a budget concern — confirm their actual range and check whether a lower-ticket unit/project fits before writing them off.';
-    },
-  },
-  {
-    id: 'preferredTime',
-    detect: function (c) {
-      // Explicit time ("after 6pm", "before 10 am", "by 7pm") — quote the
-      // exact phrase back, since "call them back at the right time" is
-      // far more useful with the actual time attached.
-      const explicit = c.match(/\b(after|before|around|by)\s*(\d{1,2})(?:[:.]\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b/);
-      if (explicit) {
-        return 'They mentioned a specific time ("' + explicit[0].trim() + '") — target the callback for then, not a random slot.';
-      }
-      // Looser part-of-day mention with no exact hour — still worth a
-      // callback-timing nudge, just without a phrase to quote.
-      const words = _wordsOfGs_(c);
-      const partOfDay = ['evening', 'morning', 'afternoon', 'night'].find(function (w) { return _anySignalGs_(words, [w]); });
-      if (partOfDay) return 'They mentioned a preferred time of day (' + partOfDay + ') — target the callback for then, not a random slot.';
-      return null;
-    },
-  },
-  {
-    id: 'preferredChannel',
-    detect: function (c, words) {
-      // Needs BOTH a channel word AND an explicit preference word — a bare
-      // mention of "whatsapp" (e.g. from the existing WhatsApp
-      // Sent/Unavailable outcomes) isn't the same as "only reach me on
-      // WhatsApp, don't call".
-      const hasPreferenceWord = _anySignalGs_(words, ['only', 'prefer', 'dont call', 'not call', 'reach on', 'contact on', 'message me']);
-      if (!hasPreferenceWord) return null;
-      if (_anySignalGs_(words, ['whatsapp', 'wp', 'wa'])) return 'They asked to be reached via WhatsApp instead of a call — switch channels for this follow-up.';
-      if (_anySignalGs_(words, ['sms', 'text', 'message', 'msg'])) return 'They asked to be reached via text/SMS instead of a call — switch channels for this follow-up.';
-      return null;
-    },
-  },
-  {
-    id: 'decisionMakerElsewhere',
-    detect: function (c, words) {
-      const hasFamilyWord = _anySignalGs_(words, ['husband', 'wife', 'spouse', 'partner', 'family']);
-      const hasConsultWord = _anySignalGs_(words, ['decide', 'discuss', 'consult', 'ask', 'check with', 'talk to']);
-      if (!hasFamilyWord || !hasConsultWord) return null;
-      return 'Decision involves someone who wasn\'t part of this call — find out who, and when they\'ll be available together.';
-    },
-  },
-];
-
-// Runs every FOLLOWUP_MODIFIERS_GS_ entry against one comment and returns
-// the clause strings for whichever ones fire (0 or more) — the caller
-// (overnightFollowupHintGs_) appends these to the primary suggestion.
-// `primaryOutcome` lets a modifier suppress itself when the primary
-// suggestion already covers the same ground (see budgetConcern's skipIf).
-function detectFollowupModifiersGs_(comment, primaryOutcome) {
-  const c = String(comment || '').toLowerCase();
-  if (!c) return [];
-  const words = _wordsOfGs_(c);
-  const clauses = [];
-  FOLLOWUP_MODIFIERS_GS_.forEach(function (mod) {
-    if (mod.skipIf && mod.skipIf === primaryOutcome) return;
-    const clause = mod.detect(c, words);
-    if (clause) clauses.push(clause);
-  });
-  return clauses;
-}
 
 // Shared scan behind buildTodayCallBaselineGs_ and lastSnapshotBeforeGs_
 // below — reads Movement_Log's EXISTING rows (this run hasn't appended
@@ -702,9 +207,9 @@ function _lastMovementLogSnapshotByKeyGs_(ss, cutoffMs) {
 // `beforeDate`'s IST calendar day (i.e. yesterday-or-earlier only) —
 // direct port of dashboard.html's buildTodayCallBaseline. Exists to
 // compute "calls made so far TODAY" (callAttempts - this baseline, see
-// computeSlaFlags_'s underCalledToday) against a fixed start-of-day
-// reference point — deliberately NOT "the most recent snapshot,
-// whenever that was", which lastSnapshotBeforeGs_ below is for.
+// computeSlaFlags_'s underCalledToday, SlaEngine.gs) against a fixed
+// start-of-day reference point — deliberately NOT "the most recent
+// snapshot, whenever that was", which lastSnapshotBeforeGs_ below is for.
 function buildTodayCallBaselineGs_(ss, beforeDate) {
   const todayStart = new Date(istDayKeyGs_(beforeDate) + 'T00:00:00+05:30').getTime();
   const detailed = _lastMovementLogSnapshotByKeyGs_(ss, todayStart);
@@ -715,7 +220,7 @@ function buildTodayCallBaselineGs_(ss, beforeDate) {
 
 // Each lead's LATEST snapshot strictly before `beforeDate`, whatever
 // calendar day it falls on — as {atMs, call_attempts}. Used by
-// noCommentFollowUpGs_ (OvernightEmailer.gs) to compare against the most
+// noCommentFollowUpGs_ (FollowupEngine.gs) to compare against the most
 // recent actually-known call_attempts count and tell "genuinely stalled"
 // from "actively being worked". Deliberately NOT
 // buildTodayCallBaselineGs_'s "yesterday or earlier only" scope: an
@@ -726,92 +231,6 @@ function buildTodayCallBaselineGs_(ss, beforeDate) {
 // exclude it.
 function lastSnapshotBeforeGs_(ss, beforeDate) {
   return _lastMovementLogSnapshotByKeyGs_(ss, beforeDate.getTime());
-}
-
-// Faithful port of the 5 SLA rules dashboard.html's enrichLead computes —
-// see that function for the canonical definitions this must stay
-// traceable back to. Only computes what SLA_History needs (isOpenLead +
-// the 5 rules), not the many other fields enrichLead also derives purely
-// for the dashboard's own UI (sibling pooling, multi-agent detection, etc.)
-function computeSlaFlags_(row, colIndex, now, baselineMap) {
-  const stage = getVal_(row, colIndex, 'current_stage');
-  const closingReason = getVal_(row, colIndex, 'closing_reason');
-  const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-  const isOpenLead = isOpenLead_(stage, closingReason, leadClosingReason);
-
-  const flags = {
-    isOpenLead: isOpenLead,
-    inactiveRmNewLead: false, isNotUpdated: false, followupOverdue: false,
-    underCalledToday: false, stageStuck48h: false,
-  };
-  if (!isOpenLead) return flags;
-
-  const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
-  const created = createdRaw instanceof Date ? createdRaw : null;
-  if (!created) return flags; // undatable — no rule can fire, same as enrichLead's ageHours=null path
-
-  const ageHours = (now.getTime() - created.getTime()) / 36e5;
-  const pastGrace = ageHours >= LEAD_GRACE_HOURS_;
-  const isUnder48h = ageHours <= LEAD_LIFECYCLE_HOURS_;
-  const past48h = ageHours > LEAD_LIFECYCLE_HOURS_;
-  const isCreatedToday = istDayKeyGs_(created) === istDayKeyGs_(now);
-
-  // Inactive-RM Lead Added — deliberately no grace period (the problem is
-  // the assignment, not RM speed). getVal_ already returns real `false`
-  // for a checkbox-typed cell (only '' on a truly null/undefined value —
-  // see its own comment), so `|| ''` here would silently swallow that
-  // `false` into an empty string that reads as "unknown" below instead
-  // of "inactive" — same fix as dashboard.html's enrichLead().
-  const rmActiveRawVal = getVal_(row, colIndex, 'rm_is_active');
-  const rmActiveRaw = String(rmActiveRawVal != null ? rmActiveRawVal : '').trim().toLowerCase();
-  const rmIsInactive = ['false', 'no', 'inactive', '0', 'n'].indexOf(rmActiveRaw) !== -1;
-  flags.inactiveRmNewLead = isCreatedToday && rmIsInactive;
-
-  // Leads Pending Beyond 48 Hours.
-  flags.stageStuck48h = past48h && pastGrace;
-
-  const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
-  const connectDate = connectTimeRaw instanceof Date ? connectTimeRaw : null;
-  const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
-
-  // Deliberately grace-exempt, same as dashboard.html — see its own
-  // comment on neverConnectedPastWindow: a silent lead shouldn't sit
-  // unflagged in the 10-min-to-3h gap this exists to catch.
-  const neverConnectedPastWindow = isUnder48h && !connectDate &&
-    businessMinutesBetweenGs_(created, now) > FIRST_CONTACT_SLA_MINUTES_;
-
-  // Not Updated — canonical stage text (once past grace), OR never
-  // connected past the 10-minute window regardless of stage text.
-  flags.isNotUpdated = isUnder48h &&
-    ((pastGrace && canonicalStage_(stage) === 'not updated') || neverConnectedPastWindow);
-
-  // Follow-up Overdue (4h Post-Connect).
-  const internalComments = getVal_(row, colIndex, 'internal_status_comments');
-  const stageComments = getVal_(row, colIndex, 'stage_comments');
-  const lastCommentAt = latestCommentTimestamp_(internalComments, stageComments);
-  const hoursSinceConnect = connectDate ? (now.getTime() - connectDate.getTime()) / 36e5 : null;
-  const hoursSinceLastComment = lastCommentAt ? (now.getTime() - lastCommentAt.getTime()) / 36e5 : null;
-  const followupStaleHours = hoursSinceLastComment !== null ? hoursSinceLastComment
-    : (hoursSinceConnect !== null ? hoursSinceConnect : ageHours);
-  flags.followupOverdue = isUnder48h && pastGrace && hasConnected && followupStaleHours > FOLLOWUP_REVIEW_HOURS_;
-
-  // Behind on Today's Calls.
-  const callAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
-  let attemptsToday;
-  if (isCreatedToday) {
-    attemptsToday = callAttempts;
-  } else {
-    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    const baselineKey = clientId || ('l:' + leadId);
-    const baseline = baselineMap[baselineKey];
-    attemptsToday = baseline !== undefined
-      ? Math.max(0, callAttempts - baseline)
-      : countTodayCommentEntries_(internalComments, stageComments, now); // no pre-today baseline yet — same fallback as enrichLead's loggedToday
-  }
-  flags.underCalledToday = pastGrace && attemptsToday < MIN_CALLS_PER_DAY_;
-
-  return flags;
 }
 
 function ensureSlaHistorySheet_(ss) {

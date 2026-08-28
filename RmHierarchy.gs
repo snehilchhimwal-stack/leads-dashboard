@@ -39,13 +39,16 @@
  * match was found; still blank for the handful that weren't. A human can
  * always overwrite any auto-filled email — see point 3 below for what
  * survives a later rebuild. Until a manager has an email (auto-filled or
- * hand-entered), resolveRecipientEmailsForRegion_ in OvernightEmailer.gs
+ * hand-entered), resolveRecipientEmailsForRegion_ in EmailInfra.gs
  * finds no emails to route to for RMs under them and falls back to the
  * legacy Region_Recipients entry for that region, so today's automation
  * keeps working unchanged for anyone still uncovered.
  *
  * ============================== SETUP (one-time) ==============================
- *   1. Same Apps Script project as MovementTracker.gs and OvernightEmailer.gs.
+ *   1. Same Apps Script project as every other file this project needs —
+ *      Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
+ *      MovementTracker.gs, OvernightEmailer.gs, AllIssuesEmailer.gs, and
+ *      RmHierarchy.private.gs (see Core.gs's own header for the full list).
  *      Add a new file, paste this whole thing in.
  *   2. Run setupRmHierarchy once (or it runs automatically as part of
  *      setupOvernightEmailer). This creates two sheets:
@@ -255,7 +258,7 @@ const RM_HIERARCHY_RAW_ = [
   // matches the row above exactly): the leads sheet's RM column sometimes
   // has just "Mohammed Khan" for this same person -- a real "no
   // recipient" production case (region mapped to SoBo, since HNI is
-  // SoBo's own team label in REGION_GROUP_MAP_/OvernightEmailer.gs).
+  // SoBo's own team label in REGION_GROUP_MAP_/EmailInfra.gs).
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Adil Shaikh','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Central','S1','Rohit Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
@@ -337,7 +340,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Pawan Motwani','','','Swapnil Gowalkar','Bipin More'],
 
   // Whole "Loan" team added from Book7 directly — this is one of the 11
-  // configured regions (REGION_GROUP_MAP_, OvernightEmailer.gs) but had
+  // configured regions (REGION_GROUP_MAP_, EmailInfra.gs) but had
   // ZERO rows here before this, found via a full Book7-vs-RM_HIERARCHY_RAW_
   // diff (315 Book7 people vs 212 rows here) run specifically to catch
   // every gap of Neelam Singh's kind, not just the ones that happened to
