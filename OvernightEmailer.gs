@@ -681,17 +681,30 @@ function overnightStatusLabelGs_(stage) {
 //      last_comment if no structured entry exists) — its inferred
 //      outcome mapped through FOLLOWUP_SUGGESTIONS_GS_, or a quoted "no
 //      keyword match" note when the comment has real content but
-//      nothing recognizable.
+//      nothing recognizable. Any FOLLOWUP_MODIFIERS_GS_ that also fire on
+//      the same comment (budget concern, a preferred callback time,
+//      preferred contact channel, decision-maker not on the call) get
+//      appended after the primary suggestion — see
+//      detectFollowupModifiersGs_ (MovementTracker.gs) for why this is a
+//      second, independent pass rather than more OUTCOME_RULES_GS_
+//      entries: the primary outcome only ever returns its FIRST matching
+//      category, so a genuinely useful second signal in the same comment
+//      (e.g. "cut the call... price too high") would otherwise never
+//      surface just because a higher-priority rule already claimed the
+//      match.
 //   2. Once there's truly no owner-logged comment text at all (no entry,
 //      or the owner's only logged entry was a blank check-in with no
 //      text) — see noCommentFollowUpGs_ below, which reads call_attempts
 //      against the last known snapshot instead of guessing from
-//      hasConnected/SLA flags.
+//      hasConnected/SLA flags. Modifiers don't apply here — there's no
+//      comment text to scan.
 // now/baselineEntry feed tier 2 only — see noCommentFollowUpGs_.
 function overnightFollowupHintGs_(row, colIndex, now, baselineEntry) {
   const latest = latestOutcomeGs_(row, colIndex);
   if (latest && latest.comment) {
-    return FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
+    const base = FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
+    const modifierClauses = detectFollowupModifiersGs_(latest.comment, latest.outcome);
+    return modifierClauses.length ? base + ' ' + modifierClauses.join(' ') : base;
   }
   return noCommentFollowUpGs_(row, colIndex, now, baselineEntry);
 }

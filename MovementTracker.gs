@@ -561,6 +561,106 @@ function unmatchedFollowUpGs_(comment, loggedBy) {
   return 'No keyword match — latest note' + (who ? ' (' + who + ')' : '') + ': "' + text + '". Read this and log a specific next call/action.';
 }
 
+// ===== FOLLOW-UP MODIFIERS =====
+// A second, INDEPENDENT pass over the same comment text, run in addition
+// to (not instead of) inferOutcomeGs_/FOLLOWUP_SUGGESTIONS_GS_ above. The
+// primary outcome picks the FIRST matching category in priority order and
+// stops there — real comments often carry a second, genuinely actionable
+// signal that the primary category never gets a chance to surface (e.g. a
+// comment that reads as "Call Declined" because of "cut the call" ALSO
+// names a specific callback time, which the generic Call Declined text
+// has no way to mention). Modifiers don't compete with each other or
+// with the primary outcome — every one that fires gets appended, so a
+// comment can carry a primary label plus several stacked clauses.
+//
+// Deliberately scoped to 4 self-contained modifiers for this first pass
+// (budget, preferred time, preferred channel, decision-maker-elsewhere) —
+// each is a pure keyword/pattern check with no external data dependency.
+// Two more discussed but NOT built here (rejected-a-specific-project /
+// interested-in-an-alternative-project) need a reliable project-name list
+// to match against plus positive/negative sentiment disambiguation around
+// the name — meaningfully higher false-positive risk, left for a
+// follow-up once this simpler set has been seen against real data.
+//
+// Each entry: id (for future reference/logging), an optional `signals`
+// list checked via the same _anySignalGs_ fuzzy matching every
+// OUTCOME_RULES_GS_ entry uses, an optional `skipIf` (outcome name to
+// suppress this modifier for — avoids a clause that just restates the
+// primary suggestion), and `detect(c, words)` returning either null (no
+// match) or the clause string to append — a function rather than a
+// static string so a modifier can quote back the SPECIFIC phrase it
+// found (e.g. the actual time mentioned), not just a generic template.
+const FOLLOWUP_MODIFIERS_GS_ = [
+  {
+    id: 'budgetConcern',
+    skipIf: 'Budget Concern', // primary suggestion already covers this — don't say it twice
+    signals: ['budget', 'expensive', 'too high', 'high price', 'costly', 'costlier', 'cant afford', 'cannot afford', 'out of budget', 'beyond budget'],
+    detect: function (c, words) {
+      if (!_anySignalGs_(words, this.signals)) return null;
+      return 'They also raised a budget concern — confirm their actual range and check whether a lower-ticket unit/project fits before writing them off.';
+    },
+  },
+  {
+    id: 'preferredTime',
+    detect: function (c) {
+      // Explicit time ("after 6pm", "before 10 am", "by 7pm") — quote the
+      // exact phrase back, since "call them back at the right time" is
+      // far more useful with the actual time attached.
+      const explicit = c.match(/\b(after|before|around|by)\s*(\d{1,2})(?:[:.]\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b/);
+      if (explicit) {
+        return 'They mentioned a specific time ("' + explicit[0].trim() + '") — target the callback for then, not a random slot.';
+      }
+      // Looser part-of-day mention with no exact hour — still worth a
+      // callback-timing nudge, just without a phrase to quote.
+      const words = _wordsOfGs_(c);
+      const partOfDay = ['evening', 'morning', 'afternoon', 'night'].find(function (w) { return _anySignalGs_(words, [w]); });
+      if (partOfDay) return 'They mentioned a preferred time of day (' + partOfDay + ') — target the callback for then, not a random slot.';
+      return null;
+    },
+  },
+  {
+    id: 'preferredChannel',
+    detect: function (c, words) {
+      // Needs BOTH a channel word AND an explicit preference word — a bare
+      // mention of "whatsapp" (e.g. from the existing WhatsApp
+      // Sent/Unavailable outcomes) isn't the same as "only reach me on
+      // WhatsApp, don't call".
+      const hasPreferenceWord = _anySignalGs_(words, ['only', 'prefer', 'dont call', 'not call', 'reach on', 'contact on', 'message me']);
+      if (!hasPreferenceWord) return null;
+      if (_anySignalGs_(words, ['whatsapp', 'wp', 'wa'])) return 'They asked to be reached via WhatsApp instead of a call — switch channels for this follow-up.';
+      if (_anySignalGs_(words, ['sms', 'text', 'message', 'msg'])) return 'They asked to be reached via text/SMS instead of a call — switch channels for this follow-up.';
+      return null;
+    },
+  },
+  {
+    id: 'decisionMakerElsewhere',
+    detect: function (c, words) {
+      const hasFamilyWord = _anySignalGs_(words, ['husband', 'wife', 'spouse', 'partner', 'family']);
+      const hasConsultWord = _anySignalGs_(words, ['decide', 'discuss', 'consult', 'ask', 'check with', 'talk to']);
+      if (!hasFamilyWord || !hasConsultWord) return null;
+      return 'Decision involves someone who wasn\'t part of this call — find out who, and when they\'ll be available together.';
+    },
+  },
+];
+
+// Runs every FOLLOWUP_MODIFIERS_GS_ entry against one comment and returns
+// the clause strings for whichever ones fire (0 or more) — the caller
+// (overnightFollowupHintGs_) appends these to the primary suggestion.
+// `primaryOutcome` lets a modifier suppress itself when the primary
+// suggestion already covers the same ground (see budgetConcern's skipIf).
+function detectFollowupModifiersGs_(comment, primaryOutcome) {
+  const c = String(comment || '').toLowerCase();
+  if (!c) return [];
+  const words = _wordsOfGs_(c);
+  const clauses = [];
+  FOLLOWUP_MODIFIERS_GS_.forEach(function (mod) {
+    if (mod.skipIf && mod.skipIf === primaryOutcome) return;
+    const clause = mod.detect(c, words);
+    if (clause) clauses.push(clause);
+  });
+  return clauses;
+}
+
 // Shared scan behind buildTodayCallBaselineGs_ and lastSnapshotBeforeGs_
 // below — reads Movement_Log's EXISTING rows (this run hasn't appended
 // its own yet) and, for every identity key (client_id, else lead_id),
