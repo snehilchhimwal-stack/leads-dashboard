@@ -599,6 +599,19 @@
 
   /* ---------- sections ---------- */
   section{ margin-bottom:34px; scroll-margin-top:72px; }
+  /* Region Issue Trend + Same-Cohort Progress side by side, so both are
+     visible together without scrolling from one to the other — the
+     .filter-summary text under each is already collapsed by default
+     (initCollapsibleSectionInfo), so the real height driver left is each
+     section's own controls/chart/table, and this is what actually gets
+     both on one screen: half the combined height of stacking them,
+     governed by whichever of the two is taller. Falls back to stacked
+     (each section's own margin-bottom keeps its usual spacing) below
+     900px, where a 2-column split would just squeeze each into a column
+     too narrow for its own table. */
+  .tracking-pair-grid{ display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; margin-bottom:34px; }
+  .tracking-pair-grid section{ margin-bottom:0; }
+  @media (max-width:900px){ .tracking-pair-grid{ grid-template-columns:1fr; gap:0; margin-bottom:0; } .tracking-pair-grid section{ margin-bottom:34px; } }
   .section-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
   .section-bar{ width:4px; height:16px; border-radius:2px; }
   .section-bar.blue{ background:var(--blue); }
@@ -1257,6 +1270,7 @@
         <div class="section-scroll no-cap"><table id="trackingWowTable"><thead></thead><tbody></tbody></table></div>
       </section>
 
+      <div class="tracking-pair-grid">
       <section id="sec-tracking">
         <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Region Issue Trend</div><div class="section-count" id="trackingCount"></div></div>
         <div class="filter-summary">Reads the same <span class="mono">Movement_Log</span> sheet tab as the Movement tab below — nothing here is stored in this browser, so any pair of captured snapshots reads identically for anyone who opens this Sheet. Pick a "From" snapshot (e.g. right when you sent a region's email) and a "To" snapshot (e.g. now); the chart and table below show ONLY that range, grouped the same way the region emails are grouped (<span class="mono">mainRegionFor(effectiveRegion())</span>). If a day has several captures (the 6-hourly trigger plus any manual Snapshot now clicks), the connected line plots that day's latest one — every other same-day capture still shows, but only as a small dim dot in the background. Hover a line or dot to see which issue it is and its exact value; date labels include the day of week. New comparison points come from either <span class="mono">MovementTracker.gs</span>'s automatic every-6-hours capture, or the Snapshot now button up in the header. The top mini-chart (bright green) is Total Leads in System — every matching lead at that snapshot, any stage, not just open ones — so you can tell whether an issue count dropped because it was actually worked down or just because overall volume shrank; the table's % columns divide each row by that same total.</div>
@@ -1286,6 +1300,7 @@
         <div id="trackingCohortNotice" class="truncation-notice" style="display:none;"></div>
         <div class="section-scroll"><table id="trackingCohortTable"><thead></thead><tbody></tbody></table></div>
       </section>
+      </div>
 
       <section id="sec-tracking-48h">
         <div class="section-head"><div class="section-bar red"></div><div class="section-title">0&ndash;48h Cohort Outcome (approx.)</div><div class="section-count" id="tracking48hCount"></div></div>
