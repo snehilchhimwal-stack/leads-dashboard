@@ -494,31 +494,13 @@
   .section-scroll.no-cap{ max-height:none; overflow-y:visible; overflow-x:visible; }
 
   /* ---------- week-over-week cohort comparison ---------- */
-  .wow-chart{
-    background:var(--surface); border:1px solid var(--border); border-radius:8px;
-    padding:16px 18px; display:flex; flex-direction:column; gap:18px;
-  }
-  .wow-metric-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; }
-  .wow-metric-label{ font-size:12.5px; font-weight:600; color:var(--text-dim); }
-  .wow-bar-row{ display:flex; align-items:center; gap:10px; margin-bottom:5px; }
-  .wow-bar-row:last-child{ margin-bottom:0; }
-  .wow-bar-tag{
-    font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-faint);
-    width:52px; flex-shrink:0;
-  }
-  .wow-bar-track{ flex:1; height:14px; background:var(--surface-2); border-radius:3px; overflow:hidden; min-width:60px; }
-  .wow-bar-fill{ height:100%; border-radius:3px 0 0 3px; }
-  .wow-bar-fill.cur{ background:var(--blue); }
-  .wow-bar-fill.prev{ background:var(--text-faint); opacity:.5; }
-  .wow-bar-val{
-    font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-dim);
-    width:52px; flex-shrink:0; text-align:right;
-  }
-  /* Same delta badge in both the chart (wow-metric-head) and the table
-     cells (pctCellHtml) — one visual language for "did this get better or
-     worse" throughout the section. Polarity is decided by the caller
-     (higher is better for the two Opp% metrics, worse for 48h Close%),
-     never guessed from the sign of the number alone. */
+  /* Delta badge used in the table's own cells (wowPctCellHtml,
+     tab-tracking.js) — "did this get better or worse" for each region's
+     row. Polarity is decided by the caller (higher is better for the two
+     Opp% metrics, worse for 48h Close%), never guessed from the sign of
+     the number alone. The paired-bar chart this section used to also
+     render here was removed (not useful in practice) — these classes
+     stayed since the table still uses them. */
   .wow-delta{
     font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600;
     padding:2px 7px; border-radius:4px; white-space:nowrap;
@@ -1270,12 +1252,8 @@
 
       <section id="sec-tracking-wow">
         <div class="section-head"><div class="section-bar purple"></div><div class="section-title">Week-over-Week Cohort Comparison</div><div class="section-count" id="trackingWowCount"></div></div>
-        <div class="filter-summary">This week (the 7 most recently COMPLETED days) vs last week (the 7 before that), per region — same-day and 48h Opportunity+ rate, and 48h close-without-converting rate, so a genuine trend is visible at a glance instead of having to compare one day at a time. Reads live Movement_Log where it's still retained and falls back to the archived <span class="mono">Daily_Cohort_History</span> for older days, same as Daily Cohort by Region above — always the unfiltered picture across every Project/TL/Source, since the archive doesn't retain those. The region picker below narrows the CHART only; the table always shows every region so you can scan all of them for the same trend at once.</div>
-        <div class="stale-controls" style="margin-bottom:10px;">
-          <label class="stale-label">Region <select id="trackingWowRegionSelect" class="stale-select"></select></label>
-        </div>
+        <div class="filter-summary">This week (the 7 most recently COMPLETED days) vs last week (the 7 before that), per region — same-day and 48h Opportunity+ rate, and 48h close-without-converting rate, so a genuine trend is visible at a glance instead of having to compare one day at a time. Reads live Movement_Log where it's still retained and falls back to the archived <span class="mono">Daily_Cohort_History</span> for older days, same as Daily Cohort by Region above — always the unfiltered picture across every Project/TL/Source, since the archive doesn't retain those.</div>
         <div id="trackingWowNotice" class="truncation-notice" style="display:none;"></div>
-        <div id="trackingWowChart" style="margin-bottom:14px;"></div>
         <div class="section-scroll no-cap"><table id="trackingWowTable"><thead></thead><tbody></tbody></table></div>
       </section>
 

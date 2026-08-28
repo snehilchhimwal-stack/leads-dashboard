@@ -1239,75 +1239,27 @@ function wowPctCellHtml(curNum, curDen, prevNum, prevDen, polarity){
   return `<div class="wow-pct">${curTxt}</div>${wowDeltaBadgeHtml(delta, polarity)}`;
 }
 
-// Paired-bar chart (this week vs last week) for whichever single region is
-// selected in #trackingWowRegionSelect (or the All-Regions totals) — one
-// row-pair per rate metric, each with a delta badge using the SAME
-// wowDeltaBadgeHtml the table cells use, so the chart and table read as
-// one visual language.
-function renderWowChartHtml(cur, prev){
-  const metrics = [
-    { label: 'Same-Day Opp%', curNum: cur.sameDayOpp, curDen: cur.sameDayResolved, prevNum: prev.sameDayOpp, prevDen: prev.sameDayResolved, polarity: 1 },
-    { label: '48h Opp%', curNum: cur.opp48h, curDen: cur.resolved48h, prevNum: prev.opp48h, prevDen: prev.resolved48h, polarity: 1 },
-    { label: '48h Close%', curNum: cur.closed48h, curDen: cur.resolved48h, prevNum: prev.closed48h, prevDen: prev.resolved48h, polarity: -1 },
-  ];
-  return `<div class="wow-chart">` + metrics.map(m => {
-    const { cur: curPct, prev: prevPct, delta } = wowPctDelta(m.curNum, m.curDen, m.prevNum, m.prevDen);
-    const barPct = (p) => p === null ? 0 : Math.max(1.5, p);
-    const barTxt = (p) => p === null ? '—' : `${p.toFixed(1)}%`;
-    return `<div class="wow-metric">
-      <div class="wow-metric-head">
-        <span class="wow-metric-label">${esc(m.label)}</span>
-        ${wowDeltaBadgeHtml(delta, m.polarity)}
-      </div>
-      <div class="wow-bar-row">
-        <span class="wow-bar-tag">This wk</span>
-        <div class="wow-bar-track"><div class="wow-bar-fill cur" style="width:${barPct(curPct)}%"></div></div>
-        <span class="wow-bar-val">${barTxt(curPct)}</span>
-      </div>
-      <div class="wow-bar-row">
-        <span class="wow-bar-tag">Last wk</span>
-        <div class="wow-bar-track"><div class="wow-bar-fill prev" style="width:${barPct(prevPct)}%"></div></div>
-        <span class="wow-bar-val">${barTxt(prevPct)}</span>
-      </div>
-    </div>`;
-  }).join('') + `</div>`;
-}
-
 // Table: one row per region present in EITHER week, fixed A-Z order (same
 // convention as Daily Cohort by Region above — never re-sorted by volume
-// or by how much a region moved), plus a combined All Regions row. The
-// chart above narrows to whatever #trackingWowRegionSelect has picked;
-// this table always shows every region so the whole picture is scannable
-// at once, per the section's own point.
+// or by how much a region moved), plus a combined All Regions row. Used to
+// be paired with a chart (narrowed by its own region picker) — removed as
+// not useful in practice; the table alone is the whole section now.
 async function renderWeekOverWeekCohort(){
   const table = document.getElementById('trackingWowTable');
   if (!table) return;
   const thead = table.querySelector('thead'), tbody = table.querySelector('tbody');
   const countEl = document.getElementById('trackingWowCount');
   const noticeEl = document.getElementById('trackingWowNotice');
-  const chartEl = document.getElementById('trackingWowChart');
-  const regionSelect = document.getElementById('trackingWowRegionSelect');
-  if (!regionSelect) return;
 
   const clear = (message) => {
     if (countEl) countEl.textContent = '';
     thead.innerHTML = ''; tbody.innerHTML = '';
-    if (chartEl) chartEl.innerHTML = '';
     if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
   };
 
   if (movementFetchState !== 'ok') { clear(esc(movementUnavailableReason())); return; }
 
-  // Region dropdown built from the fixed region map, preserving whatever
-  // was already selected across re-renders — same pattern as Region Issue
-  // Trend's own trackingRegionSelect above.
   const regionList = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort();
-  const prevValue = regionSelect.value;
-  regionSelect.innerHTML = `<option value="__all__">All regions (combined)</option>` +
-    regionList.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
-  regionSelect.value = (prevValue && (prevValue === '__all__' || regionList.includes(prevValue))) ? prevValue : '__all__';
-  const selectedRegion = regionSelect.value;
-
   const { thisWeek, lastWeek } = await computeWeekOverWeekCohort();
 
   if (!thisWeek.daysWithData && !lastWeek.daysWithData) {
@@ -1317,7 +1269,7 @@ async function renderWeekOverWeekCohort(){
 
   if (noticeEl) {
     noticeEl.style.display = 'block';
-    noticeEl.innerHTML = `This week: ${esc(thisWeek.dateKeys[6])} to ${esc(thisWeek.dateKeys[0])} (${thisWeek.daysWithData} of ${thisWeek.totalDays} days have data). Last week: ${esc(lastWeek.dateKeys[6])} to ${esc(lastWeek.dateKeys[0])} (${lastWeek.daysWithData} of ${lastWeek.totalDays} days have data). Always the unfiltered picture across every Project/TL/Source — only the region picker below narrows it, and only for the chart.`;
+    noticeEl.innerHTML = `This week: ${esc(thisWeek.dateKeys[6])} to ${esc(thisWeek.dateKeys[0])} (${thisWeek.daysWithData} of ${thisWeek.totalDays} days have data). Last week: ${esc(lastWeek.dateKeys[6])} to ${esc(lastWeek.dateKeys[0])} (${lastWeek.daysWithData} of ${lastWeek.totalDays} days have data). Always the unfiltered picture across every Project/TL/Source.`;
   }
   if (countEl) countEl.textContent = `${regionList.length} regions`;
 
@@ -1356,8 +1308,4 @@ async function renderWeekOverWeekCohort(){
   rows.push(rowHtml('All Regions', curTotals, prevTotals, 'font-weight:600; border-top:2px solid var(--border);'));
 
   tbody.innerHTML = rows.join('');
-
-  const chartCur = selectedRegion === '__all__' ? curTotals : (thisWeek.byRegion.get(selectedRegion) || emptyCohortBucket(selectedRegion));
-  const chartPrev = selectedRegion === '__all__' ? prevTotals : (lastWeek.byRegion.get(selectedRegion) || emptyCohortBucket(selectedRegion));
-  if (chartEl) chartEl.innerHTML = renderWowChartHtml(chartCur, chartPrev);
 }
