@@ -1068,9 +1068,20 @@ function saveGmailClientId(){
 // than btoa() directly, which only handles Latin-1.
 function utf8ToBase64(str){
   const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  bytes.forEach(b => { binary += String.fromCharCode(b); });
-  return btoa(binary);
+  // Chunked String.fromCharCode + array-join instead of the old
+  // `binary += String.fromCharCode(b)` per byte — repeated string
+  // concatenation in a loop is O(n) per append in the worst case, O(n^2)
+  // overall for a long string, and this runs on the FULL email
+  // subject/body before every Gmail send (perf pass, 2026-08-28).
+  // 8192-byte chunks stay well under String.fromCharCode/apply's
+  // argument-count ceiling while still cutting the number of
+  // intermediate strings created by ~8192x.
+  const CHUNK = 8192;
+  const parts = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(parts.join(''));
 }
 function encodeHeaderUtf8(str){
   return /^[\x00-\x7F]*$/.test(str) ? str : `=?UTF-8?B?${utf8ToBase64(str)}?=`;
@@ -1558,150 +1569,182 @@ function reportDateRange(includedLeads){
 // issue-flagged population) will ever have an entry, so this naturally
 // only overrides suggestedFollowUp for that population and falls through
 // unchanged for notConnected/stuck/stalled rows.
+//
+// renderReports calls this function TWICE per Generate click — once
+// (line ~1351) to get leadsToPush before the Lead_Followups round-trip,
+// once more (line ~1421) with the real followupLookup once that
+// round-trip finishes. The row-collection below (5 full issueLeads
+// passes, deliberately kept separate per-issue — see each pass's own
+// comment for why) is entirely independent of followupLookup/combineAll,
+// so it produces the IDENTICAL result both times; only the grouping/
+// HTML-building tail below it actually varies (by combineAll, and by
+// which follow-up text followupTextFor resolves per row). Cached here
+// keyed on the `issueLeads` array reference — perf pass (2026-08-28):
+// this used to unconditionally redo all 5 passes (plus
+// currentStalledRowsByRegion's own full scan) on every call, so one
+// Generate click paid for that scan twice. A fresh filter/refresh always
+// creates a brand-new issueLeads array, so the cache invalidates itself
+// correctly the moment the underlying data actually changes.
+let _rwrRowsCacheKey = null;
+let _rwrRowsCache = null;
 function buildRegionWiseReports(combineAll, followupLookup){
   const now = new Date();
   const DIVIDER = '='.repeat(50);
   const SUBDIVIDER = '-'.repeat(50);
   const STUCK_LABEL = ISSUE_PRIORITY.find(r => r.key === 'stageStuck48h').label;
   const followupTextFor = (r) => (followupLookup && followupLookup[String(r.lead_id).trim()]) || suggestedFollowUp(r);
-  let undatableCount = 0, outOfScope = 0;
-  // Fresh for this generation — this path previously never touched the
-  // names dict at all, so reportScopeNotice()'s "NOT IN REPORTS" breakdown
-  // showed whatever a completely different report mode had last left
-  // behind (or nothing, if none had run yet this session).
-  _lastReportOutOfScopeNames = {};
+  let undatableCount, outOfScope, rows, notConnectedRows, stuckRows, warmCloseRows, closedNoCommentRows, stalledByRegion, outOfScopeNames;
 
-  // Collect every flagged lead with its primary reportable issue.
-  // issueLeads is already the per-copy view (see its declaration) — each
-  // RM's own copy judged on its own issue flags, not a combined-across-
-  // copies total, and a customer can only belong to one region in an
-  // email, which this view's own copy already reflects.
-  const rows = [];
-  issueLeads.forEach(l => {
-    const issue = reportableIssueFor(l);
-    if (!issue) {
-      // reportableIssueFor only returns null for an undatable lead (no
-      // parseable lead_assigned_at) or one whose only flag isn't one of the
-      // emailable rules — every emailable flag now reports immediately,
-      // grace-exempt or not (see reportableIssueFor's own comment).
-      const anyFlag = ISSUE_PRIORITY.some(r => l[r.key]);
-      if (anyFlag) undatableCount++;
-      return;
-    }
-    const main = mainRegionFor(effectiveRegion(l));
-    if (!main) {
-      outOfScope++;
-      const raw = String(l.region || '(blank)').trim() || '(blank)';
-      _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
-      return;
-    }
-    rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_assigned_at: l.lead_assigned_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
-  });
+  if (_rwrRowsCacheKey === issueLeads && _rwrRowsCache) {
+    // Cache hit — see this function's own header comment. Every value
+    // below is IDENTICAL to what the row-collection pass would produce
+    // again right now, since issueLeads hasn't changed since it ran.
+    ({ undatableCount, outOfScope, rows, notConnectedRows, stuckRows, warmCloseRows, closedNoCommentRows, stalledByRegion, outOfScopeNames } = _rwrRowsCache);
+    _lastReportOutOfScopeNames = outOfScopeNames;
+  } else {
+    undatableCount = 0; outOfScope = 0;
+    // Fresh for this generation — this path previously never touched the
+    // names dict at all, so reportScopeNotice()'s "NOT IN REPORTS" breakdown
+    // showed whatever a completely different report mode had last left
+    // behind (or nothing, if none had run yet this session).
+    _lastReportOutOfScopeNames = {};
 
-  // Not Connected in 10 Minutes rides along in this same email as its own
-  // trailing section, deliberately collected separately from the pass
-  // above — it's independent of reportableIssueFor/ISSUE_PRIORITY (see the
-  // note on ISSUE_PRIORITY) so it never competes for or masks a lead's
-  // actionable issue, and it can't get lost inside the alphabetically-
-  // sorted issue tally either, since it's appended after that instead of
-  // being one of its entries.
-  const notConnectedRows = [];
-  issueLeads.forEach(l => {
-    if (!l.firstContactBreach) return;
-    const main = mainRegionFor(effectiveRegion(l));
-    if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
-    notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
-  });
+    // Collect every flagged lead with its primary reportable issue.
+    // issueLeads is already the per-copy view (see its declaration) — each
+    // RM's own copy judged on its own issue flags, not a combined-across-
+    // copies total, and a customer can only belong to one region in an
+    // email, which this view's own copy already reflects.
+    rows = [];
+    issueLeads.forEach(l => {
+      const issue = reportableIssueFor(l);
+      if (!issue) {
+        // reportableIssueFor only returns null for an undatable lead (no
+        // parseable lead_assigned_at) or one whose only flag isn't one of the
+        // emailable rules — every emailable flag now reports immediately,
+        // grace-exempt or not (see reportableIssueFor's own comment).
+        const anyFlag = ISSUE_PRIORITY.some(r => l[r.key]);
+        if (anyFlag) undatableCount++;
+        return;
+      }
+      const main = mainRegionFor(effectiveRegion(l));
+      if (!main) {
+        outOfScope++;
+        const raw = String(l.region || '(blank)').trim() || '(blank)';
+        _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
+        return;
+      }
+      rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_assigned_at: l.lead_assigned_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+    });
 
-  // Leads Pending Beyond 48 Hours rides along too, as its own trailing
-  // section — reportableIssueFor picks ONE primary issue per lead, and
-  // Behind on Today's Calls has no age ceiling, so a lead that's both
-  // stuck 48h+ AND behind on today's calls reports as the latter, which
-  // silently hides the 48h+ compliance breach from this combined email
-  // (it still shows fine in its own dashboard section and single-issue
-  // email — this only affects the shared primary-issue pick here). This
-  // second pass catches every stuck lead NOT already the primary pick, so
-  // it's never fully hidden; leads that already surface under their own
-  // "Leads Pending Beyond 48 Hours" entry above aren't duplicated here.
-  const stuckRows = [];
-  issueLeads.forEach(l => {
-    if (!l.stageStuck48h) return;
-    if (reportableIssueFor(l) === STUCK_LABEL) return; // already the primary pick, shown above
-    const main = mainRegionFor(effectiveRegion(l));
-    if (!main) return;
-    stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
-  });
+    // Not Connected in 10 Minutes rides along in this same email as its own
+    // trailing section, deliberately collected separately from the pass
+    // above — it's independent of reportableIssueFor/ISSUE_PRIORITY (see the
+    // note on ISSUE_PRIORITY) so it never competes for or masks a lead's
+    // actionable issue, and it can't get lost inside the alphabetically-
+    // sorted issue tally either, since it's appended after that instead of
+    // being one of its entries.
+    notConnectedRows = [];
+    issueLeads.forEach(l => {
+      if (!l.firstContactBreach) return;
+      const main = mainRegionFor(effectiveRegion(l));
+      if (!main) return; // same out-of-scope handling as the main pass, just not double-counted into its tally
+      notConnectedRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+    });
 
-  // Possible Premature Closes rides along too, as its own trailing section —
-  // closed leads (isLeadClosed) whose most recent logged note across the
-  // whole family (latestFamilyOutcome — same pooling suggestedFollowUp uses)
-  // still reads as engaged rather than a clear no. Not proof the close was
-  // wrong, just a discrepancy worth a second look before it's gone for good.
-  // Independent of reportableIssueFor/ISSUE_PRIORITY — a closed lead never
-  // carries an open-lead SLA flag, so this population never overlaps with
-  // `rows` above.
-  const WARM_CLOSE_OUTCOMES = new Set(['Interested', 'Visit Arranged', 'Visit Completed', 'Details Shared', 'Considering', 'Budget Concern', 'Loan In Process', 'DNP']);
-  // Broking Advisor and Duplicate Lead are legitimate closing reasons on
-  // their own terms — this check exists to catch closes that look
-  // premature despite still sounding engaged, not to second-guess every
-  // closed lead, and neither reason has anything to do with client
-  // interest. Duplicate Lead is the one exception that still needs
-  // substantiating: without the ORIGINAL lead's id cited somewhere in the
-  // comment history, an unverified "duplicate" claim is itself exactly
-  // the kind of thing this section exists to surface, so it still flags —
-  // just with its own distinct reason, independent of the warm-outcome
-  // check below (a "duplicate" comment rarely contains an engaged-sounding
-  // keyword anyway, so relying on that check alone would silently miss it).
-  // Lead ids in this sheet are plain digit strings (e.g. 2145357) — a 6+
-  // digit run anywhere in the comment/closing-comment text is treated as
-  // "an id was cited," without requiring an exact length match.
-  const LEAD_ID_IN_TEXT_RE = /\d{6,}/;
-  const warmCloseRows = [];
-  issueLeads.forEach(l => {
-    if (!isLeadClosed(l)) return;
-    const closingReasonRaw = String(l.lead_closing_reason || l.closing_reason || '').trim();
-    const closingReasonNorm = closingReasonRaw.toLowerCase();
-    if (closingReasonNorm === 'broking advisor') return;
-    if (closingReasonNorm === 'duplicate lead') {
-      const citedText = [combinedCommentsText(l), l.last_comment, l.lead_closing_comment].filter(Boolean).join(' ');
-      if (LEAD_ID_IN_TEXT_RE.test(citedText)) return; // legitimate — original lead id cited
+    // Leads Pending Beyond 48 Hours rides along too, as its own trailing
+    // section — reportableIssueFor picks ONE primary issue per lead, and
+    // Behind on Today's Calls has no age ceiling, so a lead that's both
+    // stuck 48h+ AND behind on today's calls reports as the latter, which
+    // silently hides the 48h+ compliance breach from this combined email
+    // (it still shows fine in its own dashboard section and single-issue
+    // email — this only affects the shared primary-issue pick here). This
+    // second pass catches every stuck lead NOT already the primary pick, so
+    // it's never fully hidden; leads that already surface under their own
+    // "Leads Pending Beyond 48 Hours" entry above aren't duplicated here.
+    stuckRows = [];
+    issueLeads.forEach(l => {
+      if (!l.stageStuck48h) return;
+      if (reportableIssueFor(l) === STUCK_LABEL) return; // already the primary pick, shown above
       const main = mainRegionFor(effectiveRegion(l));
       if (!main) return;
-      warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason: closingReasonRaw, lastNote: '(no original lead id found in the comments)', lastOutcome: 'Duplicate Lead — missing original id', siblingRMs: l.siblingRMs });
-      return;
-    }
-    const latest = latestFamilyOutcome(l);
-    if (!latest || !WARM_CLOSE_OUTCOMES.has(latest.outcome)) return;
-    const main = mainRegionFor(effectiveRegion(l));
-    if (!main) return;
-    const closedReason = closingReasonRaw || '—';
-    warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason, lastNote: latest.comment, lastOutcome: latest.outcome, siblingRMs: l.siblingRMs });
-  });
+      stuckRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+    });
 
-  // Closed with No Comment rides along too, as its own trailing section —
-  // a closed lead with no real narrative ever logged at all (see
-  // hasAnyNarrativeComment/closedWithNoComment in enrichLead — a bare
-  // closing_reason tag doesn't count). Independent of reportableIssueFor/
-  // ISSUE_PRIORITY, same reasoning as Possible Premature Closes above: a
-  // closed lead never carries an open-lead SLA flag, so this population
-  // never overlaps with `rows`.
-  const closedNoCommentRows = [];
-  issueLeads.forEach(l => {
-    if (!l.closedWithNoComment) return;
-    const main = mainRegionFor(effectiveRegion(l));
-    if (!main) return;
-    closedNoCommentRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, closing_reason: l.closing_reason, siblingRMs: l.siblingRMs });
-  });
+    // Possible Premature Closes rides along too, as its own trailing section —
+    // closed leads (isLeadClosed) whose most recent logged note across the
+    // whole family (latestFamilyOutcome — same pooling suggestedFollowUp uses)
+    // still reads as engaged rather than a clear no. Not proof the close was
+    // wrong, just a discrepancy worth a second look before it's gone for good.
+    // Independent of reportableIssueFor/ISSUE_PRIORITY — a closed lead never
+    // carries an open-lead SLA flag, so this population never overlaps with
+    // `rows` above.
+    const WARM_CLOSE_OUTCOMES = new Set(['Interested', 'Visit Arranged', 'Visit Completed', 'Details Shared', 'Considering', 'Budget Concern', 'Loan In Process', 'DNP']);
+    // Broking Advisor and Duplicate Lead are legitimate closing reasons on
+    // their own terms — this check exists to catch closes that look
+    // premature despite still sounding engaged, not to second-guess every
+    // closed lead, and neither reason has anything to do with client
+    // interest. Duplicate Lead is the one exception that still needs
+    // substantiating: without the ORIGINAL lead's id cited somewhere in the
+    // comment history, an unverified "duplicate" claim is itself exactly
+    // the kind of thing this section exists to surface, so it still flags —
+    // just with its own distinct reason, independent of the warm-outcome
+    // check below (a "duplicate" comment rarely contains an engaged-sounding
+    // keyword anyway, so relying on that check alone would silently miss it).
+    // Lead ids in this sheet are plain digit strings (e.g. 2145357) — a 6+
+    // digit run anywhere in the comment/closing-comment text is treated as
+    // "an id was cited," without requiring an exact length match.
+    const LEAD_ID_IN_TEXT_RE = /\d{6,}/;
+    warmCloseRows = [];
+    issueLeads.forEach(l => {
+      if (!isLeadClosed(l)) return;
+      const closingReasonRaw = String(l.lead_closing_reason || l.closing_reason || '').trim();
+      const closingReasonNorm = closingReasonRaw.toLowerCase();
+      if (closingReasonNorm === 'broking advisor') return;
+      if (closingReasonNorm === 'duplicate lead') {
+        const citedText = [combinedCommentsText(l), l.last_comment, l.lead_closing_comment].filter(Boolean).join(' ');
+        if (LEAD_ID_IN_TEXT_RE.test(citedText)) return; // legitimate — original lead id cited
+        const main = mainRegionFor(effectiveRegion(l));
+        if (!main) return;
+        warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason: closingReasonRaw, lastNote: '(no original lead id found in the comments)', lastOutcome: 'Duplicate Lead — missing original id', siblingRMs: l.siblingRMs });
+        return;
+      }
+      const latest = latestFamilyOutcome(l);
+      if (!latest || !WARM_CLOSE_OUTCOMES.has(latest.outcome)) return;
+      const main = mainRegionFor(effectiveRegion(l));
+      if (!main) return;
+      const closedReason = closingReasonRaw || '—';
+      warmCloseRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', closedReason, lastNote: latest.comment, lastOutcome: latest.outcome, siblingRMs: l.siblingRMs });
+    });
 
-  // Stalled Leads: every lead currently stalled per
-  // currentStalledRowsByRegion — computeStalledLeads' own always-current
-  // check (no comment in 6h, or never-commented with attempts unchanged
-  // vs ~6h ago, for anything assigned 2+ days ago), read fresh every time
-  // this builds — rides along as this email's first, most important
-  // section every time, not just on repeat. Keyed by mainRegion
-  // (groupItemsByReportRegion already resolves it that way), so it lines
-  // up directly with `key` below without a second resolution pass.
-  const stalledByRegion = currentStalledRowsByRegion();
+    // Closed with No Comment rides along too, as its own trailing section —
+    // a closed lead with no real narrative ever logged at all (see
+    // hasAnyNarrativeComment/closedWithNoComment in enrichLead — a bare
+    // closing_reason tag doesn't count). Independent of reportableIssueFor/
+    // ISSUE_PRIORITY, same reasoning as Possible Premature Closes above: a
+    // closed lead never carries an open-lead SLA flag, so this population
+    // never overlaps with `rows`.
+    closedNoCommentRows = [];
+    issueLeads.forEach(l => {
+      if (!l.closedWithNoComment) return;
+      const main = mainRegionFor(effectiveRegion(l));
+      if (!main) return;
+      closedNoCommentRows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', TL: l.TL || '', lead_assigned_at: l.lead_assigned_at, closing_reason: l.closing_reason, siblingRMs: l.siblingRMs });
+    });
+
+    // Stalled Leads: every lead currently stalled per
+    // currentStalledRowsByRegion — computeStalledLeads' own always-current
+    // check (no comment in 6h, or never-commented with attempts unchanged
+    // vs ~6h ago, for anything assigned 2+ days ago), read fresh every time
+    // this builds — rides along as this email's first, most important
+    // section every time, not just on repeat. Keyed by mainRegion
+    // (groupItemsByReportRegion already resolves it that way), so it lines
+    // up directly with `key` below without a second resolution pass.
+    stalledByRegion = currentStalledRowsByRegion();
+
+    outOfScopeNames = _lastReportOutOfScopeNames;
+    _rwrRowsCache = { undatableCount, outOfScope, rows, notConnectedRows, stuckRows, warmCloseRows, closedNoCommentRows, stalledByRegion, outOfScopeNames };
+    _rwrRowsCacheKey = issueLeads;
+  }
 
   _lastReportUndatable = undatableCount;
   _lastReportOutOfScope = outOfScope;

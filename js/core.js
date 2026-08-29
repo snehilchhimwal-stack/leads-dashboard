@@ -1161,26 +1161,50 @@ function businessMinutesBetween(start, end){
   return totalMs / 60000;
 }
 
+// Memoized by the exact string parsed — same rationale/pattern as
+// inferOutcome's own cache further down: the SAME date string (e.g. one
+// lead's lead_assigned_at) gets parsed repeatedly across dozens of call
+// sites in this codebase (enrichLead, passesFilters, snapshotSlaHistory,
+// every tab's own history-walking functions — parseDate has ~60 call
+// sites total) within a single render pass, and the regex-based parse
+// below is real work per call. Date-object inputs are NOT cached — that
+// path is already O(1) with no regex, so caching it would add lookup
+// overhead for no benefit. Safe to share the returned Date object across
+// every caller: confirmed nothing in this codebase ever mutates a
+// parseDate() result in place (the one Date .setDate() call in this file,
+// defaultDateRangeValue, operates on a fresh `new Date(now)` clone, never
+// on a parsed value) — a mutated shared object would otherwise corrupt
+// every other caller holding the same cached reference.
+const _parseDateCache = new Map();
 function parseDate(v){
   if (!v) return null;
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
   const s = String(v).trim();
   if (!s) return null;
+  const cached = _parseDateCache.get(s);
+  if (cached !== undefined) return cached;
 
   // "2026-08-13 10:18:05" / "2026-08-13T10:18" carry no timezone. That is the
   // sheet's and the comment log's own format, and it is IST — handing it to
   // `new Date()` would resolve it in the browser's zone instead.
   const dt = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if (dt) return istWallToInstant(+dt[1], +dt[2] - 1, +dt[3], +dt[4], +dt[5], +(dt[6] || 0));
-
-  const d0 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (d0) return istWallToInstant(+d0[1], +d0[2] - 1, +d0[3], 0, 0, 0);
-
-  // Anything with an explicit zone (trailing Z, +05:30) is already absolute —
-  // this is the path our own toISOString() round-trip takes, so it must NOT
-  // be shifted again.
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
+  let result;
+  if (dt) {
+    result = istWallToInstant(+dt[1], +dt[2] - 1, +dt[3], +dt[4], +dt[5], +(dt[6] || 0));
+  } else {
+    const d0 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (d0) {
+      result = istWallToInstant(+d0[1], +d0[2] - 1, +d0[3], 0, 0, 0);
+    } else {
+      // Anything with an explicit zone (trailing Z, +05:30) is already
+      // absolute — this is the path our own toISOString() round-trip
+      // takes, so it must NOT be shifted again.
+      const d = new Date(s);
+      result = isNaN(d.getTime()) ? null : d;
+    }
+  }
+  _parseDateCache.set(s, result);
+  return result;
 }
 
 function canonicalStage(stage){
@@ -1332,8 +1356,11 @@ function enrichLead(l){
   // now: "connected" (last_connect / last_connect_time) is a stronger
   // signal than call_attempts, which only proves a dial was placed, not
   // that the customer actually picked up.
-  const hasConnected = !!(String(l.last_connect || '').trim() || parseDate(l.last_connect_time));
+  // connectDate computed once and reused for hasConnected below — this
+  // used to call parseDate(l.last_connect_time) twice per lead, every
+  // render (perf pass, 2026-08-28).
   const connectDate = parseDate(l.last_connect_time);
+  const hasConnected = !!(String(l.last_connect || '').trim() || connectDate);
 
   // Rule 1: first contact within 10 minutes of assignment — measured in
   // WORKING minutes only, so time outside 9 AM–7 PM doesn't count against
