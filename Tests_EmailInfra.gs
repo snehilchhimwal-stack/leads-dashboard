@@ -85,6 +85,21 @@ function runEmailInfraTests_() {
     TestAssertEqual_(resolution.results.length, 0, 'resolveRecipientEmailsForRegion_: no buckets when nothing resolves and there is no legacy fallback');
     TestAssertEqual_(resolution.trulyUnresolved.length, 1, 'resolveRecipientEmailsForRegion_: correctly reports the RM as truly unresolved');
 
+    // ---- resolveRecipientEmailsForRegion_: opts.hierarchyData + the new
+    // chLevelRms field on its own result (perf pass, 2026-08-28) — a
+    // caller that loads RM_Hierarchy/Manager_Directory once per run and
+    // threads it through must get output byte-identical to the normal
+    // (internally-loading) path, and must be able to read chLevelRms
+    // straight off the result without a second
+    // resolveRecipientBucketsForRms_ call (see AllIssuesEmailer.gs's own
+    // fix for the real double-call this closes). ----
+    const preloadedHierarchy = loadRmHierarchyAndEmails_(ss);
+    const noPreload = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Test CH Self'], {}, { fireAlerts: false });
+    const withHierarchyPreload = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Test CH Self'], {}, { fireAlerts: false, hierarchyData: preloadedHierarchy });
+    TestAssertEqual_(JSON.stringify(withHierarchyPreload), JSON.stringify(noPreload), 'resolveRecipientEmailsForRegion_: opts.hierarchyData produces output byte-identical to omitting it');
+    TestAssertEqual_(noPreload.chLevelRms.length, 1, 'resolveRecipientEmailsForRegion_: now returns chLevelRms directly in its result, so a caller (AllIssuesEmailer.gs) never has to call resolveRecipientBucketsForRms_ a second time just to get it');
+    TestAssertEqual_(noPreload.chLevelRms[0].chEmail, TEST_EMAIL_CH_, 'resolveRecipientEmailsForRegion_: the returned chLevelRms entry is the real self-holding CH data, not a stub');
+
     // ---- TEST_MODE_OVERRIDE_EMAIL_ redirection ----
     TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
     resolution = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Test RM One'], {}, { fireAlerts: false });

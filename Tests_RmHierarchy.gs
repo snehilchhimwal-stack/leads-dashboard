@@ -83,6 +83,17 @@ function runRmHierarchyTests_() {
     TestAssertEqual_(resolved.unresolved.length, 1, 'resolveRecipientBucketsForRms_: ...plus the right number of unresolved entries');
     TestAssertEqual_(resolved.chLevelRms.length, 1, 'resolveRecipientBucketsForRms_: ...plus the right number of chLevelRms entries, all in one pass');
 
+    // ---- resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) —
+    // perf pass (2026-08-28): passing an already-loaded hierarchyData
+    // must produce output IDENTICAL to the normal path (which loads it
+    // internally via loadRmHierarchyAndEmails_), for every branch at
+    // once — this is the real equivalence the "load once per run,
+    // thread it through" optimization depends on. ----
+    const mixedRmNames = ['Test RM One', 'Test RM Three', 'Test RM Orphan', 'Test CH Self', 'Test Ceo Self'];
+    const withoutPreload = resolveRecipientBucketsForRms_(ss, mixedRmNames);
+    const withPreload = resolveRecipientBucketsForRms_(ss, mixedRmNames, hierarchyData);
+    TestAssertEqual_(JSON.stringify(withPreload), JSON.stringify(withoutPreload), 'resolveRecipientBucketsForRms_: passing a pre-loaded hierarchyData produces output byte-identical to the normal (internally-loading) path, across every branch (normal buckets, unresolved, chLevelRms self-holding, and leadership self-holding) at once');
+
     // ---- ensureRmHierarchySheet_ / ensureManagerDirectorySheet_: fresh creation ----
     const freshSs = TestMockSpreadsheet_({});
     const freshSheet = ensureRmHierarchySheet_(freshSs);

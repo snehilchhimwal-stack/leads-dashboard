@@ -63,6 +63,14 @@ function runMovementTrackerTests_() {
     const lastSnap = lastSnapshotBeforeGs_(priorSs, now);
     TestAssert_(!!lastSnap['C-3'] && lastSnap['C-3'].call_attempts === 4, 'lastSnapshotBeforeGs_: returns the full {atMs, call_attempts} entry, not just the count');
 
+    // ---- buildMovementLogMapsGs_ (perf pass, 2026-08-28) — reads
+    // Movement_Log ONCE and must produce results IDENTICAL to calling
+    // buildTodayCallBaselineGs_ and lastSnapshotBeforeGs_ separately. ----
+    const combined = buildMovementLogMapsGs_(priorSs, now);
+    TestAssertEqual_(combined.baselineMap['C-3'], baseline['C-3'], 'buildMovementLogMapsGs_: baselineMap matches buildTodayCallBaselineGs_\'s own separate result exactly');
+    TestAssertEqual_(combined.lastSnapshotMap['C-3'].call_attempts, lastSnap['C-3'].call_attempts, 'buildMovementLogMapsGs_: lastSnapshotMap matches lastSnapshotBeforeGs_\'s own separate result exactly');
+    TestAssertEqual_(combined.lastSnapshotMap['C-3'].atMs, lastSnap['C-3'].atMs, 'buildMovementLogMapsGs_: lastSnapshotMap\'s atMs matches too, not just call_attempts');
+
     // ---- pruneMovementLog_: retention cutoff + row-headroom shrink ----
     // pruneMovementLog_ computes its cutoff from the REAL wall clock
     // (Date.now()), not an injectable `now` — so these two rows must be
