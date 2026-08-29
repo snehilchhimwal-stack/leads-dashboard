@@ -131,14 +131,26 @@ function sendAllIssuesEmails() {
   const win = allIssuesWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss); // EmailInfra.gs
   const recipients = loadRegionRecipients_(ss); // EmailInfra.gs — legacy fallback, same as overnight
-  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
+  // Loaded ONCE and threaded through resolveRecipientEmailsForRegion_ below
+  // (via opts.hierarchyData) instead of letting each region's own call
+  // re-load RM_Hierarchy + Manager_Directory from scratch — see
+  // resolveRecipientBucketsForRms_'s own comment (RmHierarchy.gs).
+  const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'loadRmHierarchyAndEmails_');
   // Real per-lead baseline for the "no comment logged" Suggested Follow-up
   // tier (noCommentFollowUpGs_) — WITHOUT this, every no-comment lead gets
   // the same generic "connect and log the outcome" line regardless of
   // whether the RM has actually been dialing (this was missing from the
   // first version of this script — sendOvernightMorningEmails always
   // computes this and passes the real per-lead entry; this now does too).
-  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
+  // buildMovementLogMapsGs_ (MovementTracker.gs), not the two separate
+  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ calls this used to
+  // make — those each did their own full read of Movement_Log (the
+  // largest sheet in this project), so calling both back to back paid
+  // for that read TWICE; this reads it once and derives both maps from
+  // the same in-memory rows.
+  const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
+  const baselineMap = movementMaps.baselineMap;
+  const lastSnapshotMap = movementMaps.lastSnapshotMap;
 
   // Flat candidate list first, deduped by customer identity, THEN grouped
   // by region — same reasoning as sendOvernightMorningEmails: a customer
@@ -239,13 +251,17 @@ function sendAllIssuesEmails() {
       if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
       rmToLeads[l.RM].push(l);
     });
-    const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: false, rmToLeads: rmToLeads, dateLabel: dateLabel });
+    const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: false, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData });
 
     // CH-level self-holding/reports-all-the-way-up RMs — own diversion,
     // same split as the overnight script (resolveRecipientEmailsForRegion_
     // itself doesn't fire this alert when fireAlerts:false, so it's called
-    // explicitly here instead).
-    notifyChLevelIssuesGs_(region, resolveRecipientBucketsForRms_(ss, rmNames).chLevelRms, rmToLeads, win);
+    // explicitly here instead). Reads resolution.chLevelRms (which the
+    // call just above already computed) instead of calling
+    // resolveRecipientBucketsForRms_ a second time with identical
+    // arguments — that second call used to double this file's own share
+    // of the per-region RM_Hierarchy/Manager_Directory reload cost.
+    notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win);
 
     resolution.trulyUnresolved.forEach(function (u) {
       (rmToLeads[u.rmName] || []).forEach(function (l) {

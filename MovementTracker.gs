@@ -175,19 +175,21 @@ const SLA_HISTORY_COLUMNS_ = [
   'snapshot_at', 'source',
 ];
 
-// Shared scan behind buildTodayCallBaselineGs_ and lastSnapshotBeforeGs_
-// below — reads Movement_Log's EXISTING rows (this run hasn't appended
-// its own yet) and, for every identity key (client_id, else lead_id),
-// keeps the LATEST snapshot strictly before `cutoffMs` as
-// {atMs, call_attempts}. The two callers differ only in what they pass
-// as the cutoff — see each one's own comment for why that difference
-// matters.
-function _lastMovementLogSnapshotByKeyGs_(ss, cutoffMs) {
-  const map = {}; // key -> {atMs, call_attempts}
+// Raw parsed Movement_Log rows — {key, atMs, call_attempts} per row, NOT
+// yet collapsed to "latest per key". Split out from the old
+// _lastMovementLogSnapshotByKeyGs_ (2026-08-28, perf pass) so the actual
+// Sheets read happens in exactly ONE place: every caller that needs the
+// "latest snapshot before some cutoff" answer for MORE than one cutoff
+// (every email-send path does — see buildMovementLogMapsGs_ below) can
+// now read Movement_Log — the largest sheet in this project — ONCE and
+// derive every cutoff's answer from the same in-memory array, instead of
+// each cutoff triggering its own full getRange().getValues() round-trip.
+function _readMovementLogRowsGs_(ss) {
+  const out = [];
   const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
-  if (!sheet) return map;
+  if (!sheet) return out;
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return map;
+  if (lastRow < 2) return out;
 
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
@@ -195,21 +197,43 @@ function _lastMovementLogSnapshotByKeyGs_(ss, cutoffMs) {
   const leadIdCol = headers.indexOf('lead_id');
   const clientIdCol = headers.indexOf('client_id');
   const callAttemptsCol = headers.indexOf('call_attempts');
-  if (snapAtCol === -1 || callAttemptsCol === -1) return map;
+  if (snapAtCol === -1 || callAttemptsCol === -1) return out;
 
   const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   values.forEach(function (row) {
     const ts = row[snapAtCol];
     if (!(ts instanceof Date)) return;
-    const atMs = ts.getTime();
-    if (atMs >= cutoffMs) return;
     const clientId = String(row[clientIdCol] || '').trim();
     const leadId = String(row[leadIdCol] || '').trim();
-    const key = clientId || ('l:' + leadId);
-    const cur = map[key];
-    if (!cur || atMs > cur.atMs) map[key] = { atMs: atMs, call_attempts: Number(row[callAttemptsCol]) || 0 };
+    out.push({ key: clientId || ('l:' + leadId), atMs: ts.getTime(), call_attempts: Number(row[callAttemptsCol]) || 0 });
+  });
+  return out;
+}
+
+// For every identity key, keeps the LATEST row strictly before `cutoffMs`
+// as {atMs, call_attempts}. Pure in-memory pass over rows already read by
+// _readMovementLogRowsGs_ — no Sheets calls here, so a caller applying
+// more than one cutoff (see buildMovementLogMapsGs_) can call this
+// cheaply as many times as needed against the SAME read.
+function _collapseLatestByKeyGs_(rows, cutoffMs) {
+  const map = {};
+  rows.forEach(function (r) {
+    if (r.atMs >= cutoffMs) return;
+    const cur = map[r.key];
+    if (!cur || r.atMs > cur.atMs) map[r.key] = { atMs: r.atMs, call_attempts: r.call_attempts };
   });
   return map;
+}
+
+// Single-cutoff convenience wrapper — same signature/behavior as before
+// this was split into _readMovementLogRowsGs_ + _collapseLatestByKeyGs_.
+// Kept for the one caller that only ever needs ONE cutoff
+// (buildTodayCallBaselineGs_'s own use inside writeSlaHistorySnapshot_/
+// snapshotOpenLeads_, which never also needs lastSnapshotBeforeGs_ in the
+// same run) — a caller needing BOTH should use buildMovementLogMapsGs_
+// below instead, to avoid two separate reads.
+function _lastMovementLogSnapshotByKeyGs_(ss, cutoffMs) {
+  return _collapseLatestByKeyGs_(_readMovementLogRowsGs_(ss), cutoffMs);
 }
 
 // Each lead's call_attempts as of the latest snapshot strictly before
@@ -240,6 +264,24 @@ function buildTodayCallBaselineGs_(ss, beforeDate) {
 // exclude it.
 function lastSnapshotBeforeGs_(ss, beforeDate) {
   return _lastMovementLogSnapshotByKeyGs_(ss, beforeDate.getTime());
+}
+
+// Both maps at once, from a SINGLE Movement_Log read — every email-send
+// path (OvernightEmailer.gs's morning + follow-up runs,
+// AllIssuesEmailer.gs's run) needs both buildTodayCallBaselineGs_'s and
+// lastSnapshotBeforeGs_'s answers together, and previously called each
+// separately, paying for Movement_Log's full read TWICE per run. The two
+// cutoffs are genuinely different (start-of-today vs strictly-before-now)
+// so neither map can be derived from the other — but both can be derived
+// from the SAME raw rows, which is the actual expensive part (the Sheets
+// round-trip), not the in-memory collapse.
+function buildMovementLogMapsGs_(ss, now) {
+  const rows = _readMovementLogRowsGs_(ss);
+  const todayStart = new Date(istDayKeyGs_(now) + 'T00:00:00+05:30').getTime();
+  const detailedBaseline = _collapseLatestByKeyGs_(rows, todayStart);
+  const baselineMap = {};
+  Object.keys(detailedBaseline).forEach(function (key) { baselineMap[key] = detailedBaseline[key].call_attempts; });
+  return { baselineMap: baselineMap, lastSnapshotMap: _collapseLatestByKeyGs_(rows, now.getTime()) };
 }
 
 function ensureSlaHistorySheet_(ss) {

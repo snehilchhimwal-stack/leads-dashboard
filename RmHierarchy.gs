@@ -834,8 +834,19 @@ function lookupRmChain_(byRmNameLower, rmName) {
   return undefined;
 }
 
-function resolveRecipientBucketsForRms_(ss, rmNames) {
-  const data = loadRmHierarchyAndEmails_(ss);
+// `hierarchyData`, when passed, is used INSTEAD OF calling
+// loadRmHierarchyAndEmails_(ss) here — perf pass (2026-08-28): this
+// function used to unconditionally reload RM_Hierarchy + Manager_Directory
+// (2 full-sheet reads plus 2 ensure*Sheet_ existence checks) EVERY call,
+// and it's called once PER REGION from every email-send path — for an
+// 11-region run that's ~44 Sheets calls re-fetching data that's static
+// for the whole run, instead of loading it once. Callers that loop over
+// several regions in one run (sendOvernightMorningEmails,
+// sendAllIssuesEmails) now load it once and pass it through; anything
+// that still omits it (a one-off manual/debug call) keeps working exactly
+// as before, just with its own fresh load.
+function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
+  const data = hierarchyData || loadRmHierarchyAndEmails_(ss);
   const buckets = {}; // lowercased primaryName -> { primaryName, primaryEmail, primaryRole, ccSet, rmNames }
   const unresolved = [];
   const chLevelRms = [];

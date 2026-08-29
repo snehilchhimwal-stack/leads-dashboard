@@ -442,13 +442,22 @@ function sendOvernightMorningEmails() {
   const win = overnightWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const recipients = loadRegionRecipients_(ss);
-  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (MovementTracker.gs)
-  // each read the whole Movement_Log tab — wrapped at the call site
-  // rather than editing that shared file, same retry reasoning as
-  // readLeadsTab_ above. Detailed (keeps each entry's snapshot timestamp)
+  // Loaded ONCE here and threaded through resolveRecipientEmailsForRegion_
+  // below (via opts.hierarchyData) instead of letting each region's own
+  // call re-load RM_Hierarchy + Manager_Directory from scratch — those are
+  // static for the whole run, so re-loading per region (11 regions x 2
+  // sheets) was 22 avoidable Sheets calls. See
+  // resolveRecipientBucketsForRms_'s own comment (RmHierarchy.gs).
+  const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'loadRmHierarchyAndEmails_');
+  // buildMovementLogMapsGs_ (MovementTracker.gs) reads Movement_Log — the
+  // largest sheet in this project — ONCE and derives both maps from that
+  // one read, instead of the two separate buildTodayCallBaselineGs_/
+  // lastSnapshotBeforeGs_ calls this used to make (each of which did its
+  // own full read). Detailed (keeps each entry's snapshot timestamp)
   // feeds noCommentFollowUpGs_ (FollowupEngine.gs) below.
-  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
-  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
+  const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
+  const baselineMap = movementMaps.baselineMap;
+  const lastSnapshotMap = movementMaps.lastSnapshotMap;
 
   // Flat candidate list first, deduped by customer identity below, THEN
   // grouped by region — a customer held by more than one RM at once
@@ -585,7 +594,7 @@ function sendOvernightMorningEmails() {
       if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
       rmToLeads[l.RM].push(l);
     });
-    const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel });
+    const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData });
 
     // RMs with no resolvable recipient anywhere AND no Region_Recipients
     // fallback either — their leads got no automated email at all this
@@ -639,24 +648,40 @@ function pushUnresolvedToLeadFollowups_(ss, entries) {
 
   return withRetry_(function () {
     const lastRow = sheet.getLastRow();
-    const rowNumberByLeadId = {};
-    if (lastRow >= 2) {
-      sheet.getRange(2, 1, lastRow - 1, 1).getValues().forEach(function (r, i) {
-        const id = String((r && r[0]) || '').trim();
-        if (id) rowNumberByLeadId[id] = i + 2;
-      });
-    }
+    const rowIndexByLeadId = {}; // lead_id -> 0-based offset into existingValues
+    const dataRowCount = lastRow >= 2 ? lastRow - 1 : 0;
+    // Read the whole existing range ONCE (columns A-H) — perf pass
+    // (2026-08-28): the old version wrote each entry with up to 3
+    // separate setValues() calls (or one appendRow()), so a run with N
+    // unresolved leads cost up to ~3N Sheets round-trips. Reading once,
+    // patching the matched rows in memory, and writing back in at most 2
+    // batched calls (existing-row updates + new-row appends) does the
+    // same upsert in O(1) Sheets calls instead of O(N).
+    const existingValues = dataRowCount > 0 ? sheet.getRange(2, 1, dataRowCount, 8).getValues() : [];
+    existingValues.forEach(function (r, i) {
+      const id = String((r && r[0]) || '').trim();
+      if (id) rowIndexByLeadId[id] = i;
+    });
+
     const updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+    const newRows = [];
+    let existingChanged = false;
     entries.forEach(function (e) {
-      const rowNum = rowNumberByLeadId[e.lead_id];
-      if (rowNum) {
-        sheet.getRange(rowNum, 1, 1, 5).setValues([[e.lead_id, e.region, e.RM, e.issue, e.comments]]);
-        sheet.getRange(rowNum, 7, 1, 1).setValues([[updatedAt]]);
-        sheet.getRange(rowNum, 8, 1, 1).setValues([[e.comments]]);
+      const idx = rowIndexByLeadId[e.lead_id];
+      if (idx !== undefined) {
+        // Column F (index 5, "suggested_followup") is deliberately
+        // preserved untouched — same as the original's column-skipping
+        // writes — that column is filled by a human or the dashboard's
+        // own Generate flow, never by this automated push.
+        existingValues[idx] = [e.lead_id, e.region, e.RM, e.issue, e.comments, existingValues[idx][5], updatedAt, e.comments];
+        existingChanged = true;
       } else {
-        sheet.appendRow([e.lead_id, e.region, e.RM, e.issue, e.comments, '', updatedAt, e.comments]);
+        newRows.push([e.lead_id, e.region, e.RM, e.issue, e.comments, '', updatedAt, e.comments]);
       }
     });
+
+    if (existingChanged) sheet.getRange(2, 1, existingValues.length, 8).setValues(existingValues);
+    if (newRows.length) sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
     return true;
   }, 'pushUnresolvedToLeadFollowups_');
 }
@@ -815,12 +840,13 @@ function sendOvernightFollowupEmails() {
   if (!todaysRuns.length) return;
 
   const { colIndex, dataRows } = readLeadsTab_(ss);
-  // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_ (MovementTracker.gs)
-  // each read the whole Movement_Log tab — wrapped at the call site
-  // rather than editing that shared file, same retry reasoning as
-  // readLeadsTab_ above. Detailed feeds noCommentFollowUpGs_.
-  const baselineMap = withRetry_(function () { return buildTodayCallBaselineGs_(ss, now); }, 'buildTodayCallBaselineGs_');
-  const lastSnapshotMap = withRetry_(function () { return lastSnapshotBeforeGs_(ss, now); }, 'lastSnapshotBeforeGs_');
+  // buildMovementLogMapsGs_ (MovementTracker.gs) reads Movement_Log ONCE
+  // and derives both maps from that one read — see
+  // sendOvernightMorningEmails' identical comment above. Detailed feeds
+  // noCommentFollowUpGs_.
+  const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
+  const baselineMap = movementMaps.baselineMap;
+  const lastSnapshotMap = movementMaps.lastSnapshotMap;
   const byLeadId = {};
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
@@ -1010,6 +1036,11 @@ function backfillTodaysOvernightLogRecipientsNow() {
     if (leadId) rmByLeadId[leadId] = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
   });
   const legacyRecipients = loadRegionRecipients_(ss);
+  // Loaded ONCE, same reasoning as the real send paths (see
+  // resolveRecipientBucketsForRms_'s own comment) — this loop can touch
+  // several rows/regions, each of which used to independently reload
+  // RM_Hierarchy + Manager_Directory from scratch.
+  const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'loadRmHierarchyAndEmails_');
 
   let filled = 0, skippedAlready = 0, skippedNoRms = 0, skippedUnresolved = 0;
   logRows.forEach(function (r, i) {
@@ -1040,7 +1071,7 @@ function backfillTodaysOvernightLogRecipientsNow() {
     // No opts passed — fireAlerts stays false, so re-running this backfill
     // (safe/idempotent by design) can't also re-fire a real CH-level or
     // "no recipient" alert every time.
-    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients).results;
+    const recEmails = resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, { hierarchyData: hierarchyData }).results;
     if (!recEmails.length) { skippedUnresolved++; return; }
     if (recEmails.length > 1) {
       Logger.log('Backfill for ' + region + ' row ' + (i + 2) + ' resolved to ' + recEmails.length + ' buckets instead of 1 — using the first; the RM list reconstructed from lead_ids_json may not exactly match the original bucket.');

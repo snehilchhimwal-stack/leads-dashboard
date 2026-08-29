@@ -285,17 +285,26 @@ function ensureRegionRecipientsSheet_(ss) {
 // opts.rmToLeads (optional, RM name -> array of full lead objects) and
 // opts.dateLabel (optional, "d MMM yyyy" string) — only used to pass
 // through to the CH-level alert so it can send a full per-lead report,
-// not just a bare lead-ID list. Fine to omit both.
-// Returns { results: [...], trulyUnresolved: [{rmName, reason}] } — RMs
-// with NO resolvable recipient AND no Region_Recipients fallback either,
-// so their leads got no automated email at all this run. Callers with
-// fireAlerts on should fold these into the per-lead "not sent" report
-// (notifyLeadSendFailuresGs_ above) instead of alerting here directly.
+// not just a bare lead-ID list. Fine to omit both. opts.hierarchyData
+// (optional, the object loadRmHierarchyAndEmails_ returns) — pass this
+// when a caller already loaded it once for the whole run (see
+// resolveRecipientBucketsForRms_'s own comment on why); omitted, this
+// falls back to a fresh per-call load exactly as before.
+// Returns { results: [...], trulyUnresolved: [{rmName, reason}],
+// chLevelRms: [...] } — RMs with NO resolvable recipient AND no
+// Region_Recipients fallback either, so their leads got no automated
+// email at all this run. Callers with fireAlerts on should fold these
+// into the per-lead "not sent" report (notifyLeadSendFailuresGs_ above)
+// instead of alerting here directly. chLevelRms is returned so a caller
+// that needs it directly (AllIssuesEmailer.gs's own CH-level report)
+// doesn't have to call resolveRecipientBucketsForRms_ a second time just
+// to get it — see that call site's own comment.
 function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
   const fireAlerts = !!(opts && opts.fireAlerts);
   const rmToLeads = (opts && opts.rmToLeads) || {};
   const dateLabel = (opts && opts.dateLabel) || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
-  const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
+  const hierarchyData = opts && opts.hierarchyData;
+  const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
     return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
@@ -335,10 +344,10 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
     const testResults = results.map(function (r) {
       return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole, originalTo: r.to, originalCc: r.cc };
     });
-    return { results: testResults, trulyUnresolved: trulyUnresolved };
+    return { results: testResults, trulyUnresolved: trulyUnresolved, chLevelRms: resolved.chLevelRms };
   }
 
-  return { results: results, trulyUnresolved: trulyUnresolved };
+  return { results: results, trulyUnresolved: trulyUnresolved, chLevelRms: resolved.chLevelRms };
 }
 
 function loadRegionRecipients_(ss) {
