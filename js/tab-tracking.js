@@ -40,8 +40,11 @@ function computeIssueTalliesByRun(regionFilter){
   // underlying records), this only decides how many DISTINCT customers
   // that adds up to.
   const byRunCustomers = new Map(); // atMs -> Map(customerKey -> {at, isOpenLead, flags})
+  // Read + parsed ONCE for this whole scan, not once per snapshot row —
+  // see currentDateFilterRange's own comment (tab-movement.js).
+  const dateRange = currentDateFilterRange();
   movementSnapshots.forEach(rec => {
-    if (!passesMovementFilters(rec)) return;
+    if (!passesMovementFilters(rec, dateRange)) return;
     if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
 
     const atMs = rec.snapshot_at.getTime();
@@ -116,10 +119,13 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
   // themselves stay judged independently elsewhere, this only decides how
   // many distinct customers the fixed cohort adds up to.
   const byCustomer = new Map(); // customerKey -> {fromSeen, toSeen, fromFlags, toFlags}
+  // Read + parsed ONCE for this whole scan — see currentDateFilterRange's
+  // own comment (tab-movement.js).
+  const dateRange = currentDateFilterRange();
   movementSnapshots.forEach(rec => {
     const atMs = rec.snapshot_at.getTime();
     if (atMs !== fromMs && atMs !== toMs) return;
-    if (!passesMovementFilters(rec)) return;
+    if (!passesMovementFilters(rec, dateRange)) return;
     if (regionFilter !== '__all__' && mainRegionFor(effectiveRegion(rec)) !== regionFilter) return;
     const leadId = String(rec.lead_id || '').trim();
     if (!leadId) return;
@@ -232,7 +238,10 @@ function computeZeroTo48hCohort(){
 
   byLead.forEach((history, key) => {
     if (!history.length) return;
-    if (!passesMovementFilters(history[0])) return; // Project/Region/TL/Source/Sub-source — date handled below, against created, not snapshot_at
+    // fromDate/toDate already computed just above — passed through so
+    // passesMovementFilters doesn't also re-read + re-parse the same DOM
+    // inputs on every one of these per-lead calls (perf pass, 2026-08-28).
+    if (!passesMovementFilters(history[0], { fromDate, toDate })) return; // Project/Region/TL/Source/Sub-source — date handled below, against created, not snapshot_at
     const created = parseDate(history[0].lead_assigned_at);
     if (!created) return;
     if (fromDate && created < fromDate) return;
@@ -853,6 +862,27 @@ function render48hCohort(){
 // happens to have the dashboard open right now has selected; the on-screen
 // table (renderDailyCohortByRegion) never passes this, so it keeps
 // reflecting the current filters exactly as before.
+// See computeDailyCohortByRegion's own comment on liveByKey for why this
+// is cached (keyed on the allParsedLeads array reference — a WeakMap, so
+// a stale entry is garbage-collected normally once a fresh fetch replaces
+// allParsedLeads, never leaking).
+const _dailyCohortLiveByKeyCacheMap = new WeakMap();
+function _dailyCohortLiveByKeyCache(leadsArr){
+  const cached = _dailyCohortLiveByKeyCacheMap.get(leadsArr);
+  if (cached) return cached;
+  const liveByKey = new Map();
+  leadsArr.forEach(l => {
+    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    liveByKey.set(key, l);
+  });
+  _dailyCohortLiveByKeyCacheMap.set(leadsArr, liveByKey);
+  return liveByKey;
+}
+// See the `entries` build inside computeDailyCohortByRegion for how this
+// is used — keyed on the byLead Map reference (buildMovementHistories'
+// own cached result).
+const _dailyCohortEntriesCacheMap = new WeakMap();
+
 function computeDailyCohortByRegion(dateKey, opts){
   if (!dateKey) return null;
   const ignoreFilters = !!(opts && opts.ignoreFilters);
@@ -863,11 +893,16 @@ function computeDailyCohortByRegion(dateKey, opts){
   const byLead = buildMovementHistories();
   const nowMs = Date.now();
   const sameDayDeadlineMs = Math.min(dayEnd.getTime(), nowMs);
-  const liveByKey = new Map();
-  allParsedLeads.forEach(l => {
-    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
-    liveByKey.set(key, l);
-  });
+  // liveByKey (and the `entries` merge just below, which is built purely
+  // from liveByKey + byLead) are cached across calls, keyed on both input
+  // references — computeWeekOverWeekCohort calls this function once PER
+  // DAY in a 14-day window, plus renderDailyCohortByRegion calls it once
+  // more directly, and every one of those calls used to rebuild the same
+  // liveByKey map from the whole allParsedLeads array from scratch (perf
+  // pass, 2026-08-28). A fresh data refresh always creates new
+  // allParsedLeads/byLead references, so the cache invalidates itself
+  // correctly the moment the underlying data actually changes.
+  const liveByKey = _dailyCohortLiveByKeyCache(allParsedLeads);
 
   const byRegion = new Map(); // mainRegion -> stats
   function statsFor(region){
@@ -892,9 +927,19 @@ function computeDailyCohortByRegion(dateKey, opts){
   // just makes sure such a lead reaches that call at all, the same way
   // the Daily_Cohort_History fallback (renderDailyCohortByRegion) catches
   // a DIFFERENT reason a day can go missing (aged out of retention).
-  const entries = [];
-  byLead.forEach((history, key) => entries.push([key, history]));
-  liveByKey.forEach((liveLead, key) => { if (!byLead.has(key)) entries.push([key, []]); });
+  // Cached the same way as liveByKey above, keyed on the byLead Map
+  // reference (and re-checked against liveByKey, in case that ever
+  // changes while byLead somehow doesn't) — this merge is otherwise
+  // rebuilt on every one of computeWeekOverWeekCohort's 14 calls too.
+  let entriesCacheEntry = _dailyCohortEntriesCacheMap.get(byLead);
+  if (!entriesCacheEntry || entriesCacheEntry.liveByKey !== liveByKey) {
+    const built = [];
+    byLead.forEach((history, key) => built.push([key, history]));
+    liveByKey.forEach((liveLead, key) => { if (!byLead.has(key)) built.push([key, []]); });
+    entriesCacheEntry = { liveByKey, entries: built };
+    _dailyCohortEntriesCacheMap.set(byLead, entriesCacheEntry);
+  }
+  const entries = entriesCacheEntry.entries;
 
   let totalCreated = 0;
   entries.forEach(([key, history]) => {

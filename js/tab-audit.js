@@ -37,7 +37,25 @@ const auditState = { periods: new Set(['Today']) };
 // individually rather than via lastCommentAt, because a lead commented on
 // both yesterday and today must answer to BOTH periods — the newest-only
 // timestamp would silently drop the earlier day.
+//
+// Memoized by the lead object reference — this is a pure function of `l`'s
+// own comment/connect fields, and the SAME `l` reference is reused across
+// every one of buildAuditControls' (up to 5) preset scans plus
+// renderAudit/renderActivityByHour's own auditMatches() calls within ONE
+// render pass (up to 7 full passes over `leads` per render before this,
+// each recomputing the same per-lead event list from scratch) — and also
+// across tab-rmtimeline.js's own callers in that same pass. A WeakMap
+// means only the FIRST caller to touch a given lead in a render pass does
+// the real parseActionLog/parseDate work; every later caller gets an O(1)
+// lookup. A fresh render pass always creates new enriched lead objects (a
+// new enrichLead() call per lead), so the cache invalidates itself
+// correctly the moment the underlying data actually changes. Safe: no
+// caller anywhere mutates the returned array or its event objects, only
+// reads/filters/maps them (perf pass, 2026-08-28).
+const _updateEventsForCache = new WeakMap();
 function updateEventsFor(l){
+  const cached = _updateEventsForCache.get(l);
+  if (cached) return cached;
   const events = [];
   const connect = parseDate(l.last_connect_time);
   if (connect) events.push({ kind: 'Call connect', at: connect, by: l.RM || '', text: '' });
@@ -45,7 +63,9 @@ function updateEventsFor(l){
     const at = e.ts ? parseDate(e.ts) : null;
     if (at) events.push({ kind: 'Comment', at, by: e.loggedBy || '', text: e.comment || '' });
   });
-  return events.sort((a, b) => b.at - a.at);
+  const sorted = events.sort((a, b) => b.at - a.at);
+  _updateEventsForCache.set(l, sorted);
+  return sorted;
 }
 
 function activeAuditRanges(){

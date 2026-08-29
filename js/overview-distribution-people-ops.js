@@ -481,7 +481,17 @@ function percentileOfSorted(sorted, p){
 // can share the exact same per-RM computation (SLA score, breach-by-check,
 // median/p90 contact time) instead of re-deriving it — one definition of
 // "SLA score," not two that could quietly drift apart.
+// Cached by the `leads` array reference — a pure function of it, called
+// once by renderRMScoreTable (Overview) and once more by renderMorningBrief
+// (tab-morning.js), which reuses this exact result rather than its own
+// separate aggregation (see that call site's own comment). A fresh filter/
+// refresh always creates a new `leads` array, so the cache invalidates
+// itself correctly the moment the underlying data changes (perf pass,
+// 2026-08-28).
+let _rmScoreRowsCacheSrc = null;
+let _rmScoreRowsCache = null;
 function computeRMScoreRows(){
+  if (_rmScoreRowsCacheSrc === leads) return _rmScoreRowsCache;
   const byRM = {};
   leads.forEach(l => {
     const key = l.RM || 'Unassigned';
@@ -530,7 +540,7 @@ function computeRMScoreRows(){
     }
   });
 
-  return Object.values(byRM).map(b => {
+  const result = Object.values(byRM).map(b => {
     const slaScore = b.open ? Math.round(((b.open - b.breached) / b.open) * 100) : null;
     const sortedContactMins = b.contactMins.slice().sort((x, y) => x - y);
     return Object.assign({}, b, {
@@ -548,6 +558,9 @@ function computeRMScoreRows(){
     if (b.slaScore === null) return -1;
     return a.slaScore - b.slaScore;
   });
+  _rmScoreRowsCacheSrc = leads;
+  _rmScoreRowsCache = result;
+  return result;
 }
 
 function renderRMScoreTable(){

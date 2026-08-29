@@ -340,6 +340,23 @@ function enrichSnapshotCached(rec){
 // assigned on the picked day could still get silently excluded just
 // because the unrelated top-bar range happens to be set to a different
 // window (see computeDailyCohortByRegion's own call site).
+// Reads and parses the two Assigned-date filter inputs ONCE. Callers that
+// check passesMovementFilters() once PER RECORD in a loop — movement
+// history can run to many more rows than the leads list itself — should
+// call this once before their loop and pass the result in via
+// opts.fromDate/opts.toDate (see passesMovementFilters below), instead of
+// letting it re-read the DOM and re-parse on every single call (perf
+// pass, 2026-08-28 — applyMovementFilters just below already gets this
+// right; passesMovementFilters didn't).
+function currentDateFilterRange(){
+  const fromVal = document.getElementById('dateFromInput').value;
+  const toVal = document.getElementById('dateToInput').value;
+  return {
+    fromDate: fromVal ? parseDate(fromVal + ' 00:00:00') : null,
+    toDate: toVal ? parseDate(toVal + ' 23:59:59') : null,
+  };
+}
+
 function passesMovementFilters(rec, opts){
   const skipDateFilter = !!(opts && opts.skipDateFilter);
   const projSel = filterState.project, regSel = filterState.region, tlSel = filterState.TL;
@@ -350,11 +367,13 @@ function passesMovementFilters(rec, opts){
   if (srcSel.size && !Array.from(srcSel).some(s => s.toLowerCase() === String(rec.group_source).trim().toLowerCase())) return false;
   if (bucketSel.size && !bucketSel.has(String(rec.source_bucket).trim())) return false;
   if (skipDateFilter) return true;
-  const fromVal = document.getElementById('dateFromInput').value;
-  const toVal = document.getElementById('dateToInput').value;
-  if (fromVal || toVal) {
-    const fromDate = fromVal ? parseDate(fromVal + ' 00:00:00') : null;
-    const toDate = toVal ? parseDate(toVal + ' 23:59:59') : null;
+  // opts.fromDate/opts.toDate, when provided, are used INSTEAD of reading
+  // + parsing the DOM inputs here — see currentDateFilterRange's own
+  // comment. Omitted (the original call shape), this falls back to
+  // exactly the original per-call DOM read/parse, so any caller not yet
+  // updated keeps working unchanged.
+  const { fromDate, toDate } = (opts && (opts.fromDate !== undefined || opts.toDate !== undefined)) ? opts : currentDateFilterRange();
+  if (fromDate || toDate) {
     const created = parseDate(rec.lead_assigned_at);
     if (!created) return false;
     if (fromDate && created < fromDate) return false;
@@ -628,25 +647,45 @@ function fmtHoursSpan(h){
 // whichever RM's row sorted second. Fixed by splitting each customer
 // bucket back into one chronological sequence per lead_id (copy) before
 // scanning.
+// Memoized by the `history` array reference — computeRmStallLeaderboard
+// and computeTimeToOpportunity each independently split every lead's
+// history back into per-copy sequences on every render; since both read
+// from buildMovementHistories()'s own cached result (same array
+// references across both calls, as long as movementSnapshots/leads
+// haven't changed), a WeakMap keyed on the history array lets the SECOND
+// caller reuse the FIRST's already-computed split instead of redoing it
+// (perf pass, 2026-08-28). WeakMap so a history array that's no longer
+// referenced (a fresh refresh replaces buildMovementHistories' whole Map)
+// is garbage-collected normally, never leaking. Safe: this function is a
+// pure read of `history`, and no caller ever mutates the returned arrays
+// or their record objects afterward.
+const _splitHistoryByCopyCache = new WeakMap();
 function splitHistoryByCopy(history){
+  const cached = _splitHistoryByCopyCache.get(history);
+  if (cached) return cached;
   const byCopy = new Map();
   history.forEach(rec => {
     const key = String(rec.lead_id).trim();
     if (!byCopy.has(key)) byCopy.set(key, []);
     byCopy.get(key).push(rec);
   });
-  return Array.from(byCopy.values());
+  const result = Array.from(byCopy.values());
+  _splitHistoryByCopyCache.set(history, result);
+  return result;
 }
 
 function computeRmStallLeaderboard(){
   const byLead = buildMovementHistories();
   const byRM = new Map();
+  // Read + parsed ONCE for this whole render pass, not once per snapshot
+  // row inside the loop below — see currentDateFilterRange's own comment.
+  const dateRange = currentDateFilterRange();
 
   byLead.forEach((history) => {
     splitHistoryByCopy(history).forEach((copyHistory) => {
       for (let i = 1; i < copyHistory.length; i++) {
         const prev = copyHistory[i - 1], cur = copyHistory[i];
-        if (!passesMovementFilters(cur)) continue;
+        if (!passesMovementFilters(cur, dateRange)) continue;
 
         const curEnriched = enrichSnapshotCached(cur);
         if (!ISSUE_PRIORITY.some(rule => curEnriched[rule.key])) continue; // not flagged at this checkpoint
@@ -684,11 +723,14 @@ function computeRmStallLeaderboard(){
 function computeTimeToOpportunity(){
   const byLead = buildMovementHistories();
   const results = [];
+  // Read + parsed ONCE for this whole render pass — see
+  // currentDateFilterRange's own comment.
+  const dateRange = currentDateFilterRange();
   byLead.forEach((history) => {
     splitHistoryByCopy(history).forEach((copyHistory) => {
       if (!copyHistory.length) return;
       const first = copyHistory[0];
-      if (!passesMovementFilters(first)) return;
+      if (!passesMovementFilters(first, dateRange)) return;
       if (enrichSnapshotCached(first).oppOrAbove) return; // crossing not observable — excluded, not understated
 
       let crossing = null;
@@ -749,7 +791,18 @@ function summarizeTimeToRemediate(episodes){
 // that comment appeared under — a phrase repeated across many different
 // customers is a stronger signal to add a keyword rule for than one that
 // only ever showed up on a single lead.
+// Cached by the movementSnapshots array reference — this is a pure
+// function of that (unfiltered, whole-history — see its own comment
+// above) array, which only changes on an actual Movement_Log
+// fetch/refresh, never on a filter tweak. renderUnmatchedCommentsCount is
+// called from renderMovementTab() on every render regardless, so without
+// this cache the full retained history got walked again on every filter
+// change even though the result couldn't possibly have changed (perf
+// pass, 2026-08-28).
+let _unmatchedMovementCommentsCacheSrc = null;
+let _unmatchedMovementCommentsCache = null;
 function computeUnmatchedMovementComments(){
+  if (_unmatchedMovementCommentsCacheSrc === movementSnapshots) return _unmatchedMovementCommentsCache;
   const byText = new Map(); // lowercased text -> { text, leadIds:Set, RM, region, project, timestamp }
   movementSnapshots.forEach(rec => {
     const entries = parseActionLog(combinedCommentsText(rec));
@@ -771,9 +824,12 @@ function computeUnmatchedMovementComments(){
       if (item.ts && !entry.timestamp) entry.timestamp = item.ts; // prefer a dated occurrence over an earlier undated one
     });
   });
-  return Array.from(byText.values())
+  const result = Array.from(byText.values())
     .map(e => ({ text: e.text, leadCount: e.leadIds.size, exampleLeadId: Array.from(e.leadIds)[0], RM: e.RM, region: e.region, project: e.project, timestamp: e.timestamp }))
     .sort((a, b) => b.leadCount - a.leadCount || a.text.localeCompare(b.text));
+  _unmatchedMovementCommentsCacheSrc = movementSnapshots;
+  _unmatchedMovementCommentsCache = result;
+  return result;
 }
 
 function renderUnmatchedCommentsCount(){

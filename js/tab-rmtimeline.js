@@ -39,10 +39,17 @@ function rmtlScopedLeads(){
   });
 }
 
-function populateRMTimelineSelect(){
+// scopedLeads is optional — pass the already-computed rmtlScopedLeads()
+// result when a caller (renderRMTimelineTab) needs it more than once in
+// the same render pass, instead of letting each of the 3-4 functions that
+// use it recompute the same filter scan independently (perf pass,
+// 2026-08-28). Omitted, this computes it fresh exactly as before, for the
+// one standalone caller (the day-picker's own onchange handler) that
+// doesn't have an already-computed one to reuse.
+function populateRMTimelineSelect(scopedLeads){
   const sel = document.getElementById('rmtlRMSelect');
   if (!sel) return null;
-  const rmList = Array.from(new Set(rmtlScopedLeads().map(l => l.RM || 'Unassigned').filter(Boolean))).sort();
+  const rmList = Array.from(new Set((scopedLeads || rmtlScopedLeads()).map(l => l.RM || 'Unassigned').filter(Boolean))).sort();
   const prevValue = sel.value;
   sel.innerHTML = rmList.map(rm => `<option value="${esc(rm)}">${esc(rm)}</option>`).join('');
   if (prevValue && rmList.includes(prevValue)) sel.value = prevValue;
@@ -58,14 +65,14 @@ function populateRMTimelineSelect(){
 // for why: `leads` is ALSO gated by that same dateFromInput/dateToInput
 // range, which could exclude or entirely empty out the window this
 // calendar is trying to show on its own terms.
-function renderRMDailyCalendar(rm, selectedDay){
+function renderRMDailyCalendar(rm, selectedDay, scopedLeads){
   const el = document.getElementById('rmtlDailyTrend');
   const countEl = document.getElementById('rmtlDailyCount');
   if (!el) return;
   if (!rm) { el.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
 
   const byDay = new Map();
-  rmtlScopedLeads().forEach(l => {
+  (scopedLeads || rmtlScopedLeads()).forEach(l => {
     if ((l.RM || 'Unassigned') !== rm) return;
     const d = parseDate(l.lead_assigned_at);
     if (!d) return;
@@ -120,13 +127,13 @@ function renderRMDailyCalendar(rm, selectedDay){
 // gate) for the same reason the calendar above does — a picked day
 // shouldn't go empty just because the top-of-page date filter's range
 // doesn't happen to cover it.
-function renderRMDayTimeline(rm, dayKey){
+function renderRMDayTimeline(rm, dayKey, scopedLeads){
   const listEl = document.getElementById('rmtlTimelineList');
   const countEl = document.getElementById('rmtlTimelineCount');
   if (!listEl) return;
   if (!rm || !dayKey) { listEl.innerHTML = ''; if (countEl) countEl.textContent = ''; return; }
 
-  const rmLeads = rmtlScopedLeads().filter(l => (l.RM || 'Unassigned') === rm);
+  const rmLeads = (scopedLeads || rmtlScopedLeads()).filter(l => (l.RM || 'Unassigned') === rm);
   const events = [];
   rmLeads.forEach(l => {
     updateEventsFor(l).forEach(ev => {
@@ -184,8 +191,11 @@ function renderRMIssueList(rm){
 // totalAll here means "leads assigned to this RM at that snapshot".
 function computeIssueTalliesByRunForRM(rmName){
   const byRun = new Map();
+  // Read + parsed ONCE for this whole scan — see currentDateFilterRange's
+  // own comment (tab-movement.js).
+  const dateRange = currentDateFilterRange();
   movementSnapshots.forEach(rec => {
-    if (!passesMovementFilters(rec)) return;
+    if (!passesMovementFilters(rec, dateRange)) return;
     if ((rec.RM || 'Unassigned') !== rmName) return;
 
     const atMs = rec.snapshot_at.getTime();
@@ -236,7 +246,14 @@ function renderRMIssueHistory(rm){
 }
 
 function renderRMTimelineTab(){
-  const rm = populateRMTimelineSelect();
+  // Computed ONCE for this whole render pass and threaded through every
+  // call below that needs it, instead of each of populateRMTimelineSelect/
+  // renderRMDailyCalendar/renderRMDayTimeline (and, on an RM-change, the
+  // branch right below) independently re-filtering allParsedLeads on its
+  // own (perf pass, 2026-08-28) — this tab renders unconditionally on
+  // every renderAll().
+  const scopedLeads = rmtlScopedLeads();
+  const rm = populateRMTimelineSelect(scopedLeads);
   const dayInput = document.getElementById('rmtlDayInput');
   if (!dayInput) return;
 
@@ -245,7 +262,7 @@ function renderRMTimelineTab(){
   // fresh fetch) shouldn't yank a day the user deliberately picked.
   if (rm && rm !== _rmtlLastRM) {
     _rmtlLastRM = rm;
-    const rmLeads = rmtlScopedLeads().filter(l => (l.RM || 'Unassigned') === rm);
+    const rmLeads = scopedLeads.filter(l => (l.RM || 'Unassigned') === rm);
     let latest = null;
     rmLeads.forEach(l => {
       const evs = updateEventsFor(l);
@@ -254,8 +271,8 @@ function renderRMTimelineTab(){
     dayInput.value = istDateKey(latest || _renderNow);
   }
 
-  renderRMDailyCalendar(rm, dayInput.value);
-  renderRMDayTimeline(rm, dayInput.value);
+  renderRMDailyCalendar(rm, dayInput.value, scopedLeads);
+  renderRMDayTimeline(rm, dayInput.value, scopedLeads);
   renderRMIssueList(rm);
   renderRMIssueHistory(rm);
 }
