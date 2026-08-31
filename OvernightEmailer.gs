@@ -436,7 +436,30 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
  * since "status" here is the lead's funnel stage, not which SLA check
  * fired.
  */
+/**
+ * Trigger entry point (installed by setupOvernightEmailer — same function
+ * name the trigger targets, so renaming the real body below needs no
+ * trigger re-registration). Wraps the whole real run in a try/catch: same
+ * "a crash before ANY per-region work even starts must alert ops, not
+ * fail silently" reasoning as sendAllIssuesEmails' own wrapper
+ * (AllIssuesEmailer.gs) — added 2026-08-31 after a real production case
+ * of an all-issues run failing with zero visible signal to anyone.
+ * Re-thrown after alerting so the Executions log still correctly shows
+ * this run as Failed, never silently swallowed.
+ */
 function sendOvernightMorningEmails() {
+  try {
+    sendOvernightMorningEmails_();
+  } catch (e) {
+    notifyOpsAlertGs_('sendOvernightMorningEmails crashed — NO overnight morning emails were sent this run', [
+      'sendOvernightMorningEmails threw before completing, so nothing was sent for ANY region this run.',
+      'Error: ' + (e && e.stack ? e.stack : e),
+    ]);
+    throw e;
+  }
+}
+
+function sendOvernightMorningEmails_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const win = overnightWindowGs_(now);
@@ -815,7 +838,25 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
  * blocking each other over, so this happens ONCE for every region's
  * unresolved leads together, not once per region.
  */
+/**
+ * Trigger entry point (installed by setupOvernightEmailer). Same
+ * crash-alerts-ops-then-rethrows wrapper as sendOvernightMorningEmails
+ * above and sendAllIssuesEmails (AllIssuesEmailer.gs) — see that one's
+ * own comment for why this matters.
+ */
 function sendOvernightFollowupEmails() {
+  try {
+    sendOvernightFollowupEmails_();
+  } catch (e) {
+    notifyOpsAlertGs_('sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were sent this run', [
+      'sendOvernightFollowupEmails threw before completing, so no follow-up thread was updated for ANY region this run.',
+      'Error: ' + (e && e.stack ? e.stack : e),
+    ]);
+    throw e;
+  }
+}
+
+function sendOvernightFollowupEmails_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const todayKey = istDayKeyGs_(now);

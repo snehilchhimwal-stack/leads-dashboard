@@ -280,6 +280,31 @@ function runOvernightEmailerTests_() {
     }
 
     TestAssertOnlyTestEmails_();
+
+    // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either
+    // real run must alert ops before it aborts, not fail silently — same
+    // reasoning/pattern as sendAllIssuesEmails' own wrapper
+    // (AllIssuesEmailer.gs), applied here to both this file's trigger
+    // entry points.
+    const realReadLeadsTab = readLeadsTab_;
+    readLeadsTab_ = function () { throw new Error('simulated total failure — Sheets error withRetry_ could not recover from'); };
+    try {
+      TestAssertThrows_(function () { sendOvernightMorningEmails(); }, 'sendOvernightMorningEmails: a total crash still re-throws — the Apps Script Executions log correctly shows this run as Failed, never silently swallowed');
+      TestAssert_(TestGmailLog_.sent.some(function (e) { return /sendOvernightMorningEmails crashed/.test(e.subject); }), 'sendOvernightMorningEmails: a total crash fires an ops alert BEFORE re-throwing, naming the crash explicitly');
+    } finally {
+      readLeadsTab_ = realReadLeadsTab;
+    }
+
+    const realEnsureOvernightLogSheet = ensureOvernightLogSheet_;
+    ensureOvernightLogSheet_ = function () { throw new Error('simulated total failure — Sheets error withRetry_ could not recover from'); };
+    try {
+      TestAssertThrows_(function () { sendOvernightFollowupEmails(); }, 'sendOvernightFollowupEmails: a total crash still re-throws — the Apps Script Executions log correctly shows this run as Failed, never silently swallowed');
+      TestAssert_(TestGmailLog_.sent.some(function (e) { return /sendOvernightFollowupEmails crashed/.test(e.subject); }), 'sendOvernightFollowupEmails: a total crash fires an ops alert BEFORE re-throwing, naming the crash explicitly');
+    } finally {
+      ensureOvernightLogSheet_ = realEnsureOvernightLogSheet;
+    }
+
+    TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();
   }
