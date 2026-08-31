@@ -352,6 +352,9 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','A1','Akash Ugale','','','','Sanjyota Bhosale'], // leads sheet drops the middle "A" — real row: "Akash A Ugale"
   ['Hyderabad','S1','Peddapally Shivaji','Vemula Ajay','','','Mukesh Mishra'], // leads sheet drops the middle "Veera" — real row: "Peddapally Veera Shivaji"
   ['Pune','S1','Shaikh Wasim Shaikh Harun','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'], // leads sheet uses the full "<given> <father's name>" form — real row: "Wasim Shaikh"
+  // 2 more, found via auditUnresolvedRmsNow's first real run (2026-08-31).
+  ['Pune','City Lead','Sourabh Sareen Pnl','','','',''], // leads sheet appends " Pnl" (P&L) — real row: "Sourabh Sareen"
+  ['Loan','BDM','Mohmmad Azaz Izhar Anasair','','','','Mayur Panjari'], // leads sheet misspells both names — real row: "Mohammad Azaz Izhar Ansari"
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
@@ -580,11 +583,14 @@ function clearAllRmHierarchyExclusionsNow() {
 }
 
 /**
- * Proactive coverage audit — scans every OPEN lead in the current month's
- * tab and returns every DISTINCT RM name that does NOT resolve via
- * lookupRmChain_ (the SAME lookup, including its role-suffix-stripping
- * fallback, a real send would actually use) — either because the row is
- * missing entirely, or found but hand-marked Excluded (which routes
+ * Proactive coverage audit — scans every OPEN, google/Non-UTM-or-Search
+ * lead (passesGoogleNonUtmSearchGs_ — the SAME scope gate both real email
+ * scripts apply before ever needing RM resolution; a lead outside this
+ * scope would never actually need routing in production, so it's not a
+ * gap) in the current month's tab and returns every DISTINCT RM name that
+ * does NOT resolve via lookupRmChain_ (the SAME lookup, including its
+ * role-suffix-stripping fallback, a real send would actually use) —
+ * either because the row is missing entirely, or found but hand-marked Excluded (which routes
  * nowhere just the same). A name matching LEADERSHIP_NAME_TO_EMAIL_ is
  * NOT a gap (that's the separate, already-working self-CH fallback for
  * senior leadership with no RM_Hierarchy row at all) and is excluded here.
@@ -631,6 +637,17 @@ function auditUnresolvedRms_(ss) {
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
+    // Same scope gate BOTH real email scripts apply before ever needing
+    // RM resolution (AllIssuesEmailer.gs, OvernightEmailer.gs) — without
+    // this, a lead from a genuinely different source (e.g. Magnet's own
+    // separate lead flow) that would NEVER actually reach RM resolution
+    // in production gets reported here as if it were a real gap. Real
+    // production case this fixes: a first version of this audit (before
+    // this gate existed) flagged several Magnet-team names with dozens of
+    // "unresolved" leads each — all non-Google leads that never needed
+    // routing in the first place, drowning out the small number of
+    // genuine gaps in the same report.
+    if (!passesGoogleNonUtmSearchGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'))) return;
     const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
     const closingReason = getVal_(row, colIndex, 'closing_reason');
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');

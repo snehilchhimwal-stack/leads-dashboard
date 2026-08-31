@@ -181,6 +181,14 @@ function runRmHierarchyTests_() {
       auditLeadRow({ lead_id: 'L-CLOSED', client_id: 'C-CLOSED', RM: 'Ghost RM Nobody Knows', current_stage: 'Won' }),
       // Blank RM -- skipped, not counted as a gap.
       auditLeadRow({ lead_id: 'L-BLANK', client_id: 'C-BLANK', RM: '' }),
+      // Out of scope entirely (not google/Non-UTM/Search) -- would NEVER
+      // actually need routing in production (both real email scripts
+      // gate on this before ever resolving an RM), so an unresolvable RM
+      // name here must NOT be reported as a gap. Real production case:
+      // before this gate existed, several Magnet-team names (non-Google
+      // leads) showed up with dozens of "unresolved" leads each, drowning
+      // out the small number of genuine gaps in the same report.
+      auditLeadRow({ lead_id: 'L-OUTOFSCOPE', client_id: 'C-OUTOFSCOPE', RM: 'Ghost RM Nobody Knows', group_source: 'Facebook' }),
     ];
     ss._sheets[auditMonthShort] = TestMockSheet_(auditMonthShort, auditRows);
 
@@ -194,7 +202,7 @@ function runRmHierarchyTests_() {
     TestAssertEqual_(auditByName['Test RM Excl'].count, 2, 'auditUnresolvedRms_: counts every open lead for that RM, not just one');
     TestAssertEqual_(auditByName['Test RM Excl'].leadIds.sort(), ['L-EXCL-1', 'L-EXCL-2'], 'auditUnresolvedRms_: lists the actual affected lead_ids');
     TestAssert_(!!auditByName['Ghost RM Nobody Knows'], 'auditUnresolvedRms_: a name with no RM_Hierarchy row at all and no leadership match IS reported');
-    TestAssertEqual_(auditByName['Ghost RM Nobody Knows'].count, 1, 'auditUnresolvedRms_: the closed lead for this same RM name is correctly excluded from the count (only L-GHOST, not L-CLOSED)');
+    TestAssertEqual_(auditByName['Ghost RM Nobody Knows'].count, 1, 'auditUnresolvedRms_: the closed lead AND the out-of-scope (non-google) lead for this same RM name are correctly excluded from the count (only L-GHOST, not L-CLOSED or L-OUTOFSCOPE)');
     TestAssertEqual_(typeof auditByName['Ghost RM Nobody Knows'].inCompanyRoster, 'boolean', 'auditUnresolvedRms_: inCompanyRoster is always a real boolean, never undefined');
     TestAssertEqual_(Object.keys(auditByName).length, 2, 'auditUnresolvedRms_: reports exactly the 2 genuine gaps, nothing more and nothing less');
 
