@@ -149,6 +149,22 @@ function runAllIssuesEmailerTests_() {
     }
 
     TestAssertOnlyTestEmails_();
+
+    // ---- Top-level containment (2026-08-31): a crash ANYWHERE in the
+    // real run must alert ops before it aborts, not fail silently ----
+    // readLeadsTab_ is called near the very top of sendAllIssuesEmails_,
+    // before any per-region work — simulates the exact "something threw
+    // before the send loop even started" scenario that used to mean
+    // nothing sent, nothing logged anywhere a human would see.
+    const realReadLeadsTab = readLeadsTab_;
+    readLeadsTab_ = function () { throw new Error('simulated total failure — Sheets error withRetry_ could not recover from'); };
+    try {
+      TestAssertThrows_(function () { sendAllIssuesEmails(); }, 'sendAllIssuesEmails: a total crash still re-throws — the Apps Script Executions log correctly shows this run as Failed, never silently swallowed');
+      TestAssert_(TestGmailLog_.sent.some(function (e) { return /sendAllIssuesEmails crashed/.test(e.subject); }), 'sendAllIssuesEmails: a total crash fires an ops alert BEFORE re-throwing, naming the crash explicitly — previously nothing was sent and nothing was logged anywhere visible');
+    } finally {
+      readLeadsTab_ = realReadLeadsTab;
+    }
+    TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();
   }

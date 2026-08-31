@@ -116,16 +116,41 @@ function ensureAllIssuesLogSheet_(ss) {
 }
 
 /**
- * Main entry point — run manually (sendAllIssuesEmailsNow) or on the
- * trigger installed by setupAllIssuesEmailTrigger. Same overall shape as
- * sendOvernightMorningEmails (OvernightEmailer.gs): read the leads tab
- * once, scan every row through the scope gates, compute each lead's SLA
- * flags, dedupe by customer identity, bucket by region then by resolved
- * hierarchy recipient, send one email per bucket, and finish with one
- * consolidated "not sent" report for anything that couldn't be routed or
- * failed to send.
+ * Trigger entry point (installed by setupAllIssuesEmailTrigger — same
+ * function name the trigger targets, so renaming the real body below to
+ * sendAllIssuesEmails_ needs no trigger re-registration). Wraps the whole
+ * real run in a try/catch: without this, ANYTHING thrown before the
+ * per-region send loop even starts (a Sheets error withRetry_ couldn't
+ * recover from, a bad row, a bug in a shared dependency) aborted the
+ * entire run with NOTHING sent for ANY region and NOTHING logged anywhere
+ * a human would see — notifyLeadSendFailuresGs_ (the normal "some leads
+ * didn't get an email" report) never even runs if something upstream
+ * throws, so a total failure was completely silent: no email to anyone,
+ * no ops alert, just an Apps Script Executions log entry nobody was
+ * watching. Re-thrown after alerting so Executions still correctly shows
+ * this run as Failed — never silently swallowed.
  */
 function sendAllIssuesEmails() {
+  try {
+    sendAllIssuesEmails_();
+  } catch (e) {
+    notifyOpsAlertGs_('sendAllIssuesEmails crashed — NO All-Issues emails were sent this run', [
+      'sendAllIssuesEmails threw before completing, so nothing was sent for ANY region this run — not even the usual per-lead "not sent" report, which only runs if the function reaches its own end.',
+      'Error: ' + (e && e.stack ? e.stack : e),
+    ]);
+    throw e;
+  }
+}
+
+/**
+ * The real run. Same overall shape as sendOvernightMorningEmails
+ * (OvernightEmailer.gs): read the leads tab once, scan every row through
+ * the scope gates, compute each lead's SLA flags, dedupe by customer
+ * identity, bucket by region then by resolved hierarchy recipient, send
+ * one email per bucket, and finish with one consolidated "not sent"
+ * report for anything that couldn't be routed or failed to send.
+ */
+function sendAllIssuesEmails_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const win = allIssuesWindowGs_(now);
