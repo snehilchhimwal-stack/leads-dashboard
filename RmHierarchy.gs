@@ -1,39 +1,65 @@
 /**
  * RM Hierarchy — resolves each RM's real manager chain (A1/Team Lead, TM,
- * RH, CH) from the same official HR export Book7.xlsx that
+ * RH, CH) from the company's official HR roster export that
  * RmHierarchy.private.gs's employee-email table already comes from, so
  * OvernightEmailer.gs can route an issue email to the SPECIFIC managers of
  * whichever RMs actually had overnight activity — not a single fixed
  * per-region address that gets CC'd on everything whether or not anyone
  * under them did anything.
  *
+ * SOURCE / LAST REFRESHED: originally built from a one-time "Book7.xlsx"
+ * export; regenerated 2026-08-31 from a fresher, more complete "HR Live"
+ * roster export (same shape — New E Code / Name / Role / .../"Official
+ * Mail Id"/...) covering the whole company, one row per person, including
+ * per-person manager-chain columns. Comments below that still say "Book7"
+ * are describing the general technique, which applies identically to
+ * this newer export — re-export and regenerate both RM_HIERARCHY_RAW_
+ * here and EMPLOYEE_EMAIL_BY_NAME_RAW_ (RmHierarchy.private.gs) together
+ * whenever the roster changes meaningfully; there's no live sync.
+ *
  * WHY THIS IS ITS OWN FILE: RM_HIERARCHY_RAW_ below is a large static table
  * (one row per person from the source export) — keeping it separate from
  * OvernightEmailer.gs's send logic makes both easier to read, and makes it
  * obvious this table is data to refresh occasionally, not code to edit.
  *
- * WHY THIS IS PRE-RESOLVED, NOT RAW: Book7's own export is POSITIONAL, not
- * per-role — its "A1 - 1/S2" / "A1 - 2" / "RH" / "CH/CL" columns hold
- * whoever the next real manager up the chain happens to be, landing in
- * whichever column matches how many hops that specific person's chain has
- * (e.g. an S1 reporting straight to a TM with no A1 in between has that TM
- * in the RH-position column, not because the TM IS an RH, but because
- * that's the next column over). Each row below was built by resolving
- * every filled slot against THAT PERSON'S OWN role (Book7 tags everyone as
- * S1/A1/TM/RH/Cluster Head/City Lead/Commercial Head/etc.) rather than
- * trusting column position — the only reliable way to build clean tl/tm/
- * rh/ch columns from this export. TM is a real tier Book7 has that the
- * OLD org-chart source this file used to be built from did not: it sits
- * above A1 but below RH — some regions route S1s straight to a TM with no
- * A1 at all, others keep a real A1 with a TM one level above THEM.
+ * WHY THIS IS PRE-RESOLVED, NOT RAW: the HR export's own columns are
+ * POSITIONAL, not per-role — its "A1 - 1/S2" / "A1 - 2" / "RH" / "CH/CL"
+ * columns hold whoever the next real manager up the chain happens to be,
+ * landing in whichever column matches how many hops that specific
+ * person's chain has (e.g. an S1 reporting straight to a TM with no A1 in
+ * between has that TM in the RH-position column, not because the TM IS an
+ * RH, but because that's the next column over). Each row below was built
+ * by resolving every filled slot against THAT PERSON'S OWN role (the
+ * export tags everyone as S1/A1/TM/RH/Cluster Head/City Lead/Commercial
+ * Head/etc.) rather than trusting column position — the only reliable way
+ * to build clean tl/tm/rh/ch columns from this export. TM is a real tier
+ * this export has that the OLD org-chart source this file used to be
+ * built from did not: it sits above A1 but below RH — some regions route
+ * S1s straight to a TM with no A1 at all, others keep a real A1 with a TM
+ * one level above THEM.
+ *
+ * A handful of people occupy a manager tier functionally but the export's
+ * own Role field doesn't literally say so (a Director/Manager title
+ * standing in for a missing Cluster Head, an S2 acting as a TM with no
+ * real TM title) — these get an explicit, named override in the build
+ * process rather than silently falling through as unmapped; the 2026-08-31
+ * refresh carried forward every override the prior table already had
+ * (Mukesh Mishra as Bangalore/Hyderabad's effective Cluster Head, Mayur
+ * Panjari as Loan's effective City Lead, Zahid Shaikh as Loan's effective
+ * A1, Yash Kalal as Sourcing - Pune's effective TM), confirmed still
+ * accurate against the fresh export. A handful of alias rows are also
+ * carried forward unconditionally — real production cases where the
+ * leads sheet's own RM column spells a name differently than the HR
+ * export does (a dropped middle name, an appended role suffix); each
+ * points at the exact same resolved chain as the real person's own row.
  *
  * EMAIL ADDRESSES: EMPLOYEE_EMAIL_BY_NAME_RAW_ (RmHierarchy.private.gs) is
- * sourced from this SAME Book7.xlsx export, matched in by NAME
- * (case/whitespace-normalized, see normPersonName_) since Book7 and this
- * table share no common ID column, only name text — but since both now
- * come from the identical source rows (not two independently-exported
- * files with different spellings, like the old org-chart source had),
- * name matching here is far more reliable than it used to be.
+ * sourced from this SAME HR export, matched in by NAME
+ * (case/whitespace-normalized, see normPersonName_) since the two tables
+ * share no common ID column, only name text — but since both now come
+ * from the identical source rows (not two independently-exported files
+ * with different spellings, like the old org-chart source had), name
+ * matching here is far more reliable than it used to be.
  * setupRmHierarchy() writes a "Manager_Directory" sheet — one row per
  * unique manager name — with its Email column PRE-FILLED wherever a name
  * match was found; still blank for the handful that weren't. A human can
@@ -79,19 +105,17 @@ const RM_HIERARCHY_SHEET_ = 'RM_Hierarchy';
 const MANAGER_DIRECTORY_SHEET_ = 'Manager_Directory';
 
 // One row per person: [team, role, name, tl, tm, rh, ch] — ALREADY
-// resolved (see the file header above for why raw Book7 columns can't be
-// read positionally). Source: Book7.xlsx, same export
-// RmHierarchy.private.gs's EMPLOYEE_EMAIL_BY_NAME_RAW_ comes from. Every
-// person in the HR roster is included, not just Sales — a Finance/HR/
-// Marketing person simply never appears as anyone's "RM" on a real lead,
-// so their row is inert; including them costs nothing and maximizes the
-// chance any real RM name resolves.
+// resolved (see the file header above for why raw HR-export columns
+// can't be read positionally). Source: the company's HR roster export,
+// same export RmHierarchy.private.gs's EMPLOYEE_EMAIL_BY_NAME_RAW_ comes
+// from. Scoped to sales-track people only (S1/S2/S3/A1/TL/TM/RH/RM/BDM/
+// Cluster Head/City Lead/Commercial Head, across the 11 real lead-
+// assignment regions plus Sourcing - Pune) — a Finance/HR/Marketing/
+// Technology/Magnet/Post Sales/Customer Experience person never appears
+// as anyone's "RM" on a real first-sale Google lead, so their row would
+// just be noise this table was never meant to carry (same scope the
+// prior table had already settled on).
 const RM_HIERARCHY_RAW_ = [
-  ['Leadership','Commercial Head','Neha Mishra','','','',''],
-  // Added as Bangalore/Hyderabad's CH per explicit request — no row for
-  // Mukesh Mishra in the original org-chart export, so added here
-  // directly rather than relying on the auto-match.
-  ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
   ['Navi Mumbai','Cluster Head','Vidya Jadhav','','','',''],
   ['Thane','Cluster Head','Bipin More','','','',''],
   ['Central','Cluster Head','Sanjyota Bhosale','','','',''],
@@ -101,44 +125,43 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','RH','Rajkumar Ombase','','','','Sanjyota Bhosale'],
   ['Bangalore','A1','Chaithanya M','','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','A1','Krishna Murthy','','','','Mukesh Mishra'],
-  // Added from Book7's own export (she was never included in the
-  // original hierarchy build, despite having a full chain there:
-  // TL Chaithanya M, RH Romen Singh, CH Mukesh Mishra) — real production
-  // symptom: her overnight leads got no automated email, with an
-  // "unresolved, not in RM_Hierarchy" ops alert instead.
-  ['Bangalore','S1','Neelam Singh','Chaithanya M','','Romen Singh',''],
   ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Loan','City Lead','Mayur Panjari','','','',''],
   ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Akash A Ugale','','','','Sanjyota Bhosale'],
   ['Central','S1','Prajwal Shetty','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Ashish Kadam','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','City Lead','Sourabh Sareen','','','',''],
-  ['Bangalore','S1','Sangam S','Krishna Murthy','','',''],
-  ['Bangalore','S1','Chandana N R','','','Romen Singh',''],
+  ['Loan','Executive','Sachin Kadam','Zahid Shaikh','','','Mayur Panjari'],
+  ['Bangalore','S1','Sangam S','Krishna Murthy','','','Mukesh Mishra'],
+  ['Bangalore','S1','Chandana N R','','','Romen Singh','Mukesh Mishra'],
+  ['Loan','BDM','Swapnil B Bhosale','','','','Mayur Panjari'],
   ['Pune','RH','Sachindra Wadane','','','','Sourabh Sareen'],
   ['Pune','A1','Nishant Anand','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Rahul Panherkar','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','TM','Ayaz Bagwan','','','','Sourabh Sareen'],
   ['Pune','S1','Siddhesh Bhagwat','','','Sachindra Wadane','Sourabh Sareen'],
-  ['Pune','S1','Shailesh Tiwari','','','Sachindra wadane','Sourabh Sareen'],
+  ['Pune','S1','Shailesh Tiwari','','','Sachindra Wadane','Sourabh Sareen'],
   ['Harbour','A1','Yash Sharma','','','','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Shahnavaz Shaikh','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','S1','Nagesh Maharnavar','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Shubham Buchade','Avinash Kumar','','','Vidya Jadhav'],
   ['Thane','A1','Amit Upadhyay','','','','Bipin More'],
-  ['Bangalore','S1','Manoj M','Rahan Khan','','Romen Singh',''],
+  ['Bangalore','S1','Manoj M','Rahan Khan','','Romen Singh','Mukesh Mishra'],
   ['Pune','TM','Rahul Poudel','','','','Sourabh Sareen'],
   ['Pune','A1','Prathamesh A Pande','','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','A1','Nayan Pabale','','Rahul Poudel','','Sourabh Sareen'],
   ['Thane','S1','Mamtaben Sosa','Amit Upadhyay','','','Bipin More'],
+  ['Loan','Executive','Siddhi Kate','Zahid Shaikh','','','Mayur Panjari'],
   ['Pune','S1','Santosh Khandare','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Swapnil Waghmode','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
-  ['Bangalore','S1','Anurag G Singh','Krishna Murthy','','',''],
   ['Central','S1','Khushal Soni','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','A1','Omkar Ghate','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Akshay More','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Loan','BDM','Yogesh Choudhari','','','','Mayur Panjari'],
   ['Thane','S1','Avinash Khare','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
-  ['Hyderabad','S1','Parusharothu Vinay Varma','Vemula Ajay','','',''],
+  ['Hyderabad','S1','Parusharothu Vinay Varma','Vemula Ajay','','','Mukesh Mishra'],
+  ['Sourcing - Pune','TM','Yash Kalal','','','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Rutuja Daule','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Chandrakant Bhagat','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Prachi Chouhan','','Sampada Pawar','','Vidya Jadhav'],
@@ -151,7 +174,9 @@ const RM_HIERARCHY_RAW_ = [
   ['Hyderabad','A1','Vemula Ajay','','','','Mukesh Mishra'],
   ['Western','S1','Saravash Upadhyay','','Minas Patel','','Rahul Gandhi'],
   ['Harbour','S1','Nitin Devariya','Yash Sharma','','','Sanjyota Bhosale'],
-  ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh',''],
+  ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh','Mukesh Mishra'],
+  ['Loan','BDM','Angad Yadav','','','','Mayur Panjari'],
+  ['Sourcing - Pune','S3','Nikhil Jadhav','','Yash Kalal','','Sourabh Sareen'],
   ['Western','S1','Arbaz Patel','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Western','Cluster Head','Rahul Gandhi','','','',''],
   ['Pune','S1','Nikhil Sarwade','','','Sachindra Wadane','Sourabh Sareen'],
@@ -163,24 +188,24 @@ const RM_HIERARCHY_RAW_ = [
   ['HNI','S1','Sahil Gupta','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Thane','S1','Mohit Manwani','','Sanket Yadav','','Bipin More'],
   ['Thane','A1','Ganesh Saroj','','','Swapnil Gowalkar','Bipin More'],
-  ['Pune','S1','Nagmma Mujnayak','Firoj Shaikh','','','Sourabh Sareen'],
-  ['Hyderabad','S1','Maagathoti Adilakshmi','Vemula Ajay','','',''],
+  ['Pune','S1','Nagmma Mujnayak','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Hyderabad','S1','Maagathoti Adilakshmi','Vemula Ajay','','','Mukesh Mishra'],
   ['Navi Mumbai','S1','Jayesh Parab','Avinash Kumar','','','Vidya Jadhav'],
-  ['Bangalore','S1','Praveen R','Krishna Murthy','','',''],
+  ['Bangalore','S1','Praveen R','Krishna Murthy','','','Mukesh Mishra'],
   ['Western','A1','Prathmesh S Pandey','','','','Rahul Gandhi'],
-  ['Central','S1','Shital Bhagwane','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['HNI','A1','Pritesh Shankhat','','','','Abhhijjit Gandhii'],
   ['Western','S1','Vijay Yadav','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Western','S1','Lovkesh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Bangalore','S1','Mhd Haseebulla','Krishna Murthy','','',''],
+  ['Bangalore','S1','Mhd Haseebulla','Krishna Murthy','','','Mukesh Mishra'],
   ['Western','S1','Kundan Singh','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Hyderabad','S1','Vadlapudi Divya','Vemula Ajay','','',''],
+  ['Hyderabad','S1','Vadlapudi Divya','Vemula Ajay','','','Mukesh Mishra'],
   ['Thane','S1','Avinash Das','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Central','S1','Purvesh Ugawekar','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Harbour','S1','Dhiraj Chhoda','Yash Sharma','','','Sanjyota Bhosale'],
   ['Central','S1','Mustakim Sayyad','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Pune','S1','Somanath Sangle','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Divya Rohela','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Loan','BDM','Akshay Kakade','','','','Mayur Panjari'],
   ['Pune','S1','Arbaj Shaikh','','Rahul Poudel','','Sourabh Sareen'],
   ['Thane','S1','Kamlesh Tawale','','','Swapnil Gowalkar','Bipin More'],
   ['Thane','S1','Arbaaz Ansari','Amit Upadhyay','','','Bipin More'],
@@ -188,31 +213,29 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Vaibhav Bhadkumbe','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Central','S1','Kishan Patel','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Joshi Dhairya','','','','Vidya Jadhav'],
-  // ch added — his own row was missing the Mukesh Mishra reference his
-  // own Bangalore A1 subordinates (Chaithanya M, Krishna Murthy,
-  // Mainuddin T, Rahan Khan) already carry, which meant a lead assigned
-  // directly to Romen Singh himself fell to "unresolved" instead of
-  // properly routing further up like everyone below him does.
   ['Bangalore','RH','Romen Singh','','','','Mukesh Mishra'],
-  ['Bangalore','S1','Sippal Khora','Chaithanya M','','Romen Singh',''],
+  ['Bangalore','S1','Sippal Khora','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Harbour','S1','Aakash Dhole','Yash Sharma','','','Sanjyota Bhosale'],
   ['Western','S1','Yash Kandhare','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Bangalore','S1','Suman Das','Mainuddin T','','Romen Singh',''],
-  ['Bangalore','S1','Zain Ahmed','Chaithanya M','','Romen Singh',''],
+  ['Sourcing - Pune','S3','Dnyaneshwari Pawar','','Yash Kalal','','Sourabh Sareen'],
+  ['Loan','Manager','Aditya Gera','','','','Mayur Panjari'],
+  ['Bangalore','S1','Suman Das','Mainuddin T','','Romen Singh','Mukesh Mishra'],
+  ['Bangalore','S1','Zain Ahmed','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Souvik Biswas','','','Sachindra Wadane','Sourabh Sareen'],
   ['Central','S1','Mihir Jivani','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Bangalore','S1','Divakar V','Chaithanya M','','Romen Singh',''],
+  ['Bangalore','S1','Divakar V','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','A1','Mainuddin T','','','Romen Singh','Mukesh Mishra'],
   ['Western','S1','Saurabh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Pune','S1','Vishwanath Zalake','Firoj Shaikh','','','Sourabh Sareen'],
+  ['Pune','S1','Vishwanath Zalake','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Ritik Minekar','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Central','S1','Sumeet Pal','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Central','S1','Gurmohit Singh Sandhu','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Bangalore','S1','Mahesh V','Rahan Khan','','Romen Singh',''],
+  ['Bangalore','S1','Mahesh V','Rahan Khan','','Romen Singh','Mukesh Mishra'],
   ['Harbour','S1','Bisma Shah','Yash Sharma','','','Sanjyota Bhosale'],
-  ['Bangalore','S1','Abdur Rahim','Mainuddin T','','Romen Singh',''],
+  ['Bangalore','S1','Abdur Rahim','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Nagnath Dhotre','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Aditya Tripathi','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
+  ['Loan','Executive','Kanchan Hatipkar','Zahid Shaikh','','','Mayur Panjari'],
   ['Pune','S1','Chaitali Patil','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Sajid Mulani','Amit Upadhyay','','','Bipin More'],
   ['Western','S1','Eknidhi Chabra','','Minas Patel','','Rahul Gandhi'],
@@ -228,12 +251,14 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Pramod Ghaytadak','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Gouttam Aicha','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Sagar Mahamuni','','','Swapnil Gowalkar','Bipin More'],
+  ['Bangalore','S1','Neelam Singh','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Central','S1','Karan Shinde','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['HNI','S1','Yashodeep Kubavat','','','','Abhhijjit Gandhii'],
   ['Western','S1','Riya Yadav','','Minas Patel','','Rahul Gandhi'],
   ['Central','S1','Mayuresh Chavan','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','S1','Vivek Yadav','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Hyderabad','S1','Peddapally Veera Shivaji','Vemula Ajay','','',''],
+  ['Sourcing - Pune','S3','Anagha Sangole','','Yash Kalal','','Sourabh Sareen'],
+  ['Hyderabad','S1','Peddapally Veera Shivaji','Vemula Ajay','','','Mukesh Mishra'],
   ['Thane','S1','Hitesh Jaiswar','Amit Upadhyay','','','Bipin More'],
   ['Navi Mumbai','S1','Kartik Shirsat','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Rinky Bidare','','Sampada Pawar','','Vidya Jadhav'],
@@ -241,36 +266,29 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Kishan Lohar','Amit Upadhyay','','','Bipin More'],
   ['Navi Mumbai','S1','Suman Pujari','Avinash Kumar','','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Tejal Nikam','Avinash Kumar','','','Vidya Jadhav'],
-  ['Hyderabad','S1','G Anand Kumar','Vemula Ajay','','',''],
-  // Alias row, confirmed by hand: the leads sheet's RM column sometimes
-  // has just "G Kumar" for this same person (a real "no recipient"
-  // production case) — exact-match name lookup needs a literal row for
-  // each spelling actually seen, same chain as his real row above.
-  ['Hyderabad','S1','G Kumar','Vemula Ajay','','',''],
+  ['Hyderabad','S1','G Anand Kumar','Vemula Ajay','','','Mukesh Mishra'],
+  ['Loan','A1','Zahid Shaikh','','','','Mayur Panjari'],
   ['Pune','S1','Aadesh Narwade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
   ['Harbour','S1','Manan Bhatt','Yash Sharma','','','Sanjyota Bhosale'],
-  ['Western','S1','Vijay Katheriya','','MInas Patel','','Rahul Gandhi'],
-  ['Bangalore','S1','Rahul Singh','Krishna murthy','','',''],
+  ['Western','S1','Vijay Katheriya','','Minas Patel','','Rahul Gandhi'],
+  ['Bangalore','S1','Rahul Singh','Krishna Murthy','','','Mukesh Mishra'],
   ['Pune','S1','Aabid Khan','Firoj Shaikh','','','Sourabh Sareen'],
   ['HNI','S1','Mohammed Rafiq Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
-  // Alias row, confirmed by hand against Book7 (email mohammed.khan@homesfy.in
-  // matches the row above exactly): the leads sheet's RM column sometimes
-  // has just "Mohammed Khan" for this same person -- a real "no
-  // recipient" production case (region mapped to SoBo, since HNI is
-  // SoBo's own team label in REGION_GROUP_MAP_/EmailInfra.gs).
-  ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Adil Shaikh','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['Loan','BDM','Husen Shaikh','','','','Mayur Panjari'],
+  ['Loan','Executive','Narayan Dhimar','','','','Mayur Panjari'],
   ['Central','S1','Rohit Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Kumar Babu','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Loan','BDM','Krishna Nayak','','','','Mayur Panjari'],
   ['Pune','S1','Rahul Raj','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Central','S1','Fakrealam Ansari','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','S1','Sahil Gote','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','A1','Rohit Rathod','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Yash Awade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Israr Khan','Firoj Shaikh','','','Sourabh Sareen'],
-  ['Bangalore','S1','Md Muzamil','Mainuddin T','','Romen Singh',''],
-  ['Bangalore','S1','Mohammed Hidayathulla','Chaithanya M','','Romen Singh',''],
+  ['Bangalore','S1','Md Muzamil','Mainuddin T','','Romen Singh','Mukesh Mishra'],
+  ['Bangalore','S1','Mohammed Hidayathulla','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Navi Mumbai','S1','Chandni Khatoon','','','','Vidya Jadhav'],
   ['Pune','S1','Rajdeep Jalan','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Pranav Deshmukh','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
@@ -283,7 +301,6 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','S1','Sanjay Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Bangalore','A1','Rahan Khan','','','Romen Singh','Mukesh Mishra'],
   ['Central','S1','Saurabh Pacharne','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Navi Mumbai','S1','Amit Rathod','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','S1','Ramesh Kudale','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'],
   ['HNI','S1','Hetal Gohil','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Jyoti Sharma','','','','Abhhijjit Gandhii'],
@@ -292,18 +309,9 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Akash Jogdand','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Vivek Solanke','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['HNI','S1','Mohd Faizan Shaikh','','','','Abhhijjit Gandhii'],
-  // Alias — leads sheet has him as the shorter "Mohd Shaikh" (no
-  // "Faizan"); do not go with any role or position in name, do not
-  // consider — same name-variant pattern as G Kumar/Mohammed Khan
-  // earlier. Real production symptom: "unresolved, not in RM_Hierarchy"
-  // ops alert for SoBo (HNI rolls up into the SoBo main-region bucket).
-  ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
+  ['Sourcing - Pune','S3','Vidisha Kakade','','Yash Kalal','','Sourabh Sareen'],
   ['Harbour','S1','Atharva Belose','Yash Sharma','','','Sanjyota Bhosale'],
-  // Alias — leads sheet has his middle initial: "Atharva P Belose". Real
-  // production symptom: "unresolved, not in RM_Hierarchy" ops alert for
-  // Harbour.
-  ['Harbour','S1','Atharva P Belose','Yash Sharma','','','Sanjyota Bhosale'],
-  ['Hyderabad','S1','Nikhil Goud','Vemula Ajay','','',''],
+  ['Hyderabad','S1','Nikhil Goud','Vemula Ajay','','','Mukesh Mishra'],
   ['Thane','TM','Sanket Yadav','','','','Bipin More'],
   ['Pune','S1','Abhikesh Kumar','','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Krish Sinha','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
@@ -311,67 +319,31 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Roshan Pandey','','Sanket Yadav','','Bipin More'],
   ['Navi Mumbai','S1','Harshith S','','Sampada Pawar','','Vidya Jadhav'],
   ['Pune','S1','Adinath Munde','','Rahul Poudel','','Sourabh Sareen'],
+  ['Loan','Executive','Gayatri Kukade','','','','Mayur Panjari'],
   ['Pune','S1','Buddhabhushan Wakode','','Rahul Poudel','','Sourabh Sareen'],
-  ['Commercial','A1','Aarya Sadanam','','','','Neha Mishra'],
-  ['Bangalore','S1','Vijay Kumar E','Rahan Khan','','Romen Singh',''],
+  ['Commercial','S3','Aarya Sadanam','','','','Neha Mishra'],
+  ['Loan','Executive','Divya Dalvi','Zahid Shaikh','','','Mayur Panjari'],
+  ['Loan','BDM','Mohammad Azaz Izhar Ansari','','','','Mayur Panjari'],
+  ['Loan','Executive','Priyanka Shede','Zahid Shaikh','','','Mayur Panjari'],
+  ['Bangalore','S1','Vijay Kumar E','Rahan Khan','','Romen Singh','Mukesh Mishra'],
   ['Central','S1','Farid Shaikh','Akash A Ugale','','','Sanjyota Bhosale'],
-  ['Thane','S1','Riyan Jamadar','','','','Bipin More'],
+  ['Thane','S1','Riyan Jamadar','','Sanket Yadav','','Bipin More'],
+  ['Loan','Executive','Mohd Ali Khan','Zahid Shaikh','','','Mayur Panjari'],
   ['Thane','S1','Rahul Chauhan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Central','S1','Shreyang Chudasama','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Central','S1','Shresth Bhuwania','Akash A Ugale','','','Sanjyota Bhosale'],
-  ['Bangalore','S1','Kavya B R','','','Romen Singh',''],
+  ['Bangalore','S1','Kavya B R','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Vijay Kshirsagar','','Rahul Poudel','','Sourabh Sareen'],
-  // Whole "Sourcing - Pune" team corrected/added from Book7 directly
-  // (row-by-row lookup, not the pre-resolved export) after 4 of its 6
-  // people showed up as "no recipient" — Yash Kalal (their actual
-  // manager, role 'TM' here even though Book7 literally labels him
-  // 'S2'/"Supervisor": functionally identical to Sampada
-  // Pawar/Minas Patel/Sanket Yadav — reports directly to a CH with no
-  // A1 layer, with S1/S3 reports under him) was missing entirely, which
-  // also means Darshana Javeri's row below was WRONG (went straight to
-  // Sourabh Sareen with no tm at all) until this fix.
-  ['Sourcing - Pune','TM','Yash Kalal','','','','Sourabh Sareen'],
-  ['Sourcing - Pune','S3','Nikhil Jadhav','','Yash Kalal','','Sourabh Sareen'],
-  ['Sourcing - Pune','S3','Dnyaneshwari Pawar','','Yash Kalal','','Sourabh Sareen'],
-  ['Sourcing - Pune','S3','Anagha Sangole','','Yash Kalal','','Sourabh Sareen'],
-  ['Sourcing - Pune','S3','Vidisha Kakade','','Yash Kalal','','Sourabh Sareen'],
   ['Sourcing - Pune','S3','Darshana Javeri','','Yash Kalal','','Sourabh Sareen'],
   ['Thane','S1','Pawan Motwani','','','Swapnil Gowalkar','Bipin More'],
-
-  // Whole "Loan" team added from Book7 directly — this is one of the 11
-  // configured regions (REGION_GROUP_MAP_, EmailInfra.gs) but had
-  // ZERO rows here before this, found via a full Book7-vs-RM_HIERARCHY_RAW_
-  // diff (315 Book7 people vs 212 rows here) run specifically to catch
-  // every gap of Neelam Singh's kind, not just the ones that happened to
-  // surface as a real "no recipient" alert yet. Every OTHER Book7 person
-  // with no row here (Marketing/Technology/Finance/HR/Customer Experience/
-  // Post Sales/Magnet/Sales Trainer/corporate Leadership) is a genuinely
-  // different business unit or corporate function — never assigned as an
-  // RM on a first-sale Google lead, so deliberately NOT added; adding them
-  // would just be noise this table was never meant to carry.
-  // Mayur Panjari is Loan's top (Book7 P&L = Mukesh Mishra directly,
-  // nothing else above him within Loan) — same structural position as
-  // Sourabh Sareen (Pune City Lead), so given the same role label for the
-  // same reason (isTopOfOrgRole_ — RmHierarchy.gs).
-  ['Loan','City Lead','Mayur Panjari','','','',''],
-  ['Loan','A1','Zahid Shaikh','','','Mayur Panjari',''],
-  ['Loan','S1','Swapnil B Bhosale','','','Mayur Panjari',''],
-  ['Loan','S1','Yogesh Choudhari','','','Mayur Panjari',''],
-  ['Loan','S1','Angad Yadav','','','Mayur Panjari',''],
-  ['Loan','S1','Akshay Kakade','','','Mayur Panjari',''],
-  ['Loan','S1','Aditya Gera','','','Mayur Panjari',''],
-  ['Loan','S1','Husen Shaikh','','','Mayur Panjari',''],
-  ['Loan','S1','Narayan Dhimar','','','Mayur Panjari',''],
-  ['Loan','S1','Krishna Nayak','','','Mayur Panjari',''],
-  ['Loan','S1','Gayatri Kukade','','','Mayur Panjari',''],
-  ['Loan','S1','Mohammad Azaz Izhar Ansari','','','Mayur Panjari',''],
-  ['Loan','S1','Sachin Kadam','Zahid Shaikh','','Mayur Panjari',''],
-  ['Loan','S1','Kanchan Hatipkar','Zahid Shaikh','','Mayur Panjari',''],
-  ['Loan','S1','Divya Dalvi','Zahid Shaikh','','Mayur Panjari',''],
-  ['Loan','S1','Priyanka Shede','Zahid Shaikh','','Mayur Panjari',''],
-  ['Loan','S1','Mohd Ali Khan','Zahid Shaikh','','Mayur Panjari',''],
-  ['Loan','S1','Siddhi Kate','Zahid Shaikh','','Mayur Panjari',''],
+  ['Pune','S1','Pranav Vilas Mhatale','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Leadership','Commercial Head','Neha Mishra','','','',''],
+  ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
+  ['Hyderabad','S1','G Kumar','Vemula Ajay','','','Mukesh Mishra'],
+  ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
+  ['Harbour','S1','Atharva P Belose','Yash Sharma','','','Sanjyota Bhosale'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
@@ -641,11 +613,11 @@ function ensureManagerDirectorySheetInternal_(ss, forceRefresh) {
   const rows = names.map(function (key) {
     const m = byManager[key];
     // A human-entered email (however it got there) always wins over the
-    // Book7 auto-lookup — never overwrite what someone already typed in.
+    // HR-export auto-lookup — never overwrite what someone already typed in.
     const priorEmail = priorEmails[key] || '';
     const autoEmail = lookupEmployeeEmail_(m.name);
     const email = priorEmail || autoEmail;
-    const emailSource = priorEmail ? 'manual' : (autoEmail ? 'Book7 auto-match' : '');
+    const emailSource = priorEmail ? 'manual' : (autoEmail ? 'HR export auto-match' : '');
     return [m.name, Array.from(m.roles).sort().join(', '), Array.from(m.regions).sort().join(', '), email, m.reportCount, emailSource];
   });
 
@@ -949,7 +921,7 @@ function setupRmHierarchy() {
   ensureManagerDirectorySheet_(ss);
   Logger.log(
     'RM_Hierarchy + Manager_Directory ready. Most managers already have an email auto-filled from ' +
-    'Book7.xlsx (see Manager_Directory\'s email_source column: "Book7 auto-match" vs "manual") — check ' +
+    'the HR export (see Manager_Directory\'s email_source column: "HR export auto-match" vs "manual") — check ' +
     'the ones still blank and fill those in by hand. Until a manager has an email either way, ' +
     'OvernightEmailer falls back to the legacy Region_Recipients entry for that region.'
   );
