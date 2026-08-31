@@ -389,7 +389,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
     const failureReason = isSendBlocked
       ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send'
-      : 'Send error: ' + e;
+      : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so the draft may already exist)';
     notifyOpsAlertGs_('Morning email failed for ' + region + bucketNote, [
       'Region: ' + region + bucketNote,
       'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
@@ -398,7 +398,16 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       'These leads got no automated email this run — the window is fixed to this morning\'s run only, so tomorrow\'s run will NOT retry them.',
       isSendBlocked
         ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
-        : 'Error: ' + e,
+        // Any OTHER error here (not the specific "operation not allowed"
+        // phrase) still carries the same underlying risk: createDraft()
+        // and send() are two steps chained together, so this could be a
+        // genuine failure before any draft was ever created, OR the draft
+        // could have been created successfully with only send() failing
+        // (same situation as the branch above, just a different error
+        // text — real production case: "Exception: Not found" from this
+        // exact chain, with no draft-restriction keyword to key off of).
+        // Check Gmail Drafts to tell which one actually happened.
+        : 'Error: ' + e + '. Check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '" before assuming nothing was created — createDraft() succeeding while the chained send() fails looks exactly like this from here.',
     ]);
     return { reason: failureReason };
   }

@@ -344,6 +344,14 @@ const RM_HIERARCHY_RAW_ = [
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
   ['Harbour','S1','Atharva P Belose','Yash Sharma','','','Sanjyota Bhosale'],
+  // 3 more alias rows, found 2026-08-31 via a real "Leads Not Sent" ops
+  // report — same pattern as the 4 above (the leads sheet's own RM column
+  // spells these differently than the HR export does), just not
+  // previously known/reported until they actually caused a no-recipient
+  // failure.
+  ['Central','A1','Akash Ugale','','','','Sanjyota Bhosale'], // leads sheet drops the middle "A" — real row: "Akash A Ugale"
+  ['Hyderabad','S1','Peddapally Shivaji','Vemula Ajay','','','Mukesh Mishra'], // leads sheet drops the middle "Veera" — real row: "Peddapally Veera Shivaji"
+  ['Pune','S1','Shaikh Wasim Shaikh Harun','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'], // leads sheet uses the full "<given> <father's name>" form — real row: "Wasim Shaikh"
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in

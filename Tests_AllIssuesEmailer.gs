@@ -148,6 +148,24 @@ function runAllIssuesEmailerTests_() {
       GmailApp = realGmailApp;
     }
 
+    // ---- sendOneAllIssuesEmail_: a DIFFERENT send error (not "operation
+    // not allowed") must ALSO point at Gmail Drafts — real production
+    // case: "Exception: Not found" from this exact createDraft().send()
+    // chain, which used to get only a bare "Error: ..." with no Drafts
+    // guidance at all. ----
+    GmailApp = TestMockGmailApp_({});
+    GmailApp.createDraft = function () { return { send: function () { throw new Error('Exception: Not found'); } }; };
+    try {
+      const logSheet2 = ensureAllIssuesLogSheet_(ss);
+      const failRec2 = { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' };
+      const failLeads2 = [{ lead_id: 'L-FAIL2', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'test' }];
+      const result2 = sendOneAllIssuesEmail_(ss, logSheet2, 'Pune', failRec2, failLeads2, '17 Aug 2026', istDayKeyGs_(now), now, win);
+      TestAssertContains_(result2.reason, 'Not found', 'sendOneAllIssuesEmail_: a non-"operation not allowed" error is still reported with its own real text');
+      TestAssertContains_(result2.reason, 'Gmail Drafts', 'sendOneAllIssuesEmail_: a non-"operation not allowed" error STILL points at Gmail Drafts — createDraft() may have already succeeded even though this specific error text isn\'t the known send-block phrase');
+    } finally {
+      GmailApp = realGmailApp;
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in the
