@@ -210,17 +210,32 @@ function withRetry_(fn, label) {
 // read/write is safe to blindly retry, but retrying a SEND risks
 // creating a genuine duplicate email if the original attempt actually
 // succeeded and only the confirmation was lost (a "timed out"-class
-// error is exactly this kind of ambiguous). "Gmail operation not
-// allowed" is different: it's Google explicitly REFUSING the send, a
-// definitive rejection with no ambiguity about whether it went through —
-// it didn't — so retrying THIS specific error can't produce a duplicate.
-// Real production case this addresses: one run sent 15 emails in ~30
-// seconds and exactly 2 failed with this error, each one surrounded by
-// successful sends immediately before and after — a persistent policy
-// block would have failed every send, not 2 scattered ones, so this
-// reads as a brief, intermittent Gmail-side hiccup (plausibly a soft
-// rate-limit reaction to sending that many emails in quick succession)
-// that a short retry would very likely clear.
+// error is exactly this kind of ambiguous). Both errors below are
+// different: each is Google either explicitly REFUSING the send, or
+// (see "not found") a case we've since confirmed the send definitely did
+// NOT go through — no ambiguity about whether it already succeeded, so
+// retrying either can't produce a duplicate SEND (worst case for "not
+// found": one extra harmless unsent draft left behind, never a second
+// real send, since createDraft() runs fresh on every attempt).
+//   - "Gmail operation not allowed": Google explicitly refusing the send.
+//     Real production case this addresses: one run sent 15 emails in ~30
+//     seconds and exactly 2 failed with this error, each one surrounded
+//     by successful sends immediately before and after — a persistent
+//     policy block would have failed every send, not 2 scattered ones,
+//     so this reads as a brief, intermittent Gmail-side hiccup (plausibly
+//     a soft rate-limit reaction to sending that many emails in quick
+//     succession) that a short retry would very likely clear.
+//   - "...Not found" (added 2026-08-31): createDraft(...).send() chains
+//     two calls — draft creation, then an immediate send lookup BY that
+//     draft's ID. Real production case: 9 leads in one region's bucket
+//     failed with exactly this error; the user found a real, fully-formed
+//     draft sitting in Gmail Drafts and sent it manually without any
+//     issue — confirming createDraft() had already succeeded and only the
+//     immediately-chained lookup-and-send failed to find it yet. This is
+//     a documented Apps Script GmailApp eventual-consistency gap (the
+//     freshly-created draft isn't always instantly resolvable by that
+//     internal lookup) — exactly the kind of brief, transient condition a
+//     short retry clears, not a permission or logic problem.
 function withSendRetry_(fn, label) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -228,9 +243,9 @@ function withSendRetry_(fn, label) {
       return fn();
     } catch (e) {
       const msg = String((e && e.message) || e);
-      const isSafeToRetry = /operation not allowed/i.test(msg);
+      const isSafeToRetry = /operation not allowed|not found/i.test(msg);
       if (!isSafeToRetry || attempt === maxAttempts) throw e;
-      Logger.log((label || 'Gmail send') + ' failed with a definitive rejection, safe to retry (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
+      Logger.log((label || 'Gmail send') + ' failed with a known-safe-to-retry error (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
       Utilities.sleep(attempt * 2000);
     }
   }

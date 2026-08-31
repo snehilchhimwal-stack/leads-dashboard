@@ -37,6 +37,18 @@ function runEmailInfraTests_() {
     TestAssertEqual_(sendResult, 'sent', 'withSendRetry_: retries a definitive "operation not allowed" rejection and eventually succeeds');
     TestAssertEqual_(calls, 2, 'withSendRetry_: retried exactly once before succeeding');
 
+    // "...Not found" (added 2026-08-31, real production case: createDraft()
+    // succeeds — confirmed by finding and manually sending the leftover
+    // draft — but the immediately-chained send() fails to look it up yet).
+    calls = 0;
+    const sendResult2 = withSendRetry_(function () {
+      calls++;
+      if (calls < 2) throw new Error('Exception: Not found');
+      return 'sent';
+    }, 'test send retry (not found)');
+    TestAssertEqual_(sendResult2, 'sent', 'withSendRetry_: retries a "...Not found" createDraft()/send() lookup race and eventually succeeds');
+    TestAssertEqual_(calls, 2, 'withSendRetry_: retried exactly once before succeeding');
+
     calls = 0;
     TestAssertThrows_(function () {
       withSendRetry_(function () { calls++; throw new Error('Some other ambiguous failure'); }, 'test send non-retry');
