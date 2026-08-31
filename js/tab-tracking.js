@@ -218,6 +218,67 @@ function evidenceAtDeadline(history, deadlineMs, liveLead){
   return null;
 }
 
+// ONE-OFF DIAGNOSTIC (browser console) — for one date (optionally scoped
+// to one main region), lists every lead assigned that day with its
+// same-day and 48h evidence side by side: which snapshot each came from,
+// and whether it's the SAME snapshot serving both. Built specifically to
+// answer "is a Same-Day/48h Opp% tie in Daily Cohort by Region a real
+// coincidence (independent evidence, the lead genuinely didn't move) or
+// degraded evidence (the exact same snapshot silently reused for both
+// deadlines because nothing closer survives retention)?" — rather than
+// guessing from the rendered percentages alone. Reads the SAME
+// buildMovementHistories()/evidenceAtDeadline the real render uses, so
+// it can never disagree with what's on screen. Read-only — no writes.
+// Usage: debugDailyCohortEvidence('2026-08-25') or
+// debugDailyCohortEvidence('2026-08-25', 'Harbour').
+function debugDailyCohortEvidence(dateKey, region){
+  const dayStart = parseDate(dateKey + ' 00:00:00');
+  const dayEnd = parseDate(dateKey + ' 23:59:59');
+  if (!dayStart || !dayEnd) { console.warn('debugDailyCohortEvidence: bad dateKey — expected "yyyy-MM-dd".'); return; }
+  const nowMs = Date.now();
+  const sameDayDeadlineMs = Math.min(dayEnd.getTime(), nowMs);
+
+  const byLead = buildMovementHistories();
+  const liveByKey = new Map();
+  allParsedLeads.forEach(l => {
+    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    liveByKey.set(key, l);
+  });
+
+  const rows = [];
+  byLead.forEach((history, key) => {
+    if (!history.length) return;
+    const first = history[0];
+    if (!passesMovementFilters(first, { skipDateFilter: true })) return;
+    const created = parseDate(first.lead_assigned_at);
+    if (!created || created < dayStart || created > dayEnd) return;
+    const r = mainRegionFor(effectiveRegion(first)) || 'Unmapped';
+    if (region && region !== '__all__' && r !== region) return;
+
+    const sameDay = evidenceAtDeadline(history, sameDayDeadlineMs, liveByKey.get(key));
+    const deadline48hMs = created.getTime() + CONFIG.LEAD_LIFECYCLE_HOURS * 3600 * 1000;
+    const windowComplete = nowMs >= deadline48hMs;
+    const at48h = windowComplete ? evidenceAtDeadline(history, deadline48hMs, liveByKey.get(key)) : null;
+
+    rows.push({
+      lead_id: first.lead_id, key: key, region: r, created: istStamp(created),
+      sameDayEvidenceAt: sameDay && sameDay.evidence ? istStamp(sameDay.evidence.snapshot_at) : (sameDay ? 'live sheet (no history)' : 'none'),
+      sameDayOpp: sameDay ? sameDay.oppOrAbove : null,
+      windowComplete: windowComplete,
+      at48hEvidenceAt: at48h && at48h.evidence ? istStamp(at48h.evidence.snapshot_at) : (at48h ? 'live sheet (no history)' : (windowComplete ? 'none' : 'n/a — 48h not elapsed yet')),
+      at48hOpp: at48h ? at48h.oppOrAbove : null,
+      SAME_EVIDENCE_REUSED: !!(sameDay && at48h && sameDay.evidence && at48h.evidence && sameDay.evidence.snapshot_at.getTime() === at48h.evidence.snapshot_at.getTime()),
+    });
+  });
+
+  console.table(rows);
+  const reused = rows.filter(r => r.SAME_EVIDENCE_REUSED).length;
+  console.log(rows.length + ' lead(s) shown for ' + dateKey + (region ? (' / ' + region) : ' (all regions)') + '. ' +
+    reused + ' of them have the EXACT SAME snapshot serving as BOTH their same-day and 48h evidence' +
+    (reused ? ' — that\'s degraded evidence (no real point-in-time data survived between the two deadlines), not a coincidence.' : ' — every lead shown has genuinely independent evidence for the two checks, so a tie in the rendered table is a real result, not degradation.'));
+  return rows;
+}
+
 function computeZeroTo48hCohort(){
   const fromVal = document.getElementById('dateFromInput').value;
   const toVal = document.getElementById('dateToInput').value;
