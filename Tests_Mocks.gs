@@ -144,6 +144,35 @@ function TestMockRange_(sheet, row, col, numRows, numCols) {
       }
       return this;
     },
+    // Real Range.sort(sortSpecObj) column indices are absolute sheet
+    // columns (1 = A), not relative to the range's own start column —
+    // matters here since every real caller's range happens to start at
+    // column 1 too, so this stays correct either way. Stable multi-key
+    // sort restricted to this range's own row span, same "only within
+    // the range" semantics as the real API. Added for
+    // upsertDailyCohortHistoryRowsGs_ (MovementTracker.gs), the first
+    // production caller to need it.
+    sort: function (sortSpecs) {
+      const specs = Array.isArray(sortSpecs) ? sortSpecs : [sortSpecs];
+      const rows = [];
+      for (let r = 0; r < numRows; r++) rows.push(sheet._data[row - 1 + r] || []);
+      rows.sort(function (a, b) {
+        for (let i = 0; i < specs.length; i++) {
+          const spec = specs[i];
+          const idx = spec.column - 1;
+          const av = a[idx], bv = b[idx];
+          let cmp;
+          if (av === bv) cmp = 0;
+          else if (av === undefined || av === '') cmp = (bv === undefined || bv === '') ? 0 : -1;
+          else if (bv === undefined || bv === '') cmp = 1;
+          else cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+          if (cmp !== 0) return spec.ascending === false ? -cmp : cmp;
+        }
+        return 0;
+      });
+      for (let r = 0; r < numRows; r++) sheet._data[row - 1 + r] = rows[r];
+      return this;
+    },
   };
 }
 

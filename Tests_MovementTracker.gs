@@ -121,6 +121,144 @@ function runMovementTrackerTests_() {
       ScriptApp = priorScriptApp;
       SpreadsheetApp = realSpreadsheetApp2;
     }
+
+    // ---- Daily Cohort History (Gs) — automatic recording, 2026-08-31 ----
+    // "now" = a fixed point 7-9 days after the fixture leads below were
+    // assigned, so Aug 24 is fully 48h-elapsed AND still within a 7-day
+    // retention window, Aug 30 is still under 48h, and Aug 1 is a lead
+    // that's STILL open (keeps showing up in every recent capture) but
+    // whose OWN day is long outside retention — exactly the real scenario
+    // that used to make Same-Day and 48h evidence silently collapse to
+    // the same fallback snapshot for an old date.
+    const dchNow = new Date('2026-08-31T12:00:00+05:30');
+    const movementLogHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+    function movementRow(atDate, overrides) {
+      const defaults = {
+        lead_id: 'L-X', client_id: 'C-X', region: 'Pune East', group_source: 'google',
+        current_stage: 'Suspect', lead_assigned_at: dchNow, closing_reason: '',
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return movementLogHeader.map(function (k) {
+        if (k === 'snapshot_at') return atDate;
+        if (k === 'snapshot_label') return 'test';
+        return merged[k] !== undefined ? merged[k] : '';
+      });
+    }
+    const laCreated = new Date('2026-08-24T10:00:00+05:30');
+    const ldCreated = new Date('2026-08-24T15:00:00+05:30');
+    const lbCreated = new Date('2026-08-30T10:00:00+05:30');
+    const lcCreated = new Date('2026-08-01T09:00:00+05:30');
+    const dchMovementRows = [
+      // L-A: raw region "Pune East" -> main region "Pune". Same-day
+      // evidence (Suspect, not opp) genuinely differs from 48h evidence
+      // (Opportunity) — proves the two deadlines are NOT silently
+      // collapsing onto the same fallback snapshot.
+      movementRow(new Date('2026-08-24T12:00:00+05:30'), { lead_id: 'L-A', client_id: 'C-A', region: 'Pune East', lead_assigned_at: laCreated, current_stage: 'Suspect' }),
+      movementRow(new Date('2026-08-24T20:00:00+05:30'), { lead_id: 'L-A', client_id: 'C-A', region: 'Pune East', lead_assigned_at: laCreated, current_stage: 'Suspect' }),
+      movementRow(new Date('2026-08-26T09:00:00+05:30'), { lead_id: 'L-A', client_id: 'C-A', region: 'Pune East', lead_assigned_at: laCreated, current_stage: 'Opportunity' }),
+      // L-D: raw region "Bangalore" but group_source=loan -> Loan bucket.
+      // Closes (Won — an excluded/closed stage) without ever reaching
+      // Opportunity+, exercising closed48h.
+      movementRow(new Date('2026-08-24T16:00:00+05:30'), { lead_id: 'L-D', client_id: 'C-D', region: 'Bangalore', group_source: 'loan', lead_assigned_at: ldCreated, current_stage: 'Won' }),
+      // L-B: created within the last 48h as of dchNow — Aug 30 must NOT
+      // show up as eligible yet.
+      movementRow(new Date('2026-08-30T11:00:00+05:30'), { lead_id: 'L-B', client_id: 'C-B', region: 'Thane', lead_assigned_at: lbCreated, current_stage: 'Suspect' }),
+      // L-C: created a month ago, still open — its most recent retained
+      // snapshot is from Aug 26, but its OWN day (Aug 1) is long outside
+      // Movement_Log's currently retained span (earliest retained row
+      // here is Aug 24), so Aug 1 must be excluded even though this lead
+      // itself is still represented in retained data.
+      movementRow(new Date('2026-08-26T08:00:00+05:30'), { lead_id: 'L-C', client_id: 'C-C', region: 'Central', lead_assigned_at: lcCreated, current_stage: 'Suspect' }),
+    ];
+
+    const dchHistoryRows = _readMovementLogHistoryRowsGs_(TestMockSpreadsheet_({
+      'Movement_Log': TestMockSheet_('Movement_Log', [movementLogHeader].concat(dchMovementRows)),
+    }));
+    TestAssertEqual_(dchHistoryRows.length, dchMovementRows.length, '_readMovementLogHistoryRowsGs_: reads every retained Movement_Log row');
+
+    const dchEligible = eligibleDailyCohortDatesGs_(dchHistoryRows, dchNow);
+    TestAssertEqual_(dchEligible, ['2026-08-24'], 'eligibleDailyCohortDatesGs_: only the fully-elapsed, still-retained day is eligible — excludes a still-under-48h day (Aug 30) and a day aged out of retention (Aug 1)');
+
+    const dchByRegion = computeDailyCohortByRegionGs_('2026-08-24', dchHistoryRows, {}, dchNow);
+    TestAssert_(!!dchByRegion['Pune'], 'computeDailyCohortByRegionGs_: raw region "Pune East" correctly groups to main region "Pune"');
+    TestAssertEqual_(dchByRegion['Pune'].created, 1, 'computeDailyCohortByRegionGs_: Pune created count');
+    TestAssertEqual_(dchByRegion['Pune'].sameDayOpp, 0, 'computeDailyCohortByRegionGs_: L-A was still Suspect (not opp) by end of its own day');
+    TestAssertEqual_(dchByRegion['Pune'].opp48h, 1, 'computeDailyCohortByRegionGs_: L-A HAD reached Opportunity by its 48h mark — genuinely different evidence from the same-day figure, not the same fallback snapshot reused for both');
+    TestAssert_(!!dchByRegion['Loan'], 'computeDailyCohortByRegionGs_: group_source=loan overrides raw region "Bangalore" to the Loan bucket');
+    TestAssertEqual_(dchByRegion['Loan'].closed48h, 1, 'computeDailyCohortByRegionGs_: L-D closed (Won) without ever reaching Opportunity+');
+    TestAssert_(!dchByRegion['Thane'] && !dchByRegion['Central'], 'computeDailyCohortByRegionGs_: leads created on other days (L-B: Aug 30, L-C: Aug 1) are excluded from the Aug 24 cohort');
+
+    const dchLiveByKey = {
+      'C-E': { region: 'Hyderabad', groupSource: 'google', stage: 'Opportunity', closingReason: '', leadClosingReason: '', leadAssignedAt: new Date('2026-08-24T09:00:00+05:30') },
+    };
+    const dchByRegionWithLive = computeDailyCohortByRegionGs_('2026-08-24', dchHistoryRows, dchLiveByKey, dchNow);
+    TestAssert_(!!dchByRegionWithLive['Hyderabad'], 'computeDailyCohortByRegionGs_: a lead Movement_Log never captured at all is still counted, via the live-lead fallback');
+    TestAssertEqual_(dchByRegionWithLive['Hyderabad'].opp48h, 1, 'computeDailyCohortByRegionGs_: the live-only lead\'s CURRENT status is used as evidence, since Movement_Log has nothing at all for it');
+
+    const dchArchiveSs = TestMockSpreadsheet_({});
+    upsertDailyCohortHistoryRowsGs_(dchArchiveSs, [
+      { date: '2026-08-24', region: 'Pune', stats: dchByRegion['Pune'] },
+      { date: '2026-08-24', region: 'Loan', stats: dchByRegion['Loan'] },
+    ], dchNow);
+    const dchSheet = dchArchiveSs.getSheetByName('Daily_Cohort_History');
+    TestAssert_(!!dchSheet, 'upsertDailyCohortHistoryRowsGs_: creates the Daily_Cohort_History sheet on first write');
+    TestAssertEqual_(dchSheet.getRange(1, 1, 1, DAILY_COHORT_HISTORY_COLUMNS_.length).getValues()[0], DAILY_COHORT_HISTORY_COLUMNS_, 'upsertDailyCohortHistoryRowsGs_: header matches the browser writer\'s DAILY_COHORT_HISTORY_COLUMNS_ schema exactly');
+    TestAssertEqual_(dchSheet.getLastRow(), 3, 'upsertDailyCohortHistoryRowsGs_: header + 2 data rows');
+    const dchKeysAfterInsert = dchSheet.getRange(2, 1, 2, 1).getValues().map(function (r) { return r[0]; }).sort();
+    TestAssertEqual_(dchKeysAfterInsert, ['2026-08-24|Loan', '2026-08-24|Pune'], 'upsertDailyCohortHistoryRowsGs_: date_region key format matches "date|region"');
+
+    // Re-run with an UPDATED Pune stat — must update in place, not duplicate.
+    upsertDailyCohortHistoryRowsGs_(dchArchiveSs, [
+      { date: '2026-08-24', region: 'Pune', stats: Object.assign({}, dchByRegion['Pune'], { created: 9 }) },
+    ], dchNow);
+    TestAssertEqual_(dchSheet.getLastRow(), 3, 'upsertDailyCohortHistoryRowsGs_: re-running with an existing date+region key updates in place, never duplicates a row');
+    const dchUpdatedRows = dchSheet.getRange(2, 1, 2, DAILY_COHORT_HISTORY_COLUMNS_.length).getValues();
+    const dchPuneRow = dchUpdatedRows.filter(function (r) { return r[0] === '2026-08-24|Pune'; })[0];
+    TestAssertEqual_(dchPuneRow[3], 9, 'upsertDailyCohortHistoryRowsGs_: the created-count column is actually overwritten on update');
+    const dchLoanRow = dchUpdatedRows.filter(function (r) { return r[0] === '2026-08-24|Loan'; })[0];
+    TestAssertEqual_(dchLoanRow[3], 1, 'upsertDailyCohortHistoryRowsGs_: updating one key leaves an unrelated existing row untouched');
+
+    // ---- persistDailyCohortHistoryGs_: full orchestrator, end to end ----
+    const dchOrchestratorSs = TestMockSpreadsheet_({
+      'Movement_Log': TestMockSheet_('Movement_Log', [movementLogHeader].concat(dchMovementRows)),
+    });
+    persistDailyCohortHistoryGs_(dchOrchestratorSs, [], {}, dchNow);
+    const dchArchiveSheet = dchOrchestratorSs.getSheetByName('Daily_Cohort_History');
+    TestAssert_(!!dchArchiveSheet, 'persistDailyCohortHistoryGs_: creates and writes Daily_Cohort_History end to end from a Movement_Log-only spreadsheet');
+    TestAssertEqual_(dchArchiveSheet.getLastRow(), 3, 'persistDailyCohortHistoryGs_: one header + Pune + Loan rows for the single eligible date');
+    const dchArchiveKeys = dchArchiveSheet.getRange(2, 1, 2, 1).getValues().map(function (r) { return r[0]; }).sort();
+    TestAssertEqual_(dchArchiveKeys, ['2026-08-24|Loan', '2026-08-24|Pune'], 'persistDailyCohortHistoryGs_: writes exactly the two eligible region rows');
+    TestAssertEqual_(dchArchiveSheet.getRange(2, 12, 1, 1).getValue(), 'AppsScript', 'persistDailyCohortHistoryGs_: source column is always "AppsScript" for a row written from here (vs. "Dashboard"/"Backfill" from the browser)');
+
+    // ---- Error containment: a Daily_Cohort_History failure must never block the core Movement_Log capture ----
+    const containmentLeadsHeader = TestFixture_leadsHeader_();
+    const containmentBannerRow = containmentLeadsHeader.map(function () { return ''; });
+    function containmentLeadRow(overrides) {
+      const defaults = {
+        lead_id: 'L-CT', client_id: 'C-CT', RM: 'Test RM One', TL: 'Test A1 One', project: 'P', region: 'Test Region',
+        client: 'Client', lead_assigned_at: dchNow, group_source: 'google', source_bucket: 'Non-UTM',
+        current_stage: 'Suspect', rm_is_active: true, call_attempts: 1,
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return containmentLeadsHeader.map(function (k) { return merged[k] !== undefined ? merged[k] : ''; });
+    }
+    const containmentMonthShort = Utilities.formatDate(dchNow, 'Asia/Kolkata', 'MMM');
+    const containmentLeadsSheet = TestMockSheet_(containmentMonthShort, [containmentBannerRow, containmentLeadsHeader, containmentLeadRow({})]);
+    const containmentSs = TestMockSpreadsheet_({});
+    containmentSs._sheets[containmentMonthShort] = containmentLeadsSheet;
+
+    const containmentRealSpreadsheetApp = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return containmentSs; }, flush: function () {} };
+    const realPersistDailyCohortHistoryGs_ = persistDailyCohortHistoryGs_;
+    persistDailyCohortHistoryGs_ = function () { throw new Error('simulated Daily_Cohort_History failure'); };
+    try {
+      snapshotOpenLeads_('containment test');
+      const containmentMovementLog = containmentSs.getSheetByName('Movement_Log');
+      TestAssert_(!!containmentMovementLog && containmentMovementLog.getLastRow() === 2, 'snapshotOpenLeads_: a persistDailyCohortHistoryGs_ throw still lets Movement_Log capture complete (header + 1 data row)');
+    } finally {
+      persistDailyCohortHistoryGs_ = realPersistDailyCohortHistoryGs_;
+      SpreadsheetApp = containmentRealSpreadsheetApp;
+    }
   } finally {
     TestEnv_tearDown_();
   }

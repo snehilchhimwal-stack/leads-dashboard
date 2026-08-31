@@ -406,6 +406,18 @@ function snapshotOpenLeads_(label) {
   logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
 
   pruneMovementLog_(ss);
+
+  // Runs LAST, after Movement_Log's own prune, so it reads Movement_Log's
+  // true current (post-prune) retained range rather than a stale
+  // about-to-be-trimmed one. Same "can never block the core Movement_Log
+  // capture" wrapping as the SLA_History/Unmatched_Comments_Log writes
+  // above — see persistDailyCohortHistoryGs_'s own header comment for why
+  // this needs to run unattended at all.
+  try {
+    persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now);
+  } catch (e) {
+    Logger.log('Daily_Cohort_History persist failed (Movement_Log capture continues): ' + e);
+  }
 }
 
 // Rewrites the whole data range with only rows newer than the retention
@@ -464,6 +476,354 @@ function pruneMovementLog_(ss) {
 // needing a successful snapshot append first. Safe to re-run any time.
 function pruneMovementLogNow() {
   pruneMovementLog_(SpreadsheetApp.getActiveSpreadsheet());
+}
+
+/**
+ * Daily Cohort History — automatic, unattended persistence of the
+ * dashboard's own "Daily Cohort by Region" table (js/tab-tracking.js:
+ * computeDailyCohortByRegion) into a Daily_Cohort_History sheet tab, on
+ * the SAME 6-hourly trigger snapshotOpenLeads_ already runs on. Direct
+ * port of computeDailyCohortByRegion / eligibleDailyCohortDates /
+ * persistDailyCohortHistory (js/tab-tracking.js) and
+ * upsertDailyCohortHistoryRows (js/sheets-writeback.js) — same schema,
+ * same eligibility rule, same evidence-at-deadline fallback order, so a
+ * row written from here is indistinguishable in shape from one the
+ * browser wrote (only the `source` column differs — 'AppsScript' here
+ * vs 'Dashboard'/'Backfill' from the browser).
+ *
+ * WHY THIS EXISTS: the browser-side persistDailyCohortHistory only runs
+ * when someone actually has the dashboard open at a moment Movement_Log
+ * still covers the day in question — miss that window (nobody opens the
+ * dashboard for a stretch) and that day's true same-day/48h evidence is
+ * gone forever once Movement_Log prunes past MOVEMENT_LOG_RETENTION_DAYS,
+ * silently replaced by degraded fallback evidence (both "same-day" and
+ * "48h" deadlines start resolving to the same nearest-surviving snapshot,
+ * which is what made those two columns read identical for an old date).
+ * Running this from the SAME unattended trigger that already captures
+ * Movement_Log itself closes that gap: every day gets a real chance to be
+ * recorded within 6 hours of becoming eligible, regardless of browser
+ * activity.
+ *
+ * SELF-HEALING BY CONSTRUCTION: eligibleDailyCohortDatesGs_ below always
+ * recomputes the FULL currently-eligible window (every day still inside
+ * Movement_Log's retention whose 48h window has elapsed), not just
+ * "today" — and the write is an upsert keyed by date+region, so a day
+ * missed on one run (a trigger failure, a temporary error) is simply
+ * re-attempted and correctly filled in on the next run, as long as it's
+ * still within Movement_Log's retention window when that next run
+ * happens. A day that ages out of retention before ANY run ever covers
+ * it is a genuine, permanent gap — no amount of retrying recovers data
+ * that has already been pruned from Movement_Log.
+ */
+
+const DAILY_COHORT_HISTORY_SHEET_ = 'Daily_Cohort_History';
+// Must exactly match DAILY_COHORT_HISTORY_COLUMNS in js/sheets-writeback.js
+// — both sides write into the same tab and must agree on column order.
+const DAILY_COHORT_HISTORY_COLUMNS_ = [
+  'date_region', 'date', 'region', 'created', 'same_day_resolved', 'same_day_opp',
+  'window_complete', 'resolved_48h', 'opp_48h', 'closed_48h', 'updated_at', 'source',
+];
+
+function ensureDailyCohortHistorySheetGs_(ss) {
+  let sheet = ss.getSheetByName(DAILY_COHORT_HISTORY_SHEET_);
+  if (!sheet) {
+    sheet = ss.insertSheet(DAILY_COHORT_HISTORY_SHEET_);
+    sheet.getRange(1, 1, 1, DAILY_COHORT_HISTORY_COLUMNS_.length).setValues([DAILY_COHORT_HISTORY_COLUMNS_]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+// Full-row Movement_Log reader (region/stage/closing_reason/lead_assigned_at
+// included) — deliberately separate from _readMovementLogRowsGs_ above,
+// which only reads the {key, atMs, call_attempts} shape the SLA baseline
+// maps need. Returns every retained row, unfiltered by date — callers
+// slice by lead (key) and deadline themselves.
+function _readMovementLogHistoryRowsGs_(ss) {
+  const out = [];
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!sheet) return out;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return out;
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const idx = {};
+  ['snapshot_at', 'lead_id', 'client_id', 'region', 'group_source', 'current_stage', 'closing_reason', 'lead_assigned_at'].forEach(function (h) {
+    idx[h] = headers.indexOf(h);
+  });
+  if (idx.snapshot_at === -1) return out;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  values.forEach(function (row) {
+    const ts = row[idx.snapshot_at];
+    if (!(ts instanceof Date)) return;
+    const leadId = String(row[idx.lead_id] || '').trim();
+    if (!leadId) return;
+    const clientId = String(row[idx.client_id] || '').trim();
+    out.push({
+      key: clientId || ('l:' + leadId),
+      atMs: ts.getTime(),
+      region: idx.region === -1 ? '' : row[idx.region],
+      groupSource: idx.group_source === -1 ? '' : row[idx.group_source],
+      stage: idx.current_stage === -1 ? '' : row[idx.current_stage],
+      closingReason: idx.closing_reason === -1 ? '' : row[idx.closing_reason],
+      leadAssignedAt: idx.lead_assigned_at === -1 ? '' : row[idx.lead_assigned_at],
+    });
+  });
+  return out;
+}
+
+// Port of dashboard.html/reports.js's effectiveRegion, GROUP_SOURCE-only:
+// Movement_Log never captures a project_region column (not in
+// SNAPSHOT_COLUMNS_ above), so the browser's project_region-based Loan
+// override can never fire off a stored snapshot row either — this mirrors
+// exactly what's actually reachable from Movement_Log data, not a
+// hypothetical fuller port.
+function _effectiveRegionGs_(groupSource, region) {
+  if (normRegionKeyGs_(String(groupSource || '')) === 'loan') return 'Loan';
+  return String(region || '').trim();
+}
+
+// Port of evidenceAtDeadline (js/tab-tracking.js): prefers the latest
+// history record at-or-before the deadline, falls back to the first one
+// after it, and finally to precomputed live-sheet evidence when history
+// has nothing on either side. `liveEvidence` is {oppOrAbove, isOpenLead}
+// or null — precomputed once per lead by the caller, not per deadline.
+function _evidenceAtDeadlineGs_(historyForKey, deadlineMs, liveEvidence) {
+  let atOrBefore = null, firstAfter = null;
+  historyForKey.forEach(function (rec) {
+    if (rec.atMs <= deadlineMs) { if (!atOrBefore || rec.atMs > atOrBefore.atMs) atOrBefore = rec; }
+    else if (!firstAfter || rec.atMs < firstAfter.atMs) firstAfter = rec;
+  });
+  const evidence = atOrBefore || firstAfter;
+  if (evidence) {
+    return { oppOrAbove: isOppOrAbove_(evidence.stage), isOpenLead: isOpenLead_(evidence.stage, evidence.closingReason, '') };
+  }
+  return liveEvidence || null;
+}
+
+// Port of eligibleDailyCohortDates (js/tab-tracking.js): every calendar
+// day whose dayEnd falls within Movement_Log's actual retained coverage
+// (real point-in-time evidence nearby) AND whose entire 48h window has
+// already elapsed (every stored number final, never partial).
+function eligibleDailyCohortDatesGs_(historyRows, now) {
+  if (!historyRows.length) return [];
+  let earliestMs = null;
+  historyRows.forEach(function (r) { if (earliestMs === null || r.atMs < earliestMs) earliestMs = r.atMs; });
+
+  const earliestByKey = {};
+  historyRows.forEach(function (r) {
+    if (!earliestByKey[r.key] || r.atMs < earliestByKey[r.key].atMs) earliestByKey[r.key] = r;
+  });
+  const dayKeys = {};
+  Object.keys(earliestByKey).forEach(function (key) {
+    const created = earliestByKey[key].leadAssignedAt;
+    if (!(created instanceof Date)) return;
+    dayKeys[istDayKeyGs_(created)] = true;
+  });
+
+  const nowMs = now.getTime();
+  return Object.keys(dayKeys).filter(function (dateKey) {
+    const dayEndMs = new Date(dateKey + 'T23:59:59+05:30').getTime();
+    return dayEndMs >= earliestMs && (dayEndMs + LEAD_LIFECYCLE_HOURS_ * 3600 * 1000) <= nowMs;
+  }).sort();
+}
+
+// Builds a live-lead lookup from the current month tab's just-read rows
+// (the SAME dataRows/colIndex snapshotOpenLeads_ already has this run) —
+// covers the rare case where Movement_Log never captured a single
+// snapshot of a lead at all (added and resolved between two 6-hourly
+// captures, or a genuine capture gap), same reasoning as
+// computeDailyCohortByRegion's own liveByKey merge. First copy of a
+// customer split across 2 RM rows wins — only region/stage/created are
+// read from this, and both copies carry the same lead_assigned_at.
+function _buildLiveLeadIndexGs_(dataRows, colIndex) {
+  const out = {};
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    const key = clientId || ('l:' + leadId);
+    if (out[key]) return;
+    out[key] = {
+      region: getVal_(row, colIndex, 'region'),
+      groupSource: getVal_(row, colIndex, 'group_source'),
+      stage: getVal_(row, colIndex, 'current_stage'),
+      closingReason: getVal_(row, colIndex, 'closing_reason'),
+      leadClosingReason: getVal_(row, colIndex, 'lead_closing_reason'),
+      leadAssignedAt: getVal_(row, colIndex, 'lead_assigned_at'),
+    };
+  });
+  return out;
+}
+
+// Port of computeDailyCohortByRegion (js/tab-tracking.js) for one
+// calendar day — returns {region -> stats}. Always the TRUE unfiltered
+// picture (no Project/Region/TL/Source filtering — those are a dashboard
+// browser-UI concept only), matching persistDailyCohortHistory's own
+// ignoreFilters:true call, since a persisted archive row must reflect
+// reality regardless of who has the dashboard open with which filters.
+function computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now) {
+  const dayStart = new Date(dateKey + 'T00:00:00+05:30');
+  const dayEnd = new Date(dateKey + 'T23:59:59+05:30');
+  const nowMs = now.getTime();
+  const sameDayDeadlineMs = Math.min(dayEnd.getTime(), nowMs);
+
+  const byKey = {};
+  historyRows.forEach(function (r) {
+    if (!byKey[r.key]) byKey[r.key] = [];
+    byKey[r.key].push(r);
+  });
+
+  // Every lead with Movement_Log history, PLUS any live-only lead
+  // Movement_Log never captured at all — same union computeDailyCohortByRegion
+  // builds in the browser.
+  const allKeys = {};
+  Object.keys(byKey).forEach(function (k) { allKeys[k] = true; });
+  Object.keys(liveByKey).forEach(function (k) { allKeys[k] = true; });
+
+  const byRegion = {};
+  function statsFor(region) {
+    if (!byRegion[region]) byRegion[region] = {
+      region: region, created: 0, sameDayResolved: 0, sameDayOpp: 0,
+      windowComplete: 0, resolved48h: 0, opp48h: 0, closed48h: 0,
+    };
+    return byRegion[region];
+  }
+
+  Object.keys(allKeys).forEach(function (key) {
+    const history = byKey[key] || [];
+    const live = liveByKey[key];
+
+    let first = null;
+    history.forEach(function (r) { if (!first || r.atMs < first.atMs) first = r; });
+    const source = first || live;
+    if (!source) return;
+    const created = first ? first.leadAssignedAt : live.leadAssignedAt;
+    if (!(created instanceof Date)) return;
+    if (created < dayStart || created > dayEnd) return;
+
+    const region = mainRegionForGs_(_effectiveRegionGs_(source.groupSource, source.region)) || 'Unmapped';
+    const stats = statsFor(region);
+    stats.created++;
+
+    const liveEvidence = live
+      ? { oppOrAbove: isOppOrAbove_(live.stage), isOpenLead: isOpenLead_(live.stage, live.closingReason, live.leadClosingReason) }
+      : null;
+
+    const sameDay = _evidenceAtDeadlineGs_(history, sameDayDeadlineMs, liveEvidence);
+    if (sameDay) {
+      stats.sameDayResolved++;
+      if (sameDay.oppOrAbove) stats.sameDayOpp++;
+    }
+
+    const deadline48hMs = created.getTime() + LEAD_LIFECYCLE_HOURS_ * 3600 * 1000;
+    if (nowMs < deadline48hMs) return; // this lead's own 48h window hasn't elapsed yet
+    stats.windowComplete++;
+    const at48h = _evidenceAtDeadlineGs_(history, deadline48hMs, liveEvidence);
+    if (!at48h) return;
+    stats.resolved48h++;
+    if (at48h.oppOrAbove) stats.opp48h++;
+    else if (!at48h.isOpenLead) stats.closed48h++;
+  });
+
+  return byRegion;
+}
+
+// Port of upsertDailyCohortHistoryRows (js/sheets-writeback.js): upserts
+// one row per {date, region, stats} entry, keyed by "date|region" (column
+// A), same schema/column order as the browser's writer. source is always
+// 'AppsScript' here so a reader can tell which side wrote a given row.
+// Re-sorts by date then region after any append, same as the browser's
+// own sortDailyCohortHistorySheet_ — keeps the tab readable regardless of
+// which side wrote most recently.
+function upsertDailyCohortHistoryRowsGs_(ss, entries, now) {
+  if (!entries.length) return;
+  const sheet = ensureDailyCohortHistorySheetGs_(ss);
+  const lastRow = sheet.getLastRow();
+  const rowNumberByKey = {};
+  if (lastRow >= 2) {
+    const existingKeys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    existingKeys.forEach(function (r, i) {
+      const k = String(r[0] || '').trim();
+      if (k) rowNumberByKey[k] = i + 2; // +2: row 1 is the header
+    });
+  }
+
+  const updatedAt = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  const toAppend = [];
+  entries.forEach(function (e) {
+    const key = e.date + '|' + e.region;
+    const s = e.stats;
+    const rowValues = [
+      key, e.date, e.region, s.created, s.sameDayResolved, s.sameDayOpp,
+      s.windowComplete, s.resolved48h, s.opp48h, s.closed48h, updatedAt, 'AppsScript',
+    ];
+    const rowNum = rowNumberByKey[key];
+    if (rowNum) {
+      sheet.getRange(rowNum, 1, 1, rowValues.length).setValues([rowValues]);
+    } else {
+      toAppend.push(rowValues);
+    }
+  });
+
+  if (toAppend.length) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, toAppend.length, toAppend[0].length).setValues(toAppend);
+    const dataRowCount = sheet.getLastRow() - 1;
+    if (dataRowCount > 1) {
+      sheet.getRange(2, 1, dataRowCount, DAILY_COHORT_HISTORY_COLUMNS_.length)
+        .sort([{ column: 2, ascending: true }, { column: 3, ascending: true }]); // date, then region
+    }
+  }
+}
+
+// Orchestrator — called from snapshotOpenLeads_ on every 6-hourly run.
+// `dataRows`/`colIndex` are the SAME current-month-tab rows that run
+// already read, reused here for the live-lead fallback rather than a
+// second read of the source tab.
+function persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now) {
+  const historyRows = _readMovementLogHistoryRowsGs_(ss);
+  if (!historyRows.length) return;
+
+  const eligibleDates = eligibleDailyCohortDatesGs_(historyRows, now);
+  if (!eligibleDates.length) return;
+
+  const liveByKey = _buildLiveLeadIndexGs_(dataRows, colIndex);
+
+  const entries = [];
+  eligibleDates.forEach(function (dateKey) {
+    const byRegion = computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now);
+    Object.keys(byRegion).forEach(function (region) {
+      const stats = byRegion[region];
+      if (!stats.created) return;
+      entries.push({ date: dateKey, region: region, stats: stats });
+    });
+  });
+  if (!entries.length) return;
+
+  upsertDailyCohortHistoryRowsGs_(ss, entries, now);
+}
+
+// Manual run (function dropdown -> Run) — recomputes and upserts
+// Daily_Cohort_History for every currently-eligible date without waiting
+// for the next scheduled snapshotPeriodic trigger. Useful right after
+// deploying this, or to force an immediate catch-up. Reads the current
+// month tab itself rather than requiring snapshotOpenLeads_ to have just
+// run.
+function persistDailyCohortHistoryNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tabName = resolveTabName_(ss);
+  const src = ss.getSheetByName(tabName);
+  if (!src) throw new Error('Daily Cohort History: tab "' + tabName + '" not found.');
+  const lastRow = src.getLastRow();
+  const lastCol = src.getLastColumn();
+  if (lastRow < 3) { Logger.log('Nothing to read from ' + tabName + '.'); return; }
+  const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
+  const colIndex = buildColIndex_(headerRow);
+  const dataRows = src.getRange(3, 1, lastRow - 2, lastCol).getValues();
+  persistDailyCohortHistoryGs_(ss, dataRows, colIndex, new Date());
+  Logger.log('Daily_Cohort_History persist run complete.');
 }
 
 // ---- Trigger entry point ----
