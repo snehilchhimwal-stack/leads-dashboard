@@ -109,6 +109,22 @@ function runRmHierarchyTests_() {
     TestAssert_(!!sourabh, 'resolveRmHierarchy_: real production data still has a "Sourabh Sareen" row');
     TestAssertEqual_(sourabh && sourabh.role, 'City Lead', 'resolveRmHierarchy_: Sourabh Sareen\'s real recorded role is still "City Lead"');
 
+    // Prathamesh A Pande left the company 2026-08-31 -- his own row is
+    // gone, and his 4 former reports now fall through directly to their
+    // own senior (TM Rahul Poudel), not left dangling on a departed A1.
+    TestAssert_(!realResolved.some(function (p) { return p.name === 'Prathamesh A Pande'; }), 'resolveRmHierarchy_: real production data no longer has a "Prathamesh A Pande" row (departed 2026-08-31)');
+    const akshayMore = realResolved.find(function (p) { return p.name === 'Akshay More'; });
+    TestAssert_(!!akshayMore, 'resolveRmHierarchy_: Akshay More (a former Prathamesh A Pande report) still has a row');
+    TestAssertEqual_(akshayMore && akshayMore.tl, '', 'resolveRmHierarchy_: Akshay More\'s tl no longer names the departed Prathamesh A Pande');
+    TestAssertEqual_(akshayMore && akshayMore.tm, 'Rahul Poudel', 'resolveRmHierarchy_: Akshay More\'s primary correctly falls through to his own senior, TM Rahul Poudel');
+
+    // "Kavya Gowda" -- confirmed by the user directly as the same person
+    // as the existing "Kavya B R" row; must resolve to that EXACT chain.
+    const kavyaBR = realResolved.find(function (p) { return p.name === 'Kavya B R'; });
+    const kavyaGowda = realResolved.find(function (p) { return p.name === 'Kavya Gowda'; });
+    TestAssert_(!!kavyaBR && !!kavyaGowda, 'resolveRmHierarchy_: both "Kavya B R" and its alias "Kavya Gowda" have rows');
+    TestAssertEqual_(JSON.stringify({ tl: kavyaGowda.tl, tm: kavyaGowda.tm, rh: kavyaGowda.rh, ch: kavyaGowda.ch }), JSON.stringify({ tl: kavyaBR.tl, tm: kavyaBR.tm, rh: kavyaBR.rh, ch: kavyaBR.ch }), 'resolveRmHierarchy_: "Kavya Gowda" resolves to the exact same chain as "Kavya B R"');
+
     // ---- rebuildRmHierarchy: preserves manual edits across a rebuild ----
     // rebuildRmHierarchy() (unlike everything above) takes no `ss`
     // parameter — it always operates on SpreadsheetApp.getActiveSpreadsheet()

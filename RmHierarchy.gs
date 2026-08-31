@@ -149,7 +149,6 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','A1','Amit Upadhyay','','','','Bipin More'],
   ['Bangalore','S1','Manoj M','Rahan Khan','','Romen Singh','Mukesh Mishra'],
   ['Pune','TM','Rahul Poudel','','','','Sourabh Sareen'],
-  ['Pune','A1','Prathamesh A Pande','','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','A1','Nayan Pabale','','Rahul Poudel','','Sourabh Sareen'],
   ['Thane','S1','Mamtaben Sosa','Amit Upadhyay','','','Bipin More'],
   ['Loan','Executive','Siddhi Kate','Zahid Shaikh','','','Mayur Panjari'],
@@ -157,7 +156,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Swapnil Waghmode','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Central','S1','Khushal Soni','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','A1','Omkar Ghate','','Ayaz Bagwan','','Sourabh Sareen'],
-  ['Pune','S1','Akshay More','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Akshay More','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Loan','BDM','Yogesh Choudhari','','','','Mayur Panjari'],
   ['Thane','S1','Avinash Khare','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Hyderabad','S1','Parusharothu Vinay Varma','Vemula Ajay','','','Mukesh Mishra'],
@@ -268,7 +267,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','S1','Tejal Nikam','Avinash Kumar','','','Vidya Jadhav'],
   ['Hyderabad','S1','G Anand Kumar','Vemula Ajay','','','Mukesh Mishra'],
   ['Loan','A1','Zahid Shaikh','','','','Mayur Panjari'],
-  ['Pune','S1','Aadesh Narwade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Aadesh Narwade','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
   ['Harbour','S1','Manan Bhatt','Yash Sharma','','','Sanjyota Bhosale'],
   ['Western','S1','Vijay Katheriya','','Minas Patel','','Rahul Gandhi'],
@@ -285,13 +284,13 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','S1','Fakrealam Ansari','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','S1','Sahil Gote','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','A1','Rohit Rathod','','','Sachindra Wadane','Sourabh Sareen'],
-  ['Pune','S1','Yash Awade','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Yash Awade','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Pune','S1','Israr Khan','Firoj Shaikh','','','Sourabh Sareen'],
   ['Bangalore','S1','Md Muzamil','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','S1','Mohammed Hidayathulla','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Navi Mumbai','S1','Chandni Khatoon','','','','Vidya Jadhav'],
   ['Pune','S1','Rajdeep Jalan','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
-  ['Pune','S1','Pranav Deshmukh','Prathamesh A Pande','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Pranav Deshmukh','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Navi Mumbai','S1','Jitendra Phulwaria','','','','Vidya Jadhav'],
   ['Central','S1','Sneha Upadhyay','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Thane','S1','Jay Patil','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
@@ -355,6 +354,8 @@ const RM_HIERARCHY_RAW_ = [
   // 2 more, found via auditUnresolvedRmsNow's first real run (2026-08-31).
   ['Pune','City Lead','Sourabh Sareen Pnl','','','',''], // leads sheet appends " Pnl" (P&L) — real row: "Sourabh Sareen"
   ['Loan','BDM','Mohmmad Azaz Izhar Anasair','','','','Mayur Panjari'], // leads sheet misspells both names — real row: "Mohammad Azaz Izhar Ansari"
+  // Confirmed by the user directly (not a guess) — same person as "Kavya B R".
+  ['Bangalore','S1','Kavya Gowda','Mainuddin T','','Romen Singh','Mukesh Mishra'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
@@ -866,7 +867,10 @@ function isTopOfOrgRole_(role) {
  * automated email purposes, every TM is
  * ALSO treated as an A1 (gets their own bucket) — EXCEPT Pune's two TMs
  * who already have real A1s under them (Ayaz Bagwan -> Omkar
- * Ghate/Firoj Shaikh; Rahul Poudel -> Prathamesh A Pande/Nayan Pabale).
+ * Ghate/Firoj Shaikh; Rahul Poudel -> Nayan Pabale — Prathamesh A Pande
+ * also reported here until he left the company, 2026-08-31; the rule
+ * itself is unchanged, Rahul Poudel still needs the CC exception because
+ * of Nayan Pabale alone).
  * Nothing extra to special-case for that exception: anyone reporting to
  * one of those real A1s already has `tl` filled with the A1's own name
  * on their own row (not blank), so `chain.tl` is checked FIRST above and
