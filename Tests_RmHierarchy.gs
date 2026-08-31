@@ -125,6 +125,13 @@ function runRmHierarchyTests_() {
     TestAssert_(!!kavyaBR && !!kavyaGowda, 'resolveRmHierarchy_: both "Kavya B R" and its alias "Kavya Gowda" have rows');
     TestAssertEqual_(JSON.stringify({ tl: kavyaGowda.tl, tm: kavyaGowda.tm, rh: kavyaGowda.rh, ch: kavyaGowda.ch }), JSON.stringify({ tl: kavyaBR.tl, tm: kavyaBR.tm, rh: kavyaBR.rh, ch: kavyaBR.ch }), 'resolveRmHierarchy_: "Kavya Gowda" resolves to the exact same chain as "Kavya B R"');
 
+    // "Shamakuri Goud" -- confirmed by the user directly as the same
+    // person as the existing "Nikhil Goud" row; must resolve identically.
+    const nikhilGoud = realResolved.find(function (p) { return p.name === 'Nikhil Goud'; });
+    const shamakuriGoud = realResolved.find(function (p) { return p.name === 'Shamakuri Goud'; });
+    TestAssert_(!!nikhilGoud && !!shamakuriGoud, 'resolveRmHierarchy_: both "Nikhil Goud" and its alias "Shamakuri Goud" have rows');
+    TestAssertEqual_(JSON.stringify({ tl: shamakuriGoud.tl, tm: shamakuriGoud.tm, rh: shamakuriGoud.rh, ch: shamakuriGoud.ch }), JSON.stringify({ tl: nikhilGoud.tl, tm: nikhilGoud.tm, rh: nikhilGoud.rh, ch: nikhilGoud.ch }), 'resolveRmHierarchy_: "Shamakuri Goud" resolves to the exact same chain as "Nikhil Goud"');
+
     // ---- rebuildRmHierarchy: preserves manual edits across a rebuild ----
     // rebuildRmHierarchy() (unlike everything above) takes no `ss`
     // parameter — it always operates on SpreadsheetApp.getActiveSpreadsheet()

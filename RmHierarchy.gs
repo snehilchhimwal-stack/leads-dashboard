@@ -356,6 +356,8 @@ const RM_HIERARCHY_RAW_ = [
   ['Loan','BDM','Mohmmad Azaz Izhar Anasair','','','','Mayur Panjari'], // leads sheet misspells both names — real row: "Mohammad Azaz Izhar Ansari"
   // Confirmed by the user directly (not a guess) — same person as "Kavya B R".
   ['Bangalore','S1','Kavya Gowda','Mainuddin T','','Romen Singh','Mukesh Mishra'],
+  // Confirmed by the user directly (not a guess) — same person as "Nikhil Goud".
+  ['Hyderabad','S1','Shamakuri Goud','Vemula Ajay','','','Mukesh Mishra'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
