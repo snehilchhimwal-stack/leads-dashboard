@@ -230,6 +230,26 @@ function runMovementTrackerTests_() {
     TestAssertEqual_(dchArchiveKeys, ['2026-08-24|Loan', '2026-08-24|Pune'], 'persistDailyCohortHistoryGs_: writes exactly the two eligible region rows');
     TestAssertEqual_(dchArchiveSheet.getRange(2, 12, 1, 1).getValue(), 'AppsScript', 'persistDailyCohortHistoryGs_: source column is always "AppsScript" for a row written from here (vs. "Dashboard"/"Backfill" from the browser)');
 
+    // ---- Write-once: an already-archived day must NEVER be recomputed/overwritten ----
+    // Capture Aug 24's updated_at from the first run above, then re-run
+    // persistDailyCohortHistoryGs_ against the SAME Movement_Log data but a
+    // LATER `now` (2026-09-03) — one that also makes Aug 30 (L-B) newly
+    // eligible for the first time. If Aug 24 got silently recomputed here,
+    // its updated_at would change even though nothing about its own
+    // evidence should ever be touched again; Aug 30 SHOULD get written,
+    // since that date has no archived row yet (genuine self-healing, not
+    // re-touching an already-final one).
+    const dchAug24UpdatedAtBefore = dchArchiveSheet.getRange(2, 11, 1, 1).getValue();
+    const dchLaterNow = new Date('2026-09-03T12:00:00+05:30');
+    persistDailyCohortHistoryGs_(dchOrchestratorSs, [], {}, dchLaterNow);
+    TestAssertEqual_(dchArchiveSheet.getLastRow(), 4, 'persistDailyCohortHistoryGs_ (write-once): a later run only ADDS the newly-eligible Aug 30 row — Aug 24\'s existing rows are not duplicated or removed');
+    const dchRowsAfterLaterRun = dchArchiveSheet.getRange(2, 1, 3, DAILY_COHORT_HISTORY_COLUMNS_.length).getValues();
+    const dchAug24RowAfter = dchRowsAfterLaterRun.filter(function (r) { return r[0] === '2026-08-24|Pune'; })[0];
+    TestAssertEqual_(dchAug24RowAfter[10], dchAug24UpdatedAtBefore, 'persistDailyCohortHistoryGs_ (write-once): Aug 24\'s updated_at is UNCHANGED after the later run — it was never recomputed, let alone overwritten');
+    const dchAug30Row = dchRowsAfterLaterRun.filter(function (r) { return r[0] === '2026-08-30|Thane'; })[0];
+    TestAssert_(!!dchAug30Row, 'persistDailyCohortHistoryGs_ (write-once): Aug 30 — a genuinely NEW eligible date — is still written the first time it becomes eligible (self-healing for gaps still works)');
+    if (dchAug30Row) TestAssertEqual_(dchAug30Row[3], 1, 'persistDailyCohortHistoryGs_ (write-once): the new Aug 30 row carries correct, freshly-computed stats');
+
     // ---- Error containment: a Daily_Cohort_History failure must never block the core Movement_Log capture ----
     const containmentLeadsHeader = TestFixture_leadsHeader_();
     const containmentBannerRow = containmentLeadsHeader.map(function () { return ''; });

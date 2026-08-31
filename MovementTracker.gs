@@ -504,16 +504,32 @@ function pruneMovementLogNow() {
  * recorded within 6 hours of becoming eligible, regardless of browser
  * activity.
  *
- * SELF-HEALING BY CONSTRUCTION: eligibleDailyCohortDatesGs_ below always
- * recomputes the FULL currently-eligible window (every day still inside
- * Movement_Log's retention whose 48h window has elapsed), not just
- * "today" — and the write is an upsert keyed by date+region, so a day
- * missed on one run (a trigger failure, a temporary error) is simply
- * re-attempted and correctly filled in on the next run, as long as it's
- * still within Movement_Log's retention window when that next run
- * happens. A day that ages out of retention before ANY run ever covers
- * it is a genuine, permanent gap — no amount of retrying recovers data
- * that has already been pruned from Movement_Log.
+ * SELF-HEALING, GAPS ONLY, NEVER OVERWRITES AN ALREADY-ARCHIVED DAY:
+ * eligibleDailyCohortDatesGs_ below always recomputes the FULL
+ * currently-eligible window (every day still inside Movement_Log's
+ * retention whose 48h window has elapsed), not just "today" — but
+ * persistDailyCohortHistoryGs_ only ever computes and writes a date that
+ * has NO row in Daily_Cohort_History yet (see _readArchivedDailyCohortDatesGs_).
+ * A day missed on one run (a trigger failure, a temporary error) is
+ * simply re-attempted and correctly filled in on the next run, as long as
+ * it's still within Movement_Log's retention window when that next run
+ * happens. A day that ages out of retention before ANY run ever covers it
+ * is a genuine, permanent gap — no amount of retrying recovers data that
+ * has already been pruned from Movement_Log.
+ *
+ * WHY NEVER RE-TOUCH AN ALREADY-ARCHIVED DAY (this is not optional):
+ * evidenceAtDeadline's fallback order (nearest at-or-before the deadline,
+ * else nearest after it) is only ACCURATE while genuine near-deadline
+ * evidence is still retained. If a day were blindly recomputed on every
+ * eligible run forever, then once its true near-48h-mark snapshot
+ * eventually ages out of the 7-day window, a later re-run would fall back
+ * to whatever snapshot happens to survive next — which could be a lead's
+ * status from DAYS after its real 48h deadline, silently crediting a late
+ * conversion that should never count, and overwriting an already-correct,
+ * already-final archived row with a wrong one. Write-once avoids this
+ * entirely: a day's numbers are locked in using the freshest possible
+ * evidence, the very first time it becomes eligible, and never touched
+ * again.
  */
 
 const DAILY_COHORT_HISTORY_SHEET_ = 'Daily_Cohort_History';
@@ -782,6 +798,24 @@ function upsertDailyCohortHistoryRowsGs_(ss, entries, now) {
 // `dataRows`/`colIndex` are the SAME current-month-tab rows that run
 // already read, reused here for the live-lead fallback rather than a
 // second read of the source tab.
+// Reads just column B (date) of every existing Daily_Cohort_History row,
+// as a {dateKey: true} set — cheap single-column read used to decide
+// which eligible dates are genuinely new vs. already final. Returns {} if
+// the tab doesn't exist yet (nothing archived at all).
+function _readArchivedDailyCohortDatesGs_(ss) {
+  const out = {};
+  const sheet = ss.getSheetByName(DAILY_COHORT_HISTORY_SHEET_);
+  if (!sheet) return out;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return out;
+  const values = sheet.getRange(2, 2, lastRow - 1, 1).getValues(); // column B = date
+  values.forEach(function (r) {
+    const d = String(r[0] || '').trim();
+    if (d) out[d] = true;
+  });
+  return out;
+}
+
 function persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now) {
   const historyRows = _readMovementLogHistoryRowsGs_(ss);
   if (!historyRows.length) return;
@@ -789,10 +823,17 @@ function persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now) {
   const eligibleDates = eligibleDailyCohortDatesGs_(historyRows, now);
   if (!eligibleDates.length) return;
 
+  // Only ever compute/write a date that has NO row in Daily_Cohort_History
+  // yet — see this section's own header comment for why re-touching an
+  // already-archived day is actively dangerous, not just wasted work.
+  const archivedDates = _readArchivedDailyCohortDatesGs_(ss);
+  const newDates = eligibleDates.filter(function (d) { return !archivedDates[d]; });
+  if (!newDates.length) return;
+
   const liveByKey = _buildLiveLeadIndexGs_(dataRows, colIndex);
 
   const entries = [];
-  eligibleDates.forEach(function (dateKey) {
+  newDates.forEach(function (dateKey) {
     const byRegion = computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now);
     Object.keys(byRegion).forEach(function (region) {
       const stats = byRegion[region];

@@ -1035,12 +1035,26 @@ function eligibleDailyCohortDates(){
 // assigned that day has had its own 48h mark pass), so a stored row is
 // always final — same-day and 48h numbers land together, once, rather
 // than needing a silent follow-up correction once more data comes in.
-// Re-checked and re-upserted on every refresh (cheap: a handful of
-// eligible recent days × regions, all from data already loaded) so a run
-// missed one day still gets caught on the next, as long as it's re-run
-// before that day ages out of Movement_Log's retention — a date that goes
-// unresolved AND unretained before any refresh ever covers it is lost,
-// same limitation SLA_History already has for gaps longer than that.
+// Re-CHECKED on every refresh (cheap: a handful of eligible recent days ×
+// regions, all from data already loaded) so a run missed one day still
+// gets caught on the next, as long as it's re-run before that day ages
+// out of Movement_Log's retention — a date that goes unresolved AND
+// unretained before any refresh ever covers it is lost, same limitation
+// SLA_History already has for gaps longer than that.
+//
+// NEVER RE-WRITES a date already present in Daily_Cohort_History (see the
+// archivedDates filter below) — this is not optional. evidenceAtDeadline's
+// fallback (nearest at-or-before the deadline, else nearest after) is only
+// accurate while genuine near-deadline evidence is still retained.
+// Blindly recomputing an already-archived day on every refresh forever
+// would eventually — once that day's true near-48h-mark snapshot ages out
+// of the 7-day window — start falling back to whatever snapshot survives
+// next, which could be a lead's status from days AFTER its real deadline,
+// silently crediting a late conversion that should never count and
+// overwriting an already-correct, already-final row with a wrong one.
+// Same fix, same reasoning, applied identically in the Apps Script port
+// (persistDailyCohortHistoryGs_, MovementTracker.gs) — see that function's
+// own header comment.
 //
 // Candidate dates come from eligibleDailyCohortDates below, NOT from
 // every distinct lead_assigned_at seen in history — a lead stays open
@@ -1061,8 +1075,17 @@ async function persistDailyCohortHistory(){
   const eligibleDates = eligibleDailyCohortDates();
   if (!eligibleDates.length) return;
 
+  // If we can't even tell what's already archived, skip this run rather
+  // than risk recomputing (and possibly overwriting) an already-final day
+  // with degraded evidence — see this function's own header comment.
+  let archivedRows;
+  try { archivedRows = await fetchAllDailyCohortHistoryRows(); } catch (e) { return; }
+  const archivedDates = new Set(archivedRows.map(r => r.date));
+  const newDates = eligibleDates.filter(dateKey => !archivedDates.has(dateKey));
+  if (!newDates.length) return;
+
   const entries = [];
-  eligibleDates.forEach(dateKey => {
+  newDates.forEach(dateKey => {
     const result = computeDailyCohortByRegion(dateKey, { ignoreFilters: true });
     if (!result || !result.totalCreated) return;
     result.byRegion.forEach(stats => {
