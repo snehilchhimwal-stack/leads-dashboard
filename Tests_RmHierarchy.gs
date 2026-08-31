@@ -145,6 +145,64 @@ function runRmHierarchyTests_() {
     } finally {
       SpreadsheetApp = realSpreadsheetApp;
     }
+
+    // ---- auditUnresolvedRms_: proactive coverage audit (2026-08-31) ----
+    const auditNow = new Date();
+    const auditLeadsHeader = TestFixture_leadsHeader_();
+    const auditBannerRow = auditLeadsHeader.map(function () { return ''; });
+    function auditLeadRow(overrides) {
+      const defaults = {
+        lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM One', TL: '', project: 'P', region: 'Test Region',
+        client: 'Client', lead_assigned_at: auditNow, group_source: 'google', source_bucket: 'Non-UTM',
+        current_stage: 'Suspect', closing_reason: '', lead_closing_reason: '',
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return auditLeadsHeader.map(function (k) { return merged[k] !== undefined ? merged[k] : ''; });
+    }
+    const auditMonthShort = Utilities.formatDate(auditNow, 'Asia/Kolkata', 'MMM');
+    const auditRows = [
+      auditBannerRow, auditLeadsHeader,
+      // Resolves fine via a real A1 -- must NOT appear in the audit.
+      auditLeadRow({ lead_id: 'L-OK', client_id: 'C-OK', RM: 'Test RM One' }),
+      // Excluded -- resolves to a row, but routes nowhere just the same,
+      // so it MUST still count as a gap for this audit's purposes (unlike
+      // a plain "resolves fine" lookup).
+      auditLeadRow({ lead_id: 'L-EXCL-1', client_id: 'C-EXCL-1', RM: 'Test RM Excl' }),
+      auditLeadRow({ lead_id: 'L-EXCL-2', client_id: 'C-EXCL-2', RM: 'Test RM Excl' }),
+      // No RM_Hierarchy row at all, and not recognized leadership -- a
+      // genuine gap.
+      auditLeadRow({ lead_id: 'L-GHOST', client_id: 'C-GHOST', RM: 'Ghost RM Nobody Knows' }),
+      // Recognized senior leadership with no RM_Hierarchy row -- resolves
+      // fine via the self-CH fallback (LEADERSHIP_NAME_TO_EMAIL_), must
+      // NOT be reported as a gap.
+      auditLeadRow({ lead_id: 'L-LEADERSHIP', client_id: 'C-LEADERSHIP', RM: 'Test Ceo Self' }),
+      // Closed -- excluded entirely regardless of whether the RM would
+      // resolve, same as every other issue-scanning script in this project.
+      auditLeadRow({ lead_id: 'L-CLOSED', client_id: 'C-CLOSED', RM: 'Ghost RM Nobody Knows', current_stage: 'Won' }),
+      // Blank RM -- skipped, not counted as a gap.
+      auditLeadRow({ lead_id: 'L-BLANK', client_id: 'C-BLANK', RM: '' }),
+    ];
+    ss._sheets[auditMonthShort] = TestMockSheet_(auditMonthShort, auditRows);
+
+    const auditResults = auditUnresolvedRms_(ss);
+    const auditByName = {};
+    auditResults.forEach(function (r) { auditByName[r.name] = r; });
+
+    TestAssert_(!auditByName['Test RM One'], 'auditUnresolvedRms_: an RM that resolves fine is never reported');
+    TestAssert_(!auditByName['Test Ceo Self'], 'auditUnresolvedRms_: recognized leadership (self-CH fallback) is never reported, even with no RM_Hierarchy row at all');
+    TestAssert_(!!auditByName['Test RM Excl'], 'auditUnresolvedRms_: an Excluded RM IS reported (a found-but-excluded row routes nowhere, same practical effect as missing)');
+    TestAssertEqual_(auditByName['Test RM Excl'].count, 2, 'auditUnresolvedRms_: counts every open lead for that RM, not just one');
+    TestAssertEqual_(auditByName['Test RM Excl'].leadIds.sort(), ['L-EXCL-1', 'L-EXCL-2'], 'auditUnresolvedRms_: lists the actual affected lead_ids');
+    TestAssert_(!!auditByName['Ghost RM Nobody Knows'], 'auditUnresolvedRms_: a name with no RM_Hierarchy row at all and no leadership match IS reported');
+    TestAssertEqual_(auditByName['Ghost RM Nobody Knows'].count, 1, 'auditUnresolvedRms_: the closed lead for this same RM name is correctly excluded from the count (only L-GHOST, not L-CLOSED)');
+    TestAssertEqual_(typeof auditByName['Ghost RM Nobody Knows'].inCompanyRoster, 'boolean', 'auditUnresolvedRms_: inCompanyRoster is always a real boolean, never undefined');
+    TestAssertEqual_(Object.keys(auditByName).length, 2, 'auditUnresolvedRms_: reports exactly the 2 genuine gaps, nothing more and nothing less');
+
+    // Console wrapper — Logger-only output, no return value to assert on;
+    // just confirm it runs against the same fixture without throwing.
+    let auditNowThrew = null;
+    try { auditUnresolvedRmsNow(); } catch (e) { auditNowThrew = e; }
+    TestAssertEqual_(auditNowThrew, null, 'auditUnresolvedRmsNow: the console wrapper runs without throwing');
   } finally {
     TestEnv_tearDown_();
   }

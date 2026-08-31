@@ -579,6 +579,101 @@ function clearAllRmHierarchyExclusionsNow() {
   Logger.log('Cleared Excluded on ' + cleared + ' row(s) out of ' + values.length + ' total. Re-run listExcludedRmsNow to confirm the list is now empty, then re-run backfillTodaysOvernightLogRecipientsNow (OvernightEmailer.gs) to pick up the newly-resolvable RMs for today.');
 }
 
+/**
+ * Proactive coverage audit — scans every OPEN lead in the current month's
+ * tab and returns every DISTINCT RM name that does NOT resolve via
+ * lookupRmChain_ (the SAME lookup, including its role-suffix-stripping
+ * fallback, a real send would actually use) — either because the row is
+ * missing entirely, or found but hand-marked Excluded (which routes
+ * nowhere just the same). A name matching LEADERSHIP_NAME_TO_EMAIL_ is
+ * NOT a gap (that's the separate, already-working self-CH fallback for
+ * senior leadership with no RM_Hierarchy row at all) and is excluded here.
+ *
+ * WHY THIS EXISTS: the "Leads Not Sent" ops report already catches every
+ * one of these gaps, but only REACTIVELY — one lead at a time, only once
+ * that lead happens to trip an SLA check and an automated send actually
+ * fails. This instead surfaces every CURRENT gap in one pass, proactively
+ * — added 2026-08-31 after a single ops report surfaced 3 name-spelling
+ * gaps and one departed employee's unreassigned lead all at once. Running
+ * this periodically (or right after any staff change) catches the same
+ * class of issue before it ever reaches a real send.
+ *
+ * Doesn't attempt to auto-classify WHY a name doesn't resolve — that call
+ * needs a human who knows the current roster. It does add one hint: does
+ * this EXACT name string appear anywhere in EMPLOYEE_EMAIL_BY_NAME_RAW_
+ * (the whole-company roster, not just this table's sales-track subset)?
+ * A name absent from BOTH tables is almost certainly a departed employee
+ * or a genuine spelling variant needing an alias row; a name present in
+ * EMPLOYEE_EMAIL_BY_NAME_RAW_ under this EXACT spelling is a real current
+ * employee just missing from the sales hierarchy specifically (unusual,
+ * worth a closer look).
+ *
+ * Pure(ish) — one read of the leads tab plus loadRmHierarchyAndEmails_, no
+ * writes. Returns [{ name, count, leadIds, inCompanyRoster }], sorted by
+ * name (leadIds capped at 20 per name; count is always the true total).
+ * auditUnresolvedRmsNow below is the console-callable wrapper that logs
+ * this in a readable form.
+ */
+function auditUnresolvedRms_(ss) {
+  const tabName = resolveTabName_(ss);
+  const src = ss.getSheetByName(tabName);
+  if (!src) throw new Error('auditUnresolvedRms_: tab "' + tabName + '" not found.');
+  const lastRow = src.getLastRow();
+  const lastCol = src.getLastColumn();
+  if (lastRow < 3) return [];
+
+  const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
+  const colIndex = buildColIndex_(headerRow);
+  const dataRows = src.getRange(3, 1, lastRow - 2, lastCol).getValues();
+  const data = loadRmHierarchyAndEmails_(ss);
+
+  const byName = {};
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+    const closingReason = getVal_(row, colIndex, 'closing_reason');
+    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed leads don't need routing
+    const rmName = String(getVal_(row, colIndex, 'RM') || '').trim();
+    if (!rmName) return;
+    if (LEADERSHIP_NAME_TO_EMAIL_[rmName.toLowerCase()]) return; // self-CH fallback works fine without a row
+    const chain = lookupRmChain_(data.byRmNameLower, rmName);
+    if (chain && !chain.excluded) return; // resolves fine — not a gap
+    if (!byName[rmName]) byName[rmName] = { count: 0, leadIds: [] };
+    byName[rmName].count++;
+    if (byName[rmName].leadIds.length < 20) byName[rmName].leadIds.push(leadId);
+  });
+
+  return Object.keys(byName).sort().map(function (name) {
+    const inCompanyRoster = typeof EMPLOYEE_EMAIL_BY_NAME_RAW_ !== 'undefined' &&
+      EMPLOYEE_EMAIL_BY_NAME_RAW_.some(function (r) { return r[0] === name; });
+    return { name: name, count: byName[name].count, leadIds: byName[name].leadIds, inCompanyRoster: inCompanyRoster };
+  });
+}
+
+// Console-callable wrapper (function dropdown -> Run) — logs
+// auditUnresolvedRms_'s result in a readable form. See that function's
+// own header for the full explanation of what this catches and why.
+function auditUnresolvedRmsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const results = auditUnresolvedRms_(ss);
+  if (!results.length) {
+    Logger.log('No unresolved RM names found among currently open leads — every open lead\'s RM resolves in RM_Hierarchy.');
+    return;
+  }
+
+  Logger.log(results.length + ' distinct RM name(s) on OPEN leads do not resolve in RM_Hierarchy:');
+  results.forEach(function (r) {
+    const hint = r.inCompanyRoster
+      ? 'exact name IS in the company email roster — a current employee, just missing from RM_Hierarchy\'s sales-track table specifically'
+      : 'exact name is NOT in the company email roster either — likely departed, or a spelling variant needing an alias row';
+    const more = r.count > r.leadIds.length ? (' (+' + (r.count - r.leadIds.length) + ' more)') : '';
+    Logger.log('  "' + r.name + '" — ' + r.count + ' open lead(s): ' + r.leadIds.join(', ') + more + '  [' + hint + ']');
+  });
+  Logger.log('For each: either add a name-variant alias row to RM_HIERARCHY_RAW_ (if this is a real employee spelled differently on the leads sheet) and run rebuildRmHierarchy(), or reassign these leads to their current owner in the sheet (if the person has left).');
+}
+
 // Same small-independently-retried-steps shape as ensureRmHierarchySheet_/
 // rebuildRmHierarchy above, for the same reason — one big withRetry_ around
 // delete+recreate+write makes every retry redo the whole thing.
