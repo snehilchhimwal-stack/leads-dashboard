@@ -1132,19 +1132,41 @@ async function renderDailyCohortByRegion(){
   const dateKey = dateInput ? dateInput.value : '';
   if (!dateKey) { clear('Pick a date above to see that day\'s leads broken down by region.'); return; }
 
+  // A date whose own day-end already predates every snapshot Movement_Log
+  // currently retains has NO real same-day/48h evidence left to find —
+  // evidenceAtDeadline's fallback (nearest at-or-before, else nearest
+  // after) would silently substitute whatever happens to survive next,
+  // which reads as a precise percentage but isn't a real answer (this is
+  // exactly the failure mode that made Same-Day and 48h Opp% collapse to
+  // the same number for an old date). Once a date crosses this line, only
+  // the archive (captured while evidence was still fresh) or an honest
+  // "NA" is trustworthy — never the live recomputation's own percentages.
+  const dayEndForStaleness = parseDate(dateKey + ' 23:59:59');
+  let earliestRetainedMs = null;
+  movementSnapshots.forEach(rec => {
+    const ms = rec.snapshot_at.getTime();
+    if (earliestRetainedMs === null || ms < earliestRetainedMs) earliestRetainedMs = ms;
+  });
+  const isStale = !!(dayEndForStaleness && earliestRetainedMs !== null && dayEndForStaleness.getTime() < earliestRetainedMs);
+
   let result = computeDailyCohortByRegion(dateKey);
   let fromHistory = false;
+  let unreliable = false; // stale, no archive — Assigned counts still real (lead_assigned_at never depends on retention), outcome %s are not
   // Daily_Cohort_History rows are always the TRUE unfiltered picture
   // (persistDailyCohortHistory always writes with ignoreFilters:true —
   // see its own comment), so this fallback can't honor the current
   // Project/Region/TL/Source filters the way the live path does. Flagged
   // in the notice below so a filter that looks like it's "not working"
   // for an archived date isn't mistaken for a bug.
-  if (!result || !result.totalCreated) {
-    try {
-      const archived = await fetchDailyCohortHistoryForDate(dateKey);
-      if (archived && archived.totalCreated) { result = archived; fromHistory = true; }
-    } catch (e) { /* no archived data either — falls through to the empty-state message below */ }
+  if (isStale || !result || !result.totalCreated) {
+    let archived = null;
+    try { archived = await fetchDailyCohortHistoryForDate(dateKey); } catch (e) { /* no archived data either — handled below */ }
+    if (archived && archived.totalCreated) {
+      result = archived;
+      fromHistory = true;
+    } else if (isStale && result && result.totalCreated) {
+      unreliable = true;
+    }
   }
 
   if (!result || !result.totalCreated) { clear(`No leads (for the current Project/Region/TL/Source filters) were assigned on ${esc(dateKey)}.`); return; }
@@ -1153,11 +1175,14 @@ async function renderDailyCohortByRegion(){
     if (fromHistory) {
       noticeEl.style.display = 'block';
       noticeEl.innerHTML = `Movement_Log no longer covers ${esc(dateKey)} — showing the final numbers already archived in <span class="mono">Daily_Cohort_History</span> instead. Those are always the unfiltered picture across every region, so the Project/Region/TL/Source filters above don't apply to this row set.`;
+    } else if (unreliable) {
+      noticeEl.style.display = 'block';
+      noticeEl.innerHTML = `Movement_Log no longer has real evidence near ${esc(dateKey)}'s own day-end or 48h mark, and this date was never archived to <span class="mono">Daily_Cohort_History</span> before that evidence aged out — Same-Day/48h/Close figures shown as <b>NA</b> below rather than a number degraded fallback evidence would produce. Assigned counts are still accurate (they only need <span class="mono">lead_assigned_at</span>, not a same-day snapshot).`;
     } else {
       noticeEl.style.display = 'none';
     }
   }
-  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} assigned ${dateKey}${fromHistory ? ' (archived)' : ''}`;
+  if (countEl) countEl.textContent = `${result.totalCreated} lead${result.totalCreated === 1 ? '' : 's'} assigned ${dateKey}${fromHistory ? ' (archived)' : ''}${unreliable ? ' (outcome data NA)' : ''}`;
 
   thead.innerHTML = `<tr>
     <th>Region</th>
@@ -1169,14 +1194,18 @@ async function renderDailyCohortByRegion(){
   </tr>`;
 
   const pct = (n, d) => d ? `${(n / d * 100).toFixed(1)}%` : '—';
+  // Once `unreliable`, every outcome cell shows a plain "NA" instead of a
+  // computed percentage — see the isStale/unreliable block above for why
+  // a number here would be actively misleading, not just imprecise.
+  const outcomeCell = (n, d) => unreliable ? '<span class="dim">NA</span>' : pct(n, d);
   const regionList = Array.from(new Set(Object.values(REGION_GROUP_MAP))).sort();
   const rowHtml = (stats, rowStyle) => `<tr${rowStyle ? ` style="${rowStyle}"` : ''}>
     <td>${esc(stats.region)}</td>
     <td class="num">${stats.created}</td>
-    <td class="num">${pct(stats.sameDayOpp, stats.sameDayResolved)}</td>
-    <td class="num">${pct(stats.opp48h, stats.resolved48h)}</td>
-    <td class="num">${pct(stats.closed48h, stats.resolved48h)}</td>
-    <td class="num dim">${stats.resolved48h} of ${stats.created}${stats.windowComplete < stats.created ? ' (partial)' : ''}</td>
+    <td class="num">${outcomeCell(stats.sameDayOpp, stats.sameDayResolved)}</td>
+    <td class="num">${outcomeCell(stats.opp48h, stats.resolved48h)}</td>
+    <td class="num">${outcomeCell(stats.closed48h, stats.resolved48h)}</td>
+    <td class="num dim">${unreliable ? 'NA' : `${stats.resolved48h} of ${stats.created}${stats.windowComplete < stats.created ? ' (partial)' : ''}`}</td>
   </tr>`;
 
   // regionList is already alphabetical (sorted above) and .filter() keeps
