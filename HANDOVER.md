@@ -1,0 +1,382 @@
+# Handover — Leads Dashboard
+
+This document is for whoever takes this project over. It explains what the
+system is, how the code is organized, exactly which permissions/credentials
+are needed and how to get them, and how to run the test suite. It does not
+duplicate what the code comments already say in detail — where a file's own
+header comment covers something thoroughly, this doc points at it instead of
+repeating it.
+
+Written 2026-08-31. If something below goes stale, fix this file in the same
+commit that changes the thing it describes.
+
+---
+
+## 1. What this is
+
+A lead-operations dashboard for Homesfy's first-sale (developer/builder)
+real-estate leads, built on top of one Google Sheet. It has two independent
+halves that never talk to each other directly — they only share the same
+Google Sheet as a data layer:
+
+1. **The dashboard** (`dashboard.html` + `js/*.js`) — a static, client-only
+   web page (no server, no build step) hosted on GitHub Pages. A signed-in
+   user's browser reads the Sheet directly via the Google Sheets API, renders
+   every tab, and can write back to the Sheet (snapshots, follow-up queue,
+   SLA history) and send region-summary emails via Gmail — all from that
+   browser tab, all requiring a human present.
+
+2. **The Apps Script backend** (`Core.gs`, `SlaEngine.gs`,
+   `FollowupEngine.gs`, `EmailInfra.gs`, `MovementTracker.gs`,
+   `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `RmHierarchy.gs`,
+   `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`) — a script bound to
+   the same Google Sheet, running on Google's own servers on a fixed
+   schedule. It exists specifically for the things a static page can't do
+   unattended: snapshotting the sheet every 6 hours and sending automatic
+   emails at fixed clock times, whether or not anyone has the dashboard open.
+
+Because these are genuinely separate runtimes (browser JS vs. Apps Script),
+several pieces of business logic are **intentionally duplicated** — e.g. the
+comment-classification keyword rules exist once in `js/core.js`
+(`OUTCOME_RULES`) and once in `FollowupEngine.gs`
+(`OUTCOME_RULES_GS_`), because Apps Script cannot `import` a browser file.
+Any change to shared logic (SLA rules, comment classification, stage
+ordering) must be made **in both places** or the dashboard and the automatic
+emails will silently disagree. See §6 for the current list of duplicated
+pairs.
+
+---
+
+## 2. Repository layout
+
+Deployed at `github.com/snehilchhimwal-stack/leads-dashboard` (GitHub Pages).
+Confirm the Pages source branch/folder under the repo's **Settings → Pages**
+— not re-verified in this doc.
+
+| File | Role |
+|---|---|
+| `dashboard.html` | The page shell: `<style>` block (dark theme), all markup/tab containers, the sign-in gate UI, and `<script src>` tags loading the `js/*.js` files below **in order** (order matters — see §3). |
+| `js/core.js` | Loaded first. Shared foundation: row parsing, header-alias mapping, `enrichLead` (the single source of truth for a lead's derived state — SLA flags, stage, funnel position), the sign-in gate (`GATE_SCOPE`), comment classification (`OUTCOME_RULES`/`inferOutcome`), IST date helpers. Everything else depends on this file. |
+| `js/tab-audit.js` | Audit tab — "when was a lead last touched." |
+| `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
+| `js/tab-rmtimeline.js` | RM Timeline tab — per-RM daily calendar and day timeline. |
+| `js/tab-movement.js` | Movement tab — reads the `Movement_Log` sheet tab that `MovementTracker.gs` populates; stalled leads, overnight cohort, RM stall leaderboard, time-to-Opportunity. |
+| `js/tab-morning.js` | Morning Brief tab — 10 summary cards, all backed by data other tabs already compute (no new logic). |
+| `js/reports.js` | Region email report generation + the Gmail send flow (separate OAuth grant — see §4). |
+| `js/sheets-writeback.js` | Every write path back to the Sheet: on-demand Movement_Log snapshot, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`. |
+| `js/overview-distribution-people-ops.js` | The main Overview: `renderAll()` orchestrator, tab switching, KPI/trend/RM-score tables, Operations issue lists (the 5 SLA checks), CSV export. |
+| `js/main.js` | Loaded last. Just the couple of top-level bootstrap calls that must run after every other file has defined its functions. |
+| `Core.gs` | Apps Script shared foundation — row parsing/stage classification, ported from `js/core.js`. Every other `.gs` file depends on it. |
+| `SlaEngine.gs` | The 5 SLA rules, ported from `enrichLead` in `js/core.js`. |
+| `FollowupEngine.gs` | Comment classification + Suggested Follow-up text, ported from `js/core.js`'s `OUTCOME_RULES`/`inferOutcome`. |
+| `EmailInfra.gs` | Shared email plumbing: retry wrappers, the leads-tab reader, region-name mapping, ops alerting, the HTML email template. |
+| `MovementTracker.gs` | The 4x/day (00:00/06:00/12:00/18:00 IST) snapshot trigger — writes `Movement_Log` and `SLA_History` rows. |
+| `OvernightEmailer.gs` | 10:00 IST daily region email (overnight leads/issues) + 13:00 IST same-thread follow-up showing what got resolved. |
+| `AllIssuesEmailer.gs` | 17:00 IST daily email covering all 5 Operations SLA checks for Google Non-UTM/Search leads assigned in the last 3 calendar days. |
+| `RmHierarchy.gs` | Resolves each RM's manager chain (A1/TM/RH/CH) from the HR export, so issue emails route to the right specific managers. |
+| `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
+| `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. |
+| `Tests_*.gs` | The Apps Script mock test suite — see §7. |
+| `working files on 28th for automatic email/` | **Not in git**, and not authoritative — a manual backup snapshot of a few `.gs` files from mid-development. The root-level `.gs` files are always the source of truth; this folder is safe to ignore or delete. |
+| `design/live-ops-redesign.html` | A standalone visual mockup from an earlier exploration pass — not wired to real data, not part of the live app. |
+
+**Load order matters** for the `<script src>` tags in `dashboard.html`:
+`core.js` → `tab-audit.js` → `tab-tracking.js` → `tab-rmtimeline.js` →
+`tab-movement.js` → `tab-morning.js` → `reports.js` → `sheets-writeback.js` →
+`overview-distribution-people-ops.js` → `main.js`. These are classic
+`<script>` tags (no modules, no bundler) sharing one global scope — a
+function or `let`/`const` defined in one file is a bare global every later
+file can call directly. If you add a new `js/*.gs` file, add its `<script
+src>` tag in the right position (after whatever it depends on, before
+`main.js`).
+
+The `.gs` files work the same way inside one Apps Script project: **every
+file in an Apps Script project shares one global namespace**, regardless of
+filename. The split into `Core.gs`/`SlaEngine.gs`/etc. is purely
+organizational (see each file's own header comment) — it has zero effect on
+how the code runs. There is no `appsscript.json` checked into this repo; the
+authoritative manifest lives inside the Sheet's own bound Apps Script
+project (see §4.3).
+
+---
+
+## 3. How the dashboard works (browser side)
+
+1. **Sign-in gate** (`js/core.js`, `#authGate` in `dashboard.html`) — the
+   page shows nothing until the user authorizes. Requests `GATE_SCOPE`
+   (`.../auth/spreadsheets` + `.../auth/userinfo.email`) via Google
+   Identity Services' token client. Nothing loads without this.
+2. User pastes/confirms the **Sheet ID or URL** (`#sheetIdInput` — defaults
+   to the production sheet, see §4.1) and clicks fetch. `fetchAndRender()`
+   pulls the current month's tab (auto-detected by name, or forced via
+   `TAB_NAME_OVERRIDE` in `Core.gs` on the Apps Script side / the
+   equivalent logic in `js/core.js`), parses every row through
+   `HEADER_ALIASES` → `enrichLead()`, and calls `renderAll()`.
+3. `renderAll()` (in `overview-distribution-people-ops.js`) renders **every**
+   tab in one pass — tab switching afterward is a pure `display:none` toggle
+   on pre-rendered DOM, not a re-render.
+4. **Region email reports** (`js/reports.js`) — generates the same report
+   content per region as `OvernightEmailer.gs`/`AllIssuesEmailer.gs` build
+   automatically, but on demand from the browser. Sending requires a
+   **second, separate** OAuth grant (`GMAIL_SCOPE`, `gmail.send` — see
+   §4.2) — deliberately kept separate from the read/write Sheets grant so a
+   user can browse the dashboard without ever being asked for send
+   permission.
+5. **Write-back paths** (`js/sheets-writeback.js`) — an on-demand
+   Movement_Log snapshot button/auto-checkbox, plus the machinery that
+   pushes unresolved issue leads into `Lead_Followups` and appends
+   `SLA_History`/`Daily_Cohort_History` rows. All reuse the Sheets-write
+   token from step 1 (no separate grant needed).
+
+---
+
+## 4. Permissions & credentials — what's needed, and how to get it
+
+This is the section a new maintainer needs first. There are **four separate
+things** that gate this system, and they are not all controlled by the same
+person.
+
+### 4.1 Google Sheet access
+
+The data lives in one Google Sheet
+(`1QmYB1VqLMisiQXoed6-vSQqgA9nroGIMHsBInZafKGU` — the default baked into
+`#sheetIdInput` in `dashboard.html`). Whoever takes this over needs **Editor**
+access to that Sheet, from whoever currently owns/shares it — that's the same
+access needed to:
+- Open **Extensions → Apps Script** on it (where the `.gs` backend actually
+  runs — see §4.3), and
+- Have the dashboard's write-back paths succeed (a Viewer-only Google account
+  can sign in and read the dashboard fine, but every write — snapshot,
+  follow-up push, SLA history — will fail with a permissions error).
+
+Regional heads/team leads who only need to *read* the dashboard and generate
+(not send) reports can work with Viewer access to the Sheet; anyone expected
+to use the write-back buttons or maintain the Apps Script needs Editor.
+
+### 4.2 Google Cloud OAuth Client ID
+
+Both browser-side consent flows — the sign-in gate (§3 step 1) and the Gmail
+send grant (§3 step 4) — share **one** OAuth 2.0 Client ID from one Google
+Cloud project:
+
+```
+888792607049-4u0ok266girae40pt4o1m74uhn08rg19.apps.googleusercontent.com
+```
+
+(`DEFAULT_CLIENT_ID` in `js/reports.js`, line ~895 — also the value the
+sign-in gate falls back to via `getGmailClientId()`.) They're deliberately
+one Client ID requesting two different scopes on two separate
+`initTokenClient()` calls, not two separate apps.
+
+**To get access to this**, you need to be added as a member/editor on the
+underlying Google Cloud project in the [Google Cloud
+Console](https://console.cloud.google.com/) — ask whoever set this project up
+(check the Cloud project's IAM page for current owners) to add your Google
+account. From there:
+- **APIs & Services → Credentials** — this is where the Client ID above
+  lives, and where you'd rotate/regenerate it if it were ever compromised.
+- **APIs & Services → OAuth consent screen** — controls which Google
+  accounts can even see a consent prompt (internal vs. external/testing
+  mode, and the explicit test-user list if it's still in "Testing" publish
+  status — an account not on that list will be refused before ever seeing a
+  consent screen).
+- **Authorized JavaScript origins** on the Client ID's own settings — must
+  list the exact origin the dashboard is served from (the GitHub Pages URL).
+  If the dashboard is ever moved to a new domain/URL, this must be updated
+  or every sign-in will fail.
+- **Enabled APIs** — Google Sheets API and Gmail API must both be enabled on
+  this Cloud project for the two scopes above to work.
+
+If you ever need a **different** Client ID (e.g. spinning up a project under
+new ownership), the only two places to change it are `DEFAULT_CLIENT_ID` in
+`js/reports.js` and telling users to clear/replace their locally-saved one —
+each browser also lets a user override it manually via the "one-time setup"
+input fields (`#gateClientIdInput`, `#gmailClientIdInput`), stored in that
+browser's own `localStorage` under the key `gsl_gmail_client_id`. Changing
+the constant does not retroactively update anyone's already-saved override.
+
+### 4.3 Apps Script project (the automated backend)
+
+There is **no CI, no `clasp`, no automated deploy** for the `.gs` files.
+The authoritative running copy lives inside the Sheet itself:
+**Extensions → Apps Script** (requires Editor access to the Sheet, §4.1).
+Deploying a change today is manual: edit the file in this repo, then copy
+its full contents over the matching file in the Apps Script editor, save,
+and (if you touched anything with a time trigger) re-run that file's
+`setupXxx()` function once.
+
+**One file is never in this git repo, on purpose:**
+`RmHierarchy.private.gs` (see `.gitignore` and the file's own header) — it
+holds a real internal employee-name → email lookup table sourced from an HR
+export. It must exist in the Apps Script project alongside every other file
+(RM hierarchy routing silently falls back to a generic per-region address
+without it — nothing crashes, it just degrades). **Get this file directly
+from the outgoing maintainer, out of band from git** (e.g. a direct file
+transfer), never by pushing it to GitHub.
+
+**First-run authorization**: the first time any Apps Script function that
+touches Gmail/Sheets/Triggers is run from the Apps Script editor (including
+the one-time `setupXxx()` calls below), Google will show its own
+"this app wants to..." authorization dialog to whichever Google account is
+running it. That account must accept it, and must be the account with Editor
+access to the Sheet — there's no separate credential to request here, it
+rides on the Sheet-editor account's own Google login.
+
+**One-time setup functions** — each installs its own time-based trigger(s),
+safe to re-run (each clears its own prior trigger before reinstalling, so
+re-running after an edit never leaves a duplicate):
+
+| Run this function... | ...from this file | Installs |
+|---|---|---|
+| `setupMovementTracking()` | `MovementTracker.gs` | 4 daily triggers at 00:00, 06:00, 12:00, 18:00 IST (`SNAPSHOT_HOURS_`) → `snapshotPeriodic` → snapshot + SLA_History row. Also removes any stale legacy `snapshotEvening` trigger. |
+| `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
+| `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
+
+None of these have a menu/`onOpen()` — they only run from the Apps Script
+editor's function dropdown (select the function name, click Run), by a human
+with Editor access.
+
+**Config constants a new maintainer will likely need to update** (all are
+real people/addresses, hardcoded — update on personnel change):
+
+| Constant | File | Current value | Purpose |
+|---|---|---|---|
+| `OPS_ALERT_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | Where ops/failure alerts (e.g. a send failure) go. |
+| `CH_LEVEL_EMAIL_` | `EmailInfra.gs` | `ashish.ivlekar@homesfy.in` | Fallback CH-level routing address. |
+| `ALWAYS_CC_EMAILS_` | `RmHierarchy.gs` | `ashish.kukreja@homesfy.in`, `saurabh.mishra@homesfy.in` | CC'd on every region issue email, regardless of region. |
+| `TEST_MODE_OVERRIDE_EMAIL_` | `EmailInfra.gs` | `''` (empty) | Safety valve: if set to a real address, **every** real send (not just tests) redirects there instead of real recipients. Leave empty in production; useful for a live smoke-test without running the mock suite. |
+
+Also worth knowing: **console-only utilities**, callable from the Apps
+Script/browser console but with no button anywhere in the UI (confirmed
+intentional, not an oversight) — `clearSlaHistory()` /
+`backfillSlaHistoryFromMovementLog()` (`js/core.js` /
+`js/sheets-writeback.js`), `downloadNoIssueLeadsNow()` /
+`debugFollowupStatusNow()` (`OvernightEmailer.gs`).
+
+### 4.4 GitHub repo access
+
+Push access to `github.com/snehilchhimwal-stack/leads-dashboard` is needed to
+change `dashboard.html`/`js/*.js` (the deployed frontend) or to keep this
+repo's copies of the `.gs` files in sync with what's actually pasted into the
+Apps Script editor. Ask the current repo owner to add the new maintainer as
+a collaborator. Verify the GitHub Pages source (branch/folder) under this
+repo's **Settings → Pages** — not independently re-confirmed in this
+document.
+
+---
+
+## 5. Data the Sheet holds
+
+Beyond the leads tab itself (one tab per month, auto-detected by name), the
+system reads/writes these tabs:
+
+| Tab | Written by | Read by |
+|---|---|---|
+| `Movement_Log` | `MovementTracker.gs` (every 6h) + optionally the dashboard's on-demand snapshot | Movement tab, RM Timeline tab, `UnmatchedCommentLogger.gs` |
+| `SLA_History` | `MovementTracker.gs` (every 6h) + the dashboard on refresh | Trend/history views |
+| `Lead_Followups` | `OvernightEmailer.gs`'s send paths + the dashboard's Operations "Generate" flow | The follow-up email content itself |
+| `Daily_Cohort_History` | `js/sheets-writeback.js` | Tracking tab's cohort comparison |
+| `Unmatched_Comments_Log` | `UnmatchedCommentLogger.gs` (piggybacks on every `snapshotOpenLeads_` run) | Manual human review — the source for deciding what to add to `OUTCOME_RULES`/`OUTCOME_RULES_GS_` next |
+| `RM_Hierarchy`, `Manager_Directory` | `setupRmHierarchy()` (one-time, then manually maintained) | `RmHierarchy.gs`'s recipient routing |
+
+---
+
+## 6. Logic that's duplicated across the two runtimes
+
+Because the browser and Apps Script can't share code, these pairs must be
+edited **together**. Each `.gs` file's header comment names exactly which
+`js/core.js` construct it ports from — check there before assuming a
+one-line fix in one file is complete:
+
+| Concept | Browser (`js/core.js`) | Apps Script |
+|---|---|---|
+| Row parsing / header aliases | `HEADER_ALIASES` | `HEADER_ALIASES_` (`Core.gs`) |
+| Stage classification / SLA flags | `enrichLead()` | `computeSlaFlags_` (`SlaEngine.gs`) |
+| Comment classification | `OUTCOME_RULES` / `inferOutcome` | `OUTCOME_RULES_GS_` / `inferOutcomeGs_` (`FollowupEngine.gs`) |
+| Suggested follow-up text | `FOLLOWUP_SUGGESTIONS` | `FollowupEngine.gs` |
+
+A new comment pattern found via `Unmatched_Comments_Log` (§5) needs a keyword
+added to **both** `OUTCOME_RULES` (dashboard) and `OUTCOME_RULES_GS_`
+(automatic emails) — adding it to only one means the dashboard and the
+automatic emails will classify the same lead differently.
+
+---
+
+## 7. Testing
+
+### 7.1 Apps Script mock test suite (exists today, real, run this before shipping any `.gs` change)
+
+`Tests_Mocks.gs` + one `Tests_<File>.gs` per production file +
+`Tests_RunAll.gs`. **Nothing in this suite ever touches your real
+spreadsheet or sends a real email** — every run temporarily reassigns the
+global `SpreadsheetApp`/`GmailApp`/`Utilities`/`ScriptApp` to in-memory fakes
+(`TestMockSpreadsheet_`, `MockGmailApp`, etc.), then restores the real ones
+in a `finally` block, same pattern real-world Apps Script testing uses since
+there's no official mocking API. See `Tests_Mocks.gs`'s own header for the
+full explanation of why this is safe. The only two email addresses that ever
+appear anywhere in the suite are `snehil.chhimwal@gmail.com` and
+`ashish.ivlekar@homesfy.in` (`TEST_EMAIL_PRIMARY_`/`TEST_EMAIL_CH_`).
+
+**To run it**: open the Sheet's Apps Script editor, make sure all the
+`Tests_*.gs` files are pasted in alongside the production files, select
+`runAllTests` (in `Tests_RunAll.gs`) from the function dropdown, click Run,
+read the pass/fail summary in the execution log (View → Logs, or the
+Executions panel). To check just one file after a targeted change, run its
+own `run<File>TestsNow()` function instead (e.g. `runMovementTrackerTestsNow`)
+— each file re-does its own setup, so file order never matters and one
+file's fixtures can't leak into another's.
+
+**When you add or change a `.gs` function**, add or update the matching
+assertion in that file's `Tests_*.gs` — this suite is only as good as its
+coverage, and past gaps in this project were closed reactively (see git
+history around 2026-08-29) specifically because a change shipped without a
+matching test.
+
+### 7.2 Dashboard (browser JS) — no persisted suite exists today
+
+There is currently **no permanent, run-anytime test suite** for
+`js/*.js`. Verification during development so far has been ad hoc: serve
+the repo locally, build a synthetic dataset covering every code path,
+invoke the render/compute functions directly in the browser console, and
+either eyeball the output or hash-compare it against the same call against
+the pre-change version of the file (`git show HEAD:<file>`) to confirm
+byte-identical behavior. That approach works but leaves nothing behind for
+the next person to just run.
+
+**Recommended first task for whoever takes this over**: build a small
+permanent harness for this — a local HTML page that loads the real
+`js/*.js` files against a fixed synthetic dataset and asserts on key
+outputs, checked into the repo (e.g. `test/dashboard.test.html`), so a JS
+change can be verified the same one-command way `runAllTests()` already
+verifies the Apps Script side. Not built yet; flagging it here rather than
+leaving it undiscoverable.
+
+**Local preview in the meantime**: `dashboard.html` is a static file — any
+local static file server pointed at the repo root works
+(no build step, no `npm install`). Open it, sign in against a real (or
+test) Sheet, and use the browser console directly.
+
+---
+
+## 8. Where to look when something breaks
+
+- **Dashboard shows wrong/missing data, or a write-back fails**: browser
+  DevTools console first — `HEADER_ALIASES` mismatches, OAuth scope/consent
+  issues, and Sheets API errors all surface there with the actual API error
+  text.
+- **An automatic email didn't send, or sent to the wrong people**: Apps
+  Script editor → **Executions** (left sidebar) — shows every trigger-fired
+  run, its logs, and any thrown error, going back further than the
+  in-session `Logger.log` output. `notifyOpsAlertGs_`/`OPS_ALERT_EMAIL_`
+  (§4.3) should also have already emailed a failure notice for anything that
+  threw inside a guarded path.
+- **Recipient routing looks wrong** (an issue email went to the wrong
+  manager, or fell back to a generic address): check `RM_Hierarchy` /
+  `Manager_Directory` sheet tabs for a blank/stale email against that RM's
+  actual current manager, and confirm `RmHierarchy.private.gs` is present
+  and current in the Apps Script project (§4.3) — a missing or stale entry
+  there is the most common cause.
+- **A real RM comment produced a generic/wrong Suggested Follow-up**: check
+  `Unmatched_Comments_Log` — if the exact phrasing shows up there, the
+  keyword engine genuinely doesn't recognize it yet; that's the signal to
+  add a rule per §6, not a bug to chase elsewhere.
