@@ -217,11 +217,13 @@ function repeatOffendersDateKeysForRange(range, now){
 
 // Generic aggregator: groups the given (already filtered/time-scoped)
 // Daily_RM_Issues rows by keyFn(rec). Ranked by instancePct (total
-// flagged-instances per distinct flagged lead, as a %) — NOT raw
-// totalInstances alone. Raw instances rewards volume: a rollup with 60
-// flagged leads and 75 instances (75/60 = 125%, each lead flagged about
-// once) would outrank one with 10 flagged leads and 25 instances
-// (25/10 = 250%, each lead flagged 2.5x on average) purely for having
+// flagged-instances per distinct flagged lead — kept ×100 internally
+// for the sort, but shown in the UI as a plain "2.5x avg flagged
+// nights" ratio, not a %, per explicit request) — NOT raw totalInstances
+// alone. Raw instances rewards volume: a rollup with 60 flagged leads
+// and 75 instances (75/60 = 1.25x, each lead flagged about once) would
+// outrank one with 10 flagged leads and 25 instances (25/10 = 2.5x,
+// each lead flagged on average two and a half times) purely for having
 // more leads, even though the SECOND is the genuinely worse repeat
 // pattern per lead. distinctLeads has no "total leads this RM owns"
 // denominator available — Daily_RM_Issues only ever contains FLAGGED
@@ -363,7 +365,7 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
       <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
       <td class="num">${r.distinctLeads}</td>
       <td class="num">${r.totalInstances}</td>
-      <td class="num">${r.instancePct.toFixed(1)}%</td>
+      <td class="num">${(r.totalInstances / r.distinctLeads).toFixed(1)}x</td>
       <td class="dim" style="font-size:11.5px;">${topIssues}</td>
     </tr>`;
   }).join('');
@@ -373,7 +375,7 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
       <th></th><th>Name</th>
       <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Leads</th>
       <th style="text-align:right" title="Total flagged-lead-rows. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
-      <th style="text-align:right" title="Sort key: Instances ÷ Leads × 100 — average number of times each already-flagged lead got flagged again, as a %. 250% means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">%</th>
+      <th style="text-align:right" title="Sort key: Instances ÷ Leads — average number of times each already-flagged lead got flagged again. 2.5x means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">Avg Flagged<br><span class="dim" style="font-weight:400; font-size:9.5px;">(Instances ÷ Leads)</span></th>
       <th>Top Issues</th>
     </tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
