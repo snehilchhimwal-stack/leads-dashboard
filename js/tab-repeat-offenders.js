@@ -325,7 +325,19 @@ function renderRepeatOffenders(){
   if (noticeEl) noticeEl.style.display = 'none';
   if (countEl) countEl.textContent = `${scoped.length} flagged instance${scoped.length === 1 ? '' : 's'}`;
 
-  const rmList = aggregateRepeatOffenders(scoped, rec => rec.RM).slice(0, 20);
+  // Full RM ranking, computed once — the two volume-cut tables below
+  // (Leads > 50 / > 100) just re-filter this same already-sorted list
+  // rather than re-aggregating from scratch. Ranking by Avg Flagged
+  // (aggregateRepeatOffenders' own sort) deliberately favors RATE over
+  // volume — see this section's own filter-summary text — so an RM
+  // carrying a genuinely large number of distinct flagged leads can sit
+  // far down (or off) the plain Top 20 despite the sheer size of their
+  // problem. These two extra cuts restore that visibility directly,
+  // still ranked by the same Avg Flagged rule within each cut.
+  const rmListFull = aggregateRepeatOffenders(scoped, rec => rec.RM);
+  const rmList = rmListFull.slice(0, 20);
+  const rmListOver50 = rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20);
+  const rmListOver100 = rmListFull.filter(r => r.distinctLeads > 100).slice(0, 20);
   const a1tmList = aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10);
   const rhList = aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5);
   // Region needs no hierarchy lookup at all — it's a field already on
@@ -336,11 +348,19 @@ function renderRepeatOffenders(){
   const regionList = aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15);
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
 
+  // Grid order is deliberately NOT "biggest cap first" — it pairs tables
+  // whose typical row counts are closest, so the 2-column grid doesn't
+  // routinely pair a 20-row table against a 5-row one and leave a tall
+  // gap. The three RM-cut tables (cap 20 each) pair with each other and
+  // with Region (cap 15, the next closest); A1/TM (cap 10) and RH
+  // (cap 5) — both always small — pair together last.
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
     ${repeatOffenderTableHtml('Top 20 RMs', rmList, false)}
+    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false)}
+    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 100)', rmListOver100, false)}
+    ${repeatOffenderTableHtml('By Region', regionList, false)}
     ${repeatOffenderTableHtml('Top 10 A1 / TM', a1tmList, hierarchyMissing)}
     ${repeatOffenderTableHtml('Top 5 RH', rhList, hierarchyMissing)}
-    ${repeatOffenderTableHtml('By Region', regionList, false)}
   </div>`;
 }
 
