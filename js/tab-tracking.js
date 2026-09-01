@@ -1219,7 +1219,16 @@ async function renderDailyCohortByRegion(){
   // Project/Region/TL/Source filters the way the live path does. Flagged
   // in the notice below so a filter that looks like it's "not working"
   // for an archived date isn't mistaken for a bug.
-  if (isStale || !result || !result.totalCreated) {
+  // Only fall back to the (unfiltered) archive for genuine staleness — a
+  // live, correctly-filtered `result` that's just legitimately zero (the
+  // current Project/Region/TL/Source filters happen to exclude every lead
+  // assigned that day) must NOT trigger this, or the archive's unfiltered
+  // totals silently override the user's filter selection, which reads
+  // exactly like "filters aren't being respected" (real bug, found via a
+  // user report 2026-09-01: `!result.totalCreated` alone used to trigger
+  // this fallback too, conflating "no live evidence for this date at all"
+  // with "filtered down to nothing" — very different situations).
+  if (isStale || !result) {
     let archived = null;
     try { archived = await fetchDailyCohortHistoryForDate(dateKey); } catch (e) { /* no archived data either — handled below */ }
     if (archived && archived.totalCreated) {
