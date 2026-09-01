@@ -351,6 +351,10 @@ function repairDailyRmIssuesMissingFieldsNow() {
     Logger.log('Daily_RM_Issues header is missing TL/group_source/source_bucket entirely — run captureDailyRmIssuesNow() or backfillDailyRmIssuesFromMovementLogNow() once first (either self-heals the header via ensureDailyRmIssueLogSheet_), then re-run this.');
     return;
   }
+  // lead_assigned_at was added after TL/group_source/source_bucket — an
+  // older sheet that hasn't self-healed yet just skips repairing this
+  // one field, same as it always could for the other 3.
+  const hasLeadAssignedCol = colIdx.lead_assigned_at !== -1;
 
   const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   if (!movementSheet) { Logger.log('Movement_Log does not exist — cannot look up TL/group_source/source_bucket for repair.'); return; }
@@ -375,18 +379,27 @@ function repairDailyRmIssuesMissingFieldsNow() {
       TL: getVal_(row, mColIndex, 'TL'),
       group_source: getVal_(row, mColIndex, 'group_source'),
       source_bucket: getVal_(row, mColIndex, 'source_bucket'),
+      lead_assigned_at: getVal_(row, mColIndex, 'lead_assigned_at'),
     });
   });
 
   const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for repair');
-  const tlCol = [], gsCol = [], sbCol = [];
+  const tlCol = [], gsCol = [], sbCol = [], laCol = [];
   let repaired = 0, unresolvable = 0, alreadyComplete = 0;
 
   values.forEach(function (row) {
     const tl = row[colIdx.TL], gs = row[colIdx.group_source], sb = row[colIdx.source_bucket];
-    if (String(tl || '').trim() || String(gs || '').trim() || String(sb || '').trim()) {
+    const la = hasLeadAssignedCol ? row[colIdx.lead_assigned_at] : null;
+    // Checked independently — a row can have TL/group_source/source_bucket
+    // already filled in (an earlier repair run) while STILL missing
+    // lead_assigned_at (added later), or vice versa.
+    const needsTlGsSb = !(String(tl || '').trim() || String(gs || '').trim() || String(sb || '').trim());
+    const needsLa = hasLeadAssignedCol && !(la instanceof Date) && !String(la || '').trim();
+
+    if (!needsTlGsSb && !needsLa) {
       alreadyComplete++;
       tlCol.push([tl]); gsCol.push([gs]); sbCol.push([sb]);
+      if (hasLeadAssignedCol) laCol.push([la]);
       return;
     }
     const leadId = String(row[colIdx.lead_id] || '').trim();
@@ -394,6 +407,7 @@ function repairDailyRmIssuesMissingFieldsNow() {
     if (!candidates || !candidates.length) {
       unresolvable++;
       tlCol.push([tl]); gsCol.push([gs]); sbCol.push([sb]); // leave blank — nothing to repair from
+      if (hasLeadAssignedCol) laCol.push([la]);
       return;
     }
     const capturedAtRaw = row[colIdx.captured_at];
@@ -412,18 +426,25 @@ function repairDailyRmIssuesMissingFieldsNow() {
         if (diff < bestDiff) { bestDiff = diff; best = c; }
       });
     }
-    tlCol.push([best.TL]); gsCol.push([best.group_source]); sbCol.push([best.source_bucket]);
+    tlCol.push([needsTlGsSb ? best.TL : tl]);
+    gsCol.push([needsTlGsSb ? best.group_source : gs]);
+    sbCol.push([needsTlGsSb ? best.source_bucket : sb]);
+    if (hasLeadAssignedCol) laCol.push([needsLa ? best.lead_assigned_at : la]);
     repaired++;
   });
 
   withRetry_(function () { logSheet.getRange(2, colIdx.TL + 1, tlCol.length, 1).setValues(tlCol); }, 'write repaired TL column');
   withRetry_(function () { logSheet.getRange(2, colIdx.group_source + 1, gsCol.length, 1).setValues(gsCol); }, 'write repaired group_source column');
   withRetry_(function () { logSheet.getRange(2, colIdx.source_bucket + 1, sbCol.length, 1).setValues(sbCol); }, 'write repaired source_bucket column');
+  if (hasLeadAssignedCol) {
+    withRetry_(function () { logSheet.getRange(2, colIdx.lead_assigned_at + 1, laCol.length, 1).setValues(laCol); }, 'write repaired lead_assigned_at column');
+  }
 
   Logger.log(
     'Repair done: ' + repaired + ' row(s) filled in from Movement_Log, ' + alreadyComplete +
-    ' already had at least one of the 3 fields (left untouched), ' + unresolvable +
-    ' could not be matched to any Movement_Log lead_id (likely already aged out of the 7-day retention window — permanently unrepairable for those specific rows).'
+    ' already had every field (left untouched), ' + unresolvable +
+    ' could not be matched to any Movement_Log lead_id (likely already aged out of the 7-day retention window — permanently unrepairable for those specific rows).' +
+    (hasLeadAssignedCol ? '' : ' (lead_assigned_at column not found — header needs to self-heal first, via captureDailyRmIssuesNow() or backfillDailyRmIssuesFromMovementLogNow().)')
   );
 }
 
