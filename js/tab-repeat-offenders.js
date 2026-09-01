@@ -94,6 +94,15 @@ async function fetchDailyRmIssues(sheetId){
           group_source: getRaw(c, 'group_source') || '',
           source_bucket: getRaw(c, 'source_bucket') || '',
           lead_assigned_at: getDate(c, 'lead_assigned_at'),
+          // IST day-key of lead_assigned_at, computed once here (same
+          // pattern as `date` above) rather than per-filter-pass — this is
+          // what the Time range selector actually matches against, since
+          // "Today" etc. should mean "assigned today", not "flagged
+          // tonight". Null when the row predates this column or the repair
+          // couldn't resolve it — such rows simply never match a specific
+          // range (they still show under All-time, which skips date
+          // matching entirely).
+          leadAssignedDateKey: (function () { const la = getDate(c, 'lead_assigned_at'); return la ? istDateKey(la) : null; })(),
         };
       })
       .filter(r => r.date); // undated rows can't be placed into a time range — drop them
@@ -311,7 +320,14 @@ function renderRepeatOffenders(){
   // actually caused it, rather than a single opaque "nothing matches"
   // message that leaves "is my 26k rows of data even being read?"
   // unanswerable from the UI alone.
-  const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(rec.date));
+  //
+  // Matched on leadAssignedDateKey (the lead's own assignment date), NOT
+  // `date` (the night this row was captured as flagged) — "Today" means
+  // "leads assigned today", same as a manual check of the leads sheet
+  // would show, even though a lead assigned days ago can still be flagged
+  // tonight. A row with no resolvable lead_assigned_at never matches a
+  // specific range (it still shows under All-time, which skips this check).
+  const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(rec.leadAssignedDateKey));
   const scoped = dateOnlyScoped.filter(passesRepeatOffenderFilters);
 
   if (!scoped.length) {
@@ -324,7 +340,7 @@ function renderRepeatOffenders(){
     const filterNote = activeFilters.length
       ? `Active filters likely narrowing this to zero: <b>${esc(activeFilters.join(', '))}</b>. Clear them in the filter bar above to check.`
       : 'No Project/Region/TL/Source/Sub-source filters are currently active, so this is NOT a filter issue — the flagged leads in this time range genuinely have no matching rows (unlikely if the time range is "From when history began").';
-    clear(`<b>${esc(dailyRmIssues.length)}</b> total flagged instance${dailyRmIssues.length === 1 ? '' : 's'} loaded from Daily_RM_Issues; <b>${esc(dateOnlyScoped.length)}</b> fall in this time range; <b>0</b> match after the top-bar filters below. ${filterNote} (The top-bar Assigned-date range filter never applies here, by design — only this section\'s own Time range selector does.)`);
+    clear(`<b>${esc(dailyRmIssues.length)}</b> total flagged instance${dailyRmIssues.length === 1 ? '' : 's'} loaded from Daily_RM_Issues; <b>${esc(dateOnlyScoped.length)}</b> were assigned in this time range; <b>0</b> match after the top-bar filters below. ${filterNote} (The top-bar Assigned-date range filter never applies here, by design — only this section\'s own Time range selector does, and it now also matches on assignment date.)`);
     if (countEl) countEl.textContent = '0';
     return;
   }
