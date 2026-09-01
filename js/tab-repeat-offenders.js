@@ -204,18 +204,22 @@ function repeatOffendersDateKeysForRange(range, now){
 }
 
 // Generic aggregator: groups the given (already filtered/time-scoped)
-// Daily_RM_Issues rows by keyFn(rec.RM), same 3 metrics + priority order
-// as computeRepeatOffenderRmsGs_ (DailyRmIssueLog.gs) — distinctDays,
-// then distinctIssueTypes, then totalInstances, so the most persistent
-// AND broadest pattern rises to the top at every rollup level, not just
-// the RM level. distinctRMs (how many different RMs roll up into this
-// one key) is extra context for a manager/RH-level row, always 1 at the
-// RM level itself.
+// Daily_RM_Issues rows by keyFn(rec), ranked by totalInstances alone —
+// simplified 2026-09-01 after the Days/Types-first priority (matching
+// computeRepeatOffenderRmsGs_, DailyRmIssueLog.gs) produced rankings that
+// read as counter-intuitive in the UI (a lower-instance row outranking a
+// higher one once Days/Types were tied) — direct instance count is easier
+// to read at a glance, even though it loses the "broad vs narrow" signal
+// the Days/Types priority was capturing. distinctDays/distinctIssueTypes
+// are still computed (harmless, and available if a future view wants them
+// again) but no longer sorted on or displayed. distinctRMs (how many
+// different RMs roll up into this one key) is extra context for a
+// manager/RH/region-level row, always 1 at the RM level itself.
 function aggregateRepeatOffenders(rows, keyFn){
   const byKey = {};
   rows.forEach(rec => {
-    const key = keyFn(rec.RM);
-    if (!key) return; // unresolvable in RM_Hierarchy — excluded from rollup views, same as auditUnresolvedRmsNow's population
+    const key = keyFn(rec);
+    if (!key) return; // unresolvable (e.g. not in RM_Hierarchy for a manager/RH rollup) — excluded, same population auditUnresolvedRmsNow flags
     if (!byKey[key]) byKey[key] = { name: key, days: new Set(), issueTypes: new Set(), byIssue: {}, totalInstances: 0, rms: new Set() };
     const b = byKey[key];
     b.days.add(rec.date);
@@ -230,7 +234,7 @@ function aggregateRepeatOffenders(rows, keyFn){
       name: b.name, distinctDays: b.days.size, distinctIssueTypes: b.issueTypes.size,
       totalInstances: b.totalInstances, byIssue: b.byIssue, distinctRMs: b.rms.size,
     };
-  }).sort((a, b) => (b.distinctDays - a.distinctDays) || (b.distinctIssueTypes - a.distinctIssueTypes) || (b.totalInstances - a.totalInstances));
+  }).sort((a, b) => b.totalInstances - a.totalInstances);
 }
 
 function renderRepeatOffenders(){
@@ -282,15 +286,22 @@ function renderRepeatOffenders(){
   if (noticeEl) noticeEl.style.display = 'none';
   if (countEl) countEl.textContent = `${scoped.length} flagged instance${scoped.length === 1 ? '' : 's'}`;
 
-  const rmList = aggregateRepeatOffenders(scoped, rm => rm).slice(0, 20);
-  const a1tmList = aggregateRepeatOffenders(scoped, primaryManagerForRm).slice(0, 10);
-  const rhList = aggregateRepeatOffenders(scoped, rhForRm).slice(0, 5);
+  const rmList = aggregateRepeatOffenders(scoped, rec => rec.RM).slice(0, 20);
+  const a1tmList = aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10);
+  const rhList = aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5);
+  // Region needs no hierarchy lookup at all — it's a field already on
+  // every Daily_RM_Issues row. Not capped tightly like the RM/A1-TM/RH
+  // lists: there are only ~11 canonical regions (REGION_GROUP_MAP,
+  // core.js), so 15 comfortably shows all of them without needing a
+  // separate "show more" affordance.
+  const regionList = aggregateRepeatOffenders(scoped, rec => rec.region || 'Unassigned').slice(0, 15);
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
 
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
     ${repeatOffenderTableHtml('Top 20 RMs', rmList, false)}
     ${repeatOffenderTableHtml('Top 10 A1 / TM', a1tmList, hierarchyMissing)}
     ${repeatOffenderTableHtml('Top 5 RH', rhList, hierarchyMissing)}
+    ${repeatOffenderTableHtml('By Region', regionList, false)}
   </div>`;
 }
 
@@ -313,8 +324,6 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
     return `<tr>
       <td class="num dim">${i + 1}</td>
       <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
-      <td class="num">${r.distinctDays}</td>
-      <td class="num">${r.distinctIssueTypes}</td>
       <td class="num">${r.totalInstances}</td>
       <td class="dim" style="font-size:11.5px;">${topIssues}</td>
     </tr>`;
@@ -322,7 +331,9 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
   return `<div>
     <div class="repeat-offenders-subtitle">${esc(title)}</div>
     <div class="section-scroll no-cap"><table><thead><tr>
-      <th></th><th>Name</th><th style="text-align:right">Days</th><th style="text-align:right">Types</th><th style="text-align:right">Instances</th><th>Top Issues</th>
+      <th></th><th>Name</th>
+      <th style="text-align:right" title="Total flagged-lead-rows in the current time range/filters. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
+      <th>Top Issues</th>
     </tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }

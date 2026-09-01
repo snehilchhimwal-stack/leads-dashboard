@@ -612,7 +612,7 @@
   .tracking-pair-grid{ display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; margin-bottom:34px; }
   .tracking-pair-grid section{ margin-bottom:0; }
   @media (max-width:900px){ .tracking-pair-grid{ grid-template-columns:1fr; gap:0; margin-bottom:0; } .tracking-pair-grid section{ margin-bottom:34px; } }
-  .repeat-offenders-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; align-items:start; }
+  .repeat-offenders-grid{ display:grid; grid-template-columns:1fr 1fr; gap:20px 24px; align-items:start; }
   @media (max-width:900px){ .repeat-offenders-grid{ grid-template-columns:1fr; gap:24px; } }
   .repeat-offenders-subtitle{ font-size:12.5px; font-weight:600; color:var(--text-dim); margin-bottom:8px; }
   .section-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
@@ -1046,7 +1046,7 @@
 
     <section id="sec-repeatoffenders">
       <div class="section-head"><div class="section-bar purple"></div><div class="section-title">Repeat Offenders</div><div class="section-count" id="repeatOffendersCount"></div></div>
-      <div class="filter-summary">Built from <span class="mono">Daily_RM_Issues</span> — a nightly 22:50 IST snapshot of every open lead flagged for one of the 5 SLA checks above (DailyRmIssueLog.gs). "Repeat" means showing up repeatedly across MULTIPLE DAYS and/or MULTIPLE checks, not a one-off single-day blip — ranked by distinct days flagged first, then distinct issue types, then total instances. Respects Project/Region/TL/Source/Sub-source above; the Assigned-date range filter does NOT apply here (this has its own independent time-range picker instead — the two answer different questions).</div>
+      <div class="filter-summary">Built from <span class="mono">Daily_RM_Issues</span> — a nightly 22:50 IST snapshot of every open lead flagged for one of the 5 SLA checks above (DailyRmIssueLog.gs). "Repeat" means showing up repeatedly across multiple nights, not a one-off single-day blip. Respects Project/Region/TL/Source/Sub-source above; the Assigned-date range filter does NOT apply here (this has its own independent time-range picker instead — the two answer different questions).<br><br><b>Ranking (every table below, same rule):</b> sorted by <b>Instances</b> — total flagged-lead-rows in the current time range/filters; the same lead flagged on 3 different nights counts as 3. Rollups (A1/TM/RH/Region) sum every field across everyone underneath them, with the RM count shown in parentheses.</div>
       <div class="stale-controls" style="margin-bottom:12px;">
         <label class="stale-label">Time range
           <select id="repeatOffendersRangeSelect" class="stale-select">
