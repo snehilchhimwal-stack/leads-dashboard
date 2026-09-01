@@ -239,11 +239,16 @@ function aggregateRepeatOffenders(rows, keyFn){
   rows.forEach(rec => {
     const key = keyFn(rec);
     if (!key) return; // unresolvable (e.g. not in RM_Hierarchy for a manager/RH rollup) — excluded, same population auditUnresolvedRmsNow flags
-    if (!byKey[key]) byKey[key] = { name: key, days: new Set(), issueTypes: new Set(), byIssue: {}, totalInstances: 0, rms: new Set(), leads: new Set() };
+    if (!byKey[key]) byKey[key] = { name: key, days: new Set(), issueTypes: new Set(), byIssue: {}, byIssueLabel: {}, totalInstances: 0, rms: new Set(), leads: new Set() };
     const b = byKey[key];
     b.days.add(rec.date);
     b.issueTypes.add(rec.issue_key);
     b.byIssue[rec.issue_key] = (b.byIssue[rec.issue_key] || 0) + 1;
+    // Captured straight from the record's own issue_label (Daily_RM_Issues'
+    // own column, ultimately from primaryIssueGs_/ISSUE_PRIORITY_GS_,
+    // SlaEngine.gs) rather than a second hardcoded key->label table here
+    // that could quietly drift out of sync with the real source.
+    if (!b.byIssueLabel[rec.issue_key]) b.byIssueLabel[rec.issue_key] = rec.issue_label || rec.issue_key;
     b.totalInstances++;
     b.rms.add(rec.RM);
     b.leads.add(rec.lead_id);
@@ -253,7 +258,7 @@ function aggregateRepeatOffenders(rows, keyFn){
     const distinctLeads = b.leads.size;
     return {
       name: b.name, distinctDays: b.days.size, distinctIssueTypes: b.issueTypes.size,
-      totalInstances: b.totalInstances, byIssue: b.byIssue, distinctRMs: b.rms.size,
+      totalInstances: b.totalInstances, byIssue: b.byIssue, byIssueLabel: b.byIssueLabel, distinctRMs: b.rms.size,
       distinctLeads: distinctLeads, instancePct: distinctLeads ? (b.totalInstances / distinctLeads * 100) : 0,
     };
   }).sort((a, b) => (b.instancePct - a.instancePct) || (b.totalInstances - a.totalInstances) || (b.distinctLeads - a.distinctLeads));
@@ -348,12 +353,11 @@ function renderRepeatOffenders(){
   const regionList = aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15);
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
 
-  // Grid order is deliberately NOT "biggest cap first" — it pairs tables
-  // whose typical row counts are closest, so the 2-column grid doesn't
-  // routinely pair a 20-row table against a 5-row one and leave a tall
-  // gap. The three RM-cut tables (cap 20 each) pair with each other and
-  // with Region (cap 15, the next closest); A1/TM (cap 10) and RH
-  // (cap 5) — both always small — pair together last.
+  // Grid order is now purely logical grouping (the 3 RM cuts together,
+  // then Region, then the hierarchy rollups) — no longer height-driven,
+  // since every card renders in the same bounded, scrollable box
+  // regardless of row count (see repeatOffenderTableHtml's own comment),
+  // and the grid itself is auto-fit rather than a fixed 2-column split.
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
     ${repeatOffenderTableHtml('Top 20 RMs', rmList, false)}
     ${repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false)}
@@ -364,40 +368,52 @@ function renderRepeatOffenders(){
   </div>`;
 }
 
+// Every card (populated, empty, or hierarchy-unavailable) renders the
+// SAME shell — header row + .section-scroll table — so every card in
+// the grid has an identical outer shape regardless of how many rows it
+// actually has. Combined with .section-scroll's own default max-height
+// (360px, capped+scrollable+sticky-header — the same box every other
+// table on this dashboard already uses; this file used to opt OUT of it
+// via .no-cap, which is exactly what let a 20-row table and a 3-row
+// table sit side by side with a large blank gap under the shorter one),
+// this is what actually fixes the uneven-height problem: not clever
+// grid pairing (removed below), just never letting two differently-tall
+// tables produce differently-tall cards in the first place.
 function repeatOffenderTableHtml(title, list, hierarchyMissing){
-  if (hierarchyMissing) {
-    return `<div>
-      <div class="repeat-offenders-subtitle">${esc(title)}</div>
-      <div class="dim" style="font-size:12px;">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</div>
-    </div>`;
-  }
-  if (!list.length) {
-    return `<div>
-      <div class="repeat-offenders-subtitle">${esc(title)}</div>
-      <div class="dim" style="font-size:12px;">Nothing to show for the current filters/range.</div>
-    </div>`;
-  }
-  const rows = list.map((r, i) => {
-    const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
-      .map(k => `${esc(k)}: ${r.byIssue[k]}`).join(', ');
-    return `<tr>
-      <td class="num dim">${i + 1}</td>
-      <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
-      <td class="num">${r.distinctLeads}</td>
-      <td class="num">${r.totalInstances}</td>
-      <td class="num">${(r.totalInstances / r.distinctLeads).toFixed(1)}x</td>
-      <td class="dim" style="font-size:11.5px;">${topIssues}</td>
-    </tr>`;
-  }).join('');
-  return `<div>
-    <div class="repeat-offenders-subtitle">${esc(title)}</div>
-    <div class="section-scroll no-cap"><table><thead><tr>
+  const headHtml = `<tr>
       <th></th><th>Name</th>
       <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Leads</th>
       <th style="text-align:right" title="Total flagged-lead-rows. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
       <th style="text-align:right" title="Sort key: Instances ÷ Leads — average number of times each already-flagged lead got flagged again. 2.5x means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">Avg Flagged<br><span class="dim" style="font-weight:400; font-size:9.5px;">(Instances ÷ Leads)</span></th>
       <th>Top Issues</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
+    </tr>`;
+
+  let rows;
+  if (hierarchyMissing) {
+    rows = `<tr><td colspan="5" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
+  } else if (!list.length) {
+    rows = `<tr><td colspan="5" class="empty-row">Nothing to show for the current filters/range.</td></tr>`;
+  } else {
+    rows = list.map((r, i) => {
+      // Compact chips instead of a raw "key: n, key: n" text dump — same
+      // .chip component every issue-flavored card elsewhere on this
+      // dashboard already uses (e.g. the RM Timeline day-detail list).
+      const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
+        .map(k => `<span class="chip red" style="margin:0 4px 2px 0;">${esc(r.byIssueLabel[k] || k)}: ${r.byIssue[k]}</span>`).join('');
+      return `<tr>
+        <td class="num dim">${i + 1}</td>
+        <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
+        <td class="num">${r.distinctLeads}</td>
+        <td class="num">${r.totalInstances}</td>
+        <td class="num">${(r.totalInstances / r.distinctLeads).toFixed(1)}x</td>
+        <td>${topIssues}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  return `<div>
+    <div class="repeat-offenders-subtitle">${esc(title)}</div>
+    <div class="section-scroll"><table><thead>${headHtml}</thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }
 
