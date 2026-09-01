@@ -68,6 +68,16 @@ function runDailyRmIssueLogTests_() {
     ensureDailyRmIssueLogSheet_(ss);
     TestAssertEqual_(logSheet.getLastRow(), 1, 'ensureDailyRmIssueLogSheet_: re-running against an existing sheet does not touch it further');
 
+    // ---- self-healing header: a sheet from before TL/group_source/source_bucket existed ----
+    const oldColumns = DAILY_RM_ISSUE_LOG_COLUMNS_.slice(0, 9); // the original 9, pre-2026-09-01
+    const healSs = TestMockSpreadsheet_({});
+    const healSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [oldColumns, ['2026-08-20', 'Test RM One', 'Pune', 'P', 'L-OLD', 'C-OLD', 'stageStuck48h', 'Stuck 48h+', 'old capture']]);
+    healSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = healSheet;
+    ensureDailyRmIssueLogSheet_(healSs);
+    const healedHeader = healSheet.getRange(1, 1, 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(healedHeader, DAILY_RM_ISSUE_LOG_COLUMNS_, 'ensureDailyRmIssueLogSheet_: self-heals an older 9-column sheet by appending the 3 missing headers, same pattern as ensureMovementLogSheet_');
+    TestAssertEqual_(healSheet.getRange(2, 2, 1, 1).getValues()[0][0], 'Test RM One', 'ensureDailyRmIssueLogSheet_: self-healing the header never touches existing data rows');
+
     // ---- captureDailyRmIssuesNow(): first run tonight ----
     captureDailyRmIssuesNow();
     TestAssertEqual_(logSheet.getLastRow(), 3, 'captureDailyRmIssuesNow: exactly 2 data rows written (the 2 flagged leads; clean/closed/blank-id are all correctly excluded)');
@@ -89,6 +99,9 @@ function runDailyRmIssueLogTests_() {
     TestAssertEqual_(row[6], expectedIssue.key, 'captureDailyRmIssuesNow: issue_key matches what computeSlaFlags_/primaryIssueGs_ actually compute for this lead');
     TestAssertEqual_(row[7], expectedIssue.label, 'captureDailyRmIssuesNow: issue_label matches too');
     TestAssert_(!!String(row[8] || '').trim(), 'captureDailyRmIssuesNow: captured_at is populated');
+    TestAssertEqual_(row[9], 'Test A1 One', 'captureDailyRmIssuesNow: TL column is captured (2026-09-01 addition, for the dashboard\'s filter support)');
+    TestAssertEqual_(row[10], 'google', 'captureDailyRmIssuesNow: group_source column is captured');
+    TestAssertEqual_(row[11], 'Non-UTM', 'captureDailyRmIssuesNow: source_bucket column is captured');
 
     // ---- idempotency: a second run the SAME night logs nothing new ----
     captureDailyRmIssuesNow();
@@ -231,6 +244,9 @@ function runDailyRmIssueLogTests_() {
     TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][1], 'Test RM One', 'backfillDailyRmIssuesFromMovementLog_: RM column correct');
     TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][5], 'C-DAY1-FLAGGED', 'backfillDailyRmIssuesFromMovementLog_: client_id column correct');
     TestAssert_(!!String(bfByLeadId['L-DAY1-FLAGGED'][8] || '').trim(), 'backfillDailyRmIssuesFromMovementLog_: captured_at is populated, using the snapshot\'s own time');
+    TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][9], 'Test A1 One', 'backfillDailyRmIssuesFromMovementLog_: TL column is captured from Movement_Log too (it was in SNAPSHOT_COLUMNS_ from the start, unlike rm_is_active/lead_closing_reason)');
+    TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][10], 'google', 'backfillDailyRmIssuesFromMovementLog_: group_source column is captured from Movement_Log');
+    TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][11], 'Non-UTM', 'backfillDailyRmIssuesFromMovementLog_: source_bucket column is captured from Movement_Log');
 
     // Re-running is safe (idempotent) — a second call must skip everything
     // it just wrote, adding nothing new.

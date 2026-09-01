@@ -36,7 +36,17 @@
  */
 
 const DAILY_RM_ISSUE_LOG_SHEET_ = 'Daily_RM_Issues';
-const DAILY_RM_ISSUE_LOG_COLUMNS_ = ['date', 'RM', 'region', 'project', 'lead_id', 'client_id', 'issue_key', 'issue_label', 'captured_at'];
+const DAILY_RM_ISSUE_LOG_COLUMNS_ = [
+  'date', 'RM', 'region', 'project', 'lead_id', 'client_id', 'issue_key', 'issue_label', 'captured_at',
+  // Added 2026-09-01 for the dashboard's Repeat Offenders section — the
+  // browser-side leaderboard needs to honor the SAME top-bar Project/
+  // Region/TL/Source/Bucket filters everything else does, and this log
+  // never carried TL/source/bucket before now. Appended at the end, not
+  // inserted — see ensureDailyRmIssueLogSheet_'s self-healing header
+  // below on why order matters (same reasoning as
+  // MovementTracker.gs's SNAPSHOT_COLUMNS_).
+  'TL', 'group_source', 'source_bucket',
+];
 
 function ensureDailyRmIssueLogSheet_(ss) {
   let sheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
@@ -44,6 +54,20 @@ function ensureDailyRmIssueLogSheet_(ss) {
     sheet = ss.insertSheet(DAILY_RM_ISSUE_LOG_SHEET_);
     sheet.getRange(1, 1, 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).setValues([DAILY_RM_ISSUE_LOG_COLUMNS_]);
     sheet.setFrozenRows(1);
+    return sheet;
+  }
+  // Self-heal, same pattern as ensureMovementLogSheet_/ensureSlaHistorySheet_
+  // — append whatever header columns are missing rather than requiring an
+  // exact pre-built match, so a sheet created before TL/group_source/
+  // source_bucket existed still ends up with every column this script
+  // (and the dashboard's own fetch) expects.
+  const lastCol = sheet.getLastColumn();
+  const existingHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  const existingSet = {};
+  existingHeaders.forEach(function (h) { existingSet[String(h || '').trim()] = true; });
+  const missing = DAILY_RM_ISSUE_LOG_COLUMNS_.filter(function (h) { return !existingSet[h]; });
+  if (missing.length) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
   }
   return sheet;
 }
@@ -116,6 +140,7 @@ function captureDailyRmIssues_() {
     rows.push([
       todayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
       leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, captureAtValue,
+      getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
     ]);
   });
 
@@ -246,6 +271,11 @@ function backfillDailyRmIssuesFromMovementLog_(ss) {
       allNewRows.push([
         dayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
         leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, capturedAtValue,
+        // TL/group_source/source_bucket were part of SNAPSHOT_COLUMNS_
+        // from the very start (unlike rm_is_active/lead_closing_reason —
+        // see this function's own header note), so every Movement_Log
+        // row, old or new, already carries real values for these three.
+        getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
       ]);
       dayRowCount++;
     });
