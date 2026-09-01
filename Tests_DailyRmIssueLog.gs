@@ -159,6 +159,94 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = realSs3;
     }
 
+    // ---- backfillDailyRmIssuesFromMovementLog_: reconstructs history from Movement_Log ----
+    const bfSs = TestMockSpreadsheet_({});
+    const movementSheet = ensureMovementLogSheet_(bfSs); // real header, so this can't drift from production
+    const movementHeader = movementSheet.getRange(1, 1, 1, movementSheet.getLastColumn()).getValues()[0];
+    const bfRow = function (overrides) {
+      const defaults = {
+        snapshot_at: null, snapshot_label: 'test', lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM One', TL: 'Test A1 One',
+        project: 'Test Project', region: 'Pune', client: 'Client',
+        lead_assigned_at: '', group_source: 'google', source_bucket: 'Non-UTM', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '',
+        internal_status_comments: '', closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, stage_comments: '',
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return movementHeader.map(function (k) { return merged[k]; });
+    };
+
+    // day1Early/day1Late must land on the exact SAME IST calendar day (two
+    // runs, one day) — noon-anchored to whatever calendar day "3 days ago"
+    // falls on, then offset a few hours either side, so this can never
+    // accidentally spill into a different day depending on what real
+    // hour `now` happens to be when the suite runs.
+    const day1Anchor = TestFixture_daysAgo_(now, 3);
+    const day1Noon = new Date(istDayKeyGs_(day1Anchor) + 'T12:00:00+05:30');
+    const day1Early = TestFixture_hoursAgo_(day1Noon, 3); // 09:00 IST that day
+    const day1Late = TestFixture_hoursAgo_(day1Noon, -3); // 15:00 IST that day — the day's LATEST run, this is the one that should win
+    const day2At = TestFixture_daysAgo_(now, 2);
+    const day3At = TestFixture_daysAgo_(now, 1); // this day is pre-seeded into Daily_RM_Issues below — must be skipped
+
+    // Day 1: TWO runs. The early run's only lead (L-EARLYONLY) must NOT
+    // survive into the backfill — only the later run's rows should.
+    movementSheet.appendRow(bfRow({ snapshot_at: day1Early, lead_id: 'L-EARLYONLY', client_id: 'C-EARLYONLY', lead_assigned_at: TestFixture_hoursAgo_(day1Early, 1) }));
+    movementSheet.appendRow(bfRow({ snapshot_at: day1Late, lead_id: 'L-DAY1-FLAGGED', client_id: 'C-DAY1-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(day1Late, 60) })); // well past 48h as of day1Late
+    movementSheet.appendRow(bfRow({ snapshot_at: day1Late, lead_id: 'L-DAY1-CLOSED', client_id: 'C-DAY1-CLOSED', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(day1Late, 60) }));
+
+    // Day 2: one run, one flagged lead.
+    movementSheet.appendRow(bfRow({ snapshot_at: day2At, lead_id: 'L-DAY2-FLAGGED', client_id: 'C-DAY2-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(day2At, 60) }));
+
+    // Day 3: has a Movement_Log snapshot too, but Daily_RM_Issues is
+    // pre-seeded for this day below — must be skipped entirely.
+    movementSheet.appendRow(bfRow({ snapshot_at: day3At, lead_id: 'L-DAY3-FLAGGED', client_id: 'C-DAY3-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(day3At, 60) }));
+
+    const bfLogSheet = ensureDailyRmIssueLogSheet_(bfSs);
+    bfLogSheet.appendRow([istDayKeyGs_(day3At), 'Test RM One', 'Pune', 'Test Project', 'L-ALREADY-CAPTURED', 'C-ALREADY-CAPTURED', 'stageStuck48h', 'Stuck 48h+', 'already captured']);
+
+    const bfResult = backfillDailyRmIssuesFromMovementLog_(bfSs);
+
+    TestAssertEqual_(bfResult.daysBackfilled.length, 2, 'backfillDailyRmIssuesFromMovementLog_: backfills exactly 2 days (day 1 and day 2 — day 3 is skipped, already captured)');
+    TestAssertEqual_(bfResult.daysSkipped.length, 1, 'backfillDailyRmIssuesFromMovementLog_: reports exactly 1 skipped day');
+    TestAssertContains_(bfResult.daysSkipped[0], istDayKeyGs_(day3At), 'backfillDailyRmIssuesFromMovementLog_: the skipped day is day 3, by name');
+
+    const bfLoggedRows = bfLogSheet.getRange(2, 1, bfLogSheet.getLastRow() - 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
+    const bfByLeadId = {};
+    bfLoggedRows.forEach(function (r) { bfByLeadId[r[4]] = r; });
+
+    TestAssert_(!bfByLeadId['L-EARLYONLY'], 'backfillDailyRmIssuesFromMovementLog_: a lead only present in an EARLIER same-day run is correctly excluded — only the day\'s LATEST run counts');
+    TestAssert_(!!bfByLeadId['L-DAY1-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: a flagged open lead from the day\'s latest run is backfilled');
+    TestAssert_(!bfByLeadId['L-DAY1-CLOSED'], 'backfillDailyRmIssuesFromMovementLog_: a closed lead is correctly excluded, even from the day\'s latest run');
+    TestAssert_(!!bfByLeadId['L-DAY2-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: day 2 (a single-run day) is backfilled too');
+    TestAssert_(!bfByLeadId['L-DAY3-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: day 3\'s Movement_Log data is NOT backfilled — Daily_RM_Issues already had a row for that day');
+    TestAssertEqual_(bfByLeadId['L-ALREADY-CAPTURED'][6], 'stageStuck48h', 'backfillDailyRmIssuesFromMovementLog_: the pre-seeded day-3 row itself is left untouched');
+
+    TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][0], istDayKeyGs_(day1Late), 'backfillDailyRmIssuesFromMovementLog_: date column uses the snapshot\'s own IST day, not today');
+    TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][1], 'Test RM One', 'backfillDailyRmIssuesFromMovementLog_: RM column correct');
+    TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][5], 'C-DAY1-FLAGGED', 'backfillDailyRmIssuesFromMovementLog_: client_id column correct');
+    TestAssert_(!!String(bfByLeadId['L-DAY1-FLAGGED'][8] || '').trim(), 'backfillDailyRmIssuesFromMovementLog_: captured_at is populated, using the snapshot\'s own time');
+
+    // Re-running is safe (idempotent) — a second call must skip everything
+    // it just wrote, adding nothing new.
+    const bfRowCountAfterFirst = bfLogSheet.getLastRow();
+    const bfResult2 = backfillDailyRmIssuesFromMovementLog_(bfSs);
+    TestAssertEqual_(bfResult2.rowsWritten, 0, 'backfillDailyRmIssuesFromMovementLog_: re-running writes nothing new');
+    TestAssertEqual_(bfLogSheet.getLastRow(), bfRowCountAfterFirst, 'backfillDailyRmIssuesFromMovementLog_: re-running does not change the sheet\'s row count at all');
+
+    // Safe against a spreadsheet with no Movement_Log at all yet.
+    const bfEmptySs = TestMockSpreadsheet_({});
+    const bfEmptyResult = backfillDailyRmIssuesFromMovementLog_(bfEmptySs);
+    TestAssertEqual_(bfEmptyResult.rowsWritten, 0, 'backfillDailyRmIssuesFromMovementLog_: does not throw and writes nothing when Movement_Log does not exist yet');
+
+    // Console-callable wrapper, smoke test only.
+    const realSs5 = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return bfEmptySs; }, flush: function () {} };
+    try {
+      backfillDailyRmIssuesFromMovementLogNow();
+      TestAssert_(true, 'backfillDailyRmIssuesFromMovementLogNow: does not throw');
+    } finally {
+      SpreadsheetApp = realSs5;
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment: a crash anywhere in captureDailyRmIssues_

@@ -129,6 +129,139 @@ function captureDailyRmIssues_() {
 
 function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
 
+/**
+ * One-time (or occasional) backfill: reconstructs Daily_RM_Issues for
+ * every day Movement_Log still retains a snapshot for, using each day's
+ * own LATEST snapshot run as the "as of" state — the closest available
+ * stand-in for what the real 22:50 IST capture would have recorded,
+ * since Movement_Log's 4x-daily captures (00:00/06:00/12:00/18:00 IST —
+ * SNAPSHOT_HOURS_ below) never include a literal 22:50 snapshot; 18:00
+ * is the closest one before it lands. Skips any day Daily_RM_Issues
+ * ALREADY has rows for (the SAME per-day idempotency guard
+ * captureDailyRmIssues_ itself uses), so this is always safe to re-run
+ * and can never duplicate or overwrite a night the real trigger already
+ * captured for real.
+ *
+ * KNOWN LIMITATION, by construction — Movement_Log's own captured
+ * columns (SNAPSHOT_COLUMNS_, MovementTracker.gs) don't include
+ * rm_is_active or lead_closing_reason; only the live leads tab has
+ * those. Concretely, for every backfilled day:
+ *   - inactiveRmNewLead can never fire (rm_is_active reads as blank,
+ *     which computeSlaFlags_ treats as "not inactive").
+ *   - a lead closed ONLY via the sheet's own lead_closing_reason column
+ *     (not the RM-entered closing_reason) is still counted open here,
+ *     and may show up flagged for something else instead of being
+ *     correctly excluded as closed.
+ * Every night captureDailyRmIssues_ itself runs live (once
+ * setupDailyRmIssueLog() is installed) reads the real leads tab and has
+ * neither gap — this only ever affects days reconstructed from history.
+ *
+ * Pure read of Movement_Log + one append to Daily_RM_Issues; never
+ * touches the real leads tab. Returns
+ * {daysBackfilled: [string], daysSkipped: [string], rowsWritten: number}.
+ */
+function backfillDailyRmIssuesFromMovementLog_(ss) {
+  const logSheet = ensureDailyRmIssueLogSheet_(ss);
+  const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!movementSheet) { Logger.log('Movement_Log does not exist yet — nothing to backfill.'); return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 }; }
+  const lastRow = movementSheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Movement_Log is empty — nothing to backfill.'); return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 }; }
+
+  const lastCol = movementSheet.getLastColumn();
+  const header = movementSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const snapAtIdx = header.indexOf('snapshot_at'); // not in HEADER_ALIASES_ — read positionally, same as _readMovementLogRowsGs_
+  if (snapAtIdx === -1) { Logger.log('Movement_Log has no snapshot_at column — cannot backfill.'); return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 }; }
+  const colIndex = buildColIndex_(header);
+
+  const allRows = withRetry_(function () { return movementSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Movement_Log for backfill');
+
+  // Group by IST day, keeping only each day's LATEST snapshot_at — every
+  // lead captured together in one snapshotOpenLeads_ run shares that
+  // exact same timestamp, so grouping on it correctly picks up the whole
+  // run, not just one row.
+  const latestByDay = {}; // dayKey -> { tsMs, ts, rows: [] }
+  allRows.forEach(function (row) {
+    const ts = row[snapAtIdx];
+    if (!(ts instanceof Date)) return;
+    const dayKey = istDayKeyGs_(ts);
+    const tsMs = ts.getTime();
+    if (!latestByDay[dayKey] || tsMs > latestByDay[dayKey].tsMs) {
+      latestByDay[dayKey] = { tsMs: tsMs, ts: ts, rows: [] };
+    }
+  });
+  allRows.forEach(function (row) {
+    const ts = row[snapAtIdx];
+    if (!(ts instanceof Date)) return;
+    const dayKey = istDayKeyGs_(ts);
+    const entry = latestByDay[dayKey];
+    if (entry && ts.getTime() === entry.tsMs) entry.rows.push(row);
+  });
+
+  const alreadyCaptured = {};
+  const priorLastRow = logSheet.getLastRow();
+  if (priorLastRow >= 2) {
+    withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 1).getValues(); }, 'read Daily_RM_Issues for backfill idempotency check')
+      .forEach(function (r) {
+        const cell = r[0];
+        const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
+        if (key) alreadyCaptured[key] = true;
+      });
+  }
+
+  const daysBackfilled = [];
+  const daysSkipped = [];
+  const allNewRows = [];
+
+  Object.keys(latestByDay).sort().forEach(function (dayKey) {
+    if (alreadyCaptured[dayKey]) { daysSkipped.push(dayKey); return; }
+    const entry = latestByDay[dayKey];
+    const asOf = entry.ts;
+    const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, asOf); }, 'buildMovementLogMapsGs_ (backfill ' + dayKey + ')').baselineMap;
+    const capturedAtValue = Utilities.formatDate(asOf, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+
+    let dayRowCount = 0;
+    entry.rows.forEach(function (row) {
+      const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+      if (!leadId) return;
+      const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+      const closingReason = getVal_(row, colIndex, 'closing_reason');
+      // lead_closing_reason isn't one of Movement_Log's own captured
+      // columns — see this function's own header note on why that's a
+      // known, narrow limitation of backfilling from history rather than
+      // a bug.
+      if (!isOpenLead_(stage, closingReason, '')) return;
+
+      const flags = computeSlaFlags_(row, colIndex, asOf, baselineMap);
+      const issue = primaryIssueGs_(flags);
+      if (!issue) return;
+
+      const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+      allNewRows.push([
+        dayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
+        leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, capturedAtValue,
+      ]);
+      dayRowCount++;
+    });
+    daysBackfilled.push(dayKey + ' (' + dayRowCount + ' flagged lead(s), as of ' + capturedAtValue + ')');
+  });
+
+  if (allNewRows.length) {
+    const startRow = logSheet.getLastRow() + 1;
+    withRetry_(function () { logSheet.getRange(startRow, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows); }, 'write Daily_RM_Issues backfill rows');
+  }
+
+  Logger.log('Backfilled ' + daysBackfilled.length + ' day(s) (' + allNewRows.length + ' total flagged-lead row(s)): ' + (daysBackfilled.join('; ') || '(none)'));
+  if (daysSkipped.length) Logger.log('Skipped ' + daysSkipped.length + ' day(s) Daily_RM_Issues already has rows for: ' + daysSkipped.join(', '));
+
+  return { daysBackfilled: daysBackfilled, daysSkipped: daysSkipped, rowsWritten: allNewRows.length };
+}
+
+// Console-callable (function dropdown -> Run).
+function backfillDailyRmIssuesFromMovementLogNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  backfillDailyRmIssuesFromMovementLog_(ss);
+}
+
 // ---- One-time setup — run this once from the editor ----
 function setupDailyRmIssueLog() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
