@@ -216,15 +216,20 @@ function repeatOffendersDateKeysForRange(range, now){
 }
 
 // Generic aggregator: groups the given (already filtered/time-scoped)
-// Daily_RM_Issues rows by keyFn(rec), ranked by totalInstances alone —
-// simplified 2026-09-01 after the Days/Types-first priority (matching
-// computeRepeatOffenderRmsGs_, DailyRmIssueLog.gs) produced rankings that
-// read as counter-intuitive in the UI (a lower-instance row outranking a
-// higher one once Days/Types were tied) — direct instance count is easier
-// to read at a glance, even though it loses the "broad vs narrow" signal
-// the Days/Types priority was capturing. distinctDays/distinctIssueTypes
-// are still computed (harmless, and available if a future view wants them
-// again) but no longer sorted on or displayed. distinctRMs (how many
+// Daily_RM_Issues rows by keyFn(rec). Ranked by instancePct (total
+// flagged-instances per distinct flagged lead, as a %) — NOT raw
+// totalInstances alone. Raw instances rewards volume: a rollup with 60
+// flagged leads and 75 instances (75/60 = 125%, each lead flagged about
+// once) would outrank one with 10 flagged leads and 25 instances
+// (25/10 = 250%, each lead flagged 2.5x on average) purely for having
+// more leads, even though the SECOND is the genuinely worse repeat
+// pattern per lead. distinctLeads has no "total leads this RM owns"
+// denominator available — Daily_RM_Issues only ever contains FLAGGED
+// rows, never a complete lead roster — so this is specifically "how many
+// times did each already-flagged lead get flagged again", not "what
+// fraction of this RM's whole book is flagged." distinctDays/
+// distinctIssueTypes are still computed (harmless, available if a future
+// view wants them) but not sorted on or displayed. distinctRMs (how many
 // different RMs roll up into this one key) is extra context for a
 // manager/RH/region-level row, always 1 at the RM level itself.
 function aggregateRepeatOffenders(rows, keyFn){
@@ -232,21 +237,24 @@ function aggregateRepeatOffenders(rows, keyFn){
   rows.forEach(rec => {
     const key = keyFn(rec);
     if (!key) return; // unresolvable (e.g. not in RM_Hierarchy for a manager/RH rollup) — excluded, same population auditUnresolvedRmsNow flags
-    if (!byKey[key]) byKey[key] = { name: key, days: new Set(), issueTypes: new Set(), byIssue: {}, totalInstances: 0, rms: new Set() };
+    if (!byKey[key]) byKey[key] = { name: key, days: new Set(), issueTypes: new Set(), byIssue: {}, totalInstances: 0, rms: new Set(), leads: new Set() };
     const b = byKey[key];
     b.days.add(rec.date);
     b.issueTypes.add(rec.issue_key);
     b.byIssue[rec.issue_key] = (b.byIssue[rec.issue_key] || 0) + 1;
     b.totalInstances++;
     b.rms.add(rec.RM);
+    b.leads.add(rec.lead_id);
   });
   return Object.keys(byKey).map(key => {
     const b = byKey[key];
+    const distinctLeads = b.leads.size;
     return {
       name: b.name, distinctDays: b.days.size, distinctIssueTypes: b.issueTypes.size,
       totalInstances: b.totalInstances, byIssue: b.byIssue, distinctRMs: b.rms.size,
+      distinctLeads: distinctLeads, instancePct: distinctLeads ? (b.totalInstances / distinctLeads * 100) : 0,
     };
-  }).sort((a, b) => b.totalInstances - a.totalInstances);
+  }).sort((a, b) => (b.instancePct - a.instancePct) || (b.totalInstances - a.totalInstances) || (b.distinctLeads - a.distinctLeads));
 }
 
 function renderRepeatOffenders(){
@@ -336,7 +344,9 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
     return `<tr>
       <td class="num dim">${i + 1}</td>
       <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
+      <td class="num">${r.distinctLeads}</td>
       <td class="num">${r.totalInstances}</td>
+      <td class="num">${r.instancePct.toFixed(1)}%</td>
       <td class="dim" style="font-size:11.5px;">${topIssues}</td>
     </tr>`;
   }).join('');
@@ -344,7 +354,9 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
     <div class="repeat-offenders-subtitle">${esc(title)}</div>
     <div class="section-scroll no-cap"><table><thead><tr>
       <th></th><th>Name</th>
-      <th style="text-align:right" title="Total flagged-lead-rows in the current time range/filters. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
+      <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Leads</th>
+      <th style="text-align:right" title="Total flagged-lead-rows. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
+      <th style="text-align:right" title="Sort key: Instances ÷ Leads × 100 — average number of times each already-flagged lead got flagged again, as a %. 250% means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">%</th>
       <th>Top Issues</th>
     </tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
