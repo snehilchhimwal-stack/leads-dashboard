@@ -1101,6 +1101,17 @@ async function fetchAndRender(){
       // own comment in tab-tracking.js).
       persistDailyCohortHistory().catch(() => {});
     });
+    // Same best-effort, non-blocking treatment as fetchMovementLog above
+    // — Repeat Offenders' two source tabs (Daily_RM_Issues, RM_Hierarchy)
+    // are each written/maintained by separate Apps Script logic that
+    // might not be set up yet, and the main dashboard must never wait on
+    // or fail because of either fetch. Independent of fetchMovementLog's
+    // own fetch/render pass (different tabs, no shared dependency), and
+    // renderRepeatOffenders() alone is enough here — it doesn't need the
+    // rest of the dashboard re-rendered, just its own section.
+    Promise.all([fetchDailyRmIssues(sheetId), fetchRmHierarchyForRollup(sheetId)]).then(() => {
+      renderRepeatOffenders();
+    });
 
     document.getElementById('configPanel').style.display = 'none';
     document.getElementById('changeSourceBtn').style.display = 'inline-block';

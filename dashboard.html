@@ -612,6 +612,9 @@
   .tracking-pair-grid{ display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; margin-bottom:34px; }
   .tracking-pair-grid section{ margin-bottom:0; }
   @media (max-width:900px){ .tracking-pair-grid{ grid-template-columns:1fr; gap:0; margin-bottom:0; } .tracking-pair-grid section{ margin-bottom:34px; } }
+  .repeat-offenders-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; align-items:start; }
+  @media (max-width:900px){ .repeat-offenders-grid{ grid-template-columns:1fr; gap:24px; } }
+  .repeat-offenders-subtitle{ font-size:12.5px; font-weight:600; color:var(--text-dim); margin-bottom:8px; }
   .section-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
   .section-bar{ width:4px; height:16px; border-radius:2px; }
   .section-bar.blue{ background:var(--blue); }
@@ -1041,6 +1044,24 @@
       <div class="section-scroll"><div class="card-list" id="closedNoCommentList"></div></div>
     </section>
 
+    <section id="sec-repeatoffenders">
+      <div class="section-head"><div class="section-bar purple"></div><div class="section-title">Repeat Offenders</div><div class="section-count" id="repeatOffendersCount"></div></div>
+      <div class="filter-summary">Built from <span class="mono">Daily_RM_Issues</span> — a nightly 22:50 IST snapshot of every open lead flagged for one of the 5 SLA checks above (DailyRmIssueLog.gs). "Repeat" means showing up repeatedly across MULTIPLE DAYS and/or MULTIPLE checks, not a one-off single-day blip — ranked by distinct days flagged first, then distinct issue types, then total instances. Respects Project/Region/TL/Source/Sub-source above; the Assigned-date range filter does NOT apply here (this has its own independent time-range picker instead — the two answer different questions).</div>
+      <div class="stale-controls" style="margin-bottom:12px;">
+        <label class="stale-label">Time range
+          <select id="repeatOffendersRangeSelect" class="stale-select">
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="thisWeek">This Week</option>
+            <option value="last7Days" selected>Last 7 Days</option>
+            <option value="allTime">From when history began</option>
+          </select>
+        </label>
+      </div>
+      <div id="repeatOffendersNotice" class="truncation-notice" style="display:none;"></div>
+      <div id="repeatOffendersBody"></div>
+    </section>
+
     <section id="sec-reports">
       <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Region Email Reports</div><div class="section-count" id="regionReportCount"></div></div>
 
@@ -1344,6 +1365,7 @@
 <script src="js/tab-tracking.js"></script>
 <script src="js/tab-rmtimeline.js"></script>
 <script src="js/tab-movement.js"></script>
+<script src="js/tab-repeat-offenders.js"></script>
 <script src="js/tab-morning.js"></script>
 <script src="js/reports.js"></script>
 <script src="js/sheets-writeback.js"></script>

@@ -275,6 +275,7 @@ function renderAll(){
   renderStuckList();
   renderRecordingList();
   renderClosedNoCommentList();
+  renderRepeatOffenders();
   renderDailyTrend();
   renderRMScoreTable();
   renderFanout();
