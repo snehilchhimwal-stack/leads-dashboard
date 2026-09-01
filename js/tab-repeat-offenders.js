@@ -257,10 +257,25 @@ function renderRepeatOffenders(){
   const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
   const dateKeys = repeatOffendersDateKeysForRange(range, now);
 
-  const scoped = dailyRmIssues.filter(rec => (!dateKeys || dateKeys.has(rec.date)) && passesRepeatOffenderFilters(rec));
+  // Split into two passes (date-range, then the top-bar filters) instead
+  // of one combined filter — so an empty result can say WHICH of the two
+  // actually caused it, rather than a single opaque "nothing matches"
+  // message that leaves "is my 26k rows of data even being read?"
+  // unanswerable from the UI alone.
+  const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(rec.date));
+  const scoped = dateOnlyScoped.filter(passesRepeatOffenderFilters);
 
   if (!scoped.length) {
-    clear('No flagged leads for the current Project/Region/TL/Source/Sub-source filters in this time range.');
+    const activeFilters = [];
+    if (filterState.project.size) activeFilters.push(`Project (${filterState.project.size})`);
+    if (filterState.region.size) activeFilters.push(`Region (${filterState.region.size})`);
+    if (filterState.TL.size) activeFilters.push(`TL (${filterState.TL.size})`);
+    if (filterState.source.size) activeFilters.push(`Source (${filterState.source.size})`);
+    if (filterState.bucket.size) activeFilters.push(`Sub-source (${filterState.bucket.size})`);
+    const filterNote = activeFilters.length
+      ? `Active filters likely narrowing this to zero: <b>${esc(activeFilters.join(', '))}</b>. Clear them in the filter bar above to check.`
+      : 'No Project/Region/TL/Source/Sub-source filters are currently active, so this is NOT a filter issue — the flagged leads in this time range genuinely have no matching rows (unlikely if the time range is "From when history began").';
+    clear(`<b>${esc(dailyRmIssues.length)}</b> total flagged instance${dailyRmIssues.length === 1 ? '' : 's'} loaded from Daily_RM_Issues; <b>${esc(dateOnlyScoped.length)}</b> fall in this time range; <b>0</b> match after the top-bar filters below. ${filterNote} (The top-bar Assigned-date range filter never applies here, by design — only this section\'s own Time range selector does.)`);
     if (countEl) countEl.textContent = '0';
     return;
   }
