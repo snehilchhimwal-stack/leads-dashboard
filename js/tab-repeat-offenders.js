@@ -257,6 +257,23 @@ function aggregateRepeatOffenders(rows, keyFn){
   }).sort((a, b) => (b.instancePct - a.instancePct) || (b.totalInstances - a.totalInstances) || (b.distinctLeads - a.distinctLeads));
 }
 
+// The By Region table's own grouping key — mirrors effectiveRegion +
+// mainRegionFor (reports.js), the SAME normalization every other
+// region-based view on this dashboard uses, so a sub-region variant
+// (e.g. "Pune East") correctly rolls up into its canonical main region
+// ("Pune") instead of forming its own separate row and silently
+// under-counting the main region's true total (real bug, found via a
+// user report comparing this table's Pune count against Overview's).
+// Daily_RM_Issues has group_source (so that half of the Loan override
+// applies) but never project_region (not one of its captured columns) —
+// same gap _effectiveRegionGs_ (MovementTracker.gs) already documents
+// for the identical reason. Falls back to the raw region for anything
+// mainRegionFor doesn't recognize, rather than dropping it silently.
+function _repeatOffendersRegionKey(rec){
+  const raw = normRegionKey(rec.group_source || '') === 'loan' ? 'Loan' : String(rec.region || '').trim();
+  return mainRegionFor(raw) || raw || 'Unassigned';
+}
+
 function renderRepeatOffenders(){
   const bodyEl = document.getElementById('repeatOffendersBody');
   const noticeEl = document.getElementById('repeatOffendersNotice');
@@ -312,9 +329,9 @@ function renderRepeatOffenders(){
   // Region needs no hierarchy lookup at all — it's a field already on
   // every Daily_RM_Issues row. Not capped tightly like the RM/A1-TM/RH
   // lists: there are only ~11 canonical regions (REGION_GROUP_MAP,
-  // core.js), so 15 comfortably shows all of them without needing a
+  // reports.js), so 15 comfortably shows all of them without needing a
   // separate "show more" affordance.
-  const regionList = aggregateRepeatOffenders(scoped, rec => rec.region || 'Unassigned').slice(0, 15);
+  const regionList = aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15);
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
 
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
