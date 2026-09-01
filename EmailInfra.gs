@@ -243,10 +243,24 @@ function withSendRetry_(fn, label) {
       return fn();
     } catch (e) {
       const msg = String((e && e.message) || e);
-      const isSafeToRetry = /operation not allowed|not found/i.test(msg);
+      const isNotFoundRace = /not found/i.test(msg);
+      const isSafeToRetry = /operation not allowed/i.test(msg) || isNotFoundRace;
       if (!isSafeToRetry || attempt === maxAttempts) throw e;
-      Logger.log((label || 'Gmail send') + ' failed with a known-safe-to-retry error (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
-      Utilities.sleep(attempt * 2000);
+      // Two different failure modes, two different waits. "Not found" is a
+      // millisecond-scale eventual-consistency gap between createDraft()
+      // and the immediately-chained send()'s lookup-by-ID (see this
+      // function's own header comment) — not load-related, so a short flat
+      // wait clears it just as reliably as a longer backoff, without
+      // paying for one. "Operation not allowed" is different: a soft
+      // rate-limit reaction to sending many emails in quick succession,
+      // which genuinely benefits from the longer, increasing wait.
+      // Added 2026-09-02: a real run showed the "not found" race is common
+      // enough (not rare) that the original 2s/4s backoff — sized for the
+      // rate-limit case — was measurably lengthening the whole run once
+      // applied to this race too.
+      const waitMs = isNotFoundRace ? 400 : attempt * 2000;
+      Logger.log((label || 'Gmail send') + ' failed with a known-safe-to-retry error (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + waitMs + 'ms');
+      Utilities.sleep(waitMs);
     }
   }
 }

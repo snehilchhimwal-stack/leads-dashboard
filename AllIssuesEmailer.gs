@@ -151,16 +151,25 @@ function sendAllIssuesEmails() {
  * report for anything that couldn't be routed or failed to send.
  */
 function sendAllIssuesEmails_() {
+  // Timing breadcrumbs (added 2026-09-02, after a real run took ~50min end
+  // to end with no way to tell from Executions alone whether the time went
+  // into the preliminary reads or the per-bucket send loop). Purely
+  // observational — logged, never alerted on, never changes behavior.
+  const runStart = Date.now();
+  const elapsed_ = function () { return ((Date.now() - runStart) / 1000).toFixed(1) + 's'; };
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const win = allIssuesWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss); // EmailInfra.gs
+  Logger.log('[timing] readLeadsTab_ done at ' + elapsed_() + ' (' + dataRows.length + ' rows)');
   const recipients = loadRegionRecipients_(ss); // EmailInfra.gs — legacy fallback, same as overnight
   // Loaded ONCE and threaded through resolveRecipientEmailsForRegion_ below
   // (via opts.hierarchyData) instead of letting each region's own call
   // re-load RM_Hierarchy + Manager_Directory from scratch — see
   // resolveRecipientBucketsForRms_'s own comment (RmHierarchy.gs).
   const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'loadRmHierarchyAndEmails_');
+  Logger.log('[timing] loadRmHierarchyAndEmails_ done at ' + elapsed_());
   // Real per-lead baseline for the "no comment logged" Suggested Follow-up
   // tier (noCommentFollowUpGs_) — WITHOUT this, every no-comment lead gets
   // the same generic "connect and log the outcome" line regardless of
@@ -176,6 +185,7 @@ function sendAllIssuesEmails_() {
   const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
   const baselineMap = movementMaps.baselineMap;
   const lastSnapshotMap = movementMaps.lastSnapshotMap;
+  Logger.log('[timing] buildMovementLogMapsGs_ done at ' + elapsed_() + ' — all preliminary reads finished, starting the per-region send loop');
 
   // Flat candidate list first, deduped by customer identity, THEN grouped
   // by region — same reasoning as sendOvernightMorningEmails: a customer
@@ -261,6 +271,7 @@ function sendAllIssuesEmails_() {
   }
 
   const failedLeadEntries = [];
+  let bucketSendCount = 0; // [timing] how many individual Gmail sends this run actually made — the send loop's own duration only means something alongside this count
 
   Object.keys(byRegion).sort().forEach(function (region) {
     const flaggedLeads = byRegion[region];
@@ -269,6 +280,7 @@ function sendAllIssuesEmails_() {
       Logger.log('Skipping ' + region + ' — already has an AllIssues_Log row dated today (' + todayKey + '); not re-sending.');
       return;
     }
+    const regionStart_ = Date.now();
 
     const rmNames = Array.from(new Set(flaggedLeads.map(function (l) { return l.RM; })));
     const rmToLeads = {};
@@ -298,19 +310,23 @@ function sendAllIssuesEmails_() {
       const rmSet = new Set(rec.rmNames);
       const bucketLeads = flaggedLeads.filter(function (l) { return rmSet.has(l.RM); });
       const failure = sendOneAllIssuesEmail_(ss, logSheet, region, rec, bucketLeads, dateLabel, todayKey, now, win);
+      bucketSendCount++;
       if (failure) {
         bucketLeads.forEach(function (l) {
           failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: rec.to, cc: rec.cc || '', reason: failure.reason });
         });
       }
     });
+    Logger.log('[timing] ' + region + ' done at ' + elapsed_() + ' (' + resolution.results.length + ' bucket(s) this region, ' + ((Date.now() - regionStart_) / 1000).toFixed(1) + 's for this region)');
   });
+  Logger.log('[timing] send loop finished at ' + elapsed_() + ' — ' + bucketSendCount + ' total bucket email(s) sent this run');
 
   // Reused directly from EmailInfra.gs — same shape entries
   // ({lead_id, RM, to, cc, reason}), same consolidated report, sent to
   // the same OPS_ALERT_EMAIL_. No need for a separate copy of this
   // function just because the run that produced the entries is different.
   notifyLeadSendFailuresGs_(failedLeadEntries);
+  Logger.log('[timing] sendAllIssuesEmails_ finished — total ' + elapsed_() + ', ' + bucketSendCount + ' bucket email(s), ' + failedLeadEntries.length + ' failed lead entrie(s)');
 }
 
 // CH-level report for this script's own scope — same visual shell and
