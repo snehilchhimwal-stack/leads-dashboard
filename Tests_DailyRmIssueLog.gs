@@ -193,8 +193,14 @@ function runDailyRmIssueLogTests_() {
     movementSheet.appendRow(bfRow({ snapshot_at: day1Late, lead_id: 'L-DAY1-FLAGGED', client_id: 'C-DAY1-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(day1Late, 60) })); // well past 48h as of day1Late
     movementSheet.appendRow(bfRow({ snapshot_at: day1Late, lead_id: 'L-DAY1-CLOSED', client_id: 'C-DAY1-CLOSED', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(day1Late, 60) }));
 
-    // Day 2: one run, one flagged lead.
+    // Day 2: one run, one flagged lead, plus a lead closed ONLY via
+    // lead_closing_reason (not the RM-entered closing_reason, not stage)
+    // — proves the 2026-09-01 fix (lead_closing_reason is now captured
+    // into Movement_Log and read dynamically here) actually works, not
+    // just that the old hardcoded-'' limitation was removed from a
+    // comment.
     movementSheet.appendRow(bfRow({ snapshot_at: day2At, lead_id: 'L-DAY2-FLAGGED', client_id: 'C-DAY2-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(day2At, 60) }));
+    movementSheet.appendRow(bfRow({ snapshot_at: day2At, lead_id: 'L-DAY2-CLOSED-VIA-LEADCLOSING', client_id: 'C-DAY2-CLOSED-VIA-LEADCLOSING', lead_closing_reason: 'Duplicate', lead_assigned_at: TestFixture_hoursAgo_(day2At, 60) }));
 
     // Day 3: has a Movement_Log snapshot too, but Daily_RM_Issues is
     // pre-seeded for this day below — must be skipped entirely.
@@ -217,6 +223,7 @@ function runDailyRmIssueLogTests_() {
     TestAssert_(!!bfByLeadId['L-DAY1-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: a flagged open lead from the day\'s latest run is backfilled');
     TestAssert_(!bfByLeadId['L-DAY1-CLOSED'], 'backfillDailyRmIssuesFromMovementLog_: a closed lead is correctly excluded, even from the day\'s latest run');
     TestAssert_(!!bfByLeadId['L-DAY2-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: day 2 (a single-run day) is backfilled too');
+    TestAssert_(!bfByLeadId['L-DAY2-CLOSED-VIA-LEADCLOSING'], 'backfillDailyRmIssuesFromMovementLog_: a lead closed ONLY via lead_closing_reason is correctly excluded — proves lead_closing_reason is now really read from Movement_Log, not just documented as fixed');
     TestAssert_(!bfByLeadId['L-DAY3-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: day 3\'s Movement_Log data is NOT backfilled — Daily_RM_Issues already had a row for that day');
     TestAssertEqual_(bfByLeadId['L-ALREADY-CAPTURED'][6], 'stageStuck48h', 'backfillDailyRmIssuesFromMovementLog_: the pre-seeded day-3 row itself is left untouched');
 

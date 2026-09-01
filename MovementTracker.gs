@@ -109,6 +109,19 @@ const SNAPSHOT_COLUMNS_ = [
   'internal_status_comments', 'closing_reason',
   'call_attempts', 'call_count', 'duration',
   'stage_comments',
+  // Added 2026-09-01: neither was ever needed here before, because every
+  // consumer that reads them (computeSlaFlags_'s inactiveRmNewLead rule,
+  // isOpenLead_'s lead_closing_reason check) always ran against a
+  // freshly-read LIVE leads-tab row, never a stored Movement_Log row —
+  // see HEADER_ALIASES_'s own comments on both (Core.gs). That stopped
+  // being true once backfillDailyRmIssuesFromMovementLog_
+  // (DailyRmIssueLog.gs) needed to reconstruct SLA flags for a PAST day
+  // using only what Movement_Log itself retained. Appended at the end,
+  // not inserted — see ensureMovementLogSheet_'s self-healing header
+  // comment on why that matters. A row captured BEFORE this change has
+  // neither column at all (not even blank) — only rows captured from
+  // here on carry real values.
+  'rm_is_active', 'lead_closing_reason',
 ];
 
 function ensureMovementLogSheet_(ss) {

@@ -142,10 +142,13 @@ function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
  * and can never duplicate or overwrite a night the real trigger already
  * captured for real.
  *
- * KNOWN LIMITATION, by construction — Movement_Log's own captured
- * columns (SNAPSHOT_COLUMNS_, MovementTracker.gs) don't include
- * rm_is_active or lead_closing_reason; only the live leads tab has
- * those. Concretely, for every backfilled day:
+ * KNOWN LIMITATION, narrower since 2026-09-01 — rm_is_active and
+ * lead_closing_reason were added to SNAPSHOT_COLUMNS_ (MovementTracker.gs)
+ * on that date, so any Movement_Log row captured FROM THEN ON carries
+ * real values for both, and this function reads them dynamically (via
+ * colIndex, same as every other field here) — no special-casing needed.
+ * A row captured BEFORE that change has neither column at all, so for
+ * any day whose latest snapshot predates it:
  *   - inactiveRmNewLead can never fire (rm_is_active reads as blank,
  *     which computeSlaFlags_ treats as "not inactive").
  *   - a lead closed ONLY via the sheet's own lead_closing_reason column
@@ -154,7 +157,8 @@ function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
  *     correctly excluded as closed.
  * Every night captureDailyRmIssues_ itself runs live (once
  * setupDailyRmIssueLog() is installed) reads the real leads tab and has
- * neither gap — this only ever affects days reconstructed from history.
+ * neither gap, regardless of date — this only ever affects days
+ * reconstructed from Movement_Log history predating the column addition.
  *
  * Pure read of Movement_Log + one append to Daily_RM_Issues; never
  * touches the real leads tab. Returns
@@ -225,11 +229,14 @@ function backfillDailyRmIssuesFromMovementLog_(ss) {
       if (!leadId) return;
       const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
       const closingReason = getVal_(row, colIndex, 'closing_reason');
-      // lead_closing_reason isn't one of Movement_Log's own captured
-      // columns — see this function's own header note on why that's a
-      // known, narrow limitation of backfilling from history rather than
-      // a bug.
-      if (!isOpenLead_(stage, closingReason, '')) return;
+      // Read dynamically via colIndex, same as every other field — for a
+      // row captured before 2026-09-01 (predating lead_closing_reason
+      // being added to SNAPSHOT_COLUMNS_), colIndex simply won't map it
+      // and this reads as '', same as explicitly passing '' used to.
+      // See this function's own header note on why that's a known,
+      // narrow limitation for OLDER history rather than a bug.
+      const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+      if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
 
       const flags = computeSlaFlags_(row, colIndex, asOf, baselineMap);
       const issue = primaryIssueGs_(flags);

@@ -64,6 +64,12 @@ const MOVEMENT_LOG_COLUMNS = [
   'internal_status_comments', 'closing_reason',
   'call_attempts', 'call_count', 'duration',
   'stage_comments',
+  // Added 2026-09-01, mirroring MovementTracker.gs's SNAPSHOT_COLUMNS_ —
+  // see that constant's own comment for why these two weren't needed
+  // here before. A sheet row captured before this date simply has
+  // neither column (idx resolves to -1 for both, read as '' below), so
+  // this stays safe against older history.
+  'rm_is_active', 'lead_closing_reason',
 ];
 // Same list minus the two metadata columns — the fields read directly off
 // a live lead record when the browser writes its own snapshot.
@@ -225,6 +231,14 @@ async function fetchMovementLog(sheetId){
           call_attempts: Number(getRaw(c, 'call_attempts')) || 0,
           call_count: Number(getRaw(c, 'call_count')) || 0,
           duration: Number(getRaw(c, 'duration')) || 0,
+          // NOT `|| ''` — rm_is_active is often a real Sheets checkbox
+          // (`false`), and `||''` would silently swallow that into an
+          // empty string that reads as "unknown" instead of "inactive"
+          // (same reasoning as core.js's own live-sheet parse of this
+          // field). getRaw already returns '' for a genuinely missing
+          // column (idx===-1) or blank cell, so no separate fallback needed.
+          rm_is_active: getRaw(c, 'rm_is_active'),
+          lead_closing_reason: getRaw(c, 'lead_closing_reason') || '',
         };
       })
       .filter(r => r.snapshot_at); // undated rows can't be sequenced — drop them
