@@ -34,7 +34,7 @@ let rmHierarchyByNameLower = new Map(); // lowercased RM name -> {name, role, tl
 let rmHierarchyFetchState = 'idle';     // 'idle' | 'loading' | 'ok' | 'missing' | 'error'
 
 const DAILY_RM_ISSUES_TAB_NAME = 'Daily_RM_Issues';
-const DAILY_RM_ISSUES_COLUMNS = ['date', 'RM', 'region', 'project', 'lead_id', 'client_id', 'issue_key', 'issue_label', 'captured_at', 'TL', 'group_source', 'source_bucket'];
+const DAILY_RM_ISSUES_COLUMNS = ['date', 'RM', 'region', 'project', 'lead_id', 'client_id', 'issue_key', 'issue_label', 'captured_at', 'TL', 'group_source', 'source_bucket', 'lead_assigned_at'];
 const RM_HIERARCHY_TAB_NAME = 'RM_Hierarchy';
 const RM_HIERARCHY_COLUMNS = ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'];
 
@@ -63,7 +63,7 @@ async function fetchDailyRmIssues(sheetId){
     // Declaring it a date column here is safe either way: gvizCellDate
     // falls back to parseDate() on a plain string when the raw value
     // wasn't actually converted to a serial.
-    const table = valuesToGvizShape(values, (label) => label === 'date');
+    const table = valuesToGvizShape(values, (label) => label === 'date' || label === 'lead_assigned_at');
     const cols = table.cols;
     const rows = table.rows.map(r => r.c || []);
     const idx = {};
@@ -93,6 +93,7 @@ async function fetchDailyRmIssues(sheetId){
           TL: getRaw(c, 'TL') || '',
           group_source: getRaw(c, 'group_source') || '',
           source_bucket: getRaw(c, 'source_bucket') || '',
+          lead_assigned_at: getDate(c, 'lead_assigned_at'),
         };
       })
       .filter(r => r.date); // undated rows can't be placed into a time range — drop them

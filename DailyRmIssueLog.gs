@@ -46,6 +46,10 @@ const DAILY_RM_ISSUE_LOG_COLUMNS_ = [
   // below on why order matters (same reasoning as
   // MovementTracker.gs's SNAPSHOT_COLUMNS_).
   'TL', 'group_source', 'source_bucket',
+  // Added 2026-09-01: date above is the CAPTURE date, not this — needed
+  // to tell "flagged tonight" apart from "assigned today" (a much older
+  // lead can still be flagged tonight).
+  'lead_assigned_at',
 ];
 
 function ensureDailyRmIssueLogSheet_(ss) {
@@ -141,6 +145,7 @@ function captureDailyRmIssues_() {
       todayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
       leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, captureAtValue,
       getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
+      getVal_(row, colIndex, 'lead_assigned_at'),
     ]);
   });
 
@@ -276,6 +281,7 @@ function backfillDailyRmIssuesFromMovementLog_(ss) {
         // see this function's own header note), so every Movement_Log
         // row, old or new, already carries real values for these three.
         getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
+      getVal_(row, colIndex, 'lead_assigned_at'),
       ]);
       dayRowCount++;
     });
