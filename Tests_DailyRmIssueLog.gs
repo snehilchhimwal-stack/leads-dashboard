@@ -270,6 +270,82 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = realSs5;
     }
 
+    // ---- repairDailyRmIssuesMissingFieldsNow(): real 2026-09-01 incident ----
+    const repairSs = TestMockSpreadsheet_({});
+    const repairMovementSheet = ensureMovementLogSheet_(repairSs);
+    const repairMovementHeader = repairMovementSheet.getRange(1, 1, 1, repairMovementSheet.getLastColumn()).getValues()[0];
+    const repairMovementRow = function (overrides) {
+      const defaults = {
+        snapshot_at: null, snapshot_label: 'test', lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM One', TL: 'Real A1',
+        project: 'Test Project', region: 'Pune', client: 'Client',
+        lead_assigned_at: '', group_source: 'facebook', source_bucket: 'UTM', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '',
+        internal_status_comments: '', closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, stage_comments: '',
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return repairMovementHeader.map(function (k) { return merged[k]; });
+    };
+    const repairSnapAt = TestFixture_hoursAgo_(now, 6);
+    repairMovementSheet.appendRow(repairMovementRow({ snapshot_at: repairSnapAt, lead_id: 'L-INCOMPLETE', client_id: 'C-INCOMPLETE', TL: 'Real A1', group_source: 'facebook', source_bucket: 'UTM' }));
+
+    const repairLogSheet = ensureDailyRmIssueLogSheet_(repairSs);
+    const repairCapturedAt = Utilities.formatDate(repairSnapAt, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+    // Row A: already complete (has real values) — must be left untouched.
+    repairLogSheet.appendRow([istDayKeyGs_(now), 'Test RM One', 'Pune', 'Test Project', 'L-COMPLETE', 'C-COMPLETE', 'stageStuck48h', 'Stuck 48h+', repairCapturedAt, 'Already A1', 'google', 'Non-UTM']);
+    // Row B: incomplete (blank TL/group_source/source_bucket), lead IS in Movement_Log — should get repaired.
+    repairLogSheet.appendRow([istDayKeyGs_(now), 'Test RM One', 'Pune', 'Test Project', 'L-INCOMPLETE', 'C-INCOMPLETE', 'stageStuck48h', 'Stuck 48h+', repairCapturedAt, '', '', '']);
+    // Row C: incomplete, lead NOT in Movement_Log at all — stays unresolvable.
+    repairLogSheet.appendRow([istDayKeyGs_(now), 'Test RM Two', 'Bangalore', 'Test Project', 'L-UNRESOLVABLE', 'C-UNRESOLVABLE', 'followupOverdue', 'Follow-up Overdue', repairCapturedAt, '', '', '']);
+
+    const realSs6 = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return repairSs; }, flush: function () {} };
+    try {
+      repairDailyRmIssuesMissingFieldsNow();
+    } finally {
+      SpreadsheetApp = realSs6;
+    }
+
+    const repairedRows = repairLogSheet.getRange(2, 1, 3, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
+    const repairById = {};
+    repairedRows.forEach(function (r) { repairById[r[4]] = r; });
+
+    TestAssertEqual_(repairById['L-COMPLETE'][9], 'Already A1', 'repairDailyRmIssuesMissingFieldsNow: an already-complete row\'s TL is left untouched');
+    TestAssertEqual_(repairById['L-COMPLETE'][10], 'google', 'repairDailyRmIssuesMissingFieldsNow: an already-complete row\'s group_source is left untouched');
+    TestAssertEqual_(repairById['L-COMPLETE'][11], 'Non-UTM', 'repairDailyRmIssuesMissingFieldsNow: an already-complete row\'s source_bucket is left untouched');
+
+    TestAssertEqual_(repairById['L-INCOMPLETE'][9], 'Real A1', 'repairDailyRmIssuesMissingFieldsNow: an incomplete row\'s TL is filled in from Movement_Log');
+    TestAssertEqual_(repairById['L-INCOMPLETE'][10], 'facebook', 'repairDailyRmIssuesMissingFieldsNow: an incomplete row\'s group_source is filled in from Movement_Log');
+    TestAssertEqual_(repairById['L-INCOMPLETE'][11], 'UTM', 'repairDailyRmIssuesMissingFieldsNow: an incomplete row\'s source_bucket is filled in from Movement_Log');
+    // Everything else on the repaired row must be untouched.
+    TestAssertEqual_(repairById['L-INCOMPLETE'][6], 'stageStuck48h', 'repairDailyRmIssuesMissingFieldsNow: repairing a row never touches its issue_key');
+    TestAssertEqual_(repairById['L-INCOMPLETE'][5], 'C-INCOMPLETE', 'repairDailyRmIssuesMissingFieldsNow: repairing a row never touches its client_id');
+
+    TestAssertEqual_(repairById['L-UNRESOLVABLE'][9], '', 'repairDailyRmIssuesMissingFieldsNow: a lead not found in Movement_Log at all stays blank (not fabricated)');
+
+    // Re-running is safe — the newly-repaired row is now "already complete" and left alone a second time.
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return repairSs; }, flush: function () {} };
+    try {
+      repairDailyRmIssuesMissingFieldsNow();
+    } finally {
+      SpreadsheetApp = realSs6;
+    }
+    const repairedRowsAgain = repairLogSheet.getRange(2, 1, 3, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
+    const repairByIdAgain = {};
+    repairedRowsAgain.forEach(function (r) { repairByIdAgain[r[4]] = r; });
+    TestAssertEqual_(repairByIdAgain['L-INCOMPLETE'][9], 'Real A1', 'repairDailyRmIssuesMissingFieldsNow: re-running is idempotent — the already-repaired row is unchanged');
+
+    // Safe against a sheet whose header still predates the 3 new columns.
+    const oldHeaderSs = TestMockSpreadsheet_({});
+    const oldHeaderSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [DAILY_RM_ISSUE_LOG_COLUMNS_.slice(0, 9), ['2026-08-20', 'Test RM One', 'Pune', 'P', 'L-OLD', 'C-OLD', 'stageStuck48h', 'Stuck 48h+', 'old']]);
+    oldHeaderSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = oldHeaderSheet;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return oldHeaderSs; }, flush: function () {} };
+    try {
+      repairDailyRmIssuesMissingFieldsNow();
+      TestAssert_(true, 'repairDailyRmIssuesMissingFieldsNow: does not throw against a sheet whose header still predates the 3 new columns');
+    } finally {
+      SpreadsheetApp = realSs6;
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment: a crash anywhere in captureDailyRmIssues_

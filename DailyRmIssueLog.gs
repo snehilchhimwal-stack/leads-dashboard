@@ -299,6 +299,128 @@ function backfillDailyRmIssuesFromMovementLogNow() {
   backfillDailyRmIssuesFromMovementLog_(ss);
 }
 
+/**
+ * ONE-OFF REPAIR (real 2026-09-01 incident): fills in TL/group_source/
+ * source_bucket for Daily_RM_Issues rows that were captured or
+ * backfilled BEFORE those 3 columns were added to
+ * DAILY_RM_ISSUE_LOG_COLUMNS_ — confirmed via a real screenshot of the
+ * live sheet showing those 3 columns genuinely blank for the earliest
+ * backfilled days, which is exactly why the dashboard's Repeat Offenders
+ * section's Source/Sub-source/TL filters were zeroing everything out
+ * even with real data present. Re-running
+ * backfillDailyRmIssuesFromMovementLogNow() does NOT fix this on its
+ * own — its per-day idempotency guard skips any day Daily_RM_Issues
+ * already has rows for, which is every day currently affected.
+ *
+ * This is a targeted UPDATE, not a recompute: for each row with all 3
+ * of TL/group_source/source_bucket blank, looks up that SAME lead_id in
+ * Movement_Log and copies across just those 3 fields from whichever of
+ * that lead's retained snapshots lands closest to the row's own
+ * captured_at — date/RM/region/project/lead_id/client_id/issue_key/
+ * issue_label/captured_at are never touched. A row with at least one of
+ * the 3 already non-blank is left completely alone (treated as already
+ * repaired/complete), so this is safe to re-run.
+ *
+ * TIME-SENSITIVE: Movement_Log only retains 7 days — a row whose lead
+ * has no surviving Movement_Log entry at all (already aged out) simply
+ * can't be repaired and is left blank, logged separately as
+ * unresolvable rather than silently skipped. Run this as soon as
+ * possible after noticing incomplete rows, before more history prunes.
+ *
+ * Batched as 3 whole-column writes (not one write per row), so this
+ * stays fast even across tens of thousands of rows. Console-callable
+ * (function dropdown -> Run).
+ */
+function repairDailyRmIssuesMissingFieldsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
+  if (!logSheet) { Logger.log('Daily_RM_Issues does not exist yet — nothing to repair.'); return; }
+  const lastRow = logSheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Daily_RM_Issues is empty — nothing to repair.'); return; }
+  const lastCol = logSheet.getLastColumn();
+  const header = withRetry_(function () { return logSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Daily_RM_Issues header for repair');
+  const colIdx = {};
+  DAILY_RM_ISSUE_LOG_COLUMNS_.forEach(function (h) { colIdx[h] = header.indexOf(h); });
+  if (colIdx.TL === -1 || colIdx.group_source === -1 || colIdx.source_bucket === -1) {
+    Logger.log('Daily_RM_Issues header is missing TL/group_source/source_bucket entirely — run captureDailyRmIssuesNow() or backfillDailyRmIssuesFromMovementLogNow() once first (either self-heals the header via ensureDailyRmIssueLogSheet_), then re-run this.');
+    return;
+  }
+
+  const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!movementSheet) { Logger.log('Movement_Log does not exist — cannot look up TL/group_source/source_bucket for repair.'); return; }
+  const mLastRow = movementSheet.getLastRow();
+  if (mLastRow < 2) { Logger.log('Movement_Log is empty — cannot repair.'); return; }
+  const mLastCol = movementSheet.getLastColumn();
+  const mHeader = withRetry_(function () { return movementSheet.getRange(1, 1, 1, mLastCol).getValues()[0]; }, 'read Movement_Log header for repair');
+  const mColIndex = buildColIndex_(mHeader);
+  const mSnapAtIdx = mHeader.indexOf('snapshot_at');
+  const mRows = withRetry_(function () { return movementSheet.getRange(2, 1, mLastRow - 1, mLastCol).getValues(); }, 'read Movement_Log for repair');
+
+  // lead_id -> every retained snapshot's {atMs, TL, group_source, source_bucket}.
+  const byLeadId = {};
+  mRows.forEach(function (row) {
+    const leadId = String(getVal_(row, mColIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const ts = row[mSnapAtIdx];
+    if (!(ts instanceof Date)) return;
+    if (!byLeadId[leadId]) byLeadId[leadId] = [];
+    byLeadId[leadId].push({
+      atMs: ts.getTime(),
+      TL: getVal_(row, mColIndex, 'TL'),
+      group_source: getVal_(row, mColIndex, 'group_source'),
+      source_bucket: getVal_(row, mColIndex, 'source_bucket'),
+    });
+  });
+
+  const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for repair');
+  const tlCol = [], gsCol = [], sbCol = [];
+  let repaired = 0, unresolvable = 0, alreadyComplete = 0;
+
+  values.forEach(function (row) {
+    const tl = row[colIdx.TL], gs = row[colIdx.group_source], sb = row[colIdx.source_bucket];
+    if (String(tl || '').trim() || String(gs || '').trim() || String(sb || '').trim()) {
+      alreadyComplete++;
+      tlCol.push([tl]); gsCol.push([gs]); sbCol.push([sb]);
+      return;
+    }
+    const leadId = String(row[colIdx.lead_id] || '').trim();
+    const candidates = byLeadId[leadId];
+    if (!candidates || !candidates.length) {
+      unresolvable++;
+      tlCol.push([tl]); gsCol.push([gs]); sbCol.push([sb]); // leave blank — nothing to repair from
+      return;
+    }
+    const capturedAtRaw = row[colIdx.captured_at];
+    let targetMs = null;
+    if (capturedAtRaw instanceof Date) {
+      targetMs = capturedAtRaw.getTime();
+    } else {
+      const parsed = new Date(String(capturedAtRaw || '').trim().replace(' ', 'T') + '+05:30');
+      if (!isNaN(parsed.getTime())) targetMs = parsed.getTime();
+    }
+    let best = candidates[0];
+    if (targetMs !== null) {
+      let bestDiff = Math.abs(candidates[0].atMs - targetMs);
+      candidates.forEach(function (c) {
+        const diff = Math.abs(c.atMs - targetMs);
+        if (diff < bestDiff) { bestDiff = diff; best = c; }
+      });
+    }
+    tlCol.push([best.TL]); gsCol.push([best.group_source]); sbCol.push([best.source_bucket]);
+    repaired++;
+  });
+
+  withRetry_(function () { logSheet.getRange(2, colIdx.TL + 1, tlCol.length, 1).setValues(tlCol); }, 'write repaired TL column');
+  withRetry_(function () { logSheet.getRange(2, colIdx.group_source + 1, gsCol.length, 1).setValues(gsCol); }, 'write repaired group_source column');
+  withRetry_(function () { logSheet.getRange(2, colIdx.source_bucket + 1, sbCol.length, 1).setValues(sbCol); }, 'write repaired source_bucket column');
+
+  Logger.log(
+    'Repair done: ' + repaired + ' row(s) filled in from Movement_Log, ' + alreadyComplete +
+    ' already had at least one of the 3 fields (left untouched), ' + unresolvable +
+    ' could not be matched to any Movement_Log lead_id (likely already aged out of the 7-day retention window — permanently unrepairable for those specific rows).'
+  );
+}
+
 // ---- One-time setup — run this once from the editor ----
 function setupDailyRmIssueLog() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
