@@ -73,9 +73,9 @@
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as every other file this project needs —
  *      Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
- *      MovementTracker.gs, OvernightEmailer.gs, AllIssuesEmailer.gs, and
- *      RmHierarchy.private.gs (see Core.gs's own header for the full list).
- *      Add a new file, paste this whole thing in.
+ *      MovementTracker.gs, OvernightEmailer.gs, AllIssuesEmailer.gs,
+ *      RmHierarchy.private.gs, and DailyRmIssueLog.gs (see Core.gs's own
+ *      header for the full list). Add a new file, paste this whole thing in.
  *   2. Run setupRmHierarchy once (or it runs automatically as part of
  *      setupOvernightEmailer). This creates two sheets:
  *        - RM_Hierarchy: one row per person, showing the resolved

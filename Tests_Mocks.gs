@@ -40,7 +40,8 @@
  * project (see Core.gs's own header for the full production file list).
  * Then add Tests_Core.gs, Tests_SlaEngine.gs, Tests_FollowupEngine.gs,
  * Tests_EmailInfra.gs, Tests_RmHierarchy.gs, Tests_MovementTracker.gs,
- * Tests_OvernightEmailer.gs, Tests_AllIssuesEmailer.gs, and Tests_RunAll.gs.
+ * Tests_OvernightEmailer.gs, Tests_AllIssuesEmailer.gs,
+ * Tests_DailyRmIssueLog.gs, and Tests_RunAll.gs.
  * Run `runAllTests` from the function dropdown to run everything, or any
  * single file's own `runXyzTestsNow` to run just that one concern.
  * ================================================================================

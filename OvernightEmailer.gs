@@ -52,13 +52,14 @@
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as every other file this project needs —
  *      Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
- *      MovementTracker.gs, AllIssuesEmailer.gs, RmHierarchy.gs, AND
- *      RmHierarchy.private.gs (Extensions → Apps Script — every file must
- *      be in one project). Add each as a new file, paste the contents
- *      in. RmHierarchy.private.gs lives only on your machine (see its own
- *      header) — it's what makes Manager_Directory come pre-filled with
- *      real emails instead of every cell starting blank; the rest of this
- *      still works without it, just with more manual fill-in.
+ *      MovementTracker.gs, AllIssuesEmailer.gs, RmHierarchy.gs,
+ *      RmHierarchy.private.gs, AND DailyRmIssueLog.gs (Extensions → Apps
+ *      Script — every file must be in one project). Add each as a new
+ *      file, paste the contents in. RmHierarchy.private.gs lives only on
+ *      your machine (see its own header) — it's what makes
+ *      Manager_Directory come pre-filled with real emails instead of
+ *      every cell starting blank; the rest of this still works without
+ *      it, just with more manual fill-in.
  *   2. In the function dropdown, select setupOvernightEmailer, click Run.
  *      Approve the permissions prompt (it needs Gmail send + spreadsheet
  *      read/write). This creates Region_Recipients, Overnight_Log,

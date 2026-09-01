@@ -41,7 +41,8 @@
  *      needs as its own file (Core.gs, SlaEngine.gs, FollowupEngine.gs,
  *      EmailInfra.gs, MovementTracker.gs, OvernightEmailer.gs,
  *      AllIssuesEmailer.gs, RmHierarchy.gs, RmHierarchy.private.gs,
- *      UnmatchedCommentLogger.gs — see Core.gs's own header), pasting each
+ *      UnmatchedCommentLogger.gs, DailyRmIssueLog.gs — see Core.gs's own
+ *      header), pasting each
  *      file's contents in. File names don't matter to Apps Script, only
  *      that every file is present in one project — naming them to match
  *      just keeps the editor's file list self-explanatory.

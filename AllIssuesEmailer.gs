@@ -43,10 +43,10 @@
  * ============================== SETUP (one-time) ==============================
  *   1. Same Apps Script project as every other file this project needs —
  *      Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
- *      MovementTracker.gs, OvernightEmailer.gs, RmHierarchy.gs, and
- *      RmHierarchy.private.gs (see Core.gs's own header for the full
- *      list) — paste this in as its own file (Apps Script editor → + →
- *      Script → name it AllIssuesEmailer).
+ *      MovementTracker.gs, OvernightEmailer.gs, RmHierarchy.gs,
+ *      RmHierarchy.private.gs, and DailyRmIssueLog.gs (see Core.gs's own
+ *      header for the full list) — paste this in as its own file
+ *      (Apps Script editor → + → Script → name it AllIssuesEmailer).
  *   2. In the function dropdown, select setupAllIssuesEmailTrigger, click
  *      Run, approve permissions. Installs ONE daily trigger at
  *      ALL_ISSUES_RUN_HOUR_ (5pm IST — one run a day, per explicit
