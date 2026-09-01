@@ -92,10 +92,17 @@ function runEmailInfraTests_() {
     TestAssertEqual_(resolution.results[0].to, TEST_EMAIL_PRIMARY_, 'resolveRecipientEmailsForRegion_: legacy fallback uses the manually-configured Region_Recipients To');
     TestAssertEqual_(resolution.trulyUnresolved.length, 0, 'resolveRecipientEmailsForRegion_: not truly unresolved once the legacy fallback covers it');
 
-    // ---- truly unresolved: no RM_Hierarchy chain AND no legacy fallback either ----
+    // ---- CH-level backstop: no RM_Hierarchy chain AND no legacy fallback
+    // either (2026-09-01 — real production case: a departed RM whose own
+    // row was removed from RM_Hierarchy entirely, with one straggler lead
+    // still naming them in a region with no Region_Recipients row filled
+    // in). Used to be dropped entirely ("truly unresolved"); now routes to
+    // the same CH_LEVEL_EMAIL_ backstop a self-holding top-of-org RM uses. ----
     resolution = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Some Totally Unknown RM'], {}, { fireAlerts: false });
-    TestAssertEqual_(resolution.results.length, 0, 'resolveRecipientEmailsForRegion_: no buckets when nothing resolves and there is no legacy fallback');
-    TestAssertEqual_(resolution.trulyUnresolved.length, 1, 'resolveRecipientEmailsForRegion_: correctly reports the RM as truly unresolved');
+    TestAssertEqual_(resolution.results.length, 1, 'resolveRecipientEmailsForRegion_: routes to the CH-level backstop when nothing resolves and there is no legacy fallback either');
+    TestAssertEqual_(resolution.results[0].to, TEST_EMAIL_CH_, 'resolveRecipientEmailsForRegion_: CH-level backstop goes to CH_LEVEL_EMAIL_');
+    TestAssertContains_(resolution.results[0].source, 'backstop', 'resolveRecipientEmailsForRegion_: backstop entry\'s source names it as a backstop, not a normal RM_Hierarchy/legacy match');
+    TestAssertEqual_(resolution.trulyUnresolved.length, 0, 'resolveRecipientEmailsForRegion_: no longer truly unresolved — the CH-level backstop always covers this case now');
 
     // ---- resolveRecipientEmailsForRegion_: opts.hierarchyData + the new
     // chLevelRms field on its own result (perf pass, 2026-08-28) — a

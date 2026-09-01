@@ -244,7 +244,7 @@ real people/addresses, hardcoded — update on personnel change):
 | Constant | File | Current value | Purpose |
 |---|---|---|---|
 | `OPS_ALERT_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | Where ops/failure alerts (e.g. a send failure) go. |
-| `CH_LEVEL_EMAIL_` | `EmailInfra.gs` | `ashish.ivlekar@homesfy.in` | Fallback CH-level routing address. |
+| `CH_LEVEL_EMAIL_` | `EmailInfra.gs` | `ashish.ivlekar@homesfy.in` | Fallback CH-level routing address — used both for a real top-of-org person personally holding a lead, and (since 2026-09-01) as the last-resort backstop when an RM name doesn't resolve anywhere (departed employee, unaliased spelling variant) AND that region has no `Region_Recipients` fallback configured either, so a broken chain still reaches someone instead of the lead being silently dropped. See `resolveRecipientEmailsForRegion_`'s own comment (`EmailInfra.gs`). |
 | `ALWAYS_CC_EMAILS_` | `RmHierarchy.gs` | `ashish.kukreja@homesfy.in`, `saurabh.mishra@homesfy.in` | CC'd on every region issue email, regardless of region. |
 | `TEST_MODE_OVERRIDE_EMAIL_` | `EmailInfra.gs` | `''` (empty) | Safety valve: if set to a real address, **every** real send (not just tests) redirects there instead of real recipients. Leave empty in production; useful for a live smoke-test without running the mock suite. |
 

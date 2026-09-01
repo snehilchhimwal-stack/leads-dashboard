@@ -283,9 +283,12 @@ function ensureRegionRecipientsSheet_(ss) {
 // back to ONE combined email via the legacy Region_Recipients entry —
 // keeps the automation sending during the gradual rollout instead of
 // going silent the moment RM_Hierarchy exists but some emails aren't
-// filled in yet. Returns an array of { to, cc, rmNames, source,
-// bucketLabel, primaryRole } — one entry per email that should actually
-// be sent for this region (zero, one, or many).
+// filled in yet. If THAT'S not configured for this region either, they
+// fall back a second time to CH_LEVEL_EMAIL_ (a company-wide backstop,
+// not region-specific) — see the "no fallback configured" branch below
+// for why. Returns an array of { to, cc, rmNames, source, bucketLabel,
+// primaryRole } — one entry per email that should actually be sent for
+// this region (zero, one, or many).
 //
 // opts.fireAlerts (default false) gates the CH-level alert this function
 // can send — only the real unattended send paths (OvernightEmailer.gs's
@@ -306,14 +309,16 @@ function ensureRegionRecipientsSheet_(ss) {
 // resolveRecipientBucketsForRms_'s own comment on why); omitted, this
 // falls back to a fresh per-call load exactly as before.
 // Returns { results: [...], trulyUnresolved: [{rmName, reason}],
-// chLevelRms: [...] } — RMs with NO resolvable recipient AND no
-// Region_Recipients fallback either, so their leads got no automated
-// email at all this run. Callers with fireAlerts on should fold these
-// into the per-lead "not sent" report (notifyLeadSendFailuresGs_ above)
-// instead of alerting here directly. chLevelRms is returned so a caller
-// that needs it directly (AllIssuesEmailer.gs's own CH-level report)
-// doesn't have to call resolveRecipientBucketsForRms_ a second time just
-// to get it — see that call site's own comment.
+// chLevelRms: [...] }. trulyUnresolved is kept in the return shape for
+// callers that already read it, but as of 2026-09-01 it should always be
+// empty in practice — see the CH_LEVEL_EMAIL_ backstop below, which now
+// covers every case that used to land here. Callers with fireAlerts on
+// should still fold anything that DOES show up in it into the per-lead
+// "not sent" report (notifyLeadSendFailuresGs_ above) instead of
+// alerting here directly, as a belt-and-braces measure. chLevelRms is
+// returned so a caller that needs it directly (AllIssuesEmailer.gs's own
+// CH-level report) doesn't have to call resolveRecipientBucketsForRms_ a
+// second time just to get it — see that call site's own comment.
 function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts) {
   const fireAlerts = !!(opts && opts.fireAlerts);
   const rmToLeads = (opts && opts.rmToLeads) || {};
@@ -338,10 +343,30 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       const unresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
       results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: unresolvedNames, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + unresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
     } else {
-      // No recipient configured anywhere for these RMs — their leads get
-      // no automated email at all this run. The caller folds this into
-      // the per-lead "not sent" report.
-      trulyUnresolved = resolved.unresolved;
+      // No recipient configured anywhere for these RMs — used to mean
+      // their leads got no automated email at all this run (trulyUnresolved
+      // below, surfaced only in the ops-only "Leads Not Sent" diagnostic —
+      // never actually reaching anyone who could act on the lead itself).
+      // As of 2026-09-01: real production case was a departed RM (own row
+      // removed from RM_Hierarchy entirely, e.g. Prathamesh A Pande) with
+      // one straggler lead still naming them, in a region with no
+      // Region_Recipients row filled in either — that lead got silently
+      // dropped from all coverage until someone happened to run
+      // auditUnresolvedRmsNow() and noticed. Instead of dropping it,
+      // route it to CH_LEVEL_EMAIL_ (EmailInfra.gs) — the SAME
+      // company-wide backstop already used when a real top-of-org person
+      // personally holds a lead (see isTopOfOrgRole_'s branch above in
+      // resolveRecipientBucketsForRms_) — so a genuinely broken chain
+      // still reaches a real, actionable inbox automatically, with no
+      // human needing to notice and configure a fallback first. This does
+      // NOT fix the underlying gap (the alias/reassignment still needs
+      // doing — auditUnresolvedRmsNow() still surfaces it for that), it
+      // just means nothing silently falls through the floor while that's
+      // pending.
+      const chCcSet = new Set();
+      ALWAYS_CC_EMAILS_.forEach(function (e) { chCcSet.add(e); });
+      const chUnresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
+      results.push({ to: CH_LEVEL_EMAIL_, cc: Array.from(chCcSet).join(',') || undefined, rmNames: chUnresolvedNames, source: 'CH-level backstop (no RM_Hierarchy match and no Region_Recipients fallback for ' + region + ': ' + chUnresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs (backstop)', primaryRole: '' });
     }
   }
 
