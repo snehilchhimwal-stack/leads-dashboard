@@ -55,6 +55,39 @@ function runEmailInfraTests_() {
     }, 'withSendRetry_: a non-"operation not allowed" error propagates');
     TestAssertEqual_(calls, 1, 'withSendRetry_: an ambiguous (non-definitive) failure is NOT retried, to avoid a possible duplicate send');
 
+    // withSendRetry_'s two safe-to-retry errors wait different amounts
+    // (added 2026-09-02) — "Not found" is a millisecond-scale timing race,
+    // not a load condition, so it retries after a flat 400ms; "operation
+    // not allowed" is a soft rate-limit reaction that keeps the longer
+    // attempt*2000ms backoff. Utilities.sleep is a no-op in this suite
+    // (Tests_Mocks.gs), so without spying on the actual ms argument, a
+    // regression that silently swapped or merged these two waits would
+    // pass every other test here (they only check retry count/outcome,
+    // never the wait itself) and slip through unnoticed.
+    const realSleep = Utilities.sleep;
+    const sleepCalls = [];
+    Utilities.sleep = function (ms) { sleepCalls.push(ms); };
+    try {
+      calls = 0;
+      withSendRetry_(function () {
+        calls++;
+        if (calls < 2) throw new Error('Exception: Not found');
+        return 'sent';
+      }, 'test send retry timing (not found)');
+      TestAssertEqual_(sleepCalls[0], 400, 'withSendRetry_: "Not found" retries after a flat 400ms, not the rate-limit backoff');
+
+      sleepCalls.length = 0;
+      calls = 0;
+      withSendRetry_(function () {
+        calls++;
+        if (calls < 2) throw new Error('Gmail operation not allowed for this user');
+        return 'sent';
+      }, 'test send retry timing (operation not allowed)');
+      TestAssertEqual_(sleepCalls[0], 2000, 'withSendRetry_: "operation not allowed" keeps the original attempt*2000ms backoff');
+    } finally {
+      Utilities.sleep = realSleep;
+    }
+
     // ---- passesGoogleNonUtmSearchGs_ ----
     TestAssert_(passesGoogleNonUtmSearchGs_('Google', 'Non-UTM') === true, 'passesGoogleNonUtmSearchGs_: google + Non-UTM passes');
     TestAssert_(passesGoogleNonUtmSearchGs_('google', 'Search') === true, 'passesGoogleNonUtmSearchGs_: google + Search passes (case-insensitive)');
