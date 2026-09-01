@@ -200,6 +200,18 @@ function repeatOffendersDateKeysForRange(range, now){
     for (let i = 0; i < 7; i++) set.add(istDateKey(new Date(now.getTime() - i * 86400000)));
     return set;
   }
+  if (range === 'custom') {
+    const fromEl = document.getElementById('repeatOffendersCustomFrom');
+    const toEl = document.getElementById('repeatOffendersCustomTo');
+    const fromVal = fromEl ? fromEl.value : ''; // "YYYY-MM-DD" from <input type="date">, or "" if unset
+    const toVal = toEl ? toEl.value : '';
+    if (!fromVal || !toVal) return null; // incomplete custom range — no restriction rather than a confusing empty result
+    const fromMs = new Date(fromVal + 'T00:00:00+05:30').getTime();
+    const toMs = new Date(toVal + 'T00:00:00+05:30').getTime();
+    const set = new Set();
+    for (let ms = Math.min(fromMs, toMs); ms <= Math.max(fromMs, toMs); ms += 86400000) set.add(istDateKey(new Date(ms)));
+    return set;
+  }
   return null; // allTime
 }
 
@@ -338,9 +350,32 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
   </div>`;
 }
 
+// Shows/hides the custom From/To date inputs based on the range select's
+// current value — called once at load (in case "Custom range…" is ever
+// pre-selected, e.g. after a browser back/forward restoring form state)
+// and again on every change.
+function _repeatOffendersSyncCustomRangeVisibility(){
+  const rangeEl = document.getElementById('repeatOffendersRangeSelect');
+  const isCustom = !!rangeEl && rangeEl.value === 'custom';
+  const fromWrap = document.getElementById('repeatOffendersCustomFromWrap');
+  const toWrap = document.getElementById('repeatOffendersCustomToWrap');
+  if (fromWrap) fromWrap.style.display = isCustom ? '' : 'none';
+  if (toWrap) toWrap.style.display = isCustom ? '' : 'none';
+}
+
 // Top-level, same reasoning as reports.js's own reportModeSelect wiring
-// — this script tag loads after the static HTML it targets, so the
+// — this script tag loads after the static HTML it targets, so every
 // element already exists by the time this runs. Purely local re-render
 // (no re-fetch needed): every range's data is already in dailyRmIssues.
 const _repeatOffendersRangeSelectEl = document.getElementById('repeatOffendersRangeSelect');
-if (_repeatOffendersRangeSelectEl) _repeatOffendersRangeSelectEl.addEventListener('change', renderRepeatOffenders);
+if (_repeatOffendersRangeSelectEl) {
+  _repeatOffendersRangeSelectEl.addEventListener('change', function(){
+    _repeatOffendersSyncCustomRangeVisibility();
+    renderRepeatOffenders();
+  });
+}
+const _repeatOffendersCustomFromEl = document.getElementById('repeatOffendersCustomFrom');
+if (_repeatOffendersCustomFromEl) _repeatOffendersCustomFromEl.addEventListener('change', renderRepeatOffenders);
+const _repeatOffendersCustomToEl = document.getElementById('repeatOffendersCustomTo');
+if (_repeatOffendersCustomToEl) _repeatOffendersCustomToEl.addEventListener('change', renderRepeatOffenders);
+_repeatOffendersSyncCustomRangeVisibility();
