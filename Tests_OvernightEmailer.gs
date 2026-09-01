@@ -27,7 +27,7 @@ function runOvernightEmailerTests_() {
   const win = overnightWindowGs_(now);
   const midWindow = new Date((win.from.getTime() + win.to.getTime()) / 2);
   const outsideWindow = TestFixture_daysAgo_(now, 4);
-  const monthShort = Utilities.formatDate(now, 'Asia/Kolkata', 'MMM');
+  const monthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
   const header = TestFixture_leadsHeader_();
   const banner = header.map(function () { return ''; });
 

@@ -539,7 +539,7 @@ async function fetchAndRender(){
   const tabName = document.getElementById('tabNameInput').value.trim();
 
   if (!rawId.trim() || !tabName){
-    showError('<b>Missing info.</b> Paste your Google Sheet URL/ID and the month tab name above, then click Connect &amp; Refresh.');
+    showError('<b>Missing info.</b> Paste your Google Sheet URL/ID and the leads tab name above, then click Connect &amp; Refresh.');
     return;
   }
 

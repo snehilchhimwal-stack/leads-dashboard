@@ -381,7 +381,7 @@ function loadRegionRecipients_(ss) {
   }, 'loadRegionRecipients_');
 }
 
-// Reads the current month tab and returns {colIndex, dataRows} — same
+// Reads the leads tab and returns {colIndex, dataRows} — same
 // shape MovementTracker.gs's snapshotOpenLeads_ reads, factored out here
 // so every send path (OvernightEmailer.gs's morning + follow-up runs,
 // AllIssuesEmailer.gs's run) shares one read path. This is the single

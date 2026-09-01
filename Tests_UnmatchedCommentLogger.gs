@@ -36,7 +36,7 @@ function runUnmatchedCommentLoggerTests_() {
   ];
 
   const ss = TestMockSpreadsheet_({});
-  const monthShort = Utilities.formatDate(now, 'Asia/Kolkata', 'MMM');
+  const monthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
   ss._sheets[monthShort] = TestMockSheet_(monthShort, rows);
 
   TestEnv_setUp_('Tests_UnmatchedCommentLogger', ss);

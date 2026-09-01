@@ -27,7 +27,7 @@
  * ================================================================================
  */
 
-const TAB_NAME_OVERRIDE = ''; // e.g. 'Aug' — leave blank to auto-detect
+const TAB_NAME_OVERRIDE = 'leads'; // The leads tab has one fixed name — it no longer rotates every month. Change this if it's ever renamed again.
 
 // Mirrors HEADER_ALIASES in dashboard.html. Keep these two in sync if a
 // column header in your export ever changes.
@@ -127,14 +127,14 @@ function isOpenLead_(stage, closingReason, leadClosingReason) {
   return !excluded && !isOppOrAbove_(stage);
 }
 
-// ---- Tab resolution: same auto-detect the dashboard's setup guide describes. ----
+// ---- Tab resolution: the leads tab has one fixed name — see
+// TAB_NAME_OVERRIDE above. (Earlier versions of this project auto-detected
+// a rotating "Aug"/"Aug-2026"-style monthly tab; the sheet no longer
+// rotates, so that logic was removed 2026-09-01. If it's ever renamed
+// again, just update TAB_NAME_OVERRIDE — every caller here goes through
+// this one function.) ----
 function resolveTabName_(ss) {
-  if (TAB_NAME_OVERRIDE) return TAB_NAME_OVERRIDE;
-  const monthShort = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'MMM'); // "Aug"
-  if (ss.getSheetByName(monthShort)) return monthShort;
-  const monthYear = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'MMM-yyyy'); // "Aug-2026"
-  if (ss.getSheetByName(monthYear)) return monthYear;
-  throw new Error('No tab named "' + monthShort + '" or "' + monthYear + '" found. Set TAB_NAME_OVERRIDE at the top of Core.gs to your exact tab name.');
+  return TAB_NAME_OVERRIDE;
 }
 
 // ---- Column mapping. Row 1 = banner/import-bar row, row 2 = real

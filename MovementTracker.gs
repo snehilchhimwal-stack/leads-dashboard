@@ -60,8 +60,10 @@
  *   6. Done. Check Triggers (clock icon, left sidebar) to confirm all
  *      four snapshotPeriodic entries show up. From here it runs unattended.
  *
- * If your month tab isn't named like "Aug" or "Aug-2026", set
- * TAB_NAME_OVERRIDE (Core.gs) to the exact tab name.
+ * The leads tab has one fixed name, set via TAB_NAME_OVERRIDE (Core.gs) —
+ * currently 'leads'. (Earlier versions of this project auto-detected a
+ * rotating "Aug"/"Aug-2026"-style monthly tab; the sheet no longer
+ * rotates, so if it's ever renamed again, just update that one constant.)
  *
  * Cadence: four separate .atHour() triggers (SNAPSHOT_HOURS_), not one
  * .everyHours(6) trigger — deliberately, after everyHours() was observed
@@ -69,10 +71,7 @@
  * not just landing a few minutes late). atHour() triggers still land
  * within roughly 15 minutes of their target hour, not the exact minute —
  * so don't expect a snapshot at the literal top of the hour, just close to
- * it, every time. And a snapshot taken right at a month boundary reads
- * whichever tab resolveTabName_ finds for TODAY's date, so the very first
- * snapshot of a new month won't retroactively relabel the last one from
- * the old month — expected, not a bug.
+ * it, every time.
  * ================================================================================
  */
 

@@ -38,18 +38,9 @@ function runCoreTests_() {
     TestAssert_(isOpenLead_('Won', '', '') === false, 'isOpenLead_: closed-stage text -> not open');
 
     // ---- resolveTabName_ ----
-    const monthShort = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'MMM');
-    const monthYear = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'MMM-yyyy');
-    const ssShort = TestMockSpreadsheet_({});
-    ssShort._sheets[monthShort] = TestMockSheet_(monthShort, []);
-    TestAssertEqual_(resolveTabName_(ssShort), monthShort, 'resolveTabName_: finds the short month-name tab');
-
-    const ssYear = TestMockSpreadsheet_({});
-    ssYear._sheets[monthYear] = TestMockSheet_(monthYear, []);
-    TestAssertEqual_(resolveTabName_(ssYear), monthYear, 'resolveTabName_: falls back to the month-year tab when short name is absent');
-
-    const ssNone = TestMockSpreadsheet_({});
-    TestAssertThrows_(function () { resolveTabName_(ssNone); }, 'resolveTabName_: throws when neither tab exists');
+    // The leads tab has one fixed name (TAB_NAME_OVERRIDE, Core.gs) — no
+    // month-based auto-detect since 2026-09-01.
+    TestAssertEqual_(resolveTabName_(TestMockSpreadsheet_({})), 'leads', 'resolveTabName_: always returns the fixed "leads" tab name');
 
     // ---- buildColIndex_ / getVal_ ----
     const header = ['Lead ID', 'RM', 'Region', 'Current Stage'];

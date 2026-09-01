@@ -18,7 +18,7 @@ function runMovementTrackerTests_() {
     return leadsHeader.map(function (k) { return merged[k] !== undefined ? merged[k] : ''; });
   }
 
-  const monthShort = Utilities.formatDate(now, 'Asia/Kolkata', 'MMM');
+  const monthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
   const leadsSheet = TestMockSheet_(monthShort, [bannerRow, leadsHeader, leadRow({}), leadRow({ lead_id: '' /* blank lead_id: must be skipped */ }), leadRow({ lead_id: 'L-2', client_id: 'C-2', RM: 'Test RM Two' })]);
   const ss = TestMockSpreadsheet_({});
   ss._sheets[monthShort] = leadsSheet;
@@ -262,7 +262,7 @@ function runMovementTrackerTests_() {
       const merged = Object.assign({}, defaults, overrides || {});
       return containmentLeadsHeader.map(function (k) { return merged[k] !== undefined ? merged[k] : ''; });
     }
-    const containmentMonthShort = Utilities.formatDate(dchNow, 'Asia/Kolkata', 'MMM');
+    const containmentMonthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
     const containmentLeadsSheet = TestMockSheet_(containmentMonthShort, [containmentBannerRow, containmentLeadsHeader, containmentLeadRow({})]);
     const containmentSs = TestMockSpreadsheet_({});
     containmentSs._sheets[containmentMonthShort] = containmentLeadsSheet;

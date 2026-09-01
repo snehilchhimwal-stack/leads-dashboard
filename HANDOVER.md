@@ -108,9 +108,11 @@ project (see §4.3).
    Identity Services' token client. Nothing loads without this.
 2. User pastes/confirms the **Sheet ID or URL** (`#sheetIdInput` — defaults
    to the production sheet, see §4.1) and clicks fetch. `fetchAndRender()`
-   pulls the current month's tab (auto-detected by name, or forced via
-   `TAB_NAME_OVERRIDE` in `Core.gs` on the Apps Script side / the
-   equivalent logic in `js/core.js`), parses every row through
+   pulls the leads tab (a single fixed name, `TAB_NAME_OVERRIDE` in
+   `Core.gs` on the Apps Script side / the `#tabNameInput` field in
+   `js/core.js` on the browser side — currently `leads`; earlier versions
+   of this project auto-detected a rotating monthly tab name, but the
+   sheet no longer rotates), parses every row through
    `HEADER_ALIASES` → `enrichLead()`, and calls `renderAll()`.
 3. `renderAll()` (in `overview-distribution-people-ops.js`) renders **every**
    tab in one pass — tab switching afterward is a pure `display:none` toggle
@@ -267,8 +269,8 @@ document.
 
 ## 5. Data the Sheet holds
 
-Beyond the leads tab itself (one tab per month, auto-detected by name), the
-system reads/writes these tabs:
+Beyond the leads tab itself (one fixed tab, named `leads` — see
+`TAB_NAME_OVERRIDE` in `Core.gs`), the system reads/writes these tabs:
 
 | Tab | Written by | Read by |
 |---|---|---|

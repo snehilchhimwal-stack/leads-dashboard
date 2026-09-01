@@ -21,7 +21,7 @@ function runAllIssuesEmailerTests_() {
   const now = new Date();
   const win = allIssuesWindowGs_(now);
   const midWindow = new Date((win.from.getTime() + win.to.getTime()) / 2);
-  const monthShort = Utilities.formatDate(now, 'Asia/Kolkata', 'MMM');
+  const monthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
   const header = TestFixture_leadsHeader_();
   const banner = header.map(function () { return ''; });
 

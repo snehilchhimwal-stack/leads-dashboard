@@ -182,7 +182,7 @@ function runRmHierarchyTests_() {
       const merged = Object.assign({}, defaults, overrides || {});
       return auditLeadsHeader.map(function (k) { return merged[k] !== undefined ? merged[k] : ''; });
     }
-    const auditMonthShort = Utilities.formatDate(auditNow, 'Asia/Kolkata', 'MMM');
+    const auditMonthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
     const auditRows = [
       auditBannerRow, auditLeadsHeader,
       // Resolves fine via a real A1 -- must NOT appear in the audit.
