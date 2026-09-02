@@ -102,6 +102,41 @@ function runEmailInfraTests_() {
     TestAssertEqual_(mainRegionForGs_('HNI'), 'SoBo', 'mainRegionForGs_: HNI rolls up into SoBo');
     TestAssertEqual_(mainRegionForGs_('Some Unconfigured Region'), null, 'mainRegionForGs_: an unrecognized region returns null (out of scope)');
 
+    // ---- groupChLevelRmsByCh_ / splitSelfAndReportingRmNames_ / groupLeadsByRmAndFlatten_ ----
+    // (extracted 2026-09 out of OvernightEmailer.gs/AllIssuesEmailer.gs's
+    // duplicated CH-level notifiers — see EmailInfra.gs's own comment)
+    const chLevelRmsFixture = [
+      { chName: 'Vidya Jadhav', chEmail: 'vidya@example.com', chRole: 'Cluster Head', rmName: 'Vidya Jadhav' }, // self-held
+      { chName: 'Vidya Jadhav', chEmail: 'vidya@example.com', chRole: 'Cluster Head', rmName: 'Sanket Yadav' },  // reports up
+      { chName: 'Omkar Ghate', chEmail: 'omkar@example.com', chRole: 'City Lead', rmName: 'Priya Sharma' },
+    ];
+    const byChResult = groupChLevelRmsByCh_(chLevelRmsFixture);
+    TestAssertEqual_(Object.keys(byChResult).length, 2, 'groupChLevelRmsByCh_: 3 entries across 2 distinct CHs group into 2 buckets');
+    TestAssertEqual_(byChResult['Vidya Jadhav'].rmNames.length, 2, 'groupChLevelRmsByCh_: both of Vidya\'s entries land under her bucket');
+    TestAssertEqual_(byChResult['Vidya Jadhav'].chEmail, 'vidya@example.com', 'groupChLevelRmsByCh_: preserves chEmail on the bucket');
+    TestAssertEqual_(byChResult['Omkar Ghate'].rmNames[0], 'Priya Sharma', 'groupChLevelRmsByCh_: a CH with one reporting RM gets a one-entry rmNames list');
+
+    const splitResult = splitSelfAndReportingRmNames_('Vidya Jadhav', byChResult['Vidya Jadhav'].rmNames);
+    TestAssertEqual_(splitResult.selfRmNames.length, 1, 'splitSelfAndReportingRmNames_: exactly one self-held name (Vidya herself)');
+    TestAssertEqual_(splitResult.selfRmNames[0], 'Vidya Jadhav', 'splitSelfAndReportingRmNames_: the self-held name is Vidya\'s own');
+    TestAssertEqual_(splitResult.reportingRmNames.length, 1, 'splitSelfAndReportingRmNames_: exactly one reporting-up name (Sanket)');
+    TestAssertEqual_(splitResult.reportingRmNames[0], 'Sanket Yadav', 'splitSelfAndReportingRmNames_: the reporting-up name is Sanket\'s');
+    const splitCaseInsensitive = splitSelfAndReportingRmNames_('vidya jadhav', ['VIDYA JADHAV', 'Sanket Yadav']);
+    TestAssertEqual_(splitCaseInsensitive.selfRmNames.length, 1, 'splitSelfAndReportingRmNames_: self-match is case-insensitive');
+
+    const rmToLeadsFixture = {
+      'Vidya Jadhav': [{ lead_id: 'L1', status: 'Not Updated' }],
+      'Sanket Yadav': [{ lead_id: 'L2', status: 'Suspect' }, { lead_id: 'L3', status: 'Suspect' }],
+      'Unrelated RM': [{ lead_id: 'L99', status: 'Booking' }], // not in rmNames — must be excluded
+    };
+    const groupedResult = groupLeadsByRmAndFlatten_(['Vidya Jadhav', 'Sanket Yadav'], rmToLeadsFixture);
+    TestAssertEqual_(groupedResult.rmKeys.length, 2, 'groupLeadsByRmAndFlatten_: 2 RMs with leads produce 2 keys');
+    TestAssertEqual_(groupedResult.rmKeys[0], 'Sanket Yadav', 'groupLeadsByRmAndFlatten_: rmKeys sorted alphabetically (Sanket before Vidya)');
+    TestAssertEqual_(groupedResult.allLeads.length, 3, 'groupLeadsByRmAndFlatten_: flattens to 3 total leads across both RMs');
+    TestAssertEqual_(groupedResult.allLeads[0].lead_id, 'L2', 'groupLeadsByRmAndFlatten_: flattened order follows the sorted rmKeys order, not insertion order');
+    const groupedWithZero = groupLeadsByRmAndFlatten_(['Vidya Jadhav', 'Someone With No Leads'], rmToLeadsFixture);
+    TestAssertEqual_(groupedWithZero.rmKeys.length, 1, 'groupLeadsByRmAndFlatten_: an RM with zero leads is dropped from rmKeys entirely');
+
     // ---- ensureRegionRecipientsSheet_ / loadRegionRecipients_ ----
     const recSheet = ensureRegionRecipientsSheet_(ss);
     TestAssert_(recSheet.getLastRow() > 1, 'ensureRegionRecipientsSheet_: creates a header row plus one row per configured region');

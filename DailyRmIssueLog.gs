@@ -151,8 +151,24 @@ function captureDailyRmIssues_() {
 
   if (!rows.length) { Logger.log('No open leads currently flagged for any SLA issue — nothing to log tonight.'); return; }
 
-  const startRow = logSheet.getLastRow() + 1;
-  withRetry_(function () { logSheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows); }, 'write Daily_RM_Issues rows');
+  // Chunked writes — same BACKFILL_CHUNK_SIZE_ pattern
+  // backfillOneDayFromMovementLog_ already uses, applied here to the main
+  // nightly capture itself. This function scans the whole company every
+  // night by design (see this file's own header), so its write is
+  // comparably large every single night — a real production incident
+  // (2026-09-01: a 475s run wrote zero rows, most likely a single
+  // oversized setValues() call failing non-transiently) showed that a
+  // one-shot write for the whole night's rows makes an all-or-nothing
+  // failure the norm, not an edge case. Chunking means a failure partway
+  // through loses only the rows after the failed chunk, not the entire
+  // night's capture — and each chunk still gets withRetry_'s own
+  // transient-error retry on top.
+  let startRow = logSheet.getLastRow() + 1;
+  for (let i = 0; i < rows.length; i += BACKFILL_CHUNK_SIZE_) {
+    const chunk = rows.slice(i, i + BACKFILL_CHUNK_SIZE_);
+    withRetry_(function () { logSheet.getRange(startRow, 1, chunk.length, chunk[0].length).setValues(chunk); }, 'write Daily_RM_Issues chunk (rows ' + i + '-' + (i + chunk.length) + ')');
+    startRow += chunk.length;
+  }
   const rmCount = new Set(rows.map(function (r) { return r[1]; })).size;
   Logger.log('Captured ' + rows.length + ' flagged lead(s) across ' + rmCount + ' RM(s) for ' + todayKey + '.');
 }

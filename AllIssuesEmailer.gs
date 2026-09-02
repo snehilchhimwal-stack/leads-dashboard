@@ -340,11 +340,7 @@ function sendAllIssuesEmails_() {
 // this script).
 function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
   if (!chLevelRms.length) return;
-  const byCh = {};
-  chLevelRms.forEach(function (r) {
-    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, chRole: r.chRole, rmNames: [] };
-    byCh[r.chName].rmNames.push(r.rmName);
-  });
+  const byCh = groupChLevelRmsByCh_(chLevelRms);
   const dateRangeLabel = allIssuesDateRangeLabelGs_(win);
 
   Object.keys(byCh).forEach(function (chName) {
@@ -355,8 +351,9 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
     // same "Name (real role)" shape the normal-bucket subject uses.
     const subject = chName + ' (' + (entry.chRole || 'CH') + ') google Leads With Issue ' + dateRangeLabel;
 
-    const selfRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() === chName.toLowerCase(); });
-    const reportingRmNames = entry.rmNames.filter(function (n) { return n.toLowerCase() !== chName.toLowerCase(); });
+    const split = splitSelfAndReportingRmNames_(chName, entry.rmNames);
+    const selfRmNames = split.selfRmNames;
+    const reportingRmNames = split.reportingRmNames;
     const noteParts = [];
     if (selfRmNames.length) {
       noteParts.push(chName + ' is personally holding ' + (selfRmNames.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
@@ -371,14 +368,10 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
       plain: 'NOTE: sent to Ops, not to ' + chName + ' — ' + noteParts.join(' ') + '\n\n',
     };
 
-    const byRM = {};
-    entry.rmNames.forEach(function (rmName) {
-      const leads = (rmToLeads && rmToLeads[rmName]) || [];
-      if (leads.length) byRM[rmName] = leads;
-    });
-    const rmKeys = Object.keys(byRM).sort();
-    const allLeads = [];
-    rmKeys.forEach(function (rm) { allLeads.push.apply(allLeads, byRM[rm]); });
+    const grouped = groupLeadsByRmAndFlatten_(entry.rmNames, rmToLeads);
+    const byRM = grouped.byRM;
+    const rmKeys = grouped.rmKeys;
+    const allLeads = grouped.allLeads;
     const issueTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.issueLabel; }))).length;
 
     const html = noteBanner.html + renderOvernightReportEmailHTML_({

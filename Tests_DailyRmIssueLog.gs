@@ -107,6 +107,39 @@ function runDailyRmIssueLogTests_() {
     captureDailyRmIssuesNow();
     TestAssertEqual_(logSheet.getLastRow(), 3, 'captureDailyRmIssuesNow: a second run the same night does not duplicate rows — idempotency guard working');
 
+    // ---- captureDailyRmIssues_'s nightly write is chunked (2026-09 fix) ----
+    // Real incident (2026-09-01): a single unchunked setValues() covering
+    // the whole night's rows is an all-or-nothing write — this rebuilds
+    // that exact shape (comfortably past 2 chunk boundaries) and confirms
+    // every row lands correctly with none dropped/duplicated/misplaced at
+    // a chunk edge, the risk this specific change could introduce.
+    const bigRowCount = BACKFILL_CHUNK_SIZE_ * 2 + 37; // 2 full chunks + 1 partial
+    const bigRows = [banner, header];
+    for (let i = 0; i < bigRowCount; i++) {
+      bigRows.push(TestDRIL_row_({
+        lead_id: 'L-BIG-' + i, client_id: 'C-BIG-' + i, RM: 'Test RM One', region: 'Pune',
+        project: 'Test Project', lead_assigned_at: TestFixture_hoursAgo_(now, 60),
+      }));
+    }
+    const bigSs = TestMockSpreadsheet_({});
+    bigSs._sheets['leads'] = TestMockSheet_('leads', bigRows);
+    const realSsForBigTest = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return bigSs; }, flush: function () {} };
+    try {
+      captureDailyRmIssuesNow();
+      const bigLogSheet = bigSs.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
+      TestAssertEqual_(bigLogSheet.getLastRow(), bigRowCount + 1, 'captureDailyRmIssuesNow (chunked write): every one of ' + bigRowCount + ' flagged leads is written — none lost across the ' + Math.ceil(bigRowCount / BACKFILL_CHUNK_SIZE_) + '-chunk boundary');
+      const allBigRows = bigLogSheet.getRange(2, 1, bigRowCount, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
+      const bigIds = allBigRows.map(function (r) { return r[4]; });
+      TestAssertEqual_(bigIds[0], 'L-BIG-0', 'captureDailyRmIssuesNow (chunked write): first row is the first lead, in original order');
+      TestAssertEqual_(bigIds[BACKFILL_CHUNK_SIZE_ - 1], 'L-BIG-' + (BACKFILL_CHUNK_SIZE_ - 1), 'captureDailyRmIssuesNow (chunked write): last row of chunk 1 is exactly right — no off-by-one at the boundary');
+      TestAssertEqual_(bigIds[BACKFILL_CHUNK_SIZE_], 'L-BIG-' + BACKFILL_CHUNK_SIZE_, 'captureDailyRmIssuesNow (chunked write): first row of chunk 2 picks up immediately after chunk 1, nothing skipped or repeated');
+      TestAssertEqual_(bigIds[bigRowCount - 1], 'L-BIG-' + (bigRowCount - 1), 'captureDailyRmIssuesNow (chunked write): last row overall (the partial 3rd chunk) is correct');
+      TestAssertEqual_(new Set(bigIds).size, bigRowCount, 'captureDailyRmIssuesNow (chunked write): all lead_ids are distinct — no row duplicated across a chunk boundary');
+    } finally {
+      SpreadsheetApp = realSsForBigTest;
+    }
+
     // ---- a night with nothing flagged logs nothing, and does not throw ----
     const quietSs = TestMockSpreadsheet_({});
     quietSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, cleanRow]);

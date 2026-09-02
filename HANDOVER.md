@@ -453,9 +453,19 @@ wrote **zero rows**, with no crash alert — the leading theory is a
 single oversized `setValues()` write failing non-transiently, though
 this was never definitively confirmed from the Executions log alone (no
 error text was shared). `backfillOneDayFromMovementLogNow()` (below)
-exists specifically to recover from exactly this, and now writes in
-5,000-row chunks instead of one call, so a future failure loses at most
-one chunk instead of the whole night.
+exists to recover from exactly this after the fact, and writes in
+5,000-row chunks instead of one call, so a future recovery run loses at
+most one chunk instead of the whole night.
+
+**2026-09 fix**: `captureDailyRmIssues_` itself (the actual 22:50
+trigger, not just the recovery tool) now writes its nightly rows in the
+same 5,000-row (`BACKFILL_CHUNK_SIZE_`) chunks, rather than one
+unbounded `setValues()` call — so the class of incident above should now
+fail (if it ever recurs) at a specific chunk, losing only the rows after
+it, not the entire night. Covered by a dedicated test
+(`Tests_DailyRmIssueLog.gs`) that runs a 10,037-row capture (2 full
+chunks + a partial one) and checks both chunk boundaries for an
+off-by-one.
 
 ### 9.3 Utility functions (console-callable, `DailyRmIssueLog.gs`)
 

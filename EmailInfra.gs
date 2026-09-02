@@ -443,6 +443,53 @@ function readLeadsTab_(ss) {
   }, 'readLeadsTab_');
 }
 
+// ============ CH-LEVEL REPORT GROUPING (shared) ============
+// Extracted from OvernightEmailer.gs's notifyChLevelLeadsGs_ and
+// AllIssuesEmailer.gs's notifyChLevelIssuesGs_ — both built the exact
+// same three groupings inline, byte-for-byte identical, before diverging
+// into their own subject/KPI/section wording (2026-09 modularity
+// refactor; pure code motion — the two callers' own logic is unchanged,
+// they just call these instead of repeating them).
+
+// Groups a resolveRecipientBucketsForRms_ chLevelRms list by the CH each
+// entry routes to — {chName: {chEmail, chRole, rmNames: [...]}}.
+function groupChLevelRmsByCh_(chLevelRms) {
+  const byCh = {};
+  chLevelRms.forEach(function (r) {
+    if (!byCh[r.chName]) byCh[r.chName] = { chEmail: r.chEmail, chRole: r.chRole, rmNames: [] };
+    byCh[r.chName].rmNames.push(r.rmName);
+  });
+  return byCh;
+}
+
+// Splits one CH-level entry's rmNames into the CH's own self-held leads
+// (rmName === chName, case-insensitive) vs. names that genuinely report
+// up to the CH — two different situations each caller explains with its
+// own note/action wording (a self-held lead has nobody below to route
+// through; a reporting-up name is missing a TL/TM/RH in RM_Hierarchy).
+function splitSelfAndReportingRmNames_(chName, rmNames) {
+  const selfRmNames = rmNames.filter(function (n) { return n.toLowerCase() === chName.toLowerCase(); });
+  const reportingRmNames = rmNames.filter(function (n) { return n.toLowerCase() !== chName.toLowerCase(); });
+  return { selfRmNames: selfRmNames, reportingRmNames: reportingRmNames };
+}
+
+// Groups one CH-level entry's leads by whoever actually holds each one
+// (the real RM name, looked up in rmToLeads — the CH's own name for a
+// self-held case, per splitSelfAndReportingRmNames_ above), drops any RM
+// with zero leads, and flattens into one list sorted by RM name — same
+// "who currently holds this" grouping a normal per-RM email already uses.
+function groupLeadsByRmAndFlatten_(rmNames, rmToLeads) {
+  const byRM = {};
+  rmNames.forEach(function (rmName) {
+    const leads = (rmToLeads && rmToLeads[rmName]) || [];
+    if (leads.length) byRM[rmName] = leads;
+  });
+  const rmKeys = Object.keys(byRM).sort();
+  const allLeads = [];
+  rmKeys.forEach(function (rm) { allLeads.push.apply(allLeads, byRM[rm]); });
+  return { byRM: byRM, rmKeys: rmKeys, allLeads: allLeads };
+}
+
 // Apps Script port of the dashboard's renderReportEmailHTML (js/reports.js)
 // — same eyebrow/KPI-card/section visual shell, hand-built here since
 // Apps Script is a separate runtime with no access to that browser-side
