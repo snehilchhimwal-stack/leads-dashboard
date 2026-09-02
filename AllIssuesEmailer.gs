@@ -525,6 +525,27 @@ function sendAllIssuesEmailsNow() { sendAllIssuesEmails(); }
 // IST. Safe to re-run: clears any trigger this function previously
 // installed for sendAllIssuesEmails before adding the new one, so
 // changing ALL_ISSUES_RUN_HOUR_ and re-running never leaves a duplicate.
+//
+// .nearMinute(0) added 2026-09-02: this was the ONLY fixed-hour trigger in
+// the whole project without a pinned minute (sendOvernightMorningEmails/
+// sendOvernightFollowupEmails use .nearMinute(0), captureDailyRmIssues uses
+// .nearMinute(50) — see their own setup functions). Without it, Apps
+// Script only promises firing SOMEWHERE inside the target hour — this
+// project's own MovementTracker.gs header already documents atHour()
+// alone as landing "within roughly 15 minutes" under normal load, but a
+// real run fired 54 minutes late (17:54 instead of ~17:00), which is what
+// actually produced the "process takes 50-58 minutes" symptom — the
+// SCRIPT itself only took ~4 minutes end to end that same run (see its
+// own [timing] Logger.log lines). nearMinute() doesn't guarantee exact-
+// minute firing either, but it's the same lever already proven to keep
+// this project's other daily email trigger close to its target.
+//
+// IMPORTANT: editing this function's source does NOT retroactively change
+// the trigger already installed in this Apps Script project — a trigger's
+// schedule is fixed at the moment it's created. This function must be
+// RE-RUN (function dropdown -> setupAllIssuesEmailTrigger -> Run) after
+// deploying this change, so the old (unpinned) trigger gets deleted and
+// the new (nearMinute-pinned) one takes its place.
 function setupAllIssuesEmailTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'sendAllIssuesEmails') ScriptApp.deleteTrigger(t);
@@ -532,8 +553,9 @@ function setupAllIssuesEmailTrigger() {
   ScriptApp.newTrigger('sendAllIssuesEmails')
     .timeBased()
     .atHour(ALL_ISSUES_RUN_HOUR_)
+    .nearMinute(0)
     .everyDays(1)
     .inTimezone('Asia/Kolkata')
     .create();
-  Logger.log('All-Issues Emailer trigger installed — runs daily at ' + ALL_ISSUES_RUN_HOUR_ + ':00 IST.');
+  Logger.log('All-Issues Emailer trigger installed — runs daily near ' + ALL_ISSUES_RUN_HOUR_ + ':00 IST.');
 }
