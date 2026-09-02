@@ -8,17 +8,19 @@
      the Gmail send block in the main script). Requires this page to be
      served over http/https — file:// pages cannot complete Google sign-in. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<!-- html2canvas + jsPDF: power the Repeat Offenders tab's "Download PDF"
-     export (js/repeat-offenders-pdf.js) — each table is snapshotted as a
-     canvas image so it can never be split across a PDF page, and so the
-     PDF reuses the app's own live table markup/CSS pixel-for-pixel rather
-     than a separately-maintained PDF-only table renderer. Not async/defer:
-     loaded synchronously so both globals (window.html2canvas,
-     window.jspdf.jsPDF) are guaranteed ready by the time a user could
-     possibly click the button, same reasoning as every other script tag
-     on this page. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<!-- jsPDF + jspdf-autotable: power the Repeat Offenders tab's "Download PDF"
+     export (js/repeat-offenders-pdf.js). autoTable draws real vector
+     text/lines — actual vector text and cell borders, never a screenshot
+     — so the PDF's data stays selectable/searchable, and its own
+     pageBreak:'avoid' option is what guarantees a table is moved whole to
+     the next page rather than ever split. Not async/defer: loaded
+     synchronously so window.jspdf.jsPDF and its .autoTable() method are
+     guaranteed ready by the time a user could possibly click the button,
+     same reasoning as every other script tag on this page. Load order
+     matters here specifically: autotable extends jsPDF's own prototype,
+     so its script tag must come after jsPDF's. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -503,18 +505,6 @@
      directly (not "auto") makes the point explicit rather than relying on
      scrollWidth staying under clientWidth by luck. */
   .section-scroll.no-cap{ max-height:none; overflow-y:visible; overflow-x:visible; }
-
-  /* ---------- Repeat Offenders PDF export (js/repeat-offenders-pdf.js) ----------
-     Each table is rendered off-screen (position:fixed, far off the left
-     edge — never visible, never affects real page layout/scroll) using
-     the SAME repeatOffenderTableHtml() markup the live page uses, then
-     snapshotted to an image. .section-scroll's own max-height/overflow
-     (above) exists to keep the ON-SCREEN grid tidy — for an export, that
-     would just crop the table, so it's turned off, scoped to ONLY this
-     offscreen container via the ancestor selector, exactly like .no-cap
-     above but reusable for a container whose class list is otherwise
-     built dynamically. */
-  .repeat-pdf-render .section-scroll{ max-height:none; overflow:visible; }
 
   /* ---------- week-over-week cohort comparison ---------- */
   /* Delta badge used in the table's own cells (wowPctCellHtml,
@@ -1153,7 +1143,7 @@
           </label>
           <label class="date-filter" id="repeatOffendersCustomFromWrap" style="display:none;">From <input type="date" id="repeatOffendersCustomFrom" /></label>
           <label class="date-filter" id="repeatOffendersCustomToWrap" style="display:none;">To <input type="date" id="repeatOffendersCustomTo" /></label>
-          <button class="btn" id="repeatOffendersDownloadPdfBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Last 3 days (by assigned date) + Last 7 Days (by capture date), same tables and columns as below. Empty tables and empty dates are left out. Respects the Project/Region/TL/Source/Sub-source filters above — independent of the Time range picker's own current selection.">Download PDF</button>
+          <button class="btn" id="repeatOffendersDownloadPdfBtn" style="padding:8px 12px; font-size:12.5px; margin-left:auto;" title="Exports whichever Time range is currently selected to the left (Yesterday, This Week, Last 7 Days, from when history began, or a custom range) — broken out by individual date where the range spans more than one day. Same tables/columns as below, and the same Project/Region/TL/Source/Sub-source filters above. Empty tables and empty dates are left out.">Download PDF</button>
           <span id="repeatOffendersPdfStatus" style="font-size:11.5px; color:var(--text-faint); white-space:nowrap;"></span>
         </div>
         <div id="repeatOffendersNotice" class="truncation-notice" style="display:none;"></div>

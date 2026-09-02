@@ -1,51 +1,96 @@
 // ============================================================
 // repeat-offenders-pdf.js — "Download PDF" export for the Repeat
-// Offenders tab: a Date-wise section (last 3 IST days, by lead
-// assignment date) plus a Last 7 Days section (by capture/flag date,
-// matching the on-screen "Last 7 Days" Time range option exactly),
-// covering the same 6 possible tables the live page shows (Top 20 RMs /
-// Leads>50 / Leads>100, By Region, Top 10 A1/TM, Top 5 RH). A table with
-// zero rows — or an A1/TM/RH rollup when RM_Hierarchy isn't loaded — is
-// left out entirely, never printed as an empty placeholder; a date with
-// no populated tables is left out too.
+// Offenders tab. Rebuilt (2026-09-02, v2) to follow whichever Time range
+// filter is CURRENTLY SELECTED on screen — Yesterday exports only
+// yesterday, Last 7 Days exports only the last 7 days (broken out by
+// individual date), This Week the same, From when history began exports
+// one unscoped summary, Custom range exports its picked span broken out
+// by date — rather than the original fixed "last 3 days + Last 7 Days"
+// scheme. Every date/range is computed via repeatOffendersDateKeysForRange
+// (tab-repeat-offenders.js), the EXACT function the live page's own
+// Time range dropdown uses, so the PDF can never show a different dataset
+// than what's on screen for that filter.
+//
+// v2 also replaces the original screenshot-based approach (html2canvas +
+// one raster image per page) with REAL vector tables via jsPDF's
+// autoTable plugin — actual text and cell borders, selectable/searchable
+// in the resulting PDF, not a picture of the UI. autoTable's own
+// pageBreak:'avoid' option is what guarantees a table is moved WHOLE to
+// the next page rather than ever split mid-table; multiple small tables
+// are free to share a page since each only advances the page cursor by
+// its own actual height.
 //
 // Depends on js/tab-repeat-offenders.js (dailyRmIssues,
 // dailyRmIssuesFetchState, rmHierarchyFetchState, aggregateRepeatOffenders,
 // primaryManagerForRm, rhForRm, _repeatOffendersRegionKey,
-// passesRepeatOffenderFilters, repeatOffenderTableHtml,
-// repeatOffendersDateKeysForRange) and js/core-foundation.js
-// (istDateKey, relativeDayLabel) / js/core-outcome-engine.js (istStamp) /
-// js/core-ui.js (esc) — all loaded earlier in dashboard.html, but this
-// only ever runs on a user click, well after every js/*.js file has
-// finished loading, so exact script order doesn't matter here (same
-// reasoning core-foundation.js's own header comment gives). Also needs
-// html2canvas + jsPDF (loaded in dashboard.html's <head>).
-//
-// APPROACH: each table (heading + the table itself) is composed as one
-// off-screen DOM node using the EXACT SAME repeatOffenderTableHtml()
-// markup/CSS the live page renders with — so the PDF's table names,
-// columns and data can never drift from what's on screen — then
-// snapshotted as one image via html2canvas and placed on its own PDF
-// page (scaled to fit, portrait or landscape depending on the table's
-// own rendered shape) via jsPDF. A table is therefore physically
-// incapable of splitting across a page boundary: it's one atomic image,
-// scaled down to fit the page rather than cropped or split if it's ever
-// too large. Tradeoff: the PDF's text isn't selectable/searchable (it's
-// a raster image, not vector text) — acceptable here since the explicit
-// priority was visual fidelity to the existing UI. A vector-text
-// alternative (jsPDF's autoTable plugin) is noted in HANDOVER.md if that
-// tradeoff ever needs revisiting — autoTable's own default pagination
-// SPLITS a long table across pages, which is the opposite of what was
-// asked for here, so it would need extra work to match this behavior.
+// passesRepeatOffenderFilters, repeatOffendersDateKeysForRange) and
+// js/core-foundation.js (istDateKey) / js/core-outcome-engine.js (istStamp)
+// / js/reports-build.js (IST_MONTHS) — all loaded earlier in
+// dashboard.html, but this only ever runs on a user click, well after
+// every js/*.js file has finished loading, so exact script order doesn't
+// matter here (same reasoning core-foundation.js's own header comment
+// gives). Also needs jsPDF + jspdf-autotable (loaded in dashboard.html's
+// <head>).
 // ============================================================
 
 let _repeatOffendersPdfGenerating = false;
 
-// One table candidate for a section: { title, list } (the same `list`
-// shape aggregateRepeatOffenders returns). Filters out empty candidates
-// and the two hierarchy-dependent rollups when RM_Hierarchy isn't
-// loaded — repeatOffenderTableHtml would otherwise print a "could not be
-// read" placeholder row, which isn't real data worth a PDF page.
+const REPEAT_OFFENDERS_PDF_FILTER_NAMES_ = {
+  yesterday: 'YESTERDAY',
+  thisWeek: 'THIS WEEK',
+  last7Days: 'LAST 7 DAYS',
+  allTime: 'FROM WHEN HISTORY BEGAN',
+  custom: 'CUSTOM RANGE',
+};
+
+// "YYYY-MM-DD" -> "Sep 2, 2026" — matches the header example format
+// exactly. Reuses IST_MONTHS (reports-build.js) rather than a second
+// hardcoded month-name list.
+function _repeatOffendersPdfFormatDate(dayKey){
+  const parts = dayKey.split('-');
+  const y = Number(parts[0]), m = Number(parts[1]), d = Number(parts[2]);
+  return IST_MONTHS[m - 1] + ' ' + d + ', ' + y;
+}
+
+// null dateKeys (allTime, or an incomplete custom range — see
+// repeatOffendersDateKeysForRange's own comment) => no specific date to
+// show. One key => "Date: ...". More than one => "Date Range: ... – ...".
+function _repeatOffendersPdfDateLine(dateKeys){
+  if (dateKeys === null) return null;
+  const sorted = Array.from(dateKeys).sort();
+  if (!sorted.length) return null;
+  if (sorted.length === 1) return 'Date: ' + _repeatOffendersPdfFormatDate(sorted[0]);
+  return 'Date Range: ' + _repeatOffendersPdfFormatDate(sorted[0]) + ' – ' + _repeatOffendersPdfFormatDate(sorted[sorted.length - 1]);
+}
+
+// Reads the live page's OWN current filter state — same range select,
+// same repeatOffendersDateKeysForRange call, same usesAssignedDate rule
+// renderRepeatOffenders itself uses (Yesterday/Custom => assigned date,
+// This Week/Last 7 Days => capture date, All-time => no date filter at
+// all) — so the PDF can never independently invent a different dataset
+// than what's currently on screen.
+function _repeatOffendersPdfCurrentFilterInfo(){
+  const rangeSel = document.getElementById('repeatOffendersRangeSelect');
+  const range = rangeSel ? rangeSel.value : 'last7Days';
+  const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
+  const dateKeys = repeatOffendersDateKeysForRange(range, now);
+  const usesAssignedDate = (range === 'yesterday' || range === 'custom');
+  return {
+    range: range,
+    now: now,
+    dateKeys: dateKeys,
+    usesAssignedDate: usesAssignedDate,
+    displayName: REPEAT_OFFENDERS_PDF_FILTER_NAMES_[range] || String(range).toUpperCase(),
+    dateLine: _repeatOffendersPdfDateLine(dateKeys),
+  };
+}
+
+// One table candidate for a date/section: { title, list } (the same
+// `list` shape aggregateRepeatOffenders returns). Filters out empty
+// candidates and the two hierarchy-dependent rollups when RM_Hierarchy
+// isn't loaded — repeatOffenderTableHtml would otherwise print a "could
+// not be read" placeholder row on screen, which isn't real data worth a
+// PDF page.
 function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
   const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(useAssignedDate ? rec.leadAssignedDateKey : rec.date));
   const scoped = dateOnlyScoped.filter(passesRepeatOffenderFilters);
@@ -64,40 +109,35 @@ function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
   return candidates.filter(c => c.list.length > 0);
 }
 
-// Full ordered list of page specs: { sectionLabel, dateLabel, title, list }.
-// Date-wise = today, yesterday, 2 days ago (IST calendar days, matching
-// every other date grouping on this tab — "Today" here means the same
-// IST "today" the rest of the app already uses, not a raw browser-local
-// date, so it stays consistent with Yesterday/This Week/Last 7 Days
-// right next to it), scoped by ASSIGNED date — same convention this
-// tab's own "Yesterday" option already uses ("how many of that day's
-// leads are already a problem"), extended to 3 individual days. Last 7
-// Days is scoped by CAPTURE date instead, identical to the on-screen
-// "Last 7 Days" option (see renderRepeatOffenders's own comment on why:
-// a genuine repeat offender is almost always an old lead whose
-// assignment date is never recent). Empty dates/tables are already
-// excluded by _repeatOffendersPdfSectionTables above.
-function _repeatOffendersPdfBuildPageSpecs(){
+// Full ordered list of page specs: { dateLabel, title, list }.
+// - allTime (or an incomplete custom range): dateKeys is null => ONE
+//   unscoped section, dateLabel null (no per-date breakdown makes sense
+//   over unbounded history).
+// - Every other filter: broken out by INDIVIDUAL date, most recent
+//   first, so "the reader can tell which day's data they are viewing"
+//   even when the filter spans several days (Last 7 Days, This Week, or
+//   a multi-day Custom range). A date with nothing populated across all
+//   6 candidate tables is simply never added — no heading, no
+//   placeholder, exactly the same omission rule a single table gets.
+function _repeatOffendersPdfBuildPageSpecs(filterInfo){
   const specs = [];
-  const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
-  const todayKey = istDateKey(now);
-
-  for (let offset = 0; offset < 3; offset++) {
-    const dayKey = istDateKey(new Date(now.getTime() - offset * 86400000));
-    const dateLabel = relativeDayLabel(dayKey, todayKey);
-    const tables = _repeatOffendersPdfSectionTables(new Set([dayKey]), true);
-    tables.forEach(t => specs.push({ sectionLabel: 'Date-wise', dateLabel: dateLabel, title: t.title, list: t.list }));
+  if (filterInfo.dateKeys === null) {
+    _repeatOffendersPdfSectionTables(null, filterInfo.usesAssignedDate)
+      .forEach(t => specs.push({ dateLabel: null, title: t.title, list: t.list }));
+    return specs;
   }
-
-  const last7Keys = repeatOffendersDateKeysForRange('last7Days', now);
-  const last7Tables = _repeatOffendersPdfSectionTables(last7Keys, false);
-  last7Tables.forEach(t => specs.push({ sectionLabel: 'Last 7 Days', dateLabel: null, title: t.title, list: t.list }));
-
+  const sortedDayKeys = Array.from(filterInfo.dateKeys).sort().reverse(); // most recent first
+  sortedDayKeys.forEach(function (dayKey) {
+    const tables = _repeatOffendersPdfSectionTables(new Set([dayKey]), filterInfo.usesAssignedDate);
+    if (!tables.length) return; // nothing populated for this date — omit entirely
+    const dateLabel = _repeatOffendersPdfFormatDate(dayKey);
+    tables.forEach(t => specs.push({ dateLabel: dateLabel, title: t.title, list: t.list }));
+  });
   return specs;
 }
 
 // One line describing the currently-active top-bar filters (or their
-// absence) — printed on the cover page so the PDF is self-explanatory
+// absence) — printed in the PDF header so the report is self-explanatory
 // about its own scope without needing the live dashboard open alongside it.
 function _repeatOffendersPdfFilterSummaryLine(){
   const parts = [];
@@ -106,137 +146,161 @@ function _repeatOffendersPdfFilterSummaryLine(){
   if (filterState.TL.size) parts.push('TL: ' + Array.from(filterState.TL).join(', '));
   if (filterState.source.size) parts.push('Source: ' + Array.from(filterState.source).join(', '));
   if (filterState.bucket.size) parts.push('Sub-source: ' + Array.from(filterState.bucket).join(', '));
-  return parts.length ? ('Filters applied (top of page): ' + parts.join(' · ')) : 'No Project/Region/TL/Source/Sub-source filters applied — full dataset.';
+  return parts.length ? parts.join(' · ') : null;
 }
 
-// One off-screen page node: a small heading (section + date, matching
-// relativeDayLabel's own "Today (2 Sep)" style already used throughout
-// the app) directly above the real table markup — repeatOffenderTableHtml
-// already renders its own title line in the same visual style the live
-// grid uses, so nothing here duplicates it.
-// Sizes to its own content (display:inline-block, no fixed width) rather
-// than a uniform width for every table — a short RM-name/issue-chip mix
-// wants ~550-650px, a table with longer names or more/longer issue
-// labels naturally wants more, up to ~850px+. That measured width (not a
-// width-vs-height aspect ratio, which a mostly-empty SHORT table would
-// always "win" regardless of how few columns it has) is what decides
-// portrait vs landscape below — a real per-table content decision matching
-// what "wide table" actually means, not an artifact of a fixed render width.
-function _repeatOffendersPdfBuildTableNode(spec){
-  const wrap = document.createElement('div');
-  wrap.className = 'repeat-pdf-render';
-  wrap.style.cssText = 'display:inline-block; min-width:480px; padding:28px; background:var(--bg); font-family:"Inter",system-ui,sans-serif; color:var(--text); box-sizing:border-box;';
-  const dateHtml = spec.dateLabel ? ` · ${esc(spec.dateLabel)}` : '';
-  wrap.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--border);">
-      <div class="eyebrow">${esc(spec.sectionLabel)}${dateHtml}</div>
-      <div class="eyebrow" style="opacity:.55;">Repeat Offenders Report</div>
-    </div>
-    ${repeatOffenderTableHtml(spec.title, spec.list, false)}
-  `;
-  return wrap;
+// Converts one aggregateRepeatOffenders() row into the exact same 6
+// columns repeatOffenderTableHtml shows on screen (#, Name (+RM count),
+// Leads, Instances, Avg Flagged, Top Issues) — plain strings for
+// autoTable, no HTML/markup involved.
+function _repeatOffendersPdfTableRows(list){
+  return list.map(function (r, i) {
+    const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
+      .map(k => (r.byIssueLabel[k] || k) + ': ' + r.byIssue[k]).join('    ');
+    const name = r.name + (r.distinctRMs > 1 ? ' (' + r.distinctRMs + ' RMs)' : '');
+    return [String(i + 1), name, String(r.distinctLeads), String(r.totalInstances), (r.totalInstances / r.distinctLeads).toFixed(1) + 'x', topIssues];
+  });
 }
 
-// The report's cover page — title, generation timestamp, a one-line
-// explanation of the two sections, and the active-filter summary.
-function _repeatOffendersPdfBuildCoverNode(filterSummaryLine){
-  const wrap = document.createElement('div');
-  wrap.className = 'repeat-pdf-render';
-  wrap.style.cssText = 'width:760px; height:520px; padding:56px; background:var(--bg); display:flex; flex-direction:column; justify-content:center; font-family:"Inter",system-ui,sans-serif; color:var(--text); box-sizing:border-box;';
-  wrap.innerHTML = `
-    <div class="eyebrow">Lead Funnel · SLA Monitor</div>
-    <div style="font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:var(--text); margin:10px 0 6px;">Repeat Offenders Report</div>
-    <div style="color:var(--text-dim); font-size:13px; margin-bottom:26px;">Generated ${esc(istStamp(new Date()))} IST</div>
-    <div style="display:flex; flex-direction:column; gap:9px; font-size:12.5px; color:var(--text-dim); margin-bottom:22px;">
-      <div><span class="chip dim-chip" style="margin-right:8px;">Date-wise</span>Today, Yesterday, and 2 days ago — by lead assignment date</div>
-      <div><span class="chip dim-chip" style="margin-right:8px;">Last 7 Days</span>The most recent 7 nights' captures — by flag date, same as the on-screen Time range option</div>
-    </div>
-    <div class="filter-summary" style="margin:0;">${esc(filterSummaryLine)}</div>
-    <div class="filter-summary" style="margin:6px 0 0;">Tables with zero entries — and any date with no populated tables — are left out of this report.</div>
-  `;
-  return wrap;
-}
+const REPEAT_OFFENDERS_PDF_MARGIN_ = 40;
+const REPEAT_OFFENDERS_PDF_TABLE_GAP_ = 20;
 
-// A table's rendered width beyond this comfortably fills (or exceeds) a
-// portrait A4 page's content area at a readable scale — past it,
-// landscape gives the same content more room instead of shrinking small.
-const REPEAT_OFFENDERS_PDF_LANDSCAPE_WIDTH_PX = 700;
-
-// Renders every page node to canvas (html2canvas) and assembles the PDF
-// (jsPDF), one page per node — a cover page first (always portrait — a
-// title page, not a data table, so it isn't subject to the width rule
-// below), then one page per entry in `specs`. Portrait vs landscape for
-// a TABLE page is decided from that node's own measured DOM width (see
-// REPEAT_OFFENDERS_PDF_LANDSCAPE_WIDTH_PX above and
-// _repeatOffendersPdfBuildTableNode's own comment on why width — not a
-// width-vs-height aspect ratio — is what actually distinguishes a
-// genuinely wide table from a merely short one). The resulting image is
-// always scaled to fit fully within the page's printable area (shrinking
-// to fit height if fitting the width alone would overflow) — the "never
-// split, shrink instead" strategy.
-async function _repeatOffendersPdfRenderPages(specs, filterSummaryLine){
-  const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-  if (!jsPDFCtor || !window.html2canvas) {
-    throw new Error('PDF library failed to load — check your connection and try again.');
+// Starts a fresh page if fewer than minSpace points remain below the
+// current cursor — used before a date heading and before a table's own
+// title line, so neither is ever left stranded at the very bottom of a
+// page with its content pushed to the next one (the table itself is
+// additionally protected by autoTable's own pageBreak:'avoid' below
+// regardless of how accurate this estimate is).
+function _repeatOffendersPdfEnsureRoom(doc, y, minSpace){
+  const pageH = doc.internal.pageSize.getHeight();
+  if (pageH - y < minSpace) {
+    doc.addPage('a4', 'portrait');
+    return REPEAT_OFFENDERS_PDF_MARGIN_;
   }
+  return y;
+}
 
-  const totalPages = specs.length + 1; // +1 for the cover page
-  const host = document.createElement('div');
-  host.style.cssText = 'position:fixed; left:-99999px; top:0; z-index:-1;';
-  document.body.appendChild(host);
+// Builds the whole PDF as real vector content — no canvas, no images.
+// One doc.autoTable() call per table; each only advances the page cursor
+// by its own actual rendered height, so several small tables naturally
+// pack onto one page, while pageBreak:'avoid' moves a table that would
+// NOT fit in the remaining space to a fresh page whole, never splitting
+// it. A table whose row count is unusually large (beyond this app's own
+// current 20-row cap on every candidate table) drops to a smaller font
+// instead — the same "appropriate layout for a large table" strategy in
+// spirit, chosen over a landscape-orientation switch specifically
+// because it composes safely with the page-cursor/heading-room tracking
+// above without the added complexity of mixing page orientations.
+function _repeatOffendersPdfRenderPages(specs, filterInfo){
+  const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  if (!jsPDFCtor) throw new Error('PDF library failed to load — check your connection and try again.');
+  const doc = new jsPDFCtor({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  if (typeof doc.autoTable !== 'function') throw new Error('PDF table library failed to load — check your connection and try again.');
 
-  const MARGIN = 32;
-  const FOOTER_SPACE = 20;
-  let doc = null;
-  const bgColor = getComputedStyle(document.body).backgroundColor || '#0f1216';
+  const pageW = doc.internal.pageSize.getWidth();
+  let y = REPEAT_OFFENDERS_PDF_MARGIN_;
 
-  const renderNodeToDoc = async (node, pageNum, forceLandscape) => {
-    const isLandscape = forceLandscape != null ? forceLandscape : (node.scrollWidth > REPEAT_OFFENDERS_PDF_LANDSCAPE_WIDTH_PX);
-    const canvas = await html2canvas(node, { backgroundColor: bgColor, scale: 2, useCORS: true });
-    // JPEG, not PNG: jsPDF's addImage doesn't preserve a PNG's own
-    // compression — it decodes to a raw bitmap and re-encodes with only
-    // generic Flate compression, which for anti-aliased text on a dark
-    // background lands close to the UNCOMPRESSED bitmap size (a single
-    // table page came out ~2.5MB as "PNG" vs ~40-55KB as JPEG at quality
-    // 0.95 — the same page, a ~50x difference). Every page here is fully
-    // opaque (backgroundColor above + each node's own solid background),
-    // so JPEG's lack of alpha support costs nothing.
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-    if (!doc) {
-      doc = new jsPDFCtor({ orientation: isLandscape ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' });
-    } else {
-      doc.addPage('a4', isLandscape ? 'landscape' : 'portrait');
+  // ---- Report header (real vector text — title, active filter, date/range) ----
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(20, 23, 28);
+  doc.text('REPEAT OFFENDERS REPORT', REPEAT_OFFENDERS_PDF_MARGIN_, y);
+  y += 8;
+  doc.setDrawColor(245, 154, 0); // Homesfy brand gold — same accent the live app's own header/loading screens use
+  doc.setLineWidth(2);
+  doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, REPEAT_OFFENDERS_PDF_MARGIN_ + 46, y);
+  y += 22;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(70, 75, 85);
+  doc.text('Filter: ' + filterInfo.displayName, REPEAT_OFFENDERS_PDF_MARGIN_, y);
+  y += 16;
+  if (filterInfo.dateLine) {
+    doc.setFont('helvetica', 'normal');
+    doc.text(filterInfo.dateLine, REPEAT_OFFENDERS_PDF_MARGIN_, y);
+    y += 16;
+  }
+  const filterSummaryLine = _repeatOffendersPdfFilterSummaryLine();
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(145, 150, 160);
+  // istStamp() already appends "IST" itself (e.g. "2026-09-02 07:46 PM IST") — no separate suffix needed here.
+  doc.text('Generated ' + istStamp(new Date()) + (filterSummaryLine ? '   ·   ' + filterSummaryLine : ''), REPEAT_OFFENDERS_PDF_MARGIN_, y);
+  y += 14;
+  doc.setDrawColor(220, 223, 228);
+  doc.setLineWidth(1);
+  doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, pageW - REPEAT_OFFENDERS_PDF_MARGIN_, y);
+  y += 22;
+
+  let currentDateLabel; // undefined sentinel — first spec always draws its own heading (or none, if dateLabel is null)
+  let firstSection = true;
+
+  specs.forEach(function (spec) {
+    if (spec.dateLabel !== currentDateLabel) {
+      currentDateLabel = spec.dateLabel;
+      if (!firstSection) y += 8; // small extra breathing room between date sections
+      if (spec.dateLabel) {
+        y = _repeatOffendersPdfEnsureRoom(doc, y, 110); // heading + room for at least the start of its first table
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(55, 59, 68);
+        doc.text('DATE: ' + spec.dateLabel.toUpperCase(), REPEAT_OFFENDERS_PDF_MARGIN_, y);
+        y += 8;
+        doc.setDrawColor(230, 232, 236);
+        doc.setLineWidth(0.75);
+        doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, pageW - REPEAT_OFFENDERS_PDF_MARGIN_, y);
+        y += 16;
+      }
     }
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const availW = pageW - MARGIN * 2;
-    const availH = pageH - MARGIN * 2 - FOOTER_SPACE;
-    const imgRatio = canvas.width / canvas.height;
-    let drawW = availW;
-    let drawH = drawW / imgRatio;
-    if (drawH > availH) { drawH = availH; drawW = drawH * imgRatio; } // shrink-to-fit rather than crop/split
-    const x = (pageW - drawW) / 2;
-    const y = MARGIN;
-    doc.addImage(imgData, 'JPEG', x, y, drawW, drawH);
-    doc.setFontSize(9);
-    doc.setTextColor(140, 140, 140);
-    doc.text(`Page ${pageNum} of ${totalPages}`, pageW / 2, pageH - 16, { align: 'center' });
-  };
+    firstSection = false;
 
-  try {
-    const coverNode = _repeatOffendersPdfBuildCoverNode(filterSummaryLine);
-    host.appendChild(coverNode);
-    await renderNodeToDoc(coverNode, 1, false); // cover page: always portrait
-    host.removeChild(coverNode);
+    // Table title
+    y = _repeatOffendersPdfEnsureRoom(doc, y, 90);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(30, 33, 38);
+    doc.text(spec.title, REPEAT_OFFENDERS_PDF_MARGIN_, y);
+    y += 12;
 
-    for (let i = 0; i < specs.length; i++) {
-      const node = _repeatOffendersPdfBuildTableNode(specs[i]);
-      host.appendChild(node);
-      await renderNodeToDoc(node, i + 2);
-      host.removeChild(node);
-    }
-  } finally {
-    document.body.removeChild(host);
+    const rows = _repeatOffendersPdfTableRows(spec.list);
+    const compact = rows.length > 20; // beyond this app's own current per-table cap — defensive, not expected to trigger today
+    doc.autoTable({
+      startY: y,
+      head: [['#', 'Name', 'Leads', 'Instances', 'Avg Flagged', 'Top Issues']],
+      body: rows,
+      theme: 'grid',
+      styles: {
+        fontSize: compact ? 7 : 8.5, cellPadding: compact ? 3 : 5,
+        textColor: [35, 38, 44], lineColor: [222, 225, 230], lineWidth: 0.6, overflow: 'linebreak',
+      },
+      headStyles: { fillColor: [23, 27, 33], textColor: [235, 237, 240], fontStyle: 'bold', fontSize: compact ? 7 : 8.5 },
+      alternateRowStyles: { fillColor: [246, 247, 249] },
+      columnStyles: {
+        0: { cellWidth: 22, halign: 'right' },
+        1: { cellWidth: 130 },
+        2: { cellWidth: 44, halign: 'right' },
+        3: { cellWidth: 56, halign: 'right' },
+        4: { cellWidth: 68, halign: 'right' },
+        5: { cellWidth: 'auto' },
+      },
+      margin: { left: REPEAT_OFFENDERS_PDF_MARGIN_, right: REPEAT_OFFENDERS_PDF_MARGIN_, bottom: REPEAT_OFFENDERS_PDF_MARGIN_ },
+      pageBreak: 'avoid',    // the whole table moves to a fresh page if it doesn't fit — never split mid-table
+      rowPageBreak: 'avoid', // a single row's own text is never cut across a page boundary either
+    });
+    y = doc.lastAutoTable.finalY + REPEAT_OFFENDERS_PDF_TABLE_GAP_;
+  });
+
+  // ---- Page numbers (drawn last, once every page exists) ----
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(150, 154, 162);
+    doc.text('Page ' + p + ' of ' + pageCount, pw / 2, ph - 18, { align: 'center' });
   }
 
   return doc;
@@ -244,9 +308,9 @@ async function _repeatOffendersPdfRenderPages(specs, filterSummaryLine){
 
 // The button's click handler. Guards: a duplicate click while already
 // generating is a no-op (not queued, not restarted); no Daily_RM_Issues
-// data yet, or genuinely nothing to report across every section, shows a
-// clear inline status message instead of downloading a blank/near-blank
-// PDF.
+// data yet, or genuinely nothing to report for the CURRENTLY SELECTED
+// filter, shows a clear inline status message instead of downloading a
+// blank/near-blank PDF.
 async function downloadRepeatOffendersPdf(){
   if (_repeatOffendersPdfGenerating) return;
   const btn = document.getElementById('repeatOffendersDownloadPdfBtn');
@@ -267,16 +331,16 @@ async function downloadRepeatOffendersPdf(){
   if (statusEl) { statusEl.textContent = ''; statusEl.style.color = 'var(--text-faint)'; }
 
   try {
-    const specs = _repeatOffendersPdfBuildPageSpecs();
+    const filterInfo = _repeatOffendersPdfCurrentFilterInfo();
+    const specs = _repeatOffendersPdfBuildPageSpecs(filterInfo);
     if (!specs.length) {
-      if (statusEl) { statusEl.textContent = 'No flagged instances in the last 3 days or Last 7 Days under the current filters — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
+      if (statusEl) { statusEl.textContent = 'No data available for the selected period.'; statusEl.style.color = 'var(--amber)'; }
       return;
     }
-    const filterSummaryLine = _repeatOffendersPdfFilterSummaryLine();
-    const doc = await _repeatOffendersPdfRenderPages(specs, filterSummaryLine);
+    const doc = _repeatOffendersPdfRenderPages(specs, filterInfo);
     const filenameDate = istDateKey(new Date());
     doc.save(`Repeat-Offender-Report-${filenameDate}.pdf`);
-    const pageCount = specs.length + 1;
+    const pageCount = doc.internal.getNumberOfPages();
     if (statusEl) { statusEl.textContent = `Downloaded (${pageCount} page${pageCount === 1 ? '' : 's'}).`; statusEl.style.color = 'var(--green)'; }
   } catch (err) {
     console.error('downloadRepeatOffendersPdf failed:', err);
