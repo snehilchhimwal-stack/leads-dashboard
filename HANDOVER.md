@@ -7,8 +7,10 @@ duplicate what the code comments already say in detail — where a file's own
 header comment covers something thoroughly, this doc points at it instead of
 repeating it.
 
-Written 2026-08-31. If something below goes stale, fix this file in the same
-commit that changes the thing it describes.
+Written 2026-08-31, updated 2026-09-02 (added the Daily_RM_Issues/Repeat
+Offenders subsystem — §9 — and the day's other fixes; see §9 for what's new).
+If something below goes stale, fix this file in the same commit that changes
+the thing it describes.
 
 ---
 
@@ -29,7 +31,8 @@ Google Sheet as a data layer:
 2. **The Apps Script backend** (`Core.gs`, `SlaEngine.gs`,
    `FollowupEngine.gs`, `EmailInfra.gs`, `MovementTracker.gs`,
    `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `RmHierarchy.gs`,
-   `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`) — a script bound to
+   `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`, `DailyRmIssueLog.gs`
+   — see §9) — a script bound to
    the same Google Sheet, running on Google's own servers on a fixed
    schedule. It exists specifically for the things a static page can't do
    unattended: snapshotting the sheet every 6 hours and sending automatic
@@ -61,6 +64,7 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
 | `js/tab-rmtimeline.js` | RM Timeline tab — per-RM daily calendar and day timeline. |
 | `js/tab-movement.js` | Movement tab — reads the `Movement_Log` sheet tab that `MovementTracker.gs` populates; stalled leads, overnight cohort, RM stall leaderboard, time-to-Opportunity. |
+| `js/tab-repeat-offenders.js` | Repeat Offenders tab (own top-level tab, added 2026-09-01) — reads the `Daily_RM_Issues` sheet tab that `DailyRmIssueLog.gs` populates nightly; RM/A1-TM/RH/Region leaderboards ranked by Avg Flagged (instances ÷ distinct leads). See §9 for the whole subsystem, including a real Time-range filtering gotcha worth reading before touching this file. |
 | `js/tab-morning.js` | Morning Brief tab — 10 summary cards, all backed by data other tabs already compute (no new logic). |
 | `js/reports.js` | Region email report generation + the Gmail send flow (separate OAuth grant — see §4). |
 | `js/sheets-writeback.js` | Every write path back to the Sheet: on-demand Movement_Log snapshot, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`. |
@@ -76,14 +80,16 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | `RmHierarchy.gs` | Resolves each RM's manager chain (A1/TM/RH/CH) from the HR export, so issue emails route to the right specific managers. |
 | `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. |
+| `DailyRmIssueLog.gs` | Nightly (22:50 IST) full-company SLA-issue census — feeds `js/tab-repeat-offenders.js`. Added 2026-09-01. See §9 — this one has real operational quirks (unbounded nightly row growth, a real incident where a run took ~8min and wrote nothing) worth knowing before you're debugging it live. |
 | `Tests_*.gs` | The Apps Script mock test suite — see §7. |
 | `working files on 28th for automatic email/` | **Not in git**, and not authoritative — a manual backup snapshot of a few `.gs` files from mid-development. The root-level `.gs` files are always the source of truth; this folder is safe to ignore or delete. |
 | `design/live-ops-redesign.html` | A standalone visual mockup from an earlier exploration pass — not wired to real data, not part of the live app. |
 
 **Load order matters** for the `<script src>` tags in `dashboard.html`:
 `core.js` → `tab-audit.js` → `tab-tracking.js` → `tab-rmtimeline.js` →
-`tab-movement.js` → `tab-morning.js` → `reports.js` → `sheets-writeback.js` →
-`overview-distribution-people-ops.js` → `main.js`. These are classic
+`tab-movement.js` → `tab-repeat-offenders.js` → `tab-morning.js` →
+`reports.js` → `sheets-writeback.js` → `overview-distribution-people-ops.js` →
+`main.js`. These are classic
 `<script>` tags (no modules, no bundler) sharing one global scope — a
 function or `let`/`const` defined in one file is a bare global every later
 file can call directly. If you add a new `js/*.gs` file, add its `<script
@@ -233,6 +239,7 @@ re-running after an edit never leaves a duplicate):
 | `setupMovementTracking()` | `MovementTracker.gs` | 4 daily triggers at 00:00, 06:00, 12:00, 18:00 IST (`SNAPSHOT_HOURS_`) → `snapshotPeriodic` → snapshot + SLA_History row. Also removes any stale legacy `snapshotEvening` trigger. |
 | `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
+| `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
 
 None of these have a menu/`onOpen()` — they only run from the Apps Script
 editor's function dropdown (select the function name, click Run), by a human
@@ -280,6 +287,7 @@ Beyond the leads tab itself (one fixed tab, named `leads` — see
 | `Daily_Cohort_History` | `js/sheets-writeback.js` | Tracking tab's cohort comparison |
 | `Unmatched_Comments_Log` | `UnmatchedCommentLogger.gs` (piggybacks on every `snapshotOpenLeads_` run) | Manual human review — the source for deciding what to add to `OUTCOME_RULES`/`OUTCOME_RULES_GS_` next |
 | `RM_Hierarchy`, `Manager_Directory` | `setupRmHierarchy()` (one-time, then manually maintained) | `RmHierarchy.gs`'s recipient routing |
+| `Daily_RM_Issues` | `DailyRmIssueLog.gs` (nightly, 22:50 IST) + its own backfill/repair utilities | `js/tab-repeat-offenders.js` (Repeat Offenders tab) — see §9 |
 
 ---
 
@@ -382,3 +390,109 @@ test) Sheet, and use the browser console directly.
   `Unmatched_Comments_Log` — if the exact phrasing shows up there, the
   keyword engine genuinely doesn't recognize it yet; that's the signal to
   add a rule per §6, not a bug to chase elsewhere.
+- **A night's Daily_RM_Issues capture looks missing** (Repeat Offenders shows
+  suspiciously little for a day you'd expect data): check Apps Script
+  Executions for `captureDailyRmIssues` around 22:50 IST that night — a real
+  2026-09-01 incident had it run for ~475s (platform-reported duration) and
+  write zero rows, with no crash alert to explain why. If a specific night is
+  confirmed missing, run `backfillOneDayFromMovementLogNow('YYYY-MM-DD')`
+  (no argument defaults to yesterday) to recover it from Movement_Log — see
+  §9.
+- **AllIssuesEmailer's 17:00 send looks unusually slow**: check Executions
+  for `sendAllIssuesEmails` — as of 2026-09-02 it logs `[timing]` markers
+  after each preliminary read, after each region, and a final summary
+  (elapsed + bucket count), specifically so a slow run is diagnosable
+  without guesswork. A real incident had a normal ~few-minute run balloon to
+  ~50 minutes; root cause was `withSendRetry_`'s "Not found" retry (a Gmail
+  createDraft()/send() eventual-consistency race) using a rate-limit-sized
+  backoff for a millisecond-scale timing issue — since fixed to a flat
+  400ms for that specific error (EmailInfra.gs).
+
+---
+
+## 9. Repeat Offenders (the Daily_RM_Issues subsystem)
+
+Added 2026-09-01, iterated heavily that day and the next. This is the
+newest, least battle-tested part of the system — read this section before
+changing anything under it.
+
+### 9.1 What it is and why
+
+Operations (§1) shows the 5 SLA checks against the CURRENT live sheet —
+it can't tell you whether a lead's problem is a one-off or the same lead
+breaking rules night after night. `DailyRmIssueLog.gs` exists to answer
+that: every night at 22:50 IST, `captureDailyRmIssues` scans **every
+currently open lead in the whole company** (deliberately unscoped by
+date or region — see its own header comment) and writes one row per
+lead currently flagged for any of the 5 SLA checks into `Daily_RM_Issues`.
+The dashboard's Repeat Offenders tab (`js/tab-repeat-offenders.js`) reads
+that accumulated history and ranks RMs/managers/regions by **Avg
+Flagged** (instances ÷ distinct leads) — a lead flagged on 5 different
+nights counts as 5 instances against 1 lead, which is exactly the
+"keeps coming back" signal the feature is built to surface.
+
+### 9.2 A real scale/reliability gotcha
+
+Because the nightly scan is unscoped, `Daily_RM_Issues` grows by
+**tens of thousands of rows per night** (one real capture alone produced
+~26,660 rows) — this is by design, not a leak, but it means every
+capture run genuinely does a lot of work: a full read of the leads tab,
+a full read of `Movement_Log` (the largest sheet in the project), and
+one very large write. A real 2026-09-01 incident: that night's
+`captureDailyRmIssues` execution ran for ~475s (Executions log) but
+wrote **zero rows**, with no crash alert — the leading theory is a
+single oversized `setValues()` write failing non-transiently, though
+this was never definitively confirmed from the Executions log alone (no
+error text was shared). `backfillOneDayFromMovementLogNow()` (below)
+exists specifically to recover from exactly this, and now writes in
+5,000-row chunks instead of one call, so a future failure loses at most
+one chunk instead of the whole night.
+
+### 9.3 Utility functions (console-callable, `DailyRmIssueLog.gs`)
+
+| Function | What it does |
+|---|---|
+| `captureDailyRmIssuesNow()` | Runs tonight's capture immediately (same logic the 22:50 trigger runs). Idempotent per IST day — a second run the same day does nothing. |
+| `backfillDailyRmIssuesFromMovementLogNow()` | Reconstructs **every** day `Movement_Log` still retains (up to 7 days) that `Daily_RM_Issues` doesn't already have rows for, using each day's latest snapshot as a stand-in for the missed 22:50 capture. One combined write across all days found. |
+| `backfillOneDayFromMovementLogNow(dayKey?)` | Added 2026-09-02, in response to the incident in §9.2. Same idea, but scoped to exactly **one** day — no argument defaults to yesterday. Lower blast radius than the multi-day version, and writes in chunks (see §9.2). This is the one to reach for after confirming a specific night is missing. |
+| `repairDailyRmIssuesMissingFieldsNow()` | One-off repair for rows written before `TL`/`group_source`/`source_bucket`/`lead_assigned_at` existed in the schema — backfills them from `Movement_Log` by matching `lead_id` and nearest timestamp. Safe to re-run; leaves already-complete rows untouched. |
+| `reportRepeatOffenderRmsNow()` | Logs a quick RM leaderboard straight to the Apps Script console — a lighter-weight sanity check than opening the dashboard. |
+
+### 9.4 The Time-range filter's date-basis split (dashboard side) — read before touching `js/tab-repeat-offenders.js`
+
+The Repeat Offenders tab has its own Time range dropdown (Yesterday /
+This Week / Last 7 Days / From when history began / Custom range — no
+"Today", since capture only happens once, late at night). This dropdown
+does **not** use one consistent date field — and that's deliberate,
+learned the hard way from two real, contradictory bug reports the same
+day:
+
+- **Yesterday / Custom range** match on `leadAssignedDateKey` (the
+  lead's own `lead_assigned_at`, not the night it was captured) — fixed
+  after a report that "Today" was showing more flagged leads than the
+  RM had even been assigned that day. Answers "how many of yesterday's
+  newly-assigned leads are already a problem."
+- **This Week / Last 7 Days** match on `date` instead (the night the row
+  was captured) — reverted back to this after the OPPOSITE report:
+  applying the assignment-date rule here made a real, severe repeat
+  offender (14 old leads, 60 real instances across the week) collapse to
+  1 lead / 6 instances, because a genuine repeat offender's leads are
+  almost always OLD — their assignment date is never "this week," even
+  while they keep generating fresh instances every night. Answers "how
+  much repeat-flagging activity happened in this window, regardless of
+  how old the lead is."
+- **All-time** applies no date filter at all either way.
+
+If you're tempted to "simplify" this back to one consistent rule,
+re-read both bullets above first — each one exists because the other
+rule was tried and broke a real, reported case.
+
+### 9.5 Known open issue
+
+**Not yet root-caused**: a user report that Repeat Offenders is "not
+working properly" specifically for the `isNotUpdated` ("Not Updated" /
+CRM Not Updated) issue type — no reproduction steps captured yet, logged
+in the To-Do Dashboard (`C:\Users\User\Desktop\Strategy\To-do Dashboard\tasks.json`,
+task `t-41`) rather than fixed. Needs a specific example (lead ID +
+what was expected vs. shown) before it can be diagnosed the same
+ground-truth way §9.4's two bugs were.
