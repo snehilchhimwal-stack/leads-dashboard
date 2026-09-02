@@ -180,6 +180,20 @@ function _repeatOffendersPdfEnsureRoom(doc, y, minSpace){
   return y;
 }
 
+// A real (if approximate) height estimate for the table BEFORE handing it
+// to autoTable — the room-check below needs this, not a fixed guess, to
+// actually keep a heading/title attached to its table. A row is ~fontSize
+// + 2*cellPadding + a little leading; "Top Issues" is capped at 2 issue
+// entries by _repeatOffendersPdfSectionTables, so it wraps to at most a
+// couple of lines even in the worst case — the flat per-row constants
+// below already budget for that, so this stays a same-order-of-magnitude
+// estimate without needing to actually measure wrapped text width.
+function _repeatOffendersPdfEstimateTableHeight(rowCount, compact){
+  const rowH = compact ? 15 : 20;
+  const headerH = compact ? 20 : 26;
+  return headerH + rowCount * rowH;
+}
+
 // Builds the whole PDF as real vector content — no canvas, no images.
 // One doc.autoTable() call per table; each only advances the page cursor
 // by its own actual rendered height, so several small tables naturally
@@ -235,13 +249,32 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
 
   let currentDateLabel; // undefined sentinel — first spec always draws its own heading (or none, if dateLabel is null)
   let firstSection = true;
+  const pageUsableH = doc.internal.pageSize.getHeight() - REPEAT_OFFENDERS_PDF_MARGIN_ * 2;
 
   specs.forEach(function (spec) {
-    if (spec.dateLabel !== currentDateLabel) {
+    const rows = _repeatOffendersPdfTableRows(spec.list);
+    const compact = rows.length > 20; // beyond this app's own current per-table cap — defensive, not expected to trigger today
+    // Clamped to one full page's worth: a table taller than that can never
+    // fit regardless of where it starts, so there's nothing more this
+    // check can do for it — autoTable's own pageBreak:'avoid' still keeps
+    // it from being SPLIT, it just runs past the estimate in that rare case.
+    const estTableH = Math.min(_repeatOffendersPdfEstimateTableHeight(rows.length, compact), pageUsableH);
+    const TITLE_H = 26;
+    const isNewDate = spec.dateLabel !== currentDateLabel;
+    const DATE_HEADING_H = isNewDate && spec.dateLabel ? 32 : 0;
+
+    // ONE combined room check covering date heading (if this table starts
+    // a new date section) + table title + the table's own estimated
+    // height — so a heading/title is never drawn on a page that can't
+    // also fit at least the start of its table (the exact bug a fixed,
+    // too-small minSpace guess produced: "By Region" printed at the
+    // bottom of a page with the actual table pushed to the next one).
+    y = _repeatOffendersPdfEnsureRoom(doc, y, DATE_HEADING_H + TITLE_H + estTableH);
+
+    if (isNewDate) {
       currentDateLabel = spec.dateLabel;
       if (!firstSection) y += 8; // small extra breathing room between date sections
       if (spec.dateLabel) {
-        y = _repeatOffendersPdfEnsureRoom(doc, y, 110); // heading + room for at least the start of its first table
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(11);
         doc.setTextColor(55, 59, 68);
@@ -256,15 +289,11 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     firstSection = false;
 
     // Table title
-    y = _repeatOffendersPdfEnsureRoom(doc, y, 90);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(30, 33, 38);
     doc.text(spec.title, REPEAT_OFFENDERS_PDF_MARGIN_, y);
     y += 12;
-
-    const rows = _repeatOffendersPdfTableRows(spec.list);
-    const compact = rows.length > 20; // beyond this app's own current per-table cap — defensive, not expected to trigger today
     doc.autoTable({
       startY: y,
       head: [['#', 'Name', 'Leads', 'Instances', 'Avg Flagged', 'Top Issues']],
