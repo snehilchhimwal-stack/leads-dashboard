@@ -270,6 +270,87 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = realSs5;
     }
 
+    // ---- backfillOneDayFromMovementLog_: single-day recovery (real 2026-09-01 incident) ----
+    const odSs = TestMockSpreadsheet_({});
+    const odMovementSheet = ensureMovementLogSheet_(odSs);
+    const odMovementHeader = odMovementSheet.getRange(1, 1, 1, odMovementSheet.getLastColumn()).getValues()[0];
+    const odRow = function (overrides) {
+      const defaults = {
+        snapshot_at: null, snapshot_label: 'test', lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM One', TL: 'Test A1 One',
+        project: 'Test Project', region: 'Pune', client: 'Client',
+        lead_assigned_at: '', group_source: 'google', source_bucket: 'Non-UTM', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '',
+        internal_status_comments: '', closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, stage_comments: '',
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return odMovementHeader.map(function (k) { return merged[k]; });
+    };
+
+    const odTargetDay = TestFixture_daysAgo_(now, 1); // "yesterday" — the common real-world case
+    const odTargetDayKey = istDayKeyGs_(odTargetDay);
+    const odEarly = TestFixture_hoursAgo_(new Date(istDayKeyGs_(odTargetDay) + 'T12:00:00+05:30'), 3); // 09:00 IST that day
+    const odLate = TestFixture_hoursAgo_(new Date(istDayKeyGs_(odTargetDay) + 'T12:00:00+05:30'), -3); // 15:00 IST — the day's latest run, should win
+    const odOtherDay = TestFixture_daysAgo_(now, 2); // a DIFFERENT day, present in Movement_Log — must be left alone
+
+    odMovementSheet.appendRow(odRow({ snapshot_at: odEarly, lead_id: 'L-OD-EARLYONLY', client_id: 'C-OD-EARLYONLY', lead_assigned_at: TestFixture_hoursAgo_(odEarly, 1) }));
+    odMovementSheet.appendRow(odRow({ snapshot_at: odLate, lead_id: 'L-OD-FLAGGED', client_id: 'C-OD-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(odLate, 60) }));
+    odMovementSheet.appendRow(odRow({ snapshot_at: odLate, lead_id: 'L-OD-CLOSED', client_id: 'C-OD-CLOSED', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(odLate, 60) }));
+    odMovementSheet.appendRow(odRow({ snapshot_at: odOtherDay, lead_id: 'L-OD-OTHERDAY', client_id: 'C-OD-OTHERDAY', lead_assigned_at: TestFixture_hoursAgo_(odOtherDay, 60) }));
+
+    const odLogSheet = ensureDailyRmIssueLogSheet_(odSs);
+    const odResult = backfillOneDayFromMovementLog_(odSs, odTargetDayKey);
+
+    TestAssertEqual_(odResult.skipped, false, 'backfillOneDayFromMovementLog_: a genuinely missing day is not reported as skipped');
+    TestAssertEqual_(odResult.rowsWritten, 1, 'backfillOneDayFromMovementLog_: writes exactly 1 row (the one flagged, open lead from the target day\'s LATEST run)');
+
+    const odLoggedRows = odLogSheet.getRange(2, 1, odLogSheet.getLastRow() - 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
+    const odById = {};
+    odLoggedRows.forEach(function (r) { odById[r[4]] = r; });
+
+    TestAssert_(!odById['L-OD-EARLYONLY'], 'backfillOneDayFromMovementLog_: a lead only present in an EARLIER same-day run is excluded — only the day\'s latest run counts');
+    TestAssert_(!!odById['L-OD-FLAGGED'], 'backfillOneDayFromMovementLog_: the flagged open lead from the target day\'s latest run is backfilled');
+    TestAssert_(!odById['L-OD-CLOSED'], 'backfillOneDayFromMovementLog_: a closed lead is excluded even from the latest run');
+    TestAssert_(!odById['L-OD-OTHERDAY'], 'backfillOneDayFromMovementLog_: a DIFFERENT day\'s Movement_Log data is left alone — only the requested dayKey is touched');
+    TestAssertEqual_(odById['L-OD-FLAGGED'][0], odTargetDayKey, 'backfillOneDayFromMovementLog_: date column is the requested dayKey, not today');
+    TestAssertEqual_(odById['L-OD-FLAGGED'][9], 'Test A1 One', 'backfillOneDayFromMovementLog_: TL column captured from Movement_Log');
+    TestAssertEqual_(odById['L-OD-FLAGGED'][10], 'google', 'backfillOneDayFromMovementLog_: group_source column captured');
+
+    // Re-running the SAME day is safe — idempotency guard skips it.
+    const odResult2 = backfillOneDayFromMovementLog_(odSs, odTargetDayKey);
+    TestAssertEqual_(odResult2.skipped, true, 'backfillOneDayFromMovementLog_: re-running the same day reports skipped');
+    TestAssertEqual_(odResult2.rowsWritten, 0, 'backfillOneDayFromMovementLog_: re-running the same day writes nothing new');
+
+    // A day with no Movement_Log snapshot at all (aged out / never existed).
+    const odMissingResult = backfillOneDayFromMovementLog_(odSs, '2020-01-01');
+    TestAssertEqual_(odMissingResult.rowsWritten, 0, 'backfillOneDayFromMovementLog_: a day with no Movement_Log snapshot writes nothing and does not throw');
+    TestAssertEqual_(odMissingResult.skipped, false, 'backfillOneDayFromMovementLog_: a day with no snapshot is reported as not-skipped (genuinely nothing to find, not "already done")');
+
+    // Safe against a spreadsheet with no Movement_Log at all yet.
+    const odEmptySs = TestMockSpreadsheet_({});
+    const odEmptyResult = backfillOneDayFromMovementLog_(odEmptySs, odTargetDayKey);
+    TestAssertEqual_(odEmptyResult.rowsWritten, 0, 'backfillOneDayFromMovementLog_: does not throw and writes nothing when Movement_Log does not exist yet');
+
+    // Console-callable wrapper: no dayKey given -> defaults to yesterday (IST).
+    const realSs7 = SpreadsheetApp;
+    const wrapperSs = TestMockSpreadsheet_({});
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return wrapperSs; }, flush: function () {} };
+    try {
+      const wrapperResult = backfillOneDayFromMovementLogNow();
+      TestAssertEqual_(wrapperResult.rowsWritten, 0, 'backfillOneDayFromMovementLogNow: does not throw with no argument (defaults to yesterday) against an empty spreadsheet');
+    } finally {
+      SpreadsheetApp = realSs7;
+    }
+    // And an explicit dayKey argument is honored, not overridden by the
+    // yesterday default — target odSs's already-captured day, which
+    // should come back skipped rather than silently re-defaulting.
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return odSs; }, flush: function () {} };
+    try {
+      const explicitResult = backfillOneDayFromMovementLogNow(odTargetDayKey);
+      TestAssertEqual_(explicitResult.skipped, true, 'backfillOneDayFromMovementLogNow: an explicit dayKey argument is honored (targets the already-captured day, correctly skipped) rather than silently defaulting to yesterday');
+    } finally {
+      SpreadsheetApp = realSs7;
+    }
+
     // ---- repairDailyRmIssuesMissingFieldsNow(): real 2026-09-01 incident ----
     const repairSs = TestMockSpreadsheet_({});
     const repairMovementSheet = ensureMovementLogSheet_(repairSs);
