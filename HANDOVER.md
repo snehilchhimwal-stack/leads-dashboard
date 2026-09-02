@@ -40,7 +40,7 @@ Google Sheet as a data layer:
 
 Because these are genuinely separate runtimes (browser JS vs. Apps Script),
 several pieces of business logic are **intentionally duplicated** — e.g. the
-comment-classification keyword rules exist once in `js/core.js`
+comment-classification keyword rules exist once in `js/core-outcome-engine.js`
 (`OUTCOME_RULES`) and once in `FollowupEngine.gs`
 (`OUTCOME_RULES_GS_`), because Apps Script cannot `import` a browser file.
 Any change to shared logic (SLA rules, comment classification, stage
@@ -59,7 +59,7 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | File | Role |
 |---|---|
 | `dashboard.html` | The page shell: `<style>` block (dark theme), all markup/tab containers, the sign-in gate UI, and `<script src>` tags loading the `js/*.js` files below **in order** (order matters — see §3). |
-| `js/core.js` | Loaded first. Shared foundation: row parsing, header-alias mapping, `enrichLead` (the single source of truth for a lead's derived state — SLA flags, stage, funnel position), the sign-in gate (`GATE_SCOPE`), comment classification (`OUTCOME_RULES`/`inferOutcome`), IST date helpers. Everything else depends on this file. |
+| `js/core-*.js` (9 files) | Loaded first, in this order: `core-foundation.js` (CONFIG, ISSUE_PRIORITY, IST date helpers) → `core-sheets-fetch.js` (HEADER_ALIASES, the `leads`/`issueLeads`/`filterState` module state, Sheets API v4 read + gviz parsing) → `core-auth.js` (the sign-in gate, `GATE_SCOPE`) → `core-lead-model.js` (stage classifiers + `enrichLead`, the single source of truth for a lead's derived state — SLA flags, stage, funnel position) → `core-collation.js` (multi-RM-copy dedup/collation display) → `core-outcome-engine.js` (comment classification, `OUTCOME_RULES`/`inferOutcome`) → `core-fetch-and-render.js` (`fetchAndRender` itself) → `core-ui.js` (generic UI chrome: `esc`, loading overlay, alert cards) → `core-filters.js` (`applyFiltersAndRender`, the filter-bar UI). Formerly one `js/core.js` file (3,120 lines) — split in the 2026-09 modularity refactor (pure code motion, no logic changed; see git history). Everything else still depends on this whole group exactly as it depended on the single file before — order AMONG the 9 mostly doesn't matter (see `core-foundation.js`'s own header comment for why), but all 9 must load before every other `js/*.js` file below. |
 | `js/tab-audit.js` | Audit tab — "when was a lead last touched." |
 | `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
 | `js/tab-rmtimeline.js` | RM Timeline tab — per-RM daily calendar and day timeline. |
@@ -108,7 +108,7 @@ project (see §4.3).
 
 ## 3. How the dashboard works (browser side)
 
-1. **Sign-in gate** (`js/core.js`, `#authGate` in `dashboard.html`) — the
+1. **Sign-in gate** (`js/core-auth.js`, `#authGate` in `dashboard.html`) — the
    page shows nothing until the user authorizes. Requests `GATE_SCOPE`
    (`.../auth/spreadsheets` + `.../auth/userinfo.email`) via Google
    Identity Services' token client. Nothing loads without this.
@@ -116,10 +116,12 @@ project (see §4.3).
    to the production sheet, see §4.1) and clicks fetch. `fetchAndRender()`
    pulls the leads tab (a single fixed name, `TAB_NAME_OVERRIDE` in
    `Core.gs` on the Apps Script side / the `#tabNameInput` field in
-   `js/core.js` on the browser side — currently `leads`; earlier versions
-   of this project auto-detected a rotating monthly tab name, but the
-   sheet no longer rotates), parses every row through
-   `HEADER_ALIASES` → `enrichLead()`, and calls `renderAll()`.
+   `js/core-fetch-and-render.js` on the browser side — currently `leads`;
+   earlier versions of this project auto-detected a rotating monthly tab
+   name, but the sheet no longer rotates), parses every row through
+   `HEADER_ALIASES` (`js/core-sheets-fetch.js`) → `enrichLead()`
+   (`js/core-lead-model.js`, called from `applyFiltersAndRender` in
+   `js/core-filters.js`), and calls `renderAll()`.
 3. `renderAll()` (in `overview-distribution-people-ops.js`) renders **every**
    tab in one pass — tab switching afterward is a pure `display:none` toggle
    on pre-rendered DOM, not a re-render.
@@ -256,11 +258,15 @@ real people/addresses, hardcoded — update on personnel change):
 | `TEST_MODE_OVERRIDE_EMAIL_` | `EmailInfra.gs` | `''` (empty) | Safety valve: if set to a real address, **every** real send (not just tests) redirects there instead of real recipients. Leave empty in production; useful for a live smoke-test without running the mock suite. |
 
 Also worth knowing: **console-only utilities**, callable from the Apps
-Script/browser console but with no button anywhere in the UI (confirmed
-intentional, not an oversight) — `clearSlaHistory()` /
-`backfillSlaHistoryFromMovementLog()` (`js/core.js` /
-`js/sheets-writeback.js`), `downloadNoIssueLeadsNow()` /
-`debugFollowupStatusNow()` (`OvernightEmailer.gs`).
+Script/browser console with no button in the UI (confirmed intentional,
+not an oversight) — `downloadNoIssueLeadsNow()` / `debugFollowupStatusNow()`
+(`OvernightEmailer.gs`), `debugDailyCohortEvidence()` (`js/tab-tracking.js`).
+`clearSlaHistory()` / `backfillSlaHistoryFromMovementLog()`
+(`js/core-filters.js` / `js/sheets-writeback.js`) and the equivalent pair
+for `Daily_Cohort_History` (`js/sheets-writeback.js`) are no longer
+console-only — Tracking → SLA History Maintenance / Daily Cohort History
+have real buttons for both now — but both stay callable from the console
+too.
 
 ### 4.4 GitHub repo access
 
@@ -295,14 +301,17 @@ Beyond the leads tab itself (one fixed tab, named `leads` — see
 
 Because the browser and Apps Script can't share code, these pairs must be
 edited **together**. Each `.gs` file's header comment names exactly which
-`js/core.js` construct it ports from — check there before assuming a
+browser-side construct it ports from (still describing the file as
+`js/core.js` in some older comments — that file was later split into the
+9 `js/core-*.js` files in §2's table, pure code motion, so the construct
+itself hasn't moved logic, just files) — check there before assuming a
 one-line fix in one file is complete:
 
-| Concept | Browser (`js/core.js`) | Apps Script |
+| Concept | Browser | Apps Script |
 |---|---|---|
-| Row parsing / header aliases | `HEADER_ALIASES` | `HEADER_ALIASES_` (`Core.gs`) |
-| Stage classification / SLA flags | `enrichLead()` | `computeSlaFlags_` (`SlaEngine.gs`) |
-| Comment classification | `OUTCOME_RULES` / `inferOutcome` | `OUTCOME_RULES_GS_` / `inferOutcomeGs_` (`FollowupEngine.gs`) |
+| Row parsing / header aliases | `HEADER_ALIASES` (`js/core-sheets-fetch.js`) | `HEADER_ALIASES_` (`Core.gs`) |
+| Stage classification / SLA flags | `enrichLead()` (`js/core-lead-model.js`) | `computeSlaFlags_` (`SlaEngine.gs`) |
+| Comment classification | `OUTCOME_RULES` / `inferOutcome` (`js/core-outcome-engine.js`) | `OUTCOME_RULES_GS_` / `inferOutcomeGs_` (`FollowupEngine.gs`) |
 | Suggested follow-up text | `FOLLOWUP_SUGGESTIONS` | `FollowupEngine.gs` |
 
 A new comment pattern found via `Unmatched_Comments_Log` (§5) needs a keyword
