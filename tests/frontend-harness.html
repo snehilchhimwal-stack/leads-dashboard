@@ -1,0 +1,309 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Frontend regression harness</title>
+<!--
+  ============================================================
+  tests/frontend-harness.html — saved, re-runnable browser-JS
+  regression harness for dashboard.html + js/*.js.
+
+  WHY THIS EXISTS: the dashboard has zero committed frontend tests (the
+  11 Tests_*.gs files only cover the Apps Script backend). Every prior
+  verification of a frontend change in this project's history was an ad
+  hoc synthetic-data probe built fresh each time and thrown away. This
+  file formalizes that same proven technique — mock the network boundary
+  (sheetsApiValuesGet + the OAuth token pair), run the REAL render
+  pipeline against synthetic data, assert on the resulting DOM — into one
+  saved file that never drifts from the real app, because it loads
+  dashboard.html and js/*.js LIVE at run time rather than embedding a
+  copy of either:
+    1. fetch()es the real dashboard.html and grafts its <body> into this
+       page, so every element id a render function targets already exists.
+    2. Reads dashboard.html's OWN <script src="js/..."> list (in its own
+       declared order) and injects those exact files — a future file
+       added/removed/reordered in dashboard.html is picked up here
+       automatically; this harness can never silently go stale against it.
+    3. Overrides sheetsApiValuesGet (the single real network-read choke
+       point every js/*.js file goes through — see core.js) to serve a
+       synthetic Leads-tab dataset and an empty array for every other
+       tab (Movement_Log / Daily_RM_Issues / RM_Hierarchy / ...), so the
+       "no history yet" / "MovementTracker.gs not set up" degrade paths
+       get exercised for free rather than skipped.
+    4. Runs fetchAndRender() for real, waits out its two chained
+       setTimeout(...,0) render passes (see applyFiltersAndRender in
+       core.js — the same reason earlier ad hoc runs needed calling
+       twice for determinism), then asserts against the live DOM.
+
+  HOW TO RUN: preview_start the "dashboard" launch config (serves the
+  whole repo over http, which fetch() here needs — this will NOT work
+  opened as a local file:// page), then navigate to
+  /tests/frontend-harness.html. Read window.__harnessResults or the
+  on-page log afterward, or read_console_messages for the single
+  HARNESS_RESULT line this prints as JSON.
+
+  COVERAGE (first slice — see HANDOVER.md refactor notes for what's
+  still deferred): Overview (KPI strip, region table), all 7 Operations
+  alert-card issue types plus Approaching-48h, People (RM Workload),
+  Audit (renders), tab switching, and the graceful empty-history path
+  for Repeat Offenders/Movement/Tracking. NOT yet covered: those three
+  tabs' actual DATA-populated paths (would need synthetic Movement_Log
+  and Daily_RM_Issues rows too), Reports/Gmail send flows, Sheets
+  write-back paths (snapshot, follow-ups push, SLA history) — those
+  mock `fetch`/`sheetsApiValuesGet` themselves per-test, following this
+  same pattern, the way earlier ad hoc verification already did.
+  ============================================================
+-->
+<style>
+  body{ font-family:'Consolas','IBM Plex Mono',monospace; background:#0f1216; color:#e7eaee; padding:20px; }
+  #status{ font-size:15px; font-weight:600; margin-bottom:10px; }
+  #log{ white-space:pre-wrap; font-size:12.5px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div id="status">Loading dashboard.html…</div>
+<pre id="log"></pre>
+<script>
+(async function () {
+  const logEl = document.getElementById('log');
+  const statusEl = document.getElementById('status');
+  const results = { pass: 0, fail: 0, failures: [] };
+
+  function log(line) { logEl.textContent += line + '\n'; }
+  function assert(name, cond, detail) {
+    if (cond) { results.pass++; log('PASS  ' + name); }
+    else { results.fail++; results.failures.push(name + (detail ? ' — ' + detail : '')); log('FAIL  ' + name + (detail ? ' — ' + detail : '')); }
+  }
+
+  // ---- 1. Fetch the REAL dashboard.html and graft its body into this page ----
+  let htmlText;
+  try {
+    htmlText = await fetch('../dashboard.html').then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    });
+  } catch (e) {
+    statusEl.textContent = 'FATAL: could not fetch ../dashboard.html — this harness must be served over http (preview_start the "dashboard" config), not opened as a local file. ' + e.message;
+    statusEl.style.color = '#ff5d5d';
+    return;
+  }
+  const parsed = new DOMParser().parseFromString(htmlText, 'text/html');
+
+  const harnessUi = document.createElement('div');
+  harnessUi.id = '__harnessUi';
+  harnessUi.style.cssText = 'position:fixed; top:0; right:0; width:420px; max-height:100vh; overflow:auto; background:#0f1216; border-left:1px solid #2a3038; padding:16px; z-index:99999;';
+  harnessUi.appendChild(statusEl);
+  harnessUi.appendChild(logEl);
+
+  document.body.innerHTML = parsed.body.innerHTML;
+  document.body.appendChild(harnessUi);
+
+  const authGate = document.getElementById('authGate');
+  if (authGate) authGate.style.display = 'none';
+  const appShell = document.getElementById('appShell');
+  if (appShell) appShell.style.display = '';
+
+  // ---- 2. Load the real js/*.js files, in dashboard.html's OWN declared order ----
+  const scriptSrcs = Array.from(parsed.querySelectorAll('script[src^="js/"]')).map(s => s.getAttribute('src'));
+  if (!scriptSrcs.length) {
+    statusEl.textContent = 'FATAL: found no <script src="js/..."> tags in dashboard.html — did its markup change shape?';
+    statusEl.style.color = '#ff5d5d';
+    return;
+  }
+  for (const src of scriptSrcs) {
+    await new Promise((resolve, reject) => {
+      const tag = document.createElement('script');
+      tag.src = '../' + src;
+      tag.onload = resolve;
+      tag.onerror = () => reject(new Error('failed to load ' + src));
+      document.head.appendChild(tag);
+    });
+  }
+  statusEl.textContent = 'Scripts loaded (' + scriptSrcs.length + '). Building synthetic dataset…';
+
+  // ---- 3. Synthetic dataset ----
+  // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
+  // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),
+  // so leads land in the right SLA bucket regardless of the machine running
+  // this harness's own timezone.
+  function istWall(msAgo) {
+    const d = new Date(Date.now() - msAgo + 330 * 60000);
+    const p = n => String(n).padStart(2, '0');
+    return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + ' ' +
+      p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+  }
+  const H = 3600000;
+  const ago = h => istWall(h * H);
+
+  const headers = ['lead_id', 'RM', 'TL', 'rm_is_active', 'project', 'region', 'project_region', 'client',
+    'lead_assigned_at', 'group_source', 'source_bucket', 'current_stage', 'client_id',
+    'last_connect', 'last_connect_time', 'last_comment', 'internal_status_comments', 'stage_comments',
+    'closing_reason', 'lead_closing_reason', 'lead_closing_comment', 'call_attempts', 'call_count', 'duration'];
+  function row(o) { return headers.map(h => (o[h] !== undefined ? o[h] : '')); }
+
+  const rows = [
+    // L001 — Inactive-RM Lead Added: fresh today, RM marked inactive.
+    row({ lead_id: 'L001', RM: 'Neha Singh', TL: 'Aman Verma', rm_is_active: false, project: 'Riverside Residency', region: 'South',
+      client: 'Client A', lead_assigned_at: ago(2), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Not Updated',
+      client_id: 'C001', call_attempts: 0 }),
+    // L002 — Not Updated: past grace, zero comments/calls.
+    row({ lead_id: 'L002', RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client B', lead_assigned_at: ago(10), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Not Updated',
+      client_id: 'C002', call_attempts: 0 }),
+    // L003 — Not Connected in 10 Minutes: connected, but ~4h after assignment.
+    row({ lead_id: 'L003', RM: 'Sonal Mehta', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client C', lead_assigned_at: ago(5), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+      client_id: 'C003', last_connect_time: ago(4), call_attempts: 2,
+      internal_status_comments: ago(4) + ' - Called, will call back later' }),
+    // L004 — Follow-up Overdue: last connect 6h ago (> the 4h review window).
+    row({ lead_id: 'L004', RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client D', lead_assigned_at: ago(30), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Suspect',
+      client_id: 'C004', last_connect_time: ago(6), call_attempts: 3,
+      internal_status_comments: ago(6) + ' - Connected, interested, will follow up' }),
+    // L005 — Behind on Today's Calls: assigned today, only 2 attempts so far.
+    row({ lead_id: 'L005', RM: 'Kunal Joshi', TL: 'Aman Verma', rm_is_active: true, project: 'Riverside Residency', region: 'South',
+      client: 'Client E', lead_assigned_at: ago(6), group_source: 'Meta Ads', source_bucket: 'Facebook', current_stage: 'Suspect',
+      client_id: 'C005', call_attempts: 2, last_connect_time: ago(5),
+      internal_status_comments: ago(5) + ' - Spoke briefly, needs more calls today' }),
+    // L006 — Stuck: 60h old, well-worked, still short of Opportunity.
+    // Stage must be a FUNNEL_ORDER entry BEFORE 'opportunity' (core.js) —
+    // 'pipeline'/'visit booked'/etc. all rank AFTER it, so isOppOrAbove()
+    // would already read those as past Opportunity, not stuck short of it.
+    row({ lead_id: 'L006', RM: 'Sonal Mehta', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client F', lead_assigned_at: ago(60), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Suspect',
+      client_id: 'C006', call_attempts: 8, last_connect_time: ago(10),
+      internal_status_comments: ago(10) + ' - Still evaluating, multiple follow-ups done' }),
+    // L007 — Recording Not Working: zero call_attempts but real comment/work exists.
+    row({ lead_id: 'L007', RM: 'Kunal Joshi', TL: 'Aman Verma', rm_is_active: true, project: 'Riverside Residency', region: 'South',
+      client: 'Client G', lead_assigned_at: ago(15), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+      client_id: 'C007', call_attempts: 0,
+      internal_status_comments: ago(14) + ' - Called and discussed project details, customer interested' }),
+    // L008 — Closed with No Comment: closed stage, every comment field empty.
+    row({ lead_id: 'L008', RM: 'Neha Singh', TL: 'Aman Verma', rm_is_active: false, project: 'Riverside Residency', region: 'South',
+      client: 'Client H', lead_assigned_at: ago(40), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Lost',
+      client_id: 'C008', call_attempts: 0 }),
+    // L009 — healthy Opportunity+ lead (must NOT be misflagged Stuck).
+    row({ lead_id: 'L009', RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client I', lead_assigned_at: ago(25), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Opportunity',
+      client_id: 'C009', call_attempts: 4, last_connect_time: ago(1),
+      internal_status_comments: ago(1) + ' - Strong interest, scheduling visit' }),
+    // L010 — closed-won Booking (must NOT be misflagged Stuck or No-Comment).
+    row({ lead_id: 'L010', RM: 'Sonal Mehta', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client J', lead_assigned_at: ago(70), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Booking',
+      client_id: 'C010', call_attempts: 10, last_connect_time: ago(20),
+      internal_status_comments: ago(20) + ' - Booking confirmed, documents signed' }),
+    // L011 — 30 min old, zero calls: per Not Updated's OWN documented rule
+    // (dashboard.html) this still surfaces there despite being inside the
+    // general 3h grace band, because it already missed the 10-minute
+    // first-contact window with literally zero contact — that specific
+    // clause is deliberately NOT grace-gated. L015 below is the real
+    // grace-period case (still inside the 10-minute window itself).
+    row({ lead_id: 'L011', RM: 'Kunal Joshi', TL: 'Aman Verma', rm_is_active: true, project: 'Riverside Residency', region: 'South',
+      client: 'Client K', lead_assigned_at: ago(0.5), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Not Updated',
+      client_id: 'C011', call_attempts: 0 }),
+    // L015 — 3 minutes old: must NOT trip anything — still inside BOTH the
+    // 10-minute first-contact window and the 3h general grace period.
+    row({ lead_id: 'L015', RM: 'Kunal Joshi', TL: 'Aman Verma', rm_is_active: true, project: 'Riverside Residency', region: 'South',
+      client: 'Client N', lead_assigned_at: ago(0.05), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Not Updated',
+      client_id: 'C015', call_attempts: 0 }),
+    // L012 — Approaching 48h Deadline: 44h old, not yet Opportunity (same
+    // FUNNEL_ORDER-before-'opportunity' requirement as L006 above).
+    row({ lead_id: 'L012', RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client L', lead_assigned_at: ago(44), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Suspect',
+      client_id: 'C012', call_attempts: 5, last_connect_time: ago(3),
+      internal_status_comments: ago(3) + ' - Visit scheduled for this weekend' }),
+    // L013/L014 — same client_id, two RM copies (collation/fan-out/claim-rate).
+    row({ lead_id: 'L013', RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client M', lead_assigned_at: ago(8), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Not Updated',
+      client_id: 'C013', call_attempts: 0 }),
+    row({ lead_id: 'L014', RM: 'Sonal Mehta', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client M', lead_assigned_at: ago(8), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Opportunity',
+      client_id: 'C013', call_attempts: 3, last_connect_time: ago(6),
+      internal_status_comments: ago(6) + ' - Same customer, claimed by Sonal, strong interest' }),
+  ];
+  const values = [headers.slice(), ...rows];
+
+  // ---- 4. Mock the network boundary only — everything else is the real app ----
+  sheetsApiValuesGet = async function (sheetId, range) {
+    if (/!A2:AZ$/.test(range)) return values; // the Leads tab read
+    return []; // Movement_Log / Daily_RM_Issues / RM_Hierarchy / etc. — exercises the "no history yet" degrade path
+  };
+  gateAccessToken = 'test-token';
+  gateTokenExpiresAt = Date.now() + 3600000;
+
+  document.getElementById('sheetIdInput').value = 'harness-sheet-id';
+  document.getElementById('tabNameInput').value = 'leads';
+
+  // ---- 5. Run the real pipeline ----
+  statusEl.textContent = 'Running fetchAndRender()…';
+  let threw = null;
+  try {
+    await fetchAndRender();
+    // fetchAndRender() kicks off applyFiltersAndRender(), which defers the
+    // actual render through two chained setTimeout(...,0) passes (see
+    // core.js) rather than awaiting it — wait that out before asserting.
+    const start = Date.now();
+    while (typeof _isApplyingFilters !== 'undefined' && _isApplyingFilters && Date.now() - start < 3000) {
+      await new Promise(r => setTimeout(r, 20));
+    }
+    await new Promise(r => setTimeout(r, 30));
+  } catch (e) {
+    threw = e;
+  }
+  assert('fetchAndRender completes with no uncaught exception', !threw, threw && (threw.message + '\n' + threw.stack));
+
+  if (!threw) {
+    const textOf = id => { const el = document.getElementById(id); return el ? el.textContent : ''; };
+
+    assert('parsed the 14 synthetic rows into leads[]', Array.isArray(leads) && leads.length > 0, 'leads.length=' + (leads && leads.length));
+
+    const kpiStrip = document.getElementById('kpiStrip');
+    assert('KPI strip rendered at least one tile', !!kpiStrip && kpiStrip.children.length > 0);
+
+    const regionTableText = textOf('regionTable');
+    assert('Region table lists North', regionTableText.indexOf('North') !== -1);
+    assert('Region table lists South', regionTableText.indexOf('South') !== -1);
+
+    assert('Inactive-RM Lead Added lists L001', textOf('inactiveRmList').indexOf('L001') !== -1);
+    assert('Not Updated lists L002', textOf('notUpdatedList').indexOf('L002') !== -1);
+    assert('Not Updated lists L011 (missed first-contact overrides the 3h grace band)', textOf('notUpdatedList').indexOf('L011') !== -1);
+    assert('Not Updated excludes L015 (still inside the 10-minute first-contact window)', textOf('notUpdatedList').indexOf('L015') === -1);
+    assert('Not Connected in 10 Minutes lists L003', textOf('notConnList').indexOf('L003') !== -1);
+    assert('Follow-up Overdue lists L004', textOf('followupList').indexOf('L004') !== -1);
+    assert("Behind on Today's Calls lists L005", textOf('dueTodayList').indexOf('L005') !== -1);
+    assert('Stuck (48h+, not Opportunity) lists L006', textOf('stuckList').indexOf('L006') !== -1);
+    assert('Recording Not Working lists L007', textOf('recordingList').indexOf('L007') !== -1);
+    assert('Closed with No Comment lists L008', textOf('closedNoCommentList').indexOf('L008') !== -1);
+    assert('Approaching 48h Deadline lists L012', textOf('approachingDeadlineList').indexOf('L012') !== -1);
+
+    assert('Stuck does NOT list L009 (already Opportunity)', textOf('stuckList').indexOf('L009') === -1);
+    assert('Stuck does NOT list L010 (Booking, closed)', textOf('stuckList').indexOf('L010') === -1);
+
+    const rmTableText = textOf('rmTable');
+    ['Ravi Kumar', 'Sonal Mehta', 'Kunal Joshi', 'Neha Singh'].forEach(rm =>
+      assert('RM Workload table lists ' + rm, rmTableText.indexOf(rm) !== -1));
+
+    const auditTable = document.getElementById('auditTable');
+    assert('Audit table rendered a tbody', !!auditTable && !!auditTable.querySelector('tbody'));
+
+    // Graceful empty-history paths — Movement_Log/Daily_RM_Issues were mocked
+    // to []. renderRepeatOffenders's own `clear()` deliberately empties
+    // #repeatOffendersBody and puts the explanatory message in the SEPARATE
+    // #repeatOffendersNotice element instead (see tab-repeat-offenders.js) —
+    // assert against the element the message actually lands in.
+    assert('Repeat Offenders shows a "no data yet" notice on empty Daily_RM_Issues (no throw)', textOf('repeatOffendersNotice').indexOf('Daily_RM_Issues') !== -1);
+    assert('Movement/Overnight rendered without throwing on empty Movement_Log', !!document.getElementById('overnightList'));
+
+    const opsTabBtn = document.querySelector('.tab-btn[data-tab="tab-operations"]');
+    if (opsTabBtn) opsTabBtn.click();
+    assert('Clicking the Operations tab button activates its panel', document.getElementById('tab-operations').classList.contains('active'));
+  }
+
+  statusEl.textContent = 'Done: ' + results.pass + ' passed, ' + results.fail + ' failed.';
+  statusEl.style.color = results.fail ? '#ff5d5d' : '#4ade80';
+  window.__harnessResults = results;
+  console.log('HARNESS_RESULT', JSON.stringify({ pass: results.pass, fail: results.fail, failures: results.failures }));
+})();
+</script>
+</body>
+</html>
