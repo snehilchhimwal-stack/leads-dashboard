@@ -66,7 +66,7 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | `js/tab-movement.js` | Movement tab — reads the `Movement_Log` sheet tab that `MovementTracker.gs` populates; stalled leads, overnight cohort, RM stall leaderboard, time-to-Opportunity. |
 | `js/tab-repeat-offenders.js` | Repeat Offenders tab (own top-level tab, added 2026-09-01) — reads the `Daily_RM_Issues` sheet tab that `DailyRmIssueLog.gs` populates nightly; RM/A1-TM/RH/Region leaderboards ranked by Avg Flagged (instances ÷ distinct leads). See §9 for the whole subsystem, including a real Time-range filtering gotcha worth reading before touching this file. |
 | `js/tab-morning.js` | Morning Brief tab — 10 summary cards, all backed by data other tabs already compute (no new logic). |
-| `js/reports.js` | Region email report generation + the Gmail send flow (separate OAuth grant — see §4). |
+| `js/reports-build.js` / `js/reports-gmail.js` / `js/reports-ui.js` | Formerly one `js/reports.js` file (2,246 lines) — split in the 2026-09 modularity refactor (pure code motion; see git history). `reports-build.js` builds report content (region grouping, email templates); `reports-gmail.js` is the real one-click Gmail-API send flow (separate OAuth grant — see §4); `reports-ui.js` is the mailto flow + all render/copy/download UI, and loads LAST of the three (see its own header comment for why). |
 | `js/sheets-writeback.js` | Every write path back to the Sheet: on-demand Movement_Log snapshot, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`. |
 | `js/overview-distribution-people-ops.js` | The main Overview: `renderAll()` orchestrator, tab switching, KPI/trend/RM-score tables, Operations issue lists (the 5 SLA checks), CSV export. |
 | `js/main.js` | Loaded last. Just the couple of top-level bootstrap calls that must run after every other file has defined its functions. |
@@ -125,7 +125,7 @@ project (see §4.3).
 3. `renderAll()` (in `overview-distribution-people-ops.js`) renders **every**
    tab in one pass — tab switching afterward is a pure `display:none` toggle
    on pre-rendered DOM, not a re-render.
-4. **Region email reports** (`js/reports.js`) — generates the same report
+4. **Region email reports** (`js/reports-build.js`/`js/reports-gmail.js`/`js/reports-ui.js`) — generates the same report
    content per region as `OvernightEmailer.gs`/`AllIssuesEmailer.gs` build
    automatically, but on demand from the browser. Sending requires a
    **second, separate** OAuth grant (`GMAIL_SCOPE`, `gmail.send` — see
@@ -173,7 +173,7 @@ Cloud project:
 888792607049-4u0ok266girae40pt4o1m74uhn08rg19.apps.googleusercontent.com
 ```
 
-(`DEFAULT_CLIENT_ID` in `js/reports.js`, line ~895 — also the value the
+(`DEFAULT_CLIENT_ID` in `js/reports-gmail.js`, line ~42 — also the value the
 sign-in gate falls back to via `getGmailClientId()`.) They're deliberately
 one Client ID requesting two different scopes on two separate
 `initTokenClient()` calls, not two separate apps.
@@ -199,7 +199,7 @@ account. From there:
 
 If you ever need a **different** Client ID (e.g. spinning up a project under
 new ownership), the only two places to change it are `DEFAULT_CLIENT_ID` in
-`js/reports.js` and telling users to clear/replace their locally-saved one —
+`js/reports-gmail.js` and telling users to clear/replace their locally-saved one —
 each browser also lets a user override it manually via the "one-time setup"
 input fields (`#gateClientIdInput`, `#gmailClientIdInput`), stored in that
 browser's own `localStorage` under the key `gsl_gmail_client_id`. Changing

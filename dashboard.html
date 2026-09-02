@@ -1398,7 +1398,13 @@
 <script src="js/tab-movement.js"></script>
 <script src="js/tab-repeat-offenders.js"></script>
 <script src="js/tab-morning.js"></script>
-<script src="js/reports.js"></script>
+<!-- reports.js was split into these 3 files (Phase 3 of the modularity
+     refactor pass — see HANDOVER.md). reports-ui.js MUST load last of
+     the three (its own header comment explains why — a top-level init
+     block that calls into reports-gmail.js immediately at parse time). -->
+<script src="js/reports-build.js"></script>
+<script src="js/reports-gmail.js"></script>
+<script src="js/reports-ui.js"></script>
 <script src="js/sheets-writeback.js"></script>
 <script src="js/overview-distribution-people-ops.js"></script>
 <script src="js/main.js"></script>
