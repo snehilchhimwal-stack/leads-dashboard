@@ -1,9 +1,9 @@
 // ============================================================
 // core-auth.js — the Google sign-in gate (access control). Split out
 // of core.js (Phase 2 — see HANDOVER.md). Pure code motion — no logic
-// changed. Distinct from js/reports.js's separate Gmail OAuth consent
-// grant (connectGmail) — two independent consent flows sharing one
-// Client ID, by design (see that file's own header).
+// changed. Distinct from js/reports-gmail.js's separate Gmail OAuth
+// consent grant (connectGmail) — two independent consent flows sharing
+// one Client ID, by design (see that file's own header).
 // ============================================================
 
 

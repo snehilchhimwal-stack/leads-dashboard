@@ -1400,9 +1400,9 @@ document.getElementById('dateToInput').addEventListener('change', () => {
 // Priority order for the CSV export, the combined "all issues" report,
 // Stalled Leads, and the RM stall leaderboard / time-to-remediate
 // stats — a lead can technically match several categories at once (e.g.
-// ISSUE_PRIORITY itself now lives in js/core.js — js/reports.js needs it at
-// its own top-level parse time (script-load order), before this inline
-// block runs, so it can no longer be declared down here.
+// ISSUE_PRIORITY itself now lives in js/core-foundation.js — js/reports-build.js
+// needs it at its own top-level parse time (script-load order), before this
+// inline block runs, so it can no longer be declared down here.
 
 // Fixed color per known issue label — keeps the Movement tab's stall
 // breakdown chart visually stable across refreshes (same issue, same color

@@ -87,10 +87,11 @@ const CONFIG = {
 };
 
 // Relocated here (from dashboard.html's "Issues CSV Export" section) because
-// js/reports.js builds a derived lookup from this array at its OWN top level
-// (see _FLAG_BY_ISSUE_PRIORITY_LABEL), which runs at script-load time — this
-// has to be defined before that runs, and core.js is the one file guaranteed
-// to load first. Read by the filter engine, Tracking, RM Timeline, Movement,
+// js/reports-build.js builds a derived lookup from this array at its OWN top
+// level (see _FLAG_BY_ISSUE_PRIORITY_LABEL), which runs at script-load time
+// — this has to be defined before that runs, and this file is the first of
+// the 9 core-*.js splits, guaranteed to load before every other js/*.js
+// file. Read by the filter engine, Tracking, RM Timeline, Movement,
 // Reports, and Sheets write-back.
 //
 // Ordered by priority: when a lead matches more than one check (e.g. both

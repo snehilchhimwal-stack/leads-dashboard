@@ -1375,9 +1375,8 @@
 </div>
 
 <!-- core.js was split into these 9 files (Phase 2 of the modularity
-     refactor pass — see HANDOVER.md). All 9 must load before every
-     tab-*.js/reports.js/sheets-writeback.js/overview-distribution-people-ops.js/
-     main.js file below, same as core.js as a whole always had to —
+     refactor pass — see HANDOVER.md). All 9 must load before every other
+     js/*.js file below, same as core.js as a whole always had to —
      everything downstream of them depends on functions/state defined
      here. Order AMONG the 9 themselves is mostly narrative (fetch/parse
      -> domain model -> orchestration -> generic UI chrome) rather than a
