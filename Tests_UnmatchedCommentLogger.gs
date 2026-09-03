@@ -87,6 +87,69 @@ function runUnmatchedCommentLoggerTests_() {
     TestAssertEqual_(thirdCount, 1, 'scanUnmatchedCommentsGs_: a genuinely NEW unmatched comment on an already-logged lead produces exactly 1 new row');
     TestAssertEqual_(logSheet.getLastRow(), 4, 'scanUnmatchedCommentsGs_: sheet now has 3 data rows total — the old L-UNMATCHED entry is NOT overwritten, the new one is appended alongside it');
 
+    // ---- de-dup survives comment_at coming back as a real Date object ----
+    // Regression test for the 2026-09-03 production incident: Sheets
+    // silently converts a "yyyy-MM-dd HH:mm"-shaped STRING write into a
+    // date-typed cell, so a REAL sheet's getValues() returns a JS Date
+    // for comment_at, not the original string — TestMockSheet_ never did
+    // this (which is exactly why the bug shipped with a fully green test
+    // suite), so this test builds that Date object by hand to actually
+    // exercise the fix. Without the fix, this comment would be re-logged
+    // as a duplicate on every run forever.
+    const dateSs = TestMockSpreadsheet_({});
+    dateSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+      TestUCL_row_(header, { lead_id: 'L-DATECELL', internal_status_comments: 'Test RM One: Already logged before this run - 2026-08-20 09:15' }),
+    ]);
+    const dateLogSheet = ensureUnmatchedCommentsLogSheet_(dateSs);
+    // Same shape scanUnmatchedCommentsGs_ itself writes, EXCEPT comment_at
+    // is a real Date (as a real sheet would hand back), not the string
+    // "2026-08-20 09:15" the write path actually sends.
+    dateLogSheet.appendRow([
+      '2026-08-20', 'L-DATECELL', 'Test RM One', 'Pune', 'P', 'Already logged before this run',
+      new Date('2026-08-20T09:15:00+05:30'), '2026-08-20 09:20:00', false, '',
+    ]);
+    const { colIndex: dateColIndex, dataRows: dateDataRows } = readLeadsTab_(dateSs);
+    const dateRunCount = scanUnmatchedCommentsGs_(dateSs, dateDataRows, dateColIndex, now);
+    TestAssertEqual_(dateRunCount, 0, 'scanUnmatchedCommentsGs_: correctly recognizes an already-logged comment as a duplicate even when comment_at reads back as a Date object, not a string (2026-09-03 fix)');
+    TestAssertEqual_(dateLogSheet.getLastRow(), 2, 'scanUnmatchedCommentsGs_: no duplicate row was appended for the Date-typed comment_at case');
+
+    // ---- dedupeUnmatchedCommentsNow: collapses the backlog the bug produced ----
+    const dedupeSs = TestMockSpreadsheet_({});
+    const dedupeLogSheet = ensureUnmatchedCommentsLogSheet_(dedupeSs);
+    // Three duplicate rows for the SAME (lead_id, comment_at) — one with a
+    // string comment_at, one with a Date object (the shape the bug
+    // actually produced against a real sheet), one marked reviewed=true
+    // (review work that must survive the cleanup).
+    dedupeLogSheet.appendRow(['2026-08-20', 'L-DUP', 'Test RM One', 'Pune', 'P', 'Repeated comment', '2026-08-20 09:15', '2026-08-20 09:20:00', false, '']);
+    dedupeLogSheet.appendRow(['2026-08-20', 'L-DUP', 'Test RM One', 'Pune', 'P', 'Repeated comment', new Date('2026-08-20T09:15:00+05:30'), '2026-08-20 15:20:00', false, '']);
+    dedupeLogSheet.appendRow(['2026-08-21', 'L-DUP', 'Test RM One', 'Pune', 'P', 'Repeated comment', '2026-08-20 09:15', '2026-08-21 09:20:00', true, 'looked at this one']);
+    // A genuinely different comment on a different lead — must survive untouched.
+    dedupeLogSheet.appendRow(['2026-08-20', 'L-UNIQUE', 'Test RM Two', 'Pune', 'P', 'A completely different comment', '2026-08-20 10:00', '2026-08-20 10:05:00', false, '']);
+    const realSsDedupe = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return dedupeSs; }, flush: function () {} };
+    try {
+      dedupeUnmatchedCommentsNow();
+      const dedupedRows = dedupeLogSheet.getRange(2, 1, dedupeLogSheet.getLastRow() - 1, 10).getValues();
+      TestAssertEqual_(dedupedRows.length, 2, 'dedupeUnmatchedCommentsNow: collapses the 3 L-DUP duplicates down to 1, keeps L-UNIQUE untouched (2 rows total)');
+      const dupRow = dedupedRows.find(function (r) { return r[1] === 'L-DUP'; });
+      TestAssertEqual_(dupRow[8], true, 'dedupeUnmatchedCommentsNow: keeps the REVIEWED duplicate over unreviewed ones, never silently discarding review work');
+      TestAssertEqual_(dupRow[9], 'looked at this one', 'dedupeUnmatchedCommentsNow: keeps the reviewed row\'s note intact');
+      TestAssert_(!!dedupedRows.find(function (r) { return r[1] === 'L-UNIQUE'; }), 'dedupeUnmatchedCommentsNow: a genuinely unique row is never touched');
+    } finally {
+      SpreadsheetApp = realSsDedupe;
+    }
+
+    // Safe to run against an empty/missing sheet.
+    const emptyDedupeSs = TestMockSpreadsheet_({});
+    const realSsDedupeEmpty = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return emptyDedupeSs; }, flush: function () {} };
+    try {
+      dedupeUnmatchedCommentsNow(); // must not throw when the sheet doesn't exist at all
+      TestAssert_(true, 'dedupeUnmatchedCommentsNow: does not throw when Unmatched_Comments_Log does not exist yet');
+    } finally {
+      SpreadsheetApp = realSsDedupeEmpty;
+    }
+
     // ---- scanUnmatchedCommentsNow (reads the leads tab itself) ----
     const freshSs = TestMockSpreadsheet_({});
     freshSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,

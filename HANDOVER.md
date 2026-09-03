@@ -399,6 +399,26 @@ test) Sheet, and use the browser console directly.
   `Unmatched_Comments_Log` — if the exact phrasing shows up there, the
   keyword engine genuinely doesn't recognize it yet; that's the signal to
   add a rule per §6, not a bug to chase elsewhere.
+- **`Unmatched_Comments_Log` has thousands of exact-duplicate rows** (the
+  same `lead_id`+comment repeating across many capture dates): this was a
+  real, confirmed bug from this file's creation through 2026-09-03 — the
+  de-dup check compared `comment_at` as a string, but Sheets silently
+  converts that "yyyy-MM-dd HH:mm"-shaped string into a real Date-typed
+  cell on write, so the read-back never matched and every still-open
+  comment got re-logged on every 6-hourly run forever. Fixed in
+  `UnmatchedCommentLogger.gs`'s `scanUnmatchedCommentsGs_` (reformats a
+  Date-typed `comment_at` cell back to the write-side string format before
+  comparing — same "date column silently became a Date" handling already
+  used for `Daily_RM_Issues`/`Overnight_Log`/`Movement_Log` elsewhere in
+  this project). The existing test suite's mock sheet never simulated this
+  real Sheets behavior, so it stayed green the whole time — a real
+  regression test for it (writing a literal `Date` object into the mock,
+  the same shape a real sheet hands back) was added to
+  `Tests_UnmatchedCommentLogger.gs`. Run `dedupeUnmatchedCommentsNow()`
+  ONCE, after syncing the fix to the live Apps Script project, to collapse
+  the backlog this bug produced (keeps one row per genuinely unique
+  comment, preferring a reviewed duplicate over an unreviewed one so no
+  review work is lost).
 - **A night's Daily_RM_Issues capture looks missing** (Repeat Offenders shows
   suspiciously little for a day you'd expect data): check Apps Script
   Executions for `captureDailyRmIssues` around 22:50 IST that night — a real

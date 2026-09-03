@@ -44,6 +44,23 @@
  * steady-state volume stays low; only genuinely new unmatched comments
  * ever add a row.
  *
+ * REAL INCIDENT, FIXED 2026-09-03: the de-dup check above was silently
+ * broken from this file's very first version. comment_at is written as a
+ * plain "yyyy-MM-dd HH:mm" string, which Sheets' own type detection
+ * recognizes as a real datetime and silently converts to a Date-typed
+ * cell — so reading it back returned a JS Date object, and comparing
+ * String(thatDate) against the freshly-computed string key never
+ * matched. Every still-open comment was re-logged as a brand-new row on
+ * every single 6-hourly run, all the way back to this file's creation —
+ * confirmed via a real export showing the same (lead_id, comment) pairs
+ * repeating across 20+ consecutive captures. scanUnmatchedCommentsGs_'s
+ * read-back now reformats a Date-typed comment_at cell back to the exact
+ * string the write side uses before building the key (same "date column
+ * silently became a Date" handling this project already uses for
+ * Daily_RM_Issues/Overnight_Log/Movement_Log). Run
+ * dedupeUnmatchedCommentsNow() ONCE after syncing this fix to collapse
+ * the backlog it produced.
+ *
  * Depends on Core.gs (getVal_, isOpenLead_, istDayKeyGs_),
  * FollowupEngine.gs (latestOutcomeGs_), EmailInfra.gs (withRetry_,
  * readLeadsTab_) — load order between files doesn't matter to Apps
@@ -64,7 +81,8 @@
  * with, run clearReviewedUnmatchedCommentsNow (function dropdown) to
  * clear out every reviewed=true row and keep the sheet from growing
  * unbounded — this is a manual step, not automatic, since only a human
- * should decide a review cycle is actually done.
+ * should decide a review cycle is actually done. See dedupeUnmatchedCommentsNow
+ * for the one-off backlog cleanup needed after the 2026-09-03 fix above.
  * ================================================================================
  */
 
@@ -117,11 +135,33 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
     // back ONLY the comment_at column here would build a different key
     // for every row that was logged via the no-timestamp fallback
     // (comment_at blank), silently defeating de-dup for exactly those.
+    //
+    // 2026-09-03 fix — a real, confirmed production incident: comment_at
+    // is written as a plain "yyyy-MM-dd HH:mm" STRING (unmatchedCommentDedupKeyGs_'s
+    // own `.ts` format, straight from latestOutcomeGs_'s regex match), but
+    // that string is exactly the shape Sheets' own locale-aware type
+    // detection recognizes as a real datetime — so the CELL silently
+    // becomes a date-typed cell, and getValues() reads it back as a JS
+    // Date object, not the original string. String(dateObj) then produces
+    // something like "Thu Aug 27 2026 17:26:00 GMT+0530 (India Standard
+    // Time)", which can never equal the freshly-computed "2026-08-27
+    // 17:26" key — so alreadyLogged NEVER matched, and every comment got
+    // re-logged on every single run since this file was created (confirmed
+    // via a real Unmatched_Comments_Log export: the same (lead_id,
+    // comment) pairs repeating across 20+ consecutive 6-hourly captures).
+    // Same "date column auto-converted to serial/Date" gotcha this project
+    // already handles elsewhere (Daily_RM_Issues' own `date` column,
+    // OvernightEmailer.gs's Overnight_Log read, Movement_Log) — reformat
+    // a Date-typed cell back to the exact string format the write side
+    // uses before building the key, same as those.
     withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, 7).getValues(); }, 'read Unmatched_Comments_Log for de-dup')
       .forEach(function (r) {
         const leadId = String(r[1] || '').trim();
         const comment = String(r[5] || '').trim();
-        const commentAt = String(r[6] || '').trim();
+        const commentAtRaw = r[6];
+        const commentAt = commentAtRaw instanceof Date
+          ? Utilities.formatDate(commentAtRaw, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
+          : String(commentAtRaw || '').trim();
         if (leadId) alreadyLogged[leadId + '|' + (commentAt || comment)] = true;
       });
   }
@@ -204,4 +244,60 @@ function clearReviewedUnmatchedCommentsNow() {
     sheet.getRange(2, 9, kept.length, 1).insertCheckboxes();
   }
   Logger.log('Cleared ' + clearedCount + ' reviewed row(s) out of ' + values.length + ' total; ' + kept.length + ' not-yet-reviewed row(s) kept.');
+}
+
+// ONE-OFF RECOVERY — run this ONCE after syncing the 2026-09-03 de-dup fix
+// above (scanUnmatchedCommentsGs_'s comment_at-is-a-Date read-back bug),
+// to collapse the backlog that bug produced back down to one row per
+// genuinely unique (lead_id, comment_at-or-comment) pair — every run
+// since this file was first created re-logged every still-open comment as
+// a brand-new row instead of recognizing it as already logged, so a
+// single real comment can currently have dozens of duplicate rows, one
+// per 6-hourly capture it survived across. Keeps the EARLIEST row per
+// key (oldest `date`/`logged_at` — the first time this comment was truly
+// new) UNLESS a later duplicate is marked reviewed=true, in which case
+// that reviewed one wins, so no review work already done gets silently
+// discarded. Same clear-and-rewrite approach as clearReviewedUnmatchedCommentsNow.
+// Safe to re-run — a sheet with no duplicates left is a no-op. Not meant
+// to run repeatedly: once this bug is actually fixed in the live project,
+// new duplicates should stop appearing on their own.
+function dedupeUnmatchedCommentsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(UNMATCHED_COMMENTS_LOG_SHEET_);
+  if (!sheet) { Logger.log('Unmatched_Comments_Log does not exist yet — nothing to dedupe.'); return; }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Unmatched_Comments_Log is empty — nothing to dedupe.'); return; }
+
+  const lastCol = UNMATCHED_COMMENTS_LOG_COLUMNS_.length;
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const byKey = {}; // key -> the row currently kept for it
+  values.forEach(function (row) {
+    const leadId = String(row[1] || '').trim();
+    if (!leadId) return;
+    const comment = String(row[5] || '').trim();
+    const commentAtRaw = row[6];
+    const commentAt = commentAtRaw instanceof Date
+      ? Utilities.formatDate(commentAtRaw, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
+      : String(commentAtRaw || '').trim();
+    const key = leadId + '|' + (commentAt || comment);
+    const existing = byKey[key];
+    if (!existing) { byKey[key] = row; return; }
+    // Prefer a reviewed duplicate over an unreviewed one (never lose
+    // review work already done); otherwise keep whichever has the
+    // earlier logged_at (column 8, index 7) — the original first-seen row.
+    const existingReviewed = !!existing[8], rowReviewed = !!row[8];
+    if (rowReviewed && !existingReviewed) { byKey[key] = row; return; }
+    if (rowReviewed === existingReviewed && row[7] < existing[7]) { byKey[key] = row; }
+  });
+
+  const kept = Object.keys(byKey).map(function (k) { return byKey[k]; });
+  const clearedCount = values.length - kept.length;
+
+  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+  if (kept.length) {
+    sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
+    sheet.getRange(2, 9, kept.length, 1).insertCheckboxes();
+  }
+  Logger.log('Deduped: removed ' + clearedCount + ' duplicate row(s) out of ' + values.length + ' total; ' + kept.length + ' unique row(s) kept.');
 }
