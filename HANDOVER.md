@@ -547,7 +547,7 @@ why a specific lead's reported issue changed.
 Covered by new assertions in `Tests_SlaEngine.gs` (a 76h-old "Not
 Updated"-stage lead now asserts both `isNotUpdated` and `stageStuck48h`
 true) and verified directly against the real `.gs` source (not a
-reimplementation) via a disposable browser harness before commit. Like
-every other backend change, **this still needs the usual manual sync into
-the live Apps Script project** (§4.3) before it affects the real 22:50 IST
-capture or the email digests.
+reimplementation) via a disposable browser harness before commit.
+Synced into the live Apps Script project manually the same day (per the
+user, not independently re-verified from this session — see §4.3 on why
+that sync is always a separate manual step from the git push).
