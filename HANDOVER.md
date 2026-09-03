@@ -624,3 +624,50 @@ reimplementation) via a disposable browser harness before commit.
 Synced into the live Apps Script project manually the same day (per the
 user, not independently re-verified from this session — see §4.3 on why
 that sync is always a separate manual step from the git push).
+
+### 9.6 `OUTCOME_RULES` keyword mining — added 2026-09-03
+
+Requested after the §"Unmatched_Comments_Log de-dup bug" fix (see §8)
+finally made the log trustworthy: with de-dup working, the ~2,500-row
+export was mined by hand for new recurring patterns not covered by any
+existing rule. Four changes landed in both `OUTCOME_RULES_GS_`
+(`FollowupEngine.gs`) and `OUTCOME_RULES` (`js/core-outcome-engine.js`),
+kept in sync per §6:
+
+- **`Wrong Number` gained a `test` function** to catch a reversed phrasing
+  the existing multi-word signals miss: "Number is invalid"/"No.is
+  invalid" (noun-then-verb-then-adjective, not the existing "invalid
+  number" signal's adjective-then-noun order) and "doesnt exist" as its
+  own 2-word contraction (the existing "does not exist" signal needs 3
+  consecutive words and can't match a contraction).
+- **New outcome `Already With Another RM/CP`** — by far the single
+  largest recurring bucket in the audited export: a customer already
+  being worked by a different RM or channel partner ("already in touch
+  with RM X", "already discussed with other rtmi"). Distinct from
+  `Booked Elsewhere` (no purchase decision implied) and from `Needs
+  Cross-Team Routing` (that's the RM requesting a hand-off; this is the
+  customer reporting they're already someone else's).
+- **New outcome `Channel Partner / Broker Lead`** — the lead itself is a
+  channel partner/broker calling on a client's behalf, not the end
+  customer ("He is cp", "Its a channel partners,"). Bare `'cp'` as an
+  exact-match signal mirrors this file's existing precedent (`'ni'`,
+  `'wn'`, `'cb'`).
+- **New outcome `Voice Unclear`** — call connected (unlike `Disconnected`)
+  but audio was unusable ("Voice not audible", "Voice was cracking").
+
+**Patterns deliberately left out**, per this file's own established
+discipline against guessing on ambiguous shorthand (same reasoning as the
+`BPCL Not Shared` note above it in `FollowupEngine.gs`): bare "AA" and
+"After answering" shorthand of unconfirmed meaning, and "bought/purchased/
+booked at [named project]" comments, which carry the same
+our-project-vs-competitor ambiguity already flagged as a reason to leave
+a pattern out. Revisit if/when their meaning is confirmed with the team.
+
+Verified two ways before commit: (1) a disposable browser harness running
+25 real comment strings pulled directly from the audited export against
+the real `inferOutcomeGs_`/`OUTCOME_RULES_GS_` (all pass), plus a second
+harness confirming frontend/backend parity on a subset (all pass); (2)
+the existing **`Tests_FollowupEngine.gs` suite run in full** against the
+modified rule set — 106/106 pass, confirming the new rules (inserted
+mid-array) didn't steal a match that used to belong to a pre-existing,
+later rule.

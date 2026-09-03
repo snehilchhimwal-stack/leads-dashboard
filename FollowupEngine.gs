@@ -163,7 +163,19 @@ const OUTCOME_RULES_GS_ = [
       // 'not exist'/'does not exist' — a distinct, recurring phrasing of
       // the same underlying meaning as "invalid number" above.
       'not exist', 'does not exist', 'number doesnt exist',
-    ] },
+    // 2026-09-03: real, recurring reversed phrasing the plain multi-word
+    // signals above miss entirely — "Number is invalid"/"No.is invalid"
+    // (noun-then-verb-then-adjective, not "invalid number"'s
+    // adjective-then-noun) and "doesnt exist" as its own contracted
+    // 2-word form (the existing 'does not exist' signal needs 3
+    // CONSECUTIVE words and can never match a 2-word contraction). 'no'
+    // paired with 'invalid' is safe despite being a near-universal word
+    // elsewhere — 'invalid' itself is rare/specific enough that the AND
+    // pairing still only fires on genuine wrong-number comments.
+    ], test: function (c, w) {
+      return (_anySignalGs_(w, ['invalid']) && _anySignalGs_(w, ['number', 'no']))
+        || (_anySignalGs_(w, ['exist']) && _anySignalGs_(w, ['doesnt', 'does', 'not', 'nahi']));
+    } },
   // NEW outcome — real, recurring pattern: an RM flagging the LEAD ITSELF
   // as not genuine (fake/duplicate/accidental), not a real customer who
   // declined. Checked early, same tier as Wrong Number, since neither is
@@ -203,6 +215,39 @@ const OUTCOME_RULES_GS_ = [
   { outcome: 'Needs Cross-Team Routing', signals: [
       'cross call', 'cross pitch', 'need a cross', 'need to cross', 'needs a cross',
     ] },
+  // NEW outcome, added 2026-09-03 — real, recurring pattern, audited
+  // against a fresh ~2,500-comment Unmatched_Comments_Log export (after
+  // fixing this same file's de-dup bug — see UnmatchedCommentLogger.gs):
+  // by far the SINGLE LARGEST recurring bucket in that batch was a
+  // customer already being worked by a DIFFERENT RM or channel partner —
+  // "already in touch with RM X", "she already touch with someone",
+  // "already discussed with other rtmi", "already spoke to someone
+  // asking details directly". Distinct from Booked Elsewhere (no
+  // purchase decision implied, just a duplicate/overlapping lead) and
+  // from Needs Cross-Team Routing (that's the RM asking for a hand-off;
+  // this is the CUSTOMER reporting they're already someone else's).
+  // Checked at the same tier, since both mean "don't just retry the call
+  // — this needs de-duplication/ownership resolved first".
+  { outcome: 'Already With Another RM/CP', signals: [
+      'already in touch', 'already touch', 'in touch with someone', 'already discussed with',
+      'already spoke to', 'already talked with', 'in contact with', 'has conversation with',
+      'to other rm', 'touch with another', 'contact with another',
+    ] },
+  // NEW outcome, added 2026-09-03 — same audit as above: the lead itself
+  // is a channel partner/broker calling on a client's behalf, not the end
+  // customer — a real, recurring, unambiguous pattern ("He is cp", "Its a
+  // channel partners,", "Name is channel partner,,", "This is from tatva
+  // real estate advisor,,"). Distinct from Junk/Duplicate Lead (a CP
+  // enquiry is a genuine lead, just needing the CP handling process, not
+  // a fake/accidental one) and from Already With Another RM/CP above
+  // (this is about WHO the caller is, not who else is working the
+  // customer). 'cp' as a bare 2-letter exact-match signal mirrors this
+  // same file's existing precedent ('ni', 'wn', 'cb' above) — Homesfy-
+  // internal telecalling shorthand this specific and this frequent is
+  // safe at zero typo tolerance.
+  { outcome: 'Channel Partner / Broker Lead', signals: [
+      'channel partner', 'broker', 'cp', 'real estate advisor',
+    ] },
   // NEW outcome — "BPCL" (Budget, Possession timeline, Configuration,
   // Location — Homesfy-internal shorthand, confirmed 2026-08-28) was left
   // out of the initial batch review since its meaning wasn't known yet;
@@ -238,6 +283,22 @@ const OUTCOME_RULES_GS_ = [
       'disconnected', 'call disc', 'disc', 'network issue', 'network problem', 'poor network',
       'call not connecting', 'call not connected', 'call not connect', 'not getting connected',
       'not connecting', 'not connected', 'call drop', 'blank call',
+    ] },
+  // NEW outcome, added 2026-09-03 — real, recurring pattern from the same
+  // Unmatched_Comments_Log audit as Already With Another RM/CP above: the
+  // call CONNECTED (unlike Disconnected/RNR above) but the audio itself
+  // was unusable ("Voice not audible", "wasn't audible", "Voice prblm",
+  // "Voice was cracking", "Not getting voice properly"). A genuinely
+  // different problem from a dropped/never-connected call — the fix is
+  // "retry or switch channel", not "the call failed to connect at all".
+  // Bare 'audible'/'cracking' are included despite being single common
+  // words because in this domain they are near-universally used to flag
+  // exactly this problem (an RM has no reason to remark on audio quality
+  // except to report it was bad) — same risk tolerance this file already
+  // applies to other bare single-word signals like 'interested'/'busy'.
+  { outcome: 'Voice Unclear', signals: [
+      'voice not audible', 'not audible', 'audible', 'voice unclear', 'voice not clear', 'cracking',
+      'voice problem', 'voice prblm', 'not getting voice', 'voice issue',
     ] },
   { outcome: 'Out of Station', signals: ['out of station', 'out station', 'out of town', 'not in town', 'travelling'] },
   { outcome: 'WhatsApp Unavailable', test: function (c, w) { return _anySignalGs_(w, ['whatsapp', 'wp', 'wa']) && _anySignalGs_(w, ['not on', 'not available']); } },
@@ -359,11 +420,14 @@ const FOLLOWUP_SUGGESTIONS_GS_ = {
   'Busy': 'Line was busy — retry within a few hours.',
   'Booked Elsewhere': "Client says they've booked/purchased elsewhere — confirm this is genuinely final before closing; don't assume dead until it's verified.",
   'Needs Cross-Team Routing': "RM flagged this needs a cross-call/cross-pitch handoff to another project or team — confirm that hand-off actually happened rather than letting it sit untouched.",
+  'Already With Another RM/CP': "Customer says they're already being worked by a different RM or channel partner — confirm who actually owns this customer and resolve the duplicate before continuing normal follow-up on both copies.",
+  'Channel Partner / Broker Lead': "The lead itself is a channel partner/broker calling on a client's behalf, not the end customer — verify quickly and route through the CP process rather than treating this as a direct-customer follow-up.",
   'BPCL Not Shared': "Customer hasn't shared their BPCL (Budget, Possession timeline, Configuration, Location) — keep working to pin these down; without them it's hard to pitch a relevant option.",
   'Resale / Rental (Out of Scope)': "Client is looking for resale or rental, not a new first-sale (developer/builder) property — we don't work that segment. Close with this as the reason rather than treating it as lost interest.",
   'RNR': 'No response — retry at a different time of day; consider a WhatsApp follow-up.',
   'Ringing / RNR': 'Rang but no pickup — retry at a different time of day.',
   'Disconnected': "Call dropped, didn't connect, or connected with no response — retry; flag the number if this keeps happening.",
+  'Voice Unclear': 'Call connected but audio was unclear or cracking — retry the call, or switch to a WhatsApp call/voice note if the network keeps degrading.',
   'Out of Station': "Client is travelling — schedule the follow-up for when they're back rather than repeat-calling now.",
   'WhatsApp Unavailable': "This contact isn't reachable on WhatsApp (or doesn't have it) — stick to voice calls or SMS instead of defaulting back to a WhatsApp text.",
   'WhatsApp Sent': 'A WhatsApp/text message was sent or dropped but not yet followed by a call — a text may go unseen, call to confirm.',
