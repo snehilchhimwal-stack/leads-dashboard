@@ -92,8 +92,26 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
 
   // Not Updated — canonical stage text (once past grace), OR never
   // connected past the 10-minute window regardless of stage text.
-  flags.isNotUpdated = isUnder48h &&
-    ((pastGrace && canonicalStage_(stage) === 'not updated') || neverConnectedPastWindow);
+  //
+  // Deliberately NOT gated on isUnder48h (2026-09-03 fix — real data check
+  // found ~40% of leads whose stage is STILL literally "Not Updated" were
+  // over 48h old and had silently stopped being counted here, because the
+  // old `isUnder48h &&` gate cut them off the instant they crossed 48h —
+  // even though nothing about them had changed. They didn't vanish, they
+  // just started being reported ONLY as stageStuck48h instead, which
+  // doesn't distinguish "still sitting at the CRM's default untouched
+  // stage" from any other 48h+-stuck lead — exactly the gap a Repeat
+  // Offenders user noticed (a genuinely neglected lead never builds up
+  // more than ~2 nights of "Not Updated" history before this gate silently
+  // reclassified it). Now isNotUpdated and stageStuck48h can both be true
+  // for the same lead at once; ISSUE_PRIORITY_GS_ picks isNotUpdated first
+  // (it outranks stageStuck48h), so a lead whose stage still literally
+  // reads "Not Updated" is reported as that — not silently absorbed into
+  // Stuck — no matter how old it gets. This changes what
+  // AllIssuesEmailer.gs/OvernightEmailer.gs report for such leads (now
+  // "Not Updated" instead of "Stuck 48h+") — an intentional, requested
+  // side effect, not an oversight.
+  flags.isNotUpdated = (pastGrace && canonicalStage_(stage) === 'not updated') || neverConnectedPastWindow;
 
   // Follow-up Overdue (4h Post-Connect).
   const internalComments = getVal_(row, colIndex, 'internal_status_comments');

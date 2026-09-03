@@ -77,6 +77,18 @@ function runSlaEngineTests_() {
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
     TestAssert_(flags.isNotUpdated === false, 'isNotUpdated: does not fire once the lead has actually connected');
 
+    // 2026-09-03 fix: isNotUpdated must NOT stop firing once a lead crosses
+    // 48h old, as long as its stage text is still literally "Not Updated" —
+    // real data showed leads over 48h old whose stage never changed were
+    // silently dropping out of this check and only surfacing as
+    // stageStuck48h, losing the "still sitting untouched" signal entirely.
+    // Both flags are expected true at once now; ISSUE_PRIORITY_GS_ (not
+    // tested here) is what picks isNotUpdated as the reported issue.
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 76), current_stage: 'Not Updated' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === true, 'isNotUpdated: still fires for canonical "not updated" stage text on a lead well past 48h old (no longer gated on isUnder48h)');
+    TestAssert_(flags.stageStuck48h === true, 'isNotUpdated fix sanity: the same past-48h "Not Updated"-stage lead is ALSO stageStuck48h (both true at once is the intended new behavior)');
+
     // ---- followupOverdue ----
     f = TestSla_buildRow_({
       lead_assigned_at: TestFixture_hoursAgo_(now, 10), current_stage: 'Suspect',

@@ -344,7 +344,19 @@ function enrichLead(l){
   // connected with past the 10-minute window belongs here now, not under
   // Not Connected in 10 Minutes, regardless of what its stage text happens
   // to say.
-  const isNotUpdated = isOpenLead && isUnder48h &&
+  //
+  // Deliberately NOT gated on isUnder48h (2026-09-03 fix — mirrors
+  // SlaEngine.gs's computeSlaFlags_, see its own comment for the full
+  // reasoning). A lead whose stage text is STILL literally "Not Updated"
+  // keeps being flagged here no matter how old it gets, instead of
+  // silently stopping at the 48h mark and only being reachable via
+  // stageStuck48h from then on — real data showed ~40% of live
+  // stage-text-"Not Updated" leads were past 48h and had already fallen
+  // into exactly that gap. isNotUpdated and stageStuck48h can now both be
+  // true for the same lead; ISSUE_PRIORITY ranks isNotUpdated above
+  // stageStuck48h, so such a lead is still reported as "Not Updated", not
+  // silently absorbed into "Stuck 48h+".
+  const isNotUpdated = isOpenLead &&
     ((pastGrace && canonicalStage(l.current_stage) === 'not updated') || neverConnectedPastWindow);
 
   // SOP Rule 4 — Post-Connect Follow-up: once connected, CRM should be

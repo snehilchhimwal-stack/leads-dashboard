@@ -506,12 +506,48 @@ If you're tempted to "simplify" this back to one consistent rule,
 re-read both bullets above first — each one exists because the other
 rule was tried and broke a real, reported case.
 
-### 9.5 Known open issue
+### 9.5 `isNotUpdated`'s 48h gate — fixed 2026-09-03
 
-**Not yet root-caused**: a user report that Repeat Offenders is "not
-working properly" specifically for the `isNotUpdated` ("Not Updated" /
-CRM Not Updated) issue type — no reproduction steps captured yet, logged
-in the To-Do Dashboard (`C:\Users\User\Desktop\Strategy\To-do Dashboard\tasks.json`,
-task `t-41`) rather than fixed. Needs a specific example (lead ID +
-what was expected vs. shown) before it can be diagnosed the same
-ground-truth way §9.4's two bugs were.
+Root-caused via a live data check (real `Daily_RM_Issues` + real `leads`
+tab, signed in as an actual user), triggered by a user report that Repeat
+Offenders was "not working properly" specifically for the `isNotUpdated`
+("Not Updated") issue type.
+
+**What was wrong**: `computeSlaFlags_`/`enrichLead`'s `isNotUpdated` used
+to be gated on `isUnder48h` — it stopped firing the instant a lead crossed
+48 hours old, even if the lead's CRM stage was STILL literally the text
+"Not Updated" (nothing about the lead had changed; the check just went
+silent). From then on the lead was only reachable via `stageStuck48h`
+("Leads Pending Beyond 48 Hours"), which doesn't distinguish "still
+sitting at the CRM's default untouched stage" from any other 48h+-stuck
+lead. Measured against the real sheet: of 158 open leads whose stage text
+was literally "Not Updated," **64 (40.5%) were past 48h** and had already
+fallen out of this check — including one 141 hours old. This also
+explains a pattern in `Daily_RM_Issues` history: no lead had ever
+accumulated more than 4 nights of `isNotUpdated` instances, because the
+gate capped it at ~2 nights before any lead migrated out, no matter how
+long it actually sat untouched.
+
+**The fix**: `isNotUpdated` (both `SlaEngine.gs`'s `computeSlaFlags_` and
+`js/core-lead-model.js`'s `enrichLead`, kept in sync as always) no longer
+checks `isUnder48h`. It now fires purely on "stage text is literally 'not
+updated' past grace" OR "never connected past the 10-minute window" —
+full stop, regardless of age. `isNotUpdated` and `stageStuck48h` can now
+both be true for the same lead at once; `ISSUE_PRIORITY`/`ISSUE_PRIORITY_GS_`
+already ranks `isNotUpdated` above `stageStuck48h`, so such a lead is
+reported as "Not Updated," not silently absorbed into "Stuck 48h+."
+
+**Real side effect to know about**: `AllIssuesEmailer.gs`/
+`OvernightEmailer.gs` pick their reported issue the same priority-order
+way, so a lead that used to email as "Stuck 48h+" once past 48h will now
+email as "Not Updated" instead if its stage never changed. This is the
+intended, requested behavior, not a regression — flag it if anyone asks
+why a specific lead's reported issue changed.
+
+Covered by new assertions in `Tests_SlaEngine.gs` (a 76h-old "Not
+Updated"-stage lead now asserts both `isNotUpdated` and `stageStuck48h`
+true) and verified directly against the real `.gs` source (not a
+reimplementation) via a disposable browser harness before commit. Like
+every other backend change, **this still needs the usual manual sync into
+the live Apps Script project** (§4.3) before it affects the real 22:50 IST
+capture or the email digests.
