@@ -490,24 +490,45 @@ real denominator — `aggregateRepeatOffenders`'s own comment already
 flagged this gap ("no total leads this RM owns denominator available").
 
 `totalLeadsByKey()` (`js/tab-repeat-offenders.js`) computes it by
-cross-referencing `allParsedLeads` (the live "leads" tab — **not**
-`Daily_RM_Issues`, which only ever contains flagged rows) against
-`lead_assigned_at`, using the exact same `keyFn`/`passesRepeatOffenderFilters`
-already used for the flagged side, so it groups identically across RM/
-Region/A1-TM/RH. Always assigned-date-based (no "captured on" concept
-applies to a plain roster count) — for a single-date table this is just
-that day's new assignments; for a multi-day range it's naturally the sum
-across days, since a lead has exactly one assignment date.
+cross-referencing `movementSnapshots` (Movement_Log's own history,
+`js/tab-movement.js` — **not** `Daily_RM_Issues`, which only ever
+contains flagged rows) against `lead_assigned_at`, using the exact same
+`keyFn`/`passesRepeatOffenderFilters` already used for the flagged side,
+so it groups identically across RM/Region/A1-TM/RH. Always
+assigned-date-based (no "captured on" concept applies to a plain roster
+count) — for a single-date table this is just that day's new
+assignments; for a multi-day range it's naturally the sum across days,
+since a lead has exactly one assignment date.
 
-**Known limitation, same category as §9.4's date-basis gotcha**:
-`allParsedLeads` is the live sheet AS IT READS RIGHT NOW, with no history
-of its own — a lead that has since closed/converted, or aged out of
-whatever the live sheet currently retains (observed ~7-8 days as of
-2026-09-03), silently disappears from this count. Yesterday/Last 7 Days/
-This Week are normally within that window; a Custom range or All-time
-reaching further back can undercount. The PDF prints a short footnote
-explaining this (a static page has no hover tooltip); the live tab
-carries it as the column header's `title` tooltip instead.
+**First cut used `allParsedLeads` (the live "leads" tab) instead — wrong,
+switched same day.** The live leads tab only ever holds currently-OPEN
+leads (a closed/converted lead is removed from it entirely), so that
+version silently missed every lead that had since closed, undercounting
+even for a date well within the ordinary window. Movement_Log's own
+`snapshotOpenLeads_` (`MovementTracker.gs`) explicitly captures "every
+lead... open or closed", so switching the source fixed that — a lead
+stays visible here for as long as any of its snapshots survives
+Movement_Log's own retention, not just until it closes. A lead can appear
+in several snapshot rows (once per capture run it was still reachable
+for); `totalLeadsByKey` dedupes to one row per `lead_id` first, taking
+whichever snapshot is latest.
+
+**Known limitation, narrower now but not eliminated, same category as
+§9.4's date-basis gotcha**: Movement_Log is itself pruned to a 7-day
+rolling window (`MOVEMENT_LOG_RETENTION_DAYS`) — a lead closed AND aged
+out past that window is still not counted. Yesterday/Last 7 Days/This
+Week are normally within that window; a Custom range or All-time reaching
+further back can undercount. The PDF prints a short footnote explaining
+this (a static page has no hover tooltip); the live tab carries it as the
+column header's `title` tooltip instead.
+
+Wiring note: `renderRepeatOffenders()` used to fire as soon as
+`Daily_RM_Issues`/`RM_Hierarchy` resolved, independent of the separate
+`fetchMovementLog()` call — Total Leads needed that data too, so
+`core-fetch-and-render.js` now threads the SAME in-flight
+`fetchMovementLog()` promise into Repeat Offenders' own `Promise.all`
+(a promise supports multiple independent `.then()` subscribers, so this
+does not trigger a second network call).
 
 ### 9.4 The Time-range filter's date-basis split (dashboard side) — read before touching `js/tab-repeat-offenders.js`
 

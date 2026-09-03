@@ -23,7 +23,9 @@
 // Depends on js/tab-repeat-offenders.js (dailyRmIssues,
 // dailyRmIssuesFetchState, rmHierarchyFetchState, aggregateRepeatOffenders,
 // primaryManagerForRm, rhForRm, _repeatOffendersRegionKey,
-// passesRepeatOffenderFilters, repeatOffendersDateKeysForRange) and
+// passesRepeatOffenderFilters, repeatOffendersDateKeysForRange,
+// totalLeadsByKey — the last of which reads js/tab-movement.js's own
+// movementSnapshots, added 2026-09-03 for the "Total Leads" column) and
 // js/core-foundation.js (istDateKey) / js/core-outcome-engine.js (istStamp)
 // / js/reports-build.js (IST_MONTHS) — all loaded earlier in
 // dashboard.html, but this only ever runs on a user click, well after
@@ -271,7 +273,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const totalLeadsNoteLines = doc.splitTextToSize(
-    '"Total Leads" = every lead assigned in this range, issue or not, from the live leads sheet as it reads today — a lead since closed or aged out of what the sheet currently retains is not counted, so it can undercount for older dates.',
+    '"Total Leads" = every lead assigned in this range, issue or not, from Movement_Log\'s history (includes leads since closed). Movement_Log itself retains only 7 days, so a closed lead aged out past that window is still not counted — this can undercount for a Custom range or All-time reaching further back.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(totalLeadsNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);

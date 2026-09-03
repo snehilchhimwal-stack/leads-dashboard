@@ -573,7 +573,12 @@ async function fetchAndRender(){
     // script writes to, and might not exist yet (setup not done) or the
     // caller might have no data in it yet. Either way the main dashboard
     // must not wait on or fail because of this second fetch.
-    fetchMovementLog(sheetId).then(() => {
+    // Captured in a variable (not just fire-and-forget) so Repeat
+    // Offenders' own Promise.all below can ALSO wait on this exact same
+    // in-flight fetch — a Promise supports multiple independent .then()
+    // subscribers, so this does not trigger a second network call.
+    const movementLogPromise = fetchMovementLog(sheetId);
+    movementLogPromise.then(() => {
       trackingPopulateSnapshotSelectors();
       // Behind on Today's Calls' attemptsToday depends on Movement_Log for
       // a real day-over-day call_attempts delta (see buildTodayCallBaseline)
@@ -596,11 +601,16 @@ async function fetchAndRender(){
     // — Repeat Offenders' two source tabs (Daily_RM_Issues, RM_Hierarchy)
     // are each written/maintained by separate Apps Script logic that
     // might not be set up yet, and the main dashboard must never wait on
-    // or fail because of either fetch. Independent of fetchMovementLog's
-    // own fetch/render pass (different tabs, no shared dependency), and
-    // renderRepeatOffenders() alone is enough here — it doesn't need the
-    // rest of the dashboard re-rendered, just its own section.
-    Promise.all([fetchDailyRmIssues(sheetId), fetchRmHierarchyForRollup(sheetId)]).then(() => {
+    // or fail because of either fetch. renderRepeatOffenders() alone is
+    // enough here — it doesn't need the rest of the dashboard re-rendered,
+    // just its own section. ALSO waits on movementLogPromise now (2026-09-03)
+    // — Total Leads (totalLeadsByKey, tab-repeat-offenders.js) reads
+    // movementSnapshots, not allParsedLeads, so it needs that fetch settled
+    // too, whichever of the two finishes last. movementLogPromise never
+    // rejects (fetchMovementLog catches its own errors internally, same as
+    // fetchDailyRmIssues/fetchRmHierarchyForRollup), so this Promise.all is
+    // still safe even when Movement_Log genuinely isn't set up.
+    Promise.all([fetchDailyRmIssues(sheetId), fetchRmHierarchyForRollup(sheetId), movementLogPromise]).then(() => {
       renderRepeatOffenders();
     });
 

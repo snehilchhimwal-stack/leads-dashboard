@@ -277,42 +277,72 @@ function aggregateRepeatOffenders(rows, keyFn){
 // Total leads assigned to each group-key, REGARDLESS of whether currently
 // flagged for any SLA issue — the denominator aggregateRepeatOffenders'
 // own comment flags as unavailable ("Daily_RM_Issues only ever contains
-// FLAGGED rows, never a complete lead roster"). Cross-references the live
-// `allParsedLeads` (the actual "leads" tab, fetched once at page load —
-// NOT Daily_RM_Issues) rather than trying to derive it from flagged rows
-// alone. keyFn/dateKeys use the exact same shape and semantics as
-// aggregateRepeatOffenders/repeatOffendersDateKeysForRange (a raw lead
-// object has the same .RM/.region/.group_source/.TL/.source_bucket field
-// names Daily_RM_Issues rows do, from the same HEADER_ALIASES_
-// convention, so the identical keyFn/passesRepeatOffenderFilters work
-// unchanged against either shape) — dateKeys is always matched against
-// the LEAD's OWN lead_assigned_at (never a "captured on" concept, which
-// doesn't apply to a plain roster count); null means unrestricted, one
-// Set of N dates means "assigned on any of those N days", which doubles
-// as both the single-date case (Just That Day) and the multi-day case
-// (naturally sums to the union across the days — a lead has exactly one
-// assignment date, so summing per-day counts and counting the union of
-// days are the same number).
+// FLAGGED rows, never a complete lead roster").
 //
-// KNOWN LIMITATION: `allParsedLeads` is the live "leads" tab as it reads
-// RIGHT NOW — it does not retain history. Once a lead closes/converts or
-// ages out of whatever window the live sheet itself currently retains
-// (observed ~7-8 days as of 2026-09-03), it silently drops out of this
-// count. Recent ranges (Yesterday, Last 7 Days, This Week) are normally
-// within that window; a Custom range or All-time reaching further back
-// can undercount — Total Leads is a live-snapshot count, not a durable
-// historical one the way Daily_RM_Issues' own flagged-instance history is.
+// Reads `movementSnapshots` (Movement_Log, tab-movement.js's own fetch —
+// see MOVEMENT_LOG_COLUMNS), NOT `allParsedLeads` (the live "leads" tab).
+// This was tried against allParsedLeads first and switched after a real
+// gap: the live leads tab only ever holds currently-OPEN leads (a closed/
+// converted lead is removed from it entirely), so a Total Leads count
+// built from it would silently miss every lead that closed since it was
+// assigned — undercounting even for a date well within the ordinary
+// window. Movement_Log's own snapshotOpenLeads_ (MovementTracker.gs)
+// explicitly captures "every lead... open or closed", so a lead is still
+// visible here for as long as ANY of its 4-times-daily snapshots survives
+// Movement_Log's own MOVEMENT_LOG_RETENTION_DAYS (7 days) pruning — it
+// only drops out once it has been closed AND pruned, not the moment it
+// closes.
+//
+// A lead can appear in several snapshot rows (once per capture run it
+// was still reachable for) — deduped to ONE row per lead_id first, taking
+// whichever snapshot is LATEST, so a reassigned lead's RM/region/etc.
+// reflects its most recently known state (this can occasionally disagree
+// with which RM's Daily_RM_Issues instance-count a specific night's flag
+// landed under, if the lead was reassigned in between — a documented,
+// accepted imprecision for what is fundamentally a denominator/
+// sanity-check number, not a payroll-grade attribution).
+//
+// keyFn/dateKeys use the exact same shape and semantics as
+// aggregateRepeatOffenders/repeatOffendersDateKeysForRange (a
+// movementSnapshots record has the same .RM/.region/.group_source/.TL/
+// .source_bucket field names Daily_RM_Issues rows do, from the same
+// HEADER_ALIASES_ convention, so the identical keyFn/
+// passesRepeatOffenderFilters work unchanged against this shape too) —
+// dateKeys is always matched against the LEAD's OWN lead_assigned_at
+// (never a "captured on" concept, which doesn't apply to a plain roster
+// count); null means unrestricted, one Set of N dates means "assigned on
+// any of those N days", which doubles as both the single-date case (Just
+// That Day) and the multi-day case (naturally sums to the union across
+// the days — a lead has exactly one assignment date, so summing per-day
+// counts and counting the union of days are the same number).
+//
+// KNOWN LIMITATION, narrower than the allParsedLeads version but not
+// eliminated: Movement_Log itself is ALSO pruned to a 7-day rolling
+// window (MOVEMENT_LOG_RETENTION_DAYS, MovementTracker.gs) — a lead
+// closed AND aged out past that window is gone from here too. Recent
+// ranges (Yesterday, Last 7 Days, This Week) are normally within that
+// window; a Custom range or All-time reaching further back can still
+// undercount.
 function totalLeadsByKey(keyFn, dateKeys){
   const counts = {};
-  if (typeof allParsedLeads === 'undefined') return counts;
-  allParsedLeads.forEach(l => {
-    if (!passesRepeatOffenderFilters(l)) return;
+  if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return counts;
+
+  const latestByLeadId = new Map();
+  movementSnapshots.forEach(rec => {
+    const id = String(rec.lead_id || '').trim();
+    if (!id) return;
+    const cur = latestByLeadId.get(id);
+    if (!cur || (rec.snapshot_at && (!cur.snapshot_at || rec.snapshot_at > cur.snapshot_at))) latestByLeadId.set(id, rec);
+  });
+
+  latestByLeadId.forEach(rec => {
+    if (!passesRepeatOffenderFilters(rec)) return;
     if (dateKeys) {
-      const assignedDate = parseDate(l.lead_assigned_at);
+      const assignedDate = parseDate(rec.lead_assigned_at);
       const dk = assignedDate ? istDateKey(assignedDate) : null;
       if (!dk || !dateKeys.has(dk)) return;
     }
-    const key = keyFn(l);
+    const key = keyFn(rec);
     if (!key) return;
     counts[key] = (counts[key] || 0) + 1;
   });
@@ -466,7 +496,7 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing, totalLeadsMap){
   const headHtml = `<tr>
       <th></th><th>Name</th>
       <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Flagged Leads</th>
-      <th style="text-align:right" title="ALL leads assigned in the current time range/filters, whether flagged for an issue or not — from the live leads roster, not Daily_RM_Issues. Live-snapshot count: a lead that has since closed, converted, or aged out of what the live sheet currently retains is not counted, so this can undercount for older/wider ranges (see totalLeadsByKey's own comment).">Total Leads</th>
+      <th style="text-align:right" title="ALL leads assigned in the current time range/filters, whether flagged for an issue or not — from Movement_Log's history (includes leads that have since closed), not Daily_RM_Issues or the live leads tab. Movement_Log is itself pruned to a 7-day rolling window, so a lead closed AND aged out past that window is still not counted — this can undercount for a Custom range or All-time reaching further back (see totalLeadsByKey's own comment).">Total Leads</th>
       <th style="text-align:right" title="Total flagged-lead-rows. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
       <th style="text-align:right" title="Sort key: Instances ÷ Flagged Leads — average number of times each already-flagged lead got flagged again. 2.5x means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">Avg Flagged<br><span class="dim" style="font-weight:400; font-size:9.5px;">(Instances ÷ Flagged Leads)</span></th>
       <th>Top Issues</th>
