@@ -477,6 +477,38 @@ off-by-one.
 | `repairDailyRmIssuesMissingFieldsNow()` | One-off repair for rows written before `TL`/`group_source`/`source_bucket`/`lead_assigned_at` existed in the schema — backfills them from `Movement_Log` by matching `lead_id` and nearest timestamp. Safe to re-run; leaves already-complete rows untouched. |
 | `reportRepeatOffenderRmsNow()` | Logs a quick RM leaderboard straight to the Apps Script console — a lighter-weight sanity check than opening the dashboard. |
 
+### 9.3.1 "Total Leads" column — added 2026-09-03
+
+Every Repeat Offenders table (live tab and PDF export) now shows two
+distinct counts side by side: **Flagged Leads** (the original "Leads"
+column — distinct leads that got flagged for an issue at least once,
+`aggregateRepeatOffenders`' own count) and **Total Leads** (every lead
+assigned in the same range, flagged or not). Added after a user report
+that the PDF's per-RM lead count looked too high; investigation confirmed
+the flagged count was correct, but there was no way to see it against a
+real denominator — `aggregateRepeatOffenders`'s own comment already
+flagged this gap ("no total leads this RM owns denominator available").
+
+`totalLeadsByKey()` (`js/tab-repeat-offenders.js`) computes it by
+cross-referencing `allParsedLeads` (the live "leads" tab — **not**
+`Daily_RM_Issues`, which only ever contains flagged rows) against
+`lead_assigned_at`, using the exact same `keyFn`/`passesRepeatOffenderFilters`
+already used for the flagged side, so it groups identically across RM/
+Region/A1-TM/RH. Always assigned-date-based (no "captured on" concept
+applies to a plain roster count) — for a single-date table this is just
+that day's new assignments; for a multi-day range it's naturally the sum
+across days, since a lead has exactly one assignment date.
+
+**Known limitation, same category as §9.4's date-basis gotcha**:
+`allParsedLeads` is the live sheet AS IT READS RIGHT NOW, with no history
+of its own — a lead that has since closed/converted, or aged out of
+whatever the live sheet currently retains (observed ~7-8 days as of
+2026-09-03), silently disappears from this count. Yesterday/Last 7 Days/
+This Week are normally within that window; a Custom range or All-time
+reaching further back can undercount. The PDF prints a short footnote
+explaining this (a static page has no hover tooltip); the live tab
+carries it as the column header's `title` tooltip instead.
+
 ### 9.4 The Time-range filter's date-basis split (dashboard side) — read before touching `js/tab-repeat-offenders.js`
 
 The Repeat Offenders tab has its own Time range dropdown (Yesterday /

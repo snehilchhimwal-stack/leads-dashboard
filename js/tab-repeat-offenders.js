@@ -274,6 +274,51 @@ function aggregateRepeatOffenders(rows, keyFn){
   }).sort((a, b) => (b.instancePct - a.instancePct) || (b.totalInstances - a.totalInstances) || (b.distinctLeads - a.distinctLeads));
 }
 
+// Total leads assigned to each group-key, REGARDLESS of whether currently
+// flagged for any SLA issue — the denominator aggregateRepeatOffenders'
+// own comment flags as unavailable ("Daily_RM_Issues only ever contains
+// FLAGGED rows, never a complete lead roster"). Cross-references the live
+// `allParsedLeads` (the actual "leads" tab, fetched once at page load —
+// NOT Daily_RM_Issues) rather than trying to derive it from flagged rows
+// alone. keyFn/dateKeys use the exact same shape and semantics as
+// aggregateRepeatOffenders/repeatOffendersDateKeysForRange (a raw lead
+// object has the same .RM/.region/.group_source/.TL/.source_bucket field
+// names Daily_RM_Issues rows do, from the same HEADER_ALIASES_
+// convention, so the identical keyFn/passesRepeatOffenderFilters work
+// unchanged against either shape) — dateKeys is always matched against
+// the LEAD's OWN lead_assigned_at (never a "captured on" concept, which
+// doesn't apply to a plain roster count); null means unrestricted, one
+// Set of N dates means "assigned on any of those N days", which doubles
+// as both the single-date case (Just That Day) and the multi-day case
+// (naturally sums to the union across the days — a lead has exactly one
+// assignment date, so summing per-day counts and counting the union of
+// days are the same number).
+//
+// KNOWN LIMITATION: `allParsedLeads` is the live "leads" tab as it reads
+// RIGHT NOW — it does not retain history. Once a lead closes/converts or
+// ages out of whatever window the live sheet itself currently retains
+// (observed ~7-8 days as of 2026-09-03), it silently drops out of this
+// count. Recent ranges (Yesterday, Last 7 Days, This Week) are normally
+// within that window; a Custom range or All-time reaching further back
+// can undercount — Total Leads is a live-snapshot count, not a durable
+// historical one the way Daily_RM_Issues' own flagged-instance history is.
+function totalLeadsByKey(keyFn, dateKeys){
+  const counts = {};
+  if (typeof allParsedLeads === 'undefined') return counts;
+  allParsedLeads.forEach(l => {
+    if (!passesRepeatOffenderFilters(l)) return;
+    if (dateKeys) {
+      const assignedDate = parseDate(l.lead_assigned_at);
+      const dk = assignedDate ? istDateKey(assignedDate) : null;
+      if (!dk || !dateKeys.has(dk)) return;
+    }
+    const key = keyFn(l);
+    if (!key) return;
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return counts;
+}
+
 // The By Region table's own grouping key — mirrors effectiveRegion +
 // mainRegionFor (reports.js), the SAME normalization every other
 // region-based view on this dashboard uses, so a sub-region variant
@@ -380,18 +425,29 @@ function renderRepeatOffenders(){
   const regionList = aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15);
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
 
+  // Total Leads (issue or not) per group-key, from the live leads roster —
+  // see totalLeadsByKey's own comment. One map per grouping, same dateKeys
+  // this whole render pass already scoped to (NOT re-split into
+  // assigned-date-vs-capture-date the way the issue-instance side is —
+  // Total Leads is always assigned-date-based, there's no "captured"
+  // concept for a plain roster count).
+  const totalLeadsRM = totalLeadsByKey(l => l.RM, dateKeys);
+  const totalLeadsRegion = totalLeadsByKey(l => _repeatOffendersRegionKey(l), dateKeys);
+  const totalLeadsA1TM = hierarchyMissing ? {} : totalLeadsByKey(l => primaryManagerForRm(l.RM), dateKeys);
+  const totalLeadsRH = hierarchyMissing ? {} : totalLeadsByKey(l => rhForRm(l.RM), dateKeys);
+
   // Grid order is now purely logical grouping (the 3 RM cuts together,
   // then Region, then the hierarchy rollups) — no longer height-driven,
   // since every card renders in the same bounded, scrollable box
   // regardless of row count (see repeatOffenderTableHtml's own comment),
   // and the grid itself is auto-fit rather than a fixed 2-column split.
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${repeatOffenderTableHtml('Top 20 RMs', rmList, false)}
-    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false)}
-    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 100)', rmListOver100, false)}
-    ${repeatOffenderTableHtml('By Region', regionList, false)}
-    ${repeatOffenderTableHtml('Top 10 A1 / TM', a1tmList, hierarchyMissing)}
-    ${repeatOffenderTableHtml('Top 5 RH', rhList, hierarchyMissing)}
+    ${repeatOffenderTableHtml('Top 20 RMs', rmList, false, totalLeadsRM)}
+    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false, totalLeadsRM)}
+    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 100)', rmListOver100, false, totalLeadsRM)}
+    ${repeatOffenderTableHtml('By Region', regionList, false, totalLeadsRegion)}
+    ${repeatOffenderTableHtml('Top 10 A1 / TM', a1tmList, hierarchyMissing, totalLeadsA1TM)}
+    ${repeatOffenderTableHtml('Top 5 RH', rhList, hierarchyMissing, totalLeadsRH)}
   </div>`;
 }
 
@@ -406,20 +462,21 @@ function renderRepeatOffenders(){
 // this is what actually fixes the uneven-height problem: not clever
 // grid pairing (removed below), just never letting two differently-tall
 // tables produce differently-tall cards in the first place.
-function repeatOffenderTableHtml(title, list, hierarchyMissing){
+function repeatOffenderTableHtml(title, list, hierarchyMissing, totalLeadsMap){
   const headHtml = `<tr>
       <th></th><th>Name</th>
-      <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Leads</th>
+      <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Flagged Leads</th>
+      <th style="text-align:right" title="ALL leads assigned in the current time range/filters, whether flagged for an issue or not — from the live leads roster, not Daily_RM_Issues. Live-snapshot count: a lead that has since closed, converted, or aged out of what the live sheet currently retains is not counted, so this can undercount for older/wider ranges (see totalLeadsByKey's own comment).">Total Leads</th>
       <th style="text-align:right" title="Total flagged-lead-rows. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
-      <th style="text-align:right" title="Sort key: Instances ÷ Leads — average number of times each already-flagged lead got flagged again. 2.5x means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">Avg Flagged<br><span class="dim" style="font-weight:400; font-size:9.5px;">(Instances ÷ Leads)</span></th>
+      <th style="text-align:right" title="Sort key: Instances ÷ Flagged Leads — average number of times each already-flagged lead got flagged again. 2.5x means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">Avg Flagged<br><span class="dim" style="font-weight:400; font-size:9.5px;">(Instances ÷ Flagged Leads)</span></th>
       <th>Top Issues</th>
     </tr>`;
 
   let rows;
   if (hierarchyMissing) {
-    rows = `<tr><td colspan="5" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
+    rows = `<tr><td colspan="6" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
   } else if (!list.length) {
-    rows = `<tr><td colspan="5" class="empty-row">Nothing to show for the current filters/range.</td></tr>`;
+    rows = `<tr><td colspan="6" class="empty-row">Nothing to show for the current filters/range.</td></tr>`;
   } else {
     rows = list.map((r, i) => {
       // Compact chips instead of a raw "key: n, key: n" text dump — same
@@ -427,10 +484,12 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing){
       // dashboard already uses (e.g. the RM Timeline day-detail list).
       const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
         .map(k => `<span class="chip red" style="margin:0 4px 2px 0;">${esc(r.byIssueLabel[k] || k)}: ${r.byIssue[k]}</span>`).join('');
+      const totalLeads = (totalLeadsMap && totalLeadsMap[r.name]) || 0;
       return `<tr>
         <td class="num dim">${i + 1}</td>
         <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
         <td class="num">${r.distinctLeads}</td>
+        <td class="num">${totalLeads}</td>
         <td class="num">${r.totalInstances}</td>
         <td class="num">${(r.totalInstances / r.distinctLeads).toFixed(1)}x</td>
         <td>${topIssues}</td>

@@ -91,6 +91,14 @@ function _repeatOffendersPdfCurrentFilterInfo(){
 // isn't loaded — repeatOffenderTableHtml would otherwise print a "could
 // not be read" placeholder row on screen, which isn't real data worth a
 // PDF page.
+// Stamps r.totalLeads onto every row of `list` from `totalLeadsMap` (see
+// tab-repeat-offenders.js's totalLeadsByKey) — mutates in place since each
+// list here is freshly built per call, never shared/re-rendered.
+function _repeatOffendersPdfAttachTotalLeads(list, totalLeadsMap){
+  list.forEach(r => { r.totalLeads = (totalLeadsMap && totalLeadsMap[r.name]) || 0; });
+  return list;
+}
+
 function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
   const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(useAssignedDate ? rec.leadAssignedDateKey : rec.date));
   const scoped = dateOnlyScoped.filter(passesRepeatOffenderFilters);
@@ -98,13 +106,24 @@ function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
 
   const rmListFull = aggregateRepeatOffenders(scoped, rec => rec.RM);
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
+
+  // Total Leads (issue or not), from the live leads roster — always
+  // assigned-date-based regardless of useAssignedDate (that flag is about
+  // which date field the ISSUE side matches on; a plain roster count has
+  // no "captured on" concept to begin with). Same dateKeys this whole
+  // section is already scoped to.
+  const totalLeadsRM = totalLeadsByKey(l => l.RM, dateKeys);
+  const totalLeadsRegion = totalLeadsByKey(l => _repeatOffendersRegionKey(l), dateKeys);
+  const totalLeadsA1TM = hierarchyMissing ? {} : totalLeadsByKey(l => primaryManagerForRm(l.RM), dateKeys);
+  const totalLeadsRH = hierarchyMissing ? {} : totalLeadsByKey(l => rhForRm(l.RM), dateKeys);
+
   const candidates = [
-    { title: 'Top 20 RMs', list: rmListFull.slice(0, 20) },
-    { title: 'Top 20 RMs (Leads > 50)', list: rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20) },
-    { title: 'Top 20 RMs (Leads > 100)', list: rmListFull.filter(r => r.distinctLeads > 100).slice(0, 20) },
-    { title: 'By Region', list: aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15) },
-    { title: 'Top 10 A1 / TM', list: hierarchyMissing ? [] : aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10) },
-    { title: 'Top 5 RH', list: hierarchyMissing ? [] : aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5) },
+    { title: 'Top 20 RMs', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.slice(0, 20), totalLeadsRM) },
+    { title: 'Top 20 RMs (Leads > 50)', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20), totalLeadsRM) },
+    { title: 'Top 20 RMs (Leads > 100)', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.filter(r => r.distinctLeads > 100).slice(0, 20), totalLeadsRM) },
+    { title: 'By Region', list: _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15), totalLeadsRegion) },
+    { title: 'Top 10 A1 / TM', list: hierarchyMissing ? [] : _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10), totalLeadsA1TM) },
+    { title: 'Top 5 RH', list: hierarchyMissing ? [] : _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5), totalLeadsRH) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }
@@ -149,16 +168,17 @@ function _repeatOffendersPdfFilterSummaryLine(){
   return parts.length ? parts.join(' · ') : null;
 }
 
-// Converts one aggregateRepeatOffenders() row into the exact same 6
+// Converts one aggregateRepeatOffenders() row into the exact same 7
 // columns repeatOffenderTableHtml shows on screen (#, Name (+RM count),
-// Leads, Instances, Avg Flagged, Top Issues) — plain strings for
-// autoTable, no HTML/markup involved.
+// Flagged Leads, Total Leads, Instances, Avg Flagged, Top Issues) — plain
+// strings for autoTable, no HTML/markup involved. r.totalLeads is stamped
+// on by _repeatOffendersPdfAttachTotalLeads before this ever runs.
 function _repeatOffendersPdfTableRows(list){
   return list.map(function (r, i) {
     const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
       .map(k => (r.byIssueLabel[k] || k) + ': ' + r.byIssue[k]).join('    ');
     const name = r.name + (r.distinctRMs > 1 ? ' (' + r.distinctRMs + ' RMs)' : '');
-    return [String(i + 1), name, String(r.distinctLeads), String(r.totalInstances), (r.totalInstances / r.distinctLeads).toFixed(1) + 'x', topIssues];
+    return [String(i + 1), name, String(r.distinctLeads), String(r.totalLeads || 0), String(r.totalInstances), (r.totalInstances / r.distinctLeads).toFixed(1) + 'x', topIssues];
   });
 }
 
@@ -241,7 +261,21 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setTextColor(145, 150, 160);
   // istStamp() already appends "IST" itself (e.g. "2026-09-02 07:46 PM IST") — no separate suffix needed here.
   doc.text('Generated ' + istStamp(new Date()) + (filterSummaryLine ? '   ·   ' + filterSummaryLine : ''), REPEAT_OFFENDERS_PDF_MARGIN_, y);
-  y += 14;
+  y += 12;
+  // A static PDF has no hover tooltip to carry totalLeadsByKey's own
+  // caveat, so it gets one printed (wrapped) note instead — otherwise
+  // "Total Leads" looking smaller than "Flagged Leads" for an older date
+  // reads as a bug rather than the known live-snapshot limitation it
+  // actually is. splitTextToSize wraps to the usable page width — doc.text
+  // does NOT auto-wrap on its own and would otherwise run off the edge.
+  doc.setFontSize(8);
+  doc.setTextColor(165, 169, 177);
+  const totalLeadsNoteLines = doc.splitTextToSize(
+    '"Total Leads" = every lead assigned in this range, issue or not, from the live leads sheet as it reads today — a lead since closed or aged out of what the sheet currently retains is not counted, so it can undercount for older dates.',
+    pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
+  );
+  doc.text(totalLeadsNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
+  y += totalLeadsNoteLines.length * 10 + 4;
   doc.setDrawColor(220, 223, 228);
   doc.setLineWidth(1);
   doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, pageW - REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -296,7 +330,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     y += 12;
     doc.autoTable({
       startY: y,
-      head: [['#', 'Name', 'Leads', 'Instances', 'Avg Flagged', 'Top Issues']],
+      head: [['#', 'Name', 'Flagged Leads', 'Total Leads', 'Instances', 'Avg Flagged', 'Top Issues']],
       body: rows,
       theme: 'grid',
       styles: {
@@ -307,11 +341,12 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
       alternateRowStyles: { fillColor: [246, 247, 249] },
       columnStyles: {
         0: { cellWidth: 22, halign: 'right' },
-        1: { cellWidth: 130 },
-        2: { cellWidth: 44, halign: 'right' },
-        3: { cellWidth: 56, halign: 'right' },
-        4: { cellWidth: 68, halign: 'right' },
-        5: { cellWidth: 'auto' },
+        1: { cellWidth: 110 },
+        2: { cellWidth: 52, halign: 'right' },
+        3: { cellWidth: 48, halign: 'right' },
+        4: { cellWidth: 52, halign: 'right' },
+        5: { cellWidth: 60, halign: 'right' },
+        6: { cellWidth: 'auto' },
       },
       margin: { left: REPEAT_OFFENDERS_PDF_MARGIN_, right: REPEAT_OFFENDERS_PDF_MARGIN_, bottom: REPEAT_OFFENDERS_PDF_MARGIN_ },
       pageBreak: 'avoid',    // the whole table moves to a fresh page if it doesn't fit — never split mid-table
