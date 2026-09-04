@@ -910,8 +910,26 @@ classification values matched exactly by hand computation before being
 carried into `Tests_DailyRmIssueLog.gs`'s new `reportRmPerformanceNow()`
 test block as Movement_Log-row fixtures reconstructing the identical
 observations; (2) pushed to GitHub for the existing Actions CI
-(`.github/workflows/test.yml`) to actually run — see the commit this
-paragraph ships with for the result.
+(`.github/workflows/test.yml`) to actually run.
+
+**CI genuinely caught a real fixture bug on the first push (commit
+`acfc1f4`)** — worth recording precisely because this is exactly the
+scenario `run-gs-tests.js`/GitHub Actions exists for: a browser cross-check
+of Stage 2-4's pure arithmetic against hand-built observation objects
+isn't the same as the fixture's Movement_Log ROWS actually reconstructing
+those observations through the real Stage 1. The rows' shared, fixed-old
+`lead_assigned_at` made `stageStuck48h` (no stage/connection condition at
+all — purely `past48h && pastGrace`) fire unconditionally for every row,
+bad and clean alike, diluting Scenario A/B below their intended
+classification thresholds. A concurrent session working the same CI
+failure independently found and fixed a second, related contamination
+(`underCalledToday`, via a dated comment-log fixture addition) before the
+two sessions coordinated (each on this project's own concurrent-session
+messaging) to avoid duplicating the fix. Resolved in commit `e8818bd`
+(anchoring `lead_assigned_at` to 10h before each row's own snapshot
+instead of one fixed date, plus matching `call_attempts` between the
+"bad" and "clean" row builders) — CI confirmed green on that commit,
+569/569 across the full suite.
 
 Real `Movement_Log` data still hasn't been checked against any of this
 (needs a signed-in live session) — worth doing now that all 4 phases are
