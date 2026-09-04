@@ -451,3 +451,19 @@ function sortRmPerformanceByPriority(list){
   const rank = c => c === 'Below Expectations' ? 0 : c === 'Watch — concentrated' ? 1 : c === 'On Track' ? 2 : 3;
   return list.slice().sort((a, b) => (rank(a.classification) - rank(b.classification)) || (b.composite - a.composite));
 }
+
+// "Below Expectations only" view, added 2026-09-04 per explicit request:
+// "I want below expectation only, and those which are worst so that i can
+// focus on them" — On Track, Watch — concentrated, AND Insufficient Data
+// are all DROPPED entirely, not just de-emphasized (the user explicitly
+// declined including Watch — concentrated too, despite it also being a
+// real, actionable finding — "i only want to weed out the worst
+// performers"). Shared between the live tab and the PDF export for the
+// same reason sortRmPerformanceByPriority/rmPerformanceDrivenBy are — one
+// filter, not two copies that could drift. Callers should still run the
+// result through sortRmPerformanceByPriority (worst-first by composite —
+// the tier comparison becomes a no-op once every row shares one
+// classification, so it degrades cleanly to a pure composite sort).
+function filterRmPerformanceWorst(list){
+  return list.filter(r => r.classification === 'Below Expectations');
+}

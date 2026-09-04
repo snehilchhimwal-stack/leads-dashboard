@@ -940,3 +940,58 @@ change in this project has needed — Apps Script does not auto-deploy from
 GitHub (§4.3). `DailyRmIssueLog.gs` needs re-pasting into the live Apps
 Script project before `reportRmPerformanceNow()` is callable there for
 real.
+
+### 9.7.1 "Below Expectations only" filter — added 2026-09-04
+
+Per explicit request ("i want below expectation only, and those which are
+worst so that i can focus on them") — every table on the live tab AND
+every table in the PDF export now shows **only** `classification ===
+'Below Expectations'` rows. `On Track`, `Watch — concentrated`, and
+`Insufficient Data` are still fully COMPUTED (the peer average and
+shrinkage genuinely need the whole group, not just the bad rows) but
+never displayed — dropped entirely, not just de-emphasized. Confirmed via
+`AskUserQuestion`: `Watch — concentrated` (a real, actionable finding —
+1-2 chronically-bad leads) is deliberately excluded too, not just
+`On Track`/`Insufficient Data` — the user's own words: "i only want to
+weed out the worst performers."
+
+Two new shared functions in `js/core-rm-performance.js`, alongside
+`sortRmPerformanceByPriority`/`rmPerformanceDrivenBy` (same reasoning —
+one filter used by both the live tab and the PDF, never two copies that
+could drift):
+
+```js
+function filterRmPerformanceWorst(list){
+  return list.filter(r => r.classification === 'Below Expectations');
+}
+```
+
+Callers run `sortRmPerformanceByPriority(filterRmPerformanceWorst(list))`
+— the priority sort still works unchanged (its classification-tier
+comparison degrades to a no-op once every row shares one tier, sorting
+purely by composite descending, worst first).
+
+**Empty state redesigned as good news, not an error.** An empty
+"Below Expectations" table now means nobody currently qualifies —
+`rmPerformanceTableHtml`'s empty-row message and the PDF's "no data"
+status text were both reworded to say so explicitly (not the old generic
+"nothing to show", which reads like something broke).
+`#repeatOffendersCount` now reports the FILTERED count ("2 RMs below
+expectations"), not the total number of RMs with any eligible lead-day.
+
+**Real fixture-testing catch during verification, not assumed safe going
+in**: an initial harness assertion expected a single-region test fixture's
+Region rollup to ALSO read Below Expectations (since it aggregates the
+same bad RM) — it read On Track instead. Root cause, confirmed by
+inspection, not a bug: with only ONE region in the fixture, that region
+has no peer to compare against (the peer average IS itself), so it can
+structurally never read as "elevated relative to peer" — correct,
+pre-existing shrinkage/classification behavior (Phase 1), unrelated to
+this filter. Fixed the test assertion, not the code.
+
+Verified via a disposable harness (deleted after use), 12/12 assertions:
+a 3-RM fixture (one clearly Below Expectations, one On Track, one
+Insufficient Data) confirmed the Below-Expectations RM appears and the
+other two are excluded from BOTH the live-tab DOM and the PDF row-builder
+output, the count/status text update correctly, and an all-clean fixture
+renders the new friendly empty-state message rather than looking broken.

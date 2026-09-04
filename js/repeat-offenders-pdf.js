@@ -104,13 +104,19 @@ function _repeatOffendersPdfCurrentFilterInfo(){
 // Filters out empty candidates and the two hierarchy-dependent rollups
 // when RM_Hierarchy isn't loaded — the live tab would print a "could not
 // be read" placeholder row instead, which isn't real data worth a PDF page.
+// "Below Expectations only" (2026-09-04, matching the live tab — see its
+// own comment on filterRmPerformanceWorst, core-rm-performance.js): On
+// Track / Watch — concentrated / Insufficient Data are computed (the peer
+// average needs the whole group) but never printed, only the worst
+// performers.
 function _repeatOffendersPdfSectionTables(dateKeys){
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
+  const worst = (list) => sortRmPerformanceByPriority(filterRmPerformanceWorst(list));
   const candidates = [
-    { title: 'RMs', list: sortRmPerformanceByPriority(computeRmPerformance(dateKeys)).slice(0, 20) },
-    { title: 'By Region', list: sortRmPerformanceByPriority(computeRmPerformance(dateKeys, rec => _repeatOffendersRegionKey(rec))).slice(0, 15) },
-    { title: 'A1 / TM', list: hierarchyMissing ? [] : sortRmPerformanceByPriority(computeRmPerformance(dateKeys, rec => primaryManagerForRm(rec.RM))).slice(0, 10) },
-    { title: 'RH', list: hierarchyMissing ? [] : sortRmPerformanceByPriority(computeRmPerformance(dateKeys, rec => rhForRm(rec.RM))).slice(0, 5) },
+    { title: 'RMs', list: worst(computeRmPerformance(dateKeys)).slice(0, 20) },
+    { title: 'By Region', list: worst(computeRmPerformance(dateKeys, rec => _repeatOffendersRegionKey(rec))).slice(0, 15) },
+    { title: 'A1 / TM', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => primaryManagerForRm(rec.RM))).slice(0, 10) },
+    { title: 'RH', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => rhForRm(rec.RM))).slice(0, 5) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }
@@ -260,7 +266,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const methodologyNoteLines = doc.splitTextToSize(
-    'Workload = distinct leads eligible for at least one scored SLA rule. Status: Insufficient Data (fewer than 5 eligible leads), On Track, Watch — concentrated (elevated but driven by 1-2 chronically-bad leads), or Below Expectations (elevated and spread across the book). Score = severity-weighted composite vs. the peer average it\'s shrunk toward — higher is worse. Driven by names the rule(s) actually pushing an elevated score up. Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days — a Custom range or "From when history began" reaching further back can undercount.',
+    'Every table below shows Below Expectations rows ONLY (elevated composite spread across the book — a real pattern, not a couple of stuck leads) -- On Track, Watch — concentrated, and Insufficient Data are computed the same way (the peer average needs the whole group) but deliberately not printed here. Worst first, by Score. A table with no rows is good news, not missing data. Workload = distinct leads eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward — higher is worse. Driven by names the rule(s) actually pushing the score up. Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days — a Custom range or "From when history began" reaching further back can undercount.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -389,7 +395,13 @@ async function downloadRepeatOffendersPdf(){
     const filterInfo = _repeatOffendersPdfCurrentFilterInfo();
     const specs = _repeatOffendersPdfBuildPageSpecs(filterInfo);
     if (!specs.length) {
-      if (statusEl) { statusEl.textContent = 'No data available for the selected period.'; statusEl.style.color = 'var(--amber)'; }
+      // Movement_Log data existing was already confirmed above (the
+      // movementFetchState/movementSnapshots.length gate at the top of
+      // this function), so an empty specs list here means every group is
+      // On Track/Watch/Insufficient Data for the selected period — no one
+      // is classified Below Expectations — not that nothing could be
+      // computed.
+      if (statusEl) { statusEl.textContent = 'No one is classified Below Expectations for the selected period — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
       return;
     }
     const doc = _repeatOffendersPdfRenderPages(specs, filterInfo);

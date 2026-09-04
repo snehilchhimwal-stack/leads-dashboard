@@ -427,19 +427,28 @@ function renderRepeatOffenders(){
     return;
   }
   if (noticeEl) noticeEl.style.display = 'none';
-  if (countEl) countEl.textContent = `${rmFull.length} RM${rmFull.length === 1 ? '' : 's'}`;
+
+  // "Below Expectations only" — per explicit request, every table drops
+  // On Track / Watch — concentrated / Insufficient Data entirely, showing
+  // only the worst performers to focus on. filterRmPerformanceWorst +
+  // sortRmPerformanceByPriority (both core-rm-performance.js) are shared
+  // with the PDF export — see their own comments for why.
+  const rmWorst = sortRmPerformanceByPriority(filterRmPerformanceWorst(rmFull));
+  const regionWorst = sortRmPerformanceByPriority(filterRmPerformanceWorst(regionFull));
+  const a1tmWorst = hierarchyMissing ? [] : sortRmPerformanceByPriority(filterRmPerformanceWorst(a1tmFull));
+  const rhWorst = hierarchyMissing ? [] : sortRmPerformanceByPriority(filterRmPerformanceWorst(rhFull));
+
+  if (countEl) countEl.textContent = `${rmWorst.length} RM${rmWorst.length === 1 ? '' : 's'} below expectations`;
 
   // Region needs no hierarchy lookup — it's a field already on every
   // Movement_Log row. Not capped tightly like the RM/A1-TM/RH lists:
   // there are only ~11 canonical regions (REGION_GROUP_MAP, reports.js),
   // so 15 comfortably shows all of them without needing a "show more".
-  // sortRmPerformanceByPriority (core-rm-performance.js) is shared with
-  // the PDF export — see its own comment for why.
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${rmPerformanceTableHtml('RMs', sortRmPerformanceByPriority(rmFull).slice(0, 20), false)}
-    ${rmPerformanceTableHtml('By Region', sortRmPerformanceByPriority(regionFull).slice(0, 15), false)}
-    ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : sortRmPerformanceByPriority(a1tmFull).slice(0, 10), hierarchyMissing)}
-    ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : sortRmPerformanceByPriority(rhFull).slice(0, 5), hierarchyMissing)}
+    ${rmPerformanceTableHtml('RMs', rmWorst.slice(0, 20), false)}
+    ${rmPerformanceTableHtml('By Region', regionWorst.slice(0, 15), false)}
+    ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : a1tmWorst.slice(0, 10), hierarchyMissing)}
+    ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : rhWorst.slice(0, 5), hierarchyMissing)}
   </div>`;
 }
 
@@ -470,7 +479,7 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing){
   if (hierarchyMissing) {
     rows = `<tr><td colspan="6" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
   } else if (!list.length) {
-    rows = `<tr><td colspan="6" class="empty-row">Nothing to show for the current filters/range.</td></tr>`;
+    rows = `<tr><td colspan="6" class="empty-row">No one classified Below Expectations for the current filters/range — nothing to act on right now.</td></tr>`;
   } else {
     rows = list.map((r, i) => {
       const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
