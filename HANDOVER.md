@@ -759,10 +759,72 @@ Watch — concentrated / Below Expectations) plus confirming
 — flagged as the natural next confirmation once Phase 2 wiring makes the
 numbers visible in the UI.
 
-**Not yet done**: Phase 2 (replace the live tab's tables with this
-engine's output), Phase 3 (PDF export), Phase 4
-(`reportRepeatOffenderRmsNow()` in `DailyRmIssueLog.gs`, the console
-sanity-check leaderboard — would need a `.gs` mirror of this same
-reconstruction, ideally re-running `computeSlaFlags_` against
-`Movement_Log` history the same way `backfillDailyRmIssuesFromMovementLog_`
-already does, rather than a fresh reimplementation).
+**Phase 2 (done) — live tab wiring, tables replaced outright.**
+`renderRepeatOffenders()`/`repeatOffenderTableHtml()` (`js/tab-repeat-offenders.js`)
+now call `computeRmPerformance()` directly instead of `aggregateRepeatOffenders()`
+— the old "Top 20 RMs / Leads > 50 / By Region / Top 10 A1-TM / Top 5 RH"
+tables are gone, replaced by the same 4 groupings (RM/Region/A1-TM/RH) run
+through the new engine and rendered by a new `rmPerformanceTableHtml()`
+(`repeatOffenderTableHtml` itself was dead code after this and removed —
+nothing else called it; the PDF export still uses `aggregateRepeatOffenders`
+directly, untouched, so it stays defined for Phase 3). New columns:
+**Workload** (distinct eligible leads), **Status** (the 4-value
+classification, as a colored chip — red/amber/green/dim matching this
+dashboard's existing `.chip` variants), **Score** (composite vs. peer
+composite), **Driven by** (the 1-2 scored rules actually pushing an
+elevated score, worst first, shown only for Watch/Below Expectations rows
+— filtered to rules with a REAL violation, not just a nonzero
+shrinkage-blended rate). Sorted by classification tier first (Below
+Expectations → Watch → On Track → Insufficient Data), composite within
+each tier — not pure composite, since shrinkage means even a clean RM
+carries a small nonzero score and could otherwise outrank a real finding.
+
+**A generalization made during this phase, not before**: `computeRmPerformance`/
+`reconstructRmPerformanceObservations`/`aggregateRmPerformance`/
+`classifyRmPerformance` all now take a `keyFn` (defaulting to RM), so the
+exact same reconstruction/rate/shrinkage/classification pipeline serves
+Region/A1-TM/RH rollups too — mirroring how `aggregateRepeatOffenders(rows,
+keyFn)` already generalizes across the old 4 tables. The observation/output
+field carrying the group name was renamed `RM` → `name` accordingly.
+Re-verified after the generalization (not assumed safe): the same 25
+RM-keyed assertions from Phase 1's harness, still passing, PLUS new
+assertions proving a region-keyed reconstruction produces the same
+underlying numbers under a different grouping, and that a `keyFn`
+resolving to null/'' (an unresolvable A1-TM/RH lookup) excludes the record
+entirely rather than silently bucketing it as "Unassigned" — same
+population rule `aggregateRepeatOffenders`/`totalLeadsByKey` already use.
+
+Section gating also moved from `dailyRmIssuesFetchState` to
+`movementFetchState` (this section no longer reads `Daily_RM_Issues` at
+all) — the static filter-summary text (`dashboard.html`) was rewritten to
+match: no more "Leads/Instances/Avg Flagged" or the old assigned-vs-
+captured date-field split (the new engine always matches a lead-day
+against its own Movement_Log observation day, which is the correct basis
+for a rate that measures exposure, not a one-off assignment event).
+
+Verified via two disposable harnesses (both deleted after use): (1) a
+regenerated engine-level harness confirming the `keyFn` generalization
+didn't change RM-keyed behavior (25/25) plus the new region-keyed/
+null-key assertions (25/25 total, see above); (2) a DOM-level harness
+that grafts the real `dashboard.html` body, drives `movementSnapshots`/
+`movementFetchState`/`rmHierarchyFetchState` directly (bypassing the
+network), calls `renderRepeatOffenders()` for real, and asserts on the
+actual rendered HTML — 12/12 pass, including "no `undefined`/`NaN`
+leaked into the markup", "Insufficient Data correctly suppresses the
+'Driven by' callout even at a 100% raw rate", and "the hierarchy-missing
+message renders in exactly both of the A1-TM and RH cards". Also
+`tests/frontend-harness.html`'s own empty-history assertion was updated
+(it checked for literal "Daily_RM_Issues" text in the notice — now checks
+"Movement_Log", matching the new gating) and the full suite re-run clean,
+26/26.
+
+**Not yet done**: Phase 3 (PDF export, `js/repeat-offenders-pdf.js` —
+currently untouched, still calls `aggregateRepeatOffenders`/
+`totalLeadsByKey` directly), Phase 4 (`reportRepeatOffenderRmsNow()` in
+`DailyRmIssueLog.gs`, the console sanity-check leaderboard — would need a
+`.gs` mirror of this same reconstruction, ideally re-running
+`computeSlaFlags_` against `Movement_Log` history the same way
+`backfillDailyRmIssuesFromMovementLog_` already does, rather than a fresh
+reimplementation). Real `Movement_Log` data still hasn't been checked
+against this (needs a signed-in live session) — now that the numbers are
+actually visible in the UI, this is worth doing before Phase 3/4.

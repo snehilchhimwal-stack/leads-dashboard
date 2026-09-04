@@ -290,8 +290,10 @@
     // to []. renderRepeatOffenders's own `clear()` deliberately empties
     // #repeatOffendersBody and puts the explanatory message in the SEPARATE
     // #repeatOffendersNotice element instead (see tab-repeat-offenders.js) —
-    // assert against the element the message actually lands in.
-    assert('Repeat Offenders shows a "no data yet" notice on empty Daily_RM_Issues (no throw)', textOf('repeatOffendersNotice').indexOf('Daily_RM_Issues') !== -1);
+    // assert against the element the message actually lands in. Checks for
+    // "Movement_Log", not "Daily_RM_Issues" — the 2026-09-04 RM Performance
+    // redesign moved this section's data source (see HANDOVER.md §9.7).
+    assert('Repeat Offenders shows a "no data yet" notice on empty Movement_Log (no throw)', textOf('repeatOffendersNotice').indexOf('Movement_Log') !== -1);
     assert('Movement/Overnight rendered without throwing on empty Movement_Log', !!document.getElementById('overnightList'));
 
     const opsTabBtn = document.querySelector('.tab-btn[data-tab="tab-operations"]');

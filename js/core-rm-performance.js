@@ -166,11 +166,21 @@ function _rmPerfDaysBetweenKeys(a, b){
 }
 
 // Stage 1 — walk every retained Movement_Log lead-copy history and emit
-// one {RM, lead_id, dayKey, rule, violated} record for every (lead, day,
+// one {name, lead_id, dayKey, rule, violated} record for every (lead, day,
 // rule) combination where the lead was actually ELIGIBLE for that rule.
 // dateKeys: null = every day Movement_Log still retains; a Set of
 // istDateKey strings = restrict to those days only (same convention as
 // totalLeadsByKey/repeatOffendersDateKeysForRange).
+//
+// keyFn(rec) picks the GROUPING key from the raw Movement_Log snapshot
+// record — defaults to the RM, but the exact same reconstruction/rate/
+// shrinkage/classification pipeline works unchanged for Region/A1-TM/RH
+// rollups by passing a different keyFn, mirroring how
+// aggregateRepeatOffenders(rows, keyFn) already generalizes across all 4
+// of Repeat Offenders' old grouping levels. A record whose key resolves
+// to null/'' (e.g. an RM not found in RM_Hierarchy for an A1-TM/RH
+// rollup) is dropped entirely — same "unresolvable, excluded" population
+// aggregateRepeatOffenders and totalLeadsByKey both already use.
 //
 // ONE reference snapshot per (lead-copy, calendar day) — the LATEST
 // snapshot of that day — is used, mirroring totalLeadsByKey's own
@@ -178,9 +188,10 @@ function _rmPerfDaysBetweenKeys(a, b){
 // (00:00/06:00/12:00/18:00 IST) means that's the 18:00 capture when
 // present, the closest available proxy to Daily_RM_Issues' own 22:50 IST
 // nightly capture time.
-function reconstructRmPerformanceObservations(dateKeys){
+function reconstructRmPerformanceObservations(dateKeys, keyFn){
   const observations = [];
   if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return observations;
+  const getKey = keyFn || (rec => rec.RM || 'Unassigned');
 
   const byLead = buildMovementHistories();
   byLead.forEach(history => {
@@ -197,6 +208,9 @@ function reconstructRmPerformanceObservations(dateKeys){
 
       Array.from(byDay.keys()).sort().forEach(dayKey => {
         const rec = byDay.get(dayKey);
+        const groupKey = getKey(rec);
+        if (!groupKey) return; // unresolvable for this rollup — excluded, not "Unassigned"
+
         const enriched = enrichSnapshotCached(rec);
         if (!enriched.isOpenLead) return; // a closed lead is eligible for nothing
 
@@ -208,7 +222,7 @@ function reconstructRmPerformanceObservations(dateKeys){
         RM_PERF_RULES.forEach(rule => {
           if (!rule.eligible(enriched, ctx)) return;
           observations.push({
-            RM: rec.RM || 'Unassigned',
+            name: groupKey,
             lead_id: String(rec.lead_id || '').trim(),
             dayKey: dayKey,
             rule: rule.key,
@@ -222,11 +236,13 @@ function reconstructRmPerformanceObservations(dateKeys){
   return observations;
 }
 
-// Stage 2 — roll Stage 1's raw observations up to RM x rule: eligible/
+// Stage 2 — roll Stage 1's raw observations up to group x rule: eligible/
 // violation lead-day counts, distinct eligible/violated lead counts, and
 // the persistence signal (longest run of CONSECUTIVE-CALENDAR-DAY
 // violations on any single lead, plus how many leads hit the chronic
-// threshold). Returns a Map keyed by RM name.
+// threshold). Returns a Map keyed by the same grouping key
+// reconstructRmPerformanceObservations was called with (RM name by
+// default, or whatever keyFn produced — a region, an A1/TM, an RH).
 //
 // Confidence for the shrinkage step (Stage 3) is deliberately based on
 // DISTINCT ELIGIBLE LEADS, not eligible lead-days, even though the RATE
@@ -235,19 +251,19 @@ function reconstructRmPerformanceObservations(dateKeys){
 // independent trials, so counting lead-days as "sample size" would
 // overstate how much evidence a single chronic lead actually provides.
 function aggregateRmPerformance(observations){
-  const byRM = new Map();
+  const byGroup = new Map();
 
   observations.forEach(o => {
-    if (!byRM.has(o.RM)) byRM.set(o.RM, { RM: o.RM, rules: new Map() });
-    const rmEntry = byRM.get(o.RM);
-    if (!rmEntry.rules.has(o.rule)) {
-      rmEntry.rules.set(o.rule, {
+    if (!byGroup.has(o.name)) byGroup.set(o.name, { name: o.name, rules: new Map() });
+    const groupEntry = byGroup.get(o.name);
+    if (!groupEntry.rules.has(o.rule)) {
+      groupEntry.rules.set(o.rule, {
         eligibleDays: 0, violationDays: 0,
         eligibleLeads: new Set(), violatedLeads: new Set(),
         perLead: new Map(), // lead_id -> [{dayKey, violated}, ...]
       });
     }
-    const r = rmEntry.rules.get(o.rule);
+    const r = groupEntry.rules.get(o.rule);
     r.eligibleDays++;
     r.eligibleLeads.add(o.lead_id);
     if (o.violated) { r.violationDays++; r.violatedLeads.add(o.lead_id); }
@@ -255,8 +271,8 @@ function aggregateRmPerformance(observations){
     r.perLead.get(o.lead_id).push({ dayKey: o.dayKey, violated: o.violated });
   });
 
-  byRM.forEach(rmEntry => {
-    rmEntry.rules.forEach(r => {
+  byGroup.forEach(groupEntry => {
+    groupEntry.rules.forEach(r => {
       r.rate = r.eligibleDays ? r.violationDays / r.eligibleDays : 0;
       r.distinctEligibleLeads = r.eligibleLeads.size;
       r.distinctViolatedLeads = r.violatedLeads.size;
@@ -279,17 +295,17 @@ function aggregateRmPerformance(observations){
     });
   });
 
-  return byRM;
+  return byGroup;
 }
 
-// Company-wide (all RMs currently in byRM) violation rate per rule,
-// weighted by lead-days rather than a plain average-of-RM-rates — an RM
-// with 200 eligible lead-days should influence the peer baseline more
-// than one with 6, same reasoning as any exposure-weighted rate.
-function computeRmPerfPeerAverages(byRM){
+// Company-wide (all groups currently in byGroup) violation rate per rule,
+// weighted by lead-days rather than a plain average-of-group-rates — a
+// group with 200 eligible lead-days should influence the peer baseline
+// more than one with 6, same reasoning as any exposure-weighted rate.
+function computeRmPerfPeerAverages(byGroup){
   const totals = {};
-  byRM.forEach(rmEntry => {
-    rmEntry.rules.forEach((r, ruleKey) => {
+  byGroup.forEach(groupEntry => {
+    groupEntry.rules.forEach((r, ruleKey) => {
       if (!totals[ruleKey]) totals[ruleKey] = { violationDays: 0, eligibleDays: 0 };
       totals[ruleKey].violationDays += r.violationDays;
       totals[ruleKey].eligibleDays += r.eligibleDays;
@@ -302,11 +318,11 @@ function computeRmPerfPeerAverages(byRM){
   return peerAvg;
 }
 
-// Stage 3+4 — shrink each RM's per-rule rate toward the peer average
+// Stage 3+4 — shrink each group's per-rule rate toward the peer average
 // (weighted by distinct-lead confidence, see aggregateRmPerformance's own
 // comment), combine into one severity-weighted composite score, and
 // classify. Returns an array, most-concerning first (highest composite),
-// each entry: { RM, distinctLeads, composite, peerComposite, rules:
+// each entry: { name, distinctLeads, composite, peerComposite, rules:
 // {ruleKey: {eligibleDays, violationDays, distinctEligibleLeads,
 // distinctViolatedLeads, rawRate, shrunkRate, maxStreak, chronicLeads,
 // concentrated}}, routingIssueDays, classification }.
@@ -319,21 +335,21 @@ function computeRmPerfPeerAverages(byRM){
 //   'Watch — concentrated'    — composite elevated, but driven by chronic
 //                               leads (a case-management question).
 //   'Below Expectations'      — composite elevated, and NOT concentrated —
-//                               a broad pattern across the RM's own book.
-function classifyRmPerformance(byRM){
-  const peerAvg = computeRmPerfPeerAverages(byRM);
+//                               a broad pattern across the group's own book.
+function classifyRmPerformance(byGroup){
+  const peerAvg = computeRmPerfPeerAverages(byGroup);
   const peerComposite = RM_PERF_SCORED_RULE_KEYS.reduce(
     (sum, k) => sum + RM_PERF_RULE_WEIGHTS[k] * (peerAvg[k] || 0), 0);
 
   const results = [];
-  byRM.forEach(rmEntry => {
+  byGroup.forEach(groupEntry => {
     let composite = 0;
     const allEligibleLeads = new Set();
     let anyConcentrated = false;
     const perRuleOut = {};
 
     RM_PERF_SCORED_RULE_KEYS.forEach(ruleKey => {
-      const r = rmEntry.rules.get(ruleKey);
+      const r = groupEntry.rules.get(ruleKey);
       const eligibleDays = r ? r.eligibleDays : 0;
       const violationDays = r ? r.violationDays : 0;
       const distinctEligibleLeads = r ? r.distinctEligibleLeads : 0;
@@ -355,7 +371,7 @@ function classifyRmPerformance(byRM){
       };
     });
 
-    const inactiveRmRule = rmEntry.rules.get('inactiveRmNewLead');
+    const inactiveRmRule = groupEntry.rules.get('inactiveRmNewLead');
     const nLeads = allEligibleLeads.size;
 
     let classification;
@@ -365,7 +381,7 @@ function classifyRmPerformance(byRM){
     else classification = 'Below Expectations';
 
     results.push({
-      RM: rmEntry.RM,
+      name: groupEntry.name,
       distinctLeads: nLeads,
       composite: composite,
       peerComposite: peerComposite,
@@ -378,12 +394,16 @@ function classifyRmPerformance(byRM){
   return results.sort((a, b) => b.composite - a.composite);
 }
 
-// Top-level orchestration — the one function later UI wiring (Phase 2+)
-// should actually call. dateKeys: same convention as
-// reconstructRmPerformanceObservations (null = all retained history, a
-// Set of istDateKey strings = restrict to those days).
-function computeRmPerformance(dateKeys){
-  const observations = reconstructRmPerformanceObservations(dateKeys);
-  const byRM = aggregateRmPerformance(observations);
-  return classifyRmPerformance(byRM);
+// Top-level orchestration — the one function UI wiring should actually
+// call. dateKeys: same convention as reconstructRmPerformanceObservations
+// (null = all retained history, a Set of istDateKey strings = restrict to
+// those days). keyFn: same convention too (defaults to RM) — pass
+// rec => primaryManagerForRm(rec.RM) / rec => rhForRm(rec.RM) /
+// rec => _repeatOffendersRegionKey(rec) (all tab-repeat-offenders.js) for
+// the A1-TM / RH / Region rollups, exactly as aggregateRepeatOffenders'
+// own callers already do.
+function computeRmPerformance(dateKeys, keyFn){
+  const observations = reconstructRmPerformanceObservations(dateKeys, keyFn);
+  const byGroup = aggregateRmPerformance(observations);
+  return classifyRmPerformance(byGroup);
 }

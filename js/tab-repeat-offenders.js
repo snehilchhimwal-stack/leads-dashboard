@@ -378,10 +378,17 @@ function renderRepeatOffenders(){
     if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
   };
 
-  if (dailyRmIssuesFetchState === 'loading') { clear('Loading repeat-offender history…'); return; }
-  if (dailyRmIssuesFetchState === 'error') { clear('Could not load Daily_RM_Issues: ' + esc(dailyRmIssuesFetchError)); return; }
-  if (dailyRmIssuesFetchState !== 'ok' || !dailyRmIssues.length) {
-    clear('No <span class="mono">Daily_RM_Issues</span> data yet — run <span class="mono">setupDailyRmIssueLog()</span> then <span class="mono">backfillDailyRmIssuesFromMovementLogNow()</span> in Apps Script (DailyRmIssueLog.gs), or wait for tonight\'s 22:50 IST capture.');
+  // 2026-09-04 redesign (see HANDOVER.md §9.7 for the full writeup): this
+  // section now reads Movement_Log via computeRmPerformance()
+  // (core-rm-performance.js), NOT Daily_RM_Issues — Daily_RM_Issues is a
+  // violations-only log and can't supply a true eligible-population
+  // denominator, which is exactly what made the old "Avg Flagged" ranking
+  // unfair to begin with. Gating below checks Movement_Log's own fetch
+  // state accordingly.
+  if (movementFetchState === 'loading') { clear('Loading Movement_Log history…'); return; }
+  if (movementFetchState === 'error') { clear('Could not load Movement_Log: ' + esc(movementFetchError)); return; }
+  if (movementFetchState !== 'ok' || !movementSnapshots.length) {
+    clear('No <span class="mono">Movement_Log</span> data yet — see MovementTracker.gs for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once), or allow ~6–12h after setup for enough captured history to compute a rate against.');
     return;
   }
 
@@ -389,32 +396,23 @@ function renderRepeatOffenders(){
   const range = rangeSel ? rangeSel.value : 'last7Days';
   const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
   const dateKeys = repeatOffendersDateKeysForRange(range, now);
+  // Movement_Log itself only retains a rolling 7-day window
+  // (MOVEMENT_LOG_RETENTION_DAYS, MovementTracker.gs) — Yesterday/This
+  // Week/Last 7 Days stay safely inside it, but "From when history began"
+  // or a Custom range reaching further back can undercount (a lead
+  // closed AND aged out past 7 days is gone from Movement_Log too). Same
+  // known limitation totalLeadsByKey already carries — surfaced here via
+  // the section's own static filter-summary text (dashboard.html) rather
+  // than a dynamic per-range check, to keep this in line with how that
+  // existing caveat is already presented.
+  const hierarchyMissing = rmHierarchyFetchState !== 'ok';
 
-  // Split into two passes (date-range, then the top-bar filters) instead
-  // of one combined filter — so an empty result can say WHICH of the two
-  // actually caused it, rather than a single opaque "nothing matches"
-  // message that leaves "is my 26k rows of data even being read?"
-  // unanswerable from the UI alone.
-  //
-  // Which date field gets matched depends on the range, because "Yesterday"
-  // and "This Week"/"Last 7 Days" are really asking two different
-  // questions:
-  //   - Yesterday/Custom: leadAssignedDateKey (the lead's own assignment
-  //     date) — "how many of yesterday's newly-assigned leads are already
-  //     a problem", matching what a manual check of the leads sheet shows.
-  //   - This Week/Last 7 Days: `date` (the night this row was captured as
-  //     flagged) — a genuine repeat offender is almost always an OLD lead
-  //     that keeps getting reflagged; filtering those by assignment date
-  //     would hide the exact pattern this section exists to surface, since
-  //     an old-but-still-broken lead's assignment date is never recent.
-  //   - All-time: dateKeys is null, so neither field is even checked.
-  // A row with no resolvable lead_assigned_at never matches a
-  // Yesterday/Custom range (it still shows under All-time).
-  const usesAssignedDate = (range === 'yesterday' || range === 'custom');
-  const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(usesAssignedDate ? rec.leadAssignedDateKey : rec.date));
-  const scoped = dateOnlyScoped.filter(passesRepeatOffenderFilters);
+  const rmFull = computeRmPerformance(dateKeys);
+  const regionFull = computeRmPerformance(dateKeys, rec => _repeatOffendersRegionKey(rec));
+  const a1tmFull = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => primaryManagerForRm(rec.RM));
+  const rhFull = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rhForRm(rec.RM));
 
-  if (!scoped.length) {
+  if (!rmFull.length) {
     const activeFilters = [];
     if (filterState.project.size) activeFilters.push(`Project (${filterState.project.size})`);
     if (filterState.region.size) activeFilters.push(`Region (${filterState.region.size})`);
@@ -423,92 +421,56 @@ function renderRepeatOffenders(){
     if (filterState.bucket.size) activeFilters.push(`Sub-source (${filterState.bucket.size})`);
     const filterNote = activeFilters.length
       ? `Active filters likely narrowing this to zero: <b>${esc(activeFilters.join(', '))}</b>. Clear them in the filter bar above to check.`
-      : 'No Project/Region/TL/Source/Sub-source filters are currently active, so this is NOT a filter issue — the flagged leads in this time range genuinely have no matching rows (unlikely if the time range is "From when history began").';
-    const scopedByLabel = usesAssignedDate ? 'were assigned in this time range' : 'fall in this time range';
-    clear(`<b>${esc(dailyRmIssues.length)}</b> total flagged instance${dailyRmIssues.length === 1 ? '' : 's'} loaded from Daily_RM_Issues; <b>${esc(dateOnlyScoped.length)}</b> ${scopedByLabel}; <b>0</b> match after the top-bar filters below. ${filterNote} (The top-bar Assigned-date range filter never applies here, by design — only this section\'s own Time range selector does.)`);
+      : 'No Project/Region/TL/Source/Sub-source filters are currently active, so this is NOT a filter issue — no leads in Movement_Log genuinely have SLA-eligible history in this time range (unlikely if the time range is "From when history began").';
+    clear(`<b>${esc(movementSnapshots.length)}</b> total Movement_Log snapshot rows loaded; <b>0</b> RMs have SLA-eligible lead-days after the current time range/top-bar filters. ${filterNote}`);
     if (countEl) countEl.textContent = '0';
     return;
   }
   if (noticeEl) noticeEl.style.display = 'none';
-  if (countEl) countEl.textContent = `${scoped.length} flagged instance${scoped.length === 1 ? '' : 's'}`;
+  if (countEl) countEl.textContent = `${rmFull.length} RM${rmFull.length === 1 ? '' : 's'}`;
 
-  // Full RM ranking, computed once — the volume-cut table below
-  // (Leads > 50) just re-filters this same already-sorted list rather
-  // than re-aggregating from scratch. Ranking by Avg Flagged
-  // (aggregateRepeatOffenders' own sort) deliberately favors RATE over
-  // volume — see this section's own filter-summary text — so an RM
-  // carrying a genuinely large number of distinct flagged leads can sit
-  // far down (or off) the plain Top 20 despite the sheer size of their
-  // problem. This extra cut restores that visibility directly, still
-  // ranked by the same Avg Flagged rule within the cut. (A parallel
-  // "Leads > 100" cut existed here too but was removed 2026-09-04 — in
-  // practice never populated, since >100 distinct FLAGGED leads for one
-  // RM never occurred in real data; the same PDF-side table was already
-  // being silently dropped for exactly that reason, see
-  // repeat-offenders-pdf.js.)
-  const rmListFull = aggregateRepeatOffenders(scoped, rec => rec.RM);
-  const rmList = rmListFull.slice(0, 20);
-  const rmListOver50 = rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20);
-  const a1tmList = aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10);
-  const rhList = aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5);
-  // Region needs no hierarchy lookup at all — it's a field already on
-  // every Daily_RM_Issues row. Not capped tightly like the RM/A1-TM/RH
-  // lists: there are only ~11 canonical regions (REGION_GROUP_MAP,
-  // reports.js), so 15 comfortably shows all of them without needing a
-  // separate "show more" affordance.
-  const regionList = aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15);
-  const hierarchyMissing = rmHierarchyFetchState !== 'ok';
+  // Most-concerning first: classification tier before composite score, so
+  // an "Insufficient Data" row (which can still carry a nonzero shrunk
+  // composite — shrinkage still blends toward the peer average even
+  // below the volume gate) never outranks a real "Below Expectations"
+  // finding just because its raw number happens to be higher.
+  const classificationRank = c => c === 'Below Expectations' ? 0 : c === 'Watch — concentrated' ? 1 : c === 'On Track' ? 2 : 3;
+  const byPriority = list => list.slice().sort((a, b) =>
+    (classificationRank(a.classification) - classificationRank(b.classification)) || (b.composite - a.composite));
 
-  // Total Leads (issue or not) per group-key, from the live leads roster —
-  // see totalLeadsByKey's own comment. One map per grouping, same dateKeys
-  // this whole render pass already scoped to (NOT re-split into
-  // assigned-date-vs-capture-date the way the issue-instance side is —
-  // Total Leads is always assigned-date-based, there's no "captured"
-  // concept for a plain roster count).
-  const totalLeadsRM = totalLeadsByKey(l => l.RM, dateKeys);
-  const totalLeadsRegion = totalLeadsByKey(l => _repeatOffendersRegionKey(l), dateKeys);
-  const totalLeadsA1TM = hierarchyMissing ? {} : totalLeadsByKey(l => primaryManagerForRm(l.RM), dateKeys);
-  const totalLeadsRH = hierarchyMissing ? {} : totalLeadsByKey(l => rhForRm(l.RM), dateKeys);
-
-  // Grid order is now purely logical grouping (the 3 RM cuts together,
-  // then Region, then the hierarchy rollups) — no longer height-driven,
-  // since every card renders in the same bounded, scrollable box
-  // regardless of row count (see repeatOffenderTableHtml's own comment),
-  // and the grid itself is auto-fit rather than a fixed 2-column split.
-  // "Leads > 50" is only ever populated in a wide date range/filter combo
-  // — omitted entirely (not even an empty-state card) when there's
-  // nothing in it, same omission rule the PDF export already applies to
-  // its own equivalent table (see repeat-offenders-pdf.js).
-  const over50Html = rmListOver50.length ? repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false, totalLeadsRM) : '';
-
+  // Region needs no hierarchy lookup — it's a field already on every
+  // Movement_Log row. Not capped tightly like the RM/A1-TM/RH lists:
+  // there are only ~11 canonical regions (REGION_GROUP_MAP, reports.js),
+  // so 15 comfortably shows all of them without needing a "show more".
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${repeatOffenderTableHtml('Top 20 RMs', rmList, false, totalLeadsRM)}
-    ${over50Html}
-    ${repeatOffenderTableHtml('By Region', regionList, false, totalLeadsRegion)}
-    ${repeatOffenderTableHtml('Top 10 A1 / TM', a1tmList, hierarchyMissing, totalLeadsA1TM)}
-    ${repeatOffenderTableHtml('Top 5 RH', rhList, hierarchyMissing, totalLeadsRH)}
+    ${rmPerformanceTableHtml('RMs', byPriority(rmFull).slice(0, 20), false)}
+    ${rmPerformanceTableHtml('By Region', byPriority(regionFull).slice(0, 15), false)}
+    ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : byPriority(a1tmFull).slice(0, 10), hierarchyMissing)}
+    ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : byPriority(rhFull).slice(0, 5), hierarchyMissing)}
   </div>`;
 }
 
-// Every card (populated, empty, or hierarchy-unavailable) renders the
-// SAME shell — header row + .section-scroll table — so every card in
-// the grid has an identical outer shape regardless of how many rows it
-// actually has. Combined with .section-scroll's own default max-height
-// (360px, capped+scrollable+sticky-header — the same box every other
-// table on this dashboard already uses; this file used to opt OUT of it
-// via .no-cap, which is exactly what let a 20-row table and a 3-row
-// table sit side by side with a large blank gap under the shorter one),
-// this is what actually fixes the uneven-height problem: not clever
-// grid pairing (removed below), just never letting two differently-tall
-// tables produce differently-tall cards in the first place.
-function repeatOffenderTableHtml(title, list, hierarchyMissing, totalLeadsMap){
+const RM_PERF_CLASSIFICATION_CHIP_CLASS = {
+  'Below Expectations': 'red-chip',
+  'Watch — concentrated': 'amber-warn-chip',
+  'On Track': 'green-chip',
+  'Insufficient Data': 'dim-chip',
+};
+const RM_PERF_CLASSIFICATION_TITLE = 'Insufficient Data: fewer than 5 distinct eligible leads — too little evidence to judge either way, regardless of how the raw rate looks. On Track: composite score within 25% of the peer average. Watch — concentrated: composite elevated, but driven by one or two chronically-bad leads (a case to check, not a broad pattern). Below Expectations: composite elevated AND spread across the book — a real pattern, not a couple of stuck leads.';
+
+// Same shell every card on this dashboard already uses — header row +
+// bounded/scrollable .section-scroll table, so every card in the grid has
+// an identical outer shape regardless of row count. Renders
+// computeRmPerformance()'s output directly (core-rm-performance.js) —
+// see that file's own header comment for the full methodology this
+// replaced "Avg Flagged" with, 2026-09-04.
+function rmPerformanceTableHtml(title, list, hierarchyMissing){
   const headHtml = `<tr>
       <th></th><th>Name</th>
-      <th style="text-align:right" title="Distinct leads that got flagged at least once in the current time range/filters.">Flagged Leads</th>
-      <th style="text-align:right" title="ALL leads assigned in the current time range/filters, whether flagged for an issue or not — from Movement_Log's history (includes leads that have since closed), not Daily_RM_Issues or the live leads tab. Movement_Log is itself pruned to a 7-day rolling window, so a lead closed AND aged out past that window is still not counted — this can undercount for a Custom range or All-time reaching further back (see totalLeadsByKey's own comment).">Total Leads</th>
-      <th style="text-align:right" title="Total flagged-lead-rows. The same lead flagged on 3 different nights counts 3 times.">Instances</th>
-      <th style="text-align:right" title="Sort key: Instances ÷ Flagged Leads — average number of times each already-flagged lead got flagged again. 2.5x means each flagged lead averaged 2.5 flagged nights. Ranks higher than a bigger Instances count with more Leads behind it (that's volume, not a worse per-lead pattern).">Avg Flagged<br><span class="dim" style="font-weight:400; font-size:9.5px;">(Instances ÷ Flagged Leads)</span></th>
-      <th>Top Issues</th>
+      <th style="text-align:right" title="Distinct leads eligible for at least one scored SLA rule in the current time range/filters — this group's real workload, not just its flagged leads.">Workload</th>
+      <th title="${esc(RM_PERF_CLASSIFICATION_TITLE)}">Status</th>
+      <th style="text-align:right" title="Severity-weighted, workload-adjusted composite score across Not Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+ (Inactive-RM Lead Added is tracked separately below, never scored here — it's a routing/assignment issue, not an execution one). Shrunk toward the peer average so a tiny sample can't dominate the ranking. Higher = worse; shown against the peer composite for scale.">Score<br><span class="dim" style="font-weight:400; font-size:9.5px;">(vs peer)</span></th>
+      <th>Driven by</th>
     </tr>`;
 
   let rows;
@@ -518,20 +480,39 @@ function repeatOffenderTableHtml(title, list, hierarchyMissing, totalLeadsMap){
     rows = `<tr><td colspan="6" class="empty-row">Nothing to show for the current filters/range.</td></tr>`;
   } else {
     rows = list.map((r, i) => {
-      // Compact chips instead of a raw "key: n, key: n" text dump — same
-      // .chip component every issue-flavored card elsewhere on this
-      // dashboard already uses (e.g. the RM Timeline day-detail list).
-      const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
-        .map(k => `<span class="chip red" style="margin:0 4px 2px 0;">${esc(r.byIssueLabel[k] || k)}: ${r.byIssue[k]}</span>`).join('');
-      const totalLeads = (totalLeadsMap && totalLeadsMap[r.name]) || 0;
+      const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
+      // "Driven by" — the scored rule(s) actually pushing this group's
+      // score up, ranked by their real weighted contribution to the
+      // composite (weight × shrunkRate), worst first — so a manager sees
+      // WHAT to talk about, not just THAT something's off. Filtered to
+      // violationDays>0 (a REAL violation happened), not merely
+      // shrunkRate>0 (shrinkage alone gives every rule a small nonzero
+      // blended rate toward the peer average even with zero violations,
+      // which would otherwise list a rule the group never actually
+      // broke). Only shown once elevated — On Track/Insufficient Data
+      // rows have nothing worth calling out here.
+      let driven = '';
+      if (r.classification === 'Below Expectations' || r.classification === 'Watch — concentrated') {
+        driven = RM_PERF_SCORED_RULE_KEYS
+          .map(k => Object.assign({ key: k, weight: RM_PERF_RULE_WEIGHTS[k] }, r.rules[k]))
+          .filter(x => x.violationDays > 0)
+          .sort((a, b) => (b.weight * b.shrunkRate) - (a.weight * a.shrunkRate))
+          .slice(0, 2)
+          .map(x => {
+            const label = (RM_PERF_RULES.find(rr => rr.key === x.key) || {}).label || x.key;
+            const chronicTag = x.concentrated ? ` <span class="dim" style="font-size:10px;">(${x.chronicLeads} chronic)</span>` : '';
+            return `<span class="chip ${x.concentrated ? 'amber' : 'red'}" style="margin:0 4px 2px 0;" title="${esc(x.violationDays)} of ${esc(x.eligibleDays)} eligible lead-days, ${esc(x.distinctViolatedLeads)} of ${esc(x.distinctEligibleLeads)} eligible leads affected">${esc(label)}: ${(x.rawRate * 100).toFixed(0)}%${chronicTag}</span>`;
+          }).join('');
+      }
+      const routingNote = r.routingIssueDays > 0
+        ? `<div class="dim" style="font-size:10px; margin-top:2px;">+${esc(r.routingIssueDays)} Inactive-RM Lead Added day(s) — a routing issue, not scored here</div>` : '';
       return `<tr>
         <td class="num dim">${i + 1}</td>
-        <td>${esc(r.name)}${r.distinctRMs > 1 ? ` <span class="dim" style="font-size:11px;">(${r.distinctRMs} RMs)</span>` : ''}</td>
-        <td class="num">${r.distinctLeads}</td>
-        <td class="num">${totalLeads}</td>
-        <td class="num">${r.totalInstances}</td>
-        <td class="num">${(r.totalInstances / r.distinctLeads).toFixed(1)}x</td>
-        <td>${topIssues}</td>
+        <td>${esc(r.name)}</td>
+        <td class="num">${esc(r.distinctLeads)}</td>
+        <td><span class="chip ${chipClass}">${esc(r.classification)}</span></td>
+        <td class="num">${r.composite.toFixed(2)} <span class="dim" style="font-size:10px;">/ ${r.peerComposite.toFixed(2)}</span></td>
+        <td>${driven}${routingNote}</td>
       </tr>`;
     }).join('');
   }
