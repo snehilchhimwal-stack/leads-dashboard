@@ -429,24 +429,17 @@ function renderRepeatOffenders(){
   if (noticeEl) noticeEl.style.display = 'none';
   if (countEl) countEl.textContent = `${rmFull.length} RM${rmFull.length === 1 ? '' : 's'}`;
 
-  // Most-concerning first: classification tier before composite score, so
-  // an "Insufficient Data" row (which can still carry a nonzero shrunk
-  // composite — shrinkage still blends toward the peer average even
-  // below the volume gate) never outranks a real "Below Expectations"
-  // finding just because its raw number happens to be higher.
-  const classificationRank = c => c === 'Below Expectations' ? 0 : c === 'Watch — concentrated' ? 1 : c === 'On Track' ? 2 : 3;
-  const byPriority = list => list.slice().sort((a, b) =>
-    (classificationRank(a.classification) - classificationRank(b.classification)) || (b.composite - a.composite));
-
   // Region needs no hierarchy lookup — it's a field already on every
   // Movement_Log row. Not capped tightly like the RM/A1-TM/RH lists:
   // there are only ~11 canonical regions (REGION_GROUP_MAP, reports.js),
   // so 15 comfortably shows all of them without needing a "show more".
+  // sortRmPerformanceByPriority (core-rm-performance.js) is shared with
+  // the PDF export — see its own comment for why.
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${rmPerformanceTableHtml('RMs', byPriority(rmFull).slice(0, 20), false)}
-    ${rmPerformanceTableHtml('By Region', byPriority(regionFull).slice(0, 15), false)}
-    ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : byPriority(a1tmFull).slice(0, 10), hierarchyMissing)}
-    ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : byPriority(rhFull).slice(0, 5), hierarchyMissing)}
+    ${rmPerformanceTableHtml('RMs', sortRmPerformanceByPriority(rmFull).slice(0, 20), false)}
+    ${rmPerformanceTableHtml('By Region', sortRmPerformanceByPriority(regionFull).slice(0, 15), false)}
+    ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : sortRmPerformanceByPriority(a1tmFull).slice(0, 10), hierarchyMissing)}
+    ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : sortRmPerformanceByPriority(rhFull).slice(0, 5), hierarchyMissing)}
   </div>`;
 }
 
@@ -481,29 +474,15 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing){
   } else {
     rows = list.map((r, i) => {
       const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
-      // "Driven by" — the scored rule(s) actually pushing this group's
-      // score up, ranked by their real weighted contribution to the
-      // composite (weight × shrunkRate), worst first — so a manager sees
-      // WHAT to talk about, not just THAT something's off. Filtered to
-      // violationDays>0 (a REAL violation happened), not merely
-      // shrunkRate>0 (shrinkage alone gives every rule a small nonzero
-      // blended rate toward the peer average even with zero violations,
-      // which would otherwise list a rule the group never actually
-      // broke). Only shown once elevated — On Track/Insufficient Data
-      // rows have nothing worth calling out here.
-      let driven = '';
-      if (r.classification === 'Below Expectations' || r.classification === 'Watch — concentrated') {
-        driven = RM_PERF_SCORED_RULE_KEYS
-          .map(k => Object.assign({ key: k, weight: RM_PERF_RULE_WEIGHTS[k] }, r.rules[k]))
-          .filter(x => x.violationDays > 0)
-          .sort((a, b) => (b.weight * b.shrunkRate) - (a.weight * a.shrunkRate))
-          .slice(0, 2)
-          .map(x => {
-            const label = (RM_PERF_RULES.find(rr => rr.key === x.key) || {}).label || x.key;
-            const chronicTag = x.concentrated ? ` <span class="dim" style="font-size:10px;">(${x.chronicLeads} chronic)</span>` : '';
-            return `<span class="chip ${x.concentrated ? 'amber' : 'red'}" style="margin:0 4px 2px 0;" title="${esc(x.violationDays)} of ${esc(x.eligibleDays)} eligible lead-days, ${esc(x.distinctViolatedLeads)} of ${esc(x.distinctEligibleLeads)} eligible leads affected">${esc(label)}: ${(x.rawRate * 100).toFixed(0)}%${chronicTag}</span>`;
-          }).join('');
-      }
+      // rmPerformanceDrivenBy (core-rm-performance.js, shared with the PDF
+      // export) already applies the classification gate and the
+      // violationDays>0 filter — see its own comment for why shrunkRate>0
+      // alone isn't enough (shrinkage gives every rule a small nonzero
+      // blended rate toward the peer average even with zero violations).
+      const driven = rmPerformanceDrivenBy(r).map(x => {
+        const chronicTag = x.concentrated ? ` <span class="dim" style="font-size:10px;">(${x.chronicLeads} chronic)</span>` : '';
+        return `<span class="chip ${x.concentrated ? 'amber' : 'red'}" style="margin:0 4px 2px 0;" title="${esc(x.violationDays)} of ${esc(x.eligibleDays)} eligible lead-days, ${esc(x.distinctViolatedLeads)} of ${esc(x.distinctEligibleLeads)} eligible leads affected">${esc(x.label)}: ${(x.rawRate * 100).toFixed(0)}%${chronicTag}</span>`;
+      }).join('');
       const routingNote = r.routingIssueDays > 0
         ? `<div class="dim" style="font-size:10px; margin-top:2px;">+${esc(r.routingIssueDays)} Inactive-RM Lead Added day(s) — a routing issue, not scored here</div>` : '';
       return `<tr>

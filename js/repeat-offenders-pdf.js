@@ -20,19 +20,28 @@
 // are free to share a page since each only advances the page cursor by
 // its own actual height.
 //
-// Depends on js/tab-repeat-offenders.js (dailyRmIssues,
-// dailyRmIssuesFetchState, rmHierarchyFetchState, aggregateRepeatOffenders,
+// 2026-09-04, Phase 3 of the RM Performance redesign (HANDOVER.md §9.7):
+// rebuilt AGAIN to match Phase 2's live-tab rewrite — this export now
+// mirrors computeRmPerformance()'s workload-normalized, confidence-aware
+// methodology instead of the old "Avg Flagged" ranking, via the exact
+// same core-rm-performance.js engine the live tab uses (never a separate
+// PDF-side reimplementation). See core-rm-performance.js's own header
+// comment for the full methodology.
+//
+// Depends on js/tab-repeat-offenders.js (rmHierarchyFetchState,
 // primaryManagerForRm, rhForRm, _repeatOffendersRegionKey,
-// passesRepeatOffenderFilters, repeatOffendersDateKeysForRange,
-// totalLeadsByKey — the last of which reads js/tab-movement.js's own
-// movementSnapshots, added 2026-09-03 for the "Total Leads" column) and
-// js/core-foundation.js (istDateKey) / js/core-outcome-engine.js (istStamp)
-// / js/reports-build.js (IST_MONTHS) — all loaded earlier in
-// dashboard.html, but this only ever runs on a user click, well after
-// every js/*.js file has finished loading, so exact script order doesn't
-// matter here (same reasoning core-foundation.js's own header comment
-// gives). Also needs jsPDF + jspdf-autotable (loaded in dashboard.html's
-// <head>).
+// repeatOffendersDateKeysForRange), js/core-rm-performance.js
+// (computeRmPerformance, sortRmPerformanceByPriority, rmPerformanceDrivenBy
+// — shared with the live tab so "what's driving an elevated score" and
+// "what order to list groups in" can never quietly drift apart between
+// the two surfaces), js/tab-movement.js (movementFetchState,
+// movementSnapshots, movementFetchError) and js/core-foundation.js
+// (istDateKey) / js/core-outcome-engine.js (istStamp) / js/reports-build.js
+// (IST_MONTHS) — all loaded earlier in dashboard.html, but this only ever
+// runs on a user click, well after every js/*.js file has finished
+// loading, so exact script order doesn't matter here (same reasoning
+// core-foundation.js's own header comment gives). Also needs jsPDF +
+// jspdf-autotable (loaded in dashboard.html's <head>).
 // ============================================================
 
 let _repeatOffendersPdfGenerating = false;
@@ -66,65 +75,42 @@ function _repeatOffendersPdfDateLine(dateKeys){
 }
 
 // Reads the live page's OWN current filter state — same range select,
-// same repeatOffendersDateKeysForRange call, same usesAssignedDate rule
-// renderRepeatOffenders itself uses (Yesterday/Custom => assigned date,
-// This Week/Last 7 Days => capture date, All-time => no date filter at
-// all) — so the PDF can never independently invent a different dataset
-// than what's currently on screen.
+// same repeatOffendersDateKeysForRange call renderRepeatOffenders itself
+// uses — so the PDF can never independently invent a different dataset
+// than what's currently on screen. No more usesAssignedDate: the
+// pre-2026-09-04 engine matched EITHER a lead's assignment date OR its
+// flagged-capture date depending on the selected range; the new
+// computeRmPerformance() engine always matches a lead-day against its own
+// Movement_Log OBSERVATION day, the same for every range — see
+// core-rm-performance.js's own header comment.
 function _repeatOffendersPdfCurrentFilterInfo(){
   const rangeSel = document.getElementById('repeatOffendersRangeSelect');
   const range = rangeSel ? rangeSel.value : 'last7Days';
   const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
   const dateKeys = repeatOffendersDateKeysForRange(range, now);
-  const usesAssignedDate = (range === 'yesterday' || range === 'custom');
   return {
     range: range,
     now: now,
     dateKeys: dateKeys,
-    usesAssignedDate: usesAssignedDate,
     displayName: REPEAT_OFFENDERS_PDF_FILTER_NAMES_[range] || String(range).toUpperCase(),
     dateLine: _repeatOffendersPdfDateLine(dateKeys),
   };
 }
 
 // One table candidate for a date/section: { title, list } (the same
-// `list` shape aggregateRepeatOffenders returns). Filters out empty
-// candidates and the two hierarchy-dependent rollups when RM_Hierarchy
-// isn't loaded — repeatOffenderTableHtml would otherwise print a "could
-// not be read" placeholder row on screen, which isn't real data worth a
-// PDF page.
-// Stamps r.totalLeads onto every row of `list` from `totalLeadsMap` (see
-// tab-repeat-offenders.js's totalLeadsByKey) — mutates in place since each
-// list here is freshly built per call, never shared/re-rendered.
-function _repeatOffendersPdfAttachTotalLeads(list, totalLeadsMap){
-  list.forEach(r => { r.totalLeads = (totalLeadsMap && totalLeadsMap[r.name]) || 0; });
-  return list;
-}
-
-function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
-  const dateOnlyScoped = dailyRmIssues.filter(rec => !dateKeys || dateKeys.has(useAssignedDate ? rec.leadAssignedDateKey : rec.date));
-  const scoped = dateOnlyScoped.filter(passesRepeatOffenderFilters);
-  if (!scoped.length) return [];
-
-  const rmListFull = aggregateRepeatOffenders(scoped, rec => rec.RM);
+// `list` shape computeRmPerformance() returns, already sorted worst-first
+// by sortRmPerformanceByPriority and capped — same 4 groupings, same caps,
+// as the live tab's own rmPerformanceTableHtml calls, tab-repeat-offenders.js).
+// Filters out empty candidates and the two hierarchy-dependent rollups
+// when RM_Hierarchy isn't loaded — the live tab would print a "could not
+// be read" placeholder row instead, which isn't real data worth a PDF page.
+function _repeatOffendersPdfSectionTables(dateKeys){
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
-
-  // Total Leads (issue or not), from the live leads roster — always
-  // assigned-date-based regardless of useAssignedDate (that flag is about
-  // which date field the ISSUE side matches on; a plain roster count has
-  // no "captured on" concept to begin with). Same dateKeys this whole
-  // section is already scoped to.
-  const totalLeadsRM = totalLeadsByKey(l => l.RM, dateKeys);
-  const totalLeadsRegion = totalLeadsByKey(l => _repeatOffendersRegionKey(l), dateKeys);
-  const totalLeadsA1TM = hierarchyMissing ? {} : totalLeadsByKey(l => primaryManagerForRm(l.RM), dateKeys);
-  const totalLeadsRH = hierarchyMissing ? {} : totalLeadsByKey(l => rhForRm(l.RM), dateKeys);
-
   const candidates = [
-    { title: 'Top 20 RMs', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.slice(0, 20), totalLeadsRM) },
-    { title: 'Top 20 RMs (Leads > 50)', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20), totalLeadsRM) },
-    { title: 'By Region', list: _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15), totalLeadsRegion) },
-    { title: 'Top 10 A1 / TM', list: hierarchyMissing ? [] : _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10), totalLeadsA1TM) },
-    { title: 'Top 5 RH', list: hierarchyMissing ? [] : _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5), totalLeadsRH) },
+    { title: 'RMs', list: sortRmPerformanceByPriority(computeRmPerformance(dateKeys)).slice(0, 20) },
+    { title: 'By Region', list: sortRmPerformanceByPriority(computeRmPerformance(dateKeys, rec => _repeatOffendersRegionKey(rec))).slice(0, 15) },
+    { title: 'A1 / TM', list: hierarchyMissing ? [] : sortRmPerformanceByPriority(computeRmPerformance(dateKeys, rec => primaryManagerForRm(rec.RM))).slice(0, 10) },
+    { title: 'RH', list: hierarchyMissing ? [] : sortRmPerformanceByPriority(computeRmPerformance(dateKeys, rec => rhForRm(rec.RM))).slice(0, 5) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }
@@ -137,18 +123,18 @@ function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
 //   first, so "the reader can tell which day's data they are viewing"
 //   even when the filter spans several days (Last 7 Days, This Week, or
 //   a multi-day Custom range). A date with nothing populated across all
-//   6 candidate tables is simply never added — no heading, no
+//   4 candidate tables is simply never added — no heading, no
 //   placeholder, exactly the same omission rule a single table gets.
 function _repeatOffendersPdfBuildPageSpecs(filterInfo){
   const specs = [];
   if (filterInfo.dateKeys === null) {
-    _repeatOffendersPdfSectionTables(null, filterInfo.usesAssignedDate)
+    _repeatOffendersPdfSectionTables(null)
       .forEach(t => specs.push({ dateLabel: null, title: t.title, list: t.list }));
     return specs;
   }
   const sortedDayKeys = Array.from(filterInfo.dateKeys).sort().reverse(); // most recent first
   sortedDayKeys.forEach(function (dayKey) {
-    const tables = _repeatOffendersPdfSectionTables(new Set([dayKey]), filterInfo.usesAssignedDate);
+    const tables = _repeatOffendersPdfSectionTables(new Set([dayKey]));
     if (!tables.length) return; // nothing populated for this date — omit entirely
     const dateLabel = _repeatOffendersPdfFormatDate(dayKey);
     tables.forEach(t => specs.push({ dateLabel: dateLabel, title: t.title, list: t.list }));
@@ -169,17 +155,21 @@ function _repeatOffendersPdfFilterSummaryLine(){
   return parts.length ? parts.join(' · ') : null;
 }
 
-// Converts one aggregateRepeatOffenders() row into the exact same 7
-// columns repeatOffenderTableHtml shows on screen (#, Name (+RM count),
-// Flagged Leads, Total Leads, Instances, Avg Flagged, Top Issues) — plain
-// strings for autoTable, no HTML/markup involved. r.totalLeads is stamped
-// on by _repeatOffendersPdfAttachTotalLeads before this ever runs.
+// Converts one computeRmPerformance() row into the exact same 6 columns
+// the live tab's rmPerformanceTableHtml shows on screen (#, Name,
+// Workload, Status, Score, Driven by) — plain strings for autoTable, no
+// HTML/markup involved. "Driven by" reuses rmPerformanceDrivenBy
+// (core-rm-performance.js, shared with the live tab) so the two surfaces
+// can never name a different rule as the cause of the same elevated score.
 function _repeatOffendersPdfTableRows(list){
   return list.map(function (r, i) {
-    const topIssues = Object.keys(r.byIssue).sort((a, b) => r.byIssue[b] - r.byIssue[a]).slice(0, 2)
-      .map(k => (r.byIssueLabel[k] || k) + ': ' + r.byIssue[k]).join('    ');
-    const name = r.name + (r.distinctRMs > 1 ? ' (' + r.distinctRMs + ' RMs)' : '');
-    return [String(i + 1), name, String(r.distinctLeads), String(r.totalLeads || 0), String(r.totalInstances), (r.totalInstances / r.distinctLeads).toFixed(1) + 'x', topIssues];
+    const drivenParts = rmPerformanceDrivenBy(r).map(x => {
+      const chronicTag = x.concentrated ? ' (' + x.chronicLeads + ' chronic)' : '';
+      return x.label + ': ' + (x.rawRate * 100).toFixed(0) + '%' + chronicTag;
+    });
+    if (r.routingIssueDays > 0) drivenParts.push('+' + r.routingIssueDays + ' Inactive-RM routing day(s)');
+    const score = r.composite.toFixed(2) + ' / ' + r.peerComposite.toFixed(2);
+    return [String(i + 1), r.name, String(r.distinctLeads), r.classification, score, drivenParts.join('    ')];
   });
 }
 
@@ -263,20 +253,18 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   // istStamp() already appends "IST" itself (e.g. "2026-09-02 07:46 PM IST") — no separate suffix needed here.
   doc.text('Generated ' + istStamp(new Date()) + (filterSummaryLine ? '   ·   ' + filterSummaryLine : ''), REPEAT_OFFENDERS_PDF_MARGIN_, y);
   y += 12;
-  // A static PDF has no hover tooltip to carry totalLeadsByKey's own
-  // caveat, so it gets one printed (wrapped) note instead — otherwise
-  // "Total Leads" looking smaller than "Flagged Leads" for an older date
-  // reads as a bug rather than the known live-snapshot limitation it
-  // actually is. splitTextToSize wraps to the usable page width — doc.text
-  // does NOT auto-wrap on its own and would otherwise run off the edge.
+  // A static PDF has no hover tooltip to carry the live tab's own column
+  // explanations, so they get one printed (wrapped) note instead.
+  // splitTextToSize wraps to the usable page width — doc.text does NOT
+  // auto-wrap on its own and would otherwise run off the edge.
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
-  const totalLeadsNoteLines = doc.splitTextToSize(
-    '"Total Leads" = every lead assigned in this range, issue or not, from Movement_Log\'s history (includes leads since closed). Movement_Log itself retains only 7 days, so a closed lead aged out past that window is still not counted — this can undercount for a Custom range or All-time reaching further back.',
+  const methodologyNoteLines = doc.splitTextToSize(
+    'Workload = distinct leads eligible for at least one scored SLA rule. Status: Insufficient Data (fewer than 5 eligible leads), On Track, Watch — concentrated (elevated but driven by 1-2 chronically-bad leads), or Below Expectations (elevated and spread across the book). Score = severity-weighted composite vs. the peer average it\'s shrunk toward — higher is worse. Driven by names the rule(s) actually pushing an elevated score up. Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days — a Custom range or "From when history began" reaching further back can undercount.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
-  doc.text(totalLeadsNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
-  y += totalLeadsNoteLines.length * 10 + 4;
+  doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
+  y += methodologyNoteLines.length * 10 + 4;
   doc.setDrawColor(220, 223, 228);
   doc.setLineWidth(1);
   doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, pageW - REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -331,7 +319,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     y += 12;
     doc.autoTable({
       startY: y,
-      head: [['#', 'Name', 'Flagged Leads', 'Total Leads', 'Instances', 'Avg Flagged', 'Top Issues']],
+      head: [['#', 'Name', 'Workload', 'Status', 'Score (vs peer)', 'Driven by']],
       body: rows,
       theme: 'grid',
       styles: {
@@ -343,11 +331,10 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
       columnStyles: {
         0: { cellWidth: 22, halign: 'right' },
         1: { cellWidth: 110 },
-        2: { cellWidth: 52, halign: 'right' },
-        3: { cellWidth: 48, halign: 'right' },
-        4: { cellWidth: 52, halign: 'right' },
-        5: { cellWidth: 60, halign: 'right' },
-        6: { cellWidth: 'auto' },
+        2: { cellWidth: 55, halign: 'right' },
+        3: { cellWidth: 95 },
+        4: { cellWidth: 75, halign: 'right' },
+        5: { cellWidth: 'auto' },
       },
       margin: { left: REPEAT_OFFENDERS_PDF_MARGIN_, right: REPEAT_OFFENDERS_PDF_MARGIN_, bottom: REPEAT_OFFENDERS_PDF_MARGIN_ },
       pageBreak: 'avoid',    // the whole table moves to a fresh page if it doesn't fit — never split mid-table
@@ -372,21 +359,24 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
 }
 
 // The button's click handler. Guards: a duplicate click while already
-// generating is a no-op (not queued, not restarted); no Daily_RM_Issues
-// data yet, or genuinely nothing to report for the CURRENTLY SELECTED
-// filter, shows a clear inline status message instead of downloading a
-// blank/near-blank PDF.
+// generating is a no-op (not queued, not restarted); no Movement_Log data
+// yet, or genuinely nothing to report for the CURRENTLY SELECTED filter,
+// shows a clear inline status message instead of downloading a blank/
+// near-blank PDF. Gated on movementFetchState/movementSnapshots, not
+// Daily_RM_Issues — matches renderRepeatOffenders' own gating
+// (tab-repeat-offenders.js), since this export no longer reads
+// Daily_RM_Issues at all (2026-09-04 redesign, HANDOVER.md §9.7).
 async function downloadRepeatOffendersPdf(){
   if (_repeatOffendersPdfGenerating) return;
   const btn = document.getElementById('repeatOffendersDownloadPdfBtn');
   const statusEl = document.getElementById('repeatOffendersPdfStatus');
 
-  if (dailyRmIssuesFetchState === 'loading') {
-    if (statusEl) { statusEl.textContent = 'Still loading Daily_RM_Issues — try again in a moment.'; statusEl.style.color = 'var(--amber)'; }
+  if (movementFetchState === 'loading') {
+    if (statusEl) { statusEl.textContent = 'Still loading Movement_Log — try again in a moment.'; statusEl.style.color = 'var(--amber)'; }
     return;
   }
-  if (dailyRmIssuesFetchState !== 'ok' || !dailyRmIssues.length) {
-    if (statusEl) { statusEl.textContent = 'No Daily_RM_Issues data loaded yet — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
+  if (movementFetchState !== 'ok' || !movementSnapshots.length) {
+    if (statusEl) { statusEl.textContent = 'No Movement_Log data loaded yet — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
     return;
   }
 

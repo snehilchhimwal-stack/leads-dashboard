@@ -407,3 +407,47 @@ function computeRmPerformance(dateKeys, keyFn){
   const byGroup = aggregateRmPerformance(observations);
   return classifyRmPerformance(byGroup);
 }
+
+// Shared display helpers — used by BOTH the live tab
+// (js/tab-repeat-offenders.js's rmPerformanceTableHtml) and the PDF export
+// (js/repeat-offenders-pdf.js), so "which rule is actually driving an
+// elevated score" and "what order to list groups in" can never quietly
+// drift apart between the two surfaces the way this dashboard's dual .gs/
+// browser SLA logic already has to be deliberately kept in sync (see
+// HANDOVER.md §6) — here it's the same JS runtime on both sides, so
+// there's no excuse for two copies at all.
+
+// The 1-2 scored rules actually pushing a classified result's score up,
+// ranked by their real weighted contribution to the composite (weight ×
+// shrunkRate), worst first. Filtered to rules with a REAL violation
+// (violationDays>0), not merely a nonzero shrunkRate — shrinkage alone
+// gives every rule a small nonzero blended rate toward the peer average
+// even with zero actual violations, which would otherwise list a rule the
+// group never broke. Returns [] for On Track/Insufficient Data (nothing
+// worth calling out) — same gate both renderers already need, extracted
+// here so neither can forget it. Each entry: {key, label, weight,
+// eligibleDays, violationDays, distinctEligibleLeads, distinctViolatedLeads,
+// rawRate, shrunkRate, maxStreak, chronicLeads, concentrated}.
+function rmPerformanceDrivenBy(r){
+  if (r.classification !== 'Below Expectations' && r.classification !== 'Watch — concentrated') return [];
+  return RM_PERF_SCORED_RULE_KEYS
+    .map(k => Object.assign(
+      { key: k, weight: RM_PERF_RULE_WEIGHTS[k], label: (RM_PERF_RULES.find(rr => rr.key === k) || {}).label || k },
+      r.rules[k]
+    ))
+    .filter(x => x.violationDays > 0)
+    .sort((a, b) => (b.weight * b.shrunkRate) - (a.weight * a.shrunkRate))
+    .slice(0, 2);
+}
+
+// Most-concerning first: classification tier before composite score, so
+// an "Insufficient Data" row (which can still carry a nonzero shrunk
+// composite — shrinkage still blends toward the peer average even below
+// the volume gate) never outranks a real "Below Expectations" finding
+// just because its raw number happens to be higher. classifyRmPerformance's
+// own return is only sorted by raw composite — this is the display-order
+// pass both renderers need on top of that.
+function sortRmPerformanceByPriority(list){
+  const rank = c => c === 'Below Expectations' ? 0 : c === 'Watch — concentrated' ? 1 : c === 'On Track' ? 2 : 3;
+  return list.slice().sort((a, b) => (rank(a.classification) - rank(b.classification)) || (b.composite - a.composite));
+}

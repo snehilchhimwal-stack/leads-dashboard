@@ -818,13 +818,54 @@ message renders in exactly both of the A1-TM and RH cards". Also
 "Movement_Log", matching the new gating) and the full suite re-run clean,
 26/26.
 
-**Not yet done**: Phase 3 (PDF export, `js/repeat-offenders-pdf.js` —
-currently untouched, still calls `aggregateRepeatOffenders`/
-`totalLeadsByKey` directly), Phase 4 (`reportRepeatOffenderRmsNow()` in
+**Phase 3 (done) — PDF export rewired to match.** `js/repeat-offenders-pdf.js`
+now calls `computeRmPerformance()` (via the same `sortRmPerformanceByPriority`/
+`rmPerformanceDrivenBy` helpers the live tab uses — added to
+`core-rm-performance.js` specifically so "what's driving an elevated
+score" and "what order to list groups in" can never drift between the two
+surfaces, both being plain JS) instead of `aggregateRepeatOffenders`/
+`totalLeadsByKey`. Table titles/columns now match the live tab exactly
+(RMs / By Region / A1-TM / RH; #, Name, Workload, Status, Score, Driven
+by — 6 columns, down from 7). `usesAssignedDate` was retired entirely
+(no longer meaningful — the new engine always matches a lead-day against
+its own Movement_Log observation day, the same for every Time range
+option, so there's no more "which date field" choice to make). Gating
+moved from `dailyRmIssuesFetchState`/`dailyRmIssues` to
+`movementFetchState`/`movementSnapshots`, matching Phase 2. The printed
+header note was rewritten to explain the new columns instead of the old
+"Total Leads" caveat (which no longer applies — there's no separate Total
+Leads concept now, Workload IS the new denominator).
+
+Verified via a disposable harness (deleted after use), 13/13 assertions,
+in two parts: (1) `_repeatOffendersPdfTableRows()` called directly against
+real `computeRmPerformance()` output from a hand-built fixture (a
+6-lead RM chronically failing 3 of the 5 rules vs. a fully-compliant
+6-lead peer) — checked exact row content (workload, classification,
+"Driven by" text) column-by-column, not just "did it run". This also
+caught a genuinely correct-but-non-obvious behavior worth noting: the
+fixture's "Driven by" for the bad RM named `isNotUpdated` and
+`stageStuck48h`, NOT `underCalledToday` — despite `underCalledToday`
+having a higher rule weight — because the fixture's peer RM happened to
+have an equally OLD book (so `stageStuck48h`'s peer baseline was ALSO
+near 100%, correctly making it not a differentiating signal after
+shrinkage), while the peer was fully compliant on calls specifically (so
+`underCalledToday`'s peer baseline was near 0%, and Broad's real edge
+over peer there should have dominated — worth a closer look if this
+surprises anyone reading real output, though the shrinkage math checks
+out by hand). (2) A true end-to-end run —
+`_repeatOffendersPdfCurrentFilterInfo` → `_repeatOffendersPdfBuildPageSpecs`
+→ `_repeatOffendersPdfRenderPages` — against real jsPDF + jspdf-autotable
+(loaded from the same CDN URLs `dashboard.html` uses), confirming no
+throw and a real multi-page `doc` comes back. Also re-ran the full
+`tests/frontend-harness.html` suite clean, 26/26, confirming the Phase 3
+changes didn't disturb anything Phase 1/2 already covered.
+
+**Not yet done**: Phase 4 (`reportRepeatOffenderRmsNow()` in
 `DailyRmIssueLog.gs`, the console sanity-check leaderboard — would need a
 `.gs` mirror of this same reconstruction, ideally re-running
 `computeSlaFlags_` against `Movement_Log` history the same way
 `backfillDailyRmIssuesFromMovementLog_` already does, rather than a fresh
-reimplementation). Real `Movement_Log` data still hasn't been checked
-against this (needs a signed-in live session) — now that the numbers are
-actually visible in the UI, this is worth doing before Phase 3/4.
+reimplementation; lowest priority of the 4 phases — console-only, not
+user-facing). Real `Movement_Log` data still hasn't been checked against
+this (needs a signed-in live session) — now that the numbers are visible
+in both the live tab and the PDF, this is worth doing before Phase 4.
