@@ -432,19 +432,23 @@ function renderRepeatOffenders(){
   if (noticeEl) noticeEl.style.display = 'none';
   if (countEl) countEl.textContent = `${scoped.length} flagged instance${scoped.length === 1 ? '' : 's'}`;
 
-  // Full RM ranking, computed once — the two volume-cut tables below
-  // (Leads > 50 / > 100) just re-filter this same already-sorted list
-  // rather than re-aggregating from scratch. Ranking by Avg Flagged
+  // Full RM ranking, computed once — the volume-cut table below
+  // (Leads > 50) just re-filters this same already-sorted list rather
+  // than re-aggregating from scratch. Ranking by Avg Flagged
   // (aggregateRepeatOffenders' own sort) deliberately favors RATE over
   // volume — see this section's own filter-summary text — so an RM
   // carrying a genuinely large number of distinct flagged leads can sit
   // far down (or off) the plain Top 20 despite the sheer size of their
-  // problem. These two extra cuts restore that visibility directly,
-  // still ranked by the same Avg Flagged rule within each cut.
+  // problem. This extra cut restores that visibility directly, still
+  // ranked by the same Avg Flagged rule within the cut. (A parallel
+  // "Leads > 100" cut existed here too but was removed 2026-09-04 — in
+  // practice never populated, since >100 distinct FLAGGED leads for one
+  // RM never occurred in real data; the same PDF-side table was already
+  // being silently dropped for exactly that reason, see
+  // repeat-offenders-pdf.js.)
   const rmListFull = aggregateRepeatOffenders(scoped, rec => rec.RM);
   const rmList = rmListFull.slice(0, 20);
   const rmListOver50 = rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20);
-  const rmListOver100 = rmListFull.filter(r => r.distinctLeads > 100).slice(0, 20);
   const a1tmList = aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10);
   const rhList = aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5);
   // Region needs no hierarchy lookup at all — it's a field already on
@@ -471,10 +475,15 @@ function renderRepeatOffenders(){
   // since every card renders in the same bounded, scrollable box
   // regardless of row count (see repeatOffenderTableHtml's own comment),
   // and the grid itself is auto-fit rather than a fixed 2-column split.
+  // "Leads > 50" is only ever populated in a wide date range/filter combo
+  // — omitted entirely (not even an empty-state card) when there's
+  // nothing in it, same omission rule the PDF export already applies to
+  // its own equivalent table (see repeat-offenders-pdf.js).
+  const over50Html = rmListOver50.length ? repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false, totalLeadsRM) : '';
+
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
     ${repeatOffenderTableHtml('Top 20 RMs', rmList, false, totalLeadsRM)}
-    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 50)', rmListOver50, false, totalLeadsRM)}
-    ${repeatOffenderTableHtml('Top 20 RMs (Leads > 100)', rmListOver100, false, totalLeadsRM)}
+    ${over50Html}
     ${repeatOffenderTableHtml('By Region', regionList, false, totalLeadsRegion)}
     ${repeatOffenderTableHtml('Top 10 A1 / TM', a1tmList, hierarchyMissing, totalLeadsA1TM)}
     ${repeatOffenderTableHtml('Top 5 RH', rhList, hierarchyMissing, totalLeadsRH)}

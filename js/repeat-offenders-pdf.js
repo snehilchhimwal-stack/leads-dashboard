@@ -122,7 +122,6 @@ function _repeatOffendersPdfSectionTables(dateKeys, useAssignedDate){
   const candidates = [
     { title: 'Top 20 RMs', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.slice(0, 20), totalLeadsRM) },
     { title: 'Top 20 RMs (Leads > 50)', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.filter(r => r.distinctLeads > 50).slice(0, 20), totalLeadsRM) },
-    { title: 'Top 20 RMs (Leads > 100)', list: _repeatOffendersPdfAttachTotalLeads(rmListFull.filter(r => r.distinctLeads > 100).slice(0, 20), totalLeadsRM) },
     { title: 'By Region', list: _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => _repeatOffendersRegionKey(rec)).slice(0, 15), totalLeadsRegion) },
     { title: 'Top 10 A1 / TM', list: hierarchyMissing ? [] : _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => primaryManagerForRm(rec.RM)).slice(0, 10), totalLeadsA1TM) },
     { title: 'Top 5 RH', list: hierarchyMissing ? [] : _repeatOffendersPdfAttachTotalLeads(aggregateRepeatOffenders(scoped, rec => rhForRm(rec.RM)).slice(0, 5), totalLeadsRH) },
