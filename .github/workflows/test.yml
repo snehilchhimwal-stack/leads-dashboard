@@ -1,0 +1,16 @@
+name: Apps Script tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run Apps Script test suite (Tests_*.gs)
+        run: node test/run-gs-tests.js

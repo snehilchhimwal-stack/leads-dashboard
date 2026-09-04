@@ -1,0 +1,8 @@
+{
+  "name": "leads-dashboard",
+  "private": true,
+  "description": "Homesfy lead-ops dashboard (Apps Script + browser dashboard). No runtime dependencies -- test/run-gs-tests.js uses only Node's standard library.",
+  "scripts": {
+    "test": "node test/run-gs-tests.js"
+  }
+}
