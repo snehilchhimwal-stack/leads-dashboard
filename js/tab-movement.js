@@ -32,6 +32,15 @@ let movementFetchState = 'idle';        // 'idle' | 'loading' | 'ok' | 'missing'
 // Tracking-tab section and the RM Timeline calendar go to explain an
 // empty state, so this never has to be duplicated per call site.
 let movementFetchError = '';
+// Wall-clock time the CURRENT (or most recent) fetchMovementLog() call
+// began — null before the first call ever starts. Added 2026-09-05
+// (HANDOVER.md §9.7.2) so a caller waiting on movementFetchState==='loading'
+// can show real elapsed time instead of a static, unchanging message —
+// Movement_Log is 232k+ rows at current real scale and a live-measured
+// fetch took ~12s, long enough that "Loading…" with no progress signal
+// reasonably reads as stuck. Set at the top of every fetchMovementLog()
+// call regardless of which of its (currently 2) call sites triggered it.
+let movementFetchStartedAt = null;
 let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
@@ -129,6 +138,7 @@ function lastSnapshotBefore(asOf){
 async function fetchMovementLog(sheetId){
   movementFetchState = 'loading';
   movementFetchError = '';
+  movementFetchStartedAt = new Date();
   try {
     // Movement_Log is a plain tab we control (no import-tool banner row),
     // so headers live in row 1 — unlike the main sheet's A2:Z convention.

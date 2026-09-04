@@ -995,3 +995,89 @@ Insufficient Data) confirmed the Below-Expectations RM appears and the
 other two are excluded from BOTH the live-tab DOM and the PDF row-builder
 output, the count/status text update correctly, and an all-clean fixture
 renders the new friendly empty-state message rather than looking broken.
+
+### 9.7.2 Root-cause investigation ("seriously wrong, not working") — 2026-09-05
+
+User report, verbatim in spirit: the Repeat Offenders tab looked broken,
+and existing verification hadn't caught it. Explicit instruction: distrust
+every existing assumption, re-derive from first principles, prove
+correctness with evidence the same implementation didn't produce.
+
+**What was actually checked, live, against real production data (not
+synthetic fixtures)**, using a signed-in Claude-in-Chrome session:
+- Independently hand-reconstructed one real RM's (Sanjay Gupta,
+  2026-09-03) eligible-lead-day count straight from raw `Movement_Log`
+  fields, using hand-written open/closed/age logic — deliberately NOT
+  calling `enrichLead` or any function under audit. First attempt used a
+  flawed methodology (filtered by RM before picking each lead's true
+  latest snapshot of the day) and produced a false "88 raw leads vs 15
+  reported workload" alarm. Redone correctly — matching
+  `reconstructRmPerformanceObservations`'s actual method: pick the TRUE
+  latest snapshot of the day first, THEN check whose RM it shows (handles
+  reassignment correctly) — it produced 26 correctly-attributed lead-days,
+  14 of them open-past-3h by the same from-scratch logic. The engine's own
+  reported workload: 15 (the +1 is `isNotUpdated`'s extra
+  `neverConnectedPastWindow` eligibility path, which doesn't require the
+  3h grace — exactly explains the gap). **Conclusion: the classification
+  pipeline is correct for this real case; my own first verification
+  attempt had the bug.**
+- Verified the shrinkage arithmetic directly from raw observation counts:
+  `followupOverdue` peer rate = 667 violated ÷ 903 eligible lead-days =
+  0.7386, and a zero-eligible RM's `shrunkRate` for that rule came back as
+  exactly 0.7386 (100% peer weight when `distinctEligibleLeads=0`, per the
+  shrinkage formula) — confirms the formula is implemented as specified,
+  not just "looks plausible."
+- Confirmed via GitHub's own API (`check-runs`) and a direct HTTP fetch of
+  the live URL (bypassing browser cache) that the deployed code matches
+  the repository — not a caching illusion.
+
+**Two real, confirmed defects found and fixed** (a genuine root cause,
+not the calculation logic):
+1. **A fully dead, gating network fetch.** `fetchDailyRmIssues()`
+   (`js/tab-repeat-offenders.js`) still fetched all of `Daily_RM_Issues`
+   on every page load and was one of the 3 members of the `Promise.all`
+   that gates `renderRepeatOffenders()` — but a full-codebase grep
+   confirmed the `dailyRmIssues` array it populated was never read by
+   anything, anywhere, since the 2026-09-04 redesign moved this section
+   onto `Movement_Log`. Live-measured cost: **41,718 rows, 2.4s**, for
+   zero benefit. Removed entirely — the function, its module state
+   (`dailyRmIssues`/`dailyRmIssuesFetchState`/`dailyRmIssuesFetchError`),
+   its constants (`DAILY_RM_ISSUES_TAB_NAME`/`DAILY_RM_ISSUES_COLUMNS`),
+   and its slot in `core-fetch-and-render.js`'s `Promise.all`. Also
+   removed `aggregateRepeatOffenders`/`totalLeadsByKey` — the old
+   pre-redesign aggregation functions, confirmed dead by the same grep
+   (nothing called either one anymore; the PDF export was already rewired
+   in Phase 3).
+2. **A real, unindicated ~12-second load.** `Movement_Log` has grown to
+   **232,607 rows** at current real scale; a live-measured fetch took
+   **~12 seconds**. `renderRepeatOffenders()` already showed a "Loading
+   Movement_Log history…" message during this wait (confirmed present and
+   correctly wired — an earlier hypothesis that there was NO loading
+   state at all was investigated and disproven), but it was static for
+   the entire ~12+ seconds with no progress signal, while every other tab
+   in the dashboard renders near-instantly by comparison — a plausible,
+   evidence-backed explanation for "feels broken" that has nothing to do
+   with correctness. Fixed: `fetchMovementLog()` (`js/tab-movement.js`)
+   now records `movementFetchStartedAt`; `renderRepeatOffenders()`'s
+   loading branch shows real elapsed seconds and self-schedules ONE
+   re-render 1s later (guarded by `_repeatOffendersLoadingPollScheduled`
+   against stacking multiple timers) purely to refresh that number — it
+   never re-fetches anything, and stops rescheduling itself the moment
+   `movementFetchState` stops being `'loading'`.
+
+**Not found to be a bug, but worth flagging to ops as a real number worth
+a gut-check**: the company-wide `followupOverdue` rate is genuinely
+73.9% (667/903 real lead-days, verified above) — high enough to be
+surprising, but it's the same `followupOverdue` rule Operations has used
+since before this redesign, just newly reused here for scoring. Not
+something this investigation changed or should change without a business
+conversation.
+
+Verified via two disposable harnesses (deleted after use): the existing
+`tests/frontend-harness.html` suite re-run clean (25/26, the 1 failure
+the same pre-existing, already root-caused time-of-day flake from
+§9.6/§9.7.1 — unrelated); and a dedicated 9-assertion harness
+specifically exercising the new elapsed-time poll (confirms it shows 0s
+immediately, ticks up on its own without any external re-render call,
+never stacks more than one pending timer, and — critically — stops
+rescheduling itself once loading finishes, rather than looping forever).

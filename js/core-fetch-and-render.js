@@ -598,19 +598,30 @@ async function fetchAndRender(){
       persistDailyCohortHistory().catch(() => {});
     });
     // Same best-effort, non-blocking treatment as fetchMovementLog above
-    // — Repeat Offenders' two source tabs (Daily_RM_Issues, RM_Hierarchy)
-    // are each written/maintained by separate Apps Script logic that
-    // might not be set up yet, and the main dashboard must never wait on
-    // or fail because of either fetch. renderRepeatOffenders() alone is
-    // enough here — it doesn't need the rest of the dashboard re-rendered,
-    // just its own section. ALSO waits on movementLogPromise now (2026-09-03)
-    // — Total Leads (totalLeadsByKey, tab-repeat-offenders.js) reads
-    // movementSnapshots, not allParsedLeads, so it needs that fetch settled
-    // too, whichever of the two finishes last. movementLogPromise never
-    // rejects (fetchMovementLog catches its own errors internally, same as
-    // fetchDailyRmIssues/fetchRmHierarchyForRollup), so this Promise.all is
-    // still safe even when Movement_Log genuinely isn't set up.
-    Promise.all([fetchDailyRmIssues(sheetId), fetchRmHierarchyForRollup(sheetId), movementLogPromise]).then(() => {
+    // — Repeat Offenders' one remaining source tab (RM_Hierarchy, for the
+    // A1-TM/RH rollups) is written/maintained by separate Apps Script
+    // logic that might not be set up yet, and the main dashboard must
+    // never wait on or fail because of it. renderRepeatOffenders() alone
+    // is enough here — it doesn't need the rest of the dashboard
+    // re-rendered, just its own section. Also waits on movementLogPromise
+    // — Repeat Offenders itself reads movementSnapshots (via
+    // computeRmPerformance(), core-rm-performance.js), so it needs that
+    // fetch settled too, whichever of the two finishes last.
+    // movementLogPromise never rejects (fetchMovementLog catches its own
+    // errors internally, same as fetchRmHierarchyForRollup), so this
+    // Promise.all is still safe even when Movement_Log genuinely isn't
+    // set up.
+    //
+    // fetchDailyRmIssues(sheetId) used to be a third member of this
+    // Promise.all — removed 2026-09-05 (HANDOVER.md §9.7.2) after a
+    // full-codebase audit confirmed nothing had read the Daily_RM_Issues
+    // data it fetched since the 2026-09-04 redesign moved this section
+    // onto Movement_Log. It was a real, measured cost for zero benefit:
+    // a live check found Daily_RM_Issues at 41,718 rows, a 2.4s fetch,
+    // gating this same render for no reason. The function itself (and its
+    // dailyRmIssues/dailyRmIssuesFetchState module state) was deleted
+    // from tab-repeat-offenders.js in the same pass.
+    Promise.all([fetchRmHierarchyForRollup(sheetId), movementLogPromise]).then(() => {
       renderRepeatOffenders();
     });
 

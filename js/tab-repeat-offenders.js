@@ -1,17 +1,25 @@
 // ============================================================
 // tab-repeat-offenders.js — Repeat Offenders section (Operations tab).
-// Reads "Daily_RM_Issues", a nightly 22:50 IST snapshot a separate Apps
-// Script (DailyRmIssueLog.gs) writes independently of whether this
-// dashboard or the Sheet itself is open — same reasoning as
-// Movement_Log (tab-movement.js's own header comment). Shows a top-20
-// RM leaderboard plus a hierarchy rollup to top-10 A1/TM and top-5 RH,
-// with a Today/Yesterday/This Week/Last 7 Days/All-time selector,
-// honoring the same top-bar Project/Region/TL/Source/Bucket filters
-// every other Movement-backed view does (see passesMovementFilters's
-// own comment on skipDateFilter for the same "this section has its own
-// independent time control" reasoning — the top bar's Assigned-date
-// RANGE filter does not apply here either, same as Daily Cohort by
-// Region in tab-tracking.js).
+// Reads "Movement_Log" (via computeRmPerformance(), core-rm-performance.js)
+// to rank RMs/Regions/A1-TM/RH by a workload-normalized "RM Performance"
+// methodology — see that file's own header comment for the full
+// reconstruction/shrinkage/classification writeup, and HANDOVER.md §9.7
+// for the redesign history. Every table shows Below Expectations rows
+// only, worst first (filterRmPerformanceWorst/sortRmPerformanceByPriority,
+// also core-rm-performance.js).
+//
+// NOT "Daily_RM_Issues" — that was this section's data source before the
+// 2026-09-04 redesign, and fetching it (fetchDailyRmIssues) was removed
+// entirely once a full-codebase audit confirmed nothing read it anymore:
+// it's a violations-only log with no real eligible-population denominator,
+// which is exactly what made the pre-redesign "Avg Flagged" ranking
+// unfair to begin with (see HANDOVER.md §9.7's "Why" section). Honoring
+// the same top-bar Project/Region/TL/Source/Bucket filters every other
+// Movement-backed view does, via passesRepeatOffenderFilters below; the
+// top bar's Assigned-date RANGE filter does not apply here — this section
+// has its own independent Time range picker instead, matched against each
+// lead-day's own Movement_Log OBSERVATION day (see
+// core-rm-performance.js's header comment for why).
 //
 // Depends on core.js (filterState, mainRegionFor, sheetsApiValuesGet,
 // valuesToGvizShape/gvizCellRaw/gvizCellDate, istDateKey/istParts, esc)
@@ -26,94 +34,16 @@
 // reading RM_Hierarchy here doesn't violate it.
 // ============================================================
 
-let dailyRmIssues = [];               // {date, RM, region, project, lead_id, client_id, issue_key, issue_label, TL, group_source, source_bucket}
-let dailyRmIssuesFetchState = 'idle'; // 'idle' | 'loading' | 'ok' | 'missing' | 'error'
-let dailyRmIssuesFetchError = '';
+// Guards against stacking more than one pending 1s re-render timer while
+// Movement_Log is still loading — see renderRepeatOffenders' own comment
+// on why this exists (elapsed-time progress feedback, added 2026-09-05).
+let _repeatOffendersLoadingPollScheduled = false;
 
 let rmHierarchyByNameLower = new Map(); // lowercased RM name -> {name, role, tl, tm, rh, ch}
 let rmHierarchyFetchState = 'idle';     // 'idle' | 'loading' | 'ok' | 'missing' | 'error'
 
-const DAILY_RM_ISSUES_TAB_NAME = 'Daily_RM_Issues';
-const DAILY_RM_ISSUES_COLUMNS = ['date', 'RM', 'region', 'project', 'lead_id', 'client_id', 'issue_key', 'issue_label', 'captured_at', 'TL', 'group_source', 'source_bucket', 'lead_assigned_at'];
 const RM_HIERARCHY_TAB_NAME = 'RM_Hierarchy';
 const RM_HIERARCHY_COLUMNS = ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'];
-
-async function fetchDailyRmIssues(sheetId){
-  dailyRmIssuesFetchState = 'loading';
-  dailyRmIssuesFetchError = '';
-  try {
-    let values;
-    try {
-      values = await sheetsApiValuesGet(sheetId, `${DAILY_RM_ISSUES_TAB_NAME}!A1:Z`);
-    } catch (err) {
-      // Same 400-vs-everything-else split as fetchMovementLog — a missing
-      // tab (setup not done yet) is the expected/common case, not an error.
-      if (err.status === 400) { dailyRmIssuesFetchState = 'missing'; dailyRmIssues = []; return; }
-      dailyRmIssuesFetchState = 'error';
-      dailyRmIssuesFetchError = err.status ? `HTTP ${err.status}: ${err.message}` : String((err && err.message) || err);
-      dailyRmIssues = [];
-      return;
-    }
-    if (!values.length) { dailyRmIssuesFetchState = 'missing'; dailyRmIssues = []; return; }
-
-    // 'date' was written by Apps Script as a plain "yyyy-MM-dd" STRING
-    // (istDayKeyGs_), but Sheets can auto-detect that as a real date and
-    // store it as a serial number instead — same gotcha the Overnight_Log
-    // read (OvernightEmailer.gs) and Movement_Log both already handle.
-    // Declaring it a date column here is safe either way: gvizCellDate
-    // falls back to parseDate() on a plain string when the raw value
-    // wasn't actually converted to a serial.
-    const table = valuesToGvizShape(values, (label) => label === 'date' || label === 'lead_assigned_at');
-    const cols = table.cols;
-    const rows = table.rows.map(r => r.c || []);
-    const idx = {};
-    DAILY_RM_ISSUES_COLUMNS.forEach(key => {
-      let found = -1;
-      cols.forEach((c, i) => { if (found === -1 && String(c.label || '').trim() === key) found = i; });
-      idx[key] = found;
-    });
-    if (idx.RM === -1 || idx.date === -1) { dailyRmIssuesFetchState = 'missing'; dailyRmIssues = []; return; }
-
-    const getRaw = (c, key) => idx[key] === -1 ? '' : gvizCellRaw(c[idx[key]]);
-    const getDate = (c, key) => idx[key] === -1 ? null : gvizCellDate(c[idx[key]]);
-
-    dailyRmIssues = rows
-      .filter(c => String(getRaw(c, 'RM')).trim() !== '')
-      .map(c => {
-        const dateVal = getDate(c, 'date');
-        return {
-          date: dateVal ? istDateKey(dateVal) : String(getRaw(c, 'date')).trim(),
-          RM: getRaw(c, 'RM') || 'Unassigned',
-          region: getRaw(c, 'region') || 'Unassigned',
-          project: getRaw(c, 'project') || '',
-          lead_id: getRaw(c, 'lead_id'),
-          client_id: getRaw(c, 'client_id'),
-          issue_key: getRaw(c, 'issue_key'),
-          issue_label: getRaw(c, 'issue_label'),
-          TL: getRaw(c, 'TL') || '',
-          group_source: getRaw(c, 'group_source') || '',
-          source_bucket: getRaw(c, 'source_bucket') || '',
-          lead_assigned_at: getDate(c, 'lead_assigned_at'),
-          // IST day-key of lead_assigned_at, computed once here (same
-          // pattern as `date` above) rather than per-filter-pass — this is
-          // what the Time range selector actually matches against, since
-          // "Today" etc. should mean "assigned today", not "flagged
-          // tonight". Null when the row predates this column or the repair
-          // couldn't resolve it — such rows simply never match a specific
-          // range (they still show under All-time, which skips date
-          // matching entirely).
-          leadAssignedDateKey: (function () { const la = getDate(c, 'lead_assigned_at'); return la ? istDateKey(la) : null; })(),
-        };
-      })
-      .filter(r => r.date); // undated rows can't be placed into a time range — drop them
-
-    dailyRmIssuesFetchState = dailyRmIssues.length ? 'ok' : 'missing';
-  } catch (err) {
-    dailyRmIssuesFetchState = 'error';
-    dailyRmIssuesFetchError = String((err && err.message) || err);
-    dailyRmIssues = [];
-  }
-}
 
 async function fetchRmHierarchyForRollup(sheetId){
   rmHierarchyFetchState = 'loading';
@@ -225,130 +155,6 @@ function repeatOffendersDateKeysForRange(range, now){
   return null; // allTime
 }
 
-// Generic aggregator: groups the given (already filtered/time-scoped)
-// Daily_RM_Issues rows by keyFn(rec). Ranked by instancePct (total
-// flagged-instances per distinct flagged lead — kept ×100 internally
-// for the sort, but shown in the UI as a plain "2.5x avg flagged
-// nights" ratio, not a %, per explicit request) — NOT raw totalInstances
-// alone. Raw instances rewards volume: a rollup with 60 flagged leads
-// and 75 instances (75/60 = 1.25x, each lead flagged about once) would
-// outrank one with 10 flagged leads and 25 instances (25/10 = 2.5x,
-// each lead flagged on average two and a half times) purely for having
-// more leads, even though the SECOND is the genuinely worse repeat
-// pattern per lead. distinctLeads has no "total leads this RM owns"
-// denominator available — Daily_RM_Issues only ever contains FLAGGED
-// rows, never a complete lead roster — so this is specifically "how many
-// times did each already-flagged lead get flagged again", not "what
-// fraction of this RM's whole book is flagged." distinctDays/
-// distinctIssueTypes are still computed (harmless, available if a future
-// view wants them) but not sorted on or displayed. distinctRMs (how many
-// different RMs roll up into this one key) is extra context for a
-// manager/RH/region-level row, always 1 at the RM level itself.
-function aggregateRepeatOffenders(rows, keyFn){
-  const byKey = {};
-  rows.forEach(rec => {
-    const key = keyFn(rec);
-    if (!key) return; // unresolvable (e.g. not in RM_Hierarchy for a manager/RH rollup) — excluded, same population auditUnresolvedRmsNow flags
-    if (!byKey[key]) byKey[key] = { name: key, days: new Set(), issueTypes: new Set(), byIssue: {}, byIssueLabel: {}, totalInstances: 0, rms: new Set(), leads: new Set() };
-    const b = byKey[key];
-    b.days.add(rec.date);
-    b.issueTypes.add(rec.issue_key);
-    b.byIssue[rec.issue_key] = (b.byIssue[rec.issue_key] || 0) + 1;
-    // Captured straight from the record's own issue_label (Daily_RM_Issues'
-    // own column, ultimately from primaryIssueGs_/ISSUE_PRIORITY_GS_,
-    // SlaEngine.gs) rather than a second hardcoded key->label table here
-    // that could quietly drift out of sync with the real source.
-    if (!b.byIssueLabel[rec.issue_key]) b.byIssueLabel[rec.issue_key] = rec.issue_label || rec.issue_key;
-    b.totalInstances++;
-    b.rms.add(rec.RM);
-    b.leads.add(rec.lead_id);
-  });
-  return Object.keys(byKey).map(key => {
-    const b = byKey[key];
-    const distinctLeads = b.leads.size;
-    return {
-      name: b.name, distinctDays: b.days.size, distinctIssueTypes: b.issueTypes.size,
-      totalInstances: b.totalInstances, byIssue: b.byIssue, byIssueLabel: b.byIssueLabel, distinctRMs: b.rms.size,
-      distinctLeads: distinctLeads, instancePct: distinctLeads ? (b.totalInstances / distinctLeads * 100) : 0,
-    };
-  }).sort((a, b) => (b.instancePct - a.instancePct) || (b.totalInstances - a.totalInstances) || (b.distinctLeads - a.distinctLeads));
-}
-
-// Total leads assigned to each group-key, REGARDLESS of whether currently
-// flagged for any SLA issue — the denominator aggregateRepeatOffenders'
-// own comment flags as unavailable ("Daily_RM_Issues only ever contains
-// FLAGGED rows, never a complete lead roster").
-//
-// Reads `movementSnapshots` (Movement_Log, tab-movement.js's own fetch —
-// see MOVEMENT_LOG_COLUMNS), NOT `allParsedLeads` (the live "leads" tab).
-// This was tried against allParsedLeads first and switched after a real
-// gap: the live leads tab only ever holds currently-OPEN leads (a closed/
-// converted lead is removed from it entirely), so a Total Leads count
-// built from it would silently miss every lead that closed since it was
-// assigned — undercounting even for a date well within the ordinary
-// window. Movement_Log's own snapshotOpenLeads_ (MovementTracker.gs)
-// explicitly captures "every lead... open or closed", so a lead is still
-// visible here for as long as ANY of its 4-times-daily snapshots survives
-// Movement_Log's own MOVEMENT_LOG_RETENTION_DAYS (7 days) pruning — it
-// only drops out once it has been closed AND pruned, not the moment it
-// closes.
-//
-// A lead can appear in several snapshot rows (once per capture run it
-// was still reachable for) — deduped to ONE row per lead_id first, taking
-// whichever snapshot is LATEST, so a reassigned lead's RM/region/etc.
-// reflects its most recently known state (this can occasionally disagree
-// with which RM's Daily_RM_Issues instance-count a specific night's flag
-// landed under, if the lead was reassigned in between — a documented,
-// accepted imprecision for what is fundamentally a denominator/
-// sanity-check number, not a payroll-grade attribution).
-//
-// keyFn/dateKeys use the exact same shape and semantics as
-// aggregateRepeatOffenders/repeatOffendersDateKeysForRange (a
-// movementSnapshots record has the same .RM/.region/.group_source/.TL/
-// .source_bucket field names Daily_RM_Issues rows do, from the same
-// HEADER_ALIASES_ convention, so the identical keyFn/
-// passesRepeatOffenderFilters work unchanged against this shape too) —
-// dateKeys is always matched against the LEAD's OWN lead_assigned_at
-// (never a "captured on" concept, which doesn't apply to a plain roster
-// count); null means unrestricted, one Set of N dates means "assigned on
-// any of those N days", which doubles as both the single-date case (Just
-// That Day) and the multi-day case (naturally sums to the union across
-// the days — a lead has exactly one assignment date, so summing per-day
-// counts and counting the union of days are the same number).
-//
-// KNOWN LIMITATION, narrower than the allParsedLeads version but not
-// eliminated: Movement_Log itself is ALSO pruned to a 7-day rolling
-// window (MOVEMENT_LOG_RETENTION_DAYS, MovementTracker.gs) — a lead
-// closed AND aged out past that window is gone from here too. Recent
-// ranges (Yesterday, Last 7 Days, This Week) are normally within that
-// window; a Custom range or All-time reaching further back can still
-// undercount.
-function totalLeadsByKey(keyFn, dateKeys){
-  const counts = {};
-  if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return counts;
-
-  const latestByLeadId = new Map();
-  movementSnapshots.forEach(rec => {
-    const id = String(rec.lead_id || '').trim();
-    if (!id) return;
-    const cur = latestByLeadId.get(id);
-    if (!cur || (rec.snapshot_at && (!cur.snapshot_at || rec.snapshot_at > cur.snapshot_at))) latestByLeadId.set(id, rec);
-  });
-
-  latestByLeadId.forEach(rec => {
-    if (!passesRepeatOffenderFilters(rec)) return;
-    if (dateKeys) {
-      const assignedDate = parseDate(rec.lead_assigned_at);
-      const dk = assignedDate ? istDateKey(assignedDate) : null;
-      if (!dk || !dateKeys.has(dk)) return;
-    }
-    const key = keyFn(rec);
-    if (!key) return;
-    counts[key] = (counts[key] || 0) + 1;
-  });
-  return counts;
-}
-
 // The By Region table's own grouping key — mirrors effectiveRegion +
 // mainRegionFor (reports.js), the SAME normalization every other
 // region-based view on this dashboard uses, so a sub-region variant
@@ -356,11 +162,12 @@ function totalLeadsByKey(keyFn, dateKeys){
 // ("Pune") instead of forming its own separate row and silently
 // under-counting the main region's true total (real bug, found via a
 // user report comparing this table's Pune count against Overview's).
-// Daily_RM_Issues has group_source (so that half of the Loan override
-// applies) but never project_region (not one of its captured columns) —
-// same gap _effectiveRegionGs_ (MovementTracker.gs) already documents
-// for the identical reason. Falls back to the raw region for anything
-// mainRegionFor doesn't recognize, rather than dropping it silently.
+// Movement_Log has group_source (so that half of the Loan override
+// applies) but never project_region (not one of SNAPSHOT_COLUMNS_'s
+// captured columns) — same gap _effectiveRegionGs_ (MovementTracker.gs)
+// already documents for the identical reason. Falls back to the raw
+// region for anything mainRegionFor doesn't recognize, rather than
+// dropping it silently.
 function _repeatOffendersRegionKey(rec){
   const raw = normRegionKey(rec.group_source || '') === 'loan' ? 'Loan' : String(rec.region || '').trim();
   return mainRegionFor(raw) || raw || 'Unassigned';
@@ -385,7 +192,30 @@ function renderRepeatOffenders(){
   // denominator, which is exactly what made the old "Avg Flagged" ranking
   // unfair to begin with. Gating below checks Movement_Log's own fetch
   // state accordingly.
-  if (movementFetchState === 'loading') { clear('Loading Movement_Log history…'); return; }
+  //
+  // Added 2026-09-05, after a real root-cause investigation (HANDOVER.md
+  // §9.7.2): at current real data volume, Movement_Log's OWN fetch alone
+  // measured ~12s live (232k+ rows) — a static, unchanging "Loading…"
+  // message for that whole window reads as "stuck", especially since
+  // every other tab in this dashboard renders near-instantly by
+  // comparison. This self-schedules ONE re-render 1s later, purely to
+  // refresh the elapsed-time text — it does NOT re-fetch anything, and
+  // the moment movementFetchState stops being 'loading' the chain simply
+  // stops rescheduling itself (the next call falls through to a
+  // different branch entirely). _repeatOffendersLoadingPollScheduled
+  // guards against stacking more than one pending timer if something else
+  // also calls renderRepeatOffenders() while one is already pending.
+  if (movementFetchState === 'loading') {
+    const elapsedSec = (typeof movementFetchStartedAt !== 'undefined' && movementFetchStartedAt)
+      ? Math.max(0, Math.round((Date.now() - movementFetchStartedAt.getTime()) / 1000)) : null;
+    const elapsedNote = elapsedSec !== null ? ` (${elapsedSec}s elapsed — Movement_Log is large; this can take up to ~15s)` : '';
+    clear('Loading Movement_Log history…' + esc(elapsedNote));
+    if (!_repeatOffendersLoadingPollScheduled) {
+      _repeatOffendersLoadingPollScheduled = true;
+      setTimeout(() => { _repeatOffendersLoadingPollScheduled = false; renderRepeatOffenders(); }, 1000);
+    }
+    return;
+  }
   if (movementFetchState === 'error') { clear('Could not load Movement_Log: ' + esc(movementFetchError)); return; }
   if (movementFetchState !== 'ok' || !movementSnapshots.length) {
     clear('No <span class="mono">Movement_Log</span> data yet — see MovementTracker.gs for the one-time setup (open your Sheet → Extensions → Apps Script → paste it in → run <span class="mono">setupMovementTracking()</span> once), or allow ~6–12h after setup for enough captured history to compute a rate against.');
@@ -400,8 +230,9 @@ function renderRepeatOffenders(){
   // (MOVEMENT_LOG_RETENTION_DAYS, MovementTracker.gs) — Yesterday/This
   // Week/Last 7 Days stay safely inside it, but "From when history began"
   // or a Custom range reaching further back can undercount (a lead
-  // closed AND aged out past 7 days is gone from Movement_Log too). Same
-  // known limitation totalLeadsByKey already carries — surfaced here via
+  // closed AND aged out past 7 days is gone from Movement_Log too) — same
+  // 7-day-retention limitation this whole feature already carries (see
+  // core-rm-performance.js's own header comment) — surfaced here via
   // the section's own static filter-summary text (dashboard.html) rather
   // than a dynamic per-range check, to keep this in line with how that
   // existing caveat is already presented.
@@ -527,7 +358,7 @@ function _repeatOffendersSyncCustomRangeVisibility(){
 // Top-level, same reasoning as reports.js's own reportModeSelect wiring
 // — this script tag loads after the static HTML it targets, so every
 // element already exists by the time this runs. Purely local re-render
-// (no re-fetch needed): every range's data is already in dailyRmIssues.
+// (no re-fetch needed): every range's data is already in movementSnapshots.
 const _repeatOffendersRangeSelectEl = document.getElementById('repeatOffendersRangeSelect');
 if (_repeatOffendersRangeSelectEl) {
   _repeatOffendersRangeSelectEl.addEventListener('change', function(){
