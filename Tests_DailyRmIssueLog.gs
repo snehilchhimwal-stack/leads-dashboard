@@ -187,12 +187,7 @@ function runDailyRmIssueLogTests_() {
       const defaults = {
         snapshot_at: null, snapshot_label: 'test', lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM', TL: 'Test A1',
         project: 'Test Project', region: 'Pune', client: 'Client',
-        // Fixed, far in the past relative to every fixture day below (all
-        // in Jan/Feb/Mar 2026) -- guarantees pastGrace=true and
-        // isCreatedThatDay=false uniformly, so every snapshot day's
-        // eligibility for isNotUpdated depends only on current_stage/
-        // last_connect, not on any per-day age arithmetic.
-        lead_assigned_at: new Date('2025-12-01T00:00:00+05:30'),
+        lead_assigned_at: null, // every caller sets this explicitly -- see rmPerfBadRow_/rmPerfCleanRow_
         group_source: 'google', source_bucket: 'Non-UTM', current_stage: 'Not Updated',
         last_connect: '', last_connect_time: '', last_comment: '',
         internal_status_comments: '', closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, stage_comments: '',
@@ -200,15 +195,59 @@ function runDailyRmIssueLogTests_() {
       const merged = Object.assign({}, defaults, overrides || {});
       return header.map(function (k) { return merged[k]; });
     }
+    // 10 hours before the row's own snapshot -- past LEAD_GRACE_HOURS_ (3h,
+    // needed for isNotUpdated/underCalledToday eligibility) but comfortably
+    // under LEAD_LIFECYCLE_HOURS_ (48h). Relative to each row's OWN
+    // snapshot_at, not one fixed date, specifically so stageStuck48h (whose
+    // OUTCOME is purely past48h && pastGrace -- no stage/connection
+    // condition at all, so nothing else can suppress it) never fires for
+    // ANY row here, bad or clean alike. An earlier version of this fixture
+    // used one fixed old lead_assigned_at for every row; that made
+    // stageStuck48h fire unconditionally company-wide, contaminating the
+    // composite the same way the (separately found and fixed, see
+    // rmPerfCallLog_ below) underCalledToday contamination did -- caught
+    // via a disposable browser harness cross-checking the real numbers
+    // against js/core-rm-performance.js after a CI run failed on both.
+    function rmPerfLeadAssignedAt_(dayNoon) { return new Date(dayNoon.getTime() - 10 * 3600000); }
     // A "bad" (isNotUpdated-eligible AND violated) row for (leadId, RM, day-noon).
+    // call_attempts/call_count matched to rmPerfCleanRow_'s -- otherwise a
+    // "bad" row (defaulting to call_attempts: 0) also genuinely violates
+    // underCalledToday, muddying a fixture meant to isolate isNotUpdated
+    // alone as the one differentiating rule (caught via
+    // rmPerformanceDrivenByGs_ naming 2 driving rules instead of the
+    // expected 1, not assumed correct going in).
     function rmPerfBadRow_(header, leadId, RM, dayNoon) {
-      return rmPerfRowFor_(header, { snapshot_at: dayNoon, lead_id: leadId, client_id: 'C-' + leadId, RM: RM, current_stage: 'Not Updated' });
+      return rmPerfRowFor_(header, { snapshot_at: dayNoon, lead_id: leadId, client_id: 'C-' + leadId, RM: RM, current_stage: 'Not Updated', lead_assigned_at: rmPerfLeadAssignedAt_(dayNoon), call_attempts: 10, call_count: 10 });
     }
-    // A "clean" (eligible, NOT violated) row -- connected, and a stage that
-    // does not canonicalize to 'not updated', so isNotUpdated reads false
-    // via both of its OR-branches.
+    // N dated action-log entries, all on dayNoon's own IST calendar day,
+    // matching parseDatedCommentEntries_'s expected "... - yyyy-MM-dd
+    // HH:mm" format (FollowupEngine.gs). Belt-and-braces for
+    // underCalledToday alongside rmPerfLeadAssignedAt_ above: with
+    // lead_assigned_at now only 10h before the snapshot, isCreatedThatDay
+    // is true and attemptsToday reads call_attempts directly (this log is
+    // never actually consulted on that path) -- kept anyway so the fixture
+    // stays correct even if a future tweak moves lead_assigned_at back
+    // outside "created today".
+    function rmPerfCallLog_(dayNoon, n) {
+      const dayKey = istDayKeyGs_(dayNoon);
+      const parts = [];
+      for (let i = 0; i < n; i++) parts.push('RM: call ' + (i + 1) + ' - ' + dayKey + ' ' + String(9 + i).padStart(2, '0') + ':00');
+      return parts.join(' | ');
+    }
+    // A "clean" (eligible, NOT violated) row -- connected with a stage that
+    // does not canonicalize to 'not updated' (isNotUpdated reads false via
+    // both of its OR-branches), enough call_attempts to clear
+    // underCalledToday directly (isCreatedThatDay=true via
+    // rmPerfLeadAssignedAt_, see above), and the dated call-log belt-and-
+    // braces too. Genuinely compliant on every rule it's eligible for, not
+    // just the one a given scenario is built to isolate.
     function rmPerfCleanRow_(header, leadId, RM, dayNoon) {
-      return rmPerfRowFor_(header, { snapshot_at: dayNoon, lead_id: leadId, client_id: 'C-' + leadId, RM: RM, current_stage: 'Connected', last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(dayNoon, 1) });
+      return rmPerfRowFor_(header, {
+        snapshot_at: dayNoon, lead_id: leadId, client_id: 'C-' + leadId, RM: RM,
+        current_stage: 'Connected', last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(dayNoon, 1),
+        lead_assigned_at: rmPerfLeadAssignedAt_(dayNoon), call_attempts: 10, call_count: 10,
+        internal_status_comments: rmPerfCallLog_(dayNoon, 5),
+      });
     }
     const rmPerfDay_ = function (iso) { return new Date(iso + 'T12:00:00+05:30'); }; // noon-anchored, same reasoning as the backfill test's day1Noon
 
