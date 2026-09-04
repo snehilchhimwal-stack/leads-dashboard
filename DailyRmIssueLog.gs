@@ -610,87 +610,371 @@ function setupDailyRmIssueLog() {
 }
 
 /**
- * Aggregates the accumulated Daily_RM_Issues log per RM over the last
- * `sinceDaysBack` days (default 14): distinct days flagged, distinct
- * issue types flagged, total flagged-lead-instances, and a breakdown by
- * issue. "Repeat offender" here means showing up repeatedly ACROSS this
- * dashboard's own 5 issue checks over MULTIPLE DAYS — not a one-off
- * single-day, single-check blip. Sorted by distinctDays, then
- * distinctIssueTypes, then totalInstances, so the most persistent AND
- * broadest pattern rises to the top — high distinctDays alone just means
- * "keeps coming back for the same thing"; high distinctIssueTypes too
- * means "broad dysfunction, not one specific check."
+ * RM Performance — Phase 4 of the redesign (2026-09-04): a .gs mirror of
+ * js/core-rm-performance.js's workload-normalized methodology, for a
+ * console sanity-check leaderboard. REPLACES computeRepeatOffenderRmsGs_/
+ * reportRepeatOffenderRmsNow outright (same "replace, don't keep the old
+ * metric alongside" decision as Phases 2-3 on the live tab/PDF) — the old
+ * "distinctDays/distinctIssueTypes/totalInstances" ranking had the exact
+ * same no-real-denominator problem the whole redesign exists to fix (see
+ * HANDOVER.md §9.7's "Why" section), just one level further removed: it
+ * read Daily_RM_Issues, which only ever logs a VIOLATION and never a lead
+ * that was eligible and passed, so it inherited the missing-denominator
+ * problem structurally, the same way the old dashboard tables did.
  *
- * The log only has data from whenever setupDailyRmIssueLog() was first
- * run, so `sinceDaysBack` naturally shrinks to whatever's actually
- * accumulated — this needs at least a few nights of captures before the
- * distinction between "repeat" and "one-off" means anything at all.
+ * REUSES computeSlaFlags_ (SlaEngine.gs) for every rule's actual pass/fail
+ * outcome — no rule logic is reimplemented a third time. The one thing
+ * duplicated here is a ~15-line ELIGIBILITY-WINDOW derivation
+ * (computeRmPerfEligibilityGs_ below) — pastGrace/isUnder48h/
+ * isCreatedThatDay/hasConnected/neverConnectedPastWindow — because
+ * computeSlaFlags_ computes these internally but only returns the final
+ * violation booleans, not the intermediate eligibility context this
+ * engine also needs. This mirrors js/core-rm-performance.js's own design
+ * exactly: its RM_PERF_RULES eligibility gates are a thin layer on top of
+ * enrichLead's outputs, not a re-derivation of the rules themselves — see
+ * that file's own header comment for the same reasoning.
  *
- * Pure read, no writes. Returns [{RM, distinctDays, distinctIssueTypes,
- * totalInstances, byIssue}], most persistent/broadest first.
+ * SCOPE, DELIBERATELY NARROWER than the live tab: RM-level only, no
+ * Region/A1-TM/RH rollups (those already exist, fully verified, on the
+ * live dashboard — this console function's whole job is a quick sanity
+ * check, not a duplicate delivery surface). Reads Movement_Log directly
+ * (same 7-day retention as the browser engine, same reason: it needs the
+ * PASS/FAIL denominator, not just Daily_RM_Issues' violations-only log).
+ *
+ * The constants immediately below MUST stay numerically identical to
+ * js/core-rm-performance.js's RM_PERF_* constants — same "keep in sync"
+ * discipline already established for SlaEngine.gs vs dashboard.html's
+ * enrichLead (see this file's own header comment on that).
  */
-function computeRepeatOffenderRmsGs_(ss, opts) {
-  const sheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
+const RM_PERF_RULE_WEIGHTS_GS_ = {
+  isNotUpdated: 1.5, followupOverdue: 1.2, underCalledToday: 1.0, stageStuck48h: 0.8,
+};
+const RM_PERF_SCORED_RULE_KEYS_GS_ = Object.keys(RM_PERF_RULE_WEIGHTS_GS_);
+const RM_PERF_SHRINKAGE_K_GS_ = 8;
+const RM_PERF_MIN_VOLUME_LEADS_GS_ = 5;
+const RM_PERF_CHRONIC_STREAK_DAYS_GS_ = 3;
+const RM_PERF_FLAG_RATIO_GS_ = 1.25;
+const RM_PERF_CONCENTRATION_BREADTH_CEILING_GS_ = 0.25;
 
-  const sinceDaysBack = (opts && opts.sinceDaysBack) || 14;
-  const cutoffMs = Date.now() - sinceDaysBack * 24 * 3600 * 1000;
+// Eligibility gate + display label per rule — ported from
+// js/core-rm-performance.js's RM_PERF_RULES (same keys, same conditions,
+// see that file for the full per-rule rationale). inactiveRmNewLade is
+// included here (for eligibility bookkeeping/routingIssueDays) but stays
+// excluded from RM_PERF_SCORED_RULE_KEYS_GS_ above, so it never enters the
+// composite score — a routing/assignment failure, not an RM execution one.
+const RM_PERF_RULES_GS_ = [
+  { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added', eligible: function (ctx) { return ctx.isCreatedThatDay; } },
+  { key: 'isNotUpdated', label: 'Not Updated', eligible: function (ctx) { return ctx.pastGrace || ctx.neverConnectedPastWindow; } },
+  { key: 'followupOverdue', label: 'Follow-up Overdue', eligible: function (ctx) { return ctx.isUnder48h && ctx.pastGrace && ctx.hasConnected; } },
+  { key: 'underCalledToday', label: "Behind on Today's Calls", eligible: function (ctx) { return ctx.pastGrace; } },
+  { key: 'stageStuck48h', label: 'Stuck 48h+', eligible: function (ctx) { return ctx.pastGrace; } },
+];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
-  const byRM = {};
-  values.forEach(function (row) {
-    const dateCell = row[0];
-    const dateKey = dateCell instanceof Date ? istDayKeyGs_(dateCell) : String(dateCell || '').trim();
-    if (!dateKey) return;
-    const dateMs = new Date(dateKey + 'T00:00:00+05:30').getTime();
-    if (isNaN(dateMs) || dateMs < cutoffMs) return;
-
-    const rm = String(row[1] || '').trim() || 'Unassigned';
-    const issueKey = String(row[6] || '').trim();
-    if (!byRM[rm]) byRM[rm] = { RM: rm, days: {}, issueTypes: {}, byIssue: {}, totalInstances: 0 };
-    const b = byRM[rm];
-    b.days[dateKey] = true;
-    b.issueTypes[issueKey] = true;
-    b.byIssue[issueKey] = (b.byIssue[issueKey] || 0) + 1;
-    b.totalInstances++;
-  });
-
-  return Object.keys(byRM).map(function (rm) {
-    const b = byRM[rm];
-    return {
-      RM: rm,
-      distinctDays: Object.keys(b.days).length,
-      distinctIssueTypes: Object.keys(b.issueTypes).length,
-      totalInstances: b.totalInstances,
-      byIssue: b.byIssue,
-    };
-  }).sort(function (a, b) {
-    if (b.distinctDays !== a.distinctDays) return b.distinctDays - a.distinctDays;
-    if (b.distinctIssueTypes !== a.distinctIssueTypes) return b.distinctIssueTypes - a.distinctIssueTypes;
-    return b.totalInstances - a.totalInstances;
-  });
+// Calendar-day difference between two "YYYY-MM-DD" istDayKeyGs_ strings —
+// direct port of js/core-rm-performance.js's _rmPerfDaysBetweenKeys (pure
+// Date.UTC arithmetic, noon-anchored to sidestep any DST edge case; no
+// browser dependency, so this ports byte-for-byte).
+function _rmPerfDaysBetweenKeysGs_(a, b) {
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  const da = Date.UTC(pa[0], pa[1] - 1, pa[2], 12);
+  const db = Date.UTC(pb[0], pb[1] - 1, pb[2], 12);
+  return Math.round((db - da) / 86400000);
 }
 
-// Console-callable (function dropdown -> Run) — logs
-// computeRepeatOffenderRmsGs_'s result in a readable form. Needs at
-// least a few nights of Daily_RM_Issues data to show a meaningful
-// pattern — a single night's capture alone can't distinguish a repeat
-// offender from a one-off.
-function reportRepeatOffenderRmsNow() {
+// The eligibility-window context computeSlaFlags_ derives internally but
+// doesn't expose — see this section's own header comment for why this is
+// a deliberate, minimal duplication of DERIVATION (not of rule logic).
+// Returns null for an undatable lead (no lead_assigned_at), same early-out
+// computeSlaFlags_ itself uses.
+function computeRmPerfEligibilityGs_(row, colIndex, now) {
+  const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
+  const created = createdRaw instanceof Date ? createdRaw : null;
+  if (!created) return null;
+  const ageHours = (now.getTime() - created.getTime()) / 36e5;
+  const pastGrace = ageHours >= LEAD_GRACE_HOURS_;
+  const isUnder48h = ageHours <= LEAD_LIFECYCLE_HOURS_;
+  const isCreatedThatDay = istDayKeyGs_(created) === istDayKeyGs_(now);
+  const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
+  const connectDate = connectTimeRaw instanceof Date ? connectTimeRaw : null;
+  const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
+  const neverConnectedPastWindow = isUnder48h && !connectDate &&
+    businessMinutesBetweenGs_(created, now) > FIRST_CONTACT_SLA_MINUTES_;
+  return {
+    pastGrace: pastGrace, isUnder48h: isUnder48h, isCreatedThatDay: isCreatedThatDay,
+    hasConnected: hasConnected, neverConnectedPastWindow: neverConnectedPastWindow,
+  };
+}
+
+/**
+ * Stage 1 — walks every retained Movement_Log row, keeps the LATEST
+ * snapshot per (lead_id, calendar day) [equivalent to the browser engine's
+ * buildMovementHistories()+splitHistoryByCopy()+"latest that day" combined
+ * — grouping by client_id first is a no-op for this purpose, since
+ * splitHistoryByCopy immediately re-splits back to lead_id anyway], and
+ * emits one {name, leadId, dayKey, rule, violated} record per (lead, day,
+ * rule) the lead was actually ELIGIBLE for. Processed day-by-day (not
+ * lead-by-lead) so buildMovementLogMapsGs_ — a full Movement_Log rescan —
+ * runs once per distinct day, not once per lead, same granularity
+ * backfillDailyRmIssuesFromMovementLog_ already uses for the same reason.
+ * Unfiltered — no dashboard top-bar filter concept applies to a console
+ * function, same as computeRepeatOffenderRmsGs_ before it.
+ */
+function reconstructRmPerformanceObservationsGs_(ss) {
+  const observations = [];
+  const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!movementSheet) return observations;
+  const lastRow = movementSheet.getLastRow();
+  if (lastRow < 2) return observations;
+  const lastCol = movementSheet.getLastColumn();
+  const header = withRetry_(function () { return movementSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Movement_Log header for RM performance reconstruction');
+  const snapAtIdx = header.indexOf('snapshot_at');
+  if (snapAtIdx === -1) return observations;
+  const colIndex = buildColIndex_(header);
+  const allRows = withRetry_(function () { return movementSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Movement_Log for RM performance reconstruction');
+
+  const latestByLeadDay = {}; // "leadId|dayKey" -> {row, ts, dayKey, leadId}
+  allRows.forEach(function (row) {
+    const ts = row[snapAtIdx];
+    if (!(ts instanceof Date)) return;
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const dayKey = istDayKeyGs_(ts);
+    const mapKey = leadId + '|' + dayKey;
+    if (!latestByLeadDay[mapKey] || ts.getTime() > latestByLeadDay[mapKey].ts.getTime()) {
+      latestByLeadDay[mapKey] = { row: row, ts: ts, dayKey: dayKey, leadId: leadId };
+    }
+  });
+
+  const rowsByDay = {};
+  Object.keys(latestByLeadDay).forEach(function (mapKey) {
+    const entry = latestByLeadDay[mapKey];
+    if (!rowsByDay[entry.dayKey]) rowsByDay[entry.dayKey] = [];
+    rowsByDay[entry.dayKey].push(entry);
+  });
+
+  Object.keys(rowsByDay).sort().forEach(function (dayKey) {
+    const entries = rowsByDay[dayKey];
+    // buildMovementLogMapsGs_'s baselineMap only depends on istDayKeyGs_(now)
+    // (it truncates to that day's start internally) -- any entry's own
+    // timestamp is an equally valid anchor for the whole day's baseline.
+    const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, entries[0].ts); }, 'buildMovementLogMapsGs_ (RM performance, ' + dayKey + ')').baselineMap;
+
+    entries.forEach(function (entry) {
+      const row = entry.row;
+      const stage = getVal_(row, colIndex, 'current_stage');
+      const closingReason = getVal_(row, colIndex, 'closing_reason');
+      const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+      if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed -- eligible for nothing
+
+      const ctx = computeRmPerfEligibilityGs_(row, colIndex, entry.ts);
+      if (!ctx) return; // undatable
+
+      const flags = computeSlaFlags_(row, colIndex, entry.ts, baselineMap);
+      const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+
+      RM_PERF_RULES_GS_.forEach(function (rule) {
+        if (!rule.eligible(ctx)) return;
+        observations.push({ name: RM, leadId: entry.leadId, dayKey: dayKey, rule: rule.key, violated: !!flags[rule.key] });
+      });
+    });
+  });
+
+  return observations;
+}
+
+// Stage 2 — rolls Stage 1's observations up to RM x rule: eligible/
+// violation lead-day counts, distinct eligible/violated lead counts, and
+// the chronic-streak signal (longest run of CONSECUTIVE-CALENDAR-DAY
+// violations on any one lead). Direct port of
+// js/core-rm-performance.js's aggregateRmPerformance -- same reasoning on
+// why confidence for shrinkage (Stage 3) is based on DISTINCT LEADS, not
+// lead-days (a lead flagged 5 nights running is 5 correlated
+// observations of one problem, not 5 independent trials).
+function aggregateRmPerformanceGs_(observations) {
+  const byGroup = {};
+  observations.forEach(function (o) {
+    if (!byGroup[o.name]) byGroup[o.name] = { name: o.name, rules: {} };
+    const groupEntry = byGroup[o.name];
+    if (!groupEntry.rules[o.rule]) {
+      groupEntry.rules[o.rule] = { eligibleDays: 0, violationDays: 0, eligibleLeads: {}, violatedLeads: {}, perLead: {} };
+    }
+    const r = groupEntry.rules[o.rule];
+    r.eligibleDays++;
+    r.eligibleLeads[o.leadId] = true;
+    if (o.violated) { r.violationDays++; r.violatedLeads[o.leadId] = true; }
+    if (!r.perLead[o.leadId]) r.perLead[o.leadId] = [];
+    r.perLead[o.leadId].push({ dayKey: o.dayKey, violated: o.violated });
+  });
+
+  Object.keys(byGroup).forEach(function (name) {
+    const groupEntry = byGroup[name];
+    Object.keys(groupEntry.rules).forEach(function (ruleKey) {
+      const r = groupEntry.rules[ruleKey];
+      r.rate = r.eligibleDays ? r.violationDays / r.eligibleDays : 0;
+      r.distinctEligibleLeads = Object.keys(r.eligibleLeads).length;
+      r.distinctViolatedLeads = Object.keys(r.violatedLeads).length;
+
+      let maxStreak = 0, chronicLeads = 0;
+      Object.keys(r.perLead).forEach(function (leadId) {
+        const days = r.perLead[leadId].slice().sort(function (a, b) { return a.dayKey < b.dayKey ? -1 : (a.dayKey > b.dayKey ? 1 : 0); });
+        let streak = 0, best = 0, prevDayKey = null;
+        days.forEach(function (d) {
+          const adjacent = prevDayKey !== null && _rmPerfDaysBetweenKeysGs_(prevDayKey, d.dayKey) === 1;
+          streak = d.violated ? (adjacent ? streak + 1 : 1) : 0;
+          if (streak > best) best = streak;
+          prevDayKey = d.dayKey;
+        });
+        if (best > maxStreak) maxStreak = best;
+        if (best >= RM_PERF_CHRONIC_STREAK_DAYS_GS_) chronicLeads++;
+      });
+      r.maxStreak = maxStreak;
+      r.chronicLeads = chronicLeads;
+    });
+  });
+
+  return byGroup;
+}
+
+// Company-wide (every group currently in byGroup) violation rate per rule,
+// weighted by lead-days. Direct port of computeRmPerfPeerAverages.
+function computeRmPerfPeerAveragesGs_(byGroup) {
+  const totals = {};
+  Object.keys(byGroup).forEach(function (name) {
+    const groupEntry = byGroup[name];
+    Object.keys(groupEntry.rules).forEach(function (ruleKey) {
+      const r = groupEntry.rules[ruleKey];
+      if (!totals[ruleKey]) totals[ruleKey] = { violationDays: 0, eligibleDays: 0 };
+      totals[ruleKey].violationDays += r.violationDays;
+      totals[ruleKey].eligibleDays += r.eligibleDays;
+    });
+  });
+  const peerAvg = {};
+  Object.keys(totals).forEach(function (ruleKey) {
+    peerAvg[ruleKey] = totals[ruleKey].eligibleDays ? totals[ruleKey].violationDays / totals[ruleKey].eligibleDays : 0;
+  });
+  return peerAvg;
+}
+
+// Stage 3+4 — shrinks each RM's per-rule rate toward the peer average
+// (weighted by distinct-lead confidence), combines into one
+// severity-weighted composite, and classifies. Direct port of
+// classifyRmPerformance — same 4 classification branches (Insufficient
+// Data / On Track / Watch — concentrated / Below Expectations), same
+// thresholds (RM_PERF_*_GS_ above). Returns an array sorted by raw
+// composite, most-concerning first — same as the browser engine, callers
+// wanting classification-tier-first ordering should sort further (see
+// sortRmPerformanceByPriorityGs_ below).
+function classifyRmPerformanceGs_(byGroup) {
+  const peerAvg = computeRmPerfPeerAveragesGs_(byGroup);
+  let peerComposite = 0;
+  RM_PERF_SCORED_RULE_KEYS_GS_.forEach(function (k) { peerComposite += RM_PERF_RULE_WEIGHTS_GS_[k] * (peerAvg[k] || 0); });
+
+  const results = [];
+  Object.keys(byGroup).forEach(function (name) {
+    const groupEntry = byGroup[name];
+    let composite = 0;
+    const allEligibleLeads = {};
+    let anyConcentrated = false;
+    const perRuleOut = {};
+
+    RM_PERF_SCORED_RULE_KEYS_GS_.forEach(function (ruleKey) {
+      const r = groupEntry.rules[ruleKey];
+      const eligibleDays = r ? r.eligibleDays : 0;
+      const violationDays = r ? r.violationDays : 0;
+      const distinctEligibleLeads = r ? r.distinctEligibleLeads : 0;
+      const distinctViolatedLeads = r ? r.distinctViolatedLeads : 0;
+      const rawRate = eligibleDays ? violationDays / eligibleDays : 0;
+      const shrunkRate = (distinctEligibleLeads / (distinctEligibleLeads + RM_PERF_SHRINKAGE_K_GS_)) * rawRate
+        + (RM_PERF_SHRINKAGE_K_GS_ / (distinctEligibleLeads + RM_PERF_SHRINKAGE_K_GS_)) * (peerAvg[ruleKey] || 0);
+      const chronicLeads = r ? r.chronicLeads : 0;
+      const concentrated = chronicLeads > 0 && distinctEligibleLeads > 0
+        && (distinctViolatedLeads / distinctEligibleLeads) <= RM_PERF_CONCENTRATION_BREADTH_CEILING_GS_;
+
+      composite += RM_PERF_RULE_WEIGHTS_GS_[ruleKey] * shrunkRate;
+      if (r) Object.keys(r.eligibleLeads).forEach(function (id) { allEligibleLeads[id] = true; });
+      if (concentrated) anyConcentrated = true;
+
+      perRuleOut[ruleKey] = {
+        eligibleDays: eligibleDays, violationDays: violationDays, distinctEligibleLeads: distinctEligibleLeads,
+        distinctViolatedLeads: distinctViolatedLeads, rawRate: rawRate, shrunkRate: shrunkRate,
+        maxStreak: r ? r.maxStreak : 0, chronicLeads: chronicLeads, concentrated: concentrated,
+      };
+    });
+
+    const inactiveRmRule = groupEntry.rules.inactiveRmNewLead;
+    const nLeads = Object.keys(allEligibleLeads).length;
+
+    let classification;
+    if (nLeads < RM_PERF_MIN_VOLUME_LEADS_GS_) classification = 'Insufficient Data';
+    else if (composite <= peerComposite * RM_PERF_FLAG_RATIO_GS_) classification = 'On Track';
+    else if (anyConcentrated) classification = 'Watch — concentrated';
+    else classification = 'Below Expectations';
+
+    results.push({
+      name: name, distinctLeads: nLeads, composite: composite, peerComposite: peerComposite,
+      rules: perRuleOut, routingIssueDays: inactiveRmRule ? inactiveRmRule.violationDays : 0,
+      classification: classification,
+    });
+  });
+
+  return results.sort(function (a, b) { return b.composite - a.composite; });
+}
+
+// Top-level orchestration.
+function computeRmPerformanceGs_(ss) {
+  const observations = reconstructRmPerformanceObservationsGs_(ss);
+  const byGroup = aggregateRmPerformanceGs_(observations);
+  return classifyRmPerformanceGs_(byGroup);
+}
+
+// The 1-2 scored rules actually pushing a classified result's score up,
+// worst first, filtered to rules with a REAL violation (not merely a
+// nonzero shrunkRate, which shrinkage gives every rule even at zero real
+// violations). Direct port of rmPerformanceDrivenBy.
+function rmPerformanceDrivenByGs_(r) {
+  if (r.classification !== 'Below Expectations' && r.classification !== 'Watch — concentrated') return [];
+  return RM_PERF_SCORED_RULE_KEYS_GS_
+    .map(function (k) {
+      const rule = RM_PERF_RULES_GS_.filter(function (rr) { return rr.key === k; })[0];
+      return Object.assign({ key: k, weight: RM_PERF_RULE_WEIGHTS_GS_[k], label: rule ? rule.label : k }, r.rules[k]);
+    })
+    .filter(function (x) { return x.violationDays > 0; })
+    .sort(function (a, b) { return (b.weight * b.shrunkRate) - (a.weight * a.shrunkRate); })
+    .slice(0, 2);
+}
+
+// Classification tier first, composite within each tier -- direct port of
+// sortRmPerformanceByPriority (classifyRmPerformanceGs_'s own return is
+// only sorted by raw composite, which a shrinkage-inflated Insufficient
+// Data row could otherwise outrank a real finding under).
+function sortRmPerformanceByPriorityGs_(list) {
+  function rank(c) { return c === 'Below Expectations' ? 0 : c === 'Watch — concentrated' ? 1 : c === 'On Track' ? 2 : 3; }
+  return list.slice().sort(function (a, b) { return (rank(a.classification) - rank(b.classification)) || (b.composite - a.composite); });
+}
+
+// Console-callable (function dropdown -> Run) — the RM Performance
+// leaderboard, same workload-normalized methodology as the dashboard's
+// Repeat Offenders section (HANDOVER.md §9.7). Needs at least one retained
+// Movement_Log snapshot day; Movement_Log's 7-day retention caps how far
+// back this can ever see, same limitation totalLeadsByKey/the browser
+// engine already have.
+function reportRmPerformanceNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const results = computeRepeatOffenderRmsGs_(ss, {});
+  const results = computeRmPerformanceGs_(ss);
   if (!results.length) {
-    Logger.log('No Daily_RM_Issues data yet — run captureDailyRmIssuesNow() at least once (or wait for tonight\'s 22:50 IST trigger), then check back after a few nights.');
+    Logger.log('No Movement_Log data to compute from — needs at least one retained snapshot (Movement_Log keeps at most 7 days). Nothing to report yet.');
     return;
   }
 
-  Logger.log(results.length + ' RM(s) with at least one flagged lead in the last 14 days, most persistent/broadest first:');
-  results.slice(0, 30).forEach(function (r) {
-    const issueBreakdown = Object.keys(r.byIssue).sort(function (a, b) { return r.byIssue[b] - r.byIssue[a]; })
-      .map(function (k) { return k + ': ' + r.byIssue[k]; }).join(', ');
-    Logger.log('  ' + r.RM + ' — ' + r.distinctDays + ' day(s), ' + r.distinctIssueTypes + ' issue type(s), ' + r.totalInstances + ' total flagged instance(s) — [' + issueBreakdown + ']');
+  const sorted = sortRmPerformanceByPriorityGs_(results);
+  Logger.log(sorted.length + ' RM(s) with at least one eligible lead-day in the retained Movement_Log history (up to 7 days), worst first:');
+  sorted.slice(0, 40).forEach(function (r) {
+    const drivenBy = rmPerformanceDrivenByGs_(r).map(function (d) {
+      return d.label + ' (rate ' + Math.round(d.rawRate * 100) + '%, ' + d.distinctViolatedLeads + '/' + d.distinctEligibleLeads + ' lead(s)' + (d.concentrated ? ', concentrated' : '') + ')';
+    }).join('; ');
+    Logger.log('  ' + r.name + ' — ' + r.classification + ' — workload ' + r.distinctLeads + ' lead(s), score ' + r.composite.toFixed(2) + ' vs peer ' + r.peerComposite.toFixed(2) +
+      (r.routingIssueDays ? ', ' + r.routingIssueDays + ' inactive-RM routing day(s) (not scored)' : '') +
+      (drivenBy ? ' — driven by: ' + drivenBy : ''));
   });
-  Logger.log('Read this as: high distinctDays = persistent (keeps coming back), high distinctIssueTypes = broad (not just one specific check) — both together is the strongest signal of a genuine, consistent pattern rather than a one-off.');
+  Logger.log('Same workload-normalized methodology as the dashboard\'s Repeat Offenders section (see HANDOVER.md §9.7) — Score is a severity-weighted, small-sample-adjusted composite vs. the peer average, not a raw violation count. "Insufficient Data" means fewer than ' + RM_PERF_MIN_VOLUME_LEADS_GS_ + ' distinct eligible leads — not enough evidence either way. RM-level only (no Region/A1-TM/RH rollups here — see those on the live dashboard).');
 }

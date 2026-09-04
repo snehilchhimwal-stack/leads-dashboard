@@ -153,54 +153,151 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = realSs;
     }
 
-    // ---- computeRepeatOffenderRmsGs_: pure aggregation over a hand-seeded log ----
-    const repeatSs = TestMockSpreadsheet_({});
-    const repeatLogSheet = ensureDailyRmIssueLogSheet_(repeatSs);
-    const capturedAt = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
-    const dateToday = istDayKeyGs_(now);
-    const date2DaysAgo = istDayKeyGs_(TestFixture_daysAgo_(now, 2));
-    const date5DaysAgo = istDayKeyGs_(TestFixture_daysAgo_(now, 5));
-    const date20DaysAgo = istDayKeyGs_(TestFixture_daysAgo_(now, 20));
-    [
-      [dateToday, 'Test RM One', 'Pune', 'P', 'L-1', 'C-1', 'stageStuck48h', 'Stuck 48h+', capturedAt],
-      [date2DaysAgo, 'Test RM One', 'Pune', 'P', 'L-2', 'C-2', 'stageStuck48h', 'Stuck 48h+', capturedAt],
-      [date5DaysAgo, 'Test RM One', 'Pune', 'P', 'L-3', 'C-3', 'followupOverdue', 'Follow-up Overdue', capturedAt],
-      [dateToday, 'Test RM Two', 'Bangalore', 'P2', 'L-4', 'C-4', 'underCalledToday', "Behind on Today's Calls", capturedAt],
-      // Outside the default 14-day window — must be excluded unless sinceDaysBack widens.
-      [date20DaysAgo, 'Test RM Old', 'Pune', 'P', 'L-5', 'C-5', 'stageStuck48h', 'Stuck 48h+', capturedAt],
-    ].forEach(function (r) { repeatLogSheet.appendRow(r); });
+    // ---- RM Performance (Phase 4): reconstructRmPerformanceObservationsGs_
+    // / aggregateRmPerformanceGs_ / classifyRmPerformanceGs_ against a
+    // hand-seeded Movement_Log ----
+    //
+    // Expected classifications below were NOT hand-derived from scratch --
+    // they were cross-checked against the real, already-proven
+    // js/core-rm-performance.js engine (aggregateRmPerformance/
+    // classifyRmPerformance, which take the same {name, lead_id, dayKey,
+    // rule, violated} observation shape and have zero DOM/browser
+    // dependency) using the IDENTICAL observation sets these Movement_Log
+    // fixtures are built to reconstruct, via a disposable browser harness
+    // (deleted after use, same "disposable, not committed" pattern as
+    // _verify-rm-performance.html). This is exactly the same lesson
+    // HANDOVER.md's Phase 1 writeup already names: don't mix an
+    // intentionally-extreme test RM into a peer pool too small to absorb
+    // it, or the peer average gets pulled up by the very outlier it's
+    // supposed to be a baseline for.
+    // Each scenario gets its OWN mock spreadsheet/Movement_Log/peer pool --
+    // NOT one shared sheet for all three. classifyRmPerformanceGs_ computes
+    // the peer average across every group CURRENTLY passed to it, so
+    // combining an intentionally-extreme test RM into the same call as
+    // another scenario's RMs would let its own violations drag the peer
+    // average up to meet it -- the exact pitfall named in this block's own
+    // header comment above. Isolating scenarios is what keeps each one's
+    // math identical to what was verified in the browser.
+    function rmPerfMakeSheet_() {
+      const ss = TestMockSpreadsheet_({});
+      const sheet = ensureMovementLogSheet_(ss); // real header, so this can't drift from production
+      return { ss: ss, sheet: sheet, header: sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0] };
+    }
+    function rmPerfRowFor_(header, overrides) {
+      const defaults = {
+        snapshot_at: null, snapshot_label: 'test', lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM', TL: 'Test A1',
+        project: 'Test Project', region: 'Pune', client: 'Client',
+        // Fixed, far in the past relative to every fixture day below (all
+        // in Jan/Feb/Mar 2026) -- guarantees pastGrace=true and
+        // isCreatedThatDay=false uniformly, so every snapshot day's
+        // eligibility for isNotUpdated depends only on current_stage/
+        // last_connect, not on any per-day age arithmetic.
+        lead_assigned_at: new Date('2025-12-01T00:00:00+05:30'),
+        group_source: 'google', source_bucket: 'Non-UTM', current_stage: 'Not Updated',
+        last_connect: '', last_connect_time: '', last_comment: '',
+        internal_status_comments: '', closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, stage_comments: '',
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return header.map(function (k) { return merged[k]; });
+    }
+    // A "bad" (isNotUpdated-eligible AND violated) row for (leadId, RM, day-noon).
+    function rmPerfBadRow_(header, leadId, RM, dayNoon) {
+      return rmPerfRowFor_(header, { snapshot_at: dayNoon, lead_id: leadId, client_id: 'C-' + leadId, RM: RM, current_stage: 'Not Updated' });
+    }
+    // A "clean" (eligible, NOT violated) row -- connected, and a stage that
+    // does not canonicalize to 'not updated', so isNotUpdated reads false
+    // via both of its OR-branches.
+    function rmPerfCleanRow_(header, leadId, RM, dayNoon) {
+      return rmPerfRowFor_(header, { snapshot_at: dayNoon, lead_id: leadId, client_id: 'C-' + leadId, RM: RM, current_stage: 'Connected', last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(dayNoon, 1) });
+    }
+    const rmPerfDay_ = function (iso) { return new Date(iso + 'T12:00:00+05:30'); }; // noon-anchored, same reasoning as the backfill test's day1Noon
 
-    let results = computeRepeatOffenderRmsGs_(repeatSs, {});
-    TestAssertEqual_(results.length, 2, 'computeRepeatOffenderRmsGs_: default 14-day window excludes Test RM Old (flagged 20 days back)');
-    TestAssertEqual_(results[0].RM, 'Test RM One', 'computeRepeatOffenderRmsGs_: the RM with more distinct days AND issue types sorts first');
-    TestAssertEqual_(results[0].distinctDays, 3, 'computeRepeatOffenderRmsGs_: distinctDays counts 3 separate days for Test RM One');
-    TestAssertEqual_(results[0].distinctIssueTypes, 2, 'computeRepeatOffenderRmsGs_: distinctIssueTypes counts stageStuck48h + followupOverdue');
-    TestAssertEqual_(results[0].totalInstances, 3, 'computeRepeatOffenderRmsGs_: totalInstances counts every row, not just distinct days');
-    TestAssertEqual_(results[0].byIssue.stageStuck48h, 2, 'computeRepeatOffenderRmsGs_: byIssue breaks down per-issue-key counts correctly');
-    TestAssertEqual_(results[0].byIssue.followupOverdue, 1, 'computeRepeatOffenderRmsGs_: ...for every issue key present, not just the most common one');
-    TestAssertEqual_(results[1].RM, 'Test RM Two', 'computeRepeatOffenderRmsGs_: a one-off single-day RM sorts after the persistent one');
-    TestAssertEqual_(results[1].distinctDays, 1, 'computeRepeatOffenderRmsGs_: Test RM Two correctly shows just 1 distinct day');
+    // -- Scenario A: 'Below Expectations' (broad) -- 6 leads under 'Bad
+    // Broad' violated isNotUpdated on all of 4 consecutive days (chronic,
+    // but EVERY eligible lead is violated -- breadth 100%, so NOT
+    // "concentrated"); 6 leads under 'Good' compliant the same 4 days.
+    const rmPerfA = rmPerfMakeSheet_();
+    const days4 = ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'].map(rmPerfDay_);
+    for (let i = 1; i <= 6; i++) { days4.forEach(function (d) { rmPerfA.sheet.appendRow(rmPerfBadRow_(rmPerfA.header, 'A-BAD-L' + i, 'Bad Broad', d)); }); }
+    for (let i = 1; i <= 6; i++) { days4.forEach(function (d) { rmPerfA.sheet.appendRow(rmPerfCleanRow_(rmPerfA.header, 'A-GOOD-L' + i, 'Good', d)); }); }
 
-    results = computeRepeatOffenderRmsGs_(repeatSs, { sinceDaysBack: 30 });
-    TestAssertEqual_(results.length, 3, 'computeRepeatOffenderRmsGs_: a wider sinceDaysBack picks up Test RM Old too');
-    TestAssert_(results.some(function (r) { return r.RM === 'Test RM Old'; }), 'computeRepeatOffenderRmsGs_: Test RM Old is present once the window covers 20 days back');
+    const rmPerfAObservations = reconstructRmPerformanceObservationsGs_(rmPerfA.ss);
+    TestAssert_(rmPerfAObservations.length > 0, 'reconstructRmPerformanceObservationsGs_: produced observations from the seeded Movement_Log');
+    const rmPerfAResults = computeRmPerformanceGs_(rmPerfA.ss);
+    const rmPerfAByName = {}; rmPerfAResults.forEach(function (r) { rmPerfAByName[r.name] = r; });
 
-    TestAssertEqual_(computeRepeatOffenderRmsGs_(TestMockSpreadsheet_({}), {}).length, 0, 'computeRepeatOffenderRmsGs_: returns an empty array when Daily_RM_Issues does not exist yet');
+    TestAssertEqual_(rmPerfAByName['Bad Broad'].classification, 'Below Expectations', 'classifyRmPerformanceGs_: 6/6 leads chronically violated (100% breadth) classifies as Below Expectations, not concentrated');
+    TestAssertEqual_(rmPerfAByName['Bad Broad'].distinctLeads, 6, 'classifyRmPerformanceGs_: Bad Broad workload is exactly the 6 seeded leads');
+    TestAssertEqual_(rmPerfAByName['Good'].classification, 'On Track', 'classifyRmPerformanceGs_: a fully-compliant group classifies On Track');
+    TestAssert_(rmPerfAByName['Bad Broad'].composite > rmPerfAByName['Good'].composite, 'classifyRmPerformanceGs_: the violating group\'s composite score exceeds the compliant group\'s');
+    TestAssertEqual_(rmPerformanceDrivenByGs_(rmPerfAByName['Good']).length, 0, 'rmPerformanceDrivenByGs_: an On Track group has nothing "driving" its score');
+    const rmPerfASorted = sortRmPerformanceByPriorityGs_(rmPerfAResults);
+    TestAssert_(rmPerfASorted.findIndex(function (r) { return r.name === 'Bad Broad'; }) < rmPerfASorted.findIndex(function (r) { return r.name === 'Good'; }), 'sortRmPerformanceByPriorityGs_: Below Expectations ranks ahead of On Track');
 
-    // ---- reportRepeatOffenderRmsNow(): console-callable wrapper, smoke test only ----
+    // -- Scenario B: 'Watch — concentrated' -- 'Watch1' has ONE lead
+    // violated 10 straight days (chronic) plus 7 other leads eligible just
+    // 1 day each, all compliant (breadth 1/8 = 12.5%, well under the 25%
+    // ceiling). Three SEPARATE 8-lead, fully-compliant peer RMs
+    // (GoodA/GoodB/GoodC) keep the peer pool large enough that Watch1's own
+    // violations don't drag the peer average up to meet it.
+    const rmPerfB = rmPerfMakeSheet_();
+    const days10 = ['2026-02-01', '2026-02-02', '2026-02-03', '2026-02-04', '2026-02-05', '2026-02-06', '2026-02-07', '2026-02-08', '2026-02-09', '2026-02-10'].map(rmPerfDay_);
+    const feb1 = rmPerfDay_('2026-02-01');
+    days10.forEach(function (d) { rmPerfB.sheet.appendRow(rmPerfBadRow_(rmPerfB.header, 'B-WATCH-BAD', 'Watch1', d)); });
+    for (let i = 1; i <= 7; i++) { rmPerfB.sheet.appendRow(rmPerfCleanRow_(rmPerfB.header, 'B-WATCH-OK' + i, 'Watch1', feb1)); }
+    ['GoodA', 'GoodB', 'GoodC'].forEach(function (rm) {
+      for (let i = 1; i <= 8; i++) { rmPerfB.sheet.appendRow(rmPerfCleanRow_(rmPerfB.header, 'B-' + rm + '-L' + i, rm, feb1)); }
+    });
+
+    const rmPerfBResults = computeRmPerformanceGs_(rmPerfB.ss);
+    const rmPerfBByName = {}; rmPerfBResults.forEach(function (r) { rmPerfBByName[r.name] = r; });
+
+    TestAssertEqual_(rmPerfBByName['Watch1'].classification, 'Watch — concentrated', 'classifyRmPerformanceGs_: 1/8 leads chronically violated (12.5% breadth) classifies as Watch — concentrated, not Below Expectations');
+    TestAssertEqual_(rmPerfBByName['Watch1'].distinctLeads, 8, 'classifyRmPerformanceGs_: Watch1 workload is the 1 chronic lead + 7 compliant leads');
+    TestAssertEqual_(rmPerfBByName['Watch1'].rules.isNotUpdated.maxStreak, 10, 'classifyRmPerformanceGs_: the chronic lead\'s 10 CONSECUTIVE calendar days are correctly detected as one streak');
+    TestAssertEqual_(rmPerfBByName['Watch1'].rules.isNotUpdated.chronicLeads, 1, 'classifyRmPerformanceGs_: exactly 1 lead crosses the chronic-streak threshold');
+    TestAssertEqual_(rmPerfBByName['Watch1'].rules.isNotUpdated.concentrated, true, 'classifyRmPerformanceGs_: low breadth + a chronic lead correctly flags concentrated=true for this rule');
+    ['GoodA', 'GoodB', 'GoodC'].forEach(function (rm) {
+      TestAssertEqual_(rmPerfBByName[rm].classification, 'On Track', 'classifyRmPerformanceGs_: peer group ' + rm + ' (fully compliant) classifies On Track');
+    });
+    const watchDrivenBy = rmPerformanceDrivenByGs_(rmPerfBByName['Watch1']);
+    TestAssertEqual_(watchDrivenBy.length, 1, 'rmPerformanceDrivenByGs_: exactly one rule (isNotUpdated) has a real violation for Watch1');
+    TestAssertEqual_(watchDrivenBy[0].key, 'isNotUpdated', 'rmPerformanceDrivenByGs_: names the correct rule');
+    const rmPerfBSorted = sortRmPerformanceByPriorityGs_(rmPerfBResults);
+    TestAssert_(rmPerfBSorted.findIndex(function (r) { return r.name === 'Watch1'; }) < rmPerfBSorted.findIndex(function (r) { return r.name === 'GoodA'; }), 'sortRmPerformanceByPriorityGs_: Watch — concentrated ranks ahead of On Track');
+
+    // -- Scenario C: 'Insufficient Data' -- only 2 distinct eligible leads
+    // (below RM_PERF_MIN_VOLUME_LEADS_GS_ = 5), even though both are
+    // violated every day shown -- volume gate wins regardless of rate.
+    const rmPerfC = rmPerfMakeSheet_();
+    const days3 = ['2026-03-01', '2026-03-02', '2026-03-03'].map(rmPerfDay_);
+    days3.forEach(function (d) { rmPerfC.sheet.appendRow(rmPerfBadRow_(rmPerfC.header, 'C-SPARSE-L1', 'Sparse', d)); });
+    days3.slice(0, 2).forEach(function (d) { rmPerfC.sheet.appendRow(rmPerfBadRow_(rmPerfC.header, 'C-SPARSE-L2', 'Sparse', d)); });
+
+    const rmPerfCResults = computeRmPerformanceGs_(rmPerfC.ss);
+    const rmPerfCByName = {}; rmPerfCResults.forEach(function (r) { rmPerfCByName[r.name] = r; });
+    TestAssertEqual_(rmPerfCByName['Sparse'].classification, 'Insufficient Data', 'classifyRmPerformanceGs_: fewer than RM_PERF_MIN_VOLUME_LEADS_GS_ distinct eligible leads is always Insufficient Data, regardless of violation rate');
+    TestAssertEqual_(rmPerfCByName['Sparse'].distinctLeads, 2, 'classifyRmPerformanceGs_: Sparse workload is exactly the 2 seeded leads');
+
+    // -- empty-input handling --
+    TestAssertEqual_(computeRmPerformanceGs_(TestMockSpreadsheet_({})).length, 0, 'computeRmPerformanceGs_: returns an empty array when Movement_Log does not exist yet');
+    const rmPerfEmpty = rmPerfMakeSheet_();
+    TestAssertEqual_(computeRmPerformanceGs_(rmPerfEmpty.ss).length, 0, 'computeRmPerformanceGs_: returns an empty array when Movement_Log exists but has no data rows');
+
+    // ---- reportRmPerformanceNow(): console-callable wrapper, smoke test ----
     const realSs2 = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return TestMockSpreadsheet_({}); }, flush: function () {} };
     try {
-      reportRepeatOffenderRmsNow(); // must not throw against a spreadsheet with no Daily_RM_Issues data at all yet
-      TestAssert_(true, 'reportRepeatOffenderRmsNow: does not throw when there is no Daily_RM_Issues data yet');
+      reportRmPerformanceNow(); // must not throw against a spreadsheet with no Movement_Log data at all yet
+      TestAssert_(true, 'reportRmPerformanceNow: does not throw when there is no Movement_Log data yet');
     } finally {
       SpreadsheetApp = realSs2;
     }
     const realSs3 = SpreadsheetApp;
-    SpreadsheetApp = { getActiveSpreadsheet: function () { return repeatSs; }, flush: function () {} };
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return rmPerfA.ss; }, flush: function () {} };
     try {
-      reportRepeatOffenderRmsNow(); // must not throw against real accumulated data either
-      TestAssert_(true, 'reportRepeatOffenderRmsNow: does not throw against populated Daily_RM_Issues data');
+      reportRmPerformanceNow(); // must not throw against real accumulated data either
+      TestAssert_(true, 'reportRmPerformanceNow: does not throw against populated Movement_Log data');
     } finally {
       SpreadsheetApp = realSs3;
     }

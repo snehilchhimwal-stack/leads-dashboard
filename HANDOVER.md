@@ -860,12 +860,65 @@ throw and a real multi-page `doc` comes back. Also re-ran the full
 `tests/frontend-harness.html` suite clean, 26/26, confirming the Phase 3
 changes didn't disturb anything Phase 1/2 already covered.
 
-**Not yet done**: Phase 4 (`reportRepeatOffenderRmsNow()` in
-`DailyRmIssueLog.gs`, the console sanity-check leaderboard — would need a
-`.gs` mirror of this same reconstruction, ideally re-running
-`computeSlaFlags_` against `Movement_Log` history the same way
-`backfillDailyRmIssuesFromMovementLog_` already does, rather than a fresh
-reimplementation; lowest priority of the 4 phases — console-only, not
-user-facing). Real `Movement_Log` data still hasn't been checked against
-this (needs a signed-in live session) — now that the numbers are visible
-in both the live tab and the PDF, this is worth doing before Phase 4.
+**Phase 4 (done) — `.gs` console leaderboard, `DailyRmIssueLog.gs`.**
+`reportRmPerformanceNow()` replaces `reportRepeatOffenderRmsNow()`/
+`computeRepeatOffenderRmsGs_` outright (same "replace, don't keep the old
+metric alongside" call as Phases 2-3) — the function it replaces had the
+exact same missing-denominator problem the whole redesign exists to fix,
+one level further removed: it read `Daily_RM_Issues`, a violations-only
+log with no record of a lead that was eligible and PASSED.
+
+Reuses `computeSlaFlags_` (`SlaEngine.gs`) for every rule's actual
+pass/fail outcome — no rule logic reimplemented a third time. The one
+new piece is `computeRmPerfEligibilityGs_`, a ~15-line port of the
+eligibility-WINDOW derivation (`pastGrace`/`isUnder48h`/
+`isCreatedThatDay`/`hasConnected`/`neverConnectedPastWindow`) that
+`computeSlaFlags_` computes internally but doesn't expose — mirrors
+`js/core-rm-performance.js`'s own `RM_PERF_RULES` design exactly (a thin
+eligibility layer on top of the rule engine, not a re-derivation of the
+rules themselves). `reconstructRmPerformanceObservationsGs_` walks
+`Movement_Log` grouped by `lead_id` (the `client_id`-level intermediate
+grouping the browser engine's `buildMovementHistories` does is a no-op
+here — `splitHistoryByCopy` immediately re-splits back to `lead_id`
+anyway), keeps the LATEST snapshot per (lead, calendar day), and processes
+day-by-day so `buildMovementLogMapsGs_` (a full rescan) runs once per
+distinct day, not once per lead — same granularity
+`backfillDailyRmIssuesFromMovementLog_` already uses.
+`aggregateRmPerformanceGs_`/`computeRmPerfPeerAveragesGs_`/
+`classifyRmPerformanceGs_`/`rmPerformanceDrivenByGs_`/
+`sortRmPerformanceByPriorityGs_` are direct ports of the browser engine's
+Stage 2-4 (pure arithmetic, zero DOM dependency, so these port
+byte-for-byte modulo `function` vs arrow-function syntax to match this
+project's established `.gs` style). **Scope, deliberately narrower than
+the live tab**: RM-level only, no Region/A1-TM/RH rollups — those already
+exist, fully verified, on the live dashboard; this console function's job
+is a quick sanity check, not a duplicate delivery surface.
+
+Verified two ways, since this machine has no local Node (the
+`test/run-gs-tests.js` GitHub Actions harness is the only way to actually
+execute `Tests_*.gs` here) and the local Apps Script test suite couldn't
+be run before committing: (1) the exact same `{name, lead_id, dayKey,
+rule, violated}` observation shape both engines share means Stage 2-4's
+pure arithmetic could be cross-checked directly against the REAL,
+already-proven `js/core-rm-performance.js` functions (`aggregateRmPerformance`/
+`classifyRmPerformance`, zero browser dependency) via a disposable browser
+harness (deleted after use) — 3 scenarios (Below Expectations/broad, Watch
+— concentrated, Insufficient Data), each isolated in its own peer pool
+(the exact "don't mix an extreme test RM into too small a peer pool" pitfall
+this file's own Phase 1 section names), gave composite/peerComposite/
+classification values matched exactly by hand computation before being
+carried into `Tests_DailyRmIssueLog.gs`'s new `reportRmPerformanceNow()`
+test block as Movement_Log-row fixtures reconstructing the identical
+observations; (2) pushed to GitHub for the existing Actions CI
+(`.github/workflows/test.yml`) to actually run — see the commit this
+paragraph ships with for the result.
+
+Real `Movement_Log` data still hasn't been checked against any of this
+(needs a signed-in live session) — worth doing now that all 4 phases are
+wired end to end (engine → live tab → PDF → console).
+
+**Deploying `.gs` changes**: same manual-copy step every prior `.gs`
+change in this project has needed — Apps Script does not auto-deploy from
+GitHub (§4.3). `DailyRmIssueLog.gs` needs re-pasting into the live Apps
+Script project before `reportRmPerformanceNow()` is callable there for
+real.
