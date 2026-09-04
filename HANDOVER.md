@@ -671,3 +671,98 @@ the existing **`Tests_FollowupEngine.gs` suite run in full** against the
 modified rule set — 106/106 pass, confirming the new rules (inserted
 mid-array) didn't steal a match that used to belong to a pre-existing,
 later rule.
+
+### 9.7 RM Performance redesign — replacing "Avg Flagged" (in progress, 2026-09-04)
+
+**Why**: `Avg Flagged` (Instances ÷ Flagged Leads, §9.3/9.4's ranking key)
+has no real denominator — it's conditioned on leads that are ALREADY
+flagged, never on an RM's actual book, so it can't distinguish "2 of this
+RM's 30 leads went chronically bad" from "both of this RM's 2 total leads
+went chronically bad" (identical score, radically different stories). Full
+first-principles rationale (why the old logic is wrong, what "below
+expectations" should actually mean, denominator analysis, small-sample
+handling, worked examples) was worked out in chat before any code was
+written — ask for that writeup if it's not already in this session's
+history. User decision: **replace** the existing Repeat Offenders tables
+outright (not add the new metric alongside them), delivered in phases —
+dashboard engine first, then live-tab wiring, then PDF export, then the
+`DailyRmIssueLog.gs` console leaderboard, each phase independently
+verified and committed.
+
+**Phase 1 (done) — `js/core-rm-performance.js`**: the reconstruction +
+aggregation + classification engine, no UI wiring yet (the existing
+Repeat Offenders tables are UNCHANGED and still live). Core idea: for
+every (lead, calendar day, one of the 5 SLA rules), was the lead ELIGIBLE
+for that rule that day, and did it pass or fail — rolled up per RM per
+rule into violations ÷ eligible lead-days, a real rate, then adjusted for
+small samples (empirical-Bayes shrinkage toward a peer average, weighted
+by DISTINCT LEADS not lead-days, since consecutive-day violations on one
+lead are correlated observations, not independent trials) and weighted by
+rule severity into one composite score, gated by a minimum-volume
+threshold before classifying an RM as anything other than "Insufficient
+Data".
+
+**Reuses existing infrastructure entirely — no SLA logic reimplemented a
+third time.** `computeRmPerformance` re-derives eligibility AND outcome
+for all 5 rules by re-running `enrichLead` (via the ALREADY-EXISTING
+`enrichLeadAsOf`/`enrichSnapshotCached` helpers, `tab-movement.js` —
+previously only used by the RM Stall Leaderboard/Time to Opportunity)
+against each day's `Movement_Log` snapshot — not `Daily_RM_Issues`, which
+only ever stores the single highest-priority issue per lead per night
+(`ISSUE_PRIORITY`) and never records a lead that was eligible and PASSED,
+making it structurally unable to supply a true denominator.
+`Movement_Log`'s snapshots already carry every raw field `enrichLead`
+needs (confirmed against `MovementTracker.gs`'s own `SNAPSHOT_COLUMNS_`),
+so this needed no new capture-side changes — same 7-day retention caveat
+as `totalLeadsByKey` (§9.3.1) applies here too.
+
+Per-rule eligibility gates are derived purely from fields `enrichLead`
+already returns (`ageHours`, `isUnder48h`, `hasConnected`,
+`neverConnectedPastWindow`) plus two cheap local derivations (`pastGrace`
+from `ageHours`, `isCreatedThatDay` via `istSameDay`) — see the file's own
+header comment for the full per-rule table. `inactiveRmNewLead` is
+DELIBERATELY excluded from the composite score (it's an assignment/
+routing failure, not an RM execution failure) but still tracked
+separately as `routingIssueDays` on each classified result.
+
+**A real design fix found via building the verification harness, not
+before**: "concentrated" (a case-management question — go check 1-2
+specific leads) vs "broad" (a coaching question — the RM's whole book is
+affected) was first defined as `chronicLeads / distinctViolatedLeads`
+(share of violated leads that are chronic) — but that can't tell "6 of
+this RM's 6 leads are ALL chronically bad" (breadth 100%, arguably the
+worst case there is) apart from "2 of this RM's 30 leads are chronically
+bad" (breadth 6.7%, genuinely a small-case problem) — both read as "every
+violated lead is chronic" under that ratio. Fixed to use BREADTH instead
+(`distinctViolatedLeads / distinctEligibleLeads <= 25%`, combined with
+"at least one chronic lead") — caught by hand-computing the fixture's
+expected numbers before running it, not by the test itself.
+
+Verified via `_verify-rm-performance.html` (disposable, deleted after
+use): 32/32 assertions, in two parts — (1) a hand-built multi-day
+`Movement_Log` fixture run through the REAL `reconstructRmPerformanceObservations`/
+`aggregateRmPerformance`, checking exact eligible/violation lead-day
+counts against hand computation, including a specific regression case for
+the streak-vs-gap logic (a lead violated on day 1 and day 3 with a
+COMPLIANT day 2 between them must NOT read as a 2-day streak — proven via
+`_rmPerfDaysBetweenKeys`' calendar-adjacency check, not just "consecutive
+array entries"); (2) a direct unit test of `classifyRmPerformance` against
+a hand-built peer pool (a modest, realistic ~7%-rate baseline, NOT mixed
+with the intentionally-extreme test RMs — an early version of this test
+mixed them and produced 2 failures that were test-design bugs, not module
+bugs: an extreme outlier in the same peer pool inflates the peer average
+enough to make a genuinely-elevated RM read as "normal by comparison"),
+covering all 4 classification branches (Insufficient Data / On Track /
+Watch — concentrated / Below Expectations) plus confirming
+`inactiveRmNewLead` truly never moves the composite score. No real
+`Movement_Log` data has been checked yet (needs a signed-in live session)
+— flagged as the natural next confirmation once Phase 2 wiring makes the
+numbers visible in the UI.
+
+**Not yet done**: Phase 2 (replace the live tab's tables with this
+engine's output), Phase 3 (PDF export), Phase 4
+(`reportRepeatOffenderRmsNow()` in `DailyRmIssueLog.gs`, the console
+sanity-check leaderboard — would need a `.gs` mirror of this same
+reconstruction, ideally re-running `computeSlaFlags_` against
+`Movement_Log` history the same way `backfillDailyRmIssuesFromMovementLog_`
+already does, rather than a fresh reimplementation).
