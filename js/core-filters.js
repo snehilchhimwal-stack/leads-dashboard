@@ -274,6 +274,18 @@ function buildFilterUI(){
     dateToEl.value = def.to;
   }
 
+  // Explicit, on-demand recalculation — takes filterState exactly as it
+  // currently is (no changes to it, unlike Reset Filters below) and just
+  // re-runs the same applyFiltersAndRender() pass every filter control
+  // already triggers automatically on change. Added 2026-09-04 per
+  // explicit request, after a live troubleshooting session where a stale
+  // browser tab (holding pre-deploy JS, not a filter/calculation bug) made
+  // it genuinely unclear whether a given view reflected the current
+  // filters — this button gives an unambiguous, visible "recalculate now"
+  // action instead of relying on trusting that a filter click already
+  // fired the pipeline.
+  document.getElementById('recalculateBtn').onclick = () => { applyFiltersAndRender(); };
+
   document.getElementById('clearFiltersBtn').onclick = () => {
     filterState.project.clear();
     filterState.region.clear();
