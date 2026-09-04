@@ -412,7 +412,7 @@ function inferOutcomeGs_(comment) {
 }
 
 const FOLLOWUP_SUGGESTIONS_GS_ = {
-  'Do Not Disturb': "Client asked not to be called — stop calling immediately, log as DND, and only re-engage via an approved channel (SMS/email) if policy allows.",
+  'Do Not Disturb': "Client indicated they don't want to be called — cross-call once to verify this is a genuine do-not-call request before logging it as DND and stopping outreach; once confirmed, re-engage only via an approved channel (SMS/email) if policy allows.",
   'Switched Off': 'Phone was switched off, out of service/network, or otherwise unreachable — retry later today; try an alternate number if one is on file.',
   'Wrong Number': 'Number appears incorrect — verify the contact number with the source/RM before calling again.',
   'Junk / Duplicate Lead': 'RM flagged this as not a genuine lead (fake/duplicate/accidental enquiry) — verify quickly, then close with the right reason instead of continuing normal follow-up.',
