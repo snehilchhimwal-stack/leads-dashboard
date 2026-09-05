@@ -452,6 +452,21 @@ function sortRmPerformanceByPriority(list){
   return list.slice().sort((a, b) => (rank(a.classification) - rank(b.classification)) || (b.composite - a.composite));
 }
 
+// Pure score ranking, no classification-tier grouping and no filtering —
+// added 2026-09-06 for the Region rollup specifically, per explicit
+// request: "for region show all just according to the score, with worst
+// region being first." Unlike sortRmPerformanceByPriority (which puts
+// every Below Expectations row ahead of every On Track row regardless of
+// raw score), this is a flat sort by composite alone — worst score first,
+// full stop, no other row hidden or reordered. Deliberately not used for
+// RM/A1-TM/RH, which stay "top defaulters only" (filterRmPerformanceWorst)
+// per the 2026-09-04 request that introduced that filter — Region is
+// small enough (~11 canonical regions) to just show the whole ranked list
+// at a glance instead of hiding all but the worst.
+function sortRmPerformanceByScore(list){
+  return list.slice().sort((a, b) => b.composite - a.composite);
+}
+
 // "Below Expectations only" view, added 2026-09-04 per explicit request:
 // "I want below expectation only, and those which are worst so that i can
 // focus on them" — On Track, Watch — concentrated, AND Insufficient Data

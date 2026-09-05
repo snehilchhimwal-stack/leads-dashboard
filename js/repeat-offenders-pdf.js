@@ -104,11 +104,18 @@ function _repeatOffendersPdfCurrentFilterInfo(){
 // Filters out empty candidates and the two hierarchy-dependent rollups
 // when RM_Hierarchy isn't loaded — the live tab would print a "could not
 // be read" placeholder row instead, which isn't real data worth a PDF page.
-// "Below Expectations only" (2026-09-04, matching the live tab — see its
-// own comment on filterRmPerformanceWorst, core-rm-performance.js): On
-// Track / Watch — concentrated / Insufficient Data are computed (the peer
-// average needs the whole group) but never printed, only the worst
-// performers.
+// "Below Expectations only" for all 4 tables, including Region — this is
+// a DELIBERATE divergence from the live tab as of 2026-09-06, not a
+// drift bug: the live tab's By Region table now shows every region
+// ranked by score (sortRmPerformanceByScore, see tab-repeat-offenders.js's
+// renderRepeatOffenders) since it's a glance-view where the full spread
+// is useful. This PDF is a printed action list instead — a period with
+// no flagged regions should print nothing for Region (and, if nothing
+// else is flagged either, correctly report "nothing to export" below),
+// not an always-populated 11-row table of mostly-fine regions. On
+// Track / Watch — concentrated / Insufficient Data are still computed
+// everywhere (the peer average needs the whole group) but never printed
+// here, only the worst performers.
 function _repeatOffendersPdfSectionTables(dateKeys){
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
   const worst = (list) => sortRmPerformanceByPriority(filterRmPerformanceWorst(list));

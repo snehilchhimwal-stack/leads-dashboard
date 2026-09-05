@@ -4,9 +4,11 @@
 // to rank RMs/Regions/A1-TM/RH by a workload-normalized "RM Performance"
 // methodology — see that file's own header comment for the full
 // reconstruction/shrinkage/classification writeup, and HANDOVER.md §9.7
-// for the redesign history. Every table shows Below Expectations rows
-// only, worst first (filterRmPerformanceWorst/sortRmPerformanceByPriority,
-// also core-rm-performance.js).
+// for the redesign history. RM/A1-TM/RH tables show Below Expectations
+// rows only, worst first (filterRmPerformanceWorst/sortRmPerformanceByPriority,
+// core-rm-performance.js). By Region is the one exception (2026-09-06):
+// ALL regions, ranked purely by composite score, worst first
+// (sortRmPerformanceByScore) — see renderRepeatOffenders' own comment for why.
 //
 // NOT "Daily_RM_Issues" — that was this section's data source before the
 // 2026-09-04 redesign, and fetching it (fetchDailyRmIssues) was removed
@@ -265,19 +267,27 @@ function renderRepeatOffenders(){
   // sortRmPerformanceByPriority (both core-rm-performance.js) are shared
   // with the PDF export — see their own comments for why.
   const rmWorst = sortRmPerformanceByPriority(filterRmPerformanceWorst(rmFull));
-  const regionWorst = sortRmPerformanceByPriority(filterRmPerformanceWorst(regionFull));
   const a1tmWorst = hierarchyMissing ? [] : sortRmPerformanceByPriority(filterRmPerformanceWorst(a1tmFull));
   const rhWorst = hierarchyMissing ? [] : sortRmPerformanceByPriority(filterRmPerformanceWorst(rhFull));
+
+  // Region is the one exception (2026-09-06, explicit request): ALL
+  // regions, not just the flagged ones, ranked purely by composite score
+  // (sortRmPerformanceByScore, core-rm-performance.js) — worst first, no
+  // classification-tier grouping and nothing hidden. Small enough a list
+  // (~11 canonical regions) that seeing the full spread is more useful
+  // here than hiding everything but the worst, unlike the RM/A1-TM/RH
+  // lists above which stay "top defaulters only" by design.
+  const regionAll = sortRmPerformanceByScore(regionFull);
 
   if (countEl) countEl.textContent = `${rmWorst.length} RM${rmWorst.length === 1 ? '' : 's'} below expectations`;
 
   // Region needs no hierarchy lookup — it's a field already on every
-  // Movement_Log row. Not capped tightly like the RM/A1-TM/RH lists:
-  // there are only ~11 canonical regions (REGION_GROUP_MAP, reports.js),
-  // so 15 comfortably shows all of them without needing a "show more".
+  // Movement_Log row. Not capped at all: there are only ~11 canonical
+  // regions (REGION_GROUP_MAP, reports.js), and "show all" was the
+  // explicit request for this one list — no slice, unlike the other 3.
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
     ${rmPerformanceTableHtml('RMs', rmWorst.slice(0, 20), false)}
-    ${rmPerformanceTableHtml('By Region', regionWorst.slice(0, 15), false)}
+    ${rmPerformanceTableHtml('By Region', regionAll, false, 'No region data for the current filters/range.')}
     ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : a1tmWorst.slice(0, 10), hierarchyMissing)}
     ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : rhWorst.slice(0, 5), hierarchyMissing)}
   </div>`;
@@ -297,7 +307,7 @@ const RM_PERF_CLASSIFICATION_TITLE = 'Insufficient Data: fewer than 5 distinct e
 // computeRmPerformance()'s output directly (core-rm-performance.js) —
 // see that file's own header comment for the full methodology this
 // replaced "Avg Flagged" with, 2026-09-04.
-function rmPerformanceTableHtml(title, list, hierarchyMissing){
+function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage){
   const headHtml = `<tr>
       <th></th><th>Name</th>
       <th style="text-align:right" title="Distinct leads eligible for at least one scored SLA rule in the current time range/filters — this group's real workload, not just its flagged leads.">Workload</th>
@@ -310,7 +320,7 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing){
   if (hierarchyMissing) {
     rows = `<tr><td colspan="6" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
   } else if (!list.length) {
-    rows = `<tr><td colspan="6" class="empty-row">No one classified Below Expectations for the current filters/range — nothing to act on right now.</td></tr>`;
+    rows = `<tr><td colspan="6" class="empty-row">${esc(emptyMessage || 'No one classified Below Expectations for the current filters/range — nothing to act on right now.')}</td></tr>`;
   } else {
     rows = list.map((r, i) => {
       const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
