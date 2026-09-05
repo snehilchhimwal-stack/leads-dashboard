@@ -41,6 +41,7 @@ const PRODUCTION_FILES = [
   'OvernightEmailer.gs',
   'AllIssuesEmailer.gs',
   'UnmatchedCommentLogger.gs',
+  'InteractionHistoryLogger.gs',
   'DailyRmIssueLog.gs',
 ];
 
@@ -53,6 +54,7 @@ const TEST_FILES = [
   'Tests_RmHierarchy.gs',
   'Tests_MovementTracker.gs',
   'Tests_UnmatchedCommentLogger.gs',
+  'Tests_InteractionHistoryLogger.gs',
   'Tests_OvernightEmailer.gs',
   'Tests_AllIssuesEmailer.gs',
   'Tests_DailyRmIssueLog.gs',

@@ -5,9 +5,9 @@
  * independently runnable too (runCoreTestsNow, runSlaEngineTestsNow,
  * runFollowupEngineTestsNow, runEmailInfraTestsNow, runRmHierarchyTestsNow,
  * runMovementTrackerTestsNow, runUnmatchedCommentLoggerTestsNow,
- * runOvernightEmailerTestsNow, runAllIssuesEmailerTestsNow,
- * runDailyRmIssueLogTestsNow) when you only want to check one concern
- * after a change to just that file.
+ * runInteractionHistoryLoggerTestsNow, runOvernightEmailerTestsNow,
+ * runAllIssuesEmailerTestsNow, runDailyRmIssueLogTestsNow) when you only
+ * want to check one concern after a change to just that file.
  *
  * NOTHING here sends a real email or touches your real spreadsheet — see
  * Tests_Mocks.gs's own header for exactly why that's true. Every test
@@ -24,6 +24,7 @@ function runAllTests() {
     runRmHierarchyTests_,
     runMovementTrackerTests_,
     runUnmatchedCommentLoggerTests_,
+    runInteractionHistoryLoggerTests_,
     runOvernightEmailerTests_,
     runAllIssuesEmailerTests_,
     runDailyRmIssueLogTests_,

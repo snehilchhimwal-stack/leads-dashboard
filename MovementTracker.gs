@@ -400,6 +400,16 @@ function snapshotOpenLeads_(label) {
     Logger.log('Unmatched_Comments_Log scan failed (Movement_Log capture continues): ' + e);
   }
 
+  // Same "can never block the core capture" wrapping as the two writes
+  // just above — see InteractionHistoryLogger.gs's own header for why
+  // this exists (the forward-looking capture decision from the "No real
+  // interaction-history data exists anywhere" To-Do task, 2026-09-05).
+  try {
+    logInteractionHistoryGs_(ss, dataRows, colIndex, now);
+  } catch (e) {
+    Logger.log('Comment_History log failed (Movement_Log capture continues): ' + e);
+  }
+
   const out = [];
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
