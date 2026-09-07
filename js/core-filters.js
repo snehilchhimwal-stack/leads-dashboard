@@ -274,17 +274,12 @@ function buildFilterUI(){
     dateToEl.value = def.to;
   }
 
-  // Explicit, on-demand recalculation — takes filterState exactly as it
-  // currently is (no changes to it, unlike Reset Filters below) and just
-  // re-runs the same applyFiltersAndRender() pass every filter control
-  // already triggers automatically on change. Added 2026-09-04 per
-  // explicit request, after a live troubleshooting session where a stale
-  // browser tab (holding pre-deploy JS, not a filter/calculation bug) made
-  // it genuinely unclear whether a given view reflected the current
-  // filters — this button gives an unambiguous, visible "recalculate now"
-  // action instead of relying on trusting that a filter click already
-  // fired the pipeline.
-  document.getElementById('recalculateBtn').onclick = () => { applyFiltersAndRender(); };
+  // The explicit "Recalculate" button (added 2026-09-04) moved OUT of
+  // this shared top filter bar and into the Repeat Offenders tab itself
+  // on 2026-09-07, per explicit request — it's specific to that report,
+  // not a whole-dashboard action, so it shouldn't be visible on every
+  // tab. See tab-repeat-offenders.js's own wiring for its new home; this
+  // file no longer references #recalculateBtn at all.
 
   document.getElementById('clearFiltersBtn').onclick = () => {
     filterState.project.clear();

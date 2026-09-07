@@ -144,19 +144,37 @@ function _repeatOffendersFilterSummaryText(filters){
 }
 
 // null return (allTime) means "no date filter at all".
+//
+// Yesterday/This Week/Last 7 Days are all anchored at YESTERDAY, never
+// `now` itself (fixed 2026-09-07, explicit request: "Today may have
+// incomplete data, so do not treat today as a completed reporting day").
+// yesterdayMs is the ONE shared anchor every named-range branch below
+// builds from, so "what day does Yesterday mean" can never quietly
+// drift from "what's the most recent day Last 7 Days/This Week include"
+// — REAL BUG this replaced: Last 7 Days previously looped i=0..6 off
+// `now` directly, which put TODAY (i=0, possibly still-incomplete data)
+// in the set and dropped what should have been its 7th day back. Now
+// i=1..7 off yesterdayMs, e.g. "today" Sep 7 -> Aug 31 through Sep 6
+// inclusive, matching the exact example in the request.
 function repeatOffendersDateKeysForRange(range, now){
-  if (range === 'today') return new Set([istDateKey(now)]);
-  if (range === 'yesterday') return new Set([istDateKey(new Date(now.getTime() - 86400000))]);
+  if (range === 'today') return new Set([istDateKey(now)]); // dead from the UI (no "Today" option) — kept only as a defensive fallback, deliberately NOT used by any real range below
+  const yesterdayMs = now.getTime() - 86400000;
+  if (range === 'yesterday') return new Set([istDateKey(new Date(yesterdayMs))]);
   if (range === 'thisWeek') {
-    const p = istParts(now);
+    // Completed days of the CURRENT ISO week (Monday start) up to and
+    // including yesterday. If yesterday itself is a Monday (today is
+    // Tuesday), this correctly returns just that single day, not any
+    // of last week's tail.
+    const p = istParts(new Date(yesterdayMs));
     const daysSinceMonday = (p.dow + 6) % 7; // Sunday(0)->6, Monday(1)->0, ...
     const set = new Set();
-    for (let i = 0; i <= daysSinceMonday; i++) set.add(istDateKey(new Date(now.getTime() - i * 86400000)));
+    for (let i = 0; i <= daysSinceMonday; i++) set.add(istDateKey(new Date(yesterdayMs - i * 86400000)));
     return set;
   }
   if (range === 'last7Days') {
+    // The 7 CONSECUTIVE COMPLETED calendar days ending yesterday.
     const set = new Set();
-    for (let i = 0; i < 7; i++) set.add(istDateKey(new Date(now.getTime() - i * 86400000)));
+    for (let i = 0; i < 7; i++) set.add(istDateKey(new Date(yesterdayMs - i * 86400000)));
     return set;
   }
   if (range === 'custom') {
@@ -172,6 +190,48 @@ function repeatOffendersDateKeysForRange(range, now){
     return set;
   }
   return null; // allTime
+}
+
+// "YYYY-MM-DD" -> "Sep 6, 2026" — the one shared date-formatting
+// function for this whole section (live tab AND the PDF export both
+// call this, neither has its own copy) — reuses IST_MONTHS
+// (reports-build.js) rather than a second hardcoded month-name list.
+function repeatOffendersFormatDate(dayKey){
+  const parts = dayKey.split('-');
+  const y = Number(parts[0]), m = Number(parts[1]), d = Number(parts[2]);
+  return IST_MONTHS[m - 1] + ' ' + d + ', ' + y;
+}
+
+// The resolved {from, to} calendar-day pair (formatted, human-readable)
+// for whichever Set repeatOffendersDateKeysForRange just returned —
+// derived from that SAME Set's own min/max day, not a second independent
+// date computation, so a displayed range can never disagree with what
+// was actually used to filter (explicit 2026-09-07 request: "Use the
+// same date calculation logic across filters, tables, PDF downloads...
+// avoid duplicating date logic in multiple places"). Returns null for
+// allTime (dateKeys === null, no bounded range to show) or an incomplete
+// custom range (repeatOffendersDateKeysForRange already returns null for
+// that too) — both cases already handled identically upstream.
+function repeatOffendersResolvedDateRange(dateKeys){
+  if (!dateKeys || !dateKeys.size) return null;
+  const sorted = Array.from(dateKeys).sort();
+  return { from: sorted[0], to: sorted[sorted.length - 1], fromFormatted: repeatOffendersFormatDate(sorted[0]), toFormatted: repeatOffendersFormatDate(sorted[sorted.length - 1]) };
+}
+
+// Requirement (2026-09-07): "For 'Last 7 Days', show the calculated
+// range clearly as: From: [start date] To: [yesterday]." Shown for every
+// bounded range (Yesterday/This Week/Last 7 Days/Custom), not just Last 7
+// Days specifically, since the same clarity is just as useful there — a
+// single-day range (Yesterday) collapses to "From: X To: X" rather than
+// a special-cased single-date format, deliberately, so the label's shape
+// never changes across ranges. Blank for "From when history began"
+// (dateKeys null, genuinely unbounded — nothing to show) or an
+// incomplete Custom range (also null, both From/To not filled in yet).
+function _repeatOffendersUpdateRangeDisplay(dateKeys){
+  const el = document.getElementById('repeatOffendersRangeDisplay');
+  if (!el) return;
+  const resolved = repeatOffendersResolvedDateRange(dateKeys);
+  el.textContent = resolved ? `From: ${resolved.fromFormatted}  To: ${resolved.toFormatted}` : '';
 }
 
 // One Worker in flight at a time. _repeatOffendersRunId is bumped on
@@ -242,6 +302,7 @@ function renderRepeatOffenders(){
   const range = rangeSel ? rangeSel.value : 'last7Days';
   const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
   const dateKeys = repeatOffendersDateKeysForRange(range, now);
+  _repeatOffendersUpdateRangeDisplay(dateKeys);
   // Movement_Log itself only retains a rolling 7-day window
   // (MOVEMENT_LOG_RETENTION_DAYS, MovementTracker.gs) — Yesterday/This
   // Week/Last 7 Days stay safely inside it, but "From when history began"
@@ -613,3 +674,26 @@ if (_repeatOffendersCustomFromEl) _repeatOffendersCustomFromEl.addEventListener(
 const _repeatOffendersCustomToEl = document.getElementById('repeatOffendersCustomTo');
 if (_repeatOffendersCustomToEl) _repeatOffendersCustomToEl.addEventListener('change', renderRepeatOffenders);
 _repeatOffendersSyncCustomRangeVisibility();
+
+// The "Recalculate" button, moved here from the shared top filter bar
+// 2026-09-07 (explicit request — it's specific to this report, not a
+// whole-dashboard action, so living inside #tab-repeatoffenders means it
+// naturally shows/hides with the tab itself via the existing
+// .tab-panel.active CSS toggle, no extra show/hide JS needed). Scoped to
+// just this report's own re-render (renderRepeatOffenders), not the full
+// applyFiltersAndRender() the old shared button used to call — every
+// OTHER tab already re-renders near-instantly on its own whenever a
+// filter actually changes, so recalculating them here too would just be
+// wasted work for a button whose whole point is now "re-run the slow
+// one". _renderNow is refreshed first so Yesterday/This Week/Last 7 Days
+// re-anchor to the ACTUAL current moment on every click, not whatever
+// stale timestamp the last full page load or filter change happened to
+// set — the same freshness a real applyFiltersAndRender() pass would
+// have given this section for free.
+const _repeatOffendersRecalculateBtnEl = document.getElementById('repeatOffendersRecalculateBtn');
+if (_repeatOffendersRecalculateBtnEl) {
+  _repeatOffendersRecalculateBtnEl.addEventListener('click', function(){
+    _renderNow = new Date();
+    renderRepeatOffenders();
+  });
+}

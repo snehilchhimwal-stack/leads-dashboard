@@ -55,24 +55,19 @@ const REPEAT_OFFENDERS_PDF_FILTER_NAMES_ = {
   custom: 'CUSTOM RANGE',
 };
 
-// "YYYY-MM-DD" -> "Sep 2, 2026" — matches the header example format
-// exactly. Reuses IST_MONTHS (reports-build.js) rather than a second
-// hardcoded month-name list.
-function _repeatOffendersPdfFormatDate(dayKey){
-  const parts = dayKey.split('-');
-  const y = Number(parts[0]), m = Number(parts[1]), d = Number(parts[2]);
-  return IST_MONTHS[m - 1] + ' ' + d + ', ' + y;
-}
-
 // null dateKeys (allTime, or an incomplete custom range — see
 // repeatOffendersDateKeysForRange's own comment) => no specific date to
 // show. One key => "Date: ...". More than one => "Date Range: ... – ...".
+// Built from repeatOffendersResolvedDateRange + repeatOffendersFormatDate
+// (tab-repeat-offenders.js) — the SAME shared functions the live page's
+// own From/To range display uses (2026-09-07), not a second independent
+// date-formatting/range-resolution — so the PDF's header can never show
+// a different range than what's on screen for the same filter.
 function _repeatOffendersPdfDateLine(dateKeys){
-  if (dateKeys === null) return null;
-  const sorted = Array.from(dateKeys).sort();
-  if (!sorted.length) return null;
-  if (sorted.length === 1) return 'Date: ' + _repeatOffendersPdfFormatDate(sorted[0]);
-  return 'Date Range: ' + _repeatOffendersPdfFormatDate(sorted[0]) + ' – ' + _repeatOffendersPdfFormatDate(sorted[sorted.length - 1]);
+  const resolved = repeatOffendersResolvedDateRange(dateKeys);
+  if (!resolved) return null;
+  if (resolved.from === resolved.to) return 'Date: ' + resolved.fromFormatted;
+  return 'Date Range: ' + resolved.fromFormatted + ' – ' + resolved.toFormatted;
 }
 
 // Reads the live page's OWN current filter state — same range select,
@@ -150,7 +145,7 @@ function _repeatOffendersPdfBuildPageSpecs(filterInfo){
   sortedDayKeys.forEach(function (dayKey) {
     const tables = _repeatOffendersPdfSectionTables(new Set([dayKey]));
     if (!tables.length) return; // nothing populated for this date — omit entirely
-    const dateLabel = _repeatOffendersPdfFormatDate(dayKey);
+    const dateLabel = repeatOffendersFormatDate(dayKey);
     tables.forEach(t => specs.push({ dateLabel: dateLabel, title: t.title, list: t.list }));
   });
   return specs;
