@@ -299,6 +299,15 @@ function reconstructRmPerformanceObservations(dateKeys, keyFn, filters){
             dayKey: dayKey,
             rule: rule.key,
             violated: !!enriched[rule.key],
+            // rm/region: the RAW record's own RM and region, independent of
+            // what groupKey happens to be for THIS rollup (e.g. still the
+            // individual RM name even when keyFn groups by Region/A1-TM/RH)
+            // -- added 2026-09-07 so aggregateRmPerformance can track which
+            // RMs and regions actually make up any group, at any rollup
+            // level, for the hierarchy-column display (see
+            // classifyRmPerformance's distinctRMs/primaryRegion).
+            rm: String(rec.RM || 'Unassigned').trim(),
+            region: repeatOffendersRegionKey(rec),
           });
         });
       });
@@ -326,8 +335,23 @@ function aggregateRmPerformance(observations){
   const byGroup = new Map();
 
   observations.forEach(o => {
-    if (!byGroup.has(o.name)) byGroup.set(o.name, { name: o.name, rules: new Map() });
+    if (!byGroup.has(o.name)) {
+      byGroup.set(o.name, {
+        name: o.name, rules: new Map(),
+        // Group-level (not per-rule) tracking, added 2026-09-07 for the
+        // hierarchy display columns (RM/A1-TM/RH/Region) — independent of
+        // which rule fired, just "who/where made up this group's
+        // observations at all". distinctRMs stays a 1-element Set for an
+        // RM-level rollup (its own name) and grows for Region/A1-TM/RH
+        // rollups, where it's exactly the "how many distinct RMs" figure
+        // those tables need. regionCounts feeds the "dominant region" a
+        // non-Region row shows (see classifyRmPerformance).
+        distinctRMs: new Set(), regionCounts: new Map(),
+      });
+    }
     const groupEntry = byGroup.get(o.name);
+    groupEntry.distinctRMs.add(o.rm);
+    groupEntry.regionCounts.set(o.region, (groupEntry.regionCounts.get(o.region) || 0) + 1);
     if (!groupEntry.rules.has(o.rule)) {
       groupEntry.rules.set(o.rule, {
         eligibleDays: 0, violationDays: 0,
@@ -397,7 +421,10 @@ function computeRmPerfPeerAverages(byGroup){
 // each entry: { name, distinctLeads, composite, peerComposite, rules:
 // {ruleKey: {eligibleDays, violationDays, distinctEligibleLeads,
 // distinctViolatedLeads, rawRate, shrunkRate, maxStreak, chronicLeads,
-// concentrated}}, routingIssueDays, classification }.
+// concentrated}}, routingIssueDays, classification, totalInstances,
+// distinctRMs, primaryRegion } — the last 3 added 2026-09-07 for the
+// hierarchy/instance-count table columns, see their own inline comments
+// on the results.push() call below.
 //
 // classification is one of:
 //   'Insufficient Data'      — fewer than RM_PERF_MIN_VOLUME_LEADS distinct
@@ -418,12 +445,14 @@ function classifyRmPerformance(byGroup){
     let composite = 0;
     const allEligibleLeads = new Set();
     let anyConcentrated = false;
+    let totalInstances = 0; // sum of violationDays across the 4 SCORED rules only — see result comment below
     const perRuleOut = {};
 
     RM_PERF_SCORED_RULE_KEYS.forEach(ruleKey => {
       const r = groupEntry.rules.get(ruleKey);
       const eligibleDays = r ? r.eligibleDays : 0;
       const violationDays = r ? r.violationDays : 0;
+      totalInstances += violationDays;
       const distinctEligibleLeads = r ? r.distinctEligibleLeads : 0;
       const distinctViolatedLeads = r ? r.distinctViolatedLeads : 0;
       const rawRate = eligibleDays ? violationDays / eligibleDays : 0;
@@ -452,6 +481,19 @@ function classifyRmPerformance(byGroup){
     else if (anyConcentrated) classification = 'Watch — concentrated';
     else classification = 'Below Expectations';
 
+    // Dominant region among this group's OWN observations — the most
+    // frequently observed region wins ties by insertion order (Map
+    // preserves first-seen order, so a genuine tie favors whichever region
+    // was encountered first, not a meaningfully different outcome for a
+    // real tie). For a Region-rollup row this is trivially that region
+    // itself, whole population; for RM/A1-TM/RH rows it's the region their
+    // eligible leads are actually concentrated in.
+    let primaryRegion = '';
+    let bestRegionCount = -1;
+    groupEntry.regionCounts.forEach((count, region) => {
+      if (count > bestRegionCount) { bestRegionCount = count; primaryRegion = region; }
+    });
+
     results.push({
       name: groupEntry.name,
       distinctLeads: nLeads,
@@ -460,6 +502,11 @@ function classifyRmPerformance(byGroup){
       rules: perRuleOut,
       routingIssueDays: inactiveRmRule ? inactiveRmRule.violationDays : 0,
       classification: classification,
+      // 2026-09-07 additions, replacing the "Driven by" column on every
+      // table with real hierarchy/volume figures instead:
+      totalInstances: totalInstances, // total violation-day INSTANCES across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues — that log was removed as a data source in the 2026-09-04 redesign for having no real eligible-population denominator; this is the same real methodology's own instance count instead)
+      distinctRMs: groupEntry.distinctRMs, // Set<RM name> — size 1 for an RM-level row (itself); >1 for Region/A1-TM/RH rows, however many distinct RMs actually contributed
+      primaryRegion: primaryRegion, // this row's own name for a Region-level row; the region its leads are actually concentrated in otherwise
     });
   });
 
@@ -501,10 +548,15 @@ function computeRmPerformance(dateKeys, keyFn, filters){
 // gives every rule a small nonzero blended rate toward the peer average
 // even with zero actual violations, which would otherwise list a rule the
 // group never broke. Returns [] for On Track/Insufficient Data (nothing
-// worth calling out) — same gate both renderers already need, extracted
-// here so neither can forget it. Each entry: {key, label, weight,
+// worth calling out). Each entry: {key, label, weight,
 // eligibleDays, violationDays, distinctEligibleLeads, distinctViolatedLeads,
 // rawRate, shrunkRate, maxStreak, chronicLeads, concentrated}.
+//
+// NOT CALLED BY EITHER RENDERER as of 2026-09-07 — the "Driven by" column
+// was removed from all 4 live-tab tables and the PDF, per explicit
+// request, replaced by rmPerformanceHierarchyCells + totalInstances
+// below. Left defined (still correct, still tested) rather than deleted,
+// in case a future request brings a "why" column back.
 function rmPerformanceDrivenBy(r){
   if (r.classification !== 'Below Expectations' && r.classification !== 'Watch — concentrated') return [];
   return RM_PERF_SCORED_RULE_KEYS
@@ -515,6 +567,43 @@ function rmPerformanceDrivenBy(r){
     .filter(x => x.violationDays > 0)
     .sort((a, b) => (b.weight * b.shrunkRate) - (a.weight * a.shrunkRate))
     .slice(0, 2);
+}
+
+// The 4 hierarchy display columns (Region / RMs / A1-TM / RH) for one
+// classified result row, at ANY rollup level — added 2026-09-07 replacing
+// "Driven by" on every table (RM/Region/A1-TM/RH, live tab and PDF alike).
+// Built from distinctRMs (the real set of RM names behind this row,
+// aggregateRmPerformance/classifyRmPerformance) and primaryRegion (the
+// region those RMs' eligible leads are actually concentrated in) —
+// nothing here is a new computation over raw data, just a display
+// derivation from what Stage 2/4 already tracked.
+//
+// The rule for every column: show the actual NAME when the row maps to
+// exactly one of them (an RM row always has exactly 1 distinct RM — itself
+// — so A1-TM/RH resolve to real single names via direct lookup; a Region/
+// A1-TM/RH row can easily span many RMs, in which case naming one would
+// be arbitrary, so it shows a COUNT instead, clearly labeled). rmHierarchyByNameLower
+// may be null (RM_Hierarchy not loaded) — A1-TM/RH then read "—", same
+// "unavailable" convention the A1-TM/RH tables themselves already use.
+function rmPerformanceHierarchyCells(r, rmHierarchyByNameLower){
+  const rmSet = r.distinctRMs || new Set();
+  const rmCount = rmSet.size;
+  const region = r.primaryRegion || '—';
+  const rms = rmCount === 0 ? '—' : rmCount === 1 ? Array.from(rmSet)[0] : `${rmCount} RMs`;
+
+  let a1tm = '—', rh = '—';
+  if (rmHierarchyByNameLower) {
+    const a1tmSet = new Set(), rhSet = new Set();
+    rmSet.forEach(rmName => {
+      const a1tmName = rmPerfPrimaryManagerFor(rmName, rmHierarchyByNameLower);
+      if (a1tmName) a1tmSet.add(a1tmName);
+      const rhName = rmPerfRhFor(rmName, rmHierarchyByNameLower);
+      if (rhName) rhSet.add(rhName);
+    });
+    a1tm = a1tmSet.size === 0 ? '—' : a1tmSet.size === 1 ? Array.from(a1tmSet)[0] : `${a1tmSet.size} managers`;
+    rh = rhSet.size === 0 ? '—' : rhSet.size === 1 ? Array.from(rhSet)[0] : `${rhSet.size} RHs`;
+  }
+  return { region, rms, a1tm, rh };
 }
 
 // Most-concerning first: classification tier before composite score, so

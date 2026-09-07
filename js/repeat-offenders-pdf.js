@@ -169,21 +169,22 @@ function _repeatOffendersPdfFilterSummaryLine(){
   return parts.length ? parts.join(' · ') : null;
 }
 
-// Converts one computeRmPerformance() row into the exact same 6 columns
-// the live tab's rmPerformanceTableHtml shows on screen (#, Name,
-// Workload, Status, Score, Driven by) — plain strings for autoTable, no
-// HTML/markup involved. "Driven by" reuses rmPerformanceDrivenBy
-// (core-rm-performance.js, shared with the live tab) so the two surfaces
-// can never name a different rule as the cause of the same elevated score.
-function _repeatOffendersPdfTableRows(list){
+// Converts one computeRmPerformance() row into the exact same 10 columns
+// the live tab's rmPerformanceTableHtml shows on screen (#, Name, Unique
+// Leads, Status, Score, Instances, Region, RMs, A1/TM, RH) — plain
+// strings for autoTable, no HTML/markup involved. Region/RMs/A1-TM/RH
+// reuse rmPerformanceHierarchyCells (core-rm-performance.js, shared with
+// the live tab) so the two surfaces can never disagree on who's actually
+// behind a given row. "Driven by" was removed from both surfaces
+// 2026-09-07 — see rmPerformanceDrivenBy's own comment (still defined,
+// just unused by either renderer now).
+function _repeatOffendersPdfTableRows(list, rmHierarchyByNameLower){
   return list.map(function (r, i) {
-    const drivenParts = rmPerformanceDrivenBy(r).map(x => {
-      const chronicTag = x.concentrated ? ' (' + x.chronicLeads + ' chronic)' : '';
-      return x.label + ': ' + (x.rawRate * 100).toFixed(0) + '%' + chronicTag;
-    });
-    if (r.routingIssueDays > 0) drivenParts.push('+' + r.routingIssueDays + ' Inactive-RM routing day(s)');
     const score = r.composite.toFixed(2) + ' / ' + r.peerComposite.toFixed(2);
-    return [String(i + 1), r.name, String(r.distinctLeads), r.classification, score, drivenParts.join('    ')];
+    const hc = rmPerformanceHierarchyCells(r, rmHierarchyByNameLower);
+    let name = r.name;
+    if (r.routingIssueDays > 0) name += '\n+' + r.routingIssueDays + ' Inactive-RM routing day(s)';
+    return [String(i + 1), name, String(r.distinctLeads), r.classification, score, String(r.totalInstances), hc.region, hc.rms, hc.a1tm, hc.rh];
   });
 }
 
@@ -199,7 +200,7 @@ const REPEAT_OFFENDERS_PDF_TABLE_GAP_ = 20;
 function _repeatOffendersPdfEnsureRoom(doc, y, minSpace){
   const pageH = doc.internal.pageSize.getHeight();
   if (pageH - y < minSpace) {
-    doc.addPage('a4', 'portrait');
+    doc.addPage('a4', 'landscape');
     return REPEAT_OFFENDERS_PDF_MARGIN_;
   }
   return y;
@@ -227,13 +228,18 @@ function _repeatOffendersPdfEstimateTableHeight(rowCount, compact){
 // it. A table whose row count is unusually large (beyond this app's own
 // current 20-row cap on every candidate table) drops to a smaller font
 // instead — the same "appropriate layout for a large table" strategy in
-// spirit, chosen over a landscape-orientation switch specifically
-// because it composes safely with the page-cursor/heading-room tracking
-// above without the added complexity of mixing page orientations.
+// spirit. Orientation itself is landscape throughout (switched from
+// portrait 2026-09-07, when the table grew from 6 to 10 columns to add
+// the hierarchy/instance-count columns — portrait's ~515pt usable width
+// couldn't fit 10 columns without illegibly cramping them; landscape's
+// ~762pt can). Still uniformly ONE orientation for every page (the
+// original concern here was never mixing portrait/landscape on different
+// pages of the same document, which this preserves — addPage below also
+// requests 'landscape', not a mix).
 function _repeatOffendersPdfRenderPages(specs, filterInfo){
   const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (!jsPDFCtor) throw new Error('PDF library failed to load — check your connection and try again.');
-  const doc = new jsPDFCtor({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const doc = new jsPDFCtor({ orientation: 'landscape', unit: 'pt', format: 'a4' });
   if (typeof doc.autoTable !== 'function') throw new Error('PDF table library failed to load — check your connection and try again.');
 
   const pageW = doc.internal.pageSize.getWidth();
@@ -274,7 +280,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const methodologyNoteLines = doc.splitTextToSize(
-    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Workload = distinct leads eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse. Driven by names the rule(s) actually pushing an elevated score up (blank for an On Track row). Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
+    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse. Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Region/RMs/A1-TM/RH show a name when this row maps to exactly one, or a count when it spans more than one (e.g. a Region row spans many RMs). Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one, shown as a note under the Name column when it applies). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -289,7 +295,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   const pageUsableH = doc.internal.pageSize.getHeight() - REPEAT_OFFENDERS_PDF_MARGIN_ * 2;
 
   specs.forEach(function (spec) {
-    const rows = _repeatOffendersPdfTableRows(spec.list);
+    const rows = _repeatOffendersPdfTableRows(spec.list, rmHierarchyByNameLower);
     const compact = rows.length > 20; // beyond this app's own current per-table cap — defensive, not expected to trigger today
     // Clamped to one full page's worth: a table taller than that can never
     // fit regardless of where it starts, so there's nothing more this
@@ -333,7 +339,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     y += 12;
     doc.autoTable({
       startY: y,
-      head: [['#', 'Name', 'Workload', 'Status', 'Score (vs peer)', 'Driven by']],
+      head: [['#', 'Name', 'Unique Leads', 'Status', 'Score (vs peer)', 'Instances', 'Region', 'RMs', 'A1/TM', 'RH']],
       body: rows,
       theme: 'grid',
       styles: {
@@ -342,13 +348,23 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
       },
       headStyles: { fillColor: [23, 27, 33], textColor: [235, 237, 240], fontStyle: 'bold', fontSize: compact ? 7 : 8.5 },
       alternateRowStyles: { fillColor: [246, 247, 249] },
+      // 10 columns now (was 6) — widths tuned for landscape A4's ~762pt
+      // usable width (see _repeatOffendersPdfRenderPages' own comment on
+      // why this switched from portrait). Region/RMs/A1-TM/RH get 'auto'
+      // since their content length varies a lot (a single name vs. a
+      // short "N managers" count) and autoTable distributes remaining
+      // width proportionally among 'auto' columns.
       columnStyles: {
-        0: { cellWidth: 22, halign: 'right' },
-        1: { cellWidth: 110 },
-        2: { cellWidth: 55, halign: 'right' },
-        3: { cellWidth: 95 },
-        4: { cellWidth: 75, halign: 'right' },
-        5: { cellWidth: 'auto' },
+        0: { cellWidth: 20, halign: 'right' },
+        1: { cellWidth: 105 },
+        2: { cellWidth: 60, halign: 'right' },
+        3: { cellWidth: 90 },
+        4: { cellWidth: 65, halign: 'right' },
+        5: { cellWidth: 55, halign: 'right' },
+        6: { cellWidth: 'auto' },
+        7: { cellWidth: 'auto' },
+        8: { cellWidth: 'auto' },
+        9: { cellWidth: 'auto' },
       },
       margin: { left: REPEAT_OFFENDERS_PDF_MARGIN_, right: REPEAT_OFFENDERS_PDF_MARGIN_, bottom: REPEAT_OFFENDERS_PDF_MARGIN_ },
       pageBreak: 'avoid',    // the whole table moves to a fresh page if it doesn't fit — never split mid-table

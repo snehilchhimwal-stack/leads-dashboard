@@ -418,10 +418,10 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
 
   const emptyMsg = 'No RM/region/manager has enough eligible data to rank for the current filters/range.';
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${rmPerformanceTableHtml('RMs — worst 20', rmRanked.slice(0, 20), false, emptyMsg)}
-    ${rmPerformanceTableHtml('By Region — worst first, all shown', regionRanked, false, emptyMsg)}
-    ${rmPerformanceTableHtml('A1 / TM — worst 10', hierarchyMissing ? [] : a1tmRanked.slice(0, 10), hierarchyMissing, emptyMsg)}
-    ${rmPerformanceTableHtml('RH — worst 5', hierarchyMissing ? [] : rhRanked.slice(0, 5), hierarchyMissing, emptyMsg)}
+    ${rmPerformanceTableHtml('RMs — worst 20', rmRanked.slice(0, 20), false, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml('By Region — worst first, all shown', regionRanked, false, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml('A1 / TM — worst 10', hierarchyMissing ? [] : a1tmRanked.slice(0, 10), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml('RH — worst 5', hierarchyMissing ? [] : rhRanked.slice(0, 5), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
   </div>
   ${_repeatOffendersDebugPanelHtml(stageCounts, hierarchyMissing)}`;
 
@@ -484,7 +484,7 @@ function _repeatOffendersDebugPanelHtml(sc, hierarchyMissing){
       </div>
       <div>
         <div class="repeat-offenders-subtitle">Stage 5 — empirical-Bayes shrinkage</div>
-        <div class="dim" style="font-size:12px;">shrunkRate = n/(n+8) × rawRate + 8/(n+8) × peerRate, applied per RM per rule using the Stage 4 peer rates above — see any row's "Driven by" tooltip in the RM table for a real worked example (rawRate vs. the shown Score).</div>
+        <div class="dim" style="font-size:12px;">shrunkRate = n/(n+8) × rawRate + 8/(n+8) × peerRate, applied per RM per rule using the Stage 4 peer rates above — the RM table's Score column is exactly this, weighted and summed across the 4 scored rules.</div>
       </div>
       <div>
         <div class="repeat-offenders-subtitle">Stage 6 — composite scores</div>
@@ -528,41 +528,52 @@ const RM_PERF_CLASSIFICATION_TITLE = 'Insufficient Data: fewer than 5 distinct e
 // computeRmPerformance()'s output directly (core-rm-performance.js) —
 // see that file's own header comment for the full methodology this
 // replaced "Avg Flagged" with, 2026-09-04.
-function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage){
+//
+// 2026-09-07 (explicit request): the "Driven by" column is gone from
+// every table. In its place: Instances (totalInstances — total violation-
+// day count across the 4 scored rules, the Movement_Log-based equivalent
+// of what Daily_RM_Issues used to count, without that log's missing-
+// denominator problem) and 4 hierarchy columns — Region / RMs / A1-TM /
+// RH (rmPerformanceHierarchyCells, core-rm-performance.js) — so every row,
+// at any rollup level, shows exactly which part of the org it belongs to,
+// not just a name and a score. `rmHierarchyByNameLower` (may be null) is
+// now a required param, needed for the A1-TM/RH hierarchy cells even on
+// tables that aren't themselves the A1-TM/RH rollup.
+function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage, rmHierarchyByNameLower){
   const headHtml = `<tr>
       <th></th><th>Name</th>
-      <th style="text-align:right" title="Distinct leads eligible for at least one scored SLA rule in the current time range/filters — this group's real workload, not just its flagged leads.">Workload</th>
+      <th style="text-align:right" title="Exact count of distinct leads eligible for at least one scored SLA rule in the current time range/filters — this group's real book, not just its flagged leads.">Unique Leads</th>
       <th title="${esc(RM_PERF_CLASSIFICATION_TITLE)}">Status</th>
-      <th style="text-align:right" title="Severity-weighted, workload-adjusted composite score across Not Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+ (Inactive-RM Lead Added is tracked separately below, never scored here — it's a routing/assignment issue, not an execution one). Shrunk toward the peer average so a tiny sample can't dominate the ranking. Higher = worse; shown against the peer composite for scale.">Score<br><span class="dim" style="font-weight:400; font-size:9.5px;">(vs peer)</span></th>
-      <th>Driven by</th>
+      <th style="text-align:right" title="Severity-weighted, workload-adjusted composite score across Not Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+ (Inactive-RM Lead Added is tracked separately, never scored here — it's a routing/assignment issue, not an execution one). Shrunk toward the peer average so a tiny sample can't dominate the ranking. Higher = worse; shown against the peer composite for scale.">Score<br><span class="dim" style="font-weight:400; font-size:9.5px;">(vs peer)</span></th>
+      <th style="text-align:right" title="Total violation-day INSTANCES across the 4 scored rules (Not Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+) — e.g. one lead flagged Not Updated on 3 different days counts as 3 instances. Movement_Log-based, the same real eligible-population methodology as the Score column, not the old Daily_RM_Issues violations-only log.">Instances</th>
+      <th title="The region this row's eligible leads are actually concentrated in most.">Region</th>
+      <th title="The RM(s) behind this row — the RM's own name for an RM row; a count for a Region/A1-TM/RH row that spans more than one.">RMs</th>
+      <th title="The A1/TM manager(s) behind this row — a name when unambiguous, a count when this row spans more than one manager. — when RM_Hierarchy isn't loaded.">A1/TM</th>
+      <th title="The RH(s) behind this row — a name when unambiguous, a count when this row spans more than one. — when RM_Hierarchy isn't loaded.">RH</th>
     </tr>`;
 
   let rows;
   if (hierarchyMissing) {
-    rows = `<tr><td colspan="6" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
+    rows = `<tr><td colspan="10" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
   } else if (!list.length) {
-    rows = `<tr><td colspan="6" class="empty-row">${esc(emptyMessage || 'No one has enough eligible data to rank for the current filters/range.')}</td></tr>`;
+    rows = `<tr><td colspan="10" class="empty-row">${esc(emptyMessage || 'No one has enough eligible data to rank for the current filters/range.')}</td></tr>`;
   } else {
     rows = list.map((r, i) => {
       const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
-      // rmPerformanceDrivenBy (core-rm-performance.js, shared with the PDF
-      // export) already applies the classification gate and the
-      // violationDays>0 filter — see its own comment for why shrunkRate>0
-      // alone isn't enough (shrinkage gives every rule a small nonzero
-      // blended rate toward the peer average even with zero violations).
-      const driven = rmPerformanceDrivenBy(r).map(x => {
-        const chronicTag = x.concentrated ? ` <span class="dim" style="font-size:10px;">(${x.chronicLeads} chronic)</span>` : '';
-        return `<span class="chip ${x.concentrated ? 'amber' : 'red'}" style="margin:0 4px 2px 0;" title="${esc(x.violationDays)} of ${esc(x.eligibleDays)} eligible lead-days, ${esc(x.distinctViolatedLeads)} of ${esc(x.distinctEligibleLeads)} eligible leads affected">${esc(x.label)}: ${(x.rawRate * 100).toFixed(0)}%${chronicTag}</span>`;
-      }).join('');
       const routingNote = r.routingIssueDays > 0
         ? `<div class="dim" style="font-size:10px; margin-top:2px;">+${esc(r.routingIssueDays)} Inactive-RM Lead Added day(s) — a routing issue, not scored here</div>` : '';
+      const hc = rmPerformanceHierarchyCells(r, rmHierarchyByNameLower);
       return `<tr>
         <td class="num dim">${i + 1}</td>
-        <td>${esc(r.name)}</td>
+        <td>${esc(r.name)}${routingNote}</td>
         <td class="num">${esc(r.distinctLeads)}</td>
         <td><span class="chip ${chipClass}">${esc(r.classification)}</span></td>
         <td class="num">${r.composite.toFixed(2)} <span class="dim" style="font-size:10px;">/ ${r.peerComposite.toFixed(2)}</span></td>
-        <td>${driven}${routingNote}</td>
+        <td class="num">${esc(r.totalInstances)}</td>
+        <td>${esc(hc.region)}</td>
+        <td>${esc(hc.rms)}</td>
+        <td>${esc(hc.a1tm)}</td>
+        <td>${esc(hc.rh)}</td>
       </tr>`;
     }).join('');
   }
