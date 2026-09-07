@@ -1377,7 +1377,160 @@ inconsistent with its neighbor, not as a live bug.
 
 ---
 
-## Parts 6-7 — not yet run
+## Part 6 of 7 — Duplicate/Dead Logic + Hidden Dependencies + Source-of-Truth Matrix
+
+*(covers prompt sections 12 "duplicate/dead/conflicting logic", 13
+"hidden dependencies", 14 "sources of truth", 15 "system-wide logic
+matrix")*
+
+### 6.1 The pending UI-redesign plan's known-bug list — re-verified against current code, not restated from memory
+
+Per this part's own task description, every item on that plan's list was
+checked directly against the code as it exists now, not assumed still
+open. **Result: all 7 items fail to reproduce — every single one is
+either already fixed or was inaccurate when written.**
+
+| # | Claimed bug | Verified against | Result |
+|---|---|---|---|
+| 1 | `_logLeadRegistry` unbounded growth | `js/core-ui.js` + `renderAll()` | ❌ Does not reproduce — cleared at the top of every `renderAll()` (`js/overview-distribution-people-ops.js:164`), confirmed independently in Parts 1, 2, and 5 |
+| 2 | Shared `_followupWaitCancelled` boolean cross-cancels concurrent waits | `js/sheets-writeback.js:710-794` | ❌ Does not reproduce — it's a `Map` keyed by `cancelBtnId`, with an in-code comment explicitly describing this exact bug as already fixed |
+| 3 | `sendAllReportsGmail` missing OAuth-resume for batch sends | `js/reports-gmail.js:155-186` | ❌ Does not reproduce — the token-callback resume explicitly branches on `pending.kind==='bulk'` and calls `_runBulkGmailSend(...)`; the code comment says "for either a single report's Send button or a bulk 'Send all' click" |
+| 4 | Two Operations cards (Not Connected in 10 min, Inactive-RM Lead Added) missing `.log-toggle` | `renderNotConnectedList`/`renderInactiveRmList` (`js/overview-distribution-people-ops.js:1188-1213, 1328-1348`) | ❌ Does not reproduce — both call `logToggleMarkup(l, logId)` and render it into the card |
+| 5 | Stale doc-comment on `clearLeadFollowupsTab` claiming it fires post-send | `js/sheets-writeback.js:289-298` | ❌ Does not reproduce — the current comment correctly says it runs "at the START of every Generate cycle," explicitly "Not send-gated" |
+| 6 | Duplicated `.ms-panel` CSS rule (`display:none` declared twice) | `dashboard.html:398-404` | ❌ Does not reproduce — exactly one `.ms-panel{...}` block exists; `.ms-panel.open{...}` is a distinct modifier rule, not a duplicate |
+| 7 | `NOT_SHARED` error name inverted (describes a 404 as a sharing problem) | `js/core-fetch-and-render.js:637-653` | ❌ Does not reproduce — no `NOT_SHARED` identifier exists anywhere in the codebase; the actual names are `NOT_FOUND` (404) and `ACCESS_DENIED` (403), already correctly distinct and correctly labeled |
+
+**Conclusion for whoever picks this back up**: treat that plan's bug list
+as stale. Given items 1 and 2 were already independently confirmed fixed
+as far back as Part 1 of this audit, and items 3, 5, 6, 7 above show no
+trace of ever having been broken the way described (no partial fix, no
+half-renamed variable, no leftover duplicate — clean single
+implementations throughout), the more likely explanation is that a
+real fix pass landed between when that plan was written and this audit,
+not that the plan's findings were fabricated. Either way, **none of these
+7 items should be re-actioned** — re-verify only if new evidence
+surfaces suggesting a regression.
+
+### 6.2 Duplicate/dead/conflicting logic — genuinely new findings this part
+
+Beyond the real duplicated-by-necessity pairs already fully catalogued in
+Part 3 (§3.1-§3.9) and diffed in Part 4 (§4.1-§4.9), this part traced two
+further items:
+
+- **`lead_closing_comment` is read by real logic, not just displayed**
+  (a partial correction to Part 4 §4.8, which called it "display purposes
+  only"): it feeds `suggestedFollowUp()`'s closing-reason text
+  (`js/core-outcome-engine.js:829`) AND is one of 3 text sources scanned
+  by the "Possible Premature Closes" check
+  (`js/reports-build.js:840`, alongside `combinedCommentsText`/
+  `last_comment`). Its absence from the backend's `HEADER_ALIASES_`
+  (confirmed Part 4) means the backend can never read this column for
+  any purpose — but see next point, that turns out not to matter today.
+- **"Possible Premature Closes" is entirely client-only, with no backend
+  equivalent at all** (grepped `Premature`/`premature` across every `.gs`
+  and `.js` file — found only in `js/reports-build.js` and
+  `js/core-outcome-engine.js`). This is a genuinely useful data-quality
+  check — flagging a closed lead whose last comment still reads
+  "engaged" — that only ever runs when a human manually clicks Generate
+  on the Operations tab. It is **not** part of either scheduled email
+  (`OvernightEmailer.gs`/`AllIssuesEmailer.gs`), so a premature close on
+  a night nobody happens to generate a report never gets automatically
+  surfaced to anyone. Not a bug (nothing is broken), but a real scope gap
+  worth a maintainer decision: either this check stays a manual-report-
+  only tool by design, or it's worth porting to one of the scheduled
+  emails the way the 5 SLA rules were.
+
+No further genuinely NEW duplicate-calculation, duplicate-API-call, or
+dead-function findings survived a targeted check in this part beyond
+what Parts 3-5 already surfaced with real evidence — consistent with
+this audit's own rule against calling something dead without evidence:
+the console-only utilities already catalogued (`reportRmPerformanceNow`,
+`clearSlaHistory`, `backfillSlaHistoryFromMovementLog`, and siblings) are
+confirmed intentional, documented, callable tools, not orphaned dead
+code.
+
+### 6.3 Hidden dependencies — "if I change this, what could break?"
+
+| If I change this | These parts could break | Why | What to recheck |
+|---|---|---|---|
+| `FUNNEL_ORDER`/`STAGE_ALIASES`/`CLOSED_STAGE_EXACT`/`CLOSED_STAGE_STEMS` (client `CONFIG`, `js/core-foundation.js`) | Every SLA flag, every stage-gated table (funnel chart, region/TL/RM tables), `isLeadClosed`, filter/report scope checks, `Movement_Log`-derived history (`enrichLeadAsOf`) | `canonicalStage()` is the single classification every downstream check trusts | Edit `Core.gs`'s identical constants in the SAME change (Part 4 confirmed these currently match exactly) — a client-only edit silently desyncs the automated emails/Daily_RM_Issues capture from that moment on, with no error anywhere to catch it |
+| `OUTCOME_RULES` (client, `js/core-outcome-engine.js`) | `suggestedFollowUp`, `Lead_Followups` column F fallback text, report/email bodies, this session's own earlier offline Tier-1/Tier-3 contact-failure research (external, not code, but reads the same classification concept) | 31-rule ordered classifier, currently byte-identical to the backend (Part 4 §4.1) | Edit `OUTCOME_RULES_GS_` in `FollowupEngine.gs` in the SAME change, or the dashboard and the automated emails will classify the same comment differently going forward |
+| `computeSlaFlags_`/`enrichLead`'s 7 threshold constants | Every Operations issue card, `Daily_RM_Issues` capture, both scheduled emails, RM Performance scoring's eligibility windows | These are the actual pass/fail bar for every SLA rule in the app | Edit both `SlaEngine.gs` and `js/core-lead-model.js`'s `CONFIG` together (Part 4 confirmed exact match today); re-check `DailyRmIssueLog.gs`'s `RM_PERF_*_GS_` constants too if a threshold change should also shift RM scoring |
+| A `leads`-tab column NAME (e.g. renaming `current_stage`) | Everything — `HEADER_ALIASES`/`HEADER_ALIASES_` both silently stop resolving that column, `colIndex[key]` returns `-1`, `getVal`/`getVal_` return `''` for every row | Both runtimes' column-mapping is alias-list-based, not positional — a genuine rename needs a NEW alias added, not a code change elsewhere | Add the new header text as an alias in BOTH `HEADER_ALIASES` (client) and `HEADER_ALIASES_` (backend) before the rename goes live in the Sheet, or every downstream check for that field goes silently blank on both sides simultaneously (no error, no warning — `''` just reads as falsy everywhere it's checked) |
+| `Movement_Log`'s column ORDER (`SNAPSHOT_COLUMNS_`/`MOVEMENT_LOG_COLUMNS`) | Every reader of historical `Movement_Log` rows: Stalled Leads, RM Stall Leaderboard, Time-to-Opportunity, Repeat Offenders, RM Timeline, Tracking's cohort sections, `Daily_RM_Issues` backfill | Confirmed append-only-by-convention (Part 1: "Appended at the end, not inserted") — both writers currently agree exactly (Part 4 §4.7) | A column REORDER (not append) desyncs every already-written historical row's meaning from that point backward — must stay append-only on both sides, and both `SNAPSHOT_COLUMNS_` and `MOVEMENT_LOG_COLUMNS`/`SNAPSHOT_FIELD_KEYS` must be edited together, in the same relative order |
+| `filterState`'s shape (currently `{project,region,TL,source,bucket}`, each a `Set`) | `_applyFiltersAndRenderImpl`'s `passesFilters` closure, `buildMultiSelect`'s change handlers, `buildFilterUI`, every filter-bar UI element by `id` | It's the one piece of state every render pass reads to decide what's visible | Adding a new filter dimension needs a new `Set` here AND a new clause in `passesFilters` AND a new `buildMultiSelect(...)` call wiring a new DOM element — missing any one of the three means the new filter UI either does nothing or throws on an undefined Set |
+| `ISSUE_PRIORITY`/`ISSUE_PRIORITY_GS_`'s ORDER | Every place that reports "the" issue for a lead flagged by more than one rule: report subjects, `Daily_RM_Issues`' `issue_key`/`issue_label`, `SLA_History`'s per-check columns (order-dependent in `upsertSlaHistoryRows`, which zips `ISSUE_PRIORITY.map(r=>r.key)` positionally) | A reorder changes which single label a multi-flagged lead is reported under everywhere at once | Reorder both `ISSUE_PRIORITY` and `ISSUE_PRIORITY_GS_` together; also re-check `SLA_History`'s existing historical rows still line up with whatever column order `upsertSlaHistoryRows` assumes — a reorder changes the MEANING of already-written columns, not just future ones |
+| `REGION_GROUP_MAP`/`REGION_GROUP_MAP_` | Region filter, every region table, region-email bucketing on both runtimes, Repeat Offenders' region rollup | The one canonical 11-region lookup both runtimes currently share exactly (Part 4 §4.3) | Edit both together; also re-check §4.4's already-broken Loan-override path doesn't get MORE broken by a region-map change made only with the client's `effectiveRegion()` two-step process in mind |
+
+### 6.4 Source-of-truth matrix
+
+| Concept | Source of truth | Other copies | Consistent? | Risk |
+|---|---|---|---|---|
+| Lead SLA status (the 6 flags) | `enrichLead()` (client) | `computeSlaFlags_()` (backend) | ✅ Verified consistent (Part 4 §4.2) | Low — actively verified, both edited together per code comments |
+| Lead stage / open-closed | `canonicalStage()`/`isLeadClosed()` (client) | `canonicalStage_()`/`isOpenLead_()` (backend) | ✅ Verified consistent (Part 4 §4.2) | Low |
+| Comment classification | `inferOutcome()` (client) | `inferOutcomeGs_()` (backend) | ✅ Verified consistent, all 31 rules (Part 4 §4.1) | Low |
+| Region (Loan-override path, live-leads-tab data) | `effectiveRegion()` (client) | `mainRegionForGs_()` (backend) | 🔴 **NOT consistent** — backend never applies the override at all (Part 4 §4.4) | **High** — confirmed live disagreement in production |
+| Region (Movement_Log-derived data) | `_effectiveRegionGs_`/`repeatOffendersRegionKey` (both, reduced form) | — | ✅ Consistent, documented shared limitation (Part 4 §4.5) | Low |
+| RM/lead "score" | **Does not exist** — no per-lead numeric score anywhere in this app (Part 2 §0) | — | n/a | n/a |
+| RM Performance score | `core-rm-performance.js` (client, live tab + PDF) | `DailyRmIssueLog.gs`'s `..._GS_` mirror (backend, console-only) | Constants verified identical (Part 1); full algorithm body not independently line-by-line diffed (Part 3 §3.6 note) | Medium — tuning constants can't silently drift (confirmed), but a logic-body edit on one side without the other wouldn't be caught by anything in this codebase |
+| Lead owner (`RM`) | The `leads` sheet's own `RM` column | Read identically, unmodified, by every consumer on both runtimes | ✅ Single raw source, no transformation to disagree about | Low |
+| Lead source (`group_source`/`source_bucket`) | Same — raw Sheet columns | Same | ✅ Single raw source | Low |
+| Lead value/revenue | **Does not exist** (Part 2 §0) | — | n/a | n/a |
+| Dashboard totals / KPIs (Overview tab) | `allParsedLeads` → `leads`/`issueLeads` (one pipeline, Part 2 §2) | — | ✅ Single pipeline | Low |
+| Repeat Offenders' totals | `movementSnapshots` (a **different** pipeline — Movement_Log, not the live leads tab) | — | Internally consistent with itself, but genuinely a **separate data source** from the rest of the dashboard's KPIs, with its own narrower filter predicate (Part 3 §3.7, Part 5 §5.1) | Medium — not wrong, but a viewer comparing an Overview KPI to a Repeat Offenders number is comparing two different pipelines, not a shared source of truth |
+| Filter state | `filterState` (one object, one writer path) | — | ✅ Single source | Low |
+| **User permissions** | **No application-level permission system exists at all.** Access control is delegated entirely to the Google Sheet's own native sharing permissions (Viewer/Editor) — confirmed across all 5 prior parts, nothing resembling a role/permission check was found anywhere in `js/*.js` or `*.gs`. Anyone who can open `dashboard.html` and sign into a Google account with Sheet access sees every region, every RM, every tab — there is no identity-based scoping of what's shown. | n/a | n/a | Worth stating plainly since the source prompt explicitly asks about permission sources of truth — this app genuinely has none of its own; whatever access control exists is 100% Google's, not this codebase's |
+| Lead counts | Same pipeline as Dashboard totals | — | ✅ | Low |
+| Conversion metrics (Opportunity+, Booking) | `isOppOrAbove`/`isBookingLead`/`isSoftBookingLead` (client) | `isOppOrAbove_()` (backend, no Booking/SoftBooking backend equivalent found — not needed, since no backend flow reports on booking-stage leads specifically) | ✅ for the shared subset (`isOppOrAbove`) | Low |
+
+### 6.5 System-wide logic matrix
+
+| Concept | Where defined | Where read | Where changed | Calculation/rule | Dependencies | Conflicts | Risk |
+|---|---|---|---|---|---|---|---|
+| SLA flags | `core-lead-model.js`/`SlaEngine.gs` | Every Operations card, both emails, `Daily_RM_Issues`, RM Performance | Never by a user directly — only by the underlying lead data changing | 6 boolean rules, age/grace/connect/comment-timestamp-driven | `CONFIG`/thresholds, `movementSnapshots` baseline | None found (Part 4) | Low |
+| Comment outcome | `core-outcome-engine.js`/`FollowupEngine.gs` | Follow-up suggestions, reports, `Unmatched_Comments_Log`/`Comment_History` | Never directly — only classifies existing comment text | 31-rule ordered fuzzy-keyword match | Fuzzy-match engine, static rule table | None found (Part 4) | Low |
+| Region | `reports-build.js`/`EmailInfra.gs` | Filters, region tables, region-email bucketing | Never directly | 2-step override (Loan) + 11-region canonical map | `project_region`/`group_source`/`region` raw columns | 🔴 **Confirmed** — Loan-override missing on 3 backend call sites (§6.4) | **High** |
+| Movement history | `MovementTracker.gs`/`js/sheets-writeback.js`/`js/tab-movement.js` | Stalled Leads, RM Stall, Time-to-Opportunity, Repeat Offenders, RM Timeline, Tracking, `Daily_RM_Issues` backfill | 2 independent writers, verified same schema (§4.7) | Snapshot every lead's current state, 4×/day + manual | `allParsedLeads`/live leads tab | Snapshot-only guard gap (§5.4) | Medium |
+| Filter state | `core-filters.js`/`core-sheets-fetch.js` | `_applyFiltersAndRenderImpl` | User's own filter-bar interaction only | Set-membership + date-range predicate | DOM inputs, `filterState` | None found | Low |
+| RM Performance | `core-rm-performance.js`/`DailyRmIssueLog.gs` | Repeat Offenders tab, PDF export, console leaderboard | Never directly — reconstructed fresh from history each time | Eligibility/violation reconstruction, empirical-Bayes shrinkage, severity weighting | `movementSnapshots`, `computeSlaFlags_` (backend only, reused not reimplemented) | Constants verified match; algorithm body not fully diffed | Medium |
+| Generate/Lead_Followups cycle | `js/reports-ui.js`/`js/sheets-writeback.js`/`OvernightEmailer.gs` | Report generation, both scheduled emails' follow-up bridge | User clicks Generate, or the 10am/1pm trigger fires | 3-phase build-push-wait-rebuild (client); poll-with-fallback (backend) | `Lead_Followups` tab, the client's own mutex (backend has none) | 🟡 **Confirmed** — unguarded cross-runtime overlap window (Part 3 §3.8) | Medium |
+| Recipient routing | `RmHierarchy.gs` only | Both scheduled emails | Via `RM_Hierarchy`/`Manager_Directory` sheet edits, or `RmHierarchy.private.gs` | `tl→tm→rh→ch` nearest-tier walk | Backend-only, no client equivalent, no redundancy | n/a (single implementation) | Single point of failure, not a conflict (Part 3 §3.7) |
+| KPI strip | `js/overview-distribution-people-ops.js` | Overview tab only | Never directly | 6 tiles, mixed customer-level/issue-level counting | `leads`/`issueLeads` | Undocumented dataset-mixing (§5.1) | Low/Medium |
+
+### 6.6 Findings carried forward for Part 7's severity ranking
+
+Consolidated list of every concrete finding from Parts 3-6 (Part 7 assigns
+final severity — this is the input list, not the ranking):
+
+1. **Loan-region override missing from all 3 scheduled-email call sites**
+   (Part 4 §4.4 / this part §6.4) — real, live, production disagreement.
+2. **`browserSnapshotOpenLeads` has no reentrancy guard** (Part 5 §5.4) —
+   confirmed via direct comparison against the Generate button's proven
+   pattern in the same file.
+3. **`MIN_CALLS_AFTER_48H` display/logic mismatch** (Part 4 §4.9) —
+   client-only, undocumented.
+4. **Cross-runtime `Lead_Followups` overlap window** (Part 3 §3.8) — the
+   client mutex can't reach the backend's independent polling.
+5. **"Possible Premature Closes" has no scheduled-email equivalent**
+   (this part §6.2) — a real, useful check that only fires on manual
+   Generate.
+6. **KPI strip mixes customer-level and issue-level counts, undocumented
+   in the UI** (Part 5 §5.1).
+7. **Dropped click during rapid filter changes** (Part 5 §5.4) — low
+   real-world impact.
+8. **`RmHierarchy.gs` is a single point of failure** for both scheduled
+   emails (Part 3 §3.7) — no redundant implementation to cross-check.
+9. **`lead_closing_comment` unavailable to the backend** (this part
+   §6.2) — narrower than the client's Possible Premature Closes text set
+   would need if this check were ever ported to the backend.
+10. **All 7 items from the pending UI-redesign plan's bug list are
+    stale** (§6.1) — not a defect, but an important housekeeping fact:
+    that plan's bug list should not be re-actioned.
+
+---
+
+## Part 7 — not yet run
 
 See the To-Do Dashboard's research project for the full task sequence and
-what each remaining part covers.
+what it covers (final findings ranking, plain-English walkthrough,
+remaining diagrams, checklist, and the full assembled report).
