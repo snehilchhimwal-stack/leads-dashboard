@@ -152,6 +152,78 @@ const RM_PERF_RULES = [
     eligible: (e, ctx) => ctx.pastGrace },
 ];
 
+// Filter/keyFn dependencies, relocated here from tab-repeat-offenders.js
+// (2026-09-06) so the whole Stage 1 pipeline is DOM-free and can run
+// inside a Web Worker via importScripts() of this file plus its own
+// dependencies (core-foundation.js, core-lead-model.js,
+// core-outcome-engine.js, reports-build.js, tab-movement.js -- none of
+// which touch document/window at module-parse time; confirmed by a real
+// grep-and-read dependency trace before this move, not assumed).
+// tab-repeat-offenders.js itself is NOT importScripts-able (it wires its
+// own range-select listeners via document.getElementById at its own
+// top level) -- exactly why these four lived there uncomfortably before:
+// everything they themselves need is DOM-free, but the file they sat in
+// wasn't.
+//
+// All four are now PARAMETERIZED rather than reading filterState /
+// rmHierarchyByNameLower as ambient globals -- required, not optional,
+// parameters, so a caller (main thread or worker) can never silently fall
+// back to "whatever the live global happens to be right now". The main
+// thread captures an explicit, frozen snapshot once per Recalculate click
+// (captureRepeatOffendersFilterSnapshot, tab-repeat-offenders.js) and
+// threads it through everywhere from there.
+
+// Same Project/Region/TL/Source/Bucket filters every other Movement-backed
+// view honors (see passesMovementFilters, tab-movement.js) -- deliberately
+// NOT reusing that function directly, since a Movement_Log row's `region`
+// is the raw value captured at flag time, not run through effectiveRegion()'s
+// cross-field Loan-source inference the way a live lead record is. A "Loan"
+// lead may not filter perfectly under the Region control here as a result --
+// a narrow, documented gap, not a silent one.
+// `filters`: {project, region, TL, source, bucket}, each a Set -- same
+// shape as filterState itself, just an explicit frozen copy of it instead
+// of the live object.
+function passesRepeatOffenderFilters(rec, filters){
+  if (filters.project.size && !filters.project.has(rec.project)) return false;
+  if (filters.region.size && !filters.region.has(rec.region) && !filters.region.has(mainRegionFor(rec.region))) return false;
+  if (filters.TL.size && !filters.TL.has(rec.TL)) return false;
+  if (filters.source.size && !Array.from(filters.source).some(s => s.toLowerCase() === String(rec.group_source).trim().toLowerCase())) return false;
+  if (filters.bucket.size && !filters.bucket.has(String(rec.source_bucket).trim())) return false;
+  return true;
+}
+
+// This RM's primary people-manager -- A1 if they have one, else TM, same
+// "prefer A1, fall back to TM" preference resolveRecipientBucketsForRms_
+// (RmHierarchy.gs) uses for real email routing. Returns null when the RM
+// isn't in RM_Hierarchy at all (departed, or an unaliased spelling variant
+// -- same population auditUnresolvedRmsNow() already surfaces).
+// `rmHierarchyByNameLower`: Map<lowercased name, {tl, tm, rh, ch, ...}> --
+// an explicit snapshot, not the live rmHierarchyByNameLower global (which
+// only exists on the main thread, populated by a real RM_Hierarchy fetch).
+function rmPerfPrimaryManagerFor(rmName, rmHierarchyByNameLower){
+  const row = rmHierarchyByNameLower.get(String(rmName || '').trim().toLowerCase());
+  if (!row) return null;
+  return row.tl || row.tm || null;
+}
+function rmPerfRhFor(rmName, rmHierarchyByNameLower){
+  const row = rmHierarchyByNameLower.get(String(rmName || '').trim().toLowerCase());
+  return row ? (row.rh || null) : null;
+}
+
+// The By Region table's own grouping key -- mirrors effectiveRegion +
+// mainRegionFor (reports-build.js), the SAME normalization every other
+// region-based view on this dashboard uses, so a sub-region variant (e.g.
+// "Pune East") correctly rolls up into its canonical main region ("Pune")
+// instead of forming its own separate row. Movement_Log has group_source
+// (so the Loan override applies) but never project_region -- same gap
+// _effectiveRegionGs_ (MovementTracker.gs) already documents. No
+// filterState/hierarchy dependency, so no snapshot parameter is needed
+// beyond the record itself.
+function repeatOffendersRegionKey(rec){
+  const raw = normRegionKey(rec.group_source || '') === 'loan' ? 'Loan' : String(rec.region || '').trim();
+  return mainRegionFor(raw) || raw || 'Unassigned';
+}
+
 // Calendar-day difference between two "YYYY-MM-DD" istDateKey strings.
 // Parsed as UTC noon specifically to dodge any local-timezone DST edge
 // (irrelevant to IST itself, which has none, but this runs in the
@@ -188,7 +260,7 @@ function _rmPerfDaysBetweenKeys(a, b){
 // (00:00/06:00/12:00/18:00 IST) means that's the 18:00 capture when
 // present, the closest available proxy to Daily_RM_Issues' own 22:50 IST
 // nightly capture time.
-function reconstructRmPerformanceObservations(dateKeys, keyFn){
+function reconstructRmPerformanceObservations(dateKeys, keyFn, filters){
   const observations = [];
   if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return observations;
   const getKey = keyFn || (rec => rec.RM || 'Unassigned');
@@ -198,7 +270,7 @@ function reconstructRmPerformanceObservations(dateKeys, keyFn){
     splitHistoryByCopy(history).forEach(copyHistory => {
       const byDay = new Map(); // dayKey -> latest snapshot record that day
       copyHistory.forEach(rec => {
-        if (!passesRepeatOffenderFilters(rec)) return;
+        if (!passesRepeatOffenderFilters(rec, filters)) return;
         const dayKey = istDateKey(rec.snapshot_at);
         if (dateKeys && !dateKeys.has(dayKey)) return;
         const cur = byDay.get(dayKey);
@@ -398,12 +470,17 @@ function classifyRmPerformance(byGroup){
 // call. dateKeys: same convention as reconstructRmPerformanceObservations
 // (null = all retained history, a Set of istDateKey strings = restrict to
 // those days). keyFn: same convention too (defaults to RM) — pass
-// rec => primaryManagerForRm(rec.RM) / rec => rhForRm(rec.RM) /
-// rec => _repeatOffendersRegionKey(rec) (all tab-repeat-offenders.js) for
-// the A1-TM / RH / Region rollups, exactly as aggregateRepeatOffenders'
-// own callers already do.
-function computeRmPerformance(dateKeys, keyFn){
-  const observations = reconstructRmPerformanceObservations(dateKeys, keyFn);
+// rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower) /
+// rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower) /
+// rec => repeatOffendersRegionKey(rec) for the A1-TM / RH / Region
+// rollups. `filters`: required, an explicit {project,region,TL,source,
+// bucket} Set snapshot (captureRepeatOffendersFilterSnapshot,
+// tab-repeat-offenders.js) — every call site must pass one, on the main
+// thread or from inside a Worker, so the filtered population this
+// function's peer average is built from is always explicit, never an
+// ambient global read.
+function computeRmPerformance(dateKeys, keyFn, filters){
+  const observations = reconstructRmPerformanceObservations(dateKeys, keyFn, filters);
   const byGroup = aggregateRmPerformance(observations);
   return classifyRmPerformance(byGroup);
 }

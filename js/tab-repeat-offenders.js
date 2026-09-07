@@ -17,11 +17,21 @@
 // which is exactly what made the pre-redesign "Avg Flagged" ranking
 // unfair to begin with (see HANDOVER.md §9.7's "Why" section). Honoring
 // the same top-bar Project/Region/TL/Source/Bucket filters every other
-// Movement-backed view does, via passesRepeatOffenderFilters below; the
-// top bar's Assigned-date RANGE filter does not apply here — this section
-// has its own independent Time range picker instead, matched against each
+// Movement-backed view does, via passesRepeatOffenderFilters
+// (core-rm-performance.js — see captureRepeatOffendersFilterSnapshot
+// below for how the live filterState becomes an explicit, frozen
+// snapshot before this section ever reads it); the top bar's
+// Assigned-date RANGE filter does not apply here — this section has its
+// own independent Time range picker instead, matched against each
 // lead-day's own Movement_Log OBSERVATION day (see
 // core-rm-performance.js's header comment for why).
+//
+// 2026-09-06: the whole calculation (Stages 1-4, all four RM/Region/
+// A1-TM/RH rollups) now runs inside a dedicated Web Worker
+// (js/rm-performance-worker.js) instead of synchronously on this thread
+// — see runRepeatOffendersRecalculation below. This file itself stays
+// main-thread-only (it owns the DOM), but everything it used to compute
+// inline now gets posted to the worker and rendered from its response.
 //
 // Depends on core.js (filterState, mainRegionFor, sheetsApiValuesGet,
 // valuesToGvizShape/gvizCellRaw/gvizCellDate, istDateKey/istParts, esc)
@@ -91,39 +101,45 @@ async function fetchRmHierarchyForRollup(sheetId){
   }
 }
 
-// This RM's primary people-manager — A1 if they have one, else TM, same
-// "prefer A1, fall back to TM" preference resolveRecipientBucketsForRms_
-// (RmHierarchy.gs) uses for real email routing. Returns null when the RM
-// isn't in RM_Hierarchy at all (departed, or an unaliased spelling
-// variant — same population auditUnresolvedRmsNow() already surfaces).
-function primaryManagerForRm(rmName){
-  const row = rmHierarchyByNameLower.get(String(rmName || '').trim().toLowerCase());
-  if (!row) return null;
-  return row.tl || row.tm || null;
-}
-function rhForRm(rmName){
-  const row = rmHierarchyByNameLower.get(String(rmName || '').trim().toLowerCase());
-  return row ? (row.rh || null) : null;
+// primaryManagerForRm/rhForRm/passesRepeatOffenderFilters/
+// _repeatOffendersRegionKey all moved to core-rm-performance.js
+// (2026-09-06, renamed rmPerfPrimaryManagerFor/rmPerfRhFor/
+// repeatOffendersRegionKey, passesRepeatOffenderFilters kept its name) —
+// that file is DOM-free and importScripts-able from a Worker; this one
+// isn't (see captureRepeatOffendersFilterSnapshot below and this file's
+// own header comment). All four are now parameterized (explicit
+// filters/rmHierarchyByNameLower snapshot instead of reading the live
+// filterState/rmHierarchyByNameLower globals ambiently) — every call
+// site in this file passes an explicit snapshot from here on.
+
+// Frozen, explicit snapshot of the live filterState Sets — captured once
+// per Recalculate click (or any filter change; every filter control's
+// onchange already routes through applyFiltersAndRender → renderAll →
+// renderRepeatOffenders, see this file's own header comment) and threaded
+// through every computeRmPerformance call below. Fresh Set copies, not
+// references to the live Sets — a filter changed by the user AFTER this
+// snapshot was taken (e.g. mid-calculation, were this ever made async)
+// can never retroactively change what an in-flight calculation sees.
+function captureRepeatOffendersFilterSnapshot(){
+  return {
+    project: new Set(filterState.project),
+    region: new Set(filterState.region),
+    TL: new Set(filterState.TL),
+    source: new Set(filterState.source),
+    bucket: new Set(filterState.bucket),
+  };
 }
 
-// Same Project/Region/TL/Source/Bucket filters every other Movement-
-// backed view honors (see passesMovementFilters, tab-movement.js) —
-// deliberately NOT re-using that function directly, since a
-// Daily_RM_Issues row's `region` is the raw value captured at flag time
-// (getVal_ off the live leads tab or a Movement_Log row), not run
-// through effectiveRegion()'s cross-field Loan-source inference the way
-// a live lead record is. A "Loan" lead may not filter perfectly under
-// the Region control here as a result — a narrow, documented gap, not a
-// silent one.
-function passesRepeatOffenderFilters(rec){
-  const projSel = filterState.project, regSel = filterState.region, tlSel = filterState.TL;
-  const srcSel = filterState.source, bucketSel = filterState.bucket;
-  if (projSel.size && !projSel.has(rec.project)) return false;
-  if (regSel.size && !regSel.has(rec.region) && !regSel.has(mainRegionFor(rec.region))) return false;
-  if (tlSel.size && !tlSel.has(rec.TL)) return false;
-  if (srcSel.size && !Array.from(srcSel).some(s => s.toLowerCase() === String(rec.group_source).trim().toLowerCase())) return false;
-  if (bucketSel.size && !bucketSel.has(String(rec.source_bucket).trim())) return false;
-  return true;
+// Plain-language summary of an active filter snapshot, for the
+// recalculation status strip — "All" per dimension when nothing is
+// selected (never restricts a dimension it wasn't asked to), otherwise
+// the selected values themselves.
+function _repeatOffendersFilterSummaryText(filters){
+  const parts = [
+    ['Project', filters.project], ['Region', filters.region], ['TL', filters.TL],
+    ['Source', filters.source], ['Sub-source', filters.bucket],
+  ].map(([label, set]) => `${label}: ${set.size ? Array.from(set).join(', ') : 'All'}`);
+  return parts.join(' · ');
 }
 
 // null return (allTime) means "no date filter at all".
@@ -157,34 +173,31 @@ function repeatOffendersDateKeysForRange(range, now){
   return null; // allTime
 }
 
-// The By Region table's own grouping key — mirrors effectiveRegion +
-// mainRegionFor (reports.js), the SAME normalization every other
-// region-based view on this dashboard uses, so a sub-region variant
-// (e.g. "Pune East") correctly rolls up into its canonical main region
-// ("Pune") instead of forming its own separate row and silently
-// under-counting the main region's true total (real bug, found via a
-// user report comparing this table's Pune count against Overview's).
-// Movement_Log has group_source (so that half of the Loan override
-// applies) but never project_region (not one of SNAPSHOT_COLUMNS_'s
-// captured columns) — same gap _effectiveRegionGs_ (MovementTracker.gs)
-// already documents for the identical reason. Falls back to the raw
-// region for anything mainRegionFor doesn't recognize, rather than
-// dropping it silently.
-function _repeatOffendersRegionKey(rec){
-  const raw = normRegionKey(rec.group_source || '') === 'loan' ? 'Loan' : String(rec.region || '').trim();
-  return mainRegionFor(raw) || raw || 'Unassigned';
-}
+// One Worker in flight at a time. _repeatOffendersRunId is bumped on
+// every call to runRepeatOffendersRecalculation and closed over by that
+// call's onmessage handler — a response whose runId no longer matches
+// the live counter is from a superseded run and is silently dropped,
+// which is what actually prevents an old and new calculation's results
+// from ever being mixed together (2026-09-06 requirement). terminate()
+// on the old worker is belt-and-suspenders on top of that: it stops a
+// slow/hung previous run from continuing to burn CPU in the background,
+// but the runId check is what guarantees correctness even if terminate()
+// raced a message that was already in flight.
+let _repeatOffendersWorker = null;
+let _repeatOffendersRunId = 0;
 
 function renderRepeatOffenders(){
   const bodyEl = document.getElementById('repeatOffendersBody');
   const noticeEl = document.getElementById('repeatOffendersNotice');
   const countEl = document.getElementById('repeatOffendersCount');
+  const statusEl = document.getElementById('repeatOffendersRecalcStatus');
   if (!bodyEl) return;
 
   const clear = (message) => {
     bodyEl.innerHTML = '';
     if (countEl) countEl.textContent = '';
     if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = message; }
+    if (statusEl) statusEl.innerHTML = '';
   };
 
   // 2026-09-04 redesign (see HANDOVER.md §9.7 for the full writeup): this
@@ -239,24 +252,144 @@ function renderRepeatOffenders(){
   // than a dynamic per-range check, to keep this in line with how that
   // existing caveat is already presented.
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
+  // Frozen input snapshot — captured exactly once here, at the top of
+  // this render pass, before any async/Worker hand-off. Everything the
+  // calculation touches (filters, dateKeys, hierarchy) is now a plain
+  // value closed over by this one call, not a live global the worker (or
+  // a later filter change on this thread) could see mid-flight.
+  const filters = captureRepeatOffendersFilterSnapshot();
 
-  const rmFull = computeRmPerformance(dateKeys);
-  const regionFull = computeRmPerformance(dateKeys, rec => _repeatOffendersRegionKey(rec));
-  const a1tmFull = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => primaryManagerForRm(rec.RM));
-  const rhFull = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rhForRm(rec.RM));
+  runRepeatOffendersRecalculation({ dateKeys, hierarchyMissing, filters, bodyEl, noticeEl, countEl, statusEl, clear });
+}
+
+// Runs the ENTIRE Stage 1-4 + RM/Region/A1-TM/RH pipeline inside a
+// dedicated Web Worker (js/rm-performance-worker.js) so a large dataset
+// never blocks this tab's UI thread — per explicit 2026-09-06 request.
+// No LLM/API call anywhere in this path: it's the exact same
+// deterministic functions core-rm-performance.js always ran, just off
+// the main thread. Falls back to running them synchronously HERE (same
+// functions, same results, only the "does it block the tab" property
+// differs) if a Worker can't even be constructed — e.g. a locked-down
+// environment, or this file opened directly over file:// during local
+// testing rather than served over http(s).
+function runRepeatOffendersRecalculation(ctx){
+  const { dateKeys, hierarchyMissing, filters, bodyEl, noticeEl, countEl, statusEl, clear } = ctx;
+  const runId = ++_repeatOffendersRunId;
+  const startedAtWall = new Date();
+  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+  if (_repeatOffendersWorker) { _repeatOffendersWorker.terminate(); _repeatOffendersWorker = null; }
+
+  if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = 'Recalculation started…'; }
+  if (statusEl) statusEl.innerHTML = _repeatOffendersStatusHtml({ phase: 'started', filters, sourceRecordCount: movementSnapshots.length, startedAtWall });
+
+  const onDone = (msg) => {
+    if (runId !== _repeatOffendersRunId) return; // superseded by a newer run — drop, never mix
+    const elapsedMs = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0;
+    _renderRepeatOffendersResult({ bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing }, msg, elapsedMs, startedAtWall);
+  };
+  const onFail = (reason) => {
+    if (runId !== _repeatOffendersRunId) return;
+    clear('Recalculation failed (' + esc(reason) + ') — falling back to a direct, non-worker calculation.');
+    _runRepeatOffendersSynchronously({ dateKeys, hierarchyMissing, filters }, onDone);
+  };
+
+  let worker;
+  try {
+    worker = new Worker('js/rm-performance-worker.js');
+  } catch (err) {
+    onFail(String((err && err.message) || err));
+    return;
+  }
+  _repeatOffendersWorker = worker;
+
+  worker.onmessage = (e) => {
+    if (runId !== _repeatOffendersRunId) return;
+    const msg = e.data;
+    if (msg.type === 'progress') {
+      if (statusEl) statusEl.innerHTML = _repeatOffendersStatusHtml({ phase: 'progress', stage: msg.stage, filters, sourceRecordCount: movementSnapshots.length, startedAtWall });
+      return;
+    }
+    worker.terminate();
+    if (_repeatOffendersWorker === worker) _repeatOffendersWorker = null;
+    if (msg.type === 'error') { onFail(msg.message); return; }
+    onDone(msg);
+  };
+  worker.onerror = (err) => {
+    worker.terminate();
+    if (_repeatOffendersWorker === worker) _repeatOffendersWorker = null;
+    onFail((err && err.message) || 'worker failed to load');
+  };
+
+  worker.postMessage({
+    snapshots: movementSnapshots,
+    dateKeys: dateKeys,
+    filters: filters,
+    rmHierarchyByNameLower: hierarchyMissing ? null : rmHierarchyByNameLower,
+  });
+}
+
+// Same 3 real stage functions the worker calls, run right here instead —
+// used only when a Worker genuinely cannot be constructed. Produces the
+// exact same `msg` shape onDone expects, so the result renderer can't
+// tell (and doesn't need to) which path actually ran.
+function _runRepeatOffendersSynchronously(ctx, onDone){
+  const { dateKeys, hierarchyMissing, filters } = ctx;
+  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const stage1FilteredCount = movementSnapshots.filter(rec => passesRepeatOffenderFilters(rec, filters)).length;
+
+  const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters);
+  const rmByGroup = aggregateRmPerformance(rmObservations);
+  const rmPeerAvg = computeRmPerfPeerAverages(rmByGroup);
+  const rm = classifyRmPerformance(rmByGroup);
+  const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters);
+  const a1tm = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters);
+  const rh = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters);
+
+  const composites = rm.map(r => r.composite);
+  const compositeRange = composites.length
+    ? { min: Math.min(...composites), max: Math.max(...composites), avg: composites.reduce((a, b) => a + b, 0) / composites.length }
+    : null;
+  const classCounts = (list) => list.reduce((acc, r) => { acc[r.classification] = (acc[r.classification] || 0) + 1; return acc; }, {});
+
+  onDone({
+    rm, region, a1tm, rh,
+    stageCounts: {
+      sourceRecordCount: movementSnapshots.length,
+      stage1FilteredCount: stage1FilteredCount,
+      stage2ObservationCount: rmObservations.length,
+      stage2Sample: rmObservations.slice(0, 3),
+      stage3GroupCount: rmByGroup.size,
+      stage4PeerAverages: rmPeerAvg,
+      stage6CompositeRange: compositeRange,
+      stage7ClassificationCounts: { rm: classCounts(rm), region: classCounts(region), a1tm: classCounts(a1tm), rh: classCounts(rh) },
+      stage8RollupCounts: { rm: rm.length, region: region.length, a1tm: a1tm.length, rh: rh.length },
+      computeMs: ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0,
+    },
+  });
+}
+
+// Renders the worker's (or the synchronous fallback's) result — the same
+// table-building logic this function always ran, just now fed by a
+// message instead of a direct function return.
+function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
+  const { bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing } = ctx;
+  const { rm: rmFull, region: regionFull, a1tm: a1tmFull, rh: rhFull, stageCounts } = msg;
 
   if (!rmFull.length) {
     const activeFilters = [];
-    if (filterState.project.size) activeFilters.push(`Project (${filterState.project.size})`);
-    if (filterState.region.size) activeFilters.push(`Region (${filterState.region.size})`);
-    if (filterState.TL.size) activeFilters.push(`TL (${filterState.TL.size})`);
-    if (filterState.source.size) activeFilters.push(`Source (${filterState.source.size})`);
-    if (filterState.bucket.size) activeFilters.push(`Sub-source (${filterState.bucket.size})`);
+    if (filters.project.size) activeFilters.push(`Project (${filters.project.size})`);
+    if (filters.region.size) activeFilters.push(`Region (${filters.region.size})`);
+    if (filters.TL.size) activeFilters.push(`TL (${filters.TL.size})`);
+    if (filters.source.size) activeFilters.push(`Source (${filters.source.size})`);
+    if (filters.bucket.size) activeFilters.push(`Sub-source (${filters.bucket.size})`);
     const filterNote = activeFilters.length
       ? `Active filters likely narrowing this to zero: <b>${esc(activeFilters.join(', '))}</b>. Clear them in the filter bar above to check.`
       : 'No Project/Region/TL/Source/Sub-source filters are currently active, so this is NOT a filter issue — no leads in Movement_Log genuinely have SLA-eligible history in this time range (unlikely if the time range is "From when history began").';
-    clear(`<b>${esc(movementSnapshots.length)}</b> total Movement_Log snapshot rows loaded; <b>0</b> RMs have SLA-eligible lead-days after the current time range/top-bar filters. ${filterNote}`);
+    bodyEl.innerHTML = '';
     if (countEl) countEl.textContent = '0';
+    if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = `<b>${esc(stageCounts.sourceRecordCount)}</b> total Movement_Log snapshot rows loaded; <b>0</b> RMs have SLA-eligible lead-days after the current time range/top-bar filters. ${filterNote}`; }
+    if (statusEl) statusEl.innerHTML = _repeatOffendersStatusHtml({ phase: 'completed', filters, sourceRecordCount: stageCounts.sourceRecordCount, startedAtWall, elapsedMs });
     return;
   }
   if (noticeEl) noticeEl.style.display = 'none';
@@ -290,7 +423,96 @@ function renderRepeatOffenders(){
     ${rmPerformanceTableHtml('By Region', regionAll, false, 'No region data for the current filters/range.')}
     ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : a1tmWorst.slice(0, 10), hierarchyMissing)}
     ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : rhWorst.slice(0, 5), hierarchyMissing)}
-  </div>`;
+  </div>
+  ${_repeatOffendersDebugPanelHtml(stageCounts, hierarchyMissing)}`;
+
+  if (statusEl) statusEl.innerHTML = _repeatOffendersStatusHtml({ phase: 'completed', filters, sourceRecordCount: stageCounts.sourceRecordCount, startedAtWall, elapsedMs });
+}
+
+// The recalculation status strip — "Recalculation started", active
+// filters, source-record count, per-stage progress, and (once done) the
+// completion timestamp + time taken. Per explicit request (§11.8): "The
+// 'Recalculate' button should... Display the recalculation timestamp and
+// active filter set."
+const _REPEAT_OFFENDERS_PROGRESS_LABEL = { rm: 'RMs', region: 'Regions', a1tm: 'A1/TM managers', rh: 'RHs' };
+function _repeatOffendersStatusHtml(opts){
+  const { phase, filters, sourceRecordCount, startedAtWall, elapsedMs, stage } = opts;
+  const filterLine = `<div class="dim" style="font-size:11px; margin-top:3px;">Filters — ${esc(_repeatOffendersFilterSummaryText(filters))}</div>`;
+  const startedLine = `<div class="dim" style="font-size:10.5px;">Started ${esc(startedAtWall.toLocaleTimeString('en-IN', { hour12: false }))} IST · ${esc(sourceRecordCount)} Movement_Log source records</div>`;
+  if (phase === 'started') {
+    return `<div><b>Recalculation started…</b></div>${filterLine}${startedLine}`;
+  }
+  if (phase === 'progress') {
+    return `<div><b>Recalculating…</b> computing ${esc(_REPEAT_OFFENDERS_PROGRESS_LABEL[stage] || stage)}</div>${filterLine}${startedLine}`;
+  }
+  // completed (including the "0 RMs eligible" empty case — still a real completion, not a failure)
+  return `<div><b>Recalculation completed</b> — ${(elapsedMs / 1000).toFixed(2)}s</div>${filterLine}${startedLine}`;
+}
+
+// Validation/debug panel (§9) — collapsed by default (this is diagnostic
+// detail, not something every viewer needs open), exposing real counts
+// from every stage of the run that just completed, plus how each
+// rollup's peer baseline is actually computed — so "is Region really
+// independent of RM" is answered by what's on screen, not by trusting a
+// comment in the source.
+function _repeatOffendersDebugPanelHtml(sc, hierarchyMissing){
+  const peerRows = Object.entries(sc.stage4PeerAverages || {})
+    .map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${(v * 100).toFixed(2)}%</td></tr>`).join('');
+  const sampleRows = (sc.stage2Sample || [])
+    .map(o => `<tr><td>${esc(o.name)}</td><td>${esc(o.lead_id)}</td><td>${esc(o.dayKey)}</td><td>${esc(o.rule)}</td><td>${o.violated ? 'yes' : 'no'}</td></tr>`).join('');
+  const classRow = (label, counts) => `<tr><td>${esc(label)}</td><td class="num">${esc(counts['Below Expectations'] || 0)}</td><td class="num">${esc(counts['Watch — concentrated'] || 0)}</td><td class="num">${esc(counts['On Track'] || 0)}</td><td class="num">${esc(counts['Insufficient Data'] || 0)}</td></tr>`;
+  const cr = sc.stage6CompositeRange;
+
+  return `<details style="margin-top:16px;">
+    <summary style="cursor:pointer; font-size:12.5px; color:var(--text-faint);">Validation / debug — calculation stages</summary>
+    <div style="margin-top:10px; display:grid; gap:14px;">
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 1 — filtered source records</div>
+        <div class="dim" style="font-size:12px;">${esc(sc.sourceRecordCount)} Movement_Log snapshot rows in scope → ${esc(sc.stage1FilteredCount)} pass the active Project/Region/TL/Source/Sub-source filters (before any date/eligibility check).</div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 2 — eligible lead/day/rule observations (RM level)</div>
+        <div class="dim" style="font-size:12px; margin-bottom:4px;">${esc(sc.stage2ObservationCount)} observations reconstructed. Sample:</div>
+        <div class="section-scroll"><table><thead><tr><th>RM</th><th>Lead</th><th>Day</th><th>Rule</th><th>Violated</th></tr></thead><tbody>${sampleRows || '<tr><td colspan="5" class="empty-row">No observations.</td></tr>'}</tbody></table></div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 3 — RM aggregation</div>
+        <div class="dim" style="font-size:12px;">${esc(sc.stage3GroupCount)} distinct RMs with at least one eligible observation.</div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 4 — filtered peer averages (RM level, this filtered population only)</div>
+        <div class="section-scroll"><table><thead><tr><th>Rule</th><th style="text-align:right">Peer rate</th></tr></thead><tbody>${peerRows}</tbody></table></div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 5 — empirical-Bayes shrinkage</div>
+        <div class="dim" style="font-size:12px;">shrunkRate = n/(n+8) × rawRate + 8/(n+8) × peerRate, applied per RM per rule using the Stage 4 peer rates above — see any row's "Driven by" tooltip in the RM table for a real worked example (rawRate vs. the shown Score).</div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 6 — composite scores</div>
+        <div class="dim" style="font-size:12px;">${cr ? `min ${cr.min.toFixed(2)} · avg ${cr.avg.toFixed(2)} · max ${cr.max.toFixed(2)}, across ${esc(sc.stage3GroupCount)} RMs. Threshold = peer composite × 1.25 (not hard-coded — recomputed from Stage 4's filtered peer averages every run).` : 'No RMs to score.'}</div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 7 — classification breakdown</div>
+        <div class="section-scroll"><table><thead><tr><th>Level</th><th class="num">Below Exp.</th><th class="num">Watch</th><th class="num">On Track</th><th class="num">Insuff. Data</th></tr></thead><tbody>
+          ${classRow('RM', sc.stage7ClassificationCounts.rm)}
+          ${classRow('Region', sc.stage7ClassificationCounts.region)}
+          ${hierarchyMissing ? '' : classRow('A1/TM', sc.stage7ClassificationCounts.a1tm)}
+          ${hierarchyMissing ? '' : classRow('RH', sc.stage7ClassificationCounts.rh)}
+        </tbody></table></div>
+      </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 8 — rollup calculation method</div>
+        <div class="dim" style="font-size:12px; line-height:1.6;">
+          <b>RM</b>: own independent peer population &amp; empirical-Bayes baseline (peer = every OTHER RM in the filtered population) — ${esc(sc.stage8RollupCounts.rm)} RMs scored.<br>
+          <b>Region</b>: own independent peer population &amp; baseline (peer = every OTHER region) — NOT rolled up from RM scores — ${esc(sc.stage8RollupCounts.region)} regions scored, all shown.<br>
+          <b>A1/TM</b>: own independent peer population &amp; baseline (peer = every OTHER A1/TM) — ${hierarchyMissing ? 'unavailable (RM_Hierarchy not loaded)' : esc(sc.stage8RollupCounts.a1tm) + ' managers scored'}.<br>
+          <b>RH</b>: own independent peer population &amp; baseline (peer = every OTHER RH) — ${hierarchyMissing ? 'unavailable (RM_Hierarchy not loaded)' : esc(sc.stage8RollupCounts.rh) + ' RHs scored'}.<br>
+          All four re-run Stage 1-4 from scratch with their own grouping key — none is derived by averaging another level's already-computed scores.
+        </div>
+      </div>
+      <div class="dim" style="font-size:11px;">Worker compute time: ${sc.computeMs.toFixed(1)}ms (Stage 1-4 + all rollups, excludes structured-clone/message-passing overhead).</div>
+    </div>
+  </details>`;
 }
 
 const RM_PERF_CLASSIFICATION_CHIP_CLASS = {

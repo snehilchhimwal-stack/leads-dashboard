@@ -29,9 +29,9 @@
 // comment for the full methodology.
 //
 // Depends on js/tab-repeat-offenders.js (rmHierarchyFetchState,
-// primaryManagerForRm, rhForRm, _repeatOffendersRegionKey,
-// repeatOffendersDateKeysForRange), js/core-rm-performance.js
-// (computeRmPerformance, sortRmPerformanceByPriority, rmPerformanceDrivenBy
+// repeatOffendersDateKeysForRange, captureRepeatOffendersFilterSnapshot),
+// js/core-rm-performance.js (computeRmPerformance, rmPerfPrimaryManagerFor,
+// rmPerfRhFor, repeatOffendersRegionKey, sortRmPerformanceByPriority, rmPerformanceDrivenBy
 // — shared with the live tab so "what's driving an elevated score" and
 // "what order to list groups in" can never quietly drift apart between
 // the two surfaces), js/tab-movement.js (movementFetchState,
@@ -118,12 +118,17 @@ function _repeatOffendersPdfCurrentFilterInfo(){
 // here, only the worst performers.
 function _repeatOffendersPdfSectionTables(dateKeys){
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
+  // Frozen filter snapshot (core-rm-performance.js's passesRepeatOffenderFilters
+  // now requires one explicitly — see captureRepeatOffendersFilterSnapshot,
+  // tab-repeat-offenders.js) — captured fresh per PDF generation, same as
+  // the live tab does per render.
+  const filters = captureRepeatOffendersFilterSnapshot();
   const worst = (list) => sortRmPerformanceByPriority(filterRmPerformanceWorst(list));
   const candidates = [
-    { title: 'RMs', list: worst(computeRmPerformance(dateKeys)).slice(0, 20) },
-    { title: 'By Region', list: worst(computeRmPerformance(dateKeys, rec => _repeatOffendersRegionKey(rec))).slice(0, 15) },
-    { title: 'A1 / TM', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => primaryManagerForRm(rec.RM))).slice(0, 10) },
-    { title: 'RH', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => rhForRm(rec.RM))).slice(0, 5) },
+    { title: 'RMs', list: worst(computeRmPerformance(dateKeys, undefined, filters)).slice(0, 20) },
+    { title: 'By Region', list: worst(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters)).slice(0, 15) },
+    { title: 'A1 / TM', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 10) },
+    { title: 'RH', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 5) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }
