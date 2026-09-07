@@ -124,31 +124,32 @@ function _repeatOffendersPdfSectionTables(dateKeys){
   return candidates.filter(c => c.list.length > 0);
 }
 
-// Full ordered list of page specs: { dateLabel, title, list }.
-// - allTime (or an incomplete custom range): dateKeys is null => ONE
-//   unscoped section, dateLabel null (no per-date breakdown makes sense
-//   over unbounded history).
-// - Every other filter: broken out by INDIVIDUAL date, most recent
-//   first, so "the reader can tell which day's data they are viewing"
-//   even when the filter spans several days (Last 7 Days, This Week, or
-//   a multi-day Custom range). A date with nothing populated across all
-//   4 candidate tables is simply never added — no heading, no
-//   placeholder, exactly the same omission rule a single table gets.
+// Full ordered list of page specs: { dateLabel, title, list } — ONE
+// COMBINED report for whatever range is currently selected (Yesterday/
+// This Week/Last 7 Days/Custom/From when history began), dateLabel
+// always null. Changed 2026-09-07, explicit request: "the pdf should
+// not contain all last 7 days, but a combine report of last 7 days."
+//
+// Previously this broke a multi-day range into one SEPARATE set of
+// tables PER INDIVIDUAL DAY (up to 7 "DATE: ..." sections x 4 tables —
+// a 19-page PDF for a single Last 7 Days export), each computed from
+// just that one day's own data alone. That's a real, different, far
+// noisier calculation than what the live tab shows for the exact same
+// "Last 7 Days" selection: computeRmPerformance (core-rm-performance.js)
+// always takes the WHOLE dateKeys Set as one unit — one composite score
+// per RM built from all 7 days of observations combined, not 7 separate
+// 1-day scores — so the old per-day PDF pages could never actually match
+// what was on screen. Passing dateKeys through WHOLE, exactly once (same
+// as the allTime branch already did), makes the PDF compute the identical
+// thing the screen does for whatever range is picked — the header's own
+// "Date Range: ..." line (already printed once, see
+// _repeatOffendersPdfDateLine) is the only date context needed now, so
+// every spec's dateLabel is null (no more per-section "DATE:" headings —
+// _repeatOffendersPdfRenderPages already skips drawing one whenever
+// dateLabel is falsy).
 function _repeatOffendersPdfBuildPageSpecs(filterInfo){
-  const specs = [];
-  if (filterInfo.dateKeys === null) {
-    _repeatOffendersPdfSectionTables(null)
-      .forEach(t => specs.push({ dateLabel: null, title: t.title, list: t.list }));
-    return specs;
-  }
-  const sortedDayKeys = Array.from(filterInfo.dateKeys).sort().reverse(); // most recent first
-  sortedDayKeys.forEach(function (dayKey) {
-    const tables = _repeatOffendersPdfSectionTables(new Set([dayKey]));
-    if (!tables.length) return; // nothing populated for this date — omit entirely
-    const dateLabel = repeatOffendersFormatDate(dayKey);
-    tables.forEach(t => specs.push({ dateLabel: dateLabel, title: t.title, list: t.list }));
-  });
-  return specs;
+  return _repeatOffendersPdfSectionTables(filterInfo.dateKeys)
+    .map(t => ({ dateLabel: null, title: t.title, list: t.list }));
 }
 
 // One line describing the currently-active top-bar filters (or their
@@ -164,22 +165,26 @@ function _repeatOffendersPdfFilterSummaryLine(){
   return parts.length ? parts.join(' · ') : null;
 }
 
-// Converts one computeRmPerformance() row into the exact same 10 columns
-// the live tab's rmPerformanceTableHtml shows on screen (#, Name, Unique
-// Leads, Status, Score, Instances, Region, RMs, A1/TM, RH) — plain
-// strings for autoTable, no HTML/markup involved. Region/RMs/A1-TM/RH
-// reuse rmPerformanceHierarchyCells (core-rm-performance.js, shared with
-// the live tab) so the two surfaces can never disagree on who's actually
-// behind a given row. "Driven by" was removed from both surfaces
-// 2026-09-07 — see rmPerformanceDrivenBy's own comment (still defined,
-// just unused by either renderer now).
+// Converts one computeRmPerformance() row into the PDF's own 6 columns
+// (#, Name, Unique Leads, Score, Instances, Region) — plain strings for
+// autoTable, no HTML/markup involved. PDF-ONLY column set, explicit
+// request 2026-09-07: "remove the following from table in pdf only:
+// Status, RMs, A1/TM, RH" — the live tab KEEPS all 10 columns
+// unchanged (rmPerformanceTableHtml, tab-repeat-offenders.js); this is
+// a display-only trim for the printed report, not a change to what data
+// exists. Region still reuses rmPerformanceHierarchyCells
+// (core-rm-performance.js, shared with the live tab) for the one
+// hierarchy column that DOES stay, so it can't disagree with what the
+// live tab would show for the same row. "Driven by" was removed from
+// both surfaces 2026-09-07 — see rmPerformanceDrivenBy's own comment
+// (still defined, just unused by either renderer now).
 function _repeatOffendersPdfTableRows(list, rmHierarchyByNameLower){
   return list.map(function (r, i) {
     const score = r.composite.toFixed(2) + ' / ' + r.peerComposite.toFixed(2);
     const hc = rmPerformanceHierarchyCells(r, rmHierarchyByNameLower);
     let name = r.name;
     if (r.routingIssueDays > 0) name += '\n+' + r.routingIssueDays + ' Inactive-RM routing day(s)';
-    return [String(i + 1), name, String(r.distinctLeads), r.classification, score, String(r.totalInstances), hc.region, hc.rms, hc.a1tm, hc.rh];
+    return [String(i + 1), name, String(r.distinctLeads), score, String(r.totalInstances), hc.region];
   });
 }
 
@@ -195,7 +200,7 @@ const REPEAT_OFFENDERS_PDF_TABLE_GAP_ = 20;
 function _repeatOffendersPdfEnsureRoom(doc, y, minSpace){
   const pageH = doc.internal.pageSize.getHeight();
   if (pageH - y < minSpace) {
-    doc.addPage('a4', 'landscape');
+    doc.addPage('a4', 'portrait');
     return REPEAT_OFFENDERS_PDF_MARGIN_;
   }
   return y;
@@ -223,18 +228,17 @@ function _repeatOffendersPdfEstimateTableHeight(rowCount, compact){
 // it. A table whose row count is unusually large (beyond this app's own
 // current 20-row cap on every candidate table) drops to a smaller font
 // instead — the same "appropriate layout for a large table" strategy in
-// spirit. Orientation itself is landscape throughout (switched from
-// portrait 2026-09-07, when the table grew from 6 to 10 columns to add
-// the hierarchy/instance-count columns — portrait's ~515pt usable width
-// couldn't fit 10 columns without illegibly cramping them; landscape's
-// ~762pt can). Still uniformly ONE orientation for every page (the
-// original concern here was never mixing portrait/landscape on different
-// pages of the same document, which this preserves — addPage below also
-// requests 'landscape', not a mix).
+// spirit. Orientation: portrait (reverted 2026-09-07 — briefly landscape
+// on 2026-09-06 while this table had 10 columns/hierarchy detail; those 4
+// columns were then dropped from the PDF specifically, see
+// _repeatOffendersPdfTableRows' own comment, so the 6 remaining columns
+// fit portrait's ~515pt usable width fine again, same as before that
+// addition). Still uniformly ONE orientation for every page — addPage
+// below also requests 'portrait', not a mix.
 function _repeatOffendersPdfRenderPages(specs, filterInfo){
   const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (!jsPDFCtor) throw new Error('PDF library failed to load — check your connection and try again.');
-  const doc = new jsPDFCtor({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const doc = new jsPDFCtor({ orientation: 'portrait', unit: 'pt', format: 'a4' });
   if (typeof doc.autoTable !== 'function') throw new Error('PDF table library failed to load — check your connection and try again.');
 
   const pageW = doc.internal.pageSize.getWidth();
@@ -275,7 +279,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const methodologyNoteLines = doc.splitTextToSize(
-    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse. Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Region/RMs/A1-TM/RH show a name when this row maps to exactly one, or a count when it spans more than one (e.g. a Region row spans many RMs). Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one, shown as a note under the Name column when it applies). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
+    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse (not printed here, but still what every row is ranked by -- see the live dashboard for the full Status/RMs/A1-TM/RH breakdown per row). Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Region shows the region this row\'s leads are actually concentrated in. A note under the Name column flags Inactive-RM Lead Added days when they apply (tracked but never scored -- a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -285,8 +289,12 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, pageW - REPEAT_OFFENDERS_PDF_MARGIN_, y);
   y += 22;
 
-  let currentDateLabel; // undefined sentinel — first spec always draws its own heading (or none, if dateLabel is null)
-  let firstSection = true;
+  // No per-section "DATE: ..." headings any more (2026-09-07 — every spec
+  // is now one combined report for the whole selected range, dateLabel
+  // always null; see _repeatOffendersPdfBuildPageSpecs' own comment). The
+  // single "Date Range: ..." line already printed once in the document
+  // header (_repeatOffendersPdfDateLine) is the only date context this
+  // report needs now.
   const pageUsableH = doc.internal.pageSize.getHeight() - REPEAT_OFFENDERS_PDF_MARGIN_ * 2;
 
   specs.forEach(function (spec) {
@@ -298,33 +306,13 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     // it from being SPLIT, it just runs past the estimate in that rare case.
     const estTableH = Math.min(_repeatOffendersPdfEstimateTableHeight(rows.length, compact), pageUsableH);
     const TITLE_H = 26;
-    const isNewDate = spec.dateLabel !== currentDateLabel;
-    const DATE_HEADING_H = isNewDate && spec.dateLabel ? 32 : 0;
 
-    // ONE combined room check covering date heading (if this table starts
-    // a new date section) + table title + the table's own estimated
-    // height — so a heading/title is never drawn on a page that can't
-    // also fit at least the start of its table (the exact bug a fixed,
-    // too-small minSpace guess produced: "By Region" printed at the
-    // bottom of a page with the actual table pushed to the next one).
-    y = _repeatOffendersPdfEnsureRoom(doc, y, DATE_HEADING_H + TITLE_H + estTableH);
-
-    if (isNewDate) {
-      currentDateLabel = spec.dateLabel;
-      if (!firstSection) y += 8; // small extra breathing room between date sections
-      if (spec.dateLabel) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(55, 59, 68);
-        doc.text('DATE: ' + spec.dateLabel.toUpperCase(), REPEAT_OFFENDERS_PDF_MARGIN_, y);
-        y += 8;
-        doc.setDrawColor(230, 232, 236);
-        doc.setLineWidth(0.75);
-        doc.line(REPEAT_OFFENDERS_PDF_MARGIN_, y, pageW - REPEAT_OFFENDERS_PDF_MARGIN_, y);
-        y += 16;
-      }
-    }
-    firstSection = false;
+    // Room check covering the table's own title + its estimated height —
+    // so a title is never drawn on a page that can't also fit at least
+    // the start of its table (the exact bug a fixed, too-small minSpace
+    // guess produced: "By Region" printed at the bottom of a page with
+    // the actual table pushed to the next one).
+    y = _repeatOffendersPdfEnsureRoom(doc, y, TITLE_H + estTableH);
 
     // Table title
     doc.setFont('helvetica', 'bold');
@@ -334,7 +322,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     y += 12;
     doc.autoTable({
       startY: y,
-      head: [['#', 'Name', 'Unique Leads', 'Status', 'Score (vs peer)', 'Instances', 'Region', 'RMs', 'A1/TM', 'RH']],
+      head: [['#', 'Name', 'Unique Leads', 'Score (vs peer)', 'Instances', 'Region']],
       body: rows,
       theme: 'grid',
       styles: {
@@ -343,23 +331,18 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
       },
       headStyles: { fillColor: [23, 27, 33], textColor: [235, 237, 240], fontStyle: 'bold', fontSize: compact ? 7 : 8.5 },
       alternateRowStyles: { fillColor: [246, 247, 249] },
-      // 10 columns now (was 6) — widths tuned for landscape A4's ~762pt
-      // usable width (see _repeatOffendersPdfRenderPages' own comment on
-      // why this switched from portrait). Region/RMs/A1-TM/RH get 'auto'
-      // since their content length varies a lot (a single name vs. a
-      // short "N managers" count) and autoTable distributes remaining
-      // width proportionally among 'auto' columns.
+      // 6 columns (Status/RMs/A1-TM/RH dropped 2026-09-07, PDF-only) —
+      // widths tuned for portrait A4's ~515pt usable width, back to what
+      // this table used before the 2026-09-06 hierarchy-column addition
+      // (see _repeatOffendersPdfRenderPages' own comment on the
+      // portrait/landscape switch).
       columnStyles: {
-        0: { cellWidth: 20, halign: 'right' },
-        1: { cellWidth: 105 },
-        2: { cellWidth: 60, halign: 'right' },
-        3: { cellWidth: 90 },
+        0: { cellWidth: 24, halign: 'right' },
+        1: { cellWidth: 140 },
+        2: { cellWidth: 65, halign: 'right' },
+        3: { cellWidth: 80, halign: 'right' },
         4: { cellWidth: 65, halign: 'right' },
-        5: { cellWidth: 55, halign: 'right' },
-        6: { cellWidth: 'auto' },
-        7: { cellWidth: 'auto' },
-        8: { cellWidth: 'auto' },
-        9: { cellWidth: 'auto' },
+        5: { cellWidth: 'auto' },
       },
       margin: { left: REPEAT_OFFENDERS_PDF_MARGIN_, right: REPEAT_OFFENDERS_PDF_MARGIN_, bottom: REPEAT_OFFENDERS_PDF_MARGIN_ },
       pageBreak: 'avoid',    // the whole table moves to a fresh page if it doesn't fit — never split mid-table

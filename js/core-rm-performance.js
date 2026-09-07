@@ -224,26 +224,41 @@ function repeatOffendersRegionKey(rec){
   return mainRegionFor(raw) || raw || 'Unassigned';
 }
 
-// Names that don't have ANY resolvable RM_Hierarchy row (confirmed live,
-// 2026-09-07, by querying RM_Hierarchy for their emails directly -- zero
-// matches under any variant) but are known leadership, not individual
-// RMs with a real book of leads -- explicit request. Exact, CASE-
-// SENSITIVE strings as they actually appear in Movement_Log's RM column
-// (verified live against real snapshot data, not guessed) -- a name
-// added here that doesn't exactly match production's spelling silently
-// does nothing, so re-verify the real string before changing this list.
-//   'Ashish Kukreja'      -- ashish.kukreja@homesfy.in
-//   'saurabh Mishra'      -- saurabh.mishra@homesfy.in
-//   'Mukesh Mishra Admin' -- an admin-login alias of the real Cluster
-//                            Head "Mukesh Mishra" (who IS excluded via
-//                            the role-based path below, since that name
-//                            DOES resolve) -- found while verifying this
-//                            exclusion live, not explicitly named in the
-//                            request, but clearly the same leadership
-//                            person under a second login.
+// Names excluded by exact string, not by RM_Hierarchy role -- either
+// because they have NO resolvable row at all (confirmed live by querying
+// RM_Hierarchy for their emails directly -- zero matches under any
+// variant), or because their row DOES resolve but under a role string
+// that isn't 'Cluster Head' even though they're known leadership (so the
+// role-based path below can't catch them either). Exact, CASE-SENSITIVE
+// strings as they actually appear in Movement_Log's RM column (verified
+// live against real snapshot data, not guessed) -- a name added here
+// that doesn't exactly match production's spelling silently does
+// nothing, so re-verify the real string before changing this list.
+//   'Ashish Kukreja'       -- ashish.kukreja@homesfy.in; no RM_Hierarchy row at all
+//   'saurabh Mishra'       -- saurabh.mishra@homesfy.in; no RM_Hierarchy row at all
+//   'Mukesh Mishra Admin'  -- an admin-login alias of the real Cluster
+//                             Head "Mukesh Mishra" (who IS excluded via
+//                             the role-based path below, since THAT name
+//                             DOES resolve) -- found while verifying this
+//                             exclusion live, not explicitly named in the
+//                             request, but clearly the same leadership
+//                             person under a second login.
+//   'Sourabh Sareen'       -- explicit request, 2026-09-07: "Sourabh
+//                             Sareen is also ch". DOES have an
+//                             RM_Hierarchy row (confirmed live), but
+//                             role: 'City Lead', not 'Cluster Head' --
+//                             the role-based path below genuinely can't
+//                             reach him.
+//   'Sourabh Sareen Pnl'   -- same admin-alias pattern as "Mukesh Mishra
+//                             Admin" -- also has its own RM_Hierarchy row
+//                             (role: 'City Lead' too), found live while
+//                             verifying "Sourabh Sareen" above, not
+//                             explicitly named in the request.
 const RM_PERF_LEADERSHIP_NAME_EXCLUSIONS = new Set([
   'Ashish Kukreja',
   'saurabh Mishra',
+  'Sourabh Sareen',
+  'Sourabh Sareen Pnl',
   'Mukesh Mishra Admin',
 ]);
 
