@@ -1229,7 +1229,155 @@ text should say 5, not 10) rather than left ambiguous.
 
 ---
 
-## Parts 5-7 — not yet run
+## Part 5 of 7 — Metrics, Filters, State + Edge Cases
+
+*(covers prompt sections 7 "KPI/calculation audit", 8 "filters/search/
+sort/pagination", 9 "state management", 11 "edge cases")*
+
+### 5.1 KPI audit — the Overview tab's KPI strip
+
+All 6 tiles are built in one function (`js/overview-distribution-people-ops.js:159-259`,
+inside `renderAll()`) — read directly, not inferred:
+
+| Tile | Formula | Source array | Filter-bar respecting? |
+|---|---|---|---|
+| Total Leads | `countCollatedAmong(leads)` — every customer | `leads` (customer-level) | Yes |
+| Opportunity+ | count where `l.oppOrAbove` | `leads` (customer-level) | Yes |
+| Behind on Today's Calls | count where `l.underCalledToday` | **`issueLeads`** (copy-level) | Yes |
+| Not Connected in 10 min | count where `l.firstContactBreach` | **`issueLeads`** (copy-level) | Yes |
+| No Attempts Yet | count where `l.isOpenLead && l.call_attempts===0` | `leads` (customer-level) | Yes |
+| Median 1st Contact | median/p90 of `businessMinsToConnect` across `leads` | `leads` (customer-level) | Yes |
+
+**Real finding, confirmed intentional (not a bug) but worth stating
+plainly**: the KPI strip silently mixes two different counting bases —
+4 tiles count distinct **customers**, 2 tiles count distinct **issue
+instances** (a customer whose two RM copies are each independently
+flagged counts as 2 in those two tiles, 1 everywhere else). The code
+comment explains why (`js/overview-distribution-people-ops.js:188-191`
+— matching the section badges below the strip, not an oversight), but
+nothing in the UI itself tells a viewer that "Behind on Today's Calls"
+and "Not Connected in 10 min" aren't directly comparable to the other 4
+numbers on the same strip. All 6 tiles ARE correctly filter-bar
+respecting — both `leads` and `issueLeads` are rebuilt from
+`allParsedLeads` on every `applyFiltersAndRender()` pass (Part 2 §3), so
+there's no dataset-staleness gap between the KPI strip and whichever
+filters are currently active.
+
+**Other metrics found across tabs, each independently sourced and
+verified filter-respecting** (all read from `leads`/`issueLeads`/
+`movementSnapshots`, never a separate unfiltered copy):
+- `computeRMScoreRows()` (overview file): per-RM SLA score =
+  `(open − breached) / open × 100`, computed only over open leads.
+- Repeat Offenders' RM Performance composite score (Part 3 §3.6): sourced
+  from `movementSnapshots`, NOT `leads` — this table does **not** honor
+  the top-bar filter bar the same way (confirmed in Part 3: its own
+  `passesRepeatOffenderFilters` is deliberately a different, narrower
+  predicate than `passesMovementFilters`, and RM Timeline's own scoping
+  function explicitly excludes the date-range filter — see Part 2 §5 and
+  Part 3 §3.7 for the documented reasons). Worth restating here since
+  prompt section 8 explicitly asks "whether filters affect KPIs" — for
+  this one table, the answer is "partially, by deliberate, documented
+  design, not the same as the rest of the dashboard."
+- Tracking tab's 0–48h Cohort Outcome / Daily Cohort by Region /
+  Week-over-Week Comparison: all sourced from `movementSnapshots`
+  (Part 2 §1), each with its own cohort-eligibility windowing — not
+  directly filtered by the top filter bar at all (they're time-windowed,
+  not filter-state-driven), which is a structurally different, but
+  consistent and intentional, kind of scoping than the rest of the app.
+
+### 5.2 Filters, search, sort, pagination — traced, and 3 of the 4 don't exist as the prompt assumes
+
+**Filters**: entirely client-side, in-memory (Part 2 §3's diagram). One
+predicate closure (`passesFilters`, `core-filters.js:73-86`) checks
+Project (exact match), Region (via `effectiveRegion`, not raw region —
+confirmed Part 2), TL (exact), Source (case-insensitive), Bucket (exact),
+and an inclusive date range on `lead_assigned_at`. Applied identically to
+build both `leads` and `issueLeads` in the same pass — **no dataset
+divergence between what the table shows and what the KPI strip counts**.
+Reset (`Clear Filters`) is not a separate code path — it empties every
+`Set` in `filterState` and re-runs the identical pipeline (Part 2 §3).
+
+**Search**: **does not exist as a lead-level feature.** The only "search"
+in the codebase (`core-filters.js:313-386`) is a text box inside each
+multi-select dropdown's own panel, which narrows which **checkbox
+options** are visible in that one dropdown (e.g. typing "pun" in the
+Region dropdown to find "Pune" faster) — it never touches
+`allParsedLeads`/`leads`/`issueLeads` and has no interaction with the
+real filter predicate at all. There is nothing to "combine with filters"
+in the sense prompt section 8 asks about, because it isn't a dataset
+search.
+
+**Sort**: **no user-facing sort control exists anywhere in the dashboard.**
+Every `.sort()` call found (grepped across the whole `js/` tree) is
+internal and hardcoded inside a specific render function — e.g. stage/
+source breakdowns sorted by count descending, region/TL/project tables
+sorted by total descending, Repeat Offenders sorted by score. None of
+these are user-clickable column headers; a viewer cannot re-sort any
+table in this app.
+
+**Pagination**: **does not exist.** Every table/list renders its complete
+filtered result set in one pass. The only size-bounding mechanism is
+`MAX_CARDS=200` (`js/core-ui.js`) on the card-based issue lists — a hard
+truncation with a "showing 200 of N" notice, not real pagination (there's
+no way to see cards 201+ without narrowing the filter).
+
+### 5.3 State management inventory
+
+Every module-level `let`/`const` (not a pure config constant) that holds
+real mutable state, compiled from direct reads across Parts 1-4:
+
+| State | Declared | Written by | Read by | Staleness risk |
+|---|---|---|---|---|
+| `allParsedLeads` | `core-sheets-fetch.js` | only `fetchAndRender()` | `_applyFiltersAndRenderImpl`, RM Timeline, Overnight cohort | Stale until next real fetch — no auto-refresh on a timer; a long-open tab can silently drift from the live Sheet until the user clicks Refresh or takes a write action that happens to re-fetch |
+| `leads` / `issueLeads` | `core-sheets-fetch.js` | only `_applyFiltersAndRenderImpl` | nearly every render function | Rebuilt on every filter pass — cannot go stale independently of `allParsedLeads` |
+| `filterState` | `core-sheets-fetch.js` | `buildMultiSelect`'s change handlers | `_applyFiltersAndRenderImpl` | Lives for the whole session; nothing ever resets it except the user's own Clear Filters click |
+| `gateAccessToken`/`gateTokenExpiresAt`/`gateUserEmail` | `core-auth.js` | only `core-auth.js` (OAuth callback) | `core-sheets-fetch.js`, `core-filters.js` (bare cross-file reads) | Checked via `gateTokenValid()` (5s buffer) before every real fetch/write — not stale-by-surprise |
+| `gmailAccessToken`/`gmailTokenExpiresAt` | `reports-gmail.js` | only `reports-gmail.js` | `reports-gmail.js` only | Same pattern, separate token, never persisted (in-memory only, by design) |
+| `movementSnapshots`/`movementFetchState`/`_currentSheetId` | `tab-movement.js` | `fetchMovementLog()`, `browserSnapshotOpenLeads()` | Stalled Leads, RM Stall, Time-to-Opportunity, Repeat Offenders, RM Timeline, Tracking, `sheets-writeback.js` (needs `_currentSheetId` for every write) | Refreshed explicitly after every write that touches Movement_Log (Part 2 §4) — no independent staleness path found |
+| `_generateCycleOwner` | `sheets-writeback.js` | `tryClaimGenerateCycle`/`releaseGenerateCycle` | both Generate flows | A `finally` block releases it on every exit path (confirmed in the code read for §5.4 below) — no observed leak path |
+| `_followupWaitCancelled` | `sheets-writeback.js` | per-`cancelBtnId` | `waitForAllFollowups` | Keyed Map, confirmed fixed from an earlier shared-boolean bug (Part 1) |
+| `_renderNow` | `core-lead-model.js` | `_applyFiltersAndRenderImpl` (start of every pass) | `enrichLead` and everything it calls | One consistent clock per render pass, by design — never mid-pass drift |
+| `_todayCallBaselineByKey`/`_lastSnapshotByKey` | `core-lead-model.js` | `_applyFiltersAndRenderImpl` | `enrichLead`'s `attemptsToday` | Rebuilt every filter pass from `movementSnapshots` — as fresh as the last Movement_Log fetch, not staler |
+| `_actionLogCache`/`_inferOutcomeCache`/`_parseDateCache` | `core-outcome-engine.js`/`core-lead-model.js` | memoized on first use | many | `_actionLogCache` explicitly cleared on every `fetchAndRender()` (confirmed Part 1); `_inferOutcomeCache`/`_parseDateCache` are pure functions of static rules + input text, so never need clearing — confirmed safe, not just unclear |
+| `_logLeadRegistry` | `core-ui.js` | `toggleActionLog` | `toggleActionLog` | Cleared at the top of every `renderAll()` (confirmed Part 2/3) — the "unbounded growth" concern from an earlier audit plan does not reproduce in current code |
+| `_refreshMorningBriefOnNextRender` | `core-filters.js` | set `true` on real refresh/Generate checkpoints, `false` after `renderMorningBrief()` runs once | `renderAll()`'s own gate | Working as designed — Morning Brief is deliberately NOT live |
+| `window._regionReports` / `_allReports` | `reports-ui.js` / `reports-build.js` | Generate flows | reports-ui.js, reports-gmail.js | `_allReports` is a bare cross-file `let`, not `window.`-qualified (Part 2 finding) — functionally fine today, structurally more fragile than its sibling |
+| `window._overnightRegionReports` | `tab-movement.js` | `renderOvernightRegionReports()` | same file's send buttons | Consistently `window.`-qualified — no shadow-property risk found (Part 1) |
+
+**No instance of the `window.x=` vs bare `let x=` shadow-property pitfall
+was found causing an actual bug** — every module-level state variable
+audited across all 4 prior parts is either a consistent bare `let`
+(read/written by name across files, the app's normal pattern) or a
+consistent `window.x` (2 confirmed cases, both used correctly on both
+ends). `_allReports` is the one spot flagged as stylistically
+inconsistent with its neighbor, not as a live bug.
+
+### 5.4 Edge cases — walked against the real code, not assumed
+
+| Edge case | Trigger | Code path | Result | User sees an error? | Fix needed? |
+|---|---|---|---|---|---|
+| Zero leads (filters narrow to nothing) | Filter combination matches 0 leads | `leads=[]`, `issueLeads=[]`; `medianOfSorted`/`percentileOfSorted` both explicitly `return null` on an empty array (`js/overview-distribution-people-ops.js:470-479`) | KPI strip shows "—" for Median 1st Contact, "0" elsewhere; tables render empty | No error — clean empty state | None needed, already correct |
+| Failed Sheets API call (bad Sheet ID, no access, bad tab name, malformed data) | Initial connect/refresh | `fetchAndRender()`'s `catch` block (`js/core-fetch-and-render.js:637-651`) | **6 distinct, specific user-facing messages**: ACCESS_DENIED (with the signed-in email named), sheet-not-found, tab-not-found, no-data, column-mismatch (includes a literal index:value debug dump of row 2), generic network failure | Yes, always, with actionable next steps | None needed — this is genuinely thorough |
+| OAuth token expiry mid-write | Token expires between page load and a write action (Snapshot, Generate, etc.) | `pushLeadsToFollowups`/`browserSnapshotOpenLeads` both call `gateTokenValid()` first and `await gateSignIn()` if expired, before attempting the write (confirmed Part 2) | Re-auth popup, then the write proceeds normally | Yes, a status line ("Re-signing in…") | None needed |
+| 🟡 **Concurrent snapshot captures (double-click "Snapshot Now")** | User clicks the button twice quickly, or two people have the dashboard open and both click near-simultaneously | `initMovementUI()`'s click handler (`js/tab-movement.js:1289-1290`) calls `browserSnapshotOpenLeads()` directly — **no `btn.disabled` guard, no reentrancy flag, no mutex of any kind** | Two overlapping `appendSheetRows(Movement_Log, ...)` calls can both run to completion, writing two near-duplicate snapshot batches (and two `SLA_History` entries) for what is effectively the same moment | No — nothing warns the user, both calls "succeed" | **Yes** — add the same `btn.disabled=true/false` guard `renderOvernightRegionReports()` already uses for its own Generate button (`js/tab-movement.js:1197,1221`), a proven pattern already in this exact file |
+| Empty filter/search results | A filter combination (or a dropdown search term) matches nothing | Same as "zero leads" for the filter case; the dropdown search just shows an empty checkbox list (`core-filters.js`'s `renderOptions`) | Clean empty states in both cases | No error | None needed |
+| Rapid filter changes | User toggles several checkboxes quickly | `applyFiltersAndRender()`'s `_isApplyingFilters` reentrancy guard (`core-filters.js:11,39`) — a second call while one is in flight is a silent no-op | Only the LAST completed pass's filter state is what eventually renders — a click during an in-flight pass is dropped, not queued | No error, no visible sign a click was dropped | 🟡 Minor: a dropped click during a fast double-toggle isn't re-applied automatically — the user has to notice the checkbox state and the rendered result don't match and interact again. Low real-world impact (the overlay/UI is briefly blocked during the pass anyway), but worth a note for Part 6. |
+| Concurrent Generate flows (Operations vs Overnight) | Both triggered close together | `tryClaimGenerateCycle`/`releaseGenerateCycle` mutex (Part 3 §3.8) | Second flow is refused with a clear status message naming which flow currently owns the cycle | Yes, explicit | None needed on the client side (the cross-runtime gap from Part 3 §3.8 — the backend's own independent `Lead_Followups` polling isn't covered by this mutex — remains open, carried to Part 6) |
+
+### 5.5 Open items carried into later parts
+
+- §5.4's unguarded concurrent-snapshot gap — **Part 6**, ranked finding
+  (likely MEDIUM — no data corruption, just duplicate rows in an
+  already-pruned, retention-bounded log).
+- §5.1's KPI-strip dataset-mixing (customer-level vs issue-level tiles,
+  undocumented in the UI itself) — **Part 6**, likely LOW/MEDIUM
+  (correct by design, but a real "could confuse a viewer" finding).
+- §5.4's dropped-click-during-rapid-filter-changes — **Part 6**, likely
+  LOW.
+
+---
+
+## Parts 6-7 — not yet run
 
 See the To-Do Dashboard's research project for the full task sequence and
 what each remaining part covers.
