@@ -31,7 +31,8 @@
 // Depends on js/tab-repeat-offenders.js (rmHierarchyFetchState,
 // repeatOffendersDateKeysForRange, captureRepeatOffendersFilterSnapshot),
 // js/core-rm-performance.js (computeRmPerformance, rmPerfPrimaryManagerFor,
-// rmPerfRhFor, repeatOffendersRegionKey, sortRmPerformanceByPriority, rmPerformanceDrivenBy
+// rmPerfRhFor, repeatOffendersRegionKey, filterRmPerformanceRankable,
+// sortRmPerformanceByScore, rmPerformanceDrivenBy
 // — shared with the live tab so "what's driving an elevated score" and
 // "what order to list groups in" can never quietly drift apart between
 // the two surfaces), js/tab-movement.js (movementFetchState,
@@ -98,24 +99,19 @@ function _repeatOffendersPdfCurrentFilterInfo(){
 }
 
 // One table candidate for a date/section: { title, list } (the same
-// `list` shape computeRmPerformance() returns, already sorted worst-first
-// by sortRmPerformanceByPriority and capped — same 4 groupings, same caps,
-// as the live tab's own rmPerformanceTableHtml calls, tab-repeat-offenders.js).
-// Filters out empty candidates and the two hierarchy-dependent rollups
-// when RM_Hierarchy isn't loaded — the live tab would print a "could not
-// be read" placeholder row instead, which isn't real data worth a PDF page.
-// "Below Expectations only" for all 4 tables, including Region — this is
-// a DELIBERATE divergence from the live tab as of 2026-09-06, not a
-// drift bug: the live tab's By Region table now shows every region
-// ranked by score (sortRmPerformanceByScore, see tab-repeat-offenders.js's
-// renderRepeatOffenders) since it's a glance-view where the full spread
-// is useful. This PDF is a printed action list instead — a period with
-// no flagged regions should print nothing for Region (and, if nothing
-// else is flagged either, correctly report "nothing to export" below),
-// not an always-populated 11-row table of mostly-fine regions. On
-// Track / Watch — concentrated / Insufficient Data are still computed
-// everywhere (the peer average needs the whole group) but never printed
-// here, only the worst performers.
+// `list` shape computeRmPerformance() returns). Filters out empty
+// candidates and the two hierarchy-dependent rollups when RM_Hierarchy
+// isn't loaded — the live tab would print a "could not be read"
+// placeholder row instead, which isn't real data worth a PDF page.
+//
+// 2026-09-07 (explicit request — "same for pdf download"): matches the
+// live tab exactly now, no divergence. Worst N by raw score REGARDLESS
+// of classification (rankFor below) — RM 20 / A1-TM 10 / RH 5 / Region
+// ALL, uncapped — except Insufficient Data is never shown in any of the
+// 4, even to pad out a short list. filterRmPerformanceRankable +
+// sortRmPerformanceByScore (both core-rm-performance.js) are the SAME
+// functions tab-repeat-offenders.js's renderRepeatOffenders calls, so the
+// two can't quietly drift apart on what counts as "worst".
 function _repeatOffendersPdfSectionTables(dateKeys){
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
   // Frozen filter snapshot (core-rm-performance.js's passesRepeatOffenderFilters
@@ -123,12 +119,12 @@ function _repeatOffendersPdfSectionTables(dateKeys){
   // tab-repeat-offenders.js) — captured fresh per PDF generation, same as
   // the live tab does per render.
   const filters = captureRepeatOffendersFilterSnapshot();
-  const worst = (list) => sortRmPerformanceByPriority(filterRmPerformanceWorst(list));
+  const rankFor = (list) => sortRmPerformanceByScore(filterRmPerformanceRankable(list));
   const candidates = [
-    { title: 'RMs', list: worst(computeRmPerformance(dateKeys, undefined, filters)).slice(0, 20) },
-    { title: 'By Region', list: worst(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters)).slice(0, 15) },
-    { title: 'A1 / TM', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 10) },
-    { title: 'RH', list: hierarchyMissing ? [] : worst(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 5) },
+    { title: 'RMs — worst 20', list: rankFor(computeRmPerformance(dateKeys, undefined, filters)).slice(0, 20) },
+    { title: 'By Region — worst first, all shown', list: rankFor(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters)) },
+    { title: 'A1 / TM — worst 10', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 10) },
+    { title: 'RH — worst 5', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 5) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }
@@ -278,7 +274,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const methodologyNoteLines = doc.splitTextToSize(
-    'Every table below shows Below Expectations rows ONLY (elevated composite spread across the book — a real pattern, not a couple of stuck leads) -- On Track, Watch — concentrated, and Insufficient Data are computed the same way (the peer average needs the whole group) but deliberately not printed here. Worst first, by Score. A table with no rows is good news, not missing data. Workload = distinct leads eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward — higher is worse. Driven by names the rule(s) actually pushing the score up. Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days — a Custom range or "From when history began" reaching further back can undercount.',
+    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Workload = distinct leads eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse. Driven by names the rule(s) actually pushing an elevated score up (blank for an On Track row). Inactive-RM Lead Added is tracked but never scored (a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -409,11 +405,14 @@ async function downloadRepeatOffendersPdf(){
     if (!specs.length) {
       // Movement_Log data existing was already confirmed above (the
       // movementFetchState/movementSnapshots.length gate at the top of
-      // this function), so an empty specs list here means every group is
-      // On Track/Watch/Insufficient Data for the selected period — no one
-      // is classified Below Expectations — not that nothing could be
-      // computed.
-      if (statusEl) { statusEl.textContent = 'No one is classified Below Expectations for the selected period — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
+      // this function), so an empty specs list here means every RM/Region/
+      // A1-TM/RH group is Insufficient Data (or there are none at all) for
+      // every date in range — not that nothing could be computed. Since
+      // 2026-09-07, the tables print worst-N regardless of classification,
+      // so this is now a rarer case than the old "nobody's Below
+      // Expectations" gate — it only fires when there's genuinely too
+      // little evidence anywhere to rank.
+      if (statusEl) { statusEl.textContent = 'No RM/region/manager has enough eligible data to rank for the selected period — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
       return;
     }
     const doc = _repeatOffendersPdfRenderPages(specs, filterInfo);

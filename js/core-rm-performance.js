@@ -530,32 +530,41 @@ function sortRmPerformanceByPriority(list){
 }
 
 // Pure score ranking, no classification-tier grouping and no filtering —
-// added 2026-09-06 for the Region rollup specifically, per explicit
-// request: "for region show all just according to the score, with worst
-// region being first." Unlike sortRmPerformanceByPriority (which puts
-// every Below Expectations row ahead of every On Track row regardless of
-// raw score), this is a flat sort by composite alone — worst score first,
-// full stop, no other row hidden or reordered. Deliberately not used for
-// RM/A1-TM/RH, which stay "top defaulters only" (filterRmPerformanceWorst)
-// per the 2026-09-04 request that introduced that filter — Region is
-// small enough (~11 canonical regions) to just show the whole ranked list
-// at a glance instead of hiding all but the worst.
+// added 2026-09-06 for the Region rollup, then (2026-09-07) extended to
+// every table's display order — see filterRmPerformanceRankable just
+// below for the current "who's shown" rule per table. Unlike
+// sortRmPerformanceByPriority (which puts every Below Expectations row
+// ahead of every On Track row regardless of raw score), this is a flat
+// sort by composite alone — worst score first, full stop, no other row
+// reordered.
 function sortRmPerformanceByScore(list){
   return list.slice().sort((a, b) => b.composite - a.composite);
 }
 
-// "Below Expectations only" view, added 2026-09-04 per explicit request:
-// "I want below expectation only, and those which are worst so that i can
-// focus on them" — On Track, Watch — concentrated, AND Insufficient Data
-// are all DROPPED entirely, not just de-emphasized (the user explicitly
-// declined including Watch — concentrated too, despite it also being a
-// real, actionable finding — "i only want to weed out the worst
-// performers"). Shared between the live tab and the PDF export for the
-// same reason sortRmPerformanceByPriority/rmPerformanceDrivenBy are — one
-// filter, not two copies that could drift. Callers should still run the
-// result through sortRmPerformanceByPriority (worst-first by composite —
-// the tier comparison becomes a no-op once every row shares one
-// classification, so it degrades cleanly to a pure composite sort).
+// "Below Expectations only", added 2026-09-04, then NARROWED for display
+// purposes on 2026-09-07 (see filterRmPerformanceRankable below, now the
+// one both renderers actually build their tables from) — kept here
+// because it's still the right definition of a genuine, actionable
+// violation on its own: used for the RM count badge
+// (renderRepeatOffenders) and anything else that needs to know "how many
+// are ACTUALLY below expectations", as opposed to "how many rows does the
+// table show".
 function filterRmPerformanceWorst(list){
   return list.filter(r => r.classification === 'Below Expectations');
+}
+
+// The actual display filter for all 4 tables (RM/Region/A1-TM/RH), live
+// tab AND PDF export, as of 2026-09-07 — explicit request: show the worst
+// N performers by score REGARDLESS of classification (a merely "On
+// Track" row can still be shown, to fill out the ranked list, once
+// there's fewer than N genuine Below Expectations rows), except NEVER an
+// "Insufficient Data" row, even to pad out the count — too little
+// evidence to rank at all, so it's excluded rather than shown out of
+// context next to real scores. This supersedes filterRmPerformanceWorst
+// as the display filter (that function is now used only for the genuine
+// violation COUNT, not for what the table shows) — callers should run the
+// result through sortRmPerformanceByScore, then slice to the table's own
+// cap (20 for RM, 10 for A1-TM, 5 for RH, uncapped for Region).
+function filterRmPerformanceRankable(list){
+  return list.filter(r => r.classification !== 'Insufficient Data');
 }

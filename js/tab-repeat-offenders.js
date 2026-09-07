@@ -4,11 +4,12 @@
 // to rank RMs/Regions/A1-TM/RH by a workload-normalized "RM Performance"
 // methodology — see that file's own header comment for the full
 // reconstruction/shrinkage/classification writeup, and HANDOVER.md §9.7
-// for the redesign history. RM/A1-TM/RH tables show Below Expectations
-// rows only, worst first (filterRmPerformanceWorst/sortRmPerformanceByPriority,
-// core-rm-performance.js). By Region is the one exception (2026-09-06):
-// ALL regions, ranked purely by composite score, worst first
-// (sortRmPerformanceByScore) — see renderRepeatOffenders' own comment for why.
+// for the redesign history. All 4 tables (RM/A1-TM/RH/Region) show the
+// worst performers first by raw score, regardless of classification,
+// excluding only Insufficient Data (filterRmPerformanceRankable +
+// sortRmPerformanceByScore, core-rm-performance.js) — RM capped at 20,
+// A1-TM at 10, RH at 5, Region uncapped (all shown) — see
+// renderRepeatOffenders' own comment for the full 2026-09-07 rationale.
 //
 // NOT "Daily_RM_Issues" — that was this section's data source before the
 // 2026-09-04 redesign, and fetching it (fetchDailyRmIssues) was removed
@@ -394,35 +395,33 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
   }
   if (noticeEl) noticeEl.style.display = 'none';
 
-  // "Below Expectations only" — per explicit request, every table drops
-  // On Track / Watch — concentrated / Insufficient Data entirely, showing
-  // only the worst performers to focus on. filterRmPerformanceWorst +
-  // sortRmPerformanceByPriority (both core-rm-performance.js) are shared
-  // with the PDF export — see their own comments for why.
-  const rmWorst = sortRmPerformanceByPriority(filterRmPerformanceWorst(rmFull));
-  const a1tmWorst = hierarchyMissing ? [] : sortRmPerformanceByPriority(filterRmPerformanceWorst(a1tmFull));
-  const rhWorst = hierarchyMissing ? [] : sortRmPerformanceByPriority(filterRmPerformanceWorst(rhFull));
+  // 2026-09-07 (explicit request, supersedes the 2026-09-04/09-06
+  // designs): all 4 tables now show the worst N by score, REGARDLESS of
+  // classification, EXCEPT Insufficient Data is never shown in any of
+  // them, even to pad out a short list — filterRmPerformanceRankable +
+  // sortRmPerformanceByScore (both core-rm-performance.js), shared with
+  // the PDF export so the two can't drift. The genuine "N below
+  // expectations" COUNT (the badge below) still means what it always
+  // did — filterRmPerformanceWorst, strict Below Expectations only — it's
+  // only the TABLE CONTENTS that now show more than just that count when
+  // there are fewer than N real violations.
+  const rmRanked = sortRmPerformanceByScore(filterRmPerformanceRankable(rmFull));
+  const a1tmRanked = hierarchyMissing ? [] : sortRmPerformanceByScore(filterRmPerformanceRankable(a1tmFull));
+  const rhRanked = hierarchyMissing ? [] : sortRmPerformanceByScore(filterRmPerformanceRankable(rhFull));
+  // Region: same rankable filter, but uncapped — "show all" was the
+  // explicit 2026-09-06 request, still true here, just now also
+  // excluding Insufficient Data rows per the newer request.
+  const regionRanked = sortRmPerformanceByScore(filterRmPerformanceRankable(regionFull));
 
-  // Region is the one exception (2026-09-06, explicit request): ALL
-  // regions, not just the flagged ones, ranked purely by composite score
-  // (sortRmPerformanceByScore, core-rm-performance.js) — worst first, no
-  // classification-tier grouping and nothing hidden. Small enough a list
-  // (~11 canonical regions) that seeing the full spread is more useful
-  // here than hiding everything but the worst, unlike the RM/A1-TM/RH
-  // lists above which stay "top defaulters only" by design.
-  const regionAll = sortRmPerformanceByScore(regionFull);
+  const rmBelowCount = filterRmPerformanceWorst(rmFull).length;
+  if (countEl) countEl.textContent = `${rmBelowCount} RM${rmBelowCount === 1 ? '' : 's'} below expectations`;
 
-  if (countEl) countEl.textContent = `${rmWorst.length} RM${rmWorst.length === 1 ? '' : 's'} below expectations`;
-
-  // Region needs no hierarchy lookup — it's a field already on every
-  // Movement_Log row. Not capped at all: there are only ~11 canonical
-  // regions (REGION_GROUP_MAP, reports.js), and "show all" was the
-  // explicit request for this one list — no slice, unlike the other 3.
+  const emptyMsg = 'No RM/region/manager has enough eligible data to rank for the current filters/range.';
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${rmPerformanceTableHtml('RMs', rmWorst.slice(0, 20), false)}
-    ${rmPerformanceTableHtml('By Region', regionAll, false, 'No region data for the current filters/range.')}
-    ${rmPerformanceTableHtml('A1 / TM', hierarchyMissing ? [] : a1tmWorst.slice(0, 10), hierarchyMissing)}
-    ${rmPerformanceTableHtml('RH', hierarchyMissing ? [] : rhWorst.slice(0, 5), hierarchyMissing)}
+    ${rmPerformanceTableHtml('RMs — worst 20', rmRanked.slice(0, 20), false, emptyMsg)}
+    ${rmPerformanceTableHtml('By Region — worst first, all shown', regionRanked, false, emptyMsg)}
+    ${rmPerformanceTableHtml('A1 / TM — worst 10', hierarchyMissing ? [] : a1tmRanked.slice(0, 10), hierarchyMissing, emptyMsg)}
+    ${rmPerformanceTableHtml('RH — worst 5', hierarchyMissing ? [] : rhRanked.slice(0, 5), hierarchyMissing, emptyMsg)}
   </div>
   ${_repeatOffendersDebugPanelHtml(stageCounts, hierarchyMissing)}`;
 
@@ -542,7 +541,7 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage){
   if (hierarchyMissing) {
     rows = `<tr><td colspan="6" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
   } else if (!list.length) {
-    rows = `<tr><td colspan="6" class="empty-row">${esc(emptyMessage || 'No one classified Below Expectations for the current filters/range — nothing to act on right now.')}</td></tr>`;
+    rows = `<tr><td colspan="6" class="empty-row">${esc(emptyMessage || 'No one has enough eligible data to rank for the current filters/range.')}</td></tr>`;
   } else {
     rows = list.map((r, i) => {
       const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
