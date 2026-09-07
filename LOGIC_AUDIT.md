@@ -1529,8 +1529,810 @@ final severity — this is the input list, not the ranking):
 
 ---
 
-## Part 7 — not yet run
+## Part 7 of 7 — Findings, Plain-English Walkthrough + Final Assembled Report
 
-See the To-Do Dashboard's research project for the full task sequence and
-what it covers (final findings ranking, plain-English walkthrough,
-remaining diagrams, checklist, and the full assembled report).
+*(covers prompt sections 16-22 and the FINAL REPORT FORMAT)*
+
+### Where this report lives — decided explicitly, not defaulted
+
+**This file, in the Leads Dashboard repo, alongside `HANDOVER.md`.** Not
+the research folder (`My Idea/data based testing/`), which holds
+offline/CSV-based analysis with no connection to this codebase; not a
+separate new file, which would fragment one audit across two documents
+for no benefit. `HANDOVER.md` is already this repo's "how it works and
+what's happened to it" reference — this file is its logic-correctness
+counterpart, and belongs next to it for the same reason.
+
+**Format decision, stated plainly**: the 22-section structure below IS
+the assembled final report the original prompt asked for. Sections that
+would simply restate Parts 1-6 verbatim (architecture, data flow, the
+file map, business logic, filters, state, KPIs, consistency, sources of
+truth, dependencies, edge cases, duplicate logic) are written as a real
+synthesis paragraph plus an exact pointer into the Part above — not
+copy-pasted a second time. Retyping ~1,500 lines of already-verified
+material into a new structure would add transcription-drift risk for
+zero new information. The genuinely NEW content this part contributes —
+executive summary, the plain-English walkthrough, 2 new diagrams,
+full severity-ranked findings, prioritized fixes, a verification
+checklist, and the final assessment — is written out in full below, not
+pointed elsewhere.
+
+---
+
+# 1. Executive Summary
+
+The Leads Dashboard is a static, client-only web page
+(`dashboard.html` + 22 `js/*.js` files, no framework, no build step, no
+server) that reads and writes one Google Sheet directly through the
+browser's own Google OAuth session, paired with an independent Google
+Apps Script backend (11 production `.gs` files) bound to the same Sheet
+that runs unattended on fixed clock triggers for the things a static
+page can't do alone — scheduled emails and an unattended 4×/day history
+capture. The two runtimes never call each other; they only ever meet
+through shared Sheet tabs, and because neither can `import` the other's
+code, several genuinely important pieces of business logic (SLA rules,
+comment classification, region normalization, funnel-stage
+classification) are deliberately duplicated by necessity, by design, on
+both sides.
+
+**The core finding of this audit: that duplication is, today, in
+verified working order.** Four full side-by-side diffs (Part 4) — the
+31-rule comment classifier, the 6 SLA flags and their 7 thresholds, the
+11-region canonical map, and the two independent `Movement_Log` writers'
+column schemas — all came back byte-for-byte identical. This is not
+assumed from "kept in sync" comments; every one was read fresh and
+compared directly. A second, equally important finding: **every item on
+this project's own pending known-bug list (7 items, from an earlier
+audit pass) was re-checked directly against current code in Part 6, and
+none reproduce** — either already fixed, or inaccurate when written.
+That list should not be re-actioned.
+
+Against that generally solid picture, this audit found **one real,
+live, production-affecting inconsistency**: the Loan-source region
+override that the live dashboard's own region-email builder applies is
+completely absent from all 3 call sites in the two scheduled backend
+emails, meaning a Loan-sourced lead can be bucketed under a different
+region — and routed to a different recipient — depending on which
+surface produced the report (Part 4 §4.4). No CRITICAL findings
+surfaced anywhere in this audit — no data corruption, no security gap,
+no crash path. The rest of the findings (full list, §18 below) are real
+but bounded: a missing reentrancy guard on one write button, a
+display-text/logic mismatch on one threshold, an unguarded cross-runtime
+overlap window on the follow-up cycle, and a handful of coverage/
+labeling gaps.
+
+**What to do next**, in order: fix the Loan-region override (§18/§19 #1,
+the only HIGH item), add the missing reentrancy guard on the Snapshot
+button (§18/§19 #2), then work down the MEDIUM/LOW list as time allows.
+Nothing here blocks continued normal use of the dashboard while those
+fixes land.
+
+---
+
+# 2. Overall Dashboard Architecture
+
+**Synthesis**: no database/ORM/server tier exists — the Google Sheet
+itself is the datastore, the Sheets API is the fetch/write layer, and
+plain top-level `let`/`const` globals (one shared browser script scope,
+no framework) are the state layer. A fully separate Apps Script runtime
+handles everything that must run unattended. Full 19-layer breakdown,
+central files/sources of truth, and the complete Mermaid architecture
+diagram: **Part 1, §1-§3** (above). Trigger schedule for every backend
+job: **Part 1, §5**.
+
+# 3. How the Dashboard Works End-to-End
+
+*(the plain-English walkthrough — prompt section 17)*
+
+**When a user opens the Leads Dashboard**, they see a sign-in gate
+(`dashboard.html`'s `#authGate`) and nothing else — no data has been
+fetched yet, because `main.js`'s 4-line bootstrap only wires up UI
+chrome (`initCollapsibleSectionInfo`, `initRMTimelineUI`,
+`initMovementUI`, `initAuthGate`) and waits for a real user action.
+
+1. **What loads**: 23 `js/*.js` files load in sequence
+   (`dashboard.html`'s real order, documented — and one small
+   discrepancy from what `CLAUDE.md` claims, both noted — in Part 1
+   §4a), establishing every shared function and state variable but
+   doing no real work yet.
+2. **Where data comes from**: the user clicks Sign In, Google's OAuth
+   popup runs, and once a token lands, `fetchAndRender()`
+   (`js/core-fetch-and-render.js`) makes the one real Sheets API call
+   (`sheetsApiValuesGet`) against the `leads` tab.
+3. **How it gets processed**: the raw rows are parsed via
+   `HEADER_ALIASES`, then collated — a union-find pass merges rows that
+   share a `lead_id` or a `client_id` + similar region into one
+   customer record (`mergeRowsIntoOneLead`), taking the
+   furthest-progressed stage and MAX (not SUM) of call-count-style
+   fields, since those are client-cumulative, not per-copy partial
+   contributions.
+4. **How state is created**: the collated result becomes
+   `allParsedLeads` — the canonical in-memory array everything else
+   derives from. A second, independent fetch (`fetchMovementLog`) pulls
+   4×/day history from `Movement_Log` into `movementSnapshots`.
+5. **How filters work**: the multi-select filter bar (Project/Region/
+   TL/Source/Bucket + a date range) writes into `filterState`; every
+   change re-runs `applyFiltersAndRender()`, which filters
+   `allParsedLeads` and runs `enrichLead()` on what's left, producing
+   `leads` (one row per customer) and `issueLeads` (one row per RM
+   copy, for issue-level accuracy).
+6. **How leads reach the table**: every render function
+   (`renderRegionTable`, `renderRMTable`, the Operations issue cards,
+   etc.) reads directly from `leads`/`issueLeads` — there is no separate
+   "table dataset" that could drift from what the KPIs count.
+7. **How KPIs are calculated**: the 6-tile KPI strip
+   (`renderAll()`, `js/overview-distribution-people-ops.js`) counts
+   directly from `leads`/`issueLeads` — 4 tiles at customer granularity,
+   2 at issue-copy granularity, both filter-respecting (Part 5 §5.1).
+8. **How charts get their data**: the same two arrays, or
+   `movementSnapshots` for anything historical/trend-based (the
+   Tracking tab's cohort charts, RM Timeline's issue-history chart).
+9. **What happens when a user opens a lead**: there is no dedicated
+   lead-detail page or modal anywhere in this app (confirmed, Part 1's
+   HTML-shell research found none). The closest equivalent is the Audit
+   tab's or RM Timeline's inline per-lead event timeline
+   (`updateEventsFor`), rendered from data already in memory — no
+   additional fetch.
+10. **What happens when a lead is edited**: this dashboard never writes
+    lead-content fields (stage, comments, RM) back to the Sheet at
+    all — those originate in the source CRM and flow one way, into the
+    dashboard, never back out. The dashboard's own writes are
+    operational: Movement snapshots, `SLA_History`/`Daily_Cohort_History`
+    entries, `Lead_Followups` suggestions, and `Send_Log` records.
+11. **What happens when status/stage changes**: nothing the dashboard
+    does changes it — a stage change happens in the CRM, and the next
+    fetch simply reflects it. `enrichLead()`'s 6 SLA flags are
+    recomputed fresh on every filter pass from whatever the current
+    stage/timestamps say; nothing is cached stale across a stage change.
+12. **What happens when a lead is "assigned"**: same as above — RM
+    reassignment is a CRM action, not a dashboard one. The dashboard
+    only reads whichever `RM` the Sheet currently says.
+13. **What happens when a lead is deleted/archived**: not a concept
+    this app has — there's no soft-delete or archive flag anywhere in
+    the schema this audit found. A lead simply stops appearing once its
+    row leaves the `leads` tab (a CRM-side action) or is closed
+    (`isLeadClosed`, which excludes it from every SLA check but doesn't
+    remove it from historical views like Movement_Log).
+14. **How the UI gets updated afterward**: for a real Sheets write
+    (Movement snapshot, SLA_History, Lead_Followups, Daily_Cohort_History),
+    there's no generic cache-invalidation layer — every write function's
+    own success path explicitly names and calls the exact `render*()`
+    functions it knows are downstream (Part 2 §4's diagram shows the
+    concrete example). This is hand-wired, not automatic, everywhere in
+    the app.
+
+The Apps Script side runs entirely independently of any of this — its
+own 4×/day snapshot, 10am/1pm overnight emails, 5pm all-issues email,
+and 22:50 nightly capture fire on Apps Script's own clock regardless of
+whether anyone has the dashboard open at all.
+
+# 4. Complete Data Flow
+
+**Synthesis**: field-by-field trace for every real field this app has
+(and an explicit list of template fields — email, phone, a numeric lead
+score, value/revenue, tags — that genuinely don't exist here, confirmed
+against `HEADER_ALIASES`, not assumed): **Part 2, §0-§1**. Initial-load
+sequence diagram, filter-flow diagram, write-back/mutation-flow diagram:
+**Part 2, §2-§4**.
+
+# 5. File and Component Map
+
+**Synthesis**: the full Responsibility/Inputs/Outputs/Depends-On/
+Used-By/Important-Logic table for all 35 production files (HTML shell,
+11 core JS files, 12 tab/feature JS files, 11 backend `.gs` files):
+**Part 1, §4**. Trigger table: **Part 1, §5**.
+
+# 6. Major User Flows
+
+**Synthesis**: full USER ACTION → ... → VISIBLE RESULT traces for
+dashboard load, filter apply/reset, opening a lead's detail (confirmed
+no such page exists), manual Movement snapshot, Generate region
+reports, Gmail send, SLA_History write, and the 4 fully backend-only
+unattended flows: **Part 2, §5**. Diagrams: **Part 2, §2-§4**.
+
+# 7. Business Logic Map
+
+**Synthesis**: all 10 real business rules this app has, each with
+implementation location, inputs/outputs, dependencies, and whether it's
+duplicated across runtimes: **Part 3, §3.1-§3.9**.
+
+**New diagram (F) — status/stage/business-logic flow**, not previously
+drawn in this audit:
+
+```mermaid
+flowchart TB
+    RAW["Raw current_stage text\n(leads Sheet)"] --> CANON["canonicalStage() / canonicalStage_()\n9-band FUNNEL_ORDER lookup"]
+    CANON --> OPEN{"isOpenLead_ / isLeadClosed?\nstage OR closing_reason OR\nlead_closing_reason"}
+    OPEN -- closed --> EXCLUDED["Excluded from every\nSLA check and the KPI strip's\nopen-lead tiles"]
+    OPEN -- open --> OPPCHECK{"isOppOrAbove?\nstage rank >= Opportunity"}
+    OPPCHECK -- yes --> OPP["Opportunity+ KPI, funnel chart --\nno longer SLA-eligible"]
+    OPPCHECK -- no --> SLAGATE["SLA-eligible population"]
+
+    SLAGATE --> R1["inactiveRmNewLead\nassigned today + rm_is_active=false"]
+    SLAGATE --> R2["isNotUpdated\nstage still literal 'not updated'\nOR never connected past 10min"]
+    SLAGATE --> R3["followupOverdue\nconnected, quiet > 4h"]
+    SLAGATE --> R4["underCalledToday\nattemptsToday < 5"]
+    SLAGATE --> R5["stageStuck48h\nopen, past 48h, past grace"]
+
+    R1 --> PRI["ISSUE_PRIORITY / ISSUE_PRIORITY_GS_\ninactiveRmNewLead > isNotUpdated >\nfollowupOverdue > underCalledToday >\nstageStuck48h"]
+    R2 --> PRI
+    R3 --> PRI
+    R4 --> PRI
+    R5 --> PRI
+
+    PRI --> CARDS["Operations issue cards --\nALL matching rules shown,\none card list per rule"]
+    PRI --> SINGLE["Single-label consumers:\nDaily_RM_Issues.issue_key,\nreport/email subject lines,\nSLA_History's per-check columns"]
+
+    COMMENTTEXT["A lead's latest comment text"] --> CLASSIFY["inferOutcome() / inferOutcomeGs_()\n31-rule ordered fuzzy classifier\n(independent of the 5 SLA rules --\nclassifies WHAT was said,\nnot WHETHER an SLA was missed)"]
+    CLASSIFY --> SUGGEST["suggestedFollowUp() /\novernightFollowupHintGs_()"]
+    SUGGEST --> FOLLOWUPCOL["Lead_Followups column F\n(algorithmic fallback,\noverwritten by a human if\nthey review in time)"]
+
+    R2 -.->|"a lead can be BOTH\nSLA-flagged AND classified"| CLASSIFY
+```
+
+# 8. Filter / Search / Sort / Pagination Logic
+
+**Synthesis**: confirmed search, sort, and pagination essentially don't
+exist here the way the generic template assumes — no lead-level search
+(only a per-dropdown option-list search), no user-facing sort control
+anywhere, no real pagination (`MAX_CARDS=200` is a hard truncation).
+Filters are a single client-side predicate applied identically to both
+`leads` and `issueLeads`. Full trace: **Part 5, §5.2**.
+
+# 9. State Management Logic
+
+**Synthesis**: 14-row inventory of every module-level state variable —
+owner, readers, writers, staleness risk. No live `window.x`-vs-bare-`let`
+shadow-property bug found anywhere; one stylistic inconsistency noted
+(`_allReports`). Full table: **Part 5, §5.3**.
+
+# 10. API / Backend / Database Logic
+
+**Synthesis**: the "database" is one Google Sheet, ~13 tabs, no schema
+enforcement beyond header-row column names. `HEADER_ALIASES`/
+`HEADER_ALIASES_` are the two runtimes' column-mapping layers — 22 of
+23 client keys match the backend exactly; `project_region` is the one
+consequential gap (feeds directly into the HIGH finding, §18 #1).
+Full backend file map: **Part 1, §4d**. Full field-by-field diffs
+(thresholds, region maps, IST helpers, `Movement_Log` write schema):
+**Part 4, §4.1-§4.9**.
+
+# 11. KPI and Calculation Audit
+
+**Synthesis**: all 6 KPI-strip tiles traced to exact formula and source
+array; confirmed 4 count distinct customers and 2 count distinct issue
+instances (intentional, undocumented in the UI). Repeat Offenders' totals
+come from a genuinely different pipeline (`movementSnapshots`, not the
+live leads tab) — internally consistent but not directly comparable to
+the rest of the dashboard's numbers. Full table: **Part 5, §5.1**.
+
+# 12. Logic Consistency Audit
+
+**Synthesis**: the 4 highest-value duplicated-logic pairs — comment
+classification (31 rules), SLA flags (6 rules + 7 thresholds), region
+map (11 regions), Movement_Log write schema — are all verified in exact
+agreement via fresh direct reads, not assumed from "keep in sync"
+comments. The one place consistency actually breaks: the Loan-region
+override, present on the client, absent from all 3 backend scheduled-
+email call sites. Full diffs: **Part 4, §4.1-§4.9**. Full 7-item
+stale-bug-list re-verification: **Part 6, §6.1**.
+
+# 13. Source-of-Truth Audit
+
+**Synthesis**: 14-concept matrix — every concept classified as a clear
+single source, multiple-but-consistent sources, or multiple-and-
+conflicting sources, with an explicit, first-time-stated finding that
+**this app has no application-level permission system at all** — access
+control is 100% delegated to the Google Sheet's own native sharing.
+Full matrix: **Part 6, §6.4**.
+
+# 14. Logic Dependency Matrix
+
+**Synthesis**: 10-concept matrix (definition site, read sites, change
+triggers, dependencies, conflicts, risk) plus a 7-row "if I change this,
+here's what breaks and why" table for the highest-risk shared pieces.
+Full tables: **Part 6, §6.3, §6.5**.
+
+**New diagram (G) — dependencies between the most important
+components**, not previously drawn in this audit:
+
+```mermaid
+flowchart LR
+    subgraph HUBS["The 4 real hubs everything else depends on"]
+        ALLPARSED[("allParsedLeads")]
+        MOVLOG[("movementSnapshots\n/ Movement_Log")]
+        FILTERSTATE[("filterState")]
+        SHEETID[("_currentSheetId")]
+    end
+
+    FETCH["core-fetch-and-render.js"] -- builds --> ALLPARSED
+    FILTERSAPP["core-filters.js"] -- reads --> ALLPARSED
+    FILTERSAPP -- reads --> FILTERSTATE
+    FILTERSAPP -- writes --> LEADS[("leads / issueLeads")]
+
+    LEADS --> OVERVIEW["overview-distribution-people-ops.js\n(renderAll orchestrator)"]
+    LEADS --> AUDIT["tab-audit.js"]
+    LEADS --> RMTL["tab-rmtimeline.js"]
+    LEADS --> REPORTBUILD["reports-build.js"]
+    LEADS --> MORNING["tab-morning.js"]
+
+    MOVEMENT["tab-movement.js"] -- builds --> MOVLOG
+    MOVEMENT -- sets --> SHEETID
+    MOVLOG --> TRACKING["tab-tracking.js"]
+    MOVLOG --> REPEATOFF["tab-repeat-offenders.js"]
+    MOVLOG --> RMPERF["core-rm-performance.js"]
+    MOVLOG --> RMTL
+
+    OVERVIEW --> MOVEMENT
+    OVERVIEW --> TRACKING
+    OVERVIEW --> RMTL
+    OVERVIEW --> AUDIT
+
+    REPORTBUILD --> REPORTUI["reports-ui.js"]
+    REPORTUI --> WRITEBACK["sheets-writeback.js"]
+    MOVEMENT -- "Snapshot Now" --> WRITEBACK
+    TRACKING -- "admin buttons" --> WRITEBACK
+    WRITEBACK -- needs --> SHEETID
+    WRITEBACK -. "write, then re-render" .-> MOVEMENT
+    WRITEBACK -. "write, then re-render" .-> TRACKING
+
+    REPORTUI --> GMAIL["reports-gmail.js"]
+    GMAIL -. "logEmailSend\n(fire-and-forget)" .-> WRITEBACK
+
+    style HUBS fill:#1a2332,stroke:#4a90d9,color:#fff
+```
+
+Reading this: `allParsedLeads` and `movementSnapshots` are the two true
+data hubs — nearly every tab depends on one or the other (several depend
+on both). `sheets-writeback.js` is the single choke point for every real
+write, and `_currentSheetId` (owned by `tab-movement.js`, of all places)
+is a small but critical piece of state every write function needs.
+Changing any of these 4 hub pieces has the widest blast radius in the
+app — matches §17's quick-reference below.
+
+# 15. Edge-Case Audit
+
+**Synthesis**: 7 edge cases walked against real code, not assumed — 6 of
+7 already handled correctly and verified (6 distinct Sheets-API error
+messages, null-safe zero-lead KPIs, token-expiry re-auth before every
+write, a working reentrancy guard on filter changes). One real gap
+found: no reentrancy guard on the manual snapshot button. Full table:
+**Part 5, §5.4**.
+
+# 16. Duplicate / Dead / Conflicting Logic
+
+**Synthesis**: the 7-item pending-bug-list re-verification (all 7 stale,
+**Part 6 §6.1**) plus 2 new findings — `lead_closing_comment` is real
+logic, not display-only as an earlier part of this audit first assumed
+(self-corrected in **Part 6 §6.2**); "Possible Premature Closes" is
+entirely client-only with no scheduled-email equivalent (**Part 6
+§6.2**). No other unused-function or dead-code claim survived this
+audit's own evidence bar.
+
+# 17. Hidden Dependencies
+
+**Synthesis**: full "if I change this, here's what breaks" table for
+`FUNNEL_ORDER`/`STAGE_ALIASES`, `OUTCOME_RULES`, the 7 SLA thresholds, a
+Sheets column rename, `Movement_Log`'s column order, `filterState`'s
+shape, `ISSUE_PRIORITY`'s order, and `REGION_GROUP_MAP` — each with the
+concrete recheck steps a real change would need: **Part 6, §6.3**. (A
+short, non-duplicated quick-reference version is in §21 below, per the
+prompt's own request for a *concise* dependency checklist there.)
+
+---
+
+# 18. Findings Ranked by Severity
+
+No CRITICAL findings surfaced in this audit — no data corruption, no
+security/permission gap (this app delegates all access control to
+Google's own Sheet sharing, §13), no crash path. One HIGH, three MEDIUM,
+four LOW findings, plus one process note that isn't a code defect at
+all. Severities reflect confirmed, reproduced behavior — not worst-case
+speculation.
+
+### 🟠 HIGH — Loan-region override missing from all 3 scheduled-email call sites
+
+- **Problem**: leads whose `group_source`/`project_region` says "Loan"
+  are bucketed by the live dashboard's region-email builder under
+  "Loan" (correct — Loan isn't geography), but by both scheduled emails
+  under their raw `region` column instead (e.g. "Pune").
+- **Evidence**: `js/reports-build.js:80-84` (`effectiveRegion`, 2-step
+  check) vs. `OvernightEmailer.gs:517`, `OvernightEmailer.gs:1205`,
+  `AllIssuesEmailer.gs:206` (`const rawRegion = getVal_(row, colIndex,
+  'region'); const main = mainRegionForGs_(rawRegion);` — raw value,
+  zero override, at all 3 sites). Backend's `HEADER_ALIASES_` also has
+  no `project_region` key at all (`Core.gs:36-67`), confirmed by direct
+  diff against the client's version.
+- **Files/functions**: `js/reports-build.js` (`effectiveRegion`),
+  `EmailInfra.gs` (`mainRegionForGs_`), `OvernightEmailer.gs` (2 call
+  sites), `AllIssuesEmailer.gs` (1 call site), `Core.gs`
+  (`HEADER_ALIASES_`).
+- **Why it matters**: a real subset of leads (Loan-sourced) can go to
+  the wrong regional recipient in the fully-automated emails, silently
+  — nothing errors, nothing logs a mismatch.
+- **Downstream effects**: whoever handles Loan-sourced leads may not
+  see them in the 10am/1pm/5pm emails; whoever owns the raw geographic
+  region instead receives leads that aren't really theirs to action.
+- **Recommended fix**: add `project_region` to `HEADER_ALIASES_`
+  (`Core.gs`), then add an `_effectiveRegionForLiveLeadGs_`-style helper
+  (mirroring `effectiveRegion`'s exact 2-step check, not the reduced
+  Movement_Log-only version) and call it at all 3 sites before
+  `mainRegionForGs_`.
+- **What to test afterward**: a synthetic Loan-sourced lead (raw region
+  = a real geographic name) should appear under "Loan" in all 3
+  scheduled email paths, matching what the dashboard's own report
+  builder already shows for the same lead. Re-run `Tests_EmailInfra.gs`
+  and add a case for this specifically.
+
+### 🟡 MEDIUM — `browserSnapshotOpenLeads` has no reentrancy guard
+
+- **Problem**: the "Snapshot Now" button has no `disabled` state and no
+  mutex, unlike the Generate button in the same file, which has both.
+- **Evidence**: `js/tab-movement.js:1289-1290` (click handler, no
+  guard) vs. `js/tab-movement.js:1197,1221` (Generate button's
+  `btn.disabled = true/false` pattern, same file).
+- **Files/functions**: `js/sheets-writeback.js` (`browserSnapshotOpenLeads`),
+  `js/tab-movement.js` (`initMovementUI`).
+- **Why it matters**: a double-click, or two people clicking near-
+  simultaneously, runs two overlapping writes.
+- **Downstream effects**: duplicate `Movement_Log`/`SLA_History` rows
+  for effectively the same moment — bounded, since both tables are
+  already retention-pruned (Part 1 §4d, the 2026-09-07 fix), but still
+  incorrect historical data while it's retained.
+- **Recommended fix**: add the same `btn.disabled = true` / `finally {
+  btn.disabled = false }` guard already proven in the same file.
+- **What to test afterward**: rapid double-click no longer produces two
+  Movement_Log batches; button visibly disables during the write.
+
+### 🟡 MEDIUM — `CONFIG.MIN_CALLS_AFTER_48H` is display-only, disagrees with the real flag threshold
+
+- **Problem**: the "requires N calls" text on Approaching/Stuck cards
+  shows 10 once a lead is past 48h, but the actual `underCalledToday`
+  flag always compares against 5, regardless of lead age.
+- **Evidence**: `js/overview-distribution-people-ops.js:~1227` (`req =
+  l.past48h ? CONFIG.MIN_CALLS_AFTER_48H : CONFIG.MIN_CALLS_PER_DAY`) vs.
+  `js/core-lead-model.js`'s `underCalledToday` line (`attemptsToday <
+  CONFIG.MIN_CALLS_PER_DAY`, no age branch).
+- **Files/functions**: `js/core-foundation.js` (`CONFIG`),
+  `js/overview-distribution-people-ops.js` (3 display call sites),
+  `js/core-lead-model.js` (`enrichLead`).
+- **Why it matters**: an RM or manager reading the card's displayed
+  requirement gets a number that doesn't match what actually triggers
+  the flag.
+- **Downstream effects**: none functional (the flag itself is correct)
+  — purely a trust/clarity issue in what the UI communicates.
+- **Recommended fix**: a maintainer decision, not a mechanical fix —
+  either make `underCalledToday` actually use the higher bar past 48h
+  (a real behavior change) or change the display text to say 5
+  everywhere (a copy-only fix). Flagging for a decision, not
+  prescribing one.
+- **What to test afterward**: whichever direction is chosen, confirm
+  the displayed number and the flag's real threshold agree for a
+  past-48h fixture lead.
+
+### 🟡 MEDIUM — Unguarded cross-runtime `Lead_Followups` overlap window
+
+- **Problem**: the client's `_generateCycleOwner` mutex only prevents
+  the dashboard's own two Generate flows from colliding; nothing stops
+  the Apps Script 10am/1pm overnight run from clearing/rewriting
+  `Lead_Followups` while a human has the dashboard's own Generate cycle
+  open.
+- **Evidence**: `js/sheets-writeback.js:275-285` (mutex, client-only
+  scope) vs. `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_`/
+  `waitForFollowupSuggestions_` (independent polling, no awareness of
+  the client's mutex — confirmed Part 3 §3.8).
+- **Files/functions**: `js/sheets-writeback.js`, `OvernightEmailer.gs`.
+- **Why it matters**: a human mid-review of a follow-up suggestion could
+  have it silently overwritten by an automated run landing at the same
+  moment.
+- **Downstream effects**: a reviewed, human-quality suggestion could be
+  replaced by the algorithmic fallback without anyone noticing, if the
+  timing lines up.
+- **Recommended fix**: not confirmed as having caused a real incident
+  (Part 3's own hedge) — worth a lightweight mitigation (e.g. the
+  backend checks a "last touched" timestamp before clearing) rather than
+  a large redesign, given the actual collision window is narrow (10am/
+  1pm, a few minutes each).
+- **What to test afterward**: a synthetic timing test isn't practical
+  without live Apps Script access — recommend monitoring
+  `Lead_Followups`' `updated_at` column for a real overlap before
+  investing further here.
+
+### 🔵 LOW — "Possible Premature Closes" has no scheduled-email equivalent
+
+Client-only check (`js/reports-build.js:809-853`), confirmed via grep
+that no `.gs` file implements anything similar. Not a bug — a coverage
+gap: this useful data-quality flag only surfaces when a human manually
+clicks Generate. **Fix**: port to `AllIssuesEmailer.gs` if automated
+coverage is wanted; requires also adding `lead_closing_comment` to
+`HEADER_ALIASES_` first (currently backend-unreadable, Part 4 §4.8).
+
+### 🔵 LOW — KPI strip mixes customer-level and issue-level counts, undocumented in the UI
+
+`js/overview-distribution-people-ops.js:159-259`. Correct by design
+(matches the section badges below the strip), but nothing on the strip
+itself tells a viewer 2 of the 6 numbers use a different counting basis.
+**Fix**: a small footnote/tooltip on the two issue-level tiles.
+
+### 🔵 LOW — Dropped click during rapid filter changes
+
+`js/core-filters.js:11,39` — `_isApplyingFilters` silently no-ops a
+second filter-apply call while one is in flight, rather than queuing
+it. Low real-world impact (the loading overlay blocks most accidental
+double-clicks anyway). **Fix**: queue the latest pending filter state
+instead of dropping it, if this ever proves to matter in practice.
+
+### 🔵 LOW — `RmHierarchy.gs` is a single point of failure for both scheduled emails
+
+Part 3 §3.7 — genuinely backend-only, no redundant implementation to
+cross-check against. Not a defect; a resilience note. **Mitigation**: the
+existing `auditUnresolvedRmsNow()` proactive scan (Part 1) is already
+the right kind of safety net — worth confirming it's actually run
+periodically, not just available.
+
+### Process note (not a severity-ranked code defect)
+
+**All 7 items on the pending UI-redesign audit plan's known-bug list are
+stale** (Part 6 §6.1) — confirmed non-reproducing, not restated from
+memory. Action: don't re-action that list; if it resurfaces in a future
+session, point to Part 6 §6.1's verification.
+
+---
+
+# 19. Recommended Fixes
+
+In the requested priority order:
+
+1. **Critical correctness/security/data issues**: none found.
+2. **High-risk logic inconsistencies**: fix the Loan-region override
+   gap (§18 HIGH) — add `project_region` to `HEADER_ALIASES_` and port
+   `effectiveRegion`'s real 2-step logic to the 3 backend call sites.
+3. **Incorrect calculations**: resolve the `MIN_CALLS_AFTER_48H`
+   display/logic mismatch (§18 MEDIUM #2) — maintainer decides which
+   side is "correct," then align the other.
+4. **State/data synchronization issues**: add the Snapshot button's
+   reentrancy guard (§18 MEDIUM #1); consider the lightweight
+   `Lead_Followups` overlap mitigation (§18 MEDIUM #3) if monitoring
+   ever shows a real collision.
+5. **Duplicated/conflicting business logic**: none currently
+   conflicting — the 4 major duplicated pairs are verified in sync
+   (§12). No action needed here beyond normal "edit both sides together"
+   discipline already documented in this project's own `CLAUDE.md`.
+6. **Maintainability improvements**: decide whether "Possible Premature
+   Closes" should be ported to the backend (§18 LOW #1, requires the
+   `lead_closing_comment` header-alias addition first); add a KPI-strip
+   footnote for the customer-vs-issue-level tiles (§18 LOW #2); update
+   `CLAUDE.md`'s documented script-load order to match `dashboard.html`'s
+   real order (a small, low-risk doc fix noted in Part 1 §6).
+
+---
+
+# 20. Verification Checklist
+
+A practical, concrete, pre/post-change checklist for this specific app —
+not generic boilerplate.
+
+### Data Model
+- [ ] Does the field exist in `HEADER_ALIASES` (client,
+      `js/core-sheets-fetch.js`) **and** `HEADER_ALIASES_` (backend,
+      `Core.gs`)? A field missing from one side reads as `''`/blank
+      there, silently, with no error.
+- [ ] If the field is a date, is it read via `parseDate`/`getVal_`'s
+      `instanceof Date` checks, not assumed to always be a real `Date`
+      object? (Sheets can auto-convert a date-shaped string —
+      documented real bug class, Part 1.)
+- [ ] If the field is a checkbox/boolean, does the read use
+      `!= null` rather than `|| ''` (the `rm_is_active`/`false` pitfall,
+      both `enrichLead` and `computeSlaFlags_` handle this correctly —
+      keep any new boolean field consistent with that pattern)?
+
+### API
+- [ ] Does the new/changed Sheets call use `sheetsApiValuesGet`/
+      `appendSheetRows`/`sheetsApiValuesBatchUpdate` (client) or
+      `withRetry_`-wrapped calls (backend) — not a raw, unwrapped
+      `fetch`/`SpreadsheetApp` call that skips the existing retry logic?
+- [ ] Does a write that could hit Sheets' date-auto-conversion issue use
+      `RAW` value-input (like `upsertSlaHistoryRows` does), not the
+      default `USER_ENTERED`?
+- [ ] Is the OAuth token checked (`gateTokenValid()`/`gmailTokenValid`)
+      before the call, with a re-auth path, matching every existing
+      write function?
+
+### Business Logic
+- [ ] If a change touches `enrichLead()`, was the identical change also
+      made to `computeSlaFlags_()` (`SlaEngine.gs`) — and vice versa?
+- [ ] If a change touches `OUTCOME_RULES`, was the identical change also
+      made to `OUTCOME_RULES_GS_` (`FollowupEngine.gs`) — and vice versa?
+- [ ] If a change touches `REGION_GROUP_MAP`/`effectiveRegion`, does it
+      also need to reach `REGION_GROUP_MAP_`/`mainRegionForGs_`'s 3 call
+      sites — and does it correctly distinguish the Movement_Log-derived
+      reduced path from the live-leads-tab full path (§18 HIGH)?
+- [ ] Does `ISSUE_PRIORITY`/`ISSUE_PRIORITY_GS_`'s order still match if
+      either was touched?
+
+### Frontend State
+- [ ] Is the new state a bare top-level `let`, consistent with this
+      app's own convention — not a `window.x=` unless there's a specific
+      reason (2 legitimate precedents: `window._regionReports`,
+      `window._overnightRegionReports`)?
+- [ ] Does anything need to clear a cache keyed on this state (like
+      `_actionLogCache.clear()` on every `fetchAndRender()`)?
+- [ ] Does a write to this state need a corresponding explicit
+      re-render call at every write site (there's no generic
+      invalidation — Part 2 §4)?
+
+### Filters
+- [ ] Does a new filter dimension add a `Set` to `filterState`, a clause
+      in `passesFilters` (`core-filters.js`), AND a `buildMultiSelect(...)`
+      wiring call — all three, or the filter silently does nothing?
+- [ ] Does the new filter apply identically to both `leads` and
+      `issueLeads` (the copySplit-aware pattern `core-filters.js:98-120`
+      already uses), not just one?
+
+### Table
+- [ ] Does the table read from `leads`/`issueLeads` (filter-respecting)
+      rather than `allParsedLeads` directly (unfiltered)?
+- [ ] Empty-result state: does it show a real empty message, not a
+      blank/broken render (every existing table does — keep that)?
+- [ ] If a card list, is it wrapped with `MAX_CARDS`/`truncationNotice`
+      the same way every other issue-card list is?
+
+### Dashboard Metrics
+- [ ] Is the new metric's source array (`leads` vs. `issueLeads` vs.
+      `movementSnapshots`) stated somewhere near it — this audit found
+      the KPI strip's own customer-vs-issue split undocumented (§18 LOW)
+      and Repeat Offenders' separate pipeline likewise unlabeled; don't
+      repeat that for a new metric.
+- [ ] Does it recompute on every filter pass, or does it need the same
+      `_refreshMorningBriefOnNextRender`-style explicit gate if it's
+      meant to be a checkpoint snapshot, not a live number?
+
+### Mutations
+- [ ] Does the write function have a reentrancy guard (button
+      `disabled` + `finally`) — this audit found one real gap
+      (Snapshot Now, §18 MEDIUM #1); don't add a second one.
+- [ ] If it competes with another flow for the same Sheet tab, does it
+      go through `tryClaimGenerateCycle`/`releaseGenerateCycle`, or a
+      new equivalent if the competing flows are new?
+- [ ] Does the write re-fetch and explicitly re-render every downstream
+      consumer, by name, the way `browserSnapshotOpenLeads` does?
+
+### Edge Cases
+- [ ] Zero rows / zero leads: confirmed safe pattern exists
+      (`medianOfSorted`/`percentileOfSorted` return `null`, checked
+      before display) — follow it for any new aggregate.
+- [ ] A failed Sheets call: does it produce one of the 6 specific
+      messages this app already has, or at minimum the generic fallback
+      — never a silent failure?
+- [ ] Concurrent writes: does a double-click or two simultaneous users
+      produce duplicate rows, and is that acceptable for this
+      particular write (bounded by retention) or does it need a guard?
+
+### Testing
+- [ ] `.gs` change: added/updated the matching assertion in the same
+      commit (`CLAUDE.md`'s own stated convention), run via
+      `node test/run-gs-tests.js` or CI.
+- [ ] `.gs` change with a time trigger: `setupXxx()` re-run needed only
+      if the SCHEDULE itself changed, not the logic inside — confirmed
+      in Part 1 §5, don't over-apply this.
+- [ ] `js/*.js` change: exercised against `tests/frontend-harness.html`
+      if the change is real new behavior, per `CLAUDE.md`'s own
+      stated (if informal) convention — no persisted CI suite exists for
+      the client side as of this audit.
+- [ ] `.gs` change: remember it is not live until manually pasted into
+      the Apps Script editor (`CLAUDE.md`'s top gotcha) — this audit
+      itself hit this exact requirement fixing the Daily_RM_Issues
+      retention bug earlier this session.
+
+---
+
+# 21. "If I Change X, What Else Could Break?" — concise version
+
+*(the full table with recheck steps is Part 6 §6.3; this is the quick
+scan-down-the-list version the prompt separately asks for)*
+
+- **A stage/funnel constant** → every SLA flag, every stage-gated table,
+  both runtimes' automated emails. Edit both sides together.
+- **`OUTCOME_RULES`** → follow-up text, report/email bodies. Edit both
+  sides together.
+- **An SLA threshold** → every Operations card, `Daily_RM_Issues`, both
+  emails, RM Performance eligibility. Edit both sides together, and
+  `DailyRmIssueLog.gs`'s `RM_PERF_*_GS_` if scoring should shift too.
+- **A `leads`-tab column name** → both `HEADER_ALIASES` maps go blank
+  for it silently. Add the new alias to both BEFORE the Sheet renames.
+- **`Movement_Log`'s column order** → every historical-data reader on
+  both runtimes. Append-only, never reorder.
+- **`filterState`'s shape** → the filter bar UI, `passesFilters`,
+  `buildMultiSelect` wiring — all three need the matching edit.
+- **`ISSUE_PRIORITY`'s order** → which single label a multi-flagged
+  lead is reported under, everywhere at once, including already-written
+  `SLA_History` column meaning.
+- **`REGION_GROUP_MAP`** → filters, region tables, region-email
+  bucketing on both runtimes — and don't forget the still-broken
+  Loan-override path (§18 HIGH) while touching this area.
+- **`allParsedLeads`'s shape** (adding/removing a field on the merged
+  record) → `mergeRowsIntoOneLead`'s own field list, `enrichLead`'s
+  input assumptions, and any render function reading the new/removed
+  field.
+- **`_currentSheetId`** → every function in `sheets-writeback.js`, since
+  all of them need it and it's owned by a different file
+  (`tab-movement.js`) than the one that needs it most.
+
+---
+
+# 22. Final Assessment
+
+**What is working correctly?** The core duplicated-logic discipline this
+app depends on for cross-runtime correctness — verified, not assumed,
+across 4 major pairs (comment classification, SLA rules, region
+mapping, Movement_Log schema) — is genuinely intact today. Error
+handling on the initial connect is thorough (6 distinct messages).
+OAuth token expiry is handled correctly and consistently everywhere a
+write happens. The filter pipeline has no table-vs-KPI dataset
+divergence risk by construction (both come from one filter pass). Zero
+CRITICAL findings anywhere in this audit.
+
+**What are the biggest logic risks?** The Loan-region override gap
+(§18 HIGH) is the one live, confirmed, production-affecting
+inconsistency — a real subset of leads can reach the wrong recipient in
+fully automated emails today. Second: the complete absence of any
+reentrancy guard on the Snapshot button, in a codebase that clearly
+knows and uses that exact pattern elsewhere (Generate button, same
+file) — the kind of gap most likely to recur elsewhere if not corrected
+as a template.
+
+**What logic is duplicated?** By design and necessity: SLA rules,
+comment classification, region normalization, funnel-stage
+classification, Movement_Log's write schema, RM Performance scoring
+constants — all between the browser client and the Apps Script backend,
+none of it accidental, all of it verified consistent as of this audit
+except the one Loan-region gap.
+
+**What logic conflicts?** Only the Loan-region override (§18 HIGH). No
+other confirmed conflict survived direct verification in this audit —
+several suspected ones (the pending bug list, §6.1) turned out not to
+reproduce at all.
+
+**What are the sources of truth?** Single, clear sources for lead
+owner/source (raw Sheet columns), filter state, and the main dashboard
+pipeline. Verified-consistent dual sources for SLA status, stage, and
+comment classification. One backend-only source with no redundancy
+(RM hierarchy/routing). One genuinely separate pipeline worth knowing
+about (Repeat Offenders' `movementSnapshots`-based totals vs. the rest
+of the dashboard's `allParsedLeads`-based totals) — not wrong, just
+different, and not obviously labeled as such in the UI.
+
+**What is unclear from the code?** Whether `MIN_CALLS_AFTER_48H`'s
+display/logic mismatch (§18 MEDIUM) is an intentional design choice
+(display a stricter aspirational number once a lead is old) or a genuine
+oversight — no comment anywhere states the intent either way; a
+maintainer decision is needed, not a code archaeology exercise (none
+was found to resolve it). Also unclear: whether the pending UI-redesign
+plan's now-stale bug list reflects real fixes that landed since it was
+written, or inaccuracies in that plan from the start — functionally
+doesn't matter (§6.1's conclusion holds either way), but worth knowing
+if that plan's other, non-bug-list content is trusted for anything else.
+
+**What should be fixed first?** The Loan-region override (§19 #2) —
+it's the only HIGH-severity, confirmed-live, production-affecting
+finding in this entire audit, with a clear, scoped fix.
+
+**What should be tested before making changes?** Anything touching a
+duplicated-logic pair (§21) needs both runtimes exercised — this app has
+a real, working `.gs` test suite (`Tests_*.gs`, run via
+`node test/run-gs-tests.js` or CI) but no persisted client-side suite;
+`tests/frontend-harness.html` exists and should be run manually for any
+real `js/*.js` behavior change, per `CLAUDE.md`'s own stated practice.
+
+**What parts of the dashboard are most tightly coupled?**
+`allParsedLeads` and `movementSnapshots` (§14's diagram G) — nearly
+every tab depends on one or both, and `sheets-writeback.js` is the
+single choke point every real write funnels through, needing
+`_currentSheetId` from a different file entirely (`tab-movement.js`).
+These 3 pieces of state are this app's true structural core; a change
+to any of their shapes has the widest blast radius anything in this
+codebase could have.
+
+---
+
+This closes the 7-part System-wide Logic and Connection Audit.
