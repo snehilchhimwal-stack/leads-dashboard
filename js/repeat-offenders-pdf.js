@@ -93,6 +93,22 @@ function _repeatOffendersPdfCurrentFilterInfo(){
   };
 }
 
+// Whether Movement_Log has ANY raw snapshot rows at all for the given
+// dateKeys — checked BEFORE any filter/eligibility/classification logic,
+// purely "did the capture even run for these calendar days" — added
+// 2026-09-07 so the "nothing to export" status message can tell a real
+// data-capture gap (e.g. "Yesterday" selected before that day's 4x-daily
+// capture cycle has actually run — Movement_Log's most recent day can
+// genuinely lag behind the calendar) apart from "there's data but nobody
+// clears the ranking bar". null dateKeys (allTime) always returns true —
+// this function is only ever called once movementSnapshots.length is
+// already confirmed non-empty by the caller, and allTime has no day
+// boundary to be missing.
+function _repeatOffendersPdfHasAnyRowsForRange(dateKeys){
+  if (!dateKeys) return true;
+  return movementSnapshots.some(rec => dateKeys.has(istDateKey(rec.snapshot_at)));
+}
+
 // One table candidate for a date/section: { title, list } (the same
 // `list` shape computeRmPerformance() returns). Filters out empty
 // candidates and the two hierarchy-dependent rollups when RM_Hierarchy
@@ -401,12 +417,23 @@ async function downloadRepeatOffendersPdf(){
       // movementFetchState/movementSnapshots.length gate at the top of
       // this function), so an empty specs list here means every RM/Region/
       // A1-TM/RH group is Insufficient Data (or there are none at all) for
-      // every date in range — not that nothing could be computed. Since
-      // 2026-09-07, the tables print worst-N regardless of classification,
-      // so this is now a rarer case than the old "nobody's Below
-      // Expectations" gate — it only fires when there's genuinely too
-      // little evidence anywhere to rank.
-      if (statusEl) { statusEl.textContent = 'No RM/region/manager has enough eligible data to rank for the selected period — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
+      // every date in range — not that nothing could be computed. Two
+      // real, DIFFERENT reasons that can happen, distinguished here
+      // 2026-09-07 after a real report ("yesterday filter Table is
+      // missing") turned out to be neither a filter issue nor a code
+      // bug: Movement_Log genuinely had zero captured rows for that
+      // specific day (its most recent capture lagged one day behind) --
+      // "Yesterday" isn't always guaranteed to have data the moment it
+      // becomes yesterday, only once that day's capture cycle has run.
+      // _repeatOffendersPdfHasAnyRowsForRange checks the raw row count
+      // for the selected dateKeys BEFORE any eligibility/classification
+      // logic runs, so this message can say which of the two it actually
+      // is instead of one generic line covering both.
+      const hasRawRows = _repeatOffendersPdfHasAnyRowsForRange(filterInfo.dateKeys);
+      const msg = hasRawRows
+        ? 'No RM/region/manager has enough eligible data to rank for the selected period — nothing to export.'
+        : 'Movement_Log has no captured rows at all for the selected period yet — this is a live data-capture gap (e.g. "Yesterday" before that day\'s capture cycle has run), not a filter issue. Try a range with data, such as Last 7 Days.';
+      if (statusEl) { statusEl.textContent = msg; statusEl.style.color = 'var(--amber)'; }
       return;
     }
     const doc = _repeatOffendersPdfRenderPages(specs, filterInfo);
