@@ -345,7 +345,282 @@ is re-run).
 
 ---
 
-## Parts 2-7 — not yet run
+## Part 2 of 7 — Data Flow + User Flow Tracing
+
+*(covers prompt sections 2 "trace the complete data flow" and 4 "explain
+every major user flow")*
+
+### 0. Template fields that genuinely don't exist here
+
+The source prompt's minimum field list (Name, Email, Phone, Score,
+Value/Revenue, Tags, Conversion information) assumes a generic CRM/sales
+app shape. Checked directly against `HEADER_ALIASES`
+(`js/core-sheets-fetch.js:17-57` — the complete list of every raw Sheet
+column this app reads) and every write-back column list
+(`MOVEMENT_LOG_COLUMNS`, `DAILY_RM_ISSUE_LOG_COLUMNS_`, etc.):
+
+- **Email, Phone**: not determinable from the provided code — no such
+  column is read anywhere in `HEADER_ALIASES` or written anywhere. If the
+  underlying CRM export carries them, this app never touches them.
+- **A numeric lead "score"**: does not exist as a per-lead field. The only
+  "score" concept in the codebase is `computeRMScoreRows()`
+  (`js/overview-distribution-people-ops.js:494-565`) and the separate RM
+  Performance engine (`js/core-rm-performance.js`) — both score an **RM's**
+  performance, not a lead.
+- **Value/revenue**: no monetary field exists anywhere in this codebase —
+  not read, not computed, not displayed. Confirmed absent, not merely
+  undocumented.
+- **Tags**: no free-form tagging system exists. The closest analogues are
+  `source_bucket` (a fixed enum, not a tag) and the SLA issue flags
+  themselves (`isNotUpdated`, `stageStuck48h`, etc.), which function as a
+  fixed, code-defined classification, not user-assignable tags.
+- **"Name"**: the closest field is `client` (the customer's name) — read
+  but only ever displayed, never used in any business logic.
+
+The real fields that matter here, and this section's actual scope: `lead_id`
++ `client_id` (dual identity), `RM`/`TL` (owner), `region` (raw + two
+derived forms), `project`, `group_source`/`source_bucket` (source),
+`current_stage` (stage) + the 6 SLA-derived status flags (this app's real
+"status" concept), `call_attempts`/`call_count`/`duration` (activity),
+`internal_status_comments`/`stage_comments`/`last_comment`
+(comments/narrative), `lead_assigned_at` (created-date equivalent — there
+is no separate "updated_at" field on a lead; the closest is a comment's own
+logged timestamp), `isOppOrAbove`/`isBookingLead`/`isSoftBookingLead`
+(conversion-equivalent), and `Lead_Followups`/`SLA_History`/`Movement_Log`
+(the follow-up/history-tracking tables).
+
+### 1. Field-by-field trace
+
+| Field / concept | Origin (raw Sheet column, via `HEADER_ALIASES`) | Fetch | Transformation | Type | State (client) | Consumers | User-facing change | Cross-runtime twin |
+|---|---|---|---|---|---|---|---|---|
+| `lead_id` | `lead_id`/`leadid`/`lead id` | `sheetsApiValuesGet` → `gvizCellRaw` | Used as the primary union-find identity key (`core-fetch-and-render.js:295`); trimmed via `String(...).trim()` everywhere it's compared | string | Present on every record in `allParsedLeads`/`leads`/`issueLeads`; also the primary key in `Lead_Followups`, `Movement_Log`, `Daily_RM_Issues`, `Comment_History`, `Unmatched_Comments_Log` | Nearly every render function; the write key for `pushLeadsToFollowups` (`js/sheets-writeback.js:219`) | Read-only in the UI — no control lets a user edit a lead's own `lead_id` | `Core.gs`/`SlaEngine.gs`/`FollowupEngine.gs` read the identical column via `getVal_(row, colIndex, 'lead_id')` |
+| `client_id` | `client_id`/`client id` | same | Secondary union-find key (`core-fetch-and-render.js:296-297`), used together with region-similarity to merge multi-copy customers | string | Same as `lead_id` | Collation badges (`js/core-collation.js`); the `Daily_RM_Issues`/`clientlevel_by_*` audit lines this session's own research scripts used | Read-only | Backend's `computeSlaFlags_`/capture functions read the same column |
+| `RM` (owner) | `rm` | same | None at read; `mergeRowsIntoOneLead` (`core-fetch-and-render.js:428`) collects every distinct `RM` across merged copies into `collatedRMs`; `enrichLead`'s `inactiveRmNewLead` cross-references `rm_is_active` | string (`RM`), array (`collatedRMs`) | Every lead record | RM-scoped tables (`computeRMScoreRows`, Repeat Offenders, RM Timeline's `#rmtlRMSelect`); the recipient-routing key for scheduled emails (backend `RmHierarchy.gs`) | Read-only on the dashboard — reassignment is not a dashboard action at all; it happens in the source CRM, and the next fetch just reflects whatever `RM` the Sheet now says | `RmHierarchy.gs`'s org-chart lookup is keyed on this exact string (case-insensitive, with a role-suffix-stripping fallback) |
+| `region` | `region` (raw) + `project_region` (fallback input) | same | `effectiveRegion(l)` (`js/reports-build.js`) overrides raw `region` with `project_region`/`group_source` when either says "Loan"; `mainRegionFor()` further normalizes into one of 11 canonical regions via `REGION_GROUP_MAP` | string → string → string (3 layers: raw, effective, main) | `region`/`project_region` on the raw record; `effectiveRegion`/`mainRegionFor` are always recomputed on demand, never cached as a stored field | The Region filter (`core-filters.js:75`, filters on `effectiveRegion(l)`, NOT raw `region`), region tables, region-email bucketing | Read-only | `EmailInfra.gs`'s `mainRegionForGs_`/`REGION_GROUP_MAP_` — a separately maintained copy, flagged in Part 1 for Part 4's diff |
+| `project` | `project` | same | None | string | Raw record | Project filter (`core-filters.js:74`, exact match — no normalization layer like region has), project tables | Read-only | `Core.gs`/backend readers use the same raw column |
+| `group_source` / `source_bucket` (source) | `group_source`/`group source`/`source`; `source_bucket`/`sub_source`/`sub source` | same | None at read; `passesGoogleNonUtmSearchGs_` (backend) and the client's own scope checks test `group_source==='google'` + `source_bucket ∈ {'non-utm','search'}` | string / string | Raw record | Source/Bucket filters (`core-filters.js:77-78`, case-insensitive on source, exact on bucket); Source Mix table | Read-only | `EmailInfra.gs:166-171` implements the identical scope gate independently |
+| `current_stage` (stage) | `current_stage`/`current stage`/`stage` | same | `canonicalStage()` (`js/core-lead-model.js:83`) maps raw text to one of 9 funnel bands via `STAGE_ALIASES` (exact/stem matching); `isOppOrAbove`/`isClosedStage`/`isLeadClosed` derive booleans from it | string → canonical string → derived booleans | Raw `current_stage` on the record; derived booleans (`excluded`, `oppOrAbove`, `isOpenLead`) computed fresh inside `enrichLead` every render pass, never persisted | Funnel chart, every stage-gated SLA check, Stage filter is NOT exposed on the dashboard's own filter bar (only Project/Region/TL/Source/Bucket are) — stage is a derived/reported dimension here, not a user filter input | Read-only | `Core.gs`'s `canonicalStage_`/`isClosedStage_`/`isOpenLead_` — the exact backend mirror flagged for Part 4 |
+| **Status (this app's real equivalent)**: `isNotUpdated`, `stageStuck48h`, `followupOverdue`, `inactiveRmNewLead`, `underCalledToday`, `firstContactBreach` | Derived, not a raw column — computed from `current_stage` + `lead_assigned_at` + `last_connect`/`last_connect_time` + `call_attempts` + `rm_is_active` + comment timestamps | n/a | All 6 computed inside `enrichLead()` (`js/core-lead-model.js:187-433`, see the full walkthrough above) — each has its own gating logic (grace period, 48h window, priority order via `ISSUE_PRIORITY`) | boolean × 6 | Computed fresh on **every** `enrichLead()` call — i.e. every filter pass, not cached on the raw record | The 5 (6, counting `firstContactBreach`'s retrospective variant) Operations issue-list cards; `ISSUE_PRIORITY` picks ONE "primary" issue per lead for anywhere only one label fits (report subjects, `Daily_RM_Issues`) | User can't directly change a flag — it changes only when the underlying data does (a call gets logged, a comment gets added) and the lead is re-fetched/re-enriched | `SlaEngine.gs`'s `computeSlaFlags_` — the single most important cross-runtime pair in the whole app, flagged for Part 4's line-by-line diff |
+| `call_attempts` / `call_count` / `duration` (activity) | `call_attempts`/`call attempts`/`attempts`; `call_count`/`call count`; `duration` | same | On merge, taken via **MAX across copies**, not SUM (`core-fetch-and-render.js:417-419` — these are client-cumulative phone-system figures, not per-copy partial contributions); `enrichLead`'s `attemptsToday` further derives a day-over-day delta using a `Movement_Log`-sourced baseline (`_todayCallBaselineByKey`) | number → number (merged) → number (today's delta) | Raw `call_attempts` on the merged record; `attemptsToday` recomputed per `enrichLead()` call, using `_todayCallBaselineByKey` (rebuilt once per filter pass from `movementSnapshots`) | `underCalledToday` flag; Movement snapshot writes (`movementCellValue`, verbatim); Repeat Offenders' `underCalledToday` rule | Read-only — a call is logged in the source CRM, not the dashboard | Backend's `computeSlaFlags_` reads the same raw column but computes its own day-over-day baseline from `Movement_Log` independently — a second, separate implementation of the identical baseline concept (Part 4 candidate) |
+| Comments (`internal_status_comments`, `stage_comments`, `last_comment`) | Same-named columns | same | `combinedCommentsText()` concatenates all 3; `parseActionLog()` (`js/core-outcome-engine.js:72`) parses the "Name: Comment - date" structured entries out of `internal_status_comments`; on merge, `mergeCommentField()` dedupes+re-sorts each field independently across copies by embedded timestamp (`core-fetch-and-render.js:373-386`) | string → structured entries (`{loggedBy, comment, ts}`) | Raw fields on the record; `parseActionLog`'s result is memoized in `_actionLogCache` (`core-outcome-engine.js:70`), explicitly cleared on every fresh `fetchAndRender()` | `inferOutcome()` (comment classification), `latestFamilyOutcome`, `suggestedFollowUp`, the Audit tab's `updateEventsFor`, the collated text pushed into `Lead_Followups` column E | The Dashboard never writes back INTO these columns — comments are entered in the source CRM. The dashboard's own "Suggested Follow-up" text is a *separate*, human-reviewed field (`Lead_Followups` column F), never fed back into the lead's own comment columns | `FollowupEngine.gs`'s `OUTCOME_RULES_GS_`/`inferOutcomeGs_` — the second half of the Part 4 duplicated-logic pair, alongside `SlaEngine.gs` |
+| `lead_assigned_at` (created-date equivalent) | `lead_assigned_at`/`lead assigned at`/`assigned_at`/etc. | same | `parseDate()` (`js/core-lead-model.js:52`, memoized); on merge, the **earliest** value across copies is kept (`core-fetch-and-render.js:423-426` — "when this customer was actually first assigned," not a particular copy's generation time) | string → `Date` | Raw string on the record; parsed on demand via `parseDate`, never stored as a `Date` object on the lead itself | The Date filter (`fromDate`/`toDate` in `_applyFiltersAndRenderImpl`, `core-filters.js:79-84`); every age/grace/48h calculation in `enrichLead` | Read-only | Backend reads the identical column for its own age calculations |
+| **Conversion-equivalent**: `isOppOrAbove`, `isBookingLead`, `isSoftBookingLead` | Derived from `current_stage` | n/a | `js/core-lead-model.js:93-119` — `isOppOrAbove` = stage rank ≥ "Opportunity"; `isBookingLead`/`isSoftBookingLead` check the exact `booking`/`soft booking` stage names | boolean × 3 | Computed on demand, not persisted | KPI strip ("Total Opportunities+", conversion-rate-shaped tiles), funnel chart | Read-only | `Core.gs` mirrors `isOppOrAbove_` |
+| `Lead_Followups` (follow-up state) | Not a lead field — a separate Sheet tab, keyed by `lead_id` | `readLeadsTab_`-style separate read, only when the Generate cycle needs to poll it (`waitForAllFollowups`) | Column F (`suggested_followup`) is populated ONLY by a human editing the Sheet directly — the app never writes it | string | Not merged into `allParsedLeads`/`leads` at all — this is genuinely a separate table the app polls, not a lead attribute | `renderReports()`'s 3-phase Generate cycle (`js/reports-ui.js`) waits on this column specifically | The one genuinely two-way field in this whole system: the dashboard writes columns A-E/G-H, a human writes column F, the dashboard reads column F back | `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_`/`waitForFollowupSuggestions_` polls the exact same tab/column, independently of the browser |
+| `movementSnapshots` / `Movement_Log` (history) | Not a lead field — a separate Sheet tab, one row per (lead, snapshot run) | `fetchMovementLog()` (`js/tab-movement.js:138`), a fully separate read from the main leads fetch | Parsed via the same `HEADER_ALIASES`-adjacent column mapping (`MOVEMENT_LOG_COLUMNS`); consumed by `buildTodayCallBaseline`/`lastSnapshotBefore`/`buildMovementHistories`/`computeRmPerformance` | array of raw row objects | `movementSnapshots` (module-level `let`, `tab-movement.js:25`) | Stalled Leads, RM Stall Leaderboard, Time-to-Opportunity, Repeat Offenders, RM Timeline, Tracking tab's cohort/chart sections — a genuinely wide fan-out from one state array | Written to by `browserSnapshotOpenLeads()` (manual button) and read back immediately after (see §3 below) | `MovementTracker.gs`'s `snapshotOpenLeads_` writes the identical shape 4×/day, unattended |
+
+### 2. Mermaid — initial dashboard load
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant HTML as dashboard.html
+    participant Auth as core-auth.js
+    participant Fetch as core-fetch-and-render.js
+    participant SheetsAPI as Sheets API v4
+    participant State as allParsedLeads / leads / issueLeads
+    participant Filters as core-filters.js
+    participant Render as renderAll() + tab render fns
+
+    U->>HTML: opens dashboard.html
+    HTML->>HTML: loads 23 js/*.js in order, main.js runs last
+    HTML->>Auth: initAuthGate() (main.js:14)
+    Auth-->>U: shows #authGate (sign-in button)
+    U->>Auth: clicks Sign In
+    Auth->>Auth: gateSignIn() -> Google OAuth popup
+    Auth-->>Auth: gateAccessToken/gateTokenExpiresAt set
+    Auth->>Fetch: handleGateSignInClick() calls fetchAndRender()
+    Fetch->>SheetsAPI: sheetsApiValuesGet(sheetId, "leads!A:ZZ") (Bearer gateAccessToken)
+    SheetsAPI-->>Fetch: raw values[][] (UNFORMATTED_VALUE, SERIAL_NUMBER dates)
+    Fetch->>Fetch: valuesToGvizShape + gvizCellRaw/gvizCellDate parse each row
+    Fetch->>Fetch: union-find identity match + mergeRowsIntoOneLead (collate, don't dedupe)
+    Fetch->>State: allParsedLeads = dedupedLeads
+    Fetch->>Fetch: fetchMovementLog(sheetId) (tab-movement.js, separate read)
+    Fetch->>Filters: buildFilterUI() then applyFiltersAndRender()
+    Filters->>State: leads = allParsedLeads.filter(passesFilters).map(enrichLead)
+    Filters->>State: issueLeads = allParsedLeads copySplits, same filter+enrich
+    Filters->>Render: renderAll()
+    Render-->>U: KPI strip, tables, charts, issue cards all populate
+```
+
+### 3. Mermaid — filter apply / reset flow
+
+```mermaid
+flowchart LR
+    U([User]) -->|checks a Region/Project/TL/\nSource/Bucket checkbox, or\nedits From/To date| MS["buildMultiSelect's onChange\n(core-filters.js)"]
+    MS -->|mutates a Set in place| FS[("filterState\n{project,region,TL,source,bucket}\n(core-sheets-fetch.js state)")]
+    MS --> AFR["applyFiltersAndRender()\n(core-filters.js:38)"]
+    AFR -->|"2x nested setTimeout(...,0)\nforces a real paint of the\nloading overlay first"| IMPL["_applyFiltersAndRenderImpl()"]
+    IMPL -->|reads filterState + #dateFromInput/#dateToInput| PF["passesFilters(l) closure\n(project/effectiveRegion/TL/\nsource/bucket/date range)"]
+    APL[("allParsedLeads\n(unfiltered, post-collation)")] --> PF
+    PF -->|"filtered.map(enrichLead)"| LEADS[("leads\n(customer-level, enriched)")]
+    PF -->|"per copySplit unit,\nindependently filtered+enriched"| ISSUE[("issueLeads\n(copy-level, enriched)")]
+    LEADS --> RENDER["renderAll()\n(overview-distribution-people-ops.js)"]
+    ISSUE --> RENDER
+    RENDER --> U2([User sees updated tables/\ncharts/KPIs/issue cards])
+
+    RESET(["User clicks Clear Filters"]) -->|clears every Set in\nfilterState, resets date inputs| FS
+    RESET --> AFR
+```
+
+**Reset** is not a special code path — "Clear Filters" just empties every
+`Set` in `filterState` and re-runs the identical `applyFiltersAndRender()`
+pipeline, so an empty `filterState` naturally passes every lead through
+`passesFilters` unchanged. No separate "unfiltered" branch exists.
+
+### 4. Mermaid — write-back / mutation flow (concrete example: manual snapshot)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant Btn as #snapshotNowBtn
+    participant WB as sheets-writeback.js
+    participant API as Sheets API v4
+    participant Sheet as Movement_Log / SLA_History
+    participant Mov as tab-movement.js state
+    participant Render as renderMovementTab/\nrenderTrackingTab/\nrenderStalledFlaggedLeadsOps
+
+    U->>Btn: click "Snapshot Now"
+    Btn->>WB: browserSnapshotOpenLeads()
+    WB->>WB: gateTokenValid()? if not, gateSignIn()
+    WB->>WB: build rows from allParsedLeads via movementCellValue()
+    WB->>API: appendSheetRows(Movement_Log, rows)
+    API-->>Sheet: Movement_Log gets N new rows
+    WB->>WB: snapshotSlaHistory(now) (core-filters.js, chained, own try/catch)
+    WB->>API: upsertSlaHistoryRows(...) 
+    API-->>Sheet: SLA_History upserted
+    WB->>Mov: fetchMovementLog(_currentSheetId) — re-read the tab it just wrote
+    Mov-->>WB: movementSnapshots refreshed in place
+    WB->>Render: trackingPopulateSnapshotSelectors()
+    WB->>Render: renderStalledFlaggedLeadsOps()
+    WB->>Render: renderMovementTab()
+    WB->>Render: renderTrackingTab()
+    WB->>Render: renderRMIssueHistory(selectedRM) — if an RM is selected
+    Render-->>U: every Movement/Tracking/RM-Timeline section reflects the new snapshot
+```
+
+**This is the general refresh pattern across the whole app**: there is no
+generic cache-invalidation layer. Every write function's own success path
+explicitly names and calls the exact `render*()` functions it knows read
+that data — refresh is wired by hand at each call site, not automatic. The
+same shape repeats for `pushLeadsToFollowups` (re-renders the report list
+with updated status), `upsertDailyCohortHistoryRows` (no re-render needed,
+it runs silently on every page load), and `logEmailSend` (fire-and-forget,
+no re-render at all — a failure here is caught and never surfaces to the
+UI, confirmed in Part 1).
+
+### 5. Major user flows, traced end to end
+
+For each: **USER ACTION → UI → EVENT HANDLER → VALIDATION → STATE CHANGE →
+WRITE (if any) → SHEET → RESPONSE → STATE REFRESH → RE-RENDER → VISIBLE
+RESULT.**
+
+**Opening the dashboard (cold start)** — see §2's diagram above.
+
+**Applying a filter** — see §3's diagram above.
+
+**Resetting filters** — same pipeline as applying, with an empty
+`filterState` (§3, note).
+
+**Opening a lead's detail (Audit tab / RM Timeline day view)** — there is
+no dedicated "lead detail page" or modal in this app (confirmed in Part
+1's HTML-shell research: no `<dialog>`, no modal containers). The closest
+equivalent is `updateEventsFor(l)` (`js/tab-audit.js:56-69`) building a
+per-lead timeline of every dated comment/connect event, displayed inline
+in the Audit tab's table row or RM Timeline's Day Timeline list — both
+read straight from the already-in-memory `leads` array, no additional
+fetch, no state change, no write. Purely a client-side render toggle.
+
+**Manual Movement snapshot** — see §4's diagram above. **Write**:
+`Movement_Log` (append) + `SLA_History` (upsert, chained). **Refresh**:
+`fetchMovementLog` + 4 named re-renders.
+
+**Generate region reports (Operations tab)** —
+```
+USER ACTION: clicks #generateBtn
+  -> reports-ui.js: renderReports()
+    -> VALIDATION: none explicit — the button is always clickable;
+       "nothing qualifies" is handled as an empty-report state, not blocked upfront
+    -> PHASE 1 (preliminary): buildRegionWiseReports(combine) (reports-build.js,
+       pure computation) — just to get the qualifying lead list
+    -> WRITE: clearLeadFollowupsTab() then pushLeadsToFollowups(rows)
+       (sheets-writeback.js) -- guarded by tryClaimGenerateCycle('operations'),
+       a real mutex against the Overnight flow doing the same thing concurrently
+    -> WAIT: waitForAllFollowups(leadIds, ...) polls Lead_Followups column F
+       for a human-entered suggestion, up to a bounded timeout, cancelable
+       (per-cancelBtnId _followupWaitCancelled Map — confirmed fixed in Part 1)
+    -> PHASE 2 (real): buildRegionWiseReports(combine) AGAIN, now picking up
+       whatever got written to column F meanwhile — human-reviewed text if
+       it arrived in time, else the algorithmic FOLLOWUP_SUGGESTIONS fallback
+       with an explicit "UNREVIEWED" banner
+    -> STATE: window._regionReports / _allReports populated
+    -> RE-RENDER: report cards rendered into #regionReportList
+  VISIBLE RESULT: one card per region/issue combination, each with mailto
+  and "Send via Gmail" buttons, To/Cc chip inputs pre-filled from
+  Region_Recipients (localStorage-cached)
+```
+
+**Sending a report via Gmail** —
+```
+USER ACTION: clicks "Send via Gmail" on a report card
+  -> reports-gmail.js: sendReportViaGmail(report, btnId)
+    -> gmailTokenValid()? if not, opens the SEPARATE Gmail OAuth consent
+       (different token, different grant from the Sheets sign-in gate)
+    -> VALIDATION: recipientsForReport(report) (reports-ui.js) resolves
+       To/Cc — if TEST_MODE_OVERRIDE_EMAIL is set, silently substitutes
+       one address here (flagged as a live footgun in Part 1)
+    -> buildRawEmail() -> MIME-encode -> performGmailSend()
+    -> WRITE (external): fetch(POST gmail.googleapis.com/.../messages/send)
+    -> RESPONSE: on success, button flips to "Sent (click to resend)",
+       localStorage 1-hour dedupe log updated (cosmetic only)
+    -> WRITE (Sheets, fire-and-forget): logEmailSend(report, to, cc)
+       -> Send_Log append -- NOT awaited; a failure here is silently
+          swallowed, nothing tells the user Send_Log wasn't updated
+    -> on FAILURE: button restores to its PRIOR state (not a bare "Send"),
+       so a report already sent once doesn't visually regress
+  VISIBLE RESULT: button state change only — no re-render of any lead data
+```
+
+**SLA_History write (automatic, on every manual snapshot; also
+admin-triggered)** —
+```
+USER ACTION: clicks #snapshotNowBtn (chained, see Movement snapshot above)
+  OR clicks #backfillSlaHistoryBtn (tab-tracking.js, explicit admin action)
+  -> snapshotSlaHistory(now) (core-filters.js) computes ISSUE_PRIORITY-keyed
+     breach counts over the CURRENT in-memory `leads`
+  -> upsertSlaHistoryRows(entries) (sheets-writeback.js)
+    -> WRITE: SLA_History upsert-by-snapshot_at, RAW value input
+       (deliberately, to avoid the documented date-serial auto-conversion bug)
+    -> sortSlaHistorySheet_() keeps the tab chronological regardless of
+       write path
+  VISIBLE RESULT: no direct re-render — SLA_History is read back only when
+  the Tracking tab's own charts are next rendered from a fresh fetch
+```
+
+**Backend-only flows (no browser involved at all)**: the 4×/day Movement_Log
+snapshot, the 10am/1pm Overnight emails, the 5pm All-Issues email, and the
+22:50 Daily_RM_Issues capture all follow the identical shape —
+`SpreadsheetApp` read → `computeSlaFlags_`/`inferOutcomeGs_` classify →
+(for the two email scripts) `GmailApp`/Advanced Gmail Service send → a
+`*_Log` tab append — entirely on Apps Script's own clock trigger, with zero
+dependency on anyone having the dashboard open. See Part 1's trigger table
+for the exact schedule of each.
+
+### 6. Open items carried into later parts
+
+- The day-over-day call-count baseline (`_todayCallBaselineByKey` on the
+  client, a separate independent computation in `SlaEngine.gs`/backend) is
+  a second instance of the duplicated-logic risk already flagged in Part
+  1 for `enrichLead`/`computeSlaFlags_` — Part 4.
+- `TEST_MODE_OVERRIDE_EMAIL` genuinely sits in the middle of the real send
+  path (confirmed here at the exact call site, `recipientsForReport`) —
+  reinforces Part 1's flag for the findings list in Part 6/7.
+- `logEmailSend`'s fire-and-forget failure handling means `Send_Log` can
+  silently under-report real sends — worth an explicit mention in Part 6's
+  findings (a UI-invisible data-quality gap, not a functional bug).
+
+---
+
+## Parts 3-7 — not yet run
 
 See the To-Do Dashboard's research project for the full task sequence and
 what each remaining part covers.
