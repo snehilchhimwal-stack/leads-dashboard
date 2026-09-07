@@ -153,6 +153,97 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = realSs;
     }
 
+    // ---- pruneDailyRmIssueLog_: retention cutoff + row-headroom shrink
+    // (2026-09-07 fix for the real production incident where
+    // captureDailyRmIssues crashed on the workbook's 10,000,000-cell
+    // ceiling — this table had no pruning at all before this) ----
+    // Real wall clock, same reasoning as pruneMovementLog_'s own test
+    // above: the cutoff is computed from Date.now(), not an injectable
+    // `now`, so fixtures must be relative to a freshly-read real moment.
+    const realNowForPrune = new Date();
+    const prLogHeader = DAILY_RM_ISSUE_LOG_COLUMNS_;
+    // The `date` column can read back as EITHER a real Date object or a
+    // plain string, depending on whether Sheets auto-converted it on
+    // write (see pruneDailyRmIssueLog_'s own comment) — covering both
+    // shapes here, for both an old and a recent row, is the whole point
+    // of this fixture set.
+    const prOldDateCell = TestFixture_daysAgo_(realNowForPrune, 40); // outside 30-day retention
+    const prOldStringCell = istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 45)); // outside, string-shaped
+    const prRecentDateCell = TestFixture_daysAgo_(realNowForPrune, 5); // inside retention
+    const prRecentStringCell = istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 3)); // inside, string-shaped
+    function prRow_(dateCell, tag) {
+      return prLogHeader.map(function (col) {
+        if (col === 'date') return dateCell;
+        if (col === 'RM') return tag;
+        return '';
+      });
+    }
+    const prSs = TestMockSpreadsheet_({});
+    const prSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [
+      prLogHeader,
+      prRow_(prOldDateCell, 'old-date'),
+      prRow_(prOldStringCell, 'old-string'),
+      prRow_(prRecentDateCell, 'recent-date'),
+      prRow_(prRecentStringCell, 'recent-string'),
+    ]);
+    // Simulate a sheet that has grown a large row allocation over months
+    // of unpruned use — real DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ is 2000, so
+    // only an allocation well beyond (kept rows + 2000) actually exercises
+    // the shrink branch.
+    prSheet._maxRows = 10000;
+    prSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = prSheet;
+    pruneDailyRmIssueLog_(prSs);
+    const prKeptRows = prSheet.getRange(2, 1, prSheet.getLastRow() - 1, prLogHeader.length).getValues();
+    const prKeptTags = prKeptRows.map(function (r) { return r[1]; });
+    TestAssertEqual_(prKeptTags.indexOf('old-date'), -1, 'pruneDailyRmIssueLog_: a Date-typed row older than the retention window is dropped');
+    TestAssertEqual_(prKeptTags.indexOf('old-string'), -1, 'pruneDailyRmIssueLog_: a string-typed row older than the retention window is dropped');
+    TestAssert_(prKeptTags.indexOf('recent-date') >= 0, 'pruneDailyRmIssueLog_: a Date-typed row within the retention window is kept');
+    TestAssert_(prKeptTags.indexOf('recent-string') >= 0, 'pruneDailyRmIssueLog_: a string-typed row within the retention window is kept');
+    TestAssertEqual_(prKeptTags.length, 2, 'pruneDailyRmIssueLog_: exactly the 2 recent rows survive, nothing extra');
+    TestAssert_(prSheet.getMaxRows() < 10000, 'pruneDailyRmIssueLog_: shrinks an over-allocated sheet\'s row count back down toward kept-rows + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_');
+    TestAssert_(prSheet.getMaxRows() >= 1 + 2 + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_, 'pruneDailyRmIssueLog_: never shrinks below what the kept rows + headroom actually need');
+
+    // ---- pruneDailyRmIssueLogNow(): the one-off manual recovery entry
+    // point resolves SpreadsheetApp.getActiveSpreadsheet() itself, same
+    // pattern as pruneMovementLogNow ----
+    const prNowSs = TestMockSpreadsheet_({});
+    const prNowSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader, prRow_(prOldDateCell, 'old-date')]);
+    prNowSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = prNowSheet;
+    const realSsForPruneNow = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return prNowSs; }, flush: function () {} };
+    try {
+      pruneDailyRmIssueLogNow();
+      TestAssertEqual_(prNowSheet.getLastRow(), 1, 'pruneDailyRmIssueLogNow: manual recovery entry point prunes the ACTIVE spreadsheet\'s Daily_RM_Issues, dropping the old row down to header-only');
+    } finally {
+      SpreadsheetApp = realSsForPruneNow;
+    }
+
+    // ---- integration: captureDailyRmIssues_ prunes BEFORE writing, so a
+    // sheet already over its row-allocation headroom still gets tonight's
+    // capture written correctly in the SAME run — this is the exact
+    // ordering fix for the real incident (a write-then-prune order can
+    // never self-heal once a sheet is already over the cell ceiling,
+    // since the write throws before pruning is ever reached) ----
+    const intSs = TestMockSpreadsheet_({});
+    intSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+    const intOldRows = [prLogHeader];
+    for (let i = 0; i < 50; i++) { intOldRows.push(prRow_(TestFixture_daysAgo_(realNowForPrune, 40), 'stale-' + i)); }
+    const intLogSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, intOldRows);
+    intLogSheet._maxRows = 10000;
+    intSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = intLogSheet;
+    const realSsForInt = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return intSs; }, flush: function () {} };
+    try {
+      captureDailyRmIssuesNow();
+      const intRows = intLogSheet.getRange(2, 1, intLogSheet.getLastRow() - 1, prLogHeader.length).getValues();
+      const intTags = intRows.map(function (r) { return r[1]; });
+      TestAssertEqual_(intTags.filter(function (t) { return String(t).indexOf('stale-') === 0; }).length, 0, 'captureDailyRmIssuesNow: the 50 stale rows from before tonight are pruned as part of the same run');
+      TestAssert_(intTags.indexOf('Test RM One') >= 0, 'captureDailyRmIssuesNow: tonight\'s real flagged row is still written correctly in the same run pruning happened');
+      TestAssert_(intLogSheet.getMaxRows() < 10000, 'captureDailyRmIssuesNow: row allocation is shrunk as part of the same run, not left over-allocated');
+    } finally {
+      SpreadsheetApp = realSsForInt;
+    }
+
     // ---- RM Performance (Phase 4): reconstructRmPerformanceObservationsGs_
     // / aggregateRmPerformanceGs_ / classifyRmPerformanceGs_ against a
     // hand-seeded Movement_Log ----

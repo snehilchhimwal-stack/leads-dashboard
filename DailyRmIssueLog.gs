@@ -52,6 +52,45 @@ const DAILY_RM_ISSUE_LOG_COLUMNS_ = [
   'lead_assigned_at',
 ];
 
+// Added 2026-09-07 after a real production incident: captureDailyRmIssues
+// crashed with "This action would increase the number of cells in the
+// workbook above the limit of 10000000 cells" (thrown from the chunked
+// setValues() call below — see pruneDailyRmIssueLog_'s own comment for the
+// full mechanism, the exact same one MovementTracker.gs's pruneMovementLog_
+// already documents/fixes for Movement_Log). This table had NO retention
+// at all since it shipped 2026-09-01 — every night's flagged leads were
+// appended forever, unlike every other log tab in this project.
+//
+// 7 days chosen to MATCH Movement_Log's own MOVEMENT_LOG_RETENTION_DAYS,
+// not arbitrarily — and deliberately NOT something longer, based on real
+// measured volume: this file's own §9.2 incident history (HANDOVER.md)
+// documents a single night's capture producing ~26,660 rows. At this
+// table's 13 columns, even just 7 days of that volume is
+// ~26,660 x 13 x 7 =~ 2.4M cells — and Movement_Log ALONE already uses
+// ~5.6M cells at its own 7-day retention (232,607 rows x 24 columns, per
+// InteractionHistoryLogger.gs's own measured-scale comment). Those two
+// tables together already account for ~8M of the workbook's 10M-cell
+// ceiling, before the leads tab itself or any other log tab is counted —
+// which is exactly how the ceiling got hit in the first place. A LONGER
+// retention here was seriously considered (this table's whole purpose is
+// day-over-day pattern history) but rejected: nothing in this codebase
+// actually reads Daily_RM_Issues back programmatically —
+// reportRmPerformanceNow deliberately reconstructs from Movement_Log
+// instead, specifically because this log is violations-only, not a full
+// eligibility denominator (see that function's own comment) — so it
+// exists purely as a human audit trail, and 7 days (a full work week) is
+// a reasonable amount of raw history for that purpose without gambling
+// with the shared cell budget again. Raise only after confirming real
+// headroom against ALL sheets in the workbook, not just this one.
+const DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ = 7;
+// Matches MovementTracker.gs's MOVEMENT_LOG_ROW_HEADROOM_ exactly — see
+// that constant's own comment for why headroom exists at all. The exact
+// value barely matters here in practice: at ~26,660 rows/night (see
+// above), 7 days of kept rows alone dwarfs any reasonable headroom size,
+// so this only smooths out night-to-night volume variance, not the
+// dominant cost.
+const DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ = 5000;
+
 function ensureDailyRmIssueLogSheet_(ss) {
   let sheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
   if (!sheet) {
@@ -104,6 +143,17 @@ function captureDailyRmIssues_() {
   const todayKey = istDayKeyGs_(now);
 
   const logSheet = ensureDailyRmIssueLogSheet_(ss);
+
+  // Prune BEFORE writing, not after — deliberately the opposite order from
+  // MovementTracker.gs's snapshotOpenLeads_ (which prunes Movement_Log
+  // only after its own append). That after-write order is exactly what
+  // let this table run out of cell budget in the first place: once a
+  // sheet is already over the workbook's 10,000,000-cell ceiling, the
+  // write throws before a trailing prune call is ever reached, so nothing
+  // can self-heal without a manual one-off run (see
+  // pruneDailyRmIssueLogNow). Pruning first means tonight's capture always
+  // gets a chance to reclaim space before it needs it.
+  pruneDailyRmIssueLog_(ss);
 
   // Idempotency guard — same per-day pattern Overnight_Log/AllIssues_Log
   // already use: a double-fire (or a manual re-run the same night) must
@@ -174,6 +224,74 @@ function captureDailyRmIssues_() {
 }
 
 function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
+
+// Rewrites the whole data range with only rows newer than the retention
+// window — same "rewrite, don't delete individual rows out from under a
+// shifting range" approach as MovementTracker.gs's pruneMovementLog_, and
+// the SAME reason for the deleteRows step below: clearContent() only
+// empties cell VALUES, it does not shrink the sheet's actual row
+// allocation (getMaxRows()), and the workbook's 10,000,000-cell cap is on
+// the declared grid size (rows x columns, summed across every tab in the
+// workbook), not on cells that hold real content. Without the deleteRows
+// step this sheet's row count only ever grows, ratcheting the whole
+// workbook toward that ceiling forever even once the actual DATA here is
+// bounded by DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ — this is exactly the gap
+// that let captureDailyRmIssues_ crash with "This action would increase
+// the number of cells in the workbook above the limit of 10000000 cells"
+// (2026-09-06 production incident): this table had no pruning of any kind
+// from the day it shipped (2026-09-01) until this fix.
+//
+// The `date` column here is written as a plain 'yyyy-MM-dd' STRING
+// (todayKey), not a Date object — but Sheets can silently auto-convert a
+// date-shaped string into a real Date-typed cell on write (the same
+// gotcha UnmatchedCommentLogger.gs's dedupeUnmatchedCommentsNow exists to
+// recover from for comment_at), so a cell here can read back as EITHER
+// type depending on how it happened to be written. The cutoff comparison
+// below normalizes both shapes the same way captureDailyRmIssues_'s own
+// idempotency check already does (line ~144), rather than assuming one.
+function pruneDailyRmIssueLog_(ss) {
+  const logSheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
+  if (!logSheet) return;
+  const lastRow = logSheet.getLastRow();
+  if (lastRow < 2) return;
+  const lastCol = logSheet.getLastColumn();
+  const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for pruning');
+  const cutoffKey = istDayKeyGs_(new Date(Date.now() - DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ * 24 * 60 * 60 * 1000));
+  const kept = values.filter(function (row) {
+    const cell = row[0];
+    const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell || '');
+    return key >= cutoffKey; // 'yyyy-MM-dd' strings compare correctly lexicographically
+  });
+  if (kept.length === values.length) {
+    // Nothing to prune — still fall through to the row-shrink check below,
+    // since a prior run could have written more rows than this one needs
+    // (e.g. after DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ was lowered).
+  } else {
+    withRetry_(function () { logSheet.getRange(2, 1, lastRow - 1, lastCol).clearContent(); }, 'clear Daily_RM_Issues before pruned rewrite');
+    if (kept.length) {
+      withRetry_(function () { logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept); }, 'rewrite pruned Daily_RM_Issues rows');
+    }
+  }
+
+  const neededRows = 1 + kept.length + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_;
+  const maxRows = logSheet.getMaxRows();
+  if (maxRows > neededRows) {
+    logSheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  }
+}
+
+// ONE-OFF RECOVERY — run this manually (function dropdown -> Run) if
+// captureDailyRmIssues/captureDailyRmIssues_ has started failing with
+// "This action would increase the number of cells in the workbook above
+// the limit of 10000000 cells." Same reasoning as
+// MovementTracker.gs's pruneMovementLogNow: once the sheet is already
+// over the edge, the normal nightly trigger can't self-heal on its own
+// (its own write throws before it even reaches pruning) — this runs the
+// row-shrinking prune directly, without needing a successful capture
+// first. Safe to re-run any time.
+function pruneDailyRmIssueLogNow() {
+  pruneDailyRmIssueLog_(SpreadsheetApp.getActiveSpreadsheet());
+}
 
 /**
  * One-time (or occasional) backfill: reconstructs Daily_RM_Issues for

@@ -487,6 +487,51 @@ it, not the entire night. Covered by a dedicated test
 chunks + a partial one) and checks both chunk boundaries for an
 off-by-one.
 
+**2026-09-06 incident — the workbook's 10,000,000-cell ceiling, hit for
+real**: `captureDailyRmIssues` crashed with `Exception: This action
+would increase the number of cells in the workbook above the limit of
+10000000 cells`, thrown from the chunked write itself
+(`DailyRmIssueLog.gs:169` at the time). Root cause: `Daily_RM_Issues` had
+**no retention at all** from the day it shipped (2026-09-01) until this
+fix — every night's ~26,660 rows (see above) were appended forever,
+unlike every other log tab in this project (`Movement_Log` has had
+`pruneMovementLog_` since before this table existed). This is the exact
+same failure class Movement_Log itself hit before `pruneMovementLog_` was
+built — see that function's own comment in `MovementTracker.gs` for the
+underlying mechanism (Google Sheets' 10M-cell cap is on the workbook's
+*declared grid size*, summed across every tab, not on cells holding real
+content — `clearContent()` alone never shrinks it back down, only
+`deleteRows()` does).
+
+**Fix**: `pruneDailyRmIssueLog_()` (`DailyRmIssueLog.gs`), same
+rewrite-and-shrink approach as `pruneMovementLog_`, at a **7-day**
+retention (`DAILY_RM_ISSUE_LOG_RETENTION_DAYS_`) — deliberately matching
+`MOVEMENT_LOG_RETENTION_DAYS` rather than something longer: at ~26,660
+rows/night x 13 columns, even 7 days is ~2.4M cells, and Movement_Log
+alone already uses ~5.6M cells at its own 7-day retention — the two
+tables together were already most of the 10M budget before this fix, and
+nothing in this codebase actually reads `Daily_RM_Issues` back
+programmatically (`reportRmPerformanceNow` deliberately reconstructs from
+`Movement_Log` instead — see §9.3 below), so there was no reason to
+gamble on a longer window. **Pruning runs BEFORE the nightly write, not
+after** — the opposite order from `pruneMovementLog_`, and deliberately
+so: once a sheet is already over the ceiling, an *after*-write prune can
+never self-heal, because the write itself throws before pruning is ever
+reached (this is precisely what happened here). A one-off manual recovery
+function, `pruneDailyRmIssueLogNow()`, exists for exactly this situation
+— same pattern as `pruneMovementLogNow()` — run it once from the Apps
+Script editor's function dropdown to free capacity immediately if this
+error ever resurfaces before the next scheduled capture. **This fix must
+still be manually pasted into the live Apps Script project** (per
+`CLAUDE.md`'s top gotcha — a `.gs` edit in this repo is not live until
+copied over the matching file in Extensions → Apps Script and saved) —
+but **no `setupXxx()` re-run is needed** for this specific change, since
+it only changes what `captureDailyRmIssues_` does internally the next
+time its existing trigger fires, not the trigger's own schedule. Tonight's
+missed capture (2026-09-06) can still be recovered via
+`backfillOneDayFromMovementLogNow('2026-09-06')` as long as
+`Movement_Log`'s 7-day retention still covers that date.
+
 ### 9.3 Utility functions (console-callable, `DailyRmIssueLog.gs`)
 
 | Function | What it does |
