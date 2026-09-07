@@ -121,10 +121,10 @@ function _repeatOffendersPdfSectionTables(dateKeys){
   const filters = captureRepeatOffendersFilterSnapshot();
   const rankFor = (list) => sortRmPerformanceByScore(filterRmPerformanceRankable(list));
   const candidates = [
-    { title: 'RMs — worst 20', list: rankFor(computeRmPerformance(dateKeys, undefined, filters)).slice(0, 20) },
-    { title: 'By Region — worst first, all shown', list: rankFor(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters)) },
-    { title: 'A1 / TM — worst 10', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 10) },
-    { title: 'RH — worst 5', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters)).slice(0, 5) },
+    { title: 'RMs — worst 20', list: rankFor(computeRmPerformance(dateKeys, undefined, filters, rmHierarchyByNameLower)).slice(0, 20) },
+    { title: 'By Region — worst first, all shown', list: rankFor(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower)) },
+    { title: 'A1 / TM — worst 10', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, 10) },
+    { title: 'RH — worst 5', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, 5) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }

@@ -92,20 +92,20 @@ onmessage = function(e){
     // peer-average objects are available to report back for the
     // validation/debug panel — same 3 real functions computeRmPerformance
     // itself calls, in the same order, nothing reimplemented.
-    const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters);
+    const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters, rmHierarchyByNameLower);
     const rmByGroup = aggregateRmPerformance(rmObservations);
     const rmPeerAvg = computeRmPerfPeerAverages(rmByGroup);
     const rm = classifyRmPerformance(rmByGroup);
 
     postMessage({ type: 'progress', stage: 'region' });
-    const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters);
+    const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
 
     let a1tm = [], rh = [];
     if (rmHierarchyByNameLower) {
       postMessage({ type: 'progress', stage: 'a1tm' });
-      a1tm = computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters);
+      a1tm = computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
       postMessage({ type: 'progress', stage: 'rh' });
-      rh = computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters);
+      rh = computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
     }
 
     const composites = rm.map(r => r.composite);

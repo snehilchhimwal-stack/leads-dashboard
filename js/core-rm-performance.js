@@ -224,6 +224,53 @@ function repeatOffendersRegionKey(rec){
   return mainRegionFor(raw) || raw || 'Unassigned';
 }
 
+// Names that don't have ANY resolvable RM_Hierarchy row (confirmed live,
+// 2026-09-07, by querying RM_Hierarchy for their emails directly -- zero
+// matches under any variant) but are known leadership, not individual
+// RMs with a real book of leads -- explicit request. Exact, CASE-
+// SENSITIVE strings as they actually appear in Movement_Log's RM column
+// (verified live against real snapshot data, not guessed) -- a name
+// added here that doesn't exactly match production's spelling silently
+// does nothing, so re-verify the real string before changing this list.
+//   'Ashish Kukreja'      -- ashish.kukreja@homesfy.in
+//   'saurabh Mishra'      -- saurabh.mishra@homesfy.in
+//   'Mukesh Mishra Admin' -- an admin-login alias of the real Cluster
+//                            Head "Mukesh Mishra" (who IS excluded via
+//                            the role-based path below, since that name
+//                            DOES resolve) -- found while verifying this
+//                            exclusion live, not explicitly named in the
+//                            request, but clearly the same leadership
+//                            person under a second login.
+const RM_PERF_LEADERSHIP_NAME_EXCLUSIONS = new Set([
+  'Ashish Kukreja',
+  'saurabh Mishra',
+  'Mukesh Mishra Admin',
+]);
+
+// True when `rmName` (Movement_Log's raw RM field) should be excluded
+// from the RM Performance engine ENTIRELY -- not just hidden from the RM
+// table's display, but dropped from Stage 1 before any observation is
+// ever emitted, so a leadership person's leads can't inflate a region's
+// totals, distinct-RM count, or peer average either. Two paths:
+//   1. RM_Hierarchy role === 'Cluster Head' -- covers ALL regions' CHs,
+//      present or future, without a hardcoded name list (explicit
+//      request: "ALL region CH's ... should not be included").
+//   2. RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above, for names with no
+//      resolvable RM_Hierarchy row at all.
+// rmHierarchyByNameLower may be null/missing (RM_Hierarchy failed to
+// load) -- path 1 then simply can't fire, degrading gracefully to
+// path 2 only, same "unavailable, not broken" convention the A1-TM/RH
+// rollups already use elsewhere in this file.
+function rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower){
+  const name = String(rmName || '').trim();
+  if (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS.has(name)) return true;
+  if (rmHierarchyByNameLower) {
+    const row = rmHierarchyByNameLower.get(name.toLowerCase());
+    if (row && row.role === 'Cluster Head') return true;
+  }
+  return false;
+}
+
 // Calendar-day difference between two "YYYY-MM-DD" istDateKey strings.
 // Parsed as UTC noon specifically to dodge any local-timezone DST edge
 // (irrelevant to IST itself, which has none, but this runs in the
@@ -260,7 +307,7 @@ function _rmPerfDaysBetweenKeys(a, b){
 // (00:00/06:00/12:00/18:00 IST) means that's the 18:00 capture when
 // present, the closest available proxy to Daily_RM_Issues' own 22:50 IST
 // nightly capture time.
-function reconstructRmPerformanceObservations(dateKeys, keyFn, filters){
+function reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierarchyByNameLower){
   const observations = [];
   if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return observations;
   const getKey = keyFn || (rec => rec.RM || 'Unassigned');
@@ -271,6 +318,14 @@ function reconstructRmPerformanceObservations(dateKeys, keyFn, filters){
       const byDay = new Map(); // dayKey -> latest snapshot record that day
       copyHistory.forEach(rec => {
         if (!passesRepeatOffenderFilters(rec, filters)) return;
+        // Leadership (Cluster Head, or a specific known-leadership name
+        // with no resolvable RM_Hierarchy row) is excluded ENTIRELY here,
+        // at the raw-record stage, before any observation is emitted —
+        // not just hidden from the RM table's display. This is deliberate:
+        // their records would otherwise still inflate a Region/A1-TM/RH
+        // group's totals, distinct-RM count, and peer average even if
+        // their own row were merely hidden downstream.
+        if (rmPerfIsLeadershipExcluded(rec.RM, rmHierarchyByNameLower)) return;
         const dayKey = istDateKey(rec.snapshot_at);
         if (dateKeys && !dateKeys.has(dayKey)) return;
         const cur = byDay.get(dayKey);
@@ -525,9 +580,12 @@ function classifyRmPerformance(byGroup){
 // tab-repeat-offenders.js) — every call site must pass one, on the main
 // thread or from inside a Worker, so the filtered population this
 // function's peer average is built from is always explicit, never an
-// ambient global read.
-function computeRmPerformance(dateKeys, keyFn, filters){
-  const observations = reconstructRmPerformanceObservations(dateKeys, keyFn, filters);
+// ambient global read. `rmHierarchyByNameLower`: same Map (or null) every
+// call site already has on hand for the A1-TM/RH keyFns — also used here
+// to exclude leadership (Cluster Head role) from every rollup level, not
+// just the RM one (see rmPerfIsLeadershipExcluded).
+function computeRmPerformance(dateKeys, keyFn, filters, rmHierarchyByNameLower){
+  const observations = reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierarchyByNameLower);
   const byGroup = aggregateRmPerformance(observations);
   return classifyRmPerformance(byGroup);
 }

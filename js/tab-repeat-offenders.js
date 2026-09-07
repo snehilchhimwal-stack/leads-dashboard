@@ -339,13 +339,13 @@ function _runRepeatOffendersSynchronously(ctx, onDone){
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const stage1FilteredCount = movementSnapshots.filter(rec => passesRepeatOffenderFilters(rec, filters)).length;
 
-  const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters);
+  const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters, rmHierarchyByNameLower);
   const rmByGroup = aggregateRmPerformance(rmObservations);
   const rmPeerAvg = computeRmPerfPeerAverages(rmByGroup);
   const rm = classifyRmPerformance(rmByGroup);
-  const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters);
-  const a1tm = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters);
-  const rh = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters);
+  const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
+  const a1tm = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
+  const rh = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
 
   const composites = rm.map(r => r.composite);
   const compositeRange = composites.length
