@@ -960,7 +960,276 @@ restated here as business rules in their own right:
 
 ---
 
-## Parts 4-7 — not yet run
+## Part 4 of 7 — Cross-Runtime Consistency + API/DB Checks
+
+*(covers prompt sections 6 "cross-check logic against logic" and 10
+"API/DB consistency")*
+
+Every comparison below is a fresh, direct side-by-side read done in this
+part — not a re-statement of Parts 1/3's summaries. Where Part 3 hedged
+("probably still in sync, not yet fully diffed"), this part resolves that
+hedge one way or the other with evidence.
+
+### 4.1 `OUTCOME_RULES` vs `OUTCOME_RULES_GS_` — full diff
+
+Read both arrays in full (`js/core-outcome-engine.js:230-556`,
+`FollowupEngine.gs:147-401`) and compared every one of the 31 rules —
+outcome name, signal list, and `test()` function body — pairwise.
+
+**Result: all 31 rules match exactly**, in the same order, including every
+regex literal inside a `test()` function (e.g. `Wrong Number`'s
+`(_anySignal(w,['invalid']) && _anySignal(w,['number','no'])) ||
+(_anySignal(w,['exist']) && _anySignal(w,['doesnt','does','not','nahi']))`
+is character-for-character identical on both sides; `DNP`'s 4-branch regex
+test, `Requirement Noted (No Status)`'s digit-BHK regex and 17-item
+fallback list — all identical). This upgrades Part 3's hedged "probably
+still in sync" (1-rule spot check) to a verified fact: **as of this
+commit, the classifier is genuinely, completely in sync** — the one
+duplicated-logic pair in this app with the largest surface area (31
+rules, ~250 lines each) has zero drift.
+
+### 4.2 `enrichLead()` vs `computeSlaFlags_()` — full diff
+
+Read both functions in full (`js/core-lead-model.js:187-433`,
+`SlaEngine.gs:46-143`) and compared every one of the 5 shared flags'
+conditions plus every threshold constant.
+
+**Thresholds**: `LEAD_GRACE_HOURS`/`LEAD_LIFECYCLE_HOURS`/
+`MIN_CALLS_PER_DAY`/`FOLLOWUP_REVIEW_HOURS`/`FIRST_CONTACT_SLA_MINUTES`/
+`WORK_START_HOUR`/`WORK_END_HOUR` — identical values on both sides
+(3/48/5/4/10/9/19).
+
+**Flag-by-flag**:
+- `inactiveRmNewLead`: `isCreatedToday && rmIsInactive` on both sides,
+  identical `rm_is_active` string-set check
+  (`['false','no','inactive','0','n']`) and identical `!= null` guard
+  reasoning (both sides' comments explain the same checkbox-`false`
+  pitfall). **Match.**
+- `stageStuck48h`: `past48h && pastGrace` on both sides. **Match.**
+- `isNotUpdated`: `(pastGrace && canonicalStage(stage)==='not updated')
+  || neverConnectedPastWindow` on both sides, including the identical
+  2026-09-03 "not gated on isUnder48h" fix, cross-referenced by name in
+  each side's own comment. **Match.**
+- `followupOverdue`: `isUnder48h && pastGrace && hasConnected &&
+  followupStaleHours > FOLLOWUP_REVIEW_HOURS` on both sides. One
+  cosmetic difference: the client additionally checks
+  `followupStaleHours !== null` before comparing; the backend doesn't.
+  **Not a real bug** — on both sides, by the time this line runs,
+  `followupStaleHours` always falls back to `ageHours`, which is
+  guaranteed non-null at that point on both sides (verified by tracing
+  the gating conditions above it). Extra defensive code on one side,
+  functionally inert.
+- `underCalledToday`: `pastGrace && attemptsToday < MIN_CALLS_PER_DAY`
+  on both sides, with an equivalent day-over-day baseline fallback
+  (`_todayCallBaselineByKey` client-side, `baselineMap` parameter
+  backend-side). **Match.**
+
+**Scope difference, confirmed intentional**: the client's `enrichLead`
+also computes `firstContactBreach` (the retrospective "connected, but
+late" signal) — the backend's `computeSlaFlags_` does not. This is NOT
+an oversight: `firstContactBreach` is deliberately excluded from
+`ISSUE_PRIORITY` on the client too (its own comment explains why — it's
+not actionable, just a retrospective SLA-miss fact with its own separate
+report), and `computeSlaFlags_`'s own header states it "only computes
+what SLA_History needs (isOpenLead + the 5 rules)." Both sides agree on
+which 5 flags matter for the shared/automated surface.
+
+**Overall: the single most consequential duplicated pair in the app is
+verified in full agreement**, both in threshold values and in every
+flag's logic.
+
+### 4.3 `REGION_GROUP_MAP` vs `REGION_GROUP_MAP_` — full diff
+
+Read both tables in full (`js/reports-build.js:37-58`,
+`EmailInfra.gs:128-143`). **All 11 canonical regions and every sub-region
+alias match exactly**: Bangalore(+1/2/3), Central(+Central Mumbai),
+Commercial, Harbour, Hyderabad, Loan, Navi Mumbai(+2),
+Pune(+East/North/South/West), SoBo(+HNI-SoBo/HNI), Thane,
+Western(+Mumbai/1/2/3/4). `normRegionKey`/`normRegionKeyGs_`'s
+normalization regex (collapse whitespace/hyphens/underscores, lowercase,
+trim) is identical. `mainRegionFor`/`mainRegionForGs_`'s lookup-then-
+trailing-digit-suffix-fallback logic is identical. **The lookup table
+itself has zero drift.**
+
+### 4.4 🔴 The Loan-region override is silently missing from both scheduled emails
+
+This is the one real, previously-undocumented disagreement this part
+found — surfaced specifically because Part 4 checked what value actually
+flows INTO `mainRegionForGs_`, not just whether the lookup table itself
+matched (§4.3's table match made this easy to miss at the table level).
+
+**The client's real rule** (`effectiveRegion()`, `js/reports-build.js:
+80-84`) is a genuine two-step process: check `project_region==='loan'`,
+then `group_source==='loan'`, THEN fall back to raw `region` — only the
+*result* of that check is ever passed into `mainRegionFor()`. This is
+the function used by the Region filter and by the client's own
+region-email report builder (`reports-build.js`).
+
+**Checked directly where the backend's scheduled emails call the
+equivalent function** — all 3 call sites
+(`OvernightEmailer.gs:517`, `OvernightEmailer.gs:1205`,
+`AllIssuesEmailer.gs:206`):
+```js
+const rawRegion = getVal_(row, colIndex, 'region');
+const main = mainRegionForGs_(rawRegion);
+```
+**The raw `region` column is passed directly, with no Loan-override step
+of any kind** — not even the reduced group-source-only version that
+`_effectiveRegionGs_` (`MovementTracker.gs:621-624`) and
+`repeatOffendersRegionKey()` (`js/core-rm-performance.js:222-225`)
+correctly apply for Movement_Log-derived data (that reduced version
+*is* real and *is* consistently ported on both sides — see §4.5, it just
+never made it into `EmailInfra.gs`'s `mainRegionForGs_`, the function the
+scheduled emails actually call against the live `leads` tab).
+
+**Confirmed also that the backend genuinely cannot see `project_region`
+at all**: `HEADER_ALIASES_` (`Core.gs:36-67`) has no `project_region` key
+— compared directly against the client's `HEADER_ALIASES`
+(`js/core-sheets-fetch.js:17-57`), which does. Even if
+`OvernightEmailer.gs`/`AllIssuesEmailer.gs` wanted to apply the full
+override, `readLeadsTab_`'s `colIndex` has no way to resolve that column
+today.
+
+**Concrete failure scenario**: a lead whose `group_source` or
+`project_region` reads "Loan" but whose raw `region` column says, say,
+"Pune" — the live dashboard's own region-email report groups it under
+"Loan" (correct, per the documented business meaning: Loan leads aren't
+geographic). The 10am/1pm Overnight emails and the 5pm All-Issues email
+group the SAME lead under "Pune" instead, and it goes to Pune's regional
+recipients, not whoever handles Loan-sourced leads. This is silent —
+nothing errors, no warning, the lead simply lands in a different bucket
+depending on which surface produced the report. Not previously flagged
+anywhere in this codebase's own comments (unlike §4.5's gap, which both
+files openly document).
+
+**Severity**: real, concrete, currently live in production, affects who
+receives an email for a real (if likely small) subset of leads. Carried
+into Part 6's ranked findings as a HIGH/CRITICAL candidate — final
+severity call deferred to Part 6's explicit ranking pass, but the
+mechanism and reproduction path are fully confirmed here, not
+speculative.
+
+### 4.5 The Movement_Log-only reduced Loan override — confirmed consistent (not a bug)
+
+By contrast: `_effectiveRegionGs_` (backend, used by `DailyRmIssueLog.gs`'s
+RM Performance mirror) and `repeatOffendersRegionKey()` (client, used by
+the live Repeat Offenders tab) BOTH implement only the `group_source`-only
+reduced version of the Loan override, and BOTH explicitly cross-reference
+each other's identical limitation in their own comments ("same gap
+`_effectiveRegionGs_` already documents"). Root cause, confirmed
+identical on both sides: `Movement_Log`'s own write schema (§4.7) never
+captured a `project_region` column, so no code reading Movement_Log
+data — on either runtime — can ever apply the full override, regardless
+of how well-written that code is. This is a genuine, honestly-documented,
+*symmetric* limitation stemming from one shared root cause, not a
+runtime disagreement — the opposite finding from §4.4, included here for
+contrast so the two don't get conflated.
+
+### 4.6 IST timezone handling — different mechanisms, verified equivalent
+
+`istDateKey()` (client, `js/core-foundation.js:170-173`) computes IST
+wall-clock parts via manual arithmetic (`IST_OFFSET_MS = 330*60000`
+added/subtracted, then read via UTC getters). `istDayKeyGs_()` (backend,
+`Core.gs:167-169`) delegates to Apps Script's built-in
+`Utilities.formatDate(date, 'Asia/Kolkata', 'yyyy-MM-dd')`, which uses
+the IANA timezone database's real `Asia/Kolkata` definition. **These are
+two genuinely different code paths, not copies of the same code** — but
+verified equivalent for every date this app will ever handle: India has
+observed a fixed +05:30 offset with no DST since 1945, so a hardcoded
+offset and a full timezone-database lookup necessarily agree for any
+current or near-future date. Not a drift risk in practice, but worth
+recording as a case where "different implementation" was the right call
+(the browser has no reliable way to trust its own local timezone; Apps
+Script's server-side `Utilities.formatDate` can trust the IANA data
+directly) rather than something to unify.
+
+`businessMinutesBetween()` (client, `js/core-lead-model.js:14-35`) and
+`businessMinutesBetweenGs_()` (backend, `Core.gs:179-197`) were also
+read side-by-side: same day-by-day walk, same
+clip-to-[dayOpen,dayClose]-and-accumulate structure, same
+advance-to-next-midnight step — algorithmically identical, expressed
+through each side's own IST primitives. **Verified equivalent.**
+
+### 4.7 Movement_Log write schema — the two independent writers agree exactly
+
+`MOVEMENT_LOG_COLUMNS`/`SNAPSHOT_FIELD_KEYS` (client,
+`js/tab-movement.js:69-85`) and `SNAPSHOT_COLUMNS_` (backend,
+`MovementTracker.gs:105-125`) — the two column lists `browserSnapshotOpenLeads()`
+(client, manual button) and `snapshotOpenLeads_()` (backend, 4×/day
+trigger) each build their row from — are **identical, field for field, in
+the same order**: `lead_id, client_id, RM, TL, project, region, client,
+lead_assigned_at, group_source, source_bucket, current_stage,
+last_connect, last_connect_time, last_comment, internal_status_comments,
+closing_reason, call_attempts, call_count, duration, stage_comments,
+rm_is_active, lead_closing_reason`. Two genuinely independent writers to
+the same shared table, verified to produce byte-identical row shapes —
+no schema drift risk between a manually-triggered snapshot and an
+automated one.
+
+### 4.8 `HEADER_ALIASES` vs `HEADER_ALIASES_` — the rest of the diff
+
+Beyond §4.4's `project_region` finding: the client
+(`js/core-sheets-fetch.js:17-57`, 23 keys) also maps `lead_closing_comment`
+— the backend (`Core.gs:36-67`, 22 keys) does not. Checked whether this
+matters: `lead_closing_comment` is read on the client for display purposes
+only (not traced into any SLA flag, classification rule, or filter in
+this audit's Parts 2-4) — its absence on the backend does not appear to
+create a functional gap the way `project_region`'s absence does. Every
+other key matches on both sides. Ordering/grouping differs cosmetically
+(not a functional concern).
+
+### 4.9 🟡 `MIN_CALLS_AFTER_48H` — defined, used for display text, never used in the actual flag logic
+
+Found while diffing `CONFIG` (client) against `SlaEngine.gs`'s constants:
+the client's `CONFIG.MIN_CALLS_AFTER_48H = 10` has no backend counterpart
+at all. Traced every use of it: it appears in exactly 3 places, all in
+`js/overview-distribution-people-ops.js` (lines ~1153, ~1185, ~1227), and
+all 3 are building the **displayed** "requires N calls" text on an
+Approaching-Deadline/Stuck alert card — e.g. `req = l.past48h ?
+CONFIG.MIN_CALLS_AFTER_48H : CONFIG.MIN_CALLS_PER_DAY`. **The actual
+`underCalledToday` flag** (§4.2) **always compares against
+`CONFIG.MIN_CALLS_PER_DAY` (5), never `MIN_CALLS_AFTER_48H` (10),
+regardless of `past48h`** — confirmed by re-reading `enrichLead`'s own
+`underCalledToday` line. So a lead flagged `underCalledToday` with, say,
+7 calls logged (already past the real 5-call bar, so the flag has
+already fired for an unrelated reason — most likely `stageStuck48h`
+co-firing) can show a card that reads "requires 10 calls" even though
+the actual rule that put it on this list only ever required 5. Not a
+crash, not backend-relevant (this constant has no cross-runtime
+counterpart at all, so it isn't a duplication-drift risk) — but a real,
+undocumented display-says-one-number/logic-uses-another mismatch inside
+the client alone. No comment anywhere explains this as intentional.
+Carried into Part 6 as a MEDIUM finding — worth a maintainer decision
+(either the flag should also raise its bar past 48h, or the display
+text should say 5, not 10) rather than left ambiguous.
+
+### 4.10 Summary table
+
+| Pair | Verified? | Result |
+|---|---|---|
+| `OUTCOME_RULES` vs `OUTCOME_RULES_GS_` | Full 31-rule diff | ✅ Exact match |
+| `enrichLead` vs `computeSlaFlags_` | Full 5-flag + threshold diff | ✅ Exact match (1 harmless cosmetic difference) |
+| `REGION_GROUP_MAP` vs `REGION_GROUP_MAP_` | Full 11-region diff | ✅ Exact match |
+| Loan-region override (live leads tab path) | Full trace to call sites | 🔴 **Missing entirely on the backend's 3 scheduled-email call sites** |
+| Loan-region override (Movement_Log path) | Full trace to call sites | ✅ Consistently reduced on both sides, documented as intentional |
+| `istDateKey`/`istDayKeyGs_` | Read both implementations | ✅ Different code, verified equivalent output |
+| `businessMinutesBetween`/`..Gs_` | Read both implementations | ✅ Algorithmically identical |
+| `MOVEMENT_LOG_COLUMNS`/`SNAPSHOT_COLUMNS_` | Full field-list diff | ✅ Exact match |
+| `HEADER_ALIASES`/`HEADER_ALIASES_` | Full key-list diff | ⚠️ 2 client-only keys (`project_region` — see 🔴 above; `lead_closing_comment` — cosmetic) |
+| `MIN_CALLS_AFTER_48H` | Traced every use | 🟡 Client-only, display text disagrees with actual flag threshold |
+
+### 4.11 Open items carried into later parts
+
+- §4.4 (Loan-region override missing on scheduled emails) — **Part 6**,
+  ranked finding, likely HIGH or CRITICAL.
+- §4.9 (`MIN_CALLS_AFTER_48H` display/logic mismatch) — **Part 6**, ranked
+  finding, likely MEDIUM.
+- §4.8's `lead_closing_comment` asymmetry — worth a one-line mention in
+  Part 6 for completeness, low priority.
+
+---
+
+## Parts 5-7 — not yet run
 
 See the To-Do Dashboard's research project for the full task sequence and
 what each remaining part covers.
