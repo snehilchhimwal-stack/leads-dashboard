@@ -620,7 +620,347 @@ for the exact schedule of each.
 
 ---
 
-## Parts 3-7 — not yet run
+## Part 3 of 7 — Business Logic Audit
+
+*(covers prompt section 5, "audit business logic")*
+
+Format per rule: **the rule → where implemented → inputs → outputs →
+dependencies → who depends on it → duplicated elsewhere? → do the copies
+agree?** The last column is a summary-level check (spot-checked, not a
+full line-by-line diff) — the exhaustive side-by-side comparison is Part
+4's dedicated job; this part establishes what to compare.
+
+### 3.1 The 6 SLA/Operations issue flags
+
+**The rule**: a lead is flagged `isNotUpdated` / `stageStuck48h` /
+`followupOverdue` / `inactiveRmNewLead` / `underCalledToday` /
+`firstContactBreach` based on age, stage, connect/comment timestamps, and
+`rm_is_active` — full walkthrough in Part 2 §1. `ISSUE_PRIORITY` then picks
+ONE "primary" issue per lead wherever only one label fits, in the fixed
+order: `inactiveRmNewLead > isNotUpdated > followupOverdue >
+underCalledToday > stageStuck48h`.
+
+- **Where**: `enrichLead()` (`js/core-lead-model.js:187-433`, client) /
+  `computeSlaFlags_()` (`SlaEngine.gs:46-143`, backend).
+- **Inputs**: `current_stage`, `lead_assigned_at`, `last_connect`/
+  `last_connect_time`, `call_attempts`, `rm_is_active`, comment
+  timestamps, `now`, a call-count baseline map.
+- **Outputs**: 6 booleans + derived `isOpenLead`/`excluded`/`past48h`.
+- **Dependencies**: `CONFIG`/thresholds (`LEAD_GRACE_HOURS=3`,
+  `LEAD_LIFECYCLE_HOURS=48`, `MIN_CALLS_PER_DAY=5`,
+  `FOLLOWUP_REVIEW_HOURS=4`, `FIRST_CONTACT_SLA_MINUTES=10`,
+  `WORK_START_HOUR=9`/`WORK_END_HOUR=19` — identical numeric values on
+  both sides per Part 1's extraction), `canonicalStage`/`isLeadClosed`,
+  a day-over-day call baseline.
+- **Depended on by**: every Operations issue card, `Daily_RM_Issues`
+  capture, `AllIssuesEmailer.gs`, `OvernightEmailer.gs`,
+  `DailyRmIssueLog.gs`'s RM Performance reconstruction (reuses
+  `computeSlaFlags_` directly rather than reimplementing).
+- **Duplicated**: yes, by necessity (two runtimes, no shared import) —
+  the single most consequential duplicated pair in the app. CLAUDE.md §6
+  names this pair explicitly.
+- **Agree?**: thresholds match exactly (verified in Part 1). The rule
+  bodies themselves were NOT diffed line-by-line in this part — that's
+  Part 4. One asymmetry already surfaced: the client's `isNotUpdated`
+  comment (Part 2) and the backend's own comment (Part 1) both describe
+  the identical 2026-09-03 fix (removing the `isUnder48h` gate) — a good
+  sign both sides were actually edited together for that change, not just
+  documented as "should match."
+
+### 3.2 Comment classification (`OUTCOME_RULES`)
+
+**The rule**: classify a lead's latest comment into one of 31 outcome
+categories via ordered, first-match-wins keyword/regex rules, with a
+length-scaled fuzzy-typo tolerance (0 edits for words ≤4 chars, 1 for ≤8,
+2 above).
+
+- **Where**: `OUTCOME_RULES` + `inferOutcome()`
+  (`js/core-outcome-engine.js:230-556`, client) / `OUTCOME_RULES_GS_` +
+  `inferOutcomeGs_()` (`FollowupEngine.gs:147-401`, backend).
+- **Inputs**: raw comment text.
+- **Outputs**: one outcome label (or none, if nothing matches — falls
+  through to a generic "Update" bucket, logged to `Unmatched_Comments_Log`
+  by the backend for human review).
+- **Dependencies**: the fuzzy-match engine (`_editDistance`/
+  `_typoBudget`/`_signalMatches`).
+- **Depended on by**: `suggestedFollowUp`, `Lead_Followups` push,
+  `AllIssuesEmailer.gs`/`OvernightEmailer.gs` email content, this
+  session's own earlier Tier-1/Tier-3 contact-failure-vs-genuine-
+  disinterest research (a separate, offline analysis, not part of this
+  codebase).
+- **Duplicated**: yes, by necessity — CLAUDE.md §6's other named pair.
+- **Agree?**: **corrects a miscount from Part 1.** Part 1's backend
+  researcher reported "~30 rules" for the backend against the client's
+  "~110 signals" and flagged the gap as unverified. Reading both arrays
+  directly in this part: **both sides define the exact same 31 outcome
+  categories, by name, in the identical priority order** — "~110 signals"
+  was counting individual keyword strings across all 31 rules on the
+  client side, not a different number of categories; the backend
+  researcher's "~30" undercounted by one and was measuring the same axis
+  as the category count, not the keyword count, on that side. A direct
+  spot-check of "Switched Off" — chosen at random — found the client's
+  17-string signal list and 3-part `test()` function byte-for-byte
+  identical to the backend's own version quoted in Part 1. The file's own
+  in-code comment (`core-outcome-engine.js:228`, "Kept in sync with
+  FollowupEngine.gs's identical OUTCOME_RULES_GS_") appears, on this
+  direct check, to be actually upheld today — not just aspirational.
+  Full 31-rule diff (not just one spot-check) is Part 4's job, but the
+  starting assumption going into it should be "probably still in sync,"
+  not "probably drifted."
+
+### 3.3 Do Not Disturb handling
+
+**The rule**: a comment matching `['do not call', 'dont call', 'not to
+call', 'stop calling', 'dnd']` classifies as outcome "Do Not Disturb" —
+checked FIRST in the priority order (before every other rule), since a
+stop-calling request should override any other signal in the same
+comment.
+
+- **Where**: the outcome rule itself lives in `OUTCOME_RULES`/
+  `OUTCOME_RULES_GS_` (§3.2). The actual "what to do about it" is a
+  **pure advisory text string** in `FOLLOWUP_SUGGESTIONS`
+  (`js/core-outcome-engine.js:608`) / `FOLLOWUP_SUGGESTIONS_GS_`
+  (`FollowupEngine.gs:415`).
+- **Inputs**: the classified outcome label.
+- **Outputs**: display text only — *"cross-call once to verify this is a
+  genuine do-not-call request before logging it as DND and stopping
+  outreach; once confirmed, re-engage only via an approved channel
+  (SMS/email) if policy allows."*
+- **Important finding, not previously stated this plainly**: there is
+  **no enforced code path** for "verify via cross-call" — no state field
+  tracks whether a DND was cross-call-confirmed, nothing blocks further
+  outreach on a DND-classified lead, and no check anywhere reads this
+  outcome to change SLA-flag behavior. The 2026-09-04 commit
+  (`cba3a82`) that added this exact wording was a **text-only change** to
+  the suggested-follow-up string an RM reads — the actual verification
+  step is a human process the text asks for, not something the dashboard
+  or Apps Script performs or gates on.
+- **Depended on by**: whatever RM reads the Suggested Follow-up text in
+  the dashboard or in a generated report/email.
+- **Duplicated**: yes — confirmed byte-identical on both sides (direct
+  `grep` match, this part), and the commit that introduced this exact
+  wording explicitly updated both files together in the same commit.
+- **Agree?**: yes, verified directly, not just via a "kept in sync"
+  comment.
+
+### 3.4 Follow-up suggestion generation
+
+**The rule**: given a lead's classified outcome (or lack of one),
+generate the text an RM sees as a next-step suggestion — either the
+static `FOLLOWUP_SUGGESTIONS[outcome]` text, layered with up to 4
+independent "modifier" clauses (budget concern / preferred time /
+preferred channel / decision-maker elsewhere) detected by a SECOND pass
+over the same comment text, or (when no comment exists yet) a
+`call_attempts`-vs-baseline comparison against a ≥4h-old Movement_Log
+snapshot to distinguish "genuinely stalled" from "worked but not
+narrated yet."
+
+- **Where**: `suggestedFollowUp()`/`noCommentFollowUp()`/
+  `detectFollowupModifiers()` (`js/core-outcome-engine.js:818-865` +
+  modifier logic) / `overnightFollowupHintGs_()`/`noCommentFollowUpGs_()`/
+  `detectFollowupModifiersGs_()` (`FollowupEngine.gs:557-658`).
+- **Inputs**: classified outcome, comment text, `call_attempts`, a
+  Movement_Log baseline entry.
+- **Outputs**: a composed suggestion string.
+- **Dependencies**: §3.2's classifier; the 4 modifiers each have their
+  own keyword pairing (e.g. `preferredChannel` needs
+  `['only','prefer','dont call',...]` AND a channel word).
+- **Depended on by**: `Lead_Followups` column F (when a human hasn't
+  filled it yet — algorithmic fallback), report/email bodies.
+- **Duplicated**: yes, by necessity, same pair as §3.2/§3.3.
+- **Agree?**: not independently re-verified beyond §3.3's DND string
+  (which lives inside this same map) — flagged for Part 4's full pass.
+
+### 3.5 Region normalization
+
+**The rule**: raw `region` text is normalized in two layers —
+`effectiveRegion()` first overrides it with `project_region`/
+`group_source` specifically when either says "Loan" (a source-driven
+override, not geography), then `mainRegionFor()` maps into one of 11
+canonical regions via a lookup table, stripping a trailing sub-region
+number ("Western 2" → "Western") only when the base name is itself
+configured.
+
+- **Where**: `effectiveRegion()`/`mainRegionFor()`/`REGION_GROUP_MAP`
+  (`js/reports-build.js:37-129`) / `mainRegionForGs_()`/
+  `REGION_GROUP_MAP_` (`EmailInfra.gs:128-149`).
+- **Inputs**: `region`, `project_region`, `group_source`.
+- **Outputs**: one of 11 canonical region names.
+- **Dependencies**: none beyond the raw fields.
+- **Depended on by**: the Region filter (client, via `effectiveRegion`
+  only — NOT `mainRegionFor`, confirmed in Part 2), every region table,
+  region-email bucketing (client and backend, via `mainRegionFor`), Repeat
+  Offenders' own region key builder (`js/tab-repeat-offenders.js`'s
+  `_repeatOffendersRegionKey`, which Part 1 flagged as intentionally
+  **not** running the Loan-source override — see §3.8 below).
+- **Duplicated**: yes, by necessity. Both files' own comments describe
+  this mapping as drifting stale whenever CRM region text changes (real
+  cited incidents: "HNI," "Central Mumbai," "Western Mumbai," 2026-08) —
+  the maintenance burden is real and acknowledged in the code itself, not
+  a latent risk this audit is the first to notice.
+- **Agree?**: not independently re-verified in this part — the two
+  11-region lookup tables were not diffed entry-by-entry. Flagged for
+  Part 4.
+
+### 3.6 Repeat-offender / RM Performance scoring
+
+**The rule**: reconstruct, for every (RM, day, SLA rule) triple, whether
+that RM was "eligible" (had an open lead the rule could apply to) and
+whether they "violated" it (the rule actually fired) — purely from
+`Movement_Log`'s retained history, not by reading `Daily_RM_Issues` (see
+Part 1's finding that nothing reads that table programmatically). Roll up
+to per-RM rates, apply empirical-Bayes shrinkage toward the peer average
+(weighted by distinct-eligible-lead count), apply severity weights per
+rule, and classify into 4 tiers: `Insufficient Data` (<5 distinct
+leads) / `On Track` / `Watch — concentrated` / `Below Expectations`.
+
+- **Where**: `reconstructRmPerformanceObservations()`/
+  `aggregateRmPerformance()`/`classifyRmPerformance()`/
+  `computeRmPerformance()` (`js/core-rm-performance.js:191-405`) /
+  the `..Gs_` mirror (`DailyRmIssueLog.gs:722-961`, including the
+  console-only `reportRmPerformanceNow()`).
+- **Inputs**: `Movement_Log` snapshot history, `SlaEngine`/`enrichLead`'s
+  5 scored flags (deliberately excludes `inactiveRmNewLead` from
+  scoring — "a routing/assignment failure, not an RM execution one," per
+  the backend's own comment).
+- **Outputs**: per-RM (and per-Region/A1-TM/RH rollup) tier + composite
+  score + "driven by" rule breakdown.
+- **Dependencies**: tuning constants — `RM_PERF_RULE_WEIGHTS
+  ={isNotUpdated:1.5, followupOverdue:1.2, underCalledToday:1.0,
+  stageStuck48h:0.8}`, `RM_PERF_SHRINKAGE_K=8`,
+  `RM_PERF_MIN_VOLUME_LEADS=5`, `RM_PERF_CHRONIC_STREAK_DAYS=3`,
+  `RM_PERF_FLAG_RATIO=1.25`, `RM_PERF_CONCENTRATION_BREADTH_CEILING=0.25`
+  — all confirmed numerically identical between `core-rm-performance.js`
+  and `DailyRmIssueLog.gs`'s `..._GS_` copies in Part 1's extraction.
+- **Depended on by**: `js/tab-repeat-offenders.js` (live tab),
+  `js/repeat-offenders-pdf.js` (PDF export — explicitly reuses the same
+  functions as the live tab, "so the two surfaces can never independently
+  invent different data," per that file's own header, confirmed Part 1).
+  `reportRmPerformanceNow()` is the ONLY console-only, manually-run
+  consumer — confirmed to write nothing, send nothing (Part 1).
+- **Duplicated**: yes, by necessity, third named pair alongside §3.1/§3.2.
+- **Agree?**: constants match exactly (Part 1). Algorithm bodies not
+  independently re-diffed line-by-line in this part — flagged for Part 4,
+  though the shared reuse of `computeSlaFlags_` on the backend side (not
+  a reimplementation) removes one whole layer of duplication risk that
+  §3.1/§3.2 don't have: the backend's RM-performance engine literally
+  calls the same SLA function the emails/capture use, rather than
+  re-deriving eligibility independently.
+
+### 3.7 RM hierarchy / email routing fallback
+
+**The rule**: for a set of flagged RM names, resolve one email recipient
+bucket per manager by walking `tl → tm → rh → ch` and using the nearest
+tier that actually exists for that RM; RMs sharing the same primary
+manager are grouped into one bucket; Cc always includes
+`ALWAYS_CC_EMAILS_` plus the bucket's own RH/CH (and, for a small
+hand-maintained exception list, the TM too). A person already AT the top
+of the org with no chain above them is diverted to a CH-level backstop
+report instead of becoming a bucket primary.
+
+- **Where**: `RmHierarchy.gs:946-1054` (backend-only — **no client-side
+  equivalent for real routing**; `js/tab-repeat-offenders.js`'s own
+  `RM_Hierarchy` fetch, confirmed in Part 1, is read-only display
+  rollup, not routing).
+- **Inputs**: RM name, the `RM_Hierarchy`/`Manager_Directory` sheets
+  (human-editable live data, not source-controlled).
+- **Outputs**: `{buckets, unresolved, chLevelRms}`.
+- **Dependencies**: `RmHierarchy.private.gs` (gitignored, absent from
+  this repo) — its absence degrades every resolved email to `''`, which
+  then falls back further to the legacy `Region_Recipients` entry or
+  `CH_LEVEL_EMAIL_` (confirmed in Part 1 as a soft-degrade, not a crash).
+- **Depended on by**: `OvernightEmailer.gs`, `AllIssuesEmailer.gs` — the
+  only two consumers.
+- **Duplicated**: no — this is genuinely backend-only, since real
+  automated routing only happens on the unattended email side. Not a
+  duplication risk; flagged here as a **single point of failure** instead
+  (§6 in Part 6's terms) — if this logic has a bug, both scheduled emails
+  are affected identically, with no independent second implementation to
+  catch a disagreement the way the SLA/outcome pairs' redundancy
+  incidentally does.
+- **Agree?**: n/a (nothing to compare against).
+
+### 3.8 Follow-up wait/cancel + Generate-cycle mutex
+
+**The rule**: only one of {Operations "Generate", Overnight "Generate
+Region Emails"} may clear-and-rewrite `Lead_Followups` at a time
+(`_generateCycleOwner`, a real mutex); the wait for a human-entered
+Suggested Follow-up (column F) is cancelable per-button
+(`_followupWaitCancelled`, a `Map` keyed by `cancelBtnId` — confirmed in
+Part 1 as already fixed from an earlier shared-boolean cross-cancel bug).
+
+- **Where**: `js/sheets-writeback.js:275-285` (mutex),
+  `js/sheets-writeback.js:710-794` (wait/cancel).
+- **Inputs**: which flow is claiming the cycle; a `cancelBtnId`.
+- **Outputs**: whether a Generate cycle is allowed to proceed; whether a
+  wait exits early via cancel vs. timeout vs. success.
+- **Dependencies**: none beyond the two call sites.
+- **Depended on by**: `js/reports-ui.js`'s `renderReports()`,
+  `js/tab-movement.js`'s `renderOvernightRegionReports()`.
+- **Duplicated**: not exactly — the backend has an ANALOGOUS but not
+  identical mechanism: `OvernightEmailer.gs`'s
+  `pushUnresolvedToLeadFollowups_`/`waitForFollowupSuggestions_` polls
+  the same `Lead_Followups` tab for up to ~2 minutes
+  (`FOLLOWUP_WAIT_MAX_ATTEMPTS_=6`, `FOLLOWUP_WAIT_POLL_MS_=20000`),
+  independently of the browser and with no mutex against the client's own
+  Generate cycle running at the same moment.
+- **Agree?**: not a "should agree" pair — flagged instead as a genuine
+  **unguarded overlap window**: the client-side mutex only prevents two
+  *client-side* flows from colliding; nothing stops the Apps Script
+  10am/1pm overnight-followup run from clearing/rewriting
+  `Lead_Followups` at the exact moment a human has the dashboard's
+  Generate cycle open too. Carried into Part 6's hidden-dependencies
+  findings — not confirmed as having caused a real incident, but the
+  mutex's own scope (`js/sheets-writeback.js` only) structurally cannot
+  reach across runtimes.
+
+### 3.9 Region-email generation rules
+
+Three business rules specific to the two scheduled emails
+(`OvernightEmailer.gs`/`AllIssuesEmailer.gs`), confirmed in Part 1 and
+restated here as business rules in their own right:
+
+- **Grace-period non-suppression** (`reportableIssueFor()`,
+  `js/reports-build.js:653-674`): a lead's grace-exempt rules
+  (`isNotUpdated`/`inactiveRmNewLead`) must NOT be re-suppressed by a
+  blanket grace re-check at report-generation time — fixed as a real bug
+  (the re-check was a no-op once `created` is fixed and `now` only moves
+  forward, but had silently been re-applying the grace window anyway).
+- **Possible Premature Closes** (`js/reports-build.js:809-853`): flags a
+  closed lead whose most recent comment (across the whole family, not
+  just one copy) still reads as an engaged outcome (Interested/Visit
+  Arranged/etc.), or a "Duplicate Lead" close with no lead-id cited
+  anywhere as evidence.
+- **Google Non-UTM/Search scope gate** (`passesGoogleNonUtmSearchGs_`,
+  `EmailInfra.gs:166-171`): `group_source==='google'` AND
+  `source_bucket ∈ {'non-utm','search'}`. **Confirmed backend-only in
+  this part** (`grep` across every `js/*.js` file for any equivalent
+  found nothing) — this is a genuine, deliberate scope ASYMMETRY, not a
+  duplication-drift risk: the two scheduled emails narrow to this subset
+  by design, while the live dashboard's Operations tab shows every
+  flagged lead regardless of source. Worth stating plainly since it's
+  easy to misread as "the dashboard and the emails should show the same
+  leads" — they don't, on purpose.
+
+### 3.10 Open items carried into later parts
+
+- Full 31-rule `OUTCOME_RULES` vs `OUTCOME_RULES_GS_` diff (only 1 of 31
+  spot-checked here) — **Part 4**.
+- Full 11-region `REGION_GROUP_MAP` vs `REGION_GROUP_MAP_` diff (not
+  diffed at all in this part, only confirmed both exist and both are
+  self-documented as drift-prone) — **Part 4**.
+- `enrichLead` vs `computeSlaFlags_` full line-by-line body diff (only
+  the threshold constants were verified, not every conditional) —
+  **Part 4**.
+- The unguarded overlap window between the client's Generate-cycle mutex
+  and the backend's independent `Lead_Followups` polling (§3.8) —
+  **Part 6** (hidden dependencies / findings).
+- `RmHierarchy.gs`'s single-point-of-failure status (§3.7) — no
+  redundant implementation to cross-check against — **Part 6**.
+
+---
+
+## Parts 4-7 — not yet run
 
 See the To-Do Dashboard's research project for the full task sequence and
 what each remaining part covers.
