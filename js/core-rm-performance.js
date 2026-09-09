@@ -294,9 +294,10 @@ const RM_PERF_LEADERSHIP_NAME_EXCLUSIONS = new Set([
 // (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above), so canonicalizing that pair
 // specifically would have no effect either way.
 //
-// KEEP IN SYNC with RmHierarchy.gs's own RM_PERF_NAME_ALIASES_ (used by
-// DailyRmIssueLog.gs's reportRmPerformanceNow() mirror) — add a pair to
-// both, in the same commit, whenever a new one is confirmed. This list is
+// KEEP IN SYNC with DailyRmIssueLog.gs's own RM_PERF_NAME_ALIASES_GS_
+// mirror (used by reconstructRmPerformanceObservationsGs_, feeding
+// reportRmPerformanceNow()) — add a pair to both, in the same commit,
+// whenever a new one is confirmed. This list is
 // NOT exhaustive by construction: every entry here was discovered
 // reactively (a routing failure, or a direct user confirmation), so a
 // real alias this project hasn't hit yet will still split silently until
