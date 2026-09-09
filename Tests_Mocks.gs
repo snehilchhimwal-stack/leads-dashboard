@@ -332,6 +332,17 @@ function TestMockUtilities_() {
 // existingTriggers (optional): preset [{handlerFunction}] list, to test
 // that a setup*Trigger function correctly deletes its own prior triggers
 // before installing fresh ones.
+// WeekDay: added 2026-09-09 alongside .onWeekDay() below for
+// setupWeeklyOpsChecklistTrigger (OpsChecklistRunner.gs) — the first
+// trigger in this project to need a weekly (not daily) cadence. Real
+// ScriptApp.WeekDay is a full 7-day enum; mirrored completely here even
+// though only MONDAY is used today, so a future weekly trigger on a
+// different day doesn't need a second mock extension.
+const TestScriptAppWeekDay_ = {
+  SUNDAY: 'SUNDAY', MONDAY: 'MONDAY', TUESDAY: 'TUESDAY', WEDNESDAY: 'WEDNESDAY',
+  THURSDAY: 'THURSDAY', FRIDAY: 'FRIDAY', SATURDAY: 'SATURDAY',
+};
+
 function TestMockScriptApp_(existingTriggers) {
   const state = { created: [], deleted: [] };
   const triggers = (existingTriggers || []).map(function (fn) {
@@ -339,15 +350,17 @@ function TestMockScriptApp_(existingTriggers) {
   });
   const scriptApp = {
     _state: state,
+    WeekDay: TestScriptAppWeekDay_,
     getProjectTriggers: function () { return triggers; },
     deleteTrigger: function (t) { state.deleted.push(t._fn); },
     newTrigger: function (fnName) {
-      const spec = { fnName: fnName, type: null, hour: null, minute: null, days: null, tz: null };
+      const spec = { fnName: fnName, type: null, hour: null, minute: null, days: null, weekDay: null, tz: null };
       const builder = {
         timeBased: function () { spec.type = 'timeBased'; return builder; },
         atHour: function (h) { spec.hour = h; return builder; },
         nearMinute: function (m) { spec.minute = m; return builder; },
         everyDays: function (d) { spec.days = d; return builder; },
+        onWeekDay: function (d) { spec.weekDay = d; return builder; },
         inTimezone: function (tz) { spec.tz = tz; return builder; },
         create: function () { state.created.push(spec); return { getHandlerFunction: function () { return fnName; } }; },
       };

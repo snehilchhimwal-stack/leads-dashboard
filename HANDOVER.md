@@ -81,6 +81,7 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. |
 | `DailyRmIssueLog.gs` | Nightly (22:50 IST) full-company SLA-issue census — feeds `js/tab-repeat-offenders.js`. Added 2026-09-01. See §9 — this one has real operational quirks (unbounded nightly row growth, a real incident where a run took ~8min and wrote nothing) worth knowing before you're debugging it live. |
+| `OpsChecklistRunner.gs` | Weekly (Monday ~9am IST) automated summary email — 3 of `OPS_CHECKLIST.md`'s periodic checks (RM-hierarchy gaps, `Manager_Directory` email gaps, `Movement_Log` freshness) reduced to a pass/fail an unattended script can judge; sends EVERY week, issues or not, on purpose (see §8). Added 2026-09-09. |
 | `Tests_*.gs` | The Apps Script mock test suite — see §7. |
 | `working files on 28th for automatic email/` | **Not in git**, and not authoritative — a manual backup snapshot of a few `.gs` files from mid-development. The root-level `.gs` files are always the source of truth; this folder is safe to ignore or delete. |
 | `design/live-ops-redesign.html` | A standalone visual mockup from an earlier exploration pass — not wired to real data, not part of the live app. |
@@ -242,6 +243,7 @@ re-running after an edit never leaves a duplicate):
 | `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
+| `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 3 automatable checks. Sends every week regardless of outcome — see §8. |
 
 None of these have a menu/`onOpen()` — they only run from the Apps Script
 editor's function dropdown (select the function name, click Run), by a human
@@ -436,6 +438,15 @@ test) Sheet, and use the browser console directly.
   createDraft()/send() eventual-consistency race) using a rate-limit-sized
   backoff for a millisecond-scale timing issue — since fixed to a flat
   400ms for that specific error (EmailInfra.gs).
+- **This whole §8 list is reactive** — real incidents, found after the
+  fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
+  counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`
+  email gaps, `Movement_Log` capture freshness, and worst-performer
+  methodology drift between `js/core-rm-performance.js` and
+  `DailyRmIssueLog.gs` — the class of silent, slow-drifting gap that tends
+  to surface HERE only once it's already caused a real symptom. Three of
+  its checks now also run unattended, weekly — see `OpsChecklistRunner.gs`
+  in §4.3's trigger table below.
 
 ---
 

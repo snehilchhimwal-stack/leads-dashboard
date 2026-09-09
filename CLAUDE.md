@@ -16,8 +16,9 @@ other directly:
    `FollowupEngine.gs`, `EmailInfra.gs`, `MovementTracker.gs`,
    `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `RmHierarchy.gs`,
    `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`,
-   `DailyRmIssueLog.gs`) — bound to the same Sheet, running unattended on a
-   fixed clock schedule for the things a static page can't do alone.
+   `DailyRmIssueLog.gs`, `OpsChecklistRunner.gs`) — bound to the same
+   Sheet, running unattended on a fixed clock schedule for the things a
+   static page can't do alone.
 
 `js/core-*.js` load first (9 files, `HANDOVER.md` §2 for the exact order),
 then the tab files, then `main.js` last. Every `.gs` file shares ONE global
@@ -81,10 +82,23 @@ namespace regardless of filename — the split is purely organizational.
   and runs synthetic leads through the real `fetchAndRender()` pipeline.
   Re-run it after any dashboard-side change; extend it rather than
   hand-verifying in the console when you add real new behavior.
+- **Changing automatic email, RM hierarchy routing, or worst-performing-RM
+  logic specifically** (`OvernightEmailer.gs`/`AllIssuesEmailer.gs`,
+  `RmHierarchy.gs`, RM Performance/`DailyRmIssueLog.gs`): run
+  `OPS_CHECKLIST.md`'s pre-change and post-deploy items *before and after*
+  the `Tests_*.gs` run above, not instead of it — a green test suite proves
+  the logic is correct, the checklist catches the class of gap that's
+  correct-but-silently-incomplete (an unthreaded new argument, a
+  rolling-vs-calendar-day window, a drifted constant between the two
+  runtimes).
 
 ## Where to look when something breaks
 
 `HANDOVER.md` §8 is a maintained list of real past incidents and their
 symptoms (missing nightly capture, slow email sends, mis-routed recipients,
 a real dedup bug from a Sheets Date-vs-string mismatch) — check there before
-assuming something is a new bug.
+assuming something is a new bug. `OPS_CHECKLIST.md` is the companion,
+proactive counterpart — periodic checks (RM-hierarchy gaps, Manager_Directory
+email gaps, Movement_Log capture freshness, worst-performer methodology
+drift) meant to catch this project's slow-drifting failure class *before*
+it produces one of §8's incidents, not after.
