@@ -17,7 +17,8 @@ most exposed to that risk — **automatic email** (`OvernightEmailer.gs`,
 Scope and structure defined under CHECKLIST-004 (To-Do Dashboard,
 2026-09-09); content built under CHECKLIST-005; wired into CLAUDE.md/
 HANDOVER.md under CHECKLIST-006. Companion effort:
-[LEADFOLLOWUPS-001..005](#) (To-Do Dashboard) does the equivalent work
+[LEAD_FOLLOWUPS_STALENESS.md](LEAD_FOLLOWUPS_STALENESS.md)
+(`LEADFOLLOWUPS-001..005`, To-Do Dashboard) does the equivalent work
 specifically for `Lead_Followups` snapshot staleness — related, but
 tracked and built separately since it's a narrower, single-sheet concern.
 
