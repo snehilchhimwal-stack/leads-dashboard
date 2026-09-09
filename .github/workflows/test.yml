@@ -14,3 +14,14 @@ jobs:
           node-version: '20'
       - name: Run Apps Script test suite (Tests_*.gs)
         run: node test/run-gs-tests.js
+      # CI-003 (To-Do Dashboard): warn-only documentation-coverage check
+      # (CI-001/CI-002) -- prints its summary to this log but never affects
+      # this job's pass/fail result, hence continue-on-error: true as a
+      # belt-and-braces guard even though check-docs-coverage.js's own
+      # main() already always calls process.exit(0) itself. Graduates to a
+      # real blocking step only once CI-005 confirms graduation criteria
+      # against DOCUMENTATION_PROJECT_PLAN.md's Phase 5 (DOC-039) -- not
+      # done here.
+      - name: Documentation coverage check (warn-only)
+        run: node test/check-docs-coverage.js
+        continue-on-error: true
