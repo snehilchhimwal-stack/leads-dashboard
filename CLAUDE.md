@@ -16,9 +16,10 @@ other directly:
    `FollowupEngine.gs`, `EmailInfra.gs`, `MovementTracker.gs`,
    `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `RmHierarchy.gs`,
    `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`,
-   `DailyRmIssueLog.gs`, `OpsChecklistRunner.gs`) — bound to the same
-   Sheet, running unattended on a fixed clock schedule for the things a
-   static page can't do alone.
+   `DailyRmIssueLog.gs`, `OpsChecklistRunner.gs`,
+   `LeadFollowupsStaleness.gs`) — bound to the same Sheet, running
+   unattended on a fixed clock schedule for the things a static page
+   can't do alone.
 
 `js/core-*.js` load first (9 files, `HANDOVER.md` §2 for the exact order),
 then the tab files, then `main.js` last. Every `.gs` file shares ONE global

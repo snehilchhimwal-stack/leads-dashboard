@@ -212,6 +212,17 @@ function TestMockSheet_(name, initialRows) {
       sheet._data.splice(startRow - 1, howMany);
       sheet._maxRows = Math.max(sheet._maxRows - howMany, sheet._data.length);
     },
+    // Conditional formatting: added 2026-09-09 for
+    // setupLeadFollowupsStalenessFormatting (LeadFollowupsStaleness.gs) —
+    // unlike setNumberFormat/insertCheckboxes above (pure visual, nothing
+    // ever reads them back), the RULE's own formula/color inputs are
+    // worth capturing and asserting on, so this stores whatever was set
+    // rather than being a bare no-op. Still doesn't evaluate the formula
+    // against real data — that part stays untested here the same way
+    // real Sheets rendering is (verify live in the Apps Script editor).
+    _conditionalFormatRules: [],
+    getConditionalFormatRules: function () { return sheet._conditionalFormatRules.slice(); },
+    setConditionalFormatRules: function (rules) { sheet._conditionalFormatRules = rules.slice(); return sheet; },
     _syncDims_: function () {
       if (sheet._data.length + 50 > sheet._maxRows) sheet._maxRows = sheet._data.length + 200;
     },
@@ -462,7 +473,26 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
     LEADERSHIP_NAME_TO_EMAIL_: LEADERSHIP_NAME_TO_EMAIL_,
   };
 
-  SpreadsheetApp = { getActiveSpreadsheet: function () { return ss; }, flush: function () {} };
+  SpreadsheetApp = {
+    getActiveSpreadsheet: function () { return ss; },
+    flush: function () {},
+    // Added 2026-09-09 for setupLeadFollowupsStalenessFormatting
+    // (LeadFollowupsStaleness.gs) — captures whatever the real builder
+    // chain would (formula/background/fontColor/ranges) into a plain
+    // object via .build(), so a test can assert on exactly what was
+    // configured without needing to fake Sheets' actual rule evaluation.
+    newConditionalFormatRule: function () {
+      const spec = { formula: null, background: null, fontColor: null, ranges: [] };
+      const builder = {
+        whenFormulaSatisfied: function (f) { spec.formula = f; return builder; },
+        setBackground: function (c) { spec.background = c; return builder; },
+        setFontColor: function (c) { spec.fontColor = c; return builder; },
+        setRanges: function (ranges) { spec.ranges = ranges; return builder; },
+        build: function () { return spec; },
+      };
+      return builder;
+    },
+  };
   GmailApp = TestMockGmailApp_(gmailOpts);
   Utilities = TestMockUtilities_();
   ScriptApp = TestMockScriptApp_(scriptAppTriggers);

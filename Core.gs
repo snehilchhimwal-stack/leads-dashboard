@@ -3,7 +3,7 @@
  * other .gs file in this project (MovementTracker.gs, SlaEngine.gs,
  * FollowupEngine.gs, EmailInfra.gs, OvernightEmailer.gs,
  * AllIssuesEmailer.gs, RmHierarchy.gs, UnmatchedCommentLogger.gs,
- * DailyRmIssueLog.gs, OpsChecklistRunner.gs).
+ * DailyRmIssueLog.gs, OpsChecklistRunner.gs, LeadFollowupsStaleness.gs).
  * Nothing here is specific to any one script's own job — it's the "how
  * do we read a lead row and decide what stage it's in" layer every one
  * of them builds on.
@@ -21,8 +21,9 @@
  * project (Core.gs, SlaEngine.gs, FollowupEngine.gs, EmailInfra.gs,
  * MovementTracker.gs, OvernightEmailer.gs, AllIssuesEmailer.gs,
  * RmHierarchy.gs, RmHierarchy.private.gs, UnmatchedCommentLogger.gs,
- * DailyRmIssueLog.gs, OpsChecklistRunner.gs, plus the Tests_*.gs files if
- * you want the test suite too). File name doesn't
+ * DailyRmIssueLog.gs, OpsChecklistRunner.gs, LeadFollowupsStaleness.gs,
+ * plus the Tests_*.gs files if you want the test suite too). File name
+ * doesn't
  * matter to Apps Script — only the CONTENT and the project it's in — but
  * naming it to match keeps the Apps Script editor's file list
  * self-explanatory.
