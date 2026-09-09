@@ -103,6 +103,16 @@ namespace regardless of filename — the split is purely organizational.
   correct-but-silently-incomplete (an unthreaded new argument, a
   rolling-vs-calendar-day window, a drifted constant between the two
   runtimes).
+- **Changing anything that reads or writes `Lead_Followups`**
+  (`js/sheets-writeback.js`, `js/reports-ui.js`, `js/tab-movement.js`,
+  `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_`/
+  `waitForFollowupSuggestions_`, or `LeadFollowupsStaleness.gs`): read
+  `LEAD_FOLLOWUPS_STALENESS.md` first — it maps every real consumer and
+  each one's actual staleness tolerance, so a new write path or read site
+  gets checked against the same reasoning rather than re-derived from
+  scratch. If you add a new consumer, add it to that map in the same
+  change, the same discipline this file's own Testing section already
+  asks for `.gs` assertions.
 
 ## Where to look when something breaks
 
@@ -113,4 +123,7 @@ assuming something is a new bug. `OPS_CHECKLIST.md` is the companion,
 proactive counterpart — periodic checks (RM-hierarchy gaps, Manager_Directory
 email gaps, Movement_Log capture freshness, worst-performer methodology
 drift) meant to catch this project's slow-drifting failure class *before*
-it produces one of §8's incidents, not after.
+it produces one of §8's incidents, not after. `LEAD_FOLLOWUPS_STALENESS.md`
+is the same idea, scoped to one sheet — a lead reads as stuck on an issue
+it's already past ("in Follow-up" despite being an Opportunity, etc.),
+check there before assuming the classification logic itself is wrong.

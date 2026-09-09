@@ -9,7 +9,9 @@ file resolves: before designing a fix, know precisely what depends on
 `Lead_Followups` and how badly staleness actually hurts each one.
 Companion effort: [OPS_CHECKLIST.md](OPS_CHECKLIST.md) covers automatic
 email / RM hierarchy / worst-performing-RM — tracked separately since
-this is a narrower, single-sheet concern.
+this is a narrower, single-sheet concern. Cross-linked (`LEADFOLLOWUPS-005`)
+from `CLAUDE.md`'s Testing section and `HANDOVER.md` §8, which also
+carries the lead 2229674 incident itself in its own maintained format.
 
 ---
 

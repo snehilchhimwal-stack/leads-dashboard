@@ -439,6 +439,27 @@ test) Sheet, and use the browser console directly.
   createDraft()/send() eventual-consistency race) using a rate-limit-sized
   backoff for a millisecond-scale timing issue — since fixed to a flat
   400ms for that specific error (EmailInfra.gs).
+- **A lead reads as still stuck on an issue it's clearly already past**
+  (e.g. shown "in Follow-up" despite being an Opportunity, or "Not
+  Connected" despite a logged call): almost always `Lead_Followups`
+  staleness, not a classification bug — check that sheet's `updated_at`
+  column (G) for the lead in question before assuming
+  `isOppOrAbove`/`computeSlaFlags_` is wrong. Real incident, lead
+  2229674, reported 2026-09-09: live inspection confirmed the dashboard's
+  own current classification was already correct (`current_stage`
+  mapped cleanly, every SLA flag `false`) — the stale read was a
+  `Lead_Followups` row written ~19h earlier by a Generate cycle that ran
+  before the lead progressed. `Lead_Followups` is only rewritten by a
+  full Generate or refreshed per-lead by `sendOvernightFollowupEmails`
+  (13:00 IST) for a lead still matching its ORIGINAL flagged issue — once
+  a lead resolves, nothing touches its row again until the next full
+  Generate. The investigation did surface one real, separate, latent
+  gap while ruling out the classification-bug hypothesis (`isOppOrAbove`
+  lacked a closing-reason fallback its sibling `isBookingLead` already
+  had) — fixed the same day, but confirmed NOT the cause of this specific
+  incident. Full consumer map, the two visibility fixes (conditional
+  formatting on the sheet, an age caption in the 1pm email), and the
+  freshness-policy decision: `LEAD_FOLLOWUPS_STALENESS.md` (repo root).
 - **This whole §8 list is reactive** — real incidents, found after the
   fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
   counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`
@@ -447,7 +468,8 @@ test) Sheet, and use the browser console directly.
   `DailyRmIssueLog.gs` — the class of silent, slow-drifting gap that tends
   to surface HERE only once it's already caused a real symptom. Three of
   its checks now also run unattended, weekly — see `OpsChecklistRunner.gs`
-  in §4.3's trigger table below.
+  in §4.3's trigger table below. `LEAD_FOLLOWUPS_STALENESS.md` is the same
+  idea for one specific sheet — see the bullet just above.
 
 ---
 
