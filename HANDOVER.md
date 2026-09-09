@@ -7,10 +7,25 @@ duplicate what the code comments already say in detail — where a file's own
 header comment covers something thoroughly, this doc points at it instead of
 repeating it.
 
-Written 2026-08-31, updated 2026-09-02 (added the Daily_RM_Issues/Repeat
-Offenders subsystem — §9 — and the day's other fixes; see §9 for what's new).
-If something below goes stale, fix this file in the same commit that changes
-the thing it describes.
+Written 2026-08-31, updated 2026-09-09. This file went a full week
+(2026-09-02 → 2026-09-09) without a single update despite real
+architectural changes landing in that window — the RM Performance
+redesign's alias/leadership-exclusion fixes, the region-wise worst-5-RM
+breakdown, the OpsChecklistRunner/LeadFollowupsStaleness subsystems, and
+the CI-001–CI-005 documentation-coverage check itself — even though the
+very next sentence already said not to let that happen. That gap is
+exactly what prompted "CONSOLIDATED" (To-Do Dashboard, 2026-09-09): **this
+file's own architecture-relevant sections (§1–§3) are the living,
+continuously-updated architecture description for this project, until
+`docs/RELATIONSHIP_MAP.md` + the component records
+(`DOCUMENTATION_PROJECT_PLAN.md` Phase 2/3) exist to take that job over** —
+not a full narrative backfill of the missed week (a separate, larger
+undertaking, deliberately not attempted in this same pass; see
+`CLAUDE.md`'s Testing section and `.github/workflows/test.yml` for the new
+CI check that now WARNS when this file goes stale for too long, precisely
+because stating the rule alone already proved insufficient once).
+If something below goes stale, fix this file in the same commit that
+changes the thing it describes.
 
 ---
 

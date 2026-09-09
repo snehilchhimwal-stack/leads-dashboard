@@ -78,7 +78,25 @@ namespace regardless of filename — the split is purely organizational.
 - **This machine has no local Node.js** as of 2026-09-04 (`node`/`gh` both
   unresolved in both Bash and PowerShell) — `npm test` can't run locally
   here. Push and let GitHub Actions run the suite instead; check the run's
-  status via the GitHub web UI (Browser pane) rather than `gh`.
+  status via the GitHub web UI (Browser pane) rather than `gh`. A working
+  `python3`/`python` (Windows Store launcher) *is* available, confirmed
+  2026-09-09 — useful for local dry-runs/validation Node would otherwise
+  cover, and for building `.docx`/`.pptx` output, but it doesn't change
+  the point above: any `.gs` test-suite verification still has to happen
+  via a real CI push, not locally.
+- **A real architectural change updates `HANDOVER.md`'s relevant section
+  (§1–§3 especially) in the SAME commit** — not a separate follow-up, not
+  "later." `HANDOVER.md` already says this about itself; stating it
+  wasn't enough on its own — confirmed for real 2026-09-09, when it sat
+  untouched for a full week (2026-09-02 → 09-09) through several real
+  redesigns (RM Performance, the region-wise worst-5 breakdown, two new
+  `.gs` subsystems) despite that exact sentence already being there. `docs/`
+  (`DOCUMENTATION_PROJECT_PLAN.md`) will eventually take over this job for
+  real (`docs/RELATIONSHIP_MAP.md` + component records, Phase 2/3, not
+  built yet) — until then `HANDOVER.md` is it, and
+  `test/check-docs-coverage.js` (below) now WARNS in CI when it's gone
+  stale too long, since a written rule with nothing checking it drifts
+  regardless of how clearly it's stated.
 
 ## Testing
 

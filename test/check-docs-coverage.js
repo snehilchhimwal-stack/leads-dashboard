@@ -41,6 +41,31 @@
  * actually run, which hasn't happened yet), so a check keyed to a fixed
  * ID range would need updating the moment that numbering is ever revised
  * — a slug suffix match never does.
+ *
+ * SECTION 2 — HANDOVER.md FRESHNESS (added by "CONSOLIDATED", To-Do
+ * Dashboard, 2026-09-09): HANDOVER.md's own header already says "if
+ * something below goes stale, fix this file in the same commit that
+ * changes the thing it describes" — and it still sat untouched for a
+ * full week (2026-09-02 → 09-09) through several real architectural
+ * changes anyway. Stating the rule alone already proved insufficient
+ * once, so this checks it mechanically too: parses the "updated
+ * YYYY-MM-DD" date out of HANDOVER.md's own header prose and warns (never
+ * fails, same phasing as Section 1) when it's past HANDOVER_STALE_WARN_DAYS.
+ * Deliberately date-based, not git-history-based (e.g. "did this commit's
+ * diff touch HANDOVER.md") — actions/checkout@v4 defaults to a shallow
+ * clone, so per-file git history isn't reliably available here without a
+ * separate fetch-depth change, and a coarse "how long has it been"
+ * signal needs none of that. This can't tell you a SPECIFIC recent
+ * change should have touched HANDOVER.md and didn't — only that it's
+ * been quiet for a while — which is a real, useful, much simpler signal.
+ * CONSOLIDATED's own decision (see HANDOVER.md's header, CLAUDE.md, and
+ * this task in the To-Do Dashboard): HANDOVER.md's §1-§3 are the living
+ * architecture description for this project until
+ * docs/RELATIONSHIP_MAP.md + the component records
+ * (DOCUMENTATION_PROJECT_PLAN.md Phase 2/3) exist to take that job over —
+ * this check watches HANDOVER.md today; extending it to watch whatever
+ * Phase 2/3 eventually builds instead is a future, small follow-up, not
+ * decided further here.
  */
 'use strict';
 const fs = require('fs');
@@ -101,6 +126,44 @@ function printSection(label, results) {
   return uncovered.length;
 }
 
+// ---- 5. HANDOVER.md freshness — see this file's own header, "SECTION 2"
+// comment, for the full reasoning ----
+const HANDOVER_STALE_WARN_DAYS = 14;
+function checkHandoverFreshness() {
+  const handoverPath = path.join(ROOT, 'HANDOVER.md');
+  if (!fs.existsSync(handoverPath)) {
+    return { ok: false, reason: 'HANDOVER.md not found at the repo root.' };
+  }
+  const text = fs.readFileSync(handoverPath, 'utf8');
+  const m = text.match(/updated (\d{4}-\d{2}-\d{2})/);
+  if (!m) {
+    return { ok: false, reason: 'Could not find an "updated YYYY-MM-DD" date in HANDOVER.md\'s own header — its format may have changed since this check was written.' };
+  }
+  const updatedDate = new Date(m[1] + 'T00:00:00Z');
+  if (isNaN(updatedDate.getTime())) {
+    return { ok: false, reason: 'Found an "updated " date but could not parse it as a real date: "' + m[1] + '".' };
+  }
+  const daysStale = Math.floor((Date.now() - updatedDate.getTime()) / 86400000);
+  return { ok: true, updatedDate: m[1], daysStale: daysStale };
+}
+
+function printHandoverFreshness() {
+  console.log('HANDOVER.md freshness:');
+  const result = checkHandoverFreshness();
+  if (!result.ok) {
+    console.log('  Could not check — ' + result.reason);
+    return;
+  }
+  console.log('  Last updated: ' + result.updatedDate + ' (' + result.daysStale + ' day(s) ago)');
+  if (result.daysStale > HANDOVER_STALE_WARN_DAYS) {
+    console.log('  WARNING: stale — more than ' + HANDOVER_STALE_WARN_DAYS + ' days since the last update.');
+    console.log('  If a real architectural change has landed since then, update HANDOVER.md\'s relevant');
+    console.log('  section (see CLAUDE.md) — this is a signal to check, not proof something is missing.');
+  } else {
+    console.log('  OK — within the ' + HANDOVER_STALE_WARN_DAYS + '-day warn threshold.');
+  }
+}
+
 function main() {
   console.log('=========================================');
   console.log('Documentation coverage check (WARN-ONLY — see CI-001/CI-005, To-Do Dashboard)');
@@ -116,6 +179,8 @@ function main() {
   } else {
     console.log('RESULT: full coverage — every production file has a matching docs/ record.');
   }
+  console.log('=========================================');
+  printHandoverFreshness();
   console.log('=========================================');
   // ALWAYS exits 0 at this phase — see this file's own header comment
   // and CI-001's design note (To-Do Dashboard) for the graduation
