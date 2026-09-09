@@ -45,6 +45,33 @@ invented for this plan. Anything not yet confirmed is marked
 
 ---
 
+## Maintenance Model — What This Does and Does Not Automate
+
+Stated plainly, because it changes how much this system is worth trusting:
+**nothing in this plan enforces itself.** Phase 6 defines a *process*
+(`DOC-022`/`023`/`024` — how to register/update/retire a component;
+`DOC-049`'s pre-ship checklist) — it does not build anything that blocks a
+commit, fails CI, or otherwise stops a real change from landing without
+the matching `docs/` record being touched. There is no mechanism here
+comparable to `.github/workflows/test.yml`'s automatic enforcement of the
+`.gs` test suite.
+
+This means the catalog's value is entirely conditional on whoever makes a
+future change actually following `docs/PRE_SHIP_DOCUMENTATION_CHECKLIST.md`
+(`DOC-049`) — by habit, by being told to, or by a future session being
+pointed at it explicitly. A record that drifts from the real code is
+**worse than no record**, not neutral — it actively misleads a reader who
+trusts it instead of checking the source. Treat the catalog as accurate
+only as of its own `Last Updated` field, the same way `LOGIC_AUDIT.md` is
+only accurate as of the date it was run.
+
+If stronger, mechanical enforcement is wanted later (e.g. a CI check that
+fails when a new `js/*.js`/`.gs` file has no matching `docs/js-modules/`/
+`docs/gs-modules/` record), that is real additional engineering this plan
+does not include — a candidate follow-up, not something already built.
+
+---
+
 ## Documentation Architecture Decision
 
 **Recommendation: build a new, separate, modular documentation system —
@@ -92,6 +119,26 @@ designed to be edited going forward as the source of truth for "what is
 something else entirely, and lose its value as a dated record of what
 was true when the audit ran. It should stay exactly what it is.
 
+### Architecture documentation already exists — this does not replace it
+
+One more thing worth stating explicitly so it isn't rebuilt by accident:
+**this project is not the architecture documentation, and doesn't need to
+become it.** `LOGIC_AUDIT.md` Part 1 already IS the architecture-level
+reference — the 19-layer breakdown adapted to this app's real stack, the
+full Mermaid architecture diagram, and the list of central files/sources
+of truth. That's the birds-eye view, and it already exists, dated
+2026-09-05.
+
+The new `docs/` catalog sits one level down from that: `RELATIONSHIP_MAP.md`
+(`DOC-035`) gives the dependency-level view between the most important
+components, and each individual `DASH-`/`TAB-`/`JS-`/`GS-XXX` record gives
+the per-component detail `LOGIC_AUDIT.md`'s own file table already
+summarizes at a coarser grain. `docs/INDEX.md`'s introduction (`DOC-013`)
+should link to `LOGIC_AUDIT.md` Part 1 directly as "start here for the
+architecture overview" rather than re-deriving one — a third,
+independently-maintained architecture document would just be a fourth
+thing that can drift from the other three.
+
 ### The new system, and how the three relate
 
 A new, dedicated, modular documentation system — proposed home:
@@ -105,8 +152,8 @@ Relationship between the three root-level documents going forward:
 | Document | Role | Update cadence |
 |---|---|---|
 | `HANDOVER.md` | Narrative onboarding + real incident history — "how did we get here" | As real incidents happen, same as today |
-| `LOGIC_AUDIT.md` | Point-in-time audit findings and severity ranking — "what did a full pass find, as of this date" | Effectively frozen; a future full re-audit gets a new dated report, not an edit to this one |
-| `docs/` (new) | Living component catalog — "what is this, right now, and what does it touch" | Every time a component is added, changed, or retired (Phase 6 defines the process) |
+| `LOGIC_AUDIT.md` | Point-in-time audit findings, severity ranking, **and the architecture-level diagram/layer breakdown** — "what did a full pass find, as of this date" | Effectively frozen; a future full re-audit gets a new dated report, not an edit to this one |
+| `docs/` (new) | Living, component-level catalog — "what is this, right now, and what does it touch" — complements `LOGIC_AUDIT.md` Part 1's architecture view, does not replace or duplicate it | Every time a component is added, changed, or retired (Phase 6 defines the process — see the Maintenance Model note above for what this does and does not automate) |
 
 A short cross-link is added at the top of `HANDOVER.md` pointing to
 `docs/INDEX.md`, and `docs/INDEX.md` points back to `HANDOVER.md` for
@@ -610,6 +657,16 @@ document.
 2. Add the cross-links described in that section: a pointer from
    `HANDOVER.md`'s top to `docs/INDEX.md`, and from `docs/INDEX.md`
    back to `HANDOVER.md` and `LOGIC_AUDIT.md`.
+3. Explicitly link `LOGIC_AUDIT.md` Part 1 as "start here for the
+   architecture overview" — this catalog is the component-level
+   complement to it, not a replacement, and should say so in its own
+   introduction rather than leaving that implied (see this plan's
+   "Architecture documentation already exists" note).
+4. Add a short, visible note in the same introduction stating the
+   maintenance model plainly: this catalog is only as current as its
+   own `Last Updated` fields — nothing enforces it automatically (see
+   this plan's "Maintenance Model" section) — so a future reader knows
+   to check currency, not just trust the record.
 
 **Capture/document:**
 - The architecture decision, stated once, in its permanent home.
@@ -622,6 +679,11 @@ document.
 - `docs/INDEX.md` exists with a real introduction explaining what it is
   and how it relates to the other two root docs.
 - `HANDOVER.md` has the added cross-link.
+- The introduction explicitly names `LOGIC_AUDIT.md` Part 1 as the
+  architecture overview and states the catalog is its component-level
+  complement, not a replacement.
+- The introduction explicitly states the maintenance model (no
+  automatic enforcement; currency depends on `Last Updated`).
 
 **Follow-up/TBD items:**
 - None.
