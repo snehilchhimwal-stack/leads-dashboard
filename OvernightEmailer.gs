@@ -518,9 +518,9 @@ function sendOvernightMorningEmails_() {
     if (!main) return; // not one of the 11 configured regions
 
     const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    if (isOppOrAbove_(stage)) return; // already converted overnight — excluded, needs no follow-up
     const closingReason = getVal_(row, colIndex, 'closing_reason');
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+    if (isOppOrAbove_(stage, closingReason, leadClosingReason)) return; // already converted overnight — excluded, needs no follow-up
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed overnight — excluded
 
     const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
@@ -919,7 +919,7 @@ function sendOvernightFollowupEmails_() {
       const RM = String(getVal_(row, colIndex, 'RM') || '').trim();
       const closingReason = getVal_(row, colIndex, 'closing_reason');
       const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-      if (isOppOrAbove_(stage)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Reached Opportunity+' }); return; }
+      if (isOppOrAbove_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Reached Opportunity+' }); return; }
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
@@ -1205,9 +1205,9 @@ function downloadNoIssueLeadsNow() {
     const main = mainRegionForGs_(rawRegion);
     if (!main) return;
     const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    if (isOppOrAbove_(stage)) return;
     const closingReason = getVal_(row, colIndex, 'closing_reason');
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+    if (isOppOrAbove_(stage, closingReason, leadClosingReason)) return;
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
 
     const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
@@ -1318,7 +1318,7 @@ function debugFollowupStatusNow() {
       const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
       const closingReason = getVal_(row, colIndex, 'closing_reason');
       const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-      if (isOppOrAbove_(stage)) { resolvedCount++; detail.push(entry.lead_id + ' (RM: ' + rm + '): resolved (reached Opportunity+, stage="' + stage + '")'); return; }
+      if (isOppOrAbove_(stage, closingReason, leadClosingReason)) { resolvedCount++; detail.push(entry.lead_id + ' (RM: ' + rm + '): resolved (reached Opportunity+, stage="' + stage + '")'); return; }
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedCount++; detail.push(entry.lead_id + ' (RM: ' + rm + '): resolved (closed, stage="' + stage + '")'); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {

@@ -90,9 +90,24 @@ function canonicalStage(stage){
   return null;
 }
 
-function isOppOrAbove(stage){
-  const canon = canonicalStage(stage);
-  if (!canon) return false;
+// closingReason/leadClosingReason are optional — every existing call site
+// that only ever passed `stage` keeps behaving exactly as before (both
+// default to undefined, so the fallback branch below is a no-op for them).
+// Added 2026-09-09: same reasoning as isBookingLead/isSoftBookingLead just
+// below — a CRM stage text this app doesn't recognize (canonicalStage
+// returns null) previously made a lead read as NOT Opportunity+ even when
+// it had clearly already progressed there or further, per its own
+// closing/resolution reason. Real incident this addresses: lead 2229674
+// investigated 2026-09-09 turned out NOT to be caused by this gap (its
+// stage mapped cleanly) — but reading the code surfaced this as a real,
+// still-open version of the exact bug isBookingLead was already fixed for.
+function isOppOrAbove(stage, closingReason, leadClosingReason){
+  let canon = canonicalStage(stage);
+  if (!canon) {
+    const reason = String(leadClosingReason || closingReason || '').trim().toLowerCase();
+    canon = reason ? canonicalStage(reason) : null;
+    if (!canon) return false;
+  }
   const idx = CONFIG.FUNNEL_ORDER.indexOf(canon);
   const oppIdx = CONFIG.FUNNEL_ORDER.indexOf(CONFIG.OPPORTUNITY_STAGE);
   return idx >= oppIdx;
@@ -203,7 +218,7 @@ function enrichLead(l){
   // SLA issue in the dashboard despite genuinely being done.
   const hasClosingReason = !!String(l.closing_reason || '').trim() || !!String(l.lead_closing_reason || '').trim();
   const excluded = isLeadClosed(l);
-  const oppOrAbove = isOppOrAbove(l.current_stage);
+  const oppOrAbove = isOppOrAbove(l.current_stage, l.closing_reason, l.lead_closing_reason);
   const isOpenLead = !excluded && !oppOrAbove; // "open" = not closed, not already at Opportunity+
 
   const ageHours = created ? (now - created) / 36e5 : null;

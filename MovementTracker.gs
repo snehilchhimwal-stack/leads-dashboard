@@ -636,7 +636,7 @@ function _evidenceAtDeadlineGs_(historyForKey, deadlineMs, liveEvidence) {
   });
   const evidence = atOrBefore || firstAfter;
   if (evidence) {
-    return { oppOrAbove: isOppOrAbove_(evidence.stage), isOpenLead: isOpenLead_(evidence.stage, evidence.closingReason, '') };
+    return { oppOrAbove: isOppOrAbove_(evidence.stage, evidence.closingReason, ''), isOpenLead: isOpenLead_(evidence.stage, evidence.closingReason, '') };
   }
   return liveEvidence || null;
 }
@@ -747,7 +747,7 @@ function computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now) {
     stats.created++;
 
     const liveEvidence = live
-      ? { oppOrAbove: isOppOrAbove_(live.stage), isOpenLead: isOpenLead_(live.stage, live.closingReason, live.leadClosingReason) }
+      ? { oppOrAbove: isOppOrAbove_(live.stage, live.closingReason, live.leadClosingReason), isOpenLead: isOpenLead_(live.stage, live.closingReason, live.leadClosingReason) }
       : null;
 
     const sameDay = _evidenceAtDeadlineGs_(history, sameDayDeadlineMs, liveEvidence);

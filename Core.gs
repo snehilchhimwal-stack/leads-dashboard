@@ -101,9 +101,20 @@ function canonicalStage_(stage) {
   return null;
 }
 
-function isOppOrAbove_(stage) {
-  const canon = canonicalStage_(stage);
-  if (!canon) return false;
+// closingReason/leadClosingReason are optional — every existing call site
+// that only ever passed `stage` keeps behaving exactly as before. Mirrors
+// js/core-lead-model.js's identical 2026-09-09 fix — see that file's own
+// comment on isOppOrAbove for the full reasoning (a CRM stage text this
+// app doesn't recognize previously read as NOT Opportunity+ even when the
+// lead had clearly already progressed there or further, per its own
+// closing/resolution reason).
+function isOppOrAbove_(stage, closingReason, leadClosingReason) {
+  let canon = canonicalStage_(stage);
+  if (!canon) {
+    const reason = String(leadClosingReason || closingReason || '').trim().toLowerCase();
+    canon = reason ? canonicalStage_(reason) : null;
+    if (!canon) return false;
+  }
   return FUNNEL_ORDER_.indexOf(canon) >= FUNNEL_ORDER_.indexOf(OPPORTUNITY_STAGE_);
 }
 
@@ -126,7 +137,7 @@ function isClosedStage_(stage) {
 function isOpenLead_(stage, closingReason, leadClosingReason) {
   const hasClosingReason = !!String(closingReason || '').trim() || !!String(leadClosingReason || '').trim();
   const excluded = isClosedStage_(stage) || hasClosingReason;
-  return !excluded && !isOppOrAbove_(stage);
+  return !excluded && !isOppOrAbove_(stage, closingReason, leadClosingReason);
 }
 
 // ---- Tab resolution: the leads tab has one fixed name — see

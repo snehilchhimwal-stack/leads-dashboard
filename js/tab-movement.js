@@ -1013,7 +1013,7 @@ function overnightStatusLabel(l){
 // same "preliminary list, then real build" split renderReports uses for
 // the Summary email, just without needing a full throwaway report pass.
 function overnightEmailableLeads(cohortLeads){
-  return cohortLeads.filter(l => !isLeadClosed(l) && !isOppOrAbove(l.current_stage));
+  return cohortLeads.filter(l => !isLeadClosed(l) && !isOppOrAbove(l.current_stage, l.closing_reason, l.lead_closing_reason));
 }
 
 // Region-wise email reports for Overnight Leads — same {region, subject,

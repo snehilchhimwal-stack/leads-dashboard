@@ -21,6 +21,20 @@ function runCoreTests_() {
     TestAssert_(isOppOrAbove_('Not Updated') === false, 'isOppOrAbove_: Not Updated is not Opp+');
     TestAssert_(isOppOrAbove_('Unrecognized') === false, 'isOppOrAbove_: unrecognized stage is not Opp+');
 
+    // ---- isOppOrAbove_: closing_reason/lead_closing_reason fallback (2026-09-09) ----
+    // A CRM stage text this app doesn't recognize must not silently read as
+    // pre-Opportunity when the lead's own closing/resolution reason says
+    // otherwise -- same class of gap isBookingLead/isSoftBookingLead (the
+    // client-side siblings) were already fixed for.
+    TestAssert_(isOppOrAbove_('Unrecognized', 'Booking') === true, 'isOppOrAbove_: unmapped stage falls back to closingReason when it names a real funnel stage at/above Opportunity');
+    TestAssert_(isOppOrAbove_('Unrecognized', '', 'Opportunity') === true, 'isOppOrAbove_: leadClosingReason takes precedence and is checked even when closingReason is blank');
+    TestAssert_(isOppOrAbove_('Unrecognized', 'Not Interested') === false, 'isOppOrAbove_: a closing reason that is not itself a funnel stage does not falsely trigger the fallback');
+    TestAssert_(isOppOrAbove_('Unrecognized', '', '') === false, 'isOppOrAbove_: no closing reason at all still returns false for an unmapped stage');
+    TestAssert_(isOppOrAbove_('Opportunity', 'Not Interested') === true, 'isOppOrAbove_: a correctly-mapped stage is never overridden by an unrelated closing reason');
+
+    // ---- isOpenLead_ threads the same fallback through (2026-09-09) ----
+    TestAssert_(isOpenLead_('Unrecognized', '', 'Booking') === false, 'isOpenLead_: an unmapped stage with a Booking closing reason is correctly excluded as Opp+, not left open');
+
     // ---- isClosedStage_ ----
     TestAssert_(isClosedStage_('Won') === true, 'isClosedStage_: exact "Won"');
     TestAssert_(isClosedStage_('Lost') === true, 'isClosedStage_: exact "Lost"');
