@@ -94,6 +94,14 @@ namespace regardless of filename — the split is purely organizational.
   and runs synthetic leads through the real `fetchAndRender()` pipeline.
   Re-run it after any dashboard-side change; extend it rather than
   hand-verifying in the console when you add real new behavior.
+- **Adding or removing a production `js/*.js` or `.gs` file**:
+  `test/check-docs-coverage.js` (`CI-001`–`CI-005`, To-Do Dashboard,
+  2026-09-09) checks it against `docs/js-modules/`/`docs/gs-modules/` and
+  prints a summary in CI, right after the `.gs` suite — currently WARN-ONLY
+  (never fails the build), since `docs/` doesn't have those folders yet, so
+  every file correctly shows as uncovered for now. See
+  `DOCUMENTATION_PROJECT_PLAN.md`'s Maintenance Model section for the
+  graduation criteria (tied to Phase 5's `DOC-039`, not a fixed date).
 - **Changing automatic email, RM hierarchy routing, or worst-performing-RM
   logic specifically** (`OvernightEmailer.gs`/`AllIssuesEmailer.gs`,
   `RmHierarchy.gs`, RM Performance/`DailyRmIssueLog.gs`): run

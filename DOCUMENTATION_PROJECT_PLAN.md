@@ -65,10 +65,29 @@ trusts it instead of checking the source. Treat the catalog as accurate
 only as of its own `Last Updated` field, the same way `LOGIC_AUDIT.md` is
 only accurate as of the date it was run.
 
-If stronger, mechanical enforcement is wanted later (e.g. a CI check that
-fails when a new `js/*.js`/`.gs` file has no matching `docs/js-modules/`/
-`docs/gs-modules/` record), that is real additional engineering this plan
-does not include — a candidate follow-up, not something already built.
+**Update, 2026-09-09 — this candidate follow-up is no longer hypothetical.**
+`CI-001` through `CI-005` (To-Do Dashboard) built exactly the check this
+paragraph used to only propose: `test/check-docs-coverage.js` lists every
+`js/*.js` file and every production `.gs` file (`Tests_*.gs` excluded, per
+`DOC-007`'s own exclusion decision) with no matching `docs/js-modules/`/
+`docs/gs-modules/` record, wired into `.github/workflows/test.yml`
+(`CI-003`) as a step right after the `.gs` test suite — see `CLAUDE.md`'s
+own Testing section for the day-to-day pointer.
+
+It runs in **WARN-ONLY mode right now, deliberately** (`CI-001`'s design
+note): it prints a summary but always exits 0, never blocking a commit —
+correct, not a bug, since `docs/` doesn't have a `js-modules/`/`gs-modules/`
+folder yet at all (this plan's own Phase 2/3 haven't run). Expect every
+production file to show as uncovered until they do.
+
+**Graduation criteria** (when this stops being advisory and starts
+actually blocking a build without the matching record): only once Phase 5's
+`DOC-039` verification task confirms full coverage — every production file
+tracked at that point has a real `docs/` record. Not a fixed date, and not
+"most files covered" — `DOC-039`'s own completeness check is the trigger.
+Flipping the check itself (removing its `continue-on-error: true` in
+`.github/workflows/test.yml`) is a small, mechanical follow-up once that
+condition is met, not decided further here.
 
 ---
 
