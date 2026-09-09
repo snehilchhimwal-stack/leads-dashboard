@@ -378,6 +378,43 @@
       regionRmNames.indexOf('Region-RH') === -1, 'regionRmNames=' + regionRmNames.join(','));
   })();
 
+  // ---- 2e. downloadRepeatOffendersPdf: waits for RM_Hierarchy, not just
+  // Movement_Log (2026-09-09) ----
+  // Real incident: an RH and a CH showed up ranked as regular RMs in a
+  // downloaded PDF while the SAME moment's live tab correctly excluded
+  // them. Root cause -- this function only ever gated on
+  // movementFetchState; RM_Hierarchy is a separate, independent fetch,
+  // and nothing stopped a click in the window where Movement_Log had
+  // already resolved but RM_Hierarchy hadn't yet -- rmPerfIsLeadershipExcluded
+  // degrades gracefully to name-only exclusion against an empty
+  // rmHierarchyByNameLower (correct behavior for a genuinely-absent
+  // RM_Hierarchy), so the role-based half (A1/TM/RH/CH-tier) silently
+  // didn't fire. The live tab itself never hits this because its render
+  // is gated behind Promise.all([fetchRmHierarchyForRollup(...),
+  // movementLogPromise]) (core-fetch-and-render.js) -- this test proves
+  // the PDF export function now has the same guard.
+  await (async function () {
+    const savedMovementState = movementFetchState;
+    const savedSnapshots = movementSnapshots;
+    const savedHierarchyState = rmHierarchyFetchState;
+    const statusEl = document.getElementById('repeatOffendersPdfStatus');
+    const savedStatusText = statusEl ? statusEl.textContent : null;
+    movementFetchState = 'ok';
+    movementSnapshots = [{ snapshot_at: new Date(), lead_id: 'X', RM: 'Whoever', region: 'North' }];
+    rmHierarchyFetchState = 'loading';
+    try {
+      await downloadRepeatOffendersPdf();
+      assert('downloadRepeatOffendersPdf: refuses to generate while RM_Hierarchy is still loading (Movement_Log alone is not enough)',
+        !!statusEl && statusEl.textContent.indexOf('Still loading RM_Hierarchy') !== -1,
+        'statusEl text=' + (statusEl && statusEl.textContent));
+    } finally {
+      movementFetchState = savedMovementState;
+      movementSnapshots = savedSnapshots;
+      rmHierarchyFetchState = savedHierarchyState;
+      if (statusEl && savedStatusText !== null) statusEl.textContent = savedStatusText;
+    }
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

@@ -411,6 +411,33 @@ async function downloadRepeatOffendersPdf(){
     if (statusEl) { statusEl.textContent = 'No Movement_Log data loaded yet — nothing to export.'; statusEl.style.color = 'var(--amber)'; }
     return;
   }
+  // Real incident, 2026-09-09: an RH and a CH showed up ranked as regular
+  // RMs in a downloaded PDF (worst row in one region's own worst-5 table)
+  // while the SAME moment's live tab correctly excluded them. Root cause
+  // wasn't the exclusion logic itself -- rmPerfIsLeadershipExcluded
+  // (core-rm-performance.js) degrades gracefully to name-only exclusion
+  // when rmHierarchyByNameLower is empty, exactly as designed for when
+  // RM_Hierarchy genuinely isn't set up -- it was a RACE: the live tab's
+  // OWN render is gated behind Promise.all([fetchRmHierarchyForRollup(...),
+  // movementLogPromise]) (core-fetch-and-render.js) so RM_Hierarchy is
+  // always settled (loaded OR genuinely failed) before it ever renders a
+  // row, but this function only ever gated on movementFetchState -- it's
+  // entirely possible for Movement_Log's fetch to resolve first while
+  // RM_Hierarchy (a separate, independent fetch) is still in flight, and
+  // this function has no lock stopping a click in that exact window. The
+  // role-based half of the exclusion (A1/TM/RH/CH-tier) silently couldn't
+  // fire against an empty rmHierarchyByNameLower -- only the hardcoded
+  // NAME exclusions still worked, and neither of the two real people this
+  // happened to were on that list. Mirrors the Movement_Log check just
+  // above; once RM_Hierarchy settles either way (loaded OR genuinely
+  // failed/missing -- rmHierarchyFetchState 'ok'/'missing'/'error' are all
+  // fine to proceed on, same "unavailable, not broken" degrade the live
+  // tab itself already accepts for a genuinely absent RM_Hierarchy), this
+  // no longer blocks.
+  if (rmHierarchyFetchState === 'loading' || rmHierarchyFetchState === 'idle') {
+    if (statusEl) { statusEl.textContent = 'Still loading RM_Hierarchy — try again in a moment (this keeps managers/leadership correctly out of the export).'; statusEl.style.color = 'var(--amber)'; }
+    return;
+  }
 
   _repeatOffendersPdfGenerating = true;
   const originalLabel = btn ? btn.textContent : '';
