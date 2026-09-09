@@ -719,6 +719,15 @@ function pushUnresolvedToLeadFollowups_(ss, entries) {
 // Script itself has a hard execution-time ceiling, so it polls a FEW times
 // (~2 minutes total) and then proceeds with whatever's there, possibly
 // partial, possibly empty — same "send without it" outcome either way.
+//
+// Returns { lead_id: { suggestion, updatedAt } }, not a bare suggestion
+// string — LEADFOLLOWUPS-003 (2026-09-09): a suggestion this reads back
+// can be a human-typed value pushUnresolvedToLeadFollowups_ never clears
+// (unlike the dashboard's own clear-then-push cycle — see that
+// function's own header), so it can be arbitrarily old and get quoted
+// into today's 1pm email with zero freshness signal. updatedAt (column
+// G) lets the caller show its actual age. See buildFollowupSuggestionLineGs_
+// below for where that gets turned into the visible "(typed Xh ago)" text.
 function waitForFollowupSuggestions_(ss, leadIds) {
   const sheet = ss.getSheetByName(LEAD_FOLLOWUPS_SHEET_);
   if (!sheet) return {};
@@ -728,10 +737,10 @@ function waitForFollowupSuggestions_(ss, leadIds) {
       const lastRow = sheet.getLastRow();
       const out = {};
       if (lastRow < 2) return out;
-      sheet.getRange(2, 1, lastRow - 1, 6).getValues().forEach(function (r) {
+      sheet.getRange(2, 1, lastRow - 1, 7).getValues().forEach(function (r) {
         const id = String((r && r[0]) || '').trim();
         const suggestion = String((r && r[5]) || '').trim();
-        if (id && suggestion) out[id] = suggestion;
+        if (id && suggestion) out[id] = { suggestion: suggestion, updatedAt: (r && r[6] instanceof Date) ? r[6] : null };
       });
       return out;
     }, 'read Lead_Followups suggestions (attempt ' + attempt + ')');
@@ -740,6 +749,24 @@ function waitForFollowupSuggestions_(ss, leadIds) {
     if (attempt < FOLLOWUP_WAIT_MAX_ATTEMPTS_) Utilities.sleep(FOLLOWUP_WAIT_POLL_MS_);
   }
   return lookup; // time's up — whatever's filled in, possibly partial, possibly empty
+}
+
+// Pure — LEADFOLLOWUPS-003 (2026-09-09). Turns a Lead_Followups
+// updated_at Date into the short " (typed Xh ago)" suffix the 1pm email
+// appends to a human-typed suggestion (see sendOvernightFollowupEmails_'s
+// own use of this, below). Blank string for anything not worth trusting
+// as a real age — no Date at all (the row's own G cell couldn't be read,
+// see waitForFollowupSuggestions_), or a negative gap (clock skew/bad
+// data) — so a broken input never renders a nonsensical caption; it just
+// renders no caption, same as the algorithmic-fallback suggestion path
+// already does today.
+function formatFollowupAgeGs_(updatedAt, now) {
+  if (!(updatedAt instanceof Date)) return '';
+  const ageHours = (now.getTime() - updatedAt.getTime()) / 36e5;
+  if (ageHours < 0) return '';
+  if (ageHours < 1) return ' (typed <1h ago)';
+  if (ageHours < 48) return ' (typed ' + Math.round(ageHours) + 'h ago)';
+  return ' (typed ' + Math.round(ageHours / 24) + 'd ago)';
 }
 
 /**
@@ -971,9 +998,17 @@ function sendOvernightFollowupEmails_() {
     // back in time; otherwise fall back to the SAME keyword engine the
     // 10am email uses (overnightFollowupHintGs_) instead of leaving this
     // blank — previously a slow/absent dashboard response meant this
-    // column just showed "—" with nothing actionable in it.
+    // column just showed "—" with nothing actionable in it. A human
+    // suggestion gets its own age appended (LEADFOLLOWUPS-003,
+    // 2026-09-09, formatFollowupAgeGs_ above) — pushUnresolvedToLeadFollowups_
+    // never clears Lead_Followups, so this text can be arbitrarily old;
+    // the algorithmic fallback is always computed fresh right here, so it
+    // never needs (or gets) an age caption of its own.
     r.unresolvedRows.forEach(function (row) {
-      row.suggestion = suggestionByLeadId[row.lead_id] || overnightFollowupHintGs_(row.sourceRow, colIndex, now, row.baselineEntry);
+      const human = suggestionByLeadId[row.lead_id];
+      row.suggestion = human
+        ? human.suggestion + formatFollowupAgeGs_(human.updatedAt, now)
+        : overnightFollowupHintGs_(row.sourceRow, colIndex, now, row.baselineEntry);
     });
 
     const sections = [{

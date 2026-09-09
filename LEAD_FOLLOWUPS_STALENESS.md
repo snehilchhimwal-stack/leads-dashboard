@@ -105,15 +105,26 @@ than letting it build on a wrong premise — same discipline
 
 ## What this means for `LEADFOLLOWUPS-002..005`
 
-- **002** should re-scope around the correction above: the fix isn't
-  adding a new per-row timestamp (it exists), it's making the existing
-  `updated_at` column impossible to miss/misread — conditional formatting
-  for an old value, a frozen/highlighted column, or a sheet-level banner
-  cell, not a code change to the write path at all.
-- **003** — "surface it wherever a person could plausibly be looking" —
-  given consumer 1 (the raw sheet) is the actual incident surface, this
-  and 002 substantially overlap; the sheet itself is the primary surface
-  to fix, not a dashboard UI element.
+- **002** — **done.** `LeadFollowupsStaleness.gs`'s
+  `setupLeadFollowupsStalenessFormatting()` makes column G's own age
+  visible via conditional formatting (amber past 12h, red past 24h) —
+  targets consumer 1, the actual incident surface.
+- **003** — **done, and it turned out to be a genuinely separate gap
+  from 002, not just an overlap.** Consumer 1 (the raw sheet) is fully
+  covered by 002's formatting — but consumer 4
+  (`sendOvernightFollowupEmails`) reads a possibly-days-old human
+  suggestion out of column F and quotes it straight into an outbound
+  email, where NOTHING from the sheet's own formatting is visible at all
+  (an email is not the sheet). Fixed in `OvernightEmailer.gs`:
+  `waitForFollowupSuggestions_` now returns `{suggestion, updatedAt}`
+  instead of a bare string, and `sendOvernightFollowupEmails_` appends a
+  `formatFollowupAgeGs_()` caption — `" (typed Xh ago)"` /
+  `" (typed Xd ago)"` — to any human-typed suggestion it quotes. The
+  algorithmic fallback (`overnightFollowupHintGs_`) is always computed
+  fresh in the same run, so it never needs one. The two dashboard Generate
+  flows (consumers 2/3) were confirmed to need nothing here — both start
+  from a freshly *cleared* tab every cycle, so any suggestion they read
+  back was necessarily typed within that same live cycle, never old.
 - **004** (freshness policy) — consumer 4's upsert-only design is
   deliberate and correct (it can't safely clear without the dashboard's
   lock) — a real fix should target the **row level**, not a sheet-wide

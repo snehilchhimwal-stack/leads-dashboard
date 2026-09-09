@@ -267,8 +267,28 @@ function runOvernightEmailerTests_() {
     TestAssertEqual_(upsertedRow[4], 'second pass', 'pushUnresolvedToLeadFollowups_: E (collated_comments) is updated on upsert');
     TestAssertEqual_(upsertedRow[5], 'Human-written suggestion', 'pushUnresolvedToLeadFollowups_: F (suggested_followup) is left untouched — that column belongs to the dashboard/human, not this writer');
 
+    // LEADFOLLOWUPS-003 (2026-09-09): waitForFollowupSuggestions_ now
+    // returns { suggestion, updatedAt }, not a bare string — see its own
+    // header comment for why (a human suggestion can be arbitrarily old,
+    // since pushUnresolvedToLeadFollowups_ never clears the tab).
     const suggestions = waitForFollowupSuggestions_(lfSs, ['L-NEW']);
-    TestAssertEqual_(suggestions['L-NEW'], 'Human-written suggestion', 'waitForFollowupSuggestions_: reads back a suggestion that is already present, on the first poll');
+    TestAssertEqual_(suggestions['L-NEW'].suggestion, 'Human-written suggestion', 'waitForFollowupSuggestions_: reads back a suggestion that is already present, on the first poll');
+    // The mock's Utilities.formatDate returns a plain string (unlike a
+    // real sheet, which auto-parses a date-shaped string into a real
+    // Date cell on write — see LeadFollowupsStaleness.gs's own header for
+    // that confirmed behavior) — pushUnresolvedToLeadFollowups_'s own
+    // upsert above wrote G through the mock the same way, so it reads
+    // back here as a plain string too. Confirms the degrade path is
+    // graceful (null, not a crash) when a cell isn't a real Date, exactly
+    // like the mock's own honest gap, not a bug in this function.
+    TestAssertEqual_(suggestions['L-NEW'].updatedAt, null, 'waitForFollowupSuggestions_: updatedAt is null (not a crash) when the mock has not simulated Sheets\' own string-to-Date auto-conversion for that cell');
+
+    // Now with a REAL Date in column G (simulating what a genuine sheet
+    // would already have auto-converted the write-side string into).
+    lfSheet.getRange(2, 7, 1, 1).setValues([[new Date('2026-09-08T18:34:00+05:30')]]);
+    const withRealDate = waitForFollowupSuggestions_(lfSs, ['L-NEW']);
+    TestAssert_(withRealDate['L-NEW'].updatedAt instanceof Date, 'waitForFollowupSuggestions_: updatedAt comes back as a real Date when the cell actually is one');
+    TestAssertEqual_(withRealDate['L-NEW'].updatedAt.getTime(), new Date('2026-09-08T18:34:00+05:30').getTime(), 'waitForFollowupSuggestions_: updatedAt carries the exact timestamp through, not a re-derived one');
 
     // lfSs's Lead_Followups still has L-NEW's own real suggestion from
     // the earlier upsert test — waitForFollowupSuggestions_ legitimately
@@ -278,6 +298,16 @@ function runOvernightEmailerTests_() {
     // returned object is empty overall.
     const neverAnswered = waitForFollowupSuggestions_(lfSs, ['L-NOT-THERE-AT-ALL']);
     TestAssertEqual_(neverAnswered['L-NOT-THERE-AT-ALL'], undefined, 'waitForFollowupSuggestions_: gives up after FOLLOWUP_WAIT_MAX_ATTEMPTS_ polls rather than hanging when a lead never gets a suggestion filled in (sleep is mocked to a no-op, so this completes instantly)');
+
+    // ---- formatFollowupAgeGs_: pure (LEADFOLLOWUPS-003, 2026-09-09) ----
+    const ageNow = new Date('2026-09-09T09:00:00+05:30');
+    TestAssertEqual_(formatFollowupAgeGs_(new Date('2026-09-09T08:45:00+05:30'), ageNow), ' (typed <1h ago)', 'formatFollowupAgeGs_: under 1h reads as "<1h ago", not "0h ago"');
+    TestAssertEqual_(formatFollowupAgeGs_(new Date('2026-09-09T06:00:00+05:30'), ageNow), ' (typed 3h ago)', 'formatFollowupAgeGs_: a same-day age rounds to whole hours');
+    TestAssertEqual_(formatFollowupAgeGs_(new Date('2026-09-08T14:34:00+05:30'), ageNow), ' (typed 18h ago)', 'formatFollowupAgeGs_: an under-48h age still reads in hours, not days (the real incident\'s own ~19h case)');
+    TestAssertEqual_(formatFollowupAgeGs_(new Date('2026-09-06T09:00:00+05:30'), ageNow), ' (typed 3d ago)', 'formatFollowupAgeGs_: 48h or more switches to whole days');
+    TestAssertEqual_(formatFollowupAgeGs_(new Date('2026-09-09T09:05:00+05:30'), ageNow), '', 'formatFollowupAgeGs_: a future timestamp (clock skew/bad data) renders no caption rather than a negative age');
+    TestAssertEqual_(formatFollowupAgeGs_(null, ageNow), '', 'formatFollowupAgeGs_: no Date at all renders no caption');
+    TestAssertEqual_(formatFollowupAgeGs_('2026-09-08 18:34:00', ageNow), '', 'formatFollowupAgeGs_: an unconverted string (not a real Date) renders no caption rather than throwing');
 
     // ---- backfillTodaysOvernightLogRecipientsNow ----
     const backfillSs = TestMockSpreadsheet_({
