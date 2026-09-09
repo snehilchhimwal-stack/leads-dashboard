@@ -59,6 +59,17 @@ namespace regardless of filename — the split is purely organizational.
   above. There *is* CI for the test suite itself (`.github/workflows/test.yml`,
   runs `node test/run-gs-tests.js` on every push) — that only proves the
   logic is correct, not that it's live on the Sheet.
+- **Adding a new `.gs` production or `Tests_*.gs` file needs THREE
+  registrations, not one.** `Tests_RunAll.gs`'s `suites` array alone isn't
+  enough — `test/run-gs-tests.js` (the Node/CI harness) hardcodes its own
+  separate `PRODUCTION_FILES`/`TEST_FILES` lists, since Node has no way to
+  discover "every file pasted into this Apps Script project" the way the
+  real Apps Script editor does. Miss that list and CI throws a
+  `ReferenceError` on the new suite function — it was never loaded into
+  the sandbox, so `runAllTests()` can't resolve the name (real incident,
+  CHECKLIST-006, 2026-09-09). Add it to: `Tests_RunAll.gs`'s `suites`
+  array, `test/run-gs-tests.js`'s file lists, AND paste it into the live
+  Apps Script editor per the point above.
 - **`RmHierarchy.private.gs` is never in git** (`.gitignore`) — real
   employee emails. Get it directly from whoever last had it, out of band.
   Its absence doesn't crash anything; routing just silently degrades to a

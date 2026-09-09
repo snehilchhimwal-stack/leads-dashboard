@@ -31,6 +31,13 @@ const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
 
+// ADDING A NEW .gs FILE? It must be listed in PRODUCTION_FILES/TEST_FILES
+// below — Tests_RunAll.gs's own `suites` array is NOT enough on its own.
+// Real incident: CHECKLIST-006 (2026-09-09) added OpsChecklistRunner.gs +
+// Tests_OpsChecklistRunner.gs and registered the new suite in
+// Tests_RunAll.gs, but forgot this file — CI failed with a ReferenceError
+// on the undefined suite function, because runAllTests() never even had
+// the new file loaded into its sandbox to resolve that name against.
 const PRODUCTION_FILES = [
   'Core.gs',
   'EmailInfra.gs',
@@ -43,6 +50,7 @@ const PRODUCTION_FILES = [
   'UnmatchedCommentLogger.gs',
   'InteractionHistoryLogger.gs',
   'DailyRmIssueLog.gs',
+  'OpsChecklistRunner.gs',
 ];
 
 const TEST_FILES = [
@@ -58,6 +66,7 @@ const TEST_FILES = [
   'Tests_OvernightEmailer.gs',
   'Tests_AllIssuesEmailer.gs',
   'Tests_DailyRmIssueLog.gs',
+  'Tests_OpsChecklistRunner.gs',
   'Tests_RunAll.gs',
 ];
 
