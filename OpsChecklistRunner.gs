@@ -91,10 +91,24 @@ function buildWeeklyOpsChecklistSummary_(ss, now) {
  * try/catch and re-thrown so a failed send still shows up in Executions
  * as Failed, not silently green — same discipline sendAllIssuesEmails
  * (AllIssuesEmailer.gs) uses for its own top-level wrapper.
+ *
+ * Takes `now` as an explicit parameter (same split as
+ * checkMovementLogFreshness_/checkMovementLogFreshnessNow,
+ * MovementTracker.gs) specifically so a test can pin it — 2026-09-09
+ * incident: the original single `runWeeklyOpsChecklistNow()` (no `now`
+ * param) always called `new Date()` internally, so a test built around a
+ * "clean, nothing flagged" spreadsheet fixture with a Movement_Log row
+ * seeded a fixed few hours before a FIXED anchor date silently turned
+ * into a time bomb — it read as "fresh" only while the CI runner's real
+ * wall-clock time happened to still be within MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_
+ * of that fixed anchor, then started failing for real (not flaking —
+ * failing on every run) once enough real time had passed, with zero
+ * production code change. Splitting the real logic out so the test can
+ * pass the SAME fixed `now` it seeded the fixture with removes the real
+ * clock from the test entirely; runWeeklyOpsChecklistNow() below (the
+ * actual trigger target) still uses the real `new Date()`, unaffected.
  */
-function runWeeklyOpsChecklistNow() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const now = new Date();
+function runWeeklyOpsChecklist_(ss, now) {
   const summary = buildWeeklyOpsChecklistSummary_(ss, now);
 
   const subject = '[Ops Checklist] ' + (summary.issueCount ? summary.issueCount + ' item(s) to review' : 'all clear') +
@@ -108,6 +122,13 @@ function runWeeklyOpsChecklistNow() {
     throw e;
   }
   Logger.log('Weekly Ops Checklist sent — ' + summary.issueCount + ' item(s) flagged.');
+}
+
+// Trigger target / console-callable wrapper — real spreadsheet, real
+// current time. All the actual logic lives in runWeeklyOpsChecklist_
+// above so a test can pin `now` instead of racing the real clock.
+function runWeeklyOpsChecklistNow() {
+  runWeeklyOpsChecklist_(SpreadsheetApp.getActiveSpreadsheet(), new Date());
 }
 
 // One-time setup — installs a single weekly trigger, Monday ~9am IST

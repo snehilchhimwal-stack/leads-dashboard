@@ -36,17 +36,17 @@ function runOpsChecklistRunnerTests_() {
     TestAssertContains_(cleanSummary.lines.join('\n'), 'fresh', 'buildWeeklyOpsChecklistSummary_: a fresh Movement_Log is reported as fresh');
     TestAssertContains_(cleanSummary.lines.join('\n'), 'reportRmPerformanceNow', 'buildWeeklyOpsChecklistSummary_: always ends with the manual-checks reminder, even on a clean run');
 
-    // ---- runWeeklyOpsChecklistNow: clean case sends exactly one "all clear" email ----
-    const realSpreadsheetAppClean = SpreadsheetApp;
-    SpreadsheetApp = { getActiveSpreadsheet: function () { return cleanSs; }, flush: function () {} };
-    try {
-      runWeeklyOpsChecklistNow();
-    } finally {
-      SpreadsheetApp = realSpreadsheetAppClean;
-    }
-    TestAssertEqual_(TestGmailLog_.sent.length, 1, 'runWeeklyOpsChecklistNow: sends exactly one email');
-    TestAssertEqual_(TestGmailLog_.sent[0].to, TEST_EMAIL_PRIMARY_, 'runWeeklyOpsChecklistNow: sends to OPS_ALERT_EMAIL_ (reassigned to the test address)');
-    TestAssertContains_(TestGmailLog_.sent[0].subject, 'all clear', 'runWeeklyOpsChecklistNow: subject reads "all clear" when issueCount is 0');
+    // ---- runWeeklyOpsChecklist_: clean case sends exactly one "all clear"
+    // email. Calls the (ss, now)-parameterized core directly, with the
+    // SAME fixed `now` the Movement_Log fixture above was seeded relative
+    // to — NOT runWeeklyOpsChecklistNow() (which always uses the real
+    // wall clock and would make this assertion a time bomb; see
+    // runWeeklyOpsChecklist_'s own header comment, OpsChecklistRunner.gs,
+    // 2026-09-09).
+    runWeeklyOpsChecklist_(cleanSs, now);
+    TestAssertEqual_(TestGmailLog_.sent.length, 1, 'runWeeklyOpsChecklist_: sends exactly one email');
+    TestAssertEqual_(TestGmailLog_.sent[0].to, TEST_EMAIL_PRIMARY_, 'runWeeklyOpsChecklist_: sends to OPS_ALERT_EMAIL_ (reassigned to the test address)');
+    TestAssertContains_(TestGmailLog_.sent[0].subject, 'all clear', 'runWeeklyOpsChecklist_: subject reads "all clear" when issueCount is 0');
 
     // ---- buildWeeklyOpsChecklistSummary_: every kind of gap flagged at once ----
     TestGmailLog_reset_();
@@ -78,15 +78,27 @@ function runOpsChecklistRunnerTests_() {
     TestAssertContains_(dirtySummary.lines.join('\n'), 'Test A1 NoMail', 'buildWeeklyOpsChecklistSummary_: names the manager with no email');
     TestAssertContains_(dirtySummary.lines.join('\n'), 'STALE', 'buildWeeklyOpsChecklistSummary_: flags the stale Movement_Log capture');
 
-    const realSpreadsheetAppDirty = SpreadsheetApp;
+    runWeeklyOpsChecklist_(dirtySs, now);
+    TestAssertEqual_(TestGmailLog_.sent.length, 1, 'runWeeklyOpsChecklist_: still sends exactly one email on the dirty run');
+    TestAssertContains_(TestGmailLog_.sent[0].subject, 'item(s) to review', 'runWeeklyOpsChecklist_: subject names a nonzero item count when issues exist, not "all clear"');
+
+    // ---- runWeeklyOpsChecklistNow: trigger-target wrapper, smoke test
+    // only (real new Date() inside — same reason checkMovementLogFreshnessNow's
+    // own test, Tests_MovementTracker.gs, only checks "does not throw"
+    // rather than asserting on time-derived content). ----
+    TestGmailLog_reset_();
+    const realSpreadsheetAppWrapper = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return dirtySs; }, flush: function () {} };
+    let wrapperThrew = null;
     try {
       runWeeklyOpsChecklistNow();
+    } catch (e) {
+      wrapperThrew = e;
     } finally {
-      SpreadsheetApp = realSpreadsheetAppDirty;
+      SpreadsheetApp = realSpreadsheetAppWrapper;
     }
-    TestAssertEqual_(TestGmailLog_.sent.length, 1, 'runWeeklyOpsChecklistNow: still sends exactly one email on the dirty run');
-    TestAssertContains_(TestGmailLog_.sent[0].subject, 'item(s) to review', 'runWeeklyOpsChecklistNow: subject names a nonzero item count when issues exist, not "all clear"');
+    TestAssertEqual_(wrapperThrew, null, 'runWeeklyOpsChecklistNow: the trigger-target wrapper runs without throwing');
+    TestAssertEqual_(TestGmailLog_.sent.length, 1, 'runWeeklyOpsChecklistNow: the wrapper still sends exactly one email');
 
     // ---- setupWeeklyOpsChecklistTrigger: installs one weekly, nearMinute-pinned trigger; re-run is idempotent ----
     const triggerSs = TestMockSpreadsheet_({});
