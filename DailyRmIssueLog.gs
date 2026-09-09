@@ -788,6 +788,35 @@ const RM_PERF_RULES_GS_ = [
   { key: 'stageStuck48h', label: 'Stuck 48h+', eligible: function (ctx) { return ctx.pastGrace; } },
 ];
 
+// Known name-spelling variants for the SAME real person — 2026-09-09,
+// mirrors js/core-rm-performance.js's RM_PERF_NAME_ALIASES (that file's
+// own comment has the full reasoning). Without this, the SAME real
+// person's Movement_Log rows split across both spellings and can either
+// hide a genuine pattern (each half falls under RM_PERF_MIN_VOLUME_LEADS_GS_
+// and reads as Insufficient Data) or manufacture a false one (one
+// spelling concentrates their bad days while the other absorbs the
+// clean ones) — invisible either way, since nothing here flags two rows
+// as one person. High stakes: this feeds a real "who needs coaching"
+// judgment about real people. KEEP IN SYNC with the JS copy — add a pair
+// to both, same commit, whenever a new one is confirmed.
+const RM_PERF_NAME_ALIASES_GS_ = {
+  'akash ugale': 'Akash A Ugale',
+  'peddapally shivaji': 'Peddapally Veera Shivaji',
+  'shaikh wasim shaikh harun': 'Wasim Shaikh',
+  'mohmmad azaz izhar anasair': 'Mohammad Azaz Izhar Ansari',
+  'kavya gowda': 'Kavya B R',
+  'shamakuri goud': 'Nikhil Goud',
+};
+
+// Resolves a raw Movement_Log RM name to its canonical spelling via
+// RM_PERF_NAME_ALIASES_GS_ above — an unaliased name (the vast majority)
+// passes through completely unchanged, trimmed but not otherwise
+// altered.
+function rmPerfCanonicalRmNameGs_(rawName) {
+  const trimmed = String(rawName || '').trim();
+  return RM_PERF_NAME_ALIASES_GS_[trimmed.toLowerCase()] || trimmed;
+}
+
 // Calendar-day difference between two "YYYY-MM-DD" istDayKeyGs_ strings —
 // direct port of js/core-rm-performance.js's _rmPerfDaysBetweenKeys (pure
 // Date.UTC arithmetic, noon-anchored to sidestep any DST edge case; no
@@ -888,7 +917,7 @@ function reconstructRmPerformanceObservationsGs_(ss) {
       if (!ctx) return; // undatable
 
       const flags = computeSlaFlags_(row, colIndex, entry.ts, baselineMap);
-      const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+      const RM = rmPerfCanonicalRmNameGs_(getVal_(row, colIndex, 'RM')) || 'Unassigned';
 
       RM_PERF_RULES_GS_.forEach(function (rule) {
         if (!rule.eligible(ctx)) return;

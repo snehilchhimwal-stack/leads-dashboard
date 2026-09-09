@@ -146,6 +146,66 @@
   assert('isOppOrAbove: a correctly-mapped stage is never overridden by an unrelated closing reason',
     isOppOrAbove('Opportunity', 'Not Interested') === true);
 
+  // ---- 2b. RM Performance name-alias fix (2026-09-09) ----
+  // Direct, targeted tests for rmPerfCanonicalRmName plus the actual bug
+  // it fixes: two spellings of the SAME real person merging into one RM
+  // group instead of silently splitting. High stakes (this feeds a real
+  // "who needs coaching" judgment about real people) — verified here
+  // with a real synthetic dataset proving the merge actually happens,
+  // not just that the pure function returns the right string.
+  assert('rmPerfCanonicalRmName: a known alias resolves to its canonical spelling',
+    rmPerfCanonicalRmName('Akash Ugale') === 'Akash A Ugale');
+  assert('rmPerfCanonicalRmName: the canonical spelling itself passes through unchanged',
+    rmPerfCanonicalRmName('Akash A Ugale') === 'Akash A Ugale');
+  assert('rmPerfCanonicalRmName: case/whitespace-insensitive lookup',
+    rmPerfCanonicalRmName('  akash ugale  ') === 'Akash A Ugale');
+  assert('rmPerfCanonicalRmName: an unaliased name passes through unchanged (the vast majority of RMs)',
+    rmPerfCanonicalRmName('Totally Unrelated Name') === 'Totally Unrelated Name');
+  assert('rmPerfCanonicalRmName: blank input does not throw, returns blank',
+    rmPerfCanonicalRmName('') === '');
+
+  // Real integration proof: 3 distinct leads under "Akash Ugale", 3 more
+  // under "Akash A Ugale". Individually each spelling has only 3 distinct
+  // eligible leads — below RM_PERF_MIN_VOLUME_LEADS (5), so it would read
+  // as "Insufficient Data" on its own, hiding whatever pattern is really
+  // there. Combined, the same person has 6, comfortably over the
+  // threshold. If the merge is broken, this person never appears as one
+  // real, rankable row — exactly the silent-split bug this fix closes.
+  (function () {
+    const anchor = new Date('2026-09-01T18:00:00+05:30');
+    function aliasSnapshot(rmName, leadId, daysAgoAssigned) {
+      return {
+        snapshot_at: anchor, snapshot_label: 'alias test', lead_id: leadId, client_id: 'C-' + leadId,
+        RM: rmName, TL: 'Test TL', project: 'Test Project', region: 'Test Region', client: 'Test Client',
+        lead_assigned_at: new Date(anchor.getTime() - daysAgoAssigned * 86400000).toISOString(),
+        group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '', internal_status_comments: '', stage_comments: '',
+        closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, rm_is_active: true, lead_closing_reason: '',
+      };
+    }
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      aliasSnapshot('Akash Ugale', 'ALIAS-1', 3), aliasSnapshot('Akash Ugale', 'ALIAS-2', 3), aliasSnapshot('Akash Ugale', 'ALIAS-3', 3),
+      aliasSnapshot('Akash A Ugale', 'ALIAS-4', 3), aliasSnapshot('Akash A Ugale', 'ALIAS-5', 3), aliasSnapshot('Akash A Ugale', 'ALIAS-6', 3),
+    ];
+    const emptyFilters = { project: new Set(), region: new Set(), TL: new Set(), source: new Set(), bucket: new Set() };
+    let result;
+    try {
+      result = computeRmPerformance(null, undefined, emptyFilters, null);
+    } finally {
+      movementSnapshots = saved; // restore before any other test/render touches it
+    }
+    const akashEntries = result.filter(r => r.name === 'Akash A Ugale' || r.name === 'Akash Ugale');
+    assert('RM Performance alias fix: exactly one row for this person, not split across two spellings',
+      akashEntries.length === 1, 'found ' + akashEntries.length + ' row(s): ' + akashEntries.map(r => r.name).join(', '));
+    assert('RM Performance alias fix: the merged row uses the canonical spelling',
+      !!akashEntries[0] && akashEntries[0].name === 'Akash A Ugale');
+    assert('RM Performance alias fix: distinctLeads reflects the COMBINED total (6), not either half alone (3)',
+      !!akashEntries[0] && akashEntries[0].distinctLeads === 6, 'distinctLeads=' + (akashEntries[0] && akashEntries[0].distinctLeads));
+    assert('RM Performance alias fix: combined volume clears Insufficient Data (each half alone would not)',
+      !!akashEntries[0] && akashEntries[0].classification !== 'Insufficient Data', 'classification=' + (akashEntries[0] && akashEntries[0].classification));
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

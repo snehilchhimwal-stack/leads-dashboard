@@ -262,6 +262,65 @@ const RM_PERF_LEADERSHIP_NAME_EXCLUSIONS = new Set([
   'Mukesh Mishra Admin',
 ]);
 
+// Known name-spelling variants for the SAME real person — confirmed by
+// hand, 2026-09-09, mirroring RmHierarchy.gs's own alias rows in
+// RM_HIERARCHY_RAW_ (those exist there because the leads sheet itself
+// genuinely spells these people two different ways across different
+// rows — Movement_Log's own RM field is captured verbatim from that same
+// leads-sheet column, SNAPSHOT_COLUMNS_ in MovementTracker.gs, with no
+// normalization at all).
+//
+// WHY THIS MATTERS: without resolving these, the SAME real person's
+// performance data silently SPLITS across both spellings in the RM-level
+// table and every rollup's distinctRMs count — each half can fall under
+// RM_PERF_MIN_VOLUME_LEADS and read as "Insufficient Data" even though
+// their combined book would clearly rank, or one spelling can
+// concentrate a disproportionate share of their violations while the
+// other absorbs their clean days, producing a score that doesn't reflect
+// their true book. Either way it's invisible on screen — nothing hints
+// two rows are actually one person. High stakes: this ranking feeds a
+// real "who needs coaching" judgment about real people.
+//
+// The A1-TM/RH ROLLUPS (rmPerfPrimaryManagerFor/rmPerfRhFor) are NOT
+// affected by this gap — RM_Hierarchy has a real row for EACH spelling,
+// with matching resolved tl/tm/rh/ch, so either spelling already
+// correctly resolves to the same manager on its own. This map is only
+// needed for the RM-level identity itself: the default grouping key and
+// the distinctRMs/hierarchy-cell tracking that counts "how many distinct
+// RMs" contributed to a Region/A1-TM/RH row.
+//
+// "Sourabh Sareen"/"Sourabh Sareen Pnl" deliberately NOT listed here —
+// both are already excluded entirely as leadership
+// (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above), so canonicalizing that pair
+// specifically would have no effect either way.
+//
+// KEEP IN SYNC with RmHierarchy.gs's own RM_PERF_NAME_ALIASES_ (used by
+// DailyRmIssueLog.gs's reportRmPerformanceNow() mirror) — add a pair to
+// both, in the same commit, whenever a new one is confirmed. This list is
+// NOT exhaustive by construction: every entry here was discovered
+// reactively (a routing failure, or a direct user confirmation), so a
+// real alias this project hasn't hit yet will still split silently until
+// it's found and added — same limitation RmHierarchy.gs's own alias rows
+// already carry.
+const RM_PERF_NAME_ALIASES = {
+  'akash ugale': 'Akash A Ugale',
+  'peddapally shivaji': 'Peddapally Veera Shivaji',
+  'shaikh wasim shaikh harun': 'Wasim Shaikh',
+  'mohmmad azaz izhar anasair': 'Mohammad Azaz Izhar Ansari',
+  'kavya gowda': 'Kavya B R',
+  'shamakuri goud': 'Nikhil Goud',
+};
+
+// Resolves a raw Movement_Log RM name to its canonical spelling via
+// RM_PERF_NAME_ALIASES above — an unaliased name (the vast majority)
+// passes through completely unchanged, trimmed but not otherwise
+// altered, so this is a zero-behavior-change no-op for everyone not on
+// that list.
+function rmPerfCanonicalRmName(rawName){
+  const trimmed = String(rawName || '').trim();
+  return RM_PERF_NAME_ALIASES[trimmed.toLowerCase()] || trimmed;
+}
+
 // True when `rmName` (Movement_Log's raw RM field) should be excluded
 // from the RM Performance engine ENTIRELY -- not just hidden from the RM
 // table's display, but dropped from Stage 1 before any observation is
@@ -325,7 +384,12 @@ function _rmPerfDaysBetweenKeys(a, b){
 function reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierarchyByNameLower){
   const observations = [];
   if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return observations;
-  const getKey = keyFn || (rec => rec.RM || 'Unassigned');
+  // Canonicalized via RM_PERF_NAME_ALIASES (2026-09-09) — the default
+  // RM-level grouping key. A1-TM/RH keyFns passed in by the caller don't
+  // need this: RM_Hierarchy already has a matching row for each spelling
+  // variant, so they resolve to the same manager either way — see
+  // RM_PERF_NAME_ALIASES' own comment for the full reasoning.
+  const getKey = keyFn || (rec => rmPerfCanonicalRmName(rec.RM) || 'Unassigned');
 
   const byLead = buildMovementHistories();
   byLead.forEach(history => {
@@ -375,8 +439,12 @@ function reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierar
             // -- added 2026-09-07 so aggregateRmPerformance can track which
             // RMs and regions actually make up any group, at any rollup
             // level, for the hierarchy-column display (see
-            // classifyRmPerformance's distinctRMs/primaryRegion).
-            rm: String(rec.RM || 'Unassigned').trim(),
+            // classifyRmPerformance's distinctRMs/primaryRegion). Also
+            // canonicalized (2026-09-09) -- without this, the SAME real
+            // person appearing under two spellings would count as 2
+            // distinct RMs in a Region/A1-TM/RH row's own distinctRMs
+            // tally, even after the RM-level table itself got fixed above.
+            rm: rmPerfCanonicalRmName(rec.RM) || 'Unassigned',
             region: repeatOffendersRegionKey(rec),
           });
         });
