@@ -322,14 +322,35 @@ function rmPerfCanonicalRmName(rawName){
   return RM_PERF_NAME_ALIASES[trimmed.toLowerCase()] || trimmed;
 }
 
+// Roles in RM_Hierarchy that are NOT a front-line RM, regardless of name
+// -- A1 (Team Lead), TM (Team Manager), RH (Regional Head), and the
+// top-of-org tier (Cluster Head / City Lead / Commercial Head -- mirrors
+// RmHierarchy.gs's own TOP_OF_ORG_ROLES_ constant, RmHierarchy.gs line
+// ~912). Explicit request, 2026-09-09: "RM means those not A1/TM, RH, CH
+// or in leadership" -- found because a Team Lead/Team Manager CAN
+// genuinely personally hold a lead (RmHierarchy.gs's own
+// resolveRecipientBucketsForRms_ documents this as a real, expected
+// occurrence, not a data-entry glitch: "every TM is ALSO treated as an
+// A1" for routing purposes) -- which was silently letting them rank
+// alongside real RMs in every rollup here, including the new per-region
+// worst-5 tables. High stakes: this feeds a real "who needs coaching"
+// judgment about real people -- a manager should never be able to show
+// up in that judgment as if they were the RM being coached.
+// Matched case-insensitively against RM_Hierarchy's own 'role' column.
+// Deliberately does NOT exclude BDM/Executive (Loan vertical's own
+// front-line individual-contributor titles, RmHierarchy.gs's Loan rows)
+// or S1/S2/S3 (front-line sales roles) -- only the management/leadership
+// tiers the request actually named.
+const RM_PERF_NON_RM_ROLES = new Set(['a1', 'tm', 'rh', 'cluster head', 'city lead', 'commercial head']);
+
 // True when `rmName` (Movement_Log's raw RM field) should be excluded
 // from the RM Performance engine ENTIRELY -- not just hidden from the RM
 // table's display, but dropped from Stage 1 before any observation is
-// ever emitted, so a leadership person's leads can't inflate a region's
-// totals, distinct-RM count, or peer average either. Two paths:
-//   1. RM_Hierarchy role === 'Cluster Head' -- covers ALL regions' CHs,
-//      present or future, without a hardcoded name list (explicit
-//      request: "ALL region CH's ... should not be included").
+// ever emitted, so a leadership/manager person's leads can't inflate a
+// region's totals, distinct-RM count, or peer average either. Two paths:
+//   1. RM_Hierarchy role is one of RM_PERF_NON_RM_ROLES above -- covers
+//      every A1/TM/RH/CH-tier person, present or future, without a
+//      hardcoded name list.
 //   2. RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above, for names with no
 //      resolvable RM_Hierarchy row at all.
 // rmHierarchyByNameLower may be null/missing (RM_Hierarchy failed to
@@ -341,7 +362,7 @@ function rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower){
   if (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS.has(name)) return true;
   if (rmHierarchyByNameLower) {
     const row = rmHierarchyByNameLower.get(name.toLowerCase());
-    if (row && row.role === 'Cluster Head') return true;
+    if (row && RM_PERF_NON_RM_ROLES.has(String(row.role || '').trim().toLowerCase())) return true;
   }
   return false;
 }

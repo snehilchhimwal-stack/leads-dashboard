@@ -300,6 +300,84 @@
       'RegionHigh peerComposite=' + (highSample && highSample.peerComposite) + ', RegionLow peerComposite=' + (lowMidBad && lowMidBad.peerComposite));
   })();
 
+  // ---- 2d. rmPerfIsLeadershipExcluded: A1/TM/RH/CH-tier roles, not just
+  // Cluster Head (2026-09-09) ----
+  // Explicit request, found while reviewing the new per-region tables:
+  // "you are also including A1/TM, RH, CH and leadership -- RM means
+  // those not A1/TM, RH, CH or in leadership". Root cause: the exclusion
+  // only ever checked role === 'Cluster Head' -- a genuine Team Lead (A1)
+  // or Team Manager (TM) personally holding a lead (a real, documented
+  // occurrence -- see RmHierarchy.gs's resolveRecipientBucketsForRms_)
+  // ranked right alongside real RMs in every rollup, including the
+  // per-region worst-5 tables above. High stakes: this ranking feeds a
+  // real "who needs coaching" judgment -- a manager should never be
+  // mistaken for the RM being coached.
+  assert('rmPerfIsLeadershipExcluded: an A1 (Team Lead) is excluded, not just Cluster Head',
+    rmPerfIsLeadershipExcluded('Test A1 Person', new Map([['test a1 person', { role: 'A1' }]])) === true);
+  assert('rmPerfIsLeadershipExcluded: a TM (Team Manager) is excluded',
+    rmPerfIsLeadershipExcluded('Test TM Person', new Map([['test tm person', { role: 'TM' }]])) === true);
+  assert('rmPerfIsLeadershipExcluded: an RH (Regional Head) is excluded',
+    rmPerfIsLeadershipExcluded('Test RH Person', new Map([['test rh person', { role: 'RH' }]])) === true);
+  assert('rmPerfIsLeadershipExcluded: a City Lead is excluded (not just the literal string "Cluster Head")',
+    rmPerfIsLeadershipExcluded('Test City Lead', new Map([['test city lead', { role: 'City Lead' }]])) === true);
+  assert('rmPerfIsLeadershipExcluded: a Commercial Head is excluded',
+    rmPerfIsLeadershipExcluded('Test Comm Head', new Map([['test comm head', { role: 'Commercial Head' }]])) === true);
+  assert('rmPerfIsLeadershipExcluded: role match is case-insensitive (real data may vary casing)',
+    rmPerfIsLeadershipExcluded('Test A1 Lower', new Map([['test a1 lower', { role: 'a1' }]])) === true);
+  assert('rmPerfIsLeadershipExcluded: a genuine front-line S1 RM is NOT excluded',
+    rmPerfIsLeadershipExcluded('Test S1 RM', new Map([['test s1 rm', { role: 'S1' }]])) === false);
+  assert('rmPerfIsLeadershipExcluded: a Loan-vertical BDM is NOT excluded (front-line, not management)',
+    rmPerfIsLeadershipExcluded('Test BDM', new Map([['test bdm', { role: 'BDM' }]])) === false);
+
+  // Real integration proof, mirroring the alias-fix test's own pattern:
+  // a mixed dataset (2 genuine RMs + 1 A1 + 1 RH, each with their own
+  // distinct leads) run through the SAME computeRmPerformance/
+  // computeRmPerformanceByRegion pipeline the live tables actually call --
+  // proves the manager/leadership rows never reach either result, not
+  // just that the pure predicate function returns the right boolean.
+  (function () {
+    const anchor = new Date('2026-09-01T18:00:00+05:30');
+    const oldAssigned = new Date(anchor.getTime() - 10 * 3600000).toISOString();
+    function row(regionName, rmName, leadId) {
+      return { snapshot_at: anchor, snapshot_label: 'leadership excl test', lead_id: leadId, client_id: 'C-' + leadId,
+        RM: rmName, TL: 'Test TL', project: 'Test Project', region: regionName, client: 'Test Client',
+        lead_assigned_at: oldAssigned, group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '', internal_status_comments: '', stage_comments: '',
+        closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, rm_is_active: true, lead_closing_reason: '' };
+    }
+    const saved = movementSnapshots;
+    const snaps = [];
+    ['Real-RM1', 'Real-RM2'].forEach(rm => { for (let i = 1; i <= 5; i++) snaps.push(row('LeadExclRegion', rm, rm + '-' + i)); });
+    for (let i = 1; i <= 5; i++) snaps.push(row('LeadExclRegion', 'Team-A1', 'A1-' + i));
+    for (let i = 1; i <= 5; i++) snaps.push(row('LeadExclRegion', 'Region-RH', 'RH-' + i));
+    movementSnapshots = snaps;
+    const rmHierarchy = new Map([
+      ['team-a1', { name: 'Team-A1', role: 'A1', tl: '', tm: '', rh: '', ch: '' }],
+      ['region-rh', { name: 'Region-RH', role: 'RH', tl: '', tm: '', rh: '', ch: '' }],
+    ]);
+    const emptyFilters = { project: new Set(), region: new Set(), TL: new Set(), source: new Set(), bucket: new Set() };
+    let rmLevel, byRegion;
+    try {
+      rmLevel = computeRmPerformance(null, undefined, emptyFilters, rmHierarchy);
+      byRegion = computeRmPerformanceByRegion(null, emptyFilters, rmHierarchy);
+    } finally {
+      movementSnapshots = saved;
+    }
+    const rmNames = rmLevel.map(r => r.name);
+    assert('Leadership exclusion integration: the RM-level table includes both real RMs',
+      rmNames.indexOf('Real-RM1') !== -1 && rmNames.indexOf('Real-RM2') !== -1);
+    assert('Leadership exclusion integration: the RM-level table does NOT include the A1 who personally held leads',
+      rmNames.indexOf('Team-A1') === -1, 'rmNames=' + rmNames.join(','));
+    assert('Leadership exclusion integration: the RM-level table does NOT include the RH who personally held leads',
+      rmNames.indexOf('Region-RH') === -1, 'rmNames=' + rmNames.join(','));
+    const regionEntry = byRegion.find(e => e.region === 'LeadExclRegion');
+    const regionRmNames = regionEntry ? regionEntry.list.map(r => r.name) : [];
+    assert('Leadership exclusion integration: the per-region worst-5 table does NOT include the A1',
+      regionRmNames.indexOf('Team-A1') === -1, 'regionRmNames=' + regionRmNames.join(','));
+    assert('Leadership exclusion integration: the per-region worst-5 table does NOT include the RH',
+      regionRmNames.indexOf('Region-RH') === -1, 'regionRmNames=' + regionRmNames.join(','));
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),
