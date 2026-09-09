@@ -206,6 +206,100 @@
       !!akashEntries[0] && akashEntries[0].classification !== 'Insufficient Data', 'classification=' + (akashEntries[0] && akashEntries[0].classification));
   })();
 
+  // ---- 2c. Region wise repeat offender list: ADDITIONAL per-region worst-5
+  // RM tables (2026-09-09) ----
+  // Explicit correction, same day: the FIRST attempt at this task capped
+  // the existing "By Region" table (which ranks regions against each
+  // other) at 5 -- wrong, reverted. What was actually wanted: a NEW,
+  // separate breakdown, one small table PER region, each showing that
+  // region's own worst 5 RMs -- the 4 original tables (RM/Region/A1-TM/RH)
+  // stay completely untouched. computeRmPerformanceByRegion
+  // (core-rm-performance.js) is the function under test here.
+  (function () {
+    const anchor = new Date('2026-09-01T18:00:00+05:30');
+    // 10h before the snapshot -- past LEAD_GRACE_HOURS_ but comfortably
+    // under the 48h stageStuck48h threshold (stageStuck48h = past48h &&
+    // pastGrace, core-lead-model.js -- PURELY age-based, no stage/connect
+    // check at all). A 3-day-old lead_assigned_at (this file's OWN alias-
+    // fix fixture above uses exactly that) would make EVERY row here,
+    // "clean" ones included, also violate stageStuck48h regardless of
+    // stage -- silently contaminating the "clean" fixture below and
+    // exactly matching the real incident Tests_DailyRmIssueLog.gs's own
+    // rmPerfLeadAssignedAt_ comment already documents on the .gs side.
+    const oldAssigned = new Date(anchor.getTime() - 10 * 3600000).toISOString();
+    function regionBadRow(regionName, rmName, leadId) {
+      return {
+        snapshot_at: anchor, snapshot_label: 'region test', lead_id: leadId, client_id: 'C-' + leadId,
+        RM: rmName, TL: 'Test TL', project: 'Test Project', region: regionName, client: 'Test Client',
+        lead_assigned_at: oldAssigned, group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '', internal_status_comments: '', stage_comments: '',
+        closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, rm_is_active: true, lead_closing_reason: '',
+      };
+    }
+    function regionCleanRow(regionName, rmName, leadId) {
+      return {
+        snapshot_at: anchor, snapshot_label: 'region test', lead_id: leadId, client_id: 'C-' + leadId,
+        RM: rmName, TL: 'Test TL', project: 'Test Project', region: regionName, client: 'Test Client',
+        lead_assigned_at: oldAssigned, group_source: 'Google', source_bucket: 'PPC', current_stage: 'Connected',
+        last_connect: 'Connected', last_connect_time: new Date(anchor.getTime() - 3600000).toISOString(),
+        last_comment: 'ok', internal_status_comments: 'RM: call 1 - 2026-09-01 09:00', stage_comments: '',
+        closing_reason: '', call_attempts: 10, call_count: 10, duration: 0, rm_is_active: true, lead_closing_reason: '',
+      };
+    }
+    const saved = movementSnapshots;
+    const snaps = [];
+    // RegionCap: 8 distinct RMs, all 100% violated (5 leads each) -- proves
+    // the per-region cap actually applies (worst 5, not all 8) and that
+    // rows are correctly partitioned to their own region (no cross-region
+    // leakage into a table that should only ever show RegionCap RMs).
+    for (let rmN = 1; rmN <= 8; rmN++) {
+      for (let leadN = 1; leadN <= 5; leadN++) snaps.push(regionBadRow('RegionCap', 'Cap-RM' + rmN, 'CAP-' + rmN + '-' + leadN));
+    }
+    // RegionHigh: 5 RMs, ALL equally 100% violated -- every RM's own rate
+    // equals the peer average, so NONE should read as unusually bad
+    // relative to their (equally bad) regional peers.
+    for (let rmN = 1; rmN <= 5; rmN++) {
+      for (let leadN = 1; leadN <= 5; leadN++) snaps.push(regionBadRow('RegionHigh', 'High-RM' + rmN, 'HIGH-' + rmN + '-' + leadN));
+    }
+    // RegionLow: 1 RM at 60% violated (3 bad + 2 clean leads) alongside 4
+    // fully-clean peer RMs -- the region's OWN peer average is near zero,
+    // so this one RM should read as clearly flagged relative to its
+    // (mostly clean) regional peers -- the opposite outcome from an
+    // identically-behaved RM in RegionHigh, proving the peer baseline is
+    // genuinely region-scoped, not a shared/global one.
+    for (let leadN = 1; leadN <= 3; leadN++) snaps.push(regionBadRow('RegionLow', 'Low-MidBad', 'LOWBAD-' + leadN));
+    for (let leadN = 4; leadN <= 5; leadN++) snaps.push(regionCleanRow('RegionLow', 'Low-MidBad', 'LOWBAD-' + leadN));
+    for (let rmN = 1; rmN <= 4; rmN++) {
+      for (let leadN = 1; leadN <= 5; leadN++) snaps.push(regionCleanRow('RegionLow', 'Low-Clean' + rmN, 'LOWCLEAN-' + rmN + '-' + leadN));
+    }
+    movementSnapshots = snaps;
+    const emptyFilters = { project: new Set(), region: new Set(), TL: new Set(), source: new Set(), bucket: new Set() };
+    let byRegion;
+    try {
+      byRegion = computeRmPerformanceByRegion(null, emptyFilters, null);
+    } finally {
+      movementSnapshots = saved;
+    }
+    const byRegionMap = {}; byRegion.forEach(entry => { byRegionMap[entry.region] = entry; });
+
+    assert('Region wise repeat offender list: RegionCap\'s table is capped at 5 RMs, not all 8',
+      !!byRegionMap.RegionCap && byRegionMap.RegionCap.list.length === 5,
+      'length=' + (byRegionMap.RegionCap && byRegionMap.RegionCap.list.length));
+    assert('Region wise repeat offender list: RegionCap\'s rows are all actually Cap-RM* (no cross-region leakage)',
+      !!byRegionMap.RegionCap && byRegionMap.RegionCap.list.every(r => r.name.indexOf('Cap-RM') === 0));
+    assert('Region wise repeat offender list: RegionHigh (5 equally-bad RMs) has no rows flagged Below Expectations relative to their own equally-bad peers',
+      !!byRegionMap.RegionHigh && byRegionMap.RegionHigh.list.every(r => r.classification !== 'Below Expectations'),
+      'classifications=' + (byRegionMap.RegionHigh && byRegionMap.RegionHigh.list.map(r => r.classification).join(',')));
+    const lowMidBad = byRegionMap.RegionLow && byRegionMap.RegionLow.list.find(r => r.name === 'Low-MidBad');
+    assert('Region wise repeat offender list: RegionLow\'s Low-MidBad (60% violated among mostly-clean peers) IS flagged relative to its own region\'s low peer average',
+      !!lowMidBad && lowMidBad.classification !== 'On Track' && lowMidBad.classification !== 'Insufficient Data',
+      'classification=' + (lowMidBad && lowMidBad.classification));
+    const highSample = byRegionMap.RegionHigh && byRegionMap.RegionHigh.list[0];
+    assert('Region wise repeat offender list: peer baseline is genuinely region-scoped, not shared -- RegionHigh\'s peerComposite is materially higher than RegionLow\'s (its peers are mostly clean, RegionHigh\'s peers are all 100% violated)',
+      !!highSample && !!lowMidBad && highSample.peerComposite > lowMidBad.peerComposite * 1.3,
+      'RegionHigh peerComposite=' + (highSample && highSample.peerComposite) + ', RegionLow peerComposite=' + (lowMidBad && lowMidBad.peerComposite));
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

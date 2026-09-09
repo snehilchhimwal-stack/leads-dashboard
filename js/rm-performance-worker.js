@@ -48,9 +48,17 @@
 //       filters: {project,region,TL,source,bucket: Set<string>},
 //       rmHierarchyByNameLower: Map|null }
 //   OUT (postMessage back):
-//     { type: 'progress', stage: 'rm'|'region'|'a1tm'|'rh' }  -- 2-4 of these
-//     { type: 'done', rm, region, a1tm, rh, stageCounts }     -- exactly one
+//     { type: 'progress', stage: 'rm'|'region'|'a1tm'|'rh'|'byRegion' } -- 3-5 of these
+//     { type: 'done', rm, region, a1tm, rh, byRegion, stageCounts }     -- exactly one
 //     { type: 'error', message, stack }                       -- OR this, exactly one
+//
+// byRegion (added 2026-09-09, "Region wise repeat offender list" —
+// ADDITIONAL to rm/region/a1tm/rh above, doesn't replace or resize any of
+// them): [{region, list}, ...] from computeRmPerformanceByRegion
+// (core-rm-performance.js) — see that function's own header comment for
+// the full reasoning. Computed last since it re-runs the RM-keyed
+// pipeline once per region internally (small — a handful of regions —
+// but the other 4 stages are always cheaper to compute first regardless).
 // ============================================================
 
 importScripts(
@@ -108,6 +116,9 @@ onmessage = function(e){
       rh = computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
     }
 
+    postMessage({ type: 'progress', stage: 'byRegion' });
+    const byRegion = computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower);
+
     const composites = rm.map(r => r.composite);
     const compositeRange = composites.length
       ? { min: Math.min(...composites), max: Math.max(...composites), avg: composites.reduce((a, b) => a + b, 0) / composites.length }
@@ -117,7 +128,7 @@ onmessage = function(e){
 
     postMessage({
       type: 'done',
-      rm, region, a1tm, rh,
+      rm, region, a1tm, rh, byRegion,
       stageCounts: {
         sourceRecordCount: movementSnapshots.length,
         stage1FilteredCount: stage1FilteredCount,

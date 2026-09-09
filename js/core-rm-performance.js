@@ -674,6 +674,53 @@ function computeRmPerformance(dateKeys, keyFn, filters, rmHierarchyByNameLower){
   return classifyRmPerformance(byGroup);
 }
 
+// ADDITIONAL to the 4 existing rollups above (RM/Region/A1-TM/RH) — does
+// NOT replace or resize any of them. "Region wise repeat offender list":
+// explicit request, 2026-09-09, for its own separate breakdown — one
+// small table PER region, each showing that region's own worst 5 RMs
+// (ranked against each other, not against the whole company) — distinct
+// from the existing "By Region" table above, which ranks REGIONS against
+// each other and says nothing about which RM within a region is driving
+// it.
+//
+// Reuses computeRmPerformance twice, not a new methodology: first an
+// ordinary Region-keyed rollup to discover which region names are
+// actually present in the current filtered population (so this
+// automatically honors the top-bar Region filter — narrow to one region
+// there and only that region's table appears here, same as every other
+// rollup already behaves), then, per region name, an RM-keyed rollup
+// whose keyFn returns null for any record NOT in that region — exactly
+// the same "unresolvable for this rollup — excluded" mechanism
+// reconstructRmPerformanceObservations already uses for A1-TM/RH keyFns,
+// just gating on region equality instead of a hierarchy lookup. Peer
+// average for each region's RMs is therefore computed only against each
+// OTHER RM in that same region, not company-wide — the literal reading
+// of "worst 5 RM IN THAT REGION", and consistent with how narrowing the
+// top-bar Region filter already changes every other rollup's peer
+// baseline (see the RM Performance ranking limitations writeup, finding
+// #2, for why that's worth knowing about, not a new concern this
+// introduces).
+//
+// Returns [{region, list}, ...], one entry per region that has at least
+// one individually-rankable RM (Insufficient Data RMs never appear, same
+// as everywhere else), region names sorted alphabetically, `list` already
+// sorted worst-first and capped to REPEAT_OFFENDERS_REGION_RM_CAP.
+const REPEAT_OFFENDERS_REGION_RM_CAP = 5;
+function computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower){
+  const regionRollup = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
+  const regionNames = regionRollup.map(r => r.name).sort();
+  return regionNames.map(regionName => {
+    const rmInRegion = computeRmPerformance(
+      dateKeys,
+      rec => (repeatOffendersRegionKey(rec) === regionName) ? (rmPerfCanonicalRmName(rec.RM) || 'Unassigned') : null,
+      filters,
+      rmHierarchyByNameLower
+    );
+    const ranked = sortRmPerformanceByScore(filterRmPerformanceRankable(rmInRegion)).slice(0, REPEAT_OFFENDERS_REGION_RM_CAP);
+    return { region: regionName, list: ranked };
+  }).filter(entry => entry.list.length > 0);
+}
+
 // Shared display helpers — used by BOTH the live tab
 // (js/tab-repeat-offenders.js's rmPerformanceTableHtml) and the PDF export
 // (js/repeat-offenders-pdf.js), so "which rule is actually driving an

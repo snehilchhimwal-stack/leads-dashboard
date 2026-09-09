@@ -407,6 +407,9 @@ function _runRepeatOffendersSynchronously(ctx, onDone){
   const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
   const a1tm = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
   const rh = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
+  // ADDITIONAL to the 4 above, not a replacement for any — see
+  // computeRmPerformanceByRegion's own header comment (core-rm-performance.js).
+  const byRegion = computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower);
 
   const composites = rm.map(r => r.composite);
   const compositeRange = composites.length
@@ -415,7 +418,7 @@ function _runRepeatOffendersSynchronously(ctx, onDone){
   const classCounts = (list) => list.reduce((acc, r) => { acc[r.classification] = (acc[r.classification] || 0) + 1; return acc; }, {});
 
   onDone({
-    rm, region, a1tm, rh,
+    rm, region, a1tm, rh, byRegion,
     stageCounts: {
       sourceRecordCount: movementSnapshots.length,
       stage1FilteredCount: stage1FilteredCount,
@@ -436,7 +439,7 @@ function _runRepeatOffendersSynchronously(ctx, onDone){
 // message instead of a direct function return.
 function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
   const { bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing } = ctx;
-  const { rm: rmFull, region: regionFull, a1tm: a1tmFull, rh: rhFull, stageCounts } = msg;
+  const { rm: rmFull, region: regionFull, a1tm: a1tmFull, rh: rhFull, byRegion, stageCounts } = msg;
 
   if (!rmFull.length) {
     const activeFilters = [];
@@ -478,12 +481,27 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
   if (countEl) countEl.textContent = `${rmBelowCount} RM${rmBelowCount === 1 ? '' : 's'} below expectations`;
 
   const emptyMsg = 'No RM/region/manager has enough eligible data to rank for the current filters/range.';
+  // ADDITIONAL section, 2026-09-09 ("Region wise repeat offender list") —
+  // one small table PER region, each that region's own worst 5 RMs
+  // (ranked against each other, not company-wide). Does NOT touch the 4
+  // tables above in any way — a fully separate grid, appended after them.
+  // See computeRmPerformanceByRegion's own header comment
+  // (core-rm-performance.js) for why the peer baseline here is
+  // region-scoped, not global.
+  const byRegionHtml = (byRegion || []).length
+    ? `<div class="repeat-offenders-subtitle" style="margin-top:24px;">Worst 5 RMs by Region</div>
+       <div class="repeat-offenders-grid" style="margin-top:8px;">
+         ${byRegion.map(entry => rmPerformanceTableHtml(`${entry.region} — worst 5 RMs`, entry.list, false, emptyMsg, rmHierarchyByNameLower)).join('')}
+       </div>`
+    : '';
+
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
     ${rmPerformanceTableHtml('RMs — worst 20', rmRanked.slice(0, 20), false, emptyMsg, rmHierarchyByNameLower)}
     ${rmPerformanceTableHtml('By Region — worst first, all shown', regionRanked, false, emptyMsg, rmHierarchyByNameLower)}
     ${rmPerformanceTableHtml('A1 / TM — worst 10', hierarchyMissing ? [] : a1tmRanked.slice(0, 10), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
     ${rmPerformanceTableHtml('RH — worst 5', hierarchyMissing ? [] : rhRanked.slice(0, 5), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
   </div>
+  ${byRegionHtml}
   ${_repeatOffendersDebugPanelHtml(stageCounts, hierarchyMissing)}`;
 
   if (statusEl) statusEl.innerHTML = _repeatOffendersStatusHtml({ phase: 'completed', filters, sourceRecordCount: stageCounts.sourceRecordCount, startedAtWall, elapsedMs });
@@ -494,7 +512,7 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
 // completion timestamp + time taken. Per explicit request (§11.8): "The
 // 'Recalculate' button should... Display the recalculation timestamp and
 // active filter set."
-const _REPEAT_OFFENDERS_PROGRESS_LABEL = { rm: 'RMs', region: 'Regions', a1tm: 'A1/TM managers', rh: 'RHs' };
+const _REPEAT_OFFENDERS_PROGRESS_LABEL = { rm: 'RMs', region: 'Regions', a1tm: 'A1/TM managers', rh: 'RHs', byRegion: 'per-region RM breakdown' };
 function _repeatOffendersStatusHtml(opts){
   const { phase, filters, sourceRecordCount, startedAtWall, elapsedMs, stage } = opts;
   const filterLine = `<div class="dim" style="font-size:11px; margin-top:3px;">Filters — ${esc(_repeatOffendersFilterSummaryText(filters))}</div>`;
