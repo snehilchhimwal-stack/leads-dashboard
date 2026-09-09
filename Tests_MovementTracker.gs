@@ -279,6 +279,44 @@ function runMovementTrackerTests_() {
       persistDailyCohortHistoryGs_ = realPersistDailyCohortHistoryGs_;
       SpreadsheetApp = containmentRealSpreadsheetApp;
     }
+
+    // ---- checkMovementLogFreshness_: capture-freshness check (CHECKLIST-005, 2026-09-09) ----
+    const freshnessNow = new Date('2026-09-09T12:00:00+05:30');
+    const freshHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+    function freshnessRow(snapshotAt) {
+      return [snapshotAt, 'freshness test'].concat(SNAPSHOT_COLUMNS_.map(function () { return ''; }));
+    }
+
+    const missingLogSs = TestMockSpreadsheet_({});
+    TestAssertEqual_(checkMovementLogFreshness_(missingLogSs, freshnessNow).status, 'missing', 'checkMovementLogFreshness_: reports "missing" when Movement_Log does not exist yet');
+
+    const emptyLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader]) });
+    TestAssertEqual_(checkMovementLogFreshness_(emptyLogSs, freshnessNow).status, 'empty', 'checkMovementLogFreshness_: reports "empty" for a Movement_Log with only a header row');
+
+    // 2h ago — well inside the 8h grace window.
+    const freshTs = new Date(freshnessNow.getTime() - 2 * 3600000);
+    const freshLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader, freshnessRow(freshTs)]) });
+    const freshResult = checkMovementLogFreshness_(freshLogSs, freshnessNow);
+    TestAssertEqual_(freshResult.status, 'fresh', 'checkMovementLogFreshness_: a 2h-old last capture is reported fresh (within the 8h grace window)');
+    TestAssert_(Math.abs(freshResult.ageHours - 2) < 0.01, 'checkMovementLogFreshness_: ageHours is correctly computed for the fresh case');
+
+    // 10h ago — past the 8h grace window, one missed [0,6,12,18] cycle.
+    const staleTs = new Date(freshnessNow.getTime() - 10 * 3600000);
+    const staleLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader, freshnessRow(staleTs)]) });
+    TestAssertEqual_(checkMovementLogFreshness_(staleLogSs, freshnessNow).status, 'stale', 'checkMovementLogFreshness_: a 10h-old last capture is reported stale (past the 8h grace window)');
+
+    // A non-Date value in the snapshot_at cell — corrupted/hand-edited row.
+    const unreadableLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader, freshnessRow('not a date')]) });
+    TestAssertEqual_(checkMovementLogFreshness_(unreadableLogSs, freshnessNow).status, 'unreadable', 'checkMovementLogFreshness_: reports "unreadable" for a non-Date snapshot_at cell instead of throwing');
+
+    // Console wrapper — Logger-only output, no return value to assert on;
+    // just confirm it runs against a real mocked SpreadsheetApp without throwing.
+    const freshnessRealSpreadsheetApp = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return freshLogSs; }, flush: function () {} };
+    let freshnessNowThrew = null;
+    try { checkMovementLogFreshnessNow(); } catch (e) { freshnessNowThrew = e; }
+    SpreadsheetApp = freshnessRealSpreadsheetApp;
+    TestAssertEqual_(freshnessNowThrew, null, 'checkMovementLogFreshnessNow: the console wrapper runs without throwing');
   } finally {
     TestEnv_tearDown_();
   }

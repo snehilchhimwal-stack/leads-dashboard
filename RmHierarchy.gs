@@ -586,6 +586,67 @@ function clearAllRmHierarchyExclusionsNow() {
 }
 
 /**
+ * Manager_Directory email-gap scan — CHECKLIST-005 (2026-09-09). A manager
+ * who resolves fine in RM_Hierarchy but has no email in Manager_Directory
+ * doesn't show up as an "unresolved RM" anywhere — auditUnresolvedRms_
+ * above only catches the RM side of the chain, not the manager side.
+ * Instead, resolveRecipientEmailsForRegion_/resolveRecipientBucketsForRms_
+ * silently fall back to the legacy Region_Recipients catch-all for every
+ * RM reporting to that manager, and nothing currently surfaces that this
+ * happened — the same class of silent-degrade risk auditUnresolvedRms_
+ * exists to catch, just one hop further up the chain.
+ *
+ * Finds every manager with at least one real report
+ * (people_reporting_up_to_them > 0, the column ensureManagerDirectorySheetInternal_
+ * already writes) but a blank email cell. Run periodically, or right after
+ * a fresh rebuildRmHierarchy()/setupRmHierarchy() — a rebuild only
+ * PRESERVES emails already on file, it never fills a new manager's email
+ * in on its own (see this file's own header, point 3).
+ *
+ * Pure(ish) — one read of Manager_Directory, no writes. Returns
+ * [{ rowNum, name, roles, regions, reportCount }], sorted by sheet row
+ * order. auditManagerDirectoryEmailGapsNow below is the console-callable
+ * wrapper that logs this in a readable form — same split as
+ * auditUnresolvedRms_/auditUnresolvedRmsNow above.
+ */
+function auditManagerDirectoryEmailGaps_(ss) {
+  const sheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
+  if (!sheet) return null; // Manager_Directory not set up yet
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const rows = withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, 6).getValues(); }, 'auditManagerDirectoryEmailGaps_: read Manager_Directory');
+  const gaps = [];
+  rows.forEach(function (row, i) {
+    const name = String(row[0] || '').trim();
+    const email = String(row[3] || '').trim();
+    const reportCount = Number(row[4]) || 0;
+    if (name && reportCount > 0 && !email) {
+      gaps.push({ rowNum: i + 2, name: name, roles: row[1], regions: row[2], reportCount: reportCount });
+    }
+  });
+  return gaps;
+}
+
+// Console-callable wrapper (function dropdown -> Run) — logs
+// auditManagerDirectoryEmailGaps_'s result in a readable form. See that
+// function's own header for the full explanation of what this catches.
+function auditManagerDirectoryEmailGapsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gaps = auditManagerDirectoryEmailGaps_(ss);
+  if (gaps === null) { Logger.log('Manager_Directory sheet not found — run setupRmHierarchy first.'); return; }
+  if (!gaps.length) {
+    Logger.log('No email gaps — every manager with at least one real report has an email in Manager_Directory.');
+    return;
+  }
+  Logger.log(gaps.length + ' manager(s) with real reports but NO email in Manager_Directory — every RM reporting to one of these is silently falling back to the legacy Region_Recipients catch-all instead of actually reaching this manager:');
+  gaps.forEach(function (g) {
+    Logger.log('  Row ' + g.rowNum + ': ' + g.name + ' (' + g.roles + ', ' + g.regions + ') — ' + g.reportCount + ' report(s) up to them, email column blank.');
+  });
+  Logger.log('Fill in the email column for each of these in Manager_Directory directly (a later rebuild preserves it from then on, same as any other manually-entered email).');
+}
+
+/**
  * Proactive coverage audit — scans every OPEN, google/Non-UTM-or-Search
  * lead (passesGoogleNonUtmSearchGs_ — the SAME scope gate both real email
  * scripts apply before ever needing RM resolution; a lead outside this

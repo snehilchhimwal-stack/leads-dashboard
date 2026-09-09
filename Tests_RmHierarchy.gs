@@ -234,6 +234,23 @@ function runRmHierarchyTests_() {
     let auditNowThrew = null;
     try { auditUnresolvedRmsNow(); } catch (e) { auditNowThrew = e; }
     TestAssertEqual_(auditNowThrew, null, 'auditUnresolvedRmsNow: the console wrapper runs without throwing');
+
+    // ---- auditManagerDirectoryEmailGaps_: email-gap scan (CHECKLIST-005, 2026-09-09) ----
+    // TestFixture_managerDirectoryRows_ already has exactly one real gap
+    // ('Test A1 NoMail': 1 report, blank email) alongside three managers
+    // who all have a real email on file — no extra fixture rows needed.
+    const dirGaps = auditManagerDirectoryEmailGaps_(ss);
+    TestAssertEqual_(dirGaps.length, 1, 'auditManagerDirectoryEmailGaps_: finds exactly the one manager with real reports and a blank email');
+    TestAssertEqual_(dirGaps[0].name, 'Test A1 NoMail', 'auditManagerDirectoryEmailGaps_: correctly names the gapped manager');
+    TestAssertEqual_(dirGaps[0].reportCount, 1, 'auditManagerDirectoryEmailGaps_: carries through the real reportCount');
+    TestAssert_(!dirGaps.some(function (g) { return g.name === 'Test A1 One' || g.name === 'Test TM One' || g.name === 'Test CH Self'; }), 'auditManagerDirectoryEmailGaps_: managers who already have an email are never reported');
+
+    const missingDirSs = TestMockSpreadsheet_({});
+    TestAssertEqual_(auditManagerDirectoryEmailGaps_(missingDirSs), null, 'auditManagerDirectoryEmailGaps_: returns null (not throw) when Manager_Directory does not exist yet');
+
+    let dirGapsNowThrew = null;
+    try { auditManagerDirectoryEmailGapsNow(); } catch (e) { dirGapsNowThrew = e; }
+    TestAssertEqual_(dirGapsNowThrew, null, 'auditManagerDirectoryEmailGapsNow: the console wrapper runs without throwing');
   } finally {
     TestEnv_tearDown_();
   }

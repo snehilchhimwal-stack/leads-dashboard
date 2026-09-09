@@ -943,3 +943,58 @@ function setupMovementTracking() {
 function snapshotNow() {
   snapshotOpenLeads_();
 }
+
+/**
+ * Movement_Log capture-freshness check — CHECKLIST-005 (2026-09-09). Both
+ * the live dashboard's Repeat Offenders tab AND DailyRmIssueLog.gs's own
+ * reportRmPerformanceNow() console leaderboard depend on Movement_Log
+ * having recent, regularly-captured history — a silently paused, deleted,
+ * or repeatedly-failing capture trigger degrades BOTH surfaces the same
+ * way (a stale, gapped picture presented as current), and neither one
+ * currently checks for that on its own. SNAPSHOT_HOURS_ = [0, 6, 12, 18]
+ * IST means a healthy Movement_Log should never go much past ~6-7 hours
+ * without a new row (atHour() lands within roughly 15 minutes — see
+ * setupMovementTracking's own comment) — this flags anything past a
+ * generous grace window as genuinely worth checking, rather than assuming
+ * silence means everything is fine.
+ *
+ * Pure(ish) — one read of Movement_Log's last row, no writes. Returns
+ * { status: 'missing'|'empty'|'unreadable'|'fresh'|'stale', ...detail } so
+ * a caller can act on it programmatically; checkMovementLogFreshnessNow
+ * below is the console-callable wrapper that logs this in a readable form
+ * — same split as auditUnresolvedRms_/auditUnresolvedRmsNow (RmHierarchy.gs).
+ */
+const MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_ = 8;
+function checkMovementLogFreshness_(ss, now) {
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!sheet) return { status: 'missing' };
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { status: 'empty' };
+
+  const lastSnapshotAt = withRetry_(function () { return sheet.getRange(lastRow, 1).getValue(); }, 'checkMovementLogFreshness_: read last snapshot_at');
+  if (!(lastSnapshotAt instanceof Date)) return { status: 'unreadable', rawValue: lastSnapshotAt, rowNum: lastRow };
+
+  const ageHours = ((now || new Date()).getTime() - lastSnapshotAt.getTime()) / 36e5;
+  const stale = ageHours > MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_;
+  return { status: stale ? 'stale' : 'fresh', lastSnapshotAt: lastSnapshotAt, ageHours: ageHours, rowNum: lastRow };
+}
+
+// Console-callable wrapper (function dropdown -> Run) — logs
+// checkMovementLogFreshness_'s result in a readable form. See that
+// function's own header for the full explanation of what this catches.
+function checkMovementLogFreshnessNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const result = checkMovementLogFreshness_(ss, new Date());
+  if (result.status === 'missing') { Logger.log('Movement_Log sheet not found — run setupMovementTracking first.'); return; }
+  if (result.status === 'empty') { Logger.log('Movement_Log has no captured rows yet — allow time after setupMovementTracking for the first scheduled capture to fire.'); return; }
+  if (result.status === 'unreadable') {
+    Logger.log('Movement_Log row ' + result.rowNum + ' has an unreadable snapshot_at value (' + result.rawValue + ') — check the sheet directly.');
+    return;
+  }
+  const label = Utilities.formatDate(result.lastSnapshotAt, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') + ' IST';
+  if (result.status === 'fresh') {
+    Logger.log('Movement_Log is fresh — last capture ' + label + ', ' + result.ageHours.toFixed(1) + 'h ago (within the ' + MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_ + 'h grace window for the [0,6,12,18] IST schedule).');
+    return;
+  }
+  Logger.log('Movement_Log capture looks STALE — last row is ' + label + ', ' + result.ageHours.toFixed(1) + 'h ago, past the ' + MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_ + 'h grace window for the [0,6,12,18] IST schedule. Check Triggers (clock icon, left sidebar) for a paused/deleted snapshotPeriodic trigger, or its own execution history for a recent failure, before trusting Repeat Offenders or reportRmPerformanceNow right now.');
+}
