@@ -132,6 +132,47 @@ function runRmHierarchyTests_() {
     TestAssert_(!!nikhilGoud && !!shamakuriGoud, 'resolveRmHierarchy_: both "Nikhil Goud" and its alias "Shamakuri Goud" have rows');
     TestAssertEqual_(JSON.stringify({ tl: shamakuriGoud.tl, tm: shamakuriGoud.tm, rh: shamakuriGoud.rh, ch: shamakuriGoud.ch }), JSON.stringify({ tl: nikhilGoud.tl, tm: nikhilGoud.tm, rh: nikhilGoud.rh, ch: nikhilGoud.ch }), 'resolveRmHierarchy_: "Shamakuri Goud" resolves to the exact same chain as "Nikhil Goud"');
 
+    // ---- 2026-09-09 fresher HR Live export refresh ----
+    // 9 people confirmed departed (compared against the prior export
+    // before touching anything, not guessed from a blind re-derive).
+    ['Dnyaneshwari Pawar', 'Suman Das', 'Mohd Yaqub Nawab', 'Ranjana Dubey', 'Jay Patil',
+      'Jyoti Ram', 'Abhikesh Kumar', 'Roshan Pandey', 'Pawan Motwani'].forEach(function (name) {
+      TestAssert_(!realResolved.some(function (p) { return p.name === name; }), 'resolveRmHierarchy_: real production data no longer has a "' + name + '" row (departed, 2026-09-09 refresh)');
+    });
+
+    // Name formalization -- same person, same chain, just the spelling
+    // the HR export itself now uses.
+    TestAssert_(!realResolved.some(function (p) { return p.name === 'Pranav Vilas Mhatale'; }), 'resolveRmHierarchy_: the old spelling "Pranav Vilas Mhatale" is gone');
+    const pranavMhatale = realResolved.find(function (p) { return p.name === 'Pranav Mhatale'; });
+    TestAssert_(!!pranavMhatale, 'resolveRmHierarchy_: renamed to "Pranav Mhatale" with a row present');
+    TestAssertEqual_(JSON.stringify({ tl: pranavMhatale && pranavMhatale.tl, tm: pranavMhatale && pranavMhatale.tm, rh: pranavMhatale && pranavMhatale.rh, ch: pranavMhatale && pranavMhatale.ch }), JSON.stringify({ tl: '', tm: 'Ayaz Bagwan', rh: '', ch: 'Sourabh Sareen' }), 'resolveRmHierarchy_: renamed row keeps the exact same chain as before the rename');
+
+    // 3 new hires, each resolved by their OWN immediate manager's real
+    // role (not raw column position) -- see RmHierarchy.gs's own header
+    // on why that distinction matters.
+    const ayesha = realResolved.find(function (p) { return p.name === 'Ayesha Shaikh'; });
+    TestAssert_(!!ayesha, 'resolveRmHierarchy_: new hire "Ayesha Shaikh" has a row');
+    TestAssertEqual_(JSON.stringify({ tl: ayesha && ayesha.tl, rh: ayesha && ayesha.rh, ch: ayesha && ayesha.ch }), JSON.stringify({ tl: '', rh: 'Swapnil Gowalkar', ch: 'Bipin More' }), 'resolveRmHierarchy_: Ayesha Shaikh reports straight to RH Swapnil Gowalkar, no A1 between');
+
+    const tisha = realResolved.find(function (p) { return p.name === 'Tisha Valecha'; });
+    TestAssert_(!!tisha, 'resolveRmHierarchy_: new hire "Tisha Valecha" has a row');
+    TestAssertEqual_(JSON.stringify({ tm: tisha && tisha.tm, ch: tisha && tisha.ch }), JSON.stringify({ tm: 'Sanket Yadav', ch: 'Bipin More' }), 'resolveRmHierarchy_: Tisha Valecha resolves through TM Sanket Yadav (her nearest manager is TM-tier by role, despite landing in the export A1 column)');
+
+    const amitDere = realResolved.find(function (p) { return p.name === 'Amit Dere'; });
+    TestAssert_(!!amitDere, 'resolveRmHierarchy_: new hire "Amit Dere" has a row');
+    TestAssertEqual_(JSON.stringify({ tl: amitDere && amitDere.tl, rh: amitDere && amitDere.rh, ch: amitDere && amitDere.ch }), JSON.stringify({ tl: 'Rohit Rathod', rh: 'Sachindra Wadane', ch: 'Sourabh Sareen' }), 'resolveRmHierarchy_: Amit Dere resolves through A1 Rohit Rathod, continuing Rohit\'s own chain');
+
+    // Confirmed real promotion (not export noise) -- Akash A Ugale now
+    // sits above Yash Sharma. Yash Sharma's own 6 reports are
+    // deliberately NOT re-asserted here as unchanged -- see
+    // RmHierarchy.gs's own comment on that row for why they are
+    // genuinely unaffected (resolveRecipientBucketsForRms_ only reads a
+    // primary's own rh/ch for CC, never a second hop through tl).
+    const yashSharma = realResolved.find(function (p) { return p.name === 'Yash Sharma'; });
+    TestAssert_(!!yashSharma, 'resolveRmHierarchy_: "Yash Sharma" still has a row');
+    TestAssertEqual_(yashSharma && yashSharma.tl, 'Akash A Ugale', 'resolveRmHierarchy_: Yash Sharma\'s tl is now Akash A Ugale (confirmed real promotion, 2026-09-09)');
+    TestAssertEqual_(yashSharma && yashSharma.ch, 'Sanjyota Bhosale', 'resolveRmHierarchy_: Yash Sharma\'s ch is unchanged (Akash A Ugale\'s own chain continues to the same Cluster Head)');
+
     // ---- rebuildRmHierarchy: preserves manual edits across a rebuild ----
     // rebuildRmHierarchy() (unlike everything above) takes no `ss`
     // parameter — it always operates on SpreadsheetApp.getActiveSpreadsheet()

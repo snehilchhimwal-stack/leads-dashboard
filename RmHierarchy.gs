@@ -8,14 +8,24 @@
  * under them did anything.
  *
  * SOURCE / LAST REFRESHED: originally built from a one-time "Book7.xlsx"
- * export; regenerated 2026-08-31 from a fresher, more complete "HR Live"
- * roster export (same shape — New E Code / Name / Role / .../"Official
- * Mail Id"/...) covering the whole company, one row per person, including
- * per-person manager-chain columns. Comments below that still say "Book7"
- * are describing the general technique, which applies identically to
- * this newer export — re-export and regenerate both RM_HIERARCHY_RAW_
- * here and EMPLOYEE_EMAIL_BY_NAME_RAW_ (RmHierarchy.private.gs) together
- * whenever the roster changes meaningfully; there's no live sync.
+ * export; regenerated 2026-08-31, then again 2026-09-09, from a fresher,
+ * more complete "HR Live" roster export (same shape — New E Code / Name /
+ * Role / .../"Official Mail Id"/...) covering the whole company, one row
+ * per person, including per-person manager-chain columns. Comments below
+ * that still say "Book7" are describing the general technique, which
+ * applies identically to this newer export — re-export and regenerate
+ * both RM_HIERARCHY_RAW_ here and EMPLOYEE_EMAIL_BY_NAME_RAW_
+ * (RmHierarchy.private.gs) together whenever the roster changes
+ * meaningfully; there's no live sync. The 2026-09-09 refresh: 9
+ * departures, 3 new hires, 1 name formalization (Pranav Vilas Mhatale ->
+ * Pranav Mhatale, same person), and one confirmed real promotion (Akash A
+ * Ugale now sits above Yash Sharma in Harbour) — see each row's own
+ * inline comment for detail. Everyone else's raw chain-column DATA
+ * shuffled position in this export (the same person's manager moved from
+ * the "A1-2" slot to a different-numbered slot, etc.) without their
+ * actual resolved manager changing at all — confirmed via a full
+ * comparison against the prior export before touching anything, not
+ * re-derived from raw columns blind.
  *
  * WHY THIS IS ITS OWN FILE: RM_HIERARCHY_RAW_ below is a large static table
  * (one row per person from the source export) — keeping it separate from
@@ -142,7 +152,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','TM','Ayaz Bagwan','','','','Sourabh Sareen'],
   ['Pune','S1','Siddhesh Bhagwat','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Shailesh Tiwari','','','Sachindra Wadane','Sourabh Sareen'],
-  ['Harbour','A1','Yash Sharma','','','','Sanjyota Bhosale'],
+  ['Harbour','A1','Yash Sharma','Akash A Ugale','','','Sanjyota Bhosale'], // 2026-09-09 fresher HR Live export: Akash A Ugale (Central A1, pay-band moved to Terittory Manager) now sits above Yash Sharma -- confirmed with the user as a real promotion, not export noise. His own 6 reports' rows are unaffected -- resolveRecipientBucketsForRms_ only reads a primary's OWN rh/ch for CC, not a second hop through tl, so their routing is unchanged; only Yash Sharma's own primary contact changes.
   ['Navi Mumbai','S1','Shahnavaz Shaikh','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','S1','Nagesh Maharnavar','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Shubham Buchade','Avinash Kumar','','','Vidya Jadhav'],
@@ -216,9 +226,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Sippal Khora','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Harbour','S1','Aakash Dhole','Yash Sharma','','','Sanjyota Bhosale'],
   ['Western','S1','Yash Kandhare','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Sourcing - Pune','S3','Dnyaneshwari Pawar','','Yash Kalal','','Sourabh Sareen'],
   ['Loan','Manager','Aditya Gera','','','','Mayur Panjari'],
-  ['Bangalore','S1','Suman Das','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','S1','Zain Ahmed','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Souvik Biswas','','','Sachindra Wadane','Sourabh Sareen'],
   ['Central','S1','Mihir Jivani','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
@@ -242,10 +250,8 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','TM','Minas Patel','','','','Rahul Gandhi'],
   ['Central','S1','Zeya Shaikh','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Thane','S1','Vishal Chavan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
-  ['Navi Mumbai','S1','Mohd Yaqub Nawab','','Sampada Pawar','','Vidya Jadhav'],
   ['Pune','S1','Gaurav Gunjal','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Arpita Varte','','Ayaz Bagwan','','Sourabh Sareen'],
-  ['Thane','S1','Ranjana Dubey','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
   ['Thane','S1','Aman Gupta','Amit Upadhyay','','','Bipin More'],
   ['Pune','S1','Pramod Ghaytadak','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Gouttam Aicha','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
@@ -293,10 +299,8 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Pranav Deshmukh','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Navi Mumbai','S1','Jitendra Phulwaria','','','','Vidya Jadhav'],
   ['Central','S1','Sneha Upadhyay','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Thane','S1','Jay Patil','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Wasim Shaikh','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'],
   ['HNI','Cluster Head','Abhhijjit Gandhii','','','',''],
-  ['Navi Mumbai','S1','Jyoti Ram','Avinash Kumar','','','Vidya Jadhav'],
   ['Central','S1','Sanjay Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Bangalore','A1','Rahan Khan','','','Romen Singh','Mukesh Mishra'],
   ['Central','S1','Saurabh Pacharne','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
@@ -312,10 +316,8 @@ const RM_HIERARCHY_RAW_ = [
   ['Harbour','S1','Atharva Belose','Yash Sharma','','','Sanjyota Bhosale'],
   ['Hyderabad','S1','Nikhil Goud','Vemula Ajay','','','Mukesh Mishra'],
   ['Thane','TM','Sanket Yadav','','','','Bipin More'],
-  ['Pune','S1','Abhikesh Kumar','','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Krish Sinha','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Akshay Dawle','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
-  ['Thane','S1','Roshan Pandey','','Sanket Yadav','','Bipin More'],
   ['Navi Mumbai','S1','Harshith S','','Sampada Pawar','','Vidya Jadhav'],
   ['Pune','S1','Adinath Munde','','Rahul Poudel','','Sourabh Sareen'],
   ['Loan','Executive','Gayatri Kukade','','','','Mayur Panjari'],
@@ -335,8 +337,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Vijay Kshirsagar','','Rahul Poudel','','Sourabh Sareen'],
   ['Sourcing - Pune','S3','Darshana Javeri','','Yash Kalal','','Sourabh Sareen'],
-  ['Thane','S1','Pawan Motwani','','','Swapnil Gowalkar','Bipin More'],
-  ['Pune','S1','Pranav Vilas Mhatale','','Ayaz Bagwan','','Sourabh Sareen'],
+  ['Pune','S1','Pranav Mhatale','','Ayaz Bagwan','','Sourabh Sareen'], // renamed 2026-09-09 from "Pranav Vilas Mhatale" per the fresher HR Live export -- same person, same chain
   ['Leadership','Commercial Head','Neha Mishra','','','',''],
   ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
   ['Hyderabad','S1','G Kumar','Vemula Ajay','','','Mukesh Mishra'],
@@ -358,6 +359,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Kavya Gowda','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   // Confirmed by the user directly (not a guess) — same person as "Nikhil Goud".
   ['Hyderabad','S1','Shamakuri Goud','Vemula Ajay','','','Mukesh Mishra'],
+  // 3 new hires, found 2026-09-09 via a fresher HR Live export (231-person
+  // roster vs. the 2026-08-31 export's; same "regenerate when the roster
+  // changes meaningfully" process this file's own header documents).
+  ['Thane','S1','Ayesha Shaikh','','','Swapnil Gowalkar','Bipin More'],
+  ['Thane','S1','Tisha Valecha','','Sanket Yadav','','Bipin More'],
+  ['Pune','S1','Amit Dere','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
