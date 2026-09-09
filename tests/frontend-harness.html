@@ -206,6 +206,50 @@
       !!akashEntries[0] && akashEntries[0].classification !== 'Insufficient Data', 'classification=' + (akashEntries[0] && akashEntries[0].classification));
   })();
 
+  // ---- 2c. Repeat Offenders: Region table capped at worst 5 (2026-09-09) ----
+  // "Region wise repeat offender list (worst 5)" -- Region was uncapped
+  // ("all shown") until this change; now matches RM/A1-TM/RH in using the
+  // same shared REPEAT_OFFENDERS_TABLE_CAPS.region, so a long list of
+  // mostly-fine regions no longer buries the ones that actually need
+  // attention. Proven here with 7 distinct, individually-rankable regions
+  // (each with 5 distinct eligible leads, clearing RM_PERF_MIN_VOLUME_LEADS)
+  // -- if the cap silently regressed back to "show all", this would catch it.
+  assert('REPEAT_OFFENDERS_TABLE_CAPS.region is 5, matching RH\'s own cap',
+    REPEAT_OFFENDERS_TABLE_CAPS.region === 5);
+  (function () {
+    const anchor = new Date('2026-09-01T18:00:00+05:30');
+    function regionSnapshot(regionName, leadId) {
+      return {
+        snapshot_at: anchor, snapshot_label: 'region cap test', lead_id: leadId, client_id: 'C-' + leadId,
+        RM: 'RM for ' + regionName, TL: 'Test TL', project: 'Test Project', region: regionName, client: 'Test Client',
+        lead_assigned_at: new Date(anchor.getTime() - 3 * 86400000).toISOString(),
+        group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+        last_connect: '', last_connect_time: '', last_comment: '', internal_status_comments: '', stage_comments: '',
+        closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, rm_is_active: true, lead_closing_reason: '',
+      };
+    }
+    const saved = movementSnapshots;
+    const regionNames = ['Region-A', 'Region-B', 'Region-C', 'Region-D', 'Region-E', 'Region-F', 'Region-G'];
+    const snaps = [];
+    regionNames.forEach(function (regionName) {
+      for (let i = 1; i <= 5; i++) snaps.push(regionSnapshot(regionName, regionName + '-L' + i));
+    });
+    movementSnapshots = snaps;
+    const emptyFilters = { project: new Set(), region: new Set(), TL: new Set(), source: new Set(), bucket: new Set() };
+    let regionRankable;
+    try {
+      const regionFull = computeRmPerformance(null, rec => repeatOffendersRegionKey(rec), emptyFilters, null);
+      regionRankable = sortRmPerformanceByScore(filterRmPerformanceRankable(regionFull));
+    } finally {
+      movementSnapshots = saved;
+    }
+    assert('Region cap test: all 7 synthetic regions clear Insufficient Data and are individually rankable',
+      regionRankable.length === 7, 'rankable count=' + regionRankable.length);
+    const capped = regionRankable.slice(0, REPEAT_OFFENDERS_TABLE_CAPS.region);
+    assert('Region cap test: the table\'s own worst-N slice caps at 5, not all 7',
+      capped.length === 5, 'capped length=' + capped.length);
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

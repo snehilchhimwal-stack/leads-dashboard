@@ -7,9 +7,11 @@
 // for the redesign history. All 4 tables (RM/A1-TM/RH/Region) show the
 // worst performers first by raw score, regardless of classification,
 // excluding only Insufficient Data (filterRmPerformanceRankable +
-// sortRmPerformanceByScore, core-rm-performance.js) — RM capped at 20,
-// A1-TM at 10, RH at 5, Region uncapped (all shown) — see
-// renderRepeatOffenders' own comment for the full 2026-09-07 rationale.
+// sortRmPerformanceByScore, core-rm-performance.js) — capped per
+// REPEAT_OFFENDERS_TABLE_CAPS (core-rm-performance.js): RM 20, A1-TM 10,
+// RH 5, Region 5 (uncapped from 2026-09-06 until 2026-09-09 — see
+// renderRepeatOffenders' own comment for the full 2026-09-07 rationale,
+// and _renderRepeatOffendersResult's own comment for the 2026-09-09 cap).
 //
 // NOT "Daily_RM_Issues" — that was this section's data source before the
 // 2026-09-04 redesign, and fetching it (fetchDailyRmIssues) was removed
@@ -469,9 +471,13 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
   const rmRanked = sortRmPerformanceByScore(filterRmPerformanceRankable(rmFull));
   const a1tmRanked = hierarchyMissing ? [] : sortRmPerformanceByScore(filterRmPerformanceRankable(a1tmFull));
   const rhRanked = hierarchyMissing ? [] : sortRmPerformanceByScore(filterRmPerformanceRankable(rhFull));
-  // Region: same rankable filter, but uncapped — "show all" was the
-  // explicit 2026-09-06 request, still true here, just now also
-  // excluding Insufficient Data rows per the newer request.
+  // Region: same rankable filter as the other 3 — capped at
+  // REPEAT_OFFENDERS_TABLE_CAPS.region (core-rm-performance.js), same as
+  // RM/A1-TM/RH below. Was uncapped ("show all") from the 2026-09-06
+  // request until 2026-09-09, when "Region wise repeat offender list
+  // (worst 5)" explicitly asked for the same worst-N cap the other 3
+  // tables already use — a long uncapped list buried the regions that
+  // actually mattered among every "On Track" one.
   const regionRanked = sortRmPerformanceByScore(filterRmPerformanceRankable(regionFull));
 
   const rmBelowCount = filterRmPerformanceWorst(rmFull).length;
@@ -479,10 +485,10 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
 
   const emptyMsg = 'No RM/region/manager has enough eligible data to rank for the current filters/range.';
   bodyEl.innerHTML = `<div class="repeat-offenders-grid">
-    ${rmPerformanceTableHtml('RMs — worst 20', rmRanked.slice(0, 20), false, emptyMsg, rmHierarchyByNameLower)}
-    ${rmPerformanceTableHtml('By Region — worst first, all shown', regionRanked, false, emptyMsg, rmHierarchyByNameLower)}
-    ${rmPerformanceTableHtml('A1 / TM — worst 10', hierarchyMissing ? [] : a1tmRanked.slice(0, 10), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
-    ${rmPerformanceTableHtml('RH — worst 5', hierarchyMissing ? [] : rhRanked.slice(0, 5), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml(`RMs — worst ${REPEAT_OFFENDERS_TABLE_CAPS.rm}`, rmRanked.slice(0, REPEAT_OFFENDERS_TABLE_CAPS.rm), false, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml(`By Region — worst ${REPEAT_OFFENDERS_TABLE_CAPS.region}`, regionRanked.slice(0, REPEAT_OFFENDERS_TABLE_CAPS.region), false, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml(`A1 / TM — worst ${REPEAT_OFFENDERS_TABLE_CAPS.a1tm}`, hierarchyMissing ? [] : a1tmRanked.slice(0, REPEAT_OFFENDERS_TABLE_CAPS.a1tm), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
+    ${rmPerformanceTableHtml(`RH — worst ${REPEAT_OFFENDERS_TABLE_CAPS.rh}`, hierarchyMissing ? [] : rhRanked.slice(0, REPEAT_OFFENDERS_TABLE_CAPS.rh), hierarchyMissing, emptyMsg, rmHierarchyByNameLower)}
   </div>
   ${_repeatOffendersDebugPanelHtml(stageCounts, hierarchyMissing)}`;
 
@@ -564,7 +570,7 @@ function _repeatOffendersDebugPanelHtml(sc, hierarchyMissing){
         <div class="repeat-offenders-subtitle">Stage 8 — rollup calculation method</div>
         <div class="dim" style="font-size:12px; line-height:1.6;">
           <b>RM</b>: own independent peer population &amp; empirical-Bayes baseline (peer = every OTHER RM in the filtered population) — ${esc(sc.stage8RollupCounts.rm)} RMs scored.<br>
-          <b>Region</b>: own independent peer population &amp; baseline (peer = every OTHER region) — NOT rolled up from RM scores — ${esc(sc.stage8RollupCounts.region)} regions scored, all shown.<br>
+          <b>Region</b>: own independent peer population &amp; baseline (peer = every OTHER region) — NOT rolled up from RM scores — ${esc(sc.stage8RollupCounts.region)} regions scored.<br>
           <b>A1/TM</b>: own independent peer population &amp; baseline (peer = every OTHER A1/TM) — ${hierarchyMissing ? 'unavailable (RM_Hierarchy not loaded)' : esc(sc.stage8RollupCounts.a1tm) + ' managers scored'}.<br>
           <b>RH</b>: own independent peer population &amp; baseline (peer = every OTHER RH) — ${hierarchyMissing ? 'unavailable (RM_Hierarchy not loaded)' : esc(sc.stage8RollupCounts.rh) + ' RHs scored'}.<br>
           All four re-run Stage 1-4 from scratch with their own grouping key — none is derived by averaging another level's already-computed scores.

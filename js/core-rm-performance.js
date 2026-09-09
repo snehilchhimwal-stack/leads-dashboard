@@ -117,6 +117,17 @@ const RM_PERF_FLAG_RATIO = 1.25;
 // the whole point of this redesign.
 const RM_PERF_CONCENTRATION_BREADTH_CEILING = 0.25; // violated leads must be <=25% of the eligible book
 
+// How many worst-by-score rows each of the 4 rollup tables shows — RM/A1-TM/RH/Region,
+// live dashboard tab AND PDF export. A single shared source, not a literal
+// repeated in tab-repeat-offenders.js and repeat-offenders-pdf.js separately,
+// specifically so the two can never quietly drift apart on what counts as
+// "worst N" — the exact same reasoning already documented for
+// filterRmPerformanceRankable/sortRmPerformanceByScore below, now extended to
+// the cap numbers themselves. Region was uncapped ("all shown") from
+// 2026-09-06 until 2026-09-09, when it was explicitly capped to match the
+// other 3 tables — see "Region wise repeat offender list", To-Do Dashboard.
+const REPEAT_OFFENDERS_TABLE_CAPS = { rm: 20, a1tm: 10, rh: 5, region: 5 };
+
 // Per-rule eligibility gates, expressed purely in terms of what
 // enrichLead/enrichSnapshotCached ALREADY returns (ageHours, isUnder48h,
 // hasConnected, neverConnectedPastWindow — see core-lead-model.js) plus
@@ -795,7 +806,8 @@ function filterRmPerformanceWorst(list){
 // as the display filter (that function is now used only for the genuine
 // violation COUNT, not for what the table shows) — callers should run the
 // result through sortRmPerformanceByScore, then slice to the table's own
-// cap (20 for RM, 10 for A1-TM, 5 for RH, uncapped for Region).
+// cap — REPEAT_OFFENDERS_TABLE_CAPS above (20 for RM, 10 for A1-TM, 5 for
+// RH, 5 for Region as of 2026-09-09 — was uncapped before that).
 function filterRmPerformanceRankable(list){
   return list.filter(r => r.classification !== 'Insufficient Data');
 }

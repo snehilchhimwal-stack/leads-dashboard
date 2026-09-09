@@ -117,12 +117,14 @@ function _repeatOffendersPdfHasAnyRowsForRange(dateKeys){
 //
 // 2026-09-07 (explicit request — "same for pdf download"): matches the
 // live tab exactly now, no divergence. Worst N by raw score REGARDLESS
-// of classification (rankFor below) — RM 20 / A1-TM 10 / RH 5 / Region
-// ALL, uncapped — except Insufficient Data is never shown in any of the
-// 4, even to pad out a short list. filterRmPerformanceRankable +
+// of classification (rankFor below) — capped per REPEAT_OFFENDERS_TABLE_CAPS
+// (core-rm-performance.js) — except Insufficient Data is never shown in
+// any of the 4, even to pad out a short list. filterRmPerformanceRankable +
 // sortRmPerformanceByScore (both core-rm-performance.js) are the SAME
 // functions tab-repeat-offenders.js's renderRepeatOffenders calls, so the
-// two can't quietly drift apart on what counts as "worst".
+// two can't quietly drift apart on what counts as "worst" — and now the
+// SAME cap numbers too (Region was uncapped/"all shown" from 2026-09-06
+// until 2026-09-09's "Region wise repeat offender list (worst 5)").
 function _repeatOffendersPdfSectionTables(dateKeys){
   const hierarchyMissing = rmHierarchyFetchState !== 'ok';
   // Frozen filter snapshot (core-rm-performance.js's passesRepeatOffenderFilters
@@ -131,11 +133,12 @@ function _repeatOffendersPdfSectionTables(dateKeys){
   // the live tab does per render.
   const filters = captureRepeatOffendersFilterSnapshot();
   const rankFor = (list) => sortRmPerformanceByScore(filterRmPerformanceRankable(list));
+  const caps = REPEAT_OFFENDERS_TABLE_CAPS;
   const candidates = [
-    { title: 'RMs — worst 20', list: rankFor(computeRmPerformance(dateKeys, undefined, filters, rmHierarchyByNameLower)).slice(0, 20) },
-    { title: 'By Region — worst first, all shown', list: rankFor(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower)) },
-    { title: 'A1 / TM — worst 10', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, 10) },
-    { title: 'RH — worst 5', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, 5) },
+    { title: `RMs — worst ${caps.rm}`, list: rankFor(computeRmPerformance(dateKeys, undefined, filters, rmHierarchyByNameLower)).slice(0, caps.rm) },
+    { title: `By Region — worst ${caps.region}`, list: rankFor(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower)).slice(0, caps.region) },
+    { title: `A1 / TM — worst ${caps.a1tm}`, list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, caps.a1tm) },
+    { title: `RH — worst ${caps.rh}`, list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, caps.rh) },
   ];
   return candidates.filter(c => c.list.length > 0);
 }
@@ -295,7 +298,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const methodologyNoteLines = doc.splitTextToSize(
-    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse (not printed here, but still what every row is ranked by -- see the live dashboard for the full Status/RMs/A1-TM/RH breakdown per row). Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Region shows the region this row\'s leads are actually concentrated in. A note under the Name column flags Inactive-RM Lead Added days when they apply (tracked but never scored -- a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
+    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst 5) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse (not printed here, but still what every row is ranked by -- see the live dashboard for the full Status/RMs/A1-TM/RH breakdown per row). Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Region shows the region this row\'s leads are actually concentrated in. A note under the Name column flags Inactive-RM Lead Added days when they apply (tracked but never scored -- a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
