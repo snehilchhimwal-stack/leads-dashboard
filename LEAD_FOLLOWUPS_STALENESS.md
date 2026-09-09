@@ -125,12 +125,59 @@ than letting it build on a wrong premise — same discipline
   flows (consumers 2/3) were confirmed to need nothing here — both start
   from a freshly *cleared* tab every cycle, so any suggestion they read
   back was necessarily typed within that same live cycle, never old.
-- **004** (freshness policy) — consumer 4's upsert-only design is
-  deliberate and correct (it can't safely clear without the dashboard's
-  lock) — a real fix should target the **row level**, not a sheet-wide
-  marker: something that marks or removes a row once its lead is
-  confirmed resolved, not just a static "generated at" stamp that stays
-  accurate for ongoing issues but silently stops being true the moment a
-  lead resolves.
+- **004** — **decided: no new code.** 002+003 together, verified below,
+  already close both real paths a person could be misled — see
+  "LEADFOLLOWUPS-004 decision" below for the full reasoning against
+  actively pruning rows.
 - **005** — wire into `CHECKLIST-006`'s durable practice; this file is
   already cross-referenced from `OPS_CHECKLIST.md`.
+
+---
+
+## `LEADFOLLOWUPS-004` decision — a real freshness control, not just a label
+
+The task named 3 options to weigh and asked for the decision recorded
+either way. All 3, weighed against how consumer 4 (`sendOvernightFollowupEmails`,
+13:00 IST daily) actually behaves:
+
+**Option 1 — auto-run Generate before any send if the marker is stale.**
+Rejected. "Auto-run Generate" means a full `clearLeadFollowupsTab()` +
+push + wait cycle — exactly what `pushUnresolvedToLeadFollowups_`'s own
+upsert-only design was built to avoid in the first place (Apps Script
+can't see the dashboard's in-memory `_generateCycleOwner` lock, so a
+clear here could wipe rows a human is actively reviewing at that exact
+moment — see that function's own header comment). Solving 004 by
+reintroducing the exact risk 001 already identified and avoided would be
+a regression, not a fix.
+
+**Option 2 — warn or block the send past a threshold.** Rejected as not
+applicable to this consumer: `sendOvernightFollowupEmails` is unattended
+(13:00 IST, nobody present to answer a confirmation prompt), and its own
+design already deliberately tolerates missing/incomplete data rather than
+blocking (`waitForFollowupSuggestions_`'s own comment: "possibly partial,
+possibly empty — same 'send without it' outcome either way"). Blocking
+the send entirely over a stale *unrelated* row would trade a real,
+working follow-up email for no email at all, over a problem those 2
+fixes already made visible rather than hidden.
+
+**Option 3 — accept the label as sufficient (chosen, strengthened).**
+Traced what actually happens to a resolved lead's abandoned row:
+1. It never appears in a **future email** again — `sendOvernightFollowupEmails_`
+   classifies a lead as `resolvedRows` the moment it stops matching its
+   original flagged issue, and only `unresolvedRows`' lead_ids are ever
+   passed to `waitForFollowupSuggestions_` — a resolved lead's stale row
+   sits in the sheet but is never read into an outbound email again.
+2. It **does** stay visible on the raw sheet — but 002's conditional
+   formatting turns it amber, then red, exactly because nothing is
+   refreshing it anymore. This is not a gap the fix missed; it's the fix
+   *working as intended* on a row nothing else is touching.
+
+So the two real exposure paths LEADFOLLOWUPS-001 mapped — a person
+reading the raw sheet, a person reading the 1pm email — are both already
+closed by 002 and 003 together, verified above, not just asserted.
+Actively deleting or rewriting a resolved lead's row from the backend
+would add the same class of cross-process collision risk `pushUnresolvedToLeadFollowups_`
+was built to avoid, for a benefit that's already covered: tidiness, not
+correctness. **Decision: no additional code for 004** — 002+003 are the
+real freshness control this task asked for, not merely the "prerequisite
+visibility" for a still-missing third piece.
