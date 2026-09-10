@@ -22,7 +22,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | The real order (positions 1–9): `core-foundation → core-sheets-fetch → core-auth → core-lead-model → core-collation → core-outcome-engine → core-fetch-and-render → core-ui → core-filters`. **This exactly matches `HANDOVER.md` §2's *first* order paragraph** (the one with per-file descriptions). |
 | **Impact** | Functionally harmless — nothing at parse time in any of the first 9 calls into `core-rm-performance` (`LOGIC_AUDIT.md` Part 1 §4a). It's a documentation accuracy issue, not a bug. |
 | **Fix recommendation** | Edit `CLAUDE.md:24` to: "9 of the 10 `js/core-*.js` files load first (`HANDOVER.md` §2 for the exact order); `core-rm-performance.js` loads later, interleaved with the tab files — harmless, nothing at parse time calls into it." |
-| **Status** | **Follow-up task opened** — `t-tf-<see tasks.json>` "Correct CLAUDE.md's `js/core-*.js` script-load-order claim (9 vs 10 files; `core-rm-performance.js` loads 15th)". Not blocking this catalog project's critical path (`DOC-012`'s own follow-up instruction). Already recorded on `DASH-001` `## HTML / CSS structure` and every `JS-XXX` `## Load order / position`. |
+| **Status** | **Follow-up task opened** — `t-tf-7e4d0dffdf6c` "[Leads Dashboard] Doc-accuracy touch-up: CLAUDE.md script-load-order + HANDOVER.md C-2..C-7 one-liners" (Low priority, tags `leads-dashboard` / `documentation`). Not blocking this catalog project's critical path (`DOC-012`'s own follow-up instruction). Already recorded on `DASH-001` `## HTML / CSS structure` and every `JS-XXX` `## Load order / position`. |
 
 ## C-2 — `HANDOVER.md` §2's *second* load-order paragraph is stale (pre-split)
 
