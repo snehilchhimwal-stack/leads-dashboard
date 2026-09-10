@@ -126,7 +126,18 @@ sub-fields, **all lists of IDs** (not prose):
 **Reciprocity rule:** adding `Depends On: JS-014` to one record
 *obligates* adding `Used By: <this ID>` to `JS-014`'s record **in the
 same edit**. A one-directional link is a defect. `DOC-040` (Phase 5)
-verifies every link resolves and is reciprocal.
+verified every link; `test/check-catalog.py` A now enforces it on every
+push.
+
+**Exception — architecture overlays.** A `FLOW-` / `TRIGGER-` record
+lists its participants in `Depends On` (which must resolve — no
+dangling), but is **not** reciprocated: it carries `Used By: none`, and
+its participants do **not** gain `Used By: <the FLOW>`. An overlay is a
+view *across* components, not a dependency they know about — the same
+reason `HANDOVER.md` references everything without the reverse. The
+reciprocity rule above governs the own-file component rows
+(`DASH`/`TAB`/`JS`/`GS`/`SHEET`/`EXT`/`DATA`) only. (`t-tf-5ad22d8e4c2e`,
+2026-09-10.)
 
 `Used By: none` is a valid, meaningful answer (a leaf component, or an
 output with no consumer — the latter is a finding, per the Governance

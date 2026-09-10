@@ -41,9 +41,16 @@ concurrent-write)?>
 ## Known limitations
 <`LOGIC_AUDIT.md` findings; documented gaps.>
 
-<Then: Related documentation, Relationships (every participant is a
-`Depends On`; reciprocal `Used By: <this FLOW ID>` on each), Source of
-truth, Validation, Version/change reference, Revalidation trigger ("any
-participant component goes Stale, or the trigger schedule changes"),
-Handover relationship, Lifecycle/retention, Next action, Closure evidence
-— as generic.>
+<Then: Related documentation, Relationships, Source of truth, Validation,
+Version/change reference, Revalidation trigger ("any participant component
+goes Stale, or the trigger schedule changes"), Handover relationship,
+Lifecycle/retention, Next action, Closure evidence — as generic.>
+
+<!-- RECIPROCITY (t-tf-5ad22d8e4c2e, 2026-09-10): a FLOW-/TRIGGER- record
+lists every participant in `Depends On` (those IDs must resolve — no
+dangling; check-catalog.py A verifies this), but is NOT reciprocated:
+`Used By: none`, and the participants do NOT gain `Used By: <this FLOW>`.
+An overlay is a narrative view across components, not a dependency they'd
+know about — the same reason HANDOVER.md references everything without the
+reverse. This is the deliberate exception to NAMING_CONVENTIONS.md's
+reciprocity rule (which governs the 69 own-file component rows). -->

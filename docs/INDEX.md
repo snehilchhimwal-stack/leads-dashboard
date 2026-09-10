@@ -289,11 +289,7 @@ list. `DOC-032` writes the base records; `DOC-036` fills lifecycle/retention.
 | EXT-003 | EXT- | Google Identity / OAuth (sign-in gate) | `js/core-auth.js` | Closed + Monitored | none | EXT-001, EXT-002, JS-001, JS-004, JS-009, JS-018, JS-021, JS-022 | 2026-09-10 (`c82ec67`) |
 | EXT-004 | EXT- | jsPDF 2.5.1 + jspdf-autotable 3.8.2 (PDF export) | `js/repeat-offenders-pdf.js` | Closed + Monitored | none | JS-013, TAB-004 | 2026-09-10 (`c82ec67`) |
 
-### `DATA-` / `FLOW-` / `TRIGGER-` — filled in Phase 3 (`DOC-034` / `DOC-035`)
-
-`DATA-` records written by `DOC-034` (Phase 3). `FLOW-` / `TRIGGER-`
-standalone architecture records are `DOC-035`+ (Phase 3 tail / Phase 6),
-not yet built.
+### `DATA-` — traced data flows (`DOC-034`)
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
@@ -302,6 +298,19 @@ not yet built.
 | DATA-003 | DATA- | The comment-classification pipeline | traced path | Closed + Monitored | DATA-001, GS-002, GS-005, GS-006, GS-010, GS-013, JS-006, JS-007, JS-016, JS-018, SHEET-001, SHEET-004 | DATA-005, SHEET-009, SHEET-010, TAB-003 | 2026-09-10 (`c82ec67`) |
 | DATA-004 | DATA- | The Movement snapshot pipeline | traced path | Closed + Monitored | EXT-001, GS-002, GS-008, GS-012, JS-018, JS-021, SHEET-001, SHEET-002 | DATA-002, GS-001, JS-008, SHEET-005, SHEET-008, TAB-004 | 2026-09-10 (`c82ec67`) |
 | DATA-005 | DATA- | The region-email pipeline | traced path | Closed + Monitored (⚠ carries the HIGH Loan-region finding) | DATA-001, DATA-002, DATA-003, EXT-002, GS-001, JS-014, SHEET-004 | SHEET-011, TAB-003, TAB-007 | 2026-09-10 (`c82ec67`) |
+
+### `FLOW-` — cross-file workflow overlays (`architecture/`; `t-tf-5ad22d8e4c2e`)
+
+An overlay names its participants in `Depends On` but is **not**
+reciprocated (`Used By: none`) — a component does not list every overlay
+spanning it. See `../NAMING_CONVENTIONS.md` and `_templates/architecture-template.md`.
+Standalone `TRIGGER-` records were not needed — the trigger set is one
+non-ID'd index, `architecture/apps-script-triggers.md`.
+
+| ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
+|---|---|---|---|---|---|---|---|
+| FLOW-001 | FLOW- | Movement snapshot hub + piggyback loggers | `architecture/FLOW-001-movement-hub.md` | Closed + Monitored | GS-006, GS-008, GS-013, JS-018, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010 | none | 2026-09-10 (`c82ec67`) |
+| FLOW-002 | FLOW- | The 3-phase "Generate region emails" cycle | `architecture/FLOW-002-generate-cycle.md` | Closed + Monitored | EXT-002, GS-005, GS-010, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-004, SHEET-011 | none | 2026-09-10 (`c82ec67`) |
 
 ---
 
@@ -314,6 +323,7 @@ not yet built.
 - `EXT-` records: 4 / 4 (DOC-033)
 - `DASH-` records: 1 / 1 (DOC-025)
 - `DATA-` records: 5 / 5 (DOC-034)
+- `FLOW-` records: 2 / 2 (`t-tf-5ad22d8e4c2e`; overlays in `architecture/`)
 - **Component-record set is complete** — 1 `DASH-`, 8 `TAB-`
   (+ `BTN-001`..`022`), 24 `JS-`, 13 `GS-` (+ `FN-001`..`254`),
   14 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s

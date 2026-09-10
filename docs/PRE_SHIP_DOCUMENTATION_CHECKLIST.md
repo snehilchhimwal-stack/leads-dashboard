@@ -12,12 +12,27 @@ that covers `.gs` assertions / the frontend harness / `OPS_CHECKLIST.md`
 
 ## The checklist
 
+- [ ] **CI's `check-catalog.py` output was read.** The blocking checks
+      (INDEX reciprocity, record↔file coverage, `Location`→file,
+      snapshot self-consistency) must be green; the advisory ones
+      matter too — check **E**'s "1-hop impact set" and its
+      ready-to-run `update-tasks.ps1` ops JSON (run it to open the
+      revalidation task), and check **D**'s `Last Verified`-drift list.
 - [ ] **Every new or renamed component has a record.** New `js/*.js` /
       `.gs` file → a `JS-`/`GS-` record (`HOW_TO_REGISTER_A_COMPONENT.md`).
       New tab / button / Sheet tab / integration / significant function →
-      its own record or sub-table row. *(`test/check-docs-coverage.js`
-      warns for missing `js/*.js`/`.gs` file records — but not tabs,
-      buttons, functions, or Sheet tabs.)*
+      its own record or sub-table row. *(`check-catalog.py` B blocks on a
+      missing `js/*.js`/`.gs` **or** `TAB-`/`SHEET-`/`EXT-`/`DATA-` record;
+      it does **not** see new tabs/buttons/functions inside an existing
+      file — those are on you.)*
+- [ ] **Did an explanatory comment near your change go stale?** If the
+      code moved but a `//`/`/* */` comment describing *why*, a
+      threshold, a retention rule, or a cross-runtime caveat did not —
+      fix the comment in the same commit, and if that knowledge belongs
+      in a record (`## Important logic` / `## Exceptions` / `## Assumptions`)
+      put it there too. `check-catalog.py` E flags a changed line
+      touching a cross-runtime pair marker; a plain stale comment it
+      cannot see.
 - [ ] **Every changed component's record is updated** — affected fields
       only, `Last Verified` bumped to the commit, `## Version / change
       reference` set (`HOW_TO_UPDATE_A_COMPONENT.md`).
@@ -50,6 +65,7 @@ that covers `.gs` assertions / the frontend harness / `OPS_CHECKLIST.md`
 ## Definition of Done check
 
 - **Short enough to actually be used, not a restatement of the plan** —
-  ✅ (8 checkboxes; each links the one guide with the detail, none
+  ✅ (10 checkboxes; each links the one guide with the detail, none
   repeats it). Cross-references `CLAUDE.md`'s Testing section as the
-  sibling discipline rather than duplicating it.
+  sibling discipline rather than duplicating it. The `check-catalog.py`
+  and stale-comment items were added 2026-09-10 (`t-tf-5ad22d8e4c2e`).
