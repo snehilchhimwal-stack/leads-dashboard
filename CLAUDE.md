@@ -113,11 +113,11 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   `tests/frontend-harness.html` — it grafts the real `dashboard.html` +
   `js/*.js`, mocks only the network boundary (Sheets read + OAuth token
   pair), and runs synthetic leads through the real `fetchAndRender()`
-  pipeline. **In CI headless (Playwright, non-blocking — CI pass/fail not
-  yet trustworthy, see `HANDOVER.md` §7.2; run it locally)** since
-  2026-09-10 — `test/run-frontend-harness.mjs`; also run it locally
-  (serve the repo, open the page). Re-run + extend it after any
-  dashboard-side change rather than hand-verifying in the console.
+  pipeline. **In CI as its own `frontend-harness` job on the official
+  Playwright container, blocking** (`test/run-frontend-harness.mjs`; see
+  `HANDOVER.md` §7.2). Re-run + extend it locally after any dashboard-side
+  change (serve the repo, open the page) rather than hand-verifying in the
+  console.
 - **Changing, adding, or removing any `js/*.js` / `.gs` file — or editing
   a `docs/` record or `docs/INDEX.md`**: two CI steps run after the `.gs`
   suite.

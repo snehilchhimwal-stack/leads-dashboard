@@ -44,24 +44,32 @@ jobs:
         env:
           DIFF_BASE: ${{ github.event.before || github.event.pull_request.base.sha }}
           DIFF_HEAD: ${{ github.sha }}
-      # Frontend harness (tests/frontend-harness.html) headless. Forensic
-      # audit P2 item 13 (t-tf-5ad22d8e4c2e). NON-BLOCKING (continue-on-error)
-      # -- an attempt to flip it to blocking (fd59944) went red at ~28s,
-      # before Playwright/browser install could finish, so the true
-      # pass/fail is not yet trustworthy in CI. Keep it advisory and read
-      # its log manually until the install path is made reliable; local
-      # runs of the harness page are the real signal for now. It must be
-      # served over http (it fetch()es ../dashboard.html).
-      - name: Frontend render-pipeline harness (warn-only)
-        continue-on-error: true
+
+  # Frontend render-pipeline harness (tests/frontend-harness.html) headless.
+  # Forensic audit P2 item 13 (t-tf-5ad22d8e4c2e). Its own job on the
+  # OFFICIAL Playwright container -- chromium + every system dependency +
+  # a matching `playwright` npm package are already in the image, so there
+  # is no browser download / apt step to be flaky (the ~28s failure that
+  # reverted the first blocking attempt, fd59944, was a missing-system-libs
+  # launch error on the bare runner). BLOCKING: a real assertion failure
+  # from run-frontend-harness.mjs fails this job. Kept a separate job so
+  # the fast Node/Python `test` job above is never gated on a browser.
+  frontend-harness:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.47.2-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the harness
         run: |
-          set -x
-          python3 -m http.server 8000 --bind 127.0.0.1 >/dev/null 2>&1 &
-          echo $! > /tmp/http.pid
-          for i in $(seq 1 20); do curl -sf http://127.0.0.1:8000/dashboard.html >/dev/null && break || sleep 0.5; done
-          npm i --no-save playwright@1.47.2 || { echo "::warning::npm i playwright failed"; exit 0; }
-          npx playwright install chromium || { echo "::warning::playwright browser install failed"; exit 0; }
+          set -euxo pipefail
+          node --version
+          npm i --no-save playwright@1.47.2
+          npx playwright --version
+          python3 -m http.server 8000 --bind 127.0.0.1 >/tmp/httpd.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8000/dashboard.html >/dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8000/dashboard.html >/dev/null   # fail loudly if still not up
           node test/run-frontend-harness.mjs http://127.0.0.1:8000
-          code=$?
-          kill "$(cat /tmp/http.pid)" 2>/dev/null || true
-          exit $code

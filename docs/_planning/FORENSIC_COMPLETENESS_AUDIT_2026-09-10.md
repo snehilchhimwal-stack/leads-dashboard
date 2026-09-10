@@ -432,16 +432,16 @@ property holds by design but is violated in fact.
     `check-catalog.py` E flags a changed line touching a cross-runtime
     pair marker; `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` gained the
     "read check-catalog E/D" and "did a comment go stale?" checkboxes.
-13. Wire **`frontend-harness.html`** into CI — **DONE (non-blocking);
-    blocking flip attempted and reverted.** `test/run-frontend-harness.mjs`
-    (Playwright headless) + `.github/workflows/test.yml` step. The
-    `continue-on-error: true` steps showed `success` for 5 runs, but a
-    flip to blocking (`fd59944`) went red at ~28 s — before the
-    Playwright/browser install finished — so **whether the harness
-    actually passes in CI is unverified**. Kept non-blocking with
-    `set -x` + explicit install-failure warns; the **local** run is the
-    trustworthy signal. Hardening the CI install path is the open
-    sub-item.
+13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE, BLOCKING.**
+    First tries on the bare runner were flaky (`fd59944` = ~28 s
+    missing-system-libs `chromium.launch()` failure). Fixed by moving it
+    to its **own `frontend-harness` job on the official Playwright
+    container** (`mcr.microsoft.com/playwright:v1.47.2-jammy` — chromium +
+    all libs + a matching `playwright` npm package already in the image,
+    zero download, no apt). `test/run-frontend-harness.mjs` gained a
+    `chromium.launch()` guard, longer timeouts, and a full page/console
+    dump on failure. Separate job so the fast Node/Python `test` job is
+    never gated on a browser.
 14. ~~**Extend coverage** to `TAB-`/`SHEET-`/`EXT-`/`DATA-`~~ — **DONE**
     (was already `check-catalog.py` B — all 7 own-file types + `FLOW-`).
 15. ~~**`RANGE-`/`HTML-`/`CSS-`/`CLASS-` exclusion note** + Sheet-formula
@@ -480,12 +480,11 @@ pointer to `SHEET-*`);
 pointer to `apps-script-triggers.md`.
 
 **P3 — genuinely remaining:** the 7 retention `TBD` decisions
-(owner-blocked); `Owner:` distribution (no team); **harden the frontend
-harness's CI install path** so it can be made blocking (it fails at ~28 s
-today — `npm i playwright` / `playwright install chromium` on the runner
-needs a reliable recipe). `check-catalog.py` D/E and
-`check-docs-coverage.js` stay advisory/warn by design — a team that wants
-the hard gate sets `CATALOG_STRICT=1`.
+(owner-blocked); `Owner:` distribution (no team). `check-catalog.py` D/E
+and `check-docs-coverage.js` stay advisory/warn by design — a team that
+wants the hard gate sets `CATALOG_STRICT=1`. (Optional: add
+`frontend-harness` to the repo's *required* status checks in branch
+protection — a settings change, not code.)
 
 ---
 

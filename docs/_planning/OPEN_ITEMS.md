@@ -215,14 +215,18 @@ in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt.
   `master` / `/` root, no `index.html`), **§4.3** (`setupRmHierarchy()` +
   `setupLeadFollowupsStalenessFormatting()` rows + a pointer to
   `apps-script-triggers.md`).
+  frontend harness → **own `frontend-harness` CI job on the official
+  Playwright container** (`mcr.microsoft.com/playwright:v1.47.2-jammy`),
+  **blocking** — the container ships chromium + all system libs, so the
+  ~28 s bare-runner `chromium.launch()` failure (`fd59944`) is gone;
+  `run-frontend-harness.mjs` hardened (launch guard, longer timeouts,
+  full page/console dump on failure).
   **Genuinely not doable by this project:** the 7 retention `TBD`
   decisions (§B — owner + CRM-owner + compliance); `Owner:` distribution
-  (§A — no team). **Harden the frontend-harness CI install** — a flip to
-  blocking (`fd59944`) failed at ~28 s before Playwright/browser install
-  finished; the step is back to `continue-on-error` and its CI pass/fail
-  is unverified (local run is the signal). `check-catalog.py` D/E +
-  `check-docs-coverage.js` stay advisory/warn **by design** —
-  `CATALOG_STRICT=1` is the hard-gate switch for a team that wants it.
+  (§A — no team). `check-catalog.py` D/E + `check-docs-coverage.js` stay
+  advisory/warn **by design** — `CATALOG_STRICT=1` is the hard-gate
+  switch for a team that wants it; adding `frontend-harness` to the
+  repo's required status checks is a branch-protection settings change.
 
 ---
 

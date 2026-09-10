@@ -416,7 +416,7 @@ coverage, and past gaps in this project were closed reactively (see git
 history around 2026-08-29) specifically because a change shipped without a
 matching test.
 
-### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (in CI, non-blocking)
+### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (own CI job, blocking)
 
 The persisted browser-JS suite is **`tests/frontend-harness.html`** at the
 repo root. It grafts the real `dashboard.html` + every `js/*.js` file into
@@ -428,15 +428,19 @@ Re-run it after any dashboard-side change, and extend it — add the
 assertions in the same commit — rather than hand-verifying in the console.
 
 **In CI as of 2026-09-10** (`t-tf-5ad22d8e4c2e`): `.github/workflows/test.yml`
-serves the repo over `http.server` and runs the harness headless via
-Playwright (`test/run-frontend-harness.mjs`) after the catalog checks —
-prints `N passed, M failed` and any failing assertions. **Non-blocking
-(`continue-on-error: true`)** — a first attempt to make it blocking
-(`fd59944`) went red at ~28 s, before the Playwright/browser install
-finished, so its CI pass/fail is **not yet trustworthy**. Treat the
-**local** harness run as the real signal until the install path is made
-reliable: serve the repo (`preview_start` the "dashboard" config), open
-the page, read `window.__harnessResults`.
+has a **dedicated `frontend-harness` job** that runs on the **official
+Playwright container** (`mcr.microsoft.com/playwright:v1.47.2-jammy` —
+chromium + all system libraries + a matching `playwright` npm package are
+already in the image, so nothing is downloaded and there is no apt step
+to be flaky). It serves the repo over `http.server`, runs the harness
+headless via `test/run-frontend-harness.mjs`, and prints `N passed, M
+failed` + every failing assertion + the page's console on any failure.
+**Blocking** — a real assertion failure fails that job. (An earlier bare-
+runner attempt, `fd59944`, failed at ~28 s on a missing-system-libs
+`chromium.launch()` — the container fixes that class entirely.) It is a
+separate job so the fast Node/Python `test` job is never gated on a
+browser. Locally it runs the same way — serve the repo (`preview_start`
+the "dashboard" config), open the page, read `window.__harnessResults`.
 
 **Local preview in the meantime**: `dashboard.html` is a static file — any
 local static file server pointed at the repo root works
