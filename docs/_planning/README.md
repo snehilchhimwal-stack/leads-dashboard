@@ -24,7 +24,10 @@ task that produced it and includes a Definition-of-Done check.
 | `consistency-check.md` | `DOC-041` | catalog vs `LOGIC_AUDIT.md` duplicated-logic pairs + 5 direct live-code spot-checks |
 | `OPEN_ITEMS.md` | `DOC-042` | the consolidated open-items tracker (retention `TBD`, conflicts, `HANDOVER.md` reconciliation, code findings recorded-not-fixed) |
 
-Phase 1 (`DOC-001`–`DOC-013`) is complete. `DOC-013` (the catalog's
-front matter) lives in `../INDEX.md`, not here. Phase 4's `DOC-036`
-completed the `## Data Lifecycle` sections in `../sheets/`; `DOC-037`'s
-list (above) is the open-questions hand-off.
+Phase 1 (`DOC-001`–`DOC-013`) and Phase 2 (`DOC-014`–`024`) are
+complete. `DOC-013` (the catalog's front matter) lives in `../INDEX.md`;
+the `HOW_TO_*` guides (`DOC-022`–`024`) live in `../`. Phase 4
+(`DOC-036`–`038`) completed the `## Data Lifecycle` + `## Sensitivity`
+sections in `../sheets/`. Phase 5 (`DOC-039`–`042`) verified
+completeness, references, and consistency — **`OPEN_ITEMS.md` is the
+durable hand-off of everything unresolved.**
