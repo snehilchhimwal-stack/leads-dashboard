@@ -432,16 +432,19 @@ property holds by design but is violated in fact.
     `check-catalog.py` E flags a changed line touching a cross-runtime
     pair marker; `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` gained the
     "read check-catalog E/D" and "did a comment go stale?" checkboxes.
-13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE, BLOCKING.**
-    First tries on the bare runner were flaky (`fd59944` = ~28 s
-    missing-system-libs `chromium.launch()` failure). Fixed by moving it
-    to its **own `frontend-harness` job on the official Playwright
-    container** (`mcr.microsoft.com/playwright:v1.47.2-jammy` — chromium +
-    all libs + a matching `playwright` npm package already in the image,
-    zero download, no apt). `test/run-frontend-harness.mjs` gained a
-    `chromium.launch()` guard, longer timeouts, and a full page/console
-    dump on failure. Separate job so the fast Node/Python `test` job is
-    never gated on a browser.
+13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE, BLOCKING,
+    CONFIRMED GREEN** (`frontend-harness` job on CI run `3675b93`, 59/59).
+    Getting there fixed two things: (a) bare-runner
+    `chromium.launch()` missing-libs failure (`fd59944`, ~28 s) → moved to
+    its **own job on `mcr.microsoft.com/playwright:v1.47.2-jammy`**
+    (chromium + libs + matching `playwright` pkg pre-installed, zero
+    download, no apt); pure-Node `serve-and-harness.mjs` (no python3/curl
+    dependency). (b) The blocking flip surfaced a **long-known
+    time-of-day flake** — the `L011` assertion depends on IST business
+    hours (`neverConnectedPastWindow` counts working minutes) — fixed by
+    **freezing the harness `Date`** to a fixed weekday IST-afternoon
+    instant. The prior 5 `continue-on-error` "green" runs had masked it.
+    Separate job so the fast `test` job is never gated on a browser.
 14. ~~**Extend coverage** to `TAB-`/`SHEET-`/`EXT-`/`DATA-`~~ — **DONE**
     (was already `check-catalog.py` B — all 7 own-file types + `FLOW-`).
 15. ~~**`RANGE-`/`HTML-`/`CSS-`/`CLASS-` exclusion note** + Sheet-formula

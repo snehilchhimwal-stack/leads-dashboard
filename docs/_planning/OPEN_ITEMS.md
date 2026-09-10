@@ -217,10 +217,12 @@ in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt.
   `apps-script-triggers.md`).
   frontend harness → **own `frontend-harness` CI job on the official
   Playwright container** (`mcr.microsoft.com/playwright:v1.47.2-jammy`),
-  **blocking** — the container ships chromium + all system libs, so the
-  ~28 s bare-runner `chromium.launch()` failure (`fd59944`) is gone;
-  `run-frontend-harness.mjs` hardened (launch guard, longer timeouts,
-  full page/console dump on failure).
+  **blocking, confirmed green** (CI run `3675b93`, 59/59). Fixed en route:
+  the bare-runner `chromium.launch()` missing-libs failure (`fd59944`,
+  moved to the container + pure-Node `serve-and-harness.mjs`), and the
+  **long-known L011 time-of-day flake** (`neverConnectedPastWindow` counts
+  IST working minutes) — the harness `Date` is now frozen to a fixed
+  weekday IST-afternoon instant, so it's deterministic in CI.
   **Genuinely not doable by this project:** the 7 retention `TBD`
   decisions (§B — owner + CRM-owner + compliance); `Owner:` distribution
   (§A — no team). `check-catalog.py` D/E + `check-docs-coverage.js` stay

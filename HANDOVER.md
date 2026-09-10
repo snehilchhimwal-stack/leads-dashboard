@@ -435,9 +435,15 @@ already in the image, so nothing is downloaded and there is no apt step
 to be flaky). It serves the repo over `http.server`, runs the harness
 headless via `test/run-frontend-harness.mjs`, and prints `N passed, M
 failed` + every failing assertion + the page's console on any failure.
-**Blocking** — a real assertion failure fails that job. (An earlier bare-
-runner attempt, `fd59944`, failed at ~28 s on a missing-system-libs
-`chromium.launch()` — the container fixes that class entirely.) It is a
+**Blocking** — a real assertion failure fails that job. Confirmed green
+(`3675b93`, 59/59). Two problems were fixed getting here: (1) an earlier
+bare-runner attempt (`fd59944`) hit a missing-system-libs
+`chromium.launch()` at ~28 s — the container has every lib; (2) the
+harness's own **clock is now frozen** to a fixed weekday IST-afternoon
+instant (top of `tests/frontend-harness.html`) — one assertion (`L011`,
+"missed first-contact inside the 3 h grace") counts *working* minutes
+(9 AM–7 PM IST) and so only held when the harness happened to run
+in-window; this was the long-known "time-of-day flake" (§9.7.2). It is a
 separate job so the fast Node/Python `test` job is never gated on a
 browser. Locally it runs the same way — serve the repo (`preview_start`
 the "dashboard" config), open the page, read `window.__harnessResults`.
@@ -1241,7 +1247,8 @@ conversation.
 Verified via two disposable harnesses (deleted after use): the existing
 `tests/frontend-harness.html` suite re-run clean (25/26, the 1 failure
 the same pre-existing, already root-caused time-of-day flake from
-§9.6/§9.7.1 — unrelated); and a dedicated 9-assertion harness
+§9.6/§9.7.1 — unrelated; **that flake is fixed as of 2026-09-10 by
+freezing the harness clock, see §7.2**); and a dedicated 9-assertion harness
 specifically exercising the new elapsed-time poll (confirms it shows 0s
 immediately, ticks up on its own without any external re-render call,
 never stacks more than one pending timer, and — critically — stops
