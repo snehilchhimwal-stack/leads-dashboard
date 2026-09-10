@@ -7,3 +7,7 @@ RmHierarchy.private.gs
 # Personal Claude Code permission overrides (this machine only) — not
 # meant to apply to anyone else cloning this public repo.
 .claude/settings.local.json
+
+# Python bytecode from test/check-catalog.py
+__pycache__/
+*.pyc
