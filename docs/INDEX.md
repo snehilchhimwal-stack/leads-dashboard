@@ -117,7 +117,7 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Not Started | | | |
+| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | TAB-001..008, JS-001..024, EXT-001..004, SHEET-001/002/004/005/006/008/011 | none | 2026-09-10 (`c82ec67`) |
 
 ### `TAB-` — dashboard UI tabs (confirm the tab↔`JS-` mapping in `DOC-026`)
 
