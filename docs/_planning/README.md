@@ -19,6 +19,10 @@ task that produced it and includes a Definition-of-Done check.
 | `integration-inventory.md` | `DOC-011` | the 4 `EXT-` integrations + real call sites; the `<head>` check |
 | `documentation-conflicts.md` | `DOC-012` | 9 doc-vs-doc / doc-vs-code conflicts (C-1..C-9) + fixes |
 | `retention-decisions-needed.md` | `DOC-037` | the 7 `TBD` Sheet-tab retention values from `DOC-036`, each with context + options, routed for the owner's decision |
+| `completeness-verification.md` | `DOC-039` | mechanical re-check of every category against the live repo — zero gaps |
+| `reference-verification.md` | `DOC-040` | dangling-ref check (0) + `INDEX.md` reciprocity normalised to 0 one-directional pairs |
+| `consistency-check.md` | `DOC-041` | catalog vs `LOGIC_AUDIT.md` duplicated-logic pairs + 5 direct live-code spot-checks |
+| `OPEN_ITEMS.md` | `DOC-042` | the consolidated open-items tracker (retention `TBD`, conflicts, `HANDOVER.md` reconciliation, code findings recorded-not-fixed) |
 
 Phase 1 (`DOC-001`–`DOC-013`) is complete. `DOC-013` (the catalog's
 front matter) lives in `../INDEX.md`, not here. Phase 4's `DOC-036`
