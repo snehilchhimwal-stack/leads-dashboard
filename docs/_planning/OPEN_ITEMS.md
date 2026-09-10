@@ -80,19 +80,19 @@ forward.**
 `HANDOVER.md` sections Phase 5 should re-verify/update, headed by the
 biggest:
 
-- **§9.7 headline fixed `2026-09-10`** (`t-tf-5ad22d8e4c2e`): title →
-  "replaced … (shipped 2026-09-04; iterated 09-05 and 09-10)" + a
-  **Status: shipped and live** banner pointing at `TAB-004` / `JS-008` /
-  `JS-017` / `JS-022` / `GS-003` / `DATA-002`; §2's `tab-repeat-offenders.js`
-  row no longer says "Avg Flagged"; §9.3 `reportRepeatOffenderRmsNow()` →
-  `reportRmPerformanceNow()`. Targeted grep confirmed `aggregateRepeatOffenders`
-  + `totalLeadsByKey` are **removed** from code (folded into
-  `computeRmPerformance`). **Still open — the deep §9 body sweep:**
-  §9.1's "ranks by Avg Flagged" body wording, §9.3.1's references to the
-  two removed helpers, §9.4's ranking-key prose, and the worked examples
-  — a careful read of ~270 lines of §9 against current
-  `js/core-rm-performance.js` + `js/tab-repeat-offenders.js` +
-  `DailyRmIssueLog.gs` (`handover-coverage-map.md` items 1–2).
+- **§9.7 / C-5 / C-6 — RESOLVED `2026-09-10`** (`t-tf-5ad22d8e4c2e`, P3).
+  §9.7 title + **Status: shipped and live** banner; §2's
+  `tab-repeat-offenders.js` row; §9 intro notes the 2026-09-04 redesign.
+  **§9.1 rewritten** to the composite RM-performance score (shrinkage
+  `K=8`, 4 independent RM/Region/A1-TM/RH computations, `Movement_Log`-
+  reconstructed eligible book) — "Avg Flagged" is gone from the prose.
+  **§9.3.1 rewritten** — retitled, describes the current single
+  "Unique Leads" column, states `aggregateRepeatOffenders` /
+  `totalLeadsByKey` were removed, keeps the still-valid lessons.
+  §9.4 (date-basis split), §9.5 (`isNotUpdated` 48h gate), §9.6
+  (`OUTCOME_RULES` mining) re-read against current source — **still
+  accurate, left as-is**. §9.7.1/§9.7.2 are dated design-record
+  sub-notes, kept. `handover-coverage-map.md` items 1–3 closed.
 - §2 (add `js/rm-performance-worker.js` — **done `2026-09-10`** via
   `t-tf-7e4d0dffdf6c`, along with the load-order rewrite), §5 (add 5
   missing Sheet tabs; the `Movement_Log`/`SLA_History` "every 6h" wording

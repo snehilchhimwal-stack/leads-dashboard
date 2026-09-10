@@ -66,7 +66,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | `TAB-004` / `JS-008` / `JS-017` / `JS-022` / `GS-003` records + `DATA-002`; this session's fix commits. |
 | **Contradiction type** | `HANDOVER.md` §9 vs current code — the largest stale claim. |
 | **Fix recommendation** | Rewrite §9.7 to the shipped state, or shrink it to a pointer at `TAB-004` / `JS-008` / `GS-003` / `DATA-002`. Update §9.1's "Avg Flagged" framing. |
-| **Status** | **Headline fixed `2026-09-10`** (`t-tf-5ad22d8e4c2e`) — §9.7 title now "replaced … (shipped 2026-09-04; iterated 09-05 and 09-10)" + a **Status: shipped and live** banner pointing at `TAB-004` / `JS-008` / `JS-017` / `JS-022` / `GS-003` / `DATA-002`; §2's `tab-repeat-offenders.js` row + §9.7's title no longer say "Avg Flagged"/"in progress". **Still open:** the deep §9 body sweep (§9.1/§9.3.1/§9.4 wording, the worked-example prose) — `handover-coverage-map.md` items 1–2. |
+| **Status** | **RESOLVED `2026-09-10`** (`t-tf-5ad22d8e4c2e`, P3). Headline: §9.7 title + **Status: shipped and live** banner; §2's `tab-repeat-offenders.js` row. Deep body sweep: §9 intro notes the 2026-09-04 redesign; **§9.1 rewritten** to the composite-score ranking (shrinkage `K=8`, 4 independent RM/Region/A1-TM/RH computations, `Movement_Log`-reconstructed eligible book — no more "Avg Flagged"); §9.4 (date-basis split), §9.5 (`isNotUpdated` 48h gate), §9.6 (`OUTCOME_RULES` mining) re-read against current source and are **still accurate** — left as-is; §9.7.1/§9.7.2 are dated design-record sub-notes, kept. |
 
 ## C-6 — `HANDOVER.md` §9.3 / §9.3.1: renamed function names
 
@@ -77,7 +77,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | `GS-003` `## Significant functions` (`reportRmPerformanceNow` = FN-195); `JS-008` (`aggregateRmPerformance` folded into FN-054). **Targeted grep `2026-09-10`:** `reportRmPerformanceNow` (`DailyRmIssueLog.gs:1108`), `aggregateRmPerformance` (`core-rm-performance.js:494`), `computeRmPerformance` (`:692`) all present; **`totalLeadsByKey` and `aggregateRepeatOffenders` — GONE** (folded into `computeRmPerformance` per §9.7.2, confirmed `grep -n 'function totalLeadsByKey\|function aggregateRepeatOffenders'` → 0 hits). |
 | **Contradiction type** | `HANDOVER.md` §9 vs current code. |
 | **Fix recommendation** | Part of the §9.7 rewrite (C-5). |
-| **Status** | **§9.3 fixed `2026-09-10`** (`t-tf-5ad22d8e4c2e`) — `reportRepeatOffenderRmsNow()` → `reportRmPerformanceNow()` with a rename note. **Still open:** §9.3.1's `aggregateRepeatOffenders` / `totalLeadsByKey()` references (both removed from code) — rides the §9 body sweep, `handover-coverage-map.md` item 3. |
+| **Status** | **RESOLVED `2026-09-10`** (`t-tf-5ad22d8e4c2e`, P3). §9.3: `reportRepeatOffenderRmsNow()` → `reportRmPerformanceNow()`. §9.3.1 **rewritten** — retitled "The lead-count denominator — Unique Leads (history)"; describes the current single `computeRmPerformance` eligible-book count; states plainly that `aggregateRepeatOffenders` / `totalLeadsByKey` and the old Flagged/Total split were **removed** in the 2026-09-04 redesign; keeps the still-valid lessons (need a raw denominator; count from `Movement_Log` not the live `leads` tab; the 7-day-retention undercount limit). |
 
 ## C-7 — `HANDOVER.md` §5: `Movement_Log` "every 6h"
 
@@ -122,8 +122,8 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | C-2 | `HANDOVER.md` §2 vs itself + code | low | ✅ **RESOLVED `2026-09-10`** — §2 "Load order matters" paragraph rewritten to the real 23-tag order + `new Worker()` 24th file |
 | C-3 | all root docs vs code | low (dating) | ✅ **`HANDOVER.md` §1 RESOLVED `2026-09-10`** — 2 `.gs` added; `CLAUDE.md` already had them; `LOGIC_AUDIT.md` untouched (frozen) |
 | C-4 | `HANDOVER.md` §7.2 vs `CLAUDE.md` + reality | low | ✅ **RESOLVED `2026-09-10`** — §7.2 + `CLAUDE.md` testing bullet point at `tests/frontend-harness.html`; "not in CI" gap kept |
-| C-5 | `HANDOVER.md` §9.7 vs code | **medium** (largest stale claim) | ⚠ **headline fixed `2026-09-10`** (title + status banner + §2 row); deep §9 body sweep still open |
-| C-6 | `HANDOVER.md` §9.3/§9.3.1 vs code | low | ⚠ **§9.3 fixed `2026-09-10`** (`reportRmPerformanceNow`); §9.3.1 refs to the two removed fns still open |
+| C-5 | `HANDOVER.md` §9.7 vs code | **medium** (largest stale claim) | ✅ **RESOLVED `2026-09-10`** — title/banner + §2 row + §9.1 rewritten to the composite score; §9.4–§9.6 re-verified accurate |
+| C-6 | `HANDOVER.md` §9.3/§9.3.1 vs code | low | ✅ **RESOLVED `2026-09-10`** — §9.3 `reportRmPerformanceNow`; §9.3.1 rewritten (removed fns called out, current column described) |
 | C-7 | `HANDOVER.md` §5 vs §4.3 | trivial | ✅ **RESOLVED `2026-09-10`** — §5 rows + §1 prose → "4×/day at 00:00/06:00/12:00/18:00 IST" |
 | C-8 | `.gs` comments vs file layout | trivial | acknowledged by §6; touch-up when next edited |
 | C-9 | `LOGIC_AUDIT.md` vs code | N/A (frozen by design) | none |

@@ -509,7 +509,9 @@ test) Sheet, and use the browser console directly.
 
 ## 9. Repeat Offenders (the Daily_RM_Issues subsystem)
 
-Added 2026-09-01, iterated heavily that day and the next. This is the
+Added 2026-09-01, iterated heavily that day and the next, and **redesigned
+2026-09-04** — the ranking changed from "Avg Flagged" to the composite
+RM-performance score (§9.7; §9.1 has the current summary). This is the
 newest, least battle-tested part of the system — read this section before
 changing anything under it.
 
@@ -522,11 +524,26 @@ that: every night at 22:50 IST, `captureDailyRmIssues` scans **every
 currently open lead in the whole company** (deliberately unscoped by
 date or region — see its own header comment) and writes one row per
 lead currently flagged for any of the 5 SLA checks into `Daily_RM_Issues`.
-The dashboard's Repeat Offenders tab (`js/tab-repeat-offenders.js`) reads
-that accumulated history and ranks RMs/managers/regions by **Avg
-Flagged** (instances ÷ distinct leads) — a lead flagged on 5 different
-nights counts as 5 instances against 1 lead, which is exactly the
-"keeps coming back" signal the feature is built to surface.
+
+**How the tab ranks (post the §9.7 redesign, shipped 2026-09-04).** The
+Repeat Offenders tab (`js/tab-repeat-offenders.js` + `js/core-rm-performance.js`
+`computeRmPerformance`) no longer uses "Avg Flagged" (instances ÷ flagged
+leads — see §9.7 for why that had no real denominator). It now ranks by a
+**severity-weighted, workload-adjusted composite score**: for each of the
+4 *scored* rules (Not Updated / Follow-up Overdue / Behind on Today's
+Calls / Stuck 48h+ — "Inactive-RM Lead Added" is a routing issue, never
+scored), the RM's violation-day rate over their **eligible book** (every
+distinct lead eligible for that rule in the range, not just the flagged
+ones) is shrunk toward the peer average — `shrunkRate = n/(n+8)·rawRate +
+8/(n+8)·peerRate`, `RM_PERF_SHRINKAGE_K = 8` — so a tiny sample can't
+dominate. The weighted sum across the 4 rules is the **Score**, shown
+against the peer composite; a row is classified **Below Expectations** /
+**Watch — concentrated** / **On Track** / **Insufficient Data** (< 5
+distinct eligible leads). RM / Region / A1-TM / RH are **four independent
+computations**, each with its own peer population — none is rolled up by
+averaging another level. The eligible-population and instance counts are
+reconstructed from `Movement_Log` (`reconstructRmPerformanceObservations`),
+**not** read back from `Daily_RM_Issues` (which only holds flagged rows).
 
 ### 9.2 A real scale/reliability gotcha
 
@@ -610,58 +627,45 @@ missed capture (2026-09-06) can still be recovered via
 | `repairDailyRmIssuesMissingFieldsNow()` | One-off repair for rows written before `TL`/`group_source`/`source_bucket`/`lead_assigned_at` existed in the schema — backfills them from `Movement_Log` by matching `lead_id` and nearest timestamp. Safe to re-run; leaves already-complete rows untouched. |
 | `reportRmPerformanceNow()` | Logs a quick RM leaderboard straight to the Apps Script console — a lighter-weight sanity check than opening the dashboard. (Renamed from `reportRepeatOffenderRmsNow()` in the §9.7 redesign.) |
 
-### 9.3.1 "Total Leads" column — added 2026-09-03
+### 9.3.1 The lead-count denominator — "Unique Leads" (history)
 
-Every Repeat Offenders table (live tab and PDF export) now shows two
-distinct counts side by side: **Flagged Leads** (the original "Leads"
-column — distinct leads that got flagged for an issue at least once,
-`aggregateRepeatOffenders`' own count) and **Total Leads** (every lead
-assigned in the same range, flagged or not). Added after a user report
-that the PDF's per-RM lead count looked too high; investigation confirmed
-the flagged count was correct, but there was no way to see it against a
-real denominator — `aggregateRepeatOffenders`'s own comment already
-flagged this gap ("no total leads this RM owns denominator available").
+**Current state (post §9.7 redesign):** the tab shows **one** count per
+row — **Unique Leads**: the exact number of distinct leads eligible for
+at least one *scored* SLA rule in the current range/filters — this
+group's real book, computed inside `computeRmPerformance`
+(`js/core-rm-performance.js`) from the reconstructed `Movement_Log`
+observations. It is the denominator every rate in the Score column is
+taken over. The old separate **Flagged Leads** / **Total Leads** columns
+and the helpers behind them (`aggregateRepeatOffenders`,
+`totalLeadsByKey`) were **removed** in the 2026-09-04 redesign — a single
+"eligible book" count replaced both.
 
-`totalLeadsByKey()` (`js/tab-repeat-offenders.js`) computes it by
-cross-referencing `movementSnapshots` (Movement_Log's own history,
-`js/tab-movement.js` — **not** `Daily_RM_Issues`, which only ever
-contains flagged rows) against `lead_assigned_at`, using the exact same
-`keyFn`/`passesRepeatOffenderFilters` already used for the flagged side,
-so it groups identically across RM/Region/A1-TM/RH. Always
-assigned-date-based (no "captured on" concept applies to a plain roster
-count) — for a single-date table this is just that day's new
-assignments; for a multi-day range it's naturally the sum across days,
-since a lead has exactly one assignment date.
+**Why this history still matters** (the lessons carried forward into the
+current column):
 
-**First cut used `allParsedLeads` (the live "leads" tab) instead — wrong,
-switched same day.** The live leads tab only ever holds currently-OPEN
-leads (a closed/converted lead is removed from it entirely), so that
-version silently missed every lead that had since closed, undercounting
-even for a date well within the ordinary window. Movement_Log's own
-`snapshotOpenLeads_` (`MovementTracker.gs`) explicitly captures "every
-lead... open or closed", so switching the source fixed that — a lead
-stays visible here for as long as any of its snapshots survives
-Movement_Log's own retention, not just until it closes. A lead can appear
-in several snapshot rows (once per capture run it was still reachable
-for); `totalLeadsByKey` dedupes to one row per `lead_id` first, taking
-whichever snapshot is latest.
+- **A raw denominator is essential.** The whole reason "Total Leads" was
+  added on 2026-09-03 — a PDF per-RM count that "looked too high" turned
+  out correct, but there was no honest book to read it against — is
+  exactly what "Avg Flagged" lacked and what the composite Score now
+  builds in.
+- **Count from `Movement_Log`, not the live `leads` tab.** The first cut
+  (2026-09-03) used `allParsedLeads` (the live tab), which only ever
+  holds currently-OPEN leads, so it silently missed every lead that had
+  since closed. `snapshotOpenLeads_` (`MovementTracker.gs`) captures
+  "every lead… open or closed", so the count survives a lead closing.
+  `computeRmPerformance` still reconstructs from `Movement_Log` for the
+  same reason.
+- **Known limitation, unchanged:** `Movement_Log` is pruned to a 7-day
+  rolling window (`MOVEMENT_LOG_RETENTION_DAYS`) — a lead closed **and**
+  aged out past that window is not counted. Yesterday / Last 7 Days /
+  This Week are within it; a Custom or All-time range reaching further
+  back can undercount. Same category as §9.4's date-basis gotcha.
 
-**Known limitation, narrower now but not eliminated, same category as
-§9.4's date-basis gotcha**: Movement_Log is itself pruned to a 7-day
-rolling window (`MOVEMENT_LOG_RETENTION_DAYS`) — a lead closed AND aged
-out past that window is still not counted. Yesterday/Last 7 Days/This
-Week are normally within that window; a Custom range or All-time reaching
-further back can undercount. The PDF prints a short footnote explaining
-this (a static page has no hover tooltip); the live tab carries it as the
-column header's `title` tooltip instead.
-
-Wiring note: `renderRepeatOffenders()` used to fire as soon as
-`Daily_RM_Issues`/`RM_Hierarchy` resolved, independent of the separate
-`fetchMovementLog()` call — Total Leads needed that data too, so
-`core-fetch-and-render.js` now threads the SAME in-flight
-`fetchMovementLog()` promise into Repeat Offenders' own `Promise.all`
-(a promise supports multiple independent `.then()` subscribers, so this
-does not trigger a second network call).
+Wiring note (still current): `renderRepeatOffenders()` needs the
+`Movement_Log` data, so `core-fetch-and-render.js` threads the SAME
+in-flight `fetchMovementLog()` promise into Repeat Offenders' own
+`Promise.all` — a promise takes multiple `.then()` subscribers, so this
+adds no second network call.
 
 ### 9.4 The Time-range filter's date-basis split (dashboard side) — read before touching `js/tab-repeat-offenders.js`
 

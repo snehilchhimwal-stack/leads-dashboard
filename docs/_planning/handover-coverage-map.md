@@ -131,34 +131,43 @@ the redesign-renamed names flagged for Phase 5 verification:
 
 ---
 
-## Consolidated Phase 5 (`DOC-039`) verification list
+## Consolidated `HANDOVER.md` verification list
 
-1. **§9.7** — rewrite/retire the "in progress, 2026-09-04" RM Performance
-   redesign section to the shipped state (`computeRmPerformance` +
-   `computeRmPerformanceByRegion` + `RM_PERF_NON_RM_ROLES` +
-   `rmPerfCanonicalRmName`). Highest priority — the largest stale claim.
-2. **§9.1** — the "ranks by Avg Flagged" framing is pre-redesign.
-3. **§9.3 / §9.3.1** — verify `reportRepeatOffenderRmsNow()` /
-   `aggregateRepeatOffenders` / `totalLeadsByKey()` against the current
-   `js/core-rm-performance.js` + `js/tab-repeat-offenders.js` +
-   `DailyRmIssueLog.gs` function set; update the names.
-4. **§2** — add `js/rm-performance-worker.js` to the layout table (the
-   24th JS file, loaded as a Worker).
-5. **§5** — add `Send_Log`, `Region_Recipients`, `AllIssues_Log`,
-   `Overnight_Log`, `Comment_History` to the tab table; correct the
-   `Movement_Log` cadence framing.
-6. **§6** — reconcile the duplication-pairs list against `LOGIC_AUDIT.md`
-   Part 4's full set (`REGION_GROUP_MAP` ↔ `_`, IST helpers, `RM_PERF_*`
-   ↔ `_GS_`).
-7. **§7.1 / §7.2** — note the Node CI harness now runs the `.gs` suite on
-   every push; `tests/frontend-harness.html` now exists (retire "not
-   built yet").
-8. **§1** — add `OpsChecklistRunner.gs` + `LeadFollowupsStaleness.gs` to
-   the `.gs` list.
-9. **§4.2 / §4.4** — GitHub Pages source branch/folder still not
-   independently confirmed.
-10. **§4.3** — confirm the one-time-setup table is complete vs the actual
+Most items closed 2026-09-10 (`t-tf-7e4d0dffdf6c`, `t-tf-5ad22d8e4c2e`).
+
+1. ~~**§9.7**~~ — **DONE** (`t-tf-5ad22d8e4c2e` P3): title +
+   **Status: shipped and live** banner pointing at the catalog records;
+   the §9.7.1/§9.7.2 sub-notes are dated design-record, kept.
+2. ~~**§9.1**~~ — **DONE**: rewritten to the composite RM-performance
+   score (shrinkage `K=8`, 4 independent RM/Region/A1-TM/RH computations,
+   `Movement_Log`-reconstructed eligible book). "Avg Flagged" gone from
+   the prose.
+3. ~~**§9.3 / §9.3.1**~~ — **DONE**: §9.3 `reportRmPerformanceNow()`;
+   §9.3.1 rewritten (retitled; describes the current single "Unique
+   Leads" column; `aggregateRepeatOffenders` / `totalLeadsByKey` called
+   out as removed; the still-valid lessons kept). §9.4/§9.5/§9.6 re-read
+   against current source — **accurate, unchanged**.
+4. ~~**§2**~~ — **DONE** (`t-tf-7e4d0dffdf6c`): `rm-performance-worker.js`
+   + the full 23-tag load order + the `new Worker()` note.
+5. **§5** — ⚠ partial: the `Movement_Log` "every 6h" cadence is fixed
+   (`t-tf-7e4d0dffdf6c`); adding `Send_Log` / `Region_Recipients` /
+   `AllIssues_Log` / `Overnight_Log` / `Comment_History` to the §5 tab
+   table is **still open** (they all have `SHEET-` records; §5 is a
+   convenience table).
+6. **§6** — ⚠ open: reconcile the duplication-pairs list against
+   `LOGIC_AUDIT.md` Part 4's full set (`REGION_GROUP_MAP` ↔ `_`, IST
+   helpers, `RM_PERF_*` ↔ `_GS_`). `RELATIONSHIP_MAP.md` §2 already has
+   the full set; §6 is the narrative copy.
+7. ~~**§7.1 / §7.2**~~ — **DONE** (`t-tf-7e4d0dffdf6c` + P2): §7.1 Node CI
+   harness; §7.2 now "in CI headless (non-blocking)".
+8. ~~**§1**~~ — **DONE** (`t-tf-7e4d0dffdf6c`): `OpsChecklistRunner.gs` +
+   `LeadFollowupsStaleness.gs`, "13 production `.gs` files".
+9. **§4.2 / §4.4** — ⚠ open: GitHub Pages source branch/folder still not
+   independently confirmed (needs repo-settings access).
+10. **§4.3** — ⚠ open: confirm the one-time-setup table vs the actual
     `setup*()` set (`setupRmHierarchy()` has no own row).
+    `architecture/apps-script-triggers.md` (P2) is the verified trigger
+    index — §4.3's setup table could point at it.
 
 > These are **not** blockers on the Phase 3 records — every record's
 > `## Handover relationship` already states whether its section is
