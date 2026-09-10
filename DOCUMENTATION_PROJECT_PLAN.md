@@ -91,6 +91,642 @@ condition is met, not decided further here.
 
 ---
 
+## Governance Model (added 2026-09-10) — Traceability, Validation, and Change-Control System
+
+**Requested by explicit instruction, 2026-09-10**: review the Documentation
+Project as a living documentation, traceability, architecture, validation,
+and handover system — not a one-time audit. This section is that review,
+plus the resulting governing framework. It supersedes nothing above except
+where explicitly noted; the original Goals, Maintenance Model, and
+Documentation Architecture Decision sections stay intact and this section
+builds directly on them.
+
+**Evidence discipline used throughout this section**: every claim is
+labeled **Confirmed** (verified live against the actual repo/tasks.json on
+2026-09-10), **Inferred** (a reasonable read of confirmed facts, not itself
+directly observed), or **Unknown/Evidence Required** (genuinely not
+determinable from what exists today). Nothing below claims automation,
+tracking, or detection exists unless directly confirmed. Where this section
+recommends something, it's labeled **Recommended**, not stated as fact.
+
+### Current-State Audit (2026-09-10)
+
+**Confirmed, direct verification:**
+- All 50 `DOC-001` through `DOC-050` tasks (To-Do Dashboard, goal
+  `g-docproject01`) are **Not Started**. Zero of Phase 1 through Phase 6
+  has actually run. This includes `DOC-014` (create the `docs/` directory
+  structure) and `DOC-021` (build the central index skeleton) — the
+  catalog's own physical scaffolding doesn't exist yet, let alone its
+  content.
+- `docs/` (the repo folder) contains exactly one file:
+  `Lead_Lifecycle_Tracking.pptx`, unrelated to this project. No
+  `INDEX.md`, no `js-modules/`, no `gs-modules/`, no `architecture/`,
+  `validation/`, `handover/`, or `changes/` subfolder exists.
+- `CI-001` through `CI-005` (To-Do Dashboard, goal `g-cidoccoverage01`):
+  all **Completed** 2026-09-09. Real, working, verified: `test/check-docs-coverage.js`
+  exists, is wired into `.github/workflows/test.yml`, runs on every push,
+  warn-only (never fails a build). See its own dedicated evaluation below
+  — what it actually checks is much narrower than "documentation
+  coverage" as a phrase might suggest.
+- `CONSOLIDATED` (goal `g-docproject01`): **Completed** 2026-09-09. Real:
+  decided `HANDOVER.md` §1-§3 are the living architecture description
+  until `docs/RELATIONSHIP_MAP.md` + component records exist; added a
+  freshness check for `HANDOVER.md`'s own "updated" date to the same
+  script CI-001-005 built.
+- `TASKFLOW-001`/`TASKFLOW-002` (goal `g-taskflow01`): **Completed**
+  2026-09-09 — lean task-tracking definition, and `update-tasks.ps1` (a
+  local tool, To-Do Dashboard project, not part of this repo). `TASKFLOW-003`
+  (persist the rule as a standing memory) and `TASKFLOW-004` (roll out and
+  validate): **Not Started**.
+- `HANDOVER.md`: exists, 2026-09-09 header update (this session, separate
+  from this task) confirms it is being actively maintained as intended.
+  Its purpose is unchanged — narrative onboarding + incident history —
+  per explicit instruction not to redefine it.
+- `LOGIC_AUDIT.md`: exists, 2338 lines, all 7 parts present in the file
+  body (confirmed: `## Part 1 of 7` through `## Part 7 of 7`, the last
+  titled "Findings, Plain-English Walkthrough + Final Assembled Report").
+  **Finding, not invented — a real, current inconsistency**: the file's
+  own header (lines 1-7) says *"Parts complete so far: **Part 1 only.**"*
+  — factually wrong as of today; all 7 parts are actually present and
+  git history (`0d69729`, "Add LOGIC_AUDIT.md Part 7: final assembled
+  report (audit complete)") confirms the audit was completed and closed
+  out. This is exactly the class of drift this whole governance model
+  exists to catch — logged in the Dead-End Register below, not fixed
+  here (explicit instruction: do not touch `LOGIC_AUDIT.md`'s content as
+  part of this task; flagging it is this section's job, fixing it is a
+  one-line follow-up for a human or a separate, explicitly-scoped task).
+
+**Inferred:**
+- Because Phase 1-6 never ran, none of `DOCUMENTATION_PROJECT_PLAN.md`'s
+  own file-count claims (11 `.gs` files, 23 `js/*.js` files) were ever
+  corrected in the plan's OWN body outside the one paragraph `CI-005`
+  added to Maintenance Model — the Goals/Phase task descriptions
+  throughout this document likely still cite the stale 11/23 counts in
+  places `CI-005`'s edit didn't touch. Not individually re-audited line
+  by line as part of this pass — flagged as a `DOC-001`-adjacent
+  follow-up (re-inventory is literally `DOC-001`'s own job, once worked).
+
+**Unknown/Evidence Required:**
+- Whether any `docs/`-shaped documentation exists ANYWHERE else in the
+  repo outside the `docs/` folder itself (e.g. inline `.md` files at the
+  repo root not yet linked into this system) beyond what `CLAUDE.md`,
+  `HANDOVER.md`, `LOGIC_AUDIT.md`, `OPS_CHECKLIST.md`, and
+  `LEAD_FOLLOWUPS_STALENESS.md` already represent (these 5 are the
+  confirmed root-level `.md` files as of this session's own work on
+  them; not re-verified exhaustively here).
+
+### The Six Original Goals — Status Check
+
+Per the plan's own Goals section (line 17 above):
+
+| # | Goal | Status | Basis |
+|---|---|---|---|
+| 1 | Answer a narrow question about one component without reading the whole project | **Not yet satisfiable** | No component records exist to answer from. |
+| 2 | Stable, cross-referenceable IDs per component | **Not yet satisfiable** | No IDs have been assigned (Phase 2/3 not run). |
+| 3 | Dependencies/data lineage answerable from one record | **Not yet satisfiable** | Same — no records exist. |
+| 4 | Sheet tab retention/lifecycle explicit, TBD + task where unknown | **Not yet satisfiable** | `SHEET-XXX` records don't exist yet; real retention facts already known from this session's own work (`Movement_Log` = 7 days, `Daily_RM_Issues` = 7 days) are sitting in `HANDOVER.md`/code comments, not yet transcribed into a queryable record. |
+| 5 | A durable ongoing *process*, not a one-time snapshot | **Partially satisfied, narrowly** | `CI-001–CI-005` give a real (if narrow — see below) mechanical check; `CONSOLIDATED` gives a real (if narrow) freshness check for `HANDOVER.md`. Neither is the full registering/updating/validating/versioning/deprecating/retiring process `DOC-022` through `DOC-024` are supposed to define — those are also still Not Started. |
+| 6 | Leave `HANDOVER.md`/`LOGIC_AUDIT.md` intact, add a third artifact | **Satisfied** | Confirmed — neither file's purpose was redefined; `CONSOLIDATED` explicitly reaffirmed this. |
+
+**Plain reading**: the project has a genuinely good *plan* and, as of
+today, a genuinely working (if narrow) *mechanical check* — but the thing
+the six goals are actually about, the component catalog itself, does not
+exist. This governance model's job is to make sure that when it DOES get
+built (Phase 1-6, still ahead), it stays honest going forward — it cannot
+retroactively make the catalog exist today.
+
+
+### Component ID Taxonomy (extended)
+
+The original scheme (`DASH-XXX`, `TAB-XXX`, `JS-XXX`, `GS-XXX`, `FN-XXX`,
+`BTN-XXX`, `SHEET-XXX`, `DATA-XXX`, `EXT-XXX`) covers structural
+containers and functions well but has no room for cross-cutting concerns
+(exceptions, business rules, config, non-button UI, workflows as their
+own addressable thing). Extended set, **Recommended**:
+
+| Prefix | Covers | New or existing |
+|---|---|---|
+| `DASH-XXX` | A whole dashboard/app | Existing |
+| `TAB-XXX` | A tab/page/view | Existing |
+| `JS-XXX` | A client-side `.js` module | Existing |
+| `GS-XXX` | An Apps Script `.gs` module | Existing |
+| `FN-XXX` | A significant function — lives as a sub-table inside its owning `JS-XXX`/`GS-XXX`, per this plan's own "avoid a 150+-file explosion" decision, not a separate file | Existing |
+| `BTN-XXX` | A button / user action — sub-table inside its owning `TAB-XXX` | Existing |
+| `SHEET-XXX` | A Google Sheet tab | Existing |
+| `DATA-XXX` | A data flow: origin → transform → storage → consumer | Existing |
+| `EXT-XXX` | An external integration / API (Sheets API, Gmail, jsPDF, OAuth) | Existing |
+| `HTML-XXX` | A distinct structural region of `dashboard.html` (not every `<div>` — see threshold) | New |
+| `CSS-XXX` | A named non-trivial style concern (a component's visual system, not every selector) | New |
+| `CLASS-XXX` | A real reusable JS class/constructor — this codebase is mostly function-based, so expect few, not zero | New |
+| `API-XXX` | A specific API *surface* beyond "the whole integration" `EXT-XXX` already covers (one call pattern with its own quota/retry behaviour). Likely folds into `EXT-XXX` in practice — keep as an escape hatch, not a mandate to split | New |
+| `UI-XXX` | A non-button UI element with real behaviour (a filter control, a modal, a chart). Buttons stay `BTN-XXX` | New |
+| `RANGE-XXX` | A specific critical cell range within a `SHEET-XXX` where the range, not the whole tab, is the meaningful unit (a header-row banner, a lookup range) | New |
+| `TRIGGER-XXX` | An Apps Script time-based/event trigger: schedule, target function, `setupXxx()` owner | New |
+| `FLOW-XXX` | A cross-file workflow (e.g. "overnight email generation") spanning several `JS-XXX`/`GS-XXX`/`SHEET-XXX`. Broader than `DATA-XXX`'s pure lineage | New |
+| `RULE-XXX` | A named business rule/decision (RM Performance shrinkage formula, leadership-exclusion criteria) — distinct from the function that implements it | New |
+| `EXC-XXX` | A known named exception/failure mode and its handling | New |
+| `CFG-XXX` | A configuration constant with real operational weight (`RM_PERF_MIN_VOLUME_LEADS`, `CONFIG.LEAD_GRACE_HOURS`, trigger `nearMinute` pins) | New |
+
+`DOC-XXX` is deliberately NOT in this list: it is already the To-Do
+Dashboard's own Documentation-Project *task* numbering (`DOC-001..050`).
+Reusing it for component records would collide "a task about
+documentation" with "a documentation record about a doc file." Doc files
+that need a component record use `DOCF-XXX` (or fold into the
+`documentation/` architecture record) instead.
+
+**Threshold for a separate record** (the plan asked this be made explicit,
+not left implicit). A thing gets its own record when at least one holds:
+
+1. It has its own real failure mode someone would need to look up (a
+   distinct `EXC-XXX`; a routine try/catch that logs and moves on is not).
+2. It is referenced from more than one other component (the whole point
+   of an ID is being pointed at from elsewhere).
+3. It has non-obvious business logic a reader could not infer from its
+   name (`RULE-XXX` territory).
+4. It has its own lifecycle / retention / ownership distinct from its
+   container (a `SHEET-XXX`'s retention is real; a single column inside
+   it almost never needs its own record).
+
+A single `<div>`, a single CSS selector, a one-line helper called from
+exactly one place, a routine log-and-continue catch — none clear the
+bar. They are documented as PART of their owning record (its "Important
+Logic" / "Exceptions" fields), never spun out. That is the direct answer
+to "do not force every implementation detail into a separate record"
+while still keeping traceability *to* those details from the record that
+owns them.
+
+### Central Tracking Schema
+
+**Recommended** location: `docs/INDEX.md` as one table, one row per
+component; split by type into `docs/INDEX.md` → `docs/index-js.md` etc.
+only if/when it stops being readable as one table (a judgment call for
+whoever builds `DOC-021`). **Confirmed: no such file exists yet** — this
+is a schema to build against, not an audit of an existing one.
+
+| Field | Purpose |
+|---|---|
+| ID | Stable identity (`JS-014`, `SHEET-003`, …) |
+| Type | One taxonomy prefix above |
+| Goal | Which of the 6 goals (or a later goal) this supports |
+| Parent | Hierarchical container (`FN-XXX` → its `JS-XXX`; `BTN-XXX` → its `TAB-XXX`) |
+| File/Location | Real path, e.g. `js/tab-repeat-offenders.js` |
+| Owner | Responsible person. **Recommended default: `Snehil`** for everything until a real team exists — blank invites "nobody's job" |
+| Purpose | One sentence: why it exists |
+| Description | What it does |
+| Inputs / Outputs | What it consumes / produces |
+| Dependencies / Consumers | What it needs / what needs it (IDs, not prose) |
+| Data Lineage | Source → processing → destination, where applicable |
+| Logic | The non-obvious behaviour worth recording |
+| Exceptions / Error Handling | Known failure modes and what happens |
+| UI Relationship | Which `BTN-XXX`/`UI-XXX`/`TAB-XXX` invokes it |
+| Architecture Link | Which `DASH-XXX`/`FLOW-XXX` it belongs to |
+| Source of Truth | The actual file/line this record describes — link, never a copy |
+| Status | See Status Model below |
+| Validation Method / Evidence / Status | How correctness was established, the proof, current verification state |
+| Version/Commit | The commit this record was last verified against |
+| Last Verified | Date |
+| Change Reference | The commit/task that last required this record to change |
+| Downstream Impact | Known components affected if this one changes |
+| Revalidation Trigger | The condition that makes this stale — see Definition of Stale |
+| Handover Status | Whether `HANDOVER.md` needs a matching update and whether it has one |
+| Retention/Lifecycle | Especially for `SHEET-XXX`/`DATA-XXX` |
+| Remediation Owner | Who fixes a gap found against this record |
+| Next Action | What is actually left to do, if anything |
+| Closure Evidence | What proves this record is legitimately Closed |
+
+**Relationships, not duplication**: a `FN-XXX`'s Parent points at its
+`JS-XXX`; the `JS-XXX` links to the sub-table rather than re-listing every
+function's full detail. A `SHEET-XXX`'s Consumers field lists the
+`JS-XXX`/`GS-XXX` IDs that read it; those files' records link back rather
+than re-describing the tab.
+
+### Source-of-Truth Table
+
+**Recommended**, stated explicitly since the plan asks for it and one doc
+contradicting another (`LOGIC_AUDIT.md`'s stale header, found in the
+audit above) is exactly the failure mode this guards against.
+
+| Concern | Authoritative source | Why |
+|---|---|---|
+| Source code / current behaviour | The actual `.gs` / `js/*.js` files in this repo | Nothing else can be — any doc describing behaviour differently is wrong, not a competing truth |
+| Architecture (current, living) | `HANDOVER.md` §1–§3, until `docs/RELATIONSHIP_MAP.md` + component records exist | `CONSOLIDATED`'s explicit dated decision |
+| Requirements / task status | `tasks.json` (To-Do Dashboard) | The only place tasks open/close. `DOCUMENTATION_PROJECT_PLAN.md` says what a `DOC-XXX` task is FOR; `tasks.json` says whether it's done |
+| Validation (a fix/feature works) | The relevant `Tests_*.gs`, `tests/frontend-harness.html`, or a real CI run — never a description of testing without a link to the actual test | Matches this repo's existing Testing discipline |
+| Change history | `git log` | Never a hand-maintained changelog that can drift from what happened |
+| Component documentation (once it exists) | `docs/<type>/<ID>-<slug>.md` + its `docs/INDEX.md` row | The one place a component's own record lives — not duplicated into `HANDOVER.md` or a task description |
+| Handover / onboarding narrative | `HANDOVER.md` | Unchanged, per explicit instruction |
+| Audit history (point-in-time) | `LOGIC_AUDIT.md`, frozen as of its own completion | Unchanged, per explicit instruction. Its header needs a one-line factual fix (Dead-End Register) but its ROLE as the frozen 2026-09-0x snapshot is not in question |
+| Doc-coverage / freshness CI status | The actual GitHub Actions run output for `test/check-docs-coverage.js` | Not a written claim anywhere — the real run is the only proof |
+
+**No competing "current" versions.** `DOCUMENTATION_PROJECT_PLAN.md`
+describes the PLAN; it is never the source of truth for whether a given
+component's documentation is up to date — that is `docs/INDEX.md`'s "Last
+Verified" field, once it exists.
+
+### Component Record Standard (minimum template)
+
+The plan already has per-type templates (Dashboard / Tab / JS module / GS
+module / Sheet / Data flow / Integration, near the end of this file).
+Those are a good base but are **missing** several fields this governance
+model requires on EVERY record type, not just Sheets: `Exceptions` and
+`Error Handling` as their own fields, `Validation` (method + evidence +
+status), `Source of Truth` (the file/line link), `Version/Change
+Reference`, `Owner` explicitly, `Lifecycle/Retention` on every type,
+`Handover Relationship`, `Revalidation Trigger`, `Last Verified`,
+`Current Status`. When `DOC-016` is worked, extend the existing templates
+with these — do not replace them.
+
+Minimum every component record must answer without a full codebase read:
+
+```
+# <ID> — <Name>
+Type:            <taxonomy prefix>
+Location:        <real path (+ line/anchor if a sub-unit)>
+Owner:           <person> (default: Snehil)
+Status:          <Status Model state>
+Last Verified:   <date> against commit <hash>
+
+## Purpose / reason to exist
+(one paragraph — MANDATORY. A record that only describes implementation
+without saying why the thing exists is not a valid record.)
+
+## Responsibilities
+## Inputs            (+ where they originate — IDs)
+## Outputs           (+ where they go — IDs)
+## Dependencies      (IDs)
+## Consumers         (IDs; "none" is a finding, not a blank)
+## Data lineage      (source → processing → destination, if applicable)
+## Important logic / business rules   (link RULE-XXX; do not restate code)
+## Exceptions        (EXC-XXX or inline: condition → handling → failure behaviour)
+## UI relationships  (BTN-XXX / UI-XXX / TAB-XXX)
+## Architecture relationship  (DASH-XXX / FLOW-XXX)
+## Related components (IDs + why related)
+## Source of truth   (file/line link — never a code copy)
+## Validation        (method | evidence link | current status)
+## Version / change reference  (commit + task that last touched this)
+## Lifecycle / retention  (for SHEET-XXX/DATA-XXX: real value or explicit TBD + task)
+## Handover relationship  (does HANDOVER.md cover this? is that section current?)
+## Revalidation trigger   (the specific condition that makes this record stale)
+```
+
+Rule: **link to the implementation, document the behaviour, purpose,
+relationships, and verification** — do not paste source code into a
+record unless a specific short excerpt is genuinely the clearest way to
+state a rule.
+
+### Repository Structure (recommended — smallest that gives full traceability)
+
+The plan's existing `Final Documentation Structure` section already lays
+out `docs/dashboards/ tabs/ js-modules/ gs-modules/ sheets/ integrations/
+data-flows/ _templates/ _planning/ _archive/`. That is close to right and
+should NOT be expanded into a folder per taxonomy prefix (`html/ css/
+functions/ exceptions/ …` — the structure the request offers as a
+candidate) — that many folders is maintenance overhead for near-empty
+directories, and `FN-XXX`/`BTN-XXX`/`EXC-XXX`/`RULE-XXX`/`CFG-XXX` are
+sub-tables inside their owning records anyway, not files.
+
+**Recommended: keep the plan's structure, add exactly three folders:**
+
+```
+docs/
+├── INDEX.md                     (central tracking table — the schema above)
+├── NAMING_CONVENTIONS.md        (the extended taxonomy + threshold rule)
+├── RELATIONSHIP_MAP.md          (the living cross-component / architecture view)
+├── architecture/                (NEW — DASH-XXX + FLOW-XXX records; the "living architecture" HANDOVER.md §1–§3 hands over to at graduation)
+├── validation/                  (NEW — one evidence record per validated component/flow: what test, what run, what commit)
+├── changes/                     (NEW — one short record per change that touched ≥1 documented component: what changed, which IDs went stale, revalidation task id)
+├── dashboards/  tabs/  js-modules/  gs-modules/  sheets/  integrations/  data-flows/
+├── _templates/  _planning/  _archive/
+```
+
+- **Individual component record** holds: everything in the template above.
+- **`INDEX.md`** holds: one row per component (the tracking schema), and
+  nothing that isn't in a record — it is an index, not a second copy.
+- **`architecture/`** holds: `DASH-XXX` and `FLOW-XXX` records + the
+  narrative that is genuinely architecture-level, not component-level.
+- **`validation/`** holds: evidence records — "`GS-011` verified by
+  `Tests_DailyRmIssueLog.gs` run in CI #NN, commit `hash`, 2026-09-10."
+- **`changes/`** holds: change records — the output of the Change-Control
+  Mechanism below.
+- **`HANDOVER.md`** keeps: onboarding narrative, incident history (§8),
+  the "why does it look like this" story. It does NOT become the catalog.
+- **`LOGIC_AUDIT.md`** keeps: its frozen 7-part point-in-time findings.
+
+### Status Model (lifecycle — adapted, not mechanical)
+
+The request offers an 11-state chain. For this project's actual size, a
+**7-state** model is enough and less ceremony to keep honest:
+
+| State | Meaning |
+|---|---|
+| `Not Started` | No record exists |
+| `Drafted` | Record exists, content written, not yet checked against code |
+| `Validated` | Content verified against the real implementation + a stated validation method; evidence recorded |
+| `Closed + Monitored` | Validated AND architecture link verified AND handover checked AND a revalidation trigger is written down. This is the only "done" state |
+| `Stale` | A revalidation trigger fired (see Definition of Stale) — record is no longer trusted, a revalidation task exists |
+| `Reopened` | Someone is actively correcting a Stale record |
+| `Retired` | The component no longer exists; record moved to `docs/_archive/` with the commit that removed it |
+
+`Closed + Monitored` is deliberately not terminal — a component can leave
+it for `Stale` at any time and must be able to. That is the whole point
+of the model: **no record is permanently trusted.**
+
+### Definition of Done (a record cannot be `Closed + Monitored` unless…)
+
+1. The record file exists at `docs/<type>/<ID>-<slug>.md`.
+2. Its `## Purpose / reason to exist` is filled — not just implementation.
+3. It has a stable ID that appears as a row in `docs/INDEX.md`.
+4. `## Source of truth` links to the real file/line.
+5. `## Dependencies` and `## Consumers` are filled with IDs (`none` is an
+   explicit, allowed answer; blank is not).
+6. `## Data lineage` is filled where the component touches data.
+7. `## Validation` names a method AND links evidence AND states a status.
+8. `## Architecture relationship` points at a real `DASH-XXX`/`FLOW-XXX`.
+9. `## Handover relationship` states whether `HANDOVER.md` needs to cover
+   this and whether the relevant section is current.
+10. `## Version / change reference` names the commit it was verified at.
+11. `## Revalidation trigger` names a specific condition, not "when
+    things change."
+12. `## Owner` names a person.
+13. `docs/INDEX.md`'s row for this ID is updated to `Closed + Monitored`
+    with a `Last Verified` date.
+14. A `docs/changes/` record exists if this closure was prompted by a
+    code change (so the loop that created the work is itself recorded).
+
+A `Not Started` DOC-XXX *task* being marked "Done" in `tasks.json`
+without producing a record that meets all 14 is **not done** — it is
+conditionally closed at best, and the task audit below treats it that way.
+
+### Definition of Stale (objective triggers — a `Closed + Monitored` record becomes `Stale` when…)
+
+Any of these, detected by the Change-Control Mechanism:
+
+- Its source file changed (any commit touching the path in `## Location`).
+- A file it lists in `## Dependencies` changed its interface (exported
+  function signature, message shape, returned object shape).
+- A `SHEET-XXX` it touches changed columns, retention, or writers.
+- A `RULE-XXX`/`CFG-XXX` it implements changed value or logic.
+- A `TRIGGER-XXX` it belongs to changed schedule.
+- `HANDOVER.md`'s section that covers it changed, or went stale per
+  `test/check-docs-coverage.js`'s own freshness check.
+- The commit named in `## Version / change reference` is now more than
+  N commits / one release behind `HEAD` on the paths it covers (N is a
+  tuning knob for `DOC-045`, not fixed here).
+- Its validation evidence points at a test that no longer exists or a CI
+  run that has aged out.
+
+A record with an unfilled field from the Definition of Done that is later
+discovered is also `Stale` retroactively — it was never legitimately
+`Closed + Monitored`.
+
+### Change-Control Mechanism
+
+**What exists today (Confirmed):** nothing that does this. `git log`
+records what changed. `test/check-docs-coverage.js` checks whether a
+`js/*.js`/`.gs` FILE has a matching `docs/` record file and whether
+`HANDOVER.md`'s self-reported date is old. Neither knows anything about
+which *records* a given change should have made stale, because no records
+exist and there is no code that maps a changed path to affected IDs.
+
+**Recommended mechanism** (build target for `DOC-045`; the request's
+CHANGE-DETECTED → … → CLOSED+MONITORED loop, made concrete for this repo):
+
+1. **DETECT** — a push happens. The existing CI job already runs on every
+   push. Add a step: for each path in the push's diff
+   (`git diff --name-only <base>..<head>` — needs `fetch-depth: 0` on
+   `actions/checkout`, currently shallow; that is the one real
+   infra change this needs), resolve it to component IDs.
+2. **RESOLVE COMPONENT ID** — look the changed path up in `docs/INDEX.md`'s
+   `File/Location` column. A path with no row = an **undocumented
+   component** finding (the check CAN detect this once `INDEX.md` exists —
+   it cannot today).
+3. **DIRECT + DOWNSTREAM DEPENDENCIES** — from that row, read
+   `Dependencies` and `Consumers`; from each of those rows, read theirs,
+   one hop (not transitive-closure — one hop keeps the output actionable).
+4. **RELATED DOCUMENTATION / HANDOVER / VALIDATION** — for every ID in the
+   set: its own record, its `docs/validation/` evidence record, and the
+   `HANDOVER.md` section named in its `## Handover relationship`.
+5. **MARK STALE** — set those `docs/INDEX.md` rows to `Stale`.
+6. **CREATE/UPDATE REVALIDATION TASK** — one `tasks.json` task per push
+   that hit ≥1 documented component: "Revalidate <IDs> after <commit>",
+   opened via `update-tasks.ps1` (TASKFLOW-002's tool) so it costs one
+   call, not five. Assign `Owner` from the affected records (default
+   Snehil).
+7. **UPDATE COMPONENT → VALIDATE → RECORD EVIDENCE** — the human/session
+   working the revalidation task edits the record, re-checks it against
+   code, writes a fresh `docs/validation/` evidence line.
+8. **UPDATE RELATIONSHIP MAP + INDEX** — `docs/RELATIONSHIP_MAP.md` and
+   the `INDEX.md` rows go back to `Closed + Monitored` with a new
+   `Last Verified` + commit.
+9. **UPDATE HANDOVER** — if `## Handover relationship` said a section
+   needed updating, update it in that revalidation, not "later" (this is
+   already `CLAUDE.md`'s stated rule; the mechanism just makes it a
+   tracked line item instead of a hope).
+10. **CHECK DOWNSTREAM → REVALIDATE → CLOSE + MONITOR** — repeat 3–9 for
+    anything the revalidation itself changed; when nothing new goes
+    stale, the loop is closed and monitoring resumes.
+11. **A `docs/changes/<date>-<commit>.md` record** is written capturing:
+    what changed, which IDs went stale, which revalidation task, closure
+    evidence. This is the audit trail the loop produces.
+
+**Automation honesty:** steps 1–2, 5–6 are genuinely automatable inside
+the existing CI job once `INDEX.md` exists and `checkout` is deep — an
+extension of `test/check-docs-coverage.js`, not new infrastructure.
+Steps 7–10 are human/session work by nature (someone has to actually
+re-verify). Do not describe this as "automated revalidation" — it is
+**automated detection + tracked human revalidation.**
+
+### CI-001–CI-005 Evaluation
+
+`test/check-docs-coverage.js` (Confirmed by direct read — this session
+wrote it) does exactly two things and exits 0 regardless:
+
+**Check 1 — file coverage.** Lists every `js/*.js` file and every
+production `.gs` file (`Tests_*.gs` and `RmHierarchy.private.gs`
+excluded), and reports any with no `docs/js-modules/*-<slug>.md` /
+`docs/gs-modules/*-<slug>.md` file. File lists read live from the
+filesystem; match is by filename-slug suffix.
+
+**Check 2 — HANDOVER.md freshness** (added by `CONSOLIDATED`). Parses the
+`updated YYYY-MM-DD` date out of `HANDOVER.md`'s header prose; warns if
+it is more than 14 days old. Date-based only — not tied to whether any
+specific code change touched it.
+
+Against the request's checklist of what a coverage control *should*
+detect:
+
+| Should detect | Does it? | Detail |
+|---|---|---|
+| Undocumented source files | **Partial — YES for `js/*.js` and `.gs` only** | The two file types Check 1 walks. Nothing else. |
+| Undocumented functions | **No** | Check operates at file granularity; has zero `FN-XXX` awareness. |
+| Undocumented components (broadly) | **No** | 2 of ~20 taxonomy types. No `TAB`/`BTN`/`UI`/`SHEET`/`FLOW`/`RULE`/`EXC`/`TRIGGER`/`CFG`/`HTML`/`CSS`/`DATA`/`EXT` coverage at all. |
+| Undocumented Sheet tabs | **No** | `SHEET-XXX` is not checked. |
+| Missing stable IDs | **No** | Match is slug-suffix; it never verifies an ID was assigned, is unique, or is in `INDEX.md`. |
+| Broken references | **No** | No cross-reference validation of any kind. |
+| Stale documentation | **Partial — HANDOVER.md only** | Check 2, and only as "its own date is >14d old," not "code changed and this wasn't touched." No staleness check for any `docs/` record (none exist). |
+| Changed implementation without doc review | **No** | No git-diff step. Deliberately avoided git history (shallow clone). This is the single biggest gap versus the request's intent. |
+| Missing validation | **No** | No concept of validation in the script. |
+| Missing handover updates where required | **No / Partial** | Check 2 measures elapsed time, not whether a specific required update happened. |
+| Retired/deleted components still documented | **No** | Check 1 walks real-file → record only. It never walks record → real-file, so a `docs/` record pointing at a deleted file is invisible to it. |
+| Doc records pointing to nonexistent implementation | **No** | Same one-directional gap. |
+
+**Verdict (Confirmed):** CI-001–CI-005 delivered a real, working, honest
+*warn-only file-coverage tripwire for two file types* plus a
+*HANDOVER.md age warning*. That is genuinely useful and it is exactly
+what CI-001's own design note scoped. It does **not** "close the coverage
+gap described by the Documentation Project Plan" in the broad sense — it
+closes the narrowest, most mechanical slice of it. The plan's own
+Maintenance Model paragraph (as amended by CI-005) is accurate about
+this; the request's checklist is the correct list of what still isn't
+covered, and every unchecked row above is a real future work item, most
+of them blocked on `INDEX.md` existing first.
+
+### CONSOLIDATED Evaluation
+
+**What it did (Confirmed):** (a) decided `HANDOVER.md` §1–§3 is the
+living architecture description until `docs/` takes over; (b) added
+Check 2 above; (c) put the "update `HANDOVER.md` in the same commit"
+rule into `CLAUDE.md` as an active rule; (d) folded the decision into
+`DOC-023`/`DOC-050`'s task descriptions.
+
+**Do CI-001–005 and CONSOLIDATED work as one control system?**
+**Inferred: no — they are two independent checks sharing one script and
+one CI step.** They run in the same file (`test/check-docs-coverage.js`),
+in the same CI step, printing to the same log — so operationally they
+fire together. But logically they check unrelated things (file-record
+existence vs. one file's self-reported age) with **no cross-reference**:
+Check 1 does not know or care about `HANDOVER.md`; Check 2 does not know
+or care about any `js/*.js`/`.gs` file. Neither feeds the other. There is
+no shared model of "a component," no shared staleness concept, no
+propagation. Calling them "one control system" would overstate it. They
+are the first two tripwires of a system that does not otherwise exist
+yet.
+
+### Task Audit
+
+The request asks for a per-task table across every project goal/task. The
+honest, evidence-backed version: **all 50 `DOC-001`–`DOC-050` tasks are
+`Not Started`** (Confirmed 2026-09-10) — a 50-row table of identical
+`Not Started / no output / no validation / no evidence` rows would be
+noise, not information. Grouped instead, with the real distinctions:
+
+| Group | Tasks | Status | Up to date? | Component coverage | Expected output | Actual output | Validation | Central tracking | Gap → Required action |
+|---|---|---|---|---|---|---|---|---|---|
+| Phase 1 — inventory | DOC-001…012 | Not Started | Descriptions cite stale file counts (11 `.gs` / 23 `js`; real = 13 / 24) | N/A | `docs/_planning/*.md` inventories | None | None | None | Re-inventory against live filesystem when worked; use `test/run-gs-tests.js`'s `PRODUCTION_FILES` + `ls js/*.js` as the source, not this plan's prose |
+| Phase 2 — foundation | DOC-013…021 | Not Started | — | N/A | `docs/` folders, `INDEX.md` skeleton, templates, ID scheme | **None** — `docs/` has only an unrelated `.pptx` | None | None | This is the **P0 blocker** — nothing else in the project can be `Closed + Monitored` without `INDEX.md` + folders existing |
+| Phase 3 — component records | DOC-025…034 | Not Started | — | 0 of ~200+ expected records | `docs/<type>/<ID>-<slug>.md` × ~90 files | None | None | None | Blocked on Phase 2. Apply the Definition of Done above to each |
+| Phase 4 — Sheets deep dive | DOC-035…038 | Not Started | — | 0 of 14 `SHEET-XXX` | Retention/lifecycle per tab | None — real facts (`Movement_Log`/`Daily_RM_Issues` = 7d) sit in code comments, not a record | None | None | Transcribe known retention facts; `TBD` + a real follow-up task for every unknown, per Goal 4 |
+| Phase 5 — verification | DOC-039…042 | Not Started | — | N/A | Completeness + cross-ref check; open-items list | None | None | None | This is the graduation gate for flipping `test/check-docs-coverage.js` from warn to fail (per CI-005) |
+| Phase 6 — process | DOC-043…050 | Not Started | — | N/A | `HOW_TO_*` guides, `PRE_SHIP_*` checklist, cross-links | None (DOC-023/050 carry `CONSOLIDATED` addenda but the files don't exist) | None | None | DOC-045/046/047/048 must adopt this governance model's Change-Control Mechanism + Definition of Stale, not a lighter version |
+| `CI-001…005` | 5 tasks | **Completed** | Yes | 2 file types (see CI evaluation) | `test/check-docs-coverage.js` + workflow step | **Exists, runs in CI, verified** | Real CI runs (#51, #53) — but no `docs/validation/` record links them | `tasks.json` only | Conditionally closed: real output + real validation, but no `docs/validation/` evidence record and the coverage is narrow (documented in the plan). Acceptable as-is given the plan is honest about scope |
+| `CONSOLIDATED` | 1 task | **Completed** | Yes | HANDOVER.md decision + Check 2 | Plan edit + `CLAUDE.md` edit + script extension | **Exists, verified** | Python dry-run + CI run #53 green | `tasks.json` only | Conditionally closed — same as CI: real, but no formal `docs/validation/` record and no architecture record yet for it to link into |
+| `TASKFLOW-001/002` | 2 tasks | **Completed** | Yes | Task-tracking process, not a component | Design note + `update-tasks.ps1` | **Exists, `update-tasks.ps1` tested against a scratch copy + used live** | Scratch-copy test + live close of TASKFLOW-002 by itself | `tasks.json` only | Fully closed by their own (lean) definition of done |
+| `TASKFLOW-003/004` | 2 tasks | Not Started | — | — | Memory file; rollout validation | None | None | None | 003 is small; 004 should validate this governance model's overhead is actually lower, not just different |
+
+**Principle applied:** none of the `Completed` rows above is treated as
+permanently trusted. Each is "Completed against the evidence available on
+2026-09-10" and each carries a real revalidation trigger (CI script
+changes → re-evaluate the CI rows; `update-tasks.ps1` changes → re-test
+TASKFLOW-002's row).
+
+### Dead-End Register
+
+| Item | Dead end | Root cause | Impact | Required fix | Owner | Verification |
+|---|---|---|---|---|---|---|
+| `LOGIC_AUDIT.md` header | Header says "Parts complete so far: **Part 1 only**"; body has all 7 parts + git shows the audit was completed (`0d69729`) | Header line never updated as Parts 2–7 were added — the exact "written rule, nothing checking it" failure | A reader trusts the header and assumes 6/7 of the audit is missing | One-line header edit: "Parts complete: all 7 (audit closed `0d69729`)". Explicit instruction says don't touch this file's *purpose* — a factual header fix doesn't, but flag for the user's go-ahead first rather than edit unprompted | Snehil | `grep '^## Part' LOGIC_AUDIT.md` shows 7; header matches |
+| `DOCUMENTATION_PROJECT_PLAN.md` file counts | Task descriptions (DOC-006/007/027/028/029) cite "23 `js`" / "11 `.gs`"; real = 24 / 13 | Plan written before `rm-performance-worker.js`, `OpsChecklistRunner.gs`, `LeadFollowupsStaleness.gs` existed; only CI-005's one paragraph was corrected | Phase 1 tasks would inventory the wrong count if taken literally | DOC-001 re-inventories from the live filesystem when worked (already its job); no pre-emptive edit needed beyond this note | Snehil | `ls js/*.js \| wc -l` = 24; `PRODUCTION_FILES` in `test/run-gs-tests.js` = 13 |
+| CI Check 1 direction | Cannot detect a `docs/` record whose target file was deleted | Check only walks real-file → record, never record → real-file | A retired component keeps a trusted-looking record forever | Add the reverse walk to `test/check-docs-coverage.js` when `docs/` records exist (no point before) | Snehil | A deliberately-orphaned test record is flagged |
+| CI change-detection | No "implementation changed, docs not reviewed" check | `actions/checkout@v4` is shallow (`fetch-depth: 1`); the script deliberately avoids git history | The core change-sync requirement is unmet | `fetch-depth: 0` + a diff→ID step (Change-Control Mechanism step 1–2) once `INDEX.md` exists | Snehil | A push touching a documented file with no matching revalidation task is flagged |
+| `docs/validation/` | CI-001–005 / CONSOLIDATED have real validation but it lives only in `tasks.json` resolution notes + commit messages | The folder/convention doesn't exist yet | "Where's the proof this check works?" has no single answer | Create `docs/validation/` in Phase 2; backfill records for CI-001–005 + CONSOLIDATED | Snehil | Each `Completed` doc-project task has a `docs/validation/` line |
+| Retention facts | `Movement_Log = 7d`, `Daily_RM_Issues = 7d`, `Comment_History = unbounded` are known but only as code comments / `HANDOVER.md` prose | No `SHEET-XXX` records yet | Goal 4 unmet even for the tabs where the answer IS known | Transcribe into `SHEET-XXX` records in Phase 4; `TBD` + task for every unknown tab | Snehil | Every `SHEET-XXX` record has a retention value or a linked TBD task |
+| Ownership | Every `DOC-XXX` task and every future record has no explicit owner | Never assigned | "Nobody's job" on every gap | Default `Owner: Snehil` on the schema + every record until a real team exists | Snehil | No record/row with a blank Owner |
+
+### Priority Actions
+
+| P | Action | Owner | Depends on | Expected result | Validation method | Closure evidence |
+|---|---|---|---|---|---|---|
+| **P0** | Work Phase 2 (DOC-013…021): create `docs/` folders, `INDEX.md` with the tracking schema, `NAMING_CONVENTIONS.md` with the extended taxonomy, the 3 new folders (`architecture/ validation/ changes/`), extend the record templates with the missing fields | Snehil | Nothing | The catalog can physically exist; every later phase unblocks | `ls docs/` shows the structure; `test/check-docs-coverage.js` starts reporting real coverage % instead of 0/all | The folders + `INDEX.md` committed; CI run shows the new baseline |
+| **P1** | `fetch-depth: 0` on `actions/checkout` + a diff→ID step in `test/check-docs-coverage.js` (Change-Control steps 1–2) | Snehil | P0 (`INDEX.md` must exist to resolve paths to IDs) | CI can flag "documented file changed, no revalidation task" | A test push touching a known file is flagged | The flagged run + the auto-opened revalidation task |
+| **P1** | Fix `LOGIC_AUDIT.md`'s header (one line) — pending user go-ahead given the file is explicitly fenced | Snehil | User confirmation | Header stops contradicting the body | `grep` check | The one-line diff |
+| **P1** | Backfill `docs/validation/` records for CI-001…005 + CONSOLIDATED | Snehil | P0 | Every `Completed` doc-project task has linkable proof | Each task's row in the Task Audit gains a `docs/validation/` link | The records committed |
+| **P2** | Work Phase 3 (component records) under the Definition of Done above | Snehil | P0 | Goals 1–3 become satisfiable | Each record passes the 14-point Definition of Done; `test/check-docs-coverage.js` coverage climbs toward 100% | `INDEX.md` rows at `Closed + Monitored` with `Last Verified` dates |
+| **P2** | Work Phase 4 — `SHEET-XXX` records + retention; transcribe the 3 known values, `TBD`+task the rest | Snehil | P0, P2 | Goal 4 satisfiable | Every `SHEET-XXX` has a retention value or linked TBD task | The 14 records + the TBD task list |
+| **P2** | Add CI Check 1's reverse walk (record → real file) | Snehil | P2 (records must exist) | Retired-component records get flagged | Orphan test record flagged | The flagged run |
+| **P3** | Work Phase 5 (DOC-039) → then flip `test/check-docs-coverage.js` from `continue-on-error: true` to a hard gate (the CI-005 graduation) | Snehil | P2, P2-Sheets | Documentation drift becomes build-blocking | DOC-039 completeness check passes; the flip commit's CI run fails on a deliberately-removed record | The graduation commit + a proof-of-fail run |
+| **P3** | Work Phase 6 process guides — adopt this Change-Control Mechanism + Definition of Stale verbatim, not a lighter version | Snehil | P2 | The loop is documented for future sessions/hires | A dry-run: take a real recent commit, walk the loop by hand, confirm it produces the right stale set | The `HOW_TO_*` guides + the dry-run writeup |
+| **P3** | `TASKFLOW-003` (memory) + `TASKFLOW-004` (validate the overhead actually dropped) | Snehil | Nothing / TASKFLOW-002 | The lean rule survives across sessions; proof it's cheaper | 004 compares tool-call count per task-close before/after `update-tasks.ps1` | The comparison + the memory file |
+
+### Final Control Model — how the pieces fit without duplicating responsibilities
+
+```
+                       git log  ─────────────►  authoritative change history
+                          │
+   push ──► CI job ──► test/check-docs-coverage.js
+                          │        ├─ Check 1: file ↔ docs/ record coverage        (warn today, gate after DOC-039)
+                          │        ├─ Check 2: HANDOVER.md age                      (warn)
+                          │        └─ [P1] diff ↔ INDEX.md ID resolution            (to build)
+                          ▼
+              docs/INDEX.md  ◄──────────  the ONE tracking table (schema above)
+                 │   │   │                one row per component; status; Last Verified
+     ┌───────────┘   │   └───────────┐
+     ▼               ▼               ▼
+ docs/<type>/     docs/architecture/   docs/validation/     docs/changes/
+ <ID>-<slug>.md   DASH/FLOW records    evidence per ID      one per change → stale set → revalidation task
+ (the record;     (living arch;        (what test, which     (the Change-Control loop's audit trail)
+  Definition of    HANDOVER §1–3        run, which commit)
+  Done applies)    hands over here
+                   at graduation)
+     │
+     ▼
+ HANDOVER.md   ── narrative onboarding + incident history (§8). NOT the catalog.
+ LOGIC_AUDIT.md ── frozen point-in-time findings. NOT edited forward.
+ DOCUMENTATION_PROJECT_PLAN.md ── this plan + this governance model. Describes the
+                                  system; never the source of truth for any single
+                                  component's current state.
+ tasks.json ── every DOC-XXX / CI-XXX / TASKFLOW-XXX / revalidation task's status.
+ CLAUDE.md ── the active rules a working session must follow (incl. "update HANDOVER
+              in the same commit", and the doc-coverage check pointer).
+
+ THE LOOP (stays active after closure):
+ change ─► detect (CI) ─► resolve ID (INDEX) ─► impact (1 hop: deps+consumers)
+        ─► mark rows Stale ─► open revalidation task (update-tasks.ps1)
+        ─► update record ─► validate ─► write docs/validation/ + docs/changes/
+        ─► update RELATIONSHIP_MAP + INDEX ─► update HANDOVER if flagged
+        ─► check downstream ─► back to Closed + Monitored
+```
+
+### Governing principle
+
+> **No completed task or record becomes permanently trusted. It stays
+> trusted only while its implementation, purpose, architecture
+> relationship, dependencies, validation evidence, documentation, and
+> handover all remain current — and the Change-Control Mechanism is what
+> makes "no longer current" visible instead of silent.**
+
+> **No meaningful component exists without a reason to exist, an
+> identifiable owner (default Snehil), traceable relationships (IDs, both
+> directions), and a written revalidation trigger.**
+
+### What this section changes about the rest of the plan
+
+- **Goals section:** unchanged in wording; the Status Check above is the
+  current read on each.
+- **Maintenance Model section:** its CI-005 paragraph is still accurate;
+  this section is the fuller answer it pointed forward to.
+- **Documentation Architecture Decision section:** unchanged — the
+  HANDOVER-vs-LOGIC_AUDIT-vs-new-system split is reaffirmed, and Goal 6
+  is the one goal currently fully satisfied.
+- **Phases section:** phase *tasks* are unchanged; each is now governed by
+  the Definition of Done, Status Model, and Change-Control Mechanism
+  above when worked. DOC-016 gains "extend templates with the missing
+  fields"; DOC-021 gains "use the Central Tracking Schema"; DOC-045–048
+  gain "adopt the Change-Control Mechanism verbatim".
+- **Component Record Templates section (end of file):** to be extended
+  per the Component Record Standard above when DOC-016 is worked — not
+  edited now, to keep this pass to the governance layer.
+
+---
+
 ## Documentation Architecture Decision
 
 **Recommendation: build a new, separate, modular documentation system —
