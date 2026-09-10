@@ -64,6 +64,29 @@
 <div id="status">Loading dashboard.html…</div>
 <pre id="log"></pre>
 <script>
+// ---- Freeze the clock (t-tf-5ad22d8e4c2e) ----
+// Every fixture is built relative to "now" (`ago(h)`), and the real app
+// stamps `_renderNow = new Date()` at the start of each render pass. The
+// SLA rules that count *working* minutes (9 AM–7 PM IST) —
+// `neverConnectedPastWindow`, "Behind on Today's Calls" — then behave
+// differently depending on the wall-clock time this harness happens to
+// run at (e.g. the L011 "missed first-contact inside the 3 h grace"
+// assertion is only meaningful during IST business hours). Pin Date to a
+// fixed weekday IST-afternoon instant so the harness is deterministic in
+// CI regardless of when it runs.
+(function freezeClock() {
+  const FROZEN_MS = Date.UTC(2026, 8, 9, 8, 30, 0); // 2026-09-09 14:00:00 IST (a Wednesday)
+  const RealDate = Date;
+  function FakeDate(...args) {
+    return args.length ? new RealDate(...args) : new RealDate(FROZEN_MS);
+  }
+  FakeDate.prototype = RealDate.prototype;
+  FakeDate.now = () => FROZEN_MS;
+  FakeDate.parse = RealDate.parse;
+  FakeDate.UTC = RealDate.UTC;
+  // eslint-disable-next-line no-global-assign
+  Date = FakeDate;
+})();
 (async function () {
   const logEl = document.getElementById('log');
   const statusEl = document.getElementById('status');
