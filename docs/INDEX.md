@@ -244,10 +244,10 @@ list. `DOC-032` writes the base records; `DOC-036` fills lifecycle/retention.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Not Started | | | |
-| EXT-002 | EXT- | Gmail (send) — dashboard OAuth grant + `GmailApp` | `js/reports-gmail.js` / `EmailInfra.gs` | Not Started | | | |
-| EXT-003 | EXT- | Google Identity / OAuth (sign-in gate) | `js/core-auth.js` | Not Started | | | |
-| EXT-004 | EXT- | jsPDF + jspdf-autotable (PDF export) | `js/repeat-offenders-pdf.js` | Not Started | | | |
+| EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Closed + Monitored | EXT-003 | JS-009, JS-018, JS-004, JS-021, JS-022, JS-003, GS-002/004/008/011 (+ all GS transitively), SHEET-001..014 | 2026-09-10 (`c82ec67`) |
+| EXT-002 | EXT- | Gmail (send) — dashboard OAuth grant + `GmailApp` + Advanced Gmail Service | `js/reports-gmail.js` / `EmailInfra.gs` | Closed + Monitored | EXT-003 (shared Client ID), JS-014, JS-016, GS-004 | JS-015, JS-018, GS-010, GS-001, GS-004, TAB-003, TAB-007, SHEET-011/013/014 | 2026-09-10 (`c82ec67`) |
+| EXT-003 | EXT- | Google Identity / OAuth (sign-in gate) | `js/core-auth.js` | Closed + Monitored | GIS CDN script, the Google Cloud OAuth Client ID + consent-screen config | JS-001, JS-009, JS-018, JS-004, JS-021, JS-022, EXT-001, EXT-002 | 2026-09-10 (`c82ec67`) |
+| EXT-004 | EXT- | jsPDF 2.5.1 + jspdf-autotable 3.8.2 (PDF export) | `js/repeat-offenders-pdf.js` | Closed + Monitored | the two cdnjs scripts | JS-013, TAB-004 | 2026-09-10 (`c82ec67`) |
 
 ### `DATA-` / `FLOW-` / `TRIGGER-` — filled in Phase 3 (`DOC-034` / `DOC-035`)
 
@@ -262,8 +262,9 @@ recorded in Phase 3.
 - `GS-` records: 13 / 13 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each)
 - `TAB-` records: 8 / 8 (DOC-026)
 - `SHEET-` records: 14 / 14 (DOC-032 — base records; `Movement_Log` / `Daily_RM_Issues` lifecycle confirmed 7d, `Comment_History` / `Unmatched_Comments_Log` retention model confirmed, the other 10 carry `TBD` lifecycle for `DOC-036`)
-- `EXT-` records: 0 / 4
+- `EXT-` records: 4 / 4 (DOC-033)
 - `DASH-` records: 1 / 1 (DOC-025)
+- `DATA-` records: 0 / 5 (DOC-034 — data-flow records)
 - **This matches `test/check-docs-coverage.js`'s current warn output** —
   when Phase 3 lands records, that check's coverage % and this snapshot
   should move together.
