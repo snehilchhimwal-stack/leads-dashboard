@@ -42,10 +42,21 @@ INDEX = os.path.join(ROOT, "docs", "INDEX.md")
 STRICT = os.environ.get("CATALOG_STRICT") == "1"
 
 OWN = ("DASH", "TAB", "JS", "GS", "SHEET", "EXT", "DATA")
+# architecture overlays (FLOW-/TRIGGER-) reference components but are NOT
+# reciprocated -- a component does not list every overlay that spans it,
+# the same way HANDOVER.md references everything without the reverse.
+ARCH = ("FLOW", "TRIGGER")
+ANYID = re.compile(r'\b((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})\b')
 OWNID = re.compile(r'\b((?:DASH|TAB|JS|GS|SHEET|EXT|DATA)-\d{3})\b')
 FILE_IN_LOC = re.compile(r'(js/[A-Za-z0-9_.-]+\.js|[A-Za-z0-9_]+\.gs|dashboard\.html)')
 TYPE_DIR = {"DASH": "dashboards", "TAB": "tabs", "JS": "js-modules", "GS": "gs-modules",
-            "SHEET": "sheets", "EXT": "integrations", "DATA": "data-flows"}
+            "SHEET": "sheets", "EXT": "integrations", "DATA": "data-flows",
+            "FLOW": "architecture", "TRIGGER": "architecture"}
+# cross-runtime pair markers: a changed line touching one of these should
+# make someone check the OTHER runtime's twin (HANDOVER.md §6).
+PAIR_MARKERS = ("_GS_", "HEADER_ALIASES", "OUTCOME_RULES", "REGION_GROUP_MAP",
+                "RM_PERF_", "TEST_MODE_OVERRIDE_EMAIL", "FOLLOWUP_SUGGESTIONS",
+                "istDayKey", "istDateKey", "computeSlaFlags", "enrichLead")
 
 def git(*args):
     try:
@@ -65,7 +76,9 @@ def parse_index():
             continue
         cid = cells[0]
         loc = cells[3]
+        pre = cid.split("-")[0]
         rows[cid] = dict(
+            kind="arch" if pre in ARCH else ("own" if pre in OWN else "other"),
             dep=set(x for x in OWNID.findall(cells[5]) if x != cid),
             ub=set(x for x in OWNID.findall(cells[6]) if x != cid),
             loc=loc,
@@ -77,17 +90,20 @@ def parse_index():
 
 # ---------------------------------------------------------------- A
 def check_reciprocity(rows):
+    """Full reciprocity among the own-file component rows; arch overlays
+    (FLOW-/TRIGGER-) only have to resolve to a real row, not be echoed
+    back."""
     problems = []
     for a, d in rows.items():
         for b in d["dep"]:
             if b not in rows:
                 problems.append(f"{a} Depends On {b} — but {b} has no INDEX row")
-            elif a not in rows[b]["ub"]:
+            elif d["kind"] == "own" and rows[b]["kind"] == "own" and a not in rows[b]["ub"]:
                 problems.append(f"{a} Depends On {b} — but {b}'s Used By is missing {a}")
         for b in d["ub"]:
             if b not in rows:
                 problems.append(f"{a} Used By {b} — but {b} has no INDEX row")
-            elif a not in rows[b]["dep"]:
+            elif d["kind"] == "own" and rows[b]["kind"] == "own" and a not in rows[b]["dep"]:
                 problems.append(f"{b} in {a}'s Used By — but {b}'s Depends On is missing {a}")
     return sorted(set(problems))
 
@@ -100,7 +116,7 @@ def check_coverage(rows):
         disk[pre] = set()
         if os.path.isdir(d):
             for f in os.listdir(d):
-                m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA)-\d{3})-.*\.md$', f)
+                m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', f)
                 if m:
                     disk[pre].add(m.group(1))
     index_ids = set(rows)
@@ -221,9 +237,45 @@ def check_impact(rows):
                    '"C:/Users/User/Desktop/Strategy/To-do Dashboard/update-tasks.ps1" -OpsFile <path>')
         out.append("  ops JSON:")
         out.append("  " + json.dumps(ops))
+    # comment-change flag: a changed line touching a cross-runtime pair
+    # marker -> check the OTHER runtime's twin (HANDOVER.md §6).
+    diff = git("diff", "-U0", f"{base}..{head}", "--",
+               *[p for p in changed if p.endswith((".js", ".gs"))])
+    hit = {}
+    for ln in diff.splitlines():
+        if ln.startswith(("+++", "---")) or not ln.startswith(("+", "-")):
+            continue
+        for mk in PAIR_MARKERS:
+            if mk in ln:
+                hit.setdefault(mk, 0)
+                hit[mk] += 1
+    if hit:
+        out.append("PAIR MARKER touched — verify the cross-runtime twin (HANDOVER.md §6): "
+                   + ", ".join(f"{k} x{v}" for k, v in sorted(hit.items())))
     if not out:
         out.append("no changed path maps to a documented component")
     return out
+
+# ---------------------------------------------------------------- F
+def check_snapshot(rows):
+    """The 'Coverage snapshot' bullets (`<PREFIX>- records: N / M`) must
+    equal the real master-table row count for that prefix."""
+    problems = []
+    actual = {}
+    for cid in rows:
+        actual[cid.split("-")[0]] = actual.get(cid.split("-")[0], 0) + 1
+    txt = open(INDEX, encoding="utf-8").read()
+    seen = set()
+    for m in re.finditer(r'`([A-Z]+)-`\s*records:\s*(\d+)\s*/\s*(\d+)', txt):
+        pre, n, mm = m.group(1), int(m.group(2)), int(m.group(3))
+        seen.add(pre)
+        a = actual.get(pre, 0)
+        if not (n == mm == a):
+            problems.append(f"snapshot says `{pre}-` {n} / {mm} but the master table has {a} `{pre}-` row(s)")
+    for pre in ("DASH", "TAB", "JS", "GS", "SHEET", "EXT", "DATA"):
+        if actual.get(pre, 0) and pre not in seen:
+            problems.append(f"master table has {actual[pre]} `{pre}-` row(s) but the Coverage snapshot has no `{pre}-` line")
+    return problems
 
 # ---------------------------------------------------------------- main
 def main():
@@ -236,7 +288,8 @@ def main():
     fail = 0
     for label, fn in [("A. INDEX reciprocity", check_reciprocity),
                       ("B. INDEX <-> record-file coverage", check_coverage),
-                      ("C. INDEX Location -> real file", check_locations)]:
+                      ("C. INDEX Location -> real file", check_locations),
+                      ("F. Coverage snapshot self-consistency", check_snapshot)]:
         probs = fn(rows)
         if probs:
             fail += len(probs)

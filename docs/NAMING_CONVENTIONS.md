@@ -90,6 +90,29 @@ bar.
 
 ---
 
+## Prefixes defined but with zero instances (`t-tf-5ad22d8e4c2e`, 2026-09-10)
+
+Four prefixes exist in the taxonomy for completeness but **have no
+instance today**, deliberately — not a coverage gap:
+
+| Prefix | Why zero, and when to add one |
+|---|---|
+| `RANGE-` | Every `SHEET-` tab is a flat append-only data table written whole-row by Apps Script or the CRM export. **No named cell range, lookup range, or header banner carries behaviour that the whole-tab `SHEET-` record doesn't already cover.** Add a `RANGE-` only if a future feature makes one specific range (a config block, a formula-driven lookup) the meaningful unit. |
+| `HTML-` | `DASH-001`'s `## HTML / CSS structure` section covers `dashboard.html`'s shell as one unit; no single structural region has its own failure mode / multi-referrer / non-obvious logic (the §"no ID at all" bar). Add an `HTML-` only if one region grows its own documented behaviour. |
+| `CSS-` | The dark-theme custom-property system is described in `DASH-001`; no single style concern clears the bar. |
+| `CLASS-` | This codebase is function-based — `grep -nE '^\s*class \|new [A-Z]\w+\(' js/*.js` finds only `new Worker()` (an `EXT`/`FLOW` concern, not a project class). Add a `CLASS-` if a real reusable constructor is introduced. |
+
+**Sheet formulas / data-validation / filter views:** none are documented
+because **none was found** — `LOGIC_AUDIT.md` Part 1 §1 describes every
+tab as a flat data table, and no `.gs` / `js` code reads or writes a cell
+*formula* (all writes are literal values via `appendRow` / `setValues` /
+the Sheets API `RAW`/`USER_ENTERED` value path). The live Google Sheet
+was **not** inspected cell-by-cell; if a maintainer finds a
+behaviourally-significant formula, named range, or filter view, add a
+`RANGE-` sub-table row to the owning `SHEET-` record.
+
+---
+
 ## Relationships & the reciprocity rule (`DOC-017`)
 
 Every record has a `## Relationships` section with three fixed
