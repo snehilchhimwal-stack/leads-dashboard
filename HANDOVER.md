@@ -7,6 +7,14 @@ duplicate what the code comments already say in detail — where a file's own
 header comment covers something thoroughly, this doc points at it instead of
 repeating it.
 
+**For a per-component lookup** ("what does this exact file / function / tab
+/ Sheet do, what depends on it") see **`docs/INDEX.md`** — the living
+component catalog (`DOCUMENTATION_PROJECT_PLAN.md`). This file is the
+narrative; `docs/` is the reference; `LOGIC_AUDIT.md` is the frozen
+2026-09-07 audit. As of 2026-09-10 the catalog has its skeleton
+(structure, templates, seeded index) but the component records themselves
+are still Phase 3 work.
+
 Written 2026-08-31, updated 2026-09-09. This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
