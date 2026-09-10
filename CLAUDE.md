@@ -110,12 +110,13 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   (needs Node — see above) or via CI on push. When you add/change a `.gs`
   function, add the matching assertion in the same commit.
 - **`js/*.js` changes**: the persisted suite is
-  `tests/frontend-harness.html` (not in CI — it needs a browser). It grafts
-  the real `dashboard.html` + `js/*.js` files, mocks only the network
-  boundary (Sheets read + OAuth token pair), and runs synthetic leads
-  through the real `fetchAndRender()` pipeline. Re-run it after any
-  dashboard-side change; extend it rather than hand-verifying in the console
-  when you add real new behavior.
+  `tests/frontend-harness.html` — it grafts the real `dashboard.html` +
+  `js/*.js`, mocks only the network boundary (Sheets read + OAuth token
+  pair), and runs synthetic leads through the real `fetchAndRender()`
+  pipeline. **In CI headless (Playwright, non-blocking)** since
+  2026-09-10 — `test/run-frontend-harness.mjs`; also run it locally
+  (serve the repo, open the page). Re-run + extend it after any
+  dashboard-side change rather than hand-verifying in the console.
 - **Changing, adding, or removing any `js/*.js` / `.gs` file — or editing
   a `docs/` record or `docs/INDEX.md`**: two CI steps run after the `.gs`
   suite.

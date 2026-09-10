@@ -387,7 +387,7 @@ coverage, and past gaps in this project were closed reactively (see git
 history around 2026-08-29) specifically because a change shipped without a
 matching test.
 
-### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (exists; not in CI)
+### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (in CI, non-blocking)
 
 The persisted browser-JS suite is **`tests/frontend-harness.html`** at the
 repo root. It grafts the real `dashboard.html` + every `js/*.js` file into
@@ -398,12 +398,14 @@ browser and read `window.__harnessResults` (or the on-page PASS/FAIL log).
 Re-run it after any dashboard-side change, and extend it — add the
 assertions in the same commit — rather than hand-verifying in the console.
 
-**Still open — it is not wired into CI.** `.github/workflows/test.yml` runs
-the Apps Script suite (`node test/run-gs-tests.js`) and the docs-coverage
-check on every push, but not this harness — it needs a real browser, so
-running it stays manual for now. This section used to recommend *building*
-such a harness as the first handover task; that part is done, and the only
-remaining gap is the CI wiring.
+**In CI as of 2026-09-10** (`t-tf-5ad22d8e4c2e` P2): `.github/workflows/test.yml`
+serves the repo over `http.server` and runs the harness headless via
+Playwright (`test/run-frontend-harness.mjs`) after the catalog checks —
+prints `N passed, M failed` and any failing assertions. **Non-blocking
+(`continue-on-error: true`)** for now: the harness has real timing
+assumptions and this is its first CI wiring; flip to blocking once it's
+proven stable over a few runs. Locally it still runs the same way — serve
+the repo (`preview_start` the "dashboard" config) and open the page.
 
 **Local preview in the meantime**: `dashboard.html` is a static file — any
 local static file server pointed at the repo root works

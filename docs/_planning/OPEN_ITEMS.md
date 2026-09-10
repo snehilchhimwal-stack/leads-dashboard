@@ -190,14 +190,20 @@ in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt.
   "Flip `check-docs-coverage.js` Check 1 to hard-fail" → **skipped as
   moot** (`check-catalog.py` B is the broader blocking version). 57
   record-only edges → done (pruned, §E).
-- **P2 — open**: `INDEX.md` snapshot self-consistency check;
-  `FLOW-001/002` + a `TRIGGER-` index; backfill `docs/changes/` (one
-  build record) + `docs/validation/`; comment-change flag + a
-  stale-comment line in `PRE_SHIP_DOCUMENTATION_CHECKLIST.md`; wire
-  `frontend-harness.html` into CI; `check-catalog.py` E's `CATALOG_STRICT`
-  flip once a revalidation habit is proven.
-- **P3 — open**: `goalId` + `produces:` on the closed tasks; the deep
-  `HANDOVER.md` §9 body sweep (C-5/C-6, §D); the 7 retention `TBD`s (§B).
+- **P2 — DONE** (`acc7cbe`, `519a377`, `78f3816`): `check-catalog.py`
+  check F (snapshot self-consistency, BLOCKING); `FLOW-001` +
+  `FLOW-002` + `docs/architecture/apps-script-triggers.md`;
+  `docs/changes/2026-09-10-build.md` + `docs/validation/README.md`;
+  comment-change / pair-marker flag in check E + two new
+  `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` checkboxes; `frontend-harness.html`
+  headless in CI (`run-frontend-harness.mjs`, non-blocking, green run
+  #83); `NAMING_CONVENTIONS.md` zero-instance + Sheet-formula note.
+- **P3 — open**: flip the two non-blocking CI steps
+  (`check-docs-coverage.js` is moot; the frontend harness → blocking once
+  stable; `check-catalog.py` E/D → `CATALOG_STRICT=1`) once a revalidation
+  habit is proven; `goalId` + `produces:` on the closed tasks; the deep
+  `HANDOVER.md` §9 body sweep (C-5/C-6, §D); the 7 retention `TBD`s (§B);
+  `Owner:` distribution when a team forms.
 
 ---
 

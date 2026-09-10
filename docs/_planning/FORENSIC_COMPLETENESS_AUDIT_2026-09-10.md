@@ -365,10 +365,16 @@ property holds by design but is violated in fact.
 
 ## L. P0 / P1 / P2 / P3 action plan
 
-> **Update 2026-09-10 — `t-tf-5ad22d8e4c2e` (commits `3d2db17`,
-> `cb5afb1`).** P0.1, P0.3, P1.4–6, P1.8 done and green in CI (run #76).
-> `test/check-catalog.py` is the built detection half; the human
-> revalidation half (steps 7–10) and P2/P3 remain.
+> **Update 2026-09-10 — `t-tf-5ad22d8e4c2e`** (commits `3d2db17`,
+> `cb5afb1`, `acc7cbe`, `519a377`, `78f3816`). **P0 and P1 and P2 done**
+> and green in CI (runs #76–#83). `test/check-catalog.py` (checks A–F) is
+> the built detection half; `FLOW-001/002` + `apps-script-triggers.md` +
+> `docs/changes/` + `docs/validation/` populate the gaps; the frontend
+> harness now runs headless in CI (non-blocking). **Remaining:** the
+> human revalidation half (Change-Control steps 7–10), the CI-writes-the-
+> task side (infeasible — CI can't reach `tasks.json`), and **P3** (the
+> deep `HANDOVER.md` §9 sweep, `goalId`/`produces:` on closed tasks, the
+> 7 retention `TBD`s, `Owner:` distribution).
 
 **P0 — the loop does not exist without these**
 1. ~~`fetch-depth: 0` + **diff→ID resolver**~~ — **DONE**: `check-catalog.py`
@@ -402,19 +408,35 @@ property holds by design but is violated in fact.
    to `INDEX.md` (`reciprocity-normalisation-notes.md`); 69/69 records
    match exactly, 0 one-directional pairs (`recip_verify.py`).
 
-**P2 — completes coverage + evidence**
-9. `INDEX.md` **self-consistency check** (snapshot ↔ rows ↔ task states).
-10. Write **`FLOW-001/002`** + a **`TRIGGER-` index**.
-11. Backfill **`docs/changes/2026-09-10-build.md`** and **`docs/validation/`**
-    for the CI tasks + `DATA-005` + confirmed-retention SHEETs.
-12. **comment-change flag** in the diff step; add the stale-comment line to
-    `PRE_SHIP_DOCUMENTATION_CHECKLIST.md`.
-13. Wire **`frontend-harness.html`** into CI (headless).
-14. **Extend coverage** checks to `TAB-`/`SHEET-`/`EXT-`/`DATA-` by parsing
-    `INDEX.md` rather than the filesystem.
-15. Resolve the **`RANGE-`/`HTML-`/`CSS-`/`CLASS-` exclusion note** in
-    `NAMING_CONVENTIONS.md`; confirm-and-record "no behaviourally-significant
-    Sheet formulas / filter views" (or add records).
+**P2 — completes coverage + evidence — DONE 2026-09-10 (`acc7cbe`,
+`519a377`, `78f3816`)**
+9. ~~`INDEX.md` **self-consistency check**~~ — **DONE**: `check-catalog.py`
+   check F (BLOCKING) — `<PREFIX>- records: N / M` bullets must equal the
+   real master-table row count.
+10. ~~Write **`FLOW-001/002`** + a **`TRIGGER-` index**~~ — **DONE**:
+    `docs/architecture/FLOW-001-movement-hub.md`,
+    `FLOW-002-generate-cycle.md`, `apps-script-triggers.md` (a non-ID'd
+    index — no standalone `TRIGGER-` record needed). INDEX rows added;
+    overlays are not reciprocated (`NAMING_CONVENTIONS.md` exception).
+11. ~~Backfill **`docs/changes/`** + **`docs/validation/`**~~ — **DONE**:
+    `docs/changes/2026-09-10-build.md` (one combined build record),
+    `docs/validation/README.md` (per-area evidence table).
+12. ~~**comment-change flag** + `PRE_SHIP` stale-comment line~~ — **DONE**:
+    `check-catalog.py` E flags a changed line touching a cross-runtime
+    pair marker; `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` gained the
+    "read check-catalog E/D" and "did a comment go stale?" checkboxes.
+13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE (non-blocking)**:
+    `test/run-frontend-harness.mjs` (Playwright headless) +
+    `.github/workflows/test.yml` step; green on CI run #83. Flip to
+    blocking once stable.
+14. ~~**Extend coverage** to `TAB-`/`SHEET-`/`EXT-`/`DATA-`~~ — **DONE**
+    (was already `check-catalog.py` B — all 7 own-file types + `FLOW-`).
+15. ~~**`RANGE-`/`HTML-`/`CSS-`/`CLASS-` exclusion note** + Sheet-formula
+    finding~~ — **DONE**: `NAMING_CONVENTIONS.md` "Prefixes defined but
+    with zero instances" — each with its add-trigger; "no
+    behaviourally-significant Sheet formula / named range / filter view
+    found in code or `LOGIC_AUDIT.md`; live Sheet not inspected
+    cell-by-cell".
 
 **P3 — hardening**
 16. `goalId` + `produces:` on the closed `DOC-`/`CI-`/`TASKFLOW-` tasks;
