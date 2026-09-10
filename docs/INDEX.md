@@ -180,19 +180,19 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | JS-009 | JS- | core-sheets-fetch | `js/core-sheets-fetch.js` | Closed + Monitored | JS-001, JS-005, JS-006, EXT-001, SHEET-001 | JS-003, JS-004, JS-021, JS-022, (most tabs) | 2026-09-10 (`c82ec67`) |
 | JS-010 | JS- | core-ui | `js/core-ui.js` | Closed + Monitored | JS-002, JS-007, JS-005 | JS-004, JS-003, JS-011, (most tabs) | 2026-09-10 (`c82ec67`) |
 | JS-011 | JS- | main | `js/main.js` | Closed + Monitored | JS-010, JS-023, JS-021, JS-001 | none (entry point) | 2026-09-10 (`c82ec67`) |
-| JS-012 | JS- | overview-distribution-people-ops | `js/overview-distribution-people-ops.js` | Not Started | | | |
-| JS-013 | JS- | repeat-offenders-pdf | `js/repeat-offenders-pdf.js` | Not Started | | | |
-| JS-014 | JS- | reports-build | `js/reports-build.js` | Not Started | | | |
-| JS-015 | JS- | reports-gmail | `js/reports-gmail.js` | Not Started | | | |
-| JS-016 | JS- | reports-ui | `js/reports-ui.js` | Not Started | | | |
-| JS-017 | JS- | rm-performance-worker | `js/rm-performance-worker.js` | Not Started | | | |
-| JS-018 | JS- | sheets-writeback | `js/sheets-writeback.js` | Not Started | | | |
-| JS-019 | JS- | tab-audit | `js/tab-audit.js` | Not Started | | | |
-| JS-020 | JS- | tab-morning | `js/tab-morning.js` | Not Started | | | |
-| JS-021 | JS- | tab-movement | `js/tab-movement.js` | Not Started | | | |
-| JS-022 | JS- | tab-repeat-offenders | `js/tab-repeat-offenders.js` | Not Started | | | |
-| JS-023 | JS- | tab-rmtimeline | `js/tab-rmtimeline.js` | Not Started | | | |
-| JS-024 | JS- | tab-tracking | `js/tab-tracking.js` | Not Started | | | |
+| JS-012 | JS- | overview-distribution-people-ops | `js/overview-distribution-people-ops.js` | Closed + Monitored | JS-004, JS-006, JS-005, JS-010, JS-002, JS-021, JS-014 | TAB-002, TAB-003, TAB-005, JS-003, JS-004, JS-020, (every tab file) | 2026-09-10 (`c82ec67`) |
+| JS-013 | JS- | repeat-offenders-pdf | `js/repeat-offenders-pdf.js` | Closed + Monitored | JS-008, JS-022, JS-021, EXT-004 | TAB-004 | 2026-09-10 (`c82ec67`) |
+| JS-014 | JS- | reports-build | `js/reports-build.js` | Closed + Monitored | JS-005, JS-006, JS-007, JS-002, JS-010, JS-021, JS-004 | JS-016, JS-015, JS-021, JS-008, JS-023, JS-024, TAB-003, TAB-007 | 2026-09-10 (`c82ec67`) |
+| JS-015 | JS- | reports-gmail | `js/reports-gmail.js` | Closed + Monitored | EXT-002, JS-014, JS-016, JS-018, JS-001, SHEET-011 | TAB-003, TAB-007, JS-016 | 2026-09-10 (`c82ec67`) |
+| JS-016 | JS- | reports-ui | `js/reports-ui.js` | Closed + Monitored | JS-014, JS-018, JS-015, JS-020, SHEET-004 | TAB-003, JS-015 | 2026-09-10 (`c82ec67`) |
+| JS-017 | JS- | rm-performance-worker | `js/rm-performance-worker.js` | Closed + Monitored | JS-008, JS-005, JS-006, JS-007, JS-014, JS-021 | JS-022, TAB-004 | 2026-09-10 (`c82ec67`) |
+| JS-018 | JS- | sheets-writeback | `js/sheets-writeback.js` | Closed + Monitored | JS-001, JS-009, JS-006, JS-021, JS-003, EXT-001, SHEET-002, SHEET-004, SHEET-005, SHEET-008, SHEET-011 | TAB-007, TAB-003, TAB-008, JS-015, JS-016, JS-021, JS-024, JS-004 | 2026-09-10 (`c82ec67`) |
+| JS-019 | JS- | tab-audit | `js/tab-audit.js` | Closed + Monitored | JS-007, JS-006, JS-004, JS-005, JS-012, JS-010 | TAB-006, JS-012, JS-023 | 2026-09-10 (`c82ec67`) |
+| JS-020 | JS- | tab-morning | `js/tab-morning.js` | Closed + Monitored | JS-012, JS-005, JS-010, JS-004 | TAB-001, JS-012, JS-016, JS-021 | 2026-09-10 (`c82ec67`) |
+| JS-021 | JS- | tab-movement | `js/tab-movement.js` | Closed + Monitored | JS-009, JS-006, JS-014, JS-018, JS-007, JS-012, JS-020, JS-003, SHEET-002, SHEET-004, SHEET-011, EXT-001, EXT-002 | TAB-007, TAB-004, TAB-005, TAB-008, JS-008, JS-013, JS-023, JS-024, JS-003, JS-011, JS-006 | 2026-09-10 (`c82ec67`) |
+| JS-022 | JS- | tab-repeat-offenders | `js/tab-repeat-offenders.js` | Closed + Monitored | JS-009, JS-017, JS-008, JS-021, JS-014, JS-010, JS-003, SHEET-006, SHEET-002, EXT-001 | TAB-004, JS-013, JS-003, JS-012 | 2026-09-10 (`c82ec67`) |
+| JS-023 | JS- | tab-rmtimeline | `js/tab-rmtimeline.js` | Closed + Monitored | JS-019, JS-024, JS-021, JS-014, JS-005, JS-003, JS-011 | TAB-005, JS-012, JS-011 | 2026-09-10 (`c82ec67`) |
+| JS-024 | JS- | tab-tracking | `js/tab-tracking.js` | Closed + Monitored | JS-021, JS-018, JS-004, JS-014, JS-010, JS-005, SHEET-002, SHEET-005, SHEET-008 | TAB-008, JS-012, JS-023 | 2026-09-10 (`c82ec67`) |
 
 ### `GS-` — Apps Script backend modules (production; `Tests_*.gs` excluded per `DOC-007`)
 
@@ -248,7 +248,7 @@ recorded in Phase 3.
 
 ## Coverage snapshot (auto-checkable target)
 
-- `JS-` records: 11 / 24 (core layer `JS-001`..`JS-011` done — DOC-027)
+- `JS-` records: 24 / 24 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-024` DOC-028)
 - `GS-` records: 0 / 13
 - `TAB-` records: 8 / 8 (DOC-026)
 - `SHEET-` records: 0 / ≥10 (count TBD, `DOC-010`)
