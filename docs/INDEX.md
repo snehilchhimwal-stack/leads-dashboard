@@ -123,14 +123,47 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| TAB-001 | TAB- | Morning Brief | `js/tab-morning.js` (JS-020) | Not Started | | | |
-| TAB-002 | TAB- | Overview | `js/overview-distribution-people-ops.js` (JS-012) | Not Started | | | |
-| TAB-003 | TAB- | Operations | `js/overview-distribution-people-ops.js` (JS-012) | Not Started | | | |
-| TAB-004 | TAB- | Repeat Offenders | `js/tab-repeat-offenders.js` (JS-022) + `js/repeat-offenders-pdf.js` (JS-013) + worker (JS-017) | Not Started | | | |
-| TAB-005 | TAB- | People | `js/overview-distribution-people-ops.js` (JS-012) + `js/tab-rmtimeline.js` (JS-023) | Not Started | | | |
-| TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Not Started | | | |
-| TAB-007 | TAB- | Movement | `js/tab-movement.js` (JS-021) | Not Started | | | |
-| TAB-008 | TAB- | Tracking | `js/tab-tracking.js` (JS-024) | Not Started | | | |
+| TAB-001 | TAB- | Morning Brief | `js/tab-morning.js` (JS-020) | Closed + Monitored | JS-020, JS-012 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-002 | TAB- | Overview | `js/overview-distribution-people-ops.js` (JS-012) | Closed + Monitored | JS-012, JS-004, JS-006, JS-009 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-003 | TAB- | Operations | `js/overview-distribution-people-ops.js` (JS-012) + reports-*.js (JS-014/15/16) + JS-018 | Closed + Monitored | JS-012, JS-014, JS-015, JS-016, JS-018, JS-006, EXT-002, SHEET-004, SHEET-011 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-004 | TAB- | Repeat Offenders | `js/tab-repeat-offenders.js` (JS-022) + `js/repeat-offenders-pdf.js` (JS-013) + worker (JS-017) | Closed + Monitored | JS-022, JS-017, JS-008, JS-013, JS-021, JS-003, JS-014, SHEET-002, SHEET-003, SHEET-006, EXT-004 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-005 | TAB- | People | `js/overview-distribution-people-ops.js` (JS-012) + `js/tab-rmtimeline.js` (JS-023) | Closed + Monitored | JS-012, JS-023, JS-019, JS-024, JS-021, JS-014, JS-011 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Closed + Monitored | JS-019, JS-007, JS-004, JS-006 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-007 | TAB- | Movement | `js/tab-movement.js` (JS-021) | Closed + Monitored | JS-021, JS-018, JS-014, JS-016, JS-003, JS-009, SHEET-002, SHEET-004, SHEET-011, EXT-001, EXT-002 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-008 | TAB- | Tracking | `js/tab-tracking.js` (JS-024) | Closed + Monitored | JS-024, JS-018, JS-004, JS-021, JS-014, SHEET-002, SHEET-005, SHEET-008, EXT-001 | DASH-001 | 2026-09-10 (`c82ec67`) |
+
+### `BTN-` / `UI-` — tab sub-components (detail lives in the owning `TAB-XXX` record, no own file)
+
+| ID | Owner | Label / element | Invokes |
+|---|---|---|---|
+| BTN-001 | TAB-003 | Download Issues CSV (`#downloadIssuesBtn`) | `downloadIssuesCSV` (JS-012) |
+| BTN-002 | TAB-003 | Generate (`#generateBtn`) | `renderReports` (JS-016) |
+| BTN-003 | TAB-003 | Generate all regions (`#generateAllReportsBtn`) | `renderAllRegionReports` (JS-016) |
+| BTN-004 | TAB-003 | Download all reports (`#downloadAllReportsBtn`) | `downloadAllReports` (JS-016) |
+| BTN-005 | TAB-003 | Edit region recipients (`#regionRecipientsToggle`) | recipient UI (JS-016) |
+| BTN-006 | TAB-003 | Connect Gmail (`#gmailConnectBtn`) | `connectGmail` (JS-015) |
+| BTN-007 | TAB-003 | Save Client ID (`#gmailSaveClientIdBtn`) | Gmail setup (JS-015) |
+| BTN-008 | TAB-003 | Gmail setup toggle (`#gmailSetupToggle`) | toggle (JS-015) |
+| BTN-009 | TAB-003 | Cancel wait (`#followupsWaitCancelBtn`) | `_followupWaitCancelled` Map (JS-018) |
+| BTN-010 | TAB-004 | ↻ Recalculate (`#repeatOffendersRecalculateBtn`) | worker → `computeRmPerformance*` (JS-017/JS-008) |
+| BTN-011 | TAB-004 | Download PDF (`#repeatOffendersDownloadPdfBtn`) | `downloadRepeatOffendersPdf` (JS-013) |
+| BTN-012 | TAB-006 | Copy (`#auditCopyBtn`) | audit copy (JS-019) |
+| BTN-013 | TAB-006 | Download CSV (`#auditCsvBtn`) | audit CSV (JS-019) |
+| BTN-014 | TAB-007 | Snapshot now (`#snapshotNowBtn`) | `browserSnapshotOpenLeads` (JS-018) |
+| BTN-015 | TAB-007 | Auto-snapshot (`#autoSnapshotCheck`) | auto-snapshot tick (JS-018/JS-021) |
+| BTN-016 | TAB-007 | Generate Region Emails (`#overnightGenerateReportsBtn`) | Overnight generate (JS-021→JS-016/JS-018) |
+| BTN-017 | TAB-007 | Cancel wait (`#overnightFollowupsWaitCancelBtn`) | `_followupWaitCancelled` Map (JS-018) |
+| BTN-018 | TAB-007 | Download Unmatched Comments CSV (`#downloadUnmatchedCommentsBtn`) | `downloadUnmatchedCommentsCSV` (JS-021) |
+| BTN-019 | TAB-008 | Backfill SLA_History (`#backfillSlaHistoryBtn`) | `backfillSlaHistoryFromMovementLog` (JS-018) |
+| BTN-020 | TAB-008 | Clear SLA History (`#clearSlaHistoryBtn`) — **irreversible** | `clearSlaHistory` (JS-004) |
+| BTN-021 | TAB-008 | Backfill Daily Cohort History (`#backfillDailyCohortHistoryBtn`) | `upsertDailyCohortHistoryRows` (JS-018) |
+| BTN-022 | TAB-008 | Clear Daily Cohort History (`#clearDailyCohortHistoryBtn`) — **irreversible** | clear handler (JS-024) |
+| UI-001..014 | TAB-001..008 | non-button UI elements (multi-selects, charts, calendars) | see each `TAB-XXX` record's `UI-XXX` sub-table |
+
+Global (top-bar) actions — sign in (`#gateSignInBtn`), refresh (`#refreshBtn`),
+change source (`#changeSourceBtn`), clear filters (`#clearFiltersBtn`),
+Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
+"Top-level buttons / actions" section, not a `TAB-XXX`.
 
 ### `JS-` — client-side modules
 
