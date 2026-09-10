@@ -11,9 +11,12 @@ repeating it.
 / Sheet do, what depends on it") see **`docs/INDEX.md`** — the living
 component catalog (`DOCUMENTATION_PROJECT_PLAN.md`). This file is the
 narrative; `docs/` is the reference; `LOGIC_AUDIT.md` is the frozen
-2026-09-07 audit. As of 2026-09-10 the catalog has its skeleton
-(structure, templates, seeded index) but the component records themselves
-are still Phase 3 work.
+2026-09-07 audit. As of 2026-09-10 the catalog is **built** — every JS
+module, `.gs` module, tab, button, Sheet tab, integration, and key data
+flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
+"Maintaining this catalog" has the guides for keeping it current, and
+`docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
+(including this file's own §9.7 staleness).
 
 Written 2026-08-31, updated 2026-09-09. This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real

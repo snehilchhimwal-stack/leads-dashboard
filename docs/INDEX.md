@@ -99,6 +99,29 @@ cross-references.
 
 ---
 
+## Maintaining this catalog (`DOC-044`)
+
+Four short guides — reachable from here so you don't need to know their
+filenames:
+
+| Guide | When |
+|---|---|
+| **[`HOW_TO_FIND_DOCS_FOR_A_FEATURE.md`](HOW_TO_FIND_DOCS_FOR_A_FEATURE.md)** | starting on a feature — the single entry point into the catalog (surface → `Depends On` → `SHEET-XXX`, then stop) |
+| **[`HOW_TO_REGISTER_A_COMPONENT.md`](HOW_TO_REGISTER_A_COMPONENT.md)** | you added a real new tab / JS or `.gs` module / function / button / Sheet tab / integration / data flow |
+| **[`HOW_TO_UPDATE_A_COMPONENT.md`](HOW_TO_UPDATE_A_COMPONENT.md)** | code changed and an existing record needs correcting — includes **the duplicated-pair rule**, **"Recording a new dependency edge"** (`DOC-045`), and a real worked example (`DOC-047`) |
+| **[`HOW_TO_RETIRE_A_COMPONENT.md`](HOW_TO_RETIRE_A_COMPONENT.md)** | a component is obsolete — preserve the record (`_archive/`), never delete; IDs are never reused |
+
+And before shipping any feature:
+**[`PRE_SHIP_DOCUMENTATION_CHECKLIST.md`](PRE_SHIP_DOCUMENTATION_CHECKLIST.md)**
+(`DOC-049`) — the 8-point "is the catalog still current" check, sibling
+to `../CLAUDE.md`'s Testing section.
+
+Open questions this project could not resolve live in
+**[`_planning/OPEN_ITEMS.md`](_planning/OPEN_ITEMS.md)** (`DOC-042`) — a
+tracker kept alive going forward, not archived.
+
+---
+
 ## Master table
 
 Columns: **ID | Type | Name | Location | Record Status | Depends On |

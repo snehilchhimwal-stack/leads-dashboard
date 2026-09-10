@@ -11,6 +11,14 @@ This is a system-wide *logic and connection* audit, not a per-file review —
 the goal is to reconstruct how the pieces depend on and affect each other,
 not to describe each file in isolation.
 
+**For the current, living per-component picture, see `docs/INDEX.md`** —
+the component catalog (`DOCUMENTATION_PROJECT_PLAN.md`), built 2026-09-10
+largely *from* this audit's Part 1. That catalog is maintained forward
+as the code changes; **this file is not** — it stays a dated
+2026-09-07 record. `HANDOVER.md` is the third piece (onboarding
+narrative + incident history). A code change updates the relevant
+`docs/` record(s) and `HANDOVER.md` §1–§3; it never edits this file.
+
 ---
 
 ## Part 1 of 7 — Architecture + File/Component Map
