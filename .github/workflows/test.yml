@@ -9,6 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        # fetch-depth: 0 -> full history, so check-catalog.py can run
+        # `git log <verified-sha>..HEAD -- <path>` (Last-Verified drift, D)
+        # and `git diff <before>..<after>` (change -> component-ID impact,
+        # E). Forensic audit P0/P1 (t-tf-5ad22d8e4c2e).
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -25,3 +31,16 @@ jobs:
       - name: Documentation coverage check (warn-only)
         run: node test/check-docs-coverage.js
         continue-on-error: true
+      # docs/ change-control tripwires (t-tf-5ad22d8e4c2e). BLOCKING on
+      # checks A/B/C -- INDEX.md reciprocity, INDEX <-> record-file
+      # coverage both ways, and INDEX Location -> real file. All three are
+      # green as of 2026-09-10, so a failure here is a real regression
+      # (a broken back-link, a record without a row, a row pointing at a
+      # deleted file). Checks D (Last-Verified drift) and E (change ->
+      # component-ID impact + the ready-to-run revalidation-task ops JSON)
+      # only PRINT -- set CATALOG_STRICT=1 to make them blocking too.
+      - name: Catalog change-control tripwires
+        run: python3 test/check-catalog.py
+        env:
+          DIFF_BASE: ${{ github.event.before || github.event.pull_request.base.sha }}
+          DIFF_HEAD: ${{ github.sha }}
