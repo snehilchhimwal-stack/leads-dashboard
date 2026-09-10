@@ -1,9 +1,20 @@
-# Reciprocity normalisation — what was done + one decision for Snehil
+# Reciprocity normalisation — what was done
 
 **Task:** `t-tf-47c37923c3bd` — "docs/: normalise Depends On / Used By
 reciprocity across all component records".
-**Done:** 2026-09-10, additive pass. **Decision pending:** the 57
-record-only edges in §3 below (prune vs. expand).
+**Done:** 2026-09-10 in two passes — (1) additive (every record brought up
+to a superset of its `INDEX.md` row), then (2) **prune** (Snehil's call:
+every record's `Depends On` / `Used By` aligned to **exactly** its
+`INDEX.md` row; the 57 record-only edges in §3 removed).
+
+**Final state (verified `recip_verify.py`): 69/69 records' `Depends On` /
+`Used By` == their `INDEX.md` row exactly; 0 one-directional pairs across
+the record set.** `## Related` bullets, inline `` `ID` (annotation) ``
+notes, and accurate summary tails ("— every other production `.gs`") were
+kept; 3 annotations that named a since-pruned ID were reworded
+(`GS-006`/`GS-013` "same pattern as", `JS-021` "via FN-148"). `INDEX.md` /
+`LOGIC_AUDIT.md` not touched. §3 below is retained as the record of what
+was pruned and why.
 
 ---
 
@@ -47,17 +58,17 @@ the record files no longer lag it.
 
 ---
 
-## 3. DECISION NEEDED — 57 record-only edges
+## 3. The 57 record-only edges — PRUNED 2026-09-10
 
-These edges exist **in a record file but not in `INDEX.md`**. This pass
-**kept them** (additive = never delete). They are *one-directional*
-(the other end's record does not carry the reciprocal), so strictly the
-record set is not yet byte-for-byte reciprocal until they are resolved
-one way or the other.
+These edges existed **in a record file but not in `INDEX.md`**. Snehil's
+decision: **prune them** — `INDEX.md`'s "immediate next-hop" model wins,
+so every record now matches its `INDEX.md` row exactly. This section is
+kept as the record of *what was removed and why*; if any specific edge
+should come back, add it to **both** ends (record + `INDEX.md` row).
 
-Every one falls in a category below. **None is a factually wrong
-relationship** — the question is only *at what depth the catalog models
-it*.
+Every one fell in a category below. **None was a factually wrong
+relationship** — the question was only *at what depth the catalog models
+it*; the answer chosen is "as `INDEX.md` models it".
 
 ### 3a. `DATA-` flow records list transitive consumers; `INDEX` lists the immediate next hop (37 edges)
 
@@ -112,24 +123,21 @@ sheets are reached through the tabs, and are already on those tab /
 
 ---
 
-## 4. Recommendation
+## 4. Decision taken — Option A (prune)
 
-- **§3c (11 edges): prune from the record files.** `INDEX.md` is right;
-  these are over-reach or wrong-direction. `recip_apply4.py` already does
-  exactly this (it prunes every record to its `INDEX.md` row) — but it
-  also prunes §3a/§3b, so it should only be run after the §3a/§3b call.
-- **§3a + §3b (46 edges): your call, and it is a modelling-policy call,
-  not a bug.**
-  - **Option A — keep `INDEX.md`'s "immediate next hop" model** (prune the
-    records to match). Simpler to maintain: a `DATA-` flow with one
-    downstream `SHEET-` never needs re-editing when a 9th consumer tab is
-    added — only that `SHEET-` record does. Recommended.
-  - **Option B — expand `INDEX.md` to the full transitive set** (re-run a
-    `DOC-040`-style union regen over `INDEX.md` **+** the record files, so
-    both ends gain every edge and every reciprocal). More complete for
-    "who ultimately uses this pipeline", more rows to keep in sync.
-- Until you decide, the additive result in §1 stands and is correct — the
-  record set carries every authoritative (`INDEX.md`) edge reciprocally;
-  only these 57 record-only edges are still one-directional.
+Snehil chose to **keep `INDEX.md`'s "immediate next-hop" model** and prune
+the records to match (2026-09-10). Rationale: simpler to maintain — a
+`DATA-` flow that points only at the `SHEET-` it lands in never needs
+re-editing when a 9th consumer tab is added; only that `SHEET-` record
+does. All 57 edges in §3 (§3a transitive-consumer over-listing, §3b
+`DASH-001` whole-system listing, §3c spurious/wrong-direction) were
+removed. The alternative (expand `INDEX.md` to the full transitive set via
+a `DOC-040`-style union regen) was not taken.
 
-Pointer left in `OPEN_ITEMS.md` §C and `RELATIONSHIP_MAP.md` §5.
+Applied with `<scratch>/recip_apply4.py --apply` + 4 manual touch-ups
+(`EXT-003` mid-list prose, `JS-005` `none —` tail, and the 3 reworded
+annotations). Verified: `recip_verify.py` → 69/69 records == `INDEX.md`,
+0 one-directional pairs.
+
+Pointers updated: `OPEN_ITEMS.md` §E, `RELATIONSHIP_MAP.md` §5,
+`FORENSIC_COMPLETENESS_AUDIT_2026-09-10.md` (P1 item 8).

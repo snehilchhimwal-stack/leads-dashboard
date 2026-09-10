@@ -110,11 +110,10 @@ write). `LOGIC_AUDIT.md` Part 1 §1 layers 3, 11, 17; Part 7 diagram G.
 
 ## Relationships
 
-- **Depends On:** `SHEET-001`, `GS-008`, `JS-018`, `JS-021`, `GS-012`,
-  `GS-002`, `EXT-001`, `SHEET-002`
-- **Used By:** `SHEET-005`, `SHEET-008`; `JS-008`, `JS-013`, `JS-017`,
-  `JS-023`, `JS-024`; `TAB-004`, `TAB-005`, `TAB-007`, `TAB-008`;
-  `GS-001`, `GS-010`, `GS-003`; `DATA-002` (aggregates this history)
+- **Depends On:** `JS-018`, `JS-021`, `GS-002`, `GS-008`, `GS-012`,
+  `SHEET-001`, `SHEET-002`, `EXT-001`
+- **Used By:** `TAB-004`, `JS-008`, `GS-001`, `SHEET-005`, `SHEET-008`,
+  `DATA-002` (aggregates this history)
 - **Related:** `DATA-001` (the in-memory counterpart — same source, not
   persisted)
 

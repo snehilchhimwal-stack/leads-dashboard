@@ -131,11 +131,11 @@ only).
 
 ## Relationships
 
-- **Depends On:** `JS-024`, `JS-018` (writes), `JS-004` (`clearSlaHistory`),
-  `JS-021` (`movementSnapshots`), `JS-014` (`mainRegionFor` /
-  `effectiveRegion`), `SHEET-002`, `SHEET-005`, `SHEET-008`, `EXT-001`
-- **Used By:** `DASH-001`; `TAB-005` (RM Timeline reuses
-  `buildTrackingChartSvg`)
+- **Depends On:** `JS-004` (`clearSlaHistory`), `JS-014`
+  (`mainRegionFor` / `effectiveRegion`), `JS-018` (writes), `JS-021`
+  (`movementSnapshots`), `JS-024`, `SHEET-002`, `SHEET-005`,
+  `SHEET-008`, `EXT-001`
+- **Used By:** `DASH-001`
 - **Related:** `TAB-002` (live rates vs these cohort-correct numbers),
   `GS-008` (`MovementTracker.gs` also writes `SLA_History`)
 

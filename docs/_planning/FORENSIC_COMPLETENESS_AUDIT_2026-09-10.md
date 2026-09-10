@@ -20,9 +20,11 @@ traced data flow (5), and the one dashboard have a `Closed + Monitored`
 record; `FN-001..254`, `BTN-001..022`, `RULE-`, `CFG-`, `EXC-`, `UI-`, `API-`
 sub-tables are populated inside those records (850 `FN-` mentions, 208 `EXC-`,
 121 `BTN-`, 116 `CFG-`, 87 `RULE-`, 28 `UI-`, 10 `API-` — Confirmed by grep).
-`docs/INDEX.md` is internally reciprocal (0 asymmetries, `DOC-040`), and as of
-this run every record's `## Relationships` is a superset of its INDEX row
-(`t-tf-47c37923c3bd`, `cddbd17`). No code file has changed since the commit
+`docs/INDEX.md` is internally reciprocal (0 asymmetries, `DOC-040`), and after
+`t-tf-47c37923c3bd` (additive pass at `cddbd17`, then a prune to `INDEX.md`
+exactly) **all 69 records' `Depends On` / `Used By` == their `INDEX.md` row
+exactly, with 0 one-directional pairs across the record set** (verified
+`recip_verify.py`). No code file has changed since the commit
 the records were verified at (`c82ec67` → `HEAD`, `git log c82ec67..HEAD --
 js/*.js *.gs dashboard.html` is **empty** — Confirmed), so the catalog is
 genuinely current *today*.
@@ -174,7 +176,7 @@ Dependency ↔ Data lineage ↔ Architecture ↔ Validation ↔ Change ↔ Hando
 | Requirement ↔ anything | **Absent** | There are no requirement IDs anywhere. The brief's "requirement" maps loosely to the plan's Goals 1–6 | no `REQ-` concept; no record says "satisfies Goal 3" |
 | Task ↔ Component | **Weak** | `DOC-027` "created" `JS-001..011`; recorded only in each record's `## Version / change reference` prose ("record created by DOC-027") | no structured `produces:`; can't query "which task made `SHEET-009`" without grep |
 | Component ↔ Source | **Strong** | every record `## Source of truth` = file + `#Lnn` | `Last Verified` commit is `c82ec67` for all — will lie the moment code moves |
-| Component ↔ Dependency (both ways) | **Strong (today)** | `INDEX.md` reciprocal; records now supersets (this session) | 57 record-only edges still one-directional (`reciprocity-normalisation-notes.md`) — decision pending |
+| Component ↔ Dependency (both ways) | **Strong** | `INDEX.md` reciprocal; **69/69 records == `INDEX.md` exactly, 0 one-directional pairs** after the `t-tf-47c37923c3bd` prune (`recip_verify.py`) | — |
 | Component ↔ Data lineage | **Strong** | `DATA-001..005` + `JS-018 ## Data Lineage` | — |
 | Component ↔ Architecture | **Partial** | client records → `DASH-001`; `.gs` records → no `DASH-`/`FLOW-` (there is no backend `DASH-`) | backend half has no architecture anchor record; `FLOW-` empty |
 | Component ↔ Validation | **Partial** | inline `## Validation` | no `docs/validation/` artifact to link |
@@ -321,7 +323,7 @@ property holds by design but is violated in fact.
 | `DATA-005` HIGH finding (Loan-region override, no `.gs` twin) | the twin gets written, or the client override changes | `## Next action` + revalidation trigger in the record | manual | Snehil |
 | Every record's `Last Verified` | any commit on its `Location` path after `c82ec67` | **none** | manual | Snehil |
 | `INDEX.md` reciprocity | a record edited without updating both ends | `DOC-040` python check (not committed, not scheduled) | manual re-run | Snehil |
-| 57 record-only `Depends On`/`Used By` edges | already one-directional | `reciprocity-normalisation-notes.md` documents them | Snehil's prune-vs-expand decision | Snehil |
+| ~~57 record-only `Depends On`/`Used By` edges~~ **RESOLVED 2026-09-10** — pruned to `INDEX.md`; 69/69 records match exactly, 0 one-directional (`recip_verify.py`) | — | `reciprocity-normalisation-notes.md` | — | Snehil |
 | Meaningful comments (§E) | code changes, comment doesn't (or vice versa) | none | `PRE_SHIP` checklist (proposed) | Snehil |
 | The plan's governance section | the catalog progressed past it (already happened) | none | this audit | Snehil |
 | CI `check-docs-coverage.js` scope | a new taxonomy type is added | none | re-read `CI-001..005` (their own revalidation trigger, per the plan's Task Audit) | Snehil |
@@ -367,8 +369,9 @@ property holds by design but is violated in fact.
    run every push.
 6. **`Last Verified` drift check** (Definition-of-Stale trigger 7).
 7. **Flip Check 1 to hard-fail** (graduation criterion `DOC-039` is met).
-8. Decide the **57 record-only edges** (`reciprocity-normalisation-notes.md`)
-   — prune (recommended, `recip_apply4.py` ready) or expand `INDEX.md`.
+8. ~~Decide the **57 record-only edges**~~ — **DONE 2026-09-10**: pruned
+   to `INDEX.md` (`reciprocity-normalisation-notes.md`); 69/69 records
+   match exactly, 0 one-directional pairs (`recip_verify.py`).
 
 **P2 — completes coverage + evidence**
 9. `INDEX.md` **self-consistency check** (snapshot ↔ rows ↔ task states).

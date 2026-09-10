@@ -109,11 +109,12 @@ consent flows sharing one Google Client ID."
 
 ## Relationships
 
-- **Depends On:** the GIS CDN script (`dashboard.html`), the Google
-  Cloud OAuth Client ID + consent-screen config
-- **Used By:** `JS-001`, and transitively every module that reads
-  `gateAccessToken` (`JS-009`, `JS-018`, `JS-004`, `JS-021`, `JS-022`);
-  `EXT-001` (authorises its calls); `EXT-002` (rides the same Client ID)
+- **Depends On:** `none` — its real prerequisites (the GIS CDN script in
+  `dashboard.html`, the Google Cloud OAuth Client ID + consent-screen
+  config) are external, not cataloged components
+- **Used By:** `JS-001` (the sign-in gate itself), `JS-004`, `JS-009`,
+  `JS-018`, `JS-021`, `JS-022` (every module that reads `gateAccessToken`),
+  `EXT-001` (authorises its calls), `EXT-002` (rides the same Client ID)
 - **Related:** `EXT-002` (the parallel Gmail grant)
 
 ## Source of truth

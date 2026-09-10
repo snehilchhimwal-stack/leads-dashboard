@@ -129,11 +129,9 @@ Part 7 §18 HIGH / MEDIUM #3 / LOW #1.
 
 ## Relationships
 
-- **Depends On:** `JS-014`, `JS-015`, `JS-016`, `JS-018`, `GS-001`,
-  `GS-004`, `GS-010`, `GS-011`, `SHEET-004`, `SHEET-006`, `SHEET-007`,
-  `SHEET-012`, `EXT-002`, `DATA-001`, `DATA-002`, `DATA-003`
-- **Used By:** `TAB-003`, `TAB-007`, `SHEET-011`, `SHEET-013`,
-  `SHEET-014` — email recipients
+- **Depends On:** `JS-014`, `GS-001`, `SHEET-004`, `EXT-002`,
+  `DATA-001`, `DATA-002`, `DATA-003`
+- **Used By:** `TAB-003`, `TAB-007`, `SHEET-011` — email recipients
 - **Related:** `DATA-003` (supplies the follow-up text that rides in the
   email)
 

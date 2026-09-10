@@ -124,8 +124,8 @@ Movement hub) in `LOGIC_AUDIT.md` Part 1 §1.
 - **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`),
   `GS-005` (`FollowupEngine.gs` — `latestOutcomeGs_`), `SHEET-001`,
   `SHEET-010`
-- **Used By:** `GS-006`, `GS-008` (`MovementTracker.gs` —
-  `snapshotOpenLeads_` invokes it, same pattern as `GS-006`),
+- **Used By:** `GS-008` (`MovementTracker.gs` — `snapshotOpenLeads_`
+  invokes it, same piggyback pattern as InteractionHistoryLogger),
   `SHEET-010`, `DATA-003`
 - **Related:** `GS-006` (`InteractionHistoryLogger.gs` — the other
   piggyback logger), `GS-005` / `JS-007` (the classifier this loop

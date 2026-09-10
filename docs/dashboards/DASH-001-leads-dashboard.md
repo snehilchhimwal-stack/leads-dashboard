@@ -238,11 +238,9 @@ for the specific subsystems.
 ## Relationships
 
 - **Depends On:** `TAB-001`, `TAB-002`, `TAB-003`, `TAB-004`, `TAB-005`,
-  `TAB-006`, `TAB-007`, `TAB-008`, `JS-001`..`JS-024`, `EXT-001`,
-  `EXT-002`, `EXT-003`, `EXT-004`, `SHEET-001`, `SHEET-002`, `SHEET-004`,
-  `SHEET-005`, `SHEET-006`, `SHEET-008`, `SHEET-011`, `DATA-001`
-- **Used By:** `none` — top of the tree; nothing in this catalog depends
-  on `DASH-001`
+  `TAB-006`, `TAB-007`, `TAB-008`, `JS-001`, `JS-003`, `JS-004`,
+  `SHEET-001`, `SHEET-011`, `EXT-001`, `DATA-001`
+- **Used By:** `none` — top of the tree; nothing in this catalog depends on `DASH-001`
 - **Related:** the Apps Script backend (`GS-001`..`GS-013`) — a
   peer half of the system, sharing only `SHEET-*`, never a dependency
 

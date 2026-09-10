@@ -140,7 +140,7 @@ Belongs to `TAB-007`; its state serves `TAB-004`/`005`/`008`.
 - **Used By:** `TAB-004`, `TAB-005`, `TAB-007`, `TAB-008` (read
   `movementSnapshots` / `buildMovementHistories` /
   `passesMovementFilters`), `JS-003` (`fetchMovementLog`), `JS-006`
-  (baseline Maps via FN-148), `JS-008`, `JS-011` (`initMovementUI`),
+  (baseline-Map builder), `JS-008`, `JS-011` (`initMovementUI`),
   `JS-012`, `JS-013`, `JS-014`, `JS-017`, `JS-018`, `JS-022`, `JS-023`,
   `JS-024`, `DATA-004`
 - **Related:** `GS-008` (`MovementTracker.gs` — writes the `Movement_Log`

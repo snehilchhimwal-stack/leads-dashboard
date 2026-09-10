@@ -150,10 +150,10 @@ Part 6 §6.3; `OPS_CHECKLIST.md` (freshness).
 
 - **Depends On:** `JS-018` (the writers), `GS-008`, `SHEET-001` (`leads`
   — the snapshot source), `EXT-001`
-- **Used By:** `TAB-004`, `TAB-005`, `TAB-007`, `TAB-008`, `JS-006`,
-  `JS-008`, `JS-013`, `JS-018`, `JS-021`, `JS-022`, `JS-023`, `JS-024`,
-  `GS-001`, `GS-003`, `GS-008`, `GS-009`, `GS-010`, `SHEET-003`,
-  `SHEET-005`, `SHEET-008`, `DATA-002`, `DATA-004`
+- **Used By:** `TAB-004`, `TAB-007`, `TAB-008`, `JS-006`, `JS-008`,
+  `JS-013`, `JS-018`, `JS-021`, `JS-022`, `JS-023`, `JS-024`, `GS-001`,
+  `GS-003`, `GS-008`, `GS-009`, `GS-010`, `SHEET-003`, `SHEET-005`,
+  `SHEET-008`, `DATA-002`, `DATA-004`
 - **Related:** `SHEET-003` (backfillable from it)
 
 ## Source of truth

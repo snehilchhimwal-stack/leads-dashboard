@@ -94,13 +94,11 @@ header comment.
 
 ## Relationships
 
-- **Depends On:** `JS-012` (`computeRMScoreRows`, `computeDailyLeadCounts`,
-  `topBreakdown`), `JS-005` (IST helpers), `JS-010` (`esc`), `JS-004`
-  (`_refreshMorningBriefOnNextRender` gating)
-- **Used By:** `TAB-001`; `JS-012` (`renderAll`, gated), `JS-016` /
-  `JS-021` (re-called at Generate checkpoints), `JS-011`
-  (`initRMTimelineUI` is `JS-023` — but `main.js` also indirectly
-  refreshes this via the render chain)
+- **Depends On:** `JS-004` (`_refreshMorningBriefOnNextRender` gating),
+  `JS-005` (IST helpers), `JS-010` (`esc`), `JS-012`
+  (`computeRMScoreRows`, `computeDailyLeadCounts`, `topBreakdown`)
+- **Used By:** `TAB-001`, `JS-012` (`renderAll`, gated), `JS-016`,
+  `JS-021` (re-called at Generate checkpoints)
 - **Related:** `TAB-008` (Card 3 vs the cohort-correct 0–48h metric)
 
 ## Source of truth

@@ -109,9 +109,9 @@ action-log fields).
 
 ## Relationships
 
-- **Depends On:** `JS-019`, `JS-007` (`parseActionLog`), `JS-004`
-  (`buildMultiSelect`), `JS-006` (`enrichLead` output on `leads`)
-- **Used By:** `DASH-001`; `TAB-005` (RM Timeline reuses `updateEventsFor`)
+- **Depends On:** `JS-004` (`buildMultiSelect`), `JS-006` (`enrichLead`
+  output on `leads`), `JS-007` (`parseActionLog`), `JS-019`
+- **Used By:** `DASH-001`
 - **Related:** `TAB-005` (shared event-list definition)
 
 ## Source of truth

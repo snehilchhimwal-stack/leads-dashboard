@@ -109,10 +109,11 @@ try/catch-isolated inside `snapshotOpenLeads_` (`GS-013` EXC-090).
 
 ## Relationships
 
-- **Depends On:** `DATA-001`, `SHEET-001`, `JS-007`, `JS-006`, `JS-016`,
-  `JS-018`, `GS-005`, `GS-002`, `GS-010`, `GS-013`, `GS-006`, `SHEET-004`
-- **Used By:** `TAB-003`, `TAB-005`, `TAB-006`, `TAB-007`; `SHEET-009`,
-  `SHEET-010`; `DATA-005` (the region email carries the follow-up text)
+- **Depends On:** `JS-006`, `JS-007`, `JS-016`, `JS-018`, `GS-002`,
+  `GS-005`, `GS-006`, `GS-010`, `GS-013`, `SHEET-001`, `SHEET-004`,
+  `DATA-001`
+- **Used By:** `TAB-003`, `SHEET-009`, `SHEET-010`, `DATA-005` (the
+  region email carries the follow-up text)
 - **Related:** `DATA-005` (consumes the `Lead_Followups` output of this
   flow)
 

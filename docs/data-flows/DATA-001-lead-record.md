@@ -97,10 +97,9 @@ EXC-004/005). A malformed row is parsed best-effort and kept.
 
 ## Relationships
 
-- **Depends On:** `SHEET-001`, `EXT-001`, `JS-009`, `JS-003`, `JS-006`,
-  `JS-004`, `JS-002`, `JS-005`
-- **Used By:** `DATA-002`, `DATA-003`, `DATA-005`; `TAB-001`, `TAB-002`,
-  `TAB-003`, `TAB-005`, `TAB-006`; `DASH-001`
+- **Depends On:** `JS-002`, `JS-003`, `JS-004`, `JS-005`, `JS-006`,
+  `JS-009`, `SHEET-001`, `EXT-001`
+- **Used By:** `DASH-001`, `TAB-001`, `DATA-002`, `DATA-003`, `DATA-005`
 - **Related:** `DATA-004` (the persisted-snapshot counterpart of this
   in-memory flow)
 

@@ -107,8 +107,8 @@ error path of its own.
 
 ## Relationships
 
-- **Depends On:** `JS-004` (state), `JS-009`, `JS-012` (borrowed compute
-  helpers), `JS-020`, `DATA-001`
+- **Depends On:** `JS-012` (borrowed compute helpers), `JS-020`,
+  `DATA-001`
 - **Used By:** `DASH-001`
 - **Related:** `TAB-008` (Card 3 vs the cohort-correct 0–48h metric)
 
