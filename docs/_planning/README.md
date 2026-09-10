@@ -18,6 +18,9 @@ task that produced it and includes a Definition-of-Done check.
 | `sheet-inventory.md` | `DOC-010` | the 14 Sheet tabs + writer/reader; the one-spreadsheet check |
 | `integration-inventory.md` | `DOC-011` | the 4 `EXT-` integrations + real call sites; the `<head>` check |
 | `documentation-conflicts.md` | `DOC-012` | 9 doc-vs-doc / doc-vs-code conflicts (C-1..C-9) + fixes |
+| `retention-decisions-needed.md` | `DOC-037` | the 7 `TBD` Sheet-tab retention values from `DOC-036`, each with context + options, routed for the owner's decision |
 
 Phase 1 (`DOC-001`–`DOC-013`) is complete. `DOC-013` (the catalog's
-front matter) lives in `../INDEX.md`, not here.
+front matter) lives in `../INDEX.md`, not here. Phase 4's `DOC-036`
+completed the `## Data Lifecycle` sections in `../sheets/`; `DOC-037`'s
+list (above) is the open-questions hand-off.
