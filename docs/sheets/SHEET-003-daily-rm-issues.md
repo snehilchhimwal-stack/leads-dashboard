@@ -83,7 +83,7 @@ Write: `captureDailyRmIssues_`, `backfillDailyRmIssuesFromMovementLog_`,
 `ensureDailyRmIssueLogSheet_`, `repairDailyRmIssuesMissingFieldsNow`
 (all `GS-003`).
 
-## Data Lifecycle (DOC-019 — worked example, confirmed)
+## Data Lifecycle (DOC-019 — confirmed worked example; DOC-036 signed off 2026-09-10)
 
 - **Data Type:** historical
 - **Retention Period:** **7 days** (as of the 2026-09-07 fix)

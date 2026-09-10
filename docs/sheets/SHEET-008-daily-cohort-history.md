@@ -88,17 +88,22 @@ its own.
 `eligibleDailyCohortDatesGs_`, `_readArchivedDailyCohortDatesGs_`,
 `ensureDailyCohortHistorySheetGs_` (`GS-008`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** historical (permanent archive)
-- **Retention Period:** `TBD` — **explicitly NOT 7-day**; this tab
-  exists to *outlive* `Movement_Log`. No prune function. `DOC-036` to
-  confirm "keep indefinitely" is the intent.
-- **Enforced By:** `None` (no prune); `clearDailyCohortHistory` is a
-  manual all-or-nothing wipe
-- **Archive / Delete Behavior:** grows unbounded; rows are **immutable
-  once `window_complete`** — never re-derived
-- **Sensitivity:** operational (counts only)
+- **Data Type:** historical (permanent archive).
+- **Retention Period:** **`TBD` — no pruning function found.** grep at
+  `9cafa68`: no `prune*_` touches this tab. It is **explicitly not
+  7-day** (it exists to *outlive* `Movement_Log`), and its rows are
+  **immutable once `window_complete`** — but "keep indefinitely" is not
+  stated in code, so the answer is `TBD`, not "unbounded by design".
+  Feeds `DOC-037` (growth: ~11 regions/day, low risk).
+- **Enforced By:** `None`. `clearDailyCohortHistory` (`JS-024`, `BTN-022`)
+  is a manual all-or-nothing wipe.
+- **Archive / Delete Behavior:** grows unbounded in practice; rows never
+  re-derived once archived (`RULE-029`).
+- **Sensitivity:** operational (per-region counts only, no PII).
+  `DOC-038` for the operational-importance classification (read by
+  `TAB-008` only; no backend job depends on it).
 
 ## Risks of changing this tab's structure
 

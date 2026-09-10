@@ -77,15 +77,19 @@ trigger. No trigger of its own. See `GS-001` Trigger Schedule.
 `ensureAllIssuesLogSheet_`, `sendOneAllIssuesEmail_`,
 `sendAllIssuesEmails_` (all `GS-001`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** historical (send-audit log)
-- **Retention Period:** `TBD` — no prune function → likely unbounded.
-  `DOC-036` to confirm intent (grows ~1 row per region per day).
-- **Enforced By:** `None`
-- **Archive / Delete Behavior:** grows unbounded; no clear function
-- **Sensitivity:** operational (recipient addresses) — `DOC-036` to
-  classify
+- **Data Type:** historical (send-audit log).
+- **Retention Period:** **`TBD` — no pruning function found.** grep at
+  `9cafa68`: no `prune*_` and no `clear*` touches this tab. Grows ~1 row
+  per region per day (bounded, low risk). Not invented — feeds
+  `DOC-037`.
+- **Enforced By:** `None`.
+- **Archive / Delete Behavior:** grows unbounded; `ensureAllIssuesLogSheet_`
+  self-heals the header only, never removes rows.
+- **Sensitivity:** operational — recipient addresses. `DOC-038` for the
+  operational-importance classification (read only by `GS-001` itself,
+  for within-run dedupe).
 
 ## Risks of changing this tab's structure
 

@@ -83,7 +83,7 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
 `clearReviewedUnmatchedCommentsNow`, `dedupeUnmatchedCommentsNow` (all
 `GS-013`).
 
-## Data Lifecycle (DOC-019 — confirmed)
+## Data Lifecycle (DOC-019 — confirmed; DOC-036 signed off 2026-09-10)
 
 - **Data Type:** operational (a review queue)
 - **Retention Period:** **manually curated, not time-limited** —

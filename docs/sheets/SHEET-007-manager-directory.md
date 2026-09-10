@@ -81,15 +81,22 @@ Write: `ensureManagerDirectorySheetInternal_` (`GS-011`). Read:
 `loadRmHierarchyAndEmails_`, `resolveRecipientEmailsForRegion_`
 (`GS-004`), `auditManagerDirectoryEmailGaps_` (`GS-011`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** **configuration**
-- **Retention Period:** N/A — current-state table; `DOC-036` to confirm
-- **Enforced By:** N/A — rebuilt/overwritten
-- **Archive / Delete Behavior:** overwritten on rebuild (hand-filled
-  `email` values preserved where the rebuild keys match — `DOC-036` to
-  confirm the merge behaviour)
-- **Sensitivity:** contains real manager emails — `DOC-036` to classify
+- **Data Type:** **configuration** (a current-state address book).
+- **Retention Period:** **N/A — configuration.** No history, no
+  `prune*_` function (none needed).
+- **Enforced By:** N/A — `ensureManagerDirectorySheetInternal_`
+  (`GS-011`) writes the header + derived rows; the `email` column is
+  hand-filled.
+- **Archive / Delete Behavior:** overwritten on rebuild. **`TBD` —
+  whether a rebuild preserves hand-filled `email` values** (unconfirmed;
+  a rebuild that wipes them would silently break routing). Feeds
+  `DOC-037` as a data-safety question, not a retention one.
+- **Sensitivity:** **contains real manager email addresses — FLAGGED
+  for review**, adjacent to the `RmHierarchy.private.gs` concern. A
+  backend job depends on it directly (recipient resolution —
+  `LOGIC_AUDIT.md` Part 3 §3.7). `DOC-038` completes the classification.
 
 ## Risks of changing this tab's structure
 

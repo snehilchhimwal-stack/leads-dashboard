@@ -78,18 +78,23 @@ its own.
 
 `ensureSlaHistorySheet_`, `writeSlaHistorySnapshot_` (`GS-008`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** historical (aggregate)
-- **Retention Period:** `TBD` — **explicitly NOT 7-day**; this tab
-  exists precisely because `Movement_Log` is short-lived. No prune
-  function exists → likely unbounded. `DOC-036` to confirm the intended
-  retention (or that "keep forever" is the intent).
-- **Enforced By:** `None` (no prune) — `clearSlaHistory` is a manual,
-  all-or-nothing wipe, not a retention policy
-- **Archive / Delete Behavior:** grows unbounded; only manual clear
-  removes rows — `TBD` confirm intent
-- **Sensitivity:** operational (counts only, no PII)
+- **Data Type:** historical (aggregate).
+- **Retention Period:** **`TBD` — no pruning function found.** grep at
+  `9cafa68`: the only `prune*_` functions are `pruneMovementLog_` /
+  `pruneDailyRmIssueLog_`; neither touches `SLA_History`. It is
+  **explicitly not 7-day** (it exists *because* `Movement_Log` is
+  short-lived) — but "keep indefinitely" is not stated anywhere, so the
+  honest answer is `TBD`, not "unbounded by design". Feeds `DOC-037`
+  (growth: ~4 rows/day, low risk).
+- **Enforced By:** `None`. `clearSlaHistory` (`JS-004` FN-025, `BTN-020`)
+  is a manual all-or-nothing wipe, not a retention policy.
+- **Archive / Delete Behavior:** grows unbounded in practice; only the
+  manual clear removes rows.
+- **Sensitivity:** operational (counts only, no PII). `DOC-038` for the
+  operational-importance classification (read by `TAB-008` only; no
+  backend job depends on it).
 
 ## Risks of changing this tab's structure
 

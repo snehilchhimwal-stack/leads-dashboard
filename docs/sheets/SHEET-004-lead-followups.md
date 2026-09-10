@@ -90,17 +90,24 @@ its own.
 `formatFollowupAgeGs_` (`GS-010`); `buildLeadFollowupsStalenessRuleSpecs_`,
 `setupLeadFollowupsStalenessFormatting` (`GS-007`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** temporary / operational — **`TBD` confirm** (`DOC-036`)
-- **Retention Period:** effectively one Generate cycle (cleared and
-  re-populated each run) — `TBD` confirm whether stale rows persist
-  between cycles (`DOC-036`)
-- **Enforced By:** `clearLeadFollowupsTab` (`JS-018` FN-125) at the
-  start of each cycle — not a time-based prune
-- **Archive / Delete Behavior:** rows overwritten/cleared, not archived
-  — `TBD` confirm (`DOC-036`)
-- **Sensitivity:** operational (RM comment context) — `TBD` classify
+- **Data Type:** temporary (cleared and re-populated each Generate
+  cycle).
+- **Retention Period:** **no time-based retention — `TBD` whether stale
+  rows persist between cycles.** No `prune*_` function touches this tab
+  (grep at `9cafa68`). `clearLeadFollowupsTab` wipes all data rows at
+  the **start** of every Generate cycle — that is a per-cycle reset, not
+  a retention policy. Whether a row for a lead that resolves *between*
+  cycles is ever cleared before the next Generate is unconfirmed. Feeds
+  `DOC-037`.
+- **Enforced By:** `clearLeadFollowupsTab` (`JS-018` FN-125) — cycle
+  reset, not a prune. No time-based enforcer.
+- **Archive / Delete Behavior:** rows overwritten / cleared at the next
+  cycle start, never archived.
+- **Sensitivity:** operational (RM comment context) — `DOC-038` for the
+  operational-importance classification (an automated flow depends on
+  it — the `GS-010` overnight cycle + `GS-007` formatting).
 
 ## Risks of changing this tab's structure
 

@@ -87,16 +87,23 @@ Write: `rebuildRmHierarchy`, `ensureRmHierarchySheet_`,
 `resolveRmHierarchy_`, `loadRmHierarchyAndEmails_`, `lookupRmChain_`,
 `auditUnresolvedRms_`, `auditManagerDirectoryEmailGaps_` (`GS-011`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** **configuration** (not a time series)
-- **Retention Period:** N/A — a current-state table, rebuilt on demand.
-  `DOC-036` to confirm "configuration, no retention" is the right
-  framing.
-- **Enforced By:** N/A — `rebuildRmHierarchy` overwrites
-- **Archive / Delete Behavior:** overwritten on rebuild; no history kept
-- **Sensitivity:** contains real employee names + (if the private file
-  is present) real emails — `DOC-036` to classify
+- **Data Type:** **configuration** (a current-state table, not a time
+  series).
+- **Retention Period:** **N/A — configuration.** Rebuilt on demand from
+  the in-code `RM_HIERARCHY_RAW_` constant; there is no history to
+  retain and no `prune*_` function (correctly — none is needed).
+- **Enforced By:** N/A — `rebuildRmHierarchy` (`GS-011`) overwrites the
+  tab in full.
+- **Archive / Delete Behavior:** overwritten on every rebuild; no
+  history kept. `clearAllRmHierarchyExclusionsNow` clears the
+  `excluded`-column flags only, not rows.
+- **Sensitivity:** **contains real employee names, and (when
+  `RmHierarchy.private.gs` is present) real employee emails — FLAGGED
+  for review**, adjacent to the `RmHierarchy.private.gs` real-employee-
+  data concern. A backend job depends on it directly (routing —
+  `LOGIC_AUDIT.md` Part 3 §3.7). `DOC-038` completes the classification.
 
 ## Risks of changing this tab's structure
 

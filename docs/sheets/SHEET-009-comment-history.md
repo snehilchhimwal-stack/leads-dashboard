@@ -81,7 +81,7 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
 `logInteractionHistoryGs_`, `commentHistoryDedupKeyGs_`,
 `ensureCommentHistorySheet_`, `logInteractionHistoryNow` (all `GS-006`).
 
-## Data Lifecycle (DOC-019 — confirmed)
+## Data Lifecycle (DOC-019 — confirmed; DOC-036 signed off 2026-09-10)
 
 - **Data Type:** historical
 - **Retention Period:** **no limit — append-only by design.** Writes are

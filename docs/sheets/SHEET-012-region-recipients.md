@@ -80,14 +80,20 @@ own; created lazily by `GS-004`.
 `resolveRecipientEmailsForRegion_` (`GS-004`);
 `resolveRecipientBucketsForRms_` (`GS-011`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** **configuration**
-- **Retention Period:** N/A — a current-state table
-- **Enforced By:** N/A
-- **Archive / Delete Behavior:** rows edited/removed by hand; no history
-- **Sensitivity:** contains real recipient email addresses — `DOC-036`
-  to classify
+- **Data Type:** **configuration** (a hand-maintained fallback address
+  table).
+- **Retention Period:** **N/A — configuration.** No history, no
+  `prune*_` function (none needed).
+- **Enforced By:** N/A — `ensureRegionRecipientsSheet_` (`GS-004`) writes
+  only the header; `to`/`cc` are hand-filled per region.
+- **Archive / Delete Behavior:** rows edited / removed by hand; no
+  history. `clearRegionRecipientField` is the *browser* recipient UI
+  (`JS-016`), a different store — it does **not** touch this tab.
+- **Sensitivity:** contains real recipient email addresses. A backend
+  job depends on it directly (the scheduled-email recipient fallback —
+  `LOGIC_AUDIT.md` Part 3 §3.7). `DOC-038` completes the classification.
 
 ## Risks of changing this tab's structure
 

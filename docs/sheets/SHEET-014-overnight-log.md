@@ -83,18 +83,22 @@ Written by `setupOvernightEmailer()`'s `atHour(10)` trigger; read by its
 `sendOvernightFollowupEmails_`, `backfillTodaysOvernightLogRecipientsNow`
 (all `GS-010`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** operational (a same-day state handoff, plus a historical
-  send log)
-- **Retention Period:** `TBD` — only *today's* rows are functionally
-  needed (by the 13:00 run); older rows are dead weight. No prune
-  function → likely unbounded. `DOC-036` to confirm intent / whether a
-  short prune is safe.
-- **Enforced By:** `None`
-- **Archive / Delete Behavior:** grows unbounded; no clear function
-- **Sensitivity:** operational (recipient addresses + `lead_ids_json`) —
-  `DOC-036` to classify
+- **Data Type:** operational (a same-day state handoff — the 13:00 run
+  reads *today's* rows; older rows are dead weight).
+- **Retention Period:** **`TBD` — no pruning function found.** grep at
+  `9cafa68`: no `prune*_` and no `clear*` touches this tab.
+  `backfillTodaysOvernightLogRecipientsNow` is a repair function, not a
+  prune. Only ~today's rows are functionally needed, so this is the one
+  `TBD` tab where a **short prune (keep ~2 days) is likely safe** — but
+  that is a recommendation for `DOC-037`, not confirmed here.
+- **Enforced By:** `None`.
+- **Archive / Delete Behavior:** grows unbounded; no removal path.
+- **Sensitivity:** operational — recipient addresses + `lead_ids_json`.
+  A backend job depends on it directly (the 13:00 threaded reply — a
+  **functional** read, higher stakes than the other send logs).
+  `DOC-038` completes the classification.
 
 ## Risks of changing this tab's structure
 

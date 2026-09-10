@@ -89,7 +89,7 @@ Write: `snapshotOpenLeads_`, `pruneMovementLog_`, `ensureMovementLogSheet_`
 `_readMovementLogHistoryRowsGs_`, `buildTodayCallBaselineGs_`,
 `lastSnapshotBeforeGs_` (`GS-008`); `backfill…` (`GS-003`).
 
-## Data Lifecycle (DOC-019 — worked example, confirmed)
+## Data Lifecycle (DOC-019 — confirmed worked example; DOC-036 signed off 2026-09-10)
 
 - **Data Type:** historical
 - **Retention Period:** **7 days** (`MOVEMENT_LOG_RETENTION_DAYS`,

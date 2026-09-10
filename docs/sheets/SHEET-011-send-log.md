@@ -74,15 +74,19 @@ None — written only by the dashboard's send buttons (`BTN-002`..`BTN-004`,
 
 None — this tab is written only from the browser (`JS-018`).
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** historical (audit log)
-- **Retention Period:** `TBD` — no prune function exists → likely
-  unbounded. `DOC-036` to confirm the intent.
-- **Enforced By:** `None`
-- **Archive / Delete Behavior:** grows unbounded; no clear function
-- **Sensitivity:** operational (contains recipient email addresses +
-  the sender's email) — `DOC-036` to classify
+- **Data Type:** historical (audit log).
+- **Retention Period:** **`TBD` — no pruning function found.** grep at
+  `9cafa68`: no `prune*_` and **no `clear*` function of any kind**
+  touches this tab. Grows unbounded in practice (~a few rows per
+  Generate/send). Not invented — feeds `DOC-037`.
+- **Enforced By:** `None`.
+- **Archive / Delete Behavior:** grows unbounded; no automated or manual
+  removal path exists.
+- **Sensitivity:** operational — contains recipient email addresses +
+  the signed-in sender's email. `DOC-038` for the operational-importance
+  classification (read by no code — a pure audit surface).
 
 ## Risks of changing this tab's structure
 

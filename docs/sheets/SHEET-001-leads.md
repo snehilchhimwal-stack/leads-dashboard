@@ -99,17 +99,20 @@ Trigger Schedule.
 `readLeadsTab_` (`GS-004`), `buildColIndex_` / `getVal_` (`GS-002`) —
 read only.
 
-## Data Lifecycle (DOC-019 — `TBD`, filled by `DOC-036`)
+## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
 
-- **Data Type:** operational (the live source of truth) — **`TBD`
-  confirm** (`DOC-036`)
-- **Retention Period:** `TBD` — governed by the external CRM export, not
-  by this project (`DOC-036` to confirm whether the export overwrites or
-  appends)
-- **Enforced By:** `None` in this project — the CRM export owns it
-- **Archive / Delete Behavior:** `TBD` (`DOC-036`)
-- **Sensitivity:** contains customer contact context and RM comments —
-  `TBD` classify (`DOC-036`)
+- **Data Type:** operational (the live source of truth).
+- **Retention Period:** **`TBD` — governed by the external CRM export,
+  not by this project.** No pruning function in this repo touches
+  `leads` (grep at `9cafa68`: the only `prune*_` functions are
+  `pruneMovementLog_` / `pruneDailyRmIssueLog_`). Whether the export
+  overwrites or appends, and its own retention, is an external decision
+  — not invented here. Feeds `DOC-037`.
+- **Enforced By:** `None` in this project — the CRM export owns it.
+- **Archive / Delete Behavior:** `TBD` — external CRM export behaviour
+  (feeds `DOC-037`).
+- **Sensitivity:** contains customer contact context + RM comments —
+  **flagged for review**; full operational classification in `DOC-038`.
 
 ## Risks of changing this tab's structure
 
