@@ -1,0 +1,131 @@
+# Button inventory — reconciled (`DOC-031`)
+
+**Status:** Reconciled 2026-09-10 against commit `c82ec67`.
+**Scope:** every `<button>` / user-action control in `dashboard.html`
+that runs application logic. `DOC-009` (the standalone inventory task)
+was `Not Started` when Phase 3 ran, so this was **enumerated directly**
+from `dashboard.html` —
+`grep -oE '<button[^>]*id="[^"]*"'` plus the id-less `.tab-btn` set and
+the `#autoSnapshotCheck` checkbox — and the `BTN-XXX` rows in the
+`TAB-XXX` records ARE the inventory. This file is the reconciliation
+record required by `DOC-031`.
+
+---
+
+## Reconciliation result
+
+`dashboard.html` contains **34 `<button>` elements**:
+
+| Group | Count | Where documented |
+|---|---|---|
+| Id'd `<button>` on a tab panel | 22 | `BTN-001`..`BTN-022`, in their owning `TAB-XXX` record's `## Buttons / actions` sub-table |
+| Id'd `<button>` in the persistent top bar | 4 | `DASH-001` → `## Top-level buttons / actions` (sign in, refresh, change source, clear filters) + 1 more (`#downloadLeadIdsBtn`) noted there |
+| Id-less `.tab-btn` (`data-tab=…`) | 8 | one delegated handler on `#tabBar` → `DASH-001` "Tab switch" row (not 8 separate `BTN-XXX`) |
+| **Total `<button>`** | **34** | — |
+| Plus `#autoSnapshotCheck` (`<input type=checkbox>`, not a `<button>`) | 1 | `BTN-015` (`TAB-007`) — a user action, so it gets a `BTN-XXX` |
+
+**`BTN-001` … `BTN-022`** assigned, contiguous, no gaps, each owned by
+exactly one `TAB-XXX` record. Zero unresolved gaps between "buttons in
+`dashboard.html`" and "`BTN-XXX` rows in a record."
+
+---
+
+## Full map
+
+### Top bar — `DASH-001` (persistent across every tab)
+
+| Element id | Action | Handler | Documented |
+|---|---|---|---|
+| `#gateSignInBtn` | sign in (Sheets OAuth) | `gateSignIn` (`JS-001` FN-004) | `DASH-001` top-level actions |
+| `#refreshBtn` | full re-fetch + `renderAll()` | `fetchAndRender` (`JS-003` FN-015) | `DASH-001` |
+| `#changeSourceBtn` | switch the Sheet source | `JS-012` + `JS-003` | `DASH-001` |
+| `#clearFiltersBtn` | reset `filterState` | `JS-004` FN-020 | `DASH-001` |
+| `#downloadLeadIdsBtn` | filtered lead-ids CSV | `downloadFilteredLeadIdsCSV` (`JS-012` FN-085) | `DASH-001` (population = Overview "Total Leads" KPI) |
+| `.tab-btn` × 8 (`data-tab`) | tab switch (pure `display` toggle) | delegated click on `#tabBar` (`JS-012`) | `DASH-001` "Tab switch" |
+
+### `TAB-003` Operations
+
+| `BTN-XXX` | id | Invokes |
+|---|---|---|
+| BTN-001 | `#downloadIssuesBtn` | `downloadIssuesCSV` (`JS-012` FN-085) |
+| BTN-002 | `#generateBtn` | `renderReports` (`JS-016` FN-111) |
+| BTN-003 | `#generateAllReportsBtn` | `renderAllRegionReports` (`JS-016` FN-112) |
+| BTN-004 | `#downloadAllReportsBtn` | `downloadAllReports` (`JS-016` FN-118) |
+| BTN-005 | `#regionRecipientsToggle` | recipient-editor toggle (`JS-016` FN-117) |
+| BTN-006 | `#gmailConnectBtn` | `connectGmail` (`JS-015` FN-105) |
+| BTN-007 | `#gmailSaveClientIdBtn` | `saveGmailClientId` (`JS-015` FN-105) |
+| BTN-008 | `#gmailSetupToggle` | Gmail setup panel toggle (`JS-015`) |
+| BTN-009 | `#followupsWaitCancelBtn` | keyed cancel via `_followupWaitCancelled` Map (`JS-018` FN-127) |
+
+### `TAB-004` Repeat Offenders
+
+| `BTN-XXX` | id | Invokes |
+|---|---|---|
+| BTN-010 | `#repeatOffendersRecalculateBtn` | worker dispatch → `computeRmPerformance*` (`JS-017` / `JS-008`) |
+| BTN-011 | `#repeatOffendersDownloadPdfBtn` | `downloadRepeatOffendersPdf` (`JS-013` FN-088) — refuses if `RM_Hierarchy` still loading |
+
+### `TAB-006` Audit
+
+| `BTN-XXX` | id | Invokes |
+|---|---|---|
+| BTN-012 | `#auditCopyBtn` | `copyAuditIds` (`JS-019` FN-136) |
+| BTN-013 | `#auditCsvBtn` | `downloadAuditCSV` (`JS-019` FN-136) |
+
+### `TAB-007` Movement
+
+| `BTN-XXX` | id | Invokes | Note |
+|---|---|---|---|
+| BTN-014 | `#snapshotNowBtn` | `browserSnapshotOpenLeads` (`JS-018` FN-121) | **DOM position = top bar; function owner = `TAB-007`** (wired by `initMovementUI`). Placed on `TAB-007` deliberately — its behaviour is Movement-specific — and cross-listed under `DASH-001`'s top-level actions as "snapshot" |
+| BTN-015 | `#autoSnapshotCheck` (checkbox) | auto-snapshot tick (`JS-018` / `JS-021`) | same top-bar/owner split as BTN-014 |
+| BTN-016 | `#overnightGenerateReportsBtn` | Overnight generate cycle (`JS-021` FN-146 → `JS-016` / `JS-018`) | |
+| BTN-017 | `#overnightFollowupsWaitCancelBtn` | keyed cancel (`JS-018` FN-127) | |
+| BTN-018 | `#downloadUnmatchedCommentsBtn` | `downloadUnmatchedCommentsCSV` (`JS-021` FN-145) | |
+
+### `TAB-008` Tracking
+
+| `BTN-XXX` | id | Invokes | Irreversible? |
+|---|---|---|---|
+| BTN-019 | `#backfillSlaHistoryBtn` | `backfillSlaHistoryFromMovementLog` (`JS-018` FN-128) | no — upsert, re-runnable |
+| BTN-020 | `#clearSlaHistoryBtn` | `clearSlaHistory` (`JS-004` FN-025) | **yes — permanent delete** |
+| BTN-021 | `#backfillDailyCohortHistoryBtn` | `upsertDailyCohortHistoryRows` (`JS-018` FN-129) | no — never overwrites an archived date |
+| BTN-022 | `#clearDailyCohortHistoryBtn` | clear handler (`JS-024`) | **yes — permanent delete** |
+
+### Tabs with no buttons of their own
+
+`TAB-001` Morning Brief, `TAB-002` Overview, `TAB-005` People (RM
+Timeline uses UI elements — the RM selector `UI-007`, calendar cells
+`UI-008` — not buttons). Recorded as an explicit "none" in each record's
+`BTN-XXX` sub-table.
+
+---
+
+## Console-only actions — deliberately NOT given a `BTN-XXX`
+
+These run from the browser console or the Apps Script editor and have
+**no UI control** — out of scope for the button inventory (recorded here
+so their absence is not a gap):
+
+| Function | Where | Why no button |
+|---|---|---|
+| `clearSlaHistory` batch path, `snapshotSlaHistory` | `JS-004` | `clearSlaHistory` *does* have `BTN-020`; `snapshotSlaHistory` is checkpoint-driven, no button |
+| `backfillSlaHistoryFromMovementLog` sibling utilities | `JS-018` | console-callable admin |
+| every `*Now()` / `setup*()` in the `GS-*` files | Apps Script editor | backend, editor-run — see each `GS-XXX` record's Trigger Schedule + FN sub-table |
+
+---
+
+## How this stays reconciled
+
+`test/check-docs-coverage.js` does **not** check button coverage. So it
+is process: `DOC-031`'s revalidation trigger is "any commit that
+adds/removes a `<button id>` or user-action control in `dashboard.html`"
+— at which point this file and the owning `TAB-XXX` record's `BTN-XXX`
+sub-table are updated in the same commit.
+
+## Gaps found and resolved during this reconciliation
+
+None. All 26 id'd buttons + the tab-switcher set + the `#autoSnapshotCheck`
+checkbox were already covered by `BTN-001`..`BTN-022` and the `DASH-001`
+top-level actions section (both written under `DOC-026`). The only
+judgment call — placing `#snapshotNowBtn` / `#autoSnapshotCheck` on
+`TAB-007` rather than `DASH-001` despite their top-bar DOM position — is
+documented above and cross-referenced in both records.
