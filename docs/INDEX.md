@@ -251,8 +251,17 @@ list. `DOC-032` writes the base records; `DOC-036` fills lifecycle/retention.
 
 ### `DATA-` / `FLOW-` / `TRIGGER-` — filled in Phase 3 (`DOC-034` / `DOC-035`)
 
-No rows yet — data flows and cross-file workflows are identified and
-recorded in Phase 3.
+`DATA-` records written by `DOC-034` (Phase 3). `FLOW-` / `TRIGGER-`
+standalone architecture records are `DOC-035`+ (Phase 3 tail / Phase 6),
+not yet built.
+
+| ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
+|---|---|---|---|---|---|---|---|
+| DATA-001 | DATA- | The core lead record | traced path | Closed + Monitored | SHEET-001, EXT-001, JS-009, JS-003, JS-006, JS-004, JS-002, JS-005 | DATA-002, DATA-003, DATA-005, TAB-001/002/003/005/006, DASH-001 | 2026-09-10 (`c82ec67`) |
+| DATA-002 | DATA- | The SLA-flag pipeline | traced path | Closed + Monitored | DATA-001, SHEET-001, SHEET-002, JS-006, JS-005, JS-008, JS-012, GS-012, GS-002, GS-003, GS-008, GS-004 | TAB-002/003/004/008, SHEET-003, SHEET-005, DATA-005, GS-001, GS-010 | 2026-09-10 (`c82ec67`) |
+| DATA-003 | DATA- | The comment-classification pipeline | traced path | Closed + Monitored | DATA-001, SHEET-001, JS-007, JS-006, JS-016, JS-018, GS-005, GS-002, GS-010, GS-013, GS-006, SHEET-004 | TAB-003/005/006/007, SHEET-009, SHEET-010, DATA-005 | 2026-09-10 (`c82ec67`) |
+| DATA-004 | DATA- | The Movement snapshot pipeline | traced path | Closed + Monitored | SHEET-001, GS-008, JS-018, JS-021, GS-012, GS-002, EXT-001, SHEET-002 | SHEET-005, SHEET-008, JS-008/013/017/023/024, TAB-004/005/007/008, GS-001/010/003, DATA-002 | 2026-09-10 (`c82ec67`) |
+| DATA-005 | DATA- | The region-email pipeline | traced path | Closed + Monitored (⚠ carries the HIGH Loan-region finding) | DATA-002, DATA-003, SHEET-004/006/007/012, JS-014/015/016/018, GS-001/004/010/011, EXT-002 | TAB-003, TAB-007, SHEET-011/013/014, email recipients | 2026-09-10 (`c82ec67`) |
 
 ---
 
@@ -264,7 +273,12 @@ recorded in Phase 3.
 - `SHEET-` records: 14 / 14 (DOC-032 — base records; `Movement_Log` / `Daily_RM_Issues` lifecycle confirmed 7d, `Comment_History` / `Unmatched_Comments_Log` retention model confirmed, the other 10 carry `TBD` lifecycle for `DOC-036`)
 - `EXT-` records: 4 / 4 (DOC-033)
 - `DASH-` records: 1 / 1 (DOC-025)
-- `DATA-` records: 0 / 5 (DOC-034 — data-flow records)
-- **This matches `test/check-docs-coverage.js`'s current warn output** —
-  when Phase 3 lands records, that check's coverage % and this snapshot
-  should move together.
+- `DATA-` records: 5 / 5 (DOC-034)
+- **Phase 3 component-record set (`DOC-025`–`DOC-034`) is complete** —
+  1 `DASH-`, 8 `TAB-` (+ `BTN-001`..`022`), 24 `JS-`, 13 `GS-`
+  (+ `FN-001`..`254`), 14 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
+  file-coverage check should now report `js/*.js` and `*.gs` as fully
+  covered; the coverage % and this snapshot move together.
+- **Still open:** `DOC-035` (full reciprocity walk + `RELATIONSHIP_MAP.md`),
+  Phase 4 `DOC-036` (SHEET lifecycle/retention — 10 tabs carry `TBD`),
+  Phases 5–6.
