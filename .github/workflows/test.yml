@@ -60,16 +60,11 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.47.2-jammy
     steps:
       - uses: actions/checkout@v4
+      - name: Install playwright (browsers already in the image)
+        run: npm i --no-save playwright@1.47.2
       - name: Run the harness
-        run: |
-          set -euxo pipefail
-          node --version
-          npm i --no-save playwright@1.47.2
-          npx playwright --version
-          python3 -m http.server 8000 --bind 127.0.0.1 >/tmp/httpd.log 2>&1 &
-          for i in $(seq 1 40); do
-            curl -sf http://127.0.0.1:8000/dashboard.html >/dev/null && break
-            sleep 0.5
-          done
-          curl -sf http://127.0.0.1:8000/dashboard.html >/dev/null   # fail loudly if still not up
-          node test/run-frontend-harness.mjs http://127.0.0.1:8000
+        # test/serve-and-harness.mjs starts a tiny Node static server on
+        # the repo root, waits for it, runs run-frontend-harness.mjs
+        # against it, and exits with its code. Pure Node -- no python3 /
+        # curl / seq dependency on the container image.
+        run: node test/serve-and-harness.mjs
