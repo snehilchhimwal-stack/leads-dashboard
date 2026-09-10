@@ -169,17 +169,17 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| JS-001 | JS- | core-auth | `js/core-auth.js` | Not Started | | | |
-| JS-002 | JS- | core-collation | `js/core-collation.js` | Not Started | | | |
-| JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Not Started | | | |
-| JS-004 | JS- | core-filters | `js/core-filters.js` | Not Started | | | |
-| JS-005 | JS- | core-foundation | `js/core-foundation.js` | Not Started | | | |
-| JS-006 | JS- | core-lead-model | `js/core-lead-model.js` | Not Started | | | |
-| JS-007 | JS- | core-outcome-engine | `js/core-outcome-engine.js` | Not Started | | | |
-| JS-008 | JS- | core-rm-performance | `js/core-rm-performance.js` | Not Started | | | |
-| JS-009 | JS- | core-sheets-fetch | `js/core-sheets-fetch.js` | Not Started | | | |
-| JS-010 | JS- | core-ui | `js/core-ui.js` | Not Started | | | |
-| JS-011 | JS- | main | `js/main.js` | Not Started | | | |
+| JS-001 | JS- | core-auth | `js/core-auth.js` | Closed + Monitored | EXT-003, JS-015, JS-003 | JS-009, JS-003, JS-004, JS-018, JS-011, DASH-001 | 2026-09-10 (`c82ec67`) |
+| JS-002 | JS- | core-collation | `js/core-collation.js` | Closed + Monitored | JS-010, JS-003 | JS-010, JS-012, JS-014, JS-019, JS-021, JS-024 | 2026-09-10 (`c82ec67`) |
+| JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | JS-001, JS-009, JS-006, JS-014, JS-012, JS-004, JS-021, JS-022, SHEET-001, EXT-001 | JS-001, DASH-001, (transitively every tab) | 2026-09-10 (`c82ec67`) |
+| JS-004 | JS- | core-filters | `js/core-filters.js` | Closed + Monitored | JS-009, JS-006, JS-014, JS-002, JS-012, JS-010, JS-001, JS-018, SHEET-005 | JS-003, JS-001, JS-019, DASH-001, TAB-002..008 | 2026-09-10 (`c82ec67`) |
+| JS-005 | JS- | core-foundation | `js/core-foundation.js` | Closed + Monitored | none | JS-004, JS-006, JS-007, JS-008, JS-012, JS-014, JS-019, JS-021, JS-023, JS-024 (+more) | 2026-09-10 (`c82ec67`) |
+| JS-006 | JS- | core-lead-model | `js/core-lead-model.js` | Closed + Monitored | JS-005, JS-007, JS-021, SHEET-001, SHEET-002 | JS-004, JS-003, JS-008, JS-012, JS-014, JS-019, JS-021, JS-023, JS-024, JS-018 | 2026-09-10 (`c82ec67`) |
+| JS-007 | JS- | core-outcome-engine | `js/core-outcome-engine.js` | Closed + Monitored | JS-005, JS-006 | JS-006, JS-010, JS-003, JS-012, JS-014, JS-019, JS-021, JS-023, JS-024 | 2026-09-10 (`c82ec67`) |
+| JS-008 | JS- | core-rm-performance | `js/core-rm-performance.js` | Closed + Monitored | JS-005, JS-006, JS-021, JS-022, JS-014, SHEET-002, SHEET-006 | JS-017, JS-022, JS-013, TAB-004 | 2026-09-10 (`c82ec67`) |
+| JS-009 | JS- | core-sheets-fetch | `js/core-sheets-fetch.js` | Closed + Monitored | JS-001, JS-005, JS-006, EXT-001, SHEET-001 | JS-003, JS-004, JS-021, JS-022, (most tabs) | 2026-09-10 (`c82ec67`) |
+| JS-010 | JS- | core-ui | `js/core-ui.js` | Closed + Monitored | JS-002, JS-007, JS-005 | JS-004, JS-003, JS-011, (most tabs) | 2026-09-10 (`c82ec67`) |
+| JS-011 | JS- | main | `js/main.js` | Closed + Monitored | JS-010, JS-023, JS-021, JS-001 | none (entry point) | 2026-09-10 (`c82ec67`) |
 | JS-012 | JS- | overview-distribution-people-ops | `js/overview-distribution-people-ops.js` | Not Started | | | |
 | JS-013 | JS- | repeat-offenders-pdf | `js/repeat-offenders-pdf.js` | Not Started | | | |
 | JS-014 | JS- | reports-build | `js/reports-build.js` | Not Started | | | |
@@ -248,11 +248,12 @@ recorded in Phase 3.
 
 ## Coverage snapshot (auto-checkable target)
 
-- `JS-` records: 0 / 24
+- `JS-` records: 11 / 24 (core layer `JS-001`..`JS-011` done — DOC-027)
 - `GS-` records: 0 / 13
-- `TAB-` records: 0 / 8
+- `TAB-` records: 8 / 8 (DOC-026)
 - `SHEET-` records: 0 / ≥10 (count TBD, `DOC-010`)
 - `EXT-` records: 0 / 4
+- `DASH-` records: 1 / 1 (DOC-025)
 - **This matches `test/check-docs-coverage.js`'s current warn output** —
   when Phase 3 lands records, that check's coverage % and this snapshot
   should move together.
