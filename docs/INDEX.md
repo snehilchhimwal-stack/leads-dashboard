@@ -279,6 +279,15 @@ not yet built.
   (+ `FN-001`..`254`), 14 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
   file-coverage check should now report `js/*.js` and `*.gs` as fully
   covered; the coverage % and this snapshot move together.
+- **Phase 1 (`DOC-001`–`DOC-013`) is complete** — the inventories +
+  cross-checks are in `_planning/` (`file-inventory.md`,
+  `handover-coverage-map.md`, `logic-audit-source-map.md`,
+  `dashboard-inventory.md`, `tab-inventory.md`, `js-module-inventory.md`,
+  `gs-module-inventory.md`, `function-inventory.md`, `button-inventory.md`,
+  `sheet-inventory.md`, `integration-inventory.md`,
+  `documentation-conflicts.md`); `DOC-013` = this file's front matter.
 - **Still open:** `DOC-035` (full reciprocity walk + `RELATIONSHIP_MAP.md`),
   Phase 4 `DOC-036` (SHEET lifecycle/retention — 10 tabs carry `TBD`),
-  Phases 5–6.
+  Phases 5–6. Plus one small `HANDOVER.md`/`CLAUDE.md` accuracy touch-up
+  task from `DOC-012` (script-load-order + the C-2..C-7 one-liners), not
+  on the catalog's critical path.
