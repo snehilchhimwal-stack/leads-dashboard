@@ -210,17 +210,19 @@ in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt.
   `_planning/task-to-component-map.md` (the reverse index);
   `HOW_TO_UPDATE_A_COMPONENT.md` step 8 (review signal);
   `retention-decisions-needed.md` P3 appendix (copy-paste prune code);
-  **frontend harness → blocking** (5 green runs, install-flakiness still
-  warns-and-skips); `HANDOVER.md` **§5** (5 tabs added), **§6** (all 10
-  cross-runtime pairs + the HIGH Loan finding), **§2 + §4.4** (Pages
-  source **confirmed** — `master` / `/` root, no `index.html`), **§4.3**
-  (`setupRmHierarchy()` + `setupLeadFollowupsStalenessFormatting()` rows
-  + a pointer to `apps-script-triggers.md`).
+  `HANDOVER.md` **§5** (5 tabs added), **§6** (all 10 cross-runtime pairs
+  + the HIGH Loan finding), **§2 + §4.4** (Pages source **confirmed** —
+  `master` / `/` root, no `index.html`), **§4.3** (`setupRmHierarchy()` +
+  `setupLeadFollowupsStalenessFormatting()` rows + a pointer to
+  `apps-script-triggers.md`).
   **Genuinely not doable by this project:** the 7 retention `TBD`
   decisions (§B — owner + CRM-owner + compliance); `Owner:` distribution
-  (§A — no team). `check-catalog.py` D/E + `check-docs-coverage.js` stay
-  advisory/warn **by design** — `CATALOG_STRICT=1` is the hard-gate
-  switch for a team that wants it.
+  (§A — no team). **Harden the frontend-harness CI install** — a flip to
+  blocking (`fd59944`) failed at ~28 s before Playwright/browser install
+  finished; the step is back to `continue-on-error` and its CI pass/fail
+  is unverified (local run is the signal). `check-catalog.py` D/E +
+  `check-docs-coverage.js` stay advisory/warn **by design** —
+  `CATALOG_STRICT=1` is the hard-gate switch for a team that wants it.
 
 ---
 

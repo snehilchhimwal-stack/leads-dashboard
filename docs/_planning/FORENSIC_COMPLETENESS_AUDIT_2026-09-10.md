@@ -432,10 +432,16 @@ property holds by design but is violated in fact.
     `check-catalog.py` E flags a changed line touching a cross-runtime
     pair marker; `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` gained the
     "read check-catalog E/D" and "did a comment go stale?" checkboxes.
-13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE, BLOCKING**:
-    `test/run-frontend-harness.mjs` (Playwright headless) +
-    `.github/workflows/test.yml` step; green on CI runs #81, #83–#86, then
-    flipped to blocking (only browser-install flakiness warns-and-skips).
+13. Wire **`frontend-harness.html`** into CI — **DONE (non-blocking);
+    blocking flip attempted and reverted.** `test/run-frontend-harness.mjs`
+    (Playwright headless) + `.github/workflows/test.yml` step. The
+    `continue-on-error: true` steps showed `success` for 5 runs, but a
+    flip to blocking (`fd59944`) went red at ~28 s — before the
+    Playwright/browser install finished — so **whether the harness
+    actually passes in CI is unverified**. Kept non-blocking with
+    `set -x` + explicit install-failure warns; the **local** run is the
+    trustworthy signal. Hardening the CI install path is the open
+    sub-item.
 14. ~~**Extend coverage** to `TAB-`/`SHEET-`/`EXT-`/`DATA-`~~ — **DONE**
     (was already `check-catalog.py` B — all 7 own-file types + `FLOW-`).
 15. ~~**`RANGE-`/`HTML-`/`CSS-`/`CLASS-` exclusion note** + Sheet-formula
@@ -465,8 +471,8 @@ property holds by design but is violated in fact.
 19. `Owner:` distribution — **no-action by design** (single-owner
     project; `OPEN_ITEMS.md` §A).
 
-**P3 — also done 2026-09-10:** frontend harness → **blocking** (5 green
-runs); `HANDOVER.md` §5 tab-table (5 tabs + a pointer to `SHEET-*`);
+**P3 — also done 2026-09-10:** `HANDOVER.md` §5 tab-table (5 tabs + a
+pointer to `SHEET-*`);
 §6 duplication-pairs list (all 10 pairs + the HIGH Loan finding);
 §2 + §4.4 **GitHub Pages source confirmed** — "Deploy from a branch",
 `master` / `/` (root), no `index.html`; §4.3 setup table gains
@@ -474,9 +480,12 @@ runs); `HANDOVER.md` §5 tab-table (5 tabs + a pointer to `SHEET-*`);
 pointer to `apps-script-triggers.md`.
 
 **P3 — genuinely remaining:** the 7 retention `TBD` decisions
-(owner-blocked); `Owner:` distribution (no team). `check-catalog.py` D/E
-and `check-docs-coverage.js` stay advisory/warn by design — a team that
-wants the hard gate sets `CATALOG_STRICT=1`.
+(owner-blocked); `Owner:` distribution (no team); **harden the frontend
+harness's CI install path** so it can be made blocking (it fails at ~28 s
+today — `npm i playwright` / `playwright install chromium` on the runner
+needs a reliable recipe). `check-catalog.py` D/E and
+`check-docs-coverage.js` stay advisory/warn by design — a team that wants
+the hard gate sets `CATALOG_STRICT=1`.
 
 ---
 
