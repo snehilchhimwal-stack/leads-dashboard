@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-09-09. This file went a full week
+Written 2026-08-31, updated 2026-09-10. This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
 redesign's alias/leadership-exclusion fixes, the region-wise worst-5-RM
@@ -92,7 +92,7 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
 | `js/tab-rmtimeline.js` | RM Timeline tab — per-RM daily calendar and day timeline. |
 | `js/tab-movement.js` | Movement tab — reads the `Movement_Log` sheet tab that `MovementTracker.gs` populates; stalled leads, overnight cohort, RM stall leaderboard, time-to-Opportunity. |
-| `js/tab-repeat-offenders.js` | Repeat Offenders tab (own top-level tab, added 2026-09-01) — reads the `Daily_RM_Issues` sheet tab that `DailyRmIssueLog.gs` populates nightly; RM/A1-TM/RH/Region leaderboards ranked by Avg Flagged (instances ÷ distinct leads). See §9 for the whole subsystem, including a real Time-range filtering gotcha worth reading before touching this file. |
+| `js/tab-repeat-offenders.js` | Repeat Offenders tab (own top-level tab, added 2026-09-01) — reads the `Daily_RM_Issues` sheet tab that `DailyRmIssueLog.gs` populates nightly; RM/A1-TM/RH/Region leaderboards ranked by the empirical-Bayes composite RM-performance score (`computeRmPerformance`, `js/core-rm-performance.js`), which **replaced** the old "Avg Flagged" ratio in the §9.7 redesign. See §9 for the whole subsystem, including a real Time-range filtering gotcha worth reading before touching this file. |
 | `js/tab-morning.js` | Morning Brief tab — 10 summary cards, all backed by data other tabs already compute (no new logic). |
 | `js/reports-build.js` / `js/reports-gmail.js` / `js/reports-ui.js` | Formerly one `js/reports.js` file (2,246 lines) — split in the 2026-09 modularity refactor (pure code motion; see git history). `reports-build.js` builds report content (region grouping, email templates); `reports-gmail.js` is the real one-click Gmail-API send flow (separate OAuth grant — see §4); `reports-ui.js` is the mailto flow + all render/copy/download UI, and loads LAST of the three (see its own header comment for why). |
 | `js/sheets-writeback.js` | Every write path back to the Sheet: on-demand Movement_Log snapshot, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`. |
@@ -606,7 +606,7 @@ missed capture (2026-09-06) can still be recovered via
 | `backfillDailyRmIssuesFromMovementLogNow()` | Reconstructs **every** day `Movement_Log` still retains (up to 7 days) that `Daily_RM_Issues` doesn't already have rows for, using each day's latest snapshot as a stand-in for the missed 22:50 capture. One combined write across all days found. |
 | `backfillOneDayFromMovementLogNow(dayKey?)` | Added 2026-09-02, in response to the incident in §9.2. Same idea, but scoped to exactly **one** day — no argument defaults to yesterday. Lower blast radius than the multi-day version, and writes in chunks (see §9.2). This is the one to reach for after confirming a specific night is missing. |
 | `repairDailyRmIssuesMissingFieldsNow()` | One-off repair for rows written before `TL`/`group_source`/`source_bucket`/`lead_assigned_at` existed in the schema — backfills them from `Movement_Log` by matching `lead_id` and nearest timestamp. Safe to re-run; leaves already-complete rows untouched. |
-| `reportRepeatOffenderRmsNow()` | Logs a quick RM leaderboard straight to the Apps Script console — a lighter-weight sanity check than opening the dashboard. |
+| `reportRmPerformanceNow()` | Logs a quick RM leaderboard straight to the Apps Script console — a lighter-weight sanity check than opening the dashboard. (Renamed from `reportRepeatOffenderRmsNow()` in the §9.7 redesign.) |
 
 ### 9.3.1 "Total Leads" column — added 2026-09-03
 
@@ -783,7 +783,20 @@ modified rule set — 106/106 pass, confirming the new rules (inserted
 mid-array) didn't steal a match that used to belong to a pre-existing,
 later rule.
 
-### 9.7 RM Performance redesign — replacing "Avg Flagged" (in progress, 2026-09-04)
+### 9.7 RM Performance redesign — replaced "Avg Flagged" (shipped 2026-09-04; iterated 09-05 and 09-10)
+
+> **Status: shipped and live.** The empirical-Bayes composite score
+> replaced "Avg Flagged" in `js/core-rm-performance.js`
+> (`computeRmPerformance`) and its `.gs` console mirror
+> `DailyRmIssueLog.gs` (`reportRmPerformanceNow`, `RM_PERF_*_GS_`), and
+> was iterated further on 2026-09-05 (§9.7.2) and 2026-09-10 (region-wise
+> worst-5, `rmPerfCanonicalRmName` aliases, broadened leadership
+> exclusion). For the current per-component picture see the catalog:
+> `docs/tabs/TAB-004`, `docs/js-modules/JS-008` / `JS-017` / `JS-022`,
+> `docs/gs-modules/GS-003`, `docs/data-flows/DATA-002`. The narrative
+> below is the design record of the change; a deeper §9 reconciliation
+> (function-name sweep, §9.1/§9.3/§9.4 wording) is tracked in
+> `docs/_planning/documentation-conflicts.md` C-5 / C-6.
 
 **Why**: `Avg Flagged` (Instances ÷ Flagged Leads, §9.3/9.4's ranking key)
 has no real denominator — it's conditioned on leads that are ALREADY

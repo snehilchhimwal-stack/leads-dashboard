@@ -299,20 +299,34 @@ not yet built.
 - `EXT-` records: 4 / 4 (DOC-033)
 - `DASH-` records: 1 / 1 (DOC-025)
 - `DATA-` records: 5 / 5 (DOC-034)
-- **Phase 3 component-record set (`DOC-025`–`DOC-034`) is complete** —
-  1 `DASH-`, 8 `TAB-` (+ `BTN-001`..`022`), 24 `JS-`, 13 `GS-`
-  (+ `FN-001`..`254`), 14 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
-  file-coverage check should now report `js/*.js` and `*.gs` as fully
-  covered; the coverage % and this snapshot move together.
-- **Phase 1 (`DOC-001`–`DOC-013`) is complete** — the inventories +
-  cross-checks are in `_planning/` (`file-inventory.md`,
+- **Component-record set is complete** — 1 `DASH-`, 8 `TAB-`
+  (+ `BTN-001`..`022`), 24 `JS-`, 13 `GS-` (+ `FN-001`..`254`),
+  14 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
+  file-coverage check reports `js/*.js` and `*.gs` as **100% covered**
+  (verified in CI).
+- **All six phases (`DOC-001`–`DOC-050`) + the Governance Model + the
+  `CONSOLIDATED` task are complete** (2026-09-10, goal `g-docproject01`).
+  Phase 1 inventories are in `_planning/` (`file-inventory.md`,
   `handover-coverage-map.md`, `logic-audit-source-map.md`,
   `dashboard-inventory.md`, `tab-inventory.md`, `js-module-inventory.md`,
   `gs-module-inventory.md`, `function-inventory.md`, `button-inventory.md`,
   `sheet-inventory.md`, `integration-inventory.md`,
-  `documentation-conflicts.md`); `DOC-013` = this file's front matter.
-- **Still open:** `DOC-035` (full reciprocity walk + `RELATIONSHIP_MAP.md`),
-  Phase 4 `DOC-036` (SHEET lifecycle/retention — 10 tabs carry `TBD`),
-  Phases 5–6. Plus one small `HANDOVER.md`/`CLAUDE.md` accuracy touch-up
-  task from `DOC-012` (script-load-order + the C-2..C-7 one-liners), not
-  on the catalog's critical path.
+  `documentation-conflicts.md`); Phase 2 built this file + `_templates/`
+  + the `HOW_TO_*` guides; Phases 4–6 filled `SHEET-` lifecycle
+  (`DOC-036`), ran the verification passes (`completeness-verification.md`,
+  `reference-verification.md`, `consistency-check.md`), and wrote the
+  process guides + `PRE_SHIP_DOCUMENTATION_CHECKLIST.md`. The reciprocity
+  walk (`DOC-035` / `DOC-040`) is done, and the record files were then
+  aligned to `docs/INDEX.md` exactly (`t-tf-47c37923c3bd`); the `DOC-012`
+  `HANDOVER.md` / `CLAUDE.md` accuracy touch-up is done
+  (`t-tf-7e4d0dffdf6c`).
+- **Still open** — tracked in
+  **[`_planning/OPEN_ITEMS.md`](_planning/OPEN_ITEMS.md)**: 7 `SHEET-`
+  retention `TBD`s awaiting a CRM-owner / product decision (`DOC-037`,
+  `retention-decisions-needed.md`); `HANDOVER.md` §9.7's deep §9
+  reconciliation (`documentation-conflicts.md` C-5 / C-6); the
+  `LOGIC_AUDIT.md` Part 7 §18 code findings the catalog records but does
+  not fix; and the **continuous-completeness gap** — the
+  change-detection → stale → revalidation loop is designed but only
+  partly built (`FORENSIC_COMPLETENESS_AUDIT_2026-09-10.md`,
+  in progress as `t-tf-5ad22d8e4c2e`).

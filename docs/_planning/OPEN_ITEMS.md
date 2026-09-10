@@ -80,13 +80,19 @@ forward.**
 `HANDOVER.md` sections Phase 5 should re-verify/update, headed by the
 biggest:
 
-- **§9.7** "RM Performance redesign — in progress, 2026-09-04" has
-  **shipped and iterated further** (engine 485→869 lines this session).
-  Rewrite to the shipped state or shrink to a pointer at `TAB-004` /
-  `JS-008` / `GS-003` / `DATA-002`. **§9.1**'s "ranks by Avg Flagged"
-  framing is pre-redesign. **§9.3 / §9.3.1** function names
-  (`reportRepeatOffenderRmsNow`, `aggregateRepeatOffenders`,
-  `totalLeadsByKey`) likely renamed — verify against current source.
+- **§9.7 headline fixed `2026-09-10`** (`t-tf-5ad22d8e4c2e`): title →
+  "replaced … (shipped 2026-09-04; iterated 09-05 and 09-10)" + a
+  **Status: shipped and live** banner pointing at `TAB-004` / `JS-008` /
+  `JS-017` / `JS-022` / `GS-003` / `DATA-002`; §2's `tab-repeat-offenders.js`
+  row no longer says "Avg Flagged"; §9.3 `reportRepeatOffenderRmsNow()` →
+  `reportRmPerformanceNow()`. Targeted grep confirmed `aggregateRepeatOffenders`
+  + `totalLeadsByKey` are **removed** from code (folded into
+  `computeRmPerformance`). **Still open — the deep §9 body sweep:**
+  §9.1's "ranks by Avg Flagged" body wording, §9.3.1's references to the
+  two removed helpers, §9.4's ranking-key prose, and the worked examples
+  — a careful read of ~270 lines of §9 against current
+  `js/core-rm-performance.js` + `js/tab-repeat-offenders.js` +
+  `DailyRmIssueLog.gs` (`handover-coverage-map.md` items 1–2).
 - §2 (add `js/rm-performance-worker.js` — **done `2026-09-10`** via
   `t-tf-7e4d0dffdf6c`, along with the load-order rewrite), §5 (add 5
   missing Sheet tabs; the `Movement_Log`/`SLA_History` "every 6h" wording

@@ -109,9 +109,26 @@ determinable from what exists today). Nothing below claims automation,
 tracking, or detection exists unless directly confirmed. Where this section
 recommends something, it's labeled **Recommended**, not stated as fact.
 
-### Current-State Audit (2026-09-10)
+### Current-State Audit (2026-09-10) — ⚠️ PRE-BUILD SNAPSHOT
 
-**Confirmed, direct verification:**
+> **Post-build update, 2026-09-10 (later the same day):** this
+> subsection, the "Task Audit", "Dead-End Register", and "Priority
+> Actions" below were written **before** the build session that then ran
+> `DOC-001`–`DOC-050` end to end. They describe the state *before* the
+> catalog existed and are kept as a dated record of the starting point —
+> **they are not current.** For the current state see
+> `docs/INDEX.md` (69 `Closed + Monitored` records; `js/*.js` + `*.gs`
+> 100% file-covered in CI), `docs/_planning/OPEN_ITEMS.md` (the live
+> follow-up tracker), and
+> `docs/_planning/FORENSIC_COMPLETENESS_AUDIT_2026-09-10.md` (the
+> post-build audit — one-time completeness ~95%, continuous completeness
+> still being built as `t-tf-5ad22d8e4c2e`). The Governance Model's
+> *definitions* (7-state status, 14-point Definition of Done, Definition
+> of Stale, Change-Control Mechanism, Source-of-Truth Table) below remain
+> the authoritative framework; only the point-in-time *findings* are
+> superseded.
+
+**Confirmed, direct verification (as of the pre-build snapshot):**
 - All 50 `DOC-001` through `DOC-050` tasks (To-Do Dashboard, goal
   `g-docproject01`) are **Not Started**. Zero of Phase 1 through Phase 6
   has actually run. This includes `DOC-014` (create the `docs/` directory

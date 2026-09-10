@@ -66,7 +66,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | `TAB-004` / `JS-008` / `JS-017` / `JS-022` / `GS-003` records + `DATA-002`; this session's fix commits. |
 | **Contradiction type** | `HANDOVER.md` §9 vs current code — the largest stale claim. |
 | **Fix recommendation** | Rewrite §9.7 to the shipped state, or shrink it to a pointer at `TAB-004` / `JS-008` / `GS-003` / `DATA-002`. Update §9.1's "Avg Flagged" framing. |
-| **Status** | Logged; `handover-coverage-map.md` items 1–2 (highest-priority Phase 5). Not separately tasked (it's a Phase 5 job). |
+| **Status** | **Headline fixed `2026-09-10`** (`t-tf-5ad22d8e4c2e`) — §9.7 title now "replaced … (shipped 2026-09-04; iterated 09-05 and 09-10)" + a **Status: shipped and live** banner pointing at `TAB-004` / `JS-008` / `JS-017` / `JS-022` / `GS-003` / `DATA-002`; §2's `tab-repeat-offenders.js` row + §9.7's title no longer say "Avg Flagged"/"in progress". **Still open:** the deep §9 body sweep (§9.1/§9.3.1/§9.4 wording, the worked-example prose) — `handover-coverage-map.md` items 1–2. |
 
 ## C-6 — `HANDOVER.md` §9.3 / §9.3.1: renamed function names
 
@@ -74,10 +74,10 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 |---|---|
 | **In** | §9.3 lists `reportRepeatOffenderRmsNow()`; §9.3.1 references `aggregateRepeatOffenders` and `totalLeadsByKey()`. |
 | **Reality** | The Phase 3 grep of `DailyRmIssueLog.gs` found **`reportRmPerformanceNow()`** (not `reportRepeatOffenderRmsNow`); the grep of `js/core-rm-performance.js` found **`aggregateRmPerformance`** (not `aggregateRepeatOffenders`). Likely renamed in the §9.7 redesign. `totalLeadsByKey()` — not found in this session's greps; needs a targeted check. |
-| **Currently correct** | `GS-003` `## Significant functions` (`reportRmPerformanceNow` = FN-195); `JS-008` (`aggregateRmPerformance` folded into FN-054). `totalLeadsByKey` — **unresolved, flag for Phase 5.** |
+| **Currently correct** | `GS-003` `## Significant functions` (`reportRmPerformanceNow` = FN-195); `JS-008` (`aggregateRmPerformance` folded into FN-054). **Targeted grep `2026-09-10`:** `reportRmPerformanceNow` (`DailyRmIssueLog.gs:1108`), `aggregateRmPerformance` (`core-rm-performance.js:494`), `computeRmPerformance` (`:692`) all present; **`totalLeadsByKey` and `aggregateRepeatOffenders` — GONE** (folded into `computeRmPerformance` per §9.7.2, confirmed `grep -n 'function totalLeadsByKey\|function aggregateRepeatOffenders'` → 0 hits). |
 | **Contradiction type** | `HANDOVER.md` §9 vs current code. |
-| **Fix recommendation** | Part of the §9.7 rewrite (C-5). Phase 5 to confirm the current name for the "Total Leads" column helper and whether `reportRepeatOffenderRmsNow` survives as an alias. |
-| **Status** | Logged; `handover-coverage-map.md` item 3. |
+| **Fix recommendation** | Part of the §9.7 rewrite (C-5). |
+| **Status** | **§9.3 fixed `2026-09-10`** (`t-tf-5ad22d8e4c2e`) — `reportRepeatOffenderRmsNow()` → `reportRmPerformanceNow()` with a rename note. **Still open:** §9.3.1's `aggregateRepeatOffenders` / `totalLeadsByKey()` references (both removed from code) — rides the §9 body sweep, `handover-coverage-map.md` item 3. |
 
 ## C-7 — `HANDOVER.md` §5: `Movement_Log` "every 6h"
 
@@ -122,8 +122,8 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | C-2 | `HANDOVER.md` §2 vs itself + code | low | ✅ **RESOLVED `2026-09-10`** — §2 "Load order matters" paragraph rewritten to the real 23-tag order + `new Worker()` 24th file |
 | C-3 | all root docs vs code | low (dating) | ✅ **`HANDOVER.md` §1 RESOLVED `2026-09-10`** — 2 `.gs` added; `CLAUDE.md` already had them; `LOGIC_AUDIT.md` untouched (frozen) |
 | C-4 | `HANDOVER.md` §7.2 vs `CLAUDE.md` + reality | low | ✅ **RESOLVED `2026-09-10`** — §7.2 + `CLAUDE.md` testing bullet point at `tests/frontend-harness.html`; "not in CI" gap kept |
-| C-5 | `HANDOVER.md` §9.7 vs code | **medium** (largest stale claim) | Phase 5 — rewrite/retire §9.7 |
-| C-6 | `HANDOVER.md` §9.3/§9.3.1 vs code | low | part of the §9.7 rewrite + a Phase 5 targeted check |
+| C-5 | `HANDOVER.md` §9.7 vs code | **medium** (largest stale claim) | ⚠ **headline fixed `2026-09-10`** (title + status banner + §2 row); deep §9 body sweep still open |
+| C-6 | `HANDOVER.md` §9.3/§9.3.1 vs code | low | ⚠ **§9.3 fixed `2026-09-10`** (`reportRmPerformanceNow`); §9.3.1 refs to the two removed fns still open |
 | C-7 | `HANDOVER.md` §5 vs §4.3 | trivial | ✅ **RESOLVED `2026-09-10`** — §5 rows + §1 prose → "4×/day at 00:00/06:00/12:00/18:00 IST" |
 | C-8 | `.gs` comments vs file layout | trivial | acknowledged by §6; touch-up when next edited |
 | C-9 | `LOGIC_AUDIT.md` vs code | N/A (frozen by design) | none |
