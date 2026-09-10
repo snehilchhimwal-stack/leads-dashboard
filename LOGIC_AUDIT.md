@@ -2,9 +2,10 @@
 
 Full source prompt: `My Idea/data based testing/leads_dashboard_logic_audit_prompt.txt`.
 Tracked as a 7-part sequence in the To-Do Dashboard's research project (task
-titles `System-wide Logic Audit -- Part N of 7: ...`). This file is the
-running deliverable; each part fills in more of it. Parts complete so far:
-**Part 1 only.**
+titles `System-wide Logic Audit -- Part N of 7: ...`). **All 7 parts
+complete; the audit is closed** (Part 1 committed 2026-09-05, Parts 2-7
+2026-09-07, final assembled report `0d69729`). It is a dated,
+point-in-time record — accurate as of 2026-09-07, not maintained forward.
 
 This is a system-wide *logic and connection* audit, not a per-file review —
 the goal is to reconstruct how the pieces depend on and affect each other,
