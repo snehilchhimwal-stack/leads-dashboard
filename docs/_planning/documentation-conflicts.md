@@ -22,7 +22,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | The real order (positions 1–9): `core-foundation → core-sheets-fetch → core-auth → core-lead-model → core-collation → core-outcome-engine → core-fetch-and-render → core-ui → core-filters`. **This exactly matches `HANDOVER.md` §2's *first* order paragraph** (the one with per-file descriptions). |
 | **Impact** | Functionally harmless — nothing at parse time in any of the first 9 calls into `core-rm-performance` (`LOGIC_AUDIT.md` Part 1 §4a). It's a documentation accuracy issue, not a bug. |
 | **Fix recommendation** | Edit `CLAUDE.md:24` to: "9 of the 10 `js/core-*.js` files load first (`HANDOVER.md` §2 for the exact order); `core-rm-performance.js` loads later, interleaved with the tab files — harmless, nothing at parse time calls into it." |
-| **Status** | **Follow-up task opened** — `t-tf-7e4d0dffdf6c` "[Leads Dashboard] Doc-accuracy touch-up: CLAUDE.md script-load-order + HANDOVER.md C-2..C-7 one-liners" (Low priority, tags `leads-dashboard` / `documentation`). Not blocking this catalog project's critical path (`DOC-012`'s own follow-up instruction). Already recorded on `DASH-001` `## HTML / CSS structure` and every `JS-XXX` `## Load order / position`. |
+| **Status** | **RESOLVED `2026-09-10`** (`t-tf-7e4d0dffdf6c`) — `CLAUDE.md`'s load-order line rewritten to "9 of the 10 `js/core-*.js` files load first … `core-rm-performance.js` loads later (position 15 of 23)"; `HANDOVER.md` §2 table row relabelled "(9 load first; 10 exist)" with the same note. Was: follow-up task `t-tf-7e4d0dffdf6c` (Low, tags `leads-dashboard` / `documentation`), not on the catalog's critical path. Also recorded on `DASH-001` `## HTML / CSS structure` and every `JS-XXX` `## Load order / position`. |
 
 ## C-2 — `HANDOVER.md` §2's *second* load-order paragraph is stale (pre-split)
 
@@ -33,7 +33,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | The full 23-entry `<script src>` order + the `js/rm-performance-worker.js` 24th file loaded as a `new Worker()` — see `docs/_planning/js-module-inventory.md` (`DOC-006`) and `DASH-001`'s `## HTML / CSS structure`. `HANDOVER.md` §2's *first* paragraph (per-file, first-9) is fine; only this *second* paragraph is stale. |
 | **Contradiction type** | `HANDOVER.md` vs itself (§2 para 1 correct, §2 para 2 stale) **and** `HANDOVER.md` vs code. |
 | **Fix recommendation** | Fold into the same `HANDOVER.md` §2 refresh as `handover-coverage-map.md`'s Phase 5 list item for §2 — replace the pre-split names with the current 24-file picture (or point at `docs/_planning/js-module-inventory.md`). Same follow-up owner as C-1. |
-| **Status** | Logged; not separately tasked (it rides the `HANDOVER.md` §2 Phase 5 refresh, `handover-coverage-map.md` item 4). |
+| **Status** | **RESOLVED `2026-09-10`** (`t-tf-7e4d0dffdf6c`) — the "Load order matters" paragraph now spells out the real 23-`<script>`-tag order (9 `core-*.js` → tabs → `core-rm-performance` → `repeat-offenders-pdf` → `tab-morning` → 3 `reports-*` → `sheets-writeback` → `overview-…` → `main.js`) and names `js/rm-performance-worker.js` as the 24th, `new Worker()`-loaded file; points at `dashboard.html`'s own tag list as the authority. |
 
 ## C-3 — File counts: all three root docs predate 3 files
 
@@ -44,7 +44,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | `docs/_planning/file-inventory.md` (`DOC-001`) — the drift table, 4 additions / 0 removals. |
 | **Contradiction type** | Every root doc vs current code — a dating artifact (the docs are older than the files), not a real disagreement. |
 | **Fix recommendation** | `CLAUDE.md` "What this is" + `HANDOVER.md` §1 `.gs` list: add the two files. `LOGIC_AUDIT.md` is **frozen** — do **not** edit it; its dated nature is the point (`file-inventory.md` records the drift instead). |
-| **Status** | Logged; captured in `file-inventory.md` + `handover-coverage-map.md` (items 4, 8). Not separately tasked. |
+| **Status** | **`HANDOVER.md` §1 RESOLVED `2026-09-10`** (`t-tf-7e4d0dffdf6c`) — `OpsChecklistRunner.gs` + `LeadFollowupsStaleness.gs` added to the §1 `.gs` list, "13 production `.gs` files". `CLAUDE.md`'s "What this is" list already carried both. `LOGIC_AUDIT.md` / `DOCUMENTATION_PROJECT_PLAN.md` counts left as-is (frozen / captured in `file-inventory.md` + `handover-coverage-map.md` items 4, 8). |
 
 ## C-4 — `HANDOVER.md` §7.2: "no dashboard test suite exists / not built yet"
 
@@ -55,7 +55,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | `tests/frontend-harness.html` at repo root; `CLAUDE.md`'s Testing section already references it. |
 | **Contradiction type** | `HANDOVER.md` §7.2 vs `CLAUDE.md` Testing section + reality. |
 | **Fix recommendation** | `HANDOVER.md` §7.2: replace "not built yet" with a pointer to `tests/frontend-harness.html`; keep the "not in CI" caveat. |
-| **Status** | Logged; `handover-coverage-map.md` item 7. Not separately tasked. |
+| **Status** | **RESOLVED `2026-09-10`** (`t-tf-7e4d0dffdf6c`) — §7.2 heading + body rewritten to describe `tests/frontend-harness.html` as the persisted suite (grafts real `dashboard.html` + `js/*.js`, mocks the Sheets read + OAuth pair, runs synthetic leads through real `fetchAndRender()`, asserts on the DOM); the "not wired into CI — needs a browser" gap is kept explicit. `CLAUDE.md`'s `js/*.js` testing bullet got the same "no persisted suite" → "the persisted suite is …" fix. |
 
 ## C-5 — `HANDOVER.md` §9.7: "RM Performance redesign … in progress, 2026-09-04"
 
@@ -88,7 +88,7 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 | **Currently correct** | `SHEET-002` `## Automation / triggers touching it`; `GS-008` `## Trigger schedule`. |
 | **Contradiction type** | `HANDOVER.md` §5 vs `HANDOVER.md` §4.3 (§4.3 correct) — a shorthand imprecision, not a real conflict. |
 | **Fix recommendation** | Minor: §5 → "4×/day at 00:00/06:00/12:00/18:00 IST". Rides the §5 Phase 5 refresh (`handover-coverage-map.md` item 5). |
-| **Status** | Logged; low priority. |
+| **Status** | **RESOLVED `2026-09-10`** (`t-tf-7e4d0dffdf6c`) — `HANDOVER.md` §5 rows for `Movement_Log` / `SLA_History` now read "4×/day at 00:00/06:00/12:00/18:00 IST — see §4.3"; §1's "snapshotting the sheet every 6 hours" prose fixed to match. |
 
 ## C-8 — In-code `.gs` comments still say `js/core.js`
 
@@ -118,13 +118,13 @@ propagating a stale one. (`DOCUMENTATION_PROJECT_PLAN.md` Phase 1,
 
 | ID | Docs involved | Severity | Action |
 |---|---|---|---|
-| **C-1** | `CLAUDE.md` vs code | low (accuracy) | **Follow-up task opened** — correct `CLAUDE.md:24` |
-| C-2 | `HANDOVER.md` §2 vs itself + code | low | rides the §2 Phase 5 refresh |
-| C-3 | all root docs vs code | low (dating) | `CLAUDE.md` + `HANDOVER.md` §1 add 2 `.gs`; `LOGIC_AUDIT.md` untouched |
-| C-4 | `HANDOVER.md` §7.2 vs `CLAUDE.md` + reality | low | §7.2 Phase 5 refresh |
+| **C-1** | `CLAUDE.md` vs code | low (accuracy) | ✅ **RESOLVED `2026-09-10`** (`t-tf-7e4d0dffdf6c`) — `CLAUDE.md` load-order line + `HANDOVER.md` §2 table row |
+| C-2 | `HANDOVER.md` §2 vs itself + code | low | ✅ **RESOLVED `2026-09-10`** — §2 "Load order matters" paragraph rewritten to the real 23-tag order + `new Worker()` 24th file |
+| C-3 | all root docs vs code | low (dating) | ✅ **`HANDOVER.md` §1 RESOLVED `2026-09-10`** — 2 `.gs` added; `CLAUDE.md` already had them; `LOGIC_AUDIT.md` untouched (frozen) |
+| C-4 | `HANDOVER.md` §7.2 vs `CLAUDE.md` + reality | low | ✅ **RESOLVED `2026-09-10`** — §7.2 + `CLAUDE.md` testing bullet point at `tests/frontend-harness.html`; "not in CI" gap kept |
 | C-5 | `HANDOVER.md` §9.7 vs code | **medium** (largest stale claim) | Phase 5 — rewrite/retire §9.7 |
 | C-6 | `HANDOVER.md` §9.3/§9.3.1 vs code | low | part of the §9.7 rewrite + a Phase 5 targeted check |
-| C-7 | `HANDOVER.md` §5 vs §4.3 | trivial | §5 shorthand fix |
+| C-7 | `HANDOVER.md` §5 vs §4.3 | trivial | ✅ **RESOLVED `2026-09-10`** — §5 rows + §1 prose → "4×/day at 00:00/06:00/12:00/18:00 IST" |
 | C-8 | `.gs` comments vs file layout | trivial | acknowledged by §6; touch-up when next edited |
 | C-9 | `LOGIC_AUDIT.md` vs code | N/A (frozen by design) | none |
 

@@ -57,12 +57,14 @@ Google Sheet as a data layer:
 2. **The Apps Script backend** (`Core.gs`, `SlaEngine.gs`,
    `FollowupEngine.gs`, `EmailInfra.gs`, `MovementTracker.gs`,
    `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `RmHierarchy.gs`,
-   `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`, `DailyRmIssueLog.gs`
-   — see §9) — a script bound to
+   `RmHierarchy.private.gs`, `UnmatchedCommentLogger.gs`, `DailyRmIssueLog.gs`,
+   `OpsChecklistRunner.gs`, `LeadFollowupsStaleness.gs` — 13 production `.gs`
+   files; see the §2 table and §9) — a script bound to
    the same Google Sheet, running on Google's own servers on a fixed
    schedule. It exists specifically for the things a static page can't do
-   unattended: snapshotting the sheet every 6 hours and sending automatic
-   emails at fixed clock times, whether or not anyone has the dashboard open.
+   unattended: snapshotting the sheet 4×/day (00:00/06:00/12:00/18:00 IST)
+   and sending automatic emails at fixed clock times, whether or not anyone
+   has the dashboard open.
 
 Because these are genuinely separate runtimes (browser JS vs. Apps Script),
 several pieces of business logic are **intentionally duplicated** — e.g. the
@@ -85,7 +87,7 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | File | Role |
 |---|---|
 | `dashboard.html` | The page shell: `<style>` block (dark theme), all markup/tab containers, the sign-in gate UI, and `<script src>` tags loading the `js/*.js` files below **in order** (order matters — see §3). |
-| `js/core-*.js` (9 files) | Loaded first, in this order: `core-foundation.js` (CONFIG, ISSUE_PRIORITY, IST date helpers) → `core-sheets-fetch.js` (HEADER_ALIASES, the `leads`/`issueLeads`/`filterState` module state, Sheets API v4 read + gviz parsing) → `core-auth.js` (the sign-in gate, `GATE_SCOPE`) → `core-lead-model.js` (stage classifiers + `enrichLead`, the single source of truth for a lead's derived state — SLA flags, stage, funnel position) → `core-collation.js` (multi-RM-copy dedup/collation display) → `core-outcome-engine.js` (comment classification, `OUTCOME_RULES`/`inferOutcome`) → `core-fetch-and-render.js` (`fetchAndRender` itself) → `core-ui.js` (generic UI chrome: `esc`, loading overlay, alert cards) → `core-filters.js` (`applyFiltersAndRender`, the filter-bar UI). Formerly one `js/core.js` file (3,120 lines) — split in the 2026-09 modularity refactor (pure code motion, no logic changed; see git history). Everything else still depends on this whole group exactly as it depended on the single file before — order AMONG the 9 mostly doesn't matter (see `core-foundation.js`'s own header comment for why), but all 9 must load before every other `js/*.js` file below. |
+| `js/core-*.js` (9 load first; 10 exist) | Loaded first, in this order: `core-foundation.js` (CONFIG, ISSUE_PRIORITY, IST date helpers) → `core-sheets-fetch.js` (HEADER_ALIASES, the `leads`/`issueLeads`/`filterState` module state, Sheets API v4 read + gviz parsing) → `core-auth.js` (the sign-in gate, `GATE_SCOPE`) → `core-lead-model.js` (stage classifiers + `enrichLead`, the single source of truth for a lead's derived state — SLA flags, stage, funnel position) → `core-collation.js` (multi-RM-copy dedup/collation display) → `core-outcome-engine.js` (comment classification, `OUTCOME_RULES`/`inferOutcome`) → `core-fetch-and-render.js` (`fetchAndRender` itself) → `core-ui.js` (generic UI chrome: `esc`, loading overlay, alert cards) → `core-filters.js` (`applyFiltersAndRender`, the filter-bar UI). Formerly one `js/core.js` file (3,120 lines) — split in the 2026-09 modularity refactor (pure code motion, no logic changed; see git history). Everything else still depends on this whole group exactly as it depended on the single file before — order AMONG the 9 mostly doesn't matter (see `core-foundation.js`'s own header comment for why), but all 9 must load before every other `js/*.js` file below. A 10th `core-*.js` file, `core-rm-performance.js`, loads *later* — interleaved among the tab files at position 15 of 23 — which is harmless because nothing at parse time calls into it. |
 | `js/tab-audit.js` | Audit tab — "when was a lead last touched." |
 | `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
 | `js/tab-rmtimeline.js` | RM Timeline tab — per-RM daily calendar and day timeline. |
@@ -113,16 +115,21 @@ Confirm the Pages source branch/folder under the repo's **Settings → Pages**
 | `working files on 28th for automatic email/` | **Not in git**, and not authoritative — a manual backup snapshot of a few `.gs` files from mid-development. The root-level `.gs` files are always the source of truth; this folder is safe to ignore or delete. |
 | `design/live-ops-redesign.html` | A standalone visual mockup from an earlier exploration pass — not wired to real data, not part of the live app. |
 
-**Load order matters** for the `<script src>` tags in `dashboard.html`:
-`core.js` → `tab-audit.js` → `tab-tracking.js` → `tab-rmtimeline.js` →
-`tab-movement.js` → `tab-repeat-offenders.js` → `tab-morning.js` →
-`reports.js` → `sheets-writeback.js` → `overview-distribution-people-ops.js` →
-`main.js`. These are classic
-`<script>` tags (no modules, no bundler) sharing one global scope — a
-function or `let`/`const` defined in one file is a bare global every later
-file can call directly. If you add a new `js/*.gs` file, add its `<script
-src>` tag in the right position (after whatever it depends on, before
-`main.js`).
+**Load order matters** for the `<script src>` tags in `dashboard.html`.
+The real order (23 `<script src>` tags, post the 2026-09 split of `core.js`
+into 9 and `reports.js` into 3) is: the **9 `core-*.js` files** in the order
+listed above → `tab-audit.js` → `tab-tracking.js` → `tab-rmtimeline.js` →
+`tab-movement.js` → `tab-repeat-offenders.js` → `core-rm-performance.js` →
+`repeat-offenders-pdf.js` → `tab-morning.js` → `reports-build.js` →
+`reports-gmail.js` → `reports-ui.js` → `sheets-writeback.js` →
+`overview-distribution-people-ops.js` → `main.js`. (A 24th file,
+`js/rm-performance-worker.js`, is not a `<script>` tag — `tab-repeat-offenders.js`
+loads it with `new Worker()`.) Read `dashboard.html`'s own tag list as the
+authority. These are classic `<script>` tags (no modules, no bundler)
+sharing one global scope — a function or `let`/`const` defined in one file
+is a bare global every later file can call directly. If you add a new
+`js/*.js` file, add its `<script src>` tag in the right position (after
+whatever it depends on, before `main.js`).
 
 The `.gs` files work the same way inside one Apps Script project: **every
 file in an Apps Script project shares one global namespace**, regardless of
@@ -316,8 +323,8 @@ Beyond the leads tab itself (one fixed tab, named `leads` — see
 
 | Tab | Written by | Read by |
 |---|---|---|
-| `Movement_Log` | `MovementTracker.gs` (every 6h) + optionally the dashboard's on-demand snapshot | Movement tab, RM Timeline tab, `UnmatchedCommentLogger.gs` |
-| `SLA_History` | `MovementTracker.gs` (every 6h) + the dashboard on refresh | Trend/history views |
+| `Movement_Log` | `MovementTracker.gs` (4×/day at 00:00/06:00/12:00/18:00 IST — see §4.3) + optionally the dashboard's on-demand snapshot | Movement tab, RM Timeline tab, `UnmatchedCommentLogger.gs` |
+| `SLA_History` | `MovementTracker.gs` (same 4×/day trigger) + the dashboard on refresh | Trend/history views |
 | `Lead_Followups` | `OvernightEmailer.gs`'s send paths + the dashboard's Operations "Generate" flow | The follow-up email content itself |
 | `Daily_Cohort_History` | `js/sheets-writeback.js` | Tracking tab's cohort comparison |
 | `Unmatched_Comments_Log` | `UnmatchedCommentLogger.gs` (piggybacks on every `snapshotOpenLeads_` run) | Manual human review — the source for deciding what to add to `OUTCOME_RULES`/`OUTCOME_RULES_GS_` next |
@@ -380,24 +387,23 @@ coverage, and past gaps in this project were closed reactively (see git
 history around 2026-08-29) specifically because a change shipped without a
 matching test.
 
-### 7.2 Dashboard (browser JS) — no persisted suite exists today
+### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (exists; not in CI)
 
-There is currently **no permanent, run-anytime test suite** for
-`js/*.js`. Verification during development so far has been ad hoc: serve
-the repo locally, build a synthetic dataset covering every code path,
-invoke the render/compute functions directly in the browser console, and
-either eyeball the output or hash-compare it against the same call against
-the pre-change version of the file (`git show HEAD:<file>`) to confirm
-byte-identical behavior. That approach works but leaves nothing behind for
-the next person to just run.
+The persisted browser-JS suite is **`tests/frontend-harness.html`** at the
+repo root. It grafts the real `dashboard.html` + every `js/*.js` file into
+one page, mocks only the network boundary (the Sheets API read + the OAuth
+token pair), runs a fixed synthetic dataset through the real
+`fetchAndRender()` pipeline, and asserts on the resulting DOM. Open it in a
+browser and read `window.__harnessResults` (or the on-page PASS/FAIL log).
+Re-run it after any dashboard-side change, and extend it — add the
+assertions in the same commit — rather than hand-verifying in the console.
 
-**Recommended first task for whoever takes this over**: build a small
-permanent harness for this — a local HTML page that loads the real
-`js/*.js` files against a fixed synthetic dataset and asserts on key
-outputs, checked into the repo (e.g. `test/dashboard.test.html`), so a JS
-change can be verified the same one-command way `runAllTests()` already
-verifies the Apps Script side. Not built yet; flagging it here rather than
-leaving it undiscoverable.
+**Still open — it is not wired into CI.** `.github/workflows/test.yml` runs
+the Apps Script suite (`node test/run-gs-tests.js`) and the docs-coverage
+check on every push, but not this harness — it needs a real browser, so
+running it stays manual for now. This section used to recommend *building*
+such a harness as the first handover task; that part is done, and the only
+remaining gap is the CI wiring.
 
 **Local preview in the meantime**: `dashboard.html` is a static file — any
 local static file server pointed at the repo root works

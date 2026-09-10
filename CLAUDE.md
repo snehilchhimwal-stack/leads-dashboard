@@ -21,9 +21,12 @@ other directly:
    unattended on a fixed clock schedule for the things a static page
    can't do alone.
 
-`js/core-*.js` load first (9 files, `HANDOVER.md` §2 for the exact order),
-then the tab files, then `main.js` last. Every `.gs` file shares ONE global
-namespace regardless of filename — the split is purely organizational.
+9 of the 10 `js/core-*.js` files load first (`HANDOVER.md` §2 for the exact
+order), then the tab files, then `main.js` last. The exception is
+`core-rm-performance.js`, which loads later — interleaved among the tab files
+(position 15 of 23) — and that's harmless because nothing at parse time calls
+into it. Every `.gs` file shares ONE global namespace regardless of filename
+— the split is purely organizational.
 
 ## The gotchas that actually cost time here
 
@@ -106,12 +109,13 @@ namespace regardless of filename — the split is purely organizational.
   spreadsheet or a real send. Run locally with `node test/run-gs-tests.js`
   (needs Node — see above) or via CI on push. When you add/change a `.gs`
   function, add the matching assertion in the same commit.
-- **`js/*.js` changes**: no persisted suite as of this writing —
-  `tests/frontend-harness.html` grafts the real `dashboard.html` + `js/*.js`
-  files, mocks only the network boundary (Sheets read + OAuth token pair),
-  and runs synthetic leads through the real `fetchAndRender()` pipeline.
-  Re-run it after any dashboard-side change; extend it rather than
-  hand-verifying in the console when you add real new behavior.
+- **`js/*.js` changes**: the persisted suite is
+  `tests/frontend-harness.html` (not in CI — it needs a browser). It grafts
+  the real `dashboard.html` + `js/*.js` files, mocks only the network
+  boundary (Sheets read + OAuth token pair), and runs synthetic leads
+  through the real `fetchAndRender()` pipeline. Re-run it after any
+  dashboard-side change; extend it rather than hand-verifying in the console
+  when you add real new behavior.
 - **Adding or removing a production `js/*.js` or `.gs` file**:
   `test/check-docs-coverage.js` (`CI-001`–`CI-005`, To-Do Dashboard,
   2026-09-09) checks it against `docs/js-modules/`/`docs/gs-modules/` and

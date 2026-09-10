@@ -52,20 +52,22 @@ that wipes them silently breaks routing.)
 
 ## C. Doc-vs-doc / doc-vs-code conflicts (`DOC-012`)
 
-Full detail in **`documentation-conflicts.md`** (C-1..C-9). Actionable
-subset, **tasked as `t-tf-7e4d0dffdf6c`** (Low, not on the critical
-path):
+Full detail in **`documentation-conflicts.md`** (C-1..C-9). The actionable
+subset (**tasked as `t-tf-7e4d0dffdf6c`**, Low) is **DONE — `2026-09-10`**:
 
-- **C-1** `CLAUDE.md:24` — "9 `js/core-*.js` load first" (there are 10;
-  `core-rm-performance.js` loads 15th).
-- **C-2** `HANDOVER.md` §2's 2nd load-order paragraph names pre-split
-  `core.js` / `reports.js`.
-- **C-3** `CLAUDE.md` "What this is" + `HANDOVER.md` §1 `.gs` list omit
-  `OpsChecklistRunner.gs` + `LeadFollowupsStaleness.gs`.
-- **C-4** `HANDOVER.md` §7.2 "no dashboard test suite / not built yet" —
-  `tests/frontend-harness.html` now exists.
-- **C-7** `HANDOVER.md` §5 "`Movement_Log` every 6h" vs fixed
-  `[0,6,12,18]`.
+- ~~**C-1**~~ `CLAUDE.md` load-order line + `HANDOVER.md` §2 table row —
+  now "9 of the 10 `js/core-*.js` load first; `core-rm-performance.js`
+  loads later, position 15 of 23". ✅
+- ~~**C-2**~~ `HANDOVER.md` §2 "Load order matters" paragraph — rewritten
+  to the real 23-`<script>`-tag order + the `new Worker()` 24th file. ✅
+- ~~**C-3**~~ `HANDOVER.md` §1 `.gs` list — `OpsChecklistRunner.gs` +
+  `LeadFollowupsStaleness.gs` added, "13 production `.gs` files".
+  (`CLAUDE.md`'s list already carried them.) ✅
+- ~~**C-4**~~ `HANDOVER.md` §7.2 + `CLAUDE.md` testing bullet — rewritten
+  to point at `tests/frontend-harness.html`; the "not in CI" gap kept
+  explicit. ✅
+- ~~**C-7**~~ `HANDOVER.md` §1 prose + §5 table — "every 6h" → "4×/day at
+  00:00/06:00/12:00/18:00 IST". ✅
 
 `C-8` (in-code `.gs` comments say `js/core.js`) and `C-9`
 (`LOGIC_AUDIT.md` line numbers vs grown files — **frozen by design, no
@@ -85,11 +87,14 @@ biggest:
   framing is pre-redesign. **§9.3 / §9.3.1** function names
   (`reportRepeatOffenderRmsNow`, `aggregateRepeatOffenders`,
   `totalLeadsByKey`) likely renamed — verify against current source.
-- §2 (add `js/rm-performance-worker.js`), §5 (add 5 missing Sheet
-  tabs), §6 (reconcile the duplication-pairs list), §7.1/§7.2 (note the
-  Node CI harness + the frontend harness), §1 (add 2 `.gs`), §4.2/§4.4
-  (GitHub Pages source still unconfirmed), §4.3 (`setupRmHierarchy()`
-  has no own row in the setup table).
+- §2 (add `js/rm-performance-worker.js` — **done `2026-09-10`** via
+  `t-tf-7e4d0dffdf6c`, along with the load-order rewrite), §5 (add 5
+  missing Sheet tabs; the `Movement_Log`/`SLA_History` "every 6h" wording
+  **fixed `2026-09-10`**), §6 (reconcile the duplication-pairs list),
+  §7.1/§7.2 (note the Node CI harness + the frontend harness — **§7.2
+  done `2026-09-10`**), §1 (add 2 `.gs` — **done `2026-09-10`**),
+  §4.2/§4.4 (GitHub Pages source still unconfirmed), §4.3
+  (`setupRmHierarchy()` has no own row in the setup table).
 
 These are `HANDOVER.md` edits, not catalog gaps — every catalog record's
 `## Handover relationship` already states whether its section is current.
