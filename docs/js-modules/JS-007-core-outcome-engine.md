@@ -123,9 +123,10 @@ Part 4 §4.1; `CLAUDE.md` (duplication gotcha); `GS-013`
 ## Relationships
 
 - **Depends On:** `JS-005` (`istParts`), `JS-006` (`parseDate`)
-- **Used By:** `JS-006` (`enrichLead`), `JS-010` (`renderAlertCard`),
-  `JS-003` (cache clear), `JS-012`, `JS-014`, `JS-019`, `JS-021`,
-  `JS-023`, `JS-024` — nearly every tab/report file
+- **Used By:** `TAB-006`, `JS-003` (cache clear), `JS-006`
+  (`enrichLead`), `JS-010` (`renderAlertCard`), `JS-012`, `JS-014`,
+  `JS-017`, `JS-019`, `JS-021`, `JS-023`, `JS-024`, `DATA-003` — nearly
+  every tab/report file
 - **Related:** `GS-005` (`FollowupEngine.gs`), `GS-013`
   (`UnmatchedCommentLogger.gs`)
 

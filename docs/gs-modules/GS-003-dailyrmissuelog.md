@@ -141,11 +141,10 @@ drift); `LOGIC_AUDIT.md` Part 1 §4b/§4d/§5, Part 3 §3.6.
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-012` (`SlaEngine.gs`),
-  `GS-004` (`EmailInfra.gs`), `GS-008` (`MovementTracker.gs` maps +
-  `_evidenceAtDeadlineGs_`), `SHEET-001`, `SHEET-002`, `SHEET-003`
-- **Used By:** `none` — capture side is a scheduled leaf; leaderboard
-  side is manual
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`),
+  `GS-008` (`MovementTracker.gs` maps + `_evidenceAtDeadlineGs_`),
+  `GS-012` (`SlaEngine.gs`), `SHEET-001`, `SHEET-002`, `SHEET-003`
+- **Used By:** `SHEET-003`, `DATA-002`
 - **Related:** `JS-008` (`core-rm-performance.js` — the client twin),
   `JS-022` / `TAB-004` (consume the `Daily_RM_Issues` output),
   `JS-017` (the client worker)

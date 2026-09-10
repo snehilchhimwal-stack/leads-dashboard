@@ -134,8 +134,9 @@ gaps); `LOGIC_AUDIT.md` Part 1 §4d, Part 3 §3.7, Part 4 §4.3/§4.8, Part
   `resolveRecipientBucketsForRms_`, `ALWAYS_CC_EMAILS_`; a file-level
   circular reference, harmless in Apps Script's single namespace),
   `SHEET-001`, `SHEET-006`, `SHEET-007`, `SHEET-012`, `EXT-002`
-- **Used By:** `GS-001`, `GS-008`, `GS-010`, `GS-011`, `GS-003` — every
-  scheduled emailer / logger
+- **Used By:** `GS-001`, `GS-002`, `GS-003`, `GS-006`, `GS-008`,
+  `GS-009`, `GS-010`, `GS-011`, `GS-013`, `SHEET-012`, `EXT-002`,
+  `DATA-002` — every scheduled emailer / logger
 - **Related:** `JS-009` (`HEADER_ALIASES` twin), `JS-014`
   (`REGION_GROUP_MAP` twin), `JS-016` (`TEST_MODE_OVERRIDE_EMAIL` twin)
 

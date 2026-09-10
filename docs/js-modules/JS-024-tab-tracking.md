@@ -131,13 +131,15 @@ through `JS-018`). Belongs to `TAB-008`.
 
 ## Relationships
 
-- **Depends On:** `JS-021` (`movementSnapshots`, `buildMovementHistories`,
-  `passesMovementFilters`, snapshot selectors), `JS-018` (archive
-  writes), `JS-004` (`clearSlaHistory`), `JS-014` (`mainRegionFor`,
-  `effectiveRegion`), `JS-010` (`esc`), `JS-005` (IST helpers),
-  `SHEET-002`, `SHEET-005`, `SHEET-008`
-- **Used By:** `TAB-008`; `JS-012` (`renderAll` calls `renderTrackingTab`);
-  `JS-023` (RM Timeline reuses `buildTrackingChartSvg`)
+- **Depends On:** `JS-002`, `JS-004` (`clearSlaHistory`), `JS-005` (IST
+  helpers), `JS-006`, `JS-007`, `JS-010` (`esc`), `JS-014`
+  (`mainRegionFor`, `effectiveRegion`), `JS-018` (archive writes),
+  `JS-021` (`movementSnapshots`, `buildMovementHistories`,
+  `passesMovementFilters`, snapshot selectors), `SHEET-002`,
+  `SHEET-005`, `SHEET-008`
+- **Used By:** `TAB-005`, `TAB-008`, `JS-012` (`renderAll` calls
+  `renderTrackingTab`), `JS-023` (RM Timeline reuses
+  `buildTrackingChartSvg`)
 - **Related:** `GS-008` (`MovementTracker.gs` — matching cohort/SLA
   history writer), `TAB-002` (live rates vs these cohort-correct numbers)
 

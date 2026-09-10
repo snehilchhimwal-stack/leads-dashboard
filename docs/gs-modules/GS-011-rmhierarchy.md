@@ -140,11 +140,11 @@ Apps Script backend. Layer 18 (backend infra / routing) in
 
 - **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs` —
   `withRetry_`, `passesGoogleNonUtmSearchGs_`; a file-level circular
-  reference, harmless in Apps Script's single namespace),
-  `RmHierarchy.private.gs` (optional, `typeof`-guarded, **not in repo**),
-  `SHEET-006`, `SHEET-007`, `SHEET-012`
-- **Used By:** `GS-004` (`EmailInfra.gs`), `GS-001`, `GS-010`, `GS-009`
-  (`OpsChecklistRunner.gs` — the audit functions)
+  reference, harmless in Apps Script's single namespace), `SHEET-006`,
+  `SHEET-007`, `SHEET-012`
+- **Used By:** `GS-001`, `GS-004` (`EmailInfra.gs`), `GS-009`
+  (`OpsChecklistRunner.gs` — the audit functions), `GS-010`,
+  `SHEET-006`, `SHEET-007`
 - **Related:** `JS-022` (`tab-repeat-offenders.js` — the separate
   browser read of `RM_Hierarchy`), `JS-008` (`RM_PERF_NON_RM_ROLES`
   overlap)

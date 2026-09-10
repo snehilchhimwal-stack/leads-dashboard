@@ -110,14 +110,16 @@ generic template assumes), Part 7 §18 LOW #3.
 
 ## Relationships
 
-- **Depends On:** `JS-009` (`allParsedLeads` / `filterState`), `JS-006`
-  (`enrichLead`), `JS-014` (`effectiveRegion`), `JS-002`
-  (`dedupeToFamilies`), `JS-012` (`renderAll`), `JS-010`
-  (`showLoadingOverlay`), `JS-001` (`gateAccessToken` for
-  `clearSlaHistory`), `JS-018` (`upsertSlaHistoryRows`), `SHEET-005`
-- **Used By:** `JS-003`, `JS-001`, `JS-019` (`buildMultiSelect`),
-  `DASH-001`, `TAB-002`..`TAB-008` (every render goes through
-  `applyFiltersAndRender` → `renderAll`)
+- **Depends On:** `JS-001` (`gateAccessToken` for `clearSlaHistory`),
+  `JS-002` (`dedupeToFamilies`), `JS-005`, `JS-006` (`enrichLead`),
+  `JS-009` (`allParsedLeads` / `filterState`), `JS-010`
+  (`showLoadingOverlay`), `JS-012` (`renderAll`), `JS-014`
+  (`effectiveRegion`), `JS-018` (`upsertSlaHistoryRows`), `SHEET-005`,
+  `EXT-001`, `EXT-003`
+- **Used By:** `DASH-001`, `TAB-002`, `TAB-006`, `TAB-008` (every render
+  goes through `applyFiltersAndRender` → `renderAll`), `JS-001`,
+  `JS-003`, `JS-012`, `JS-014`, `JS-019` (`buildMultiSelect`), `JS-020`,
+  `JS-024`, `DATA-001`
 - **Related:** `JS-021` (Movement filter uses a different predicate,
   `passesMovementFilters`), `JS-022` (Repeat Offenders' own filter set)
 

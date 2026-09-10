@@ -78,10 +78,10 @@ buttons of its own.
 
 ## Relationships
 
-- **Depends On:** `JS-010` (`initCollapsibleSectionInfo`), `JS-023`
-  (`initRMTimelineUI`), `JS-021` (`initMovementUI`), `JS-001`
-  (`initAuthGate`)
-- **Used By:** `none` — entry point
+- **Depends On:** `JS-001` (`initAuthGate`), `JS-010`
+  (`initCollapsibleSectionInfo`), `JS-021` (`initMovementUI`), `JS-023`
+  (`initRMTimelineUI`)
+- **Used By:** `TAB-005`, `JS-023`
 - **Related:** `DASH-001` (`dashboard.html` loads this last)
 
 ## Source of truth

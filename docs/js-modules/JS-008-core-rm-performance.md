@@ -139,12 +139,13 @@ recompute via the worker.
 ## Relationships
 
 - **Depends On:** `JS-005` (`CONFIG`, IST helpers), `JS-006`
-  (`parseDate`), `JS-021` (`movementSnapshots`, `buildMovementHistories`,
+  (`parseDate`), `JS-014` (`mainRegionFor`), `JS-021`
+  (`movementSnapshots`, `buildMovementHistories`,
   `enrichSnapshotCached`), `JS-022` (`passesRepeatOffenderFilters` is
-  here but the filter *state* comes from the tab; `rmHierarchyByNameLower`
-  map), `JS-014` (`mainRegionFor`), `SHEET-002`, `SHEET-006`
-- **Used By:** `JS-017` (worker), `JS-022` (sync path), `JS-013` (PDF),
-  `TAB-004`
+  here but the filter *state* comes from the tab;
+  `rmHierarchyByNameLower` map), `SHEET-002`, `SHEET-006`, `DATA-004`
+- **Used By:** `TAB-004`, `JS-013` (PDF), `JS-017` (worker), `JS-022`
+  (sync path), `DATA-002`
 - **Related:** `GS-003` (`DailyRmIssueLog.gs` — the `.gs` console mirror)
 
 ## Source of truth

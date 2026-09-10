@@ -94,11 +94,20 @@ without a reciprocal `Used By` on the target and **65** the other way.
 
 **`DOC-040` normalised the `INDEX.md` master table** — all 69 rows'
 `Depends On` / `Used By` regenerated from the union of edges, **0
-remaining asymmetries** (`reference-verification.md`). The record-file
-prose `## Relationships` sections are dangling-clean but not byte-level
-reciprocal — that polish is `t-tf-47c37923c3bd`. `docs/INDEX.md` is the
-authoritative, now-reciprocal dependency surface. No pair was ever a
+remaining asymmetries** (`reference-verification.md`). `docs/INDEX.md` is
+the authoritative, now-reciprocal dependency surface. No pair was ever a
 *wrong* relationship — every one was a *missing back-link*.
+
+**`t-tf-47c37923c3bd` (2026-09-10) then pushed that reciprocity down into
+the record files** — an additive pass added every `INDEX.md` back-link
+the 53 lagging record files were missing (+57 `Depends On`, +171
+`Used By`). Every record's `## Relationships` is now a **superset of its
+`INDEX.md` row**, so the authoritative edge set is reciprocal in the
+record files too. Left open: **57 record-only edges** (a record asserts
+an edge `INDEX.md` does not) — all transitive-consumer over-listing on
+the `DATA-`/`DASH-001` records plus 11 spurious ones; kept for now,
+prune-vs-expand decision in `_planning/reciprocity-normalisation-notes.md`
+and `_planning/OPEN_ITEMS.md` §C.
 
 ## 6. High-risk items from `LOGIC_AUDIT.md` §6.3 — traceability check (`DOC-035` step 3)
 
@@ -121,11 +130,16 @@ Every §6.3 high-risk piece has a corresponding, linked record.
 ## Definition of Done check
 
 - **Zero one-directional `Depends On` / `Used By` pairs remain** —
-  ⚠️ **partial.** The reciprocity walk *ran* (§5) and its findings are
-  categorised; the genuine gap (`DATA-` back-links + `EXT-001`/`EXT-003`
-  enumeration) is **not** fully normalised across all record files in
-  this pass — tasked as a follow-up. No pair is *wrong*; all are
-  *missing back-links*. `RELATIONSHIP_MAP.md` + `docs/INDEX.md` are the
-  authoritative view until the normalisation pass runs.
+  ✅ for the authoritative edge set / ⚠️ 57 record-only edges deferred.
+  `DOC-040` made `docs/INDEX.md` internally reciprocal (0 asymmetries);
+  `t-tf-47c37923c3bd` (2026-09-10) then added every `INDEX.md` back-link
+  the record files were missing (+57 `Depends On`, +171 `Used By`; 53
+  files), incl. the `DATA-` back-links and the `EXT-001`/`EXT-003`
+  enumeration. Every record's `## Relationships` is now a superset of its
+  `INDEX.md` row. Still one-directional: **57 record-only edges** the
+  records assert but `INDEX.md` does not (transitive-consumer over-listing
+  on `DATA-`/`DASH-001`, plus 11 spurious) — kept pending the
+  prune-vs-expand decision in
+  `_planning/reciprocity-normalisation-notes.md`. No pair is *wrong*.
 - **Every high-risk item from `LOGIC_AUDIT.md` §6.3 is traceable in the
   new catalog** — ✅ (§6 table — all 9 map to a linked record).

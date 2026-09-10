@@ -132,11 +132,12 @@ The Apps Script backend half (peer of `DASH-001`, sharing only
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-012` (`SlaEngine.gs`),
-  `GS-005` (`FollowupEngine.gs`), `GS-004` (`EmailInfra.gs`), `GS-008`
-  (`MovementTracker.gs` maps), `GS-011` (`RmHierarchy.gs`), `SHEET-001`,
-  `SHEET-002`, `SHEET-006`, `SHEET-007`, `SHEET-012`, `EXT-002`
-- **Used By:** `none` — leaf, scheduled
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`),
+  `GS-005` (`FollowupEngine.gs`), `GS-008` (`MovementTracker.gs` maps),
+  `GS-011` (`RmHierarchy.gs`), `GS-012` (`SlaEngine.gs`), `SHEET-001`,
+  `SHEET-002`, `SHEET-006`, `SHEET-007`, `SHEET-012`, `SHEET-013`,
+  `EXT-002`, `DATA-002`, `DATA-004`
+- **Used By:** `SHEET-013`, `DATA-005`
 - **Related:** `TAB-003` (the on-demand equivalent), `GS-010`
   (`OvernightEmailer.gs` — the other scheduled emailer), `JS-014` (the
   client report builder it parallels)

@@ -126,9 +126,10 @@ creates it on the next send.
 
 ## Relationships
 
-- **Depends On:** `JS-018`, `JS-015` (the caller), `EXT-001`
-- **Used By:** `DASH-001` (write side, via `TAB-003` / `TAB-007`); no
-  code reader
+- **Depends On:** `JS-015` (the caller), `JS-018`, `EXT-001`, `EXT-002`,
+  `DATA-005`
+- **Used By:** `DASH-001` (write side, via `TAB-003` / `TAB-007`),
+  `TAB-003`, `TAB-007`, `JS-015`, `JS-018`, `JS-021` — no code reader
 - **Related:** `SHEET-013` (`AllIssues_Log`), `SHEET-014`
   (`Overnight_Log`) — the scheduled-email equivalents
 

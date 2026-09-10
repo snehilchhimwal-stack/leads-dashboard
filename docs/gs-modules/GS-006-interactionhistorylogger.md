@@ -112,11 +112,12 @@ Movement hub) in `LOGIC_AUDIT.md` Part 1 §1.
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-005` (`FollowupEngine.gs` —
-  `latestOutcomeGs_`), `GS-004` (`EmailInfra.gs`), `SHEET-001`,
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`),
+  `GS-005` (`FollowupEngine.gs` — `latestOutcomeGs_`), `SHEET-001`,
   `SHEET-009`
 - **Used By:** `GS-008` (`MovementTracker.gs` — `snapshotOpenLeads_`
-  invokes it, same pattern as `GS-013`)
+  invokes it, same pattern as `GS-013`), `GS-013`, `SHEET-009`,
+  `DATA-003`
 - **Related:** `GS-013` (`UnmatchedCommentLogger.gs` — the other
   piggyback logger), `SHEET-009` (`Comment_History` — its output)
 

@@ -141,10 +141,10 @@ gotcha); `OPS_CHECKLIST.md` (worst-performer methodology drift);
 
 ## Relationships
 
-- **Depends On:** `JS-022`, `JS-017`, `JS-008`, `JS-013`, `JS-021`
-  (`movementSnapshots`), `JS-003` (render gate), `JS-014` (`mainRegionFor`),
+- **Depends On:** `JS-003` (render gate), `JS-008`, `JS-013`, `JS-014`
+  (`mainRegionFor`), `JS-017`, `JS-021` (`movementSnapshots`), `JS-022`,
   `SHEET-002` (`Movement_Log`), `SHEET-003` (`Daily_RM_Issues` history),
-  `SHEET-006` (`RM_Hierarchy`), `EXT-004` (jsPDF)
+  `SHEET-006` (`RM_Hierarchy`), `EXT-004` (jsPDF), `DATA-004`
 - **Used By:** `DASH-001`
 - **Related:** `GS-003` (the `.gs` console mirror of the same scoring),
   `TAB-007` (shared `movementSnapshots` source)

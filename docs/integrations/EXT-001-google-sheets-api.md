@@ -111,9 +111,12 @@ Shared boundary between both halves of the system and the datastore
 
 - **Depends On:** `EXT-003` (the browser OAuth grant that authorises the
   read/write calls)
-- **Used By:** `JS-009`, `JS-018`, `JS-004`, `JS-021`, `JS-022`,
-  `JS-003`, `GS-002`, `GS-004`, `GS-008`, `GS-011`, and every other
-  `GS-XXX` transitively; `SHEET-001`..`SHEET-014`
+- **Used By:** `DASH-001`, `TAB-007`, `TAB-008`, `JS-003`, `JS-004`,
+  `JS-009`, `JS-018`, `JS-021`, `JS-022`, `GS-002`, `GS-004`, `GS-008`,
+  `GS-011`, `SHEET-001`, `SHEET-002`, `SHEET-003`, `SHEET-004`,
+  `SHEET-005`, `SHEET-006`, `SHEET-007`, `SHEET-008`, `SHEET-009`,
+  `SHEET-010`, `SHEET-011`, `SHEET-012`, `SHEET-013`, `SHEET-014`,
+  `DATA-001`, `DATA-004`
 - **Related:** `EXT-002` (Gmail — the other Google API this project
   calls)
 

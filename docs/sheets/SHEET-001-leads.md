@@ -154,10 +154,13 @@ EXC-004/005). A malformed row is parsed best-effort and kept.
 
 ## Relationships
 
-- **Depends On:** `EXT-001` (Sheets API) for access; the external CRM
+- **Depends On:** `EXT-001` (Sheets API) — for access; the external CRM
   export for content
-- **Used By:** `SHEET-002`, `JS-003`, `JS-009`, `GS-004`, `GS-008`,
-  `GS-010`, `GS-001`, `GS-003`, and transitively every `TAB-XXX`
+- **Used By:** `DASH-001`, `JS-003`, `JS-006`, `JS-009`, `GS-001`,
+  `GS-003`, `GS-004`, `GS-006`, `GS-008`, `GS-010`, `GS-013`,
+  `SHEET-002`, `SHEET-003`, `SHEET-004`, `SHEET-009`, `SHEET-010`,
+  `DATA-001`, `DATA-002`, `DATA-003`, `DATA-004` — transitively every
+  `TAB-XXX`
 - **Related:** every `SHEET-XXX` — they are all derived from or about
   this tab
 

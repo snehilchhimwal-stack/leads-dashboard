@@ -128,9 +128,9 @@ MEDIUM #2; `CLAUDE.md` (duplication gotcha).
 - **Depends On:** `GS-002` (`Core.gs`), `GS-005` (`FollowupEngine.gs` —
   `latestCommentTimestamp_`, `countTodayCommentEntries_`) — the only two
   dependencies
-- **Used By:** `GS-008` (`MovementTracker.gs`), `GS-010`
-  (`OvernightEmailer.gs`), `GS-001` (`AllIssuesEmailer.gs`), `GS-003`
-  (`DailyRmIssueLog.gs`)
+- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-003`
+  (`DailyRmIssueLog.gs`), `GS-008` (`MovementTracker.gs`), `GS-010`
+  (`OvernightEmailer.gs`), `DATA-002`, `DATA-004`
 - **Related:** `JS-006` (`core-lead-model.js` — `enrichLead`, the client
   twin), `JS-005` (`CONFIG` — the client threshold twins)
 

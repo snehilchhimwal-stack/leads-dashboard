@@ -120,13 +120,14 @@ Part 1 §4c, Part 3 §3.8/§3.9, Part 7 §18 MEDIUM #3.
 
 ## Relationships
 
-- **Depends On:** `JS-014` (`buildRegionReports` etc.), `JS-018`
-  (`tryClaimGenerateCycle` / `clearLeadFollowupsTab` /
-  `pushLeadsToFollowups` / `waitForAllFollowups`), `JS-015` (`initGmailUI`),
-  `JS-020` (`renderMorningBrief` at checkpoints), `SHEET-004`
-- **Used By:** `TAB-003`; `JS-021` (Overnight cycle reuses the same
-  `JS-018` writeback functions, not this module directly); `JS-015`
-  (`recipientsForReport`)
+- **Depends On:** `JS-014` (`buildRegionReports` etc.), `JS-015`
+  (`initGmailUI`), `JS-018` (`tryClaimGenerateCycle` /
+  `clearLeadFollowupsTab` / `pushLeadsToFollowups` /
+  `waitForAllFollowups`), `JS-020` (`renderMorningBrief` at
+  checkpoints), `SHEET-004`
+- **Used By:** `TAB-003`, `TAB-007`, `JS-015` (`recipientsForReport`),
+  `JS-018`, `JS-021` (Overnight cycle reuses the same `JS-018` writeback
+  functions, not this module directly), `EXT-002`, `DATA-003`
 - **Related:** `GS-010` (`OvernightEmailer.gs` — the unattended
   counterpart of the review cycle)
 

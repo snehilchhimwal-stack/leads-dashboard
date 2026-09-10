@@ -102,9 +102,10 @@ Part 1 §4c).
 
 - **Depends On:** `JS-008` (`computeRmPerformance`,
   `filterRmPerformanceWorst`, `repeatOffendersRegionKey`,
-  `rmPerfIsLeadershipExcluded`), `JS-022` (`rmHierarchyByNameLower`,
-  `primaryManagerForRm`, `_repeatOffendersRegionKey`,
-  `rmHierarchyFetchState`), `JS-021` (`movementSnapshots`), `EXT-004`
+  `rmPerfIsLeadershipExcluded`), `JS-021` (`movementSnapshots`),
+  `JS-022` (`rmHierarchyByNameLower`, `primaryManagerForRm`,
+  `_repeatOffendersRegionKey`, `rmHierarchyFetchState`), `SHEET-002`,
+  `SHEET-006`, `EXT-004`
 - **Used By:** `TAB-004`
 - **Related:** `JS-017` (worker — the live tab's compute path; the PDF
   computes synchronously)

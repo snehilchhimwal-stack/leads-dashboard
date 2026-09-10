@@ -106,8 +106,8 @@ audit), Part 7 §18 LOW #2.
 
 ## Relationships
 
-- **Depends On:** `JS-012`, `JS-004` (filter/render trigger), `JS-006`
-  (`enrichLead` output), `JS-009` (state)
+- **Depends On:** `JS-004` (filter/render trigger), `JS-006`
+  (`enrichLead` output), `JS-009` (state), `JS-012`, `DATA-002`
 - **Used By:** `DASH-001`
 - **Related:** `TAB-003`, `TAB-005` (same module + `renderAll()` pass),
   `TAB-008` (cohort-correct counterparts to some Overview rates)

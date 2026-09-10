@@ -150,13 +150,15 @@ trigger.
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-012` (`SlaEngine.gs`),
-  `GS-004` (`EmailInfra.gs`), `GS-013` (`UnmatchedCommentLogger.gs`,
-  piggyback), `GS-006` (`InteractionHistoryLogger.gs`, piggyback),
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`),
+  `GS-006` (`InteractionHistoryLogger.gs`, piggyback), `GS-012`
+  (`SlaEngine.gs`), `GS-013` (`UnmatchedCommentLogger.gs`, piggyback),
   `SHEET-001`, `SHEET-002`, `SHEET-005`, `SHEET-008`, `SHEET-009`,
   `SHEET-010`
-- **Used By:** `GS-001`, `GS-010`, `GS-003` (all read `Movement_Log` /
-  reuse `buildMovementLogMapsGs_`), `GS-009` (`checkMovementLogFreshness_`)
+- **Used By:** `GS-001`, `GS-003` (all read `Movement_Log` / reuse
+  `buildMovementLogMapsGs_`), `GS-009` (`checkMovementLogFreshness_`),
+  `GS-010`, `SHEET-002`, `SHEET-005`, `SHEET-008`, `SHEET-009`,
+  `SHEET-010`, `DATA-002`, `DATA-004`
 - **Related:** `JS-018` / `JS-021` / `JS-024` (the client twins of its
   Movement_Log / SLA_History / cohort writes)
 

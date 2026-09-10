@@ -108,11 +108,12 @@ Part 3 §3.9, Part 6 findings; `CLAUDE.md`.
 
 ## Relationships
 
-- **Depends On:** `EXT-003` (shares the one Client ID; the Gmail grant
-  is a second scope on it), `JS-014` (report content), `JS-016` /
-  `GS-004` (recipients)
-- **Used By:** `JS-015`, `JS-018`, `GS-010`, `GS-001`, `GS-004`,
-  `TAB-003`, `TAB-007`, `SHEET-011`, `SHEET-013`, `SHEET-014`
+- **Depends On:** `JS-014` (report content), `JS-016`, `GS-004`
+  (recipients), `EXT-003` (shares the one Client ID; the Gmail grant is
+  a second scope on it)
+- **Used By:** `TAB-003`, `TAB-007`, `JS-015`, `JS-018`, `JS-021`,
+  `GS-001`, `GS-004`, `GS-009`, `GS-010`, `SHEET-011`, `SHEET-013`,
+  `SHEET-014`, `DATA-005`
 - **Related:** `EXT-001` (Sheets — the other Google API)
 
 ## Source of truth

@@ -118,10 +118,11 @@ in `LOGIC_AUDIT.md` Part 1 §1. Every other `GS-XXX` depends on it.
 
 ## Relationships
 
-- **Depends On:** `GS-004` (`HEADER_ALIASES_` for `buildColIndex_`) —
-  the only dependency
-- **Used By:** `GS-001`, `GS-003`, `GS-005`, `GS-006`, `GS-008`,
-  `GS-010`, `GS-011`, `GS-012`, `GS-013` — every other production `.gs`
+- **Depends On:** `GS-004` (`HEADER_ALIASES_` for `buildColIndex_`),
+  `EXT-001` — the only dependency
+- **Used By:** `GS-001`, `GS-003`, `GS-004`, `GS-005`, `GS-006`,
+  `GS-008`, `GS-010`, `GS-011`, `GS-012`, `GS-013`, `DATA-002`,
+  `DATA-003`, `DATA-004` — every other production `.gs`
 - **Related:** `JS-005` (`core-foundation.js`) + `JS-006`
   (`core-lead-model.js`) — the client twins of this file's config and
   classifiers

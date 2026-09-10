@@ -147,12 +147,13 @@ Part 1 §1.
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-012` (`SlaEngine.gs`),
-  `GS-005` (`FollowupEngine.gs`), `GS-004` (`EmailInfra.gs`), `GS-008`
-  (`MovementTracker.gs` maps), `GS-011` (`RmHierarchy.gs` — routing +
-  `setupRmHierarchy()` side-call), `SHEET-001`, `SHEET-004`, `SHEET-006`,
-  `SHEET-007`, `SHEET-012`, `EXT-002` (incl. Advanced Gmail Service)
-- **Used By:** `none` — leaf, scheduled
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`),
+  `GS-005` (`FollowupEngine.gs`), `GS-008` (`MovementTracker.gs` maps),
+  `GS-011` (`RmHierarchy.gs` — routing + `setupRmHierarchy()`
+  side-call), `GS-012` (`SlaEngine.gs`), `SHEET-001`, `SHEET-002`,
+  `SHEET-004`, `SHEET-006`, `SHEET-007`, `SHEET-012`, `SHEET-014`,
+  `EXT-002` (incl. Advanced Gmail Service), `DATA-002`
+- **Used By:** `SHEET-004`, `SHEET-014`, `DATA-003`
 - **Related:** `TAB-007` / `JS-016` / `JS-018` (the on-demand
   equivalent, shared `Lead_Followups` bridge), `GS-001`
   (`AllIssuesEmailer.gs` — the other scheduled emailer), `JS-014` (the

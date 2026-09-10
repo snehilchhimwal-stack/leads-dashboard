@@ -117,12 +117,14 @@ collation, refresh-after-mutation wiring).
 
 ## Relationships
 
-- **Depends On:** `JS-001`, `JS-009`, `JS-006`, `JS-014` (region
-  helpers), `JS-012` (`renderAll`), `JS-004` (`applyFiltersAndRender`),
-  `JS-021` (`fetchMovementLog`), `JS-022` (`fetchRmHierarchyForRollup`),
-  `SHEET-001`, `EXT-001`
-- **Used By:** `JS-001`, `DASH-001`, and transitively every tab (all
-  read `allParsedLeads` / `leads` / `issueLeads` it produces)
+- **Depends On:** `JS-001`, `JS-004` (`applyFiltersAndRender`),
+  `JS-006`, `JS-007`, `JS-009`, `JS-010`, `JS-012` (`renderAll`),
+  `JS-014` (region helpers), `JS-021` (`fetchMovementLog`), `JS-022`
+  (`fetchRmHierarchyForRollup`), `SHEET-001`, `EXT-001`
+- **Used By:** `DASH-001`, `TAB-004`, `TAB-007`, `JS-001`, `JS-002`,
+  `JS-018`, `JS-021`, `JS-022`, `JS-023`, `DATA-001` — transitively
+  every tab (all read `allParsedLeads` / `leads` / `issueLeads` it
+  produces)
 - **Related:** `JS-002` (display side of the merge), `JS-018` (write
   paths re-invoke `fetchAndRender` / dependent renders after a write)
 

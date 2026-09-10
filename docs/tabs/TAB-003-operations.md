@@ -133,8 +133,9 @@ Generate blocked by the mutex (`JS-018`).
 
 ## Relationships
 
-- **Depends On:** `JS-012`, `JS-014`, `JS-015`, `JS-016`, `JS-018`,
-  `JS-006` (SLA logic), `EXT-002` (Gmail), `SHEET-004`, `SHEET-011`
+- **Depends On:** `JS-006` (SLA logic), `JS-012`, `JS-014`, `JS-015`,
+  `JS-016`, `JS-018`, `SHEET-004`, `SHEET-011`, `EXT-002` (Gmail),
+  `DATA-003`, `DATA-005`
 - **Used By:** `DASH-001`
 - **Related:** `TAB-007` (its Overnight Generate cycle shares the
   `Lead_Followups` mutex), `TAB-001` (re-called at checkpoints),

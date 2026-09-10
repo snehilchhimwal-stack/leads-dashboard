@@ -143,9 +143,9 @@ A backfill for a date past the raw window that isn't archived → skipped,
 
 ## Relationships
 
-- **Depends On:** `SHEET-002` (`Movement_Log`), `GS-008`, `JS-018`,
-  `EXT-001`
-- **Used By:** `JS-024`, `JS-018`, `TAB-008`
+- **Depends On:** `JS-018`, `GS-008`, `SHEET-002` (`Movement_Log`),
+  `EXT-001`, `DATA-004`
+- **Used By:** `TAB-008`, `JS-018`, `JS-024`, `GS-008`
 - **Related:** `SHEET-005` (`SLA_History` — the sibling long-lived
   archive)
 

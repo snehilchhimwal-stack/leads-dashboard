@@ -117,9 +117,10 @@ the KPI strip (`TAB-002`), People score tables (`TAB-005`), the reports
 - **Depends On:** `JS-005` (`CONFIG`, IST helpers), `JS-007`
   (`combinedCommentsText` / `parseActionLog`, forward ref), `JS-021`
   (`Movement_Log`-seeded baselines), `SHEET-001`, `SHEET-002`
-- **Used By:** `JS-004`, `JS-003`, `JS-008`, `JS-012`, `JS-014`,
-  `JS-019`, `JS-021`, `JS-023`, `JS-024`, `JS-018` — nearly every
-  feature module
+- **Used By:** `TAB-002`, `TAB-003`, `TAB-006`, `JS-003`, `JS-004`,
+  `JS-007`, `JS-008`, `JS-009`, `JS-012`, `JS-014`, `JS-017`, `JS-018`,
+  `JS-019`, `JS-021`, `JS-023`, `JS-024`, `DATA-001`, `DATA-002`,
+  `DATA-003` — nearly every feature module
 - **Related:** `GS-012` (`SlaEngine.gs`), `GS-002` (`Core.gs`) — the
   backend twins
 

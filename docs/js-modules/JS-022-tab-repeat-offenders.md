@@ -120,15 +120,16 @@ Belongs to `TAB-004`.
 
 ## Relationships
 
-- **Depends On:** `JS-009` (`sheetsApiValuesGet`), `JS-017` (the
-  Worker), `JS-008` (`computeRmPerformance*`, the shared region-key /
-  hierarchy helpers), `JS-021` (`movementSnapshots`), `JS-014`
-  (`mainRegionFor`), `JS-010` (`esc`), `JS-003` (render gate),
-  `SHEET-006`, `SHEET-002`, `EXT-001`
-- **Used By:** `TAB-004`; `JS-013` (reuses `rmHierarchyByNameLower`,
-  `primaryManagerForRm`, `_repeatOffendersRegionKey` by reference);
-  `JS-003` (`fetchRmHierarchyForRollup` in the `Promise.all` gate);
-  `JS-012` (`renderAll` calls `renderRepeatOffenders`)
+- **Depends On:** `JS-003` (render gate), `JS-008`
+  (`computeRmPerformance*`, the shared region-key / hierarchy helpers),
+  `JS-009` (`sheetsApiValuesGet`), `JS-010` (`esc`), `JS-014`
+  (`mainRegionFor`), `JS-017` (the Worker), `JS-021`
+  (`movementSnapshots`), `SHEET-002`, `SHEET-003`, `SHEET-006`,
+  `EXT-001`, `EXT-003`
+- **Used By:** `TAB-004`, `JS-003` (`fetchRmHierarchyForRollup` in the
+  `Promise.all` gate), `JS-008`, `JS-012` (`renderAll` calls
+  `renderRepeatOffenders`), `JS-013` (reuses `rmHierarchyByNameLower`,
+  `primaryManagerForRm`, `_repeatOffendersRegionKey` by reference)
 - **Related:** `GS-011` (`RmHierarchy.gs` — the separate Apps Script
   hierarchy read), `GS-003` (the `.gs` scoring mirror)
 

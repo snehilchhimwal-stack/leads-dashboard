@@ -133,9 +133,9 @@ partial deletion, surfaced in the admin status line (`JS-004` EXC-008).
 
 ## Relationships
 
-- **Depends On:** `SHEET-002` (`Movement_Log`), `GS-008`, `JS-018`,
-  `EXT-001`
-- **Used By:** `JS-024`, `JS-018`, `JS-004`, `TAB-008`
+- **Depends On:** `JS-018`, `GS-008`, `SHEET-002` (`Movement_Log`),
+  `EXT-001`, `DATA-002`, `DATA-004`
+- **Used By:** `TAB-008`, `JS-004`, `JS-018`, `JS-024`, `GS-008`
 - **Related:** `SHEET-008` (`Daily_Cohort_History` — the sibling
   long-lived archive)
 

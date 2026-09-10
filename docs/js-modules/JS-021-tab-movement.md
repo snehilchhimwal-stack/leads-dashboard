@@ -130,17 +130,19 @@ Belongs to `TAB-007`; its state serves `TAB-004`/`005`/`008`.
 
 ## Relationships
 
-- **Depends On:** `JS-009` (`sheetsApiValuesGet`), `JS-006`
-  (`enrichLead`), `JS-014` (`effectiveRegion`, `mainRegionFor`,
-  `buildRegionReports`), `JS-018` (Overnight write cycle), `JS-007`
-  (`inferOutcome` for unmatched comments), `JS-012` (`csvEscape`,
-  `renderBreakdownCard`), `JS-020` (`renderMorningBrief`), `JS-003`
-  (`allParsedLeads`), `SHEET-002`, `SHEET-004`, `SHEET-011`, `EXT-001`,
-  `EXT-002`
-- **Used By:** `TAB-007`; `TAB-004` / `TAB-005` / `TAB-008` (read
-  `movementSnapshots` / `buildMovementHistories` / `passesMovementFilters`);
-  `JS-008`, `JS-013`, `JS-023`, `JS-024`; `JS-003` (`fetchMovementLog`);
-  `JS-011` (`initMovementUI`); `JS-006` (baseline Maps via FN-148)
+- **Depends On:** `JS-002`, `JS-003` (`allParsedLeads`), `JS-005`,
+  `JS-006` (`enrichLead`), `JS-007` (`inferOutcome` for unmatched
+  comments), `JS-009` (`sheetsApiValuesGet`), `JS-012` (`csvEscape`,
+  `renderBreakdownCard`), `JS-014` (`effectiveRegion`, `mainRegionFor`,
+  `buildRegionReports`), `JS-018` (Overnight write cycle), `JS-020`
+  (`renderMorningBrief`), `SHEET-002`, `SHEET-004`, `SHEET-011`,
+  `EXT-001`, `EXT-002`, `EXT-003`
+- **Used By:** `TAB-004`, `TAB-005`, `TAB-007`, `TAB-008` (read
+  `movementSnapshots` / `buildMovementHistories` /
+  `passesMovementFilters`), `JS-003` (`fetchMovementLog`), `JS-006`
+  (baseline Maps via FN-148), `JS-008`, `JS-011` (`initMovementUI`),
+  `JS-012`, `JS-013`, `JS-014`, `JS-017`, `JS-018`, `JS-022`, `JS-023`,
+  `JS-024`, `DATA-004`
 - **Related:** `GS-008` (`MovementTracker.gs` — writes the `Movement_Log`
   it reads), `GS-010` (`OvernightEmailer.gs` — the unattended Overnight
   equivalent)

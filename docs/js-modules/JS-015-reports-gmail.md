@@ -112,11 +112,11 @@ Gmail" buttons in generated report HTML.
 
 ## Relationships
 
-- **Depends On:** `EXT-002` (Gmail send), `JS-014` / `JS-016` (report
-  objects, `recipientsForReport`), `JS-018` (`logEmailSend`), `JS-001`
-  (shared Client ID via `getGmailClientId`), `SHEET-011`
+- **Depends On:** `JS-001` (shared Client ID via `getGmailClientId`),
+  `JS-014`, `JS-016` (report objects, `recipientsForReport`), `JS-018`
+  (`logEmailSend`), `SHEET-011`, `EXT-002` (Gmail send)
 - **Used By:** `TAB-003`, `TAB-007` (onclick handlers in generated
-  report HTML), `JS-016` (`initGmailUI`)
+  report HTML), `JS-001`, `JS-016` (`initGmailUI`), `SHEET-011`
 - **Related:** `GS-010` / `GS-001` (the unattended send path — parallel,
   not shared), `EXT-003` (the other, separate OAuth grant)
 

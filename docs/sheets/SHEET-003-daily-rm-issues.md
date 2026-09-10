@@ -135,9 +135,9 @@ A capture failure shows as Failed in Executions. The
 
 ## Relationships
 
-- **Depends On:** `SHEET-001` (`leads`), `SHEET-002` (`Movement_Log`,
-  for backfill), `GS-003`, `EXT-001`
-- **Used By:** `JS-022`, `TAB-004`
+- **Depends On:** `GS-003`, `SHEET-001` (`leads`), `SHEET-002`
+  (`Movement_Log`, for backfill), `EXT-001`, `DATA-002`
+- **Used By:** `TAB-004`, `JS-022`, `GS-003`
 - **Related:** `SHEET-002` (`Movement_Log` — the raw source it distils)
 
 ## Source of truth

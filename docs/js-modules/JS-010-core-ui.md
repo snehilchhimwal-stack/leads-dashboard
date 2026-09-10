@@ -112,10 +112,11 @@ row 1 (`_logLeadRegistry` — does not reproduce).
 
 ## Relationships
 
-- **Depends On:** `JS-002` (`leadIdentityLine`), `JS-007` (`istStamp`,
-  `parseActionLog`), `JS-005` (`MAX_CARDS` forward ref is here, not
-  `core-foundation`)
-- **Used By:** `JS-004`, `JS-003`, `JS-011`, and virtually every
+- **Depends On:** `JS-002` (`leadIdentityLine`), `JS-005` (`MAX_CARDS`
+  forward ref is here, not `core-foundation`), `JS-007` (`istStamp`,
+  `parseActionLog`)
+- **Used By:** `JS-002`, `JS-003`, `JS-004`, `JS-011`, `JS-012`,
+  `JS-014`, `JS-019`, `JS-020`, `JS-022`, `JS-024` — virtually every
   tab/report file (`esc`, overlay, `renderAlertCard`)
 - **Related:** `JS-012` (`renderAll()` clears `_logLeadRegistry`)
 

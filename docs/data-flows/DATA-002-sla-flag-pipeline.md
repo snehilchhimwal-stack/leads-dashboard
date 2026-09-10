@@ -106,12 +106,12 @@ Part 1 §1 layers 6, 7, 17.
 
 ## Relationships
 
-- **Depends On:** `DATA-001`, `SHEET-001`, `SHEET-002`, `JS-006`,
-  `JS-005`, `JS-008`, `JS-012`, `GS-012`, `GS-002`, `GS-003`, `GS-008`,
-  `GS-004`
-- **Used By:** `TAB-002`, `TAB-003`, `TAB-004`, `TAB-008`; `SHEET-003`,
-  `SHEET-005`; `DATA-005` (the region email consumes the same flags);
-  `GS-001`, `GS-010`
+- **Depends On:** `JS-005`, `JS-006`, `JS-008`, `JS-012`, `GS-002`,
+  `GS-003`, `GS-004`, `GS-008`, `GS-012`, `SHEET-001`, `SHEET-002`,
+  `DATA-001`, `DATA-004`
+- **Used By:** `TAB-002`, `TAB-003`, `TAB-004`, `TAB-008`, `GS-001`,
+  `GS-010`, `SHEET-003`, `SHEET-005`, `DATA-005` (the region email
+  consumes the same flags)
 - **Related:** `DATA-004` (supplies the baselines + history this flow
   aggregates)
 

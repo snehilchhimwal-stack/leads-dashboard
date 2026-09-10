@@ -101,14 +101,27 @@ These are `HANDOVER.md` edits, not catalog gaps — every catalog record's
 **Not tasked** (it's the eventual `CONSOLIDATED` hand-off of the
 living-architecture role from `HANDOVER.md` §1–§3 to `docs/`).
 
-## E. Cross-reference reciprocity — `INDEX.md` done; prose sections open
+## E. Cross-reference reciprocity — `INDEX.md` done; record files done (additive); 57 record-only edges → DECISION NEEDED
 
 `DOC-040` normalised the **`docs/INDEX.md` master table** to **0
-one-directional pairs** (`reference-verification.md`). The **69 record
-files' `## Relationships` prose sections** are dangling-clean but not
-byte-level reciprocal with each other — **tasked as
-`t-tf-47c37923c3bd`** (Low; `INDEX.md` is the authoritative surface and
-is clean, so this is consistency polish).
+one-directional pairs** (`reference-verification.md`).
+**`t-tf-47c37923c3bd` (2026-09-10, done)** then pushed that into the
+record files: an additive pass added every `INDEX.md` back-link the 53
+lagging record files were missing (**+57 `Depends On`, +171 `Used By`**),
+incl. the `DATA-` back-links and the enumerated `EXT-001`/`EXT-003`
+`Used By`. Every record's `## Relationships` is now a **superset of its
+`INDEX.md` row** — the authoritative edge set is reciprocal everywhere.
+
+**Still open (decision for Snehil, not a bug):** **57 record-only edges**
+— a record asserts an edge `INDEX.md` does not. All are transitive-consumer
+over-listing on the `DATA-*` / `DASH-001` records, plus 11 spurious /
+wrong-direction ones. Kept for now (additive pass never deletes). Full
+table + recommendation in
+**`reciprocity-normalisation-notes.md`**. Two resolutions: (A) prune the
+records to `INDEX.md`'s "immediate next-hop" model (`recip_apply4.py` is
+ready — **recommended**), or (B) re-run a `DOC-040`-style union regen so
+`INDEX.md` absorbs the fuller transitive set. The 11 spurious ones (§3c of
+the notes) should be pruned either way.
 
 ## F. Known code findings the catalog records but does not fix
 

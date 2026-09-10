@@ -106,16 +106,18 @@ Part 5 §5.1 (KPI audit), Part 6 §6.1 rows 1/4.
 
 ## Relationships
 
-- **Depends On:** `JS-004` (`renderAll` is called from there), `JS-006`
-  (`enrichLead` output), `JS-005` (IST helpers, `groupLeadsByCalendarDay`),
-  `JS-010` (`esc`, `renderAlertCard`, `logToggleMarkup`), `JS-002`
-  (`leadIdentityLine`), `JS-021` (`computeStalledLeads`,
-  `downloadUnmatchedCommentsCSV`), `JS-014` (`effectiveRegion`,
-  `mainRegionFor`)
-- **Used By:** `TAB-002`, `TAB-003`, `TAB-005`; `JS-003` / `JS-004`
-  (call `renderAll`); `JS-020` (borrows `computeRMScoreRows` /
-  `computeDailyLeadCounts` / `topBreakdown`); every tab file (borrows
-  `colorForIssue` / `renderBreakdownCard` / `csvEscape`)
+- **Depends On:** `JS-002` (`leadIdentityLine`), `JS-004` (`renderAll`
+  is called from there), `JS-005` (IST helpers,
+  `groupLeadsByCalendarDay`), `JS-006` (`enrichLead` output), `JS-007`,
+  `JS-010` (`esc`, `renderAlertCard`, `logToggleMarkup`), `JS-014`
+  (`effectiveRegion`, `mainRegionFor`), `JS-019`, `JS-020`, `JS-021`
+  (`computeStalledLeads`, `downloadUnmatchedCommentsCSV`), `JS-022`,
+  `JS-023`, `JS-024`
+- **Used By:** `TAB-001`, `TAB-002`, `TAB-003`, `TAB-005`, `JS-003`,
+  `JS-004` (call `renderAll`), `JS-019`, `JS-020` (borrows
+  `computeRMScoreRows` / `computeDailyLeadCounts` / `topBreakdown`),
+  `JS-021`, `DATA-002` — every tab file (borrows `colorForIssue` /
+  `renderBreakdownCard` / `csvEscape`)
 - **Related:** `JS-019`, `JS-023`, `JS-024`, `JS-020` (all called from
   `renderAll`)
 

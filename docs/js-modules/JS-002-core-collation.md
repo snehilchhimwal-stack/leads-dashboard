@@ -91,10 +91,11 @@ nearly every tab's card/table rows (`TAB-002`..`TAB-008`).
 
 ## Relationships
 
-- **Depends On:** `JS-010` (`esc`, forward ref), `JS-003` (produces the
-  merged lead objects it formats)
-- **Used By:** `JS-010` (`renderAlertCard`), `JS-012`, `JS-014`,
-  `JS-019`, `JS-021`, `JS-024`, most tab renderers
+- **Depends On:** `JS-003` (produces the merged lead objects it
+  formats), `JS-010` (`esc`, forward ref)
+- **Used By:** `JS-004`, `JS-010` (`renderAlertCard`), `JS-012`,
+  `JS-014`, `JS-019`, `JS-021`, `JS-024`, `DATA-001` — most tab
+  renderers
 - **Related:** `JS-006` (`enrichLead` runs on the same merged objects)
 
 ## Source of truth

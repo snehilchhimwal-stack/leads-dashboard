@@ -117,14 +117,15 @@ Part 7 §18 HIGH.
 
 ## Relationships
 
-- **Depends On:** `JS-005` (`CONFIG`, `IST_MONTHS`), `JS-006`
-  (`enrichLead` output), `JS-007` (`suggestedFollowUp`), `JS-002`
-  (`dedupeToFamilies`), `JS-010` (`esc`), `JS-021`
-  (`currentStalledRowsByRegion`), `JS-004` (state)
-- **Used By:** `JS-016` (`renderReports` / mailto), `JS-015`
-  (`window._regionReports`), `JS-021` (Overnight cycle), `TAB-003`,
-  `TAB-007`; `mainRegionFor` / `effectiveRegion` also used by `JS-008`,
-  `JS-024`, `JS-023`
+- **Depends On:** `JS-002` (`dedupeToFamilies`), `JS-004` (state),
+  `JS-005` (`CONFIG`, `IST_MONTHS`), `JS-006` (`enrichLead` output),
+  `JS-007` (`suggestedFollowUp`), `JS-010` (`esc`), `JS-021`
+  (`currentStalledRowsByRegion`)
+- **Used By:** `TAB-003`, `TAB-004`, `TAB-005`, `TAB-007`, `TAB-008`,
+  `JS-003`, `JS-004`, `JS-008`, `JS-012`, `JS-015`
+  (`window._regionReports`), `JS-016` (`renderReports` / mailto),
+  `JS-017`, `JS-021` (Overnight cycle), `JS-022`, `JS-023`, `JS-024`,
+  `EXT-002`, `DATA-005`
 - **Related:** `GS-004` (`REGION_GROUP_MAP_` twin), `GS-010` / `GS-001`
   (the unattended report builders)
 

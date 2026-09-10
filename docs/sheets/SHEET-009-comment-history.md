@@ -131,9 +131,9 @@ three-registration rule for a new `.gs` file).
 
 ## Relationships
 
-- **Depends On:** `SHEET-001` (`leads`), `GS-006`, `GS-008` (the
-  piggyback host), `EXT-001`
-- **Used By:** `GS-006` only (writer)
+- **Depends On:** `GS-006`, `GS-008` (the piggyback host), `SHEET-001`
+  (`leads`), `EXT-001`, `DATA-003`
+- **Used By:** `GS-006`, `GS-008` — only (writer)
 - **Related:** `SHEET-010` (`Unmatched_Comments_Log` — the sibling
   piggyback logger's output)
 

@@ -134,9 +134,9 @@ from the coercion bug → `dedupeUnmatchedCommentsNow()` (EXC-089).
 
 ## Relationships
 
-- **Depends On:** `SHEET-001` (`leads`), `GS-013`, `GS-008` (piggyback
-  host), `GS-005` (`latestOutcomeGs_`), `EXT-001`
-- **Used By:** `GS-013` only (writer); a human (reviewer)
+- **Depends On:** `GS-005` (`latestOutcomeGs_`), `GS-008` (piggyback
+  host), `GS-013`, `SHEET-001` (`leads`), `EXT-001`, `DATA-003`
+- **Used By:** `GS-008`, `GS-013` — only (writer); a human (reviewer)
 - **Related:** `SHEET-009` (`Comment_History` — the sibling piggyback
   logger); `GS-005` / `JS-007` (the classifier this loop improves)
 

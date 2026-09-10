@@ -132,15 +132,16 @@ Mermaid), Part 3 §3.8, Part 4 §4.7, Part 6 §6.1 rows 2/5, §6.5, Part 7
 
 ## Relationships
 
-- **Depends On:** `JS-001` (`gateAccessToken`), `JS-009`
-  (`sheetsApiValuesGet`), `JS-006` (`enrichLead`), `JS-021`
-  (`_currentSheetId`, `movementSnapshots`), `JS-003` (`allParsedLeads`),
-  `EXT-001`, `SHEET-002`, `SHEET-004`, `SHEET-005`, `SHEET-008`,
-  `SHEET-011`
-- **Used By:** `TAB-007` (snapshot, Overnight cycle), `TAB-003`
-  (Generate button via `JS-016`), `TAB-008` (4 admin buttons +
-  auto-persist via `JS-024`), `JS-015` (`logEmailSend`), `JS-016`,
-  `JS-021`, `JS-024`, `JS-004`
+- **Depends On:** `JS-001` (`gateAccessToken`), `JS-003`
+  (`allParsedLeads`), `JS-006` (`enrichLead`), `JS-009`
+  (`sheetsApiValuesGet`), `JS-021` (`_currentSheetId`,
+  `movementSnapshots`), `SHEET-002`, `SHEET-004`, `SHEET-005`,
+  `SHEET-008`, `SHEET-011`, `EXT-001`, `EXT-002`, `EXT-003`
+- **Used By:** `TAB-003` (Generate button via `JS-016`), `TAB-007`
+  (snapshot, Overnight cycle), `TAB-008` (4 admin buttons + auto-persist
+  via `JS-024`), `JS-004`, `JS-015` (`logEmailSend`), `JS-016`,
+  `JS-021`, `JS-024`, `SHEET-002`, `SHEET-004`, `SHEET-005`,
+  `SHEET-008`, `SHEET-011`, `DATA-003`, `DATA-004`
 - **Related:** `GS-008` (`MovementTracker.gs` — matching Movement_Log /
   SLA_History writer), `GS-010` (`OvernightEmailer.gs` — shares the
   `Lead_Followups` bridge), `GS-007` (`LeadFollowupsStaleness.gs`)

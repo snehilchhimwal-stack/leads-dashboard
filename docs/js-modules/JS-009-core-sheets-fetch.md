@@ -119,9 +119,11 @@ canonical arrays) in `LOGIC_AUDIT.md` Part 1 §1.
 ## Relationships
 
 - **Depends On:** `JS-001` (`gateAccessToken`), `JS-005`
-  (`istWallToInstant`), `JS-006` (`parseDate`), `EXT-001`, `SHEET-001`
-- **Used By:** `JS-003`, `JS-004`, `JS-021`, `JS-022`, and virtually
-  every tab/report file (reads the state it declares)
+  (`istWallToInstant`), `JS-006` (`parseDate`), `SHEET-001`, `EXT-001`,
+  `EXT-003`
+- **Used By:** `TAB-002`, `TAB-007`, `JS-003`, `JS-004`, `JS-018`,
+  `JS-021`, `JS-022`, `DATA-001` — virtually every tab/report file
+  (reads the state it declares)
 - **Related:** `GS-004` (`EmailInfra.gs` — holds `HEADER_ALIASES_`, the
   backend twin, and `readLeadsTab_`, the backend read)
 

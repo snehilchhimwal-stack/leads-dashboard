@@ -107,11 +107,11 @@ top-level actions, not a `TAB-XXX`.
 
 ## Relationships
 
-- **Depends On:** `EXT-003` (Google Identity / OAuth), `JS-015`
-  (`getGmailClientId` / `setGmailClientId`), `JS-003` (`fetchAndRender`
-  on success)
-- **Used By:** `JS-009`, `JS-003`, `JS-004`, `JS-018`, `JS-011`,
-  `DASH-001`
+- **Depends On:** `JS-003` (`fetchAndRender` on success), `JS-004`,
+  `JS-015` (`getGmailClientId` / `setGmailClientId`), `EXT-003` (Google
+  Identity / OAuth)
+- **Used By:** `DASH-001`, `JS-003`, `JS-004`, `JS-009`, `JS-011`,
+  `JS-015`, `JS-018`
 - **Related:** `JS-015` (the parallel Gmail grant — same Client ID, a
   second `initTokenClient` call, different scope), `EXT-001`
 

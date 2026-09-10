@@ -96,12 +96,13 @@ date-range inputs (`UI-011`), `#auditCopyBtn` (`BTN-012`), `#auditCsvBtn`
 
 ## Relationships
 
-- **Depends On:** `JS-007` (`parseActionLog`, `combinedCommentsText`),
-  `JS-006` (`parseDate`), `JS-004` (`buildMultiSelect`), `JS-005`
-  (`istParts`), `JS-012` (`csvEscape`, called from `renderAll`), `JS-010`
-  (`esc`)
-- **Used By:** `TAB-006`; `JS-012` (`renderAll` calls `renderAudit` /
-  `renderActivityByHour`); `JS-023` (RM Timeline reuses `updateEventsFor`)
+- **Depends On:** `JS-002`, `JS-004` (`buildMultiSelect`), `JS-005`
+  (`istParts`), `JS-006` (`parseDate`), `JS-007` (`parseActionLog`,
+  `combinedCommentsText`), `JS-010` (`esc`), `JS-012` (`csvEscape`,
+  called from `renderAll`)
+- **Used By:** `TAB-005`, `TAB-006`, `JS-012` (`renderAll` calls
+  `renderAudit` / `renderActivityByHour`), `JS-023` (RM Timeline reuses
+  `updateEventsFor`)
 - **Related:** `TAB-005` (RM Timeline — shares the event-list definition)
 
 ## Source of truth

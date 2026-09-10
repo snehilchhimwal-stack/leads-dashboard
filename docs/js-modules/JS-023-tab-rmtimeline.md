@@ -108,13 +108,13 @@ bootstrap call. No buttons.
 
 ## Relationships
 
-- **Depends On:** `JS-019` (`updateEventsFor`), `JS-024`
-  (`buildTrackingChartSvg`), `JS-021` (`movementSnapshots`,
-  `passesMovementFilters`), `JS-014` (`effectiveRegion`), `JS-005` (IST
-  helpers), `JS-003` (`allParsedLeads`), `JS-011` (`initRMTimelineUI`
-  bootstrap)
-- **Used By:** `TAB-005`; `JS-012` (`renderAll` calls
-  `renderRMTimelineTab`); `JS-011` (`initRMTimelineUI`)
+- **Depends On:** `JS-003` (`allParsedLeads`), `JS-005` (IST helpers),
+  `JS-006`, `JS-007`, `JS-011` (`initRMTimelineUI` bootstrap), `JS-014`
+  (`effectiveRegion`), `JS-019` (`updateEventsFor`), `JS-021`
+  (`movementSnapshots`, `passesMovementFilters`), `JS-024`
+  (`buildTrackingChartSvg`), `SHEET-002`
+- **Used By:** `TAB-005`, `JS-011` (`initRMTimelineUI`), `JS-012`
+  (`renderAll` calls `renderRMTimelineTab`)
 - **Related:** `TAB-006` (shares the event-list definition), `TAB-008`
   (shares the chart builder)
 

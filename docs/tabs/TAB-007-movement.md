@@ -138,12 +138,12 @@ Overnight cycle.
 
 ## Relationships
 
-- **Depends On:** `JS-021`, `JS-018` (writes), `JS-014` / `JS-016`
-  (Overnight report content), `JS-003` (`allParsedLeads`), `JS-009`
-  (`sheetsApiValuesGet`), `SHEET-002`, `SHEET-004`, `SHEET-011`,
-  `EXT-001`, `EXT-002`
-- **Used By:** `DASH-001`; `TAB-004`, `TAB-005`, `TAB-008` (all read its
-  `movementSnapshots` state); `JS-013` (PDF)
+- **Depends On:** `JS-003` (`allParsedLeads`), `JS-009`
+  (`sheetsApiValuesGet`), `JS-014`, `JS-015`, `JS-016` (Overnight report
+  content), `JS-018` (writes), `JS-021`, `SHEET-002`, `SHEET-004`,
+  `SHEET-011`, `EXT-001`, `EXT-002`, `DATA-005`
+- **Used By:** `DASH-001`, `TAB-004`, `TAB-005`, `TAB-008` (all read its
+  `movementSnapshots` state), `JS-013` (PDF)
 - **Related:** `GS-008` (`MovementTracker.gs` writes the `Movement_Log` it
   reads), `GS-010` (`OvernightEmailer.gs` — the unattended equivalent of
   its Overnight cycle), `TAB-003` (shared `Lead_Followups` mutex)

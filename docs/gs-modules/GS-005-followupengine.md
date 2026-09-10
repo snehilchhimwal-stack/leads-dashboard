@@ -122,10 +122,11 @@ Part 4 §4.1; `CLAUDE.md` (duplication gotcha); `GS-013`
 ## Relationships
 
 - **Depends On:** `GS-002` (`Core.gs`) — the only dependency
-- **Used By:** `GS-012` (`SlaEngine.gs` — `latestCommentTimestamp_`,
-  `countTodayCommentEntries_`), `GS-010` (`OvernightEmailer.gs`),
-  `GS-001` (`AllIssuesEmailer.gs`), `GS-013`
-  (`UnmatchedCommentLogger.gs`), `GS-006` (`InteractionHistoryLogger.gs`)
+- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-006`
+  (`InteractionHistoryLogger.gs`), `GS-010` (`OvernightEmailer.gs`),
+  `GS-012` (`SlaEngine.gs` — `latestCommentTimestamp_`,
+  `countTodayCommentEntries_`), `GS-013` (`UnmatchedCommentLogger.gs`),
+  `SHEET-010`, `DATA-003`
 - **Related:** `JS-007` (`core-outcome-engine.js` — the client twin)
 
 ## Source of truth

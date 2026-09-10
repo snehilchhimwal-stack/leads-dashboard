@@ -152,10 +152,10 @@ MEDIUM #3; `CLAUDE.md`.
 
 ## Relationships
 
-- **Depends On:** `SHEET-001` (`leads`), `JS-018`, `GS-010` (the
-  writers), `EXT-001`
-- **Used By:** `JS-016`, `JS-018`, `JS-021`, `GS-010`, `GS-007`,
-  `TAB-003`, `TAB-007`
+- **Depends On:** `JS-018`, `GS-010` (the writers), `SHEET-001`
+  (`leads`), `EXT-001`
+- **Used By:** `TAB-003`, `TAB-007`, `JS-016`, `JS-018`, `JS-021`,
+  `GS-007`, `GS-010`, `DATA-003`, `DATA-005`
 - **Related:** `SHEET-011` (`Send_Log` — records the email that this
   bridge fed)
 

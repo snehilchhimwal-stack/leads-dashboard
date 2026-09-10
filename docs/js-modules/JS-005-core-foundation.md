@@ -109,9 +109,9 @@ None directly. `renderCardsByDay` output appears on `TAB-001` /
 ## Relationships
 
 - **Depends On:** `none` — top of the module tree
-- **Used By:** nearly every other `JS-XXX` (`CONFIG` + IST helpers) —
-  `JS-004`, `JS-006`, `JS-007`, `JS-008`, `JS-012`, `JS-014`, `JS-019`,
-  `JS-021`, `JS-023`, `JS-024`, and more
+- **Used By:** `JS-004`, `JS-006`, `JS-007`, `JS-008`, `JS-009`,
+  `JS-010`, `JS-012`, `JS-014`, `JS-017`, `JS-019`, `JS-020`, `JS-021`,
+  `JS-023`, `JS-024`, `DATA-001`, `DATA-002`
 - **Related:** `GS-002` (`Core.gs` — the ported backend twin of this
   file's config + IST helpers)
 
