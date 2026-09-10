@@ -64,8 +64,10 @@ edited forward.
   doesn't catch.
 - Everything else — keeping a record current when its code changes,
   keeping `Depends On` / `Used By` reciprocal, revalidating a `Stale`
-  record — is **process, done by whoever makes the change** (see
-  `HOW_TO_UPDATE_A_COMPONENT.md`, once `DOC-023` is worked).
+  record — is **process, done by whoever makes the change**:
+  `HOW_TO_REGISTER_A_COMPONENT.md` (add), `HOW_TO_UPDATE_A_COMPONENT.md`
+  (change — incl. the duplicated-pair rule), `HOW_TO_RETIRE_A_COMPONENT.md`
+  (retire, preserving the record).
 
 **A record is only as current as its own `Last Verified` field.** A
 record whose `Record Status` is `Closed + Monitored` but whose
