@@ -92,12 +92,13 @@ without a reciprocal `Used By` on the target and **65** the other way.
   on `EXT-003` (OAuth), but `EXT-001`/`EXT-003`'s `Used By` lists are
   summarised, not enumerated.
 
-**Not fully normalised in this pass** — reconciling all 243 pairs
-across the INDEX + ~90 record files is out of scope for the remaining
-budget. **This map + `docs/INDEX.md` are the authoritative dependency
-view in the meantime**; the follow-up is tasked (see below). No pair
-represents a *wrong* relationship — every one is a *missing back-link*,
-and §1–§4 above capture the ones that matter.
+**`DOC-040` normalised the `INDEX.md` master table** — all 69 rows'
+`Depends On` / `Used By` regenerated from the union of edges, **0
+remaining asymmetries** (`reference-verification.md`). The record-file
+prose `## Relationships` sections are dangling-clean but not byte-level
+reciprocal — that polish is `t-tf-47c37923c3bd`. `docs/INDEX.md` is the
+authoritative, now-reciprocal dependency surface. No pair was ever a
+*wrong* relationship — every one was a *missing back-link*.
 
 ## 6. High-risk items from `LOGIC_AUDIT.md` §6.3 — traceability check (`DOC-035` step 3)
 
