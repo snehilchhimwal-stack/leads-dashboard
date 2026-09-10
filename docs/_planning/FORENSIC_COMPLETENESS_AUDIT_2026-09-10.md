@@ -130,7 +130,7 @@ Each row is one brief requirement. `Covered?` = Yes / Partial / No / Deferred.
 | B30 | Operational procedures | **Yes** | `OPS_CHECKLIST.md` + `OpsChecklistRunner.gs` (`GS-009`); `HANDOVER.md` §8 incidents | — | — |
 | B31 | Ownership | **Partial** | `Owner: Snehil` on every record + the Governance schema default (Confirmed) | Uniform — no real accountability distribution; no owner on `docs/_planning/*` inventories | Acceptable for now; revisit if a team forms |
 | B32 | Change history / version / commit references | **Yes** | Every record `## Version / change reference` names the verifying commit; `git log` is the authoritative history (Source-of-Truth table) | The verifying commit is `c82ec67` (Phase-2 scaffolding) for all 69 — predates the record-writing itself; harmless only while code == `c82ec67` | On first code change, bump `Last Verified` per revalidation |
-| B33 | Bidirectional traceability (Goal↔Requirement↔Task↔Component↔Source↔…↔Handover) | **Partial** | Component↔Source↔Dependency↔Data↔Validation↔Handover all present in-record; INDEX gives Component↔Component both ways | **Goal↔Requirement↔Task↔Component is broken**: `DOC-0xx` tasks have `goalId: null` (not linked to `g-docproject01`); no requirement IDs exist; no record cites "implements requirement X / task DOC-0YY" | §D |
+| B33 | Bidirectional traceability (Goal↔Requirement↔Task↔Component↔Source↔…↔Handover) | **Mostly OK** (P3) | Component↔Source↔Dependency↔Data↔Validation↔Handover all in-record; INDEX gives Component↔Component both ways; **Goal↔Task linked in `tasks.json`**; Task↔Component via `_planning/task-to-component-map.md` | only a `REQ-` layer is absent (deferred — small one-owner project) | §D |
 | B34 | Source-of-truth per information type; no two docs contradict | **Yes (table) / Partial (reality)** | `DOCUMENTATION_PROJECT_PLAN.md` Source-of-Truth Table is clean and complete (Confirmed) | Reality has 3 live contradictions: the plan's own governance section vs reality; `INDEX.md` footer vs reality; `documentation-conflicts.md` C-5/C-6/C-8 still open | Fix the 3 (2 are trivial; C-5 is Phase-5 `HANDOVER.md` §9.7) |
 | B35 | Historical audits preserved, not merged into living catalog | **Yes** | `LOGIC_AUDIT.md` frozen, never edited forward; `DOC-050` added only a top pointer; `INDEX.md` "why not LOGIC_AUDIT.md" section (Confirmed) | — | — |
 | B36 | One authoritative central tracking mechanism | **Partial** | `docs/INDEX.md` is declared authoritative for component state; `tasks.json` for task state | Two mechanisms, correctly separated — but nothing enforces INDEX rows track reality, and `tasks.json` DOC tasks aren't goal-linked | §D + §L |
@@ -184,9 +184,9 @@ Dependency ↔ Data lineage ↔ Architecture ↔ Validation ↔ Change ↔ Hando
 
 | Link | State | Evidence | Missing |
 |---|---|---|---|
-| Goal ↔ Task | **Broken** | `g-docproject01` exists; all 50 `DOC-0xx` tasks have `goalId: null` (Confirmed, `tasks.json`) | tasks are not attached to the goal; the goal's completion note (added this session) is the only tie |
-| Requirement ↔ anything | **Absent** | There are no requirement IDs anywhere. The brief's "requirement" maps loosely to the plan's Goals 1–6 | no `REQ-` concept; no record says "satisfies Goal 3" |
-| Task ↔ Component | **Weak** | `DOC-027` "created" `JS-001..011`; recorded only in each record's `## Version / change reference` prose ("record created by DOC-027") | no structured `produces:`; can't query "which task made `SHEET-009`" without grep |
+| Goal ↔ Task | **OK** (corrected 2026-09-10, P3) | every `DOC-*` / `CI-*` / `TASKFLOW-*` / `CHECKLIST-*` / `LEADFOLLOWUPS-*` task carries its `goal_id` in `tasks.json` (the original "all `goalId: null`" line was a stale read — wrong key/state); the 5 `t-tf-*` catalog follow-ups were linked to `g-docproject01` in P3 |
+| Requirement ↔ anything | **Absent** — accepted | no `REQ-` IDs. The brief's "requirement" maps to the plan's Goals 1–6; a `REQ-` layer is P3-optional and not built (small project, one owner) |
+| Task ↔ Component | **OK** (P3) | each record's `## Version / change reference` names its creating task; **`_planning/task-to-component-map.md`** is the reverse index (`DOC-027` → `JS-001..011`, etc.) |
 | Component ↔ Source | **Strong** | every record `## Source of truth` = file + `#Lnn` | `Last Verified` commit is `c82ec67` for all — will lie the moment code moves |
 | Component ↔ Dependency (both ways) | **Strong** | `INDEX.md` reciprocal; **69/69 records == `INDEX.md` exactly, 0 one-directional pairs** after the `t-tf-47c37923c3bd` prune (`recip_verify.py`) | — |
 | Component ↔ Data lineage | **Strong** | `DATA-001..005` + `JS-018 ## Data Lineage` | — |
@@ -310,7 +310,7 @@ property holds by design but is violated in fact.
 | `docs/changes/` | every record → "change record that closed me" → **nothing** | folder created empty; DoD point 14 never enforced | no change→stale→revalidation trail exists; the loop's audit output is missing | backfill a single `changes/2026-09-10-build.md` for the whole build; require one per future revalidation | the diff→ID step can template it | Snehil |
 | `docs/validation/` | every record `## Validation` → evidence → inline prose, no linkable artifact | folder created empty | "show me the proof `SHEET-002`'s columns are right" → read a paragraph citing a frozen audit | populate for the CI tasks + `DATA-005` HIGH finding + the 2 confirmed-retention SHEETs | link the real CI run URL | Snehil |
 | `docs/architecture/` (`FLOW-`/`TRIGGER-`) | plan names "the 4×/day Movement hub", "the 3-phase Generate cycle" as `FLOW-` examples → **no record** | Phase 3 tail / Phase 6 never wrote them | cross-file workflows have no home; a reader chasing "the Generate cycle" hops 4 records with no anchor | write `FLOW-001` (Movement hub + piggybacks), `FLOW-002` (Generate cycle) | — | Snehil |
-| `DOC-0xx` task → the record(s) it produced | `goalId: null`; "created by DOC-027" only as prose | tasks were opened before the goal; no `produces:` field | can't answer "what did DOC-029 deliver" without grep | add `goalId` + a `produces:` list on the closed tasks (one `update-tasks.ps1` pass) | — | Snehil |
+| ~~`DOC-0xx` task → the record(s) it produced~~ **RESOLVED 2026-09-10 (P3)** | — | — | — | `_planning/task-to-component-map.md` is the forward+reverse index; `goal_id` was already set (audit's "null" was a stale read); the 5 `t-tf-*` follow-ups linked to `g-docproject01` | — | Snehil |
 | `INDEX.md` footer | "Still open: DOC-035 … Phases 5–6" → those are done | `DOC-040` rewrote the table, not the prose footer | a reader believes Phases 5–6 are pending | edit the footer to the real state | a self-consistency check (does the snapshot match the row counts + task states) | Snehil |
 | plan governance section | "all 50 tasks Not Started / docs/ has one .pptx" → reality is 69 `Closed + Monitored` records | section added 2026-09-10 *before* the build session; never revisited | the system's own design doc misrepresents the system | add a dated "Post-build update" subsection, or mark the audit "(pre-build snapshot — see catalog)" | — | Snehil |
 | `HANDOVER.md` §9.7 | "RM Performance redesign — in progress, 2026-09-04" → shipped + iterated | Phase-5 `HANDOVER.md` reconciliation (`handover-coverage-map.md` items 1–3) not done | biggest single stale claim in the living-arch doc | the C-5 fix (Phase 5) | Check 2 only sees whole-file age, not §-level | Snehil |
@@ -365,16 +365,20 @@ property holds by design but is violated in fact.
 
 ## L. P0 / P1 / P2 / P3 action plan
 
-> **Update 2026-09-10 — `t-tf-5ad22d8e4c2e`** (commits `3d2db17`,
-> `cb5afb1`, `acc7cbe`, `519a377`, `78f3816`). **P0 and P1 and P2 done**
-> and green in CI (runs #76–#83). `test/check-catalog.py` (checks A–F) is
-> the built detection half; `FLOW-001/002` + `apps-script-triggers.md` +
-> `docs/changes/` + `docs/validation/` populate the gaps; the frontend
-> harness now runs headless in CI (non-blocking). **Remaining:** the
-> human revalidation half (Change-Control steps 7–10), the CI-writes-the-
-> task side (infeasible — CI can't reach `tasks.json`), and **P3** (the
-> deep `HANDOVER.md` §9 sweep, `goalId`/`produces:` on closed tasks, the
-> 7 retention `TBD`s, `Owner:` distribution).
+> **Update 2026-09-10 — `t-tf-5ad22d8e4c2e`** (commits `3d2db17` …
+> `e4a51ca`). **P0, P1, P2 and P3 done where doable**, green in CI (runs
+> #76–#84). `test/check-catalog.py` (checks A–F) is the built detection
+> half; `FLOW-001/002` + `apps-script-triggers.md` + `docs/changes/` +
+> `docs/validation/` + `task-to-component-map.md` populate the gaps; the
+> frontend harness runs headless in CI (non-blocking); the deep
+> `HANDOVER.md` §9 sweep (C-5/C-6) is done; `HOW_TO_UPDATE` step 8 is the
+> review signal. **Genuinely remaining (not resolvable by this project):**
+> the human revalidation half (Change-Control steps 7–10, by design); CI
+> writing the revalidation task itself (CI can't reach `tasks.json`); the
+> **7 retention `TBD`s** (owner + CRM-owner + compliance call — prune code
+> now ready); `Owner:` distribution (no team); flipping the non-blocking
+> CI steps (needs a few more clean runs); a couple of `HANDOVER.md`
+> §5/§6 convenience-table additions.
 
 **P0 — the loop does not exist without these**
 1. ~~`fetch-depth: 0` + **diff→ID resolver**~~ — **DONE**: `check-catalog.py`
@@ -438,13 +442,30 @@ property holds by design but is violated in fact.
     found in code or `LOGIC_AUDIT.md`; live Sheet not inspected
     cell-by-cell".
 
-**P3 — hardening**
-16. `goalId` + `produces:` on the closed `DOC-`/`CI-`/`TASKFLOW-` tasks;
-    optional `REQ-` IDs for Goals 1–6.
-17. Second-person review signal on record closure.
-18. Resolve the 7 `TBD` retentions (`retention-decisions-needed.md`) — needs
-    a product decision, not code.
-19. `Owner:` distribution — when a team exists.
+**P3 — hardening — DONE where doable 2026-09-10 (`e4a51ca`, `<this commit>`)**
+16. ~~`goalId` + `produces:` / `REQ-`~~ — **DONE**: `goal_id` was already
+    set on all `DOC-*`/`CI-*`/`TASKFLOW-*`/`CHECKLIST-*`/`LEADFOLLOWUPS-*`
+    tasks (audit's "null" = stale read); the 5 `t-tf-*` catalog
+    follow-ups linked to `g-docproject01`;
+    `_planning/task-to-component-map.md` is the forward+reverse index.
+    `REQ-` IDs: **not built** — optional, deferred (one-owner project).
+17. ~~Second-person review signal~~ — **DONE**:
+    `HOW_TO_UPDATE_A_COMPONENT.md` step 8 — record who verified; on a PR
+    request one review + note the reviewer; solo, the green
+    `check-catalog.py` run is the independent signal; no second signal →
+    `Validated`, not `Closed + Monitored`.
+18. **7 `TBD` retentions — OWNER-BLOCKED, not resolvable here.**
+    `retention-decisions-needed.md` is the decision sheet; its P3
+    appendix now carries copy-paste `prune<Tab>_()` code for the "if
+    prune" branch. The decision itself needs Snehil + the CRM-export
+    owner + a compliance lens (the logs hold email addresses).
+19. `Owner:` distribution — **no-action by design** (single-owner
+    project; `OPEN_ITEMS.md` §A).
+
+**P3 — remaining (not blocking anything):** flip the two non-blocking CI
+steps once a few more clean runs + a real revalidation cycle prove the
+habit; `HANDOVER.md` §5 tab-table + §6 pairs-list additions; §4.2/§4.4
+GitHub Pages source confirmation (needs repo-settings access).
 
 ---
 
@@ -593,7 +614,7 @@ reciprocity; snapshot mismatch; a revalidation task open past N days.
 - `.github/workflows/test.yml` → coverage step has `continue-on-error: true`.
 - `docs/changes/`, `docs/validation/`, `docs/architecture/`, `docs/_archive/` → README stub only, 0 records.
 - Sub-record grep across records: `FN-` 254 unique / `EXC-` 208 / `BTN-` 121 mentions / `CFG-` 116 / `RULE-` 87 / `UI-` 28 / `API-` 10; `TRIGGER-`/`RANGE-`/`HTML-`/`CSS-`/`CLASS-` → 0.
-- `tasks.json`: `DOC-001..050` all `Completed`, all `goalId: null`; `g-docproject01` goal carries the completion note added earlier this session.
+- `tasks.json`: `DOC-001..050` all `Completed` and all carry `goal_id: g-docproject01` (the earlier "all `goalId: null`" note in §B/§D was a stale read — corrected 2026-09-10 P3); the 5 `t-tf-*` catalog follow-ups linked to the same goal.
 - `DOCUMENTATION_PROJECT_PLAN.md` L112–L167 "Current-State Audit (2026-09-10)" states all 50 tasks Not Started / docs/ = one `.pptx` — pre-build snapshot, never updated.
 - `docs/INDEX.md` L314–L318 "Still open: DOC-035 … Phases 5–6" — stale.
 - `HANDOVER.md` header: `updated 2026-09-09` (1 day old → CI Check 2 = OK).

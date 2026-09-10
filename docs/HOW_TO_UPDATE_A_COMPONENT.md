@@ -40,7 +40,18 @@ code changes — distinct from adding a brand-new component
 7. **If the change is a real architectural one**, update `HANDOVER.md`'s
    relevant section (§1–§3 especially) **in the same commit** — this is
    `CLAUDE.md`'s own rule and the `INDEX.md` three-document discipline.
-   A `changes/` record is also created (Governance Model DoD point 14).
+   A `changes/<date>-<sha>.md` record is also created (Governance Model
+   DoD point 14) — `test/check-catalog.py` check E prints the target
+   filename and a starter template.
+8. **Record who verified it, and get a second look when you can.** Today
+   the project is single-owner (`Owner: Snehil`), so record closure is
+   author-verifies-own-work. When the change lands on a PR, request one
+   review and note the reviewer in `## Validation`
+   (`Status: Validated 2026-mm-dd, reviewed by <name>`); solo, at least
+   let `test/check-catalog.py` run (its A/B/C are the independent check)
+   and note the CI run. A record closed with no second signal —
+   reviewer or a green CI run — is `Validated`, not
+   `Closed + Monitored`.
 
 ---
 

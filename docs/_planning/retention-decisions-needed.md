@@ -167,6 +167,47 @@ task** — tracked informally as decisions land. If a decision adds a
 
 ---
 
+## Appendix — implementation reference IF "add a prune" is chosen (`t-tf-5ad22d8e4c2e` P3)
+
+**Still not a recommendation.** This appendix exists only so that, once
+the owner decides "prune tab X at N days", the code is a copy-paste
+rather than a design task. Every one of the 4 candidates below (`Send_Log`,
+`AllIssues_Log`, `Overnight_Log`, and optionally `SLA_History` /
+`Daily_Cohort_History` if capped) would use the **same shape** as the two
+prunes that already exist:
+
+```js
+// in the owning .gs file, mirroring pruneMovementLog_ (MovementTracker.gs)
+const <TAB>_RETENTION_DAYS_ = <N>;               // the owner's number
+function prune<Tab>_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName('<Tab_Name>');
+  if (!sh) return;
+  const last = sh.getLastRow();
+  if (last < 2) return;
+  const cutoff = new Date(Date.now() - <TAB>_RETENTION_DAYS_ * 864e5);
+  const dates = sh.getRange(2, <date_col>, last - 1, 1).getValues();
+  let firstKeep = dates.findIndex(r => r[0] instanceof Date && r[0] >= cutoff);
+  if (firstKeep <= 0) return;                     // nothing to drop / all recent
+  sh.deleteRows(2, firstKeep);                    // deleteRows, NOT clearContent — see the cell-ceiling note above
+}
+```
+
+Then: call `prune<Tab>_()` **before** that tab's own write in its
+scheduled function (the `pruneDailyRmIssueLog_` prune-before-write
+lesson — an after-write prune can't self-heal a tab already over the
+ceiling); add a one-off `prune<Tab>Now()` wrapper for manual recovery;
+add a `Tests_<File>.gs` assertion (a > N-day row is dropped, an
+N-day-old row is kept); paste into the live Apps Script editor; **no
+`setupXxx()` re-run needed** (internal-behaviour change, not a schedule
+change). Fold the chosen `N` into the `SHEET-XXX` record's
+`## Data Lifecycle → Retention Period` and open a `.gs`-change task for
+the code itself.
+
+`leads` (#1) and `Lead_Followups` (#2) are **not** in this list — #1 is
+external-CRM-owned, #2 is self-bounded by the per-cycle clear.
+
+---
+
 ## Definition of Done check
 
 - **Every `TBD` from `DOC-036` appears here with enough context for a
@@ -178,4 +219,6 @@ task** — tracked informally as decisions land. If a decision adds a
   example, up front).
 - **The list is flagged for the project owner's actual decision** — ✅
   (this file states up front that the task ends at surfacing; every
-  block names a decision owner; no recommendation is made).
+  block names a decision owner; no recommendation is made). The P3
+  appendix adds copy-paste prune code for the "if prune" branch —
+  still not choosing the branch.
