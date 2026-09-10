@@ -88,6 +88,12 @@ None — this tab is written only from the browser (`JS-018`).
   the signed-in sender's email. `DOC-038` for the operational-importance
   classification (read by no code — a pure audit surface).
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **LOW** — display / audit-trail only — no automated dependency; losing it loses history, nothing stops working.
+- **Data sensitivity:** recipient + sender email addresses.
+- **Reason:** **No code reads it** — a dashboard-send audit trail; nothing breaks if it is gone. Holds resolved recipient addresses + the signed-in sender's email (a data-minimisation consideration, no operational one).
+
 ## Risks of changing this tab's structure
 
 Only `JS-018` writes it, so a column change is a single-file edit — but

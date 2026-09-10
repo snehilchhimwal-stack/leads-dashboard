@@ -96,6 +96,12 @@ its own.
   operational-importance classification (read by `TAB-008` only; no
   backend job depends on it).
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **LOW** — display / audit-trail only — no automated dependency; losing it loses history, nothing stops working.
+- **Data sensitivity:** operational — counts only, no PII.
+- **Reason:** Read only by the dashboard's Tracking tab (`JS-024`); no automated dependency. Losing it loses the long-run SLA trend chart — nothing else breaks.
+
 ## Risks of changing this tab's structure
 
 The two writers (`GS-008` + `JS-018`) share this schema and must be

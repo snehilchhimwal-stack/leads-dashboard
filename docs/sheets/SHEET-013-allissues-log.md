@@ -91,6 +91,12 @@ trigger. No trigger of its own. See `GS-001` Trigger Schedule.
   operational-importance classification (read only by `GS-001` itself,
   for within-run dedupe).
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **LOW** — display / audit-trail only — no automated dependency; losing it loses history, nothing stops working.
+- **Data sensitivity:** recipient email addresses.
+- **Reason:** Read only by `GS-001` itself, for within-run dedupe — pruning old rows is functionally safe. A 17:00-send audit trail; nothing breaks if old rows are gone.
+
 ## Risks of changing this tab's structure
 
 `ensureAllIssuesLogSheet_` **self-heals** by appending any missing header

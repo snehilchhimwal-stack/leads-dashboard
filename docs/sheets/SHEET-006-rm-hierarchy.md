@@ -105,6 +105,12 @@ Write: `rebuildRmHierarchy`, `ensureRmHierarchySheet_`,
   data concern. A backend job depends on it directly (routing —
   `LOGIC_AUDIT.md` Part 3 §3.7). `DOC-038` completes the classification.
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **CRITICAL** — an unattended backend job breaks or mis-routes if this tab is broken/missing.
+- **Data sensitivity:** **contains real employee data** — employee names, and (with `RmHierarchy.private.gs`) real emails.
+- **Reason:** `GS-011` resolves **every** scheduled email's recipient bucket from it (`LOGIC_AUDIT.md` Part 3 §3.7); a stale/broken row mis-routes or (via the fallback chain) sends an issue email to a generic backstop instead of the responsible manager. FLAGGED per `DOC-036`.
+
 ## Risks of changing this tab's structure
 
 A column rename breaks `resolveRmHierarchy_`'s parsing and `JS-022`'s

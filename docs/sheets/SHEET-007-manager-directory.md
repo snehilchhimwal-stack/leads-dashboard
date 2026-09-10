@@ -98,6 +98,12 @@ Write: `ensureManagerDirectorySheetInternal_` (`GS-011`). Read:
   backend job depends on it directly (recipient resolution —
   `LOGIC_AUDIT.md` Part 3 §3.7). `DOC-038` completes the classification.
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **CRITICAL** — an unattended backend job breaks or mis-routes if this tab is broken/missing.
+- **Data sensitivity:** **contains real employee data** — real manager email addresses.
+- **Reason:** `GS-004`'s `resolveRecipientEmailsForRegion_` reads the `email` column for every scheduled send; a blank or wrong email mis-routes that region's issue email. FLAGGED per `DOC-036`.
+
 ## Risks of changing this tab's structure
 
 A column rename breaks `resolveRecipientEmailsForRegion_`. A rebuild

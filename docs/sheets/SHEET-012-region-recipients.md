@@ -95,6 +95,12 @@ own; created lazily by `GS-004`.
   job depends on it directly (the scheduled-email recipient fallback —
   `LOGIC_AUDIT.md` Part 3 §3.7). `DOC-038` completes the classification.
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **IMPORTANT** — a live flow (dashboard feature or a degradable backend path) depends on it; no hard unattended-job failure.
+- **Data sensitivity:** real recipient email lists.
+- **Reason:** `GS-004` uses it as the recipient **fallback** for every scheduled email when manager-bucket routing yields nothing (the normal case — `RmHierarchy.private.gs` absent). A missing region row degrades that region's digest to the `CH_LEVEL_EMAIL_` backstop — routing quality, not a hard stop.
+
 ## Risks of changing this tab's structure
 
 The 3-column `region / to / cc` shape is assumed by

@@ -100,6 +100,12 @@ Written by `setupOvernightEmailer()`'s `atHour(10)` trigger; read by its
   **functional** read, higher stakes than the other send logs).
   `DOC-038` completes the classification.
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **IMPORTANT** — a live flow (dashboard feature or a degradable backend path) depends on it; no hard unattended-job failure.
+- **Data sensitivity:** recipient email addresses + `lead_ids_json`.
+- **Reason:** `GS-010`'s 13:00 run **functionally** reads *today's* rows (`thread_id` + resolved `to`/`cc`) to send the threaded follow-up — a missing/corrupt today-row breaks that region's 1pm follow-up. Rows older than same-day have no dependency.
+
 ## Risks of changing this tab's structure
 
 `sendOvernightFollowupEmails_` reads `thread_id` / `to` / `cc` by

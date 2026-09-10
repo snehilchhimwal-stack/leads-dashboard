@@ -105,6 +105,12 @@ Write: `snapshotOpenLeads_`, `pruneMovementLog_`, `ensureMovementLogSheet_`
 *(This section is complete — `Movement_Log` is one of the two tabs
 `DOC-032`/`DOC-036` already know for certain.)*
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **CRITICAL** — an unattended backend job breaks or mis-routes if this tab is broken/missing.
+- **Data sensitivity:** operational — snapshot copy of lead fields (names in `RM`/`client`, no free-text comment beyond `last_comment`).
+- **Reason:** `GS-008`'s 4×/day capture writes it and `GS-001`/`GS-010`/`GS-003` read it for `underCalledToday` baselines + past-day backfill; a broken tab degrades every scheduled email's call-count logic and blocks `Daily_RM_Issues` recovery.
+
 ## Risks of changing this tab's structure
 
 New columns must be **appended to `SNAPSHOT_COLUMNS_`, never inserted

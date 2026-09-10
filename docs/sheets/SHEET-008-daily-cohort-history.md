@@ -105,6 +105,12 @@ its own.
   `DOC-038` for the operational-importance classification (read by
   `TAB-008` only; no backend job depends on it).
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **LOW** — display / audit-trail only — no automated dependency; losing it loses history, nothing stops working.
+- **Data sensitivity:** operational — per-region counts only, no PII.
+- **Reason:** Read only by the dashboard's Tracking tab (`JS-024`); no automated dependency. It is the permanent cohort archive — losing it loses long-term cohort history, but no live flow depends on it.
+
 ## Risks of changing this tab's structure
 
 The two writers share this schema **verbatim** — the `.gs` file's own

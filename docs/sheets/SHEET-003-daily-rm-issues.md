@@ -96,6 +96,12 @@ Write: `captureDailyRmIssues_`, `backfillDailyRmIssuesFromMovementLog_`,
 *(Complete — this tab is the second confirmed worked example, per
 `../_templates/sheet-template.md`.)*
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **IMPORTANT** — a live flow (dashboard feature or a degradable backend path) depends on it; no hard unattended-job failure.
+- **Data sensitivity:** operational — SLA flags + identity, no free text.
+- **Reason:** Only the dashboard's Repeat Offenders tab (`JS-022`) reads it; **no unattended job depends on it**. Breaking it degrades `TAB-004`; nothing stops sending or capturing.
+
 ## Risks of changing this tab's structure
 
 New columns must be **appended, never inserted** —

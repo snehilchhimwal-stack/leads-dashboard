@@ -95,6 +95,12 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
   clear; unreviewed rows kept indefinitely
 - **Sensitivity:** contains RM comment text — `DOC-036` to classify
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **LOW** — display / audit-trail only — no automated dependency; losing it loses history, nothing stops working.
+- **Data sensitivity:** **free-text RM comment content**.
+- **Reason:** Only a human reads it (classifier-gap review), and `GS-013`'s piggyback scan is try/catch-isolated so a failure never blocks the Movement capture — no automated dependency. Holds RM comment text pending human review.
+
 ## Risks of changing this tab's structure
 
 The dedup depends on `lead_id` + `comment_at`/`comment` — the 2026-09-03

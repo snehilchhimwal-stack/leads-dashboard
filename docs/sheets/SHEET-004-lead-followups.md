@@ -109,6 +109,12 @@ its own.
   operational-importance classification (an automated flow depends on
   it — the `GS-010` overnight cycle + `GS-007` formatting).
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **CRITICAL** — an unattended backend job breaks or mis-routes if this tab is broken/missing.
+- **Data sensitivity:** merged RM comment history (free text) + resolved recipient context.
+- **Reason:** `GS-010`'s overnight cycle writes and polls it (column F) to build the 10:00/13:00 region emails, and `GS-007` formats it for a human reading the raw sheet — a broken tab breaks the overnight follow-up flow.
+
 ## Risks of changing this tab's structure
 
 **Column F is a hard contract** — no script may write it; a change that

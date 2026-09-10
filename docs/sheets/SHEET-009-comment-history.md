@@ -95,6 +95,12 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
   `DOC-036` to confirm the classification, but the retention answer is
   **known**.
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **LOW** — display / audit-trail only — no automated dependency; losing it loses history, nothing stops working.
+- **Data sensitivity:** **free-text RM comment content + customer context**, accumulated indefinitely.
+- **Reason:** **No code reads it at all** — a pure forward-capture dataset for future analysis; nothing breaks if it is gone. But its append-only accumulation of full comment text makes it the highest data-minimisation concern among the LOW-operational tabs.
+
 ## Risks of changing this tab's structure
 
 A column rename breaks `logInteractionHistoryGs_`'s dedup. Adding a

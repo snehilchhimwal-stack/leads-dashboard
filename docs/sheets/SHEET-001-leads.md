@@ -114,6 +114,12 @@ read only.
 - **Sensitivity:** contains customer contact context + RM comments —
   **flagged for review**; full operational classification in `DOC-038`.
 
+## Sensitivity & operational importance (DOC-038)
+
+- **Operational importance:** **CRITICAL** — an unattended backend job breaks or mis-routes if this tab is broken/missing.
+- **Data sensitivity:** customer contact context + RM comment fields (free text).
+- **Reason:** Every scheduled emailer (`GS-001`/`GS-008`/`GS-010`) reads it via `readLeadsTab_` and the dashboard parses it into `allParsedLeads` — it is the single source of truth; a broken/missing `leads` tab stops both halves of the system.
+
 ## Risks of changing this tab's structure
 
 A renamed column is usually absorbed by `HEADER_ALIASES` /
