@@ -161,6 +161,32 @@ resolved":
   yet because Phase 3 closures were prompted by this project, not by a
   code change (DoD point 14).
 
+### G.1 Forensic completeness audit (2026-09-10) — `FORENSIC_COMPLETENESS_AUDIT_2026-09-10.md`
+
+Full adversarial closed-loop audit (task `t-tf-cc97c00a3839`, done
+`d2b5fda`). Verdict: **one-time completeness ~95%, continuous
+completeness ~15%** — the change→stale→task→revalidate loop is designed
+in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt. Actionable
+output (see the report §L for detail):
+
+- **P0** — `fetch-depth: 0` + a diff→component-ID resolver in CI (a
+  changed documented path with no revalidation task ⇒ fail);
+  auto-mark-`Stale` + one `update-tasks.ps1` revalidation task per push;
+  fix the **3 live doc contradictions** (this plan's own governance
+  section still describes the pre-build state; `INDEX.md` footer says
+  Phases 5–6 open; `HANDOVER.md` §9.7 — the last is §D above / C-5).
+- **P1** — record→file reverse walk (retired/renamed/moved); commit the
+  `DOC-040` reciprocity check as a CI test; `Last Verified`-vs-`HEAD`
+  drift check; flip `check-docs-coverage.js` Check 1 to hard-fail now
+  that `DOC-039` coverage is met; settle the 57 record-only edges (§E).
+- **P2** — `INDEX.md` snapshot self-consistency check; write `FLOW-001/002`
+  + a `TRIGGER-` index; backfill `docs/changes/` (one build record) and
+  `docs/validation/`; comment-change flag + a stale-comment line in
+  `PRE_SHIP_DOCUMENTATION_CHECKLIST.md`; wire `frontend-harness.html`
+  into CI; extend coverage checks to `TAB-`/`SHEET-`/`EXT-`/`DATA-`.
+
+Tracked as one consolidated follow-up task (`t-tf-...`, see `tasks.json`).
+
 ---
 
 ## H. Naming inconsistencies (`DOC-039` / `DOC-040`)
