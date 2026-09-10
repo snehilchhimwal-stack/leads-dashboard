@@ -1,6 +1,9 @@
-# Button inventory — reconciled (`DOC-031`)
+# Button inventory (`DOC-009` + `DOC-031`)
 
-**Status:** Reconciled 2026-09-10 against commit `c82ec67`.
+**Status:** built `DOC-031` (Phase 3), reconciled against `DOC-009`'s
+Phase 1 spec 2026-09-10 (see "`DOC-009` reconciliation" at the end).
+Verified 2026-09-10 against commit `c82ec67` (record set) / `e281f9b`
+(this note).
 **Scope:** every `<button>` / user-action control in `dashboard.html`
 that runs application logic. `DOC-009` (the standalone inventory task)
 was `Not Started` when Phase 3 ran, so this was **enumerated directly**
@@ -129,3 +132,47 @@ top-level actions section (both written under `DOC-026`). The only
 judgment call — placing `#snapshotNowBtn` / `#autoSnapshotCheck` on
 `TAB-007` rather than `DASH-001` despite their top-bar DOM position — is
 documented above and cross-referenced in both records.
+
+---
+
+## `DOC-009` reconciliation (Phase 1)
+
+`DOC-009` is the Phase 1 task whose deliverable *is* this file. It ran
+**after** `DOC-031` produced the file. This section confirms the file
+satisfies `DOC-009`'s spec.
+
+### What `DOC-009` asks for
+
+1. Search `dashboard.html` for every `<button` / interactive control by
+   `id`.
+2. For each, confirm **by reading the actual `addEventListener` call
+   site** which file/function wires it and which function it calls — not
+   from the button's `id` alone.
+3. Note that `dashboard.html` has **zero inline `onclick=`-style
+   handlers** — every button is wired in JS.
+
+### `DOC-009` DoD check
+
+- **Every `<button` (and any other clickable control that triggers a
+  real action, e.g. `#autoSnapshotCheck`) in `dashboard.html` has a
+  row** — ✅. The "Reconciliation result" section: 34 `<button>`
+  elements — 22 tab-panel (`BTN-001`..`BTN-022`) + 4 top-bar + the
+  8-button tab switcher (→ `DASH-001` top-level actions) — plus the
+  `#autoSnapshotCheck` checkbox (`BTN-015`). Nothing left.
+- **Every row's target function is confirmed by reading the actual
+  `addEventListener` call site** — ✅. Every `BTN-XXX` `Invokes` cell
+  and every `DASH-001` top-level-action handler was resolved by
+  `grep -rnE "getElementById\('<id>'\)" js/` + reading the wiring during
+  `DOC-026` (see that task's session work); the "Full map" tables here
+  name the wiring file/function for each. `dashboard.html`'s
+  **zero inline handlers** confirmed by
+  `grep -c 'onclick=' dashboard.html` → 0 (`LOGIC_AUDIT.md` Part 1 §4a).
+
+### `DOC-009` note
+
+The one place a button's behaviour is *not* a plain
+`getElementById(...).addEventListener(...)` in a tab file is the tab
+switcher — a single **delegated** `click` handler on `#tabBar`
+(`js/overview-distribution-people-ops.js:364`) covering all 8
+`.tab-btn`s. Recorded as `DASH-001`'s "Tab switch" action, not 8
+`BTN-XXX` rows.

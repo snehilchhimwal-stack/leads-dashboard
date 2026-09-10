@@ -1,6 +1,9 @@
-# Function inventory — reconciled (`DOC-030`)
+# Function inventory (`DOC-008` + `DOC-030`)
 
-**Status:** Reconciled 2026-09-10 against commit `c82ec67`.
+**Status:** built `DOC-030` (Phase 3), reconciled against `DOC-008`'s
+significance bar 2026-09-10 (see "`DOC-008` reconciliation" at the end).
+Verified 2026-09-10 against commit `c82ec67` (record set) / `e281f9b`
+(this note).
 **Scope:** every significant function in `js/*.js` (24 files) and the
 production `*.gs` files (13 files) is assigned an `FN-XXX` id and lives
 in a `## Significant functions — FN-XXX sub-table` in its owning module
@@ -124,3 +127,60 @@ entry point), it gets the **next free id** — never a reused one, never
 | `GS-003` FN-190's "Calls" cell referenced `FN-191..FN-194` but only `FN-191`..`FN-193` were defined (jump to `FN-195`) | Split the over-broad `FN-191` (which had folded 4 pipeline stages into one row) into `FN-191` (reconstruct + aggregate) and **`FN-194`** (peer averages + classify), matching `JS-008` FN-053..FN-056's 1:1 structure. Now contiguous. |
 
 Zero unresolved gaps remain.
+
+---
+
+## `DOC-008` reconciliation (Phase 1)
+
+`DOC-008` is the Phase 1 task whose deliverable *is* this file. It ran
+**after** `DOC-030` produced the file, so this section confirms the file
+satisfies `DOC-008`'s spec rather than rebuilding it.
+
+### `DOC-008`'s significance bar, stated verbatim
+
+> A function is "significant" if it is **(a)** called from a file other
+> than the one it's defined in — i.e. part of the app's real cross-file
+> API surface, **OR (b)** named and described as load-bearing in
+> `LOGIC_AUDIT.md`'s own file table ("Important Logic" column), **OR
+> (c)** a `setupXxx()` / trigger-installer function on the backend.
+
+### Relationship to the bar this file already uses
+
+The "significance bar" section above uses a **superset** of `DOC-008`'s:
+
+| `DOC-008` criterion | Covered by this file's bar |
+|---|---|
+| (a) cross-file call surface | "exported / bare-global entry point another module calls by name" |
+| (b) named in `LOGIC_AUDIT.md`'s "Important Logic" column | "a function named in a `LOGIC_AUDIT.md` finding" **+** the transcription source itself (`LOGIC_AUDIT.md` Part 1 §4b/§4c/§4d) |
+| (c) `setupXxx()` / trigger installer | every `setup*()` appears — `setupMovementTracking` (`GS-008` FN-219), `setupOvernightEmailer` (`GS-010` FN-239), `setupAllIssuesEmailTrigger` (`GS-001` FN-179), `setupDailyRmIssueLog` (`GS-003` FN-195), `setupWeeklyOpsChecklistTrigger` (`GS-009` FN-230), `setupRmHierarchy` (`GS-011` FN-247), `setupLeadFollowupsStalenessFormatting` (`GS-007` FN-217) |
+
+This file's bar additionally captures rule-dense functions, state/DOM/
+network/Sheet touchers, and cross-runtime twins — a `DOC-008`-significant
+function is always in this file; the reverse is not required.
+
+### `DOC-008` DoD check
+
+- **Every function named in `LOGIC_AUDIT.md`'s file table ("Important
+  Logic" column) or trigger table (§5) appears** — ✅. `LOGIC_AUDIT.md`
+  Part 1 §4b/§4c/§4d was the direct transcription source for `DOC-027`/
+  `DOC-028`/`DOC-029`; every "Important Logic" name landed in an
+  `FN-XXX` row (e.g. `fetchAndRender`, `enrichLead`, `OUTCOME_RULES`,
+  `computeRmPerformance`, `mergeRowsIntoOneLead`, `_generateCycleOwner`,
+  `snapshotOpenLeads_`, `computeSlaFlags_`, `resolveRecipientBucketsForRms_`,
+  `sendThreadedGmailReply_`, …). §5's 5 `setupXxx()` installers +
+  `setupRmHierarchy` all appear (row above).
+- **The significance bar is written down, not just applied silently** —
+  ✅ (the "significance bar" section above + `DOC-008`'s verbatim
+  criterion here).
+
+### `DOC-008` follow-up item
+
+> "If the cross-file-call grep turns up a function that seems
+> load-bearing but wasn't named in `LOGIC_AUDIT.md`, flag it for a
+> targeted read rather than guessing."
+
+None outstanding — `DOC-027`/`DOC-028`/`DOC-029` each grepped every file
+for its own function declarations (`grep -nE '^(function|async function|const)'`)
+and read the file, so the `FN-XXX` set is derived from the current source
+directly, not only from the audit. Functions deliberately below the bar
+are listed in the "significance bar" section's second table.
