@@ -93,6 +93,64 @@ In the same commit, the **doc** update:
 
 ---
 
+## Recording a new dependency edge (`DOC-045`)
+
+The single most failure-prone part of keeping a relationship-based
+catalog current: a code change adds a new import / call / Sheet write,
+and only one side's record gets the link.
+
+**Every time a change introduces a dependency `A → B`:**
+
+1. **Identify both IDs.** `A` = the record whose code now needs `B`;
+   `B` = what it now needs. Use `docs/INDEX.md` to resolve filenames →
+   IDs.
+2. **Edit both records in the same commit:**
+   - `A`'s `## Relationships → Depends On` gains `B` (with a short "why"
+     — e.g. "`JS-021` (`movementSnapshots`)").
+   - `B`'s `## Relationships → Used By` gains `A`.
+   - Both records' `docs/INDEX.md` rows get the same edit in their
+     `Depends On` / `Used By` columns.
+3. **Re-run a scoped reference check on just the 2 touched records:**
+   confirm `A` is in `B`'s `Used By` **and** `B` is in `A`'s
+   `Depends On` — in the record file **and** the `INDEX.md` row (4
+   places total). This is `DOC-040`'s check, scoped to one edge.
+4. If `A` and `B` are a cross-runtime pair, this is also a duplication
+   edit — see the rule above.
+
+`Related:` (non-dependency "worth reading" links) is **not** required to
+be reciprocal, but reciprocating it is good practice.
+
+---
+
+## Worked example — a real `.gs` change (`DOC-047`)
+
+*The `Daily_RM_Issues` retention fix, made 2026-09-07: after the
+2026-09-06 10M-cell-workbook-ceiling crash, `pruneDailyRmIssueLog_()`
+was added to `DailyRmIssueLog.gs` at a 7-day retention
+(`DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ = 7`), with a matching assertion in
+`Tests_DailyRmIssueLog.gs` and a `HANDOVER.md` §9.2 write-up.*
+
+Had this catalog existed at the time, `HOW_TO_UPDATE_A_COMPONENT.md`'s
+process would have produced exactly these edits, in the same commit as
+the code:
+
+| # | Record | Edit |
+|---|---|---|
+| 1 | `GS-003` (`DailyRmIssueLog.gs`) | `## Significant functions` → add `pruneDailyRmIssueLog_` + `pruneDailyRmIssueLogNow` as `FN-NNN` rows; `## Config constants` → `DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ = 7` as a `CFG-NNN`; `## Exceptions` → the 2026-09-06 ceiling crash + the prune-**before**-write ordering as an `EXC-NNN`; `Last Verified` → the fix commit; `## Version / change reference` → that commit + the incident. |
+| 2 | `SHEET-003` (`Daily_RM_Issues`) | `## Data Lifecycle` → `Retention Period: 7 days`, `Enforced By: pruneDailyRmIssueLog_ (GS-003)`, `Archive/Delete Behavior: rows deleted + row allocation shrunk`; `Retention Period` moves from `TBD` → a confirmed value, so `docs/_planning/OPEN_ITEMS.md` §B loses this row. |
+| 3 | new dependency edge | `GS-003` `Depends On` gains nothing new (it already read `Daily_RM_Issues`), but `SHEET-003`'s `## Writers` table gains the `pruneDailyRmIssueLog_` row → reciprocal: `SHEET-003 ## Data Lifecycle → Enforced By` names `GS-003`, and `GS-003 ## Sheets touched` marks `SHEET-003` "Write (append + prune)". Re-check both (4 places). |
+| 4 | `docs/INDEX.md` | `GS-003` and `SHEET-003` rows → `Last Verified` bumped; `SHEET-003`'s row annotation `TBD` → `7 days confirmed`. |
+| 5 | `HANDOVER.md` | §9.2 gets the incident + fix write-up (a `.gs` architectural change — `CLAUDE.md`). `GS-003 ## Handover relationship` records that §9.2 now covers this. |
+| 6 | tests | `Tests_DailyRmIssueLog.gs` gets the chunk-boundary + prune assertion — `GS-003 ## Validation` references it. `CLAUDE.md`'s three-registration rule if a new `Tests_` were added (it wasn't — same file). |
+
+**The shape to repeat for any real change:** the owning module record's
+functions/constants/exceptions, any `SHEET-XXX` field it moves, the
+reciprocal side of any new edge, the `INDEX.md` rows, `HANDOVER.md` if
+architectural, and the test reference — all in the code change's own
+commit.
+
+---
+
 ## Definition of Stale (when a `Closed + Monitored` record must go back to `Stale`)
 
 Any of (Governance Model):

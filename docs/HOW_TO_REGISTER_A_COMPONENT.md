@@ -135,10 +135,14 @@ built.
   `cp _templates/sheet-template.md sheets/SHEET-015-forecast-log.md`.
 - `## Columns / fields` — **transcribe from the real source constant**
   (e.g. `FORECAST_LOG_COLUMNS_`), never approximate.
-- `## Writers` / `## Readers` tables; `## Data Lifecycle` — a real
-  `Retention Period` (grep for a `prune*_` fn) or the literal `TBD`
-  (never invented — feeds `DOC-037`); `## Risks of changing this tab's
-  structure` (append-only column order, Date-vs-string coercion).
+- `## Writers` / `## Readers` tables; `## Data Lifecycle` — **fill it at
+  creation** (`DOC-046`): a real `Retention Period` (grep the codebase
+  for a `prune*_` / `clear*` fn that touches the tab) **or** the literal
+  `TBD` **plus a one-line row in `_planning/OPEN_ITEMS.md` §B** — never
+  invented. Also state `DOC-038` operational importance (CRITICAL /
+  IMPORTANT / LOW + a reason). The `sheet-template.md` has this as an
+  inline instruction. `## Risks of changing this tab's structure`
+  (append-only column order, Date-vs-string coercion).
 - `INDEX.md`: the `SHEET-015` row; the coverage snapshot's `SHEET-`
   count; add `SHEET-015` to the `Used By` of every writer/reader.
 

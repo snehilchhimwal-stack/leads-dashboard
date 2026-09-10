@@ -35,12 +35,26 @@ history for a past day that the live leads tab no longer reflects.">
 ## Apps Script functions touching it
 <`GS-XXX` `FN-XXX` list — read + write.>
 
-## Data Lifecycle   (DOC-019 — fill from a real value or literal `TBD` + a task)
+<!-- DOC-046 — RECORDING RETENTION GOING FORWARD (do this when you create
+this record, not "later"):
+  * `## Data Lifecycle` below MUST be filled at creation. No blank fields.
+  * `Retention Period` = a REAL confirmed value (grep the codebase for a
+    `prune*_` / `clear*` function that touches this tab) OR the literal
+    string `TBD`. NEVER invent a number.
+  * If it's `TBD`: add a one-line row for this tab to
+    `../_planning/OPEN_ITEMS.md` §B (that file is kept alive going
+    forward, not archived) so the open question is tracked.
+  * If a real prune function is later added, that's a `.gs`/`.js` change
+    with its own task — then fold the confirmed value back into this
+    field.
+See ../HOW_TO_REGISTER_A_COMPONENT.md example 5. -->
+
+## Data Lifecycle   (DOC-019 — fill from a real value or literal `TBD` + an `OPEN_ITEMS.md` §B entry)
 - **Data Type:** historical / temporary / cached / operational / configuration
-- **Retention Period:** `<real value>` or `TBD` (never invented — if unknown, write `TBD` and open a follow-up task per Goal 4)
+- **Retention Period:** `<real value>` or `TBD` (never invented — if unknown, write `TBD` and add a row to `../_planning/OPEN_ITEMS.md` §B)
 - **Enforced By:** `<the FN-XXX / TRIGGER-XXX that actually prunes it>` or `None` (retention currently unenforced)
 - **Archive / Delete Behavior:** <what happens to aged-out rows — deleted in place, moved, row-count shrunk>
-- **Sensitivity:** operational / configuration / contains real employee data / `TBD`
+- **Sensitivity:** operational / configuration / contains real employee data / `TBD` (`DOC-038`: also state operational importance — CRITICAL / IMPORTANT / LOW — with a one-line reason)
 
 <!-- WORKED EXAMPLES — two real, confirmed values, so Phase 4 starts from a
 pattern not a blank:

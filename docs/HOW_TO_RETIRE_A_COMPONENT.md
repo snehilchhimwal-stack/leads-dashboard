@@ -87,10 +87,36 @@ thing. The `_archive/` file at `JS-017` must stay the one and only
 
 ---
 
-## Worked example
+## Retirement-candidate scan (`DOC-048`)
 
-*`js/rm-performance-worker.js` (`JS-017`) is removed — the RM-performance
-compute moves back onto the main thread.*
+**As of 2026-09-10 (`0360b79`): no real retirement candidate exists in
+this project.** This was checked, and a clean "none" is a valid, useful
+result:
+
+- `LOGIC_AUDIT.md` Part 6 §6.2 found **no confirmed dead code**.
+- `DOC-012` (conflicts) and `DOC-041` (consistency) turned up nothing
+  dead.
+- All 24 `js/*.js`, 13 production `.gs`, 8 tabs, 22 `BTN-XXX`, 14
+  `SHEET-XXX`, and 4 `EXT-XXX` are live and referenced (`DOC-039`).
+- The two "not part of the live app" artifacts — `design/live-ops-redesign.html`
+  and `working files on 28th for automatic email/` — were **never
+  cataloged** (`file-inventory.md` §9), so there is nothing to *retire*;
+  they can simply be deleted from the repo if desired.
+- `Send_Log` / `Comment_History` have no code reader but are **deliberate
+  audit / forward-capture datasets**, not dead — recorded as `LOW`
+  operational (`DOC-038`), not retirement candidates.
+
+So the worked example below is a **clearly-labelled hypothetical**, run
+only to exercise `## The process` end-to-end.
+
+## Worked example — HYPOTHETICAL (no such retirement has happened)
+
+> **This is not a real retirement.** `JS-017` is live and in use. This
+> walks `## The process` against a plausible future scenario so the
+> guide has a concrete example.
+
+*Hypothetical: `js/rm-performance-worker.js` (`JS-017`) is removed — the
+RM-performance compute moves back onto the main thread.*
 
 1. `_archive/JS-017-rm-performance-worker.md`:
    `Component Status: Retired`, `Record Status: Retired`, append:
