@@ -14,6 +14,18 @@ pre-existing untracked `.claude/` + `working files on 28th…/`).
 
 ## A. Executive assessment
 
+> **Follow-up update, 2026-09-10 — `t-tf-5ad22d8e4c2e` (`3d2db17`,
+> `cb5afb1`).** The detection half of the loop is now built:
+> `test/check-catalog.py` runs in CI (green, run #76) with `fetch-depth:
+> 0` — BLOCKING on `INDEX.md` reciprocity, `INDEX.md` ↔ record-file
+> coverage both ways, and `Location` → real-file; advisory on
+> `Last Verified` drift and change → component-ID impact (which prints
+> the `Stale` set + a ready-to-run `update-tasks.ps1` ops JSON). The 3
+> live contradictions in §H are fixed. What §§F/G/N below describe as
+> "not built" / "no" for change-detection, reverse walk, reciprocity,
+> and drift is now **built**; the write side of stale-marking + task
+> creation, and P2/P3, remain. See §L for the item-by-item status.
+
 **One-time completeness: ~95% (Confirmed).** Every `js/*.js` (24), production
 `.gs` (13), dashboard tab (8), Sheet tab (14), external integration (4),
 traced data flow (5), and the one dashboard have a `Closed + Monitored`
@@ -353,22 +365,39 @@ property holds by design but is violated in fact.
 
 ## L. P0 / P1 / P2 / P3 action plan
 
+> **Update 2026-09-10 — `t-tf-5ad22d8e4c2e` (commits `3d2db17`,
+> `cb5afb1`).** P0.1, P0.3, P1.4–6, P1.8 done and green in CI (run #76).
+> `test/check-catalog.py` is the built detection half; the human
+> revalidation half (steps 7–10) and P2/P3 remain.
+
 **P0 — the loop does not exist without these**
-1. `fetch-depth: 0` + **diff→ID resolver** step in `test/check-docs-coverage.js`
-   (Change-Control steps 1–2). Undocumented changed path ⇒ fail.
-2. **Auto-stale + one revalidation task per push** (steps 5–6), via
-   `update-tasks.ps1`. Owner from the affected records.
-3. Fix the **3 live contradictions**: the plan's governance section (add a
-   dated post-build update / relabel it a pre-build snapshot), the
-   `INDEX.md` footer, and open a Phase-5 item for `HANDOVER.md` §9.7 (C-5).
-   *(Trivial; do first — the authority docs currently lie.)*
+1. ~~`fetch-depth: 0` + **diff→ID resolver**~~ — **DONE**: `check-catalog.py`
+   check E resolves `git diff <before>..<after>` against `INDEX.md`
+   `Location` → affected IDs + 1-hop impact + a ready-to-run
+   `update-tasks.ps1` ops JSON; a changed `js/`/`.gs` path with no row ⇒
+   "undocumented component" line. Advisory (prints); `CATALOG_STRICT=1`
+   makes it fail.
+2. **Auto-stale + one revalidation task per push** — **partial**: E
+   prints the exact `Stale` set and the ops JSON; a human runs it
+   (`tasks.json` is not in this repo / on the runner). The *write* side
+   stays human by design.
+3. ~~Fix the **3 live contradictions**~~ — **DONE** (`3d2db17`): plan
+   governance section bannered as a PRE-BUILD SNAPSHOT; `INDEX.md` footer
+   rewritten; `HANDOVER.md` §9.7 headline + §2 + §9.3 fixed (deep §9 body
+   sweep still tracked, C-5/C-6).
 
 **P1 — closes the "trusted forever" hole**
-4. **record → file reverse walk** in CI (retired/renamed/moved detection).
-5. **`INDEX.md` reciprocity check** — commit the `DOC-040` python as a test,
-   run every push.
-6. **`Last Verified` drift check** (Definition-of-Stale trigger 7).
-7. **Flip Check 1 to hard-fail** (graduation criterion `DOC-039` is met).
+4. ~~**record → file reverse walk**~~ — **DONE**: `check-catalog.py` B/C
+   (both directions, all 7 own-file types, + `Location`→real-file).
+   BLOCKING.
+5. ~~**`INDEX.md` reciprocity check**~~ — **DONE**: `check-catalog.py` A.
+   BLOCKING, green.
+6. ~~**`Last Verified` drift check**~~ — **DONE**: `check-catalog.py` D.
+   Advisory (needs `fetch-depth: 0`, now set).
+7. **Flip `check-docs-coverage.js` Check 1 to hard-fail** — **skipped,
+   moot**: `check-catalog.py` B is the blocking coverage check (broader).
+   `check-docs-coverage.js` stays warn-only for its `HANDOVER.md`-age
+   signal.
 8. ~~Decide the **57 record-only edges**~~ — **DONE 2026-09-10**: pruned
    to `INDEX.md` (`reciprocity-normalisation-notes.md`); 69/69 records
    match exactly, 0 one-directional pairs (`recip_verify.py`).

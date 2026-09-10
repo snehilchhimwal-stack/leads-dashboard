@@ -152,40 +152,52 @@ resolved":
   "graduation criteria … not a fixed date"). Not done; a post-project
   call. The check also does **not** verify function-level coverage,
   cross-reference reciprocity, retired components, or "code changed
-  without doc review" (Governance Model CI-001–CI-005 Evaluation).
-- The Governance Model's **Change-Control Mechanism** (`DOC-045` build
-  target — needs `fetch-depth: 0` on `actions/checkout`) is designed but
-  not built.
-- **`docs/changes/`** is created (empty) — no `changes/` record exists
-  yet because Phase 3 closures were prompted by this project, not by a
-  code change (DoD point 14).
+  without doc review" — **but `test/check-catalog.py` (2026-09-10,
+  `t-tf-5ad22d8e4c2e`) now does**: reciprocity + record↔file coverage +
+  `Location`→file are BLOCKING; `Last Verified` drift + change→ID impact
+  are advisory. Kept for its `HANDOVER.md`-age signal.
+- The Governance Model's **Change-Control Mechanism** detection half
+  (steps 1–3, 5–6) is **built** — `check-catalog.py`, `fetch-depth: 0`
+  set, green in CI (run #76). The *write* side of steps 5–6 (mark rows
+  `Stale`, open the task) and steps 7–10 (re-verify, refresh evidence,
+  close) are **human by design** — CI prints the ops JSON, a person runs
+  it. `DOC-045` (the `HOW_TO_UPDATE` worked example) already exists.
+- **`docs/changes/`** is still empty — no `changes/` record exists yet
+  because every closure so far was prompted by the doc project itself,
+  not a code change (DoD point 14). The first real post-catalog code
+  change should produce `docs/changes/<date>-<sha>.md` (check E prints
+  the target name).
 
 ### G.1 Forensic completeness audit (2026-09-10) — `FORENSIC_COMPLETENESS_AUDIT_2026-09-10.md`
 
 Full adversarial closed-loop audit (task `t-tf-cc97c00a3839`, done
 `d2b5fda`). Verdict: **one-time completeness ~95%, continuous
-completeness ~15%** — the change→stale→task→revalidate loop is designed
-in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt. Actionable
-output (see the report §L for detail):
+completeness ~15%** — the change→stale→task→revalidate loop was designed
+in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt.
 
-- **P0** — `fetch-depth: 0` + a diff→component-ID resolver in CI (a
-  changed documented path with no revalidation task ⇒ fail);
-  auto-mark-`Stale` + one `update-tasks.ps1` revalidation task per push;
-  fix the **3 live doc contradictions** (this plan's own governance
-  section still describes the pre-build state; `INDEX.md` footer says
-  Phases 5–6 open; `HANDOVER.md` §9.7 — the last is §D above / C-5).
-- **P1** — record→file reverse walk (retired/renamed/moved); commit the
-  `DOC-040` reciprocity check as a CI test; `Last Verified`-vs-`HEAD`
-  drift check; flip `check-docs-coverage.js` Check 1 to hard-fail now
-  that `DOC-039` coverage is met. *(The 57 record-only edges are done —
-  pruned to `INDEX.md`, §E.)*
-- **P2** — `INDEX.md` snapshot self-consistency check; write `FLOW-001/002`
-  + a `TRIGGER-` index; backfill `docs/changes/` (one build record) and
-  `docs/validation/`; comment-change flag + a stale-comment line in
-  `PRE_SHIP_DOCUMENTATION_CHECKLIST.md`; wire `frontend-harness.html`
-  into CI; extend coverage checks to `TAB-`/`SHEET-`/`EXT-`/`DATA-`.
-
-Tracked as one consolidated follow-up task (`t-tf-...`, see `tasks.json`).
+- **P0 — DONE** (`3d2db17`, `cb5afb1`, `t-tf-5ad22d8e4c2e`):
+  `fetch-depth: 0` + `test/check-catalog.py` check E (diff→component-ID
+  resolver: affected IDs + 1-hop impact + a ready-to-run
+  `update-tasks.ps1` ops JSON; a changed `js/`/`.gs` with no row ⇒
+  "undocumented component"). The *write* side (mark `Stale`, open the
+  task) is human — CI can't reach `tasks.json`. **3 live contradictions
+  fixed** — plan governance section bannered PRE-BUILD SNAPSHOT,
+  `INDEX.md` footer rewritten, `HANDOVER.md` §9.7 headline + §2 + §9.3
+  (deep §9 body sweep still tracked, §D above / C-5·C-6).
+- **P1 — mostly DONE**: `check-catalog.py` A (reciprocity, BLOCKING),
+  B/C (record↔file both ways + `Location`→file, BLOCKING), D
+  (`Last Verified` drift, advisory) — all green in CI run #76.
+  "Flip `check-docs-coverage.js` Check 1 to hard-fail" → **skipped as
+  moot** (`check-catalog.py` B is the broader blocking version). 57
+  record-only edges → done (pruned, §E).
+- **P2 — open**: `INDEX.md` snapshot self-consistency check;
+  `FLOW-001/002` + a `TRIGGER-` index; backfill `docs/changes/` (one
+  build record) + `docs/validation/`; comment-change flag + a
+  stale-comment line in `PRE_SHIP_DOCUMENTATION_CHECKLIST.md`; wire
+  `frontend-harness.html` into CI; `check-catalog.py` E's `CATALOG_STRICT`
+  flip once a revalidation habit is proven.
+- **P3 — open**: `goalId` + `produces:` on the closed tasks; the deep
+  `HANDOVER.md` §9 body sweep (C-5/C-6, §D); the 7 retention `TBD`s (§B).
 
 ---
 

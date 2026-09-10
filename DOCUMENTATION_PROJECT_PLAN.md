@@ -498,15 +498,26 @@ discovered is also `Stale` retroactively — it was never legitimately
 
 ### Change-Control Mechanism
 
-**What exists today (Confirmed):** nothing that does this. `git log`
-records what changed. `test/check-docs-coverage.js` checks whether a
-`js/*.js`/`.gs` FILE has a matching `docs/` record file and whether
-`HANDOVER.md`'s self-reported date is old. Neither knows anything about
-which *records* a given change should have made stale, because no records
-exist and there is no code that maps a changed path to affected IDs.
+**What exists today (Confirmed, updated 2026-09-10):** the **detection
+half is built** — `test/check-catalog.py` (CI, blocking; commit
+`cb5afb1`, `t-tf-5ad22d8e4c2e`) does steps 1–3 and 5–6 below:
+`actions/checkout` now runs at `fetch-depth: 0`; the step reads
+`github.event.before`..`github.sha`, resolves every changed repo path
+against `docs/INDEX.md`'s `Location` column to a set of component IDs
+(a changed `js/*.js`/`.gs` with no row = an "undocumented component"
+finding), adds the 1-hop `Depends On` + `Used By`, and prints the set
+that should go `Stale` plus a ready-to-run `update-tasks.ps1` ops JSON.
+It also **blocks** on `INDEX.md` internal reciprocity, `INDEX.md` ↔
+record-file coverage both ways, and `Location` → real-file, and prints a
+`Last Verified`-drift warning per record. **Not built:** steps 5–6's
+*write* side (setting the rows to `Stale`, opening the task) is done by a
+human running the printed ops JSON — CI has no access to `tasks.json`
+(different repo, not on the runner). Steps 7–10 are human by design.
+`git log` remains the authoritative change history.
 
-**Recommended mechanism** (build target for `DOC-045`; the request's
-CHANGE-DETECTED → … → CLOSED+MONITORED loop, made concrete for this repo):
+**The mechanism** (built for steps 1–3/5–6 as above; steps 7–11 are the
+tracked human loop — the request's CHANGE-DETECTED → … → CLOSED+MONITORED
+loop, concrete for this repo):
 
 1. **DETECT** — a push happens. The existing CI job already runs on every
    push. Add a step: for each path in the push's diff

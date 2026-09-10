@@ -53,21 +53,36 @@ edited forward.
 
 ## Maintenance model — read this before trusting any record
 
-**Nothing fully enforces this catalog automatically.** As of 2026-09-10:
+**The catalog is partly enforced automatically; the rest is process.**
+As of 2026-09-10:
 
-- `test/check-docs-coverage.js` (CI, `CI-001`–`CI-005`) **warns** when a
-  `js/*.js` or `.gs` file has no matching record, and when `HANDOVER.md`
-  goes stale — it does **not** yet block a build, and it does **not**
-  check function-level coverage, cross-references, retired components, or
-  "code changed without doc review." See the Governance Model's
-  "CI-001–CI-005 Evaluation" for the full list of what it does and
-  doesn't catch.
-- Everything else — keeping a record current when its code changes,
-  keeping `Depends On` / `Used By` reciprocal, revalidating a `Stale`
-  record — is **process, done by whoever makes the change**:
+- `test/check-catalog.py` (CI, blocking; `t-tf-5ad22d8e4c2e`) **fails the
+  build** on: (A) a broken `Depends On` / `Used By` back-link in this
+  file, (B) an `INDEX.md` row with no record file or a record file with
+  no row (all 7 own-file types), (C) an `INDEX.md` `Location` naming a
+  `js/`/`.gs` file that was deleted/renamed/moved. It also **prints**
+  (advisory): (D) any record whose `Last Verified` commit is behind
+  `HEAD` on its `## Location` path, and (E) for each push, the component
+  IDs the changed paths touch + their 1-hop impact + a ready-to-run
+  `update-tasks.ps1` ops JSON for the revalidation task.
+- `test/check-docs-coverage.js` (`CI-001`–`CI-005`) **warns** on
+  `js/*.js` / `.gs` file↔record existence and `HANDOVER.md` age
+  (superseded for coverage by `check-catalog.py` B; kept for the
+  `HANDOVER.md` age signal).
+- **Still process, done by whoever makes the change** — the human half
+  of the loop (`DOCUMENTATION_PROJECT_PLAN.md` Change-Control Mechanism
+  steps 7–10): actually re-reading a flagged record against the code,
+  refreshing `## Validation` + `Last Verified` + the row, updating
+  `HANDOVER.md` where flagged, writing the `docs/changes/` record, and
+  setting the row back to `Closed + Monitored`. Guides:
   `HOW_TO_REGISTER_A_COMPONENT.md` (add), `HOW_TO_UPDATE_A_COMPONENT.md`
   (change — incl. the duplicated-pair rule), `HOW_TO_RETIRE_A_COMPONENT.md`
   (retire, preserving the record).
+- **Not yet built** (`FORENSIC_COMPLETENESS_AUDIT_2026-09-10.md`):
+  function-level (`FN-`) coverage; comment-change detection; a
+  `docs/changes/` / `docs/validation/` population habit; CI opening the
+  revalidation task itself (it can't reach `tasks.json` — E prints the
+  ops JSON for a human).
 
 **A record is only as current as its own `Last Verified` field.** A
 record whose `Record Status` is `Closed + Monitored` but whose

@@ -116,14 +116,31 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   through the real `fetchAndRender()` pipeline. Re-run it after any
   dashboard-side change; extend it rather than hand-verifying in the console
   when you add real new behavior.
-- **Adding or removing a production `js/*.js` or `.gs` file**:
-  `test/check-docs-coverage.js` (`CI-001`–`CI-005`, To-Do Dashboard,
-  2026-09-09) checks it against `docs/js-modules/`/`docs/gs-modules/` and
-  prints a summary in CI, right after the `.gs` suite — currently WARN-ONLY
-  (never fails the build), since `docs/` doesn't have those folders yet, so
-  every file correctly shows as uncovered for now. See
-  `DOCUMENTATION_PROJECT_PLAN.md`'s Maintenance Model section for the
-  graduation criteria (tied to Phase 5's `DOC-039`, not a fixed date).
+- **Changing, adding, or removing any `js/*.js` / `.gs` file — or editing
+  a `docs/` record or `docs/INDEX.md`**: two CI steps run after the `.gs`
+  suite.
+  - `test/check-docs-coverage.js` (`CI-001`–`CI-005`) — file↔record
+    existence for `js/*.js` + `.gs`, plus a `HANDOVER.md` "updated" date
+    age warning. WARN-ONLY (always exits 0).
+  - `test/check-catalog.py` (`t-tf-5ad22d8e4c2e`, 2026-09-10) — the
+    catalog change-control tripwires. **BLOCKING** on: (A) `docs/INDEX.md`
+    internal `Depends On` / `Used By` reciprocity, (B) `INDEX.md` ↔
+    record-file coverage both ways across all 7 own-file types, (C) an
+    `INDEX.md` `Location` naming a `js/`/`.gs` file that no longer exists.
+    **Advisory** (prints, doesn't fail): (D) a record whose `Last
+    Verified` commit is behind `HEAD` on its `## Location` path, (E) for
+    the push's commit range, the affected component IDs + 1-hop impact +
+    a ready-to-run `update-tasks.ps1` ops JSON to open the revalidation
+    task (CI can't reach `tasks.json`). Set `CATALOG_STRICT=1` to make
+    D/E blocking too. Needs `fetch-depth: 0` on `actions/checkout`
+    (already set). Runnable locally: `python3 test/check-catalog.py
+    [<before-sha> <after-sha>]`.
+  - **When a real code change lands**, check E's output in the CI log,
+    run the ops JSON it prints to open the revalidation task, then work
+    it per `docs/HOW_TO_UPDATE_A_COMPONENT.md` (the human half of the
+    loop — `DOCUMENTATION_PROJECT_PLAN.md` Change-Control Mechanism steps
+    7–10). `test/check-docs-coverage.js`'s WARN-ONLY graduation is now
+    moot — `check-catalog.py` B is the blocking coverage check.
 - **Changing automatic email, RM hierarchy routing, or worst-performing-RM
   logic specifically** (`OvernightEmailer.gs`/`AllIssuesEmailer.gs`,
   `RmHierarchy.gs`, RM Performance/`DailyRmIssueLog.gs`): run
