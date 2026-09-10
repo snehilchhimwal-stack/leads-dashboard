@@ -198,19 +198,19 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Not Started | | | |
-| GS-002 | GS- | Core | `Core.gs` | Not Started | | | |
-| GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Not Started | | | |
-| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Not Started | | | |
-| GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Not Started | | | |
-| GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Not Started | | | |
-| GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Not Started | | | |
-| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Not Started | | | |
-| GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Not Started | | | |
-| GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Not Started | | | |
-| GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Not Started | | | |
-| GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Not Started | | | |
-| GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Not Started | | | |
+| GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | GS-002, GS-012, GS-005, GS-004, GS-008, GS-011, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, EXT-002 | none (scheduled leaf) | 2026-09-10 (`c82ec67`) |
+| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | GS-004 (`HEADER_ALIASES_`) | GS-001, GS-003, GS-005, GS-006, GS-008, GS-010, GS-011, GS-012, GS-013 | 2026-09-10 (`c82ec67`) |
+| GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-012, GS-004, GS-008, SHEET-001, SHEET-002, SHEET-003 | none (capture scheduled; leaderboard manual) | 2026-09-10 (`c82ec67`) |
+| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | GS-002, GS-011, SHEET-001, SHEET-006, SHEET-007, SHEET-012, EXT-002 | GS-001, GS-008, GS-010, GS-011, GS-003 | 2026-09-10 (`c82ec67`) |
+| GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | GS-012, GS-010, GS-001, GS-013, GS-006 | 2026-09-10 (`c82ec67`) |
+| GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-005, GS-004, SHEET-001, SHEET-009 | GS-008 (piggyback) | 2026-09-10 (`c82ec67`) |
+| GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none (manual setup utility) | 2026-09-10 (`c82ec67`) |
+| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-012, GS-004, GS-013, GS-006, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010 | GS-001, GS-010, GS-003, GS-009 | 2026-09-10 (`c82ec67`) |
+| GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Closed + Monitored | GS-011, GS-008, GS-004, SHEET-002, SHEET-006, SHEET-007, EXT-002 | none (scheduled leaf) | 2026-09-10 (`c82ec67`) |
+| GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | GS-002, GS-012, GS-005, GS-004, GS-008, GS-011, SHEET-001, SHEET-004, SHEET-006, SHEET-007, SHEET-012, EXT-002 | none (scheduled leaf) | 2026-09-10 (`c82ec67`) |
+| GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, SHEET-006, SHEET-007, SHEET-012 | GS-004, GS-001, GS-010, GS-009 | 2026-09-10 (`c82ec67`) |
+| GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Closed + Monitored | GS-002, GS-005 | GS-008, GS-010, GS-001, GS-003 | 2026-09-10 (`c82ec67`) |
+| GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Closed + Monitored | GS-002, GS-005, GS-004, SHEET-001, SHEET-010 | GS-008 (piggyback) | 2026-09-10 (`c82ec67`) |
 
 `RmHierarchy.private.gs` is **not** cataloged — gitignored, real employee
 emails, never in this repo (`DOC-007`).
@@ -227,8 +227,18 @@ emails, never in this repo (`DOC-007`).
 | SHEET-006 | SHEET- | RM_Hierarchy | Google Sheet | Not Started | | | |
 | SHEET-007 | SHEET- | Manager_Directory | Google Sheet | Not Started | | | |
 | SHEET-008 | SHEET- | Daily_Cohort_History | Google Sheet | Not Started | | | |
-| SHEET-009 | SHEET- | Interaction_History | Google Sheet | Not Started | | | |
+| SHEET-009 | SHEET- | Comment_History | Google Sheet | Not Started | | | |
 | SHEET-010 | SHEET- | Unmatched_Comments_Log | Google Sheet | Not Started | | | |
+| SHEET-011 | SHEET- | Send_Log | Google Sheet | Not Started | | | |
+| SHEET-012 | SHEET- | Region_Recipients | Google Sheet | Not Started | | | |
+| SHEET-013 | SHEET- | AllIssues_Log | Google Sheet | Not Started | | | |
+| SHEET-014 | SHEET- | Overnight_Log | Google Sheet | Not Started | | | |
+
+**Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
+`Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and
+`InteractionHistoryLogger.gs` `ensureCommentHistorySheet_`); `SHEET-011`..`014`
+added — the full 14-tab set matches `LOGIC_AUDIT.md` Part 1 §1's datastore
+list. `DOC-032` writes the base records; `DOC-036` fills lifecycle/retention.
 
 ### `EXT-` — external integrations (confirm exact set in `DOC-011` / `DOC-033`)
 
@@ -249,9 +259,9 @@ recorded in Phase 3.
 ## Coverage snapshot (auto-checkable target)
 
 - `JS-` records: 24 / 24 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-024` DOC-028)
-- `GS-` records: 0 / 13
+- `GS-` records: 13 / 13 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each)
 - `TAB-` records: 8 / 8 (DOC-026)
-- `SHEET-` records: 0 / ≥10 (count TBD, `DOC-010`)
+- `SHEET-` records: 0 / 14 (list confirmed against `LOGIC_AUDIT.md` Part 1 §1; base records = `DOC-032`)
 - `EXT-` records: 0 / 4
 - `DASH-` records: 1 / 1 (DOC-025)
 - **This matches `test/check-docs-coverage.js`'s current warn output** —
