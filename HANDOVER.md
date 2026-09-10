@@ -81,8 +81,13 @@ pairs.
 ## 2. Repository layout
 
 Deployed at `github.com/snehilchhimwal-stack/leads-dashboard` (GitHub Pages).
-Confirm the Pages source branch/folder under the repo's **Settings → Pages**
-— not re-verified in this doc.
+**Pages source (confirmed 2026-09-10, `t-tf-5ad22d8e4c2e`):** "Deploy from
+a branch" — branch **`master`**, folder **`/` (root)**. Evidence: the
+auto-generated `pages-build-deployment` workflow (`dynamic/pages/…`, the
+branch-deploy signature) runs green on `master`;
+`https://snehilchhimwal-stack.github.io/leads-dashboard/dashboard.html`,
+`/js/core-foundation.js` and `/HANDOVER.md` all return 200. There is **no
+`index.html`** — the entry URL is `…/leads-dashboard/dashboard.html`.
 
 | File | Role |
 |---|---|
@@ -278,6 +283,11 @@ re-running after an edit never leaves a duplicate):
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
 | `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 3 automatable checks. Sends every week regardless of outcome — see §8. |
+| `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). |
+| `setupLeadFollowupsStalenessFormatting()` | `LeadFollowupsStaleness.gs` | **No trigger** — applies the amber/red conditional formatting to `Lead_Followups` (a row 12h/24h stale on its `updated_at` column). Runs immediately; re-run only if the rule changes (`GS-007`, `LEAD_FOLLOWUPS_STALENESS.md`). |
+
+The **full, source-verified trigger set** (schedules, handlers, timezone
+pins) is `docs/architecture/apps-script-triggers.md`.
 
 None of these have a menu/`onOpen()` — they only run from the Apps Script
 editor's function dropdown (select the function name, click Run), by a human
@@ -310,9 +320,10 @@ Push access to `github.com/snehilchhimwal-stack/leads-dashboard` is needed to
 change `dashboard.html`/`js/*.js` (the deployed frontend) or to keep this
 repo's copies of the `.gs` files in sync with what's actually pasted into the
 Apps Script editor. Ask the current repo owner to add the new maintainer as
-a collaborator. Verify the GitHub Pages source (branch/folder) under this
-repo's **Settings → Pages** — not independently re-confirmed in this
-document.
+a collaborator. **GitHub Pages source: "Deploy from a branch", `master` / `/`
+(root)** — confirmed 2026-09-10 (see §2); a push to `master` that touches
+`dashboard.html` / `js/*.js` is live within a minute or two of the
+`pages-build-deployment` run finishing.
 
 ---
 
@@ -330,6 +341,15 @@ Beyond the leads tab itself (one fixed tab, named `leads` — see
 | `Unmatched_Comments_Log` | `UnmatchedCommentLogger.gs` (piggybacks on every `snapshotOpenLeads_` run) | Manual human review — the source for deciding what to add to `OUTCOME_RULES`/`OUTCOME_RULES_GS_` next |
 | `RM_Hierarchy`, `Manager_Directory` | `setupRmHierarchy()` (one-time, then manually maintained) | `RmHierarchy.gs`'s recipient routing |
 | `Daily_RM_Issues` | `DailyRmIssueLog.gs` (nightly, 22:50 IST) + its own backfill/repair utilities | `js/tab-repeat-offenders.js` (Repeat Offenders tab) — see §9 |
+| `Comment_History` | `InteractionHistoryLogger.gs` (piggybacks on every `snapshotOpenLeads_` run) | `InteractionHistoryLogger.gs` itself (within-run dedup); no dashboard reader — a forward-capture dataset |
+| `Send_Log` | `js/sheets-writeback.js` (fire-and-forget, after a dashboard region-email send) | no code reader — a send-audit trail (holds recipient/sender emails) |
+| `Region_Recipients` | manually / the dashboard's "Edit region recipients" UI (`js/reports-ui.js`, `localStorage` + this tab) | `EmailInfra.gs` recipient resolution |
+| `AllIssues_Log` | `AllIssuesEmailer.gs` (17:00 IST run) | `AllIssuesEmailer.gs` itself (within-run dedup) — a send-audit trail |
+| `Overnight_Log` | `OvernightEmailer.gs` (10:00 IST run) | `OvernightEmailer.gs`'s 13:00 follow-up run (same-day thread handoff) — older rows are dead weight |
+
+Full per-tab detail (columns, retention, sensitivity, every reader/writer)
+is in `docs/sheets/SHEET-001`..`SHEET-014`; this table is the onboarding
+overview.
 
 ---
 
@@ -346,9 +366,18 @@ one-line fix in one file is complete:
 | Concept | Browser | Apps Script |
 |---|---|---|
 | Row parsing / header aliases | `HEADER_ALIASES` (`js/core-sheets-fetch.js`) | `HEADER_ALIASES_` (`Core.gs`) |
-| Stage classification / SLA flags | `enrichLead()` (`js/core-lead-model.js`) | `computeSlaFlags_` (`SlaEngine.gs`) |
+| Stage / SLA-flag **config** (thresholds, `FUNNEL_ORDER`) | `CONFIG.*` (`js/core-foundation.js`) | `Core.gs` `FUNNEL_ORDER_` + `SlaEngine.gs` `*_` thresholds |
+| Stage / SLA-flag **logic** | `enrichLead()` (`js/core-lead-model.js`) | `computeSlaFlags_` (`SlaEngine.gs`) |
 | Comment classification | `OUTCOME_RULES` / `inferOutcome` (`js/core-outcome-engine.js`) | `OUTCOME_RULES_GS_` / `inferOutcomeGs_` (`FollowupEngine.gs`) |
-| Suggested follow-up text | `FOLLOWUP_SUGGESTIONS` | `FollowupEngine.gs` |
+| Suggested follow-up text | `FOLLOWUP_SUGGESTIONS` (`js/core-outcome-engine.js`) | `FOLLOWUP_SUGGESTIONS_GS_` (`FollowupEngine.gs`) |
+| Region normalization | `REGION_GROUP_MAP` / `mainRegionFor` (`js/reports-build.js`) | `REGION_GROUP_MAP_` / `mainRegionForGs_` (`EmailInfra.gs`) |
+| **Loan-region override** | `effectiveRegion` (`js/reports-build.js`) | **NO working twin** — a real HIGH finding (`LOGIC_AUDIT.md` Part 4 §4.4 / Part 7 §18; `docs/data-flows/DATA-005`). Loan leads can be mis-attributed on the `.gs` side. |
+| RM-performance tuning constants | `RM_PERF_*` (`js/core-rm-performance.js`) | `RM_PERF_*_GS_` (`DailyRmIssueLog.gs`) — must stay numerically identical |
+| IST day boundary | `istDateKey` (`js/core-foundation.js`) | `istDayKeyGs_` (`Core.gs`) |
+| Test-mode email override (must be `''` in prod) | `TEST_MODE_OVERRIDE_EMAIL` (`js/reports-ui.js`) | `TEST_MODE_OVERRIDE_EMAIL_` (`EmailInfra.gs`) |
+
+(This table mirrors `docs/RELATIONSHIP_MAP.md` §2, which carries the exact
+`CFG-`/`RULE-` sub-IDs and `LOGIC_AUDIT.md` Part 4 section for each pair.)
 
 A new comment pattern found via `Unmatched_Comments_Log` (§5) needs a keyword
 added to **both** `OUTCOME_RULES` (dashboard) and `OUTCOME_RULES_GS_`
@@ -387,7 +416,7 @@ coverage, and past gaps in this project were closed reactively (see git
 history around 2026-08-29) specifically because a change shipped without a
 matching test.
 
-### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (in CI, non-blocking)
+### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (in CI, blocking)
 
 The persisted browser-JS suite is **`tests/frontend-harness.html`** at the
 repo root. It grafts the real `dashboard.html` + every `js/*.js` file into
@@ -398,14 +427,14 @@ browser and read `window.__harnessResults` (or the on-page PASS/FAIL log).
 Re-run it after any dashboard-side change, and extend it — add the
 assertions in the same commit — rather than hand-verifying in the console.
 
-**In CI as of 2026-09-10** (`t-tf-5ad22d8e4c2e` P2): `.github/workflows/test.yml`
+**In CI as of 2026-09-10** (`t-tf-5ad22d8e4c2e`): `.github/workflows/test.yml`
 serves the repo over `http.server` and runs the harness headless via
 Playwright (`test/run-frontend-harness.mjs`) after the catalog checks —
-prints `N passed, M failed` and any failing assertions. **Non-blocking
-(`continue-on-error: true`)** for now: the harness has real timing
-assumptions and this is its first CI wiring; flip to blocking once it's
-proven stable over a few runs. Locally it still runs the same way — serve
-the repo (`preview_start` the "dashboard" config) and open the page.
+prints `N passed, M failed` and any failing assertions. **Blocking** —
+a real assertion failure fails the build. Only Playwright/browser
+*install* flakiness (npm/apt hiccup) warns-and-skips instead of failing.
+Locally it runs the same way — serve the repo (`preview_start` the
+"dashboard" config) and open the page.
 
 **Local preview in the meantime**: `dashboard.html` is a static file — any
 local static file server pointed at the repo root works

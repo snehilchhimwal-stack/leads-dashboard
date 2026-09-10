@@ -200,23 +200,27 @@ in `DOCUMENTATION_PROJECT_PLAN.md` and essentially unbuilt.
   `docs/changes/2026-09-10-build.md` + `docs/validation/README.md`;
   comment-change / pair-marker flag in check E + two new
   `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` checkboxes; `frontend-harness.html`
-  headless in CI (`run-frontend-harness.mjs`, non-blocking, green run
-  #83); `NAMING_CONVENTIONS.md` zero-instance + Sheet-formula note.
-- **P3 — DONE where doable** (`e4a51ca` + this commit): the deep
+  headless in CI; `NAMING_CONVENTIONS.md` zero-instance + Sheet-formula
+  note.
+- **P3 — DONE** (`e4a51ca`, `07124c5`, + this commit): the deep
   `HANDOVER.md` §9 sweep (C-5/C-6 resolved — §9.1/§9.3.1 rewritten,
   §9.4–§9.6 re-verified accurate); `goal_id` — the 5 `t-tf-*` catalog
-  follow-ups linked to `g-docproject01` (the `DOC-*`/`CI-*`/`TASKFLOW-*`
-  families were already linked; the audit's "Goal↔Task broken" was a
-  stale read); `_planning/task-to-component-map.md` (the reverse index);
+  follow-ups linked to `g-docproject01` (the `DOC-*`/`CI-*`/… families
+  were already linked; the audit's "Goal↔Task broken" was a stale read);
+  `_planning/task-to-component-map.md` (the reverse index);
   `HOW_TO_UPDATE_A_COMPONENT.md` step 8 (review signal);
-  `retention-decisions-needed.md` P3 appendix (copy-paste prune code for
-  the "if prune" branch). **Not doable by this project:** the 7 retention
-  `TBD`s (§B — owner + CRM-owner + compliance call, code sketch now
-  ready); `Owner:` distribution (§A — no team); flipping the two
-  non-blocking CI steps (premature — needs a few more clean runs +ideally
-  a real revalidation cycle to prove the habit); §5 tab-table / §6
-  pairs-list additions to `HANDOVER.md` + §4.2/§4.4 repo-settings
-  confirmation (`handover-coverage-map.md` items 5/6/9/10).
+  `retention-decisions-needed.md` P3 appendix (copy-paste prune code);
+  **frontend harness → blocking** (5 green runs, install-flakiness still
+  warns-and-skips); `HANDOVER.md` **§5** (5 tabs added), **§6** (all 10
+  cross-runtime pairs + the HIGH Loan finding), **§2 + §4.4** (Pages
+  source **confirmed** — `master` / `/` root, no `index.html`), **§4.3**
+  (`setupRmHierarchy()` + `setupLeadFollowupsStalenessFormatting()` rows
+  + a pointer to `apps-script-triggers.md`).
+  **Genuinely not doable by this project:** the 7 retention `TBD`
+  decisions (§B — owner + CRM-owner + compliance); `Owner:` distribution
+  (§A — no team). `check-catalog.py` D/E + `check-docs-coverage.js` stay
+  advisory/warn **by design** — `CATALOG_STRICT=1` is the hard-gate
+  switch for a team that wants it.
 
 ---
 

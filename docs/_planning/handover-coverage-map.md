@@ -149,25 +149,31 @@ Most items closed 2026-09-10 (`t-tf-7e4d0dffdf6c`, `t-tf-5ad22d8e4c2e`).
    against current source — **accurate, unchanged**.
 4. ~~**§2**~~ — **DONE** (`t-tf-7e4d0dffdf6c`): `rm-performance-worker.js`
    + the full 23-tag load order + the `new Worker()` note.
-5. **§5** — ⚠ partial: the `Movement_Log` "every 6h" cadence is fixed
-   (`t-tf-7e4d0dffdf6c`); adding `Send_Log` / `Region_Recipients` /
-   `AllIssues_Log` / `Overnight_Log` / `Comment_History` to the §5 tab
-   table is **still open** (they all have `SHEET-` records; §5 is a
-   convenience table).
-6. **§6** — ⚠ open: reconcile the duplication-pairs list against
-   `LOGIC_AUDIT.md` Part 4's full set (`REGION_GROUP_MAP` ↔ `_`, IST
-   helpers, `RM_PERF_*` ↔ `_GS_`). `RELATIONSHIP_MAP.md` §2 already has
-   the full set; §6 is the narrative copy.
+5. ~~**§5**~~ — **DONE** (`t-tf-5ad22d8e4c2e` P3): `Comment_History` /
+   `Send_Log` / `Region_Recipients` / `AllIssues_Log` / `Overnight_Log`
+   added to the §5 tab table (each with writer/reader); the
+   `Movement_Log` cadence was already fixed (`t-tf-7e4d0dffdf6c`). §5
+   now points at `docs/sheets/SHEET-001..014` for full detail.
+6. ~~**§6**~~ — **DONE** (`t-tf-5ad22d8e4c2e` P3): §6's table now carries
+   all 10 pairs (`CONFIG` ↔ `Core.gs`/`SlaEngine.gs`, `REGION_GROUP_MAP`
+   ↔ `_`, `FOLLOWUP_SUGGESTIONS` ↔ `_GS_`, `RM_PERF_*` ↔ `_GS_`, IST
+   helpers, `TEST_MODE_OVERRIDE_EMAIL` ↔ `_`, + the **HIGH** Loan-region
+   "no working twin" finding) and points at `RELATIONSHIP_MAP.md` §2 for
+   the `CFG-`/`RULE-` sub-IDs.
 7. ~~**§7.1 / §7.2**~~ — **DONE** (`t-tf-7e4d0dffdf6c` + P2): §7.1 Node CI
    harness; §7.2 now "in CI headless (non-blocking)".
 8. ~~**§1**~~ — **DONE** (`t-tf-7e4d0dffdf6c`): `OpsChecklistRunner.gs` +
    `LeadFollowupsStaleness.gs`, "13 production `.gs` files".
-9. **§4.2 / §4.4** — ⚠ open: GitHub Pages source branch/folder still not
-   independently confirmed (needs repo-settings access).
+9. ~~**§2 / §4.4**~~ — **DONE** (`t-tf-5ad22d8e4c2e` P3): GitHub Pages
+   source **confirmed** — "Deploy from a branch", `master` / `/` (root),
+   no `index.html`, entry URL `…/leads-dashboard/dashboard.html`.
+   Evidence: the `pages-build-deployment` (`dynamic/pages/…`) workflow on
+   `master` + live 200s for root/`js/`/`docs/` paths.
 10. **§4.3** — ⚠ open: confirm the one-time-setup table vs the actual
     `setup*()` set (`setupRmHierarchy()` has no own row).
     `architecture/apps-script-triggers.md` (P2) is the verified trigger
-    index — §4.3's setup table could point at it.
+    index — §4.3's setup table could point at it. (Low priority — the
+    trigger index already carries the authoritative version.)
 
 > These are **not** blockers on the Phase 3 records — every record's
 > `## Handover relationship` already states whether its section is

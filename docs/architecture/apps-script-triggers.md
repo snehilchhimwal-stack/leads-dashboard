@@ -22,7 +22,7 @@ Verified against source at `HEAD`, 2026-09-10.
 | 6 | `atHour(10).nearMinute(0).everyDays(1)` | `sendOvernightMorningEmails` (overnight region email) | `OvernightEmailer.gs` (`GS-010`) | `setupOvernightEmailer()` | **NO** — the sole outlier |
 | 7 | `atHour(13).nearMinute(0).everyDays(1)` | `sendOvernightFollowupEmails` (same-thread "what got resolved") | `OvernightEmailer.gs` (`GS-010`) | `setupOvernightEmailer()` | **NO** |
 | 8 | `atHour(ALL_ISSUES_RUN_HOUR_ = 17).nearMinute(0).everyDays(1)` | `sendAllIssuesEmails` | `AllIssuesEmailer.gs` (`GS-001`) | `setupAllIssuesEmailTrigger()` | **yes** |
-| 9 | `onWeekDay(MONDAY).atHour(9).nearMinute(0)` | `runWeeklyOpsChecklistNow` | `OpsChecklistRunner.gs` (`GS-009`) | `setupOpsChecklistRunner()` | **yes** |
+| 9 | `onWeekDay(MONDAY).atHour(9).nearMinute(0)` | `runWeeklyOpsChecklistNow` | `OpsChecklistRunner.gs` (`GS-009`) | `setupWeeklyOpsChecklistTrigger()` | **yes** |
 
 **No trigger of their own** (called only from other `.gs` or a one-time
 setup): `Core.gs` (`GS-002`), `EmailInfra.gs` (`GS-004`),

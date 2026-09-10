@@ -370,15 +370,18 @@ property holds by design but is violated in fact.
 > #76–#84). `test/check-catalog.py` (checks A–F) is the built detection
 > half; `FLOW-001/002` + `apps-script-triggers.md` + `docs/changes/` +
 > `docs/validation/` + `task-to-component-map.md` populate the gaps; the
-> frontend harness runs headless in CI (non-blocking); the deep
-> `HANDOVER.md` §9 sweep (C-5/C-6) is done; `HOW_TO_UPDATE` step 8 is the
-> review signal. **Genuinely remaining (not resolvable by this project):**
+> frontend harness runs headless in CI (**now blocking** after 5 green
+> runs); the deep `HANDOVER.md` §9 sweep (C-5/C-6) is done; `HOW_TO_UPDATE`
+> step 8 is the review signal; `HANDOVER.md` §5 (5 tabs added), §6 (all
+> 10 cross-runtime pairs), §2/§4.4 (Pages source **confirmed** — `master`
+> / root) done. **Genuinely remaining (not resolvable by this project):**
 > the human revalidation half (Change-Control steps 7–10, by design); CI
 > writing the revalidation task itself (CI can't reach `tasks.json`); the
 > **7 retention `TBD`s** (owner + CRM-owner + compliance call — prune code
-> now ready); `Owner:` distribution (no team); flipping the non-blocking
-> CI steps (needs a few more clean runs); a couple of `HANDOVER.md`
-> §5/§6 convenience-table additions.
+> now ready); `Owner:` distribution (no team). `check-catalog.py` D/E stay
+> advisory by design (`CATALOG_STRICT=1` for a team that wants the hard
+> gate); `check-docs-coverage.js` stays warn-only (moot — `check-catalog.py`
+> B is the blocking coverage check).
 
 **P0 — the loop does not exist without these**
 1. ~~`fetch-depth: 0` + **diff→ID resolver**~~ — **DONE**: `check-catalog.py`
@@ -429,10 +432,10 @@ property holds by design but is violated in fact.
     `check-catalog.py` E flags a changed line touching a cross-runtime
     pair marker; `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` gained the
     "read check-catalog E/D" and "did a comment go stale?" checkboxes.
-13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE (non-blocking)**:
+13. ~~Wire **`frontend-harness.html`** into CI~~ — **DONE, BLOCKING**:
     `test/run-frontend-harness.mjs` (Playwright headless) +
-    `.github/workflows/test.yml` step; green on CI run #83. Flip to
-    blocking once stable.
+    `.github/workflows/test.yml` step; green on CI runs #81, #83–#86, then
+    flipped to blocking (only browser-install flakiness warns-and-skips).
 14. ~~**Extend coverage** to `TAB-`/`SHEET-`/`EXT-`/`DATA-`~~ — **DONE**
     (was already `check-catalog.py` B — all 7 own-file types + `FLOW-`).
 15. ~~**`RANGE-`/`HTML-`/`CSS-`/`CLASS-` exclusion note** + Sheet-formula
@@ -462,10 +465,18 @@ property holds by design but is violated in fact.
 19. `Owner:` distribution — **no-action by design** (single-owner
     project; `OPEN_ITEMS.md` §A).
 
-**P3 — remaining (not blocking anything):** flip the two non-blocking CI
-steps once a few more clean runs + a real revalidation cycle prove the
-habit; `HANDOVER.md` §5 tab-table + §6 pairs-list additions; §4.2/§4.4
-GitHub Pages source confirmation (needs repo-settings access).
+**P3 — also done 2026-09-10:** frontend harness → **blocking** (5 green
+runs); `HANDOVER.md` §5 tab-table (5 tabs + a pointer to `SHEET-*`);
+§6 duplication-pairs list (all 10 pairs + the HIGH Loan finding);
+§2 + §4.4 **GitHub Pages source confirmed** — "Deploy from a branch",
+`master` / `/` (root), no `index.html`; §4.3 setup table gains
+`setupRmHierarchy()` + `setupLeadFollowupsStalenessFormatting()` + a
+pointer to `apps-script-triggers.md`.
+
+**P3 — genuinely remaining:** the 7 retention `TBD` decisions
+(owner-blocked); `Owner:` distribution (no team). `check-catalog.py` D/E
+and `check-docs-coverage.js` stay advisory/warn by design — a team that
+wants the hard gate sets `CATALOG_STRICT=1`.
 
 ---
 
