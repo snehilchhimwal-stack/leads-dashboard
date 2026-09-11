@@ -201,6 +201,52 @@ found and fixed in the same session it was found.
 
 ---
 
+## Round 2 remaining-gaps fixes (2026-09-11, same day) — 6 of 7 done
+
+The round-2 box above says "do not build more architecture" — these
+fixes don't; every one closes a gap round 2 already named and scoped,
+the same discipline as the original 10. Worked one at a time, each
+investigated for a real structural angle **before** any code was
+written — three (marked "narrowed" below) turned out to need a smaller
+fix than first scoped once actually tested; one (TEST 7) was
+investigated and found to have **no** reliable structural angle at all,
+and was left alone rather than forced.
+
+| # | Gap | Check | Status | Commit |
+|---|---|---|---|---|
+| 1 | TEST 18 — `-VerifyCatalogRepo` missed downstream-only drift citations | Check D extended | ✅ **DONE** — a component only reachable via check E's 2-hop walk, never itself directly drifted, is now flagged too; zero changes needed to `update-tasks.ps1` itself | `6fb75f1` |
+| 2 | TEST 14 — `LOGIC_AUDIT.md` immutability had zero code enforcement | New check J | ✅ **DONE** — compares the audit body (from the first `## Part N of M` heading onward) against its content at the cited final commit; header above that heading stays editable (2 real precedent edits exist) | `c97254c` |
+| 3 | TEST 19 — a fabricated retention value got zero signal | New check K | ✅ **DONE** — cross-checks `retention-decisions-needed.md`'s "needing a decision" list against each tab's own record; a consistency check, not a truth check | `8fc9bb5` |
+| 4 | TEST 9 — an untracked Sheet tab got zero signal | New check L | ✅ **DONE** — every real tab name is a top-level `const ..._SHEET_`/`..._TAB_NAME` constant; flags one with no matching `docs/sheets/` record | `b8f1a3c` |
+| 5 | TEST 8 — an untracked UI button got zero signal | New check M | ✅ **DONE**, narrowed to `<button id>` only — 5 of 26 real buttons are cited *descriptively* in their own record, not by literal id; search scope is `button-inventory.md` + every tabs/dashboards record together, not the owning record alone | `e177475` |
+| 6 | TEST 10 — an untracked exception path got zero signal | New check N | ✅ **DONE, deliberately PARTIAL** — most `EXC-` rows describe a *condition* with no matching literal in code at all (confirmed by inspection); only the 2 rows citing a literal thrown string are checkable. A brand-new exception with no `EXC-` row at all still gets zero signal — that half stays open by design | `b49c8da` |
+| 7 | TEST 13 — HANDOVER staleness was a pure calendar-date proxy | New check O | ✅ **DONE** — HANDOVER §2 makes one precise claim (the real `<script src>` load order for 14 of 23 files); compares it against `dashboard.html`'s actual tag order | `ba8ff03` |
+| — | TEST 7 — a plain comment contradicting the code beside it | *(none — deferred)* | ⏸ **Investigated, no clean structural fix exists.** This is the P0 finding itself (Fix #1's own deliberately-not-built territory), not a narrower slice of it — comments cite numbers/dates/other constants for too many unrelated reasons for a reliable regex signal. The one real fix (folding an LLM-assisted review into the existing recurring spot-check task) is genuinely heavier than every check above; set aside by explicit choice, not forgotten | — |
+
+**One real bug found and fixed along the way, unrelated to any single
+check above**: the shared `git()` helper had no explicit encoding, so
+`git show <sha>:<path>` decoded with the OS locale (cp1252 on the dev
+machine, not UTF-8) — a file containing a real UTF-8 character threw
+`UnicodeDecodeError`, silently caught and returned as `""`. Fixed with
+`encoding="utf-8", errors="replace"`, benefiting every caller of `git()`,
+not just check J (where it was found).
+
+**Automation matrix, updated again**: `check-catalog.py` now runs 15
+checks (A–O, up from the original 8 and round 2's 11) — 4 blocking, 11
+advisory. The single remaining automation-matrix FAIL from round 2
+(`sheet-template.md`'s TBD-enforcement) is unchanged — no fix was ever
+proposed for it, and it wasn't in scope for this pass either.
+
+**The honest read, again**: the verdict does not flip. TEST 7's general
+case — a plain comment silently contradicting the code beside it — still
+produces **literal zero signal**, and per the spec's own strict rule that
+alone is enough to keep the overall verdict at **FAIL**. What moved:
+every OTHER named test-8/9/10/13/14/18/19 finding from round 2 is now
+either fully or partially closed, each verified against a real fixture on
+a disposable branch, not assumed correct from the code alone.
+
+---
+
 ## B. Test results
 
 `Result` — PASS (control works as the spec expects) / PARTIAL (some
