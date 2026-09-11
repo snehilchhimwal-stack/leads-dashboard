@@ -123,9 +123,23 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      already-real documents haven't silently drifted apart, which is
      exactly the shape "a fabricated value" or "a resolved decision that
      never got folded back per DOC-037's own documented process" takes.
+  L. Sheet tab coverage                (ADVISORY)
+     (E2E acceptance test report round 2, TEST 9 -- an untracked Sheet
+     tab previously got zero signal). Deliberately narrower than "detect
+     any new UI element or exception path" (TEST 8/10, NOT attempted --
+     a Sheet tab name is a structural fact, "does this button deserve a
+     sub-table row" is a judgment call the original forensic audit
+     already flagged as needing real static analysis this project
+     declined to build). Every real Sheet tab name in this codebase is
+     declared as a top-level `const ..._SHEET_ = '<Name>'` /
+     `const ..._TAB_NAME = '<Name>'` constant (.gs and js/*.js both,
+     confirmed zero exceptions by inspection); every documented one is
+     named in its record's own `**Location** | Google Sheet, tab
+     `<Name>`` line. Flags a tab-name constant with no matching
+     docs/sheets/ record.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, and K only print.
-Flip D/E/G/H/I/J/K to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, and L only print.
+Flip D/E/G/H/I/J/K/L to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -943,6 +957,64 @@ def check_tbd_retention_consistency():
                    f"still honestly say TBD in their own record)")
     return out
 
+# ---------------------------------------------------------------- L
+# TEST 9, E2E acceptance test report round 2: an untracked Sheet tab (new
+# tab added, renamed, or removed) previously got zero signal -- BTN-/UI-/
+# EXC- sub-components were already known to be outside check B's file-
+# level scope (F10), but a whole new SHEET tab is arguably worse, since
+# check B's own coverage never claimed to reach sub-table content in the
+# first place. Deliberately narrower than "detect any new UI element or
+# exception path" (round-2 retest scoping discussion, TEST 8/10 are NOT
+# attempted here -- unlike a Sheet tab name, "does this button/exception
+# deserve its own sub-table row" is a judgment call, not a structural
+# fact, and the original forensic audit already flagged that class of
+# detection as needing real static analysis this project declined to
+# build). A Sheet tab name IS a structural fact: every real one in this
+# codebase is declared as a top-level `const ..._SHEET_ = '<Name>'` /
+# `const ..._TAB_NAME = '<Name>'` constant (confirmed by inspection —
+# zero exceptions across 19 real call sites, .gs and js/*.js both), and
+# every documented one is declared in its record's own
+# `**Location** | Google Sheet, tab `<Name>`` line -- both narrow,
+# reliable, grep-able patterns, unlike "which buttons matter."
+SHEET_TAB_CONST = re.compile(r"const [A-Za-z_]*(?:SHEET|TAB_NAME)[A-Za-z_]* = '([A-Za-z_]+)'")
+SHEET_RECORD_TAB = re.compile(r"\*\*Location\*\*\s*\|\s*Google Sheet, tab `([A-Za-z_]+)`")
+
+def _gs_and_js_files():
+    for fname in sorted(os.listdir(ROOT)):
+        if fname.endswith(".gs"):
+            yield fname
+    js_dir = os.path.join(ROOT, "js")
+    if os.path.isdir(js_dir):
+        for fname in sorted(os.listdir(js_dir)):
+            if fname.endswith(".js"):
+                yield os.path.join("js", fname)
+
+def check_sheet_tab_coverage():
+    referenced = {}  # tab name -> (path, line number) of its first const declaration
+    for rel in _gs_and_js_files():
+        path = os.path.join(ROOT, rel)
+        for i, line in enumerate(open(path, encoding="utf-8"), 1):
+            m = SHEET_TAB_CONST.search(line)
+            if m:
+                referenced.setdefault(m.group(1), (rel, i))
+    declared = set()
+    sheets_dir = os.path.join(ROOT, "docs", "sheets")
+    if os.path.isdir(sheets_dir):
+        for fname in sorted(os.listdir(sheets_dir)):
+            if not fname.endswith(".md"):
+                continue
+            text = open(os.path.join(sheets_dir, fname), encoding="utf-8").read()
+            declared |= set(SHEET_RECORD_TAB.findall(text))
+    out = []
+    for tab, (rel, ln) in sorted(referenced.items()):
+        if tab not in declared:
+            out.append(f"untracked Sheet tab: '{tab}' referenced in {rel}:{ln} "
+                       f"but no docs/sheets/ record declares it")
+    if not out:
+        out.append(f"({len(referenced)} Sheet tab name(s) referenced in code, "
+                   f"all declared in a docs/sheets/ record)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -972,7 +1044,8 @@ def main():
                       ("H. Owner / Evidence content", lambda r: check_owner_evidence()),
                       ("I. Cited-literal check", check_cited_literals),
                       ("J. LOGIC_AUDIT.md immutability", lambda r: check_logic_audit_immutability()),
-                      ("K. TBD retention consistency", lambda r: check_tbd_retention_consistency())]:
+                      ("K. TBD retention consistency", lambda r: check_tbd_retention_consistency()),
+                      ("L. Sheet tab coverage", lambda r: check_sheet_tab_coverage())]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
