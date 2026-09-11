@@ -3279,5 +3279,72 @@ place; not a historical record.
   against `lead_versions` — same answer, a more natural query, demonstrated
   concretely in Phase 4.
 
-*(Phase 3 complete. Continues in Phase 4 — historical reconstruction,
-with the user's own example timeline and real queries.)*
+*(Phase 3 complete.)*
+
+## Phase 4 — Historical Reconstruction
+
+Timeline for lead `C-2091` (continuing Phase 2's example), built on the
+real capture cadence — `SNAPSHOT_HOURS_ = [0,6,12,18]` IST plus the real
+22:50 nightly distillation — rather than the literal hourly example in
+the user's original brief, per the confirmed premise:
+
+| When | What happened | Records created |
+|---|---|---|
+| Day 1, 00:00 | Lead first captured — `stage=Suspect`, `RM=Priya` | `run_id=1` (completed); **`version_id=1`** (`valid_from=Day1 00:00, valid_to=NULL, first_seen_run_id=1, last_confirmed_run_id=1`); `leads_current_state` row created, `current_version_id=1` |
+| Day 1, 06:00 | No change | `run_id=2` (completed); **no new version** — `version_id=1.last_confirmed_run_id` updated to 2; `leads_current_state.last_seen_run_id` updated to 2 |
+| Day 1, 12:00 | `stage` changes: `Suspect` → `Prospect` | `run_id=3`; `version_id=1.valid_to` set to `Day1 12:00`; **`version_id=2`** created (`RM=Priya` unchanged, `stage=Prospect`, `valid_from=Day1 12:00, valid_to=NULL, first_seen_run_id=3, last_confirmed_run_id=3`); `leads_current_state.current_version_id` → 2 |
+| Day 1, 18:00 | No change | `run_id=4`; `version_id=2.last_confirmed_run_id` → 4 |
+| Day 1, 22:50 | Nightly distillation — lead is open and SLA-flagged | A `daily_issue_distillation`-equivalent row is written for tonight, **referencing `version_id=2`** (the version that was current at capture time) rather than re-copying its fields |
+| Day 2, 00:00 | No change | `run_id=5`; `version_id=2.last_confirmed_run_id` → 5 |
+| Day 2, 06:00 | `RM` changes: `Priya` → `Rahul` | `run_id=6`; `version_id=2.valid_to` set to `Day2 06:00`; **`version_id=3`** created (`RM=Rahul`, `stage=Prospect` unchanged, `valid_from=Day2 06:00, valid_to=NULL, first_seen_run_id=6, last_confirmed_run_id=6`); `leads_current_state.current_version_id` → 3 |
+| Day 2, 12:00 | No change | `run_id=7`; `version_id=3.last_confirmed_run_id` → 7 |
+
+**Totals across this span: 7 `lead_ingestion_runs` rows (tiny — one per
+capture, not per lead) and 3 `lead_versions` rows** — versus 7 full rows
+in the current `Movement_Log` design for the same 7 captures of this one
+lead. The reduction scales with how rarely a lead's tracked fields
+actually change, not with how often captures run.
+
+### Answering point-in-time questions
+
+**What was the lead's state at Day 1, 09:00** (between the 06:00 and
+12:00 captures)?
+
+```sql
+SELECT * FROM lead_versions
+WHERE lead_key = 'C-2091'
+  AND valid_from <= '2026-09-12 09:00:00'
+  AND (valid_to IS NULL OR valid_to > '2026-09-12 09:00:00');
+-- Returns version_id=1: stage=Suspect, RM=Priya
+```
+
+**What was the lead's state at Day 1, 15:00** (between 12:00 and 18:00,
+after the stage change)?
+
+Same query shape, `'2026-09-12 15:00:00'` — returns `version_id=2`
+(`stage=Prospect, RM=Priya`). This is the same at-or-before-a-timestamp
+logic `_evidenceAtDeadlineGs_`/`enrichLeadAsOf` already implement today
+against a flat snapshot list (Phase 1) — here it's a native range
+predicate instead of a linear scan.
+
+**What was captured by the 22:50 distillation?**
+
+```sql
+SELECT d.capture_date, d.issue_key, v.current_stage, v.rm_name
+FROM daily_issue_distillation d
+JOIN lead_versions v ON v.version_id = d.version_id
+WHERE d.lead_key = 'C-2091' AND d.capture_date = '2026-09-12';
+-- Returns: stage=Prospect, RM=Priya (version_id=2, the version current at 22:50)
+```
+
+**What was the state at Day 2, 03:00** (between 00:00 and 06:00, before
+the RM reassignment)?
+
+Same range query, `'2026-09-13 03:00:00'` — still `version_id=2`
+(`RM=Priya`) — the reassignment to `Rahul` hasn't happened yet at this
+instant, even though it's the very next capture. This is the case a
+naive "just read the latest row" approach would get wrong if it didn't
+respect `valid_to` correctly; the range predicate handles it for free.
+
+*(Phase 4 complete. Continues in Phase 5 — edge cases, reasoned against
+this schema concretely, not in the abstract.)*
