@@ -437,6 +437,16 @@ function runDailyRmIssueLogTests_() {
     ['Leader A1', 'Sourabh Sareen', 'Real RM'].forEach(function (rm) {
       for (let i = 1; i <= 6; i++) { days4.forEach(function (d) { rmPerfD.sheet.appendRow(rmPerfBadRow_(rmPerfD.header, 'D-' + rm.replace(/\s+/g, '') + '-L' + i, rm, d)); }); }
     });
+    // A compliant peer group -- WITHOUT this, 'Real RM' would be the ONLY
+    // participant left in the peer pool once Leader A1/Sourabh Sareen are
+    // correctly excluded, making its own violations BE the peer average
+    // (self-referential, so it could never classify as exceeding it) --
+    // exactly the pitfall this file's own Scenario A/B header comment
+    // above already names ("don't mix an intentionally-extreme test RM
+    // into a peer pool too small to absorb it"). Caught by this test
+    // itself failing against the real engine, not assumed correct going
+    // in -- see this fix's own commit message.
+    for (let i = 1; i <= 6; i++) { days4.forEach(function (d) { rmPerfD.sheet.appendRow(rmPerfCleanRow_(rmPerfD.header, 'D-GoodD-L' + i, 'Good D', d)); }); }
 
     const rmPerfDObservations = reconstructRmPerformanceObservationsGs_(rmPerfD.ss);
     TestAssertEqual_(rmPerfDObservations.filter(function (o) { return o.name === 'Leader A1'; }).length, 0, 'reconstructRmPerformanceObservationsGs_: a role-excluded leader (A1) produces zero observations');
