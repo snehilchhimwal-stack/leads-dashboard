@@ -2495,6 +2495,214 @@ the old manual-clear-button world required watching for.
 | New `api/`/`db/` components | *(not yet assigned)* | Recommend the same owner unless the business decides otherwise — flagged, not assumed |
 | Config-table edits (`people`, `regions`, `region_recipients`) | *(currently: whoever can edit the Sheet — no real restriction)* | Part 6 recommends a real admin role; who holds it is an open decision (above) |
 
-*(Part 10 complete. Continues in Part 11 — risks, unknowns, and the
-decisions this review could not make on its own — a fuller register
-than the handover-scoped list above.)*
+*(Part 10 complete.)*
+
+---
+
+## Part 11 — Risks, Unknowns & Decisions Required
+
+**Every item below is labeled** `FACT` (already confirmed, cited
+earlier in this review), `INFERENCE` (a reasonable reading of the
+evidence that hasn't been independently verified), or `OPEN QUESTION`
+(genuinely unanswerable from the data or code alone — a specific
+question is given). Nothing here is presented as settled that isn't.
+
+### Missing information
+
+- **`OPEN QUESTION`** Exact row counts for `Manager_Directory` and
+  `Region_Recipients`, and real daily-write volume for `Comment_History`
+  and `Unmatched_Comments_Log` — flagged `UNCONFIRMED` since Part 1,
+  needs the live Sheet (Part 8 Phase 1's first job).
+- **`OPEN QUESTION`** The real, current, complete list of operational
+  regions — needed to seed the new `regions` table, and not available
+  from docs or code (region normalization today lives in a code
+  *function*, `mainRegionForGs_`, with no stored list to read).
+- **`OPEN QUESTION`** Whether `RmHierarchy.gs`'s rebuild function
+  preserves hand-filled `Manager_Directory` email values or silently
+  overwrites them — raised repeatedly since Part 2 because it's this
+  review's single most consequential unverified fact; **must be tested
+  directly against the real function, not inferred, before any
+  migration work touches this table.**
+
+### Ambiguous columns
+
+- **`INFERENCE`** `Manager_Directory.roles` was classified "remove,
+  redundant with `people.role`" in Part 4 on the reasoning that the tab
+  is derived from the same source per row. This has **not** been
+  verified against live data for every row — if any manager's `roles`
+  value ever diverged from `RM_Hierarchy.role` for a real reason, that
+  reason is currently invisible to this review. Confirm before removing.
+- **`OPEN QUESTION`** `Manager_Directory.people_reporting_up_to_them` —
+  Part 2/4 recommended removing it as fully derivable from `RM_Hierarchy`'s
+  own chain columns, but explicitly flagged this as *pending
+  confirmation, not certain*. The actual question: **has this column
+  ever been hand-edited independently of a rebuild?** If yes, it carries
+  real information nowhere else in the system.
+- **`INFERENCE`** The five redundant `date` columns (Part 4) are assumed
+  to always equal the date-portion of their sibling timestamp column.
+  This was reasoned from the columns' documented *meaning*, not verified
+  row-by-row against live data — a historical row edited by hand, or
+  affected by a timezone edge case, could in principle disagree. Worth a
+  cheap live-data check during Phase 1 before treating the removal as
+  fully safe.
+
+### Unknown business rules
+
+- **`OPEN QUESTION`** Why 7 days specifically for `Movement_Log`/
+  `Daily_RM_Issues` — the cohort-window and leaderboard-reach reasoning
+  in Part 5 is this review's own inference from *usage*, not a stated
+  business rule anywhere in the existing documentation. If the real
+  reason was ever different (or arbitrary), 7 days may not be the right
+  number to carry forward unchanged.
+- **`OPEN QUESTION`** Whether `people.excluded` should ever mean
+  "exclude from ranking but still route to them" as two separate
+  concepts, rather than one combined flag as today. Not inferable from
+  the data; a real product question if it ever comes up.
+- **`OPEN QUESTION`** Whether regions were deliberately left informal
+  (no reference table, code-normalized) to allow ad hoc additions
+  without a deploy, or whether that was simply never built. This
+  materially affects how strict the new `regions` table's write access
+  should be.
+
+### Duplicate data
+
+- **`FACT`, now addressed** The `RM_Hierarchy`/`Manager_Directory`
+  person-data overlap and the `Send_Log`/`AllIssues_Log`/`Overnight_Log`
+  audit-log overlap are both resolved by this design's merges (Parts 2–3).
+- **`FACT`, explicitly NOT addressed, out of this review's scope** The
+  comment-classification keyword tables (`OUTCOME_RULES_GS_` in
+  `FollowupEngine.gs`, and its frontend twin `OUTCOME_RULES`) are two
+  independently-maintained copies of the same rule set today — Part 7
+  noted this must stay in sync but this review does not change it. A
+  real, pre-existing duplication risk, orthogonal to the database
+  migration.
+- **`FACT`, intentional and remaining by design** The denormalized
+  `rm_name`/`region_name` text on every snapshot/log table is technically
+  "duplicate" of the same fact stored once in `people`/`regions` — this
+  is the deliberate, justified exception from Part 2, not a leftover gap.
+
+### Potential data loss
+
+- The `Manager_Directory` rebuild-preserves-emails question (above) —
+  if unconfirmed and the answer is "no," hand-maintained routing
+  addresses are **already** at risk today, independent of any
+  migration.
+- The `people_reporting_up_to_them` removal (above) — real data loss if
+  it turns out to carry independent information.
+- **`OPEN QUESTION`** Free-text encoding fidelity for
+  `Comment_History`/`Unmatched_Comments_Log` — real RM comment text
+  likely contains non-ASCII characters (names, occasionally other
+  scripts); the migration's transformation step (Part 8, Phase 3) needs
+  an explicit encoding-preservation test, not an assumption that a
+  straight text copy is automatically safe.
+- Mitigated, not eliminated, by Part 8's reconciliation checks — those
+  checks exist specifically to catch this category of risk, not to
+  guarantee it away.
+
+### Referential-integrity problems
+
+- **`FACT`, addressed for current-state tables** Free-text `RM`/`region`
+  references with zero enforcement (Part 2's central finding) are fixed
+  with real FKs on `people`/`regions`/`region_recipients`.
+- **`FACT`, intentionally NOT addressed on snapshot/log tables** — worth
+  restating plainly so it isn't mistaken for an oversight: this is a
+  deliberate trade-off (historical accuracy over enforcement), not a
+  remaining gap.
+- **`FACT`, genuinely unresolved even in the target design**
+  `people.name` has no uniqueness constraint (Part 3) — a real name
+  collision remains possible and undetected by the schema itself. The
+  only real fix (a proper external employee-ID system) isn't something
+  this review can invent; flagged as an open question for the business
+  in the Approval Checkpoint.
+
+### Historical-data risks
+
+- **`OPEN QUESTION`, concrete recommendation attached** `daily_cohort_history`'s
+  immutability (once `window_complete`) is enforced only at the
+  application layer today (Part 3 already noted the schema alone can't
+  express it). **Recommend: if the chosen database engine supports it,
+  add a real trigger/constraint blocking any `UPDATE` to an already-complete
+  row** — turning an application convention into a database guarantee.
+  Not designed in detail here since it depends on the still-unchosen
+  engine (Part 6).
+- **`OPEN QUESTION`** The real size of the Phase 4 historical load for
+  `comment_history` (accumulating since 2026-09-05, no cited volume) is
+  unknown — a real migration-sizing gap to close in Phase 1, not a
+  correctness risk, but worth planning for before assuming the migration
+  is "small."
+
+### Performance risks
+
+- The new API layer becomes the single read/write path for all 13
+  tables — a genuine new chokepoint that didn't exist when the browser
+  talked to the Sheets API directly. Partially mitigated by the fact
+  that the busiest read path (`js/core-*.js`'s `fetchMovementLog` hub,
+  Part 7) is *already* a single shared read point in the current code,
+  so this isn't a brand-new architectural shape, just a new backend
+  behind an existing good pattern.
+- The `overnight_10h` channel's 13:00 functional lookup (repeated here
+  because it is the one place a performance regression has a direct,
+  customer-visible consequence, not just a slow page load) must be
+  proven fast under the new design before cutover, not assumed fast
+  because the index exists on paper.
+- **`OPEN QUESTION`** No current query-latency baseline exists for
+  today's Sheets-based reads — Phase 6's validation has nothing
+  numeric to compare against unless one is captured during Phase 1.
+  Recommend timing the real dashboard's key loads before migration
+  starts, specifically so "is the new system fast enough" has a real
+  answer instead of a subjective one.
+
+### Security risks
+
+- **PII surface, unchanged in kind but newly centralized:** `people.email`,
+  `region_recipients` addresses, `email_sends.to`/`cc`/`sent_by`, and
+  the free-text comment tables all carry real personal data. Today
+  access control is "anyone with Sheet edit access"; the target
+  design's actual roles are still undefined (Part 6/10's open decision)
+  — **until that's resolved, cutover should not proceed**, since an
+  under-specified API could plausibly expose this data *more* broadly
+  than today's Google-account-gated Sheet, not less.
+- `RmHierarchy.private.gs` (real employee emails) is deliberately
+  `.gitignore`'d today. **Recommend an explicit check** (a real
+  incarnation of this project's own `check-catalog.py` discipline) that
+  no database seed/migration script under version control ever embeds a
+  real employee email — a plausible, easy mistake during Phase 3/4's
+  data transformation work otherwise.
+- The API authentication scheme itself (Part 7's cross-cutting item) is
+  still undesigned. This is a security risk in its own right until it's
+  designed and reviewed, not merely an outstanding engineering task.
+
+### Single points of failure
+
+- The new API layer is a SPOF for all 13 tables — the direct trade for
+  removing Sheets-specific risk. Its own uptime/redundancy needs
+  consideration proportional to what it now carries (every scheduled
+  email, every dashboard read).
+- **`FACT`, pre-existing, unrelated to migration** `RmHierarchy.private.gs`'s
+  permanent absence already means email routing silently degrades to a
+  generic fallback today (a confirmed "soft-degrade," not new).
+- **`FACT`** Single ownership — one person owns this entire system today.
+  A real organizational SPOF this review has no basis or authority to
+  resolve, named here because Part 12's final recommendation would be
+  incomplete without acknowledging it.
+
+### Manual processes that should be automated
+
+- `RM_HIERARCHY_RAW_`'s rebuild step — **addressed**, retired by this
+  design (Part 6).
+- The three manual clear buttons — **partially addressed**: `SLA_History`/
+  `Daily_Cohort_History`'s clears are superseded by Part 5's real
+  retention jobs; `Unmatched_Comments_Log`'s clear-after-review stays
+  manual **by design** (a human decision is the correct trigger, not a
+  gap).
+- The weekly Ops Checklist remains a manual run — not addressed by this
+  review, flagged only as a plausible future automation target (Part
+  15's P3 tier), not a requirement.
+- `Manager_Directory`'s hand-filled email is inherently a manual entry
+  (a human knows a manager's real address) — not something to automate
+  away; what *was* missing was a history of those manual edits, which
+  `config_audit_log` (Part 6) now provides.
+
+*(Part 11 complete. Continues in Part 12 — the executive summary,
+prioritized implementation roadmap, and the final Approval Checkpoint,
+assembling everything above into the report's final form.)*
