@@ -360,6 +360,260 @@ function runMovementTrackerTests_() {
     try { checkMovementLogFreshnessNow(); } catch (e) { freshnessNowThrew = e; }
     SpreadsheetApp = freshnessRealSpreadsheetApp;
     TestAssertEqual_(freshnessNowThrew, null, 'checkMovementLogFreshnessNow: the console wrapper runs without throwing');
+
+    // =====================================================================
+    // Phase 7 of the Lead History & Versioning Review
+    // (docs/_planning/DB_ARCHITECTURE_REVIEW.md) — real E2E validation of
+    // Phase 6's content-hash dedup, run against a fresh, self-contained
+    // spreadsheet across 4 sequential real captures. Covers every scenario
+    // named in that phase's own checklist: new lead creation (L-NEW),
+    // repeated no-change capture (L-STABLE), a single field change
+    // (L-ONECHANGE), multiple fields changing together in ONE capture
+    // (L-MULTICHANGE), changes spread across SEVERAL captures in
+    // DIFFERENT fields (L-REPEATCHANGE), a lead disappearing from the live
+    // tab (L-VANISH), and an exact-retry capture (idempotency). Real,
+    // hand-verified row counts are asserted below, not assumed.
+    //
+    // snapshotOpenLeads_ stamps every row with the REAL wall clock
+    // (`new Date()`, not injectable — see this file's own pruneMovementLog_
+    // test comment on why), and Utilities.sleep is a no-op in this test
+    // harness (Tests_Mocks.gs), so back-to-back calls here could otherwise
+    // tie on the same millisecond and make the "latest by key" comparisons
+    // this whole dedup mechanism depends on (`_latestContentHashByKeyGs_`,
+    // `_collapseLatestByKeyGs_`, both strict > / >= on a Date's getTime())
+    // non-deterministic. p7Tick_ below busy-waits on the REAL clock (not
+    // Utilities.sleep) to force each checkpoint onto its own millisecond —
+    // a real production run never needs this (captures are minutes/hours
+    // apart, scheduled 4x/day — see SNAPSHOT_HOURS_), so this is a
+    // test-harness-only concern, not a production gap.
+    // =====================================================================
+    function p7Tick_() {
+      const t0 = Date.now();
+      while (Date.now() === t0) { /* busy-wait for the real clock to advance by >=1ms */ }
+    }
+
+    const p7Now = new Date();
+    const p7Header = TestFixture_leadsHeader_();
+    const p7Banner = p7Header.map(function () { return ''; });
+    function p7LeadRow(overrides) {
+      const defaults = {
+        lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM One', TL: 'Test A1 One', project: 'P', region: 'Test Region',
+        client: 'Client', lead_assigned_at: p7Now, group_source: 'google', source_bucket: 'Non-UTM',
+        current_stage: 'Suspect', rm_is_active: true, call_attempts: 1,
+      };
+      const merged = Object.assign({}, defaults, overrides || {});
+      return p7Header.map(function (k) { return merged[k] !== undefined ? merged[k] : ''; });
+    }
+    // Direct raw-row reconstruction, mirroring _latestContentHashByKeyGs_'s
+    // own key logic (client_id, falling back to 'l:'+lead_id) — deliberately
+    // NOT going through lastSnapshotBeforeGs_/buildMovementLogMapsGs_, since
+    // those production helpers only ever collapse to {atMs, call_attempts}
+    // (see _readMovementLogRowsGs_'s own column selection) — no existing
+    // helper reconstructs an arbitrary field like current_stage as of a
+    // past point in time. That's a real, honest gap to note in Phase 7's
+    // findings, not something to paper over here: the raw data needed for
+    // full-field reconstruction is genuinely present in Movement_Log (this
+    // helper proves it), but nothing in production code wraps it yet.
+    function p7StageAsOfGs_(ss, key, beforeMs) {
+      const sheet = ss.getSheetByName('Movement_Log');
+      if (!sheet || sheet.getLastRow() < 2) return null;
+      const lastCol = sheet.getLastColumn();
+      const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+      const snapAtCol = headers.indexOf('snapshot_at');
+      const leadIdCol = headers.indexOf('lead_id');
+      const clientIdCol = headers.indexOf('client_id');
+      const stageCol = headers.indexOf('current_stage');
+      const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
+      let best = null;
+      rows.forEach(function (row) {
+        const ts = row[snapAtCol];
+        if (!(ts instanceof Date) || ts.getTime() >= beforeMs) return;
+        const rowKey = String(row[clientIdCol] || '').trim() || ('l:' + String(row[leadIdCol] || '').trim());
+        if (rowKey !== key) return;
+        if (!best || ts.getTime() > best.atMs) best = { atMs: ts.getTime(), stage: row[stageCol] };
+      });
+      return best ? best.stage : null;
+    }
+
+    const phase7Ss = TestMockSpreadsheet_({});
+    const p7RealSpreadsheetApp = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return phase7Ss; }, flush: function () {} };
+    try {
+      // ---- Capture 1: L-STABLE, L-ONECHANGE, L-MULTICHANGE,
+      // L-REPEATCHANGE, L-VANISH all present for the first time — every
+      // one of them must write (no prior hash exists yet). L-NEW is
+      // deliberately absent (the "new lead created mid-sequence" case). ----
+      const p7Capture1Rows = [p7Banner, p7Header,
+        p7LeadRow({ lead_id: 'L-STABLE', client_id: 'C-STABLE', call_attempts: 2 }),
+        p7LeadRow({ lead_id: 'L-ONECHANGE', client_id: 'C-ONECHANGE', lead_assigned_at: TestFixture_hoursAgo_(p7Now, 60), current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-MULTICHANGE', client_id: 'C-MULTICHANGE', current_stage: 'Suspect', RM: 'Test RM One' }),
+        p7LeadRow({ lead_id: 'L-REPEATCHANGE', client_id: 'C-REPEATCHANGE', call_attempts: 1, current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-VANISH', client_id: 'C-VANISH', current_stage: 'Suspect' }),
+      ];
+      phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture1Rows);
+      p7Tick_();
+      snapshotOpenLeads_('phase7 capture 1 of 4 — initial');
+      const p7Log = phase7Ss.getSheetByName('Movement_Log');
+      const p7Runs = phase7Ss.getSheetByName('Movement_Log_Runs');
+      TestAssertEqual_(p7Log.getLastRow(), 1 + 5, 'Phase 7 capture 1: 5 leads, all first-seen -> 5 new Movement_Log rows (header + 5)');
+      TestAssertEqual_(p7Runs.getLastRow(), 1 + 1, 'Phase 7 capture 1: Movement_Log_Runs gets its first row (header + 1)');
+      let p7RunRow = p7Runs.getRange(2, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssertEqual_(p7RunRow[2], 5, 'Phase 7 capture 1: lead_count_seen = 5');
+      TestAssertEqual_(p7RunRow[3], 5, 'Phase 7 capture 1: leads_changed = 5 (every lead is new)');
+
+      // ---- Capture 2: L-NEW appears for the first time; L-REPEATCHANGE's
+      // call_attempts changes (1 -> 3); L-VANISH is still present and
+      // unchanged; every other lead is unchanged. ----
+      p7Tick_();
+      const p7Capture2Rows = [p7Banner, p7Header,
+        p7LeadRow({ lead_id: 'L-STABLE', client_id: 'C-STABLE', call_attempts: 2 }),
+        p7LeadRow({ lead_id: 'L-ONECHANGE', client_id: 'C-ONECHANGE', lead_assigned_at: TestFixture_hoursAgo_(p7Now, 60), current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-MULTICHANGE', client_id: 'C-MULTICHANGE', current_stage: 'Suspect', RM: 'Test RM One' }),
+        p7LeadRow({ lead_id: 'L-REPEATCHANGE', client_id: 'C-REPEATCHANGE', call_attempts: 3, current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-VANISH', client_id: 'C-VANISH', current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-NEW', client_id: 'C-NEW', call_attempts: 5, current_stage: 'Suspect' }),
+      ];
+      phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture2Rows);
+      snapshotOpenLeads_('phase7 capture 2 of 4 — L-NEW appears, L-REPEATCHANGE.call_attempts changes');
+      TestAssertEqual_(p7Log.getLastRow(), 1 + 7, 'Phase 7 capture 2: only L-NEW (new) and L-REPEATCHANGE (real change) write -> 2 new rows (header + 7 total)');
+      TestAssertEqual_(p7Runs.getLastRow(), 1 + 2, 'Phase 7 capture 2: Movement_Log_Runs gets a 2nd row');
+      p7RunRow = p7Runs.getRange(3, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssertEqual_(p7RunRow[2], 6, 'Phase 7 capture 2: lead_count_seen = 6 (L-NEW added)');
+      TestAssertEqual_(p7RunRow[3], 2, 'Phase 7 capture 2: leads_changed = 2 (L-NEW + L-REPEATCHANGE) — L-STABLE/L-ONECHANGE/L-MULTICHANGE/L-VANISH correctly produced ZERO new rows');
+
+      // ---- Point-in-time reconstruction, strictly BETWEEN captures 2 and
+      // 3 — proves the dedup-aware "latest before T" walk finds the real
+      // latest applicable row even though most leads only have ONE row in
+      // Movement_Log at this point (their capture-1 row, never rewritten
+      // since nothing changed), while L-REPEATCHANGE and L-NEW correctly
+      // resolve to their capture-2 rows. ----
+      p7Tick_();
+      const p7TBefore3 = new Date();
+      p7Tick_();
+
+      const p7Recon = lastSnapshotBeforeGs_(phase7Ss, p7TBefore3);
+      TestAssertEqual_(p7Recon['C-REPEATCHANGE'].call_attempts, 3, 'Phase 7 reconstruction (before capture 3): L-REPEATCHANGE.call_attempts correctly resolves to its capture-2 value (3), not the stale capture-1 value (1) — proves lastSnapshotBeforeGs_ walks past the dedup gaps correctly');
+      TestAssertEqual_(p7Recon['C-STABLE'].call_attempts, 2, 'Phase 7 reconstruction (before capture 3): L-STABLE resolves to its ONLY row (capture 1) even though 2 captures have happened since — dedup did not lose or corrupt it');
+      TestAssertEqual_(p7Recon['C-NEW'].call_attempts, 5, 'Phase 7 reconstruction (before capture 3): L-NEW (created at capture 2) is already reconstructable, one capture after it first appeared');
+      TestAssertEqual_(p7Recon['C-VANISH'].call_attempts, 1, 'Phase 7 reconstruction (before capture 3): L-VANISH resolves to its capture-1 row (its only row so far, still 2 captures before it disappears)');
+
+      const p7StageBefore3Repeat = p7StageAsOfGs_(phase7Ss, 'C-REPEATCHANGE', p7TBefore3.getTime());
+      TestAssertEqual_(p7StageBefore3Repeat, 'Suspect', 'Phase 7 reconstruction (before capture 3, raw current_stage): L-REPEATCHANGE was still "Suspect" at this point — its call_attempts had changed (capture 2) but current_stage had not yet (that happens at capture 3)');
+      const p7StageBefore3OneChange = p7StageAsOfGs_(phase7Ss, 'C-ONECHANGE', p7TBefore3.getTime());
+      TestAssertEqual_(p7StageBefore3OneChange, 'Suspect', 'Phase 7 reconstruction (before capture 3, raw current_stage): L-ONECHANGE has not changed yet');
+
+      // ---- Capture 3: L-ONECHANGE's current_stage changes (Suspect ->
+      // Prospect); L-MULTICHANGE's current_stage AND RM change TOGETHER in
+      // this one capture (Suspect/Test RM One -> Opportunity/Test RM Two);
+      // L-REPEATCHANGE's current_stage ALSO changes now (Suspect ->
+      // Prospect, its SECOND real change, in a DIFFERENT field from
+      // capture 2's), carrying its already-changed call_attempts=3 forward
+      // in the same row (a written row is always the lead's FULL current
+      // state, not a delta); L-VANISH is entirely removed from the live
+      // tab (the "lead disappeared" case — no explicit deletion concept
+      // exists in this system, a lead simply stops appearing). ----
+      const p7Capture3Rows = [p7Banner, p7Header,
+        p7LeadRow({ lead_id: 'L-NEW', client_id: 'C-NEW', call_attempts: 5, current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-STABLE', client_id: 'C-STABLE', call_attempts: 2 }),
+        p7LeadRow({ lead_id: 'L-ONECHANGE', client_id: 'C-ONECHANGE', lead_assigned_at: TestFixture_hoursAgo_(p7Now, 60), current_stage: 'Prospect' }),
+        p7LeadRow({ lead_id: 'L-MULTICHANGE', client_id: 'C-MULTICHANGE', current_stage: 'Opportunity', RM: 'Test RM Two' }),
+        p7LeadRow({ lead_id: 'L-REPEATCHANGE', client_id: 'C-REPEATCHANGE', call_attempts: 3, current_stage: 'Prospect' }),
+      ];
+      phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture3Rows);
+      snapshotOpenLeads_('phase7 capture 3 of 4 — L-ONECHANGE/L-MULTICHANGE/L-REPEATCHANGE change, L-VANISH disappears');
+      TestAssertEqual_(p7Log.getLastRow(), 1 + 10, 'Phase 7 capture 3: L-ONECHANGE, L-MULTICHANGE, L-REPEATCHANGE each write exactly ONE new row -> 3 new rows (header + 10 total); L-VANISH\'s absence writes nothing (it simply is not in dataRows)');
+      TestAssertEqual_(p7Runs.getLastRow(), 1 + 3, 'Phase 7 capture 3: Movement_Log_Runs gets a 3rd row');
+      p7RunRow = p7Runs.getRange(4, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssertEqual_(p7RunRow[2], 5, 'Phase 7 capture 3: lead_count_seen = 5 (L-VANISH no longer counted at all, not even as "seen but unchanged")');
+      TestAssertEqual_(p7RunRow[3], 3, 'Phase 7 capture 3: leads_changed = 3');
+
+      const p7MultiRow = p7Log.getRange(1 + 10, 1, 1, p7Log.getLastColumn()).getValues()[0];
+      const p7StageColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('current_stage');
+      const p7RmColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('RM');
+      TestAssertEqual_(p7MultiRow[p7StageColIdx], 'Prospect', 'Phase 7 capture 3: newest row is L-REPEATCHANGE, carrying its current_stage change');
+      const p7MultiChangeRowValues = p7Log.getRange(1 + 9, 1, 1, p7Log.getLastColumn()).getValues()[0];
+      TestAssertEqual_(p7MultiChangeRowValues[p7StageColIdx], 'Opportunity', 'Phase 7 capture 3 (multi-field): L-MULTICHANGE\'s single new row carries the NEW current_stage');
+      TestAssertEqual_(p7MultiChangeRowValues[p7RmColIdx], 'Test RM Two', 'Phase 7 capture 3 (multi-field): the SAME row also carries the NEW RM — both fields changed together landed in exactly one row, not two separate partial-update rows');
+
+      // ---- Capture 4: an EXACT retry of capture 3's live-tab state (the
+      // duplicate-ingestion / idempotency case — the closest proxy this
+      // synchronous, single-threaded headless harness can offer for "the
+      // scheduled trigger and the browser button firing back-to-back";
+      // TRUE concurrent execution cannot be exercised here at all, since
+      // neither Apps Script's real execution model nor this test harness
+      // supports genuine parallelism — noted honestly rather than claimed). ----
+      p7Tick_();
+      const p7Capture4Rows = [p7Banner, p7Header,
+        p7LeadRow({ lead_id: 'L-NEW', client_id: 'C-NEW', call_attempts: 5, current_stage: 'Suspect' }),
+        p7LeadRow({ lead_id: 'L-STABLE', client_id: 'C-STABLE', call_attempts: 2 }),
+        p7LeadRow({ lead_id: 'L-ONECHANGE', client_id: 'C-ONECHANGE', lead_assigned_at: TestFixture_hoursAgo_(p7Now, 60), current_stage: 'Prospect' }),
+        p7LeadRow({ lead_id: 'L-MULTICHANGE', client_id: 'C-MULTICHANGE', current_stage: 'Opportunity', RM: 'Test RM Two' }),
+        p7LeadRow({ lead_id: 'L-REPEATCHANGE', client_id: 'C-REPEATCHANGE', call_attempts: 3, current_stage: 'Prospect' }),
+      ];
+      phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture4Rows);
+      snapshotOpenLeads_('phase7 capture 4 of 4 — exact retry / idempotency');
+      TestAssertEqual_(p7Log.getLastRow(), 1 + 10, 'Phase 7 capture 4 (retry): Movement_Log is UNCHANGED — still header + 10, zero duplicate rows from the identical retry');
+      TestAssertEqual_(p7Runs.getLastRow(), 1 + 4, 'Phase 7 capture 4 (retry): Movement_Log_Runs still gets a 4th row — "a run happened" is recorded even though it was a no-op retry. NOTE (real, acknowledged gap vs. the Phase 3 target schema): this Sheets implementation does NOT deduplicate the run record itself via an idempotency_key the way lead_ingestion_runs.idempotency_key would — a genuinely duplicate trigger fire records 2 run rows here, not 1. Left as-is for this pass; not a regression from Phase 6, just an honest limit of what Sheets/Apps Script can enforce without a real unique constraint.');
+      p7RunRow = p7Runs.getRange(5, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssertEqual_(p7RunRow[2], 5, 'Phase 7 capture 4 (retry): lead_count_seen = 5, same as capture 3');
+      TestAssertEqual_(p7RunRow[3], 0, 'Phase 7 capture 4 (retry): leads_changed = 0 — every lead in this run is bit-for-bit identical to its own latest known state, confirming the retry/idempotency case genuinely writes nothing new');
+
+      // ---- Real row-count comparison (Phase 7's own measured numbers,
+      // not the earlier illustrative examples from Phases 2/4): this exact
+      // 4-capture, 6-lead scenario wrote 10 real Movement_Log data rows.
+      // The OLD (pre-Phase-6) one-row-per-lead-per-capture behavior —
+      // still exactly what Tests_MovementTracker.gs's own capture-1-style
+      // assertions checked before Phase 6 — would have written
+      // 5 + 6 + 5 + 5 = 21 rows for the same 4 captures (hand-computed
+      // from this test's own known per-capture lead counts, not measured
+      // against a second code path, since the old behavior no longer
+      // exists to run side by side). A ~52% reduction for THIS specific
+      // synthetic scenario — explicitly not a universal claim; the real
+      // reduction on production data depends entirely on how often leads
+      // actually change between captures. ----
+      TestAssertEqual_(p7Log.getLastRow() - 1, 10, 'Phase 7: final measured Movement_Log row count for this scenario is 10 (vs. 21 under the pre-Phase-6 undeduped behavior, hand-computed from the same 5+6+5+5 per-capture lead counts asserted above)');
+
+      // ---- L-VANISH: its last known state must remain reconstructable
+      // after it disappears — a "vanished"/inactive lead's Movement_Log
+      // history is never deleted, only no longer added to. ----
+      const p7FarFuture = new Date(p7Now.getTime() + 365 * 86400000);
+      const p7VanishFinal = lastSnapshotBeforeGs_(phase7Ss, p7FarFuture);
+      TestAssert_(!!p7VanishFinal['C-VANISH'], 'Phase 7 (vanished lead): L-VANISH is STILL reconstructable after captures 3 and 4, even though it no longer appears in the live leads tab at all');
+      TestAssertEqual_(p7VanishFinal['C-VANISH'].call_attempts, 1, 'Phase 7 (vanished lead): its last known call_attempts (from capture 1/2, its only real data) is preserved correctly, unchanged by later captures it was never part of');
+      const p7VanishStage = p7StageAsOfGs_(phase7Ss, 'C-VANISH', p7FarFuture.getTime());
+      TestAssertEqual_(p7VanishStage, 'Suspect', 'Phase 7 (vanished lead): its last known current_stage is also still correctly reconstructable from the raw Movement_Log rows');
+
+      // ---- Nightly distillation (captureDailyRmIssues_, DailyRmIssueLog.gs)
+      // against this SAME post-dedup spreadsheet — confirms it is genuinely
+      // unaffected: it reads the LIVE leads tab directly (not Movement_Log)
+      // for lead data, and only touches Movement_Log via
+      // buildMovementLogMapsGs_ (already independently verified above, and
+      // cross-checked earlier in this file to match
+      // buildTodayCallBaselineGs_/lastSnapshotBeforeGs_'s own separate
+      // results exactly). L-ONECHANGE was deliberately built with the same
+      // "60 hours since assignment, never connected" recipe this project's
+      // own Tests_DailyRmIssueLog.gs uses for its ground-truth flagged
+      // fixture, so this is a real assertion, not just "did not throw". ----
+      const p7ColIndex = buildColIndex_(p7Header);
+      const p7OneChangeRow = p7Capture4Rows[p7Capture4Rows.length - 3]; // L-ONECHANGE's row in capture 4's fixture
+      const p7ExpectedFlags = computeSlaFlags_(p7OneChangeRow, p7ColIndex, new Date(), {});
+      const p7ExpectedIssue = primaryIssueGs_(p7ExpectedFlags);
+      TestAssert_(!!p7ExpectedIssue, 'Phase 7 sanity: L-ONECHANGE\'s final state really is flagged for something, otherwise the distillation check below proves nothing');
+
+      let p7DistillationThrew = null;
+      try {
+        captureDailyRmIssuesNow();
+      } catch (e) {
+        p7DistillationThrew = e;
+      }
+      TestAssertEqual_(p7DistillationThrew, null, 'Phase 7 (nightly distillation): captureDailyRmIssues_ runs to completion against a dedup-affected Movement_Log without throwing');
+      const p7DrilSheet = phase7Ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
+      TestAssert_(!!p7DrilSheet && p7DrilSheet.getLastRow() >= 2, 'Phase 7 (nightly distillation): Daily_RM_Issues gets at least one real row — L-ONECHANGE\'s flagged state was correctly captured from the LIVE leads tab');
+      const p7DrilRows = p7DrilSheet.getRange(2, 1, p7DrilSheet.getLastRow() - 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
+      TestAssert_(p7DrilRows.some(function (r) { return r[4] === 'L-ONECHANGE'; }), 'Phase 7 (nightly distillation): L-ONECHANGE specifically appears in tonight\'s Daily_RM_Issues capture');
+    } finally {
+      SpreadsheetApp = p7RealSpreadsheetApp;
+    }
   } finally {
     TestEnv_tearDown_();
   }
