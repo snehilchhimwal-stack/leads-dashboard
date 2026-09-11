@@ -52,7 +52,7 @@ email flags any blank `email`.
 | `people_reporting_up_to_them` | text | the RMs in their bucket |
 | `email_source` | text | `private_file` / `manual` / `` |
 
-Exact header: `RmHierarchy.gs` `#L826`
+Exact header: `RmHierarchy.gs` `#L824`
 (`['manager_name','roles','regions','email','people_reporting_up_to_them','email_source']`).
 
 ## Writers
@@ -146,7 +146,7 @@ The live `Manager_Directory` tab; header authored by `RmHierarchy.gs`.
 
 ## Validation
 
-- **Method:** header read from `RmHierarchy.gs` `#L826` at `c82ec67`;
+- **Method:** header read from `RmHierarchy.gs` `#L824` at `c82ec67`;
   the "hand-filled email, absent private file" behaviour cross-checked
   against `LOGIC_AUDIT.md` Part 3 §3.7. `Tests_RmHierarchy.gs` in CI.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_RmHierarchy.gs`,
