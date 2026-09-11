@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-11 against commit `74107f7` |
 
 ## Purpose / reason to exist
 
@@ -160,11 +160,28 @@ drift); `LOGIC_AUDIT.md` Part 1 §4b/§4d/§5, Part 3 §3.6.
   `reportRmPerformanceNow()` "console-only" claim confirmed
   (`LOGIC_AUDIT.md` Part 1 §4d, verified against source). The user
   confirmed this session: "DailyRmIssueLog.gs … successfully ran in test
-  in app script". `Tests_DailyRmIssueLog.gs` runs in CI.
+  in app script". `Tests_DailyRmIssueLog.gs` runs in CI. **Re-verified
+  2026-09-11** after `t-rmperf-leadexcl01` (the leadership-exclusion
+  mirror for `reportRmPerformanceNow()` — `RM_PERF_NON_RM_ROLES_GS_` /
+  `RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_` /
+  `buildRmHierarchyRoleByNameLowerGs_` / `rmPerfIsLeadershipExcludedGs_`,
+  commits `8eb4b85`/`95305fb`): new `Tests_DailyRmIssueLog.gs` Scenario D
+  (role-excluded + name-list-excluded leaders absent from both
+  `reconstructRmPerformanceObservationsGs_`'s output and
+  `computeRmPerformanceGs_`'s results, a genuine RM still classifies
+  normally) — 700/700 assertions passing (`node test/run-gs-tests.js` in
+  CI; also independently reproduced locally via
+  `test/run-gs-tests-headless.py`, this repo's headless-browser stand-in
+  for the same suite). The user confirmed pasting the fix into the live
+  Apps Script editor this session (`reportRmPerformanceNow()` is
+  console-callable, not trigger-based, so no `setupXxx()` re-run needed).
 - **Evidence:** `.github/workflows/test.yml` (`Tests_DailyRmIssueLog.gs`,
   last green run); `LOGIC_AUDIT.md` Part 1 §4d, Part 3 §3.6; the user's
-  Apps Script test confirmation this session.
-- **Status:** Validated 2026-09-10.
+  Apps Script test confirmation this session; commits `8eb4b85`/`95305fb`
+  (leadership-exclusion mirror + its Scenario D tests); the user's
+  confirmation of pasting the fix into the live Apps Script editor,
+  2026-09-11.
+- **Status:** Validated 2026-09-11.
 
 ## Version / change reference
 
