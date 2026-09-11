@@ -4204,3 +4204,54 @@ out to investigate.
 
 *(Phase 8 complete. Lead History & Versioning Review complete —
 8 of 8 phases.)*
+
+### Post-merge update (2026-09-11)
+
+`lead-history-phase6-impl` has been **merged into `master`**
+(`1c19d1a`), on the user's explicit instruction, superseding the "your
+call, not made here" framing above — this section records what
+actually happened during the merge, including two real problems found
+and fixed in the process:
+
+1. **A real line-ending mismatch, found and fixed before merging.**
+   `MovementTracker.gs` on the implementation branch had CRLF line
+   endings while its `master` counterpart (and every other file the
+   branch touched) was LF-only — inflating the branch-vs-`master` diff
+   to 2149 changed lines instead of the real ~180. Confirmed via
+   `git diff -w` (zero output — no actual content difference) before
+   normalizing the file back to LF (`6ba5bc4`) and re-running the full
+   test suite (746/746, unaffected) to confirm nothing broke. The merge
+   (`1c19d1a`) then showed its real, honest diff: 649 insertions, 46
+   deletions across the 7 files Phase 6/7 actually touched.
+2. **A real CI failure, found and fixed immediately after merging.**
+   The merge broke the real GitHub Actions `test` job (Node-based),
+   even though the local `python3 test/run-gs-tests-headless.py`
+   check — used throughout Phase 6/7 exactly as `CLAUDE.md` recommends,
+   "a pre-push sanity check, not a substitute" — passed 746/746 both
+   before and after. Root cause: `test/run-gs-tests.js` (the actual CI
+   script) maintains its **own, independent** `Utilities` sandbox mock,
+   separate from `test/run-gs-tests-headless.py`'s browser-based shim —
+   and Phase 6's original SHA-256 mock fix only ever touched the
+   browser shim, never this one. `Utilities.computeDigest`/
+   `DigestAlgorithm` were simply undefined in CI's real Node sandbox,
+   throwing the exact `TypeError` class of failure Phase 6 already
+   found and fixed once, in the *other* harness. Fixed (`0cdf6cd`) using
+   Node's own `crypto.createHash('sha256')` directly (genuinely
+   synchronous, unlike a browser's `crypto.subtle` — no hand-rolled
+   SHA-256 needed here, unlike the browser shim), with the same
+   signed-byte conversion `_leadContentHashGs_` already depends on. No
+   local Node is available on this machine to run the script directly
+   (`CLAUDE.md`), so verification before pushing was: a parse-only
+   syntax check (`new Function(code)`, never invoked) plus an
+   independent confirmation, via the browser's own `SubtleCrypto`, that
+   the same signed-byte-conversion-then-hex formula reproduces the
+   identical real NIST SHA-256 test vectors already asserted in
+   `Tests_MovementTracker.gs`.
+
+**Final state**: `master` at `0cdf6cd`, all 5 CI checks green (`deploy`,
+`report-build-status`, `build`, `test`, `frontend-harness`), 746/746
+tests passing. **Deployment note unchanged**: this repo's `.gs` files
+still do not auto-deploy from git — `MovementTracker.gs` must still be
+pasted into the live Apps Script editor and `setupMovementTracking`
+re-run once before any of this takes effect on the live production
+Sheet.
