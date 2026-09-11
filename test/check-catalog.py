@@ -943,12 +943,19 @@ def check_logic_audit_immutability():
     if current_body != historical_body:
         moved = git("log", "--oneline", f"{sha}..HEAD", "--", "LOGIC_AUDIT.md")
         commits = moved.splitlines() if moved else []
+        # NOTE: this list is every commit since {sha} that touched the file,
+        # NOT a pre-verified "these are all fine" list -- at least one of
+        # them is the actual violator (that's why this fired). Don't label
+        # the whole list "legitimate precedent" (real incident, round 3 E2E
+        # retest: a test fixture landed in this exact list and was wrongly
+        # described as confirmed-legitimate in its own violation message).
         return [f"LOGIC_AUDIT.md's audit body (from \"## Part N of M\" onward) differs from its "
                 f"content at the cited final commit {sha} — this file's own header says it is "
-                f"'not maintained forward'; a header/cross-link edit is fine (confirmed legitimate "
-                f"precedent: {', '.join(c.split()[0] for c in commits) if commits else 'see git log'}), "
-                f"but a BODY change means the historical record was edited forward — verify this was "
-                f"intentional and update the header's cited commit if the audit was deliberately reopened"]
+                f"'not maintained forward', so a header/cross-link-only edit is fine, but a BODY "
+                f"change means the historical record was edited forward. Commits touching this "
+                f"file since {sha}: {', '.join(c.split()[0] for c in commits) if commits else 'see git log'} "
+                f"— check which one(s) actually changed the body, verify this was intentional, "
+                f"and update the header's cited commit if the audit was deliberately reopened"]
     return ["(audit body unchanged since the cited final commit — header/cross-link edits only, as expected)"]
 
 # ---------------------------------------------------------------- K
