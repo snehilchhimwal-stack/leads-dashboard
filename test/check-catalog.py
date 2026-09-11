@@ -31,6 +31,13 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
   D. Last-Verified drift               (ADVISORY — never fails the build)
      a record verified at commit <sha> whose ## Location path has since
      advanced past <sha> on HEAD. Needs full git history (fetch-depth: 0).
+     PLUS: any component reachable from a directly-drifted one within the
+     SAME 2-hop dependency walk check E uses (E2E acceptance test report
+     round 2, TEST 18 -- a component only reachable this way, never
+     itself directly drifted, was invisible to update-tasks.ps1's
+     -VerifyCatalogRepo guard, which only ever scanned this section's own
+     text for component ids; printing the downstream set HERE closes that
+     gap with no change needed to that script at all).
   E. change -> component-ID impact     (ADVISORY)
      given BEFORE/AFTER shas (env DIFF_BASE / DIFF_HEAD, or argv, or
      github.event.before/after), resolve every changed repo path against
@@ -271,6 +278,7 @@ def record_path(cid):
 
 def check_last_verified_drift(rows):
     warns = []
+    drifted = set()
     have_history = git("rev-list", "--count", "HEAD") not in ("", "1")
     if not have_history:
         return ["(skipped — shallow clone; set fetch-depth: 0 on actions/checkout)"]
@@ -294,7 +302,81 @@ def check_last_verified_drift(rows):
         if moved:
             n = len(moved.splitlines())
             warns.append(f"{cid}: verified at {sha} but {', '.join(real)} advanced {n} commit(s) since — revalidate")
+            drifted.add(cid)
+    # Downstream-of-drifted (TEST 18, E2E acceptance test report round 2):
+    # a component only reachable from a genuinely drifted one via the
+    # SAME 2-hop dependency walk check E uses (_impact_walk) is just as
+    # unsafe to treat as settled -- its own Last-Verified sha may be
+    # perfectly current, but the thing it depends on (or is depended on
+    # by) has moved out from under it. Printed in THIS section (not a
+    # separate one) specifically so update-tasks.ps1's -VerifyCatalogRepo
+    # guard, which regex-scans this whole "D. Last-Verified drift" block
+    # for component ids, picks these up automatically with no change to
+    # that script needed -- confirmed for real: a task-close citing only
+    # GS-010 (downstream of a directly-drifted JS-016) went through
+    # unblocked before this; blocked after.
+    if drifted:
+        impact, _arch_hits = _impact_walk(rows, drifted)
+        downstream = sorted(impact - drifted)
+        if downstream:
+            warns.append(f"downstream of drifted (revalidate the drifted id(s) above before treating "
+                         f"any of these as settled — {', '.join(sorted(drifted))} reach them within "
+                         f"2 hops): {downstream}")
     return warns
+
+# 2-hop impact walk + architecture-overlay surfacing, factored out of
+# check_impact (Required Fix #4/#5, E2E acceptance test report) so
+# check_last_verified_drift can seed it directly from a set of DRIFTED
+# component ids (no git diff range needed) as well as check_impact
+# seeding it from a diff's changed-paths (Required Fix, TEST 18, E2E
+# acceptance test report round 2 -- a component only reachable via this
+# walk, never itself directly drifted, was invisible to
+# update-tasks.ps1's -VerifyCatalogRepo guard; confirmed for real that a
+# task-close citing GS-010, downstream of a genuinely-drifted JS-016,
+# went through unblocked).
+def _impact_walk(rows, seed):
+    # This used to stop at exactly 1 hop, confirmed broken for real in
+    # TEST 23: a real production cascade (a UI write -> a Sheet -> the
+    # SEPARATE, unattended Apps Script system that reads that Sheet) lost
+    # coverage past the first link, e.g. a change to JS-016 never
+    # surfaced GS-010 even though JS-016 -> SHEET-004 -> GS-010 is a
+    # real, reciprocal dependency chain. The graph is small (~72 rows) so
+    # a 2nd hop costs nothing measurable. A plain set (impact,
+    # monotonically growing, only ever expanded by NEW ids not already in
+    # it) is its own cycle guard -- the walk always terminates in at most
+    # `rows` iterations, and here it's capped at 2 explicitly by design,
+    # not by need.
+    impact = set(seed)
+    frontier = set(seed)
+    for _hop in range(2):
+        nxt = set()
+        for cid in frontier:
+            if cid not in rows:
+                continue
+            nxt |= rows[cid]["dep"] | rows[cid]["ub"]
+        nxt -= impact
+        if not nxt:
+            break
+        impact |= nxt
+        frontier = nxt
+    # Architecture-overlay surfacing: check A deliberately does NOT
+    # require a FLOW-/TRIGGER- row's own Depends On to be echoed back in
+    # a member's Used By (the "kind: arch" exemption in
+    # check_reciprocity -- an overlay describing many components isn't
+    # itself something every one of them should have to list). But that
+    # same exemption meant this impact walk, which only ever follows real
+    # reciprocal edges, could never walk BACK to the overlay describing a
+    # changed component -- confirmed for real in TEST 12: a GS-010 change
+    # never surfaced FLOW-002 ("The 3-phase 'Generate region emails'
+    # cycle"), even though FLOW-002's own Depends On names GS-010
+    # directly. Scanned independently of the reciprocity graph, against
+    # the full impact set found so far (not just the seed ids): any arch
+    # overlay naming a touched component in its own Depends On is
+    # relevant context for whoever reviews this change.
+    arch_hits = sorted(cid for cid, d in rows.items()
+                        if d["kind"] == "arch" and (d["dep"] & impact))
+    impact |= set(arch_hits)
+    return impact, arch_hits
 
 # ---------------------------------------------------------------- E
 def resolve_shas():
@@ -332,48 +414,7 @@ def check_impact(rows):
         elif re.match(r'js/[^/]+\.js$', p) or re.match(r'[^/]+\.gs$', p):
             if not p.startswith("Tests_") and p != "RmHierarchy.private.gs":
                 undocumented.append(p)
-    # 2-hop impact walk (Required Fix #4, E2E acceptance test report --
-    # this used to stop at exactly 1 hop, confirmed for real in TEST 23:
-    # a real production cascade (a UI write -> a Sheet -> the SEPARATE,
-    # unattended Apps Script system that reads that Sheet) lost coverage
-    # past the first link, e.g. a change to JS-016 never surfaced GS-010
-    # even though JS-016 -> SHEET-004 -> GS-010 is a real, reciprocal
-    # dependency chain. The graph is small (~72 rows) so a 2nd hop costs
-    # nothing measurable. A plain set (impact, monotonically growing,
-    # only ever expanded by NEW ids not already in it) is its own cycle
-    # guard -- the walk always terminates in at most `rows` iterations,
-    # and here it's capped at 2 explicitly by design, not by need.
-    impact = set(affected)
-    frontier = set(affected)
-    for _hop in range(2):
-        nxt = set()
-        for cid in frontier:
-            if cid not in rows:
-                continue
-            nxt |= rows[cid]["dep"] | rows[cid]["ub"]
-        nxt -= impact
-        if not nxt:
-            break
-        impact |= nxt
-        frontier = nxt
-    # Architecture-overlay surfacing (Required Fix #5, E2E acceptance
-    # test report): check A deliberately does NOT require a FLOW-/
-    # TRIGGER- row's own Depends On to be echoed back in a member's
-    # Used By (the "kind: arch" exemption in check_reciprocity -- an
-    # overlay describing many components isn't itself something every
-    # one of them should have to list). But that same exemption meant
-    # this impact walk, which only ever follows real reciprocal edges,
-    # could never walk BACK to the overlay describing a changed
-    # component -- confirmed for real in TEST 12: a GS-010 change never
-    # surfaced FLOW-002 ("The 3-phase 'Generate region emails' cycle"),
-    # even though FLOW-002's own Depends On names GS-010 directly.
-    # Scanned independently of the reciprocity graph, against the full
-    # impact set found so far (not just the directly-changed ids): any
-    # arch overlay naming a touched component in its own Depends On is
-    # relevant context for whoever reviews this change.
-    arch_hits = sorted(cid for cid, d in rows.items()
-                        if d["kind"] == "arch" and (d["dep"] & impact))
-    impact |= set(arch_hits)
+    impact, arch_hits = _impact_walk(rows, affected)
     for u in undocumented:
         out.append(f"UNDOCUMENTED COMPONENT: {u} changed but has no docs/INDEX.md row")
     if affected:
