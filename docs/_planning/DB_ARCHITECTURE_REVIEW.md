@@ -3205,7 +3205,8 @@ run — the only field ever updated after insert.
 | `lead_key` | TEXT | The stable identity — `client_id`, falling back to `lead_id`, exactly matching the real identity rule already used in `buildMovementHistories` (`js/tab-movement.js:298`), not a new invention |
 | `lead_id`, `client_id`, `client_name` | TEXT | Kept individually too, for query convenience |
 | `rm_name`, `tl_name`, `project`, `region_name`, `group_source`, `source_bucket`, `current_stage`, `last_connect`, `last_connect_time`, `last_comment`, `internal_status_comments`, `closing_reason`, `call_attempts`, `call_count`, `duration`, `stage_comments`, `rm_is_active`, `lead_closing_reason` | mixed | The full tracked-field set from `SNAPSHOT_COLUMNS_` — **deliberately denormalized text**, same reasoning as the main review |
-| `content_hash` | TEXT | A hash of every tracked field above — compared **only** against the lead's *current* version to decide "did anything change since last time." **Never used to deduplicate across full history** — see the revert edge case in Phase 5: a lead reverting to a past exact state still gets a brand-new version row, because the timeline must stay contiguous and honest about *when* each period was true |
+| `status` | ENUM(`active`,`inactive`) | **Added during Phase 5's edge-case pass** — tracked and hashed like any other field, not only mirrored on `leads_current_state`. Without this, "when did this lead become inactive" would have no real historical answer — only the *current* status would be knowable, not *when* it changed. Derived at write time from the same `isOpenLead_`-style logic already used elsewhere in this codebase, not new business logic |
+| `content_hash` | TEXT | A hash of every tracked field above (including `status`) — compared **only** against the lead's *current* version to decide "did anything change since last time." **Never used to deduplicate across full history** — see the revert edge case in Phase 5: a lead reverting to a past exact state still gets a brand-new version row, because the timeline must stay contiguous and honest about *when* each period was true |
 | `valid_from` | TIMESTAMP | When this version first became true |
 | `valid_to` | TIMESTAMP | NULL for the current version; set once a new version supersedes it |
 | `first_seen_run_id` | INTEGER | **FK → `lead_ingestion_runs.run_id`** — which run first observed this exact state |
@@ -3252,6 +3253,15 @@ for every lead. Everything else here is either append-only
 (`lead_versions`' content) or write-once (`lead_ingestion_runs`).
 **Retention:** N/A — one row per currently-known lead, overwritten in
 place; not a historical record.
+
+**Transactional requirement, added during Phase 5's edge-case pass:** a
+version transition — closing the old `lead_versions` row (`valid_to`),
+inserting the new one, and updating `leads_current_state`'s pointer —
+**must execute as one atomic transaction**, never three separate writes.
+This is what lets the database's own partial-unique-index constraint
+(above) correctly catch a concurrent double-write instead of allowing a
+half-applied transition to be visible to a concurrent reader (the
+nightly distillation, most concretely — see Phase 5).
 
 ### Why this is better than both the current design and the earlier `movement_snapshots` proposal
 
@@ -3346,5 +3356,135 @@ instant, even though it's the very next capture. This is the case a
 naive "just read the latest row" approach would get wrong if it didn't
 respect `valid_to` correctly; the range predicate handles it for free.
 
-*(Phase 4 complete. Continues in Phase 5 — edge cases, reasoned against
-this schema concretely, not in the abstract.)*
+*(Phase 4 complete.)*
+
+## Phase 5 — Edge Cases
+
+Every case from the user's brief, reasoned against the real schema and
+the real codebase — not in the abstract. Two genuine schema refinements
+came out of this pass and were folded directly into Phase 3 above (marked
+there), consistent with this whole review's practice of fixing a found
+gap in place rather than listing it as a TODO.
+
+**Lead changes multiple times between two captures.** A real,
+**unsolved** limitation, stated plainly rather than oversold: this system
+only ever observes the `leads` tab *at capture time*. If the true source
+value goes A → B → C between two 6-hourly runs, this design (like
+today's) only ever sees "A, then C" — the transient B is invisible. This
+isn't a regression from today's behavior, and no schema change on the
+*receiving* side can fix it without the source itself pushing every
+intermediate change — genuinely out of this review's scope.
+
+**Multiple fields changing in one capture.** Handled correctly and
+simply: `content_hash` covers every tracked field together, so RM and
+stage changing in the same run produces **one** new version row carrying
+both new values — not two separate rows, and not two separate content
+comparisons.
+
+**No changes between refreshes / repeated identical refreshes.** Solved
+by design (Phases 2-4): no new version row; `last_confirmed_run_id`
+updated on the existing current version.
+
+**A field value reverts to a past exact state** (e.g. stage goes
+A → B → A). Per Phase 3's explicit rule, this **always** creates a new
+version row — `content_hash` is compared only against the *current*
+version, never against the full history, specifically so the timeline
+stays honest about *when* each period was true rather than silently
+merging non-contiguous periods that happen to share a value.
+
+**First appearance of a lead.** Solved, well-defined (Phase 3/4):
+`first_seen_run_id` on the lead's first version, a new
+`leads_current_state` row.
+
+**A lead becoming inactive.** The real gap Phase 1/2 found — no explicit
+event exists today. This design closes it two ways: (1) `status` is now
+a tracked, versioned field (the Phase 5 refinement folded into Phase 3),
+derived at write time from the same `isOpenLead_`-style logic already
+used elsewhere in this codebase — not new business rules. (2) **A lead
+present in `leads_current_state` as `active` but absent from a
+just-completed run's data entirely** (removed from the source, not just
+closed) is explicitly transitioned to `inactive` as part of that run —
+a real, deliberate decision this design makes that today's system simply
+never addresses (a vanished lead just stops getting new `Movement_Log`
+rows, with nothing marking the transition).
+
+**A lead being reactivated.** Symmetric to the above: reappearing after
+being marked inactive creates a new version (status flips back to
+`active`) exactly like any other field change — no special-casing needed
+because `status` is now a normal tracked field, not a side concept.
+
+**Late/out-of-order source data.** **Out of scope, and flagged honestly
+as such** — every timestamp this system records (`run_at`, `valid_from`)
+reflects when *this system* observed a value, never when the source-side
+change actually happened, because the external CRM export (Phase 1,
+main review Part 1) exposes no such timestamp to this project. If the
+source itself delivers changes late or out of order, this design has no
+way to detect or correct that — the same is true of the current system.
+
+**Duplicate source records.** A real, **pre-existing** ambiguity this
+design inherits rather than introduces: `_buildLiveLeadIndexGs_`'s own
+comment (`MovementTracker.gs`) already documents that the same
+`client_id` can legitimately appear as two different `lead_id` rows
+(a customer split across two RMs), and existing code already resolves
+this by "first row wins" for certain lookups. This design's `lead_key`
+(client_id-first) uses the **same identity convention** already in use
+for `buildMovementHistories` — deliberately not solving an identity
+question this review wasn't asked to resolve, but explicitly named here
+rather than silently inherited.
+
+**Source identifier changes.** A real, honest limitation: since
+`lead_key` is derived entirely from `lead_id`/`client_id`, a source-side
+re-keying would look identical to "the old lead went inactive and an
+unrelated new lead appeared" — version history would not carry across
+the identifier change. Detecting this would require a stable identifier
+from the source system itself, which this project doesn't control and
+has no visibility into (`leads` is out of scope throughout this review).
+
+**Leads being merged or split.** Same root cause as identifier changes,
+same honest answer: this design (like today's) has no way to represent a
+merge/split relationship unless the external CRM export itself exposes
+one — a request that would have to go to whoever owns that export, not
+something a receiving-side schema can invent.
+
+**Concurrent captures** (the real risk Phase 1 already found: `GS-008`'s
+trigger and `JS-018`'s on-demand button can genuinely race today, per
+`LOGIC_AUDIT.md` Part 7 §18 MEDIUM #3). This design defends in depth,
+not just once: **prevention** — the main review's Part 6 already
+recommends consolidating both writers behind one API endpoint, which
+should serialize per-lead-key processing rather than allowing two
+independent callers to race at all; **detection/correctness backstop** —
+even if two concurrent transactions both try to create a new "current"
+version for the same `lead_key`, the partial unique index (Phase 3) lets
+only one commit — the loser's transaction fails the constraint and must
+retry against the now-current state, rather than silently corrupting the
+`valid_from`/`valid_to` timeline with two overlapping "current" versions.
+
+**A distillation job overlapping with an ingestion write.** Since this
+system collapses "ingestion" and "snapshot" into one event (Phase 1/2),
+the literal two-separate-process framing doesn't apply — but the real
+analogous risk is the 22:50 nightly distillation reading
+`leads_current_state`/`lead_versions` while a delayed or retried capture
+is concurrently writing to the same rows. The atomicity requirement
+added to Phase 3 (a version transition is one transaction) is what
+protects this: a concurrent reader sees either the state fully before or
+fully after a transition commits, never a half-written one.
+
+**Partial refresh failures.** Handled naturally, not through special
+resume logic: `lead_ingestion_runs.completed_at` stays `NULL` for a run
+that didn't finish (Phase 3), correctly flagging it as incomplete even
+though some leads may already have been updated before the crash. A
+retry that reprocesses every lead in the batch is still safe — for
+leads already updated by the partial run, the content-hash comparison
+finds "no change since `last_confirmed_run`" and just bumps the pointer
+again, never creating a duplicate version.
+
+**Retry/reprocessing of the same batch.** The `idempotency_key`
+`UNIQUE` constraint on `lead_ingestion_runs` (Phase 3) is what makes this
+safe: resubmitting the same logical run is an `INSERT ... ON CONFLICT`
+that must return the **existing** `run_id` (an upsert-and-return
+pattern) rather than minting a new one — every lead-processing step in
+the retry then uses that same `run_id`, combining with the partial-failure
+handling above to make the whole retry idempotent end to end.
+
+*(Phase 5 complete. Continues in Phase 6 — implementing the smallest
+safe version of this design against the real codebase.)*
