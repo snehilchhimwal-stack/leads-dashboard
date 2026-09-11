@@ -2703,6 +2703,213 @@ question is given). Nothing here is presented as settled that isn't.
   away; what *was* missing was a history of those manual edits, which
   `config_audit_log` (Part 6) now provides.
 
-*(Part 11 complete. Continues in Part 12 — the executive summary,
-prioritized implementation roadmap, and the final Approval Checkpoint,
-assembling everything above into the report's final form.)*
+*(Part 11 complete.)*
+
+---
+
+## Part 12 — Executive Summary, Prioritized Roadmap, Approval Checkpoint
+
+### Section-mapping key
+
+This document was built part by part, in the sequence requested, rather
+than pre-written in final report order — but it maps 1:1 onto the
+original brief's 15-section output format, with nothing left out:
+
+| Brief's section | Where it lives |
+|---|---|
+| 1. Executive Summary | Below, this Part |
+| 2. Current-State Inventory | Part 1 (summary table) |
+| 3. Tab-by-Tab Detailed Analysis | Part 1 (detailed analysis) |
+| 4. Current Data Relationship Map | Part 2 |
+| 5. Merge/Split/Rename/Remove Recommendations | Part 2 (decision table) |
+| 6. Target Database Schema | Part 3 |
+| 7. Current-to-Target Column Mapping (+ Column Consolidation) | Part 4 |
+| 8. Data Retention & Lifecycle Policy | Part 5 |
+| 9. Target Architecture | Part 6 |
+| 10. Codebase Impact Assessment | Part 7 |
+| 11. Migration Plan | Part 8 |
+| 12. Central Repository Structure | Part 9 |
+| 13. Handover Documentation Structure | Part 10 |
+| 14. Risks, Unknowns & Decisions Required | Part 11 |
+| 15. Prioritized Implementation Roadmap | Below, this Part |
+
+### 1. Executive Summary
+
+**What was reviewed:** all 13 Google Sheet tabs other than `leads`
+(explicitly out of scope throughout, per the original brief), grounded
+in this project's own existing, code-verified documentation
+(`docs/sheets/`) and direct source-code cross-checks — not guessed, and
+not requiring live-Sheet access to reach real, sourced conclusions for
+the great majority of this review's findings.
+
+**The headline finding:** the current system works, and nothing here
+proposes replacing it wholesale. What it lacks is specific and
+fixable: **zero referential integrity** on the `RM`/`region` values
+seven-plus tables all depend on; **configuration data whose real source
+is a hard-coded Apps Script constant**, rebuilt into a sheet for humans
+to read rather than the other way around; **three independently-written
+audit logs** for one underlying concept (an email was sent), with three
+separately-unmanaged retention policies; **two unsynced sources of
+truth** for region-recipient routing (a backend sheet and the
+dashboard's own disconnected browser storage); and a set of retention
+decisions that have sat `TBD` for months largely because they were
+weighed against Google Sheets' 10-million-cell workbook ceiling — a
+constraint that simply doesn't exist in a real database.
+
+**What's proposed:** a 13-table relational schema (Part 3) reached
+through one new, small API layer that becomes the *only* thing with
+direct database-write access — closing the referential-integrity gap
+with real foreign keys, closing the dual-writer drift by consolidating
+duplicate write logic into one implementation both the dashboard and
+Apps Script call, and closing the config-in-code problem by making
+`people`/`regions`/`region_recipients` directly editable data instead of
+a rebuild target.
+
+**What deliberately does *not* change:** `leads` stays exactly as it is,
+untouched, still fed by the external CRM export this project doesn't
+control. Apps Script stays the scheduler and the thing that talks to
+Gmail — it already does that well. The dashboard stays a static,
+client-only page. The migration's actual surface area is real but
+bounded: 13 tables, a defined set of `.gs`/`js/*.js` files (Part 7), and
+one new API layer — not a platform rewrite.
+
+**Where this stands:** this document is analysis and a plan. **No
+schema has been created, no code has been changed, and no data has
+moved.** Nine real, specific decisions need explicit confirmation before
+any of that starts (the Approval Checkpoint, below) — several of them
+are genuine business/UX trade-offs (a real user-visible change to
+region-recipient customization; three retention periods that are
+recommendations, not yet policy) that this review can size and reason
+about but cannot decide unilaterally, consistent with the brief's own
+instruction throughout.
+
+### 15. Prioritized Implementation Roadmap
+
+**P0 — must resolve before migration begins:**
+
+1. Resolve every fact flagged `UNCONFIRMED` across this review (exact
+   row counts, real daily volumes) against the live Sheet — Part 1, 11.
+2. **Test — don't assume — whether `RmHierarchy.gs`'s rebuild preserves
+   hand-filled `Manager_Directory` email values.** Raised more times in
+   this review than any other single item; a real data-safety question
+   with an unconfirmed answer — Part 2, 4, 10, 11.
+3. Enumerate the real, current, complete regions list to seed the new
+   `regions` table — Part 3, 11.
+4. Verify the two ambiguous-column assumptions
+   (`Manager_Directory.roles`, `people_reporting_up_to_them`) against
+   live data before committing to removing either — Part 4, 11.
+5. Capture a real performance baseline of today's key dashboard reads —
+   otherwise Phase 6's validation has nothing numeric to check against —
+   Part 11.
+6. Take the full Phase 1 data export/backup of all 13 tabs — Part 8.
+7. **Obtain every business decision listed in the Approval Checkpoint
+   below** — retention ratification, the `region_recipients`
+   unification, technology choice, access-control roles, the
+   `Lead_Followups`/`Unmatched_Comments_Log` UI question. **Cutover
+   specifically should not proceed until access-control roles are
+   actually defined** (Part 11's security-gate finding) — an
+   under-specified API could expose PII more broadly than today's
+   Google-account-gated Sheet.
+
+**P1 — required for migration (Part 8's Phases 2–7):**
+
+8. Provision the staging database and create the schema (Part 3/4,
+   corrected) exactly as designed.
+9. Build the API layer — routes, the database access layer, auth, and
+   the consolidated capture/materialization job logic (Part 6, 9).
+10. Run Phase 3's data cleaning/transformation against the real export,
+    producing the conflict/collision report for human review.
+11. Load the transformed historical data into staging (Phase 4), with
+    the reconciliation checks run and clean.
+12. Migrate every file from Part 7's table **in risk order**: low-risk
+    files first, then the `MovementTracker.gs`/`js/sheets-writeback.js`
+    pair together (never staggered), then `OvernightEmailer.gs`.
+13. Run the shadow-run comparison period and the full validation pass
+    (Phases 5–6), with explicit stakeholder sign-off.
+14. Execute the defined, rehearsed cutover (Phase 7), with the
+    pre-migration code path kept live as an immediate rollback option
+    through the monitoring window.
+15. Stand up `config_audit_log` and the real admin-editing path for
+    `people`/`regions`/`region_recipients` (Part 6) — this is what
+    retires the code-constant-rebuild pattern for good.
+
+**P2 — required shortly after migration:**
+
+16. Implement the scheduled retention/archival jobs per Part 5's
+    per-table cutoffs.
+17. Stand up basic monitoring/alerting on scheduled-job failure and an
+    API health-check endpoint (Part 6).
+18. Add a database-level trigger enforcing `daily_cohort_history`'s
+    immutability, if the chosen engine supports it (Part 11) — turns an
+    application convention into a real guarantee.
+19. Adopt the staging-then-production promotion process for future
+    `api`/`db` changes (Part 9) — a real process change from today's
+    direct-to-`master` pattern.
+20. Extend `check-catalog.py`'s existing discipline to cover
+    `db/schema.sql` ↔ `docs/db/` reciprocity (Part 9).
+21. **Legacy Sheet retirement (Part 8's Phase 8)** — deliberately placed
+    here, not in P1: requires its own separate explicit approval and a
+    real post-cutover confidence period (recommend weeks), never
+    bundled into the cutover decision itself.
+
+**P3 — optimization / future, not required for this migration:**
+
+22. A proper BI/analytics tool reading `sla_history`/
+    `daily_cohort_history` directly, now that they live in a real
+    database (Part 6).
+23. Consolidating scheduling itself onto a database-native scheduler
+    instead of Apps Script (Part 6) — explicitly deferred to avoid
+    migrating two things simultaneously.
+24. Automating the weekly Ops Checklist run (Part 11).
+25. Normalizing `region_recipients.to`/`cc` into a real child table
+    (Part 2's "judgment call, no firm recommendation" item) — only worth
+    it if a recipient-management UI is ever wanted.
+26. Resolving the pre-existing `OUTCOME_RULES`/`OUTCOME_RULES_GS_`
+    cross-runtime duplication (Part 7, 11) — real, but explicitly
+    outside this review's scope; a separate, standalone cleanup.
+
+### APPROVAL CHECKPOINT
+
+The following require your explicit confirmation before any
+implementation work begins. Everything else in this review is analysis
+and a recommended plan, not a decision made on your behalf.
+
+1. **Retention periods** — ratify or adjust: `sla_history`/
+   `daily_cohort_history` permanent; `email_sends` at 1–2 years
+   (`dashboard`), 90 days (`all_issues_17h`), 7 days (`overnight_10h`).
+   *(Part 5)*
+2. **`comment_history`'s unlimited free-text accumulation** — does this
+   need a data-minimization policy separate from its (already-fine)
+   retention/growth answer? *(Part 5)*
+3. **Unify `region_recipients`** into one table read by both the
+   backend and the dashboard, retiring the dashboard's
+   `localStorage`-based per-browser store — a real, user-visible change.
+   Approve, or keep the two stores separate? *(Part 2, 6, 7)*
+4. **Database and API technology choice** — deliberately not made by
+   this review; depends on hosting/ops preferences and budget this
+   review has no visibility into. *(Part 6)*
+5. **Access-control roles** — who gets read, write, and admin access to
+   the new system? Structure is recommended; the actual roles are not
+   inferable and must be defined before cutover. *(Part 6, 11)*
+6. **`Lead_Followups` and `Unmatched_Comments_Log`'s human-review
+   workflow** — stay Sheets-based (a legitimate, deliberate exception)
+   or get a dedicated small review UI? *(Part 7, 10)*
+7. **Adopt a staging-then-production promotion process** for `api`/`db`
+   changes going forward, replacing today's direct-to-`master` pattern
+   for those two directories specifically. *(Part 9)*
+8. **Ownership of the new `api`/`db` components** — same owner as
+   today, or reassigned? *(Part 9, 10)*
+9. **Legacy Sheet retirement (a separate, later approval)** — not
+   needed now; flagged so it's expected as its own explicit gate after
+   a real post-cutover confidence period, never bundled into the
+   cutover sign-off itself. *(Part 8, Phase 8)*
+
+**This review recommends proceeding to Phase 1 (Discovery and
+Validation, Part 8) once items 1–8 above have real answers** — Phase 1
+is itself where several of those answers (the live-Sheet facts, the
+rebuild-behavior test) actually get produced, so it does not require
+every open question resolved in advance, only the genuine business
+decisions. No schema creation, code change, or data movement should
+begin before that.
+
+*(End of the Database Architecture Review — all 12 parts complete.)*
