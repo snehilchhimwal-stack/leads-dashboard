@@ -92,9 +92,24 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      anchor of its own -- nothing for a line-anchored check to resolve
      against). Heuristic brace-counting to find a function's real
      extent, so findings are worded as "verify," not "wrong."
+  J. LOGIC_AUDIT.md immutability       (ADVISORY)
+     (E2E acceptance test report round 2, TEST 14 -- "held by convention
+     only," zero code enforcement, no fix originally proposed for it).
+     LOGIC_AUDIT.md's own header says it is a dated, point-in-time record
+     "not maintained forward" once closed, citing the commit its audit
+     body (Parts 1-7) was finalized at. Compares the file's CURRENT
+     body -- everything from the first "## Part N of M" heading onward,
+     deliberately excluding the header above it -- against its content
+     at that cited commit. The header-only exclusion is not a
+     convenience: real, already-accepted history has two legitimate
+     post-final edits (a stale-header fix, a cross-link pointer add),
+     both confined to the header; a naive whole-file comparison would
+     flag real, correct history as a violation. A body difference means
+     the historical record itself was edited forward -- the exact thing
+     the header's own words rule out.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, and I only print.
-Flip D/E/G/H/I to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, and J only print.
+Flip D/E/G/H/I/J to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -121,8 +136,21 @@ PAIR_MARKERS = ("_GS_", "HEADER_ALIASES", "OUTCOME_RULES", "REGION_GROUP_MAP",
 
 def git(*args):
     try:
+        # encoding="utf-8" explicitly -- without it, `text=True` decodes
+        # with the OS's default locale encoding, which on this repo's own
+        # Windows dev machine is cp1252, not UTF-8. A `git show <sha>:<path>`
+        # of a file containing a real UTF-8 multi-byte character (found
+        # for real building check J: LOGIC_AUDIT.md has a warning-sign
+        # emoji, whose UTF-8 bytes include 0x8f, invalid under cp1252)
+        # then raises UnicodeDecodeError, silently caught below and
+        # returned as "" -- which looked like "no output" to every
+        # caller, not a decode failure. errors="replace" as a second
+        # layer of safety: a genuinely malformed byte substitutes one
+        # replacement character instead of losing the whole command's
+        # output.
         return subprocess.run(["git", "-C", ROOT, *args], capture_output=True,
-                              text=True, check=False).stdout.strip()
+                              text=True, encoding="utf-8", errors="replace",
+                              check=False).stdout.strip()
     except Exception as e:
         return ""
 
@@ -794,6 +822,59 @@ def check_cited_literals(rows):
         out.append(f"(checked {checked} cited literal(s) against their line-anchored function bodies, no mismatch found)")
     return out
 
+# ---------------------------------------------------------------- J
+LOGIC_AUDIT_PATH = os.path.join(ROOT, "LOGIC_AUDIT.md")
+# The real, already-accepted commit history has TWO legitimate post-final
+# edits to this file (99170a8, 14ef03f) -- both confined to the header
+# block (cross-link pointers, a stale-header fix), never the Part 1-7
+# body itself. A naive "any commit touched this file since <final sha>"
+# check would false-positive on that real history. This compares ONLY
+# the body (from the first "## Part N of M" heading onward) against its
+# content at the cited final commit -- the header stays editable (as it
+# already legitimately has been), the actual audit findings do not.
+LOGIC_AUDIT_BODY_START = re.compile(r'^## Part \d+ of \d+', re.M)
+
+def check_logic_audit_immutability():
+    if not os.path.exists(LOGIC_AUDIT_PATH):
+        return ["(LOGIC_AUDIT.md not found — nothing to check)"]
+    have_history = git("rev-list", "--count", "HEAD") not in ("", "1")
+    if not have_history:
+        return ["(skipped — shallow clone; set fetch-depth: 0 on actions/checkout)"]
+    text = open(LOGIC_AUDIT_PATH, encoding="utf-8").read()
+    m = re.search(r'final assembled report `([0-9a-f]{7,40})`', text)
+    if not m:
+        return ["(no \"final assembled report `<sha>`\" citation found in LOGIC_AUDIT.md's "
+                "own header — cannot verify immutability; update the citation or this check)"]
+    sha = m.group(1)
+    if git("cat-file", "-t", sha) != "commit":
+        return [f"(the cited final commit {sha} is not in history — cannot verify immutability)"]
+    bm = LOGIC_AUDIT_BODY_START.search(text)
+    if not bm:
+        return ["(could not locate the audit body's start marker (\"## Part N of M\") — verify manually)"]
+    # .rstrip() both sides -- git()'s own .strip() on the historical
+    # side (shared by every caller, not worth special-casing here)
+    # already drops a trailing newline the on-disk file still has;
+    # rstripping BOTH avoids reporting that as a body difference
+    # (confirmed for real: a fresh diff of the two bodies via difflib
+    # showed zero real line differences, only a 1-character length gap
+    # from exactly this).
+    current_body = text[bm.start():].rstrip()
+    historical_text = git("show", f"{sha}:LOGIC_AUDIT.md")
+    hbm = LOGIC_AUDIT_BODY_START.search(historical_text)
+    if not hbm:
+        return [f"(could not locate the audit body's start marker in the {sha} version — verify manually)"]
+    historical_body = historical_text[hbm.start():].rstrip()
+    if current_body != historical_body:
+        moved = git("log", "--oneline", f"{sha}..HEAD", "--", "LOGIC_AUDIT.md")
+        commits = moved.splitlines() if moved else []
+        return [f"LOGIC_AUDIT.md's audit body (from \"## Part N of M\" onward) differs from its "
+                f"content at the cited final commit {sha} — this file's own header says it is "
+                f"'not maintained forward'; a header/cross-link edit is fine (confirmed legitimate "
+                f"precedent: {', '.join(c.split()[0] for c in commits) if commits else 'see git log'}), "
+                f"but a BODY change means the historical record was edited forward — verify this was "
+                f"intentional and update the header's cited commit if the audit was deliberately reopened"]
+    return ["(audit body unchanged since the cited final commit — header/cross-link edits only, as expected)"]
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -821,7 +902,8 @@ def main():
                       ("E. change -> component-ID impact", check_impact),
                       ("G. Sub-table ID uniqueness", check_subtable_ids),
                       ("H. Owner / Evidence content", lambda r: check_owner_evidence()),
-                      ("I. Cited-literal check", check_cited_literals)]:
+                      ("I. Cited-literal check", check_cited_literals),
+                      ("J. LOGIC_AUDIT.md immutability", lambda r: check_logic_audit_immutability())]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
