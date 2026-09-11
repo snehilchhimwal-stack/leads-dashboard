@@ -3158,4 +3158,126 @@ is conflating "when did we last check" with "when did this actually
 change" into one signal, which is exactly what today's design does by
 accident.
 
-*(Phase 2 complete. Continues in Phase 3 — the proposed schema.)*
+*(Phase 2 complete.)*
+
+## Phase 3 — Designing the Improved Database Structure
+
+**Relationship to the earlier `movement_snapshots` table (main review,
+Part 3):** that table is **superseded by this design**, not layered on
+top of it. It modeled exactly the same full-row-per-capture pattern
+this Phase 1/2 investigation found to be the real problem — proposing it
+again with a different name would have just relocated the duplication
+into the new database. What carries over unchanged: the denormalization
+philosophy (a version's `rm_name`/`region_name` stay frozen text, never
+a live FK — the same historical-accuracy reasoning from the main
+review's Part 2 applies identically here). What changes: instead of one
+row per lead per capture, three tables split "did a capture run,"
+"what is this lead's state right now," and "what did this lead's state
+used to be" into their own concerns — closing the exact gap Phase 2
+found.
+
+### 1. `lead_ingestion_runs` — the ingestion-event concept (new; didn't exist before)
+
+Answers "did a capture happen at time T," **independent of whether any
+lead's data changed** — this is what keeps freshness monitoring
+(Phase 2's `checkMovementLogFreshness_` finding) correct once duplicate
+version rows stop being written.
+
+| Column | Type | Notes |
+|---|---|---|
+| `run_id` | INTEGER | **PK**, surrogate |
+| `idempotency_key` | TEXT | **UNIQUE, NOT NULL** — deterministic per logical run (e.g. `scheduled:2026-09-12T00:00+05:30` for a trigger firing, a caller-supplied token for an on-demand run). **This is what makes a retry safe** — re-submitting the same run is an `INSERT ... ON CONFLICT DO NOTHING` against this key, never a second run record |
+| `run_at` | TIMESTAMP | When the capture executed |
+| `run_source` | ENUM(`scheduled`,`on_demand`) | Replaces today's two independently-coded writers with one logical concept — both call the same underlying operation (main review, Part 6's consolidation) |
+| `lead_count_seen` | INTEGER | How many leads were considered this run — a real number to monitor against, which today's design has no equivalent of |
+| `completed_at` | TIMESTAMP | NULL until the run finishes. **A run that crashed mid-way is now directly visible** (`completed_at IS NULL` past a reasonable window) — today's design has no way to distinguish "nothing changed" from "the capture never finished" |
+
+**Retention:** small and cheap to keep indefinitely — a handful of rows
+per day, not one per lead. No pruning needed.
+**Mutability:** `completed_at` is set once, at the end of a successful
+run — the only field ever updated after insert.
+
+### 2. `lead_versions` — the immutable version/change history (replaces `movement_snapshots`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `version_id` | INTEGER | **PK**, surrogate |
+| `lead_key` | TEXT | The stable identity — `client_id`, falling back to `lead_id`, exactly matching the real identity rule already used in `buildMovementHistories` (`js/tab-movement.js:298`), not a new invention |
+| `lead_id`, `client_id`, `client_name` | TEXT | Kept individually too, for query convenience |
+| `rm_name`, `tl_name`, `project`, `region_name`, `group_source`, `source_bucket`, `current_stage`, `last_connect`, `last_connect_time`, `last_comment`, `internal_status_comments`, `closing_reason`, `call_attempts`, `call_count`, `duration`, `stage_comments`, `rm_is_active`, `lead_closing_reason` | mixed | The full tracked-field set from `SNAPSHOT_COLUMNS_` — **deliberately denormalized text**, same reasoning as the main review |
+| `content_hash` | TEXT | A hash of every tracked field above — compared **only** against the lead's *current* version to decide "did anything change since last time." **Never used to deduplicate across full history** — see the revert edge case in Phase 5: a lead reverting to a past exact state still gets a brand-new version row, because the timeline must stay contiguous and honest about *when* each period was true |
+| `valid_from` | TIMESTAMP | When this version first became true |
+| `valid_to` | TIMESTAMP | NULL for the current version; set once a new version supersedes it |
+| `first_seen_run_id` | INTEGER | **FK → `lead_ingestion_runs.run_id`** — which run first observed this exact state |
+| `last_confirmed_run_id` | INTEGER | **FK → `lead_ingestion_runs.run_id`** — which run most recently confirmed this state was *still* true. **This is the field that replaces "write a duplicate row" with "update one pointer"** on an unchanged capture |
+
+**Unique constraints:** `(lead_key, valid_from)` — no two versions for
+the same lead can start at the same instant. **A partial/filtered unique
+index on `lead_key` `WHERE valid_to IS NULL`** enforces "at most one
+current version per lead" at the database level (Postgres-native syntax;
+other engines need a trigger or application-level enforcement — flagged
+as engine-dependent, not assumed).
+**Indexes:** `(lead_key, valid_from)`, `(lead_key, valid_to)` — both
+directions of the range query Phase 4 needs; `content_hash` (useful for
+"how many leads are currently in state X," not for cross-history dedup).
+**Mutability:** the tracked-field columns are **immutable once written** —
+never edited. Only `valid_to` (set once, when superseded) and
+`last_confirmed_run_id` (updated on every unchanged capture) ever change
+after insert, and neither touches the actual content columns.
+**Retention:** because this table only grows on **real changes**, not
+every capture, its growth rate is a small fraction of the current
+design's. **Recommend revisiting the main review's Part 5 retention
+figure for lead history specifically** — keeping this table indefinitely
+may now be genuinely affordable where keeping the old full-duplication
+design forever would not have been. Not a firm number here — real growth
+depends on how often leads actually change, which this review doesn't
+have a cited rate for; flagged for confirmation once real numbers are
+available (Phase 7's E2E pass can produce a first estimate).
+
+### 3. `leads_current_state` — the current/latest state concept (new; never materialized before)
+
+| Column | Type | Notes |
+|---|---|---|
+| `lead_key` | TEXT | **PK** |
+| `lead_id`, `client_id` | TEXT | |
+| `current_version_id` | INTEGER | **FK → `lead_versions.version_id`** — points at the live version, so a reader gets full context (including *when* the current state took effect) without a separate lookup |
+| `last_seen_run_id` | INTEGER | **FK → `lead_ingestion_runs.run_id`** — the most recent run that confirmed this lead at all, changed or not |
+| `status` | ENUM(`active`,`inactive`) | **New, explicit** — replaces "silently stops appearing," Phase 2's inactive-lead finding |
+| `inactivated_at` | TIMESTAMP | NULL while active |
+| `updated_at` | TIMESTAMP | When this row's pointer last moved (i.e. when the lead's state last genuinely changed) |
+
+**Mutability:** this is the **one genuinely mutable table** in the whole
+design — a real UPSERT target, updated in place on every ingestion run
+for every lead. Everything else here is either append-only
+(`lead_versions`' content) or write-once (`lead_ingestion_runs`).
+**Retention:** N/A — one row per currently-known lead, overwritten in
+place; not a historical record.
+
+### Why this is better than both the current design and the earlier `movement_snapshots` proposal
+
+- **Storage**: the 5-capture worked example in Phase 2 went from 5 full
+  rows to 3 version rows — and at the real system's scale, most leads
+  likely go far longer between genuine field changes than between
+  captures, so the real-world reduction is plausibly much larger than
+  that small example shows (not claimed as a precise figure — Phase 7's
+  E2E pass measures this for real rather than guessing).
+- **Correctness the old design couldn't express**: a run that crashed
+  mid-capture is now visible (`lead_ingestion_runs.completed_at IS
+  NULL`) instead of silently indistinguishable from "nothing changed."
+  A lead's first appearance is now a real, queryable fact
+  (`first_seen_run_id` on its first version) instead of something a
+  reader has to infer by scanning for absence.
+- **The freshness-monitoring gap Phase 2 found is closed by construction**,
+  not patched around — `lead_ingestion_runs` answers "did a capture
+  run" independently of `lead_versions` answering "did this lead change,"
+  which is exactly the separation today's single-row-per-capture design
+  collapses into one signal.
+- **Compatible with every real consumer found in Phase 1**: the
+  at-or-before-a-timestamp lookup `_evidenceAtDeadlineGs_`/
+  `enrichLeadAsOf` already perform against a flat snapshot list becomes a
+  `valid_from <= T AND (valid_to IS NULL OR valid_to > T)` range query
+  against `lead_versions` — same answer, a more natural query, demonstrated
+  concretely in Phase 4.
+
+*(Phase 3 complete. Continues in Phase 4 — historical reconstruction,
+with the user's own example timeline and real queries.)*
