@@ -3486,5 +3486,86 @@ pattern) rather than minting a new one — every lead-processing step in
 the retry then uses that same `run_id`, combining with the partial-failure
 handling above to make the whole retry idempotent end to end.
 
-*(Phase 5 complete. Continues in Phase 6 — implementing the smallest
-safe version of this design against the real codebase.)*
+*(Phase 5 complete.)*
+
+## Phase 6 — Implementing the Smallest Safe Improvement
+
+**Scope, confirmed with the user before writing any code:** the more
+ambitious of two options — full content-hash skip-if-unchanged logic
+inside `MovementTracker.gs`'s real capture path, not just documentation
+of what a future target database would do. Implemented on a disposable
+branch (`lead-history-phase6-impl`, off `master`), never touching
+`master` directly, per this project's own established discipline — the
+code lives there pending the user's decision on whether/when to merge
+it, since it's a real functional change to a live-scheduled production
+script, not the pure-analysis work the rest of this review has been.
+
+### What was built
+
+- **`MovementTracker.gs`** — `snapshotOpenLeads_` now computes a SHA-256
+  content hash over every `SNAPSHOT_COLUMNS_` field for each lead and
+  compares it against that lead's latest known hash (read once per run,
+  reusing the "one read, many lookups" discipline
+  `buildMovementLogMapsGs_` already established). An unchanged lead gets
+  **no new `Movement_Log` row** — the exact behavior Phase 1/2 found
+  missing.
+- **New `Movement_Log_Runs` sheet** — one row per capture run,
+  regardless of how many leads changed, closing the freshness-monitoring
+  gap Phase 2 found by construction, not by patching around it.
+  `checkMovementLogFreshness_` now reads this sheet instead of
+  `Movement_Log`'s own last row.
+- **`js/sheets-writeback.js` + `js/tab-movement.js`** — the browser
+  writer gets identical dedup logic, kept in lockstep with the Apps
+  Script side per this project's own established two-writer-parity
+  convention.
+- **A real bug found and fixed before it could ship:** the two writers
+  would have hashed an identical lead to two *different* digests —
+  `MovementTracker.gs` was reading a live `Date` object
+  (`getTime()`-based), while `js/sheets-writeback.js`'s
+  `movementCellValue` already renders `lead_assigned_at`/
+  `last_connect_time` as an IST wall-clock string for display. Left
+  unfixed, this would have **permanently defeated cross-writer dedup** —
+  each side would treat the other's captures as forever "different."
+  Both sides now format those two fields identically for hashing.
+- **`test/run-gs-tests-headless.py` + `Tests_Mocks.gs`** — added a real,
+  synchronous SHA-256 implementation. `Utilities.computeDigest` had no
+  mock at all before this; the browser's own `crypto.subtle.digest` is
+  Promise-based and can't stand in for the synchronous contract real
+  Apps Script code depends on without a much larger, riskier rewrite.
+  Verified against the real NIST test vectors for the empty string and
+  `"abc"` — not just "compiles and runs against itself."
+
+### Real verification, not just "it compiles"
+
+Ran this project's own headless Apps Script test suite
+(`python3 test/run-gs-tests-headless.py`) after each change:
+
+1. First run: **2 real failures**, both genuine bugs, not flaky tests —
+   `Utilities.DigestAlgorithm` was undefined (the mock gap above), and 4
+   `Tests_OpsChecklistRunner.gs` assertions broke as a direct, expected
+   consequence of `checkMovementLogFreshness_`'s data-source change (its
+   own fixtures still built a `Movement_Log`-shaped fixture, not
+   `Movement_Log_Runs`).
+2. Fixed both; re-ran: **713/713 passed**, including new assertions
+   added in the same change (per `CLAUDE.md`'s own rule) — an unchanged
+   repeat capture writes zero new rows; a real field change writes
+   exactly one; `Movement_Log_Runs` gets a row on every run regardless;
+   the SHA-256 shim matches the real NIST test vectors byte for byte.
+
+### What this does *not* include
+
+`status` (the tracked/versioned inactive-lead field from Phase 3/5) was
+**deliberately left out of this pass** — Phase 6's scope was the
+content-hash write-skip mechanism specifically; adding inactive-lead
+detection to the live capture path is a separate, later change, not
+silently bundled into this one.
+
+### Deployment note
+
+`setupMovementTracking` must be re-run once in the live Apps Script
+editor to create `Movement_Log_Runs` before this takes effect live —
+this repo's `.gs` files do not auto-deploy from git (`CLAUDE.md`'s own,
+already-stated rule, unchanged by this review).
+
+*(Phase 6 complete. Continues in Phase 7 — real E2E validation, building
+on this same implementation.)*
