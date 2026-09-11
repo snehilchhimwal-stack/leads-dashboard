@@ -30,10 +30,13 @@ What it does — five checks against docs/INDEX.md + the record files + git:
   E. change -> component-ID impact     (ADVISORY)
      given BEFORE/AFTER shas (env DIFF_BASE / DIFF_HEAD, or argv, or
      github.event.before/after), resolve every changed repo path against
-     INDEX's Location column -> affected ids + their 1-hop deps/consumers;
-     a changed js/*.js or *.gs path with NO INDEX row = "undocumented
-     component". Prints the set that should go Stale and a ready-to-run
-     update-tasks.ps1 ops JSON (CI cannot reach tasks.json itself).
+     INDEX's Location column -> affected ids + their deps/consumers out
+     to 2 hops (Required Fix #4, E2E acceptance test report -- was 1 hop
+     only; TEST 23 proved a real cascade needs the 2nd link, e.g.
+     JS-016 -> SHEET-004 -> GS-010); a changed js/*.js or *.gs path with
+     NO INDEX row = "undocumented component". Prints the set that should
+     go Stale and a ready-to-run update-tasks.ps1 ops JSON (CI cannot
+     reach tasks.json itself).
 
 Exit code: non-zero iff A, B or C fail. D and E only print.
 Flip D/E to blocking later by setting CATALOG_STRICT=1.
@@ -231,20 +234,41 @@ def check_impact(rows):
         elif re.match(r'js/[^/]+\.js$', p) or re.match(r'[^/]+\.gs$', p):
             if not p.startswith("Tests_") and p != "RmHierarchy.private.gs":
                 undocumented.append(p)
-    onehop = set(affected)
-    for cid in affected:
-        onehop |= rows[cid]["dep"] | rows[cid]["ub"]
+    # 2-hop impact walk (Required Fix #4, E2E acceptance test report --
+    # this used to stop at exactly 1 hop, confirmed for real in TEST 23:
+    # a real production cascade (a UI write -> a Sheet -> the SEPARATE,
+    # unattended Apps Script system that reads that Sheet) lost coverage
+    # past the first link, e.g. a change to JS-016 never surfaced GS-010
+    # even though JS-016 -> SHEET-004 -> GS-010 is a real, reciprocal
+    # dependency chain. The graph is small (~72 rows) so a 2nd hop costs
+    # nothing measurable. A plain set (impact, monotonically growing,
+    # only ever expanded by NEW ids not already in it) is its own cycle
+    # guard -- the walk always terminates in at most `rows` iterations,
+    # and here it's capped at 2 explicitly by design, not by need.
+    impact = set(affected)
+    frontier = set(affected)
+    for _hop in range(2):
+        nxt = set()
+        for cid in frontier:
+            if cid not in rows:
+                continue
+            nxt |= rows[cid]["dep"] | rows[cid]["ub"]
+        nxt -= impact
+        if not nxt:
+            break
+        impact |= nxt
+        frontier = nxt
     for u in undocumented:
         out.append(f"UNDOCUMENTED COMPONENT: {u} changed but has no docs/INDEX.md row")
     if affected:
-        stale = sorted(onehop)
+        stale = sorted(impact)
         hdate = git("show", "-s", "--format=%cs", head) or "undated"
         out.append(f"changed paths touch {len(affected)} documented component(s): {sorted(affected)}")
-        out.append(f"1-hop impact set (mark these INDEX rows Stale): {stale}")
+        out.append(f"impact set, up to 2 hops (mark these INDEX rows Stale): {stale}")
         ops = {"closes": [], "opens": [{
             "title": f"[Leads Dashboard] Revalidate {', '.join(sorted(affected))} after {head[:12]}",
             "why": (f"Change-control (check-catalog.py E): commit range {base[:12]}..{head[:12]} "
-                    f"touched {sorted(affected)}. 1-hop impact: {stale}. For each: re-read the "
+                    f"touched {sorted(affected)}. Impact (up to 2 hops): {stale}. For each: re-read the "
                     f"record against the code at {head[:12]}, refresh ## Validation + Last Verified + "
                     f"the INDEX.md row, update HANDOVER.md if ## Handover relationship flagged it, "
                     f"write docs/changes/{hdate}-{head[:12]}.md, then set the rows back to "
