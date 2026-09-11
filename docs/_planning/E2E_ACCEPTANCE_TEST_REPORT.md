@@ -247,6 +247,130 @@ a disposable branch, not assumed correct from the code alone.
 
 ---
 
+## Round 3 retest (2026-09-11, same day) — verdict FAIL, zero automation-matrix FAILs for the first time
+
+**Verdict: still FAIL — not reversed, and this report is not going to
+round that up.** Same discipline as rounds 1 and 2: all 9 parts of
+`docs/_planning/E2E_ACCEPTANCE_TEST_SPEC.md` run again in full on a
+fresh disposable branch (`e2e-acceptance-test`, re-created off `master`
+@ `4bc250e`, deleted after this report was committed), every one of the
+7 tests whose mechanism changed since round 2 (TEST 8/9/10/13/14/18/19)
+reproduced against a REAL fixture — a fresh, correctly-constructed one
+in every case, not a copy of a round-2 fixture — every fixture reverted,
+nothing pushed except this section and one real tooling fix found along
+the way. Full working log: `docs/_planning/E2E_ACCEPTANCE_TEST_LOG.md`
+on that now-deleted branch, same fate as rounds 1 and 2's own logs —
+this section is the durable record. Efficiency note carried the same
+discipline forward: TEST 2/3/4/5/6/7/11/12/15/16/17/20/21/22/23/25 were
+cited directly from round-2-this-session evidence rather than re-run,
+since no fix since round 2 touched any of their mechanisms — round 3's
+own real-fixture effort went entirely into the 7 tests that actually
+could have moved.
+
+### One real bug found DURING this retest (not pre-existing)
+
+**Check J's own violation message mislabeled its evidence.** When check
+J (LOGIC_AUDIT.md immutability, shipped just before this round started)
+fires, it lists every commit since the cited final SHA that touched the
+file and called the WHOLE list "confirmed legitimate precedent" — but
+by definition, when the check fires, at least one of those commits IS
+the violator, not precedent. Round 3's own TEST 14 fixture commit landed
+in that exact list and was mislabeled legitimate in its own violation
+message — a real, reproducible bug, not a hypothetical. **Fixed and
+shipped to `master` the moment it was found** (commit `7da7e68`, CI
+confirmed green, merged back into the test branch to keep testing with
+the corrected tool) — not left for a future round, same discipline as
+round 2's check-H regex bug. The message now lists commits neutrally
+instead of asserting they're all fine.
+
+### What moved, test by test
+
+| # | Test | Round 2 | Round 3 | Why |
+|---|---|---|---|---|
+| 8 | UI element (undocumented button) | FAIL (zero signal) | **real structural signal** | check M, fresh fixture confirmed it fires correctly |
+| 9 | Sheet/tab change (undocumented tab) | FAIL (zero signal) | **real structural signal** | check L, fresh fixture confirmed it fires correctly (after 2 fixture-naming false starts — no real constant uses digits, and the fixture had to avoid them too) |
+| 10 | New exception path (thrown-literal staleness) | FAIL (zero signal) | **real, narrow structural signal** | check N, fresh fixture confirmed — but only covers 2 catalog-wide citable EXC- rows |
+| 13 | Handover change | FAIL (calendar proxy only) | **real, narrow structural signal** | check O, fresh fixture (swapped two script names' stated order) confirmed it fires correctly — one precise claim, not general staleness |
+| 14 | LOGIC_AUDIT.md protection | FAIL (zero code references) | **real structural signal** | check J, fresh fixture (unauthorized body edit) confirmed it fires correctly — plus found+fixed a real bug in its own message (above) |
+| 18 | Downstream / false-closure prevention | FAIL (not blocked) | **PASS** | check D's downstream extension, fresh fixture (real `JS-016` change, probe task citing only the downstream `GS-010`) confirmed `-VerifyCatalogRepo` now blocks it |
+| 19 | TBD data (enforcement half) | FAIL (zero TBD-enforcement code) | **real structural signal** | check K, fresh fixture (fabricated non-TBD retention value, decision not actually made) confirmed it fires correctly |
+| 7 | Conflicting comment (general, the P0) | FAIL | FAIL (unchanged) | still zero code-level signal by design; real mitigation is the external weekly LLM routine, deliberately outside this test's disposable-branch scope |
+| 21 | Comment escape battery | PARTIAL (3/8, as designed) | unchanged | no fix touched the pair-marker allowlist |
+| — | False-pass battery (13 items) | 10/13 succeed (strict convention) | **7/13 succeed** | 6/13 now fully caught (was 3), 4/13 partial (was 2) — driven by checks K/L/M/N/O |
+
+Tests not re-fixtured this round (2/3/4/5/6/11/12/15/16/17/20/22/23/25)
+were cited from round-2-this-session evidence, same reasoning round 2
+itself used for its own untouched tests — their mechanisms were not
+touched by any of the 7 fixes this round shipped.
+
+### Updated automation matrix (28 controls — 24 + 4 brand new)
+
+| Verdict | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| PASS | 4 | 7 | **10** |
+| PARTIAL | 8 | 11 | **14** |
+| FAIL | 3 | 1 | **0** |
+| NOT AUTOMATED | 3 | 3 | **2** |
+| NOT APPLICABLE | 2 | 2 | 2 (unchanged) |
+
+**Zero FAIL controls for the first time across all three rounds.** The
+last one standing after round 2 (`sheet-template.md`'s TBD-enforcement)
+is now closed by check K. `LOGIC_AUDIT.md`'s immutability rule graduates
+out of NOT AUTOMATED via check J. Four brand-new controls join the
+matrix (checks L/M/N/O), each independently verified. The 2 remaining
+NOT AUTOMATED controls (`PRE_SHIP_DOCUMENTATION_CHECKLIST.md`, the
+`HOW_TO_*` process guides) are process documents by design — no fix was
+ever scoped for them, and none is proposed now.
+
+### The honest read
+
+**Zero controls reach a clean PASS on content correctness — still true,
+exactly as rounds 1 and 2 found.** Every PASS above is structural
+(existence, reciprocity, narrow-but-reliable sub-element coverage) or a
+control now correctly enforcing something it already claimed to — never
+a new content-understanding capability. Per the spec's own strict rule
+— *"a change that occurs silently, with no detection, no owner, no
+traceability, no review, is a FAIL"* — TEST 7's general case (a plain
+comment silently contradicting the code beside it) still produces
+**literal zero code-level signal**, and that alone is enough to keep
+the overall verdict at **FAIL**. This report is not going to round that
+up, no matter how the automation matrix moved.
+
+What genuinely changed, for real, verified against fresh fixtures: the
+three tests round 2 found completely unmitigated (UI/Sheet/exception
+coverage, TEST 8/9/10) now all produce real structural signal; the two
+prose-only governance rules round 2 found had zero enforcement
+(HANDOVER staleness for its one precise claim, LOGIC_AUDIT.md
+immutability) now have real code behind them; the one remaining FAIL
+in the entire 28-control automation matrix is gone; the false-pass
+battery's "still fully succeeds" count dropped from 8/13 to 3/13. That
+is real, evidence-backed progress on all 7 gaps round 2 named and
+scoped — not a verdict flip, and not nothing either. The P0 (general
+content-vs-code contradiction, TEST 7) remains the one structural gap
+this project has explicitly chosen not to close with more automation,
+mitigated instead by the external weekly LLM-assisted spot-check
+routine (`trig_01XCaCVj4YuDcy2NwpDAHbs4`) — a real, working, but
+external and judgment-based mitigation, not a code check, and therefore
+not counted toward the automation matrix's FAIL-free result above.
+
+**Per the 21-point criteria**: no additional criterion crosses from
+violated to satisfied this round beyond what round 2 already recorded —
+the criteria round 3's fixes touch (13, evidence-backed validation;
+19, TBD honesty) were already counted as satisfied or partially
+satisfied in round 2's accounting, and round 3 only deepens that
+evidence rather than crossing a new criterion.
+
+**Do not build more architecture beyond what round 2's own scoping
+already covered.** Nothing in this retest surfaced a gap the 7 fixes
+didn't already know about and choose to build — every real finding this
+round was either confirmation of an existing, correctly-scoped fix, a
+genuine fixture-construction lesson (no real constant uses digits — a
+lesson about the fixture, not the check), or a genuine bug IN one of
+those fixes (check J's message), found and fixed in the same session it
+was found.
+
+---
+
 ## B. Test results
 
 `Result` — PASS (control works as the spec expects) / PARTIAL (some
