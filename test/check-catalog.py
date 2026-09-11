@@ -33,10 +33,15 @@ What it does — five checks against docs/INDEX.md + the record files + git:
      INDEX's Location column -> affected ids + their deps/consumers out
      to 2 hops (Required Fix #4, E2E acceptance test report -- was 1 hop
      only; TEST 23 proved a real cascade needs the 2nd link, e.g.
-     JS-016 -> SHEET-004 -> GS-010); a changed js/*.js or *.gs path with
-     NO INDEX row = "undocumented component". Prints the set that should
-     go Stale and a ready-to-run update-tasks.ps1 ops JSON (CI cannot
-     reach tasks.json itself).
+     JS-016 -> SHEET-004 -> GS-010) -- PLUS any FLOW-/TRIGGER-
+     architecture overlay whose own Depends On names something in that
+     impact set (Required Fix #5 -- these overlays are exempt from
+     check A's reciprocity requirement, so the normal edge-walk could
+     never reach them; TEST 12 proved a GS-010 change needs to surface
+     FLOW-002 too). A changed js/*.js or *.gs path with NO INDEX row =
+     "undocumented component". Prints the set that should go Stale and
+     a ready-to-run update-tasks.ps1 ops JSON (CI cannot reach
+     tasks.json itself).
 
 Exit code: non-zero iff A, B or C fail. D and E only print.
 Flip D/E to blocking later by setting CATALOG_STRICT=1.
@@ -258,6 +263,24 @@ def check_impact(rows):
             break
         impact |= nxt
         frontier = nxt
+    # Architecture-overlay surfacing (Required Fix #5, E2E acceptance
+    # test report): check A deliberately does NOT require a FLOW-/
+    # TRIGGER- row's own Depends On to be echoed back in a member's
+    # Used By (the "kind: arch" exemption in check_reciprocity -- an
+    # overlay describing many components isn't itself something every
+    # one of them should have to list). But that same exemption meant
+    # this impact walk, which only ever follows real reciprocal edges,
+    # could never walk BACK to the overlay describing a changed
+    # component -- confirmed for real in TEST 12: a GS-010 change never
+    # surfaced FLOW-002 ("The 3-phase 'Generate region emails' cycle"),
+    # even though FLOW-002's own Depends On names GS-010 directly.
+    # Scanned independently of the reciprocity graph, against the full
+    # impact set found so far (not just the directly-changed ids): any
+    # arch overlay naming a touched component in its own Depends On is
+    # relevant context for whoever reviews this change.
+    arch_hits = sorted(cid for cid, d in rows.items()
+                        if d["kind"] == "arch" and (d["dep"] & impact))
+    impact |= set(arch_hits)
     for u in undocumented:
         out.append(f"UNDOCUMENTED COMPONENT: {u} changed but has no docs/INDEX.md row")
     if affected:
@@ -265,6 +288,8 @@ def check_impact(rows):
         hdate = git("show", "-s", "--format=%cs", head) or "undated"
         out.append(f"changed paths touch {len(affected)} documented component(s): {sorted(affected)}")
         out.append(f"impact set, up to 2 hops (mark these INDEX rows Stale): {stale}")
+        if arch_hits:
+            out.append(f"ARCHITECTURE OVERLAY affected — re-check {', '.join(arch_hits)} against this change too")
         ops = {"closes": [], "opens": [{
             "title": f"[Leads Dashboard] Revalidate {', '.join(sorted(affected))} after {head[:12]}",
             "why": (f"Change-control (check-catalog.py E): commit range {base[:12]}..{head[:12]} "
