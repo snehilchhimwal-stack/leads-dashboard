@@ -23,7 +23,11 @@ What it does — seven checks against docs/INDEX.md + the record files + git:
   C. INDEX Location -> real file        (BLOCKING)
      a row whose Location names js/foo.js or Foo.gs or dashboard.html
      that no longer exists on disk = a retired/renamed/moved component
-     with a stale record.
+     with a stale record. If git's own rename detection (-M) recognizes
+     the missing path as renamed to a path that still exists, the
+     problem message now names that target (Required Fix #9 -- was
+     silent on this, confirmed in TEST 4; still reads as delete+add,
+     check A still needs the reciprocity fixed by hand either way).
   D. Last-Verified drift               (ADVISORY — never fails the build)
      a record verified at commit <sha> whose ## Location path has since
      advanced past <sha> on HEAD. Needs full git history (fetch-depth: 0).
@@ -178,6 +182,51 @@ def check_coverage(rows):
     return problems
 
 # ---------------------------------------------------------------- C
+_RENAME_MAP_CACHE = None
+
+def _rename_map():
+    """old_path -> newest known rename target, across all of history.
+    Required Fix #9 (E2E acceptance test report, F6/TEST 4): git already
+    knows when a path was renamed -- its own rename detection (-M) just
+    never got read here before. Deliberately NOT `git log -- <old_path>`:
+    a pathspec filter is applied by git BEFORE rename detection runs, so
+    it silently degrades every rename to a plain delete (confirmed for
+    real building this fix -- `git log -M -- <path>` reported plain "D",
+    `git show -M` on the same commit with no pathspec correctly showed
+    "R100"). Scanning the whole history's rename records once and
+    caching them is both correct and cheap (~0.1s on this repo)."""
+    global _RENAME_MAP_CACHE
+    if _RENAME_MAP_CACHE is not None:
+        return _RENAME_MAP_CACHE
+    out = git("log", "--diff-filter=R", "-M", "--name-status", "--format=")
+    m = {}
+    # git log lists newest-first, so the FIRST time a given old_path is
+    # seen is already its most recent rename -- setdefault keeps that
+    # and ignores any older, unrelated rename that happened to reuse the
+    # same path string further back in history.
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0].startswith("R"):
+            m.setdefault(parts[1], parts[2])
+    _RENAME_MAP_CACHE = m
+    return m
+
+def find_rename_target(old_path):
+    """The most recent rename target for old_path IF that target still
+    exists on disk today (a target that's ALSO since gone isn't a useful
+    hint, so this stays silent rather than pointing at another dead
+    end). Follows one hop only -- deliberately not chained further, to
+    keep this a hint, not a full lineage reconstruction. This does not
+    give a component a rename EVENT or preserve its stable ID
+    automatically (check A still reads it as delete+add, exactly as
+    before) -- it only makes check C's own message name the likely
+    target instead of leaving "renamed?" as an open question for a
+    human to re-derive by hand."""
+    target = _rename_map().get(old_path)
+    if target and os.path.exists(os.path.join(ROOT, target)):
+        return target
+    return None
+
 def check_locations(rows):
     problems = []
     for cid, d in rows.items():
@@ -185,7 +234,12 @@ def check_locations(rows):
             if f.endswith(".js") and "*" in f:
                 continue
             if not os.path.exists(os.path.join(ROOT, f)):
-                problems.append(f"{cid} Location names `{f}` — not found on disk (retired/renamed/moved?)")
+                hint = ""
+                target = find_rename_target(f)
+                if target:
+                    hint = (f" — possible rename to `{target}`; consider "
+                            f"HOW_TO_RETIRE_A_COMPONENT.md's ID-preservation gap")
+                problems.append(f"{cid} Location names `{f}` — not found on disk (retired/renamed/moved?){hint}")
     return problems
 
 # ---------------------------------------------------------------- D
