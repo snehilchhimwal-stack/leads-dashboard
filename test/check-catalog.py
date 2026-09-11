@@ -107,9 +107,25 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      flag real, correct history as a violation. A body difference means
      the historical record itself was edited forward -- the exact thing
      the header's own words rule out.
+  K. TBD retention consistency         (ADVISORY)
+     (E2E acceptance test report round 2, TEST 19 -- "the 7 real TBD
+     cases are genuinely honest (audited); a fabricated non-TBD value
+     gets zero signal," no fix originally proposed). Scoped to retention
+     specifically, not "any unknown required property" in general --
+     retention is the one property with real tracking infrastructure
+     already built (`docs/_planning/retention-decisions-needed.md`,
+     DOC-037; `OPEN_ITEMS.md` §B is a pointer to the same file, not an
+     independent source). For every `SHEET-XXX` id that file lists as
+     "needing a decision," checks that id's own `docs/sheets/` record
+     still says `TBD` in its `**Retention Period:**` line. A CONSISTENCY
+     check, not a truth check (same limit as every other check here) --
+     it can't verify a definite value is correct, only that the two
+     already-real documents haven't silently drifted apart, which is
+     exactly the shape "a fabricated value" or "a resolved decision that
+     never got folded back per DOC-037's own documented process" takes.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, I, and J only print.
-Flip D/E/G/H/I/J to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, and K only print.
+Flip D/E/G/H/I/J/K to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -875,6 +891,58 @@ def check_logic_audit_immutability():
                 f"intentional and update the header's cited commit if the audit was deliberately reopened"]
     return ["(audit body unchanged since the cited final commit — header/cross-link edits only, as expected)"]
 
+# ---------------------------------------------------------------- K
+RETENTION_DECISIONS_PATH = os.path.join(ROOT, "docs", "_planning", "retention-decisions-needed.md")
+RETENTION_NEEDED_HEADER = re.compile(r'^### \d+\.\s*`[^`]+`\s*—\s*`(SHEET-\d{3})`', re.M)
+
+# TEST 19, E2E acceptance test report round 2: "the 7 real TBD cases are
+# genuinely honest (audited); a fabricated non-TBD value gets zero
+# signal." Scoped to retention specifically (not "any unknown required
+# property" in general) -- retention is the one property with real,
+# already-built tracking infrastructure (DOC-037's
+# retention-decisions-needed.md; OPEN_ITEMS.md §B is a pointer to the
+# same file, not an independent source). Checks CONSISTENCY between the
+# two already-real documents, not "is this retention value actually
+# true" (unknowable by code, same reasoning as every other check here
+# that stops at structural correctness) -- if a tab retention-decisions-
+# needed.md still lists as needing a decision no longer says TBD in its
+# own record, either the decision was resolved but DOC-037's own
+# documented process (fold it back into retention-decisions-needed.md)
+# wasn't followed, or a value was invented without going through a real
+# decision at all -- either way, worth a human look.
+def check_tbd_retention_consistency():
+    if not os.path.exists(RETENTION_DECISIONS_PATH):
+        return ["(docs/_planning/retention-decisions-needed.md not found — nothing to check)"]
+    needed_text = open(RETENTION_DECISIONS_PATH, encoding="utf-8").read()
+    needed_ids = RETENTION_NEEDED_HEADER.findall(needed_text)
+    if not needed_ids:
+        return ["(no \"### N. `<name>` — `SHEET-XXX`\" entries found in "
+                "retention-decisions-needed.md — nothing to check)"]
+    out = []
+    for sid in needed_ids:
+        rp = record_path(sid)
+        if not rp:
+            out.append(f"{sid}: listed in retention-decisions-needed.md but has no docs/sheets/ record file")
+            continue
+        text = open(rp, encoding="utf-8").read()
+        # [ \t]*, NOT \s* -- same cross-line-capture bug check H's
+        # Evidence/Status regex had (fixed in check-catalog.py commit
+        # 74107f7); same-line whitespace only.
+        rm = re.search(r'\*\*Retention Period:\*\*[ \t]*(.*)', text)
+        if not rm:
+            out.append(f"{sid}: no '**Retention Period:**' line found in its record — cannot verify")
+            continue
+        if "TBD" not in rm.group(1):
+            out.append(f"{sid}: retention-decisions-needed.md still lists this as needing a decision, but "
+                       f"its record's Retention Period no longer says TBD (\"{rm.group(1).strip()[:80]}\") "
+                       f"— either fold the resolved decision back into retention-decisions-needed.md's "
+                       f"'Decisions already made' table (DOC-037's own documented process), or verify this "
+                       f"wasn't invented without a real decision")
+    if not out:
+        out.append(f"(all {len(needed_ids)} tab(s) retention-decisions-needed.md lists as needing a decision "
+                   f"still honestly say TBD in their own record)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -903,7 +971,8 @@ def main():
                       ("G. Sub-table ID uniqueness", check_subtable_ids),
                       ("H. Owner / Evidence content", lambda r: check_owner_evidence()),
                       ("I. Cited-literal check", check_cited_literals),
-                      ("J. LOGIC_AUDIT.md immutability", lambda r: check_logic_audit_immutability())]:
+                      ("J. LOGIC_AUDIT.md immutability", lambda r: check_logic_audit_immutability()),
+                      ("K. TBD retention consistency", lambda r: check_tbd_retention_consistency())]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
