@@ -3083,6 +3083,79 @@ below needs to fill, not a pre-existing regression.
    fetch the whole retained 7-day window and group/sort it client-side, as
    described above.
 
-*(Phase 1 complete. Continues in Phase 2 — evaluating whether this design
-correctly separates identity, current state, versions, and events, with a
-concrete example.)*
+*(Phase 1 complete.)*
+
+## Phase 2 — Evaluating the Current Design
+
+### Concept separation, checked against the real code from Phase 1
+
+| Concept | Present? | Evidence |
+|---|---|---|
+| **Stable lead identity** | **Yes, but only partially reliable** | `client_id` (falling back to `lead_id`) is the real identity key used everywhere history is grouped (`buildMovementHistories`, `js/tab-movement.js:298`). It's stable in the sense that it's never regenerated — but it's sourced entirely from the external CRM export (out of scope), so this review can't verify it's *never* reassigned or reused at the source. |
+| **Current/latest state** | **No — not materialized at all** | There is no table or row that means "this lead's state right now." The live `leads` tab itself is the closest thing, and it's read fresh on every capture — nothing in this project stores "current state" as its own artifact separate from the historical log. |
+| **Individual changes/versions** | **No — not modeled** | Confirmed in Phase 1: `snapshotOpenLeads_` writes a full row every run regardless of whether anything changed. There is no concept of "a change" as a distinct, smaller record — only full snapshots, some of which happen to be identical to the one before. |
+| **Ingestion events (a capture ran)** | **Yes, implicitly — and this matters more than it looks** | Every `Movement_Log` row's `snapshot_at`/`snapshot_label` *is* a record that a capture ran. `checkMovementLogFreshness_` (`MovementTracker.gs:968-980`) depends on this directly — it reads the **last row's** `snapshot_at` to decide whether the whole capture pipeline is healthy or stale. See the dedup-risk note below — this is a real, live consumer of "a row exists," independent of whether the lead's data actually changed. |
+| **6-hour snapshots** | **Same thing as the ingestion event — no separate concept** | Confirmed in Phase 1: there is one cadence, not two. `Movement_Log`'s own rows are simultaneously "the ingestion capture" and "the historical snapshot." |
+| **New vs. updated leads** | **No — not distinguished at write time** | `snapshotOpenLeads_` treats a lead's first-ever appearance in `Movement_Log` identically to its hundredth — nothing marks a row as "this is the first time we've seen this lead." A reader would have to scan all prior `Movement_Log` history for the key to infer it. |
+| **Inactive/deleted leads** | **No explicit event; only implicit inference** | Confirmed in Phase 1: a closed lead is captured exactly like an open one until it stops appearing in `leads` or ages out of the 7-day retention. Nothing records "this lead became inactive on date X" — only silence, which a reader has to interpret. |
+
+### Concrete example — one lead across 5 real captures
+
+Using `MovementTracker.gs`'s real cadence (`SNAPSHOT_HOURS_ = [0,6,12,18]`
+IST), lead `L-4471` / `client_id C-2091`, RM `Priya`:
+
+| # | Capture (real cadence) | What actually happened | What `Movement_Log` stores today |
+|---|---|---|---|
+| 1 | Day 1, 00:00 | Lead first appears — `stage=Suspect`, `call_attempts=1` | **New full row** — correct, this is genuinely the first evidence of this lead |
+| 2 | Day 1, 06:00 | No change | **New full row**, byte-identical to row 1 except `snapshot_at`/`snapshot_label` |
+| 3 | Day 1, 12:00 | `stage` changes: `Suspect` → `Prospect` | **New full row** — the only column that differs from row 2 is `current_stage` (and the timestamp columns) |
+| 4 | Day 1, 18:00 | No change | **New full row**, byte-identical to row 3 except timestamp |
+| 5 | Day 2, 00:00 | `call_attempts` changes: `1` → `2` | **New full row** — only `call_attempts` (and timestamp) differs from row 4 |
+
+**Stored today: 5 full rows, ~22 columns each.** Of those, **rows 2 and 4
+are exact duplicates** of their predecessor in every column except the two
+bookkeeping columns (`snapshot_at`, `snapshot_label`). Only rows 1, 3, and
+5 carry any information not already present in the row before them.
+
+**What's actually needed to reconstruct history correctly:** exactly 3
+records — the initial state (row 1) and the two real changes (rows 3 and
+5) — **plus**, separately, a record that captures genuinely ran at all 5
+timestamps (see the freshness-check finding below, which is why this
+can't simply be "3 rows and done"). A query for "what was this lead's
+state at Day 1, 15:00" is answered identically either way: the latest
+record at-or-before that time — row 3 today, or the single `Prospect`
+version in the reduced design. Nothing about correctness requires storing
+rows 2 and 4 at all.
+
+### Where deduplication could accidentally destroy real historical state
+
+Two genuine risks, not hypothetical ones — found directly in this
+codebase's real consumers:
+
+1. **`checkMovementLogFreshness_` reads "the last row's timestamp" as a
+   health signal.** If unchanged captures simply stop writing rows,
+   a lead (or the whole capture pipeline) that is genuinely healthy but
+   has had no real changes in a while would start looking "stale" by this
+   check's current logic — because it currently conflates "a row exists"
+   with "a capture ran." **This is not a reason to keep writing duplicate
+   rows** — it's a reason the proposed design (Phase 3) must keep a
+   separate, explicit record of "an ingestion ran at time T," independent
+   of whether any lead's data changed, so freshness monitoring keeps
+   working without relying on duplicate version rows as a side effect.
+2. **`persistDailyCohortHistoryGs_`'s already-archived days must never be
+   recomputed** (Phase 1's finding). Any redesign that changes what
+   `Movement_Log`-equivalent data is retained or how far back it reaches
+   must not silently change what `evidenceAtDeadline`-style lookups
+   return for a day that's already been locked into `Daily_Cohort_History`
+   — that table's correctness depends on the raw evidence it was computed
+   from staying available (or at least reconstructible to the same
+   answer) up to the point it was archived, not before.
+
+Neither risk is created by removing duplicate *unchanged* rows — a
+last-known-value-at-or-before-T query is unaffected by whether the
+identical intermediate value was stored once or five times. The real risk
+is conflating "when did we last check" with "when did this actually
+change" into one signal, which is exactly what today's design does by
+accident.
+
+*(Phase 2 complete. Continues in Phase 3 — the proposed schema.)*
