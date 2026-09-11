@@ -371,6 +371,58 @@ was found.
 
 ---
 
+## Round 3 remaining false-pass items (2026-09-11, same day) — 1 of 7 fixed, 6 confirmed dead ends
+
+Round 3's false-pass recompute left 7 items still not fully caught (3
+still fully succeeding, 4 partial). Opened as a backlog task
+(`t-tf-21fbf968b999`), then investigated one at a time for a real
+structural angle before writing anything — same discipline as every
+check this project has built.
+
+**Fixed (1):** Documented nonexistent function — new check P.
+`FN-XXX` sub-table rows cite function names with a line anchor, the
+same row shape check I already parses for cited-literal verification.
+Tested against the real, unmodified catalog before writing any check
+code: 254 `FN-` rows, 401 extracted name citations, checks clean at
+401/401 once two real codebase conventions are handled — this
+codebase's own `` `_()` `` shorthand for "same name + trailing
+underscore private twin" (confirmed real against `OvernightEmailer.gs`,
+line anchors match exactly), and one Web Worker `onmessage =
+function(e){` assignment that isn't the usual `function name(`
+declaration style. Verified with a real fixture (a fabricated `FN-999`
+row citing a nonexistent function) on a disposable branch, reverted,
+shipped to `master` (`5133f56`), CI confirmed green.
+
+**Confirmed dead ends (6), no low-noise structural angle exists:**
+- *Untracked exception, broadened* — 42 real `throw new Error(...)`
+  sites exist, but ~35 throw dynamic/computed messages (generic
+  API-error passthroughs), not stable codes; only ~2 are genuinely
+  catalog-able, which is exactly why check N was already scoped that
+  narrowly. Broadening would flood the check with noise on legitimate
+  passthrough errors.
+- *Stale dependency* — `Depends On`/`Used By` pairs frequently
+  represent Sheet-based or external-API relationships with no
+  function-call signature to verify; a "still calls a function" check
+  would misfire on structurally legitimate non-call dependencies.
+- *Incorrect comment (general)* — this is TEST 7, the P0 itself,
+  already exhaustively investigated this session. The external weekly
+  LLM-assisted spot-check routine remains the only mitigation.
+- *Stale handover (general)* — same class of problem as the P0; check
+  O's one precise load-order claim is the ceiling without semantic
+  understanding.
+- *False "Done" (general, no-citation case)* — architecturally
+  impossible to enforce without knowing what should have been cited for
+  that specific task; the citable-drift case is already fixed (TEST 18).
+- *Missing/wrong-version validation* — no concrete trigger scenario
+  survives from the original finding to scope a check against without
+  guessing at intent.
+
+`check-catalog.py` now runs **16 checks (A–P)** — 4 blocking, 12
+advisory. The false-pass battery moves from round 3's 7/13 still
+succeeding (by the report's own strict convention) to **6/13**.
+
+---
+
 ## B. Test results
 
 `Result` — PASS (control works as the spec expects) / PARTIAL (some
