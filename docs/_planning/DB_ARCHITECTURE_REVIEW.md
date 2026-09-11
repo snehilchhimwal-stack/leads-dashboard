@@ -2134,5 +2134,152 @@ moves data runs the same core checks:
    system produces are compared for a clean, gap-free, duplicate-free
    handoff.
 
-*(Part 8 complete. Continues in Part 9 — the central repository
-structure for the redesigned system.)*
+*(Part 8 complete.)*
+
+---
+
+## Part 9 — Central Repository Structure
+
+**Recommendation stated up front: extend this existing repository,
+don't fragment into several.** This project is a single, tightly-coupled
+internal tool with one real owner today (every `docs/sheets/SHEET-XXX`
+record's `Owner` field says the same name) and an already-substantial,
+working documentation and change-control discipline
+(`docs/INDEX.md`, `test/check-catalog.py`, the `HANDOVER.md`/
+`OPS_CHECKLIST.md` pair). Splitting the new API/database work into a
+separate repository would add real multi-repo overhead (cross-repo PRs,
+duplicated CI, two places to look for "how does X work") for no
+corresponding benefit at this project's actual size and team — directly
+against the brief's own "prefer simple" instruction. The tree below adds
+new top-level directories for genuinely new concerns and leaves every
+existing file exactly where it already is.
+
+### Recommended repository tree
+
+```
+leads-dashboard/
+├── dashboard.html                  # unchanged
+├── js/                              # unchanged in location; contents migrated per Part 7
+├── *.gs                             # unchanged in location; contents migrated per Part 7
+├── Tests_*.gs                       # unchanged — existing Apps Script test discipline
+│
+├── api/                             # NEW — the API layer from Part 6
+│   ├── src/
+│   │   ├── routes/                  # one file per resource: snapshots, daily-rm-issues,
+│   │   │                            #   follow-ups, sla-history, daily-cohort-history,
+│   │   │                            #   people, regions, region-recipients, comments,
+│   │   │                            #   unmatched-comments, email-sends
+│   │   ├── db/                      # the query layer mapping to Part 3's schema
+│   │   ├── auth/                    # the authentication scheme (Part 7's cross-cutting item)
+│   │   └── jobs/                    # server-side job logic: daily_rm_issues materialization,
+│   │                                #   per-channel email_sends archival (Part 5/6)
+│   ├── tests/                       # mirrors the existing Tests_*.gs discipline, for the API layer
+│   └── (package.json / requirements.txt — per the chosen stack, Part 6's open flag)
+│
+├── db/                              # NEW — schema + migrations
+│   ├── schema.sql                   # the canonical Part 3 schema — kept in sync with this
+│   │                                #   document the same way INDEX.md is kept in sync with docs/
+│   ├── migrations/                  # one versioned file per schema change, applied in order
+│   └── seed/                        # reference-data seeds (the confirmed regions list, etc.)
+│
+├── config/                          # NEW — environment configuration
+│   ├── staging.env.example
+│   ├── production.env.example
+│   └── README.md                    # what each variable means — real secrets never committed
+│
+├── docs/                            # existing, EXTENDED not replaced
+│   ├── INDEX.md                     # extended with new component-id prefixes for db/api records,
+│   │                                #   same reciprocity discipline check-catalog.py already enforces
+│   ├── sheets/                      # kept as-is — becomes the LEGACY record once migrated,
+│   │                                #   Record Status flips to reflect retirement (Part 8, Phase 8)
+│   ├── db/                          # NEW — one record per target table, mirroring sheets/'s
+│   │                                #   exact convention (purpose, columns, writers, readers,
+│   │                                #   retention, relationships)
+│   ├── api/                         # NEW — one record per endpoint, mirroring js-modules/
+│   │                                #   gs-modules' convention
+│   └── _planning/
+│       └── DB_ARCHITECTURE_REVIEW.md   # this document — the durable design record,
+│                                        #   same role E2E_ACCEPTANCE_TEST_REPORT.md plays
+│                                        #   for that project
+│
+├── scripts/                         # NEW — one-off / migration scripts specifically
+│                                     #   (Part 8's Phase 1/3/4 data-export, transform, and
+│                                     #   load scripts, and the reconciliation checks) —
+│                                     #   distinct from api/src/jobs/, which is recurring
+│                                     #   application logic, not a throwaway migration tool
+│
+├── test/                            # existing, extended — check-catalog.py's own discipline
+│                                     #   grows a check for db/schema.sql <-> docs/db/ coverage,
+│                                     #   the same shape as its existing INDEX.md <-> record checks
+├── tests/                           # existing (frontend-harness.html etc.), extended for the
+│                                     #   API-backed dashboard code paths
+│
+├── runbooks/                        # NEW — deployment, backup/restore, rollback, and
+│                                     #   monitoring procedures (Part 10's Handover material
+│                                     #   lives here in its operational form)
+│
+├── HANDOVER.md                      # existing, EXTENDED in the same commit as the real
+│                                     #   architectural change lands — this project's own
+│                                     #   explicit, already-stated rule, unchanged by this review
+├── OPS_CHECKLIST.md                 # existing, extended with the new DB-backed checks
+├── CLAUDE.md                        # existing, extended with the new stack's real gotchas,
+│                                     #   same terse style as today
+│
+└── .github/workflows/               # existing, extended — new CI for the API layer's tests
+                                      #   and a schema-migration sanity check
+```
+
+### Where each concern belongs, explicitly
+
+- **Application code** — `js/`, `*.gs` (unchanged location, migrated content per Part 7), plus the new `api/src/`.
+- **Database/schema definitions** — `db/schema.sql`.
+- **Migrations** — `db/migrations/`, one file per change, applied strictly in order.
+- **Configuration** — `config/`, environment-specific files, **real secrets never committed** — this repo's existing `RmHierarchy.private.gs` `.gitignore` precedent (real employee data kept out of git entirely) extends directly to database credentials and API keys.
+- **Documentation** — `docs/`, extending the existing convention exactly rather than inventing a new one; `docs/sheets/` doesn't disappear, it becomes the historical record of the system this review replaces.
+- **Scripts/jobs** — a genuine, deliberate split: **`scripts/`** for one-off migration tooling (used once, during Part 8's phases, then kept only as historical record — same spirit as this project's own disposable E2E-test branches); **`api/src/jobs/`** for the recurring application logic a scheduler calls repeatedly in production. Conflating the two would make it unclear, a year from now, which scripts are safe to delete and which are load-bearing.
+- **Tests** — `test/` and `tests/` (both already exist, serving different current purposes — Python/Node harnesses and the frontend integration harness respectively — kept as-is) plus `api/tests/`, extending the same "an assertion in the same commit as the change" discipline `CLAUDE.md` already states for `.gs` files.
+- **Operational/runbook documentation** — the new `runbooks/` directory, plus the existing `HANDOVER.md`/`OPS_CHECKLIST.md` pair extended rather than duplicated — Part 10 designs the actual content that lands here.
+
+### Environment separation
+
+Staging and production are **separate deployments of the same schema
+and API code** (never diverging branches of the code itself) —
+distinguished only by which `config/*.env` file and which real database
+instance they point at. This directly matches Part 8's migration plan,
+which depends on a staging environment being a faithful, currently-live
+mirror of what production will become, not a permanently-separate
+"dev" system that drifts from it over time.
+
+### Ownership and version control
+
+**Carried forward, not changed by this review:** this project has one
+real owner today, and nothing here proposes altering that — an
+org-structure question this review has no basis to weigh in on.
+**Recommended, structural additions:**
+
+- A `CODEOWNERS` file mapping the new `api/`, `db/`, `config/`
+  directories to a reviewer — even a single-person team benefits from
+  this being explicit rather than implicit, and it scales cleanly if
+  the team ever grows.
+- **Extend `check-catalog.py`'s existing discipline** to the new
+  directories — a new check verifying `db/schema.sql` matches what's
+  documented in `docs/db/`, the same shape as its current `INDEX.md`
+  ↔ record-file reciprocity checks. This project already has a real,
+  working change-control tool; growing it to cover the new schema is
+  cheaper and more consistent than inventing a separate one.
+- **A real, flagged gap worth naming:** every commit observed
+  throughout this whole review (and, per the git history, this
+  project's history generally) pushes directly to `master`. That has
+  been low-risk for documentation-only changes, but the new `api/`/`db/`
+  code carries genuine deployment risk (a bad migration, a bad API
+  deploy) that documentation changes don't. **Recommend at minimum a
+  staging-then-production promotion step** (a tag, a protected branch,
+  or an explicit deploy action — not a direct-to-production push) for
+  changes under `api/` and `db/` specifically, once those directories
+  exist. This is a genuine process change, not just a structural one —
+  flagged for the Approval Checkpoint, since it affects how this team
+  actually works day to day, not just where files sit.
+
+*(Part 9 complete. Continues in Part 10 — the handover documentation
+structure: what actually fills the `runbooks/` and `docs/db/`/`docs/api/`
+directories designed above.)*
