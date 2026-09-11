@@ -334,6 +334,12 @@ function TestMockUtilities_() {
     base64EncodeWebSafe: function () { return real.base64EncodeWebSafe.apply(real, arguments); },
     getUuid: function () { return real.getUuid.apply(real, arguments); },
     sleep: function () { /* no-op — see file header */ },
+    // Lead History & Versioning Review, Phase 6/7 — MovementTracker.gs's
+    // _leadContentHashGs_ needs a real digest. DigestAlgorithm forwards
+    // as-is (a plain {SHA_256: 'SHA_256'} object, not a function) since
+    // real code reads it as a constant, never calls it.
+    DigestAlgorithm: real.DigestAlgorithm,
+    computeDigest: function () { return real.computeDigest.apply(real, arguments); },
   };
 }
 

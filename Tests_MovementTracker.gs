@@ -38,12 +38,53 @@ function runMovementTrackerTests_() {
     const healedHeader = healedSheet.getRange(1, 1, 1, healedSheet.getLastColumn()).getValues()[0];
     TestAssertContains_(healedHeader.join(','), SNAPSHOT_COLUMNS_[SNAPSHOT_COLUMNS_.length - 1], 'ensureMovementLogSheet_: self-heals a missing trailing header column on an existing sheet');
 
+    // ---- _leadContentHashGs_ / Utilities.computeDigest: correctness
+    // against real, external NIST SHA-256 test vectors, not just "the
+    // mock doesn't crash" — a subtly-wrong hash implementation would
+    // still pass every OTHER dedup test below (both writers would agree
+    // with themselves consistently) while being silently wrong. ----
+    const sha256Empty = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, '');
+    const sha256EmptyHex = sha256Empty.map(function (b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
+    TestAssertEqual_(sha256EmptyHex, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'Utilities.computeDigest (test shim): SHA-256 of the empty string matches the standard NIST test vector');
+    const sha256Abc = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'abc');
+    const sha256AbcHex = sha256Abc.map(function (b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
+    TestAssertEqual_(sha256AbcHex, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'Utilities.computeDigest (test shim): SHA-256 of "abc" matches the standard NIST test vector');
+
     // ---- snapshotOpenLeads_: writes rows, skips blank lead_id, triggers SLA_History ----
     snapshotOpenLeads_('test snapshot label');
     const afterSnap = ss.getSheetByName('Movement_Log');
-    TestAssertEqual_(afterSnap.getLastRow(), 3, 'snapshotOpenLeads_: writes exactly 2 data rows (3 total incl. header) — the blank-lead_id row is correctly skipped');
+    TestAssertEqual_(afterSnap.getLastRow(), 3, 'snapshotOpenLeads_: writes exactly 2 data rows (3 total incl. header) — the blank-lead_id row is correctly skipped, and the FIRST capture of a lead always writes (no prior hash to compare against)');
     const slaHistory = ss.getSheetByName('SLA_History');
     TestAssert_(!!slaHistory && slaHistory.getLastRow() === 2, 'snapshotOpenLeads_: also writes exactly one SLA_History row (header + 1) via writeSlaHistorySnapshot_');
+    const afterFirstHeader = afterSnap.getRange(1, 1, 1, afterSnap.getLastColumn()).getValues()[0];
+    TestAssertContains_(afterFirstHeader.join(','), 'content_hash', 'snapshotOpenLeads_: Movement_Log\'s header now includes the trailing content_hash column');
+    const afterFirstRows = afterSnap.getRange(2, 1, 2, afterSnap.getLastColumn()).getValues();
+    TestAssert_(afterFirstRows.every(function (r) { return typeof r[r.length - 1] === 'string' && r[r.length - 1].length === 64; }), 'snapshotOpenLeads_: every written row carries a real 64-char SHA-256 hex content_hash, not blank');
+
+    // ---- Content-hash dedup (Lead History & Versioning Review, Phase 6)
+    // — the exact gap Phase 1 of that review found: NO existing test
+    // covered "capture the same lead twice with no changes". ----
+    snapshotOpenLeads_('test snapshot label — repeat, unchanged');
+    TestAssertEqual_(afterSnap.getLastRow(), 3, 'snapshotOpenLeads_ (dedup): an immediate repeat capture with NO field changes writes ZERO new Movement_Log rows — still header + 2, not header + 4');
+    const runsAfterUnchanged = ss.getSheetByName('Movement_Log_Runs');
+    TestAssert_(!!runsAfterUnchanged, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs is created automatically on first use');
+    TestAssertEqual_(runsAfterUnchanged.getLastRow(), 3, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs still gets a new row for the unchanged run (header + 2 runs so far) — "a capture happened" stays recorded independently of whether any lead\'s content changed, the exact separation Phase 2 of the review found missing');
+    const unchangedRunRow = runsAfterUnchanged.getRange(3, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(unchangedRunRow[2], 2, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs.lead_count_seen counts both real leads (blank lead_id already excluded)');
+    TestAssertEqual_(unchangedRunRow[3], 0, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs.leads_changed is 0 for a genuinely unchanged run');
+
+    // Now change ONE field on L-1 (current_stage) and capture again —
+    // exactly one new Movement_Log row for L-1, L-2 still not duplicated.
+    leadsSheet.getRange(3, 1, 1, leadsHeader.length).setValues([leadRow({ current_stage: 'Prospect' })]);
+    snapshotOpenLeads_('test snapshot label — one field changed');
+    TestAssertEqual_(afterSnap.getLastRow(), 4, 'snapshotOpenLeads_ (dedup): a real field change on one lead (L-1: Suspect -> Prospect) writes exactly ONE new row — L-2 (unchanged) still does not get a duplicate');
+    const newestRow = afterSnap.getRange(4, 1, 1, afterSnap.getLastColumn()).getValues()[0];
+    const stageColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('current_stage'); // +2 for snapshot_at/snapshot_label, 1-indexed
+    TestAssertEqual_(newestRow[stageColIdx], 'Prospect', 'snapshotOpenLeads_ (dedup): the new row carries the CHANGED value, not the old one');
+    const firstRowHash = afterFirstRows[0][afterFirstRows[0].length - 1];
+    TestAssert_(newestRow[newestRow.length - 1] !== firstRowHash, 'snapshotOpenLeads_ (dedup): the changed row\'s content_hash differs from the lead\'s original hash');
+    const runsAfterChanged = runsAfterUnchanged.getRange(4, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(runsAfterChanged[3], 1, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs.leads_changed correctly reports 1 for this run');
 
     // ---- buildTodayCallBaselineGs_ / lastSnapshotBeforeGs_ ----
     // Seed Movement_Log with a snapshot from clearly BEFORE today, to test the baseline reads.
@@ -280,34 +321,36 @@ function runMovementTrackerTests_() {
       SpreadsheetApp = containmentRealSpreadsheetApp;
     }
 
-    // ---- checkMovementLogFreshness_: capture-freshness check (CHECKLIST-005, 2026-09-09) ----
+    // ---- checkMovementLogFreshness_: capture-freshness check (CHECKLIST-005,
+    // 2026-09-09; updated Phase 6 of the Lead History & Versioning Review
+    // to read Movement_Log_Runs instead of Movement_Log itself — see that
+    // function's own header comment for why the switch was necessary) ----
     const freshnessNow = new Date('2026-09-09T12:00:00+05:30');
-    const freshHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
-    function freshnessRow(snapshotAt) {
-      return [snapshotAt, 'freshness test'].concat(SNAPSHOT_COLUMNS_.map(function () { return ''; }));
+    function freshnessRunRow(runAt) {
+      return [runAt, 'freshness test', 5, 0];
     }
 
     const missingLogSs = TestMockSpreadsheet_({});
-    TestAssertEqual_(checkMovementLogFreshness_(missingLogSs, freshnessNow).status, 'missing', 'checkMovementLogFreshness_: reports "missing" when Movement_Log does not exist yet');
+    TestAssertEqual_(checkMovementLogFreshness_(missingLogSs, freshnessNow).status, 'missing', 'checkMovementLogFreshness_: reports "missing" when Movement_Log_Runs does not exist yet');
 
-    const emptyLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader]) });
-    TestAssertEqual_(checkMovementLogFreshness_(emptyLogSs, freshnessNow).status, 'empty', 'checkMovementLogFreshness_: reports "empty" for a Movement_Log with only a header row');
+    const emptyLogSs = TestMockSpreadsheet_({ 'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [MOVEMENT_LOG_RUNS_COLUMNS_]) });
+    TestAssertEqual_(checkMovementLogFreshness_(emptyLogSs, freshnessNow).status, 'empty', 'checkMovementLogFreshness_: reports "empty" for a Movement_Log_Runs with only a header row');
 
     // 2h ago — well inside the 8h grace window.
     const freshTs = new Date(freshnessNow.getTime() - 2 * 3600000);
-    const freshLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader, freshnessRow(freshTs)]) });
+    const freshLogSs = TestMockSpreadsheet_({ 'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [MOVEMENT_LOG_RUNS_COLUMNS_, freshnessRunRow(freshTs)]) });
     const freshResult = checkMovementLogFreshness_(freshLogSs, freshnessNow);
-    TestAssertEqual_(freshResult.status, 'fresh', 'checkMovementLogFreshness_: a 2h-old last capture is reported fresh (within the 8h grace window)');
+    TestAssertEqual_(freshResult.status, 'fresh', 'checkMovementLogFreshness_: a 2h-old last run is reported fresh (within the 8h grace window)');
     TestAssert_(Math.abs(freshResult.ageHours - 2) < 0.01, 'checkMovementLogFreshness_: ageHours is correctly computed for the fresh case');
 
     // 10h ago — past the 8h grace window, one missed [0,6,12,18] cycle.
     const staleTs = new Date(freshnessNow.getTime() - 10 * 3600000);
-    const staleLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader, freshnessRow(staleTs)]) });
-    TestAssertEqual_(checkMovementLogFreshness_(staleLogSs, freshnessNow).status, 'stale', 'checkMovementLogFreshness_: a 10h-old last capture is reported stale (past the 8h grace window)');
+    const staleLogSs = TestMockSpreadsheet_({ 'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [MOVEMENT_LOG_RUNS_COLUMNS_, freshnessRunRow(staleTs)]) });
+    TestAssertEqual_(checkMovementLogFreshness_(staleLogSs, freshnessNow).status, 'stale', 'checkMovementLogFreshness_: a 10h-old last run is reported stale (past the 8h grace window) — critically, this must fire even when every lead in that run was unchanged (leads_changed=0), which is exactly the case the review\'s Phase 2 found the OLD Movement_Log-based check would have silently misreported as stale-looking-fine or vice versa');
 
-    // A non-Date value in the snapshot_at cell — corrupted/hand-edited row.
-    const unreadableLogSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [freshHeader, freshnessRow('not a date')]) });
-    TestAssertEqual_(checkMovementLogFreshness_(unreadableLogSs, freshnessNow).status, 'unreadable', 'checkMovementLogFreshness_: reports "unreadable" for a non-Date snapshot_at cell instead of throwing');
+    // A non-Date value in the run_at cell — corrupted/hand-edited row.
+    const unreadableLogSs = TestMockSpreadsheet_({ 'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [MOVEMENT_LOG_RUNS_COLUMNS_, freshnessRunRow('not a date')]) });
+    TestAssertEqual_(checkMovementLogFreshness_(unreadableLogSs, freshnessNow).status, 'unreadable', 'checkMovementLogFreshness_: reports "unreadable" for a non-Date run_at cell instead of throwing');
 
     // Console wrapper — Logger-only output, no return value to assert on;
     // just confirm it runs against a real mocked SpreadsheetApp without throwing.

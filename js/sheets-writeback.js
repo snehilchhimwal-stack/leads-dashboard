@@ -53,6 +53,27 @@ function movementCellValue(l, key){
   return v == null ? '' : v;
 }
 
+// Content-hash dedup (Lead History & Versioning Review, Phase 6) — MUST
+// stay byte-for-byte identical to MovementTracker.gs's
+// _leadContentHashGs_: same field order (SNAPSHOT_FIELD_KEYS ==
+// SNAPSHOT_COLUMNS_), same date-field special-casing (movementCellValue
+// above already renders lead_assigned_at/last_connect_time as the same
+// IST string that side formats via Utilities.formatDate — no separate
+// handling needed here, unlike the .gs side which reads a real Date
+// object off the sheet and must convert it), same NUL join, same SHA-256,
+// same lowercase-hex encoding. A divergence here would silently break
+// cross-writer dedup — each side would treat the other's captures as
+// permanently "different" even for an identical lead.
+async function leadContentHash(l){
+  const parts = SNAPSHOT_FIELD_KEYS.map(key => {
+    const v = movementCellValue(l, key);
+    return v == null ? '' : String(v);
+  });
+  const bytes = new TextEncoder().encode(parts.join('\0'));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Generic append — used for Movement_Log snapshots, the Lead_Followups
 // export, and SLA_History, parameterized by tab name rather than
 // duplicated per tab. valueInputOption defaults to USER_ENTERED (Sheets
@@ -836,15 +857,35 @@ async function browserSnapshotOpenLeads(){
     return;
   }
 
-  const rows = leadsToSnapshot.map(l => {
+  // Content-hash dedup (Lead History & Versioning Review, Phase 6) — a
+  // fresh fetch, not the possibly-stale movementSnapshots already in
+  // memory, specifically so a capture MovementTracker.gs's own trigger
+  // made since this tab was last loaded is compared against too (see
+  // latestMovementLogHashByKey's own comment).
+  await fetchMovementLog(_currentSheetId);
+  const latestHashByKey = latestMovementLogHashByKey();
+
+  const rows = [];
+  for (const l of leadsToSnapshot) {
+    const hash = await leadContentHash(l);
+    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    if (latestHashByKey[key] === hash) continue; // unchanged since the last capture (either writer) — no new row
     const row = [snapshotAtValue, label];
-    SNAPSHOT_FIELD_KEYS.forEach(key => row.push(movementCellValue(l, key)));
-    return row;
-  });
+    SNAPSHOT_FIELD_KEYS.forEach(fieldKey => row.push(movementCellValue(l, fieldKey)));
+    row.push(hash);
+    rows.push(row);
+  }
 
   try {
-    await appendSheetRows(MOVEMENT_LOG_TAB_NAME, rows);
-    setSnapshotStatus(`Snapshot written: ${rows.length.toLocaleString()} leads at ${istStamp(now)}.`, 'var(--green)');
+    if (rows.length) await appendSheetRows(MOVEMENT_LOG_TAB_NAME, rows);
+    // Always written, even when rows.length is 0 — this run happened
+    // regardless of whether any lead's content actually changed; see
+    // MovementTracker.gs's own snapshotOpenLeads_ comment on why the two
+    // must stay independent (checkMovementLogFreshness_ depends on it).
+    try {
+      await appendSheetRows(MOVEMENT_LOG_RUNS_TAB_NAME, [[snapshotAtValue, label, leadsToSnapshot.length, rows.length]]);
+    } catch (e) { /* Movement_Log write already succeeded either way */ }
+    setSnapshotStatus(`Snapshot written: ${rows.length.toLocaleString()} of ${leadsToSnapshot.length.toLocaleString()} leads changed, at ${istStamp(now)}.`, 'var(--green)');
     // Same instant as the Movement_Log write above, not a separate
     // "whenever this happens to run" timestamp — this button previously
     // only ever wrote Movement_Log, silently never touching SLA_History
