@@ -1671,7 +1671,282 @@ on an external CRM export this project doesn't control); whether
 data-safety question, not a retention one — carried from Part 2/4,
 owned by Part 8's migration plan).
 
-*(Part 5 complete. Continues in Part 6 — the target architecture around
-this schema: source of truth, ingestion, processing, jobs, backups,
-access control, and what currently happens in Sheets that should move
-into the database or application instead.)*
+*(Part 5 complete.)*
+
+---
+
+## Part 6 — Target Architecture
+
+**Guiding principle, stated once up front so every choice below can be
+checked against it:** this is a small, working, internal operational
+tool, not a green-field system — the brief's own instructions ("prefer
+simple, maintainable architecture," "preserve existing business
+behavior unless there's a documented reason to change it") apply
+directly. Every recommendation below adds the minimum new machinery
+needed to fix the real gaps Parts 1–5 found (no referential integrity,
+two independently-drifting snapshot writers, config data trapped in
+code, no audit trail on hand-edited config, a 10M-cell ceiling driving
+retention decisions that shouldn't be driven by it) — not a rewrite for
+its own sake. `leads` and its dashboard/Apps Script *usage* stay exactly
+as they are; only the 13 tabs this review covers move.
+
+### Component overview
+
+```mermaid
+flowchart TB
+    subgraph external["External (unchanged, out of scope)"]
+        CRM["External CRM export"]
+        leads["leads (Google Sheet, unchanged)"]
+        CRM --> leads
+    end
+
+    subgraph target["Target system (new)"]
+        DB[("Database\n13 tables, Part 3 schema")]
+        API["API layer\n(the only thing with DB write credentials)"]
+        API <--> DB
+    end
+
+    subgraph consumers["Existing consumers, adapted"]
+        Dash["Dashboard (dashboard.html + js/*.js)\nGitHub Pages, browser-only"]
+        AppsScript["Apps Script\n(scheduled jobs + Gmail sends)"]
+    end
+
+    leads -->|"read via Sheets API\n(unchanged)"| Dash
+    leads -->|"read via Sheets API\n(unchanged)"| AppsScript
+    Dash <-->|"HTTPS, authenticated"| API
+    AppsScript <-->|"HTTPS, authenticated\n(replaces SpreadsheetApp calls)"| API
+    AppsScript -->|"Gmail send\n(unchanged)"| Gmail["Gmail / Advanced Gmail Service"]
+```
+
+**What this diagram is deliberately *not* proposing:** a rewrite of the
+dashboard's rendering, the Gmail-sending logic, or the trigger schedule.
+The dashboard stays a static, client-only page; Apps Script stays the
+scheduler and the thing that talks to Gmail. The only structural change
+is **where the 13 tabs' data actually lives and who's allowed to write
+it directly** — a real database instead of a spreadsheet, reached
+through one shared API instead of two independent code paths each
+re-implementing the same writes.
+
+### Source of truth
+
+The new relational database (Part 3's schema) becomes the source of
+truth for all 13 tabs this review covers. `leads` remains the source of
+truth for lead data, **unchanged** — still a Google Sheet, still fed by
+the external CRM export this project doesn't control, still read via
+the Sheets API by both the dashboard and Apps Script exactly as today.
+This review does not propose migrating `leads` itself, per the brief's
+own scope boundary — only noting the integration point explicitly here
+because every one of the 13 target tables logically references it.
+
+### Application / database responsibilities
+
+- **Database:** owns storage, constraints (FKs, enums, uniqueness — the
+  referential integrity Part 2 found completely absent today),
+  retention/archival execution.
+- **A new, small API layer** — the **one and only** component with
+  direct database write credentials. Everything else (dashboard,
+  Apps Script) reaches the database through it, authenticated over
+  HTTPS. This single change is what actually closes the biggest gaps
+  found in Parts 1–2: **it is the one place the dual-writer schema-drift
+  problem (`GS-008` and `JS-018` independently implementing the same
+  snapshot/SLA/cohort writes) gets fixed** — both callers hit the same
+  endpoint, which contains the write logic exactly once.
+- **Apps Script** keeps its current jobs (4×/day snapshot capture,
+  nightly issue capture, the 10:00/13:00/17:00 scheduled emails) and
+  keeps sending Gmail directly (a genuine strength — native Advanced
+  Gmail Service access, no reason to route email-sending through a new
+  layer). What changes: instead of `SpreadsheetApp` calls, it makes
+  authenticated HTTP calls (`UrlFetchApp`, already available in Apps
+  Script) to the API layer for anything touching the 13 migrated
+  tables.
+- **The dashboard** keeps its current UI and its own separate Gmail
+  OAuth grant for on-demand sends. What changes: reads/writes that
+  today go straight to the Sheets API for the 13 tabs (snapshot
+  capture, follow-up review, SLA/cohort history, recipient
+  configuration) go to the new API layer instead. Reads/writes to
+  `leads` itself are **unchanged** — still direct Sheets API calls,
+  since `leads` isn't migrating.
+
+### Data ingestion
+
+No new ingestion pipeline is needed. `leads` stays externally sourced
+exactly as today (out of scope). Every one of the 13 migrated tables
+already originates *inside* this system today (computed from `leads` by
+existing code) — migrating them means changing *where the write lands*
+(the database, via the API), not building a new ingestion path.
+
+### Data processing
+
+**The single highest-value simplification available here:** consolidate
+the movement-snapshot/SLA/cohort capture logic — today genuinely
+duplicated between `MovementTracker.gs` (`GS-008`, the 4×/day trigger)
+and `js/sheets-writeback.js` (`JS-018`, the on-demand button), with a
+code comment in the `.gs` file explicitly mandating the two stay in sync
+by hand — into **one** implementation, owned by the API layer, called
+by both. Apps Script's trigger and the dashboard's button both become
+thin callers of the same "capture a snapshot now" endpoint. This
+directly removes the schema-drift risk Part 1/2 flagged (both writers
+have independently gained the same columns after the fact, twice).
+
+### Reporting / analytics
+
+`sla_history`/`daily_cohort_history` reads (the Tracking tab's charts)
+become API queries against the database instead of Sheets API reads —
+no behavior change to what's displayed, just where the read goes.
+Because this data now lives in a real database with the retention
+recommended in Part 5 (permanent, negligible growth), a proper BI/
+analytics tool could read it directly in the future if ever wanted — not
+proposed now, flagged only as a natural, low-cost future option (Part
+15's P3 tier), not a requirement.
+
+### Archival
+
+Implements Part 5's retention recommendations as real, scheduled
+database jobs: `movement_snapshots`/`daily_rm_issues` prune at 7 days
+(unchanged policy, now enforced with a real deletion job instead of a
+Sheets-row-delete); `email_sends` archives per-channel on the schedule
+recommended in Part 5, moving aged rows to an archive
+table/cold-storage export rather than hard-deleting, preserving the
+audit trail's existence while keeping the actively-queried table small.
+`sla_history`/`daily_cohort_history` — no archival job, per Part 5's
+"keep permanently" recommendation.
+
+### Scheduled jobs
+
+**Recommend: keep Apps Script as the scheduler**, unchanged trigger
+times, for every job that sends Gmail (the three email jobs) — no
+reason to move email-sending infrastructure when what's actually broken
+is data storage, not scheduling. For the 4×/day snapshot capture and the
+nightly issue capture (neither of which needs Gmail), Apps Script
+remains a reasonable, low-risk choice too — **a database-native
+scheduler is a real alternative** (flagged as a P3 future
+consolidation, not recommended now) **specifically to avoid migrating
+two things — data storage AND scheduling — at the same time**, which
+would make the migration itself materially riskier for no immediate
+benefit.
+
+### Auditability
+
+`email_sends` already **is** the audit trail for every email sent —
+carried forward with the channel discriminator from Part 3. **A real
+gap this review surfaces for the first time:** there is currently **no
+history at all** of hand-edits to the configuration tables (someone
+toggling `RM_Hierarchy.excluded`, editing a `Manager_Directory` email,
+changing a `Region_Recipients` address) — a Sheet edit simply overwrites
+the cell with zero record of who changed what or when. **Recommend a
+new `config_audit_log` table** (`table_name`, `row_id`, `field`,
+`old_value`, `new_value`, `changed_by`, `changed_at`), populated by the
+API layer on every write to `people`, `region_recipients`, or
+`person_regions` — the three genuinely hand-edited configuration
+tables. Not proposed for the snapshot/log tables, which are already
+append-only and don't need it.
+
+### Backups / recovery
+
+Today, the only backup for all 13 tabs is Google's own account-level
+Sheets version history — informal, not designed for operational
+recovery, and not something this review can verify meets any real
+recovery-point objective. **Recommend standard automated database
+backups** (daily snapshots plus point-in-time recovery — a built-in
+feature of most managed relational database offerings) as a genuine,
+concrete improvement over the current state, not an extra cost item
+invented for its own sake.
+
+### Access control
+
+Today's access control is a single blunt tier: whoever has Google
+Sheets edit access can change *anything*, including hand-authoring a
+row in an audit-log tab. **Recommend real role-based access at the API
+layer**: a read role (the dashboard's general use), a write role scoped
+to the operational tables (the Apps Script service account and the
+dashboard's snapshot/follow-up/report-generation actions), and a
+separate admin role for the three configuration tables specifically.
+**This requires the business to actually define who gets which role —
+not inferable from the current system**, which has no roles at all
+today; flagged for the Approval Checkpoint.
+
+### Configuration management
+
+The single clearest "this is backwards" finding across the whole
+review: `people`'s real source today is a **hard-coded constant in
+Apps Script** (`RM_HIERARCHY_RAW_`), rebuilt into a sheet for human
+visibility. **Recommend retiring the rebuild pattern entirely** — in
+the target architecture, `people`/`regions`/`region_recipients` are
+first-class, directly-editable database rows (through a lightweight
+admin view or direct DB access for whoever maintains it today), not a
+code artifact that gets projected into a spreadsheet. This also removes
+the currently-unconfirmed risk (flagged in Part 2/4) of a rebuild
+silently wiping hand-filled `Manager_Directory` emails — there is no
+more "rebuild" step to silently get wrong.
+
+### Error handling
+
+Two real gaps found in this review, both worth naming specifically:
+(1) `Send_Log`'s write is fire-and-forget with **no self-healing header
+check**, unlike every sibling log tab — a header mismatch would corrupt
+rows silently (Part 1). (2) more generally, a failed Apps Script
+execution today is visible only by someone manually checking the
+Executions log. **Recommend:** the API layer returns structured error
+responses and logs every failure (including audit-write failures,
+replacing today's pure fire-and-forget pattern) to a simple error log;
+Apps Script callers check the response and retry or surface a failure
+rather than assuming success.
+
+### Monitoring
+
+Today's only monitoring is a **weekly manual** Ops Checklist run, plus
+whatever a real incident happens to surface after the fact (the
+`Daily_RM_Issues` cell-ceiling crash, the `Unmatched_Comments_Log`
+dedup bug — both discovered this way, not by active monitoring).
+**Recommend:** basic automated alerting on scheduled-job failure (most
+managed schedulers/databases support this natively at low cost), a
+simple health-check endpoint on the API layer, and **keeping** the
+existing weekly Ops Checklist process, adapted to query the new
+database instead of Sheets — a working process, not something to
+discard.
+
+### What currently happens in Google Sheets that should move to the database or application instead
+
+A consolidated list, gathering findings already made individually in
+Parts 1–5:
+
+1. **`RM_HIERARCHY_RAW_`** (a code constant) and the entire
+   "rebuild into a sheet" pattern for `RM_Hierarchy`/`Manager_Directory`
+   — becomes real, directly-editable database rows.
+2. **Region-name normalization** (`mainRegionForGs_`, a code function
+   with no stored reference to validate against) — becomes backed by
+   the real `regions` table.
+3. **The dual, independently-maintained snapshot/SLA/cohort write
+   logic** (`GS-008` + `JS-018`) — consolidates into one API-layer
+   implementation both callers use.
+4. **The dashboard's separate `localStorage` region-recipient store**
+   — retired in favor of the shared `region_recipients` table (Part
+   2's strongest single finding — two unsynced sources of truth for the
+   same routing data).
+5. **Manual, irreversible, un-audited sheet-row clears**
+   (`clearSlaHistory`, `clearDailyCohortHistory`,
+   `clearReviewedUnmatchedCommentsNow`) — become real database
+   operations, some no longer even needed once real retention policies
+   (Part 5) exist to do that job on a schedule instead of a manual
+   button.
+6. **Free-text `RM`/`region` values with zero write-time validation**
+   on the current-state config tables — becomes real FK-enforced
+   validation at the API layer (Part 2's referential-integrity gap).
+
+### Explicit technology flags — not decided here, flagged for confirmation
+
+This review recommends a **standard relational database** (the schema
+in Part 3 assumes one — real FKs, enums, transactions) and a **small
+API layer** as the only new components, deliberately without naming a
+specific vendor/product: that choice depends on real business inputs
+this review doesn't have — existing hosting/ops relationships, budget,
+who will actually operate it day to day, and this team's own comfort
+with a given stack (this machine, for instance, currently has no local
+Node.js — a real, confirmed constraint worth weighing against a
+Node-based API layer choice specifically). Carried to the Approval
+Checkpoint rather than assumed.
+
+*(Part 6 complete. Continues in Part 7 — the codebase impact assessment,
+now that the target data model and dependency map above exist to build
+it from, per the brief's own instruction not to plan code changes
+before the target model is settled.)*
