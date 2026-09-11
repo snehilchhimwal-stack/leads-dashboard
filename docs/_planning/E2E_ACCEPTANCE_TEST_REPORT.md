@@ -19,6 +19,68 @@ throughout as **F1–F27**.
 
 ---
 
+## Remediation status (updated 2026-09-11, same day) — all 10 required fixes done
+
+Sections B–K below are the **unmodified original findings** — what
+this run actually found on the day it ran, kept intact as the
+historical record. This box is the only thing added since: every fix
+section **I** proposed has since been designed, built, and **verified
+against a real, reproduced fixture** (mostly on disposable branches,
+deleted after — never assumed from the fix's own description). Full
+narrative for each: the chat transcript this report doesn't carry, but
+every commit message below is self-contained and cites the exact test
+it re-ran.
+
+| # | Fix | Status | Commit |
+|---|---|---|---|
+| 1 | Content-comparison mitigation for the P0 finding (F11/F13) | ✅ **DONE — both the process option chosen (recurring task) AND the lighter code option, built afterward** | Recurring weekly spot-check task `t-tf-1a5592408317` (To-Do Dashboard, first real cycle already run — found and fixed one real stale line-anchor citation, `SHEET-007` commit `85c1e2d`); **plus** new check I, the cited-literal checker — `2c8dedb` |
+| 2 | Task closure has no path back into this repo (F18) | ✅ **DONE** | `update-tasks.ps1`'s new `-VerifyCatalogRepo` flag (To-Do Dashboard — not a git repo, no commit sha; verified by reproducing a real drift scenario on a disposable branch and confirming the close was refused) |
+| 3 | Check B never scanned `docs/_archive/` (F26) | ✅ **DONE** | `b26774e` |
+| 4 | Check E impact is 1-hop only (F8) | ✅ **DONE** — now 2 hops | `c6e12b5` |
+| 5 | Architecture overlays excluded from impact (F14) | ✅ **DONE** | `068a388` |
+| 6 | HANDOVER freshness wording implies correctness (F15) | ✅ **DONE** | `32312fc` |
+| 7 | Sub-table types (~460 rows) uncovered (F10) | ✅ **DONE** — new check G (sub-table ID uniqueness) | `9b9b9b2` |
+| 8 | Blank `Owner`/`Evidence` unenforced (F17) | ✅ **DONE** — new check H | `fcde284` |
+| 9 | No rename semantics (F6) | ✅ **DONE** — check C now suggests a likely rename target | `e3ec3e5` |
+| 10 | Check F's counting logic vs. `HOW_TO_RETIRE`'s worked example (F27) | ✅ **DONE** — doc-only fix | `5781a69` |
+
+**Two real bugs were found and fixed while building these fixes**,
+neither known at the time this report was written: a PowerShell gotcha
+in `update-tasks.ps1` (an empty collection returned through the success
+pipeline silently becomes `$null` — the zero-element sibling of the
+single-element-array-unwrap gotcha `CLAUDE.md` already documented), and
+a git quirk in `check-catalog.py`'s new rename-hint (`git log -M --
+<path>` silently degrades a real rename to a plain delete, because git
+applies the pathspec filter *before* running rename detection — fixed
+by scanning history unfiltered instead). Check I's own build also
+surfaced a real design flaw in itself before shipping: the first,
+naive version produced 27 false positives against the real (known
+clean) catalog; narrowed against real re-testing to 0, then confirmed
+it could still be fooled by a real explanatory code comment before
+that was fixed too. All of this — the false starts included — is
+consistent with, not contrary to, this report's own central finding:
+building something that reliably reads meaning instead of structure is
+genuinely hard, which is exactly why the P0 finding (section H, #1)
+remains open by design. Both mitigations for it are deliberately
+narrow, not a substitute for the general fix this report declined to
+build.
+
+**What this changes about the verdict below: nothing, on purpose.**
+Section K's **FAIL** describes what the system was doing on
+2026-09-11 when it was tested — that doesn't retroactively become
+untrue because gaps it found were later closed. The honest updated
+claim is a *new* one, not yet tested: check A/B/C/F/G/H (structural
+integrity) stay exactly as strong as they always were; checks D/E/I
+(advisory, content-adjacent) are now measurably better — 2-hop and
+architecture-overlay-aware impact analysis, two new content-adjacent
+checks — while the core P0 finding (no general content-comparison
+mechanism) is unchanged and was never claimed to be closed. A real
+re-run of Parts 2–8 against this updated tooling has not been done;
+this status box reports what was fixed and how each fix was verified,
+not a new overall verdict.
+
+---
+
 ## B. Test results
 
 `Result` — PASS (control works as the spec expects) / PARTIAL (some
@@ -264,18 +326,29 @@ no automated or even clearly-owned path to resolution:
 
 ## I. Required fixes
 
-| # | Problem | Root cause | Smallest effective fix | Owner | Validation | Expected evidence |
-|---|---|---|---|---|---|---|
-| 1 | Record content can contradict code with zero signal (F11/F13, P0) | No content-comparison mechanism exists anywhere in the toolchain | Not a small fix — would need either (a) a lightweight per-record "spot check" sampling process added to `PRE_SHIP_DOCUMENTATION_CHECKLIST.md` with a *tracked, recurring* task (not just a checkbox), or (b) LLM-assisted content-vs-code diffing in CI (a real architecture change — only justified because this test proved the gap) | Snehil | Re-run TEST 11's exact fixture; a PASS requires *some* signal, not necessarily blocking | A new check-catalog.py output line, or a new recurring task actually appearing in `tasks.json` |
-| 2 | Task closure has no path back into this repo (F18, P0) | Two-repo architecture; `update-tasks.ps1` never reads `docs/INDEX.md` | Add an optional `--verify-catalog <repo-path>` flag to `update-tasks.ps1` that, for a close whose `note` references a component ID, shells out to `check-catalog.py` and refuses the close if that ID shows up in check D's drift list | Snehil | Re-run TEST 17: attempt to close a revalidation task for a component with unresolved drift; the close must fail | A non-zero exit / refused close, captured in this same log style |
-| 3 | Check B never scanned `docs/_archive/` (F26, P0) | Oversight when check B was originally built — `_archive/` didn't exist as a concept yet at that time | **Already fixed on this test branch** (`test/check-catalog.py`, commit `9a71df2` on `e2e-acceptance-test`) — port the same 8-line diff to `master` | Snehil | Re-run Part 8 Recovery A's exact steps on `master` after porting | `check-catalog.py` exit 0 immediately after a real retirement, no extra reciprocity/coverage noise |
-| 4 | Check E impact is 1-hop only (F8, P1) | `check_impact()`'s `onehop` computation is deliberately one level (`rows[cid]["dep"] \| rows[cid]["ub"]`), never recursed | Recurse the impact walk 1 more level by default (2-hop), behind a cheap cycle guard — the graph is small (72 rows) so cost is negligible | Snehil | Re-run TEST 23's exact fixture; `GS-010` must appear in the impact set for a change to `JS-016` | The printed 1-hop set includes the 2nd-hop consumer |
-| 5 | Architecture overlays excluded from impact (F14, P1) | Check A's `kind: "arch"` one-directional exemption means no back-edge is ever required, so check E can't walk back to the overlay | Have check E separately scan `FLOW-`/`TRIGGER-` rows' own `Depends On` lists for the changed ID, independent of the reciprocity graph | Snehil | Re-run TEST 12's exact fixture; `FLOW-002` must appear in the impact set for a `GS-010` change | The printed impact set includes `FLOW-002` |
-| 6 | HANDOVER freshness is a calendar proxy (F15, P1) | `check-docs-coverage.js` only ever parses the header date, never cross-references content | No cheap code fix exists (would need real content diffing, same class of problem as #1) — smallest honest fix is renaming the check's own output from "HANDOVER.md freshness: OK" to something that doesn't imply correctness, e.g. "HANDOVER.md edited within 14 days (not a correctness check)" | Snehil | Re-read the check's own output wording | The warning text no longer implies "still true," only "recently touched" |
-| 7 | Sub-table types (~460 rows) uncovered (F10, P1) | `parse_index()` hard-filters to exactly-8-cell rows | Add a second, lighter parser for the 4-cell sub-table format (`BTN-`/`UI-`/`EXC-`/etc.) that at minimum checks each sub-table ID is unique and sequential within its owning record — a much smaller ask than full content verification | Snehil | Re-run TEST 8/10's exact fixtures | A new advisory line naming the specific new/missing sub-table row |
-| 8 | Blank `Owner`/`Evidence` unenforced (F17, P2) | No field-content parsing at all | Add a 7th advisory check (`check-catalog.py` G) that greps each record for a blank `**Owner**` cell or a `Closed + Monitored`/`Validated` status with a blank/absent `Evidence:` line | Snehil | Re-run TEST 15/16's exact fixture | The new check names `JS-025` specifically |
-| 9 | No rename semantics (F6, P2) | Not attempted — `git mv` detection is possible (git already tracks renames) but nothing reads it | Have check C's failure message, when a `git log --follow` on the missing path finds a live file at a new path, suggest "possible rename to <path> — consider `HOW_TO_RETIRE`'s ID-preservation gap" | Snehil | Re-run TEST 4's exact fixture | The error message names the likely new path |
-| 10 | Check F's counting logic vs. `HOW_TO_RETIRE`'s worked example (F27, P2) | Never reconciled — the guide was written independently of the check's actual logic | Fix the doc, not the code: `HOW_TO_RETIRE_A_COMPONENT.md`'s worked example should say the snapshot count **stays the same** on retirement (the row is `Retired`, not removed) | Snehil | Re-read the corrected worked example against check F's real behavior | No contradiction between the two |
+**Status (2026-09-11): all 10 done** — see the Remediation status box
+at the top of this report for the commit list. The `Smallest effective
+fix` column below is preserved exactly as originally proposed (the
+plan); the `Status` column records what was actually verified against
+a real fixture, which in three cases (#4, #7, #9) turned out to need
+more than the original one-line plan once tested for real — narrower
+scoping (#7, discovered the "sequential" framing didn't fit how sub-IDs
+are actually assigned) or an extra bug fix found along the way (#4's
+2-hop walk shipped as designed; #9 needed a real git-quirk fix, not
+scope creep) are called out inline rather than silently absorbed.
+
+| # | Problem | Root cause | Smallest effective fix (as planned) | Status — what actually shipped, verified how |
+|---|---|---|---|---|
+| 1 | Record content can contradict code with zero signal (F11/F13, P0) | No content-comparison mechanism exists anywhere in the toolchain | Not a small fix — (a) a recurring spot-check task, or (b) LLM-diffing in CI | ✅ **DONE, both lighter options** — (a) recurring task `t-tf-1a5592408317`, cycle 1 already run for real (found + fixed a real stale citation); (b) also built the narrower code option afterward, check I (cited-literal checker) — `2c8dedb`. (c), the heavy LLM-diffing option, deliberately **not** built — still the honest open P0. |
+| 2 | Task closure has no path back into this repo (F18, P0) | Two-repo architecture; `update-tasks.ps1` never reads `docs/INDEX.md` | Optional `--verify-catalog` flag, refuses a close referencing a drifted component | ✅ **DONE** as `-VerifyCatalogRepo` — verified by reproducing real drift on a disposable branch and confirming the close was refused, nothing written |
+| 3 | Check B never scanned `docs/_archive/` (F26, P0) | Oversight — `_archive/` didn't exist as a concept when B was built | Port the test-branch fix to `master` | ✅ **DONE** — `b26774e` |
+| 4 | Check E impact is 1-hop only (F8, P1) | `onehop` computation deliberately one level, never recursed | Recurse 1 more level (2-hop) | ✅ **DONE as planned** — `c6e12b5`; `GS-010` confirmed appearing for a `JS-016` change, reproducing TEST 23 exactly |
+| 5 | Architecture overlays excluded from impact (F14, P1) | Check A's arch exemption means no back-edge to walk | Scan `FLOW-`/`TRIGGER-` rows' `Depends On` separately | ✅ **DONE** — `068a388`; `FLOW-002` confirmed appearing for a `GS-010` change, reproducing TEST 12 exactly |
+| 6 | HANDOVER freshness is a calendar proxy (F15, P1) | Only parses the header date, never cross-references content | Reword the output so it doesn't imply correctness | ✅ **DONE** — `32312fc`; verified via a faked Node environment (no local Node) against the real header date and a synthetic stale one, then confirmed in real CI |
+| 7 | Sub-table types (~460 rows) uncovered (F10, P1) | `parse_index()` hard-filters to exactly-8-cell rows | A lighter parser checking sub-IDs are unique and sequential | ✅ **DONE, narrower than planned** — new check G checks **uniqueness only** (486 real sub-IDs scanned, 0 duplicates); "sequential" was dropped once building it showed sub-IDs are assigned as one global running number across the whole catalog, not per-record, so per-record sequence isn't a meaningful check — `9b9b9b2` |
+| 8 | Blank `Owner`/`Evidence` unenforced (F17, P2) | No field-content parsing at all | New advisory check for blank Owner / unevidenced Closed+Monitored | ✅ **DONE as planned** — new check H, `fcde284`; reproduced the exact `JS-025` fixture, both findings named correctly |
+| 9 | No rename semantics (F6, P2) | Nothing reads git's own rename detection | Check C's message names a likely rename target | ✅ **DONE**, one real bug fixed en route — `e3ec3e5`. First attempt used a pathspec-filtered `git log`, which **silently degrades a real rename to a plain delete** (git applies the pathspec before running rename detection — confirmed directly, `git show -M` with no pathspec correctly found the same rename `git log -M -- <path>` missed). Fixed by scanning history unfiltered instead. |
+| 10 | Check F's counting logic vs. `HOW_TO_RETIRE`'s worked example (F27, P2) | Never reconciled against each other | Fix the doc: count stays the same on retirement | ✅ **DONE** — `5781a69`, doc-only; re-read against check F's live source line by line, confirmed no remaining contradiction |
 
 Items 11–27 (the remaining findings) have no code-level fix proposed —
 they are process/discipline items already correctly identified as such
@@ -285,22 +358,30 @@ in this report's H section (P3) and in `OPEN_ITEMS.md`.
 
 ## J. Retest plan
 
-| After fixing # | Rerun | Expected new result |
-|---|---|---|
-| 1 | TEST 11 (Part 5) | Some signal where there was none — even advisory is progress |
-| 2 | TEST 17 (Part 6) | Close attempt refused for a drifted component |
-| 3 | Part 8 Recovery A, steps 1–3 | Zero reciprocity/coverage noise after a real retirement |
-| 4 | TEST 23 (Part 3) | `GS-010` appears in the printed impact set |
-| 5 | TEST 12 (Part 5) | `FLOW-002` appears in the printed impact set |
-| 6 | TEST 13 (Part 5) | Warning text no longer implies correctness |
-| 7 | TEST 8 and TEST 10 (Part 4) | A new advisory line for the specific sub-table gap |
-| 8 | TEST 15/16 (Part 6) | `JS-025`-style record explicitly named by the new check |
-| 9 | TEST 4 (Part 3) | Error message suggests the rename target |
-| 10 | (doc-only) | Re-read `HOW_TO_RETIRE_A_COMPONENT.md`'s worked example |
+**All 10 retests below were actually run** (2026-09-11, on disposable
+`temp-*` branches per fix, deleted after) — this is not a plan anymore,
+it's a record of what really happened, alongside what was expected.
 
-Every retest above is **already fully specified** in the log (exact
-commands, exact fixtures) — no new test design is needed, only
-re-running the existing ones against the fixed tool.
+| After fixing # | Rerun | Expected new result | Actual result |
+|---|---|---|---|
+| 1 | TEST 11 (Part 5) | Some signal where there was none — even advisory is progress | ✅ Recurring spot-check cycle 1 caught a real stale citation (not the synthetic fixture — an actual pre-existing drift); check I (cited-literal) also independently flags mismatched `RAW`/`USER_ENTERED`-style literals in function bodies against sub-table citations |
+| 2 | TEST 17 (Part 6) | Close attempt refused for a drifted component | ✅ Confirmed — reproduced real drift on a disposable branch, `-VerifyCatalogRepo` refused the close, nothing written to `tasks.json` |
+| 3 | Part 8 Recovery A, steps 1–3 | Zero reciprocity/coverage noise after a real retirement | ✅ Confirmed — check B now scans `docs/_archive/`; a real retirement fixture produced zero spurious coverage findings |
+| 4 | TEST 23 (Part 3) | `GS-010` appears in the printed impact set | ✅ Confirmed exactly as predicted |
+| 5 | TEST 12 (Part 5) | `FLOW-002` appears in the printed impact set | ✅ Confirmed, plus `FLOW-001` also surfaced as a bonus (both overlays depend on the changed component) |
+| 6 | TEST 13 (Part 5) | Warning text no longer implies correctness | ✅ Confirmed — output now reads "edited within 14 days (not a correctness check)"; verified against both the real header date and a synthetic stale one in a faked Node environment, then in real CI |
+| 7 | TEST 8 and TEST 10 (Part 4) | A new advisory line for the specific sub-table gap | ✅ Confirmed, narrower than planned — new check G catches **duplicate** sub-table IDs (486 real IDs scanned, 0 duplicates on a clean run); "sequential" numbering was dropped as a check criterion once building it showed sub-IDs run as one global counter, not per-record |
+| 8 | TEST 15/16 (Part 6) | `JS-025`-style record explicitly named by the new check | ✅ Confirmed — new check H named the exact fixture record for both blank-Owner and unevidenced-Closed+Monitored cases |
+| 9 | TEST 4 (Part 3) | Error message suggests the rename target | ✅ Confirmed, after fixing a real bug found while verifying: the first implementation used a pathspec-filtered `git log`, which silently misreports a genuine rename as a plain delete (git applies the pathspec before rename detection runs) — fixed by scanning history unfiltered |
+| 10 | (doc-only) | Re-read `HOW_TO_RETIRE_A_COMPONENT.md`'s worked example | ✅ Confirmed — worked example now says the count stays `24 / 24`, matches check F's real live behavior line by line |
+
+Every retest above was **already fully specified** in the log (exact
+commands, exact fixtures) before the fix work started — no new test
+design was needed, only re-running the existing ones against the fixed
+tool. Two real bugs (not in the original test fixtures) surfaced
+*during* this verification work itself — the PowerShell empty-collection
+gotcha (#2) and the git pathspec/rename-detection quirk (#9) — both are
+documented in the fix commits and in this project's working notes.
 
 ---
 
