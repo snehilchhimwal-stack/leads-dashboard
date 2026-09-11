@@ -3569,3 +3569,210 @@ already-stated rule, unchanged by this review).
 
 *(Phase 6 complete. Continues in Phase 7 — real E2E validation, building
 on this same implementation.)*
+
+## Phase 7 — Real E2E Validation
+
+Real code, on the disposable branch `lead-history-phase6-impl` (commit
+`858ece5`, on top of Phase 6's `641398e`) — a new, self-contained
+scenario appended to `Tests_MovementTracker.gs`'s existing
+`runMovementTrackerTests_()` suite, run for real via
+`python3 test/run-gs-tests-headless.py`. Not a separate mock/manual
+walkthrough — the exact same `snapshotOpenLeads_`, `_leadContentHashGs_`,
+`_latestContentHashByKeyGs_`, `lastSnapshotBeforeGs_`, and
+`captureDailyRmIssues_` production functions Phase 6 built, exercised
+against a real (mocked-Sheets-API) spreadsheet across 4 sequential
+captures.
+
+### The scenario
+
+6 leads, 4 captures, built to cover every case Phase 7's own brief
+named:
+
+| Lead | What it tests |
+|---|---|
+| `L-NEW` | New lead creation, mid-sequence (absent capture 1, appears capture 2) |
+| `L-STABLE` | Existing lead, genuinely no changes, across all 4 captures |
+| `L-ONECHANGE` | One field changes once (`current_stage`, at capture 3) |
+| `L-MULTICHANGE` | Two fields (`current_stage` AND `RM`) change together, in the SAME capture (3) |
+| `L-REPEATCHANGE` | Changes across TWO different captures, in TWO different fields (`call_attempts` at capture 2, `current_stage` at capture 3) |
+| `L-VANISH` | Present captures 1–2, then removed entirely from the live tab from capture 3 on (the "inactive/vanished lead" case) |
+
+Capture 4 is an EXACT retry of capture 3's live-tab state — the
+duplicate-ingestion / idempotency case.
+
+### Measured results (real, from this run — not hand-waved)
+
+| After capture | Movement_Log rows (data only) | New rows this capture | Movement_Log_Runs rows | lead_count_seen | leads_changed |
+|---|---|---|---|---|---|
+| 1 (initial) | 5 | 5 | 1 | 5 | 5 |
+| 2 (L-NEW appears, L-REPEATCHANGE.call_attempts changes) | 7 | 2 | 2 | 6 | 2 |
+| 3 (L-ONECHANGE/L-MULTICHANGE/L-REPEATCHANGE change, L-VANISH disappears) | 10 | 3 | 3 | 5 | 3 |
+| 4 (exact retry) | 10 | 0 | 4 | 5 | 0 |
+
+**Final: 10 real Movement_Log data rows for this scenario**, vs. **21**
+under the pre-Phase-6 one-row-per-lead-per-capture behavior for the
+same 4 captures (5+6+5+5 — hand-computed from this test's own known
+per-capture lead counts above, since the old behavior no longer exists
+as running code to execute side by side for a true A/B measurement). A
+**~52% reduction for this specific synthetic scenario** — stated
+explicitly as a scenario-specific number, not a universal claim: the
+real reduction on production data depends entirely on how often leads
+actually change between captures, which this synthetic scenario does
+not attempt to estimate.
+
+`Movement_Log_Runs` gets exactly one row per capture call —
+**4 rows total, regardless of dedup**, including on capture 4's
+no-op retry — confirming "a capture happened" stays recorded
+independently of whether any lead's content changed, which is the
+entire reason `checkMovementLogFreshness_` was moved onto this sheet
+in Phase 6.
+
+### Point-in-time reconstruction — verified against real dedup gaps
+
+At a boundary strictly between captures 2 and 3, `lastSnapshotBeforeGs_`
+was called against the real (partially-deduped) `Movement_Log` built so
+far. Results, all asserted and passing:
+
+- `L-REPEATCHANGE.call_attempts` correctly resolved to **3** (its
+  capture-2 value) — not the stale capture-1 value of 1. At this point
+  `L-REPEATCHANGE` has exactly 2 rows in `Movement_Log` (captures 1 and
+  2); the lookup correctly walked to the most recent one strictly
+  before the boundary.
+- `L-STABLE.call_attempts` correctly resolved to its ONLY row
+  (capture 1) even though 2 captures had happened since — dedup did not
+  lose or corrupt it.
+- `L-NEW.call_attempts` was already correctly reconstructable one
+  capture after it first appeared.
+- `L-VANISH.call_attempts` correctly resolved to its capture-1 row
+  (still 2 captures before it disappears from the live tab at
+  capture 3).
+
+**A real, honest gap found, not papered over**: `lastSnapshotBeforeGs_`
+(and `buildMovementLogMapsGs_`'s `lastSnapshotMap`) only ever expose
+`{atMs, call_attempts}` per lead — see `_readMovementLogRowsGs_`
+(`MovementTracker.gs`), which reads exactly one data column besides the
+key/timestamp. No existing production helper reconstructs an arbitrary
+field (e.g. `current_stage`) as of a past point in time; `call_attempts`
+is the only field these two callers (`buildTodayCallBaselineGs_` for
+today's-calls-so-far, and the email/SLA "how long since we last saw
+this lead's state" checks) have ever needed reconstructed. Phase 7's
+test file adds a small test-only helper (`p7StageAsOfGs_`) that reads
+`Movement_Log`'s raw rows directly to prove the underlying data IS
+present and correct for full-field reconstruction (confirmed:
+`L-ONECHANGE`'s `current_stage` correctly read back as `'Suspect'`
+before capture 3 and `'Prospect'` after) — but nothing in production
+code wraps this yet. If a real future consumer needs to reconstruct an
+arbitrary field's history (not just call counts), it will need either a
+new helper built on this same raw-row pattern, or the relational
+`lead_versions` table from Phase 3, where every column is reconstructable
+by construction.
+
+### Multi-field changes land as one consistent row
+
+`L-MULTICHANGE`'s single new row at capture 3 carries BOTH its changed
+`current_stage` (`'Opportunity'`) AND its changed `RM`
+(`'Test RM Two'`) together — confirmed by reading that row's actual
+column values, not inferred. This is expected given `snapshotOpenLeads_`
+writes each lead's full current state as one row (never a delta), but
+it was verified directly rather than assumed: a bug that split a
+multi-field change into two rows, or dropped one of the two changed
+fields, would have failed this specific assertion.
+
+### Vanished lead — history preserved
+
+After `L-VANISH` disappears from the live tab (captures 3 and 4), it is
+**still fully reconstructable**: `lastSnapshotBeforeGs_` against a
+far-future date still returns its last known `call_attempts` (1, from
+capture 1/2), and the raw-row helper still returns its last known
+`current_stage` (`'Suspect'`). Movement_Log rows are never deleted for
+a lead that stops appearing — only pruned by the existing
+`MOVEMENT_LOG_RETENTION_DAYS` age-based cutoff (`pruneMovementLog_`,
+already covered by this file's own earlier tests), same as any other
+row.
+
+### Idempotency / duplicate ingestion (capture 4)
+
+An exact retry of capture 3's live-tab state wrote **zero** new
+`Movement_Log` rows (confirmed: `Movement_Log` row count unchanged at
+10) and reported `leads_changed: 0` on its `Movement_Log_Runs` row —
+the dedup mechanism correctly recognizes an identical retry as a no-op
+for data, while still recording that a run occurred.
+
+**A second real, honest gap, explicitly acknowledged**: `Movement_Log_Runs`
+itself has **no idempotency-key-style dedup** at the Sheets layer,
+unlike the Phase 3 target schema's `lead_ingestion_runs.idempotency_key`.
+A genuinely duplicate trigger fire (the same logical run, retried after
+a timeout or a double-fire) records **2** run rows here, not 1 —
+this is a real, acknowledged difference between what the target
+relational schema could enforce (a unique constraint) and what this
+Sheets/Apps Script implementation actually does (nothing prevents a
+second `ensureMovementLogRunsSheet_` append). Not a regression
+introduced by Phase 6 or Phase 7 — Sheets has no unique-constraint
+mechanism to enforce this with — but worth stating plainly rather than
+implying a guarantee that isn't actually there.
+
+### Concurrent / overlapping execution — honestly not testable here
+
+The user's own Phase 7 brief asked this be tested "to the extent the
+environment supports it." It does not, meaningfully: Apps Script's
+real execution model is single-threaded (Google enforces this — two
+triggers cannot execute the same script concurrently against the same
+spreadsheet), and this project's headless test harness
+(`test/run-gs-tests-headless.py`) runs everything synchronously in one
+browser JS engine thread. Capture 4's back-to-back retry (see above) is
+the closest available proxy — two calls in quick succession, simulating
+"the scheduled trigger, then immediately the browser button" — and it
+behaves correctly (no duplicate data, correct run accounting). But this
+is NOT a test of genuine concurrent/overlapping writes, and no tooling
+available in this repo or environment can fake real parallelism. Stated
+here explicitly rather than silently skipped or falsely claimed as
+covered.
+
+One real, non-hypothetical wrinkle surfaced while building this test
+(not a production bug — a test-harness-only concern): `Utilities.sleep`
+is mocked as a no-op in this project's test harness (`Tests_Mocks.gs`),
+and `snapshotOpenLeads_` stamps every row with the real wall clock
+(`new Date()`, not injectable). Two captures run back-to-back in a fast
+test could tie on the same millisecond, which would make the dedup
+mechanism's "latest by key" comparisons (`_latestContentHashByKeyGs_`,
+`_collapseLatestByKeyGs_` — both use strict `>`/`>=` on a timestamp)
+non-deterministic in test. Phase 7's test file busy-waits on the real
+clock between checkpoints to force this apart. In real production this
+never matters — captures are scheduled 4x/day (`SNAPSHOT_HOURS_`) or
+triggered manually, always minutes-to-hours apart — but it is worth
+noting as a latent precision assumption in `_latestContentHashByKeyGs_`
+itself: it does not currently break ties on insertion order when two
+rows share an exact timestamp, only on the timestamp comparison.
+
+### Nightly distillation (`captureDailyRmIssues_`) — confirmed unaffected
+
+Ran `captureDailyRmIssuesNow()` (`DailyRmIssueLog.gs`) directly against
+the SAME spreadsheet used for the whole scenario above, immediately
+after capture 4 — its real `Movement_Log` now has the dedup gaps
+described throughout this phase. Result: **ran to completion without
+throwing**, and correctly wrote a real `Daily_RM_Issues` row for
+`L-ONECHANGE` (built with the same "60 hours since assignment, never
+connected" recipe this project's own `Tests_DailyRmIssueLog.gs` already
+uses for its ground-truth flagged fixture — confirmed flagged via the
+real `computeSlaFlags_`/`primaryIssueGs_` functions before asserting on
+the capture, not assumed).
+
+This function was never expected to be affected by the dedup change —
+it reads the LIVE `leads` tab directly for lead data (`readLeadsTab_`),
+not `Movement_Log`, and only touches `Movement_Log` via
+`buildMovementLogMapsGs_` for the day-start call baseline (already
+independently verified earlier in this same test file to produce
+results identical to calling `buildTodayCallBaselineGs_`/
+`lastSnapshotBeforeGs_` separately). This run confirms that reasoning
+holds against real code and real (dedup-affected) data, not just
+against the isolated unit tests.
+
+### Real test totals
+
+`python3 test/run-gs-tests-headless.py`: **746/746 passed, 0 failed**
+— up from 713 at the end of Phase 6 (33 new real assertions from this
+phase, all passing on the first clean run after the busy-wait fix
+above was added; no other bugs found or fixed in this phase).
+
+*(Phase 7 complete. Continues in Phase 8 — final findings report and
+artifact update.)*
