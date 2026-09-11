@@ -80,13 +80,34 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   generic fallback address.
 - **This machine has no local Node.js** as of 2026-09-04 (`node`/`gh` both
   unresolved in both Bash and PowerShell) — `npm test` can't run locally
-  here. Push and let GitHub Actions run the suite instead; check the run's
-  status via the GitHub web UI (Browser pane) rather than `gh`. A working
-  `python3`/`python` (Windows Store launcher) *is* available, confirmed
-  2026-09-09 — useful for local dry-runs/validation Node would otherwise
-  cover, and for building `.docx`/`.pptx` output, but it doesn't change
-  the point above: any `.gs` test-suite verification still has to happen
-  via a real CI push, not locally.
+  here, and neither `gh` nor a repo-admin token is available to download a
+  failed CI run's logs (confirmed 2026-09-11: the Actions API's log-download
+  endpoint 403s — "Must have admin rights to Repository"), so a red
+  `Tests_*.gs` run's actual failure line isn't directly readable from here
+  either. A working `python3`/`python` (Windows Store launcher) *is*
+  available, confirmed 2026-09-09.
+  - **Run `python3 test/run-gs-tests-headless.py` for a real local
+    equivalent of `node test/run-gs-tests.js`** (added 2026-09-11) — drives
+    the machine's already-installed Chrome/Edge in HEADLESS mode via
+    Playwright's Python driver (`python3 -m pip install playwright`; no
+    `playwright install` browser download needed, since it launches the
+    system browser directly via `channel="chrome"`). It reads
+    `test/run-gs-tests.js`'s own `PRODUCTION_FILES`/`TEST_FILES` arrays
+    (regex-extracted, not retyped, so it can't drift out of sync with the
+    real CI list), concatenates every file, and runs the exact same
+    `Tests_*.gs` suite in the browser's JS engine instead of Node's `vm`.
+    Real incident that motivated this: commit `8eb4b85` failed CI with no
+    readable log (the 403 above); the actual bug (a self-referential
+    test-fixture peer pool) could only be found by rebuilding this same
+    check by hand in the interactive Browser pane — this script is that
+    same approach turned into a reusable, headless (no visible tab, no
+    render/paint overhead), one-command tool. Use it to catch a real
+    failure BEFORE pushing, not as a replacement for a green CI run.
+  - This still doesn't change the general point: `python3` is useful for
+    local dry-runs/validation Node would otherwise cover and for building
+    `.docx`/`.pptx` output, but GitHub Actions remains the authoritative
+    gate — always confirm CI green after pushing, the headless run is a
+    pre-push sanity check, not a substitute.
 - **A real architectural change updates `HANDOVER.md`'s relevant section
   (§1–§3 especially) in the SAME commit** — not a separate follow-up, not
   "later." `HANDOVER.md` already says this about itself; stating it
