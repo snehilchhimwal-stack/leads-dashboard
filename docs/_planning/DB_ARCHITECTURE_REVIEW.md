@@ -1469,6 +1469,209 @@ because repeating the same reasoning five times would obscure that it
   structural change for its own sake, which the brief explicitly asks
   this review not to do.
 
-*(Part 4 complete. Continues in Part 5 — the data retention and
-lifecycle policy, resolving the `TBD` retention periods this schema
-deliberately left open.)*
+*(Part 4 complete.)*
+
+---
+
+## Part 5 — Data Retention & Lifecycle Policy
+
+### The constraint that shaped the current system no longer applies the same way
+
+**Fact, cited from `docs/_planning/retention-decisions-needed.md`:**
+every retention decision made in the current system exists in the
+shadow of Google Sheets' **10-million-cell whole-workbook ceiling**
+(not reduced by clearing content, only by deleting rows) — as of that
+analysis, `Movement_Log` + `Daily_RM_Issues` alone already consumed
+**~8M of the 10M**, leaving roughly 2M cells of headroom for everything
+else. The one real production incident in this whole review
+(`Daily_RM_Issues` crashing on 2026-09-06 when it hit that ceiling) is
+direct evidence this constraint is not theoretical.
+
+**This matters for Part 5 specifically:** several of the current
+`TBD` retention answers are `TBD` largely *because* "unbounded" was
+never explicitly weighed against that shared ceiling — not because
+unbounded growth is unsafe on its own technical merits. **In the target
+architecture (a real database, not a spreadsheet), the 10-million-cell
+ceiling does not exist.** A genuinely small, slow-growing table (tens of
+thousands of rows a year) is a non-issue for any standard relational
+database at almost any horizon. This does **not** mean every retention
+question dissolves — audit-retention, compliance, and cost still matter,
+and are addressed per table below — but it does mean the recommendations
+below are reasoned from **actual business/operational need**, not from
+"will this crash the workbook," which was the dominant pressure behind
+several of the current tabs' `TBD` status.
+
+### Lifecycle classification (all 13 target tables)
+
+| Target table | Category (brief's vocabulary) | Retention (recommended) | Status |
+|---|---|---|---|
+| `people` | Reference/configuration | Permanent (soft-delete via `active` flag, never hard-deleted) | **Carried forward** — matches current "N/A, configuration" |
+| `regions` | Reference/configuration | Permanent | **New table** — no prior policy to carry forward |
+| `region_recipients` | Reference/configuration | Permanent | **Carried forward** |
+| `person_regions` | Reference/configuration | Permanent | **New table** |
+| `movement_snapshots` | Active operational / recent historical | **7 days** | **Carried forward, confirmed correct** — see below |
+| `daily_rm_issues` | Active operational / recent historical | **7 days** | **Carried forward, confirmed correct** |
+| `lead_followups` | Temporary/staging | Cleared + repopulated every Generate cycle (no time-based retention) | **Carried forward** |
+| `sla_history` | Derived/reporting, long-term historical | **Recommend: permanent** | **Resolves the Part 3 `TBD`** — see below |
+| `daily_cohort_history` | Derived/reporting, long-term historical (immutable archive) | **Recommend: permanent** | **Resolves the Part 3 `TBD`** — see below |
+| `comment_history` | Long-term historical / audit-adjacent | Unbounded, by explicit design | **Carried forward** — but flag a data-minimization question (below) |
+| `unmatched_comments_log` | Active operational (review queue) | Manually curated (until reviewed) | **Carried forward, confirmed correct** |
+| `email_sends` (`dashboard` channel) | Audit record | **Recommend: 1–2 years active, then archive** | **New recommendation** — see below |
+| `email_sends` (`all_issues_17h` channel) | Audit record | **Recommend: 90 days active, then archive** | **New recommendation** — see below |
+| `email_sends` (`overnight_10h` channel) | Active operational (functional) + audit | **Recommend: 7 days active, then archive** | **New recommendation** — see below |
+| `overnight_log_leads` | Active operational (functional child) | Matches its parent `email_sends` row | **Carried forward in shape** |
+
+### Per-table reasoning
+
+**`movement_snapshots` / `daily_rm_issues` — 7 days, recommend unchanged.**
+*Fact:* this retention is already confirmed and enforced today
+(`MOVEMENT_LOG_RETENTION_DAYS`, and `daily_rm_issues`' own prune added
+after the real 2026-09-06 incident). *Fact:* the 0–48h cohort
+computation genuinely needs at least ~2 days of raw history (Part 1),
+and the nightly leaderboard needs same-window data. *Assessment:* 7 days
+is not an artifact of the cell ceiling for these two — it reflects
+genuine operational need (how far back a "why did this lead go quiet"
+or "who's a repeat offender this week" question realistically reaches).
+**Recommend: keep 7 days in the target system.** *Archive vs delete:*
+delete (not archive) — these are point-in-time operational snapshots
+with no standalone analytical value once their derived aggregates
+(`sla_history`, `daily_cohort_history`) have captured what matters from
+them. *Trigger:* a scheduled prune job, same shape as today, ideally
+run *before* the day's write (the `daily_rm_issues` 2026-09-06 incident
+was specifically caused by a prune ordered *after* the write — flagged
+for Part 7 as a real implementation detail to preserve, not just the
+retention number). *App dependency:* yes, directly, within the window —
+already established. *Compliance/confirmation needed:* none identified
+— this is the one retention question in this review with essentially no
+open business question left.
+
+**`sla_history` / `daily_cohort_history` — recommend permanent, resolving
+the Part 3 `TBD`.** *Fact:* both exist specifically to outlive
+`Movement_Log`'s 7-day window; both have real, cited, negligible growth
+(~15K and ~48K cells/year respectively, in Sheets terms — trivially
+small in any real database). *Fact:* `daily_cohort_history` is already
+architecturally immutable once a day's window completes — a genuine
+permanent-archive design already in place. *Assessment:* the entire
+reason these tables exist is to be the long-term record; recommending
+anything *other* than "keep permanently" would work against their own
+stated purpose, and the growth rate makes cost a non-argument for a real
+database. **Recommend: permanent retention, no prune, for both.**
+*Archive vs delete:* neither — no removal at all under this
+recommendation. *Trigger:* N/A. *App dependency:* the Tracking tab's
+long-run trend/Week-over-Week views depend on this data existing
+indefinitely by design. *Compliance/confirmation needed:* low — these
+are aggregate counts, not PII-bearing rows (Part 1's sensitivity
+classification for both is already `LOW`/operational-counts-only). This
+recommendation should still be **explicitly ratified by the business**
+(not just inferred by this review) since "permanent" is a real
+commitment, not a technical default — flagged for the Approval
+Checkpoint at the end of this review.
+
+**`comment_history` — unbounded, carried forward, but flag a real
+data-minimization question.** *Fact:* this retention is already
+confirmed, not `TBD` — deliberately unbounded, by design, because the
+write rate is an order of magnitude below `Movement_Log`'s. **No change
+recommended to the retention mechanics.** *However* — Part 1 already
+flagged this as the highest data-minimization concern among all 13
+tabs: it accumulates **full free-text RM comment content plus customer
+context, indefinitely, with zero code consumer today** (a pure
+forward-capture dataset for future analysis). Retention (how long) and
+data minimization (whether unlimited raw comment text should be kept at
+all, vs. summarized/redacted after some period) are two different
+questions — this review resolves the first as "no change" and
+**explicitly does not resolve the second**, flagging it as a real open
+question for the business (see Part 11 and the Approval Checkpoint):
+does customer-data-handling policy require a retention/redaction limit
+on free-text comment content, independent of the technical growth-rate
+argument that justified "unbounded" in the first place?
+
+**`unmatched_comments_log` — manually curated, carried forward.** *Fact:*
+this is already a deliberate, working human process (review → mark
+reviewed → periodic clear), not a technical gap. **No change
+recommended.**
+
+**`email_sends` — three different recommendations by channel, replacing
+three previously-`TBD` policies.** This is the one area where the
+Sheets-ceiling reframing above matters most: today's `TBD` status on
+all three source tabs (`Send_Log`, `AllIssues_Log`, `Overnight_Log`) was
+never really about whether they're *safe* to keep — it's about whether
+"nobody ever wrote a policy" should default to "keep forever" or "prune
+soon." This review's recommendation, **explicitly separated by channel**
+since they now share one physical table with different real usage
+patterns:
+
+- **`dashboard` channel** (was `Send_Log`) — *Fact:* the **only** one
+  of the three source tabs with **zero removal path of any kind**
+  today. *Fact:* it holds recipient **and** sender email addresses — a
+  real PII/data-minimization surface, not just an operational log.
+  **Recommend: 1–2 years of active retention, then archive** (export +
+  remove from the live table, not hard-delete outright) — a common,
+  conservative default for a human-facing send-audit trail, chosen so a
+  "did we actually send the quarterly digest" question stays answerable
+  for a reasonable business cycle without holding email PII indefinitely
+  for no stated reason. **This exact number is a recommendation, not a
+  fact, and needs business/compliance confirmation** — this review has
+  no visibility into any actual audit-retention requirement the
+  business may already be under.
+- **`all_issues_17h` channel** (was `AllIssues_Log`) — *Fact:* read
+  only by its own writer, for within-run dedupe — Part 1 already
+  confirmed pruning old rows here is **functionally safe**, no
+  downstream consumer is affected. **Recommend: 90 days of active
+  retention, then archive** — generous relative to the functional need
+  (which is same-run only) but still bounded, balancing "keep a
+  reasonable audit window" against "don't hold recipient PII
+  indefinitely for a table nothing reads." Also a recommendation
+  needing business confirmation, not a fact.
+- **`overnight_10h` channel** (was `Overnight_Log`) — *Fact,* already
+  stated explicitly in the existing documentation: only ~today's rows
+  are **ever functionally needed** (the 13:00 same-day reply), making
+  this "the clearest prune candidate" of the original 13 tabs.
+  **Recommend: 7 days of active retention** (today plus a real buffer
+  for a delayed or manually-repaired run — matching
+  `movement_snapshots`' own window for consistency), **then archive.**
+  This is the one channel where the recommended number is driven
+  almost entirely by the *functional* read pattern, not an audit
+  judgment call — much more confident than the other two.
+
+  *Archive vs delete, all three channels:* **archive, not hard-delete**
+  — export to cold storage (or simply move to an `email_sends_archive`
+  table/partition) before removal from the active table, preserving the
+  audit trail's existence while keeping the actively-queried table
+  small. *Trigger:* a scheduled job per channel (they can share one
+  job with per-channel cutoffs, since they're one physical table now).
+  *App dependency:* `overnight_10h` — yes, directly, within its 7-day
+  window (the functional 13:00 read). The other two — no code
+  dependency beyond the retention window itself. *Compliance/audit/
+  recovery considerations needing confirmation:* **all three channel
+  cutoff numbers above are this review's recommendations, not confirmed
+  business policy** — flagged explicitly for the Approval Checkpoint.
+
+### Facts vs. assumptions — explicit summary
+
+**Confirmed facts, carried forward unchanged (no new decision needed):**
+`movement_snapshots`/`daily_rm_issues` 7-day retention; `comment_history`
+unbounded-by-design; `unmatched_comments_log` manually-curated;
+`lead_followups` per-cycle reset; the real cell-ceiling incident and
+growth-rate figures cited throughout.
+
+**This review's recommendations, requiring business confirmation before
+being treated as policy** (all listed again at this document's eventual
+Approval Checkpoint, Part 12): `sla_history`/`daily_cohort_history`
+permanent retention; the three `email_sends` channel cutoffs
+(1–2 years / 90 days / 7 days); whether `comment_history`'s
+unlimited-by-design free-text accumulation needs a separate
+data-minimization policy despite its technical growth rate being a
+non-issue.
+
+**Genuinely unresolved, not addressed by a retention policy at all:**
+the `leads` tab's own retention (explicitly out of scope for this
+review, and already flagged in the existing documentation as depending
+on an external CRM export this project doesn't control); whether
+`Manager_Directory`'s hand-filled emails survive a rebuild (a
+data-safety question, not a retention one — carried from Part 2/4,
+owned by Part 8's migration plan).
+
+*(Part 5 complete. Continues in Part 6 — the target architecture around
+this schema: source of truth, ingestion, processing, jobs, backups,
+access control, and what currently happens in Sheets that should move
+into the database or application instead.)*
