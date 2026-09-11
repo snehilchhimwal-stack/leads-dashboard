@@ -152,9 +152,26 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      the owning record alone (which would have false-positived on those
      same 5 real buttons). Flags a button id with no citation anywhere in
      that combined scope.
+  N. EXC- thrown-literal staleness     (ADVISORY)
+     (E2E acceptance test report round 2, TEST 10 -- third and last
+     slice of the same big item -- deliberately PARTIAL). Investigated
+     first: unlike a button id or a Sheet tab constant, most real
+     `EXC-XXX` rows describe a CONDITION ("GIS library not loaded",
+     "consent denied / popup closed") with no corresponding literal
+     anywhere in the code -- no structural fact to check a brand-new
+     undocumented exception against, confirming the original forensic
+     audit's own "needs real static analysis" call for THAT half. What
+     IS checkable: the small subset of EXC- rows (2 of the whole catalog
+     as of this check's own build) that cite a literal thrown string in
+     a code span -- `` `throw new Error('ACCESS_DENIED')` `` -- verified
+     against the owning component's real source, the same shape check I
+     already proved for FN- citations. Catches STALENESS in an
+     ALREADY-documented exception; does nothing for a brand-new
+     exception path with no EXC- row at all -- that half of TEST 10
+     stays open by design, not oversight.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, and M only print.
-Flip D/E/G/H/I/J/K/L/M to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, M, and N only print.
+Flip D/E/G/H/I/J/K/L/M/N to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -1090,6 +1107,61 @@ def check_button_coverage():
                    f"button-inventory.md or a tabs/dashboards record)")
     return out
 
+# ---------------------------------------------------------------- N
+# TEST 10, E2E acceptance test report round 2, third and last slice of
+# the big item -- deliberately PARTIAL, not full coverage. Investigated
+# first, same discipline as the other two slices: unlike a button id or a
+# Sheet tab constant, most real `EXC-XXX` rows describe a CONDITION
+# ("GIS library not loaded", "consent denied / popup closed") with no
+# corresponding literal anywhere in the code at all -- there is no
+# structural fact to check a brand-new undocumented exception against,
+# which is exactly why the original forensic audit called this "real
+# static analysis, out of scope." What IS real and checkable: a SMALL
+# subset of EXC- rows (2 of the whole catalog, confirmed by grep before
+# writing this) cite a literal thrown string inside a code span --
+# `` `throw new Error('ACCESS_DENIED')` `` -- and that string can be
+# checked against the owning component's real source, the same shape
+# check I already proved out for FN- citations. This catches STALENESS
+# in an ALREADY-documented exception (the literal changed or the throw
+# was removed, but the row wasn't updated) -- it does nothing for a
+# brand-new exception path with no EXC- row at all; that half of TEST 10
+# remains open by design, not by oversight.
+EXC_THROWN_LITERAL = re.compile(r"`throw new Error\('([A-Z_][A-Z0-9_]*)'\)`")
+
+def check_exc_thrown_literal_staleness(rows):
+    out = []
+    checked = 0
+    for sub in sorted(set(TYPE_DIR.values())):
+        d = os.path.join(ROOT, "docs", sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', fname)
+            if not m:
+                continue
+            cid = m.group(1)
+            if cid not in rows:
+                continue
+            real_files = [f for f in rows[cid]["files"] if "*" not in f]
+            record_text = open(os.path.join(d, fname), encoding="utf-8").read()
+            literals = set(EXC_THROWN_LITERAL.findall(record_text))
+            if not literals:
+                continue
+            src_text = ""
+            for rf in real_files:
+                src_path = os.path.join(ROOT, rf)
+                if os.path.exists(src_path):
+                    src_text += open(src_path, encoding="utf-8").read()
+            for lit in sorted(literals):
+                checked += 1
+                if f"'{lit}'" not in src_text and f'"{lit}"' not in src_text:
+                    out.append(f"{cid} ({sub}/{fname}): cites `throw new Error('{lit}')` "
+                               f"but '{lit}' doesn't appear anywhere in {', '.join(real_files) or '(no real Location file)'} — verify")
+    if not out:
+        out.append(f"(checked {checked} EXC- thrown-literal citation(s) against their owning "
+                   f"component's source, no staleness found)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -1121,7 +1193,8 @@ def main():
                       ("J. LOGIC_AUDIT.md immutability", lambda r: check_logic_audit_immutability()),
                       ("K. TBD retention consistency", lambda r: check_tbd_retention_consistency()),
                       ("L. Sheet tab coverage", lambda r: check_sheet_tab_coverage()),
-                      ("M. Button coverage", lambda r: check_button_coverage())]:
+                      ("M. Button coverage", lambda r: check_button_coverage()),
+                      ("N. EXC- thrown-literal staleness", check_exc_thrown_literal_staleness)]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
