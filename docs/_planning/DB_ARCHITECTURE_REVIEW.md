@@ -1946,7 +1946,63 @@ Node.js — a real, confirmed constraint worth weighing against a
 Node-based API layer choice specifically). Carried to the Approval
 Checkpoint rather than assumed.
 
-*(Part 6 complete. Continues in Part 7 — the codebase impact assessment,
-now that the target data model and dependency map above exist to build
-it from, per the brief's own instruction not to plan code changes
-before the target model is settled.)*
+*(Part 6 complete.)*
+
+---
+
+## Part 7 — Codebase Impact Assessment
+
+**Method note, per the brief's own instruction:** this assessment is
+built *after* Parts 3 and 6 (the target data model and architecture)
+already exist — every "required change" below names a real target
+endpoint/table from that model, not a guess made ahead of it. Every
+`.gs` and `js/*.js` file confirmed (via the Writers/Readers sections in
+`docs/sheets/SHEET-XXX-*.md`, cross-checked directly against the real
+file listing) to touch one of the 13 migrated tabs is covered — files
+that only touch `leads` (out of scope) are not listed.
+
+### Apps Script files
+
+| File | Current dependency | Required change | Target implementation | Migration implications | Risk |
+|---|---|---|---|---|---|
+| `MovementTracker.gs` | Writes `Movement_Log`, `SLA_History`, `Daily_Cohort_History` in one 4×/day capture pass; owns the column-list constants; prune-before-write logic | Replace `SpreadsheetApp` calls with HTTP calls to the new API's capture endpoint; retire the local column constants | Calls one API endpoint (e.g. `POST /snapshots`) that writes all three tables in one transaction | **The center of Part 6's dual-writer consolidation** — must migrate together with `js/sheets-writeback.js`, not staggered, or the two runtimes briefly write to different systems | **High** |
+| `DailyRmIssueLog.gs` | Writes `Daily_RM_Issues` nightly, chunked; backfills from `Movement_Log`; prunes at 7 days; owns RM-performance leaderboard reconstruction logic | Replace the direct capture with a call that triggers the API's nightly materialization (Part 3/6: this table is now derived from `movement_snapshots`) | Trigger calls e.g. `POST /daily-rm-issues/materialize`; the backfill capability must exist as an API operation too (real incident-recovery precedent) | The chunked-write mitigation (a real prior incident) and the prune-before-write lesson (the 2026-09-06 crash) must both be preserved in the new implementation, not just the retention number | **Medium** |
+| `RmHierarchy.gs` | Owns `RM_HIERARCHY_RAW_`; rebuilds `RM_Hierarchy` + `Manager_Directory`; `resolveRmHierarchy_`/`lookupRmChain_` power all routing | Retire the code-constant + rebuild pattern entirely (Part 6); rewrite chain-resolution to query the new `people` table | Calls `GET /people` (chain traversal via `tl_id`/`tm_id`/`rh_id`/`ch_id`) | **Real process change, not just code** — whoever edits `RM_HIERARCHY_RAW_` today needs a new way to edit the org chart; the unconfirmed rebuild-preserves-emails question (Part 2/4) must be resolved first | **High** |
+| `EmailInfra.gs` | Reads `Region_Recipients` for the routing fallback | Replace Sheets reads with an API call | `GET /region-recipients` | Contained, single clear read pattern | **Low–Medium** |
+| `AllIssuesEmailer.gs` | Writes + within-run-reads `AllIssues_Log`, self-healing header | Replace with API calls | `POST` / `GET /email-sends?channel=all_issues_17h` | Audit-only, no cross-run functional dependency | **Low** |
+| `OvernightEmailer.gs` | Writes `Overnight_Log` at 10:00; **functionally reads it back** at 13:00 for the threaded reply; also writes/reads `Lead_Followups` | Replace with API calls; the 13:00 read must hit the same-day-indexed query designed in Part 3 | `POST /email-sends` (10:00); `GET /email-sends?channel=overnight_10h&date=today&region=X` (13:00) | **The single highest-stakes functional read in this entire migration** — a bug here breaks a real send, not just an audit record | **High** |
+| `InteractionHistoryLogger.gs` | Writes `Comment_History`, piggybacked on the 4×/day trigger, de-duped | Replace with an API call | `POST /comments` | No consumers at all today — lowest-stakes writer in the review | **Low** |
+| `UnmatchedCommentLogger.gs` | Writes/reads `Unmatched_Comments_Log`; scan, dedup, manual clear-reviewed | Replace with API calls; the human review workflow (mark reviewed, clear) needs a real interface if the sheet itself retires | `POST /unmatched-comments`; `PATCH .../reviewed`; `DELETE` for the clear operation | **Open design question, not resolved here:** does this tab's human-review UI move to a small admin page, or stay Sheets-based as a legitimate exception? Flagged for Part 8/11 | **Low–Medium** |
+| `FollowupEngine.gs` (the comment-classifier keyword engine, `OUTCOME_RULES_GS_`/`inferOutcomeGs_`) | Pure classification logic — determines what `UnmatchedCommentLogger.gs` treats as unmatched; not itself a tab reader/writer | None functionally — ported as-is | Reused unchanged by the new capture logic | Must stay in lockstep with the frontend's parallel `OUTCOME_RULES` keyword table (an existing, pre-migration cross-runtime-duplication risk this review doesn't change) | **Low** (migration risk); pre-existing duplication risk unchanged |
+| `OpsChecklistRunner.gs` | Reads `RM_Hierarchy`/`Manager_Directory` for the weekly audit | Replace reads with API calls | `GET /people` | Read-only, well-isolated | **Low** |
+| `LeadFollowupsStaleness.gs` | Reads `Lead_Followups` column G to drive **Sheets-native conditional formatting on the tab itself** | **Real open design question** — conditional formatting is a Sheets-only feature; if the human-review workflow moves off Sheets entirely, this exact mechanism has nowhere to live in the same form | TBD — depends on whether `Lead_Followups` stays a deliberate Sheets-based human interface (a legitimate exception) or gets a dedicated small review UI | This may be the one tab where "stay in Sheets" is a real, defensible architectural choice rather than a migration gap — flagged for Part 8/11, not decided here | **Medium–High** (design uncertainty, not code complexity) |
+| `Core.gs` | Shared helpers (`buildColIndex_`, `getVal_`, `istDayKeyGs_`) used across most files above | Minimal — generic utilities; some (range/column-index helpers) become unnecessary once reads go through the API instead of raw Sheets ranges | Mostly unchanged; prune what's no longer called | Low-risk, mechanical | **Low** |
+| `SlaEngine.gs` (`computeSlaFlags_`) | Pure SLA-flag computation, not itself a tab reader/writer | None functionally — logic relocates into the API layer's capture implementation, ported exactly | Reused unchanged, called from the new snapshot-capture endpoint instead of from `MovementTracker.gs` directly | **Correctness-preservation risk, not integration risk** — SLA flag logic feeds everything downstream; a strong candidate for porting its existing test suite alongside it, unchanged | **Medium** |
+
+### Frontend files (`js/*.js`)
+
+| File | Current dependency | Required change | Target implementation | Migration implications | Risk |
+|---|---|---|---|---|---|
+| `js/sheets-writeback.js` | The largest write-side file — writes `Movement_Log` (on-demand), `SLA_History`, `Daily_Cohort_History` (upsert + backfill), `Lead_Followups` (push/clear/wait), `Send_Log` (fire-and-forget) | Every write becomes an API call; **must call the identical capture endpoint `MovementTracker.gs` calls** (Part 6's consolidation) | `POST /snapshots` (shared), `POST /follow-ups`, `POST /email-sends?channel=dashboard` | **Must migrate in lockstep with `MovementTracker.gs`**, same reasoning as that row — this is the other half of the dual-writer fix | **High** |
+| `js/reports-ui.js` / `js/reports-build.js` / `js/reports-gmail.js` | The Generate cycle; the dashboard's **separate `localStorage`-backed** region-recipient store (Part 2's strongest single finding) | The `localStorage` store is retired per Part 6 — reads/writes move to the shared table | `GET`/`PUT /region-recipients` | **A real, user-visible behavior change** — per-browser customization goes away in favor of one shared value; needs the business confirmation already flagged in Part 2/6, and user communication if approved | **Medium–High** |
+| `js/tab-repeat-offenders.js` | Reads `Daily_RM_Issues` + `RM_Hierarchy` for the RM/Region/A1-TM/RH leaderboards | Replace Sheets reads with API reads | `GET /daily-rm-issues`, `GET /people` | Read-only, but a high-traffic, frequently-viewed leaderboard — response time must match today's | **Medium** |
+| `js/tab-tracking.js` | Reads `SLA_History` + `Daily_Cohort_History` for charts; owns the manual clear/backfill buttons | Replace reads/writes with API calls; the manual clear buttons likely become redundant once Part 5's real retention jobs exist (or get repurposed as an admin-only override) | `GET /sla-history`, `GET /daily-cohort-history`; admin-only archive-trigger endpoints | The clear-button behavior needs an explicit product decision (keep as override, or remove) | **Medium** |
+| The `fetchMovementLog` hub (`js/core-*.js`, `JS-021`) | The **single shared read point** already used by RM performance, cohorts, RM Timeline, and the PDF export | Replace the one underlying read with an API call | `GET /movement-snapshots` | **The cleanest file to migrate in this whole review** — precisely because it's already a well-designed fan-out hub, every downstream consumer is already insulated from the data-source change | **Low–Medium** (central/high-traffic, but well-isolated by existing design) |
+| `js/tab-rmtimeline.js` | Reads via the `JS-021` hub only, not a direct Sheets reader | None, if the hub above migrates correctly | — | Insulated by the existing hub pattern | **Low** |
+
+### Cross-cutting concern — not owned by any single file
+
+**Authentication for the new API layer.** Today, the dashboard's write
+access comes entirely from the signed-in user's own Google OAuth grant
+(Sheets API scope), and Apps Script runs as its own project identity —
+neither model maps directly onto "a small number of API clients with
+their own credentials." **This is genuinely new work, not a file-by-file
+migration item** — the API layer needs its own authentication scheme
+(e.g., a service-account-style credential for Apps Script, and either a
+proxied/short-lived token or a lightweight session for the dashboard),
+designed once and applied consistently, rather than solved separately
+per file above. Flagged for Part 8's migration plan as a Phase 2/5
+prerequisite, not assigned to any one file's row.
+
+*(Part 7 complete. Continues in Part 8 — the migration plan, sequencing
+every file above into 8 safe phases with reconciliation checks.)*
