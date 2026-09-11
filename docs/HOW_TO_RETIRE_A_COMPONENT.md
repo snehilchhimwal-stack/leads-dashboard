@@ -47,8 +47,14 @@ nothing.
    - Leave the row in place — do **not** delete it. A reader scanning
      the master table needs to see that `<ID>` existed and where its
      record went.
-   - Bump the coverage snapshot at the bottom (the retired component no
-     longer counts toward "N of M covered").
+   - **The coverage snapshot count at the bottom does not change.**
+     (Corrected 2026-09-11, E2E acceptance test Required Fix #10 —
+     this used to say to decrement it, which would have made
+     `test/check-catalog.py` check F fail: F counts every row in the
+     master table for that prefix regardless of `Record Status`, so a
+     retired row — kept in place per the point above, never removed —
+     still counts. Retiring a component changes what a row *says*,
+     never how many rows exist.)
 5. **Fix every reference to it.** Grep the catalog for the ID
    (`grep -rn '<ID>' docs/`). On every record that had it in
    `Depends On` / `Used By` / `Related`:
@@ -133,7 +139,9 @@ RM-performance compute moves back onto the main thread.*
 2. `git mv docs/js-modules/JS-017-*.md docs/_archive/`.
 3. `INDEX.md`: `JS-017` row → `Retired`, `Location` →
    `_archive/JS-017-rm-performance-worker.md (retired 2026-11-04,
-   abc1234)`; `JS-` coverage snapshot 24/24 → 23/23.
+   abc1234)`; `JS-` coverage snapshot **stays** `24 / 24` — the row is
+   retired, not removed, so check-catalog.py's check F (which counts
+   every row regardless of `Record Status`) sees no change in count.
 4. Grep `JS-017`: it was in `JS-008`'s and `JS-022`'s `Used By`, and
    `TAB-004`'s `Depends On`, and `DATA-002`/`DATA-004`'s `Depends On`,
    and `RELATIONSHIP_MAP.md` §1/§3. Remove `JS-017` from each; note the
