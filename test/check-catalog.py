@@ -566,10 +566,20 @@ def check_owner_evidence():
             evidence_blank = True
             if vm:
                 block = vm.group(0)
-                sm = re.search(r'\*\*Status:\*\*\s*(.*)', block)
+                # [ \t]*, NOT \s* -- \s matches a newline too, so on a
+                # genuinely BLANK field (nothing after the colon but the
+                # line break) \s* silently skips past it and the leading
+                # "- " of the NEXT bullet, and (.*) then captures THAT
+                # line's text instead of recognizing this field as blank.
+                # Real bug, found retesting Fix #8 (E2E acceptance test,
+                # round 2): a record whose real field order is
+                # Evidence-then-Status (the actual template order) with a
+                # truly empty Evidence line read as "evidenced" here,
+                # because the match slid onto the Status line beneath it.
+                sm = re.search(r'\*\*Status:\*\*[ \t]*(.*)', block)
                 if sm and strip_comment(sm.group(1)).lower().startswith("validated"):
                     validated_status = True
-                em = re.search(r'\*\*Evidence:\*\*\s*(.*)', block)
+                em = re.search(r'\*\*Evidence:\*\*[ \t]*(.*)', block)
                 if em and strip_comment(em.group(1)):
                     evidence_blank = False
 
