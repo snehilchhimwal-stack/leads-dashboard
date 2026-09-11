@@ -817,6 +817,80 @@ function rmPerfCanonicalRmNameGs_(rawName) {
   return RM_PERF_NAME_ALIASES_GS_[trimmed.toLowerCase()] || trimmed;
 }
 
+// Leadership/manager names with NO resolvable RM_Hierarchy row — mirrors
+// js/core-rm-performance.js's RM_PERF_LEADERSHIP_NAME_EXCLUSIONS byte-for-
+// byte (that file's own comment has the full per-name reasoning; e.g.
+// "Sourabh Sareen" has a real RM_Hierarchy row but role: 'City Lead', not
+// 'Cluster Head', so the role-based path below genuinely can't reach him
+// without RM_PERF_NON_RM_ROLES_GS_ covering city lead too). KEEP IN SYNC
+// with the JS copy — add a name to both, same commit, whenever a new one
+// is confirmed.
+const RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_ = new Set([
+  'Ashish Kukreja',
+  'saurabh Mishra',
+  'Sourabh Sareen',
+  'Sourabh Sareen Pnl',
+  'Mukesh Mishra Admin',
+]);
+
+// Roles in RM_Hierarchy that are NOT a front-line RM, regardless of name —
+// direct port of js/core-rm-performance.js's RM_PERF_NON_RM_ROLES (that
+// file's own comment has the full reasoning — a Team Lead/Team Manager CAN
+// genuinely personally hold a lead, so this is a superset of
+// RmHierarchy.gs's own narrower TOP_OF_ORG_ROLES_, which only covers the
+// cluster head/city lead/commercial head tier and would silently miss
+// a1/tm/rh here). Matched case-insensitively against RM_Hierarchy's own
+// role column. Deliberately does NOT exclude BDM/Executive or S1/S2/S3 —
+// only the management/leadership tiers the JS side already excludes.
+const RM_PERF_NON_RM_ROLES_GS_ = new Set(['a1', 'tm', 'rh', 'cluster head', 'city lead', 'commercial head']);
+
+// Reads the live RM_Hierarchy sheet (RmHierarchy.gs's RM_HIERARCHY_SHEET_)
+// into a Map<lowercased name, role> for rmPerfIsLeadershipExcludedGs_
+// below — the server-side equivalent of js/tab-repeat-offenders.js's
+// fetchRmHierarchyForRollup(), narrowed to just the 'role' column this
+// exclusion check actually needs. Returns null (not an empty Map) when the
+// sheet is missing/empty/headerless, so the caller degrades gracefully to
+// the name-list path only — same "unavailable, not broken" convention
+// rmPerfIsLeadershipExcluded's own JS comment documents for a null
+// rmHierarchyByNameLower.
+function buildRmHierarchyRoleByNameLowerGs_(ss) {
+  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  if (!sheet) return null;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const lastCol = sheet.getLastColumn();
+  const header = withRetry_(function () { return sheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read RM_Hierarchy header for leadership exclusion');
+  const nameIdx = header.indexOf('name');
+  const roleIdx = header.indexOf('role');
+  if (nameIdx === -1) return null;
+  const rows = withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read RM_Hierarchy rows for leadership exclusion');
+  const byNameLower = new Map();
+  rows.forEach(function (row) {
+    const name = String(row[nameIdx] || '').trim();
+    if (!name) return;
+    byNameLower.set(name.toLowerCase(), roleIdx === -1 ? '' : String(row[roleIdx] || '').trim());
+  });
+  return byNameLower.size ? byNameLower : null;
+}
+
+// True when `rmName` (Movement_Log's raw RM field) should be excluded from
+// the RM Performance engine ENTIRELY — direct port of
+// js/core-rm-performance.js's rmPerfIsLeadershipExcluded (that file's own
+// comment has the full reasoning: dropped before any observation is ever
+// emitted, not just hidden downstream, so a leadership person's leads
+// can't inflate a peer average either). `roleByNameLower`: a
+// Map<lowercased name, role> from buildRmHierarchyRoleByNameLowerGs_ above
+// (or null — degrades to the name-list path only).
+function rmPerfIsLeadershipExcludedGs_(rmName, roleByNameLower) {
+  const name = String(rmName || '').trim();
+  if (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_.has(name)) return true;
+  if (roleByNameLower) {
+    const role = roleByNameLower.get(name.toLowerCase());
+    if (role && RM_PERF_NON_RM_ROLES_GS_.has(role.toLowerCase())) return true;
+  }
+  return false;
+}
+
 // Calendar-day difference between two "YYYY-MM-DD" istDayKeyGs_ strings —
 // direct port of js/core-rm-performance.js's _rmPerfDaysBetweenKeys (pure
 // Date.UTC arithmetic, noon-anchored to sidestep any DST edge case; no
@@ -879,12 +953,27 @@ function reconstructRmPerformanceObservationsGs_(ss) {
   const colIndex = buildColIndex_(header);
   const allRows = withRetry_(function () { return movementSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Movement_Log for RM performance reconstruction');
 
+  // Same RM_Hierarchy read js/tab-repeat-offenders.js's fetchRmHierarchyForRollup
+  // does for the browser engine, built once per call — see
+  // rmPerfIsLeadershipExcludedGs_'s own comment for why this check has to
+  // run here, at the raw-record stage, before latestByLeadDay is built.
+  const roleByNameLowerGs_ = buildRmHierarchyRoleByNameLowerGs_(ss);
+
   const latestByLeadDay = {}; // "leadId|dayKey" -> {row, ts, dayKey, leadId}
   allRows.forEach(function (row) {
     const ts = row[snapAtIdx];
     if (!(ts instanceof Date)) return;
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
+    // Leadership (Cluster Head/City Lead/Commercial Head/A1/TM/RH, or a
+    // specific known-leadership name with no resolvable RM_Hierarchy row)
+    // is excluded ENTIRELY here, before any observation is ever emitted —
+    // mirrors js/core-rm-performance.js's reconstructRmPerformanceObservations,
+    // which applies this same check on the raw (pre-canonicalization) RM
+    // field for the identical reason: their records would otherwise still
+    // inflate this report's totals even if their own row were merely
+    // hidden downstream.
+    if (rmPerfIsLeadershipExcludedGs_(getVal_(row, colIndex, 'RM'), roleByNameLowerGs_)) return;
     const dayKey = istDayKeyGs_(ts);
     const mapKey = leadId + '|' + dayKey;
     if (!latestByLeadDay[mapKey] || ts.getTime() > latestByLeadDay[mapKey].ts.getTime()) {

@@ -414,6 +414,51 @@ function runDailyRmIssueLogTests_() {
     const rmPerfEmpty = rmPerfMakeSheet_();
     TestAssertEqual_(computeRmPerformanceGs_(rmPerfEmpty.ss).length, 0, 'computeRmPerformanceGs_: returns an empty array when Movement_Log exists but has no data rows');
 
+    // -- Scenario D: leadership-exclusion mirror (t-rmperf-leadexcl01) --
+    // RM_PERF_NON_RM_ROLES_GS_ / RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_. A
+    // role-based leadership person ('A1' -- deliberately NOT cluster head/
+    // city lead/commercial head, to prove the FULL non-RM-role set is
+    // honored here, not just RmHierarchy.gs's narrower TOP_OF_ORG_ROLES_)
+    // and a name-list-based leadership person (one of
+    // RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_'s own entries, which has no
+    // RM_Hierarchy row seeded at all) both get the EXACT SAME chronically-
+    // violating fixture Scenario A's 'Bad Broad' classifies 'Below
+    // Expectations' on -- neither may appear anywhere in
+    // reconstructRmPerformanceObservationsGs_'s output or
+    // computeRmPerformanceGs_'s results, while a genuine RM given the
+    // identical fixture still classifies normally.
+    const rmPerfD = rmPerfMakeSheet_();
+    const rmHierarchySheetD = rmPerfD.ss.insertSheet('RM_Hierarchy');
+    rmHierarchySheetD.getRange(1, 1, 3, 10).setValues([
+      ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'],
+      ['Test Team', 'A1', 'Leader A1', '', '', '', '', false, '', ''],
+      ['Test Team', 'S1', 'Real RM', '', '', '', '', false, '', ''],
+    ]);
+    ['Leader A1', 'Sourabh Sareen', 'Real RM'].forEach(function (rm) {
+      for (let i = 1; i <= 6; i++) { days4.forEach(function (d) { rmPerfD.sheet.appendRow(rmPerfBadRow_(rmPerfD.header, 'D-' + rm.replace(/\s+/g, '') + '-L' + i, rm, d)); }); }
+    });
+
+    const rmPerfDObservations = reconstructRmPerformanceObservationsGs_(rmPerfD.ss);
+    TestAssertEqual_(rmPerfDObservations.filter(function (o) { return o.name === 'Leader A1'; }).length, 0, 'reconstructRmPerformanceObservationsGs_: a role-excluded leader (A1) produces zero observations');
+    TestAssertEqual_(rmPerfDObservations.filter(function (o) { return o.name === 'Sourabh Sareen'; }).length, 0, 'reconstructRmPerformanceObservationsGs_: a name-list-excluded leader produces zero observations');
+    TestAssert_(rmPerfDObservations.some(function (o) { return o.name === 'Real RM'; }), 'reconstructRmPerformanceObservationsGs_: a genuine RM given the identical fixture still produces observations');
+
+    const rmPerfDResults = computeRmPerformanceGs_(rmPerfD.ss);
+    const rmPerfDNames = rmPerfDResults.map(function (r) { return r.name; });
+    TestAssert_(rmPerfDNames.indexOf('Leader A1') === -1, 'computeRmPerformanceGs_: a role-excluded leader (A1) never appears in the RM Performance report');
+    TestAssert_(rmPerfDNames.indexOf('Sourabh Sareen') === -1, 'computeRmPerformanceGs_: a name-list-excluded leader never appears in the RM Performance report');
+    const rmPerfDByName = {}; rmPerfDResults.forEach(function (r) { rmPerfDByName[r.name] = r; });
+    TestAssertEqual_(rmPerfDByName['Real RM'].classification, 'Below Expectations', 'computeRmPerformanceGs_: a genuine RM given the identical fixture still classifies normally, proving the exclusion is scoped to leadership only');
+
+    // -- rmPerfIsLeadershipExcludedGs_ / buildRmHierarchyRoleByNameLowerGs_: direct unit coverage --
+    const rmPerfRoleMapD = buildRmHierarchyRoleByNameLowerGs_(rmPerfD.ss);
+    TestAssertEqual_(rmPerfRoleMapD.get('leader a1'), 'A1', 'buildRmHierarchyRoleByNameLowerGs_: reads the role column keyed by lowercased name');
+    TestAssert_(rmPerfIsLeadershipExcludedGs_('Leader A1', rmPerfRoleMapD), 'rmPerfIsLeadershipExcludedGs_: role-based exclusion (A1) fires against a real RM_Hierarchy row');
+    TestAssert_(rmPerfIsLeadershipExcludedGs_('Sourabh Sareen', rmPerfRoleMapD), 'rmPerfIsLeadershipExcludedGs_: name-list exclusion fires even with no matching RM_Hierarchy row');
+    TestAssert_(!rmPerfIsLeadershipExcludedGs_('Real RM', rmPerfRoleMapD), 'rmPerfIsLeadershipExcludedGs_: a genuine front-line role (S1) is not excluded');
+    TestAssert_(!rmPerfIsLeadershipExcludedGs_('Someone Unlisted', null), 'rmPerfIsLeadershipExcludedGs_: degrades to false (not a throw) with no role map and a name not on the leadership list');
+    TestAssertEqual_(buildRmHierarchyRoleByNameLowerGs_(TestMockSpreadsheet_({})), null, 'buildRmHierarchyRoleByNameLowerGs_: returns null (not an empty Map) when RM_Hierarchy does not exist');
+
     // ---- reportRmPerformanceNow(): console-callable wrapper, smoke test ----
     const realSs2 = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return TestMockSpreadsheet_({}); }, flush: function () {} };
