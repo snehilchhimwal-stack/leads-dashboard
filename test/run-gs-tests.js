@@ -132,6 +132,22 @@ function buildSandbox() {
       },
       getUuid: function () { return crypto.randomUUID(); },
       sleep: function () {},
+      // Content-hash dedup (Lead History & Versioning Review, Phase 6)
+      // needs Utilities.computeDigest — Node's own crypto module is a
+      // genuinely synchronous hasher (unlike a browser's Promise-based
+      // crypto.subtle.digest, which is why test/run-gs-tests-headless.py's
+      // browser-side shim had to hand-roll SHA-256 instead of using the
+      // platform's native implementation). Real Apps Script returns SIGNED
+      // bytes (range -128..127) — _leadContentHashGs_'s own hex conversion
+      // (MovementTracker.gs) already assumes this ((b < 0 ? b + 256 : b)),
+      // so an unsigned 0..255 array here would silently produce the WRONG
+      // hex string despite hashing the right bytes underneath.
+      DigestAlgorithm: { SHA_256: 'SHA_256' },
+      computeDigest: function (algorithm, value) {
+        if (algorithm !== 'SHA_256') throw new Error('Only SHA_256 is mocked here: ' + algorithm);
+        const buf = crypto.createHash('sha256').update(String(value), 'utf8').digest();
+        return Array.from(buf, function (b) { return b > 127 ? b - 256 : b; });
+      },
     },
     ScriptApp: {},
     Logger: { log: function () { console.log.apply(console, arguments); } },
