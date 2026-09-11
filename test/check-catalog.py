@@ -9,7 +9,7 @@ the reciprocity logic was already prototyped in Python (DOC-040), the CI
 runner has python3, and it means the checks can be run and verified
 locally on a machine with no Node (this repo's, as of 2026-09-04).
 
-What it does — six checks against docs/INDEX.md + the record files + git:
+What it does — seven checks against docs/INDEX.md + the record files + git:
 
   A. INDEX.md internal reciprocity    (BLOCKING — green as of 2026-09-10)
      every A->B in a Depends On column has B->A in B's Used By, and back;
@@ -53,9 +53,21 @@ What it does — six checks against docs/INDEX.md + the record files + git:
      piece: every sub-id must be unique across the WHOLE catalog. A
      duplicate has no legitimate justification, same class of defect as
      A/B/C/F already catch for own-file ids, just one tier down.
+  H. Owner / Evidence field content    (ADVISORY)
+     (Required Fix #8, E2E acceptance test report, F17/TESTS 15+16):
+     component-record-template.md's own header says a blank field
+     "blocks Record Status: Closed + Monitored" -- nothing ever parsed
+     `**Owner**` or `## Validation`'s `**Evidence:**` line to enforce
+     that; confirmed for real with a fully structural-correct record
+     (blank Owner + blank Evidence + Closed + Monitored, passed A/B/C/F
+     clean). Flags exactly that self-contradiction: a blank Owner cell,
+     or a Closed + Monitored / Validated status with a blank or absent
+     Evidence line. Not general content correctness (Required Fix #1's
+     much bigger, deliberately-not-built territory) -- just the one
+     specific rule the template already states and nothing checked.
 
-Exit code: non-zero iff A, B or C fail. D, E, and G only print.
-Flip D/E/G to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, and H only print.
+Flip D/E/G/H to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -431,6 +443,72 @@ def check_subtable_ids(rows=None):
         out.append("(no sub-table rows found)")
     return out
 
+# ---------------------------------------------------------------- H
+# Owner / Evidence field content (Required Fix #8, E2E acceptance test
+# report, F17/TESTS 15+16): component-record-template.md's own header
+# says "a BLANK field means 'not checked yet' and blocks Record Status:
+# Closed + Monitored" -- but nothing anywhere ever parsed `**Owner**` or
+# `## Validation`'s `**Evidence:**` line, so that rule was pure prose.
+# Confirmed for real: a fully structural-correct record (JS-025) with a
+# blank Owner AND a blank Evidence line AND Closed + Monitored status
+# passed A/B/C/F clean. This greps for exactly the self-contradiction
+# the template already names -- not general content correctness (that's
+# Required Fix #1's much bigger, deliberately-not-built territory).
+HTML_COMMENT = re.compile(r'<!--.*?-->', re.S)
+
+def strip_comment(s):
+    return HTML_COMMENT.sub('', s).strip()
+
+def check_owner_evidence():
+    out = []
+    dirs = list(TYPE_DIR.values()) + ["_archive"]
+    for sub in sorted(set(dirs)):
+        d = os.path.join(ROOT, "docs", sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', fname)
+            if not m:
+                continue
+            cid = m.group(1)
+            text = open(os.path.join(d, fname), encoding="utf-8").read()
+
+            om = re.search(r'\*\*Owner\*\*\s*\|(.*?)\|', text)
+            if om and not strip_comment(om.group(1)):
+                out.append(f"{cid} ({sub}/{fname}): blank Owner field")
+
+            # Record Status lives in its own row on most templates; the 4
+            # EXT- records fold it into "Component / Record" instead
+            # (e.g. "Active / Closed + Monitored") -- try both, in order.
+            status = None
+            rs = re.search(r'\*\*Record Status\*\*\s*\|(.*?)\|', text)
+            if rs:
+                status = strip_comment(rs.group(1))
+            else:
+                cr = re.search(r'\*\*Component / Record\*\*\s*\|(.*?)\|', text)
+                if cr and "/" in cr.group(1):
+                    status = strip_comment(cr.group(1).split("/", 1)[1])
+            status_closed = bool(status) and (
+                status.startswith("Closed + Monitored") or status.startswith("Validated"))
+
+            vm = re.search(r'##\s*Validation\b.*?(?=\n##\s|\Z)', text, re.S)
+            validated_status = False
+            evidence_blank = True
+            if vm:
+                block = vm.group(0)
+                sm = re.search(r'\*\*Status:\*\*\s*(.*)', block)
+                if sm and strip_comment(sm.group(1)).lower().startswith("validated"):
+                    validated_status = True
+                em = re.search(r'\*\*Evidence:\*\*\s*(.*)', block)
+                if em and strip_comment(em.group(1)):
+                    evidence_blank = False
+
+            if (status_closed or validated_status) and evidence_blank:
+                out.append(f"{cid} ({sub}/{fname}): status '{status or 'Validated (## Validation)'}' but ## Validation's Evidence line is blank or absent")
+    if not out:
+        out.append("(no blank Owner / unevidenced Closed+Monitored or Validated status found)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -456,7 +534,8 @@ def main():
 
     for label, fn in [("D. Last-Verified drift", check_last_verified_drift),
                       ("E. change -> component-ID impact", check_impact),
-                      ("G. Sub-table ID uniqueness", check_subtable_ids)]:
+                      ("G. Sub-table ID uniqueness", check_subtable_ids),
+                      ("H. Owner / Evidence content", lambda r: check_owner_evidence())]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
