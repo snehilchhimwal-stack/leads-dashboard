@@ -183,9 +183,23 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      `tab-repeat-offenders.js`/`main.js`) by filtering extracted names
      down to real js/ files and deduping to first occurrence. Flags a
      mismatch between the stated order and dashboard.html's real one.
+  P. Documented function existence     (ADVISORY)
+     (E2E acceptance test report round 3's false-pass battery recompute --
+     "documented nonexistent function" was one of 3 items still fully
+     succeeding after round 3's other fixes.) FN-XXX sub-table rows cite
+     function names in backticks, `` `name(...)` ``, the same row shape
+     check I already parses for cited-literal verification. Verifies each
+     cited name exists as a real `function name(` declaration (or an
+     assignment form, `name = function(`/`name = (...) =>`, for the one
+     real Web-Worker-handler exception found) in the owning component's
+     real source. Handles this codebase's own `` `_()` `` shorthand for
+     "same name + trailing underscore private twin" by carrying the
+     previous real name forward. Checked clean at 401/401 real citations
+     before shipping.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, M, N, and O only print.
-Flip D/E/G/H/I/J/K/L/M/N/O to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, M, N, O,
+and P only print.
+Flip D/E/G/H/I/J/K/L/M/N/O/P to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -1231,6 +1245,85 @@ def check_handover_load_order():
     return [f"(HANDOVER.md §2's stated load order for {len(stated)} of dashboard.html's real "
             f"<script src> files matches reality)"]
 
+# ---------------------------------------------------------------- P
+# False-pass battery item recompute, round 3: "documented nonexistent
+# function" was one of 3 items still fully succeeding after round 3's
+# fixes (docs/_planning/E2E_ACCEPTANCE_TEST_REPORT.md's round-3
+# false-pass recompute). Investigated for a real structural angle
+# before building: FN-XXX sub-table rows cite function names in
+# backticks, `name(...)`, in the same row format check I already
+# parses for cited-literal verification. Tested against the real,
+# unmodified catalog (254 FN- rows, 401 extracted name citations) before
+# writing this: 3 false positives with a naive `function name(` check,
+# both explainable, not real gaps -- (a) this codebase's own `` `_()` ``
+# shorthand for "same name + trailing underscore private twin"
+# (confirmed real: OvernightEmailer.gs `sendOvernightMorningEmails()` /
+# `_()` -> `sendOvernightMorningEmails_`, line anchors match exactly),
+# handled below by carrying the previous real name forward; and (b) one
+# Web Worker event-handler assignment style (`onmessage = function(e){`
+# in rm-performance-worker.js), not the codebase's usual `function
+# name(` declaration -- handled by also accepting an assignment form.
+# With both handled, the real catalog checks clean at 401/401.
+FN_ROW = re.compile(r'^\| (FN-\d{3}) \|([^|]*)\|')
+FN_NAME_CITE = re.compile(r'`([A-Za-z_][A-Za-z0-9_]*)\(')
+
+def _function_exists(name, src_text):
+    if re.search(r'\bfunction\s+' + re.escape(name) + r'\s*\(', src_text):
+        return True
+    if re.search(r'\b' + re.escape(name) + r'\s*=\s*function\s*\(', src_text):
+        return True
+    if re.search(r'\b' + re.escape(name) + r'\s*=\s*\([^)]*\)\s*=>', src_text):
+        return True
+    return False
+
+def check_documented_function_existence(rows):
+    out = []
+    checked = 0
+    dirs = list(TYPE_DIR.values())
+    for sub in sorted(set(dirs)):
+        d = os.path.join(ROOT, "docs", sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', fname)
+            if not m:
+                continue
+            cid = m.group(1)
+            if cid not in rows:
+                continue
+            real_files = [f for f in rows[cid]["files"] if "*" not in f]
+            if len(real_files) != 1:
+                continue  # only handle the common, unambiguous one-file case
+            src_path = os.path.join(ROOT, real_files[0])
+            if not os.path.exists(src_path):
+                continue  # check C already reports this; don't double up
+            src_text = None  # lazy-load, only if this record has a hit
+            record_lines = open(os.path.join(d, fname), encoding="utf-8").read().splitlines()
+            for line in record_lines:
+                rm = FN_ROW.match(line)
+                if not rm:
+                    continue
+                names, prev = [], None
+                for name in FN_NAME_CITE.findall(rm.group(2)):
+                    if name == "_":
+                        if prev:
+                            names.append(prev + "_")
+                        continue
+                    names.append(name)
+                    prev = name
+                if not names:
+                    continue
+                if src_text is None:
+                    src_text = open(src_path, encoding="utf-8").read()
+                for name in names:
+                    checked += 1
+                    if not _function_exists(name, src_text):
+                        out.append(f"{cid} ({sub}/{fname}): {rm.group(1)} cites `{name}(...)` but no "
+                                    f"`function {name}(` (or equivalent assignment) exists in {real_files[0]} — verify")
+    if not out:
+        out.append(f"(checked {checked} FN- cited function name(s) against their owning component's real source, all exist)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -1264,7 +1357,8 @@ def main():
                       ("L. Sheet tab coverage", lambda r: check_sheet_tab_coverage()),
                       ("M. Button coverage", lambda r: check_button_coverage()),
                       ("N. EXC- thrown-literal staleness", check_exc_thrown_literal_staleness),
-                      ("O. HANDOVER load-order staleness", lambda r: check_handover_load_order())]:
+                      ("O. HANDOVER load-order staleness", lambda r: check_handover_load_order()),
+                      ("P. Documented function existence", check_documented_function_existence)]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
