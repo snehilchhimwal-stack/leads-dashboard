@@ -611,10 +611,205 @@ data. Nothing reviewed here is pure **reporting** in the sense of being
 
 ---
 
-*(Part 1 complete. Continues in Part 2 — data relationships + merge/split
-decisions — building directly on the redundancy signals flagged above:
-the `Daily_RM_Issues` vs. `Movement_Log` derivation question, the
-`RM_Hierarchy`/`Manager_Directory` people-table question, the
-`Region_Recipients` vs. dashboard-`localStorage` split-source-of-truth
-problem, and the three-way `Send_Log`/`AllIssues_Log`/`Overnight_Log`
-audit-log overlap.)*
+*(Part 1 complete.)*
+
+---
+
+## Part 2 — Data Relationships + Merge/Split Decisions
+
+### Entity-type classification
+
+Using the brief's own vocabulary (entity / transaction-event / lookup-
+reference / configuration / log / queue / snapshot / report):
+
+| Tab | Type | Why |
+|---|---|---|
+| `Movement_Log` | **Snapshot** | Point-in-time state capture of open leads, 4×/day — not a discrete business event, a repeated freeze-frame |
+| `Daily_RM_Issues` | **Snapshot (distilled) / log** | A nightly, filtered re-capture of the same underlying open-lead state, one row per lead×issue |
+| `Lead_Followups` | **Queue** | A working set, cleared and repopulated every cycle — never a permanent record |
+| `SLA_History` | **Report (aggregate)** | Pre-computed totals per snapshot run, built specifically for a chart |
+| `Daily_Cohort_History` | **Report (aggregate, archival)** | Pre-computed per-day-per-region outcomes, immutable once complete |
+| `RM_Hierarchy` | **Entity + configuration** | One row per real person (the RM/employee entity) with structural attributes — configuration only in the sense that it's rebuilt from code today, not in what it represents |
+| `Manager_Directory` | **Lookup-reference** | A derived address lookup keyed off the same people `RM_Hierarchy` already models |
+| `Comment_History` | **Log** | Append-only event log, one row per genuinely-new comment |
+| `Unmatched_Comments_Log` | **Log + queue (hybrid)** | An event log that also functions as an active human review queue until cleared |
+| `Send_Log` | **Transaction-event / log** | One row per discrete "an email was sent" event |
+| `Region_Recipients` | **Lookup-reference / configuration** | A hand-maintained region → address mapping |
+| `AllIssues_Log` | **Transaction-event / log** | Same shape as `Send_Log`, different send channel |
+| `Overnight_Log` | **Transaction-event / log + functional state** | Structurally a send log, but also the only one of the three with a genuine same-day functional read |
+
+**`leads` itself** (out of scope, noted only for context) is the root
+**entity** table — the "lead" business object every other tab in this
+review either snapshots, derives from, or references.
+
+### Primary-key candidates and foreign-key relationships
+
+None of these 13 tabs currently use a surrogate primary key — every one
+relies on a natural or composite key (a name, a date, a timestamp). That
+is a real, structural finding in its own right (carried into the target
+schema in Part 3), not just a list of what the keys happen to be today.
+
+| Tab | Current de-facto key | Real FK relationships today (unenforced) |
+|---|---|---|
+| `Movement_Log` | composite (`lead_id`, `snapshot_at`) | `lead_id`/`client_id` → `leads`; `RM` → `RM_Hierarchy.name` (free text, no constraint) |
+| `Daily_RM_Issues` | composite (`lead_id`, `issue_key`, `date`) | same as above |
+| `Lead_Followups` | `lead_id` (true upsert key, but only unique *within* a cycle) | `RM` → `RM_Hierarchy.name`; `region` → (no canonical regions table exists — see below) |
+| `SLA_History` | `snapshot_at` (real upsert key) | none — a pure aggregate fact table, no entity reference at all |
+| `Daily_Cohort_History` | `date_region` (composite, real upsert key) | `region` → (no canonical regions table) |
+| `RM_Hierarchy` | `name` (implied — **a real risk**, see below) | `tl`/`tm`/`rh`/`ch` are self-referencing (name → name) |
+| `Manager_Directory` | `manager_name` (implied) | `manager_name` → `RM_Hierarchy.name` (the manager-tier rows) |
+| `Comment_History` | composite (`lead_id`, `comment`) per its own dedup key | `lead_id` → `leads`; `RM` → `RM_Hierarchy.name` |
+| `Unmatched_Comments_Log` | composite (`lead_id`, `comment_at`-or-`comment`) | same shape |
+| `Send_Log` | none — `sent_at` alone isn't guaranteed unique | `region` → (no regions table); `sent_by` → `RM_Hierarchy.name`/email (loosely) |
+| `Region_Recipients` | `region` (natural key) | none upstream |
+| `AllIssues_Log` | composite (`date`, `region`), plus `thread_id` as an external key | `region` → (no regions table) |
+| `Overnight_Log` | composite (`date`, `region`) — how the 13:00 run actually looks a row up | `region` → (no regions table); `thread_id` is a real external (Gmail) key |
+
+**Two structural gaps this surfaces, both real and both worth carrying
+into Part 3's schema design:**
+
+1. **`RM_Hierarchy.name` is the closest thing to a "person" primary key
+   in the whole system, and it is a bare name string.** Six other tabs
+   (`Movement_Log`, `Daily_RM_Issues`, `Lead_Followups`,
+   `Comment_History`, `Unmatched_Comments_Log`, `Send_Log.sent_by`) all
+   reference "the RM" by free-text name with **zero referential
+   integrity** — nothing prevents a typo, a since-renamed RM, or two
+   different real people who happen to share a name from silently
+   producing wrong or orphaned joins. A real surrogate `rm_id` is a
+   strong candidate for the target schema.
+2. **There is no `regions` reference table anywhere in the current
+   system, in the Sheet or in code** — region names are normalized by a
+   *function* (`mainRegionForGs_`), not validated against a *stored*
+   list. Eight of the 13 tabs carry a free-text `region` column with no
+   canonical source to check it against.
+
+### Duplicate / repeated columns across tabs
+
+| Column concept | Appears in (count) | Assessment |
+|---|---|---|
+| `lead_id` | `Movement_Log`, `Daily_RM_Issues`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log` (5) | Legitimate FK repetition — expected in any relational model too; needs a real constraint, not a merge |
+| `RM` (free text) | `Movement_Log`, `Daily_RM_Issues`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`, `RM_Hierarchy.name`, `Send_Log.sent_by` (7) | The referential-integrity gap above |
+| `region` (free text) | `Movement_Log`, `Daily_RM_Issues`, `Lead_Followups`, `Daily_Cohort_History`, `Region_Recipients`, `AllIssues_Log`, `Overnight_Log`, `Manager_Directory.regions` (8) | The missing-reference-table gap above |
+| `project` (free text) | `Movement_Log`, `Daily_RM_Issues`, `Comment_History`, `Unmatched_Comments_Log` (4) | Same shape as `region`, lower priority (not flagged as a routing dependency anywhere in Part 1) |
+| `to`/`cc` (address lists) | `Send_Log`, `Region_Recipients`, `AllIssues_Log`, `Overnight_Log` (4) | See the split/retain discussion below — different verdict for the audit logs vs. the configuration table |
+| an event timestamp, differently named (`snapshot_at`/`captured_at`/`logged_at`/`sent_at`) | nearly every tab | A naming-consistency question (Part 4), not a structural one — several tables (`Comment_History`) genuinely need **two** distinct timestamps and must keep them separate |
+| `source` (which writer produced this row) | `SLA_History`, `Daily_Cohort_History` | A legitimate, small, shared provenance concept — a good enum candidate (below) |
+| `thread_id` | `AllIssues_Log`, `Overnight_Log` | A legitimate shared concept (a Gmail thread reference) |
+
+### Normalize vs. intentionally denormalize
+
+**Keep denormalized, on purpose:** the free-text `RM`/`region`/`project`
+copies inside `Movement_Log`, `Daily_RM_Issues`, `Comment_History`, and
+`Unmatched_Comments_Log` are **snapshot/event rows** — they must freeze
+what was true *at capture time*, even if the real RM's team, region, or
+active status changes later. Replacing these with a live FK to a
+current-state `people` table would silently rewrite history every time
+someone's assignment changes. This is the standard "snapshot/history
+table denormalizes on purpose" pattern, and the brief's own instruction
+not to normalize for theory's sake applies directly here — **no change
+recommended** to these columns' denormalized nature.
+
+**Keep denormalized (aggregate), on purpose:** `SLA_History` and
+`Daily_Cohort_History` are pre-computed rollups built specifically so a
+chart can read a small number of rows across a long time span instead of
+re-scanning raw snapshot data on every page load. Collapsing them back
+into "just query the raw table" would trade a cheap read for an
+expensive one, for no correctness benefit — **no change recommended**.
+
+**Should normalize:** the *current-state* tables — a target `people`
+table (replacing `RM_Hierarchy`'s role, and merging in
+`Manager_Directory`'s email) and a new `regions` table — should be real,
+constrained reference data that the *live* config tables (`Region_Recipients`,
+and any future recipient/routing config) foreign-key into. The
+snapshot/log tables above keep their own frozen copy regardless; the
+normalization gap is specifically in the *configuration* layer, which
+today has no real reference tables to normalize against at all.
+
+### Columns mixing multiple concepts (split candidates)
+
+| Column | Tab | What's mixed | Split recommendation |
+|---|---|---|---|
+| `lead_ids_json` | `Overnight_Log` | A list of lead FKs crammed into one JSON-text cell | Split into a child table (`overnight_log_leads`: one row per send × lead) — the 13:00 run already needs to iterate individual lead ids from it, which a real child table serves natively |
+| `people_reporting_up_to_them` | `Manager_Directory` | A flattened, likely comma-separated list of names — data that `RM_Hierarchy`'s own `tl`/`tm`/`rh`/`ch` chain already encodes relationally | Likely **remove** as a stored column and compute it from the chain on read instead — **pending confirmation** this column has no independent hand-edited source (flagged, not certain) |
+| `to` / `cc` on the 3 audit logs | `Send_Log`, `AllIssues_Log`, `Overnight_Log` | A list of addresses in one text field | **Retain as-is** — nothing queries or joins on an individual address inside these; they exist purely for audit display. Splitting adds schema complexity with no query benefit — explicitly *not* recommended, per the brief's own "don't normalize for theory" instruction |
+| `to` / `cc` on `Region_Recipients` | `Region_Recipients` | Same shape, but this table drives live routing *logic*, not just audit display | **Judgment call, not a firm recommendation** — worth a real child table only if per-address enable/disable or a recipient-management UI is ever wanted. Deferred to Part 3, and flagged as a question for the business (Part 11), not something inferable from the data alone |
+
+### Columns representing the same concept, different names (merge candidates)
+
+Genuine renames-not-merges: the various `*_at` timestamp columns
+(`snapshot_at`, `captured_at`, `logged_at`, `sent_at`) all mean "when did
+this row's event happen," just named per the table's own vocabulary — a
+**naming-consistency** recommendation belongs in Part 4's column
+consolidation pass, not a structural merge here (several tables, like
+`Comment_History`'s `comment_at` **and** `logged_at`, genuinely need two
+separate timestamps and must not be collapsed into one).
+
+One real false-friend worth flagging explicitly: `RM_Hierarchy.note`
+and `Unmatched_Comments_Log.note` share a column *name* but represent
+**different concepts** (a hierarchy annotation vs. a reviewer's note) —
+called out here specifically as a reminder that identical names don't
+always mean mergeable columns.
+
+### Tabs that can safely be merged, and why
+
+- **`Daily_RM_Issues` into a derived/materialized query over
+  `Movement_Log`** — it is explicitly backfillable *from*
+  `Movement_Log` today, meaning it is already understood as a derived
+  dataset, not an independently-sourced one. The two schemas have to be
+  hand-kept-in-sync as columns get added (both separately gained `TL`/
+  `group_source`/`source_bucket`/`lead_assigned_at` after the fact) —
+  a real sign of drift risk between "one concept, two physical tables."
+- **`RM_Hierarchy` + `Manager_Directory` into one `people` entity** —
+  `Manager_Directory` is explicitly derived from the same
+  `RM_HIERARCHY_RAW_` source per Part 1, and exists only to hold an
+  `email` attribute for a subset of the people `RM_Hierarchy` already
+  rows. This is one entity (a person) with attributes split across two
+  sheets joined by name.
+- **`Send_Log` + `AllIssues_Log` + `Overnight_Log`, for audit purposes
+  only** — three physical tables recording the same underlying fact
+  ("an email was sent") for three different send channels, with
+  overlapping columns and three separately-managed (or entirely
+  unmanaged) retention policies.
+
+### Tabs that should remain separate, and why
+
+- **`SLA_History` and `Daily_Cohort_History`** — despite both being
+  long-lived aggregates outliving `Movement_Log`, they differ in grain
+  (per-snapshot-run vs. per-date-region) and, more importantly, in
+  mutability contract: `Daily_Cohort_History` is immutable once a day's
+  window completes, `SLA_History` is freely upsertable. Merging would
+  destroy that immutability guarantee for one of the two.
+- **`Comment_History` and `Unmatched_Comments_Log`** — same piggyback
+  capture mechanism, but genuinely different purpose and audience:
+  one is a forward-looking analysis capture nothing reads yet, the
+  other is an active, human-worked classifier-improvement queue.
+- **`Lead_Followups`** — the only human-in-the-loop review surface in
+  the system; no other tab shares its "one hard-contract, human-only
+  column" shape or its per-cycle-reset lifecycle.
+- **`Overnight_Log`'s functional role**, even after an audit-log
+  merge with `Send_Log`/`AllIssues_Log` — its same-day read by the
+  13:00 follow-up is a *functional* dependency, not an audit one, and
+  must be preserved as a fast, reliably-indexed lookup regardless of how
+  the audit-trail data itself is modeled.
+
+### Merge / Split / Rename / Remove decision table
+
+| Current Structure | Recommendation | Target Structure | Reason | Risk |
+|---|---|---|---|---|
+| `Daily_RM_Issues` (whole tab) | Merge into a derived/materialized nightly query over `Movement_Log` | A materialized nightly job output (not a live view — preserves current read performance) filtered to SLA-flagged open leads | Explicitly backfillable from `Movement_Log`; the two schemas already drift and require hand-sync on every new column | **Medium** — the Repeat Offenders leaderboard's current read pattern must stay just as fast; recommend a nightly ETL materialization, not a live join, to preserve behavior |
+| `RM_Hierarchy` + `Manager_Directory` | Merge | One `people` table: role/team/hierarchy chain/`excluded` flag + `email` | Same underlying entity (a person), `Manager_Directory` is explicitly derived from `RM_HIERARCHY_RAW_` already | **High** — whether a rebuild today preserves hand-filled emails is **unconfirmed**; this must be verified before migration, not assumed |
+| `Region_Recipients` (backend) + dashboard's `localStorage` recipient store | Unify | One `region_recipients` table, read by both runtimes | Two independent, unsynced sources of truth for the same routing concept today | **High** — a real behavior/UX change for the dashboard, not just a data migration; may remove a per-browser customization users currently rely on — needs a business confirmation, not just a technical migration |
+| `Send_Log` + `AllIssues_Log` + `Overnight_Log` | Partial merge (audit layer only) | One `email_sends` table with a `channel` enum; `Overnight_Log`'s functional same-day lookup preserved as an indexed query, not a separate physical table | Three overlapping audit logs for one underlying concept, three separately-managed retention gaps | **Medium** — `Overnight_Log`'s 13:00 functional read must stay fast; requires an index on (channel, date, region) in the merged table |
+| `RM_Hierarchy`'s `tl`/`tm`/`rh`/`ch` columns | Retain as-is — do **not** normalize into a flexible parent-pointer tree | Unchanged, 4 named columns on the target `people` table | The business hierarchy is a fixed, known depth; a flexible tree adds real query complexity (recursive lookups) for no business benefit here | **Low** — explicit "don't change" call |
+| `Overnight_Log.lead_ids_json` | Split | Child table `overnight_log_leads (send_id FK, lead_id)` | The 13:00 run already needs to iterate individual lead ids; a JSON blob defeats indexing | **Low–Medium** — small table, the real work is a code-path change in the 13:00 reader, not data risk |
+| `to`/`cc` on the 3 audit logs | Retain as-is (denormalized text) | Unchanged in the merged `email_sends` table | Pure audit/display fields, nothing queries into individual addresses | **Low** — explicit "don't over-normalize" call |
+| `to`/`cc` on `Region_Recipients` | Judgment call — no firm recommendation | Either retained as text or split into a real recipients table | Drives live routing logic, not just display — the only one of the four `to`/`cc` columns where normalizing might pay off | **Low**, but the decision itself needs a business answer (is a recipient-management UI ever planned?) — see Part 11 |
+| Free-text `RM` name on **live/config** tables | Normalize | Real FK to the new `people.rm_id` | Zero referential integrity today; a typo silently orphans a row | **Medium** — requires write-time validation, a real code change (Part 7), not just schema |
+| Free-text `RM` name on **snapshot/log** tables | Retain as denormalized text | Unchanged — frozen point-in-time copy | Snapshot history must not silently rewrite when a live record changes | **Low** — explicit "don't change" call |
+| `region` free text (8 tables), no reference table exists | Create new `regions` table | New reference table backing what `mainRegionForGs_` computes in code today | No stored, canonical list of valid regions exists anywhere in the current system | **Medium** — genuinely new infrastructure; needs the real, current region list confirmed by the business, not inferred |
+| `Movement_Log.snapshot_label`, `SLA_History.source`, `Daily_Cohort_History.source`, `Manager_Directory.email_source` | Convert to enum/constrained type | Database CHECK constraint / enum per column | Each already has a small, known, cited value set; an enum catches a bad value at write time | **Low** — safe tightening; verify against live data first for any uncited 4th value |
+| `Manager_Directory.people_reporting_up_to_them` | Likely remove | Computed on read from the target `people` table's chain columns instead of stored | Appears fully derivable from `RM_Hierarchy`'s own chain columns | **Medium** — needs confirmation this column is never independently hand-edited before removing it |
+
+*(Part 2 complete. Continues in Part 3 — the target database schema —
+turning every recommendation above into real tables, columns, keys, and
+constraints.)*
