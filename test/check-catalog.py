@@ -125,21 +125,36 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      never got folded back per DOC-037's own documented process" takes.
   L. Sheet tab coverage                (ADVISORY)
      (E2E acceptance test report round 2, TEST 9 -- an untracked Sheet
-     tab previously got zero signal). Deliberately narrower than "detect
-     any new UI element or exception path" (TEST 8/10, NOT attempted --
-     a Sheet tab name is a structural fact, "does this button deserve a
-     sub-table row" is a judgment call the original forensic audit
-     already flagged as needing real static analysis this project
-     declined to build). Every real Sheet tab name in this codebase is
-     declared as a top-level `const ..._SHEET_ = '<Name>'` /
-     `const ..._TAB_NAME = '<Name>'` constant (.gs and js/*.js both,
-     confirmed zero exceptions by inspection); every documented one is
-     named in its record's own `**Location** | Google Sheet, tab
-     `<Name>`` line. Flags a tab-name constant with no matching
-     docs/sheets/ record.
+     tab previously got zero signal). First of three slices of the same
+     big item (TEST 8/9/10) -- deliberately narrower than "detect any new
+     UI element or exception path": a Sheet tab name is a structural
+     fact, unlike "does this button/exception deserve a sub-table row"
+     (a judgment call the original forensic audit already flagged as
+     needing real static analysis this project declined to build; TEST
+     10, exceptions, is still NOT attempted for exactly that reason).
+     Every real Sheet tab name in this codebase is declared as a
+     top-level `const ..._SHEET_ = '<Name>'` / `const ..._TAB_NAME =
+     '<Name>'` constant (.gs and js/*.js both, confirmed zero exceptions
+     by inspection); every documented one is named in its record's own
+     `**Location** | Google Sheet, tab `<Name>`` line. Flags a tab-name
+     constant with no matching docs/sheets/ record.
+  M. Button coverage                   (ADVISORY)
+     (E2E acceptance test report round 2, TEST 8 -- second of the three
+     slices). Scoped to `<button id="...">` specifically -- never a
+     `.tab-btn`/checkbox/other control, same "avoid the judgment call"
+     reasoning as check L. Confirmed by hand before building: 5 of 26
+     real button ids are NOT cited literally in their own owning
+     DASH-001/TAB-XXX record (described by a sibling element or a plain
+     description instead, a real and correct choice, not a gap) -- all
+     26 ARE cited in `docs/_planning/button-inventory.md`, the project's
+     own declared "reconciliation record." So the search scope is that
+     file plus every docs/tabs/ + docs/dashboards/ record together, not
+     the owning record alone (which would have false-positived on those
+     same 5 real buttons). Flags a button id with no citation anywhere in
+     that combined scope.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, and L only print.
-Flip D/E/G/H/I/J/K/L to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, and M only print.
+Flip D/E/G/H/I/J/K/L/M to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -1015,6 +1030,66 @@ def check_sheet_tab_coverage():
                    f"all declared in a docs/sheets/ record)")
     return out
 
+# ---------------------------------------------------------------- M
+# TEST 8, E2E acceptance test report round 2, second slice of the same
+# big item check L started. Scoped to `<button id="...">` specifically
+# (never a `.tab-btn`/checkbox/other control -- those need a judgment
+# call about what counts as a documentable UI action, the exact overreach
+# this whole slice deliberately avoids, same reasoning as check L's own
+# Sheet-tab-only scope). A button id is a structural fact: it either
+# appears literally in `dashboard.html` or it doesn't.
+#
+# Where to check for it is NOT as clean as check L's single Location
+# line, though -- confirmed by hand before writing this: 5 of the 26 real
+# ids (gateSignInBtn, refreshBtn, changeSourceBtn, clearFiltersBtn,
+# downloadLeadIdsBtn) are NOT cited literally in DASH-001's own "Top-level
+# buttons / actions" table, which describes some of them by a sibling
+# element or a description instead ("`#authGate` button", "`#sheetIdInput`
+# + fetch button") -- a real, human-readable choice, not a gap. All 26 ARE
+# cited literally in `docs/_planning/button-inventory.md`, which its own
+# header calls "the reconciliation record" -- built specifically to be
+# the canonical, complete map (`DOC-009`/`DOC-031`). So the search scope
+# is that file PLUS every `docs/tabs/`/`docs/dashboards/` record, not
+# just the owning TAB-XXX/DASH-001 record alone -- requiring the id to
+# appear in ITS OWN specific record would have false-positived on those
+# same 5 real, already-correct buttons.
+BUTTON_ID = re.compile(r'<button[^>]*\bid="([A-Za-z0-9_]+)"')
+
+def check_button_coverage():
+    html_path = os.path.join(ROOT, "dashboard.html")
+    if not os.path.exists(html_path):
+        return ["(dashboard.html not found — nothing to check)"]
+    referenced = {}  # button id -> (path, line number) of its first occurrence
+    html_lines = open(html_path, encoding="utf-8").read().splitlines()
+    for i, line in enumerate(html_lines, 1):
+        for m in BUTTON_ID.finditer(line):
+            referenced.setdefault(m.group(1), ("dashboard.html", i))
+    for rel in _gs_and_js_files():
+        if not rel.endswith(".js"):
+            continue
+        path = os.path.join(ROOT, rel)
+        for i, line in enumerate(open(path, encoding="utf-8"), 1):
+            for m in BUTTON_ID.finditer(line):
+                referenced.setdefault(m.group(1), (rel, i))
+    doc_paths = [os.path.join(ROOT, "docs", "_planning", "button-inventory.md")]
+    for sub in ("tabs", "dashboards"):
+        d = os.path.join(ROOT, "docs", sub)
+        if os.path.isdir(d):
+            doc_paths += [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".md")]
+    docs_text = ""
+    for p in doc_paths:
+        if os.path.exists(p):
+            docs_text += open(p, encoding="utf-8").read()
+    out = []
+    for bid, (rel, ln) in sorted(referenced.items()):
+        if bid not in docs_text:
+            out.append(f"untracked button: id \"{bid}\" ({rel}:{ln}) doesn't appear in "
+                       f"docs/_planning/button-inventory.md or any docs/tabs/ or docs/dashboards/ record")
+    if not out:
+        out.append(f"({len(referenced)} button id(s) found, all cited somewhere in "
+                   f"button-inventory.md or a tabs/dashboards record)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -1045,7 +1120,8 @@ def main():
                       ("I. Cited-literal check", check_cited_literals),
                       ("J. LOGIC_AUDIT.md immutability", lambda r: check_logic_audit_immutability()),
                       ("K. TBD retention consistency", lambda r: check_tbd_retention_consistency()),
-                      ("L. Sheet tab coverage", lambda r: check_sheet_tab_coverage())]:
+                      ("L. Sheet tab coverage", lambda r: check_sheet_tab_coverage()),
+                      ("M. Button coverage", lambda r: check_button_coverage())]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
