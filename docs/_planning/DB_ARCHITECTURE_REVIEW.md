@@ -2280,6 +2280,221 @@ org-structure question this review has no basis to weigh in on.
   flagged for the Approval Checkpoint, since it affects how this team
   actually works day to day, not just where files sit.
 
-*(Part 9 complete. Continues in Part 10 — the handover documentation
-structure: what actually fills the `runbooks/` and `docs/db/`/`docs/api/`
-directories designed above.)*
+*(Part 9 complete.)*
+
+---
+
+## Part 10 — Handover Documentation
+
+**What this part is:** Part 9 designed *where* handover material lives;
+this part is the actual content that goes there — synthesized from
+Parts 1–9, not re-derived. Each subsection below names its canonical
+source in this document so nothing drifts into two disagreeing copies.
+
+### 1. Architecture overview
+
+One-paragraph version of Part 6: `leads` stays a Google Sheet, fed by
+an external CRM export, untouched by this migration. The other 13 tabs
+move into a real relational database (Part 3's schema), reached through
+one new API layer that is the **only** thing with direct write
+credentials. The dashboard (still a static page) and Apps Script (still
+the scheduler and Gmail sender) both become callers of that API instead
+of talking to Sheets directly for these 13 tables. Full detail,
+component diagram, and the reasoning behind every choice: **Part 6**.
+
+### 2. Data dictionary
+
+The full column-by-column reference is **Part 3** (every table's
+columns, types, nullability, keys) cross-referenced with **Part 4**
+(why each column is named/shaped the way it is, and what it replaced).
+Quick-reference summary:
+
+| Table | One-line purpose | Full definition |
+|---|---|---|
+| `people` | The org chart as real data (merges `RM_Hierarchy` + `Manager_Directory`) | Part 3 §1 |
+| `regions` | Canonical region list (new — didn't exist before) | Part 3 §2 |
+| `region_recipients` | Per-region fallback send addresses | Part 3 §3 |
+| `movement_snapshots` | 4×/day frozen lead-state capture | Part 3 §4 |
+| `daily_rm_issues` | Nightly SLA-flagged census, materialized from `movement_snapshots` | Part 3 §5 |
+| `lead_followups` | The human-review follow-up queue | Part 3 §6 |
+| `sla_history` | Long-lived SLA trend aggregate | Part 3 §7 |
+| `daily_cohort_history` | Permanent, immutable-once-complete cohort archive | Part 3 §8 |
+| `comment_history` | Append-only capture of every new lead comment | Part 3 §9 |
+| `unmatched_comments_log` | Classifier-gap human review queue | Part 3 §10 |
+| `email_sends` | Unified send-audit log, 3 channels | Part 3 §11 |
+| `overnight_log_leads` | Child table for the 13:00 threaded-reply lookup | Part 3 §12 |
+| `person_regions` | Which regions a person covers (new — added in Part 4) | Part 3 §13 |
+
+### 3. ERD
+
+```mermaid
+erDiagram
+    people ||--o{ people : "manages (tl/tm/rh/ch)"
+    people ||--o{ person_regions : covers
+    regions ||--o{ person_regions : "covered by"
+    regions ||--|| region_recipients : has
+    regions ||--o{ daily_cohort_history : "outcomes for"
+
+    movement_snapshots }o--|| people : "rm_name (denormalized text, not FK)"
+    daily_rm_issues }o--|| people : "rm_name (denormalized text, not FK)"
+    comment_history }o--|| people : "rm_name (denormalized text, not FK)"
+    unmatched_comments_log }o--|| people : "rm_name (denormalized text, not FK)"
+
+    email_sends ||--o{ overnight_log_leads : "lists (overnight_10h only)"
+
+    daily_rm_issues }o--|| movement_snapshots : "materialized from"
+    sla_history }o--|| movement_snapshots : "derived from"
+    daily_cohort_history }o--|| movement_snapshots : "derived from"
+```
+
+**Reading the dashed-feeling `rm_name` edges:** these are drawn to show
+the *logical* relationship — they are deliberately **not** real foreign
+keys (Part 2/3's denormalization decision). A real FK diagram would omit
+them entirely; they're kept here because a new engineer needs to know
+the relationship exists even though the database won't enforce it.
+
+### 4. Tab-to-table migration mapping (quick reference)
+
+Full column-level mapping: **Part 4**. Table-level summary:
+
+| Old Sheet tab | New table(s) |
+|---|---|
+| `Movement_Log` | `movement_snapshots` |
+| `Daily_RM_Issues` | `daily_rm_issues` (now materialized, not independently written) |
+| `Lead_Followups` | `lead_followups` |
+| `SLA_History` | `sla_history` |
+| `Daily_Cohort_History` | `daily_cohort_history` |
+| `RM_Hierarchy` | `people` |
+| `Manager_Directory` | `people` + `person_regions` (merged, per Part 2/4) |
+| `Comment_History` | `comment_history` |
+| `Unmatched_Comments_Log` | `unmatched_comments_log` |
+| `Send_Log` | `email_sends` (`channel = 'dashboard'`) |
+| `Region_Recipients` | `region_recipients` |
+| `AllIssues_Log` | `email_sends` (`channel = 'all_issues_17h'`) |
+| `Overnight_Log` | `email_sends` (`channel = 'overnight_10h'`) + `overnight_log_leads` |
+
+### 5. Job/scheduler documentation
+
+| Job | Trigger (unchanged, Part 6) | What changed |
+|---|---|---|
+| Movement snapshot capture | `atHour([0,6,12,18])`, `MovementTracker.gs` | Writes via the new shared capture API endpoint instead of `SpreadsheetApp` — same endpoint the dashboard's on-demand button now also calls (Part 6's consolidation) |
+| Daily RM issue capture | `atHour(22).nearMinute(50)`, `DailyRmIssueLog.gs` | Now a materialization job reading `movement_snapshots`, not an independent write |
+| Overnight send (AM) | `atHour(10)`, `OvernightEmailer.gs` | Writes `email_sends` (`overnight_10h`) via API |
+| Overnight follow-up (PM) | `atHour(13)`, `OvernightEmailer.gs` | **Functional read** of `email_sends` via the API's indexed same-day lookup (Part 3) — the one job where a regression is most visible, most immediately |
+| All-issues digest | `atHour(17).nearMinute(0)`, `AllIssuesEmailer.gs` | Writes `email_sends` (`all_issues_17h`) via API |
+| Comment/unmatched-comment scans | Piggybacked on the 4×/day capture, `InteractionHistoryLogger.gs`/`UnmatchedCommentLogger.gs` | Write via API |
+| Weekly Ops Checklist | Manual/weekly, `OpsChecklistRunner.gs` | Reads `people` via API instead of the two Sheets |
+| Retention/archival (new) | Recommend: scheduled, per Part 5's per-table/per-channel cutoffs | **New job** — doesn't exist in the current system; replaces the manual `clearSlaHistory`/`clearDailyCohortHistory`/`clearReviewedUnmatchedCommentsNow` buttons for the tables where a real policy now applies |
+
+### 6. Configuration documentation
+
+`people`, `regions`, and `region_recipients` are edited **directly as
+database rows** (Part 6) — there is no more "edit a code constant, run
+a rebuild" step. `people.excluded` remains the one field meant for quick
+toggling; `people.active` (new) replaces "delete the row" when someone
+leaves, preserving every historical reference to them. Whoever
+maintains the org chart today needs a new, real interface for this (an
+admin UI or direct DB access) — **this is a genuine operational change,
+not just a data-location change**, and is listed again under Open
+Decisions below.
+
+### 7. Deployment procedure (steady-state, not the one-time migration)
+
+Part 8 covers the **one-time migration**. Day-to-day, after cutover:
+schema changes go through `db/migrations/` (Part 9) as versioned,
+applied-in-order files, never a direct hand-edit of the live schema.
+API code changes deploy through the staging-then-production promotion
+step recommended in Part 9 (flagged there as a real process change from
+today's direct-to-`master` pattern). Apps Script changes keep this
+project's own existing, already-documented deployment reality
+unchanged: **Apps Script does not auto-deploy from git** — a `.gs` edit
+still isn't live until it's pasted into the Apps Script editor, exactly
+as `CLAUDE.md` already states today.
+
+### 8. Backup/restore procedure
+
+Recommend automated daily backups with point-in-time recovery (Part 6)
+— the exact mechanics depend on the still-unchosen database vendor
+(Part 6's explicitly flagged open item), so this section names the
+**requirement**, not a vendor-specific runbook, until that choice is
+made. What this replaces: today's only backup is Google's informal,
+account-level Sheets version history — never verified against any real
+recovery objective in this review, because no such objective is stated
+anywhere in the current system.
+
+### 9. Monitoring and troubleshooting
+
+Extends this project's own existing `HANDOVER.md` §8 troubleshooting
+tradition (a maintained list of real past incidents and their symptoms)
+rather than replacing it. Specific lessons this review found worth
+carrying forward explicitly:
+
+- **The `daily_rm_issues` materialization must prune/archive
+  *before* writing**, never after — this exact ordering caused the one
+  real production crash cited throughout this review (2026-09-06). The
+  underlying cell-ceiling reason is gone in a real database, but the
+  ordering lesson (don't let a write-then-clean job crash mid-write) is
+  general and still applies.
+- **Watch the `overnight_10h` channel's 13:00 read specifically** —
+  it's the one genuinely functional (not just audit) dependency
+  migrated in this whole review; its failure mode is a misdirected or
+  missing customer-facing email reply, not a silent audit gap.
+- **The old `Unmatched_Comments_Log` dedup incident** (a Sheets
+  date-coercion bug that defeated string-equality dedup) doesn't
+  transfer directly — a real database's own type system prevents that
+  specific class of bug — but it's a reminder to keep dedup keys
+  explicit and tested, not assumed safe by construction.
+
+### 10. Data-retention procedure
+
+Implements Part 5's per-table recommendations as the scheduled
+archival job named in the job table above. Operationally: each
+table/channel has its own cutoff (7 days for the two operational
+snapshot tables, permanent for the two long-term aggregates, three
+different cutoffs across the `email_sends` channels) — **checking that
+this job actually ran is a real, new monitoring item**, not something
+the old manual-clear-button world required watching for.
+
+### 11. Known limitations (handover-relevant subset)
+
+- `leads` itself is untouched and out of scope — the new system is
+  still downstream of an external CRM export this project doesn't
+  control (Part 1).
+- `people.name` has no uniqueness guarantee — a real name collision is
+  a known, accepted risk, not solved by this design (Part 3).
+- Two tabs' human-review workflows (`Lead_Followups`,
+  `Unmatched_Comments_Log`) have a genuinely open question about
+  whether they stay Sheets-based or move to a dedicated small UI (Part
+  7) — whoever inherits this system needs to resolve this, it isn't
+  resolved here.
+- The dashboard's region-recipient customization (currently
+  per-browser via `localStorage`) goes away if the `region_recipients`
+  unification (Part 2/6) is approved — a real, user-visible change, not
+  a limitation of this design so much as a deliberate trade-off needing
+  sign-off.
+
+### 12. Open decisions (consolidated from Parts 1–9)
+
+| Decision | Raised in | Status |
+|---|---|---|
+| `sla_history`/`daily_cohort_history` permanent retention | Part 5 | Recommendation made, needs ratification |
+| `email_sends` per-channel retention (1–2yr / 90d / 7d) | Part 5 | Recommendation made, needs ratification |
+| `comment_history` data-minimization policy (separate from its retention, which is settled) | Part 5 | Open question, no recommendation made |
+| `region_recipients` unification with the dashboard's `localStorage` store | Part 2, 6 | Recommended, needs business confirmation (real UX change) |
+| Access-control roles (who gets read/write/admin) | Part 6 | Structure recommended, roles themselves need the business to define |
+| Database/API technology choice | Part 6 | Deliberately not chosen here |
+| `Lead_Followups`/`Unmatched_Comments_Log` UI design | Part 7 | Genuinely open, not resolved |
+| Staging-then-production promotion process for `api`/`db` | Part 9 | Recommended, needs the team to actually adopt it |
+| Whether `Manager_Directory`'s rebuild preserves hand-filled emails | Part 2, 4 | **Must be tested, not assumed, before Phase 3 of the migration** |
+
+### 13. Ownership / responsibility matrix
+
+| Component | Owner today | Notes |
+|---|---|---|
+| Everything in this repo | Snehil (per every `docs/sheets/SHEET-XXX` record's `Owner` field) | Unchanged by this review — an org question, not a technical one |
+| New `api/`/`db/` components | *(not yet assigned)* | Recommend the same owner unless the business decides otherwise — flagged, not assumed |
+| Config-table edits (`people`, `regions`, `region_recipients`) | *(currently: whoever can edit the Sheet — no real restriction)* | Part 6 recommends a real admin role; who holds it is an open decision (above) |
+
+*(Part 10 complete. Continues in Part 11 — risks, unknowns, and the
+decisions this review could not make on its own — a fuller register
+than the handover-scoped list above.)*
