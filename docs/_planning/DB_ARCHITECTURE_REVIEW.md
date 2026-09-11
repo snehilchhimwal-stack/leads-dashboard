@@ -2912,4 +2912,177 @@ every open question resolved in advance, only the genuine business
 decisions. No schema creation, code change, or data movement should
 begin before that.
 
-*(End of the Database Architecture Review — all 12 parts complete.)*
+*(End of the 12-part Database Architecture Review.)*
+
+---
+
+# Lead History & Versioning Review
+
+A focused follow-on to the review above, on the user's explicit request:
+whether the current lead-history storage model is correct, and a proposed
+improvement. **Premise correction, confirmed with the user before this
+started:** the brief's "hourly refresh" and "6-hour snapshot" describe a
+generic two-tier ingestion pattern that doesn't literally exist in this
+codebase — there is no ORM, no SQL database, no migrations anywhere in
+this repo (Google Sheets + Apps Script throughout, confirmed by a direct
+search: zero `.sql`/migration/ORM files exist). The real system has **one**
+capture cadence, not two: `MovementTracker.gs`'s 4×/day snapshot at fixed
+hours (`SNAPSHOT_HOURS_ = [0, 6, 12, 18]` IST) — which the code's own
+header explicitly documents as a deliberate choice over Apps Script's
+`.everyHours(6)` trigger type, because that trigger has been observed
+"drifting or skipping a cycle entirely under load." The user confirmed:
+model this real cadence, not an invented hourly one.
+
+## Phase 1 — Understanding the Existing Implementation
+
+### The real capture path (`MovementTracker.gs`)
+
+`snapshotOpenLeads_(label)` (`MovementTracker.gs:365-444`) is the single
+function this whole review centers on. Every 4×/day trigger firing
+(`snapshotPeriodic`, installed by `setupMovementTracking`,
+`MovementTracker.gs:898-938`) calls it. What it actually does, read
+directly from the source:
+
+1. Reads the **entire live `leads` tab** (`MovementTracker.gs:371-377`) —
+   every row from row 3 down (row 1 = banner, row 2 = header), no
+   filtering by source, open/closed status, or anything else. The
+   function's own name (`snapshotOpenLeads_`) is misleading — its header
+   comment says explicitly: "every source, open or closed — the only
+   requirement is a non-blank lead_id."
+2. For **every single lead row**, unconditionally builds a record —
+   `[now, snapshotLabel, ...SNAPSHOT_COLUMNS_.map(...)]`
+   (`MovementTracker.gs:413-423`) — and appends it to `Movement_Log`.
+   **There is no comparison against any prior snapshot anywhere in this
+   function.** No content hash, no field-level diff, no "did anything
+   change" check of any kind. A lead whose every field is identical to
+   its last capture gets a byte-for-byte duplicate full row, every single
+   run, for as long as it keeps appearing in the `leads` tab.
+3. In the same trigger, also (each independently try/catch-wrapped so one
+   failure never blocks the others): writes one `SLA_History` row
+   (`writeSlaHistorySnapshot_`), scans for unmatched comments
+   (`scanUnmatchedCommentsGs_`), logs new comments (`logInteractionHistoryGs_`),
+   and — **after** `Movement_Log`'s own prune — persists any newly-eligible
+   `Daily_Cohort_History` day (`persistDailyCohortHistoryGs_`).
+4. Prunes `Movement_Log` to 7 days (`pruneMovementLog_`,
+   `MovementTracker.gs:451-490`) — **after** the write, not before. This
+   exact ordering is called out in `DailyRmIssueLog.gs`'s own comment
+   (below) as the root cause of a real production crash.
+
+### The second writer (`js/sheets-writeback.js`)
+
+`browserSnapshotOpenLeads()` (`js/sheets-writeback.js:809-860+`) is the
+dashboard's own "Snapshot now" button. Its own comment states the intent
+directly: "matches `MovementTracker.gs`'s own trigger exactly... so this
+manual capture path can never write a different set of leads into
+`Movement_Log` than the scheduled trigger would." Confirmed by reading
+it: same unconditional per-lead full-row write
+(`js/sheets-writeback.js:839-843`), same lack of any change-detection,
+same "every lead in the currently loaded dataset, any source, open or
+closed" scope. **Two independently-implemented writers, kept in sync by
+hand and by convention (a code comment on each side pointing at the
+other), not by any shared code path or database constraint.**
+
+### The distillation (`DailyRmIssueLog.gs`)
+
+`captureDailyRmIssues_()` (`DailyRmIssueLog.gs:140-224`) runs once
+nightly (22:50 IST). It reads the **live `leads` tab directly**
+(`readLeadsTab_`), not `Movement_Log` — `Movement_Log` is consulted only
+for the call-count baseline used in one SLA flag
+(`buildMovementLogMapsGs_`). It writes one row per (open lead × SLA
+issue) for every lead currently flagged, and it already has two things
+worth citing as **existing, working precedent** for the concerns this
+whole review is about:
+
+- **A real idempotency guard** (`DailyRmIssueLog.gs:161-173`): before
+  writing, it checks whether any existing row is already dated today,
+  and skips the whole run if so — "a double-fire... must not duplicate
+  the night's rows." This is a real, already-solved instance of the
+  "retry/reprocessing" edge case Phase 5 needs to reason about.
+- **Prune-before-write, not after** (`DailyRmIssueLog.gs:147-156`) — the
+  comment explains precisely why, citing the real incident: this table
+  shipped 2026-09-01 with prune-after-write ordering, hit the workbook's
+  10-million-cell ceiling on 2026-09-06, and crashed mid-write with no
+  self-healing path until a manual recovery run. `MovementTracker.gs`
+  still prunes *after* writing — the same latent risk this file's own
+  comment warns about, not yet applied back to `Movement_Log` itself.
+
+### The one already-existing "write-once, never re-touch" pattern
+
+`persistDailyCohortHistoryGs_` (`MovementTracker.gs:842-870`, orchestrated
+from inside `snapshotOpenLeads_` itself) is the single closest thing in
+this codebase to real historical-version discipline: it computes
+`Daily_Cohort_History` rows only for dates with **no existing row yet**
+(`_readArchivedDailyCohortDatesGs_`, `MovementTracker.gs:828-840`), and
+its own header comment states explicitly *why re-touching an
+already-archived day is dangerous, not just wasted work* — a late
+re-computation could silently substitute degraded fallback evidence for
+a day's true near-deadline snapshot, once that snapshot ages out of
+`Movement_Log`'s 7-day window, corrupting an already-correct archived
+row. **This is real, working prior art for the "immutable version,
+written once" pattern Phase 3 proposes for leads generally** — it
+already exists for one derived table, just not for `Movement_Log` itself.
+
+### Historical retrieval (`js/tab-movement.js`)
+
+`fetchMovementLog(sheetId)` (`js/tab-movement.js:138-262`) fetches the
+**entire** `Movement_Log` tab (`A1:Z`) fresh, every time it's called — no
+incremental or delta fetch exists. `buildMovementHistories()`
+(`js/tab-movement.js:293-307`) then groups that flat row list **client-side,
+in memory** by `client_id`/`lead_id`, sorted chronologically per lead —
+there is no server-side "get this lead's history" query anywhere; "what
+happened to lead X" is answered by fetching everything and filtering in
+JavaScript. `enrichLeadAsOf` (`js/tab-movement.js:320-329`) and the
+`_evidenceAtDeadlineGs_`-style at-or-before lookup (mirrored on both the
+Apps Script and browser sides) are how a point-in-time answer gets
+computed from that grouped list — a linear scan for the latest record at
+or before a target timestamp.
+
+### Existing test coverage (`Tests_MovementTracker.gs`)
+
+326 lines, covering: `ensureMovementLogSheet_`'s header self-heal,
+`buildTodayCallBaselineGs_`/`lastSnapshotBeforeGs_`/`buildMovementLogMapsGs_`'s
+lookup correctness, and `pruneMovementLog_`'s retention cutoff and
+row-shrink behavior. **One assertion directly relevant to this review**
+(`Tests_MovementTracker.gs:42-44`): `snapshotOpenLeads_` is asserted to
+write **exactly 2 data rows for 2 leads** — confirming, in the test suite
+itself, that today's behavior is "one row per lead per run, unconditionally."
+**No test exists for capturing the same lead twice with no field changes**
+— there is nothing to assert against, because nothing today treats that
+case differently from a real change. This is the exact gap Phase 6/7
+below needs to fill, not a pre-existing regression.
+
+### Tracing one lead through its real lifecycle
+
+1. **First ingestion**: a row appears in the live `leads` tab (written by
+   the external CRM export — out of scope, no code in this repo performs
+   this write). Nothing in this project reacts to a new lead appearing;
+   it simply becomes visible to the next capture.
+2. **Subsequent captures (0, 6, 12, 18 IST)**: `snapshotOpenLeads_` reads
+   it fresh from `leads` each time and appends a new, full,
+   independently-timestamped row to `Movement_Log` — every run, whether
+   or not any field differs from the previous capture.
+3. **A field changes** (say, `current_stage`): the next capture simply
+   reflects the new live value — nothing marks this row as "the one where
+   it changed"; a reader has to diff two rows itself to notice.
+4. **An unchanged capture**: byte-for-byte identical to the previous
+   `Movement_Log` row in every column except `snapshot_at`/`snapshot_label`
+   — a full duplicate.
+5. **Nightly distillation** (22:50): if the lead is currently open and
+   SLA-flagged, one row lands in `Daily_RM_Issues` for tonight, read fresh
+   from `leads` (not from `Movement_Log`'s accumulated captures).
+6. **Further changes/captures**: same as steps 2-4, repeating.
+7. **Inactivation**: nothing explicit. A closed lead keeps being captured
+   exactly like an open one (`snapshotOpenLeads_` doesn't filter by
+   status) until it either stops appearing in the live `leads` tab
+   (external CRM's behavior, out of scope) or its `Movement_Log` rows age
+   past the 7-day retention and are pruned — **there is no permanent record
+   anywhere in this system of "this lead became inactive on date X,"**
+   only whatever a reader can infer from the last captures before it
+   disappeared.
+8. **Historical retrieval**: `fetchMovementLog` + `buildMovementHistories`
+   fetch the whole retained 7-day window and group/sort it client-side, as
+   described above.
+
+*(Phase 1 complete. Continues in Phase 2 — evaluating whether this design
+correctly separates identity, current state, versions, and events, with a
+concrete example.)*
