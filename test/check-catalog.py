@@ -17,6 +17,9 @@ What it does — five checks against docs/INDEX.md + the record files + git:
   B. INDEX <-> record-file coverage    (BLOCKING)
      every own-file id (DASH/TAB/JS/GS/SHEET/EXT/DATA) in INDEX has a
      docs/<type>/<ID>-*.md file, and every such file has an INDEX row.
+     docs/_archive/ is scanned too, so a component retired per
+     HOW_TO_RETIRE_A_COMPONENT.md (moved there, INDEX row kept) still
+     counts as covered.
   C. INDEX Location -> real file        (BLOCKING)
      a row whose Location names js/foo.js or Foo.gs or dashboard.html
      that no longer exists on disk = a retired/renamed/moved component
@@ -109,6 +112,15 @@ def check_reciprocity(rows):
 
 # ---------------------------------------------------------------- B
 def check_coverage(rows):
+    # BUGFIX (E2E acceptance test Part 8, 2026-09-11 — found by actually
+    # performing a retirement): HOW_TO_RETIRE_A_COMPONENT.md's own
+    # documented process moves a retired record to docs/_archive/ and
+    # explicitly keeps its INDEX.md row in place — but this check only
+    # ever scanned the live TYPE_DIR folders, so following that process
+    # to the letter used to make check B fail (a retired ID looked
+    # exactly like a missing record). docs/_archive/ is now scanned too,
+    # for every prefix, so a properly retired component still counts as
+    # covered.
     problems = []
     disk = {}
     for pre, sub in TYPE_DIR.items():
@@ -119,10 +131,17 @@ def check_coverage(rows):
                 m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', f)
                 if m:
                     disk[pre].add(m.group(1))
+    archive_dir = os.path.join(ROOT, "docs", "_archive")
+    if os.path.isdir(archive_dir):
+        for f in os.listdir(archive_dir):
+            m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', f)
+            if m:
+                cid = m.group(1)
+                disk.setdefault(cid.split("-")[0], set()).add(cid)
     index_ids = set(rows)
-    file_ids = set().union(*disk.values())
+    file_ids = set().union(*disk.values()) if disk else set()
     for cid in sorted(index_ids - file_ids):
-        problems.append(f"INDEX row {cid} has no record file under docs/{TYPE_DIR[cid.split('-')[0]]}/")
+        problems.append(f"INDEX row {cid} has no record file under docs/{TYPE_DIR[cid.split('-')[0]]}/ or docs/_archive/")
     for cid in sorted(file_ids - index_ids):
         problems.append(f"record file {cid}-*.md exists but has no INDEX master-table row")
     return problems
