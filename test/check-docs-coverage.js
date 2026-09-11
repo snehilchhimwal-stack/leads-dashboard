@@ -66,6 +66,15 @@
  * this check watches HANDOVER.md today; extending it to watch whatever
  * Phase 2/3 eventually builds instead is a future, small follow-up, not
  * decided further here.
+ *
+ * Required Fix #6 (E2E acceptance test report, F15/TEST 13, 2026-09-11):
+ * the printed output used to say "OK" on the in-threshold path, which
+ * reads as "still correct" rather than "recently edited" — the only
+ * thing this check actually measures. TEST 13 confirmed this for real:
+ * a genuine content-breaking change to HANDOVER.md still printed "OK"
+ * the same day, since the edit date hadn't moved. Wording only, both
+ * branches — the underlying 14-day threshold and its reasoning above
+ * are unchanged.
  */
 'use strict';
 const fs = require('fs');
@@ -147,8 +156,18 @@ function checkHandoverFreshness() {
   return { ok: true, updatedDate: m[1], daysStale: daysStale };
 }
 
+// Output wording (Required Fix #6, E2E acceptance test report — F15/
+// TEST 13): this used to print "HANDOVER.md freshness: ... OK" on the
+// in-threshold path, which reads as "HANDOVER.md is still correct."
+// It isn't checking that, and can't — confirmed for real in TEST 13,
+// which made HANDOVER.md's content genuinely wrong via a real code
+// change and watched this print "OK" anyway on the very same day,
+// because the edit date hadn't moved. Every line below now says what
+// this actually measures (days since the last edit) rather than what
+// it sounds like it measures (whether the content is still true) —
+// same substance, both branches, just no wording that overclaims.
 function printHandoverFreshness() {
-  console.log('HANDOVER.md freshness:');
+  console.log('HANDOVER.md last-edited date (NOT a correctness check — see below):');
   const result = checkHandoverFreshness();
   if (!result.ok) {
     console.log('  Could not check — ' + result.reason);
@@ -156,11 +175,13 @@ function printHandoverFreshness() {
   }
   console.log('  Last updated: ' + result.updatedDate + ' (' + result.daysStale + ' day(s) ago)');
   if (result.daysStale > HANDOVER_STALE_WARN_DAYS) {
-    console.log('  WARNING: stale — more than ' + HANDOVER_STALE_WARN_DAYS + ' days since the last update.');
+    console.log('  OLD EDIT DATE: more than ' + HANDOVER_STALE_WARN_DAYS + ' days since the last update.');
     console.log('  If a real architectural change has landed since then, update HANDOVER.md\'s relevant');
     console.log('  section (see CLAUDE.md) — this is a signal to check, not proof something is missing.');
   } else {
-    console.log('  OK — within the ' + HANDOVER_STALE_WARN_DAYS + '-day warn threshold.');
+    console.log('  Recently edited (within ' + HANDOVER_STALE_WARN_DAYS + ' days) — this only means the file');
+    console.log('  was touched recently, NOT that its content is still accurate. A change today that');
+    console.log('  should have updated HANDOVER.md but didn\'t will still print exactly this line.');
   }
 }
 
