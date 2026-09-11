@@ -858,7 +858,9 @@ applies (matches `RM_Hierarchy`/`Manager_Directory`'s existing "N/A,
 configuration" classification).
 **Relationships:** self-referencing hierarchy; referenced (logically,
 not by hard FK — see below) from every operational/log table that
-carries an `RM` name today.
+carries an `RM` name today; multi-region coverage lives in
+`person_regions` (table 13, added in Part 4), not on this table
+directly.
 **Design note — kept the fixed 4-column chain (`tl_id`/`tm_id`/`rh_id`/
 `ch_id`), not a generic parent-pointer tree,** per Part 2's explicit
 "don't normalize for theory" call — the business hierarchy is a fixed,
@@ -881,11 +883,12 @@ invented here**.
 
 **Indexes:** `(region_name)`.
 **Retention:** permanent, reference data.
-**Relationships:** referenced by `region_recipients`; every
-snapshot/log table below keeps its own frozen `region_name` text copy
-(see the denormalization note under `movement_snapshots`) rather than a
-hard FK, for the same historical-accuracy reason `people` isn't hard-FK'd
-from those tables either.
+**Relationships:** referenced by `region_recipients` and by
+`person_regions` (table 13, added in Part 4); every snapshot/log table
+below keeps its own frozen `region_name` text copy (see the
+denormalization note under `movement_snapshots`) rather than a hard FK,
+for the same historical-accuracy reason `people` isn't hard-FK'd from
+those tables either.
 
 ### 3. `region_recipients` — configuration
 
@@ -915,6 +918,7 @@ truth gap Part 2 flagged as the strongest single finding in this review.
 | `snapshot_label` | ENUM(`periodic`,`manual`) | NOT NULL | Converted from free text per Part 2 |
 | `lead_id` | TEXT | NOT NULL | Logical reference to `leads` (out of scope) |
 | `client_id` | TEXT | NOT NULL | |
+| `client_name` | TEXT | NOT NULL | **Added in Part 4** — missed in the first schema pass; `Movement_Log`'s real column list has both `client_id` and a separate `client` (name) column, confirmed against `SNAPSHOT_COLUMNS_` |
 | `rm_name` | TEXT | NOT NULL | **Deliberately denormalized** — a frozen point-in-time copy, not a FK to `people`. Normalizing this would silently rewrite history when an RM's record changes later (Part 2's explicit finding) |
 | `tl_name` | TEXT | NULL | Same denormalization reasoning |
 | `project` | TEXT | NOT NULL | |
@@ -1150,6 +1154,24 @@ individual lead ids from it.
 **Classification:** operational (functional, not audit — this is what
 the 13:00 run's per-lead resolution re-check actually queries).
 
+### 13. `person_regions` — reference (junction table)
+
+**Purpose.** New table, **added in Part 4** — surfaced by the exhaustive
+column-by-column mapping pass below. `Manager_Directory.regions` ("region(s)
+they cover") is a genuinely multi-valued fact about a person that the
+Part 3 `people` table had no place for; a junction table is the correct
+relational shape for a many-to-many person↔region coverage fact,
+consistent with the brief's own instruction to model the real
+relationship rather than force it into a single column.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `person_id` | INTEGER | NOT NULL | **PK (composite) / FK → `people.person_id`** |
+| `region_id` | INTEGER | NOT NULL | **PK (composite) / FK → `regions.region_id`** |
+
+**Retention:** permanent, reference data (matches `people`).
+**Classification:** reference.
+
 ---
 
 ### Schema-wide notes
@@ -1172,5 +1194,281 @@ the 13:00 run's per-lead resolution re-check actually queries).
   number here without that dedicated analysis would be exactly the kind
   of unconfirmed assumption the brief asks not to present as fact.
 
-*(Part 3 complete. Continues in Part 4 — the current-to-target column
-mapping and the standalone column-consolidation analysis.)*
+*(Part 3 complete.)*
+
+---
+
+## Part 4 — Current-to-Target Column Mapping + Column Consolidation
+
+**Method.** Every column from every one of the 13 reviewed tabs is
+accounted for below — none silently dropped. Doing this exhaustively
+surfaced 2 real gaps in Part 3's first schema pass (`Movement_Log`'s
+separate `client` name column, and `Manager_Directory`'s multi-valued
+`regions` field) — both are now fixed directly in Part 3 above
+(`movement_snapshots.client_name`, the new `person_regions` table),
+not just noted here. It also surfaced one clean, repeated pattern: **5 of
+the 13 tabs carry a `date` column that duplicates information already in
+a full timestamp column on the same row** — all 5 get the same
+"remove, compute on read" treatment, explained once below rather than
+five times.
+
+### Current tab/column → target table/column
+
+#### `Movement_Log` → `movement_snapshots`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `snapshot_at` | `movement_snapshots.snapshot_at` | Retain as-is |
+| `snapshot_label` | `movement_snapshots.snapshot_label` | Convert to enum |
+| `lead_id` | `movement_snapshots.lead_id` | Retain as-is |
+| `client_id` | `movement_snapshots.client_id` | Retain as-is |
+| `client` (name) | `movement_snapshots.client_name` | Rename for clarity (`client` → `client_name`, disambiguates from `client_id`) |
+| `RM` | `movement_snapshots.rm_name` | Rename; retained denormalized (not a FK) |
+| `TL` | `movement_snapshots.tl_name` | Rename; denormalized |
+| `project` | `movement_snapshots.project` | Retain as-is |
+| `region` | `movement_snapshots.region_name` | Rename; denormalized |
+| `lead_assigned_at`, `group_source`, `source_bucket`, `current_stage` | same names on `movement_snapshots` | Retain as-is |
+| `last_connect`, `last_connect_time`, `last_comment`, `internal_status_comments`, `closing_reason` | same names on `movement_snapshots` | Retain as-is |
+| `call_attempts`, `call_count`, `duration` | same names on `movement_snapshots` | Retain as-is |
+| `stage_comments` | `movement_snapshots.stage_comments` | Retain as-is |
+| `rm_is_active`, `lead_closing_reason` | same names on `movement_snapshots` | Retain as-is (nullable, schema-evolution history preserved) |
+
+#### `Daily_RM_Issues` → `daily_rm_issues`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date` | `daily_rm_issues.capture_date` | Rename (`date`→`capture_date`, disambiguates from `lead_assigned_at`) |
+| `RM`, `region`, `project` | `rm_name`, `region_name`, `project` | Rename `RM`/`region`; `project` as-is; all stay denormalized |
+| `lead_id`, `client_id` | same names | Retain as-is |
+| `issue_key`, `issue_label` | same names | Retain as-is |
+| `captured_at` | same name | Retain as-is |
+| `TL`, `group_source`, `source_bucket` | `tl_name`, `group_source`, `source_bucket` | Rename `TL`; others as-is |
+| `lead_assigned_at` | same name | Retain as-is |
+| *(whole tab)* | *(materialized from `movement_snapshots`)* | **Structural merge** — see Part 2's decision; this tab's rows are now a nightly ETL output, not independently written |
+
+#### `Lead_Followups` → `lead_followups`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `lead_id` (A) | `lead_followups.lead_id` | Retain as-is (PK) |
+| `region` (B) | `region_name` | Rename |
+| `RM` (C) | `rm_name` | Rename |
+| `issue` (D) | `issue` | Retain as-is |
+| `collated_comments` (E) | `collated_comments` | Retain as-is |
+| `suggested_followup` (F) | `suggested_followup` | Retain as-is — hard human-only contract unchanged |
+| `updated_at` (G) | `updated_at` | Retain as-is |
+| `own` (H) | `own_comment` | Rename — bare `own` is unclear out of context |
+| *(none — new)* | `cycle_started_at` | **Added** — new column, not a mapping; gives the documented "resolved-between-cycles" bug something to check against |
+
+#### `SLA_History` → `sla_history`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date` | *(none — removed)* | **Remove** — see the shared "redundant date column" pattern below |
+| `openTotal`, `breachedTotal` | `open_total`, `breached_total` | Rename (camelCase → snake_case, matching the target schema's naming convention throughout) |
+| `inactiveRmNewLead`, `isNotUpdated`, `followupOverdue`, `underCalledToday`, `stageStuck48h` | `inactive_rm_new_lead`, `is_not_updated`, `followup_overdue`, `under_called_today`, `stage_stuck_48h` | Rename (same convention) |
+| `snapshot_at` | `snapshot_at` | Retain as-is (PK, the real upsert key) |
+| `source` | `source` | Convert to enum |
+
+#### `Daily_Cohort_History` → `daily_cohort_history`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date_region` | `cohort_date` + `region_id` | **Split** — a concatenated composite key becomes two real columns (one FK) |
+| `date` | `cohort_date` | Rename (part of the split above) |
+| `region` | `region_id` | **Convert to lookup** — FK to the new `regions` table instead of free text (this table is a rollup, not a frozen historical snapshot, so it can safely reference the live `regions` table) |
+| `created`, `same_day_resolved`, `same_day_opp` | same names | Retain as-is |
+| `window_complete` | same name | Retain as-is (immutability trigger — enforced at the application layer, flagged for Part 7) |
+| `resolved_48h`, `opp_48h`, `closed_48h` | same names | Retain as-is |
+| `updated_at` | same name | Retain as-is |
+| `source` | same name | Convert to enum |
+
+#### `RM_Hierarchy` → `people`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `team` | `people.team` | Retain as-is |
+| `role` | `people.role` | Convert to enum |
+| `name` | `people.name` | Retain as-is (not unique-constrained — see Part 3's name-collision note) |
+| `tl`, `tm`, `rh`, `ch` | `tl_id`, `tm_id`, `rh_id`, `ch_id` | **Convert to lookup** — free-text manager names become real self-referencing FKs |
+| `excluded` | `people.excluded` | Retain as-is |
+| `note` | `people.note` | Retain as-is |
+| `email` | `people.email` | **Merge target** — also receives `Manager_Directory.email` |
+
+#### `Manager_Directory` → `people` / `person_regions`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `manager_name` | matched to `people.name` (join key during migration only, not a stored column) | **Merge** — this row's data folds into the existing `RM_Hierarchy`-derived person, per Part 2's decision |
+| `roles` | *(none — removed)* | **Remove** — redundant with `people.role`, since `Manager_Directory` is itself derived from the same `RM_HIERARCHY_RAW_` source per row |
+| `regions` | `person_regions` (new junction table) | **Split** — a multi-valued "regions covered" fact, not a single-value column; see Part 3's new table 13 |
+| `email` | `people.email` | **Merge target** — the primary reason this tab exists; **the migration must confirm which value wins if `RM_Hierarchy`'s own `email` and this one ever disagree** — flagged for Part 8 |
+| `people_reporting_up_to_them` | *(none — removed)* | **Remove** — per Part 2's decision, computed from `people`'s own chain columns on read instead of stored twice |
+| `email_source` | `people.email_source` | Retain as-is |
+
+#### `Comment_History` → `comment_history`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date` | *(none — removed)* | **Remove** — redundant date-column pattern, below |
+| `lead_id`, `client_id` | same names | Retain as-is |
+| `RM`, `region`, `project` | `rm_name`, `region_name`, `project` | Rename `RM`/`region`; denormalized |
+| `comment` | same name | Retain as-is |
+| `comment_at` | same name | Retain as-is — genuinely distinct from `logged_at`, not merged |
+| `logged_at` | same name | Retain as-is |
+
+#### `Unmatched_Comments_Log` → `unmatched_comments_log`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date` | *(none — removed)* | **Remove** — redundant date-column pattern, below |
+| `lead_id`, `RM`, `region`, `project` | `lead_id`, `rm_name`, `region_name`, `project` | Rename `RM`/`region` |
+| `comment`, `comment_at`, `logged_at` | same names | Retain as-is |
+| `reviewed` | same name | Retain as-is |
+| `note` | same name | Retain as-is — **not** the same concept as `people.note` (Part 2's false-friend flag; both keep the same generic name here since they're genuinely unrelated columns on unrelated tables, so no actual naming collision exists in the target schema) |
+
+#### `Send_Log` → `email_sends`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `sent_at` | `email_sends.sent_at` | Retain as-is |
+| `issue_key`, `issue_label` | same names | Retain as-is (nullable — `dashboard` channel only) |
+| `region` | `region_name` | Rename |
+| `subject` | same name | Retain as-is |
+| `to`, `cc` | `to_addresses`, `cc_addresses` | Rename for clarity; retained denormalized (pure audit field) |
+| `lead_count` | same name | Retain as-is |
+| `sent_by` | same name | Retain as-is (nullable — `dashboard` channel only) |
+| *(none — new)* | `channel = 'dashboard'` | **Added** — the discriminator that replaces "which of the 3 physical tabs is this row in" |
+
+#### `AllIssues_Log` → `email_sends`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date` | *(none — removed)* | **Remove** — redundant date-column pattern, below |
+| `region` | `region_name` | Rename |
+| `bucket_label`, `primary_role` | same names | Retain as-is (nullable — `all_issues_17h` channel only) |
+| `to`, `cc` | `to_addresses`, `cc_addresses` | Rename |
+| `lead_count`, `sent_at`, `thread_id` | same names | Retain as-is |
+| *(none — new)* | `channel = 'all_issues_17h'` | **Added** |
+
+#### `Overnight_Log` → `email_sends` / `overnight_log_leads`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `date` | *(none — removed)* | **Remove** — redundant date-column pattern, below |
+| `region` | `region_name` | Rename |
+| `thread_id` | `email_sends.thread_id` | Retain as-is — **functionally critical**, unchanged |
+| `lead_ids_json` | `overnight_log_leads` (new child table) | **Split** — see Part 2/3's decision; the 13:00 run already iterates individual ids from this field |
+| `sent_at` | `email_sends.sent_at` | Retain as-is |
+| `to`, `cc` | `to_addresses`, `cc_addresses` | Rename — **functionally critical** (the 13:00 reply's actual recipients), unchanged in substance |
+| `subject` | same name | Retain as-is |
+| *(none — new)* | `channel = 'overnight_10h'` | **Added** |
+
+#### `Region_Recipients` → `region_recipients`
+
+| Current column | Target | Treatment |
+|---|---|---|
+| `region` | `region_recipients.region_id` | **Convert to lookup** — FK to the new `regions` table |
+| `to`, `cc` | `to_addresses`, `cc_addresses` | Rename; retained denormalized per Part 2's judgment call |
+| *(none — new)* | `updated_at` | **Added** — the current tab has no way to tell when an address last changed |
+
+### The shared "redundant `date` column" pattern
+
+`SLA_History`, `Comment_History`, `Unmatched_Comments_Log`,
+`AllIssues_Log`, and `Overnight_Log` **each** carry a `date` column
+whose value is entirely derivable from another timestamp column already
+on the same row (`snapshot_at`, `logged_at`, or `sent_at`, respectively).
+None of these five tables' `date` field is ever the *only* place a date
+lives — it's a convenience duplicate. **Recommendation: remove the
+stored column in all five cases, and compute it on read** (`DATE(sent_at)`
+or equivalent) via a query or a database view/generated column if a
+consuming report specifically wants a bare date. This is a genuine,
+low-risk simplification, not five separate decisions — grouped here
+because repeating the same reasoning five times would obscure that it
+*is* one pattern, not five coincidentally similar ones.
+
+### Column consolidation — grouped by treatment type
+
+**Merge:**
+- `Manager_Directory` (whole tab, matched by `manager_name`) →
+  `people`, keyed on the existing `RM_Hierarchy`-derived row for that
+  same person. *Reason:* one real-world entity (a person), currently
+  split across two sheets joined only by name-matching with no FK.
+
+**Rename:**
+- `RM` → `rm_name`, `region` → `region_name`, `TL` → `tl_name` across
+  every snapshot/log table that has them. *Reason:* the bare names
+  (`RM`, `region`) read fine inside a spreadsheet tab named for its
+  content, but are ambiguous as bare column names in a shared relational
+  schema with a dozen tables — the `_name` suffix also makes the
+  "this is denormalized text, not a live reference" intent explicit at
+  the schema level, not just in a comment.
+- `openTotal`/`breachedTotal`/etc. (camelCase) → `open_total`/
+  `breached_total`/etc. (snake_case). *Reason:* pure naming-convention
+  consistency with every other target table; no behavior change.
+- `own` → `own_comment` (`Lead_Followups`). *Reason:* a bare `own` reads
+  as an adjective with no noun in a schema context; ambiguous outside
+  the sheet's own column-header convention.
+- `to`/`cc` → `to_addresses`/`cc_addresses` everywhere they appear.
+  *Reason:* `to`/`cc` are reserved-adjacent words in several SQL
+  dialects and mail-library APIs; spelling them out avoids a real,
+  avoidable footgun.
+
+**Split:**
+- `Daily_Cohort_History.date_region` → `cohort_date` + `region_id`.
+  *Reason:* a concatenated composite key should be two real, independently
+  queryable/indexable columns.
+- `Manager_Directory.regions` → the new `person_regions` junction table.
+  *Reason:* a genuinely multi-valued fact (one manager can cover several
+  regions) doesn't belong in a single delimited-text column.
+- `Overnight_Log.lead_ids_json` → the new `overnight_log_leads` child
+  table. *Reason:* the 13:00 run already needs to query individual lead
+  ids out of this field; a real child table serves that natively instead
+  of requiring JSON parsing on every read.
+
+**Convert to lookup/reference table:**
+- `RM_Hierarchy.tl`/`tm`/`rh`/`ch` (free-text names) → self-referencing
+  FKs into `people`. *Reason:* closes the referential-integrity gap
+  Part 2 identified — today a typo'd manager name is silently accepted.
+- `Daily_Cohort_History.region` and `Region_Recipients.region` (free
+  text) → FK into the new `regions` table. *Reason:* these are
+  current-state/rollup tables, not frozen historical snapshots, so they
+  can safely reference live reference data rather than needing their own
+  frozen copy (unlike `movement_snapshots`/`daily_rm_issues`/
+  `comment_history`/etc., which deliberately keep denormalized text —
+  see Part 2's normalize-vs-denormalize reasoning).
+
+**Convert to enum/status field:**
+- `Movement_Log.snapshot_label` (`periodic`/`manual`).
+- `SLA_History.source` / `Daily_Cohort_History.source`
+  (`movement`/`browser`/`backfill`).
+- `Manager_Directory.email_source` (`private_file`/`manual`).
+- `RM_Hierarchy.role` (the 11 cited role values).
+- *(new)* `email_sends.channel` (`dashboard`/`all_issues_17h`/
+  `overnight_10h`) — not a conversion of an existing column, but
+  introduced specifically as an enum from the start.
+- *Reason, all five:* each already has a small, known, cited set of
+  real values today; a constrained type catches a bad/unexpected value
+  at write time instead of silently admitting it as free text.
+
+**Remove:**
+- The five redundant `date` columns (above).
+- `Manager_Directory.roles` — redundant with `people.role` post-merge.
+- `Manager_Directory.people_reporting_up_to_them` — computed from
+  `people`'s own chain columns on read; **flagged pending confirmation**
+  (Part 2) that it isn't independently hand-edited anywhere today, so
+  treat this one removal as provisional until that's checked in Part 8.
+
+**Retain as-is:**
+- Every identity/content column not called out above — `lead_id`,
+  `client_id`, `comment`, `issue_key`, `issue_label`, `subject`,
+  `lead_count`, `excluded`, `note`, all the call-count and cohort-outcome
+  numeric columns, and both of `Comment_History`'s two genuinely distinct
+  timestamps (`comment_at` and `logged_at`). *Reason, uniformly:* no
+  ambiguity, no redundancy, no integrity gap — changing these would be
+  structural change for its own sake, which the brief explicitly asks
+  this review not to do.
+
+*(Part 4 complete. Continues in Part 5 — the data retention and
+lifecycle policy, resolving the `TBD` retention periods this schema
+deliberately left open.)*
