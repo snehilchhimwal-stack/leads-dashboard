@@ -3776,3 +3776,431 @@ above was added; no other bugs found or fixed in this phase).
 
 *(Phase 7 complete. Continues in Phase 8 — final findings report and
 artifact update.)*
+
+## Phase 8 — Findings Report
+
+The final deliverable for this review, in the exact 10-section format
+requested. Every claim below cites the phase and file it came from —
+nothing here is new analysis; this section assembles what Phases 1–7
+already established and verified.
+
+### VERDICT
+
+**The original lead-history storage model was not correct, and the
+proposed redesign is materially better — confirmed by real
+implementation and real measurement, not just design review.**
+
+The current system (Phase 1) writes a full, ~22-column duplicate row
+to `Movement_Log` for **every** lead on **every** 4×/day capture,
+whether or not anything changed, and has no explicit concept of "this
+lead's current state," "a discrete change," or "this lead went
+inactive" — only an undifferentiated stream of full snapshots a reader
+must diff by hand. Phase 2 found two real, live consumers already
+depending on the *conflation* of "a capture ran" with "a lead's data
+changed" (`checkMovementLogFreshness_`'s freshness check), which any
+naive deduplication would have silently broken.
+
+The proposed 3-table design (Phase 3: `lead_ingestion_runs` /
+`lead_versions` / `leads_current_state`) separates those concepts
+correctly, and the **smallest safe version of it was actually built and
+shipped to a disposable branch** (Phase 6) — not just designed on
+paper — then **validated with a real, measured E2E run** (Phase 7):
+**10 real `Movement_Log` rows for a 6-lead, 4-capture scenario, vs. 21
+under the old behavior for the identical scenario** (~52% reduction,
+explicitly scenario-specific, not a universal production claim), with
+zero data loss, zero test regressions (746/746 passing, up from 713),
+and one real cross-writer bug caught and fixed *before* it ever
+shipped.
+
+**What is NOT claimed**: Phase 6 implemented `Movement_Log`'s
+dedup mechanism inside the *existing* Sheets/Apps Script system — it did
+**not** build the full relational `lead_ingestion_runs`/`lead_versions`/
+`leads_current_state` schema from Phase 3, because that would require an
+actual database engine this project doesn't have (no ORM, no SQL
+database, no migrations anywhere in this repo — confirmed Phase 1). Real
+structural limits Sheets cannot close no matter how the Apps Script code
+is written are stated plainly in ISSUES below (no true transactions, no
+unique constraints, no idempotency-key enforcement) — this verdict is
+"materially better within what Sheets can support," not "matches the
+target schema's guarantees."
+
+### CURRENT LEAD LIFECYCLE
+
+Traced directly from source (Phase 1, `MovementTracker.gs`/
+`js/sheets-writeback.js`/`DailyRmIssueLog.gs`/`js/tab-movement.js`):
+
+1. **First ingestion**: a row appears in the live `leads` tab (written
+   by the external CRM export — out of scope, no code in this repo
+   performs this write). Nothing reacts to it; it just becomes visible
+   to the next capture.
+2. **Subsequent captures** (`SNAPSHOT_HOURS_ = [0,6,12,18]` IST):
+   `snapshotOpenLeads_` reads the lead fresh from `leads` and appends a
+   new, full, independently-timestamped row to `Movement_Log` — **every
+   run**, whether or not any field differs from the previous capture.
+3. **A field changes**: the next capture simply reflects the new live
+   value — nothing marks the row as "the one where it changed"; a
+   reader must diff two rows to notice.
+4. **An unchanged capture**: byte-for-byte identical to the previous
+   row except `snapshot_at`/`snapshot_label` — a full duplicate.
+5. **Nightly distillation** (22:50 IST, `DailyRmIssueLog.gs`): if the
+   lead is open and SLA-flagged, one row lands in `Daily_RM_Issues`,
+   read **fresh from `leads`**, not from `Movement_Log`'s accumulated
+   captures.
+6. **Further changes/captures**: repeat steps 2–4.
+7. **Inactivation**: nothing explicit. A closed lead is captured
+   exactly like an open one until it stops appearing in `leads`
+   (external, out of scope) or ages past the 7-day `Movement_Log`
+   retention — **no permanent record anywhere of "this lead became
+   inactive on date X,"** only silence a reader has to interpret.
+8. **Historical retrieval**: `fetchMovementLog` fetches the entire
+   retained window fresh every call; `buildMovementHistories` groups it
+   client-side, in memory, by `client_id`/`lead_id` — no server-side
+   "get this lead's history" query exists anywhere.
+
+### CURRENT STORAGE ANALYSIS
+
+Concept-by-concept, checked against real code (Phase 2):
+
+| Concept | Present today? |
+|---|---|
+| Stable lead identity | Yes, but only partially verifiable — `client_id`/`lead_id`, sourced entirely from an out-of-scope external export |
+| Current/latest state | **No** — not materialized; the live `leads` tab itself is the closest thing |
+| Individual changes/versions | **No** — only full snapshots, some identical to the last |
+| Ingestion events ("a capture ran") | Yes, implicitly — but conflated with "a lead changed" (see below) |
+| New vs. updated leads | **No** — not distinguished at write time |
+| Inactive/deleted leads | **No explicit event** — only inferable from absence |
+
+**Concrete cost, measured on a real 5-capture example** (Phase 2): one
+lead across 5 real captures produces 5 full ~22-column rows today; only
+3 of them (the initial state and 2 real field changes) carry any
+information not already present in the row before them. Rows 2 and 4
+are exact duplicates in every column except the two timestamp
+bookkeeping fields.
+
+**The real risk found, not hypothetical**: `checkMovementLogFreshness_`
+(`MovementTracker.gs`) read `Movement_Log`'s own last row's timestamp
+as its "is the capture pipeline healthy" signal — meaning any dedup
+that simply stopped writing unchanged rows would have made a perfectly
+healthy, quiet system look increasingly stale. This is the single
+finding that shaped the rest of the review's design (the need for a
+separate `lead_ingestion_runs`-equivalent concept, Phase 3) and Phase
+6's real implementation (the new `Movement_Log_Runs` sheet).
+
+### PROPOSED DATABASE DESIGN
+
+Three tables (full column-level detail in Phase 3 above), splitting
+"did a capture run," "what is this lead's state right now," and "what
+did it used to be" — the exact three concepts Phase 2 found collapsed
+into one signal today:
+
+- **`lead_ingestion_runs`** — one row per capture, `idempotency_key`
+  UNIQUE for safe retries, `completed_at` nullable so a mid-run crash
+  is directly visible (today's design has no way to distinguish
+  "nothing changed" from "the capture never finished").
+- **`lead_versions`** — immutable, append-only version history.
+  `content_hash` (now including the `status` field added during
+  Phase 5's edge-case pass) compared only against a lead's *current*
+  version — never across full history, so a revert to a past value
+  always creates a new version, keeping the timeline honest about
+  *when* each period was actually true. `valid_from`/`valid_to` range
+  columns answer point-in-time questions directly.
+- **`leads_current_state`** — the one genuinely mutable table: a real
+  materialized "current row" per lead, with an explicit `status`
+  (`active`/`inactive`) that closes Phase 1/2's "no explicit
+  inactivation event" gap.
+
+**Transactional requirement** (added during Phase 5): a version
+transition — closing the old version, inserting the new one, updating
+the current-state pointer — must be one atomic transaction, which is
+what lets a partial unique index (`lead_key WHERE valid_to IS NULL`)
+correctly catch a concurrent double-write instead of allowing a
+half-applied transition to become visible.
+
+This design **supersedes**, rather than adds to, the earlier main
+review's `movement_snapshots` table (Part 3) — that table modeled the
+same full-row-per-capture pattern this review found to be the actual
+problem.
+
+### STORAGE COMPARISON
+
+Three separate data points, each labeled by how it was produced —
+deliberately not blended into one number:
+
+| Source | Scope | Old (full-row) | New (versioned) | Reduction |
+|---|---|---|---|---|
+| Phase 2 (illustrative, hand-worked) | 1 lead, 5 captures | 5 rows | 3 versions | 40% |
+| Phase 4 (illustrative, hand-worked) | 1 lead, 7 captures | 7 rows | 3 versions | 57% |
+| **Phase 7 (real, measured E2E)** | **6 leads, 4 captures** | **21 rows** | **10 rows** | **~52%** |
+
+The Phase 2/4 figures are hand-worked single-lead walkthroughs used to
+*explain* the mechanism; only the Phase 7 figure comes from actually
+running the real code. **None of these is a production estimate** —
+real reduction on production data depends entirely on how often leads
+genuinely change between captures, a rate this review has no cited
+figure for. The consistent direction (a real reduction in every case,
+scaling with how rarely fields actually change rather than with how
+often captures run) is the finding; the specific percentage is not
+claimed to generalize.
+
+### HISTORICAL RECONSTRUCTION
+
+**Target design** (Phase 4): a point-in-time query is a single range
+predicate against `lead_versions` —
+`valid_from <= T AND (valid_to IS NULL OR valid_to > T)` — verified
+against 4 concrete point-in-time questions on a 7-capture timeline for
+lead `C-2091`, each returning the correct version including the
+"between the 00:00 and 06:00 captures, before a same-day RM
+reassignment" case a naive "read the latest row" approach would get
+wrong.
+
+**Real implementation** (Phase 6/7): the equivalent lookup in the
+actual Sheets system is `lastSnapshotBeforeGs_`/
+`buildMovementLogMapsGs_` — verified for real in Phase 7 against a
+genuinely dedup-affected `Movement_Log` (not a clean, no-gaps fixture):
+a boundary taken strictly between captures 2 and 3 correctly resolved
+`L-REPEATCHANGE.call_attempts` to its capture-2 value (3), not the
+stale capture-1 value (1), even though only 2 rows existed for that
+lead at that point. A vanished lead (`L-VANISH`) remained fully
+reconstructable after it stopped appearing in the live tab.
+
+**A real, honest gap between target and implementation, found in
+Phase 7**: `lastSnapshotBeforeGs_` only ever exposes
+`{atMs, call_attempts}` per lead (see `_readMovementLogRowsGs_`,
+`MovementTracker.gs`) — no existing production helper reconstructs an
+*arbitrary* field (e.g. `current_stage`) as of a past point in time,
+because no real caller has needed one yet. Phase 7's test file proved
+the underlying raw data is present and correct for this via a
+test-only helper reading `Movement_Log` directly — but nothing in
+production code wraps it. The target relational schema (`lead_versions`,
+every column reconstructable by construction) does not have this gap;
+the current Sheets implementation does.
+
+### IMPLEMENTATION CHANGES
+
+Real code, on disposable branch `lead-history-phase6-impl`
+(`641398e` → `858ece5`), never touching `master`:
+
+- **`MovementTracker.gs`**: `snapshotOpenLeads_` now computes a SHA-256
+  content hash per lead over every `SNAPSHOT_COLUMNS_` field and skips
+  writing when it matches that lead's latest known hash. New
+  `Movement_Log_Runs` sheet, one row per capture regardless of dedup.
+  `checkMovementLogFreshness_` now reads `Movement_Log_Runs` instead of
+  `Movement_Log`'s own last row.
+- **`js/sheets-writeback.js` + `js/tab-movement.js`**: the browser
+  writer (`browserSnapshotOpenLeads`) gets identical dedup logic, per
+  this project's own two-writer-parity convention.
+- **A real bug found and fixed before shipping**: the two writers would
+  have hashed an identical lead to two *different* digests —
+  `MovementTracker.gs` read `lead_assigned_at`/`last_connect_time` as
+  raw `Date.getTime()`, while the browser already renders those same
+  two fields as IST wall-clock strings for display. Left unfixed, this
+  would have **permanently defeated cross-writer dedup**. Both sides
+  now format identically for hashing.
+- **`test/run-gs-tests-headless.py` + `Tests_Mocks.gs`**: added a real,
+  synchronous SHA-256 implementation (`Utilities.computeDigest` had no
+  mock at all before this), verified against the real NIST test vectors
+  for the empty string and `"abc"`.
+- **`Tests_MovementTracker.gs` + `Tests_OpsChecklistRunner.gs`**: new
+  assertions for the dedup mechanism itself, the freshness-check data
+  source change, and (Phase 7) the full 6-lead/4-capture E2E scenario.
+
+**Deliberately deferred**: `status` (the tracked/versioned
+inactive-lead field from Phase 3/5) was not wired into the live capture
+path — Phase 6's scope was the content-hash write-skip mechanism
+specifically.
+
+**Deployment note**: `setupMovementTracking` must be re-run once in the
+live Apps Script editor to create `Movement_Log_Runs` before any of
+this takes effect live — this repo's `.gs` files do not auto-deploy
+from git.
+
+### E2E RESULTS
+
+Real run, `python3 test/run-gs-tests-headless.py`: **746/746 passed, 0
+failed** (up from 713 before this phase — 33 new assertions).
+
+6-lead, 4-capture scenario (`Tests_MovementTracker.gs`, Phase 7),
+covering every case named in the original brief:
+
+| Case | Lead | Result |
+|---|---|---|
+| New lead creation, mid-sequence | `L-NEW` | Verified: writes on first appearance (capture 2), correctly reconstructable one capture later |
+| Repeated, no changes | `L-STABLE` | Verified: 1 row total across all 4 captures |
+| Single field change | `L-ONECHANGE` | Verified: exactly 1 new row when `current_stage` changed (capture 3) |
+| Multiple fields changing together, one capture | `L-MULTICHANGE` | Verified: `current_stage` AND `RM` both landed in the SAME single new row, not two |
+| Changes across several captures, different fields | `L-REPEATCHANGE` | Verified: `call_attempts` change (capture 2) and `current_stage` change (capture 3) each produced their own row; point-in-time reconstruction correctly resolved the intermediate state |
+| Inactive/vanished lead | `L-VANISH` | Verified: disappeared from the live tab at capture 3; last known state (call_attempts and current_stage) remained fully reconstructable afterward |
+| Duplicate ingestion / retry | Capture 4 (exact retry of capture 3) | Verified: 0 new `Movement_Log` rows; `Movement_Log_Runs` still got a 4th row (run recorded, no data duplicated) |
+| Concurrent/overlapping execution | — | **Not verified** — honestly out of reach: Apps Script is single-threaded and this project's test harness runs synchronously; no tooling here can fake real parallelism. The retry case above is the closest available proxy, not a substitute. |
+| Nightly distillation unaffected | `captureDailyRmIssues_` | Verified: ran to completion against this same post-dedup spreadsheet without throwing, correctly captured a real flagged lead |
+
+Measured totals: **10 real `Movement_Log` rows** for this scenario
+(vs. 21 hand-computed under the old behavior); **4 `Movement_Log_Runs`
+rows** (exactly one per capture, regardless of dedup).
+
+### ISSUES
+
+#### High
+
+1. **Problem**: Two writers (`MovementTracker.gs`'s scheduled trigger
+   and `js/sheets-writeback.js`'s on-demand button) can genuinely race
+   against `Movement_Log` today, with no locking or serialization.
+   **Root cause**: two independently-implemented code paths writing to
+   the same sheet, kept in sync only by hand and by comment convention,
+   never a shared code path or database constraint (Phase 1/5).
+   **Affected file**: `MovementTracker.gs` (`snapshotPeriodic`),
+   `js/sheets-writeback.js` (`browserSnapshotOpenLeads`).
+   **Reproduction**: trigger a scheduled capture and click "Snapshot
+   now" within the same few seconds — not attempted here (Phase 7
+   explicitly could not exercise true concurrency in this environment).
+   **Impact**: potentially interleaved/duplicated writes under real
+   concurrent load; pre-existing, already tracked in `LOGIC_AUDIT.md`
+   Part 7 §18 MEDIUM #3, not introduced by this review.
+   **Recommended fix**: consolidate both writers behind one API
+   endpoint that serializes per-lead-key processing (already
+   recommended in the main review's Part 6); the target relational
+   schema's partial unique index (Phase 3) would also catch a
+   concurrent double-write as a backstop — Sheets has no equivalent
+   enforcement mechanism.
+   **Verified by E2E**: **No** — explicitly not testable in this
+   environment (Phase 7).
+
+2. **Problem**: `snapshotOpenLeads_` prunes `Movement_Log` *after*
+   writing, not before.
+   **Root cause**: original implementation ordering, unchanged by
+   Phase 6.
+   **Affected file**: `MovementTracker.gs`, `pruneMovementLog_`'s call
+   site inside `snapshotOpenLeads_`.
+   **Reproduction**: not reproduced here — cited from a real, already-
+   documented incident in a sibling file.
+   **Impact**: `DailyRmIssueLog.gs`'s own comment cites the exact
+   failure mode this ordering causes: that file shipped with the same
+   prune-after-write order, hit the workbook's 10-million-cell ceiling,
+   and crashed mid-write with no self-healing path until a manual
+   recovery run (real incident, 2026-09-06). `Movement_Log` carries the
+   same latent risk today, and Phase 6 did not change this ordering
+   (out of its declared scope).
+   **Recommended fix**: reorder to prune-before-write in
+   `snapshotOpenLeads_`, mirroring `DailyRmIssueLog.gs`'s already-fixed
+   pattern — a small, isolated change, not attempted in this review
+   since it's outside Phase 6's stated scope (the content-hash dedup
+   mechanism specifically).
+   **Verified by E2E**: **No** — not in scope for Phase 6/7's changes;
+   flagged from reading the code, not reproduced.
+
+#### Medium
+
+3. **Problem**: `Movement_Log_Runs` has no idempotency-key-style
+   dedup at the Sheets layer.
+   **Root cause**: Sheets/Apps Script has no unique-constraint
+   mechanism to enforce this the way the target schema's
+   `lead_ingestion_runs.idempotency_key` UNIQUE column would.
+   **Affected file**: `MovementTracker.gs`,
+   `ensureMovementLogRunsSheet_`/the run-record append inside
+   `snapshotOpenLeads_`.
+   **Impact**: a genuinely duplicated trigger fire (the same logical
+   run, retried) records 2 run rows, not 1 — cosmetic (freshness
+   monitoring still reads the *latest* row correctly either way), not
+   data-corrupting.
+   **Recommended fix**: none proposed for the current Sheets
+   implementation — this is a structural limit of the platform, not a
+   bug to patch; closing it for real requires the Phase 3 target
+   schema's actual unique constraint.
+   **Verified by E2E**: **Yes** — Phase 7's capture 4 (an exact retry)
+   demonstrably added a 4th `Movement_Log_Runs` row rather than being
+   absorbed into the 3rd.
+
+4. **Problem**: No production helper reconstructs an arbitrary field's
+   history as of a past point in time — only `call_attempts` is
+   exposed.
+   **Root cause**: `_readMovementLogRowsGs_` (`MovementTracker.gs`)
+   reads exactly one data column besides the key/timestamp, because no
+   real caller (`buildTodayCallBaselineGs_`, the email/SLA paths) has
+   ever needed more than that reconstructed.
+   **Affected file**: `MovementTracker.gs`,
+   `_readMovementLogRowsGs_`/`lastSnapshotBeforeGs_`.
+   **Impact**: a future consumer needing e.g. "what was this lead's
+   stage as of last Tuesday" has no existing helper to call — it would
+   need a new one built on the same raw-row pattern Phase 7's test-only
+   `p7StageAsOfGs_` proves works, or the full target schema.
+   **Recommended fix**: not needed unless/until a real consumer needs
+   it — noted for future awareness, not treated as a defect to fix now.
+   **Verified by E2E**: **Yes** — Phase 7 proved the underlying data is
+   present and correct via a raw-row read; the absence of a wrapping
+   helper is a code-inspection finding, not a bug reproduction.
+
+#### Low
+
+5. **Problem**: `status` (the tracked/versioned inactive-lead concept
+   from Phase 3/5) is not wired into the live capture path.
+   **Root cause**: deliberate scope decision for Phase 6 — the
+   content-hash write-skip mechanism was the declared target, not
+   inactive-lead detection.
+   **Affected file**: `MovementTracker.gs`.
+   **Impact**: none currently — this is a deferred enhancement, not a
+   regression; the current system already has no inactive-lead event
+   (Phase 1/2's finding), so this is unchanged, not newly broken.
+   **Recommended fix**: a follow-up phase, if the user wants it —
+   deriving `status` at capture time from the same `isOpenLead_`-style
+   logic already used elsewhere, and including it in the content hash
+   (both already designed in Phase 3/5, not built).
+   **Verified by E2E**: N/A — out of scope by design, not tested.
+
+6. **Problem**: Several source-side limitations are inherited, not
+   introduced, by this review's design: leads changing multiple times
+   between two captures (only first/last state is ever visible),
+   duplicate source records sharing a `client_id`, source identifier
+   changes/re-keying, and lead merges/splits.
+   **Root cause**: all of these originate in the external CRM export
+   this project has no visibility into or control over (Phase 5).
+   **Affected file**: N/A — not a code defect.
+   **Impact**: none of these are fixable from the receiving side; the
+   proposed design does not claim to solve them, and neither does the
+   current system.
+   **Recommended fix**: none from this project; would require the
+   source system itself to expose finer-grained change events or a
+   stable cross-system identifier.
+   **Verified by E2E**: N/A — explicitly out of scope, not attempted.
+
+### FINAL RECOMMENDATION
+
+**Adopt the Phase 6 implementation** (content-hash dedup +
+`Movement_Log_Runs`) — it is real, tested (746/746), measurably better
+on real data (Phase 7), and fixes a genuine correctness gap
+(`checkMovementLogFreshness_`'s conflation of "a row exists" with "a
+capture ran") along the way, not just a storage-size improvement.
+
+**Three concrete next steps, in order of what actually blocks
+production benefit:**
+
+1. **Merge decision — explicitly the user's call, not made here.** The
+   code sits on `lead-history-phase6-impl` (`858ece5`), never touched
+   `master`. Recommend merging once reviewed, since it's a real,
+   tested, backward-compatible change (a pre-upgrade `Movement_Log`
+   sheet with no `content_hash` column safely falls through to
+   "always write," per `_latestContentHashByKeyGs_`'s own design) — but
+   this decision belongs to whoever owns the live production Sheet, not
+   to this review.
+2. **Manual deployment, after merge.** This repo's `.gs` files do not
+   auto-deploy — the merged code must be pasted into the live Apps
+   Script editor, and `setupMovementTracking` re-run once to create
+   `Movement_Log_Runs` before any of this takes effect for real.
+3. **Two real, unresolved risks that Phase 6 did not address** (both
+   pre-existing, both cited above as Issues #1 and #2 — the
+   prune-after-write ordering with a real precedent incident in a
+   sibling file, and the two-writer race condition) — worth a small,
+   separate follow-up, since they're genuinely independent of the
+   content-hash work and shouldn't block merging it.
+
+**Not recommended right now**: building out the full Phase 3 relational
+schema (an actual database migration). That remains the *architecturally
+correct* target for the guarantees Sheets structurally cannot provide
+(real transactions, unique constraints, idempotency-key enforcement),
+but it is a materially larger undertaking than this review's "smallest
+safe improvement" mandate, and nothing found in Phase 6/7 makes it
+urgent — the Sheets-native dedup already closes the specific,
+measured problem (unconditional full-row duplication) this review set
+out to investigate.
+
+*(Phase 8 complete. Lead History & Versioning Review complete —
+8 of 8 phases.)*
