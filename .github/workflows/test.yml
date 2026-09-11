@@ -8,14 +8,14 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         # fetch-depth: 0 -> full history, so check-catalog.py can run
         # `git log <verified-sha>..HEAD -- <path>` (Last-Verified drift, D)
         # and `git diff <before>..<after>` (change -> component-ID impact,
         # E). Forensic audit P0/P1 (t-tf-5ad22d8e4c2e).
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
       - name: Run Apps Script test suite (Tests_*.gs)
@@ -59,7 +59,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.47.2-jammy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install playwright (browsers already in the image)
         run: npm i --no-save playwright@1.47.2
       - name: Run the harness
