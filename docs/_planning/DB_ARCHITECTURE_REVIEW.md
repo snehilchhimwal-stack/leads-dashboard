@@ -2004,5 +2004,135 @@ designed once and applied consistently, rather than solved separately
 per file above. Flagged for Part 8's migration plan as a Phase 2/5
 prerequisite, not assigned to any one file's row.
 
-*(Part 7 complete. Continues in Part 8 — the migration plan, sequencing
-every file above into 8 safe phases with reconciliation checks.)*
+*(Part 7 complete.)*
+
+---
+
+## Part 8 — Migration Plan
+
+**Ground rule, stated once:** every phase up through Phase 6 makes
+**zero changes to the live Google Sheets or production code.** The
+staging environment is where the real work and real risk live; production
+stays exactly as it is today until Phase 7's deliberately short, defined
+cutover window. Nothing here executes anything — this is the sequence a
+real migration would follow, not a set of commands run by this review.
+
+### Phase 1 — Discovery and validation
+
+| | |
+|---|---|
+| **Inputs** | This review (Parts 1–7); the live Google Sheet (not yet touched by this review — needed now for the facts Parts 1–7 explicitly flagged `UNCONFIRMED`); the Approval Checkpoint items this review will finalize in Part 12 |
+| **Actions** | Resolve every `UNCONFIRMED` fact from Parts 1–4 (exact row counts for `Manager_Directory`/`Region_Recipients`, real daily volume for `Comment_History`/`Unmatched_Comments_Log`) by reading the live Sheet. Test — don't assume — whether `RmHierarchy.gs`'s rebuild function actually preserves hand-filled `Manager_Directory` emails (Part 2/4's flagged, unresolved risk). Enumerate the real, current regions list to seed the new `regions` table. Get explicit business sign-off on every item this review flagged as a recommendation needing confirmation (Part 5's retention periods, Part 6's access-control roles and DB/API technology, the `region_recipients` unification, the two open UI-design questions from Part 7). Take a full, verified export of all 13 tabs' current live data — the actual migration source, and a real backup in its own right. |
+| **Outputs** | A finalized decision log answering every open question from Parts 1–7 (not a guess); a verified full data export of the 13 tabs; the confirmed regions list; the chosen database/API technology |
+| **Validation checks** | Every flagged open question has an explicit, sourced answer. The export's row counts match the live Sheet's current counts exactly, tab by tab. |
+| **Rollback** | None needed — this phase reads and documents; it writes nothing to production. |
+| **Dependencies** | None — this is the first phase, and every later phase depends on its outputs. |
+
+### Phase 2 — Target schema creation
+
+| | |
+|---|---|
+| **Inputs** | Part 3's schema (with Part 4's corrections already folded in); Phase 1's confirmed regions list and technology choice |
+| **Actions** | Provision the chosen database in a **staging environment** (not production). Create all 13 target tables exactly as designed, plus `config_audit_log` (Part 6). Stand up the API layer's skeleton, including the authentication scheme flagged as a cross-cutting item in Part 7. |
+| **Outputs** | A working, empty (reference-data-only) target database and API layer, in staging |
+| **Validation checks** | A structural diff of the created schema against Part 3/4's design — every table, column, type, constraint, and index present as specified. A smoke test writes and reads back one synthetic row per table successfully through the API. |
+| **Rollback** | Trivial — nothing production-facing exists yet; staging can be dropped and recreated freely. |
+| **Dependencies** | Phase 1's technology choice. |
+
+### Phase 3 — Data cleaning/transformation
+
+| | |
+|---|---|
+| **Inputs** | Phase 1's verified export of the 13 tabs' live data |
+| **Actions** | Apply every rule from Part 4's column-consolidation analysis to a **copy** of the exported data: rename columns, convert free-text values to their enum equivalents, split `Overnight_Log.lead_ids_json` into individual rows, split `Manager_Directory.regions` into `person_regions` rows, drop the 5 redundant `date` columns, and resolve the `RM_Hierarchy`/`Manager_Directory` merge by matching on name. **Explicitly surface, don't silently resolve,** every real name-collision (Part 2/3's flagged risk) and every case where `RM_Hierarchy.email` and `Manager_Directory.email` disagree for the same person — write both to a conflict report for a human to resolve before Phase 4. |
+| **Outputs** | Cleaned, transformed staging data, one file/table per target table, ready to load; a conflict/collision report |
+| **Validation checks** | Row counts before/after transformation reconcile **exactly**, accounting for the specific, countable ways counts should change (a `lead_ids_json` split multiplies rows by list length in a predictable way; the `Manager_Directory`→`people` merge should produce zero *new* people rows, only enriched existing ones). Every source row is traceable to at least one target row — **nothing is silently dropped**. The conflict report is reviewed and resolved by a human before Phase 4 begins. |
+| **Rollback** | Trivial — this operates on a copy; redo from Phase 1's export at zero risk. |
+| **Dependencies** | Phase 1 (data, decisions), Phase 2 (the schema being transformed into). |
+
+### Phase 4 — Historical data migration
+
+| | |
+|---|---|
+| **Inputs** | Phase 3's cleaned data; Phase 2's staging database |
+| **Actions** | Bulk-load in dependency order: reference/config tables first (`people`, `regions`, `region_recipients`, `person_regions`), then the operational/history tables. For `movement_snapshots`/`daily_rm_issues`, load only the current 7-day window (older data was already pruned at the source — there is nothing more to migrate). For `sla_history`, `comment_history`, `daily_cohort_history`, and `email_sends`, load the **full available history**, consistent with Part 5's permanent/long-retention recommendations. |
+| **Outputs** | A fully populated staging database mirroring the live Sheets' state as of the Phase 1 snapshot |
+| **Validation checks** | Row-count reconciliation per table against Phase 3's expected counts. Field-by-field spot-checks on a real sample of rows per table. FK-integrity checks — any `rm_name`/`region_name` in a migrated row with no plausible match in the new `people`/`regions` tables is **flagged for review, not silently dropped or silently linked to the wrong person**. `daily_cohort_history` rows are checked byte-for-byte against source — this table's whole value is that it's never re-derived, only loaded verbatim (Part 3's immutability note). |
+| **Rollback** | Trivial — staging can be wiped and reloaded from Phase 3's output; production Sheets are completely untouched throughout this phase. |
+| **Dependencies** | Phase 3. |
+
+### Phase 5 — Application/code migration
+
+| | |
+|---|---|
+| **Inputs** | Part 7's file-by-file impact table; the populated staging database/API from Phase 4 |
+| **Actions** | Implement the real API endpoints against staging. Migrate the files from Part 7 **in risk order, not file-listing order** — the Low-risk files first (`InteractionHistoryLogger.gs`, `AllIssuesEmailer.gs`, `OpsChecklistRunner.gs`) to establish a working pattern and test rhythm, before the High-risk pair (`MovementTracker.gs` + `js/sheets-writeback.js`, migrated **together**, never staggered) and `OvernightEmailer.gs`. Resolve the two open UI-design questions (`Lead_Followups`, `Unmatched_Comments_Log`) per Phase 1's decision. Implement the API authentication scheme. **Production code is not touched during this phase** — everything above runs against staging behind a switch, with the live dashboard and Apps Script continuing to run on Sheets, unmodified, throughout. |
+| **Outputs** | A fully migrated codebase running against staging, functionally equivalent to production; a shadow-run period where both the old Sheets path and the new API path compute the same thing in parallel, for comparison, with the new path **not yet authoritative** |
+| **Validation checks** | Each migrated file's existing test suite (`Tests_*.gs`, the frontend harness) passes against the new implementation. During the shadow-run window (recommend 1–2 weeks, long enough to see every job — 4×/day capture, nightly, all 3 scheduled emails — run repeatedly), the old and new paths' outputs are diffed daily; **any divergence is treated as a real bug to fix, not a data quirk to explain away.** |
+| **Rollback** | Trivial — staging is isolated; production keeps running on Sheets, completely unaffected, for the entire phase. |
+| **Dependencies** | Phase 4 (data to develop and test against), Part 7's plan. |
+
+### Phase 6 — Validation
+
+| | |
+|---|---|
+| **Inputs** | Phase 5's shadow-run comparison data; every decision and check from Phases 1–5 |
+| **Actions** | Run the **full** application — dashboard and every Apps Script job — against staging as if it were production, for a defined trial period. Verify every user-facing feature by hand: leaderboards, charts, a real (test-recipient) email send through each of the 3 channels, the follow-up review workflow, and config editing. Run every reconciliation check below one final time, across all 13 tables. Get explicit sign-off from the business stakeholders. |
+| **Outputs** | A validated, signed-off staging environment, ready to become production; a written validation report itemizing every check and its result |
+| **Validation checks** | The full reconciliation-check list below, clean. A manual side-by-side QA pass — the same underlying lead data, viewed through the staging-backed dashboard vs. the production Sheets-backed one — with zero unexplained discrepancies. |
+| **Rollback** | Still trivial — this phase touches nothing in production. If validation fails, the plan simply does not advance to Phase 7 until the issue is fixed and this phase is re-run. |
+| **Dependencies** | Phase 5. |
+
+### Phase 7 — Cutover
+
+| | |
+|---|---|
+| **Inputs** | Phase 6's validated, signed-off environment |
+| **Actions** | The one genuinely time-boxed, higher-risk phase. Freeze writes to the live Sheets for a defined maintenance window. Take a final delta snapshot (anything written since Phase 1's export) and apply it to the target database. Point the Apps Script triggers and the dashboard's code at the new production database/API (promoting the validated staging environment, or a freshly-seeded production instance built identically). Monitor closely for a defined post-cutover window — **recommend 24–48 hours minimum** — with the pre-migration code kept ready, not deleted, as an immediate rollback path. |
+| **Outputs** | The new database/API is now the live, authoritative system for all 13 tabs |
+| **Validation checks** | The first full live cycle (a real 4×/day capture, the nightly issue capture, all 3 scheduled email sends) completes successfully; its output is spot-checked against what the pre-migration system would have produced for the same inputs; the new error-logging/monitoring from Part 6 shows nothing unexpected. |
+| **Rollback considerations — the most important line in this whole plan** | **A tested rollback procedure must exist and be rehearsed *before* cutover, never improvised during it.** Reverting means pointing Apps Script and the dashboard back at their pre-migration code paths — the live Sheets tabs remain fully intact and functional as the fallback data source throughout the entire monitoring window, since Phase 8 (retiring them) has not happened yet. Cutover is **not** irreversible at this point precisely because that next phase hasn't run. |
+| **Dependencies** | Phase 6's sign-off; scheduling the maintenance window is a real operational/business coordination task this review cannot schedule unilaterally. |
+
+### Phase 8 — Legacy Google Sheet retirement/archive
+
+| | |
+|---|---|
+| **Inputs** | A cutover (Phase 7) that has run cleanly through its full monitoring window with no rollback needed |
+| **Actions** | **Only after that confidence period** — recommend weeks, not days, given this is a real system with real email-sending and routing consequences — export a final, permanent archive of the legacy Sheets' 13 tabs (kept, not deleted, per Part 5's archive-over-delete philosophy throughout this whole review). Then either (a) leave the Sheet tabs in place, clearly marked read-only/deprecated — the lower-risk default this review recommends — or (b) remove the retired Apps Script code paths entirely, a separate, deliberate decision. **The Sheet tabs themselves are never deleted** by this plan; only their role as the live system ends. |
+| **Outputs** | The legacy tabs are archived and clearly marked deprecated, written to by nothing; retired code is removed or clearly marked dead |
+| **Validation checks** | A grep-based confirmation that zero remaining code paths reference the old tabs (the same discipline this project's own `check-catalog.py` already applies to its documentation). The final archive export is verified complete and accessible. |
+| **Rollback** | **This is the point where the migration stops being cheaply reversible.** Explicitly requires its own **separate, explicit approval** before executing, per the brief's own instruction never to make an irreversible change without it — this is not bundled into the Phase 7 cutover approval. |
+| **Dependencies** | Phase 7, plus real elapsed time — a confidence window, not an immediate next step. |
+
+### Reconciliation checks (apply across Phases 3, 4, 6, and 7)
+
+So that no record is ever silently lost or duplicated, every phase that
+moves data runs the same core checks:
+
+1. **Row-count reconciliation**, per table, against an *expected* count
+   derived from the documented transformation rules (a straight copy
+   reconciles 1:1; a split like `lead_ids_json` reconciles to
+   `source_rows × average_list_length`; a merge like
+   `Manager_Directory`→`people` reconciles to zero new person rows).
+2. **FK-orphan detection** — any denormalized `rm_name`/`region_name`
+   value in a migrated row with no plausible match in the new
+   `people`/`regions` tables is written to a review list, **never**
+   silently dropped and never silently guessed at.
+3. **Field-level spot checks** on a real sample per table, not just row
+   counts — catches a correct row count hiding a systematic
+   transformation bug.
+4. **Byte-for-byte verification for `daily_cohort_history`** specifically
+   — its entire value depends on never being re-derived, only loaded
+   verbatim from the source.
+5. **A daily shadow-run diff** during Phase 5/6 — the old and new
+   systems computing the same day's snapshot/SLA/cohort/send data in
+   parallel, compared automatically, with any divergence blocking
+   progress to the next phase until explained and fixed.
+6. **A final continuity check immediately after Phase 7's cutover** —
+   the last capture the old system produced and the first the new
+   system produces are compared for a clean, gap-free, duplicate-free
+   handoff.
+
+*(Part 8 complete. Continues in Part 9 — the central repository
+structure for the redesigned system.)*
