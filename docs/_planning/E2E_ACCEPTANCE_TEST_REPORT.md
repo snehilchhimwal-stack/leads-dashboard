@@ -81,6 +81,126 @@ not a new overall verdict.
 
 ---
 
+## Round 2 retest (2026-09-11) — the real re-run, updated verdict
+
+**Verdict: still FAIL — narrower than round 1, not reversed.** This is
+the real re-run the remediation box above said hadn't happened yet:
+Parts 1–9 of `docs/_planning/E2E_ACCEPTANCE_TEST_SPEC.md`, run again in
+full on a fresh disposable branch (`e2e-acceptance-test`, re-created off
+`master` @ `a15f87c`, deleted after this report was committed — same
+discipline as round 1), every test reproduced against a REAL fixture,
+every fixture reverted, nothing pushed except this section and two real
+fixes found along the way (below). Full working log:
+`docs/_planning/E2E_ACCEPTANCE_TEST_LOG.md` on that now-deleted branch —
+same fate as round 1's own log, per this project's established
+"commit only the report" discipline; this section is the durable record.
+
+### Two real bugs found DURING this retest (not pre-existing, not in the original 27 findings)
+
+1. **`check-catalog.py` check H had a genuine regex bug** (TEST 16):
+   `\*\*Evidence:\*\*\s*(.*)` used `\s*` before the capture group — `\s`
+   matches a newline, so on a genuinely blank Evidence line the match
+   slid past the line break onto the NEXT bullet (`**Status:**...`) and
+   captured THAT text instead of recognizing blankness. `JS-018`'s real
+   field order (Evidence-then-Status, the actual template order) is
+   exactly the layout that triggers it — confirmed check H read a truly
+   blank Evidence line as "evidenced," missing the exact case Fix #8 was
+   built to catch. **Fixed and shipped to `master`** the moment it was
+   found (commit `74107f7`, CI confirmed green) — not left for a future
+   round, since this is production tooling, not a test artifact. Verified
+   the fix doesn't change behavior on the real, unmodified catalog, then
+   re-ran the identical fixture against the corrected script: caught
+   correctly.
+2. **Real, organic documentation drift, used as evidence rather than
+   papered over**: `GS-003` (`DailyRmIssueLog.gs`) had gone stale earlier
+   in this same session (the leadership-exclusion mirror, commits
+   `8eb4b85`/`95305fb`, landed without a revalidation). Rather than
+   treating this as noise, it became TEST 3's real fixture (Part 2) and
+   TEST 25's real recovery drill (Part 8) — revalidated for real on
+   `master` (commit `6981257`), `check-catalog.py` D confirmed clean
+   afterward, and a task-closure probe citing `GS-003` flipped from
+   BLOCKED to allowed once the drift was genuinely resolved.
+
+### What moved, test by test (25 named tests + the false-pass battery)
+
+| # | Test | Round 1 | Round 2 | Why |
+|---|---|---|---|---|
+| 2 | Add undocumented component | PARTIAL | PARTIAL (impact analysis much better) | still file-granular, not function-granular; but the file-level signal now walks 2 hops + surfaces architecture overlays |
+| 3 | Modify Closed+Monitored, no record update | PARTIAL | PARTIAL (proven on a real incident) | still advisory-only; confirmed via `GS-003`'s own genuine drift, not a hypothetical |
+| 4 | Rename/move | PARTIAL | PARTIAL (now with a correct, active hint) | still no ID auto-preservation; check C now names the likely rename target |
+| 5 | Delete a component | PASS | PASS (unchanged) | check C still blocks correctly; correctly does NOT false-positive a rename hint on a genuine delete |
+| 6 / 23 | Dependency chain / full cascade | PARTIAL / FAIL | PARTIAL / **PARTIAL** | the NAMED real cascade (`JS-016`→`SHEET-004`→`GS-010`) now caught at 2 hops; general transitivity still capped by design |
+| 7 | Conflicting comment (general) | FAIL | FAIL (unchanged) | a plain, unformatted comment contradiction is still invisible |
+| 8 / 9 / 10 | UI / Sheet / exception coverage | FAIL | FAIL (unchanged) | check G only catches DUPLICATE sub-table IDs, confirmed it doesn't help here |
+| 11 | Doc-only change (P0) | **FAIL, zero signal** | **PARTIAL — real signal** | check I catches a disguised, bold-cited literal falsification for real; the general case (any doc-only lie) is still open by design |
+| 12 | Architecture change | PARTIAL | **PARTIAL → materially fixed** | `FLOW-001`/`FLOW-002` now surface correctly on a real `GS-010` change |
+| 13 | Handover change | FAIL | FAIL (wording fixed, mechanism unchanged) | still a calendar proxy; no longer overclaims correctness |
+| 14 | LOGIC_AUDIT.md protection | FAIL (enforcement) | FAIL (unchanged) | zero code references, confirmed by grep; no fix was proposed |
+| 15 | Missing owner | FAIL | **PASS** | check H catches it |
+| 16 | Missing evidence | FAIL | **PASS** (after fixing check H itself) | see bug #1 above |
+| 17 | Invalid revalidation / task closure | FAIL | **PARTIAL** | `-VerifyCatalogRepo` blocks a close citing a directly-drifted ID |
+| 18 | Downstream / false-closure prevention | FAIL | FAIL (unchanged, confirmed live) | the SAME guard does NOT block a close citing only a downstream (non-directly-drifted) ID |
+| 19 | TBD data | PASS (real) / FAIL (enforce) | unchanged | zero TBD-enforcement code exists; no fix was proposed |
+| 21 | Comment escape battery | PARTIAL (as designed) | unchanged by design | no fix touched the pair-marker allowlist |
+| 25 | Clean recovery | PASS (human-driven) | **PASS, on a real incident** | `GS-003`'s genuine drift, revalidated for real, confirmed via a real task-closure probe |
+| — | False-pass battery (13 items) | 12/13 succeed | **10/13 succeed** | #6 (missing evidence) and #12 (missing owner) now caught; #5 (incorrect comment) caught in its one narrow lane |
+
+Tests not in this table (1, 20, 22, 24) were not independently re-fixtured
+this round — Test 1 is superseded by this retest's own Part 1 baseline;
+20/22/24's underlying mechanisms were untouched by any of the 10 fixes
+and their specific catch/escape shapes were already directly exercised
+elsewhere in this round (see the working log's Part 7 for the exact
+citations) — noted unchanged by inspection, not re-run from scratch.
+
+### Updated automation matrix (Section C's 21 controls, now 24)
+
+| Verdict | Round 1 | Round 2 |
+|---|---|---|
+| PASS | 4 | **7** |
+| PARTIAL | 8 | **11** |
+| FAIL | 3 | **1** |
+| NOT AUTOMATED | 3 | 3 (unchanged) |
+| NOT APPLICABLE | 2 | 2 (unchanged in kind) |
+
+The single remaining FAIL: `sheet-template.md`'s TBD-enforcement — no
+fix was proposed for it, confirmed unchanged.
+
+### The honest read
+
+**Zero controls reach a clean PASS on content correctness — still true,
+exactly as round 1 found.** Every PASS above is structural, or a control
+now correctly enforcing something it already claimed to (Owner/Evidence),
+not a new content-understanding capability. Per the spec's own strict
+rule — *"a change that occurs silently, with no detection, no owner, no
+traceability, no review, is a FAIL"* — TEST 8/9/10 (new UI element, Sheet
+change, exception path) still produce **literal zero signal**, the same
+standard round 1 used to fail those tests. That alone is enough to keep
+the overall verdict at **FAIL**, and this report is not going to round
+that up. What genuinely changed: the P0 finding (content can contradict
+code with zero signal) now has a real, narrow mitigation where it had
+none; two governance gates (owner, evidence) that were pure prose now
+have working enforcement; the one real cascade named as broken in round 1
+is fixed; and the automation matrix's FAIL count dropped by two-thirds.
+That is real, evidence-backed progress on the 10 fixes this project
+actually scoped and shipped — not a verdict flip, and not nothing either.
+
+**Per the 21-point criteria**: criteria 9 (validation is evidence-backed)
+and, narrowly, 4 (architecture changes trigger impact analysis, for the
+overlay's own visibility) move from violated to satisfied. Criterion 13
+(a task can be closed without required evidence) moves from fully
+violated to partially satisfied (direct-drift citations only). The
+remaining ~17 criteria are unchanged from round 1's own accounting.
+
+**Do not build more architecture beyond what Section I already
+proposed.** Nothing in this retest surfaced a gap the 10 fixes didn't
+already know about and choose not to build (the P0's general case,
+sub-table registration, TBD enforcement, wrong-validation-version
+detection) — every real finding this round was either confirmation of an
+existing, correctly-scoped fix, or a genuine bug IN one of those fixes,
+found and fixed in the same session it was found.
+
+---
+
 ## B. Test results
 
 `Result` — PASS (control works as the spec expects) / PARTIAL (some
