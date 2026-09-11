@@ -23,9 +23,15 @@ function runOpsChecklistRunnerTests_() {
       ['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source'],
       ['Test A1 One', 'TL', 'Test Region', TEST_EMAIL_PRIMARY_, 2, 'manual'],
     ]),
-    'Movement_Log': TestMockSheet_('Movement_Log', [
-      ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_),
-      [new Date(now.getTime() - 2 * 3600000), 'clean test'].concat(SNAPSHOT_COLUMNS_.map(function () { return ''; })),
+    // checkMovementLogFreshness_ reads Movement_Log_Runs, not
+    // Movement_Log itself, since Phase 6 of the Lead History &
+    // Versioning Review (docs/_planning/DB_ARCHITECTURE_REVIEW.md) —
+    // Movement_Log's own last row stopped being a reliable "did a
+    // capture happen" signal once content-hash dedup means an unchanged
+    // lead no longer gets a new row every run.
+    'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [
+      MOVEMENT_LOG_RUNS_COLUMNS_,
+      [new Date(now.getTime() - 2 * 3600000), 'clean test', 1, 0],
     ]),
   });
   TestEnv_setUp_('Tests_OpsChecklistRunner', cleanSs);
@@ -53,9 +59,11 @@ function runOpsChecklistRunnerTests_() {
     const dirtySs = TestMockSpreadsheet_({
       'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
       'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()), // has one real gap: 'Test A1 NoMail'
-      'Movement_Log': TestMockSheet_('Movement_Log', [
-        ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_),
-        [new Date(now.getTime() - 10 * 3600000), 'stale test'].concat(SNAPSHOT_COLUMNS_.map(function () { return ''; })), // 10h ago -> stale
+      // See the clean-case fixture above for why this reads
+      // Movement_Log_Runs, not Movement_Log.
+      'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [
+        MOVEMENT_LOG_RUNS_COLUMNS_,
+        [new Date(now.getTime() - 10 * 3600000), 'stale test', 1, 0], // 10h ago -> stale
       ]),
     });
     const monthShort = 'leads';

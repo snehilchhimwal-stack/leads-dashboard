@@ -124,9 +124,71 @@ const SNAPSHOT_COLUMNS_ = [
   'rm_is_active', 'lead_closing_reason',
 ];
 
+// ==================== Content-hash dedup (Lead History & Versioning
+// Review, Phase 6) ====================
+// A trailing bookkeeping column, same "append, never insert" rule as
+// every other column here — NOT part of SNAPSHOT_COLUMNS_ (that array is
+// exactly the tracked LEAD fields; this is a computed value over them).
+const CONTENT_HASH_COLUMN_ = 'content_hash';
+
+// SHA-256 hex digest over every SNAPSHOT_COLUMNS_ field, NUL-joined so an
+// empty field can never be confused with a field boundary shifting (a
+// plain '|'-join would let 'a','b|c' and 'a|b','c' hash identically).
+// Deliberately excludes snapshot_at/snapshot_label (capture bookkeeping,
+// not lead content) and CONTENT_HASH_COLUMN_ itself. `getFieldValue` is a
+// (row, key) => value accessor — passed in rather than assuming
+// getVal_/colIndex, so this same function works both against a freshly
+// read leads-tab row (via getVal_) and a normalized {key: value} object
+// pulled from a Movement_Log row (see _movementLogRowToFieldsGs_ below).
+// Date fields get rendered as the SAME IST wall-clock string
+// js/sheets-writeback.js's movementCellValue() already produces
+// ('yyyy-MM-dd HH:mm:ss') — not getTime() or Date's own toString(),
+// which would differ from what the browser writer computes for an
+// identical instant. This is NOT cosmetic: the two writers must hash an
+// identical lead to an identical digest, or dedup silently breaks across
+// runtimes (each treats the other's capture as "different" forever).
+const CONTENT_HASH_DATE_FIELDS_ = { lead_assigned_at: true, last_connect_time: true };
+function _leadContentHashGs_(getFieldValue) {
+  const parts = SNAPSHOT_COLUMNS_.map(function (key) {
+    const v = getFieldValue(key);
+    if (CONTENT_HASH_DATE_FIELDS_[key]) {
+      return v instanceof Date ? Utilities.formatDate(v, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') : '';
+    }
+    return v === null || v === undefined ? '' : String(v);
+  });
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, parts.join(' '));
+  return bytes.map(function (b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
+}
+
+// ==================== Movement_Log_Runs (Phase 6) ====================
+// One row per capture RUN, regardless of how many leads' content actually
+// changed — decoupled on purpose from Movement_Log's own per-lead rows,
+// so "did a capture happen" stays answerable even once unchanged leads
+// stop getting a new Movement_Log row every time (see
+// checkMovementLogFreshness_ below, and the Lead History & Versioning
+// Review's Phase 2 finding this closes). Mirrors the target design's
+// `lead_ingestion_runs` table (docs/_planning/DB_ARCHITECTURE_REVIEW.md)
+// as closely as a Sheets tab reasonably can — Apps Script has no real
+// transactions, so there's no separate completed_at column here: a run
+// either finishes and this row gets written, or it throws and nothing
+// after that point runs at all (including this write) — the row's mere
+// EXISTENCE is the "completed" signal, not a nullable flag on it.
+const MOVEMENT_LOG_RUNS_SHEET_ = 'Movement_Log_Runs';
+const MOVEMENT_LOG_RUNS_COLUMNS_ = ['run_at', 'run_label', 'lead_count_seen', 'leads_changed'];
+
+function ensureMovementLogRunsSheet_(ss) {
+  let sheet = ss.getSheetByName(MOVEMENT_LOG_RUNS_SHEET_);
+  if (!sheet) {
+    sheet = ss.insertSheet(MOVEMENT_LOG_RUNS_SHEET_);
+    sheet.getRange(1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).setValues([MOVEMENT_LOG_RUNS_COLUMNS_]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
 function ensureMovementLogSheet_(ss) {
   let sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
-  const fullHeaders = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+  const fullHeaders = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_).concat([CONTENT_HASH_COLUMN_]);
   if (!sheet) {
     sheet = ss.insertSheet(MOVEMENT_LOG_SHEET);
     sheet.getRange(1, 1, 1, fullHeaders.length).setValues([fullHeaders]);
@@ -247,6 +309,48 @@ function _collapseLatestByKeyGs_(rows, cutoffMs) {
 // below instead, to avoid two separate reads.
 function _lastMovementLogSnapshotByKeyGs_(ss, cutoffMs) {
   return _collapseLatestByKeyGs_(_readMovementLogRowsGs_(ss), cutoffMs);
+}
+
+// Content-hash dedup (Phase 6) — one extra, dedicated read of
+// Movement_Log's key/timestamp/content_hash columns only (not the full
+// row width _readMovementLogHistoryRowsGs_ reads), collapsed to each
+// lead's MOST RECENT hash regardless of retention cutoff — unlike
+// _collapseLatestByKeyGs_ above, dedup must compare against whatever the
+// latest row actually is, not "latest before some boundary". A sheet
+// with no content_hash column yet (not upgraded, or genuinely empty)
+// returns {} — every lead in that case falls through to "no prior hash",
+// so the fresh capture always writes, which is the safe direction to
+// fail in (an extra row, never a wrongly-skipped one).
+function _latestContentHashByKeyGs_(ss) {
+  const map = {};
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!sheet) return map;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return map;
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const snapAtCol = headers.indexOf('snapshot_at');
+  const leadIdCol = headers.indexOf('lead_id');
+  const clientIdCol = headers.indexOf('client_id');
+  const hashCol = headers.indexOf(CONTENT_HASH_COLUMN_);
+  if (snapAtCol === -1 || hashCol === -1) return map; // not upgraded yet
+
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  values.forEach(function (row) {
+    const ts = row[snapAtCol];
+    if (!(ts instanceof Date)) return;
+    const hash = String(row[hashCol] || '').trim();
+    if (!hash) return; // a pre-upgrade row has no hash to compare against
+    const clientId = String(row[clientIdCol] || '').trim();
+    const leadId = String(row[leadIdCol] || '').trim();
+    const key = clientId || ('l:' + leadId);
+    const cur = map[key];
+    if (!cur || ts.getTime() > cur.atMs) map[key] = { atMs: ts.getTime(), hash: hash };
+  });
+
+  const out = {};
+  Object.keys(map).forEach(function (k) { out[k] = map[k].hash; });
+  return out;
 }
 
 // Each lead's call_attempts as of the latest snapshot strictly before
@@ -410,25 +514,60 @@ function snapshotOpenLeads_(label) {
     Logger.log('Comment_History log failed (Movement_Log capture continues): ' + e);
   }
 
+  // Content-hash dedup (Lead History & Versioning Review, Phase 6) — read
+  // every lead's latest hash ONCE, before this run writes anything, same
+  // "one read, many lookups" discipline buildMovementLogMapsGs_ already
+  // established. A lead whose live values hash identically to its latest
+  // Movement_Log row is CONFIRMED (its ingestion run is still recorded
+  // below via Movement_Log_Runs) but does NOT get a new duplicate row —
+  // see _leadContentHashGs_'s own header for exactly what's hashed and why.
+  const latestHashByKey = _latestContentHashByKeyGs_(ss);
+
+  let leadCountSeen = 0;
   const out = [];
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
+    leadCountSeen++;
+
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    const key = clientId || ('l:' + leadId);
+    const hash = _leadContentHashGs_(function (fieldKey) { return getVal_(row, colIndex, fieldKey); });
+    if (latestHashByKey[key] === hash) return; // unchanged since the last capture — no new row
 
     const record = [now, snapshotLabel];
-    SNAPSHOT_COLUMNS_.forEach(function (key) {
-      record.push(getVal_(row, colIndex, key));
+    SNAPSHOT_COLUMNS_.forEach(function (fieldKey) {
+      record.push(getVal_(row, colIndex, fieldKey));
     });
+    record.push(hash);
     out.push(record);
   });
 
-  if (!out.length) return;
+  if (out.length) {
+    const logSheet = ensureMovementLogSheet_(ss);
+    const startRow = logSheet.getLastRow() + 1;
+    logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
+  }
 
-  const logSheet = ensureMovementLogSheet_(ss);
-  const startRow = logSheet.getLastRow() + 1;
-  logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
-
+  // Always runs, even when out.length is 0 — pruning old rows and
+  // recording that this run happened are both independent of whether any
+  // lead's content actually changed this time. Getting this wrong (an
+  // early return before these two on a zero-change run) would silently
+  // stop Daily_Cohort_History's nightly-eligible persistence AND
+  // Movement_Log_Runs' own freshness record on any run where nothing
+  // changed — exactly the kind of regression the Lead History &
+  // Versioning Review's Phase 2 analysis warned this change could
+  // introduce if the two concepts (a run happened vs. a lead changed)
+  // aren't kept genuinely independent.
   pruneMovementLog_(ss);
+
+  try {
+    const runsSheet = ensureMovementLogRunsSheet_(ss);
+    runsSheet.getRange(runsSheet.getLastRow() + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length)
+      .setValues([[now, snapshotLabel, leadCountSeen, out.length]]);
+  } catch (e) {
+    Logger.log('Movement_Log_Runs write failed (Movement_Log capture continues): ' + e);
+  }
 
   // Runs LAST, after Movement_Log's own prune, so it reads Movement_Log's
   // true current (post-prune) retained range rather than a stale
@@ -903,6 +1042,7 @@ function snapshotPeriodic() {
 function setupMovementTracking() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureMovementLogSheet_(ss);
+  ensureMovementLogRunsSheet_(ss);
 
   // Idempotent: safe to re-run any time you need to reinstall or reschedule
   // the triggers — it won't create duplicates. Deletes EVERY existing
@@ -958,20 +1098,29 @@ function snapshotNow() {
  * generous grace window as genuinely worth checking, rather than assuming
  * silence means everything is fine.
  *
- * Pure(ish) — one read of Movement_Log's last row, no writes. Returns
- * { status: 'missing'|'empty'|'unreadable'|'fresh'|'stale', ...detail } so
- * a caller can act on it programmatically; checkMovementLogFreshnessNow
- * below is the console-callable wrapper that logs this in a readable form
- * — same split as auditUnresolvedRms_/auditUnresolvedRmsNow (RmHierarchy.gs).
+ * Pure(ish) — one read, no writes. **Reads Movement_Log_Runs, not
+ * Movement_Log itself** (changed in Phase 6 of the Lead History &
+ * Versioning Review, docs/_planning/DB_ARCHITECTURE_REVIEW.md) — since
+ * content-hash dedup means an unchanged lead no longer gets a new
+ * Movement_Log row every run, "Movement_Log's last row" stopped being a
+ * reliable "did a capture happen" signal (it would now read as
+ * increasingly stale on a perfectly healthy system with few real
+ * changes). Movement_Log_Runs gets a row on every run regardless of
+ * whether anything changed, so it stays a correct freshness signal.
+ * Returns { status: 'missing'|'empty'|'unreadable'|'fresh'|'stale',
+ * ...detail } so a caller can act on it programmatically;
+ * checkMovementLogFreshnessNow below is the console-callable wrapper
+ * that logs this in a readable form — same split as
+ * auditUnresolvedRms_/auditUnresolvedRmsNow (RmHierarchy.gs).
  */
 const MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_ = 8;
 function checkMovementLogFreshness_(ss, now) {
-  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_RUNS_SHEET_);
   if (!sheet) return { status: 'missing' };
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return { status: 'empty' };
 
-  const lastSnapshotAt = withRetry_(function () { return sheet.getRange(lastRow, 1).getValue(); }, 'checkMovementLogFreshness_: read last snapshot_at');
+  const lastSnapshotAt = withRetry_(function () { return sheet.getRange(lastRow, 1).getValue(); }, 'checkMovementLogFreshness_: read last run_at');
   if (!(lastSnapshotAt instanceof Date)) return { status: 'unreadable', rawValue: lastSnapshotAt, rowNum: lastRow };
 
   const ageHours = ((now || new Date()).getTime() - lastSnapshotAt.getTime()) / 36e5;
@@ -985,10 +1134,10 @@ function checkMovementLogFreshness_(ss, now) {
 function checkMovementLogFreshnessNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const result = checkMovementLogFreshness_(ss, new Date());
-  if (result.status === 'missing') { Logger.log('Movement_Log sheet not found — run setupMovementTracking first.'); return; }
-  if (result.status === 'empty') { Logger.log('Movement_Log has no captured rows yet — allow time after setupMovementTracking for the first scheduled capture to fire.'); return; }
+  if (result.status === 'missing') { Logger.log('Movement_Log_Runs sheet not found — run setupMovementTracking first.'); return; }
+  if (result.status === 'empty') { Logger.log('Movement_Log_Runs has no rows yet — allow time after setupMovementTracking for the first scheduled capture to fire.'); return; }
   if (result.status === 'unreadable') {
-    Logger.log('Movement_Log row ' + result.rowNum + ' has an unreadable snapshot_at value (' + result.rawValue + ') — check the sheet directly.');
+    Logger.log('Movement_Log_Runs row ' + result.rowNum + ' has an unreadable run_at value (' + result.rawValue + ') — check the sheet directly.');
     return;
   }
   const label = Utilities.formatDate(result.lastSnapshotAt, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') + ' IST';

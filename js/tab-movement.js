@@ -44,6 +44,11 @@ let movementFetchStartedAt = null;
 let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
+// Mirrors MovementTracker.gs's MOVEMENT_LOG_RUNS_SHEET_/
+// MOVEMENT_LOG_RUNS_COLUMNS_ exactly — see that constant's own comment
+// for why this exists as a tab separate from Movement_Log itself.
+const MOVEMENT_LOG_RUNS_TAB_NAME = 'Movement_Log_Runs';
+const MOVEMENT_LOG_RUNS_COLUMNS = ['run_at', 'run_label', 'lead_count_seen', 'leads_changed'];
 // Comment-history export written on every "Generate" click for the
 // combined All Issues email — see pushLeadsToFollowups. A person (or a
 // later automation) reads collated_comments and fills in
@@ -197,7 +202,12 @@ async function fetchMovementLog(sheetId){
     const cols = table.cols;
     const rows = table.rows.map(r => r.c || []);
     const idx = {};
-    MOVEMENT_LOG_COLUMNS.forEach(key => {
+    // 'content_hash' looked up the same way but NOT added to
+    // MOVEMENT_LOG_COLUMNS itself — that array also drives
+    // SNAPSHOT_FIELD_KEYS (fields read directly off a live lead record);
+    // content_hash is computed, never read off a lead, so it must stay
+    // out of that derivation.
+    MOVEMENT_LOG_COLUMNS.concat(['content_hash']).forEach(key => {
       let found = -1;
       cols.forEach((c, i) => { if (found === -1 && String(c.label || '').trim() === key) found = i; });
       idx[key] = found;
@@ -249,6 +259,11 @@ async function fetchMovementLog(sheetId){
           // column (idx===-1) or blank cell, so no separate fallback needed.
           rm_is_active: getRaw(c, 'rm_is_active'),
           lead_closing_reason: getRaw(c, 'lead_closing_reason') || '',
+          // Content-hash dedup (Lead History & Versioning Review, Phase
+          // 6) — a trailing column appended after MOVEMENT_LOG_COLUMNS,
+          // deliberately not part of that array (see its own definition):
+          // a pre-upgrade row simply has none, read here as ''.
+          content_hash: getRaw(c, 'content_hash') || '',
         };
       })
       .filter(r => r.snapshot_at); // undated rows can't be sequenced — drop them
@@ -288,6 +303,28 @@ function movementUnavailableReason(){
 // within a single render pass; without this, the same grouping/sorting of
 // the full retained history (up to 7 days of snapshots) reran from scratch
 // on every one of those, every filter change.
+// Content-hash dedup (Lead History & Versioning Review, Phase 6) — the
+// browser-writer counterpart of MovementTracker.gs's
+// _latestContentHashByKeyGs_. Deliberately NOT cached like
+// buildMovementHistories() below: browserSnapshotOpenLeads calls
+// fetchMovementLog immediately before this, specifically so a capture
+// the Apps Script trigger already made since this tab was last loaded is
+// seen here too — comparing against a stale client-side cache would
+// silently under-dedupe (or, worse, over-write) relative to whatever the
+// OTHER writer most recently recorded.
+function latestMovementLogHashByKey(){
+  const map = new Map();
+  movementSnapshots.forEach(rec => {
+    if (!rec.content_hash) return; // a pre-upgrade row has none
+    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    const cur = map.get(key);
+    if (!cur || rec.snapshot_at > cur.atMs) map.set(key, { atMs: rec.snapshot_at, hash: rec.content_hash });
+  });
+  const out = {};
+  map.forEach((v, k) => { out[k] = v.hash; });
+  return out;
+}
+
 let _movementHistoriesCache = null;
 let _movementHistoriesCacheSrc = null;
 function buildMovementHistories(){
