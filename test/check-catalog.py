@@ -9,7 +9,7 @@ the reciprocity logic was already prototyped in Python (DOC-040), the CI
 runner has python3, and it means the checks can be run and verified
 locally on a machine with no Node (this repo's, as of 2026-09-04).
 
-What it does — five checks against docs/INDEX.md + the record files + git:
+What it does — six checks against docs/INDEX.md + the record files + git:
 
   A. INDEX.md internal reciprocity    (BLOCKING — green as of 2026-09-10)
      every A->B in a Depends On column has B->A in B's Used By, and back;
@@ -42,9 +42,20 @@ What it does — five checks against docs/INDEX.md + the record files + git:
      "undocumented component". Prints the set that should go Stale and
      a ready-to-run update-tasks.ps1 ops JSON (CI cannot reach
      tasks.json itself).
+  G. Sub-table ID uniqueness           (ADVISORY)
+     (Required Fix #7, E2E acceptance test report, F10/TESTS 8+10):
+     FN-/BTN-/UI-/RULE-/EXC-/CFG-/API- sub-components (~460 rows at
+     baseline) live inside each owning record's own markdown sub-tables,
+     never as INDEX.md master-table rows -- A-C/F never see them at all.
+     This does NOT close that whole gap (catching "the code added a new
+     button/exception with no matching row" needs real JS/.gs static
+     analysis, out of scope here) -- it catches the smaller, unambiguous
+     piece: every sub-id must be unique across the WHOLE catalog. A
+     duplicate has no legitimate justification, same class of defect as
+     A/B/C/F already catch for own-file ids, just one tier down.
 
-Exit code: non-zero iff A, B or C fail. D and E only print.
-Flip D/E to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, and G only print.
+Flip D/E/G to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -345,6 +356,81 @@ def check_snapshot(rows):
             problems.append(f"master table has {actual[pre]} `{pre}-` row(s) but the Coverage snapshot has no `{pre}-` line")
     return problems
 
+# ---------------------------------------------------------------- G
+# Sub-table ID uniqueness (Required Fix #7, E2E acceptance test report,
+# F10/TESTS 8+10): FN-/BTN-/UI-/RULE-/EXC-/CFG-/API- sub-components
+# (~460 rows at baseline) live INSIDE each owning record's own markdown
+# sub-tables, not as INDEX.md master-table rows -- parse_index()'s
+# len(cells) != 8 filter never sees them at all, so nothing in A-F ever
+# looks at them. This does NOT close that whole gap -- catching "the
+# code added a new button/exception with no matching row" needs real
+# JS/.gs static analysis (a much bigger, separate undertaking, out of
+# scope here) -- but a smaller, real, zero-false-positive-risk piece of
+# it is buildable today: every sub-ID must be used exactly once across
+# the WHOLE catalog. A duplicate (the same FN-121 appearing in two
+# different records, e.g. from a bad copy-paste of a template row) is
+# unambiguously wrong with no legitimate justification, exactly the
+# same class of defect check A/B/C/F already catch for own-file ids.
+SUBTABLE_HEADER = re.compile(
+    r'^## .+ — `([A-Z]+)-XXX` sub-table\s*$', re.M)
+SUBTABLE_ROW_ID = re.compile(
+    r'^\|\s*(?:~~)?([A-Z]+-\d{3,4})(?:~~)?\b')
+
+def scan_subtable_ids():
+    """path -> list of (id, 1-based line number) for every sub-table row
+    found in every record file under the live type-dirs + docs/_archive/
+    (never docs/_templates/ -- a template's own placeholder rows aren't
+    real ids)."""
+    found = []
+    dirs = list(TYPE_DIR.values()) + ["_archive"]
+    for sub in sorted(set(dirs)):
+        d = os.path.join(ROOT, "docs", sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(d, fname)
+            lines = open(fpath, encoding="utf-8").read().splitlines()
+            in_subtable = False
+            for i, line in enumerate(lines, 1):
+                if SUBTABLE_HEADER.match(line):
+                    in_subtable = True
+                    continue
+                if in_subtable and line.startswith("## "):
+                    in_subtable = False
+                if not in_subtable or not line.lstrip().startswith("|"):
+                    continue
+                if re.match(r'^\|\s*-{2,}', line) or line.lower().startswith("| id "):
+                    continue  # the table's own header/separator row
+                m = SUBTABLE_ROW_ID.match(line)
+                if m:
+                    found.append((m.group(1), f"{sub}/{fname}:{i}"))
+    return found
+
+def check_subtable_ids(rows=None):
+    hits = scan_subtable_ids()
+    by_id = {}
+    for cid, loc in hits:
+        by_id.setdefault(cid, []).append(loc)
+    out = []
+    for cid in sorted(by_id):
+        locs = by_id[cid]
+        if len(locs) > 1:
+            out.append(f"DUPLICATE {cid} in {len(locs)} sub-table rows (must be unique across the whole catalog): {', '.join(locs)}")
+    # Wrapped in "(...)" like check E's own skip/no-op lines -- this is a
+    # status line, not a problem, and main()'s note-count filter already
+    # excludes anything starting with "(" for exactly that reason.
+    by_prefix = {}
+    for cid in by_id:
+        by_prefix[cid.split("-")[0]] = by_prefix.get(cid.split("-")[0], 0) + 1
+    if by_prefix:
+        counts = ", ".join(f"{p}-: {n}" for p, n in sorted(by_prefix.items()))
+        out.append(f"(scanned {len(by_id)} unique sub-table id(s) across {counts})")
+    else:
+        out.append("(no sub-table rows found)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -369,7 +455,8 @@ def main():
     print()
 
     for label, fn in [("D. Last-Verified drift", check_last_verified_drift),
-                      ("E. change -> component-ID impact", check_impact)]:
+                      ("E. change -> component-ID impact", check_impact),
+                      ("G. Sub-table ID uniqueness", check_subtable_ids)]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
