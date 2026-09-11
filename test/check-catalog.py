@@ -9,7 +9,7 @@ the reciprocity logic was already prototyped in Python (DOC-040), the CI
 runner has python3, and it means the checks can be run and verified
 locally on a machine with no Node (this repo's, as of 2026-09-04).
 
-What it does — seven checks against docs/INDEX.md + the record files + git:
+What it does — eight checks against docs/INDEX.md + the record files + git:
 
   A. INDEX.md internal reciprocity    (BLOCKING — green as of 2026-09-10)
      every A->B in a Depends On column has B->A in B's Used By, and back;
@@ -69,9 +69,25 @@ What it does — seven checks against docs/INDEX.md + the record files + git:
      Evidence line. Not general content correctness (Required Fix #1's
      much bigger, deliberately-not-built territory) -- just the one
      specific rule the template already states and nothing checked.
+  I. Cited-literal check               (ADVISORY)
+     The "lighter mitigation" for Required Fix #1 (F11/F13, P0) --
+     alongside the recurring weekly doc-content spot-check task, this is
+     the second, narrower, code-only answer chosen instead of the two
+     heavier options (a general LLM-diffing CI step, or nothing).
+     Neither one closes the P0 finding in general -- no check anywhere
+     compares a record's prose to the code's actual behavior wholesale,
+     and this doesn't either. What it catches is the exact, narrow shape
+     TEST 11 proved: a record citing a specific ALL-CAPS code literal
+     (e.g. `RAW`/`USER_ENTERED`) on the same line as a `#Lnn` anchor --
+     if that literal doesn't appear anywhere in the real function body
+     the anchor points into, something drifted. Misses the same test's
+     OTHER false claim (restated in a Data Lineage row with no line
+     anchor of its own -- nothing for a line-anchored check to resolve
+     against). Heuristic brace-counting to find a function's real
+     extent, so findings are worded as "verify," not "wrong."
 
-Exit code: non-zero iff A, B or C fail. D, E, G, and H only print.
-Flip D/E/G/H to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, and I only print.
+Flip D/E/G/H/I to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -563,6 +579,170 @@ def check_owner_evidence():
         out.append("(no blank Owner / unevidenced Closed+Monitored or Validated status found)")
     return out
 
+# ---------------------------------------------------------------- I
+# Cited-literal check (the "lighter mitigation," alongside the recurring
+# weekly doc-content spot-check task -- both are partial answers to
+# Required Fix #1 / F11+F13, the P0 finding this project chose NOT to
+# build the heavy fix for: no general content-comparison mechanism
+# exists, and still doesn't after this. What this DOES catch: the exact,
+# narrow, proven shape of TEST 11's failure -- a record citing a
+# specific code LITERAL (an ALL-CAPS constant like `RAW`/`USER_ENTERED`)
+# next to a `#Lnn` line anchor on the same line. If that literal doesn't
+# appear anywhere in the real function body the anchor points into,
+# something has drifted -- either the citation or the code. It does NOT
+# catch TEST 11's OTHER false claim (the same lie, restated in the
+# "Data lineage" table row, which cites the FN- id instead of its own
+# line number -- no anchor on that row, nothing for this check to
+# resolve against). Advisory only, and deliberately worded as "verify"
+# rather than "wrong" -- a heuristic text/line match can have a
+# legitimate miss (the literal genuinely lives just outside the found
+# function boundary, or the citation covers a family of near-identical
+# functions and only some use that literal).
+#
+# NARROWED AFTER REAL TESTING (2026-09-11): the first version flagged 27
+# "mismatches" on a catalog independently verified clean, every one a
+# false positive from the same root cause -- an FN- sub-table row's
+# other columns ("Inputs", "Calls") routinely name a constant BY
+# REFERENCE (what it depends on, or the range of values a parameter
+# accepts), not as literal text expected inside the function body
+# itself; e.g. `RAW`/`USER_ENTERED` in an "Inputs" cell describes what
+# a `valueInputOption` PARAMETER may be called with, and genuinely never
+# appears as bare text in a generic helper that just forwards it.
+# Confirmed for real: FN-122's `appendSheetRows` cites `RAW` in its
+# Inputs cell but never contains that string -- the CALLERS (like
+# FN-128) do. A "Calls" cell naming a cross-runtime twin compounds it
+# (e.g. "**twin `HEADER_ALIASES_` on the backend**" -- real, correct,
+# and never appears in the file being checked at all, since it lives in
+# a DIFFERENT file by definition). Narrowed to the one pattern that
+# reliably distinguishes "this literal is the code's actual behavior at
+# this line" from those: **bold** emphasis (the style this catalog uses
+# for "this is the real side effect," confirmed against FN-128's own
+# "Sheets write, **`RAW` value-input**") AND not on a line naming
+# another file in backticks nearby (a `twin`/cross-runtime mention) AND
+# not preceded by "twin" specifically, since that one phrase alone
+# accounted for the one bold false positive found.
+CITED_LITERAL = re.compile(r'\*\*([^*`]{0,20})?`([A-Z][A-Z0-9_]{1,30})`(\()?')
+OTHER_FILE_MENTION = re.compile(r'`[A-Za-z0-9_.-]+\.(?:gs|js)`')
+CROSS_REF_WORDS = ("twin", "mirror")  # "twin"/"mirrors"/"mirrored" -- this
+# catalog's two words for "the cross-runtime sibling of this constant,
+# named here for context, defined in that OTHER file/component"
+LINE_COMMENT = re.compile(r'(?<!:)//.*$')  # a real `// comment`, not the
+# `//` inside a URL's `https://` (the one lookbehind this codebase's own
+# comment style actually needs -- confirmed against real source)
+
+def strip_line_comment(line):
+    """Real, live false-negative found testing this check (2026-09-11):
+    js/sheets-writeback.js:360-361 has an explanatory comment reading
+    "RAW, not the default USER_ENTERED -- ... USER_ENTERED is exactly
+    what silently [caused a real past bug]" a few lines above the
+    function's own real, correct 'RAW' usage. A bare-word match without
+    this strip finds "USER_ENTERED" mentioned in that comment and
+    reports the function as containing it -- true, but for exactly the
+    wrong reason (explaining what NOT to use), so a record that had been
+    changed to falsely claim USER_ENTERED went uncaught on the first
+    real test of this fixture. Stripping `//` comments before matching
+    fixes it without weakening the real match: the true positive ('RAW'
+    on an actual `sheetsApiValuesBatchUpdate(..., 'RAW')` call) is
+    real code, never inside a comment, so it's untouched."""
+    return LINE_COMMENT.sub('', line)
+LINE_ANCHOR = re.compile(r'#L(\d+)')
+COMPONENT_ID_FULL = re.compile(r'^(?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3,4}$')
+
+def function_body_lines(src_lines, start_line_1indexed, cap=200):
+    """The real extent of the function/block starting at or after
+    start_line (1-indexed), found by brace-depth from the first '{' at
+    or after that line to the matching '}' -- a naive count (doesn't
+    understand strings/comments/regex literals, so a stray brace inside
+    one of those can throw it off in principle); good enough for an
+    advisory heuristic on this codebase's consistent style, capped at
+    `cap` lines so a pathological miscount can't scan the whole file."""
+    n = len(src_lines)
+    i = start_line_1indexed - 1
+    if i < 0 or i >= n:
+        return []
+    depth = 0
+    started = False
+    end = min(n, i + cap)
+    for j in range(i, end):
+        depth += src_lines[j].count("{") - src_lines[j].count("}")
+        if src_lines[j].count("{"):
+            started = True
+        if started and depth <= 0:
+            return src_lines[i:j + 1]
+    return src_lines[i:end]
+
+def check_cited_literals(rows):
+    out = []
+    checked = 0
+    dirs = list(TYPE_DIR.values())  # not _archive/ -- a retired record's
+    # cited lines describe code that's gone by definition; nothing to
+    # check a retired citation against.
+    for sub in sorted(set(dirs)):
+        d = os.path.join(ROOT, "docs", sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            m = re.match(r'((?:DASH|TAB|JS|GS|SHEET|EXT|DATA|FLOW|TRIGGER)-\d{3})-.*\.md$', fname)
+            if not m:
+                continue
+            cid = m.group(1)
+            if cid not in rows:
+                continue
+            real_files = [f for f in rows[cid]["files"] if "*" not in f]
+            if len(real_files) != 1:
+                continue  # only handle the common, unambiguous one-file case
+            src_path = os.path.join(ROOT, real_files[0])
+            if not os.path.exists(src_path):
+                continue  # check C already reports this; don't double up
+            src_lines = None  # lazy-load, only if this record has a hit
+            record_lines = open(os.path.join(d, fname), encoding="utf-8").read().splitlines()
+            for line in record_lines:
+                anchors = LINE_ANCHOR.findall(line)
+                if not anchors:
+                    continue
+                literals = []
+                for lm in CITED_LITERAL.finditer(line):
+                    prefix, tok, call_paren = lm.group(1) or "", lm.group(2), lm.group(3)
+                    if call_paren or COMPONENT_ID_FULL.match(tok) or tok.startswith("L"):
+                        continue
+                    before = line[:lm.start()]
+                    after = line[lm.end():lm.end() + 25]
+                    # A cross-reference word ("twin"/"mirror...") can sit
+                    # inside the bold span itself ("**twin `X` on the
+                    # backend**") or just before it ("the twin **`X`**");
+                    # a component ID named right after the token
+                    # ("`X` (`GS-003`)") is the same signal without
+                    # needing the word -- either way, X names a
+                    # DIFFERENT file/component's constant by definition.
+                    ctx = (prefix + " " + before[-15:]).lower()
+                    if any(w in ctx for w in CROSS_REF_WORDS):
+                        continue
+                    after_id = re.match(r'\s*\(?`?([A-Z]+-\d{3,4})', after)
+                    if after_id and COMPONENT_ID_FULL.match(after_id.group(1)):
+                        continue  # e.g. "...`RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)" -- names a different component right after
+                    if OTHER_FILE_MENTION.search(line):
+                        continue  # a filename is named on this same line -- too likely describing that file's own content, not this one's
+                    literals.append(tok)
+                if not literals:
+                    continue
+                if src_lines is None:
+                    src_lines = open(src_path, encoding="utf-8").read().splitlines()
+                for tok in literals:
+                    checked += 1
+                    found = False
+                    for ln in anchors:
+                        body = function_body_lines(src_lines, int(ln))
+                        code_only = [strip_line_comment(bl) for bl in body]
+                        if any(re.search(rf'\b{re.escape(tok)}\b', bl) for bl in code_only):
+                            found = True
+                            break
+                    if not found:
+                        out.append(f"{cid} ({sub}/{fname}): cites `{tok}` near {'/'.join('#L'+a for a in anchors)} "
+                                    f"but `{tok}` doesn't appear in that function body in {real_files[0]} — verify")
+    if not out:
+        out.append(f"(checked {checked} cited literal(s) against their line-anchored function bodies, no mismatch found)")
+    return out
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -589,7 +769,8 @@ def main():
     for label, fn in [("D. Last-Verified drift", check_last_verified_drift),
                       ("E. change -> component-ID impact", check_impact),
                       ("G. Sub-table ID uniqueness", check_subtable_ids),
-                      ("H. Owner / Evidence content", lambda r: check_owner_evidence())]:
+                      ("H. Owner / Evidence content", lambda r: check_owner_evidence()),
+                      ("I. Cited-literal check", check_cited_literals)]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
