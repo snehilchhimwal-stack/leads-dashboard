@@ -810,6 +810,367 @@ always mean mergeable columns.
 | `Movement_Log.snapshot_label`, `SLA_History.source`, `Daily_Cohort_History.source`, `Manager_Directory.email_source` | Convert to enum/constrained type | Database CHECK constraint / enum per column | Each already has a small, known, cited value set; an enum catches a bad value at write time | **Low** — safe tightening; verify against live data first for any uncited 4th value |
 | `Manager_Directory.people_reporting_up_to_them` | Likely remove | Computed on read from the target `people` table's chain columns instead of stored | Appears fully derivable from `RM_Hierarchy`'s own chain columns | **Medium** — needs confirmation this column is never independently hand-edited before removing it |
 
-*(Part 2 complete. Continues in Part 3 — the target database schema —
-turning every recommendation above into real tables, columns, keys, and
-constraints.)*
+*(Part 2 complete.)*
+
+---
+
+## Part 3 — Target Database Schema
+
+**Notation.** Types are given engine-agnostic (`TEXT`, `INTEGER`,
+`BOOLEAN`, `DATE`, `TIMESTAMP`, `ENUM(...)`, `JSON`) — the actual engine
+choice is a Part 6 (Target Architecture) decision, not assumed here.
+Every table gets a real surrogate primary key even where the current
+Sheet relies on a natural/composite key, per Part 2's finding that none
+of the 13 tabs has one today — surrogate keys are cheap, avoid the
+name-collision risk flagged on `people`, and don't preclude also placing
+a `UNIQUE` constraint on the natural key where one genuinely exists.
+`leads` stays **out of scope** — every reference to it below is a
+*logical* pointer (`lead_id TEXT`, no enforced FK, since this review
+does not touch that table's own schema), not a designed relationship.
+
+### 1. `people` — entity, reference/configuration
+
+**Purpose.** The org chart as real relational data — merges `RM_Hierarchy`
+and `Manager_Directory` per Part 2's decision, since both describe the
+same underlying person.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `person_id` | INTEGER | NOT NULL | **PK**, surrogate |
+| `name` | TEXT | NOT NULL | Display name — **not** unique-constrained (a real name collision is a known, documented risk; see Part 11's question about whether a real employee-ID system exists) |
+| `team` | TEXT | NOT NULL | |
+| `role` | ENUM(`S1`,`A1`,`TM`,`RH`,`Cluster Head`,`City Lead`,`Commercial Head`,`Executive`,`BDM`,`S3`,`Manager`) | NOT NULL | Closed set, cited from the real current distribution |
+| `tl_id` | INTEGER | NULL | **FK → `people.person_id`** (self-referencing) |
+| `tm_id` | INTEGER | NULL | **FK → `people.person_id`** |
+| `rh_id` | INTEGER | NULL | **FK → `people.person_id`** |
+| `ch_id` | INTEGER | NULL | **FK → `people.person_id`** |
+| `excluded` | BOOLEAN | NOT NULL, default `false` | Routing/ranking exclusion flag — the one field meant to be human-editable directly |
+| `note` | TEXT | NULL | Free text |
+| `email` | TEXT | NULL | Blank = a real routing gap (matches current behavior) |
+| `email_source` | ENUM(`private_file`,`manual`) | NULL | |
+| `active` | BOOLEAN | NOT NULL, default `true` | New — replaces "delete the row" for someone who leaves, preserving history for anything that already referenced them |
+
+**Indexes:** `(name)`, `(role)`, `(tl_id)`/`(tm_id)`/`(rh_id)`/`(ch_id)`
+(hierarchy traversal).
+**Unique constraints:** none beyond the PK — see the name-collision note.
+**Retention:** permanent, current-state entity — no time-based policy
+applies (matches `RM_Hierarchy`/`Manager_Directory`'s existing "N/A,
+configuration" classification).
+**Relationships:** self-referencing hierarchy; referenced (logically,
+not by hard FK — see below) from every operational/log table that
+carries an `RM` name today.
+**Design note — kept the fixed 4-column chain (`tl_id`/`tm_id`/`rh_id`/
+`ch_id`), not a generic parent-pointer tree,** per Part 2's explicit
+"don't normalize for theory" call — the business hierarchy is a fixed,
+known depth.
+
+### 2. `regions` — reference
+
+**Purpose.** New table — **no equivalent exists today**, in the Sheet or
+in code. Region normalization currently happens inside a code function
+(`mainRegionForGs_`) with nothing to validate against. Flagged in Part 2
+as needing the business's real, current region list to populate — the
+columns below are the minimum shape needed; the actual rows are **not
+invented here**.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `region_id` | INTEGER | NOT NULL | **PK**, surrogate |
+| `region_name` | TEXT | NOT NULL | **UNIQUE** |
+| `active` | BOOLEAN | NOT NULL, default `true` | |
+
+**Indexes:** `(region_name)`.
+**Retention:** permanent, reference data.
+**Relationships:** referenced by `region_recipients`; every
+snapshot/log table below keeps its own frozen `region_name` text copy
+(see the denormalization note under `movement_snapshots`) rather than a
+hard FK, for the same historical-accuracy reason `people` isn't hard-FK'd
+from those tables either.
+
+### 3. `region_recipients` — configuration
+
+**Purpose.** Replaces `Region_Recipients`, and — pending the business
+confirmation flagged in Part 6/11 — becomes the **single** source both
+the backend jobs and the dashboard read, closing the split-source-of-
+truth gap Part 2 flagged as the strongest single finding in this review.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `region_id` | INTEGER | NOT NULL | **PK, FK → `regions.region_id`** |
+| `to_addresses` | TEXT | NULL | Kept as a denormalized delimited list — see Part 2's judgment-call note; splitting into a per-address child table is optional, not recommended by default |
+| `cc_addresses` | TEXT | NULL | Same |
+| `updated_at` | TIMESTAMP | NOT NULL | New — the current tab has no way to tell when an address was last changed |
+
+**Retention:** permanent, configuration.
+**Relationships:** `region_id` → `regions`.
+
+### 4. `movement_snapshots` — operational snapshot
+
+**Purpose.** Replaces `Movement_Log` — the 4×/day frozen state capture.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `snapshot_id` | INTEGER | NOT NULL | **PK**, surrogate (a composite `lead_id`+`snapshot_at` key was considered but a surrogate is safer against any future double-write edge case) |
+| `snapshot_at` | TIMESTAMP | NOT NULL | |
+| `snapshot_label` | ENUM(`periodic`,`manual`) | NOT NULL | Converted from free text per Part 2 |
+| `lead_id` | TEXT | NOT NULL | Logical reference to `leads` (out of scope) |
+| `client_id` | TEXT | NOT NULL | |
+| `rm_name` | TEXT | NOT NULL | **Deliberately denormalized** — a frozen point-in-time copy, not a FK to `people`. Normalizing this would silently rewrite history when an RM's record changes later (Part 2's explicit finding) |
+| `tl_name` | TEXT | NULL | Same denormalization reasoning |
+| `project` | TEXT | NOT NULL | |
+| `region_name` | TEXT | NOT NULL | Same denormalization reasoning as `rm_name` |
+| `lead_assigned_at` | TIMESTAMP | NULL | |
+| `group_source` | TEXT | NULL | |
+| `source_bucket` | TEXT | NULL | |
+| `current_stage` | TEXT | NULL | |
+| `last_connect` | TIMESTAMP | NULL | |
+| `last_connect_time` | TIMESTAMP | NULL | |
+| `last_comment` | TEXT | NULL | |
+| `internal_status_comments` | TEXT | NULL | |
+| `closing_reason` | TEXT | NULL | |
+| `call_attempts` | INTEGER | NULL | |
+| `call_count` | INTEGER | NULL | |
+| `duration` | INTEGER | NULL | |
+| `stage_comments` | TEXT | NULL | |
+| `rm_is_active` | BOOLEAN | NULL | Nullable **on purpose** — rows from before 2026-09-01 genuinely have no value here; not an error state |
+| `lead_closing_reason` | TEXT | NULL | Same schema-evolution reasoning |
+
+**Indexes:** `(lead_id, snapshot_at)`, `(snapshot_at)` (for the retention
+prune), `(rm_name, snapshot_at)` (RM-performance queries), `(region_name,
+snapshot_at)`.
+**Retention:** **7 days**, carried forward unchanged from
+`MOVEMENT_LOG_RETENTION_DAYS` — a confirmed, already-correct policy, not
+revisited here.
+**Relationships:** feeds `sla_history`, `daily_cohort_history`;
+`daily_rm_issues` (below) is now *derived from* this table rather than
+independently written.
+**Classification:** operational snapshot history.
+
+### 5. `daily_rm_issues` — operational snapshot (materialized)
+
+**Purpose.** Replaces `Daily_RM_Issues`. Per Part 2's merge decision,
+this is now the **output of a nightly materialization job** reading
+`movement_snapshots`, not an independently dual-written table — closing
+the schema-drift risk flagged in Part 1/2 (both tables independently
+gained the same 4 columns after the fact). The physical table itself
+still exists (a materialized result has to land somewhere, and the
+Repeat Offenders leaderboard's current read performance must be
+preserved) — what changes is *how it's populated*, not its shape.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `issue_id` | INTEGER | NOT NULL | **PK**, surrogate |
+| `capture_date` | DATE | NOT NULL | The capture date (unchanged semantics — not the assignment date) |
+| `lead_id` | TEXT | NOT NULL | |
+| `client_id` | TEXT | NOT NULL | |
+| `rm_name` | TEXT | NOT NULL | Denormalized, same reasoning as `movement_snapshots` |
+| `tl_name` | TEXT | NULL | |
+| `region_name` | TEXT | NOT NULL | Denormalized |
+| `project` | TEXT | NOT NULL | |
+| `group_source` | TEXT | NULL | |
+| `source_bucket` | TEXT | NULL | |
+| `issue_key` | TEXT | NOT NULL | |
+| `issue_label` | TEXT | NOT NULL | |
+| `captured_at` | TIMESTAMP | NOT NULL | |
+| `lead_assigned_at` | TIMESTAMP | NULL | |
+
+**Indexes:** `(capture_date, rm_name)`, `(capture_date, region_name)` —
+matches the leaderboard's real query shapes (RM / Region / A1-TM / RH
+rollups).
+**Retention:** **7 days**, unchanged.
+**Relationships:** derived from `movement_snapshots`.
+**Classification:** operational snapshot (materialized/derived).
+
+### 6. `lead_followups` — temporary operational queue
+
+**Purpose.** Replaces `Lead_Followups` — the human-review bridge.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `lead_id` | TEXT | NOT NULL | **PK** — matches the real current upsert key |
+| `region_name` | TEXT | NOT NULL | |
+| `rm_name` | TEXT | NOT NULL | |
+| `issue` | TEXT | NOT NULL | |
+| `collated_comments` | TEXT | NULL | Script-written |
+| `suggested_followup` | TEXT | NULL | **Hard contract, unchanged: no code may ever write this column** — human-only |
+| `own_comment` | TEXT | NULL | Renamed from the current bare `own` for clarity (Part 4 owns naming, applied here for readability) |
+| `updated_at` | TIMESTAMP | NOT NULL | Drives the existing amber/red staleness formatting |
+| `cycle_started_at` | TIMESTAMP | NULL | **New** — when the current Generate cycle began; gives the existing "resolved-between-cycles" bug (a real, documented incident) something to actually check against, without changing the clear-and-repopulate behavior itself |
+
+**Retention:** cleared and repopulated every Generate cycle — matches
+current behavior. Whether a between-cycle-resolved row should be
+proactively cleared remains an open **correctness** question (Part 2's
+own note), not resolved by this schema — `cycle_started_at` is added
+specifically so that question becomes answerable in code, not solved
+here.
+**Classification:** temporary/operational queue.
+
+### 7. `sla_history` — historical aggregate / report
+
+**Purpose.** Replaces `SLA_History` — the long-lived SLA trend.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `snapshot_at` | TIMESTAMP | NOT NULL | **PK** — matches the real current upsert key exactly |
+| `open_total` | INTEGER | NOT NULL | |
+| `breached_total` | INTEGER | NOT NULL | |
+| `inactive_rm_new_lead` | INTEGER | NOT NULL | |
+| `is_not_updated` | INTEGER | NOT NULL | |
+| `followup_overdue` | INTEGER | NOT NULL | |
+| `under_called_today` | INTEGER | NOT NULL | |
+| `stage_stuck_48h` | INTEGER | NOT NULL | |
+| `source` | ENUM(`movement`,`browser`,`backfill`) | NOT NULL | Converted from free text per Part 2 |
+
+**Retention:** **`TBD`, unresolved here on purpose** — carried forward
+to Part 5, which owns the actual retention-policy recommendation.
+**Classification:** historical aggregate/report.
+
+### 8. `daily_cohort_history` — historical archive (immutable)
+
+**Purpose.** Replaces `Daily_Cohort_History`.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `cohort_date` | DATE | NOT NULL | **PK (composite, with `region_id`)** — the current `date_region` concatenated string is split into two real columns |
+| `region_id` | INTEGER | NOT NULL | **PK (composite) / FK → `regions.region_id`** |
+| `created` | INTEGER | NOT NULL | |
+| `same_day_resolved` | INTEGER | NOT NULL | |
+| `same_day_opp` | INTEGER | NOT NULL | |
+| `window_complete` | BOOLEAN | NOT NULL | Once `true`, the row is application-level immutable — **this rule is a write-path guarantee the target app must keep enforcing; the schema alone can't express it**, flagged for Part 7 |
+| `resolved_48h` | INTEGER | NULL | Null until the 48h window closes |
+| `opp_48h` | INTEGER | NULL | |
+| `closed_48h` | INTEGER | NULL | |
+| `updated_at` | TIMESTAMP | NOT NULL | |
+| `source` | ENUM(`movement`,`browser`,`backfill`) | NOT NULL | |
+
+**Retention:** **`TBD`, unresolved here on purpose** — carried to Part 5;
+Part 1/2 both note this is arguably the most legitimate "keep forever"
+candidate of all 13 original tabs.
+**Classification:** historical archive.
+
+### 9. `comment_history` — historical log (append-only)
+
+**Purpose.** Replaces `Comment_History`.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `comment_id` | INTEGER | NOT NULL | **PK**, surrogate |
+| `lead_id` | TEXT | NOT NULL | |
+| `client_id` | TEXT | NOT NULL | |
+| `rm_name` | TEXT | NOT NULL | Denormalized |
+| `region_name` | TEXT | NOT NULL | Denormalized |
+| `project` | TEXT | NOT NULL | |
+| `comment` | TEXT | NOT NULL | |
+| `comment_at` | TIMESTAMP | NOT NULL | When the RM logged it — kept **separate** from `logged_at` (two genuinely different concepts, per Part 2) |
+| `logged_at` | TIMESTAMP | NOT NULL | When this row was captured |
+
+**Unique constraint:** `(lead_id, comment)` — matches the real current
+dedup key exactly.
+**Retention:** **unbounded, by explicit design** — this policy is
+already confirmed (not `TBD`) in the existing documentation and is
+carried forward unchanged.
+**Classification:** historical log.
+
+### 10. `unmatched_comments_log` — operational review queue
+
+**Purpose.** Replaces `Unmatched_Comments_Log`.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `log_id` | INTEGER | NOT NULL | **PK**, surrogate |
+| `lead_id` | TEXT | NOT NULL | |
+| `rm_name` | TEXT | NOT NULL | |
+| `region_name` | TEXT | NOT NULL | |
+| `project` | TEXT | NOT NULL | |
+| `comment` | TEXT | NOT NULL | |
+| `comment_at` | TIMESTAMP | NOT NULL | |
+| `logged_at` | TIMESTAMP | NOT NULL | |
+| `reviewed` | BOOLEAN | NOT NULL, default `false` | |
+| `note` | TEXT | NULL | Reviewer's note — **not** the same concept as `people.note` (Part 2's false-friend flag) |
+
+**Unique constraint:** `(lead_id, comment_at)` — matches the real
+current dedup key.
+**Retention:** manually curated — rows persist until reviewed, matching
+current confirmed behavior.
+**Classification:** operational review queue.
+
+### 11. `email_sends` — historical audit log
+
+**Purpose.** Replaces `Send_Log` + `AllIssues_Log` + `Overnight_Log` for
+**audit** purposes, per Part 2's merge decision. One row per
+region-email sent, across all three send channels.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `send_id` | INTEGER | NOT NULL | **PK**, surrogate |
+| `channel` | ENUM(`dashboard`,`all_issues_17h`,`overnight_10h`) | NOT NULL | New — the discriminator that replaces "which of the 3 tabs is this row in" |
+| `sent_at` | TIMESTAMP | NOT NULL | |
+| `region_name` | TEXT | NOT NULL | |
+| `issue_key` | TEXT | NULL | `dashboard` channel only |
+| `issue_label` | TEXT | NULL | `dashboard` channel only |
+| `bucket_label` | TEXT | NULL | `all_issues_17h` channel only |
+| `primary_role` | TEXT | NULL | `all_issues_17h` channel only |
+| `subject` | TEXT | NOT NULL | |
+| `to_addresses` | TEXT | NULL | Kept denormalized — pure audit field, per Part 2 |
+| `cc_addresses` | TEXT | NULL | |
+| `lead_count` | INTEGER | NULL | |
+| `thread_id` | TEXT | NULL | `all_issues_17h` and `overnight_10h` channels |
+| `sent_by` | TEXT | NULL | `dashboard` channel only (the signed-in user) |
+
+**Indexes:** `(channel, sent_at)`, **`(channel, region_name, sent_at)`
+— this specific index is what keeps the `overnight_10h` channel's
+same-day functional lookup (the 13:00 follow-up finding its own 10:00
+row) just as fast as the current dedicated tab**, per Part 2's explicit
+requirement that the functional read not regress.
+**Nullable-by-channel design note:** several columns are meaningful for
+only one or two channels (flagged above); this is a deliberate,
+documented trade-off — a fully normalized "one table per channel plus a
+shared base table" alternative was considered and rejected as more
+complex than the small amount of genuine cross-channel reporting value
+justifies, consistent with the brief's own instruction not to add
+structure for theory's sake.
+**Retention:** **`TBD` per channel, unresolved here on purpose** —
+carried to Part 5. Flagged in Part 1: the `dashboard` channel
+(`Send_Log`) currently has **no removal path of any kind**, the only one
+of the three with that gap.
+**Classification:** historical audit log.
+
+### 12. `overnight_log_leads` — operational (functional child table)
+
+**Purpose.** New table — splits `Overnight_Log.lead_ids_json` per Part
+2's decision, since the 13:00 follow-up already needs to iterate
+individual lead ids from it.
+
+| Column | Type | Null? | Notes |
+|---|---|---|---|
+| `send_id` | INTEGER | NOT NULL | **PK (composite) / FK → `email_sends.send_id`** — only populated for `channel = 'overnight_10h'` rows |
+| `lead_id` | TEXT | NOT NULL | **PK (composite)** |
+
+**Retention:** matches its parent `email_sends` row.
+**Classification:** operational (functional, not audit — this is what
+the 13:00 run's per-lead resolution re-check actually queries).
+
+---
+
+### Schema-wide notes
+
+- **Nothing above invents a `people_reporting_up_to_them`-style derived
+  column** — per Part 2, that data is computable from `people`'s own
+  chain columns on read; it is deliberately **not** a stored column in
+  this schema, pending the confirmation flagged in Part 2 that it isn't
+  independently hand-edited anywhere today.
+- **No table hard-FKs into `people` or `regions` from a snapshot/log
+  table.** Every `rm_name`/`region_name` on `movement_snapshots`,
+  `daily_rm_issues`, `comment_history`, `unmatched_comments_log`, and
+  `email_sends` stays a denormalized text copy, by the same
+  historical-accuracy reasoning established in Part 2. Only the
+  *current-state* tables (`people`'s own self-references,
+  `region_recipients` → `regions`) carry real FK constraints.
+- **Three retention periods are deliberately left `TBD`** in this
+  schema (`sla_history`, `daily_cohort_history`, `email_sends`) — Part 3
+  designs the shape; Part 5 owns the actual policy decision. Writing a
+  number here without that dedicated analysis would be exactly the kind
+  of unconfirmed assumption the brief asks not to present as fact.
+
+*(Part 3 complete. Continues in Part 4 — the current-to-target column
+mapping and the standalone column-consolidation analysis.)*
