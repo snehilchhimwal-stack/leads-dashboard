@@ -169,9 +169,23 @@ What it does — eight checks against docs/INDEX.md + the record files + git:
      ALREADY-documented exception; does nothing for a brand-new
      exception path with no EXC- row at all -- that half of TEST 10
      stays open by design, not oversight.
+  O. HANDOVER load-order staleness     (ADVISORY)
+     (E2E acceptance test report round 2, TEST 13 -- the freshness signal
+     was a pure calendar-date proxy; Fix #6 fixed the WORDING so it no
+     longer overclaims, the mechanism itself still never cross-referenced
+     content). HANDOVER.md §2's "Load order matters" paragraph makes one
+     precise, checkable claim: the exact order of 14 of the 23 real
+     `<script src>` tags in `dashboard.html` (the 9 `core-*.js` files are
+     referenced by pointer there, not spelled out again, so they're out
+     of this check's scope). Extraction is self-correcting against
+     textual noise in that same paragraph (the pre-split `core.js`/
+     `reports.js`, no longer real files; a parenthetical re-mention of
+     `tab-repeat-offenders.js`/`main.js`) by filtering extracted names
+     down to real js/ files and deduping to first occurrence. Flags a
+     mismatch between the stated order and dashboard.html's real one.
 
-Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, M, and N only print.
-Flip D/E/G/H/I/J/K/L/M/N to blocking later by setting CATALOG_STRICT=1.
+Exit code: non-zero iff A, B or C fail. D, E, G, H, I, J, K, L, M, N, and O only print.
+Flip D/E/G/H/I/J/K/L/M/N/O to blocking later by setting CATALOG_STRICT=1.
 """
 import os, re, sys, subprocess, json
 
@@ -1162,6 +1176,54 @@ def check_exc_thrown_literal_staleness(rows):
                    f"component's source, no staleness found)")
     return out
 
+# ---------------------------------------------------------------- O
+# TEST 13, E2E acceptance test report round 2: HANDOVER.md's staleness
+# signal was a pure calendar-date proxy (Fix #6 fixed the WORDING so it
+# no longer overclaims correctness, but the mechanism itself never
+# cross-referenced content). Investigated for a real structural angle
+# before building anything, same discipline as the other slices:
+# HANDOVER.md §2's "Load order matters" paragraph makes one precise,
+# checkable claim -- the exact order of 14 of the 23 real `<script src>`
+# tags in dashboard.html (the 9 `core-*.js` files are referenced by
+# pointer, "in the order listed above," not spelled out again in THIS
+# paragraph, so they're out of THIS check's scope). Confirmed by hand:
+# the stated order currently matches dashboard.html's real tag order
+# exactly, 14/14. Extraction is self-correcting against textual noise --
+# the paragraph also mentions the pre-split `core.js`/`reports.js` (no
+# longer real files) and re-mentions `tab-repeat-offenders.js`/`main.js`
+# in a parenthetical aside -- filtering the extracted names down to only
+# ones that exist as real js/ files, then deduping to first occurrence,
+# reconstructs the intended 14-file sequence cleanly regardless.
+HANDOVER_LOAD_ORDER_PARA = re.compile(r'\*\*Load order matters\*\*.*?(?=\n\n|\Z)', re.S)
+HANDOVER_JS_CITE = re.compile(r'`([a-z][a-z0-9_-]*\.js)`')
+SCRIPT_TAG = re.compile(r'<script src="js/([a-z][a-z0-9_-]*\.js)"')
+
+def check_handover_load_order():
+    handover_path = os.path.join(ROOT, "HANDOVER.md")
+    html_path = os.path.join(ROOT, "dashboard.html")
+    if not os.path.exists(handover_path) or not os.path.exists(html_path):
+        return ["(HANDOVER.md or dashboard.html not found — nothing to check)"]
+    text = open(handover_path, encoding="utf-8").read()
+    pm = HANDOVER_LOAD_ORDER_PARA.search(text)
+    if not pm:
+        return ["(no \"**Load order matters**\" paragraph found in HANDOVER.md — verify manually)"]
+    stated = []
+    seen = set()
+    for name in HANDOVER_JS_CITE.findall(pm.group(0)):
+        if name in seen or not os.path.exists(os.path.join(ROOT, "js", name)):
+            continue
+        seen.add(name)
+        stated.append(name)
+    if not stated:
+        return ["(no real js/*.js filenames found in HANDOVER.md's load-order paragraph — verify manually)"]
+    real_tags = SCRIPT_TAG.findall(open(html_path, encoding="utf-8").read())
+    real_subset = [t for t in real_tags if t in seen]
+    if stated != real_subset:
+        return [f"HANDOVER.md §2's stated script load order doesn't match dashboard.html's real "
+                f"<script src> order — stated: {stated}; real (same subset): {real_subset}"]
+    return [f"(HANDOVER.md §2's stated load order for {len(stated)} of dashboard.html's real "
+            f"<script src> files matches reality)"]
+
 # ---------------------------------------------------------------- main
 def main():
     print("=" * 60)
@@ -1194,7 +1256,8 @@ def main():
                       ("K. TBD retention consistency", lambda r: check_tbd_retention_consistency()),
                       ("L. Sheet tab coverage", lambda r: check_sheet_tab_coverage()),
                       ("M. Button coverage", lambda r: check_button_coverage()),
-                      ("N. EXC- thrown-literal staleness", check_exc_thrown_literal_staleness)]:
+                      ("N. EXC- thrown-literal staleness", check_exc_thrown_literal_staleness),
+                      ("O. HANDOVER load-order staleness", lambda r: check_handover_load_order())]:
         lines = fn(rows)
         real = [l for l in lines if not l.startswith("(") and not l.startswith("no ")]
         print(f"{label}: {len(real)} note(s)" if real else f"{label}: clean")
