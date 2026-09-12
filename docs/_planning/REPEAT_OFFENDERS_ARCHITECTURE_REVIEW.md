@@ -302,3 +302,123 @@ against — not a company-wide average applied uniformly to every level.
 
 *(Part 2 complete. Continues in Part 3 — target architecture: data
 flow, contracts, layer responsibilities.)*
+
+## Part 3 — Target Architecture: Data Flow, Contracts, Layer Responsibilities
+
+### D. Proposed Target Architecture
+
+The Stage 1-4 calculation pipeline (`core-rm-performance.js`) is
+**already correct** (Part 1) and needs no redesign — every metric it
+produces is already filtered once, consistently, at the right layer.
+The one real structural addition is new: **a single canonical result
+object**, produced exactly once per completed calculation, cached at
+the point it's produced, and read — never recomputed — by every
+consumer. Concretely: `_renderRepeatOffendersResult`
+(`tab-repeat-offenders.js:440`), which already receives everything a
+result needs from the Worker's `'done'` message, additionally stores it
+in one module-level variable before it renders the DOM. The PDF export
+(`repeat-offenders-pdf.js`) is rewritten to read that cache and nothing
+else — it stops calling `computeRmPerformance` (or anything downstream
+of it) entirely.
+
+This is deliberately the *smallest* structural change that satisfies
+"one source of truth" — it does not introduce a new module, a new
+message-passing protocol, or a state-management library. The Worker
+already produces the complete result; the only gap is that nothing
+remembers it for a second consumer.
+
+### E. End-to-End Data Flow (text diagram)
+
+```
+Movement_Log (Google Sheet)
+  │  fetched once per page load/refresh via the Sheets API
+  ▼
+movementSnapshots                                   [js/tab-movement.js, in-memory global]
+  │
+  ▼
+buildMovementHistories()                            [group by client_id — "customer"]
+  │
+  ▼
+splitHistoryByCopy(history)                         [split by lead_id within a customer — "copy"]
+  │
+  ▼
+passesRepeatOffenderFilters(rec, filters)           [PER RAW RECORD — Project/Region/TL/Source/Sub-source]
+  │  (records failing this are dropped before anything below ever sees them)
+  ▼
+byDay "latest snapshot wins" collapse               [PER (copy, day) — this IS where "the unique-lead
+  │                                                   dataset for this day" is actually formed]
+  ▼
+RM_PERF_RULES eligibility check                     [per (copy, day, rule) — 5 SLA rules]
+  │
+  ▼
+Stage 1 observations: [{name, lead_id, dayKey, rule, violated, rm, region}, ...]
+  │
+  ▼
+aggregateRmPerformance(observations)                [group by keyFn: RM (default) | Region | A1-TM | RH]
+  │
+  ▼
+classifyRmPerformance(byGroup)                      [Unique Leads, composite, peerComposite
+  │                                                   ("Region Average" when keyFn=region),
+  │                                                   classification — ONE function, every rollup level]
+  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  CANONICAL RESULT  (NEW — the actual fix)                        │
+│  { rm[], region[], a1tm[], rh[], byRegion[], stageCounts,        │
+│    computedFrom: {filters, dateKeys, hierarchyMissing},          │
+│    computedAtWall, runId }                                       │
+│  — produced exactly once, cached in _repeatOffendersLastResult   │
+└─────────────────────────────────────────────────────────────────┘
+  │                                    │
+  ▼                                    ▼
+Screen render                    PDF export
+(_renderRepeatOffendersResult    (downloadRepeatOffendersPdf —
+ builds bodyEl.innerHTML          reads the cache ONLY, never
+ from the SAME object it          calls computeRmPerformance,
+ just cached)                     never calls captureRepeatOffendersFilterSnapshot
+                                   for a fresh compute)
+```
+
+The critical property this diagram makes visible: **today, the two
+branches at the bottom each start their own arrow back up to
+`computeRmPerformance`. In the target architecture, there is exactly
+one arrow down to the canonical result, and both branches only ever
+read from it.**
+
+### F. Data Contracts / Interfaces
+
+Every boundary in the pipeline above, with its exact shape — this is
+what "avoid duplicated calculation logic" actually means in practice:
+each stage has ONE producer and one documented shape, and every
+consumer of that shape gets it from the same place.
+
+| Boundary | Shape | Producer | Consumers |
+|---|---|---|---|
+| Filter snapshot | `{project, region, TL, source, bucket}`, each a frozen `Set<string>` | `captureRepeatOffendersFilterSnapshot()` (`tab-repeat-offenders.js:124`) | `passesRepeatOffenderFilters`, threaded through every Stage 1 call |
+| Stage 1 observation | `{name, lead_id, dayKey, rule, violated, rm, region}` | `reconstructRmPerformanceObservations` (`core-rm-performance.js:406`) | `aggregateRmPerformance` only |
+| Stage 2 group entry | `{name, rules: Map<ruleKey,{eligibleDays,violationDays,eligibleLeads:Set,violatedLeads:Set,perLead:Map,rate,distinctEligibleLeads,distinctViolatedLeads,maxStreak,chronicLeads}>, distinctRMs:Set, regionCounts:Map}` | `aggregateRmPerformance` (`core-rm-performance.js:494`) | `classifyRmPerformance`, `computeRmPerfPeerAverages` |
+| Classified row (one per RM/Region/A1-TM/RH) | `{name, distinctLeads, composite, peerComposite, rules, routingIssueDays, classification, totalInstances, distinctRMs, primaryRegion}` | `classifyRmPerformance` (`core-rm-performance.js:598`) | Table renderer (`rmPerformanceTableHtml`), PDF row-builder (`_repeatOffendersPdfTableRows`) — **both already consume this exact shape today; this contract doesn't change** |
+| **Canonical result (NEW)** | `{rm: Row[], region: Row[], a1tm: Row[], rh: Row[], byRegion: {region,list:Row[]}[], stageCounts, computedFrom: {filters, dateKeys, hierarchyMissing}, computedAtWall: Date, runId: number}` | `_renderRepeatOffendersResult` (`tab-repeat-offenders.js:440`), at the moment a Worker (or synchronous-fallback) run completes | Screen renderer (same function, immediately) **and** `downloadRepeatOffendersPdf` (reads it, doesn't produce it) |
+
+`runId` is not new plumbing — `_repeatOffendersRunId`
+(`tab-repeat-offenders.js:248`) already exists exactly to distinguish a
+superseded run from the live one; the cache simply also records which
+`runId` it came from, so the PDF export can tell "this is the latest
+completed run" from "a newer run is currently in flight" (Part 4).
+
+### G. Responsibility of Each Layer / Component
+
+| Responsibility | Owner | Notes |
+|---|---|---|
+| Filter application | `passesRepeatOffenderFilters` (`core-rm-performance.js:186`) | Unchanged — already correct, already the single implementation for this report. (`core-filters.js`'s `passesFilters`, line 73, is a *different* predicate for non-Movement-Log views — narrow, documented, deliberate divergence per Part 1's anti-pattern table; not unified here, see Risks in Part 6.) |
+| Lead/copy identity & dedup | `buildMovementHistories`/`splitHistoryByCopy` (`js/tab-movement.js:330,724`) | Unchanged |
+| Unique Lead calculation | `classifyRmPerformance`'s `distinctLeads` (`core-rm-performance.js:636,659`) | Unchanged |
+| Repeat Offender classification | `classifyRmPerformance` (`core-rm-performance.js:598`) | Unchanged — see Part 2 Rule 7 for what this term actually means here |
+| Region Average | `computeRmPerformance` keyed by region (`repeatOffendersRegionKey`) | Unchanged — same engine as Individual Work |
+| Individual Work | `computeRmPerformance` keyed by RM (default `keyFn`) | Unchanged — same engine as Region Average |
+| Recalculation orchestration (when/how often to run) | `runRepeatOffendersRecalculation` (`tab-repeat-offenders.js:337`) | Unchanged — still Worker-based, still triggered by `renderRepeatOffenders()` on every filter/range change |
+| **UI state / canonical result ownership (NEW)** | `_renderRepeatOffendersResult` (`tab-repeat-offenders.js:440`) | **New responsibility**: caches the completed result before rendering, not just after |
+| Screen rendering | `_renderRepeatOffendersResult` / `rmPerformanceTableHtml` | Unchanged in what it renders; now explicitly reads from the same object it just cached, not implicitly "whatever the worker just sent" |
+| PDF rendering | `js/repeat-offenders-pdf.js` | **Responsibility narrows**: from "compute + render" to "render only" — it should not import, call, or depend on `computeRmPerformance`/`reconstructRmPerformanceObservations`/`aggregateRmPerformance`/`classifyRmPerformance` at all after this redesign |
+
+*(Part 3 complete. Continues in Part 4 — PDF export redesign, the
+single-source-of-truth mechanism in full detail.)*
