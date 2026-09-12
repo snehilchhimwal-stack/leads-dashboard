@@ -587,6 +587,36 @@ function snapshotOpenLeads_(label) {
 // a range that keeps shifting. Also shrinks the sheet's actual row
 // allocation to match, via deleteRows — see the comment further down for
 // why that step is not optional.
+//
+// SAFETY, added after a real production incident (2026-09-12): this used
+// to clearContent() the WHOLE data range FIRST, then write `kept` back —
+// meaning any interruption between those two calls left the sheet with
+// real, still-in-retention data erased and nothing written back yet.
+// That's exactly what happened: at real data volume (Movement_Log had
+// grown to ~200K+ rows, because pruning itself had been silently unable
+// to run to completion for a long time — see below), a snapshotPeriodic
+// run took long enough to hit Apps Script's 30-minute execution ceiling
+// and was killed by the platform mid-function, landing inside that
+// clear-then-write gap. The sheet was left with its row ALLOCATION still
+// at ~196K (confirmed via Ctrl+End) but almost all DATA gone — the
+// deleteRows() shrink at the very end of this function, and most of the
+// real content, never got written back.
+//
+// Fixed by reversing the order: WRITE `kept` to its final position
+// first, THEN clear only the leftover tail beyond it. An interruption
+// at any point during or after the write leaves the sheet with, at
+// worst, some already-expired rows still sitting past where they should
+// be pruned to (stale, not lost) — which the very next successful run
+// re-reads and correctly cleans up. The kept rows themselves are never
+// erased before being replaced.
+//
+// Also skips the whole clear/write/shrink sequence entirely when every
+// row is still within retention (kept.length === values.length) — a
+// real, meaningful cost reduction on the common case (most runs prune
+// nothing), and part of why this sheet was able to balloon to ~200K rows
+// in the first place: the old code unconditionally cleared and rewrote
+// the ENTIRE range on every single run regardless of whether anything
+// actually needed pruning.
 function pruneMovementLog_(ss) {
   const logSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   if (!logSheet) return;
@@ -599,9 +629,16 @@ function pruneMovementLog_(ss) {
     const ts = row[0];
     return ts instanceof Date && ts >= cutoff;
   });
-  logSheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+
+  if (kept.length === values.length) return; // nothing to prune — don't touch the sheet at all
+
   if (kept.length) {
     logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
+  }
+  // Only the leftover tail beyond the just-written kept rows — never the
+  // range kept.length itself occupies, which was just populated above.
+  if (lastRow - 1 > kept.length) {
+    logSheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent();
   }
 
   // clearContent above only empties cell VALUES — it does not shrink the
