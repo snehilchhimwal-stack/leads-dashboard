@@ -817,3 +817,79 @@ this redesign):**
 
 *(Part 6 complete. Continues in Part 7 — final recommendation, real
 implementation, and verification.)*
+
+## Part 7 — Final Recommendation, Real Implementation, and Verification
+
+Part 5's migration plan was executed for real, on `master`, one commit
+per step, each verified in the browser before the next began:
+
+| Step | Commit | What changed | Verification |
+|---|---|---|---|
+| 1 | `8fa3895` | Added `_repeatOffendersLastResult`, threaded `range`/`now`/`dateKeys` through the ctx chain, populated the cache in `_renderRepeatOffendersResult` | 59/59 existing tests unchanged; directly confirmed in the browser that the cache populates with the full expected shape after a real render |
+| 2 | `9dea24a` | `_repeatOffendersPdfSectionTables`/`_repeatOffendersPdfCurrentFilterInfo`/`_repeatOffendersPdfFilterSummaryLine` rewritten to read the cache; `downloadRepeatOffendersPdf` gained the 3-state check; every `computeRmPerformance`/`computeRmPerformanceByRegion` call removed from `repeat-offenders-pdf.js` | 59/59 unchanged; **directly confirmed the actual fix**: a real 6-lead fixture's DOM row ("Verify RM", 6 Unique Leads, "2.50 / 2.50" Score) and the PDF row built from the same cached object matched byte-for-byte: `["1","Verify RM","6","2.50 / 2.50","12","Verify Region"]` |
+| 3 | `a74a65f` | "Download PDF" button disables the instant a recalculation starts, re-enables when the cache updates | Confirmed disabled synchronously right after triggering (before the async Worker could possibly have replied), confirmed re-enabled after completion |
+| 4 | `4b420b2` | All 11 Part 6 tests written for real into `tests/frontend-harness.html` | **76/76 tests passing** (up from 59) — confirmed both locally (dashboard dev server, fresh browser tab) and in real CI (the `frontend-harness` GitHub Actions job) |
+| 5 | (this commit) | Final cleanup + verification pass | No dead references to the old PDF function signatures found (grepped); `dashboard.html` itself loads with zero JS errors beyond the expected, pre-existing, harmless unauthenticated-Sheets-API 401 |
+
+**A real bug was found and fixed during Step 4 — in the new test code,
+not in the redesign itself.** The first draft of Test 8 ("PDF export
+before any calculation has completed") forgot to seed a non-empty
+`movementSnapshots`, so the pre-existing "Movement_Log itself hasn't
+loaded" guard fired before the new state-1 check was ever reached,
+producing the wrong status message and masking what the test was
+actually meant to prove. Caught by actually running the suite (75/76,
+1 failure) rather than assuming the test was correct because it looked
+right — fixed by seeding a minimal fixture, re-ran, 76/76.
+
+### An honest limitation, stated plainly rather than glossed over
+
+Per Part 6's own risk note: **the real ~12-15s race window this whole
+redesign closes could not be reproduced by genuine timing** in either
+the browser dev-server check or the automated suite — every synthetic
+fixture here completes near-instantly. Tests 7 and 10 (and the manual
+verification in Step 2) simulate "a recalculation is in flight" by
+directly manipulating `_repeatOffendersRunId`/`_repeatOffendersLastResult`
+rather than by genuinely racing a slow calculation against a real
+click. This is a legitimate, deterministic way to test the *mechanism*
+the fix relies on (the run-id comparison, the cache being read instead
+of recomputed) — and Step 2's byte-for-byte DOM-vs-PDF comparison is
+real, direct proof the values agree — but it is not the same as
+clicking "Download PDF" a half-second after toggling a filter against
+the real, ~232k-row production `Movement_Log` and watching it not
+diverge. That specific manual check requires a signed-in Google session
+against the real spreadsheet, which this environment does not have.
+**Recommended as a follow-up, by whoever next has that access**: toggle
+a filter on the real dashboard, immediately click "Download PDF" before
+the table finishes recalculating, and confirm the button is disabled /
+the status message appears, rather than a mismatched PDF downloading.
+
+### L. Final Recommendation
+
+**Adopt the redesign — it is real, tested, and already on `master`.**
+The root cause (a second, independent, synchronous calculation racing
+the live tab's asynchronous one) is closed by construction: there is
+now exactly one calculation per filter/range change, cached once, read
+by both the screen and the PDF. 76/76 tests passing, 5/5 CI checks
+green on every one of the 4 implementation commits.
+
+**One thing named in the original brief that does not literally apply
+to this codebase, stated honestly rather than forced to fit**: several
+of the brief's requirements (API boundaries, frontend/backend
+disagreement, repeated database/API queries) assume a client/server
+split. This dashboard has none — `dashboard.html` + `js/*.js` is a
+single static page reading Google Sheets directly from the browser, with
+`Movement_Log` fetched once per page load and held in memory
+thereafter. There was no "backend" to redesign, and no repeated network
+query to eliminate — the actual duplication was entirely in
+client-side *computation*, which Part 1 identified precisely and this
+redesign closes precisely.
+
+**Deployment note, same fact Part 5 already flagged**: unlike this
+project's `.gs` files, these changes are already live — `dashboard.html`/
+`js/*.js` auto-deploy via GitHub Pages on every push to `master`, and
+every commit above has already been pushed. No further deployment step
+is needed for this fix, unlike the separate Lead History & Versioning
+Review's Apps Script changes.
+
+*(Part 7 complete. Repeat Offenders Architecture Redesign complete —
+7 of 7 parts.)*
