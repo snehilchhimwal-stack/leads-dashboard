@@ -438,6 +438,336 @@
     }
   })();
 
+  // ---- 2f. Repeat Offenders Architecture Redesign — regression suite
+  // (docs/_planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md, Part 6) ----
+  // Tests 1-6 lock down Part 1's own finding that filtering already
+  // works correctly in the calculation engine (core-rm-performance.js) —
+  // called directly, same pattern as the existing Region-wise tests
+  // above, not through the full async UI pipeline. Tests 7-11 exercise
+  // the actual fix: the canonical result cache
+  // (_repeatOffendersLastResult, tab-repeat-offenders.js) and the PDF's
+  // new cache-only read path (js/repeat-offenders-pdf.js).
+  function _roFilterTestRow(overrides) {
+    const anchor = new Date('2026-09-01T18:00:00+05:30');
+    const oldAssigned = new Date(anchor.getTime() - 10 * 3600000).toISOString();
+    const defaults = {
+      snapshot_at: anchor, snapshot_label: 'filter test', lead_id: 'L-X', client_id: 'C-X',
+      RM: 'FilterTest RM', TL: 'Test TL', project: 'Test Project', region: 'FilterTest Region', client: 'Test Client',
+      lead_assigned_at: oldAssigned, group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
+      last_connect: '', last_connect_time: '', last_comment: '', internal_status_comments: '', stage_comments: '',
+      closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, rm_is_active: true, lead_closing_reason: '',
+    };
+    return Object.assign({}, defaults, overrides || {});
+  }
+  const _roEmptyFilters = () => ({ project: new Set(), region: new Set(), TL: new Set(), source: new Set(), bucket: new Set() });
+
+  // 1. Source filter alone.
+  (function () {
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      _roFilterTestRow({ lead_id: 'SRC-G1', client_id: 'C-SRC-G1', group_source: 'Google' }),
+      _roFilterTestRow({ lead_id: 'SRC-G2', client_id: 'C-SRC-G2', group_source: 'Google' }),
+      _roFilterTestRow({ lead_id: 'SRC-F1', client_id: 'C-SRC-F1', group_source: 'Facebook' }),
+    ];
+    let withGoogle, withNone;
+    try {
+      const googleFilters = Object.assign(_roEmptyFilters(), { source: new Set(['Google']) });
+      withGoogle = computeRmPerformance(null, undefined, googleFilters, null);
+      withNone = computeRmPerformance(null, undefined, _roEmptyFilters(), null);
+    } finally { movementSnapshots = saved; }
+    const g = withGoogle.find(r => r.name === 'FilterTest RM');
+    const all = withNone.find(r => r.name === 'FilterTest RM');
+    assert('Source filter alone: filtering to Google reduces Unique Leads to only the 2 Google leads',
+      !!g && g.distinctLeads === 2, 'distinctLeads=' + (g && g.distinctLeads));
+    assert('Source filter alone: no filter includes all 3 leads (2 Google + 1 Facebook)',
+      !!all && all.distinctLeads === 3, 'distinctLeads=' + (all && all.distinctLeads));
+  })();
+
+  // 2. Sub-source filter alone.
+  (function () {
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      _roFilterTestRow({ lead_id: 'SUB-P1', client_id: 'C-SUB-P1', source_bucket: 'PPC' }),
+      _roFilterTestRow({ lead_id: 'SUB-P2', client_id: 'C-SUB-P2', source_bucket: 'PPC' }),
+      _roFilterTestRow({ lead_id: 'SUB-U1', client_id: 'C-SUB-U1', source_bucket: 'UTM' }),
+    ];
+    let withPpc;
+    try {
+      const ppcFilters = Object.assign(_roEmptyFilters(), { bucket: new Set(['PPC']) });
+      withPpc = computeRmPerformance(null, undefined, ppcFilters, null);
+    } finally { movementSnapshots = saved; }
+    const p = withPpc.find(r => r.name === 'FilterTest RM');
+    assert('Sub-source filter alone: filtering to PPC reduces Unique Leads to only the 2 PPC leads',
+      !!p && p.distinctLeads === 2, 'distinctLeads=' + (p && p.distinctLeads));
+  })();
+
+  // 3. Multiple filters together (Region + Source) — AND, not OR.
+  (function () {
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      _roFilterTestRow({ lead_id: 'RS-A1', client_id: 'C-RS-A1', region: 'RegionA', group_source: 'Google' }),
+      _roFilterTestRow({ lead_id: 'RS-A2', client_id: 'C-RS-A2', region: 'RegionA', group_source: 'Google' }),
+      _roFilterTestRow({ lead_id: 'RS-A3', client_id: 'C-RS-A3', region: 'RegionA', group_source: 'Facebook' }),
+      _roFilterTestRow({ lead_id: 'RS-B1', client_id: 'C-RS-B1', region: 'RegionB', group_source: 'Google' }),
+    ];
+    let combined;
+    try {
+      const filters = Object.assign(_roEmptyFilters(), { region: new Set(['RegionA']), source: new Set(['Google']) });
+      combined = computeRmPerformance(null, undefined, filters, null);
+    } finally { movementSnapshots = saved; }
+    const r = combined.find(r => r.name === 'FilterTest RM');
+    assert('Multiple filters together (Region=RegionA AND Source=Google): only the 2 leads matching BOTH count',
+      !!r && r.distinctLeads === 2, 'distinctLeads=' + (r && r.distinctLeads));
+  })();
+
+  // 4. A lead with multiple Movement_Log copies (same client_id, two
+  // lead_ids) — each copy counts independently (Part 2 Rule 1/2).
+  (function () {
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      _roFilterTestRow({ lead_id: 'COPY-A', client_id: 'CUST-SHARED', region: 'RegionX' }),
+      _roFilterTestRow({ lead_id: 'COPY-B', client_id: 'CUST-SHARED', region: 'RegionY' }),
+    ];
+    let unfiltered, regionXOnly;
+    try {
+      unfiltered = computeRmPerformance(null, undefined, _roEmptyFilters(), null);
+      const regionXFilters = Object.assign(_roEmptyFilters(), { region: new Set(['RegionX']) });
+      regionXOnly = computeRmPerformance(null, undefined, regionXFilters, null);
+    } finally { movementSnapshots = saved; }
+    const both = unfiltered.find(r => r.name === 'FilterTest RM');
+    const onlyX = regionXOnly.find(r => r.name === 'FilterTest RM');
+    assert('Multiple Movement_Log copies of the same customer: both copies count independently with no filter (2, not 1)',
+      !!both && both.distinctLeads === 2, 'distinctLeads=' + (both && both.distinctLeads));
+    assert('Multiple Movement_Log copies of the same customer: filtering by one copy\'s own region excludes the other copy',
+      !!onlyX && onlyX.distinctLeads === 1, 'distinctLeads=' + (onlyX && onlyX.distinctLeads));
+  })();
+
+  // 5. A lead whose raw records span multiple source_bucket values
+  // across different captured days (Part 2 Rule 5) — filtering is
+  // per-record, not a one-time per-lead gate.
+  (function () {
+    const day1 = new Date('2026-09-01T06:00:00+05:30');
+    const day2 = new Date('2026-09-02T06:00:00+05:30');
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      _roFilterTestRow({ lead_id: 'SPAN-1', client_id: 'C-SPAN-1', snapshot_at: day1, source_bucket: 'PPC' }),
+      _roFilterTestRow({ lead_id: 'SPAN-1', client_id: 'C-SPAN-1', snapshot_at: day2, source_bucket: 'UTM' }),
+    ];
+    let ppcObs, utmObs;
+    try {
+      const ppcFilters = Object.assign(_roEmptyFilters(), { bucket: new Set(['PPC']) });
+      const utmFilters = Object.assign(_roEmptyFilters(), { bucket: new Set(['UTM']) });
+      ppcObs = reconstructRmPerformanceObservations(null, undefined, ppcFilters, null);
+      utmObs = reconstructRmPerformanceObservations(null, undefined, utmFilters, null);
+    } finally { movementSnapshots = saved; }
+    const ppcDays = new Set(ppcObs.map(o => o.dayKey));
+    const utmDays = new Set(utmObs.map(o => o.dayKey));
+    assert('A lead spanning multiple source_bucket values across days: PPC filter keeps only day 1\'s observation',
+      ppcDays.has(istDateKey(day1)) && !ppcDays.has(istDateKey(day2)),
+      'ppcDays=' + Array.from(ppcDays).join(','));
+    assert('A lead spanning multiple source_bucket values across days: UTM filter keeps only day 2\'s observation',
+      utmDays.has(istDateKey(day2)) && !utmDays.has(istDateKey(day1)),
+      'utmDays=' + Array.from(utmDays).join(','));
+  })();
+
+  // 6. A filter combination producing zero results.
+  (function () {
+    const saved = movementSnapshots;
+    movementSnapshots = [_roFilterTestRow({ lead_id: 'ZERO-1', client_id: 'C-ZERO-1' })];
+    let result;
+    try {
+      const impossibleFilters = Object.assign(_roEmptyFilters(), { source: new Set(['NoSuchSource']) });
+      result = computeRmPerformance(null, undefined, impossibleFilters, null);
+    } finally { movementSnapshots = saved; }
+    assert('Zero-result filter combination: computeRmPerformance returns an empty array, not an error or a stale result',
+      Array.isArray(result) && result.length === 0, 'length=' + (result && result.length));
+  })();
+
+  // Shared fixture for tests 7-11 — enough distinct leads (>=
+  // RM_PERF_MIN_VOLUME_LEADS) to actually rank and render, going through
+  // the REAL async UI pipeline (renderRepeatOffenders/
+  // downloadRepeatOffendersPdf), not computeRmPerformance directly —
+  // these tests are specifically about the cache/race mechanism, not the
+  // calculation itself.
+  function _roCacheTestFixture(rmName, n) {
+    const anchor = new Date();
+    const rows = [];
+    for (let i = 1; i <= n; i++) {
+      rows.push(_roFilterTestRow({
+        lead_id: rmName + '-' + i, client_id: 'C-' + rmName + '-' + i, RM: rmName,
+        snapshot_at: anchor, lead_assigned_at: new Date(anchor.getTime() - 10 * 3600000).toISOString(),
+      }));
+    }
+    return rows;
+  }
+  async function _roWaitForCache(deadlineMs) {
+    const deadline = Date.now() + (deadlineMs || 5000);
+    while (!_repeatOffendersLastResult && Date.now() < deadline) await new Promise(r => setTimeout(r, 25));
+  }
+
+  // 7. PDF export attempted while a recalculation is in flight (state 2).
+  await (async function () {
+    const savedSnapshots = movementSnapshots, savedFetch = movementFetchState, savedHier = rmHierarchyFetchState;
+    const savedRunId = _repeatOffendersRunId, savedLastResult = _repeatOffendersLastResult;
+    const rangeSel = document.getElementById('repeatOffendersRangeSelect');
+    const savedRange = rangeSel ? rangeSel.value : null;
+    const statusEl = document.getElementById('repeatOffendersPdfStatus');
+    try {
+      if (rangeSel) rangeSel.value = 'allTime';
+      movementFetchState = 'ok'; rmHierarchyFetchState = 'missing';
+      movementSnapshots = _roCacheTestFixture('InFlight RM', 6);
+      _repeatOffendersLastResult = null;
+      renderRepeatOffenders();
+      await _roWaitForCache();
+      const completed = _repeatOffendersLastResult;
+      // Simulate "a newer run is in flight" deterministically, rather
+      // than depending on real Worker timing (Part 6's own stated
+      // limitation: this harness's synthetic fixtures complete near-
+      // instantly, so a real race can't be reproduced by timing alone).
+      _repeatOffendersRunId = completed.runId + 1;
+      await downloadRepeatOffendersPdf();
+      assert('PDF export during an in-flight recalculation (state 2): blocked with the "still recalculating" message, not a mismatched export',
+        !!statusEl && statusEl.textContent.indexOf('Still recalculating') !== -1,
+        'statusEl text=' + (statusEl && statusEl.textContent));
+    } finally {
+      movementSnapshots = savedSnapshots; movementFetchState = savedFetch; rmHierarchyFetchState = savedHier;
+      _repeatOffendersRunId = savedRunId; _repeatOffendersLastResult = savedLastResult;
+      if (rangeSel && savedRange !== null) rangeSel.value = savedRange;
+    }
+  })();
+
+  // 8. PDF export before any calculation has ever completed (state 1).
+  // Movement_Log itself HAS loaded (a non-empty movementSnapshots) --
+  // this is specifically the "data is fine, but no Repeat Offenders
+  // calculation has run yet" state, distinct from the already-covered
+  // "Movement_Log itself hasn't loaded" guard above it.
+  await (async function () {
+    const savedSnapshots = movementSnapshots, savedFetch = movementFetchState, savedHier = rmHierarchyFetchState;
+    const savedLastResult = _repeatOffendersLastResult;
+    const statusEl = document.getElementById('repeatOffendersPdfStatus');
+    try {
+      movementFetchState = 'ok'; rmHierarchyFetchState = 'missing';
+      movementSnapshots = _roFilterTestRow ? [_roFilterTestRow({ lead_id: 'PRE-1', client_id: 'C-PRE-1' })] : [{ snapshot_at: new Date(), lead_id: 'PRE-1' }];
+      _repeatOffendersLastResult = null;
+      await downloadRepeatOffendersPdf();
+      assert('PDF export before any calculation has completed (state 1): blocked with the "nothing calculated yet" message',
+        !!statusEl && statusEl.textContent.indexOf('Nothing calculated yet') !== -1,
+        'statusEl text=' + (statusEl && statusEl.textContent));
+    } finally {
+      movementSnapshots = savedSnapshots; movementFetchState = savedFetch; rmHierarchyFetchState = savedHier;
+      _repeatOffendersLastResult = savedLastResult;
+    }
+  })();
+
+  // 9. PDF values match the screen exactly, for the same completed
+  // calculation — the core assertion the original brief names
+  // explicitly. Compares the DOM's own rendered row against the row
+  // _repeatOffendersPdfSectionTables/_repeatOffendersPdfTableRows build
+  // from that SAME cached object (called directly rather than through
+  // downloadRepeatOffendersPdf's full doc.save() path, since this bare
+  // harness — unlike dashboard.html itself — never loads jsPDF from a
+  // <head> <script> tag; this still fully exercises the real,
+  // production row-building functions, just not the binary PDF
+  // encoding step, which needs no test here since it doesn't touch any
+  // report data).
+  await (async function () {
+    const savedSnapshots = movementSnapshots, savedFetch = movementFetchState, savedHier = rmHierarchyFetchState;
+    const savedLastResult = _repeatOffendersLastResult;
+    const rangeSel = document.getElementById('repeatOffendersRangeSelect');
+    const savedRange = rangeSel ? rangeSel.value : null;
+    try {
+      if (rangeSel) rangeSel.value = 'allTime';
+      movementFetchState = 'ok'; rmHierarchyFetchState = 'missing';
+      movementSnapshots = _roCacheTestFixture('Match RM', 6);
+      _repeatOffendersLastResult = null;
+      renderRepeatOffenders();
+      await _roWaitForCache();
+      const cached = _repeatOffendersLastResult;
+      const domRow = Array.from(document.querySelectorAll('#repeatOffendersBody tr'))
+        .find(tr => tr.textContent.indexOf('Match RM') !== -1);
+      const domUniqueLeadsText = domRow ? domRow.querySelectorAll('td')[2].textContent.trim() : null;
+      const pdfTable = _repeatOffendersPdfSectionTables(cached).find(c => c.title.indexOf('RMs') === 0);
+      const pdfRow = pdfTable && pdfTable.list.find(r => r.name === 'Match RM');
+      assert('PDF values match the screen exactly: Unique Leads (DOM column 3) equals the PDF row\'s own distinctLeads',
+        !!domRow && !!pdfRow && domUniqueLeadsText === String(pdfRow.distinctLeads),
+        'dom=' + domUniqueLeadsText + ' pdf=' + (pdfRow && pdfRow.distinctLeads));
+      const domScoreText = domRow ? domRow.querySelectorAll('td')[4].textContent.replace(/\s+/g, ' ').trim() : null;
+      const pdfTableRow = pdfRow ? _repeatOffendersPdfTableRows([pdfRow], null)[0] : null;
+      assert('PDF values match the screen exactly: Score string built for the PDF matches the composite/peerComposite the DOM rendered from',
+        !!pdfTableRow && domScoreText.indexOf(pdfRow.composite.toFixed(2)) !== -1 && domScoreText.indexOf(pdfRow.peerComposite.toFixed(2)) !== -1,
+        'domScoreText=' + domScoreText + ' pdfTableRow=' + JSON.stringify(pdfTableRow));
+    } finally {
+      movementSnapshots = savedSnapshots; movementFetchState = savedFetch; rmHierarchyFetchState = savedHier;
+      _repeatOffendersLastResult = savedLastResult;
+      if (rangeSel && savedRange !== null) rangeSel.value = savedRange;
+    }
+  })();
+
+  // 10. A filter changes again while a previous filter change's
+  // recalculation is already in flight — the superseded run's eventual
+  // completion must never overwrite the cache with stale data.
+  await (async function () {
+    const savedSnapshots = movementSnapshots, savedFetch = movementFetchState, savedHier = rmHierarchyFetchState;
+    const savedLastResult = _repeatOffendersLastResult, savedRunId = _repeatOffendersRunId;
+    const rangeSel = document.getElementById('repeatOffendersRangeSelect');
+    const savedRange = rangeSel ? rangeSel.value : null;
+    try {
+      if (rangeSel) rangeSel.value = 'allTime';
+      movementFetchState = 'ok'; rmHierarchyFetchState = 'missing';
+      movementSnapshots = _roCacheTestFixture('Superseded RM', 6);
+      _repeatOffendersLastResult = null;
+      // Fire two recalculations back to back, as two rapid filter
+      // changes would — only the SECOND (latest) one's runId should
+      // ever end up cached, never the first.
+      renderRepeatOffenders();
+      const firstRunId = _repeatOffendersRunId;
+      renderRepeatOffenders();
+      const secondRunId = _repeatOffendersRunId;
+      await _roWaitForCache();
+      assert('A second filter change supersedes an in-flight first one: the two runs got distinct ids',
+        firstRunId !== secondRunId, 'firstRunId=' + firstRunId + ' secondRunId=' + secondRunId);
+      assert('A second filter change supersedes an in-flight first one: the cache reflects the LATEST run, never the superseded one',
+        !!_repeatOffendersLastResult && _repeatOffendersLastResult.runId === secondRunId,
+        'cached runId=' + (_repeatOffendersLastResult && _repeatOffendersLastResult.runId) + ' secondRunId=' + secondRunId);
+    } finally {
+      movementSnapshots = savedSnapshots; movementFetchState = savedFetch; rmHierarchyFetchState = savedHier;
+      _repeatOffendersLastResult = savedLastResult; _repeatOffendersRunId = savedRunId;
+      if (rangeSel && savedRange !== null) rangeSel.value = savedRange;
+    }
+  })();
+
+  // 11. The non-Worker synchronous fallback populates the cache too —
+  // forces _runRepeatOffendersSynchronously by making `new Worker(...)`
+  // throw, the same real-world trigger that path already exists to
+  // handle (a locked-down environment, or file:// testing).
+  await (async function () {
+    const savedSnapshots = movementSnapshots, savedFetch = movementFetchState, savedHier = rmHierarchyFetchState;
+    const savedLastResult = _repeatOffendersLastResult;
+    const rangeSel = document.getElementById('repeatOffendersRangeSelect');
+    const savedRange = rangeSel ? rangeSel.value : null;
+    const RealWorker = window.Worker;
+    try {
+      if (rangeSel) rangeSel.value = 'allTime';
+      movementFetchState = 'ok'; rmHierarchyFetchState = 'missing';
+      movementSnapshots = _roCacheTestFixture('Fallback RM', 6);
+      _repeatOffendersLastResult = null;
+      window.Worker = function () { throw new Error('simulated: Worker unavailable in this environment'); };
+      renderRepeatOffenders();
+      await _roWaitForCache();
+      const cached = _repeatOffendersLastResult;
+      assert('Non-Worker synchronous fallback: still populates the canonical result cache with the expected shape',
+        !!cached && Array.isArray(cached.rm) && !!cached.computedFrom, 'cached=' + JSON.stringify(cached && Object.keys(cached)));
+      const fallbackRow = cached && cached.rm.find(r => r.name === 'Fallback RM');
+      assert('Non-Worker synchronous fallback: the cached result is correct (6 Unique Leads), not just present',
+        !!fallbackRow && fallbackRow.distinctLeads === 6, 'distinctLeads=' + (fallbackRow && fallbackRow.distinctLeads));
+    } finally {
+      window.Worker = RealWorker;
+      movementSnapshots = savedSnapshots; movementFetchState = savedFetch; rmHierarchyFetchState = savedHier;
+      _repeatOffendersLastResult = savedLastResult;
+      if (rangeSel && savedRange !== null) rangeSel.value = savedRange;
+    }
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),
