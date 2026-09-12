@@ -531,3 +531,144 @@ only appears after the click.
 
 *(Part 4 complete. Continues in Part 5 — the refactoring/migration
 plan.)*
+
+## Part 5 — Refactoring / Migration Plan
+
+### I. Staged Implementation Steps
+
+**A real deployment fact that shapes the staging discipline below,
+confirmed before writing this plan**: unlike this project's `.gs` files
+(which need a manual copy-paste into the Apps Script editor before
+anything takes effect live — `CLAUDE.md`), `dashboard.html`/`js/*.js`
+are served **directly from this repo via GitHub Pages** — this
+project's own CI already runs a `deploy`/`pages build and deployment`
+job on every push to `master` (observed directly, Parts 1-4's own CI
+runs). **A push to `master` here takes effect on the live dashboard
+immediately.** There is no Apps-Script-style manual gate to hide a
+half-finished change behind. That's the reason every step below is
+staged to be independently safe and independently verified *before*
+being pushed — not staged onto a disposable branch the way the
+production Apps Script capture logic was (Lead History &
+Versioning Review) — a disposable branch would only delay when the
+live site changes, not add any real safety net for a file that
+auto-deploys the moment it lands on `master` regardless of which
+branch it was written on.
+
+**Step 1 — Add the cache, populate it, change nothing that reads it
+yet.** Purely additive; the live tab's behavior must be byte-identical
+before and after this step.
+  - Add `let _repeatOffendersLastResult = null;` (module-level,
+    `tab-repeat-offenders.js`, alongside the existing
+    `_repeatOffendersWorker`/`_repeatOffendersRunId` declarations, line
+    247-248).
+  - Thread `range` and `now` through the `ctx` object end to end — a
+    real, precise plumbing gap confirmed by re-reading the current code:
+    `renderRepeatOffenders()` (line 322-324) computes `filters` and
+    calls `runRepeatOffendersRecalculation({ dateKeys, hierarchyMissing,
+    filters, bodyEl, noticeEl, countEl, statusEl, clear })` — `range`
+    and `now` (both already computed locally at lines 301-303) are
+    **not currently included**. Add them to this object literal.
+    `runRepeatOffendersRecalculation`'s `onDone` (line 348) constructs
+    the object passed to `_renderRepeatOffendersResult` as `{ bodyEl,
+    noticeEl, countEl, statusEl, filters, hierarchyMissing }` — neither
+    `dateKeys` (available in scope, just not forwarded) nor the new
+    `range`/`now` are included there either. Add all three.
+  - At the top of `_renderRepeatOffendersResult` (line 440), before the
+    existing `if (!rmFull.length)` branch, populate
+    `_repeatOffendersLastResult` with the full shape from Part 4
+    (`runId` — the closure's own `ctx`/call already has it via
+    `onDone`'s outer `runId`; `computedAtWall` — `startedAtWall` is
+    already a parameter; `computedFrom` built from `ctx.filters`,
+    `ctx.dateKeys`, `ctx.range`, `ctx.now`, `ctx.hierarchyMissing`; and
+    `rm/region/a1tm/rh/byRegion/stageCounts` straight from `msg`).
+  - **Verify**: reload the dashboard, exercise every filter/range
+    combination already covered by manual testing today, confirm the
+    screen renders exactly as before (this step reads from nothing new,
+    so there is no behavior to regress) — then, via the Browser pane's
+    JS console, confirm `_repeatOffendersLastResult` populates with the
+    expected shape after each recalculation. Commit on its own.
+
+**Step 2 — Cut the PDF over to the cache; delete its independent
+calculation entirely (not alongside it).** This is the actual fix.
+  - Rewrite `_repeatOffendersPdfSectionTables` to take the cached object
+    (not `dateKeys`) and build `candidates` from
+    `cached.rm/region/a1tm/rh/byRegion` directly — remove every
+    `computeRmPerformance`/`computeRmPerformanceByRegion` call from this
+    file. (Both functions stay exported/used elsewhere —
+    `_runRepeatOffendersSynchronously`, line 398, still needs them for
+    the no-Worker fallback path, which is unrelated to this fix and
+    stays as-is.)
+  - Rewrite `_repeatOffendersPdfCurrentFilterInfo`/
+    `_repeatOffendersPdfFilterSummaryLine`/`_repeatOffendersPdfDateLine`
+    to take the cached `computedFrom` fields as parameters instead of
+    reading `filterState`/`document.getElementById(...)`/`_renderNow`
+    live.
+  - Add the Part 4 three-state check as the first real branch inside
+    `downloadRepeatOffendersPdf`, after the existing
+    `_repeatOffendersPdfGenerating` re-entrancy guard (unrelated, stays
+    as-is).
+  - **Verify**: (a) export immediately after a filter change completes
+    normally and produces a PDF matching the screen — the common case,
+    must keep working; (b) manually simulate the race — start a
+    recalculation, click "Download PDF" before it finishes (throttle
+    CPU in DevTools, or filter on a combination known to take a few
+    seconds against real data, to actually open the window) — confirm
+    the new state-2 message appears instead of a silently-mismatched
+    export; (c) click "Download PDF" on a completely fresh page load,
+    before any calculation has ever run — confirm the new state-1
+    message appears instead of a crash or a stale/empty PDF. Commit on
+    its own, separate from Step 1.
+
+**Step 3 — UX: disable the PDF button while stale (Part 4's
+recommended addition).**
+  - Disable `repeatOffendersDownloadPdfBtn` at the top of
+    `runRepeatOffendersRecalculation` (mirroring how the "Recalculate"
+    button already disables itself); re-enable it in
+    `_renderRepeatOffendersResult` once the new cache entry lands.
+  - **Verify**: button visibly greys out during a real multi-second
+    recalculation, re-enables the moment the table updates. Commit on
+    its own — this step is UX polish, not correctness, so isolating it
+    means Step 2's correctness fix can ship (and be reverted
+    independently, if ever needed) without depending on this one.
+
+**Step 4 — Regression tests (Part 6).** Add the Part 6 test suite to
+`tests/frontend-harness.html` immediately after Step 2 lands, before
+Step 3 — specifically including a test that reproduces the race against
+a **checked-out pre-Step-2 copy of the code first**, confirming it
+actually fails there, before confirming it passes against the fixed
+code. This is the same reproduce-before-fix discipline this project's
+own `.gs` test suites already follow, applied here for the first time
+to a `js/*.js` frontend bug. Full detail in Part 6.
+
+**Step 5 — Final cleanup + full verification pass (Part 7).** Confirm
+no dead parameters remain (e.g. `_repeatOffendersPdfSectionTables`'s old
+`dateKeys`-only signature fully replaced, not left as an unused
+alternate path); run the complete `tests/frontend-harness.html` suite;
+do one full manual pass in the Browser pane across every filter
+combination named in Part 6's test list.
+
+### Why this order satisfies the stated priorities
+
+- **Correctness first**: Step 1 (the cache existing and being correct)
+  must be verified before Step 2 (anything actually depending on it) —
+  a wrong cache shape caught at Step 1 is a no-op bug; caught at Step 2
+  it's a live, user-facing PDF bug.
+- **Minimal duplication**: Step 2 *replaces* the PDF's calculation call
+  outright, in the same commit that adds its dependency on the cache —
+  there is never a commit where both the old (independent) and new
+  (cache-based) PDF logic coexist.
+- **Backward compatibility**: `core-rm-performance.js` itself is never
+  touched by any step — the engine Part 1 already found correct stays
+  exactly as it is; only its two callers change.
+- **Testability**: every step has its own explicit verification before
+  the next begins, and Step 4 is deliberately sequenced right after the
+  real fix (Step 2), not deferred to the very end, so regression
+  coverage exists before the UX-only Step 3 and cleanup-only Step 5 are
+  layered on top.
+- **Performance**: the end state is strictly cheaper than today — one
+  Stage 1-4 calculation per filter/range change instead of two (the
+  live tab's Worker run plus whatever the PDF used to trigger
+  independently) — Step 2 removes work, it doesn't add any.
+
+*(Part 5 complete. Continues in Part 6 — comprehensive test strategy +
+risks/edge cases.)*
