@@ -142,6 +142,63 @@ function runMovementTrackerTests_() {
     TestAssert_(pruneSheet.getMaxRows() < 20000, 'pruneMovementLog_: shrinks an over-allocated sheet\'s row count back down toward kept-rows + MOVEMENT_LOG_ROW_HEADROOM_');
     TestAssert_(pruneSheet.getMaxRows() >= 1 + 1 + MOVEMENT_LOG_ROW_HEADROOM_, 'pruneMovementLog_: never shrinks below what the kept rows + headroom actually need');
 
+    // ---- pruneMovementLog_: real production incident, 2026-09-12 —
+    // write-before-clear safety + skip-when-nothing-to-prune ----
+    // Real incident: the OLD clear-then-write ordering left Movement_Log
+    // with its row ALLOCATION still at ~196K but almost all DATA gone,
+    // after a snapshotPeriodic run got killed mid-function by Apps
+    // Script's 30-minute execution ceiling — landing inside the gap
+    // between clearContent() and the setValues() that was supposed to
+    // write the kept rows back. Fixed by writing kept rows to their
+    // final position FIRST, then clearing only the leftover tail — these
+    // two tests lock down (1) the sheet is untouched at all when nothing
+    // needs pruning (also the real, meaningful cost reduction that keeps
+    // a healthy sheet from ever unconditionally clearing+rewriting its
+    // whole range every single run), and (2) with MULTIPLE kept rows
+    // (not just one, unlike the test above — a multi-row case is what
+    // would actually catch an off-by-one in the write/clear split
+    // points), each kept row's own data survives correctly and lands in
+    // the right position.
+    (function () {
+      const nowForPrune2 = new Date();
+      const allRecentSs = TestMockSpreadsheet_({});
+      const allRecentHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+      const allRecentRows = [1, 2, 3].map(function (n) {
+        return [TestFixture_daysAgo_(nowForPrune2, 1), 'recent' + n].concat(SNAPSHOT_COLUMNS_.map(function (c) { return c === 'lead_id' ? ('L-R' + n) : ''; }));
+      });
+      const allRecentSheet = TestMockSheet_('Movement_Log', [allRecentHeader].concat(allRecentRows));
+      allRecentSheet._maxRows = 20000;
+      allRecentSs._sheets['Movement_Log'] = allRecentSheet;
+      const beforeValues = allRecentSheet.getRange(1, 1, allRecentSheet.getLastRow(), allRecentHeader.length).getValues();
+      pruneMovementLog_(allRecentSs);
+      const afterValues = allRecentSheet.getRange(1, 1, allRecentSheet.getLastRow(), allRecentHeader.length).getValues();
+      TestAssertEqual_(afterValues, beforeValues, 'pruneMovementLog_: when every row is still within retention, the sheet\'s content is left completely untouched (early-return, no clear/write at all)');
+      TestAssertEqual_(allRecentSheet.getMaxRows(), 20000, 'pruneMovementLog_: the row-allocation shrink is also skipped on the nothing-to-prune path — it never runs when nothing was pruned');
+
+      const mixedSs = TestMockSpreadsheet_({});
+      const mixedHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+      function mixedRow(daysAgo, label, leadId) {
+        return [TestFixture_daysAgo_(nowForPrune2, daysAgo), label].concat(SNAPSHOT_COLUMNS_.map(function (c) { return c === 'lead_id' ? leadId : ''; }));
+      }
+      // Interleaved old/recent, 3 kept rows (not 1) — exercises the
+      // write-then-clear split at a non-trivial boundary.
+      const mixedRows = [
+        mixedRow(10, 'old1', 'L-OLD1'),
+        mixedRow(1, 'recentA', 'L-RA'),
+        mixedRow(9, 'old2', 'L-OLD2'),
+        mixedRow(2, 'recentB', 'L-RB'),
+        mixedRow(3, 'recentC', 'L-RC'),
+      ];
+      const mixedSheet = TestMockSheet_('Movement_Log', [mixedHeader].concat(mixedRows));
+      mixedSs._sheets['Movement_Log'] = mixedSheet;
+      pruneMovementLog_(mixedSs);
+      TestAssertEqual_(mixedSheet.getLastRow(), 1 + 3, 'pruneMovementLog_ (multi-row kept): exactly 3 rows survive (header + 3), the 2 old ones dropped');
+      const mixedKept = mixedSheet.getRange(2, 1, 3, mixedHeader.length).getValues();
+      const keptLeadIds = mixedKept.map(function (r) { return r[SNAPSHOT_COLUMNS_.indexOf('lead_id') + 2]; });
+      TestAssertEqual_(keptLeadIds.sort(), ['L-RA', 'L-RB', 'L-RC'].sort(), 'pruneMovementLog_ (multi-row kept): the 3 surviving rows are exactly the 3 recent ones, correctly written to their new positions — never a stale leftover or a dropped real row');
+      TestAssert_(mixedKept.every(function (r) { return r[0] instanceof Date; }), 'pruneMovementLog_ (multi-row kept): every surviving row still has a real Date in snapshot_at — write-then-clear never corrupts the column being written');
+    })();
+
     // ---- setupMovementTracking: installs exactly SNAPSHOT_HOURS_.length triggers, cleans up old ones first ----
     const setupSs = TestMockSpreadsheet_({});
     const priorTriggers = ['snapshotPeriodic', 'snapshotEvening', 'someUnrelatedTrigger'];
