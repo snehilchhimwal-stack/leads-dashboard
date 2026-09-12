@@ -358,6 +358,18 @@ function runRepeatOffendersRecalculation(ctx){
   const startedAtWall = new Date();
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
+  // UX addition, Repeat Offenders Architecture Redesign Part 4/5 (docs/
+  // _planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md) — proactively
+  // disable "Download PDF" for the duration of this run, same pattern
+  // "Recalculate" already uses on itself just below in this file. Not
+  // strictly required for correctness (downloadRepeatOffendersPdf's own
+  // 3-state check, js/repeat-offenders-pdf.js, blocks a stale export
+  // regardless of whether this disable ever ran) — a disabled button is
+  // just a clearer signal than a status message that only appears after
+  // the click.
+  const pdfBtn = document.getElementById('repeatOffendersDownloadPdfBtn');
+  if (pdfBtn) pdfBtn.disabled = true;
+
   if (_repeatOffendersWorker) { _repeatOffendersWorker.terminate(); _repeatOffendersWorker = null; }
 
   if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.innerHTML = 'Recalculation started…'; }
@@ -471,6 +483,10 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
     computedFrom: { filters, dateKeys, range, now, hierarchyMissing },
     rm: rmFull, region: regionFull, a1tm: a1tmFull, rh: rhFull, byRegion, stageCounts,
   };
+  // Re-enable "Download PDF" now that the cache reflects this (current)
+  // run — mirrors the disable in runRepeatOffendersRecalculation above.
+  const pdfBtn = document.getElementById('repeatOffendersDownloadPdfBtn');
+  if (pdfBtn) pdfBtn.disabled = false;
 
   if (!rmFull.length) {
     const activeFilters = [];
