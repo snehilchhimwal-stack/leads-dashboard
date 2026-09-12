@@ -28,14 +28,33 @@
 // PDF-side reimplementation). See core-rm-performance.js's own header
 // comment for the full methodology.
 //
-// Depends on js/tab-repeat-offenders.js (rmHierarchyFetchState,
-// repeatOffendersDateKeysForRange, captureRepeatOffendersFilterSnapshot),
-// js/core-rm-performance.js (computeRmPerformance, rmPerfPrimaryManagerFor,
-// rmPerfRhFor, repeatOffendersRegionKey, filterRmPerformanceRankable,
-// sortRmPerformanceByScore, rmPerformanceDrivenBy
-// — shared with the live tab so "what's driving an elevated score" and
-// "what order to list groups in" can never quietly drift apart between
-// the two surfaces), js/tab-movement.js (movementFetchState,
+// Repeat Offenders Architecture Redesign (docs/_planning/
+// REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md, Parts 1-5) — rebuilt a third
+// time to close a real, found bug: the paragraph above's own promise
+// ("never a separate PDF-side reimplementation") was true of the MATH,
+// but this file still called computeRmPerformance/
+// computeRmPerformanceByRegion a second, independent, SYNCHRONOUS time
+// at click time, while the live tab's own calculation runs
+// ASYNCHRONOUSLY via a dedicated Worker (js/rm-performance-worker.js,
+// up to ~12-15s for real data volume). A filter/range change mutates
+// filterState/_renderNow synchronously, before that async recalculation
+// completes — so exporting during that window could compute against
+// different inputs than whatever was still rendered on screen. This
+// file no longer calls computeRmPerformance/computeRmPerformanceByRegion
+// at all: every table (and every piece of header text — filter name,
+// date range, active-filter summary) is built from
+// _repeatOffendersLastResult (tab-repeat-offenders.js's canonical result
+// cache, populated once per completed calculation), never from a live
+// global read at export time.
+//
+// Depends on js/tab-repeat-offenders.js (_repeatOffendersLastResult,
+// _repeatOffendersRunId, rmHierarchyFetchState), js/core-rm-performance.js
+// (rmPerformanceHierarchyCells, filterRmPerformanceRankable,
+// sortRmPerformanceByScore, rmPerformanceDrivenBy — shared with the live
+// tab so "what order to list groups in" can never quietly drift apart
+// between the two surfaces; computeRmPerformance/
+// computeRmPerformanceByRegion themselves are NOT called from this file
+// any more, see above), js/tab-movement.js (movementFetchState,
 // movementSnapshots, movementFetchError) and js/core-foundation.js
 // (istDateKey) / js/core-outcome-engine.js (istStamp) / js/reports-build.js
 // (IST_MONTHS) — all loaded earlier in dashboard.html, but this only ever
@@ -70,24 +89,26 @@ function _repeatOffendersPdfDateLine(dateKeys){
   return 'Date Range: ' + resolved.fromFormatted + ' – ' + resolved.toFormatted;
 }
 
-// Reads the live page's OWN current filter state — same range select,
-// same repeatOffendersDateKeysForRange call renderRepeatOffenders itself
-// uses — so the PDF can never independently invent a different dataset
-// than what's currently on screen. No more usesAssignedDate: the
-// pre-2026-09-04 engine matched EITHER a lead's assignment date OR its
-// flagged-capture date depending on the selected range; the new
-// computeRmPerformance() engine always matches a lead-day against its own
-// Movement_Log OBSERVATION day, the same for every range — see
-// core-rm-performance.js's own header comment.
-function _repeatOffendersPdfCurrentFilterInfo(){
-  const rangeSel = document.getElementById('repeatOffendersRangeSelect');
-  const range = rangeSel ? rangeSel.value : 'last7Days';
-  const now = (typeof _renderNow !== 'undefined' && _renderNow) ? _renderNow : new Date();
-  const dateKeys = repeatOffendersDateKeysForRange(range, now);
+// Reads the CACHED result's OWN computedFrom — never the live page's
+// range-select value or _renderNow directly. This is the actual fix from
+// docs/_planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md's Part 4: those
+// live values can change (a user picks a new range) between the moment
+// the cache was produced and the moment "Download PDF" is clicked, and
+// printing THIS PDF's own header from the LIVE values while its TABLES
+// come from the (older) cache would show a header that describes filters
+// different from the data actually in the tables below it — a subtler
+// version of the same race the cache mechanism exists to close for the
+// table data itself. Every piece of text this PDF prints must trace back
+// to one cached object, never to a live global read at export time.
+function _repeatOffendersPdfCurrentFilterInfo(cached){
+  const range = cached.computedFrom.range;
+  const now = cached.computedFrom.now;
+  const dateKeys = cached.computedFrom.dateKeys;
   return {
     range: range,
     now: now,
     dateKeys: dateKeys,
+    filters: cached.computedFrom.filters,
     displayName: REPEAT_OFFENDERS_PDF_FILTER_NAMES_[range] || String(range).toUpperCase(),
     dateLine: _repeatOffendersPdfDateLine(dateKeys),
   };
@@ -109,40 +130,42 @@ function _repeatOffendersPdfHasAnyRowsForRange(dateKeys){
   return movementSnapshots.some(rec => dateKeys.has(istDateKey(rec.snapshot_at)));
 }
 
-// One table candidate for a date/section: { title, list } (the same
-// `list` shape computeRmPerformance() returns). Filters out empty
-// candidates and the two hierarchy-dependent rollups when RM_Hierarchy
-// isn't loaded — the live tab would print a "could not be read"
-// placeholder row instead, which isn't real data worth a PDF page.
+// One table candidate for a section: { title, list } (the same `list`
+// shape classifyRmPerformance() returns). Filters out empty candidates.
 //
-// 2026-09-07 (explicit request — "same for pdf download"): matches the
-// live tab exactly now, no divergence. Worst N by raw score REGARDLESS
-// of classification (rankFor below) — RM 20 / A1-TM 10 / RH 5 / Region
-// ALL, uncapped — except Insufficient Data is never shown in any of the
-// 4, even to pad out a short list. filterRmPerformanceRankable +
-// sortRmPerformanceByScore (both core-rm-performance.js) are the SAME
-// functions tab-repeat-offenders.js's renderRepeatOffenders calls, so the
-// two can't quietly drift apart on what counts as "worst".
-function _repeatOffendersPdfSectionTables(dateKeys){
-  const hierarchyMissing = rmHierarchyFetchState !== 'ok';
-  // Frozen filter snapshot (core-rm-performance.js's passesRepeatOffenderFilters
-  // now requires one explicitly — see captureRepeatOffendersFilterSnapshot,
-  // tab-repeat-offenders.js) — captured fresh per PDF generation, same as
-  // the live tab does per render.
-  const filters = captureRepeatOffendersFilterSnapshot();
+// Repeat Offenders Architecture Redesign (docs/_planning/
+// REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md, Parts 3-5): this function no
+// longer calls computeRmPerformance/computeRmPerformanceByRegion at
+// all — every raw rollup array comes from `cached`
+// (_repeatOffendersLastResult, tab-repeat-offenders.js), the SAME
+// canonical result the live tab's own table already rendered from. This
+// closes the actual root cause: the old version independently
+// recomputed from live filterState/movementSnapshots at click time,
+// racing the live tab's own asynchronous (Worker-based) recalculation.
+//
+// What still runs here, deliberately, and why it's safe: the worst-N
+// ranking (rankFor) and per-table caps (20/10/5/uncapped) are pure,
+// stateless functions of the already-computed `cached.rm`/etc. arrays —
+// they touch neither movementSnapshots nor filterState, so running them
+// again here on the SAME cached arrays the live tab already ranked
+// cannot diverge from what it showed. Region's `byRegion` entries are
+// the one exception that needs no re-ranking at all:
+// computeRmPerformanceByRegion already sorted and capped each region's
+// list internally before this was ever cached, so `cached.byRegion` is
+// used as-is.
+function _repeatOffendersPdfSectionTables(cached){
+  const hierarchyMissing = cached.computedFrom.hierarchyMissing;
   const rankFor = (list) => sortRmPerformanceByScore(filterRmPerformanceRankable(list));
   const candidates = [
-    { title: 'RMs — worst 20', list: rankFor(computeRmPerformance(dateKeys, undefined, filters, rmHierarchyByNameLower)).slice(0, 20) },
-    { title: 'By Region — worst first, all shown', list: rankFor(computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower)) },
-    { title: 'A1 / TM — worst 10', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, 10) },
-    { title: 'RH — worst 5', list: hierarchyMissing ? [] : rankFor(computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower)).slice(0, 5) },
+    { title: 'RMs — worst 20', list: rankFor(cached.rm).slice(0, 20) },
+    { title: 'By Region — worst first, all shown', list: rankFor(cached.region) },
+    { title: 'A1 / TM — worst 10', list: hierarchyMissing ? [] : rankFor(cached.a1tm).slice(0, 10) },
+    { title: 'RH — worst 5', list: hierarchyMissing ? [] : rankFor(cached.rh).slice(0, 5) },
   ];
   // ADDITIONAL, 2026-09-09 ("Region wise repeat offender list") — one
   // table PER region, that region's own worst 5 RMs. Appended after the
-  // 4 above, doesn't replace or resize any of them. computeRmPerformanceByRegion
-  // (core-rm-performance.js) already sorts and caps each region's list
-  // internally, so no rankFor/.slice needed here, unlike the 4 above.
-  computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower).forEach(entry => {
+  // 4 above, doesn't replace or resize any of them.
+  (cached.byRegion || []).forEach(entry => {
     candidates.push({ title: `${entry.region} — worst 5 RMs`, list: entry.list });
   });
   return candidates.filter(c => c.list.length > 0);
@@ -171,21 +194,24 @@ function _repeatOffendersPdfSectionTables(dateKeys){
 // every spec's dateLabel is null (no more per-section "DATE:" headings —
 // _repeatOffendersPdfRenderPages already skips drawing one whenever
 // dateLabel is falsy).
-function _repeatOffendersPdfBuildPageSpecs(filterInfo){
-  return _repeatOffendersPdfSectionTables(filterInfo.dateKeys)
+function _repeatOffendersPdfBuildPageSpecs(cached){
+  return _repeatOffendersPdfSectionTables(cached)
     .map(t => ({ dateLabel: null, title: t.title, list: t.list }));
 }
 
-// One line describing the currently-active top-bar filters (or their
-// absence) — printed in the PDF header so the report is self-explanatory
-// about its own scope without needing the live dashboard open alongside it.
-function _repeatOffendersPdfFilterSummaryLine(){
+// One line describing the filters ACTUALLY IN EFFECT for `cached`'s own
+// calculation — takes the cached filter snapshot as a parameter rather
+// than reading the live filterState global, for the same reason
+// _repeatOffendersPdfCurrentFilterInfo does (Part 4 of the architecture
+// review): filterState can already have moved on to a newer, not-yet-
+// computed selection by the time this prints.
+function _repeatOffendersPdfFilterSummaryLine(filters){
   const parts = [];
-  if (filterState.project.size) parts.push('Project: ' + Array.from(filterState.project).join(', '));
-  if (filterState.region.size) parts.push('Region: ' + Array.from(filterState.region).join(', '));
-  if (filterState.TL.size) parts.push('TL: ' + Array.from(filterState.TL).join(', '));
-  if (filterState.source.size) parts.push('Source: ' + Array.from(filterState.source).join(', '));
-  if (filterState.bucket.size) parts.push('Sub-source: ' + Array.from(filterState.bucket).join(', '));
+  if (filters.project.size) parts.push('Project: ' + Array.from(filters.project).join(', '));
+  if (filters.region.size) parts.push('Region: ' + Array.from(filters.region).join(', '));
+  if (filters.TL.size) parts.push('TL: ' + Array.from(filters.TL).join(', '));
+  if (filters.source.size) parts.push('Source: ' + Array.from(filters.source).join(', '));
+  if (filters.bucket.size) parts.push('Sub-source: ' + Array.from(filters.bucket).join(', '));
   return parts.length ? parts.join(' · ') : null;
 }
 
@@ -289,7 +315,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     doc.text(filterInfo.dateLine, REPEAT_OFFENDERS_PDF_MARGIN_, y);
     y += 16;
   }
-  const filterSummaryLine = _repeatOffendersPdfFilterSummaryLine();
+  const filterSummaryLine = _repeatOffendersPdfFilterSummaryLine(filterInfo.filters);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(145, 150, 160);
@@ -439,14 +465,41 @@ async function downloadRepeatOffendersPdf(){
     return;
   }
 
+  // Repeat Offenders Architecture Redesign (docs/_planning/
+  // REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md, Part 4) -- the actual fix
+  // for that review's Part 1 root cause. Read the canonical result
+  // cache (_repeatOffendersLastResult, tab-repeat-offenders.js) instead
+  // of independently recomputing here. Two states block export outright
+  // below, both because there is genuinely no safe-to-export
+  // calculation yet: nothing has ever completed (a fresh page load,
+  // before the first render finishes), or a NEWER one is currently in
+  // flight and hasn't landed (the exact race this whole redesign closes
+  // -- a filter/range change mutates filterState/_renderNow
+  // synchronously, then the live tab's Worker-based recalculation runs
+  // asynchronously for up to ~12-15s against real data volume; exporting
+  // during that window used to silently compute against the NEW inputs
+  // while the screen still showed the OLD result). `cached.runId !==
+  // _repeatOffendersRunId` is a single integer comparison against the
+  // run counter tab-repeat-offenders.js already bumps synchronously the
+  // instant a new run starts -- no separate in-flight flag needed.
+  const cached = _repeatOffendersLastResult;
+  if (!cached) {
+    if (statusEl) { statusEl.textContent = 'Nothing calculated yet — wait for the Repeat Offenders table to finish loading, then try again.'; statusEl.style.color = 'var(--amber)'; }
+    return;
+  }
+  if (cached.runId !== _repeatOffendersRunId) {
+    if (statusEl) { statusEl.textContent = 'Still recalculating for the current filters — wait for the table to finish updating, then try again.'; statusEl.style.color = 'var(--amber)'; }
+    return;
+  }
+
   _repeatOffendersPdfGenerating = true;
   const originalLabel = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Generating PDF…'; }
   if (statusEl) { statusEl.textContent = ''; statusEl.style.color = 'var(--text-faint)'; }
 
   try {
-    const filterInfo = _repeatOffendersPdfCurrentFilterInfo();
-    const specs = _repeatOffendersPdfBuildPageSpecs(filterInfo);
+    const filterInfo = _repeatOffendersPdfCurrentFilterInfo(cached);
+    const specs = _repeatOffendersPdfBuildPageSpecs(cached);
     if (!specs.length) {
       // Movement_Log data existing was already confirmed above (the
       // movementFetchState/movementSnapshots.length gate at the top of
