@@ -672,3 +672,148 @@ combination named in Part 6's test list.
 
 *(Part 5 complete. Continues in Part 6 — comprehensive test strategy +
 risks/edge cases.)*
+
+## Part 6 — Comprehensive Test Strategy + Risks/Edge Cases
+
+Grounded in `tests/frontend-harness.html`'s **real, existing**
+conventions (confirmed by reading it directly, not assumed): a global
+`assert(name, cond, detail)` helper; the real `dashboard.html` + every
+`js/*.js` file loaded live; `Date` frozen to a fixed instant
+(`2026-09-09T14:00:00+05:30`); save-mutate-restore-in-`finally` around
+any global this suite temporarily overrides (`movementSnapshots`,
+`movementFetchState`, `rmHierarchyFetchState`, a status element's own
+`textContent`) — the existing test at line 419-439
+(`downloadRepeatOffendersPdf: refuses to generate while RM_Hierarchy is
+still loading`) is the **direct precedent and pattern template** for
+every new race-condition test below; it already proves this exact style
+of async-gate regression test works in this harness.
+
+Per Part 5's migration plan (Step 4), the tests below are **specified
+here**, ready to transcribe into `tests/frontend-harness.html` in that
+same style; they get physically added once Part 7 lands the real Step
+1/2 code, immediately after — not before, since several of them assert
+against APIs (`_repeatOffendersLastResult`, the redesigned
+`_repeatOffendersPdfSectionTables` signature) that don't exist until
+then.
+
+### J. Comprehensive Test Plan
+
+**Filter correctness** (mostly reconfirming Part 1's finding that
+filtering itself already works — worth locking down explicitly since
+the original bug report's own words were "Source and Sub Source"):
+
+1. **Source filter alone** — two synthetic leads differing only in
+   `group_source`; filtering to one Source reduces `distinctLeads` to
+   exactly that source's lead(s), for RM, Region, and byRegion rollups
+   alike.
+2. **Sub-source filter alone** — same shape, keyed on `source_bucket`.
+3. **Multiple filters together** (Region + Source) — combined
+   restriction is AND, not OR: a lead matching Region but not Source is
+   excluded, and vice versa.
+4. **A lead with multiple Movement_Log copies** (same `client_id`, two
+   `lead_id`s, per Part 2 Rule 1) — each copy counts independently
+   toward Unique Leads; a filter matching only one copy's own raw
+   field values excludes the other copy without affecting the first.
+5. **A lead whose raw records span multiple `source_bucket` values
+   across different captured days** (Part 2 Rule 5) — the lead
+   contributes an observation on the days its OWN captured value passed
+   the filter, and correctly contributes none on days it didn't — not
+   an all-or-nothing per-lead gate.
+6. **A filter combination producing zero results** — `computeRmPerformance`
+   returns `[]` for every rollup; confirm the live tab's own
+   already-existing empty-state message renders (partially covered
+   already by this harness's documented "graceful empty-history path"
+   coverage, line 49 — this test specifically forces it via an
+   impossible filter combination rather than an empty dataset).
+
+**The actual fix — race-condition regression coverage (the heart of
+this redesign):**
+
+7. **PDF export attempted while a recalculation is in flight** — seed
+   `movementSnapshots`, trigger a recalculation (or directly bump
+   `_repeatOffendersRunId` past whatever `_repeatOffendersLastResult.runId`
+   currently is, to deterministically simulate "in flight" without
+   depending on real Worker timing), call `downloadRepeatOffendersPdf()`,
+   assert the Part 4 state-2 message appears in `#repeatOffendersPdfStatus`
+   and that `doc.save` is never reached (stub/spy `window.jspdf.jsPDF`
+   or count calls into `_repeatOffendersPdfRenderPages`).
+8. **PDF export before any calculation has ever completed** —
+   `_repeatOffendersLastResult === null`; assert the Part 4 state-1
+   message, same no-`doc.save` assertion as #7.
+9. **PDF values match the screen exactly, for the same completed
+   calculation** — the specific assertion the original brief names
+   explicitly. Seed a known fixture, run `renderRepeatOffenders()` to
+   completion (await it, same as this harness's own existing
+   `fetchAndRender` pattern), read the rendered Unique Leads/Score/
+   Instances/Region text directly out of `#repeatOffendersBody`'s DOM
+   for one known RM, then build that same RM's PDF row via the
+   redesigned `_repeatOffendersPdfTableRows`/`_repeatOffendersPdfSectionTables`
+   (called directly, not through a real file download) and assert every
+   field matches the DOM text byte-for-byte.
+10. **A filter changes again while a previous filter change's
+    recalculation is already in flight** — the superseded run's
+    eventual completion must never overwrite the cache with stale data.
+    The existing `onmessage`/`onDone` guard (`if (runId !==
+    _repeatOffendersRunId) return;`, already present, unrelated to this
+    redesign) already protects the DOM render from this; this test
+    specifically confirms `_repeatOffendersLastResult` also ends up
+    reflecting the LATEST request, not an intermediate superseded one —
+    a real gap the existing guard alone doesn't obviously cover for a
+    NEW piece of state.
+
+**Fallback-path parity:**
+
+11. **The non-Worker synchronous fallback populates the cache
+    correctly too** — force `_runRepeatOffendersSynchronously`
+    (`tab-repeat-offenders.js:398`) by making `new Worker(...)` throw
+    (the same technique this fallback path already exists to handle —
+    "a locked-down environment, or this file opened directly over
+    file://"), confirm `_repeatOffendersLastResult` still populates with
+    the correct shape and the PDF still works against it — since Part
+    5's Step 1 change lives in `_renderRepeatOffendersResult`, shared by
+    both the Worker and fallback paths, this is a real parity check, not
+    a redundant one.
+
+### K. Risks and Edge Cases Beyond the Test Plan
+
+- **Rapid, repeated filter toggling extends the wait, by design.**
+  Each toggle bumps `_repeatOffendersRunId` and supersedes whatever was
+  already in flight (test #10 above) — correct, but a user rapidly
+  clicking through several filter combinations will see the PDF button
+  stay blocked/disabled for longer than any single recalculation takes.
+  Not a defect — the alternative (letting a stale run's result populate
+  the cache) is exactly the bug being fixed — but worth calling out so
+  it isn't mistaken for a new problem during Part 7 verification.
+- **The synthetic test harness cannot reproduce the real ~12-15s race
+  window by timing alone.** Every fixture in this harness completes
+  near-instantly; tests #7 and #10 above simulate "in flight" by
+  directly manipulating `_repeatOffendersRunId`/`_repeatOffendersLastResult`
+  rather than by genuinely racing a slow calculation. This is a
+  legitimate, deterministic way to test the *mechanism*, but it doesn't
+  replace a real manual check against real data volume (Part 7 should
+  do at least one manual reproduction, CPU-throttled or against a
+  filter combination known to take real seconds, per Part 5 Step 2's
+  own verification note) — stated honestly here rather than implying
+  the automated suite alone proves the real-world race is closed.
+- **The non-Worker fallback still blocks the main thread for the full
+  calculation duration** — pre-existing behavior, unrelated to and
+  unworsened by this redesign, since it was never Worker-based to begin
+  with. Noted for completeness, not treated as in-scope to fix here.
+- **The deliberate divergence between `passesRepeatOffenderFilters` and
+  `passesFilters`/`passesMovementFilters`** (Part 1's anti-pattern
+  table, Part 3's ownership table) — a Loan-sourced lead's Region-filter
+  behavior specifically is **not** covered by this test plan, because
+  it's a known, narrow, pre-existing, intentionally out-of-scope
+  limitation (Movement_Log's raw `region` field vs. `effectiveRegion()`'s
+  cross-field inference) — not something this redesign changes. Stated
+  explicitly so its absence from the test list reads as a deliberate
+  scoping decision, not an oversight.
+- **Tab navigation away from Repeat Offenders mid-calculation** —
+  already handled by existing code (`renderAll()` calls
+  `renderRepeatOffenders()` regardless of which tab is currently
+  visible; the Worker keeps running or is `terminate()`d by the existing
+  run-superseding logic) — unaffected by this redesign, not a new risk
+  it introduces.
+
+*(Part 6 complete. Continues in Part 7 — final recommendation, real
+implementation, and verification.)*
