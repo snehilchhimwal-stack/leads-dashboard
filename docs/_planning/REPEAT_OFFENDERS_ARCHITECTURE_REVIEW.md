@@ -169,3 +169,136 @@ conclusion.
 
 *(Part 1 complete. Continues in Part 2 — explicit business rules for
 Unique Lead / Repeat Offender.)*
+
+## Part 2 — Explicit Business Rules for Unique Lead / Repeat Offender
+
+Every rule below is stated so a future engineer can check real code
+against it directly — each cites the exact function/line it comes from.
+Where the original brief's terminology doesn't quite match what this
+codebase actually implements, that mismatch is called out explicitly
+rather than papered over.
+
+**Rule 1 — Identity is two-level: customer, then copy.**
+`buildMovementHistories()` (`js/tab-movement.js:330`) groups every raw
+Movement_Log row by **`client_id`** (falling back to `'l:' + lead_id`
+when `client_id` is blank) — this is the *customer* identity.
+`splitHistoryByCopy(history)` (`js/tab-movement.js:724`) then splits
+one customer's full history further, by **`lead_id`** — because the
+same customer can legitimately be represented by more than one
+`lead_id` row (documented elsewhere in this codebase: a customer
+independently assigned to two different RMs, sometimes in different
+regions). Each resulting "copy" is one `lead_id`'s own sub-history,
+tracked entirely separately from any other copy of the same customer.
+
+**Rule 2 — "One lead" for this report means one copy (one `lead_id`),
+not one customer.** `distinctLeads`/"Unique Leads" is a count of
+distinct `lead_id` values that survived Stage 1 (`allEligibleLeads`,
+`core-rm-performance.js:606,636`) — a customer split across two RMs
+contributes up to 2 to that count, once per copy, by design (Rule 1's
+whole reason for existing: RM A's work on their copy must never be
+credited to or blamed on RM B for the other copy of the same person).
+
+**Rule 3 — Filtering is evaluated per raw snapshot record, not once per
+lead.** `passesRepeatOffenderFilters(rec, filters)`
+(`core-rm-performance.js:186`) is called inside the per-record loop
+over a copy's own chronological history
+(`reconstructRmPerformanceObservations`, line 420), checking that
+individual record's own `project`/`region`/`TL`/`group_source`/
+`source_bucket` values. There is no separate "does this lead pass the
+filter" gate evaluated once and then applied to the whole lead's
+history.
+
+**Rule 4 — Dedup order, precisely: identity grouping happens
+structurally before filtering; day-level collapse happens after
+filtering, among survivors.** The two dedup steps in this pipeline are
+not both "before" or both "after" the filter — they're on opposite
+sides of it:
+  - **Before filtering**: Rule 1's customer→copy grouping
+    (`buildMovementHistories`/`splitHistoryByCopy`) — this is structural
+    identity resolution, not filtering, and happens unconditionally.
+  - **The filter check itself** (line 421): applied per raw record,
+    inside the per-copy loop.
+  - **After filtering**: "latest snapshot wins" per calendar day
+    (the `byDay` map, lines 419-433) — a record that FAILS the filter
+    is skipped (`return`) *before* it's ever compared against that
+    day's current `byDay` entry. This means the record actually used
+    for a given (copy, day) is **the latest-by-timestamp record that
+    ALSO passed the filter that day** — not unconditionally the day's
+    true-latest capture. A day where the lead's latest capture happens
+    to fail the filter (e.g. its `source_bucket` value changed between
+    two same-day captures) falls back to an earlier same-day capture
+    that did pass, if one exists, rather than being dropped outright.
+
+**Rule 5 — A lead's eligibility for this report can genuinely differ
+day to day, and that's intentional, not a bug.** Because filtering is
+per-record (Rule 3) and Movement_Log stores one snapshot's worth of a
+lead's fields as they stood at capture time, a lead whose own
+`group_source`/`source_bucket`/`region`/`TL` value changes between
+captures (a reassignment, a data correction, a real re-classification)
+will pass the filter on some days and not others. This directly answers
+the original brief's "one lead associated with multiple Source/Sub
+Source values" question: there is no single canonical Source/Sub-source
+attributed to a lead for this report — each day's own eligibility is
+judged from that day's own captured values.
+
+**Rule 6 — "Unique Leads" is scoped to the group AND the current
+filters AND the current time range, together.** The full definition:
+the count of distinct `lead_id` values with at least one (day, rule)
+observation that (a) passed the active filters that day, (b) falls
+within the selected time range's `dateKeys`, (c) belongs to this
+group (RM/Region/A1-TM/RH, per the caller's `keyFn`), and (d) was
+eligible for at least one of the 5 scored SLA rules that day
+(`RM_PERF_RULES`, `core-rm-performance.js:142`). Changing any one of
+group / filters / time range changes this number — by design, not by
+accident.
+
+**Rule 7 — "Repeat Offender" is a GROUP-level classification in this
+codebase, not a per-lead flag — a real terminology gap between the
+original brief and the actual implementation, worth stating plainly.**
+There is no code anywhere that marks an individual lead as "a repeat
+offender." `classifyRmPerformance` (`core-rm-performance.js:598`)
+classifies **RMs, Regions, A1-TM managers, and RHs** — never leads —
+into `Insufficient Data` / `On Track` / `Watch — concentrated` /
+`Below Expectations`, based on that group's own composite SLA-violation
+score relative to its peers. The tab is named "Repeat Offenders"
+because it surfaces which *people/regions* have a repeat pattern of SLA
+violations across their book of leads — the leads themselves are the
+evidence the classification is built from, not the thing being
+classified. Any redesign work should keep using "Unique Leads",
+"Region Average", "Individual Work" (all group-level, per Rule 6/10) as
+the real vocabulary — not introduce a new "is this lead a repeat
+offender" concept the current system was never designed around.
+
+**Rule 8 — The one lead-level concept that DOES exist: "chronic."** A
+lead violating the *same* rule on `RM_PERF_CHRONIC_STREAK_DAYS` (3, line
+97) or more **consecutive calendar days** is "chronic" for that rule
+(`aggregateRmPerformance`, lines 536-550). This feeds the group-level
+`concentrated` distinction (line 622): a group's elevated score is
+"Watch — concentrated" (a case-management question — go check those
+specific leads) rather than "Below Expectations" (a broad pattern
+across the whole book) when at least one violated lead is chronic AND
+violated leads are ≤25% of the group's eligible book
+(`RM_PERF_CONCENTRATION_BREADTH_CEILING`, line 118). This is the
+closest analogue to "repeat offender" the codebase actually has at the
+lead level — a chronic lead, not a classified one.
+
+**Rule 9 — No filter selected on a dimension means no restriction on
+that dimension, full stop.** `filters.X.size === 0` short-circuits that
+check to always pass (`core-rm-performance.js:187-191`) — confirmed
+identical for Project, Region, TL, Source, and Sub-source. This applies
+per-dimension independently: leaving Source unset while Region is set
+restricts only by Region, exactly as expected.
+
+**Rule 10 — "Region Average" and "Individual Work" are the same
+calculation pipeline, differing only in grouping key — not two
+concepts needing two implementations.** `computeRmPerformance`
+(line 692) is called with `keyFn = undefined` (defaults to RM name) for
+Individual Work, and with `keyFn = rec => repeatOffendersRegionKey(rec)`
+for Region — same Stage 1-4 pipeline, same filter, same shrinkage
+math, same classification thresholds. "Region Average" specifically
+refers to a region-keyed group's own `peerComposite` (line 661) — the
+*other regions'* average, which that region's own composite is judged
+against — not a company-wide average applied uniformly to every level.
+
+*(Part 2 complete. Continues in Part 3 — target architecture: data
+flow, contracts, layer responsibilities.)*
