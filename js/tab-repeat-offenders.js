@@ -247,6 +247,24 @@ function _repeatOffendersUpdateRangeDisplay(dateKeys){
 let _repeatOffendersWorker = null;
 let _repeatOffendersRunId = 0;
 
+// Canonical result cache — Repeat Offenders Architecture Redesign
+// (docs/_planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md, Parts 3-5).
+// Populated exactly once per completed calculation, in
+// _renderRepeatOffendersResult below, and read — never recomputed — by
+// the PDF export (js/repeat-offenders-pdf.js). This is the actual fix
+// for that review's Part 1 root cause: the live tab computes
+// asynchronously via a dedicated Worker (this file), while the PDF used
+// to call the same calculation engine a second, independent,
+// synchronous time at click time — a filter/range change mutates
+// filterState/_renderNow synchronously, before this async render
+// completes, opening a real window where the PDF's own fresh
+// computation could reflect different inputs than whatever's still
+// rendered on screen. `runId` lets a reader tell "this cache reflects
+// the latest requested run" from "a newer run is in flight" via a
+// single integer comparison against the live _repeatOffendersRunId
+// counter above — no separate in-flight flag needed.
+let _repeatOffendersLastResult = null;
+
 function renderRepeatOffenders(){
   const bodyEl = document.getElementById('repeatOffendersBody');
   const noticeEl = document.getElementById('repeatOffendersNotice');
@@ -321,7 +339,7 @@ function renderRepeatOffenders(){
   // a later filter change on this thread) could see mid-flight.
   const filters = captureRepeatOffendersFilterSnapshot();
 
-  runRepeatOffendersRecalculation({ dateKeys, hierarchyMissing, filters, bodyEl, noticeEl, countEl, statusEl, clear });
+  runRepeatOffendersRecalculation({ dateKeys, range, now, hierarchyMissing, filters, bodyEl, noticeEl, countEl, statusEl, clear });
 }
 
 // Runs the ENTIRE Stage 1-4 + RM/Region/A1-TM/RH pipeline inside a
@@ -335,7 +353,7 @@ function renderRepeatOffenders(){
 // environment, or this file opened directly over file:// during local
 // testing rather than served over http(s).
 function runRepeatOffendersRecalculation(ctx){
-  const { dateKeys, hierarchyMissing, filters, bodyEl, noticeEl, countEl, statusEl, clear } = ctx;
+  const { dateKeys, range, now, hierarchyMissing, filters, bodyEl, noticeEl, countEl, statusEl, clear } = ctx;
   const runId = ++_repeatOffendersRunId;
   const startedAtWall = new Date();
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -348,7 +366,7 @@ function runRepeatOffendersRecalculation(ctx){
   const onDone = (msg) => {
     if (runId !== _repeatOffendersRunId) return; // superseded by a newer run — drop, never mix
     const elapsedMs = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0;
-    _renderRepeatOffendersResult({ bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing }, msg, elapsedMs, startedAtWall);
+    _renderRepeatOffendersResult({ bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing, dateKeys, range, now }, msg, elapsedMs, startedAtWall);
   };
   const onFail = (reason) => {
     if (runId !== _repeatOffendersRunId) return;
@@ -438,8 +456,21 @@ function _runRepeatOffendersSynchronously(ctx, onDone){
 // table-building logic this function always ran, just now fed by a
 // message instead of a direct function return.
 function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
-  const { bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing } = ctx;
+  const { bodyEl, noticeEl, countEl, statusEl, filters, hierarchyMissing, dateKeys, range, now } = ctx;
   const { rm: rmFull, region: regionFull, a1tm: a1tmFull, rh: rhFull, byRegion, stageCounts } = msg;
+
+  // Canonical result cache — set BEFORE the empty-result branch below.
+  // A genuinely empty result (filters narrowing to zero matches) is
+  // still a real, valid "this is what's on screen" state the PDF must
+  // be able to report correctly by reading this cache, not a reason to
+  // skip caching it. See this variable's own declaration (above) for
+  // the full reasoning.
+  _repeatOffendersLastResult = {
+    runId: _repeatOffendersRunId,
+    computedAtWall: new Date(),
+    computedFrom: { filters, dateKeys, range, now, hierarchyMissing },
+    rm: rmFull, region: regionFull, a1tm: a1tmFull, rh: rhFull, byRegion, stageCounts,
+  };
 
   if (!rmFull.length) {
     const activeFilters = [];
