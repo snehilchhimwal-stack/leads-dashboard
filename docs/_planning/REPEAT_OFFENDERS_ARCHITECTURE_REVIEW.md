@@ -422,3 +422,112 @@ completed run" from "a newer run is currently in flight" (Part 4).
 
 *(Part 3 complete. Continues in Part 4 — PDF export redesign, the
 single-source-of-truth mechanism in full detail.)*
+
+## Part 4 — PDF Export Redesign (Single Source of Truth)
+
+### H. PDF Export Design
+
+**A refinement to Part 3's canonical-result contract, found while
+designing this part — stated explicitly rather than silently folded
+in.** Part 3 specified `computedFrom: {filters, dateKeys,
+hierarchyMissing}`. That's not quite enough: `repeat-offenders-pdf.js`
+today *also* independently re-reads the range-select's live value and
+`_renderNow` (`_repeatOffendersPdfCurrentFilterInfo`, line 82) purely to
+print the PDF's own "Filter: X" / "Date Range: Y – Z" header lines
+(`_repeatOffendersPdfFilterSummaryLine`, line 182;
+`_repeatOffendersPdfDateLine`, line 66) — both **separately from**
+`filters`/`dateKeys` used for the actual calculation. If those live
+values change between the cache being produced and the PDF being
+generated (the exact race Part 1 identified), the printed header could
+describe filters different from the data actually in the tables below
+it — a subtler version of the same bug, in the report's own
+self-description rather than its numbers. **`computedFrom` must also
+carry `range` (the range-select value string) and `now` (the `Date`
+`dateKeys` was resolved against)**, so every piece of text the PDF
+prints — header line, date line, and table contents alike — traces
+back to the one cached object, never to a live global read at export
+time.
+
+**Final cache shape** (supersedes Part 3's `computedFrom`):
+```js
+_repeatOffendersLastResult = {
+  runId,                 // which _repeatOffendersRunId produced this
+  computedAtWall,        // Date — when this calculation completed
+  computedFrom: {
+    filters,             // frozen Set snapshot used
+    dateKeys,            // frozen Set of day-keys used
+    range,               // the range-select value ('yesterday' | 'thisWeek' | ... )
+    now,                 // the Date dateKeys was resolved against
+    hierarchyMissing,
+  },
+  rm, region, a1tm, rh, byRegion,   // raw classifyRmPerformance() arrays, exactly as the worker returned them
+  stageCounts,
+}
+```
+
+**Where it's set.** `_renderRepeatOffendersResult`
+(`tab-repeat-offenders.js:440`) sets `_repeatOffendersLastResult` at the
+top of the function, from its own `msg`/`ctx`/`runId`/`elapsedMs`
+parameters — **before** the existing `if (!rmFull.length)` early-return
+branch, so a genuinely-empty result (filters narrowing to zero matches)
+is cached too. An empty result is still a real, valid "this is what's
+currently on screen" state; the PDF must be able to correctly report
+"nothing to export for these filters" by reading the cache, the same
+way it would for a non-empty one — never by recomputing to rediscover
+the same zero.
+
+**Where display-ordering still runs twice, deliberately, and why
+that's fine.** The worst-N ranking (`sortRmPerformanceByScore` +
+`filterRmPerformanceRankable`) and per-table caps (20/10/5/uncapped)
+are pure, stateless functions of already-computed rows — they touch
+neither `movementSnapshots` nor `filterState` nor any Sheets data. The
+screen and the PDF each still call them independently, on the SAME
+cached `rm`/`region`/`a1tm`/`rh` arrays, which is safe: called twice on
+identical input, a pure sort/filter/slice cannot diverge. What must
+never run twice is the expensive, `filterState`/`movementSnapshots`-
+dependent Stage 1-4 calculation — and after this redesign, it doesn't.
+
+**The three states `downloadRepeatOffendersPdf` must handle
+explicitly:**
+
+| State | Condition | Behavior |
+|---|---|---|
+| 1. Nothing computed yet | `_repeatOffendersLastResult === null` | Block export. Status message: e.g. "Nothing calculated yet — wait for the Repeat Offenders table to finish loading, then try again." |
+| 2. A newer recalculation is in flight | `_repeatOffendersLastResult.runId !== _repeatOffendersRunId` | Block export. Status message: e.g. "Still recalculating for the current filters — wait for the table to finish updating, then try again." **This is the exact race window from Part 1, closed by construction**: `_repeatOffendersRunId` (`tab-repeat-offenders.js:248`) is already bumped synchronously the instant a new run starts (`runRepeatOffendersRecalculation`, line 339) — before the async Worker work even begins — so this single integer comparison is sufficient to detect the race with no new plumbing. |
+| 3. A completed, current cache exists | `_repeatOffendersLastResult && .runId === _repeatOffendersRunId` | Export proceeds, building every PDF section (tables, header, filter line, date line) from `_repeatOffendersLastResult` only. |
+
+No new flag is needed for "is a recalculation in flight" — reusing the
+run-id counter that already exists for exactly this "supersede an
+in-flight run" purpose (Part 3) is both simpler and cannot drift out of
+sync with the mechanism the live tab already trusts for the same
+question.
+
+**Function-level changes** (signatures shown as pseudocode — real
+diffs are Part 5's job):
+
+- `_repeatOffendersPdfSectionTables(dateKeys)` → `_repeatOffendersPdfSectionTables(cached)` —
+  reads `cached.rm/region/a1tm/rh/byRegion` directly; **no
+  `computeRmPerformance` call anywhere in this function after the
+  redesign.**
+- `_repeatOffendersPdfCurrentFilterInfo()` → reads `cached.computedFrom.range`/`.now`/`.dateKeys`
+  instead of `document.getElementById('repeatOffendersRangeSelect').value`/`_renderNow`.
+- `_repeatOffendersPdfFilterSummaryLine()` → takes `cached.computedFrom.filters` as a
+  parameter instead of reading the live `filterState` global.
+- `downloadRepeatOffendersPdf()` → gains the 3-state check above as its
+  first real branch (after the existing `_repeatOffendersPdfGenerating`
+  re-entrancy guard, which is unrelated and stays as-is).
+
+**UX addition, not strictly required for correctness but worth doing
+alongside it**: proactively disable the "Download PDF" button itself
+while `_repeatOffendersLastResult.runId !== _repeatOffendersRunId` (set
+disabled at the start of `runRepeatOffendersRecalculation`, re-enabled
+in `_renderRepeatOffendersResult` once the cache updates) — the same
+pattern the "Recalculate" button already uses on itself
+(`_repeatOffendersRecalculateBtnEl`, line 711). The reactive 3-state
+check inside `downloadRepeatOffendersPdf` must exist regardless (defense
+in depth against any click that lands before a disable takes effect),
+but a disabled button is a clearer signal than a status message that
+only appears after the click.
+
+*(Part 4 complete. Continues in Part 5 — the refactoring/migration
+plan.)*
