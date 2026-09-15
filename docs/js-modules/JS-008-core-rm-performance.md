@@ -6,8 +6,8 @@
 | **Location** | `js/core-rm-performance.js` (869 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
-| **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Record Status** | Validated |
+| **Last Verified** | 2026-09-15 against commit `9e55e36` |
 
 ## Purpose / reason to exist
 
@@ -42,7 +42,7 @@ harmless — nothing at parse time calls into it).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-052 | `computeRmPerformance(dateKeys, keyFn, filters, rmHierarchyByNameLower)` `#L692` | date keys, a group key fn (RM or Region), filters, hierarchy map | `[{group, …score, classification, drivenBy}]` | none (pure) | FN-053..FN-056 | worker (`JS-017`), sync path (`JS-022`), `JS-013` | reusable — the engine entry |
+| FN-052 | `computeRmPerformance(dateKeys, keyFn, filters, rmHierarchyByNameLower)` `#L692` | date keys, a group key fn (RM or Region), filters, hierarchy map | `[{group, …score, classification, drivenBy}]` | none (pure) | FN-053..FN-056 | worker (`JS-017`), sync path (`JS-022`) — **no longer `JS-013`** as of 2026-09-12 (the "PDF reads the cache, never recomputes" redesign, `9dea24a`): the PDF now reads `JS-022`'s `_repeatOffendersLastResult` cache instead of calling this a second time; see `JS-013`'s own record | reusable — the engine entry |
 | FN-053 | `reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierarchyByNameLower)` `#L406` | as above | per-(lead,day,rule) observation list | none | `movementSnapshots` (`JS-021`), `enrichSnapshotCached`, `passesRepeatOffenderFilters` (FN-057) | FN-052 | specific |
 | FN-054 | `aggregateRmPerformance(observations)` `#L494` | observations | per-group violation/eligibility totals | none | — | FN-052 | specific |
 | FN-055 | `computeRmPerfPeerAverages(byGroup)` `#L561` | grouped totals | peer-average baseline per rule | none | — | FN-052 | specific |
@@ -50,9 +50,9 @@ harmless — nothing at parse time calls into it).
 | FN-057 | `passesRepeatOffenderFilters(rec, filters)` `#L186` | a record + this report's filter set | bool | none | `mainRegionFor` (`JS-014`) | FN-053 | specific — **not** `passesMovementFilters`; no `effectiveRegion` Loan inference (`LOGIC_AUDIT.md` Part 4/6) |
 | FN-058 | `computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower)` `#L730` | date keys, filters, hierarchy map | `[{region, list}]` — worst-5 RMs per region, region-scoped peer average, regions with ≥1 rankable RM only | none | FN-052 (Region pass to discover regions, then RM pass per region), `mainRegionFor` (`JS-014`) | worker (`JS-017`), sync path (`JS-022`) | specific — added this session |
 | FN-059 | `rmPerfCanonicalRmName(rawName)` `#L320` | a raw RM name | canonical name (via `RM_PERF_NAME_ALIASES`) | none | — | FN-053, FN-060 | reusable |
-| FN-060 | `rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower)` `#L360` | RM name + hierarchy map | bool — true for A1/TM/RH/Cluster Head/City Lead/Commercial Head roles or the name-based leadership set | none | `RM_PERF_NON_RM_ROLES`, `RM_PERF_LEADERSHIP_NAME_EXCLUSIONS` | FN-053, FN-058, `JS-013` | reusable |
+| FN-060 | `rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower)` `#L360` | RM name + hierarchy map | bool — true for A1/TM/RH/Cluster Head/City Lead/Commercial Head roles or the name-based leadership set | none | `RM_PERF_NON_RM_ROLES`, `RM_PERF_LEADERSHIP_NAME_EXCLUSIONS` | FN-053, FN-058 — **no longer `JS-013`** (that PDF no longer calls this directly since the 2026-09-12 cache-read redesign, `9dea24a`) | reusable |
 | FN-061 | `rmPerfPrimaryManagerFor` / `rmPerfRhFor(rmName, map)` `#L203/#L208` | RM name + map | manager / RH name | none | — | `rmPerformanceHierarchyCells` (FN-063) | reusable |
-| FN-062 | `repeatOffendersRegionKey(rec)` `#L222` | a record | region bucket — Loan iff `group_source` says Loan, else `mainRegionFor(rec.region)` | none | `normRegionKey` / `mainRegionFor` (`JS-014`) | FN-058, `JS-013` | reusable — Loan detection via `group_source` ONLY (Movement_Log has no `project_region`) |
+| FN-062 | `repeatOffendersRegionKey(rec)` `#L222` | a record | region bucket — Loan iff `group_source` says Loan, else `mainRegionFor(rec.region)` | none | `normRegionKey` / `mainRegionFor` (`JS-014`) | FN-058 — **no longer `JS-013`** (that PDF no longer calls this directly since the 2026-09-12 cache-read redesign, `9dea24a`) | reusable — Loan detection via `group_source` ONLY (Movement_Log has no `project_region`) |
 | FN-063 | `rmPerformanceDrivenBy(r)` / `rmPerformanceHierarchyCells(r, map)` `#L770/#L798` | a result row | the "driven by" contributor list / hierarchy cells | none | FN-061 | table + PDF renderers | reusable |
 | FN-064 | `sortRmPerformanceByPriority` / `ByScore` / `filterRmPerformanceWorst` / `filterRmPerformanceRankable(list)` `#L826/#L839/#L851/#L867` | a result list | sorted / filtered list | none | — | `JS-022`, `JS-013` | reusable |
 
@@ -162,13 +162,24 @@ recompute via the worker.
   `computeRmPerformance` on synthetic snapshot histories.
 - **Evidence:** `LOGIC_AUDIT.md` Part 3 §3.6; this session's fix commits;
   `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-15 (weekly doc spot-check, cycle 2) — a
+  scoped correction only: `FN-052`/`FN-060`/`FN-062`'s `Called by` cells
+  wrongly still listed `JS-013` after the 2026-09-12 "PDF reads the
+  cache, never recomputes" redesign (`9dea24a`) stopped
+  `js/repeat-offenders-pdf.js` from calling `computeRmPerformance` /
+  `rmPerfIsLeadershipExcluded` / `repeatOffendersRegionKey` directly —
+  see `JS-013`'s own record. The rest of this record (line anchors,
+  `RM_PERF_*` constants, `#L692`/`#L360`/`#L222` etc.) was **not**
+  re-verified this pass — downgraded to `Validated`, not re-closed.
 
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-027. **File nearly doubled
 this session** (485L on 2026-09-05 → 869L) — alias handling, broadened
-leadership exclusion, and `computeRmPerformanceByRegion`.
+leadership exclusion, and `computeRmPerformanceByRegion`. `Called by`
+cells for `FN-052`/`FN-060`/`FN-062` corrected 2026-09-15 (weekly doc
+spot-check, cycle 2) for the `JS-013` dependency-edge change above; no
+other content re-verified against `HEAD` this pass.
 
 ## Revalidation trigger
 
