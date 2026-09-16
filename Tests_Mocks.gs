@@ -49,7 +49,13 @@
 
 const TEST_EMAIL_PRIMARY_ = 'snehil.chhimwal@gmail.com';
 const TEST_EMAIL_CH_ = 'ashish.ivlekar@homesfy.in';
-const TEST_ALLOWED_EMAILS_ = [TEST_EMAIL_PRIMARY_, TEST_EMAIL_CH_];
+// A third, distinct test address — added for TM_STILL_CC_'s own test
+// (Tests_RmHierarchy.gs), which needs the TM's email to be provably
+// DIFFERENT from the A1/TL primary's email (TEST_EMAIL_PRIMARY_), since
+// ccSet.delete(primaryEmail) would otherwise silently strip a TM email
+// that happened to collide with the primary's.
+const TEST_EMAIL_SECONDARY_ = 'snehil.chhimwal+test2@gmail.com';
+const TEST_ALLOWED_EMAILS_ = [TEST_EMAIL_PRIMARY_, TEST_EMAIL_CH_, TEST_EMAIL_SECONDARY_];
 
 // ============================== Assertions ==============================
 
