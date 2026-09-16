@@ -138,7 +138,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Loan','City Lead','Mayur Panjari','','','',''],
   ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Central','A1','Akash A Ugale','','','','Sanjyota Bhosale'],
+  ['Central','TM','Akash A Ugale','','','','Sanjyota Bhosale'], // 2026-09-16: role formalized from A1 to TM (see the Yash Sharma row's own comment for the promotion this confirms) -- his 8 direct Central S1 reports (Prajwal Shetty, Purvesh Ugawekar, Mustakim Sayyad, Kishan Patel, Sumeet Pal, Farid Shaikh, Shreyang Chudasama, Shresth Bhuwania) are unaffected: their own rows already carry tl:'Akash A Ugale' directly, so this role-label change only affects the primaryRole shown when HE is the resolved primary (his own reports, or Harbour's Yash Sharma) -- it never gates chain resolution itself (see resolveRecipientBucketsForRms_'s own docblock).
   ['Central','S1','Prajwal Shetty','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Ashish Kadam','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','City Lead','Sourabh Sareen','','','',''],
@@ -152,7 +152,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','TM','Ayaz Bagwan','','','','Sourabh Sareen'],
   ['Pune','S1','Siddhesh Bhagwat','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Shailesh Tiwari','','','Sachindra Wadane','Sourabh Sareen'],
-  ['Harbour','A1','Yash Sharma','Akash A Ugale','','','Sanjyota Bhosale'], // 2026-09-09 fresher HR Live export: Akash A Ugale (Central A1, pay-band moved to Terittory Manager) now sits above Yash Sharma -- confirmed with the user as a real promotion, not export noise. His own 6 reports' rows are unaffected -- resolveRecipientBucketsForRms_ only reads a primary's OWN rh/ch for CC, not a second hop through tl, so their routing is unchanged; only Yash Sharma's own primary contact changes.
+  ['Harbour','A1','Yash Sharma','','Akash A Ugale','','Sanjyota Bhosale'], // 2026-09-09 fresher HR Live export: Akash A Ugale now sits above Yash Sharma as his manager -- confirmed with the user as a real promotion, not export noise. 2026-09-16: role formalized to TM on his own row (see that row's comment) and moved from this row's tl column into tm, matching the Pune TM pattern (Ayaz Bagwan/Rahul Poudel -- see TM_STILL_CC_ below) since he's a real TM now, not an A1. This does NOT change who's "To" for Yash's own 6 reports' emails -- their own rows carry tl:'Yash Sharma' directly, so chain.tl resolves before Yash's own tm field is ever reached (see resolveRecipientBucketsForRms_'s own docblock) -- but moving him into tm is what lets TM_STILL_CC_ pick him up in Cc on those emails, since he's genuinely Yash's manager now and should see them.
   ['Navi Mumbai','S1','Shahnavaz Shaikh','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','S1','Nagesh Maharnavar','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Shubham Buchade','Avinash Kumar','','','Vidya Jadhav'],
@@ -359,6 +359,9 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Kavya Gowda','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   // Confirmed by the user directly (not a guess) — same person as "Nikhil Goud".
   ['Hyderabad','S1','Shamakuri Goud','Vemula Ajay','','','Mukesh Mishra'],
+  // Confirmed by the user directly (2026-09-16) — same person as "Mamtaben
+  // Sosa" (leads sheet drops the surname and appends "S 1").
+  ['Thane','S1','Mamtaben S 1','Amit Upadhyay','','','Bipin More'],
   // 3 new hires, found 2026-09-09 via a fresher HR Live export (231-person
   // roster vs. the 2026-08-31 export's; same "regenerate when the roster
   // changes meaningfully" process this file's own header documents).
@@ -935,28 +938,29 @@ function isTopOfOrgRole_(role) {
  * nobody at all below them to route it through — see chLevelRms's own
  * comment just below. Business rule this implements explicitly: for
  * automated email purposes, every TM is
- * ALSO treated as an A1 (gets their own bucket) — EXCEPT Pune's two TMs
- * who already have real A1s under them (Ayaz Bagwan -> Omkar
- * Ghate/Firoj Shaikh; Rahul Poudel -> Nayan Pabale — Prathamesh A Pande
- * also reported here until he left the company, 2026-08-31; the rule
- * itself is unchanged, Rahul Poudel still needs the CC exception because
- * of Nayan Pabale alone).
+ * ALSO treated as an A1 (gets their own bucket) — EXCEPT a TM who already
+ * has real A1s/TLs under them (Pune's Ayaz Bagwan -> Omkar Ghate/Firoj
+ * Shaikh; Rahul Poudel -> Nayan Pabale — Prathamesh A Pande also reported
+ * here until he left the company, 2026-08-31, the rule itself is
+ * unchanged, Rahul Poudel still needs the CC exception because of Nayan
+ * Pabale alone; Central's Akash A Ugale -> his own 8 direct S1 reports,
+ * plus, since 2026-09-16, Harbour's TL Yash Sharma).
  * Nothing extra to special-case for that exception: anyone reporting to
- * one of those real A1s already has `tl` filled with the A1's own name
- * on their own row (not blank), so `chain.tl` is checked FIRST above and
- * the TM is never reached for them — a TM only becomes primary for
+ * one of those real A1s/TLs already has `tl` filled with the A1's own
+ * name on their own row (not blank), so `chain.tl` is checked FIRST above
+ * and the TM is never reached for them — a TM only becomes primary for
  * someone who genuinely has no A1 above them at all.
  *
  * Each bucket's Cc is ALWAYS_CC_EMAILS_ plus whichever of RH/CH exist on
  * the PRIMARY's OWN row (not the reporting RM's row — Book7 doesn't
  * always carry every intermediate tier on a deeply-nested S1's own row,
  * but the primary's own row always does) — EXCEPT TM, which is Cc'd only
- * for Pune's two exception TMs (PUNE_TM_STILL_CC_ below — Ayaz Bagwan,
- * Rahul Poudel): a person's direct manager already IS the "To", so
- * looping in their TM too is redundant UNLESS that TM has real A1s under
- * them (the Pune case), where dropping them from Cc would lose the one
- * TM-level person actually still relevant there. Minus the primary's own
- * email either way (never cc someone already in To).
+ * for the exception TMs in TM_STILL_CC_ below (Ayaz Bagwan, Rahul Poudel,
+ * Akash A Ugale): a person's direct manager already IS the "To", so
+ * looping in their TM too is redundant UNLESS that TM has real A1s/TLs
+ * under them too (the exception cases), where dropping them from Cc would
+ * lose the one TM-level person actually still relevant there. Minus the
+ * primary's own email either way (never cc someone already in To).
  *
  * Returns { buckets: [{ primaryName, primaryEmail, primaryRole, cc:
  * [emails], rmNames: [...] }], unresolved: [{rmName, reason} — no chain
@@ -968,10 +972,12 @@ function isTopOfOrgRole_(role) {
  * send these to ops instead of the CH/leadership person directly }.
  */
 // The only TM-level names that still appear in Cc — see this function's
-// own docblock for why (each has real A1s under them; dropping them from
-// Cc would lose the one still-relevant TM-level person on those specific
-// A1s' buckets).
-const PUNE_TM_STILL_CC_ = ['ayaz bagwan', 'rahul poudel'];
+// own docblock for why (each has real A1s/TLs under them; dropping them
+// from Cc would lose the one still-relevant TM-level person on those
+// specific A1s' buckets). Not Pune-specific despite the original two
+// entries — Akash A Ugale added 2026-09-16 (Central TM, also now above
+// Harbour's TL Yash Sharma; see Yash Sharma's own row comment).
+const TM_STILL_CC_ = ['ayaz bagwan', 'rahul poudel', 'akash a ugale'];
 
 // The leads sheet's own RM column sometimes has role/position text
 // appended after a person's real name — two confirmed real cases:
@@ -1086,7 +1092,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
 
     if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, primaryRole: primaryChain.role, ccSet: new Set(), rmNames: [] };
     const ccCandidates = [primaryChain.rh, primaryChain.ch];
-    if (PUNE_TM_STILL_CC_.indexOf(String(primaryChain.tm || '').trim().toLowerCase()) !== -1) {
+    if (TM_STILL_CC_.indexOf(String(primaryChain.tm || '').trim().toLowerCase()) !== -1) {
       ccCandidates.push(primaryChain.tm);
     }
     ccCandidates.forEach(function (name) {

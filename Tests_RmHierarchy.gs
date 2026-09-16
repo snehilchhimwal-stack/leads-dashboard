@@ -43,6 +43,42 @@ function runRmHierarchyTests_() {
     TestAssertEqual_(resolved.buckets[0].primaryName, 'Test TM One', 'resolveRecipientBucketsForRms_: TM becomes primary when there is no A1 above this RM');
     TestAssertEqual_(resolved.buckets[0].primaryRole, 'TM', 'resolveRecipientBucketsForRms_: primaryRole correctly reports TM, not A1');
 
+    // ---- TM_STILL_CC_: the actual Cc-injection mechanism itself, never
+    // directly exercised before this (Ayaz Bagwan/Rahul Poudel only ever
+    // proved it worked in real production data, not under test) -- a
+    // self-contained mock hierarchy (own A1, whose own row's tm names a
+    // TM), temporarily adding that TM to TM_STILL_CC_ (a plain mutable
+    // array, so push/splice works fine on a `const` binding) so the test
+    // never depends on a real employee name. try/finally guarantees the
+    // splice-out runs even if an assertion throws, so this can never leak
+    // into a later test. ----
+    const tmCcSs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', [
+        ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'],
+        ['Test Region', 'S1', 'Test RM TmCc', 'Test A1 TmCc', '', '', 'Test CH Self', false, '', ''],
+        ['Test Region', 'A1', 'Test A1 TmCc', '', 'Test TM CcCase', '', 'Test CH Self', false, '', ''],
+        ['Test Region', 'TM', 'Test TM CcCase', '', '', '', 'Test CH Self', false, '', ''],
+        ['Test Region', 'Cluster Head', 'Test CH Self', '', '', '', '', false, '', TEST_EMAIL_CH_],
+      ]),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', [
+        ['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source'],
+        ['Test A1 TmCc', 'TL', 'Test Region', TEST_EMAIL_PRIMARY_, 1, 'manual'],
+        ['Test TM CcCase', 'TM', 'Test Region', TEST_EMAIL_SECONDARY_, 1, 'manual'],
+        ['Test CH Self', 'CH', 'Test Region', TEST_EMAIL_CH_, 1, 'manual'],
+      ]),
+    });
+    let beforeTmCc = resolveRecipientBucketsForRms_(tmCcSs, ['Test RM TmCc']);
+    TestAssert_(beforeTmCc.buckets[0].cc.indexOf(TEST_EMAIL_SECONDARY_) === -1, 'TM_STILL_CC_: before the TM is in the allowlist, their email is NOT in Cc (baseline)');
+    TM_STILL_CC_.push('test tm cccase');
+    try {
+      const afterTmCc = resolveRecipientBucketsForRms_(tmCcSs, ['Test RM TmCc']);
+      TestAssertEqual_(afterTmCc.buckets[0].primaryName, 'Test A1 TmCc', 'TM_STILL_CC_: the A1 is still the "To" -- this never changes who the primary is, only Cc');
+      TestAssert_(afterTmCc.buckets[0].cc.indexOf(TEST_EMAIL_SECONDARY_) !== -1, 'TM_STILL_CC_: once the TM is in the allowlist, their email IS added to Cc alongside their real A1/TL');
+    } finally {
+      TM_STILL_CC_.splice(TM_STILL_CC_.indexOf('test tm cccase'), 1);
+    }
+    TestAssert_(TM_STILL_CC_.indexOf('test tm cccase') === -1, 'TM_STILL_CC_: test entry cleaned up, never leaks into a later test');
+
     resolved = resolveRecipientBucketsForRms_(ss, ['Test RM Excl']);
     TestAssertEqual_(resolved.buckets.length, 0, 'resolveRecipientBucketsForRms_: an Excluded RM produces no bucket');
     TestAssertEqual_(resolved.unresolved.length, 1, 'resolveRecipientBucketsForRms_: an Excluded RM is reported unresolved');
@@ -167,11 +203,39 @@ function runRmHierarchyTests_() {
     // deliberately NOT re-asserted here as unchanged -- see
     // RmHierarchy.gs's own comment on that row for why they are
     // genuinely unaffected (resolveRecipientBucketsForRms_ only reads a
-    // primary's own rh/ch for CC, never a second hop through tl).
+    // primary's own rh/tm/ch for CC, never a second hop through tl).
     const yashSharma = realResolved.find(function (p) { return p.name === 'Yash Sharma'; });
     TestAssert_(!!yashSharma, 'resolveRmHierarchy_: "Yash Sharma" still has a row');
-    TestAssertEqual_(yashSharma && yashSharma.tl, 'Akash A Ugale', 'resolveRmHierarchy_: Yash Sharma\'s tl is now Akash A Ugale (confirmed real promotion, 2026-09-09)');
+    TestAssertEqual_(yashSharma && yashSharma.tl, '', 'resolveRmHierarchy_: Yash Sharma\'s tl is blank -- Akash A Ugale moved to tm on 2026-09-16 once his role was formalized to TM');
+    TestAssertEqual_(yashSharma && yashSharma.tm, 'Akash A Ugale', 'resolveRmHierarchy_: Yash Sharma\'s tm is now Akash A Ugale (confirmed real promotion, 2026-09-09; moved from tl to tm, 2026-09-16)');
     TestAssertEqual_(yashSharma && yashSharma.ch, 'Sanjyota Bhosale', 'resolveRmHierarchy_: Yash Sharma\'s ch is unchanged (Akash A Ugale\'s own chain continues to the same Cluster Head)');
+
+    // Akash A Ugale's own role was formalized from A1 to TM the same day
+    // (2026-09-16) -- his 8 direct Central S1 reports are unaffected,
+    // same reasoning as above (their own rows carry tl:'Akash A Ugale'
+    // directly).
+    const akashUgale = realResolved.find(function (p) { return p.name === 'Akash A Ugale'; });
+    TestAssert_(!!akashUgale, 'resolveRmHierarchy_: "Akash A Ugale" still has a row');
+    TestAssertEqual_(akashUgale && akashUgale.role, 'TM', 'resolveRmHierarchy_: Akash A Ugale\'s role is now TM, not A1 (2026-09-16 formalization)');
+    TestAssertEqual_(akashUgale && akashUgale.ch, 'Sanjyota Bhosale', 'resolveRmHierarchy_: Akash A Ugale\'s ch is unchanged');
+
+    // Now that Akash A Ugale is a real TM with real A1s/TLs under him
+    // (his own 8 Central reports, plus Harbour's Yash Sharma), he must be
+    // in the TM_STILL_CC_ exception list or he'd silently vanish from Cc
+    // on all of Yash Sharma's reports' emails despite being Yash's actual
+    // manager -- see RmHierarchy.gs's own docblock on resolveRecipientBucketsForRms_.
+    TestAssert_(TM_STILL_CC_.indexOf('akash a ugale') !== -1, 'TM_STILL_CC_: includes Akash A Ugale (2026-09-16), so he still appears in Cc on his own A1/TL reports\' buckets');
+
+    // "Mamtaben S 1" -- confirmed by the user directly (2026-09-16) as the
+    // same person as the existing "Mamtaben Sosa" row; must resolve to
+    // that EXACT chain. Not covered by stripRoleSuffix_'s fallback (that
+    // strips a trailing "S <digit>..." suffix but the leads sheet's
+    // spelling here also drops the surname "Sosa" entirely), hence a real
+    // alias row rather than relying on the generic suffix-strip.
+    const mamtabenSosa = realResolved.find(function (p) { return p.name === 'Mamtaben Sosa'; });
+    const mamtabenS1 = realResolved.find(function (p) { return p.name === 'Mamtaben S 1'; });
+    TestAssert_(!!mamtabenSosa && !!mamtabenS1, 'resolveRmHierarchy_: both "Mamtaben Sosa" and its alias "Mamtaben S 1" have rows');
+    TestAssertEqual_(JSON.stringify({ tl: mamtabenS1.tl, tm: mamtabenS1.tm, rh: mamtabenS1.rh, ch: mamtabenS1.ch }), JSON.stringify({ tl: mamtabenSosa.tl, tm: mamtabenSosa.tm, rh: mamtabenSosa.rh, ch: mamtabenSosa.ch }), 'resolveRmHierarchy_: "Mamtaben S 1" resolves to the exact same chain as "Mamtaben Sosa"');
 
     // ---- rebuildRmHierarchy: preserves manual edits across a rebuild ----
     // rebuildRmHierarchy() (unlike everything above) takes no `ss`
