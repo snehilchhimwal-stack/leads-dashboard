@@ -126,15 +126,20 @@ const MANAGER_DIRECTORY_SHEET_ = 'Manager_Directory';
 // just be noise this table was never meant to carry (same scope the
 // prior table had already settled on).
 const RM_HIERARCHY_RAW_ = [
-  ['Navi Mumbai','Cluster Head','Vidya Jadhav','','','',''],
-  ['Thane','Cluster Head','Bipin More','','','',''],
+  ['Navi Mumbai','Cluster Head','Vidya Jadhav','','','','Shitij Kaushal'], // 2026-09-17: Shitij Kaushal made her manager (see his own row + Bipin More's below)
+  ['Thane','Cluster Head','Bipin More','','','','Shitij Kaushal'], // 2026-09-17: Shitij Kaushal made his manager (see his own row + Vidya Jadhav's above)
   ['Central','Cluster Head','Sanjyota Bhosale','','','',''],
   ['Thane','RH','Swapnil Gowalkar','','','','Bipin More'],
   ['Navi Mumbai','TM','Sampada Pawar','','','','Vidya Jadhav'],
   ['Navi Mumbai','A1','Avinash Kumar','','','','Vidya Jadhav'],
   ['Central','RH','Rajkumar Ombase','','','','Sanjyota Bhosale'],
   ['Bangalore','A1','Chaithanya M','','','Romen Singh','Mukesh Mishra'],
-  ['Bangalore','A1','Krishna Murthy','','','','Mukesh Mishra'],
+  // Krishna Murthy left the company, 2026-09-17 -- row removed (same
+  // handling as Prathamesh A Pande, 2026-08-31, see the TM_STILL_CC_
+  // docblock above). His 4 direct reports below already carried
+  // ch:'Mukesh Mishra' (his own manager) directly on their own rows, so
+  // clearing their tl:'Krishna Murthy' reference is all that's needed --
+  // they fall straight through to that existing ch value as the backup.
   ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Loan','City Lead','Mayur Panjari','','','',''],
   ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
@@ -143,7 +148,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','S1','Ashish Kadam','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','City Lead','Sourabh Sareen','','','',''],
   ['Loan','Executive','Sachin Kadam','Zahid Shaikh','','','Mayur Panjari'],
-  ['Bangalore','S1','Sangam S','Krishna Murthy','','','Mukesh Mishra'],
+  ['Bangalore','S1','Sangam S','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Bangalore','S1','Chandana N R','','','Romen Singh','Mukesh Mishra'],
   ['Loan','BDM','Swapnil B Bhosale','','','','Mayur Panjari'],
   ['Pune','RH','Sachindra Wadane','','','','Sourabh Sareen'],
@@ -200,12 +205,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Nagmma Mujnayak','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Hyderabad','S1','Maagathoti Adilakshmi','Vemula Ajay','','','Mukesh Mishra'],
   ['Navi Mumbai','S1','Jayesh Parab','Avinash Kumar','','','Vidya Jadhav'],
-  ['Bangalore','S1','Praveen R','Krishna Murthy','','','Mukesh Mishra'],
+  ['Bangalore','S1','Praveen R','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Western','A1','Prathmesh S Pandey','','','','Rahul Gandhi'],
   ['HNI','A1','Pritesh Shankhat','','','','Abhhijjit Gandhii'],
   ['Western','S1','Vijay Yadav','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Western','S1','Lovkesh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Bangalore','S1','Mhd Haseebulla','Krishna Murthy','','','Mukesh Mishra'],
+  ['Bangalore','S1','Mhd Haseebulla','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Western','S1','Kundan Singh','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Hyderabad','S1','Vadlapudi Divya','Vemula Ajay','','','Mukesh Mishra'],
   ['Thane','S1','Avinash Das','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
@@ -277,7 +282,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
   ['Harbour','S1','Manan Bhatt','Yash Sharma','','','Sanjyota Bhosale'],
   ['Western','S1','Vijay Katheriya','','Minas Patel','','Rahul Gandhi'],
-  ['Bangalore','S1','Rahul Singh','Krishna Murthy','','','Mukesh Mishra'],
+  ['Bangalore','S1','Rahul Singh','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Pune','S1','Aabid Khan','Firoj Shaikh','','','Sourabh Sareen'],
   ['HNI','S1','Mohammed Rafiq Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Adil Shaikh','Pritesh Shankhat','','','Abhhijjit Gandhii'],
@@ -340,6 +345,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Pranav Mhatale','','Ayaz Bagwan','','Sourabh Sareen'], // renamed 2026-09-09 from "Pranav Vilas Mhatale" per the fresher HR Live export -- same person, same chain
   ['Leadership','Commercial Head','Neha Mishra','','','',''],
   ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
+  // Shitij Kaushal, added 2026-09-17 as Vidya Jadhav's (Navi Mumbai) and
+  // Bipin More's (Thane) manager -- see their own rows above, both now
+  // carry ch:'Shitij Kaushal'. Role tagged 'Commercial Head' matching
+  // Neha Mishra's existing title above (a real title already on record
+  // in this roster, not invented) -- CONFIRM this is his actual title.
+  ['Leadership','Commercial Head','Shitij Kaushal','','','',''],
   ['Hyderabad','S1','G Kumar','Vemula Ajay','','','Mukesh Mishra'],
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
