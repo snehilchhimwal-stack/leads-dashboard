@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `MovementTracker.gs` (1186 lines) |
+| **Location** | `MovementTracker.gs` (1226 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-15 against commit `9e55e36` |
+| **Last Verified** | 2026-09-17 against commit `9413f6a` |
 
 ## Purpose / reason to exist
 
@@ -28,6 +28,12 @@ writes the per-snapshot `SLA_History` row and (guarded) persists
   (content-hash dedup, added 2026-09-11 — see `FN-218`/`CFG-063`); always
   writes one `Movement_Log_Runs` row per run regardless of whether
   anything changed; independently try/catch each side-effect.
+- `removeEarlyCorruptedMovementLogDataNow()` — one-time, console-callable
+  cleanup for the Sep 2026 data-loss/restore incident (`HANDOVER.md` §8):
+  backs up `Movement_Log` as plain values to a fresh
+  `Movement_Log_backup_<timestamp>` tab, then drops every row snapshotted
+  before 12 Sep 2026 IST. Not wired to any trigger or button — added
+  2026-09-17.
 - `snapshotPeriodic` / `snapshotNow` — the scheduled and manual entry
   points; `setupMovementTracking` — install the 4 triggers.
 - `pruneMovementLog_` — trim rows **and** shrink the sheet's row
