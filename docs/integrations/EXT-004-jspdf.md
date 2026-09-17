@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-17 against commit `a74a65f` |
 
 ## Purpose / reason to exist
 
@@ -49,6 +49,7 @@ None — a pure client-side library. No token, no scope, no server.
 | **sandboxed viewer blocks the download** | `doc.save()` is inert — nothing downloads, no error (`JS-013` EXC-024) — a general artifact/preview constraint, not a library bug |
 | a table body overflows a page while only its title was room-checked | **fixed** — `_repeatOffendersPdfEnsureRoom` / `_repeatOffendersPdfEstimateTableHeight` estimate the full body height (`JS-013` FN-091, a real past bug) |
 | `RM_Hierarchy` still loading at export time | `downloadRepeatOffendersPdf` **refuses** with a status message rather than exporting leadership rows (`JS-013` EXC-022, added `ddc0097`) — not a library issue, a data-readiness guard |
+| PDF export raced the live tab's own async recalculation, could print tables computed against inputs different from what was on screen | **fixed**, Repeat Offenders Architecture Redesign (`a74a65f`/`9dea24a`/`8fa3895`, 2026-09-12) — `downloadRepeatOffendersPdf` no longer calls `computeRmPerformance`/`computeRmPerformanceByRegion` itself; it reads `_repeatOffendersLastResult` (`JS-022`'s canonical result cache) and refuses (rather than exports) if no cache exists yet or the cache is stale (`cached.runId !== _repeatOffendersRunId`) |
 
 ## Rate-limit / retry behaviour
 
@@ -73,7 +74,10 @@ comment). Pinned versions: **jsPDF 2.5.1**, **jspdf-autotable 3.8.2**.
 ## Data lineage
 
 `computeRmPerformance` result rows (`JS-008`, from `movementSnapshots` /
-`RM_Hierarchy`) → `_repeatOffendersPdfTableRows` (`JS-013` FN-089) →
+`RM_Hierarchy`) → `_repeatOffendersLastResult` (`JS-022`'s canonical
+result cache, populated once per completed live-tab calculation,
+Repeat Offenders Architecture Redesign `a74a65f`) → read (never
+recomputed) by `_repeatOffendersPdfTableRows` (`JS-013` FN-089) →
 `doc.autoTable(...)` → a downloaded `.pdf`. Nothing persists. Full flow:
 `DATA-002` (its output side).
 
@@ -111,14 +115,21 @@ Layer 16 (Export) in `LOGIC_AUDIT.md` Part 1 §1. Belongs to `TAB-004`.
   confirmed in `js/repeat-offenders-pdf.js` (the guard added and verified
   this session, `ddc0097`). PDF assembly is verified by manual download;
   `computeRmPerformance` (the data) is covered by
-  `tests/frontend-harness.html`.
+  `tests/frontend-harness.html`. Revalidated 2026-09-17: CDN versions and
+  load order unchanged; read the current `downloadRepeatOffendersPdf`
+  directly to confirm the data-lineage change (cache read, not a live
+  compute) — `JS-013` was already revalidated at `9e55e36` but this
+  record hadn't been cascaded (`check-catalog.py` check D).
 - **Evidence:** commit `ddc0097`; `dashboard.html` `#L20`–`#L23`;
-  `LOGIC_AUDIT.md` Part 1 §4c.
-- **Status:** Validated 2026-09-10.
+  `LOGIC_AUDIT.md` Part 1 §4c; `docs/_planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md`.
+- **Status:** Validated 2026-09-17.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-033`.
+Verified at `a74a65f`; record created by `DOC-033`, revalidated
+2026-09-17 for the Repeat Offenders Architecture Redesign (data lineage
+now flows through `_repeatOffendersLastResult`, not a live
+`computeRmPerformance` call).
 
 ## Revalidation trigger
 
@@ -147,3 +158,6 @@ none — Closed + Monitored.
 Record committed for `DOC-033`; `docs/INDEX.md` `EXT-004` → `Closed +
 Monitored`, `Last Verified` 2026-09-10, pinned CDN versions + real
 call-site references recorded. No `docs/changes/` record (`DOC-033`).
+Revalidated 2026-09-17: `Last Verified` bumped to `a74a65f`; Known
+failure modes + Data lineage updated for the canonical result cache;
+`docs/INDEX.md` row bumped to match.

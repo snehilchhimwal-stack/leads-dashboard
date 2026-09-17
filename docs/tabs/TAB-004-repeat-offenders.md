@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-17 against commit `a74a65f` |
 
 ## Purpose / reason to exist
 
@@ -76,8 +76,8 @@ invent different data" (`LOGIC_AUDIT.md` Part 1 §4c).
 
 | ID | Label | Element id | What it does | Invokes (`FN-XXX`) | Confirm/irreversible? | Failure behaviour |
 |---|---|---|---|---|---|---|
-| BTN-010 | ↻ Recalculate | `#repeatOffendersRecalculateBtn` | Re-runs this report's own computation against its current filters (this report only, not the whole dashboard) | worker dispatch → `computeRmPerformanceByRegion` / `computeRmPerformance` (`JS-017` / `JS-008`) | no | shows a progress label; on worker error, prior table stays |
-| BTN-011 | Download PDF | `#repeatOffendersDownloadPdfBtn` | Exports the current filter's tables as a vector PDF, broken out per date | `downloadRepeatOffendersPdf` (`JS-013`) | no (local download) | **refuses with a status message** if `rmHierarchyFetchState` is `loading`/`idle` (added `ddc0097`) so leadership rows can't leak into the export; inert in a sandboxed viewer |
+| BTN-010 | ↻ Recalculate | `#repeatOffendersRecalculateBtn` | Re-runs this report's own computation against its current filters (this report only, not the whole dashboard); **disables Download PDF for the run's duration** and, on completion, (re)populates the canonical result cache `_repeatOffendersLastResult` (Repeat Offenders Architecture Redesign, `a74a65f`/`9dea24a`/`8fa3895`) | worker dispatch → `computeRmPerformanceByRegion` / `computeRmPerformance` (`JS-017` / `JS-008`) | no | shows a progress label; on worker error, prior table stays; Download PDF re-enabled either way |
+| BTN-011 | Download PDF | `#repeatOffendersDownloadPdfBtn` | Exports the current filter's tables as a vector PDF, broken out per date, reading **only** the canonical result cache — never a live recompute (Repeat Offenders Architecture Redesign, below) | `downloadRepeatOffendersPdf` (`JS-013`) | no (local download) | **refuses with a status message** in 4 cases: `rmHierarchyFetchState` `loading`/`idle` (added `ddc0097`, leadership-row guard); no cache yet (`!_repeatOffendersLastResult`, "Nothing calculated yet…"); cache is stale — a newer run started but hasn't landed (`cached.runId !== _repeatOffendersRunId`, "Still recalculating…"); inert in a sandboxed viewer |
 
 ## Non-button UI elements — `UI-XXX` sub-table
 
@@ -120,13 +120,35 @@ each.
 - Region-filter gap: this tab's region filter does **not** run through
   `effectiveRegion()`'s Loan-source inference (`LOGIC_AUDIT.md` Part 1
   §4c, flagged Part 4/6).
+- **Canonical result cache** (Repeat Offenders Architecture Redesign,
+  `docs/_planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md`, `a74a65f`/
+  `9dea24a`/`8fa3895`, 2026-09-12): real bug fixed — the PDF export used
+  to independently re-run `computeRmPerformance`/`computeRmPerformanceByRegion`
+  a second, synchronous time at click time, while the live tab's own
+  calculation runs asynchronously via `JS-017`'s Worker (up to ~12–15s at
+  real data volume). A filter/range change during that window could make
+  the PDF compute against different inputs than what was still on
+  screen. Fix: `_renderRepeatOffendersResult` (`JS-022`) now populates
+  `_repeatOffendersLastResult = { runId, computedAtWall, computedFrom:
+  {filters, dateKeys, range, now, hierarchyMissing}, rm, region, a1tm,
+  rh, byRegion, stageCounts }` exactly once per completed run;
+  `downloadRepeatOffendersPdf` (`JS-013`) reads **only** this cache —
+  every table AND every header line (filter summary, date range) traces
+  back to one cached object, never a live global read at export time.
+  `runId` (compared against the live `_repeatOffendersRunId` counter)
+  lets the export tell "this cache is current" from "a newer run is in
+  flight" via one integer comparison, no separate in-flight flag needed.
 
 ## Exceptions & error handling
 
 `EXC` (on `JS-013`): `RM_Hierarchy` fetch in flight at PDF-gen time →
 refuse + "Still loading RM_Hierarchy — try again in a moment" status
-message, user retries once loaded. Worker failure leaves the last good
-table on screen.
+message, user retries once loaded. No completed calculation yet (fresh
+load) → "Nothing calculated yet…" refuse. A newer run in flight when
+Download PDF is clicked (cache present but stale) → "Still
+recalculating…" refuse — the canonical-cache guard above. Worker failure
+leaves the last good table on screen (and the last good cache, so
+Download PDF still exports the last successful result).
 
 ## Architecture relationship
 
@@ -162,15 +184,26 @@ gotcha); `OPS_CHECKLIST.md` (worst-performer methodology drift);
   3 §3.6; the RM-exclusion and per-region-worst-5 behaviour was
   hand-verified this session against live data (the alias / leadership /
   PDF-race fixes `fef04b0`, `7ef26db`, `812a3cb`, `8d9acbc`, `ddc0097`).
+  Revalidated 2026-09-17 against the Repeat Offenders Architecture
+  Redesign (`a74a65f`/`9dea24a`/`8fa3895`) — read the current
+  `_repeatOffendersLastResult` cache mechanism directly in
+  `js/tab-repeat-offenders.js` and `js/repeat-offenders-pdf.js`; `JS-013`
+  and `JS-022`'s own records were already revalidated at `9e55e36`
+  (2026-09-15) but this umbrella record and `EXT-004` had not been
+  cascaded — closing that gap now (`check-catalog.py` check D).
 - **Evidence:** `LOGIC_AUDIT.md` Part 3 §3.6; the session's fix commits;
-  `tests/frontend-harness.html` (RM-performance compute path).
-- **Status:** Validated 2026-09-10.
+  `tests/frontend-harness.html` (RM-performance compute path);
+  `docs/_planning/REPEAT_OFFENDERS_ARCHITECTURE_REVIEW.md` (the redesign
+  rationale, Parts 1–5).
+- **Status:** Validated 2026-09-17.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-026. The scoring engine
-grew materially this session (`js/core-rm-performance.js` 485L →
-869L) — new record reflects the post-session state.
+Verified at `a74a65f`; record created by DOC-026, revalidated 2026-09-17
+for the Repeat Offenders Architecture Redesign (canonical result cache
+closing the PDF/live-tab compute race). The scoring engine grew
+materially this session (`js/core-rm-performance.js` 485L → 869L) — new
+record reflects the post-session state.
 
 ## Revalidation trigger
 
@@ -178,7 +211,8 @@ Any commit touching `js/tab-repeat-offenders.js`,
 `js/rm-performance-worker.js`, `js/core-rm-performance.js`, or
 `js/repeat-offenders-pdf.js`; any `RM_PERF_*` constant changes value
 (also requires the `RM_PERF_*_GS_` twin to change); `RM_PERF_NON_RM_ROLES`
-membership changes; `#tab-repeatoffenders` button set changes.
+membership changes; `#tab-repeatoffenders` button set changes; the
+`_repeatOffendersLastResult` cache shape changes.
 
 ## Handover relationship
 
@@ -201,3 +235,6 @@ none — Closed + Monitored.
 Record committed for DOC-026; `docs/INDEX.md` `TAB-004` → `Closed +
 Monitored`, `Last Verified` 2026-09-10; `BTN-010`/`BTN-011` rows added;
 validation evidence as above. No `docs/changes/` record (DOC-026).
+Revalidated 2026-09-17: `Last Verified` bumped to `a74a65f`; `BTN-010`/
+`BTN-011` rows and Important logic / Exceptions sections updated for the
+canonical result cache; `docs/INDEX.md` row bumped to match.

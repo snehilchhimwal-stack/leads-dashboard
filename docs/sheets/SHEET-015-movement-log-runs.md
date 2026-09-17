@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `9413f6a` |
+| **Last Verified** | 2026-09-17 against commit `641398e` |
 
 ## Purpose / reason to exist
 
@@ -33,20 +33,25 @@ nullable flag on it.
 
 ## Source of the data
 
-Written by `GS-008` (`MovementTracker.gs`) at the end of
-`snapshotOpenLeads_`, after `Movement_Log`'s own prune — so it reads
-`Movement_Log`'s true post-prune retained range rather than a stale
-about-to-be-trimmed one. Wrapped in a `try/catch` (same "can never block
-the core `Movement_Log` capture" pattern as the `SLA_History`/
-`Unmatched_Comments_Log` writes) — a write failure here logs and moves on,
-it never fails the capture itself.
+Written by **two independent writers with an identical schema** — the
+same two-writer pattern as `Movement_Log` itself (`SHEET-002`):
+`GS-008` (`MovementTracker.gs`'s `snapshotOpenLeads_`, the 4×/day
+trigger) and `JS-018` (`sheets-writeback.js`'s `browserSnapshotOpenLeads`,
+the on-demand "Snapshot now" button, via constants mirrored in `JS-021`).
+Both write at the end of their respective `Movement_Log` capture, after
+the prune — so each reads `Movement_Log`'s true post-prune retained range
+rather than a stale about-to-be-trimmed one. Both wrap the write in a
+`try/catch` (same "can never block the core `Movement_Log` capture"
+pattern as the `SLA_History`/`Unmatched_Comments_Log` writes) — a write
+failure here logs and moves on, it never fails the capture itself.
 
 ## Destination / consumers
 
 `GS-008`'s own `checkMovementLogFreshness_` (console-callable wrapper:
 `checkMovementLogFreshnessNow()`) — reads this tab's last row, not
 `Movement_Log`'s, specifically because it stays a correct freshness
-signal even when nothing changed on a given run.
+signal even when nothing changed on a given run. No browser-side reader
+exists yet — `JS-018`/`JS-021` only write.
 
 ## Columns / fields
 
@@ -63,8 +68,9 @@ Exact list: `MovementTracker.gs` `MOVEMENT_LOG_RUNS_COLUMNS_` `#L177`.
 
 | Writer | Which `FN-XXX` | Mode |
 |---|---|---|
-| `GS-008` | `snapshotOpenLeads_` (end of run, after prune) | append (4×/day + on-demand) |
+| `GS-008` | `snapshotOpenLeads_` (end of run, after prune) | append (4×/day trigger) |
 | `GS-008` | `ensureMovementLogRunsSheet_` | creates tab + header on first use |
+| `JS-018` | `browserSnapshotOpenLeads` (FN-121, via `appendSheetRows`) | append (on-demand "Snapshot now") |
 
 ## Readers
 
@@ -75,10 +81,11 @@ Exact list: `MovementTracker.gs` `MOVEMENT_LOG_RUNS_COLUMNS_` `#L177`.
 ## Automation / triggers touching it
 
 Written at the tail of the same 4× `atHour([0,6,12,18])` triggers that
-write `Movement_Log` (`setupMovementTracking()`). No trigger reads it
-directly — `checkMovementLogFreshnessNow` is manual/console, though
-`OpsChecklistRunner.gs`'s Monday weekly summary calls the same
-`checkMovementLogFreshness_` underneath.
+write `Movement_Log` (`setupMovementTracking()`), and also at the tail of
+the on-demand "Snapshot now" button (`JS-018`, no trigger — a user
+click). No trigger reads it directly — `checkMovementLogFreshnessNow` is
+manual/console, though `OpsChecklistRunner.gs`'s Monday weekly summary
+calls the same `checkMovementLogFreshness_` underneath.
 
 ## Data Lifecycle
 
@@ -107,6 +114,11 @@ Columns must stay in `MOVEMENT_LOG_RUNS_COLUMNS_` order —
 `ensureMovementLogRunsSheet_` writes the header directly from that array
 on first creation only; an existing tab's header is never rewritten, so a
 column reorder here would silently desync a live tab from a code change.
+**Two-writer schema parity**: `GS-008`'s `MOVEMENT_LOG_RUNS_COLUMNS_` and
+`JS-021`'s `MOVEMENT_LOG_RUNS_COLUMNS` must be changed **in the same
+commit** — the same discipline `SHEET-002` documents for its own two
+writers (`LOGIC_AUDIT.md` Part 4 §4.7) — or the two runtimes silently
+disagree about this tab's shape.
 
 ## Relationships to other tabs
 
@@ -136,9 +148,11 @@ target design this mirrors).
 
 ## Relationships
 
-- **Depends On:** `GS-008`, `EXT-001`
-- **Used By:** `GS-008`
-- **Related:** `SHEET-002` (sibling, same capture cycle)
+- **Depends On:** `GS-008`, `JS-018`, `JS-021`, `EXT-001`
+- **Used By:** `GS-008`, `JS-018`, `JS-021`, `TAB-007` (documents the
+  write as part of its own Snapshot-now button)
+- **Related:** `SHEET-002` (sibling, same capture cycle, same two-writer
+  pattern)
 
 ## Source of truth
 
@@ -150,8 +164,12 @@ The live `Movement_Log_Runs` tab; schema defined by
 - **Method:** column list and read/write sites read directly from
   `MovementTracker.gs` source (`MOVEMENT_LOG_RUNS_SHEET_`,
   `MOVEMENT_LOG_RUNS_COLUMNS_`, `ensureMovementLogRunsSheet_`,
-  `checkMovementLogFreshness_`).
-- **Evidence:** source line citations above.
+  `checkMovementLogFreshness_`) and, once the record's initial write-up
+  had missed it, `js/sheets-writeback.js` (`browserSnapshotOpenLeads`)
+  and `js/tab-movement.js` (`MOVEMENT_LOG_RUNS_TAB_NAME`/
+  `MOVEMENT_LOG_RUNS_COLUMNS`) — the second, on-demand writer, confirmed
+  same-day against commit `641398e`'s own diff.
+- **Evidence:** source line citations above; commit `641398e`.
 - **Status:** Validated 2026-09-17. This record closes the gap flagged by
   `test/check-catalog.py` check L ("untracked Sheet tab: 'Movement_Log_Runs'
   referenced in MovementTracker.gs:176 but no docs/sheets/ record
@@ -163,7 +181,10 @@ The live `Movement_Log_Runs` tab; schema defined by
 
 Record created 2026-09-17, closing a gap found by `check-catalog.py`
 check L. Tab itself introduced by the Lead History & Versioning Review,
-Phase 6 (predates this record).
+Phase 6 (`641398e`, predates this record). Same-day correction: the
+record's first write-up only named `GS-008` as a writer; `JS-018`/`JS-021`
+(the on-demand browser writer) added once found while revalidating those
+records' own drift.
 
 ## Revalidation trigger
 
@@ -188,4 +209,7 @@ ever becomes a real size concern (4 rows/day is trivial today).
 
 Record created 2026-09-17 to close the `check-catalog.py` check L gap;
 `docs/INDEX.md` `SHEET-015` added with `Depends On`/`Used By` reciprocal
-to `GS-008`'s row.
+to `GS-008`'s row. Same-day correction while revalidating `JS-018`/
+`JS-021` (their own separate stale-doc revalidation): added `JS-018` as
+a second writer and `JS-021` as the constants' owner, both now reciprocal
+in `docs/INDEX.md` too.

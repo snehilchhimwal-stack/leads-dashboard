@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-17 against commit `641398e` |
 
 ## Purpose / reason to exist
 
@@ -63,7 +63,8 @@ Via `JS-018` (`sheets-writeback.js`):
 
 | Target | When | Function |
 |---|---|---|
-| `SHEET-002` `Movement_Log` | Snapshot Now button / auto-snapshot tick | `browserSnapshotOpenLeads` |
+| `SHEET-002` `Movement_Log` | Snapshot Now button / auto-snapshot tick | `browserSnapshotOpenLeads` — **changed leads only** since content-hash dedup (Lead History & Versioning Review Phase 6, `641398e`) |
+| `SHEET-015` `Movement_Log_Runs` | same trigger as the row above | `browserSnapshotOpenLeads` — always one row, even when nothing changed (`641398e`) |
 | `SHEET-004` `Lead_Followups` | Overnight "Generate Region Emails" cycle (clear → push → wait) | `clearLeadFollowupsTab` / `pushLeadsToFollowups` / `waitForAllFollowups` |
 | `SHEET-011` `Send_Log` | after an Overnight Gmail send | `logEmailSend` |
 
@@ -80,7 +81,7 @@ Reached from `#tabBar`. Its `movementSnapshots` / `buildMovementHistories`
 
 | ID | Label | Element id | What it does | Invokes (`FN-XXX`) | Confirm/irreversible? | Failure behaviour |
 |---|---|---|---|---|---|---|
-| BTN-014 | Snapshot now | `#snapshotNowBtn` | Writes an on-the-spot `Movement_Log` checkpoint (same sign-in, no separate connect) | `browserSnapshotOpenLeads` (`JS-018`) | writes to `Movement_Log`; **no reentrancy guard** (`LOGIC_AUDIT.md` Part 7 §18 MEDIUM #1) | on write failure, status text shows the error; rows may be partial |
+| BTN-014 | Snapshot now | `#snapshotNowBtn` | Writes an on-the-spot `Movement_Log` checkpoint for **changed leads only** (content-hash dedup) + always one `Movement_Log_Runs` row (same sign-in, no separate connect) | `browserSnapshotOpenLeads` (`JS-018`) | writes to `Movement_Log` (`SHEET-002`) + `Movement_Log_Runs` (`SHEET-015`); **no reentrancy guard** (`LOGIC_AUDIT.md` Part 7 §18 MEDIUM #1) | on write failure, status text shows the error; rows may be partial |
 | BTN-015 | Auto-snapshot (checkbox) | `#autoSnapshotCheck` | Enables periodic auto-snapshot while the tab is open | auto-snapshot tick (`JS-018` / `JS-021`) | writes to `Movement_Log` | same as BTN-014 per tick |
 | BTN-016 | Generate Region Emails | `#overnightGenerateReportsBtn` | Runs the Overnight region-email clear→push→wait→rebuild cycle | Overnight generate handler (`JS-021`) → `JS-016` / `JS-018` | writes `Lead_Followups`; gated by the mutex | falls back to the algorithmic report with "UNREVIEWED" banner if the wait is cancelled |
 | BTN-017 | Cancel wait | `#overnightFollowupsWaitCancelBtn` | Cancels the Overnight cycle's human-review wait | keyed cancel via `_followupWaitCancelled` Map (`JS-018`) | no | triggers the UNREVIEWED fallback |
@@ -116,6 +117,14 @@ content from `JS-014` / `JS-016`. Reciprocal `Used By: TAB-007` on each.
   no shadow-`let` bug here (`LOGIC_AUDIT.md` Part 1 §4c).
 - `browserSnapshotOpenLeads` has no reentrancy guard — a fast double
   Snapshot-Now can double-write (`LOGIC_AUDIT.md` Part 7 §18 MEDIUM #1).
+- **Content-hash dedup** (Lead History & Versioning Review Phase 6,
+  `641398e`, 2026-09-11): a lead whose current fields hash identically to
+  its latest known `Movement_Log` hash gets no new row on either writer
+  (this tab's `browserSnapshotOpenLeads` or `MovementTracker.gs`'s
+  `snapshotOpenLeads_`); `Movement_Log_Runs` (`SHEET-015`) still gets a
+  row every capture regardless, so "did a capture happen" stays
+  answerable even when nothing changed. Full detail: `JS-018`/`JS-021`'s
+  own records.
 
 ## Exceptions & error handling
 
@@ -141,7 +150,7 @@ Overnight cycle.
 - **Depends On:** `JS-003` (`allParsedLeads`), `JS-009`
   (`sheetsApiValuesGet`), `JS-014`, `JS-015`, `JS-016` (Overnight report
   content), `JS-018` (writes), `JS-021`, `SHEET-002`, `SHEET-004`,
-  `SHEET-011`, `EXT-001`, `EXT-002`, `DATA-005`
+  `SHEET-011`, `SHEET-015`, `EXT-001`, `EXT-002`, `DATA-005`
 - **Used By:** `DASH-001`
 - **Related:** `GS-008` (`MovementTracker.gs` writes the `Movement_Log` it
   reads), `GS-010` (`OvernightEmailer.gs` — the unattended equivalent of
@@ -157,21 +166,29 @@ Overnight cycle.
   `c82ec67`; cross-check `LOGIC_AUDIT.md` Part 1 §4c + Part 2 §4;
   `tests/frontend-harness.html` mocks the `Movement_Log` read and
   exercises `computeStalledLeads` / `browserSnapshotOpenLeads` with a
-  mocked write boundary.
+  mocked write boundary. Revalidated 2026-09-17 against `641398e` (Lead
+  History & Versioning Review Phase 6) — read the current
+  `browserSnapshotOpenLeads` (`JS-018`) content-hash dedup + the new
+  `SHEET-015` write directly; full function-level detail lives in
+  `JS-018`/`JS-021`'s own revalidated records, this umbrella record
+  updated only what it directly describes (BTN-014, the write table, the
+  business-rule list).
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c, Part 2 §4;
-  `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+  `tests/frontend-harness.html`; commit `641398e`.
+- **Status:** Validated 2026-09-17.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-026.
+Verified at `641398e`; record created by DOC-026, revalidated 2026-09-17
+for the content-hash dedup + `Movement_Log_Runs` write (`SHEET-015`).
 
 ## Revalidation trigger
 
 Any commit touching `js/tab-movement.js`; the stalled-lead rule
 thresholds change; a new consumer starts reading `movementSnapshots`;
 `#tab-movement` button set changes; `Movement_Log` (`SHEET-002`) columns
-or retention change.
+or retention change; the content-hash dedup logic or `Movement_Log_Runs`
+(`SHEET-015`) schema changes.
 
 ## Handover relationship
 
@@ -194,3 +211,6 @@ none — Closed + Monitored.
 Record committed for DOC-026; `docs/INDEX.md` `TAB-007` → `Closed +
 Monitored`, `Last Verified` 2026-09-10; `BTN-014`..`BTN-018` rows added;
 validation evidence as above. No `docs/changes/` record (DOC-026).
+Revalidated 2026-09-17: `Last Verified` bumped to `641398e`; BTN-014,
+write table, and Important logic updated for content-hash dedup +
+`SHEET-015`; `docs/INDEX.md` row bumped to match.

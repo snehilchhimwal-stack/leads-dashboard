@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/tab-movement.js` (1328 lines) |
+| **Location** | `js/tab-movement.js` (1365 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-17 against commit `641398e` |
 
 ## Purpose / reason to exist
 
@@ -44,7 +44,8 @@ In the tab group before `main.js`; `initMovementUI()` is one of
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-140 | `fetchMovementLog(sheetId)` `#L138` | sheet id | populates `movementSnapshots`; sets `movementFetchState` / `_currentSheetId` | one Sheets read; state writes | `sheetsApiValuesGet` / `valuesToGvizShape` (`JS-009`) | `fetchAndRender` (`JS-003`), refresh paths | specific — the hub's loader |
+| FN-140 | `fetchMovementLog(sheetId)` `#L138` | sheet id | populates `movementSnapshots`; sets `movementFetchState` / `_currentSheetId`; each record now also carries `content_hash` (trailing column, read via `getRaw(c, 'content_hash')`; `MOVEMENT_LOG_COLUMNS` itself deliberately excludes it — that array also derives `SNAPSHOT_FIELD_KEYS`, and `content_hash` is computed, never read off a live lead — Lead History & Versioning Review Phase 6, `641398e`) | one Sheets read; state writes | `sheetsApiValuesGet` / `valuesToGvizShape` (`JS-009`) | `fetchAndRender` (`JS-003`), refresh paths | specific — the hub's loader |
+| FN-258 | `latestMovementLogHashByKey()` `#L306` | `movementSnapshots` | `{ [client_id or 'l:'+lead_id]: latest content_hash }` | none | — | `browserSnapshotOpenLeads` (`JS-018`, content-hash dedup) | specific — the browser-writer counterpart of `MovementTracker.gs`'s `_latestContentHashByKeyGs_`; deliberately not memoised like FN-141, since `browserSnapshotOpenLeads` calls `fetchMovementLog` immediately before this specifically to see a capture the Apps Script trigger already made since this tab was last loaded |
 | FN-141 | `buildMovementHistories()` / `enrichSnapshotCached(rec)` / `enrichLeadAsOf(rawRecord, asOfDate)` `#L293/#L341/#L320` | `movementSnapshots` | per-lead ordered snapshot history; per-snapshot enriched record | memoisation caches | `enrichLead` (`JS-006`), `parseDate` | Stalled/leaderboard/time-to-opp compute here, `JS-008`, `JS-024`, `JS-023` | reusable — hub API |
 | FN-142 | `passesMovementFilters(rec, opts)` `#L384` | a record + options | bool | none | `mainRegionFor` / `effectiveRegion` (`JS-014`) | Movement/Tracking renders, `JS-024`, `JS-023` | reusable — **not** the same predicate as `passesRepeatOffenderFilters` (`JS-008`); this one *does* run `effectiveRegion`'s Loan inference |
 | FN-143 | `computeStalledLeads()` / `currentStalledRowsByRegion()` `#L543/#L591` | histories | leads ≥2 days old AND (comments but none in 6h, OR never commented + `call_attempts` unchanged vs a ~6h-old snapshot) | none | FN-141 | `renderStalledFlaggedLeadsOps` (FN-146), `overview-…` (`JS-012`), `reports-build.js` (`JS-014`) | reusable |
@@ -107,6 +108,22 @@ degrades to a labelled fallback report (EXC-045).
 schemas agree exactly (`LOGIC_AUDIT.md` Part 4 §4.7). The Overnight
 region-email cycle mirrors `OvernightEmailer.gs` (`GS-010`).
 
+**Content-hash dedup pair** (Lead History & Versioning Review Phase 6,
+`641398e`, 2026-09-11 — a DUPLICATED-PAIR RULE case,
+`docs/HOW_TO_UPDATE_A_COMPONENT.md`): `MOVEMENT_LOG_RUNS_TAB_NAME` /
+`MOVEMENT_LOG_RUNS_COLUMNS` here mirror `MovementTracker.gs`'s
+`MOVEMENT_LOG_RUNS_SHEET_` / `MOVEMENT_LOG_RUNS_COLUMNS_` (`GS-008`)
+exactly. `latestMovementLogHashByKey` (FN-258, here) is the browser
+counterpart of `_latestContentHashByKeyGs_` (`GS-008`); the actual hash
+computation is `leadContentHash` (`JS-018`), which must stay
+byte-for-byte identical to `GS-008`'s `_leadContentHashGs_` — **a real
+cross-runtime bug was found and fixed in the same commit before it
+shipped**: the two writers would have hashed an identical lead
+differently (Apps Script's raw `Date.getTime()` vs the browser's IST-
+string date rendering), permanently defeating cross-writer dedup. Both
+sides now format `lead_assigned_at`/`last_connect_time` identically
+before hashing.
+
 ## UI relationships
 
 `#tab-movement` panel; `#snapshotNowBtn` (`BTN-014`, wired here despite
@@ -136,13 +153,14 @@ Belongs to `TAB-007`; its state serves `TAB-004`/`005`/`008`.
   `renderBreakdownCard`), `JS-014` (`effectiveRegion`, `mainRegionFor`,
   `buildRegionReports`), `JS-018` (Overnight write cycle), `JS-020`
   (`renderMorningBrief`), `SHEET-002`, `SHEET-004`, `SHEET-011`,
-  `EXT-001`, `EXT-002`, `EXT-003`
+  `SHEET-015` (defines the mirrored `MOVEMENT_LOG_RUNS_TAB_NAME`/
+  `MOVEMENT_LOG_RUNS_COLUMNS` constants), `EXT-001`, `EXT-002`, `EXT-003`
 - **Used By:** `TAB-004`, `TAB-005`, `TAB-007`, `TAB-008` (read
   `movementSnapshots` / `buildMovementHistories` /
   `passesMovementFilters`), `JS-003` (`fetchMovementLog`), `JS-006`
   (baseline-Map builder), `JS-008`, `JS-011` (`initMovementUI`),
   `JS-012`, `JS-013`, `JS-014`, `JS-017`, `JS-018`, `JS-022`, `JS-023`,
-  `JS-024`, `DATA-004`
+  `JS-024`, `SHEET-015` (its constants are defined here), `DATA-004`
 - **Related:** `GS-008` (`MovementTracker.gs` — writes the `Movement_Log`
   it reads), `GS-010` (`OvernightEmailer.gs` — the unattended Overnight
   equivalent)
@@ -157,14 +175,20 @@ Belongs to `TAB-007`; its state serves `TAB-004`/`005`/`008`.
   cross-check `LOGIC_AUDIT.md` Part 1 §4c + Part 2 §4 + Part 4 §4.7.
   `tests/frontend-harness.html` mocks the `Movement_Log` read and
   exercises `buildMovementHistories` / `computeStalledLeads` /
-  `browserSnapshotOpenLeads` (write boundary mocked).
+  `browserSnapshotOpenLeads` (write boundary mocked). Revalidated
+  2026-09-17 against `641398e` (Lead History & Versioning Review Phase
+  6): read the current `fetchMovementLog`/`latestMovementLogHashByKey`
+  source directly; confirmed against `713/713` real tests
+  (`python3 test/run-gs-tests-headless.py`, per that commit's own message).
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c, Part 4 §4.7;
-  `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+  `tests/frontend-harness.html`; commit `641398e`.
+- **Status:** Validated 2026-09-17.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-028.
+Verified at `641398e`; record created by DOC-028, revalidated 2026-09-17
+for the content-hash dedup pair (FN-258 added, `Movement_Log_Runs`
+constants added, cross-runtime duplication section updated).
 
 ## Revalidation trigger
 
@@ -194,4 +218,8 @@ none — Closed + Monitored.
 Record committed for DOC-028; `docs/INDEX.md` `JS-021` → `Closed +
 Monitored`, `Last Verified` 2026-09-10, reciprocal links to `TAB-007`
 and downstream tabs confirmed; `RULE-024`..`026`, `EXC-043`..`045`
-recorded. No `docs/changes/` record (DOC-028).
+recorded. No `docs/changes/` record (DOC-028). Revalidated 2026-09-17:
+`Last Verified` bumped to `641398e`; FN-258 added; Cross-runtime
+duplication section covers the content-hash dedup pair (and the real
+date-formatting bug found and fixed before it shipped); `SHEET-015`
+added to Depends On; `docs/INDEX.md` row bumped to match.

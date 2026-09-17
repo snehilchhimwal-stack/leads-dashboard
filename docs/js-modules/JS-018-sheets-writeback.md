@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/sheets-writeback.js` (868 lines) |
+| **Location** | `js/sheets-writeback.js` (909 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-17 against commit `641398e` |
 
 ## Purpose / reason to exist
 
@@ -45,7 +45,8 @@ Loads with the tab group, before `main.js` (`LOGIC_AUDIT.md` Part 1 §4a).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-121 | `browserSnapshotOpenLeads()` `#L809` | `allParsedLeads`, `_currentSheetId` | appends Movement_Log rows | Sheets write; status text; **no reentrancy guard** | `movementCellValue` (FN-129), `appendSheetRows` (FN-122), `enrichLead` (`JS-006`) | `#snapshotNowBtn` (`BTN-014`), auto-snapshot tick (`BTN-015`) | specific — `LOGIC_AUDIT.md` Part 7 §18 MEDIUM #1 (no guard) |
+| FN-121 | `browserSnapshotOpenLeads()` `#L857` | `allParsedLeads`, `_currentSheetId` | appends Movement_Log rows **for changed leads only** (content-hash dedup, Lead History & Versioning Review Phase 6, `641398e`) + always appends one `Movement_Log_Runs` row (`SHEET-015`) regardless of whether any lead changed | re-fetches `Movement_Log` fresh first (`fetchMovementLog`, `JS-021` — not the possibly-stale in-memory `movementSnapshots`, so a capture the Apps Script trigger already made is seen too) then Sheets write; status text now reports "N of M leads changed"; **no reentrancy guard** | `movementCellValue` (FN-131), `leadContentHash` (FN-257), `latestMovementLogHashByKey` (`JS-021` FN-258), `appendSheetRows` (FN-122), `enrichLead` (`JS-006`) | `#snapshotNowBtn` (`BTN-014`), auto-snapshot tick (`BTN-015`) | specific — `LOGIC_AUDIT.md` Part 7 §18 MEDIUM #1 (no guard, unchanged) |
+| FN-257 | `leadContentHash(l)` `#L56` | a lead record | lowercase-hex SHA-256 of its `SNAPSHOT_FIELD_KEYS` fields, NUL-joined | one `crypto.subtle.digest` call (async) | `movementCellValue` (FN-131), `TextEncoder`/`crypto.subtle` | FN-121 | specific — **MUST stay byte-for-byte identical** to `MovementTracker.gs`'s `_leadContentHashGs_` (`GS-008`); see Cross-runtime duplication below for a real bug this caught |
 | FN-122 | `appendSheetRows(tabName, rows, valueInputOption)` / `sheetsApiValuesBatchUpdate(data, valueInputOption)` `#L65/#L85` | tab name, rows, `RAW`/`USER_ENTERED` | the API result | one Sheets write call | `getSheetIdByTabName` (FN-123), `gateAccessToken` (`JS-001`) | every write function here | reusable — the low-level write primitives |
 | FN-123 | `getSheetIdByTabName(tabName)` `#L253` | a tab name | the numeric sheetId | one metadata read | — | FN-122 and the clear/sort helpers | reusable |
 | FN-124 | `pushLeadsToFollowups(rows, statusElId)` `#L187` | qualifying issue leads | upserts `Lead_Followups` cols A–E, G — **never column F** (`suggested_followup`, left for a human) | Sheets upsert; status text | `appendSheetRows` (FN-122), `sheetsApiValuesBatchUpdate` (FN-122) | `renderReports` (`JS-016`), Overnight cycle (`JS-021`) | specific |
@@ -61,7 +62,8 @@ Loads with the tab group, before `main.js` (`LOGIC_AUDIT.md` Part 1 §4a).
 
 | `SHEET-XXX` | R / W | Which `FN-XXX` | Trigger | Data written | Notes |
 |---|---|---|---|---|---|
-| `SHEET-002` `Movement_Log` | W (append) | FN-121 `browserSnapshotOpenLeads` (via FN-122 `appendSheetRows`) | `#snapshotNowBtn` (`BTN-014`) / auto-snapshot tick (`BTN-015`) | one row per open lead: the `SNAPSHOT_COLUMNS_` shape (`region`, `group_source`, no `project_region`), enriched SLA flags, call counters, `snapshot_at` | schema **agrees exactly** with `MovementTracker.gs`'s writer (`LOGIC_AUDIT.md` Part 4 §4.7). No reentrancy guard on FN-121. |
+| `SHEET-002` `Movement_Log` | W (append) | FN-121 `browserSnapshotOpenLeads` (via FN-122 `appendSheetRows`) | `#snapshotNowBtn` (`BTN-014`) / auto-snapshot tick (`BTN-015`) | one row per **changed** open lead (content-hash dedup, `641398e`): the `SNAPSHOT_COLUMNS_` shape (`region`, `group_source`, no `project_region`), enriched SLA flags, call counters, `snapshot_at`, trailing `content_hash` | schema **agrees exactly** with `MovementTracker.gs`'s writer (`LOGIC_AUDIT.md` Part 4 §4.7). No reentrancy guard on FN-121. |
+| `SHEET-015` `Movement_Log_Runs` | W (append) | FN-121 `browserSnapshotOpenLeads` (via FN-122 `appendSheetRows`) | same trigger as the `Movement_Log` row above | `[run_at, run_label, lead_count_seen, leads_changed]` — always written, even when `leads_changed` is 0 | mirrors `MovementTracker.gs`'s `snapshotOpenLeads_` write to the same tab (`GS-008`); wrapped in its own try/catch so a failure here never blocks the `Movement_Log` write already committed above |
 | `SHEET-004` `Lead_Followups` | W (upsert cols A–E, G) | FN-124 `pushLeadsToFollowups` | Generate cycle (`JS-016` / `JS-021`) | lead id, region, RM, issue, latest comment, `updated_at` (col G) — **column F left blank for a human** | mutex-guarded (FN-126). Consumer map: `LEAD_FOLLOWUPS_STALENESS.md`. |
 | `SHEET-004` `Lead_Followups` | W (clear data rows) | FN-125 `clearLeadFollowupsTab` | **start** of every Generate cycle | — | "Not send-gated" — runs before the push, not after the send (`LOGIC_AUDIT.md` Part 6 §6.1 row 5) |
 | `SHEET-004` `Lead_Followups` | R (poll col F) | FN-127 `waitForAllFollowups` | Generate cycle wait phase | — | per-wait cancel via `_followupWaitCancelled` Map |
@@ -89,9 +91,9 @@ reads `Lead_Followups` (`SHEET-004`, poll), `SLA_History` /
 
 ## Data written / modified
 
-`SHEET-002`, `SHEET-004`, `SHEET-005`, `SHEET-008`, `SHEET-011` — see the
-write table. No email send (that is `JS-015`), but `logEmailSend` logs
-one.
+`SHEET-002`, `SHEET-004`, `SHEET-005`, `SHEET-008`, `SHEET-011`,
+`SHEET-015` — see the write table. No email send (that is `JS-015`), but
+`logEmailSend` logs one.
 
 ## Failure / error behaviour
 
@@ -108,6 +110,24 @@ The Movement_Log snapshot schema is intentionally identical to
 exactly"). The `Lead_Followups` bridge is shared with
 `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_` (`GS-010`). The
 `Daily_Cohort_History` schema matches the Apps Script cohort writer.
+
+**Content-hash dedup pair** (Lead History & Versioning Review Phase 6,
+`641398e`, 2026-09-11 — a DUPLICATED-PAIR RULE case,
+`docs/HOW_TO_UPDATE_A_COMPONENT.md`): `leadContentHash` (FN-257, here)
+must stay byte-for-byte identical to `MovementTracker.gs`'s
+`_leadContentHashGs_` (`GS-008`) — same field order
+(`SNAPSHOT_FIELD_KEYS` == `SNAPSHOT_COLUMNS_`), same NUL join, same
+SHA-256, same lowercase-hex encoding. **A real cross-runtime bug was
+found and fixed in the same commit before it shipped**: the two writers
+would have hashed an identical lead differently (Apps Script's raw
+`Date.getTime()` vs the browser's IST-string date rendering),
+permanently defeating cross-writer dedup — `movementCellValue` (FN-131)
+already renders `lead_assigned_at`/`last_connect_time` as the same IST
+string the `.gs` side now formats via `Utilities.formatDate`, so no
+separate handling was needed on this side once the `.gs` side was fixed
+to match. `Movement_Log_Runs` (`SHEET-015`) is written by both this
+module's `browserSnapshotOpenLeads` and `MovementTracker.gs`'s
+`snapshotOpenLeads_` — same 4-column schema.
 
 ## UI relationships
 
@@ -135,13 +155,15 @@ Mermaid), Part 3 §3.8, Part 4 §4.7, Part 6 §6.1 rows 2/5, §6.5, Part 7
 - **Depends On:** `JS-001` (`gateAccessToken`), `JS-003`
   (`allParsedLeads`), `JS-006` (`enrichLead`), `JS-009`
   (`sheetsApiValuesGet`), `JS-021` (`_currentSheetId`,
-  `movementSnapshots`), `SHEET-002`, `SHEET-004`, `SHEET-005`,
-  `SHEET-008`, `SHEET-011`, `EXT-001`, `EXT-002`, `EXT-003`
+  `movementSnapshots`, `fetchMovementLog`, `latestMovementLogHashByKey`,
+  the mirrored `MOVEMENT_LOG_RUNS_TAB_NAME`/`MOVEMENT_LOG_RUNS_COLUMNS`
+  constants), `SHEET-002`, `SHEET-004`, `SHEET-005`,
+  `SHEET-008`, `SHEET-011`, `SHEET-015`, `EXT-001`, `EXT-002`, `EXT-003`
 - **Used By:** `TAB-003` (Generate button via `JS-016`), `TAB-007`
   (snapshot, Overnight cycle), `TAB-008` (4 admin buttons + auto-persist
   via `JS-024`), `JS-004`, `JS-015` (`logEmailSend`), `JS-016`,
   `JS-021`, `JS-024`, `SHEET-002`, `SHEET-004`, `SHEET-005`,
-  `SHEET-008`, `SHEET-011`, `DATA-003`, `DATA-004`
+  `SHEET-008`, `SHEET-011`, `SHEET-015`, `DATA-003`, `DATA-004`
 - **Related:** `GS-008` (`MovementTracker.gs` — matching Movement_Log /
   SLA_History writer), `GS-010` (`OvernightEmailer.gs` — shares the
   `Lead_Followups` bridge), `GS-007` (`LeadFollowupsStaleness.gs`)
@@ -160,14 +182,21 @@ Mermaid), Part 3 §3.8, Part 4 §4.7, Part 6 §6.1 rows 2/5, §6.5, Part 7
   `tests/frontend-harness.html` mocks `window.fetch` +
   `sheetsApiValuesGet` and drives `pushLeadsToFollowups`,
   `upsertSlaHistoryRows`, `browserSnapshotOpenLeads` — confirmed no
-  throw, correct status text.
+  throw, correct status text. Revalidated 2026-09-17 against `641398e`
+  (Lead History & Versioning Review Phase 6): read `leadContentHash` and
+  the updated `browserSnapshotOpenLeads` source directly; confirmed the
+  hash-parity bug-fix (date formatting) against the commit message and
+  `MovementTracker.gs`'s `_leadContentHashGs_`; `713/713` real tests
+  (`python3 test/run-gs-tests-headless.py`, per that commit).
 - **Evidence:** `LOGIC_AUDIT.md` Part 4 §4.7, Part 6 §6.1/§6.5;
-  `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+  `tests/frontend-harness.html`; commit `641398e`.
+- **Status:** Validated 2026-09-17.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-028.
+Verified at `641398e`; record created by DOC-028, revalidated 2026-09-17
+for the content-hash dedup pair (FN-257 `leadContentHash` added,
+`SHEET-015` write added to the write table).
 
 ## Revalidation trigger
 
@@ -201,4 +230,8 @@ the revalidation trigger keeps them visible.)
 Record committed for DOC-028; `docs/INDEX.md` `JS-018` → `Closed +
 Monitored`, `Last Verified` 2026-09-10, links filled; full Data Lineage
 write table + `EXC-034`..`038` recorded (the `DOC-028` deliverable for
-this file). No `docs/changes/` record (DOC-028).
+this file). No `docs/changes/` record (DOC-028). Revalidated 2026-09-17:
+`Last Verified` bumped to `641398e`; FN-121 updated + FN-257 added; write
+table gains the `SHEET-015` row; Cross-runtime duplication section covers
+the content-hash pair; `SHEET-015` added to Depends On/Used By;
+`docs/INDEX.md` row bumped to match.
