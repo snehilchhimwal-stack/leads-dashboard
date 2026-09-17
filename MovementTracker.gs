@@ -1186,14 +1186,23 @@ function checkMovementLogFreshnessNow() {
 }
 
 // One-time console-callable cleanup for the Sep 2026 Movement_Log data-loss
-// incident: backs up the full sheet, then drops every row snapshotted before
-// 12 Sep 2026 IST (the earlier 9-11 Sep rows were restored from a corrupted
-// source and are unreliable for dedup/reporting). Safe to re-run — it always
-// takes a fresh timestamped backup first and no-ops on rows already gone.
-// Backup is written as plain values (not sheet.copyTo(), which throws
-// "This operation is not supported" on a sheet this large) in the same
-// row-chunk size used below for the rewrite, to stay clear of Apps
-// Script's per-call range/time limits on a ~100k-row sheet.
+// incident: backs up the rows about to be removed, then drops every row
+// snapshotted before 12 Sep 2026 IST (the earlier 9-11 Sep rows were
+// restored from a corrupted source and are unreliable for dedup/reporting).
+// Safe to re-run — it always takes a fresh timestamped backup first and
+// no-ops on rows already gone.
+//
+// Backup is a Drive CSV file, not a second in-workbook sheet, and covers
+// only the rows actually being deleted (not the whole table) — two
+// independent fixes for two independent failures hit running the earlier
+// full-sheet-duplicate versions of this function: sheet.copyTo() threw
+// "This operation is not supported" on a sheet this large, and a plain-
+// values full duplicate then threw "This action would increase the number
+// of cells in the workbook above the limit of 10000000 cells" — because
+// ANY full duplicate of a ~100k-row sheet competes for the same finite
+// per-workbook cell budget the live data already needs room in. A Drive
+// file has no such ceiling, and the ~kept majority isn't at risk (it's
+// staying in the sheet), so only the doomed rows need a safety copy.
 function removeEarlyCorruptedMovementLogDataNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
@@ -1201,26 +1210,32 @@ function removeEarlyCorruptedMovementLogDataNow() {
 
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
-  const allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
-  const backupName = 'Movement_Log_backup_' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmm');
-  const backupSheet = ss.insertSheet(backupName);
-  for (let i = 0; i < allValues.length; i += CHUNK) {
-    const chunk = allValues.slice(i, i + CHUNK);
-    backupSheet.getRange(1 + i, 1, chunk.length, lastCol).setValues(chunk);
-  }
-  Logger.log('Backup created: ' + backupName + ' (' + (allValues.length - 1) + ' data rows)');
-
-  const values = allValues.slice(1);
   const cutoff = new Date('2026-09-12T00:00:00+05:30');
-  const kept = values.filter(function (row) {
-    return row[0] instanceof Date && row[0] >= cutoff;
+  const kept = [];
+  const removed = [];
+  values.forEach(function (row) {
+    (row[0] instanceof Date && row[0] >= cutoff ? kept : removed).push(row);
   });
+
+  const csvEscape = function (cell) {
+    if (cell instanceof Date) return cell.toISOString();
+    const s = String(cell == null ? '' : cell);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = [header].concat(removed).map(function (row) {
+    return row.map(csvEscape).join(',');
+  }).join('\n');
+  const backupName = 'Movement_Log_removed_rows_' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmm') + '.csv';
+  const backupFile = DriveApp.createFile(backupName, csv, MimeType.CSV);
+  Logger.log('Backup of ' + removed.length + ' removed rows written to Drive: ' + backupFile.getUrl());
 
   sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
   for (let i = 0; i < kept.length; i += CHUNK) {
     const chunk = kept.slice(i, i + CHUNK);
     sheet.getRange(2 + i, 1, chunk.length, lastCol).setValues(chunk);
   }
-  Logger.log('Kept ' + kept.length + ' of ' + values.length + ' rows (removed everything before 12 Sep 2026 IST). Backup: ' + backupName);
+  Logger.log('Kept ' + kept.length + ' of ' + values.length + ' rows (removed everything before 12 Sep 2026 IST). Backup (' + removed.length + ' rows): ' + backupFile.getUrl());
 }
