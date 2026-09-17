@@ -314,12 +314,17 @@ console-only — Tracking → SLA History Maintenance / Daily Cohort History
 have real buttons for both now — but both stay callable from the console
 too. `removeEarlyCorruptedMovementLogDataNow()` (`MovementTracker.gs`,
 added 2026-09-17) is a one-time cleanup for the Sep 2026 `Movement_Log`
-data-loss incident (see §8) — backs the sheet up to a fresh
-`Movement_Log_backup_<timestamp>` tab as plain values (not `sheet.copyTo()`,
-which throws `"This operation is not supported"` on a sheet this large),
-then drops every row snapshotted before 12 Sep 2026 IST. Safe to re-run;
-not wired to any trigger or button on purpose — it's remediation for one
-specific incident, not standing functionality.
+data-loss incident (see §8) — backs up only the rows about to be removed,
+as a Drive CSV file (`Movement_Log_removed_rows_<timestamp>.csv`), then
+drops every row snapshotted before 12 Sep 2026 IST. Deliberately **not**
+a full-sheet duplicate: `sheet.copyTo()` throws `"This operation is not
+supported"` on a sheet this large, and a plain-values full duplicate then
+throws `"This action would increase the number of cells in the workbook
+above the limit of 10000000 cells"` — both because any full duplicate of
+a ~100k-row sheet competes for the same finite per-workbook cell budget
+the live data already needs room in. Safe to re-run; not wired to any
+trigger or button on purpose — it's remediation for one specific
+incident, not standing functionality.
 
 ### 4.4 GitHub repo access
 

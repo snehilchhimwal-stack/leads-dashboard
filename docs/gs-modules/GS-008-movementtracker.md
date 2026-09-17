@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `MovementTracker.gs` (1226 lines) |
+| **Location** | `MovementTracker.gs` (1241 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `9413f6a` |
+| **Last Verified** | 2026-09-17 against commit `834d7ea` |
 
 ## Purpose / reason to exist
 
@@ -30,10 +30,13 @@ writes the per-snapshot `SLA_History` row and (guarded) persists
   anything changed; independently try/catch each side-effect.
 - `removeEarlyCorruptedMovementLogDataNow()` — one-time, console-callable
   cleanup for the Sep 2026 data-loss/restore incident (`HANDOVER.md` §8):
-  backs up `Movement_Log` as plain values to a fresh
-  `Movement_Log_backup_<timestamp>` tab, then drops every row snapshotted
-  before 12 Sep 2026 IST. Not wired to any trigger or button — added
-  2026-09-17.
+  backs up only the rows about to be removed as a Drive CSV file
+  (`Movement_Log_removed_rows_<timestamp>.csv`), then drops every row
+  snapshotted before 12 Sep 2026 IST. Deliberately not a full-sheet
+  duplicate — two real failures on this sheet's size (`sheet.copyTo()`'s
+  `"This operation is not supported"`, then a plain-values duplicate's
+  10M-cell workbook ceiling) ruled that out. Not wired to any trigger or
+  button — added 2026-09-17, backup mechanism corrected same day.
 - `snapshotPeriodic` / `snapshotNow` — the scheduled and manual entry
   points; `setupMovementTracking` — install the 4 triggers.
 - `pruneMovementLog_` — trim rows **and** shrink the sheet's row
