@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `RmHierarchy.gs` (1128 lines) |
+| **Location** | `RmHierarchy.gs` (1139 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `42ebfaf` |
+| **Last Verified** | 2026-09-17 against commit `77e1eb9` |
 
 ## Purpose / reason to exist
 
@@ -68,7 +68,7 @@ data-rebuild.
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-054 | `RM_HIERARCHY_RAW_` | ~270 rows, columns `['team','role','name','tl','tm','rh','ch','excluded','note','email']` — role mix as of `c82ec67`: S1 (163), A1 (23), Executive (8), BDM (8), Cluster Head (6), TM (6), S3 (5), RH (4), City Lead (3), Manager (1), Commercial Head (1). **2026-09-16 (`42ebfaf`):** Akash A Ugale's own row role formalized A1 → TM (his real title, confirmed by the user — his 8 direct Central S1 reports are unaffected, their rows already carry `tl:'Akash A Ugale'` directly); moved from Yash Sharma's row's `tl` column into `tm` (matching the Pune TM pattern) so `TM_STILL_CC_` (`CFG-064` below) picks him up; added `['Thane','S1','Mamtaben S 1','Amit Upadhyay','','','Bipin More']` as a confirmed alias row for `Mamtaben Sosa` — the leads sheet drops her surname and appends a role suffix, a pattern `stripRoleSuffix_` alone doesn't catch (it only strips the suffix, not a dropped surname) | the static org chart | every routing decision — **requires `setupRmHierarchy()` / `rebuildRmHierarchy()` re-run to reflect in the sheets** |
+| CFG-054 | `RM_HIERARCHY_RAW_` | ~270 rows, columns `['team','role','name','tl','tm','rh','ch','excluded','note','email']` — role mix as of `c82ec67`: S1 (163), A1 (23), Executive (8), BDM (8), Cluster Head (6), TM (6), S3 (5), RH (4), City Lead (3), Manager (1), Commercial Head (1). **2026-09-16 (`42ebfaf`):** Akash A Ugale's own row role formalized A1 → TM (his real title, confirmed by the user — his 8 direct Central S1 reports are unaffected, their rows already carry `tl:'Akash A Ugale'` directly); moved from Yash Sharma's row's `tl` column into `tm` (matching the Pune TM pattern) so `TM_STILL_CC_` (`CFG-064` below) picks him up; added `['Thane','S1','Mamtaben S 1','Amit Upadhyay','','','Bipin More']` as a confirmed alias row for `Mamtaben Sosa` — the leads sheet drops her surname and appends a role suffix, a pattern `stripRoleSuffix_` alone doesn't catch (it only strips the suffix, not a dropped surname). **2026-09-17 (`77e1eb9`):** Krishna Murthy's row removed (left the company, same handling as Prathamesh A Pande 2026-08-31); his 4 direct reports' `tl` cleared, falling through to their already-present `ch:'Mukesh Mishra'`. Vidya Jadhav's and Bipin More's own rows (both previously blank-chain Cluster Heads) gained `ch:'Shitij Kaushal'`; a new row added for him (`['Leadership','Commercial Head','Shitij Kaushal','','','','']`, role unconfirmed — flagged in-source) | the static org chart | every routing decision — **requires `setupRmHierarchy()` / `rebuildRmHierarchy()` re-run to reflect in the sheets** |
 | CFG-055 | `TOP_OF_ORG_ROLES_` | `['cluster head', 'city lead', 'commercial head']` | roles that get the CH-level backstop, not a normal bucket primary | `isTopOfOrgRole_`; **overlaps `RM_PERF_NON_RM_ROLES` (`JS-008` CFG-020)** — the same 3 roles |
 | CFG-056 | `CH_LEVEL_EMAIL_` / `ALWAYS_CC_EMAILS_` | fallback addresses | where routing degrades to when a chain is blank / who is always CC'd | recipient resolution when the private file is absent |
 | CFG-064 | `TM_STILL_CC_` | `['ayaz bagwan', 'rahul poudel', 'akash a ugale']` (`#L980`) | lowercased names of TMs who are also, for specific named exceptions, the direct manager of some of their own reports (not just a `tl`-level report of someone else) — `resolveRecipientBucketsForRms_` (FN-241, `#L1095`) CCs a matching TM even when they're not the resolved primary, since a person's direct manager already IS the "To" and would otherwise never see it. Renamed from `PUNE_TM_STILL_CC_` and generalized (no longer Pune-exclusive) when Akash A Ugale was added `42ebfaf` — the exception now names a mechanism, not a region | who gets CC'd on issue emails for these 3 TMs' own direct reports |
@@ -168,18 +168,23 @@ repo; obtain from whoever last held it.)
   spot-check for both hierarchy changes plus a new self-contained
   mock-hierarchy test exercising `TM_STILL_CC_`'s Cc-injection mechanism
   for the first time under test (previously only implicitly relied on in
-  production).
+  production). Same-day, `77e1eb9`: read the Krishna Murthy removal and
+  Shitij Kaushal addition directly in source; confirmed the `ch`-slot
+  placement (not `tm`) means no `TM_STILL_CC_` entry is needed for Shitij
+  — `ch` is already in `resolveRecipientBucketsForRms_`'s default CC set.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_RmHierarchy.gs`,
-  last green run); `LOGIC_AUDIT.md` Part 3 §3.7; commit `42ebfaf`.
+  last green run); `LOGIC_AUDIT.md` Part 3 §3.7; commits `42ebfaf`,
+  `77e1eb9`.
 - **Status:** Validated 2026-09-17.
 
 ## Version / change reference
 
-Verified at `42ebfaf`; record created by DOC-029, revalidated 2026-09-17
-for the Akash A Ugale role formalization (A1 → TM, moved into
-`TM_STILL_CC_`) and the Mamtaben Sosa alias row. File grew 1054L → 1122L
-since the 2026-09-05 audit (added audit functions for
-`OpsChecklistRunner.gs`).
+Verified at `77e1eb9`; record created by DOC-029, revalidated 2026-09-17
+twice same day: for the Akash A Ugale role formalization (A1 → TM, moved
+into `TM_STILL_CC_`) and the Mamtaben Sosa alias row (`42ebfaf`), then
+for the Krishna Murthy departure and Shitij Kaushal addition (`77e1eb9`).
+File grew 1054L → 1139L since the 2026-09-05 audit (added audit
+functions for `OpsChecklistRunner.gs`).
 
 ## Revalidation trigger
 
@@ -213,7 +218,8 @@ expected repo state, handled by design.)
 Record committed for DOC-029; `docs/INDEX.md` `GS-011` → `Closed +
 Monitored`, `Last Verified` 2026-09-10, links + "no trigger / setup
 rebuilds sheets" recorded; `CFG-054`..`056`, `EXC-084`..`086`. No
-`docs/changes/` record (DOC-029). Revalidated 2026-09-17: `Last Verified`
-bumped to `42ebfaf`; `CFG-054` updated for the Akash A Ugale role change
-+ Mamtaben alias row; `CFG-064` (`TM_STILL_CC_`) added; `docs/INDEX.md`
-row bumped to match.
+`docs/changes/` record (DOC-029). Revalidated 2026-09-17 (`42ebfaf`):
+`CFG-054` updated for the Akash A Ugale role change + Mamtaben alias row;
+`CFG-064` (`TM_STILL_CC_`) added. Revalidated again same day (`77e1eb9`):
+`CFG-054` updated for the Krishna Murthy departure + Shitij Kaushal
+addition; `docs/INDEX.md` row bumped to match both times.
