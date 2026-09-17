@@ -1184,3 +1184,43 @@ function checkMovementLogFreshnessNow() {
   }
   Logger.log('Movement_Log capture looks STALE — last row is ' + label + ', ' + result.ageHours.toFixed(1) + 'h ago, past the ' + MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_ + 'h grace window for the [0,6,12,18] IST schedule. Check Triggers (clock icon, left sidebar) for a paused/deleted snapshotPeriodic trigger, or its own execution history for a recent failure, before trusting Repeat Offenders or reportRmPerformanceNow right now.');
 }
+
+// One-time console-callable cleanup for the Sep 2026 Movement_Log data-loss
+// incident: backs up the full sheet, then drops every row snapshotted before
+// 12 Sep 2026 IST (the earlier 9-11 Sep rows were restored from a corrupted
+// source and are unreliable for dedup/reporting). Safe to re-run — it always
+// takes a fresh timestamped backup first and no-ops on rows already gone.
+// Backup is written as plain values (not sheet.copyTo(), which throws
+// "This operation is not supported" on a sheet this large) in the same
+// row-chunk size used below for the rewrite, to stay clear of Apps
+// Script's per-call range/time limits on a ~100k-row sheet.
+function removeEarlyCorruptedMovementLogDataNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  const CHUNK = 10000;
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  const allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+
+  const backupName = 'Movement_Log_backup_' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmm');
+  const backupSheet = ss.insertSheet(backupName);
+  for (let i = 0; i < allValues.length; i += CHUNK) {
+    const chunk = allValues.slice(i, i + CHUNK);
+    backupSheet.getRange(1 + i, 1, chunk.length, lastCol).setValues(chunk);
+  }
+  Logger.log('Backup created: ' + backupName + ' (' + (allValues.length - 1) + ' data rows)');
+
+  const values = allValues.slice(1);
+  const cutoff = new Date('2026-09-12T00:00:00+05:30');
+  const kept = values.filter(function (row) {
+    return row[0] instanceof Date && row[0] >= cutoff;
+  });
+
+  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+  for (let i = 0; i < kept.length; i += CHUNK) {
+    const chunk = kept.slice(i, i + CHUNK);
+    sheet.getRange(2 + i, 1, chunk.length, lastCol).setValues(chunk);
+  }
+  Logger.log('Kept ' + kept.length + ' of ' + values.length + ' rows (removed everything before 12 Sep 2026 IST). Backup: ' + backupName);
+}
