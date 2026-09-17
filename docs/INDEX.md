@@ -245,7 +245,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | DATA-003, GS-001, GS-006, GS-010, GS-012, GS-013, SHEET-010 | 2026-09-10 (`c82ec67`) |
 | GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-009 | DATA-003, GS-008, SHEET-009 | 2026-09-10 (`c82ec67`) |
 | GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none | 2026-09-10 (`c82ec67`) |
-| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010 | 2026-09-15 (`9e55e36`) |
+| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-09-17 (`9413f6a`) |
 | GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Closed + Monitored | EXT-002, GS-004, GS-008, GS-011, SHEET-002, SHEET-006, SHEET-007 | none | 2026-09-10 (`c82ec67`) |
 | GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | DATA-002, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, SHEET-001, SHEET-002, SHEET-004, SHEET-006, SHEET-007, SHEET-012, SHEET-014 | DATA-003, SHEET-004, SHEET-014 | 2026-09-10 (`c82ec67`) |
 | GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, SHEET-006, SHEET-007 | 2026-09-10 (`c82ec67`) |
@@ -273,18 +273,24 @@ emails, never in this repo (`DOC-007`).
 | SHEET-012 | SHEET- | Region_Recipients | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: IMPORTANT / contact-emails) | EXT-001, GS-004 | GS-001, GS-004, GS-010, GS-011 | 2026-09-10 (`c82ec67`) |
 | SHEET-013 | SHEET- | AllIssues_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / contact-emails) | EXT-001, EXT-002, GS-001 | GS-001 | 2026-09-10 (`c82ec67`) |
 | SHEET-014 | SHEET- | Overnight_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: IMPORTANT / contact-emails) | EXT-001, EXT-002, GS-010 | GS-010 | 2026-09-10 (`c82ec67`) |
+| SHEET-015 | SHEET- | Movement_Log_Runs | Google Sheet | Closed + Monitored (lifecycle none enforced -> TBD; DOC-038: MEDIUM / operational) | EXT-001, GS-008 | GS-008 | 2026-09-17 (`9413f6a`) |
 
 **Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
 `Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and
 `InteractionHistoryLogger.gs` `ensureCommentHistorySheet_`); `SHEET-011`..`014`
 added — the full 14-tab set matches `LOGIC_AUDIT.md` Part 1 §1's datastore
 list. `DOC-032` writes the base records; `DOC-036` fills lifecycle/retention.
+`SHEET-015` (`Movement_Log_Runs`) added 2026-09-17, closing a real
+`check-catalog.py` check-L gap — the tab itself predates this record (Lead
+History & Versioning Review Phase 6), it was undocumented, not new; the
+15-tab set now exceeds `LOGIC_AUDIT.md` Part 1 §1's original count on
+purpose.
 
 ### `EXT-` — external integrations (confirm exact set in `DOC-011` / `DOC-033`)
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Closed + Monitored | EXT-003 | DASH-001, DATA-001, DATA-004, GS-002, JS-003, JS-004, JS-009, JS-018, JS-021, JS-022, SHEET-001, SHEET-002, SHEET-003, SHEET-004, SHEET-005, SHEET-006, SHEET-007, SHEET-008, SHEET-009, SHEET-010, SHEET-011, SHEET-012, SHEET-013, SHEET-014, TAB-007, TAB-008 | 2026-09-10 (`c82ec67`) |
+| EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Closed + Monitored | EXT-003 | DASH-001, DATA-001, DATA-004, GS-002, JS-003, JS-004, JS-009, JS-018, JS-021, JS-022, SHEET-001, SHEET-002, SHEET-003, SHEET-004, SHEET-005, SHEET-006, SHEET-007, SHEET-008, SHEET-009, SHEET-010, SHEET-011, SHEET-012, SHEET-013, SHEET-014, SHEET-015, TAB-007, TAB-008 | 2026-09-10 (`c82ec67`) |
 | EXT-002 | EXT- | Gmail (send) — dashboard OAuth grant + `GmailApp` + Advanced Gmail Service | `js/reports-gmail.js` / `EmailInfra.gs` | Closed + Monitored | EXT-003, GS-004, JS-014, JS-016 | DATA-005, GS-001, GS-004, GS-009, GS-010, JS-015, JS-018, JS-021, SHEET-011, SHEET-013, SHEET-014, TAB-003, TAB-007 | 2026-09-10 (`c82ec67`) |
 | EXT-003 | EXT- | Google Identity / OAuth (sign-in gate) | `js/core-auth.js` | Closed + Monitored | none | EXT-001, EXT-002, JS-001, JS-004, JS-009, JS-018, JS-021, JS-022 | 2026-09-10 (`c82ec67`) |
 | EXT-004 | EXT- | jsPDF 2.5.1 + jspdf-autotable 3.8.2 (PDF export) | `js/repeat-offenders-pdf.js` | Closed + Monitored | none | JS-013, TAB-004 | 2026-09-10 (`c82ec67`) |
@@ -309,7 +315,7 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| FLOW-001 | FLOW- | Movement snapshot hub + piggyback loggers | `architecture/FLOW-001-movement-hub.md` | Closed + Monitored | GS-006, GS-008, GS-013, JS-018, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010 | none | 2026-09-10 (`c82ec67`) |
+| FLOW-001 | FLOW- | Movement snapshot hub + piggyback loggers | `architecture/FLOW-001-movement-hub.md` | Closed + Monitored | GS-006, GS-008, GS-013, JS-018, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | none | 2026-09-10 (`c82ec67`) |
 | FLOW-002 | FLOW- | The 3-phase "Generate region emails" cycle | `architecture/FLOW-002-generate-cycle.md` | Closed + Monitored | EXT-002, GS-005, GS-010, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-004, SHEET-011 | none | 2026-09-10 (`c82ec67`) |
 
 ---
@@ -319,14 +325,14 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 - `JS-` records: 24 / 24 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-024` DOC-028)
 - `GS-` records: 13 / 13 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each)
 - `TAB-` records: 8 / 8 (DOC-026)
-- `SHEET-` records: 14 / 14 (base DOC-032; `## Data Lifecycle` DOC-036; sensitivity + operational-importance DOC-038, all with a stated reason). **Operational importance:** CRITICAL x5 (`leads`, `Movement_Log`, `Lead_Followups`, `RM_Hierarchy`, `Manager_Directory`), IMPORTANT x4 (`Daily_RM_Issues`, `Region_Recipients`, `Overnight_Log`; `Movement_Log` degradations), LOW x6 (`SLA_History`, `Daily_Cohort_History`, `Comment_History`, `Unmatched_Comments_Log`, `Send_Log`, `AllIssues_Log`). **Employee data:** `RM_Hierarchy` + `Manager_Directory` (names/emails). **Comment text:** `leads`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`. Retention: 2 confirmed 7d (`Movement_Log`, `Daily_RM_Issues`), 1 append-only-by-design (`Comment_History`), 1 manually-curated (`Unmatched_Comments_Log`), 3 N/A-configuration (`RM_Hierarchy`, `Manager_Directory`, `Region_Recipients`), **7 `TBD` — no pruning function found** (`leads`, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, `Send_Log`, `AllIssues_Log`, `Overnight_Log`) → `DOC-037`.
+- `SHEET-` records: 15 / 15 (base DOC-032; `## Data Lifecycle` DOC-036; sensitivity + operational-importance DOC-038, all with a stated reason). **Operational importance:** CRITICAL x5 (`leads`, `Movement_Log`, `Lead_Followups`, `RM_Hierarchy`, `Manager_Directory`), IMPORTANT x4 (`Daily_RM_Issues`, `Region_Recipients`, `Overnight_Log`; `Movement_Log` degradations), MEDIUM x1 (`Movement_Log_Runs`), LOW x6 (`SLA_History`, `Daily_Cohort_History`, `Comment_History`, `Unmatched_Comments_Log`, `Send_Log`, `AllIssues_Log`). **Employee data:** `RM_Hierarchy` + `Manager_Directory` (names/emails). **Comment text:** `leads`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`. Retention: 2 confirmed 7d (`Movement_Log`, `Daily_RM_Issues`), 1 append-only-by-design (`Comment_History`), 1 manually-curated (`Unmatched_Comments_Log`), 3 N/A-configuration (`RM_Hierarchy`, `Manager_Directory`, `Region_Recipients`), **8 `TBD` — no pruning function found** (`leads`, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, `Send_Log`, `AllIssues_Log`, `Overnight_Log`, `Movement_Log_Runs`) → `DOC-037`. `SHEET-015` (`Movement_Log_Runs`) added 2026-09-17, closing a `check-catalog.py` check-L gap — see Seed correction note above the `SHEET-` table.
 - `EXT-` records: 4 / 4 (DOC-033)
 - `DASH-` records: 1 / 1 (DOC-025)
 - `DATA-` records: 5 / 5 (DOC-034)
 - `FLOW-` records: 2 / 2 (`t-tf-5ad22d8e4c2e`; overlays in `architecture/`)
 - **Component-record set is complete** — 1 `DASH-`, 8 `TAB-`
   (+ `BTN-001`..`022`), 24 `JS-`, 13 `GS-` (+ `FN-001`..`254`),
-  14 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
+  15 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
   file-coverage check reports `js/*.js` and `*.gs` as **100% covered**
   (verified in CI).
 - **All six phases (`DOC-001`–`DOC-050`) + the Governance Model + the

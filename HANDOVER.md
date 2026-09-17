@@ -312,7 +312,14 @@ not an oversight) — `downloadNoIssueLeadsNow()` / `debugFollowupStatusNow()`
 for `Daily_Cohort_History` (`js/sheets-writeback.js`) are no longer
 console-only — Tracking → SLA History Maintenance / Daily Cohort History
 have real buttons for both now — but both stay callable from the console
-too.
+too. `removeEarlyCorruptedMovementLogDataNow()` (`MovementTracker.gs`,
+added 2026-09-17) is a one-time cleanup for the Sep 2026 `Movement_Log`
+data-loss incident (see §8) — backs the sheet up to a fresh
+`Movement_Log_backup_<timestamp>` tab as plain values (not `sheet.copyTo()`,
+which throws `"This operation is not supported"` on a sheet this large),
+then drops every row snapshotted before 12 Sep 2026 IST. Safe to re-run;
+not wired to any trigger or button on purpose — it's remediation for one
+specific incident, not standing functionality.
 
 ### 4.4 GitHub repo access
 
@@ -535,6 +542,17 @@ test) Sheet, and use the browser console directly.
   incident. Full consumer map, the two visibility fixes (conditional
   formatting on the sheet, an age caption in the 1pm email), and the
   freshness-policy decision: `LEAD_FOLLOWUPS_STALENESS.md` (repo root).
+- **`Movement_Log` held corrupted rows for 9–11 Sep 2026** (a restore from
+  a prior catastrophic-data-loss incident — see the `movement-log-prune-safety-fix`
+  merge, 2026-09-12 — brought back rows that broke the "most recent
+  content-hash per lead" dedup lookup's assumption of chronological row
+  order, causing every subsequent capture to write 4,600–6,500 rows
+  instead of only genuinely changed leads). Fix: `removeEarlyCorruptedMovementLogDataNow()`
+  (`MovementTracker.gs`, see the console-utilities list above) backs up
+  then drops every row before 12 Sep 2026 IST. Run once from the Apps
+  Script editor; re-check per-snapshot row counts afterward to confirm
+  dedup recovered (should drop back toward only-changed-leads volume, not
+  a near-full-table rewrite every run).
 - **This whole §8 list is reactive** — real incidents, found after the
   fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
   counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`
