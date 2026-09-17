@@ -347,10 +347,13 @@ const RM_HIERARCHY_RAW_ = [
   ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
   // Shitij Kaushal, added 2026-09-17 as Vidya Jadhav's (Navi Mumbai) and
   // Bipin More's (Thane) manager -- see their own rows above, both now
-  // carry ch:'Shitij Kaushal'. Role tagged 'Commercial Head' matching
-  // Neha Mishra's existing title above (a real title already on record
-  // in this roster, not invented) -- CONFIRM this is his actual title.
-  ['Leadership','Commercial Head','Shitij Kaushal','','','',''],
+  // carry ch:'Shitij Kaushal'. Role is 'Leadership' per the user directly
+  // (not 'Commercial Head' -- an earlier guess, corrected same day).
+  // 'Leadership' is not in TOP_OF_ORG_ROLES_, so isTopOfOrgRole_ would
+  // return false for him -- harmless here since he's only ever a
+  // manager/Cc target, never himself a flagged RM with a blank chain to
+  // self-alert on.
+  ['Leadership','Leadership','Shitij Kaushal','','','',''],
   ['Hyderabad','S1','G Kumar','Vemula Ajay','','','Mukesh Mishra'],
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
