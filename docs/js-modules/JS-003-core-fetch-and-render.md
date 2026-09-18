@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-fetch-and-render.js` (659 lines) |
+| **Location** | `js/core-fetch-and-render.js` (665 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
 
 ## Purpose / reason to exist
 
@@ -120,7 +120,9 @@ collation, refresh-after-mutation wiring).
 - **Depends On:** `JS-001`, `JS-004` (`applyFiltersAndRender`),
   `JS-006`, `JS-007`, `JS-009`, `JS-010`, `JS-012` (`renderAll`),
   `JS-014` (region helpers), `JS-021` (`fetchMovementLog`), `JS-022`
-  (`fetchRmHierarchyForRollup`), `SHEET-001`, `EXT-001`
+  (`fetchRmHierarchyForRollup`), `JS-025` (`fetchOppMonitorData`,
+  `renderOppMonitorTab` — called directly, independent of the
+  `Promise.all` above), `SHEET-001`, `EXT-001`
 - **Used By:** `DASH-001`, `TAB-004`, `TAB-007`, `JS-001`, `JS-002`,
   `JS-018`, `JS-021`, `JS-022`, `JS-023`, `DATA-001` — transitively
   every tab (all read `allParsedLeads` / `leads` / `issueLeads` it
@@ -143,11 +145,17 @@ collation, refresh-after-mutation wiring).
   `fetchAndRender()` with only the Sheets read + OAuth mocked.
 - **Evidence:** `tests/frontend-harness.html`; `LOGIC_AUDIT.md` Part 1
   §4b, Part 6 §6.1.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-18. Revalidated (`4bbb58c`): a single
+  independent, non-blocking `fetchOppMonitorData(sheetId).then(...)` call
+  was added after the existing `Promise.all([fetchRmHierarchyForRollup,
+  movementLogPromise])` block (~`#L624`) — orthogonal to everything this
+  record describes; `fetchAndRender()`'s own pipeline, error handling, and
+  collation logic are unchanged.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-027.
+Verified at `c82ec67`; record created by DOC-027. Revalidated 2026-09-18
+(`4bbb58c`) for the `TAB-009` fetch-kickoff addition.
 
 ## Revalidation trigger
 

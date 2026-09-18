@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
 
 ## Purpose / reason to exist
 
@@ -133,7 +133,10 @@ Empty `leads` → zeroed score tables.
   §4c; `tests/frontend-harness.html` runs `renderAll` (score tables) and
   `renderRMTimelineTab` on synthetic data.
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c; `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-18. Revalidated (`4bbb58c`): the shared
+  `js/overview-distribution-people-ops.js` file this tab's own logic
+  lives in advanced for an unrelated reason (`TAB-009` Opp Monitor's
+  tab-switch/renderAll wiring) — nothing this record describes changed.
 
 ## Version / change reference
 

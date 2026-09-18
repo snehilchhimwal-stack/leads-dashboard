@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
 
 ## Purpose / reason to exist
 
@@ -155,7 +155,10 @@ Generate blocked by the mutex (`JS-018`).
   `renderReports` with mocked network.
 - **Evidence:** `LOGIC_AUDIT.md` Part 3 §3.9; `tests/frontend-harness.html`;
   live button enumeration (`docs/_planning/button-inventory.md`, DOC-031).
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-18. Revalidated (`4bbb58c`): the shared
+  `js/overview-distribution-people-ops.js` file this tab's own logic
+  lives in advanced for an unrelated reason (`TAB-009` Opp Monitor's
+  tab-switch/renderAll wiring) — nothing this record describes changed.
 
 ## Version / change reference
 

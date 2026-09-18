@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `DASH-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `dashboard.html` + `js/*.js` (24 client modules) — deployed on GitHub Pages from `github.com/snehilchhimwal-stack/leads-dashboard` |
+| **Location** | `dashboard.html` + `js/*.js` (25 client modules) — deployed on GitHub Pages from `github.com/snehilchhimwal-stack/leads-dashboard` |
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
 
 ## Purpose / reason to exist
 
@@ -117,8 +117,10 @@ Not restated here — each lives on its owning record:
 
 Contains `TAB-001` Morning Brief, `TAB-002` Overview, `TAB-003`
 Operations, `TAB-004` Repeat Offenders, `TAB-005` People, `TAB-006`
-Audit, `TAB-007` Movement, `TAB-008` Tracking. Tab-specific buttons live
-on each `TAB-XXX` record as `BTN-XXX` sub-tables.
+Audit, `TAB-007` Movement, `TAB-008` Tracking, `TAB-009` Opp Monitor
+(added 2026-09-18 — the one tab with no `BTN-XXX`/`UI-XXX` sub-tables at
+all, and the one tab that hides the shared filter bar). Tab-specific
+buttons live on each `TAB-XXX` record as `BTN-XXX` sub-tables.
 
 ## Architecture relationship
 
@@ -140,8 +142,8 @@ Sheet (`SHEET-*`) and never call each other (`HANDOVER.md` §1).
 
 `TAB-001` Morning Brief · `TAB-002` Overview · `TAB-003` Operations ·
 `TAB-004` Repeat Offenders · `TAB-005` People (contains RM Timeline) ·
-`TAB-006` Audit · `TAB-007` Movement · `TAB-008` Tracking. Tab-bar order
-matches `dashboard.html`'s own `#tabBar`.
+`TAB-006` Audit · `TAB-007` Movement · `TAB-008` Tracking · `TAB-009`
+Opp Monitor. Tab-bar order matches `dashboard.html`'s own `#tabBar`.
 
 ## Top-level buttons / actions
 
@@ -257,15 +259,20 @@ architecture snapshot.
   at commit `c82ec67`; the client pipeline is exercised by
   `tests/frontend-harness.html` (grafts the real `dashboard.html` +
   `js/*.js`, mocks only the Sheets read + OAuth token pair, runs
-  synthetic leads through the real `fetchAndRender()`).
+  synthetic leads through the real `fetchAndRender()`). Revalidated
+  2026-09-18 (`4bbb58c`): `TAB-009` (Opp Monitor) added — file count
+  24→25 client modules, tab count 8→9; the change is purely additive
+  (a new tab + its own tab-switch/render wiring), nothing existing in
+  this record's own description changed.
 - **Evidence:** `HANDOVER.md` §1–§3; `LOGIC_AUDIT.md` Part 1;
   `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-18.
 
 ## Version / change reference
 
 Verified at commit `c82ec67` (Phase 2 of the Documentation Project);
-record created by DOC-025.
+record created by DOC-025. Revalidated 2026-09-18 (`4bbb58c`) for
+`TAB-009`'s addition.
 
 ## Revalidation trigger
 

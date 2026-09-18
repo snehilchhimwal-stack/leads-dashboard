@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `MovementTracker.gs` (1241 lines) |
+| **Location** | `MovementTracker.gs` (1260 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `834d7ea` |
+| **Last Verified** | 2026-09-18 against commit `2d4a573` |
 
 ## Purpose / reason to exist
 
@@ -35,8 +35,15 @@ writes the per-snapshot `SLA_History` row and (guarded) persists
   snapshotted before 12 Sep 2026 IST. Deliberately not a full-sheet
   duplicate — two real failures on this sheet's size (`sheet.copyTo()`'s
   `"This operation is not supported"`, then a plain-values duplicate's
-  10M-cell workbook ceiling) ruled that out. Not wired to any trigger or
-  button — added 2026-09-17, backup mechanism corrected same day.
+  10M-cell workbook ceiling) ruled that out. Also calls `deleteRows()`
+  after its rewrite (added 2026-09-18, `2d4a573`) — the first version of
+  this fix cleared and rewrote content but never shrank the sheet's row
+  allocation, which freed nothing toward the workbook ceiling (that cap
+  counts declared grid size, not content — see `pruneMovementLog_`'s own
+  comment, `#L644`) and was the direct cause of `captureDailyRmIssues_`
+  (`DailyRmIssueLog.gs`) crashing on the same ceiling hours later. Not
+  wired to any trigger or button — added 2026-09-17, backup mechanism
+  corrected same day, `deleteRows()` gap fixed the day after.
 - `snapshotPeriodic` / `snapshotNow` — the scheduled and manual entry
   points; `setupMovementTracking` — install the 4 triggers.
 - `pruneMovementLog_` — trim rows **and** shrink the sheet's row
@@ -202,8 +209,12 @@ trigger.
   cross-check `LOGIC_AUDIT.md` Part 1 §4d/§5 + Part 4 §4.5/§4.7.
   `Tests_MovementTracker.gs` runs in CI.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_MovementTracker.gs`,
-  last green run); `LOGIC_AUDIT.md` Part 4 §4.7.
-- **Status:** Validated 2026-09-15.
+  last green run); `LOGIC_AUDIT.md` Part 4 §4.7. Revalidated 2026-09-18
+  (`2d4a573`): read `removeEarlyCorruptedMovementLogDataNow`'s current
+  source directly to confirm the `deleteRows()` fix; real-world cause
+  confirmed via the `captureDailyRmIssues_` crash report the user shared
+  (`DailyRmIssueLog.gs:219`, same 10M-cell ceiling error).
+- **Status:** Validated 2026-09-18.
 
 ## Version / change reference
 

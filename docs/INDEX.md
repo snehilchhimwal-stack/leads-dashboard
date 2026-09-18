@@ -157,20 +157,21 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | DATA-001, EXT-001, JS-001, JS-003, JS-004, SHEET-001, SHEET-011, TAB-001, TAB-002, TAB-003, TAB-004, TAB-005, TAB-006, TAB-007, TAB-008 | none | 2026-09-10 (`c82ec67`) |
+| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | DATA-001, EXT-001, JS-001, JS-003, JS-004, SHEET-001, SHEET-011, TAB-001, TAB-002, TAB-003, TAB-004, TAB-005, TAB-006, TAB-007, TAB-008, TAB-009 | none | 2026-09-18 (`4bbb58c`) |
 
 ### `TAB-` — dashboard UI tabs (confirm the tab↔`JS-` mapping in `DOC-026`)
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | TAB-001 | TAB- | Morning Brief | `js/tab-morning.js` (JS-020) | Closed + Monitored | DATA-001, JS-012, JS-020 | DASH-001 | 2026-09-10 (`c82ec67`) |
-| TAB-002 | TAB- | Overview | `js/overview-distribution-people-ops.js` (JS-012) | Closed + Monitored | DATA-002, JS-004, JS-006, JS-009, JS-012 | DASH-001 | 2026-09-10 (`c82ec67`) |
-| TAB-003 | TAB- | Operations | `js/overview-distribution-people-ops.js` (JS-012) + reports-*.js (JS-014/15/16) + JS-018 | Closed + Monitored | DATA-003, DATA-005, EXT-002, JS-006, JS-012, JS-014, JS-015, JS-016, JS-018, SHEET-004, SHEET-011 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-002 | TAB- | Overview | `js/overview-distribution-people-ops.js` (JS-012) | Closed + Monitored | DATA-002, JS-004, JS-006, JS-009, JS-012 | DASH-001 | 2026-09-18 (`4bbb58c`) |
+| TAB-003 | TAB- | Operations | `js/overview-distribution-people-ops.js` (JS-012) + reports-*.js (JS-014/15/16) + JS-018 | Closed + Monitored | DATA-003, DATA-005, EXT-002, JS-006, JS-012, JS-014, JS-015, JS-016, JS-018, SHEET-004, SHEET-011 | DASH-001 | 2026-09-18 (`4bbb58c`) |
 | TAB-004 | TAB- | Repeat Offenders | `js/tab-repeat-offenders.js` (JS-022) + `js/repeat-offenders-pdf.js` (JS-013) + worker (JS-017) | Closed + Monitored | DATA-004, EXT-004, JS-003, JS-008, JS-013, JS-014, JS-017, JS-021, JS-022, SHEET-002, SHEET-003, SHEET-006 | DASH-001 | 2026-09-17 (`a74a65f`) |
-| TAB-005 | TAB- | People | `js/overview-distribution-people-ops.js` (JS-012) + `js/tab-rmtimeline.js` (JS-023) | Closed + Monitored | JS-011, JS-012, JS-014, JS-019, JS-021, JS-023, JS-024 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-005 | TAB- | People | `js/overview-distribution-people-ops.js` (JS-012) + `js/tab-rmtimeline.js` (JS-023) | Closed + Monitored | JS-011, JS-012, JS-014, JS-019, JS-021, JS-023, JS-024 | DASH-001 | 2026-09-18 (`4bbb58c`) |
 | TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Closed + Monitored | JS-004, JS-006, JS-007, JS-019 | DASH-001 | 2026-09-10 (`c82ec67`) |
 | TAB-007 | TAB- | Movement | `js/tab-movement.js` (JS-021) | Closed + Monitored | DATA-005, EXT-001, EXT-002, JS-003, JS-009, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-002, SHEET-004, SHEET-011, SHEET-015 | DASH-001 | 2026-09-17 (`641398e`) |
 | TAB-008 | TAB- | Tracking | `js/tab-tracking.js` (JS-024) | Closed + Monitored | EXT-001, JS-004, JS-014, JS-018, JS-021, JS-024, SHEET-002, SHEET-005, SHEET-008 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-009 | TAB- | Opp Monitor | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` (JS-025) | Drafted | EXT-001, JS-025, SHEET-016, SHEET-017 | DASH-001 | 2026-09-18 (`4bbb58c`) |
 
 ### `BTN-` / `UI-` — tab sub-components (detail lives in the owning `TAB-XXX` record, no own file)
 
@@ -211,16 +212,16 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 |---|---|---|---|---|---|---|---|
 | JS-001 | JS- | core-auth | `js/core-auth.js` | Closed + Monitored | EXT-003, JS-003, JS-004, JS-015 | DASH-001, JS-003, JS-004, JS-009, JS-011, JS-015, JS-018 | 2026-09-10 (`c82ec67`) |
 | JS-002 | JS- | core-collation | `js/core-collation.js` | Closed + Monitored | JS-003, JS-010 | DATA-001, JS-004, JS-010, JS-012, JS-014, JS-019, JS-021, JS-024 | 2026-09-10 (`c82ec67`) |
-| JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | EXT-001, JS-001, JS-004, JS-006, JS-007, JS-009, JS-010, JS-012, JS-014, JS-021, JS-022, SHEET-001 | DASH-001, DATA-001, JS-001, JS-002, JS-018, JS-021, JS-022, JS-023, TAB-004, TAB-007 | 2026-09-10 (`c82ec67`) |
+| JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | EXT-001, JS-001, JS-004, JS-006, JS-007, JS-009, JS-010, JS-012, JS-014, JS-021, JS-022, JS-025, SHEET-001 | DASH-001, DATA-001, JS-001, JS-002, JS-018, JS-021, JS-022, JS-023, TAB-004, TAB-007 | 2026-09-18 (`4bbb58c`) |
 | JS-004 | JS- | core-filters | `js/core-filters.js` | Closed + Monitored | EXT-001, EXT-003, JS-001, JS-002, JS-005, JS-006, JS-009, JS-010, JS-012, JS-014, JS-018, SHEET-005 | DASH-001, DATA-001, JS-001, JS-003, JS-012, JS-014, JS-019, JS-020, JS-024, TAB-002, TAB-006, TAB-008 | 2026-09-10 (`c82ec67`) |
-| JS-005 | JS- | core-foundation | `js/core-foundation.js` | Closed + Monitored | none | DATA-001, DATA-002, JS-004, JS-006, JS-007, JS-008, JS-009, JS-010, JS-012, JS-014, JS-017, JS-019, JS-020, JS-021, JS-023, JS-024 | 2026-09-10 (`c82ec67`) |
-| JS-006 | JS- | core-lead-model | `js/core-lead-model.js` | Closed + Monitored | JS-005, JS-007, JS-021, SHEET-001, SHEET-002 | DATA-001, DATA-002, DATA-003, JS-003, JS-004, JS-007, JS-008, JS-009, JS-012, JS-014, JS-017, JS-018, JS-019, JS-021, JS-023, JS-024, TAB-002, TAB-003, TAB-006 | 2026-09-10 (`c82ec67`) |
+| JS-005 | JS- | core-foundation | `js/core-foundation.js` | Closed + Monitored | none | DATA-001, DATA-002, JS-004, JS-006, JS-007, JS-008, JS-009, JS-010, JS-012, JS-014, JS-017, JS-019, JS-020, JS-021, JS-023, JS-024, JS-025 | 2026-09-18 (`4bbb58c`) |
+| JS-006 | JS- | core-lead-model | `js/core-lead-model.js` | Closed + Monitored | JS-005, JS-007, JS-021, SHEET-001, SHEET-002 | DATA-001, DATA-002, DATA-003, JS-003, JS-004, JS-007, JS-008, JS-009, JS-012, JS-014, JS-017, JS-018, JS-019, JS-021, JS-023, JS-024, JS-025, TAB-002, TAB-003, TAB-006 | 2026-09-18 (`4bbb58c`) |
 | JS-007 | JS- | core-outcome-engine | `js/core-outcome-engine.js` | Closed + Monitored | JS-005, JS-006 | DATA-003, JS-003, JS-006, JS-010, JS-012, JS-014, JS-017, JS-019, JS-021, JS-023, JS-024, TAB-006 | 2026-09-10 (`c82ec67`) |
 | JS-008 | JS- | core-rm-performance | `js/core-rm-performance.js` | Validated | DATA-004, JS-005, JS-006, JS-014, JS-021, JS-022, SHEET-002, SHEET-006 | DATA-002, JS-013, JS-017, JS-022, TAB-004 | 2026-09-15 (`9e55e36`) |
-| JS-009 | JS- | core-sheets-fetch | `js/core-sheets-fetch.js` | Closed + Monitored | EXT-001, EXT-003, JS-001, JS-005, JS-006, SHEET-001 | DATA-001, JS-003, JS-004, JS-018, JS-021, JS-022, TAB-002, TAB-007 | 2026-09-10 (`c82ec67`) |
-| JS-010 | JS- | core-ui | `js/core-ui.js` | Closed + Monitored | JS-002, JS-005, JS-007 | JS-002, JS-003, JS-004, JS-011, JS-012, JS-014, JS-019, JS-020, JS-022, JS-024 | 2026-09-10 (`c82ec67`) |
+| JS-009 | JS- | core-sheets-fetch | `js/core-sheets-fetch.js` | Closed + Monitored | EXT-001, EXT-003, JS-001, JS-005, JS-006, SHEET-001 | DATA-001, JS-003, JS-004, JS-018, JS-021, JS-022, JS-025, TAB-002, TAB-007 | 2026-09-18 (`4bbb58c`) |
+| JS-010 | JS- | core-ui | `js/core-ui.js` | Closed + Monitored | JS-002, JS-005, JS-007 | JS-002, JS-003, JS-004, JS-011, JS-012, JS-014, JS-019, JS-020, JS-022, JS-024, JS-025 | 2026-09-18 (`4bbb58c`) |
 | JS-011 | JS- | main | `js/main.js` | Closed + Monitored | JS-001, JS-010, JS-021, JS-023 | JS-023, TAB-005 | 2026-09-10 (`c82ec67`) |
-| JS-012 | JS- | overview-distribution-people-ops | `js/overview-distribution-people-ops.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-014, JS-019, JS-020, JS-021, JS-022, JS-023, JS-024 | DATA-002, JS-003, JS-004, JS-019, JS-020, JS-021, TAB-001, TAB-002, TAB-003, TAB-005 | 2026-09-10 (`c82ec67`) |
+| JS-012 | JS- | overview-distribution-people-ops | `js/overview-distribution-people-ops.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-014, JS-019, JS-020, JS-021, JS-022, JS-023, JS-024, JS-025 | DATA-002, JS-003, JS-004, JS-019, JS-020, JS-021, TAB-001, TAB-002, TAB-003, TAB-005 | 2026-09-18 (`4bbb58c`) |
 | JS-013 | JS- | repeat-offenders-pdf | `js/repeat-offenders-pdf.js` | Closed + Monitored | EXT-004, JS-008, JS-021, JS-022, SHEET-002, SHEET-006 | TAB-004 | 2026-09-15 (`9e55e36`) |
 | JS-014 | JS- | reports-build | `js/reports-build.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-021 | DATA-005, EXT-002, JS-003, JS-004, JS-008, JS-012, JS-015, JS-016, JS-017, JS-021, JS-022, JS-023, JS-024, TAB-003, TAB-004, TAB-005, TAB-007, TAB-008 | 2026-09-10 (`c82ec67`) |
 | JS-015 | JS- | reports-gmail | `js/reports-gmail.js` | Closed + Monitored | EXT-002, JS-001, JS-014, JS-016, JS-018, SHEET-011 | JS-001, JS-016, SHEET-011, TAB-003, TAB-007 | 2026-09-10 (`c82ec67`) |
@@ -232,7 +233,8 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | JS-021 | JS- | tab-movement | `js/tab-movement.js` | Closed + Monitored | EXT-001, EXT-002, EXT-003, JS-002, JS-003, JS-005, JS-006, JS-007, JS-009, JS-012, JS-014, JS-018, JS-020, SHEET-002, SHEET-004, SHEET-011, SHEET-015 | DATA-004, JS-003, JS-006, JS-008, JS-011, JS-012, JS-013, JS-014, JS-017, JS-018, JS-022, JS-023, JS-024, SHEET-015, TAB-004, TAB-005, TAB-007, TAB-008 | 2026-09-17 (`641398e`) |
 | JS-022 | JS- | tab-repeat-offenders | `js/tab-repeat-offenders.js` | Closed + Monitored | EXT-001, EXT-003, JS-003, JS-008, JS-009, JS-010, JS-014, JS-017, JS-021, SHEET-002, SHEET-003, SHEET-006 | JS-003, JS-008, JS-012, JS-013, TAB-004 | 2026-09-15 (`9e55e36`) |
 | JS-023 | JS- | tab-rmtimeline | `js/tab-rmtimeline.js` | Closed + Monitored | JS-003, JS-005, JS-006, JS-007, JS-011, JS-014, JS-019, JS-021, JS-024, SHEET-002 | JS-011, JS-012, TAB-005 | 2026-09-10 (`c82ec67`) |
-| JS-024 | JS- | tab-tracking | `js/tab-tracking.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-014, JS-018, JS-021, SHEET-002, SHEET-005, SHEET-008 | JS-012, JS-023, TAB-005, TAB-008 | 2026-09-10 (`c82ec67`) |
+| JS-024 | JS- | tab-tracking | `js/tab-tracking.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-014, JS-018, JS-021, SHEET-002, SHEET-005, SHEET-008 | JS-012, JS-023, JS-025, TAB-005, TAB-008 | 2026-09-18 (`4bbb58c`) |
+| JS-025 | JS- | tab-oppmonitor | `js/tab-oppmonitor.js` | Drafted | JS-005, JS-006, JS-009, JS-010, JS-024, EXT-001, SHEET-016, SHEET-017 | JS-003, JS-012, TAB-009 | 2026-09-18 (`4bbb58c`) |
 
 ### `GS-` — Apps Script backend modules (production; `Tests_*.gs` excluded per `DOC-007`)
 
@@ -245,7 +247,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | DATA-003, GS-001, GS-006, GS-010, GS-012, GS-013, SHEET-010 | 2026-09-10 (`c82ec67`) |
 | GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-009 | DATA-003, GS-008, SHEET-009 | 2026-09-10 (`c82ec67`) |
 | GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none | 2026-09-10 (`c82ec67`) |
-| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-09-17 (`9413f6a`) |
+| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-09-18 (`2d4a573`) |
 | GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Closed + Monitored | EXT-002, GS-004, GS-008, GS-011, SHEET-002, SHEET-006, SHEET-007 | none | 2026-09-10 (`c82ec67`) |
 | GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | DATA-002, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, SHEET-001, SHEET-002, SHEET-004, SHEET-006, SHEET-007, SHEET-012, SHEET-014 | DATA-003, SHEET-004, SHEET-014 | 2026-09-10 (`c82ec67`) |
 | GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, SHEET-006, SHEET-007 | 2026-09-17 (`27bd715`) |
@@ -274,6 +276,8 @@ emails, never in this repo (`DOC-007`).
 | SHEET-013 | SHEET- | AllIssues_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / contact-emails) | EXT-001, EXT-002, GS-001 | GS-001 | 2026-09-10 (`c82ec67`) |
 | SHEET-014 | SHEET- | Overnight_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: IMPORTANT / contact-emails) | EXT-001, EXT-002, GS-010 | GS-010 | 2026-09-10 (`c82ec67`) |
 | SHEET-015 | SHEET- | Movement_Log_Runs | Google Sheet | Closed + Monitored (lifecycle none enforced -> TBD; DOC-038: MEDIUM / operational) | EXT-001, GS-008, JS-018, JS-021 | GS-008, JS-018, JS-021, TAB-007 | 2026-09-17 (`641398e`) |
+| SHEET-016 | SHEET- | Opp_Monitor_Period | Google Sheet | Drafted (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`4bbb58c`) |
+| SHEET-017 | SHEET- | Opp_Monitor_Month | Google Sheet | Drafted (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`4bbb58c`) |
 
 **Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
 `Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and
@@ -284,13 +288,16 @@ list. `DOC-032` writes the base records; `DOC-036` fills lifecycle/retention.
 `check-catalog.py` check-L gap — the tab itself predates this record (Lead
 History & Versioning Review Phase 6), it was undocumented, not new; the
 15-tab set now exceeds `LOGIC_AUDIT.md` Part 1 §1's original count on
-purpose.
+purpose. `SHEET-016`/`SHEET-017` (`Opp_Monitor_Period`/`Opp_Monitor_Month`)
+added 2026-09-18 — genuinely net-new (the Opp Monitor tab feature), not a
+gap closure; both `Drafted`, and the first `SHEET-` records this project
+has with no writer in this codebase at all.
 
 ### `EXT-` — external integrations (confirm exact set in `DOC-011` / `DOC-033`)
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Closed + Monitored | EXT-003 | DASH-001, DATA-001, DATA-004, GS-002, JS-003, JS-004, JS-009, JS-018, JS-021, JS-022, SHEET-001, SHEET-002, SHEET-003, SHEET-004, SHEET-005, SHEET-006, SHEET-007, SHEET-008, SHEET-009, SHEET-010, SHEET-011, SHEET-012, SHEET-013, SHEET-014, SHEET-015, TAB-007, TAB-008 | 2026-09-10 (`c82ec67`) |
+| EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Closed + Monitored | EXT-003 | DASH-001, DATA-001, DATA-004, GS-002, JS-003, JS-004, JS-009, JS-018, JS-021, JS-022, JS-025, SHEET-001, SHEET-002, SHEET-003, SHEET-004, SHEET-005, SHEET-006, SHEET-007, SHEET-008, SHEET-009, SHEET-010, SHEET-011, SHEET-012, SHEET-013, SHEET-014, SHEET-015, SHEET-016, SHEET-017, TAB-007, TAB-008, TAB-009 | 2026-09-18 (`4bbb58c`) |
 | EXT-002 | EXT- | Gmail (send) — dashboard OAuth grant + `GmailApp` + Advanced Gmail Service | `js/reports-gmail.js` / `EmailInfra.gs` | Closed + Monitored | EXT-003, GS-004, JS-014, JS-016 | DATA-005, GS-001, GS-004, GS-009, GS-010, JS-015, JS-018, JS-021, SHEET-011, SHEET-013, SHEET-014, TAB-003, TAB-007 | 2026-09-10 (`c82ec67`) |
 | EXT-003 | EXT- | Google Identity / OAuth (sign-in gate) | `js/core-auth.js` | Closed + Monitored | none | EXT-001, EXT-002, JS-001, JS-004, JS-009, JS-018, JS-021, JS-022 | 2026-09-10 (`c82ec67`) |
 | EXT-004 | EXT- | jsPDF 2.5.1 + jspdf-autotable 3.8.2 (PDF export) | `js/repeat-offenders-pdf.js` | Closed + Monitored | none | JS-013, TAB-004 | 2026-09-17 (`a74a65f`) |
@@ -322,17 +329,17 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 
 ## Coverage snapshot (auto-checkable target)
 
-- `JS-` records: 24 / 24 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-024` DOC-028)
+- `JS-` records: 25 / 25 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-025` DOC-028)
 - `GS-` records: 13 / 13 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each)
-- `TAB-` records: 8 / 8 (DOC-026)
-- `SHEET-` records: 15 / 15 (base DOC-032; `## Data Lifecycle` DOC-036; sensitivity + operational-importance DOC-038, all with a stated reason). **Operational importance:** CRITICAL x5 (`leads`, `Movement_Log`, `Lead_Followups`, `RM_Hierarchy`, `Manager_Directory`), IMPORTANT x4 (`Daily_RM_Issues`, `Region_Recipients`, `Overnight_Log`; `Movement_Log` degradations), MEDIUM x1 (`Movement_Log_Runs`), LOW x6 (`SLA_History`, `Daily_Cohort_History`, `Comment_History`, `Unmatched_Comments_Log`, `Send_Log`, `AllIssues_Log`). **Employee data:** `RM_Hierarchy` + `Manager_Directory` (names/emails). **Comment text:** `leads`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`. Retention: 2 confirmed 7d (`Movement_Log`, `Daily_RM_Issues`), 1 append-only-by-design (`Comment_History`), 1 manually-curated (`Unmatched_Comments_Log`), 3 N/A-configuration (`RM_Hierarchy`, `Manager_Directory`, `Region_Recipients`), **8 `TBD` — no pruning function found** (`leads`, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, `Send_Log`, `AllIssues_Log`, `Overnight_Log`, `Movement_Log_Runs`) → `DOC-037`. `SHEET-015` (`Movement_Log_Runs`) added 2026-09-17, closing a `check-catalog.py` check-L gap — see Seed correction note above the `SHEET-` table.
+- `TAB-` records: 9 / 9 (DOC-026). `TAB-009` (Opp Monitor) added 2026-09-18 — `Record Status: Drafted`, not yet `Closed + Monitored` (see its own `## Next action`).
+- `SHEET-` records: 17 / 17 (base DOC-032; `## Data Lifecycle` DOC-036; sensitivity + operational-importance DOC-038, all with a stated reason). **Operational importance:** CRITICAL x5 (`leads`, `Movement_Log`, `Lead_Followups`, `RM_Hierarchy`, `Manager_Directory`), IMPORTANT x4 (`Daily_RM_Issues`, `Region_Recipients`, `Overnight_Log`; `Movement_Log` degradations), MEDIUM x1 (`Movement_Log_Runs`), LOW x8 (`SLA_History`, `Daily_Cohort_History`, `Comment_History`, `Unmatched_Comments_Log`, `Send_Log`, `AllIssues_Log`, `Opp_Monitor_Period`, `Opp_Monitor_Month`). **Employee data:** `RM_Hierarchy` + `Manager_Directory` (names/emails). **Comment text:** `leads`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`. Retention: 2 confirmed 7d (`Movement_Log`, `Daily_RM_Issues`), 1 append-only-by-design (`Comment_History`), 1 manually-curated (`Unmatched_Comments_Log`), 3 N/A-configuration (`RM_Hierarchy`, `Manager_Directory`, `Region_Recipients`), **10 `TBD` — no pruning function found** (`leads`, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, `Send_Log`, `AllIssues_Log`, `Overnight_Log`, `Movement_Log_Runs`, `Opp_Monitor_Period`, `Opp_Monitor_Month`) → `DOC-037`. `SHEET-015` (`Movement_Log_Runs`) added 2026-09-17, closing a `check-catalog.py` check-L gap. `SHEET-016`/`SHEET-017` (`Opp_Monitor_Period`/`Opp_Monitor_Month`) added 2026-09-18, net-new — both `Drafted`, and **unlike every other `SHEET-` record, have no writer anywhere in this codebase** (populated out-of-band by an external analytics session) — see Seed correction note above the `SHEET-` table.
 - `EXT-` records: 4 / 4 (DOC-033)
 - `DASH-` records: 1 / 1 (DOC-025)
 - `DATA-` records: 5 / 5 (DOC-034)
 - `FLOW-` records: 2 / 2 (`t-tf-5ad22d8e4c2e`; overlays in `architecture/`)
-- **Component-record set is complete** — 1 `DASH-`, 8 `TAB-`
-  (+ `BTN-001`..`022`), 24 `JS-`, 13 `GS-` (+ `FN-001`..`254`),
-  15 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
+- **Component-record set is complete** — 1 `DASH-`, 9 `TAB-`
+  (+ `BTN-001`..`023`), 25 `JS-`, 13 `GS-` (+ `FN-001`..`263`),
+  17 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
   file-coverage check reports `js/*.js` and `*.gs` as **100% covered**
   (verified in CI).
 - **All six phases (`DOC-001`–`DOC-050`) + the Governance Model + the

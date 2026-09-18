@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/overview-distribution-people-ops.js` (1576 lines — the largest tab file) |
+| **Location** | `js/overview-distribution-people-ops.js` (1595 lines — the largest tab file) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
 
 ## Purpose / reason to exist
 
@@ -28,7 +28,10 @@ cross-file churn.
   top (`#L164`).
 - Overview/Distribution/People tables + KPI strip.
 - All Operations issue-list cards (one `render*List` per SLA check).
-- Tab switching (delegated click on `#tabBar`).
+- Tab switching (delegated click on `#tabBar`) — also owns the one
+  cross-tab visibility rule in this app: hides `#filterBar` while
+  `TAB-009` (Opp Monitor) is active (`TABS_HIDING_FILTER_BAR`, added
+  2026-09-18), since no other tab needs this.
 - `downloadIssuesCSV` / `downloadFilteredLeadIdsCSV`.
 
 ## Load order / position
@@ -40,7 +43,7 @@ Loads near the end of the tab group, before `main.js`
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-077 | `renderAll()` `#L159` | `leads`, `issueLeads` | writes every tab's DOM | `_logLeadRegistry.clear()` `#L164`; calls ~20 `render*` fns incl. `renderTrackingTab` / `renderAudit` / `renderRMTimelineTab` / `renderMorningBrief` (gated) | every `render*` here + `JS-019` / `JS-023` / `JS-024` / `JS-020` | `applyFiltersAndRender` (`JS-004`), `fetchAndRender` (`JS-003`) | specific — the master orchestrator |
+| FN-077 | `renderAll()` `#L159` | `leads`, `issueLeads` | writes every tab's DOM | `_logLeadRegistry.clear()` `#L164`; calls ~21 `render*` fns incl. `renderTrackingTab` / `renderAudit` / `renderRMTimelineTab` / `renderMorningBrief` (gated) / `renderOppMonitorTab` (`JS-025`, added 2026-09-18) | every `render*` here + `JS-019` / `JS-023` / `JS-024` / `JS-020` / `JS-025` | `applyFiltersAndRender` (`JS-004`), `fetchAndRender` (`JS-003`) | specific — the master orchestrator |
 | FN-078 | `computeRMScoreRows()` `#L494` | `leads` | per-RM `{open, breached, score}` rows; score = `(open − breached) / open × 100` over **open leads only** | none | `medianOfSorted` / `percentileOfSorted` | `renderRMScoreTable` (FN-079), `tab-morning.js` (`JS-020`) | reusable |
 | FN-079 | `renderRMScoreTable` / `renderRMTable` `#L567/#L998` | score rows | the RM tables; `renderRMTable` flags ±25% load vs peer average | DOM write | `computeRMScoreRows` (FN-078), `renderBreakdownCard` (FN-082) | `renderAll` (FN-077) | specific |
 | FN-080 | `renderStageBreakdown` / `renderFunnel` / `renderRegionTable` / `renderTLTable` / `renderProjectTable` / `renderSourceBreakdown` / `renderSourceMix` / `renderFanout` / `renderAllocationMatrix` `#L17`..`#L796` | `leads` | the Overview/Distribution tables | DOM writes | `topBreakdown` (FN-083), `renderBreakdownCard` (FN-082), `esc` (`JS-010`) | `renderAll` (FN-077) | specific |
@@ -112,7 +115,8 @@ Part 5 §5.1 (KPI audit), Part 6 §6.1 rows 1/4.
   `JS-010` (`esc`, `renderAlertCard`, `logToggleMarkup`), `JS-014`
   (`effectiveRegion`, `mainRegionFor`), `JS-019`, `JS-020`, `JS-021`
   (`computeStalledLeads`, `downloadUnmatchedCommentsCSV`), `JS-022`,
-  `JS-023`, `JS-024`
+  `JS-023`, `JS-024`, `JS-025` (`renderOppMonitorTab`, called from
+  `renderAll`)
 - **Used By:** `TAB-001`, `TAB-002`, `TAB-003`, `TAB-005`, `JS-003`,
   `JS-004` (call `renderAll`), `JS-019`, `JS-020` (borrows
   `computeRMScoreRows` / `computeDailyLeadCounts` / `topBreakdown`),
@@ -132,14 +136,20 @@ Part 5 §5.1 (KPI audit), Part 6 §6.1 rows 1/4.
   (rows 1 and 4 — `_logLeadRegistry` clear at `#L164` and all 9 issue
   lists carrying `.log-toggle` — both confirmed not-reproduce).
   `tests/frontend-harness.html` runs `renderAll` + each touched
-  `render*` on synthetic leads.
+  `render*` on synthetic leads. Revalidated 2026-09-18 (`4bbb58c`): read
+  the tab-switch handler's new `TABS_HIDING_FILTER_BAR` block and
+  `renderAll`'s new `renderOppMonitorTab()` call directly in source;
+  `tests/frontend-harness.html`'s isolated-fixture block asserts the
+  filter-bar toggle behaves correctly on both directions of the switch.
 - **Evidence:** `LOGIC_AUDIT.md` Part 5 §5.1, Part 6 §6.1;
   `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-18.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-028.
+Verified at `c82ec67`; record created by DOC-028. Revalidated 2026-09-18
+(`4bbb58c`) for the `TAB-009` `renderAll` call + filter-bar-hiding
+addition.
 
 ## Revalidation trigger
 
