@@ -625,6 +625,12 @@ async function fetchAndRender(){
       renderRepeatOffenders();
     });
 
+    // Independent of Movement_Log / RM_Hierarchy above — Opp_Monitor_Period /
+    // Opp_Monitor_Month are written out-of-band by a separate analytics
+    // session, may not exist yet, and nothing else in the dashboard depends
+    // on this fetch (see tab-oppmonitor.js's own header comment).
+    fetchOppMonitorData(sheetId).then(() => { renderOppMonitorTab(); });
+
     document.getElementById('configPanel').style.display = 'none';
     document.getElementById('changeSourceBtn').style.display = 'inline-block';
     document.getElementById('dashboardContent').style.display = 'block';

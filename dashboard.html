@@ -944,6 +944,7 @@
       <button class="tab-btn" data-tab="tab-audit">Audit</button>
       <button class="tab-btn" data-tab="tab-movement">Movement</button>
       <button class="tab-btn" data-tab="tab-tracking">Tracking</button>
+      <button class="tab-btn" data-tab="tab-oppmonitor">Opp Monitor</button>
     </div>
 
     <!-- ============ MORNING BRIEF ============ -->
@@ -1384,6 +1385,30 @@
       </section>
     </div>
 
+    <!-- ============ OPP MONITOR ============ -->
+    <div class="tab-panel" id="tab-oppmonitor">
+      <div class="band-label">Opp Monitor <span class="band-note">Same-day / 48h Opp% for Google Non-UTM/Search leads — computed externally every ~10 days, this tab only displays what's already in the sheet</span></div>
+      <div class="filter-summary">Read-only. An external analytics session computes Same-day Opp% and Within-48h Opp% for Google Non-UTM/Search leads every ~10 days and writes the results into <span class="mono">Opp_Monitor_Period</span> / <span class="mono">Opp_Monitor_Month</span> by hand — this tab never computes anything itself, and (unlike every other tab) does not respect the Project/Region/TL/Source/Sub-source filters above, since this data is a fixed monthly aggregate, not sliceable by those dimensions.</div>
+
+      <section id="sec-oppmonitor-checklist">
+        <div class="section-head"><div class="section-bar amber"></div><div class="section-title">This Month's Checklist</div><div class="section-count" id="oppMonitorChecklistCount"></div></div>
+        <div id="oppMonitorChecklistNotice" class="truncation-notice" style="display:none;"></div>
+        <div id="oppMonitorChecklist"></div>
+      </section>
+
+      <section id="sec-oppmonitor-periods">
+        <div class="section-head"><div class="section-bar blue"></div><div class="section-title">Period Results</div><div class="section-count" id="oppMonitorPeriodCount"></div></div>
+        <div id="oppMonitorPeriodNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll" style="max-height:480px;"><table id="oppMonitorPeriodTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="sec-oppmonitor-months">
+        <div class="section-head"><div class="section-bar green"></div><div class="section-title">Monthly Trend</div><div class="section-count" id="oppMonitorMonthCount"></div></div>
+        <div id="oppMonitorMonthNotice" class="truncation-notice" style="display:none;"></div>
+        <div class="section-scroll" style="max-height:320px;"><table id="oppMonitorMonthTable"><thead></thead><tbody></tbody></table></div>
+      </section>
+    </div>
+
   </div>
 
   <footer>Reads live from Google Sheets · Refresh manually any time · Does not auto-poll in the background</footer>
@@ -1411,6 +1436,7 @@
 <script src="js/core-filters.js"></script>
 <script src="js/tab-audit.js"></script>
 <script src="js/tab-tracking.js"></script>
+<script src="js/tab-oppmonitor.js"></script>
 <script src="js/tab-rmtimeline.js"></script>
 <script src="js/tab-movement.js"></script>
 <script src="js/tab-repeat-offenders.js"></script>

@@ -943,9 +943,95 @@
     assert('Repeat Offenders shows a "no data yet" notice on empty Movement_Log (no throw)', textOf('repeatOffendersNotice').indexOf('Movement_Log') !== -1);
     assert('Movement/Overnight rendered without throwing on empty Movement_Log', !!document.getElementById('overnightList'));
 
+    // Opp Monitor: the shared mock above returns [] for every non-Leads
+    // range, so Opp_Monitor_Period/Month already went through
+    // fetchOppMonitorData (wired into fetchAndRender itself) and hit the
+    // "missing tab" graceful path for free — assert it renders the
+    // no-data notice rather than an all-pending checklist or a throw.
+    assert('Opp Monitor shows a "no data yet" notice when both sheets are missing (no throw)', textOf('oppMonitorChecklistNotice').indexOf('No Opp_Monitor data yet') !== -1);
+
     const opsTabBtn = document.querySelector('.tab-btn[data-tab="tab-operations"]');
     if (opsTabBtn) opsTabBtn.click();
     assert('Clicking the Operations tab button activates its panel', document.getElementById('tab-operations').classList.contains('active'));
+  }
+
+  // ---- 6. Opp Monitor, isolated fixture ----
+  // Separate synthetic Opp_Monitor_Period/Month data, run directly through
+  // fetchOppMonitorData()/renderOppMonitorTab() rather than a full second
+  // fetchAndRender() pass — this tab reads neither leads nor filterState,
+  // so it doesn't need the whole pipeline re-run to exercise its real
+  // logic. Frozen clock is 2026-09-09 (see freezeClock above), so "current
+  // month" = 2026-09, giving a 3-month window of 2026-07/08/09.
+  {
+    const oppPeriodHeaders = ['period_key', 'year_month', 'period_number', 'period_label', 'date_from', 'date_to',
+      'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
+      'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at', 'updated_at', 'source'];
+    const oppPeriodRows = [
+      ['2026-07_P1', '2026-07', 1, '1st-10th', '2026-07-01', '2026-07-10', 1000, 300, 400, 30, 40, 'done', '2026-07-11', 'done', '2026-07-11', 'done', '2026-07-11', '2026-07-11', 'Claude session'],
+      ['2026-07_P2', '2026-07', 2, '11th-20th', '2026-07-11', '2026-07-20', 1000, 320, 420, 32, 42, 'done', '2026-07-21', 'done', '2026-07-21', 'done', '2026-07-21', '2026-07-21', 'Claude session'],
+      ['2026-07_P3', '2026-07', 3, '21st-end', '2026-07-21', '2026-07-31', 1000, 340, 440, 34, 44, 'done', '2026-08-01', 'done', '2026-08-01', 'done', '2026-08-01', '2026-08-01', 'Claude session'],
+      ['2026-08_P1', '2026-08', 1, '1st-10th', '2026-08-01', '2026-08-10', 1100, 350, 450, 35, 45, 'done', '2026-08-11', 'done', '2026-08-11', 'done', '2026-08-11', '2026-08-11', 'Claude session'],
+      ['2026-08_P2', '2026-08', 2, '11th-20th', '2026-08-11', '2026-08-20', 1100, 360, 460, 36, 46, 'done', '2026-08-21', 'done', '2026-08-21', 'done', '2026-08-21', '2026-08-21', 'Claude session'],
+      ['2026-08_P3', '2026-08', 3, '21st-end', '2026-08-21', '2026-08-31', 1100, 380, 480, 38, 48, 'done', '2026-09-01', 'done', '2026-09-01', 'done', '2026-09-01', '2026-09-01', 'Claude session'],
+      ['2026-09_P1', '2026-09', 1, '1st-10th', '2026-09-01', '2026-09-10', 1200, 400, 500, 40, 50, 'done', '2026-09-11', 'done', '2026-09-11', 'done', '2026-09-11', '2026-09-11', 'Claude session'],
+      // Sep P2: step1/2 done, step3 (email) deliberately pending — tests
+      // a partial row's chips AND that the results table shows a row
+      // whose own checklist isn't finished yet (results != checklist).
+      ['2026-09_P2', '2026-09', 2, '11th-20th', '2026-09-11', '2026-09-20', 1200, 410, 510, 41, 51, 'done', '2026-09-21', 'done', '2026-09-21', '', '', '2026-09-21', 'Claude session'],
+      // Sep P3 deliberately absent — period hasn't been reached yet.
+    ];
+    const oppMonthHeaders = ['month_key', 'year_month', 'month_label', 'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
+      'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at', 'updated_at', 'source'];
+    const oppMonthRows = [
+      ['2026-07', '2026-07', 'July 2026', 3000, 960, 1260, 32, 42, 'done', '2026-08-01', 'done', '2026-08-01', 'done', '2026-08-01', '2026-08-01', 'Claude session'],
+      ['2026-08', '2026-08', 'August 2026', 3300, 1110, 1440, 33.6, 43.6, 'done', '2026-09-01', 'done', '2026-09-01', 'done', '2026-09-01', '2026-09-01', 'Claude session'],
+      // Sep month row deliberately absent — month isn't over yet.
+    ];
+
+    sheetsApiValuesGet = async function (sheetId, range) {
+      if (range.indexOf('Opp_Monitor_Period') === 0) return [oppPeriodHeaders, ...oppPeriodRows];
+      if (range.indexOf('Opp_Monitor_Month') === 0) return [oppMonthHeaders, ...oppMonthRows];
+      return [];
+    };
+
+    let oppThrew = null;
+    try {
+      await fetchOppMonitorData('harness-sheet-id');
+      renderOppMonitorTab();
+    } catch (e) { oppThrew = e; }
+    assert('Opp Monitor isolated fixture: fetch+render completes with no throw', !oppThrew, oppThrew && (oppThrew.message + '\n' + oppThrew.stack));
+
+    if (!oppThrew) {
+      const oppTextOf = id => { const el = document.getElementById(id); return el ? el.textContent : ''; };
+
+      // Checklist: Sep has 3 done (P1's 3 steps) + 2 done (P2's step1/step2)
+      // + 0 done at month level (no Sep month row yet) = 5 of 12.
+      assert('Opp Monitor checklist count shows 5/12 for the in-progress month', oppTextOf('oppMonitorChecklistCount').indexOf('5/12') !== -1, oppTextOf('oppMonitorChecklistCount'));
+      const checklistHtml = document.getElementById('oppMonitorChecklist').innerHTML;
+      assert('Checklist shows Period 2 Leadership email as Pending', /Leadership email: Pending/.test(checklistHtml));
+      assert('Checklist shows Period 1 Data collection as Done', /Data collection: Done/.test(checklistHtml));
+
+      const periodTableText = oppTextOf('oppMonitorPeriodTable');
+      assert('Period table lists July, August, and September rows', ['2026-07', '2026-08', '2026-09'].every(m => periodTableText.indexOf(m) !== -1));
+      assert('Period table does NOT show a row for the absent September Period 3', (periodTableText.match(/21st-end/g) || []).length === 2); // only Jul + Aug P3, not a 3rd for Sep
+
+      // Cross-month delta: Sep P1 (40.0%) vs Aug P3 (38.0%) = +2.0pp, and
+      // the ordered-slot sequence must resolve that pairing across the
+      // month boundary, not against some other row.
+      assert('Period table renders a +2.0pp up-badge for Sep P1 vs Aug P3 same-day Opp%', /▲ 2\.0pp/.test(periodTableText));
+
+      const monthTableText = oppTextOf('oppMonitorMonthTable');
+      assert('Monthly trend table lists July and August but not the absent September row', monthTableText.indexOf('July 2026') !== -1 && monthTableText.indexOf('August 2026') !== -1 && monthTableText.indexOf('2026-09') === -1);
+
+      // Filter-bar hiding — the one behavior this tab uniquely owns.
+      const filterBarEl = document.getElementById('filterBar');
+      const oppTabBtn = document.querySelector('.tab-btn[data-tab="tab-oppmonitor"]');
+      const overviewTabBtn = document.querySelector('.tab-btn[data-tab="tab-overview"]');
+      if (oppTabBtn) oppTabBtn.click();
+      assert('Clicking Opp Monitor hides the shared filter bar', filterBarEl && filterBarEl.style.display === 'none');
+      if (overviewTabBtn) overviewTabBtn.click();
+      assert('Switching back to Overview restores the shared filter bar', filterBarEl && filterBarEl.style.display === 'flex');
+    }
   }
 
   statusEl.textContent = 'Done: ' + results.pass + ' passed, ' + results.fail + ' failed.';

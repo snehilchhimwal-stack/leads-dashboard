@@ -285,6 +285,7 @@ function renderAll(){
   renderAudit();
   renderActivityByHour();
   renderMovementTab();
+  renderOppMonitorTab();
   renderJumpNav();
   updateTabBadges();
 }
@@ -361,6 +362,11 @@ function renderJumpNav(){
 }
 
 /* ===================== TAB SWITCHING ===================== */
+// Tabs whose data is a fixed monthly/period aggregate, not sliceable by the
+// shared Project/Region/TL/Source/Sub-source bar — hidden while one of
+// these is the active tab.
+const TABS_HIDING_FILTER_BAR = new Set(['tab-oppmonitor']);
+
 document.getElementById('tabBar').addEventListener('click', (e) => {
   const btn = e.target.closest('.tab-btn');
   if (!btn) return;
@@ -369,6 +375,19 @@ document.getElementById('tabBar').addEventListener('click', (e) => {
   btn.classList.add('active');
   const panel = document.getElementById(btn.dataset.tab);
   if (panel) panel.classList.add('active');
+
+  // Gated on #dashboardContent (set 'block' once on successful sign-in,
+  // core-fetch-and-render.js, right before filterBar's own one-time 'flex'
+  // reveal; the only other writer sets it 'none' inside showError()) rather
+  // than #filterBar's own current value — filterBar's inline style is
+  // exactly what this block flips between 'none' and 'flex' on every tab
+  // switch, so reading it to decide whether to touch it would break on the
+  // very next click.
+  const filterBar = document.getElementById('filterBar');
+  const dashboardContent = document.getElementById('dashboardContent');
+  if (filterBar && dashboardContent && dashboardContent.style.display !== 'none') {
+    filterBar.style.display = TABS_HIDING_FILTER_BAR.has(btn.dataset.tab) ? 'none' : 'flex';
+  }
 });
 
 // Operations badge shows total open breaches so you can see there's work
