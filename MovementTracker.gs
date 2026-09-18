@@ -1237,5 +1237,24 @@ function removeEarlyCorruptedMovementLogDataNow() {
     const chunk = kept.slice(i, i + CHUNK);
     sheet.getRange(2 + i, 1, chunk.length, lastCol).setValues(chunk);
   }
-  Logger.log('Kept ' + kept.length + ' of ' + values.length + ' rows (removed everything before 12 Sep 2026 IST). Backup (' + removed.length + ' rows): ' + backupFile.getUrl());
+
+  // Real bug found 2026-09-17: an earlier version of this function stopped
+  // here, and it achieved NOTHING toward the workbook's 10M-cell ceiling —
+  // clearContent() only empties cell VALUES, it never shrinks the sheet's
+  // actual row allocation (getMaxRows()), and that ceiling is on the
+  // workbook's total declared grid size (rows x columns, summed across
+  // every tab), not on cells holding real content. Without this step the
+  // sheet's row count never drops, which is exactly what let
+  // captureDailyRmIssues_ (DailyRmIssueLog.gs) crash with the same "This
+  // action would increase the number of cells..." error hours after this
+  // function had already "succeeded" — same mechanism pruneMovementLog_
+  // (this file, #L644) and pruneDailyRmIssueLog_ (DailyRmIssueLog.gs)
+  // already handle correctly; this one-off script was the one gap.
+  const neededRows = 1 + kept.length + MOVEMENT_LOG_ROW_HEADROOM_;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > neededRows) {
+    sheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  }
+
+  Logger.log('Kept ' + kept.length + ' of ' + values.length + ' rows (removed everything before 12 Sep 2026 IST). Row allocation shrunk to ' + sheet.getMaxRows() + '. Backup (' + removed.length + ' rows): ' + backupFile.getUrl());
 }
