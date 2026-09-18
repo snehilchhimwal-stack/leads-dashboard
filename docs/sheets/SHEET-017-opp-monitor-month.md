@@ -6,8 +6,8 @@
 | **Location** | Google Sheet, tab `Opp_Monitor_Month` |
 | **Owner** | Snehil |
 | **Component Status** | Active |
-| **Record Status** | Drafted |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Record Status** | Validated |
+| **Last Verified** | 2026-09-18 (pending commit) |
 
 ## Purpose / reason to exist
 
@@ -20,10 +20,10 @@ month rather than up to 3 per month.
 
 ## Data stored
 
-One row per completed month, 16 columns: identity, the raw counts and
+One row per completed month, 18 columns: identity, the raw counts and
 percentages an external analytics session aggregated from that month's
-periods, and per-step status/timestamp pairs for the month's own 3
-checklist steps.
+periods, average time-to-first-Opportunity-transition (days/hours), and
+per-step status/timestamp pairs for the month's own 3 checklist steps.
 
 ## Source of the data
 
@@ -51,6 +51,7 @@ separate Claude session, after that month's 3 periods
 | `step3_status` / `step3_at` | text | trend summary | |
 | `updated_at` | text | last write timestamp | |
 | `source` | text | who/what wrote the row | |
+| `avg_days_to_opp` / `avg_hrs_to_opp` | number | mean time from lead creation to first `Opportunity`-stage transition, for the whole month | same "converted leads only" averaging as `SHEET-016`; added 2026-09-18 |
 
 No month-over-month delta columns are stored — `JS-025` computes deltas
 at render time from adjacent rows' raw `*_pct` values.
@@ -126,14 +127,19 @@ The live `Opp_Monitor_Month` tab; schema defined by
 
 - **Method:** column list read directly from `js/tab-oppmonitor.js`
   source. Reader behavior verified via `tests/frontend-harness.html`'s
-  isolated-fixture block (month-over-month delta, absent-month omission).
-- **Evidence:** `tests/frontend-harness.html`; commit `4bbb58c`.
-- **Status:** Validated 2026-09-18 (author-verified, no live-sheet data
-  exists yet).
+  isolated-fixture block (month-over-month delta, absent-month omission;
+  90/90 pass after the 2026-09-18 column addition).
+- **Evidence:** `tests/frontend-harness.html`; live sheet.
+- **Status:** Validated 2026-09-18 against the live `Opp_Monitor_Month`
+  tab — created via the Sheets API and backfilled with real July/August
+  2026 rollups computed via the Homesfy analytics MCP. September
+  intentionally left empty (month not yet complete).
 
 ## Version / change reference
 
 Record created 2026-09-18, commit `4bbb58c`, alongside `TAB-009`/`JS-025`.
+Revalidated 2026-09-18 (same day) for the `avg_days_to_opp`/
+`avg_hrs_to_opp` column addition and first live backfill.
 
 ## Revalidation trigger
 
@@ -151,8 +157,10 @@ Not yet in `HANDOVER.md` — see `TAB-009`'s Next action.
 ## Next action
 
 Decide a retention policy once real usage patterns are known. Move
-`Record Status` to `Closed + Monitored` once live data is observed.
+`Record Status` to `Closed + Monitored` once the recurring workflow has
+run a full organic cycle (not just this one-time backfill).
 
 ## Closure evidence
 
-Not yet closed — `Record Status: Drafted`.
+Not yet closed — `Record Status: Validated`. Live sheet observed with
+real backfilled July/August 2026 data as of 2026-09-18.

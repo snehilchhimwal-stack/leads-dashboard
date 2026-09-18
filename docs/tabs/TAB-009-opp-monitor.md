@@ -6,8 +6,8 @@
 | **Location** | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` |
 | **Owner** | Snehil |
 | **Component Status** | Active |
-| **Record Status** | Drafted |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Record Status** | Validated |
+| **Last Verified** | 2026-09-18 (pending commit) |
 
 ## Purpose / reason to exist
 

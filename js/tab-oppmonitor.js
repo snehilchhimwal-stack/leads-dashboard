@@ -17,13 +17,13 @@ const OPP_MONITOR_PERIOD_COLUMNS = [
   'period_key', 'year_month', 'period_number', 'period_label', 'date_from', 'date_to',
   'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
   'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at',
-  'updated_at', 'source',
+  'updated_at', 'source', 'avg_days_to_opp', 'avg_hrs_to_opp',
 ];
 const OPP_MONITOR_MONTH_COLUMNS = [
   'month_key', 'year_month', 'month_label',
   'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
   'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at',
-  'updated_at', 'source',
+  'updated_at', 'source', 'avg_days_to_opp', 'avg_hrs_to_opp',
 ];
 
 let oppMonitorPeriodFetchState = 'idle'; // 'idle'|'loading'|'ok'|'missing'|'error'
@@ -104,6 +104,13 @@ function _oppMonitorShiftYearMonth(yearMonth, n){
   const [y, mo] = yearMonth.split('-').map(Number);
   const d = new Date(Date.UTC(y, mo - 1 + n, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+const OPP_MONITOR_MONTH_NAMES_ = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function _oppMonitorMonthName(yearMonth){
+  const [y, mo] = String(yearMonth || '').split('-').map(Number);
+  if (!y || !mo || mo < 1 || mo > 12) return String(yearMonth || '');
+  return `${OPP_MONITOR_MONTH_NAMES_[mo - 1]} ${y}`;
 }
 
 function _oppMonitorStepDone(status){
@@ -224,19 +231,23 @@ function _renderOppMonitorPeriodTable(){
   const slots = _oppMonitorOrderedPeriodSlots();
   const rowsBySlot = slots.map(slot => oppMonitorPeriodRows.find(r => r.year_month === slot.year_month && String(r.period_number) === String(slot.period_number)) || null);
 
-  thead.innerHTML = '<tr><th>Month</th><th>Period</th><th>Date range</th><th>Total Leads</th><th>Same-Day Opp%</th><th>Within-48h Opp%</th></tr>';
+  thead.innerHTML = '<tr><th>Month</th><th>Period</th><th>Date range</th><th>Total Leads</th><th>Same-Day Opps</th><th>Same-Day Opp%</th><th>48h Opps</th><th>Within-48h Opp%</th><th>Avg Days to Opp</th><th>Avg Hrs to Opp</th></tr>';
 
   const bodyRows = [];
   rowsBySlot.forEach((row, i) => {
     if (!row) return; // no backfill — absent slots are simply not shown, never a dash placeholder
     const prevRow = i > 0 ? rowsBySlot[i - 1] : null;
     bodyRows.push(`<tr>
-      <td>${esc(row.year_month)}</td>
+      <td>${esc(_oppMonitorMonthName(row.year_month))}</td>
       <td>${esc(row.period_label || `P${row.period_number}`)}</td>
       <td>${esc(row.date_from)} – ${esc(row.date_to)}</td>
       <td>${esc(String(row.total_leads || ''))}</td>
+      <td>${esc(String(row.same_day_count || ''))}</td>
       <td>${_oppMonitorPctCellHtml(row.same_day_pct, prevRow ? prevRow.same_day_pct : null)}</td>
+      <td>${esc(String(row.h48_count || ''))}</td>
       <td>${_oppMonitorPctCellHtml(row.h48_pct, prevRow ? prevRow.h48_pct : null)}</td>
+      <td>${row.avg_days_to_opp === '' || row.avg_days_to_opp == null ? '—' : esc(String(row.avg_days_to_opp))}</td>
+      <td>${row.avg_hrs_to_opp === '' || row.avg_hrs_to_opp == null ? '—' : esc(String(row.avg_hrs_to_opp))}</td>
     </tr>`);
   });
 
@@ -280,17 +291,21 @@ function _renderOppMonitorMonthTable(){
   ];
   const rowsByMonth = months.map(ym => oppMonitorMonthRows.find(r => r.month_key === ym) || null);
 
-  thead.innerHTML = '<tr><th>Month</th><th>Total Leads</th><th>Same-Day Opp%</th><th>Within-48h Opp%</th></tr>';
+  thead.innerHTML = '<tr><th>Month</th><th>Total Leads</th><th>Same-Day Opps</th><th>Same-Day Opp%</th><th>48h Opps</th><th>Within-48h Opp%</th><th>Avg Days to Opp</th><th>Avg Hrs to Opp</th></tr>';
 
   const bodyRows = [];
   rowsByMonth.forEach((row, i) => {
     if (!row) return; // no backfill
     const prevRow = i > 0 ? rowsByMonth[i - 1] : null;
     bodyRows.push(`<tr>
-      <td>${esc(row.month_label || row.month_key)}</td>
+      <td>${esc(row.month_label || _oppMonitorMonthName(row.month_key))}</td>
       <td>${esc(String(row.total_leads || ''))}</td>
+      <td>${esc(String(row.same_day_count || ''))}</td>
       <td>${_oppMonitorPctCellHtml(row.same_day_pct, prevRow ? prevRow.same_day_pct : null)}</td>
+      <td>${esc(String(row.h48_count || ''))}</td>
       <td>${_oppMonitorPctCellHtml(row.h48_pct, prevRow ? prevRow.h48_pct : null)}</td>
+      <td>${row.avg_days_to_opp === '' || row.avg_days_to_opp == null ? '—' : esc(String(row.avg_days_to_opp))}</td>
+      <td>${row.avg_hrs_to_opp === '' || row.avg_hrs_to_opp == null ? '—' : esc(String(row.avg_hrs_to_opp))}</td>
     </tr>`);
   });
 

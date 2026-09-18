@@ -6,8 +6,8 @@
 | **Location** | Google Sheet, tab `Opp_Monitor_Period` |
 | **Owner** | Snehil |
 | **Component Status** | Active |
-| **Record Status** | Drafted |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Record Status** | Validated |
+| **Last Verified** | 2026-09-18 (pending commit) |
 
 ## Purpose / reason to exist
 
@@ -21,10 +21,11 @@ Dashboard tool the workflow's recurring reminders actually live in.
 
 ## Data stored
 
-Up to 3 rows per month (one per period), 19 columns: identity + date
+Up to 3 rows per month (one per period), 21 columns: identity + date
 range, the raw counts and percentages an external analytics session
-computed, and per-step status/timestamp pairs for the period's own 3
-checklist steps.
+computed, average time-to-first-Opportunity-transition (days/hours,
+averaged over converted leads only), and per-step status/timestamp pairs
+for the period's own 3 checklist steps.
 
 ## Source of the data
 
@@ -56,6 +57,7 @@ a writer exists that doesn't.
 | `step3_status` / `step3_at` | text | leadership email | |
 | `updated_at` | text | last write timestamp | |
 | `source` | text | who/what wrote the row (e.g. `"Claude session"`) | |
+| `avg_days_to_opp` / `avg_hrs_to_opp` | number | mean time from lead creation to first `Opportunity`-stage transition | averaged over converted leads only (leads with no Opportunity transition are excluded, not counted as 0); added 2026-09-18 alongside the per-period opp-count columns being surfaced in the Period Results table |
 
 Exact list: `js/tab-oppmonitor.js` `OPP_MONITOR_PERIOD_COLUMNS`.
 
@@ -139,15 +141,21 @@ The live `Opp_Monitor_Period` tab; schema defined by
 - **Method:** column list read directly from `js/tab-oppmonitor.js`
   source. Reader behavior (missing-tab graceful handling, correct
   cross-month delta resolution) verified via
-  `tests/frontend-harness.html`'s isolated-fixture block.
-- **Evidence:** `tests/frontend-harness.html`; commit `4bbb58c`.
-- **Status:** Validated 2026-09-18 (author-verified, no live-sheet data
-  exists yet to cross-check against — this record describes the intended
-  schema, not a schema observed live).
+  `tests/frontend-harness.html`'s isolated-fixture block (90/90 pass
+  after the 2026-09-18 column addition).
+- **Evidence:** `tests/frontend-harness.html`; live sheet.
+- **Status:** Validated 2026-09-18 against the live `Opp_Monitor_Period`
+  tab — created directly via the Sheets API (dashboard's own OAuth
+  session, `spreadsheets` scope) and backfilled with real July/August
+  2026 Google Non-UTM/Search Same-day/48h Opp% + avg-time-to-Opp figures
+  computed via the Homesfy analytics MCP. September intentionally left
+  empty per the "no backfill" rule for the in-progress month.
 
 ## Version / change reference
 
 Record created 2026-09-18, commit `4bbb58c`, alongside `TAB-009`/`JS-025`.
+Revalidated 2026-09-18 (same day) for the `avg_days_to_opp`/
+`avg_hrs_to_opp` column addition and first live backfill.
 
 ## Revalidation trigger
 
@@ -166,9 +174,10 @@ Not yet in `HANDOVER.md` — see `TAB-009`'s Next action.
 ## Next action
 
 Decide a retention policy once real usage patterns are known (`DOC-037`).
-Move `Record Status` to `Closed + Monitored` once a live sheet with real
-data has been observed.
+Move `Record Status` to `Closed + Monitored` once the recurring workflow
+has run a full organic cycle (not just this one-time backfill).
 
 ## Closure evidence
 
-Not yet closed — `Record Status: Drafted`.
+Not yet closed — `Record Status: Validated`. Live sheet observed with
+real backfilled July/August 2026 data as of 2026-09-18.

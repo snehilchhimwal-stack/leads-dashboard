@@ -965,26 +965,28 @@
   {
     const oppPeriodHeaders = ['period_key', 'year_month', 'period_number', 'period_label', 'date_from', 'date_to',
       'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
-      'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at', 'updated_at', 'source'];
+      'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at', 'updated_at', 'source',
+      'avg_days_to_opp', 'avg_hrs_to_opp'];
     const oppPeriodRows = [
-      ['2026-07_P1', '2026-07', 1, '1st-10th', '2026-07-01', '2026-07-10', 1000, 300, 400, 30, 40, 'done', '2026-07-11', 'done', '2026-07-11', 'done', '2026-07-11', '2026-07-11', 'Claude session'],
-      ['2026-07_P2', '2026-07', 2, '11th-20th', '2026-07-11', '2026-07-20', 1000, 320, 420, 32, 42, 'done', '2026-07-21', 'done', '2026-07-21', 'done', '2026-07-21', '2026-07-21', 'Claude session'],
-      ['2026-07_P3', '2026-07', 3, '21st-end', '2026-07-21', '2026-07-31', 1000, 340, 440, 34, 44, 'done', '2026-08-01', 'done', '2026-08-01', 'done', '2026-08-01', '2026-08-01', 'Claude session'],
-      ['2026-08_P1', '2026-08', 1, '1st-10th', '2026-08-01', '2026-08-10', 1100, 350, 450, 35, 45, 'done', '2026-08-11', 'done', '2026-08-11', 'done', '2026-08-11', '2026-08-11', 'Claude session'],
-      ['2026-08_P2', '2026-08', 2, '11th-20th', '2026-08-11', '2026-08-20', 1100, 360, 460, 36, 46, 'done', '2026-08-21', 'done', '2026-08-21', 'done', '2026-08-21', '2026-08-21', 'Claude session'],
-      ['2026-08_P3', '2026-08', 3, '21st-end', '2026-08-21', '2026-08-31', 1100, 380, 480, 38, 48, 'done', '2026-09-01', 'done', '2026-09-01', 'done', '2026-09-01', '2026-09-01', 'Claude session'],
-      ['2026-09_P1', '2026-09', 1, '1st-10th', '2026-09-01', '2026-09-10', 1200, 400, 500, 40, 50, 'done', '2026-09-11', 'done', '2026-09-11', 'done', '2026-09-11', '2026-09-11', 'Claude session'],
+      ['2026-07_P1', '2026-07', 1, '1st-10th', '2026-07-01', '2026-07-10', 1000, 300, 400, 30, 40, 'done', '2026-07-11', 'done', '2026-07-11', 'done', '2026-07-11', '2026-07-11', 'Claude session', 0.9, 21.6],
+      ['2026-07_P2', '2026-07', 2, '11th-20th', '2026-07-11', '2026-07-20', 1000, 320, 420, 32, 42, 'done', '2026-07-21', 'done', '2026-07-21', 'done', '2026-07-21', '2026-07-21', 'Claude session', 0.85, 20.4],
+      ['2026-07_P3', '2026-07', 3, '21st-end', '2026-07-21', '2026-07-31', 1000, 340, 440, 34, 44, 'done', '2026-08-01', 'done', '2026-08-01', 'done', '2026-08-01', '2026-08-01', 'Claude session', 1.0, 24.0],
+      ['2026-08_P1', '2026-08', 1, '1st-10th', '2026-08-01', '2026-08-10', 1100, 350, 450, 35, 45, 'done', '2026-08-11', 'done', '2026-08-11', 'done', '2026-08-11', '2026-08-11', 'Claude session', 1.1, 26.4],
+      ['2026-08_P2', '2026-08', 2, '11th-20th', '2026-08-11', '2026-08-20', 1100, 360, 460, 36, 46, 'done', '2026-08-21', 'done', '2026-08-21', 'done', '2026-08-21', '2026-08-21', 'Claude session', 0.95, 22.8],
+      ['2026-08_P3', '2026-08', 3, '21st-end', '2026-08-21', '2026-08-31', 1100, 380, 480, 38, 48, 'done', '2026-09-01', 'done', '2026-09-01', 'done', '2026-09-01', '2026-09-01', 'Claude session', 0.88, 21.1],
+      ['2026-09_P1', '2026-09', 1, '1st-10th', '2026-09-01', '2026-09-10', 1200, 400, 500, 40, 50, 'done', '2026-09-11', 'done', '2026-09-11', 'done', '2026-09-11', '2026-09-11', 'Claude session', 0.92, 22.1],
       // Sep P2: step1/2 done, step3 (email) deliberately pending — tests
       // a partial row's chips AND that the results table shows a row
       // whose own checklist isn't finished yet (results != checklist).
-      ['2026-09_P2', '2026-09', 2, '11th-20th', '2026-09-11', '2026-09-20', 1200, 410, 510, 41, 51, 'done', '2026-09-21', 'done', '2026-09-21', '', '', '2026-09-21', 'Claude session'],
+      ['2026-09_P2', '2026-09', 2, '11th-20th', '2026-09-11', '2026-09-20', 1200, 410, 510, 41, 51, 'done', '2026-09-21', 'done', '2026-09-21', '', '', '2026-09-21', 'Claude session', 0.87, 20.9],
       // Sep P3 deliberately absent — period hasn't been reached yet.
     ];
     const oppMonthHeaders = ['month_key', 'year_month', 'month_label', 'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
-      'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at', 'updated_at', 'source'];
+      'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at', 'updated_at', 'source',
+      'avg_days_to_opp', 'avg_hrs_to_opp'];
     const oppMonthRows = [
-      ['2026-07', '2026-07', 'July 2026', 3000, 960, 1260, 32, 42, 'done', '2026-08-01', 'done', '2026-08-01', 'done', '2026-08-01', '2026-08-01', 'Claude session'],
-      ['2026-08', '2026-08', 'August 2026', 3300, 1110, 1440, 33.6, 43.6, 'done', '2026-09-01', 'done', '2026-09-01', 'done', '2026-09-01', '2026-09-01', 'Claude session'],
+      ['2026-07', '2026-07', 'July 2026', 3000, 960, 1260, 32, 42, 'done', '2026-08-01', 'done', '2026-08-01', 'done', '2026-08-01', '2026-08-01', 'Claude session', 0.93, 22.3],
+      ['2026-08', '2026-08', 'August 2026', 3300, 1110, 1440, 33.6, 43.6, 'done', '2026-09-01', 'done', '2026-09-01', 'done', '2026-09-01', '2026-09-01', 'Claude session', 0.97, 23.3],
       // Sep month row deliberately absent — month isn't over yet.
     ];
 
@@ -1012,8 +1014,10 @@
       assert('Checklist shows Period 1 Data collection as Done', /Data collection: Done/.test(checklistHtml));
 
       const periodTableText = oppTextOf('oppMonitorPeriodTable');
-      assert('Period table lists July, August, and September rows', ['2026-07', '2026-08', '2026-09'].every(m => periodTableText.indexOf(m) !== -1));
+      assert('Period table shows readable month names (July/August/September 2026), not raw year_month', ['July 2026', 'August 2026', 'September 2026'].every(m => periodTableText.indexOf(m) !== -1));
       assert('Period table does NOT show a row for the absent September Period 3', (periodTableText.match(/21st-end/g) || []).length === 2); // only Jul + Aug P3, not a 3rd for Sep
+      assert('Period table shows the Same-Day/48h opp counts, not just percentages', periodTableText.indexOf('300') !== -1 && periodTableText.indexOf('400') !== -1); // Jul P1: same_day_count=300, h48_count=400
+      assert('Period table shows Avg Days to Opp and Avg Hrs to Opp', periodTableText.indexOf('0.9') !== -1 && periodTableText.indexOf('21.6') !== -1); // Jul P1 values
 
       // Cross-month delta: Sep P1 (40.0%) vs Aug P3 (38.0%) = +2.0pp, and
       // the ordered-slot sequence must resolve that pairing across the
@@ -1022,6 +1026,7 @@
 
       const monthTableText = oppTextOf('oppMonitorMonthTable');
       assert('Monthly trend table lists July and August but not the absent September row', monthTableText.indexOf('July 2026') !== -1 && monthTableText.indexOf('August 2026') !== -1 && monthTableText.indexOf('2026-09') === -1);
+      assert('Monthly trend table shows opp counts and Avg Days/Hrs to Opp', monthTableText.indexOf('960') !== -1 && monthTableText.indexOf('0.93') !== -1 && monthTableText.indexOf('22.3') !== -1); // July month row
 
       // Filter-bar hiding — the one behavior this tab uniquely owns.
       const filterBarEl = document.getElementById('filterBar');
