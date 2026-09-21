@@ -3,6 +3,15 @@
 You are about to work on one feature. This is the single short entry
 point into the catalog — the practical payoff of the whole thing.
 
+**`python3 test/whatis.py <filename-or-partial-name-or-component-id>`**
+(added 2026-09-21) automates step 1 below plus one hop of step 2/3 in a
+single command — the component's `Purpose`, `Important logic / business
+rules`, `Cross-runtime duplication`, and `Handover relationship`
+sections, plus a one-line summary of each `Depends On` component pulled
+from its own `INDEX.md` row. Still read the linked records yourself for
+anything past that first hop; this is a faster start, not a replacement
+for the method below.
+
 ---
 
 ## The method

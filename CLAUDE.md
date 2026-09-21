@@ -30,6 +30,15 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
 
 ## The gotchas that actually cost time here
 
+- **Before touching any file, check whether a `docs/` record already
+  exists for it** — `docs/HOW_TO_FIND_DOCS_FOR_A_FEATURE.md` is the
+  entry point; **`python3 test/whatis.py <filename>`** (added 2026-09-21)
+  automates its first step, printing the component's Purpose,
+  Cross-runtime duplication, Handover relationship, and one hop of
+  Depends On in one command instead of a manual `grep docs/INDEX.md` +
+  open-the-record. A surprising amount of "the session missed something"
+  in this project has been exactly this — a record already existed and
+  said the answer, nobody thought to look.
 - **Apps Script does not auto-deploy from git.** The authoritative running
   copy is inside the Sheet's own Extensions → Apps Script editor. A `.gs`
   edit in this repo is not live until you manually paste its full contents
