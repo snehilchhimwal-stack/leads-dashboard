@@ -203,6 +203,47 @@ function runDailyRmIssueLogTests_() {
     TestAssert_(prSheet.getMaxRows() < 10000, 'pruneDailyRmIssueLog_: shrinks an over-allocated sheet\'s row count back down toward kept-rows + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_');
     TestAssert_(prSheet.getMaxRows() >= 1 + 2 + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_, 'pruneDailyRmIssueLog_: never shrinks below what the kept rows + headroom actually need');
 
+    // ---- pruneDailyRmIssueLog_(ss, incomingRowCount): 2026-09-19 fix for
+    // the SECOND real "10,000,000 cells" incident — the sheet must be
+    // sized for the caller's about-to-be-written rows too, not just
+    // kept.length + the fixed headroom alone, or the write immediately
+    // after this call is exactly what forces the grid to expand and blow
+    // the workbook ceiling again. Re-uses the same 2-recent-row fixture
+    // shape as the test above, freshly re-seeded since the previous call
+    // already pruned prSheet in place. ----
+    const prIncSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [
+      prLogHeader,
+      prRow_(prOldDateCell, 'old-date'),
+      prRow_(prRecentDateCell, 'recent-date'),
+      prRow_(prRecentStringCell, 'recent-string'),
+    ]);
+    prIncSheet._maxRows = 10000;
+    const prIncSs = TestMockSpreadsheet_({});
+    prIncSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = prIncSheet;
+    const prIncomingRowCount = 26660; // real documented single-night volume, per this file's own header comment
+    pruneDailyRmIssueLog_(prIncSs, prIncomingRowCount);
+    TestAssert_(
+      prIncSheet.getMaxRows() >= 1 + 2 + prIncomingRowCount + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_,
+      'pruneDailyRmIssueLog_: with incomingRowCount passed, sizes the sheet to fit kept rows PLUS the caller\'s pending write, not just kept + headroom alone'
+    );
+    // And the no-argument call path (pruneDailyRmIssueLogNow's own usage)
+    // must keep behaving exactly as before — incomingRowCount defaults to
+    // 0, so this is a pure regression guard on the original fix's shape.
+    const prNoIncSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [
+      prLogHeader,
+      prRow_(prOldDateCell, 'old-date'),
+      prRow_(prRecentDateCell, 'recent-date'),
+      prRow_(prRecentStringCell, 'recent-string'),
+    ]);
+    prNoIncSheet._maxRows = 10000;
+    const prNoIncSs = TestMockSpreadsheet_({});
+    prNoIncSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = prNoIncSheet;
+    pruneDailyRmIssueLog_(prNoIncSs);
+    TestAssert_(
+      prNoIncSheet.getMaxRows() < 1 + 2 + prIncomingRowCount + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_,
+      'pruneDailyRmIssueLog_: omitting incomingRowCount (the manual-recovery call shape) does not over-allocate as if a large write were pending'
+    );
+
     // ---- pruneDailyRmIssueLogNow(): the one-off manual recovery entry
     // point resolves SpreadsheetApp.getActiveSpreadsheet() itself, same
     // pattern as pruneMovementLogNow ----

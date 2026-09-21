@@ -218,6 +218,12 @@ function TestMockSheet_(name, initialRows) {
       sheet._data.splice(startRow - 1, howMany);
       sheet._maxRows = Math.max(sheet._maxRows - howMany, sheet._data.length);
     },
+    // Added 2026-09-19 for pruneDailyRmIssueLog_'s incomingRowCount fix —
+    // real Sheets grows the declared row grid without touching any cell
+    // VALUES, same asymmetry deleteRows already models the other way.
+    insertRowsAfter: function (afterPosition, howMany) {
+      sheet._maxRows = sheet._maxRows + howMany;
+    },
     // Conditional formatting: added 2026-09-09 for
     // setupLeadFollowupsStalenessFormatting (LeadFollowupsStaleness.gs) —
     // unlike setNumberFormat/insertCheckboxes above (pure visual, nothing

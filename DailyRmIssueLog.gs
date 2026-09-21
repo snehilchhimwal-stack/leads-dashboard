@@ -83,12 +83,19 @@ const DAILY_RM_ISSUE_LOG_COLUMNS_ = [
 // with the shared cell budget again. Raise only after confirming real
 // headroom against ALL sheets in the workbook, not just this one.
 const DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ = 7;
-// Matches MovementTracker.gs's MOVEMENT_LOG_ROW_HEADROOM_ exactly — see
-// that constant's own comment for why headroom exists at all. The exact
-// value barely matters here in practice: at ~26,660 rows/night (see
-// above), 7 days of kept rows alone dwarfs any reasonable headroom size,
-// so this only smooths out night-to-night volume variance, not the
-// dominant cost.
+// Matches MovementTracker.gs's MOVEMENT_LOG_ROW_HEADROOM_ in spirit, but
+// NOTE (2026-09-19 fix, second real incident): this constant alone is NOT
+// what protects tonight's write anymore. It used to be — pruneDailyRmIssueLog_
+// sized the sheet to kept.length + this fixed headroom, pruning ran BEFORE
+// rows.length was known, and a real night's volume (~26,660 rows, see
+// above) blew straight past a headroom this small, forcing the write to
+// expand the sheet's row grid and pushing the WORKBOOK over its ceiling —
+// exactly the "again error" incident. pruneDailyRmIssueLog_ now takes an
+// explicit incomingRowCount argument (captureDailyRmIssues_ passes
+// rows.length, known before pruning runs) and sizes around THAT, so the
+// write below never needs to expand the grid at all. This headroom is now
+// only a small smoothing buffer on top of an exact calculation, not the
+// thing standing between a normal night and a crash.
 const DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ = 5000;
 
 function ensureDailyRmIssueLogSheet_(ss) {
@@ -144,20 +151,10 @@ function captureDailyRmIssues_() {
 
   const logSheet = ensureDailyRmIssueLogSheet_(ss);
 
-  // Prune BEFORE writing, not after — deliberately the opposite order from
-  // MovementTracker.gs's snapshotOpenLeads_ (which prunes Movement_Log
-  // only after its own append). That after-write order is exactly what
-  // let this table run out of cell budget in the first place: once a
-  // sheet is already over the workbook's 10,000,000-cell ceiling, the
-  // write throws before a trailing prune call is ever reached, so nothing
-  // can self-heal without a manual one-off run (see
-  // pruneDailyRmIssueLogNow). Pruning first means tonight's capture always
-  // gets a chance to reclaim space before it needs it.
-  pruneDailyRmIssueLog_(ss);
-
-  // Idempotency guard — same per-day pattern Overnight_Log/AllIssues_Log
-  // already use: a double-fire (or a manual re-run the same night) must
-  // not duplicate the night's rows.
+  // Idempotency guard FIRST — needs neither pruning nor tonight's rows, so
+  // a double-fire (or a manual re-run the same night) bails out as cheaply
+  // as possible instead of paying for a full company scan and a prune pass
+  // first. Same per-day pattern Overnight_Log/AllIssues_Log already use.
   const priorLastRow = logSheet.getLastRow();
   if (priorLastRow >= 2) {
     const existingDates = withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 1).getValues(); }, 'read Daily_RM_Issues for idempotency check');
@@ -200,6 +197,17 @@ function captureDailyRmIssues_() {
   });
 
   if (!rows.length) { Logger.log('No open leads currently flagged for any SLA issue — nothing to log tonight.'); return; }
+
+  // Prune NOW, knowing exactly how many rows tonight needs — the actual
+  // fix for the 2026-09-19 recurrence of the "10,000,000 cells" crash.
+  // Pruning used to run before rows.length was known and sized the sheet
+  // to kept.length + a small fixed HEADROOM alone; a real night's volume
+  // (~26,660 rows) blew past that headroom, forcing the write below to
+  // expand the sheet's row grid — the exact operation that pushed the
+  // WORKBOOK over its ceiling. Passing rows.length lets
+  // pruneDailyRmIssueLog_ size the sheet to fit kept + tonight's rows
+  // exactly, so the write below never needs to grow the grid at all.
+  pruneDailyRmIssueLog_(ss, rows.length);
 
   // Chunked writes — same BACKFILL_CHUNK_SIZE_ pattern
   // backfillOneDayFromMovementLog_ already uses, applied here to the main
@@ -249,7 +257,8 @@ function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
 // type depending on how it happened to be written. The cutoff comparison
 // below normalizes both shapes the same way captureDailyRmIssues_'s own
 // idempotency check already does (line ~144), rather than assuming one.
-function pruneDailyRmIssueLog_(ss) {
+function pruneDailyRmIssueLog_(ss, incomingRowCount) {
+  incomingRowCount = incomingRowCount || 0;
   const logSheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
   if (!logSheet) return;
   const lastRow = logSheet.getLastRow();
@@ -273,10 +282,31 @@ function pruneDailyRmIssueLog_(ss) {
     }
   }
 
-  const neededRows = 1 + kept.length + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_;
+  // incomingRowCount is the caller's own about-to-be-written row count —
+  // captureDailyRmIssues_ passes rows.length (known before this call now
+  // runs); the manual recovery entry point pruneDailyRmIssueLogNow has no
+  // pending write, so it defaults to 0. Sizing around it, not just
+  // DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ alone, is what actually prevents the
+  // write immediately after this call from needing to expand the sheet's
+  // row grid (see captureDailyRmIssues_'s own call-site comment for the
+  // full incident this fixes).
+  const neededRows = 1 + kept.length + incomingRowCount + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_;
   const maxRows = logSheet.getMaxRows();
   if (maxRows > neededRows) {
     logSheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  } else if (maxRows < neededRows) {
+    // The gap this closes: a QUIET night (or several) shrinks the sheet
+    // down toward a small kept.length + headroom, and then a big-volume
+    // night arrives — without an explicit grow here, the allocation stays
+    // small and the WRITE right after this call is what has to expand the
+    // grid, which is the exact operation that hit the workbook's
+    // 10,000,000-cell ceiling in the first place. Growing here instead
+    // means that if there genuinely isn't room in the shared workbook
+    // budget, it fails HERE (still caught by captureDailyRmIssues_'s own
+    // try/catch, still alerts ops the same way) rather than mid-write —
+    // and when there IS room, the write below never needs to touch the
+    // grid size at all.
+    logSheet.insertRowsAfter(maxRows, neededRows - maxRows);
   }
 }
 
