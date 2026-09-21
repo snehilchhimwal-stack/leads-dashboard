@@ -97,6 +97,9 @@ const DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ = 7;
 // only a small smoothing buffer on top of an exact calculation, not the
 // thing standing between a normal night and a crash.
 const DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ = 5000;
+// Drive folder pruneDailyRmIssueLog_ archives dropped rows into before
+// they're gone from the sheet for good — see archiveRowsToDriveCsv_ (Core.gs).
+const DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_ = 'Leads Dashboard Archive — Daily_RM_Issues';
 
 function ensureDailyRmIssueLogSheet_(ss) {
   let sheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
@@ -266,16 +269,24 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount) {
   const lastCol = logSheet.getLastColumn();
   const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for pruning');
   const cutoffKey = istDayKeyGs_(new Date(Date.now() - DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ * 24 * 60 * 60 * 1000));
-  const kept = values.filter(function (row) {
+  const isKeptRow_ = function (row) {
     const cell = row[0];
     const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell || '');
     return key >= cutoffKey; // 'yyyy-MM-dd' strings compare correctly lexicographically
-  });
+  };
+  const kept = values.filter(isKeptRow_);
   if (kept.length === values.length) {
     // Nothing to prune — still fall through to the row-shrink check below,
     // since a prior run could have written more rows than this one needs
     // (e.g. after DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ was lowered).
   } else {
+    // Archive what's about to be dropped, before it's gone for good — same
+    // zero-cell-cost Drive CSV pattern as pruneMovementLog_ (MovementTracker.gs);
+    // see archiveRowsToDriveCsv_'s own comment (Core.gs).
+    const dropped = values.filter(function (row) { return !isKeptRow_(row); });
+    const header = withRetry_(function () { return logSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Daily_RM_Issues header for archiving');
+    archiveRowsToDriveCsv_(DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_, 'Daily_RM_Issues', header, dropped);
+
     withRetry_(function () { logSheet.getRange(2, 1, lastRow - 1, lastCol).clearContent(); }, 'clear Daily_RM_Issues before pruned rewrite');
     if (kept.length) {
       withRetry_(function () { logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept); }, 'rewrite pruned Daily_RM_Issues rows');

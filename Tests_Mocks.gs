@@ -259,6 +259,50 @@ function TestMockSpreadsheet_(sheetsByName) {
   };
 }
 
+// ============================== Mock DriveApp ==============================
+
+// Mocks the two DriveApp calls archiveRowsToDriveCsv_ (Core.gs) makes —
+// getFoldersByName/createFolder (find-or-create) and folder.createFile.
+// Nothing ever touches a real Drive; every created folder/file is kept
+// in-memory so a test can assert on exactly what was archived (name,
+// content, mime type) via the returned drive's _folders map.
+function TestMockDriveApp_() {
+  const folders = {}; // name -> folder object, same shape createFolder returns
+  const drive = {
+    _folders: folders, // exposed for test assertions
+    getFoldersByName: function (name) {
+      const existing = folders[name];
+      let handed = false;
+      return {
+        hasNext: function () { return !!existing && !handed; },
+        next: function () { handed = true; return existing; },
+      };
+    },
+    createFolder: function (name) {
+      if (folders[name]) return folders[name]; // idempotent, matches real Drive's own effective behavior for this codebase's find-or-create usage
+      const folder = {
+        _name: name,
+        _files: [],
+        getName: function () { return folder._name; },
+        createFile: function (fileName, content, mimeType) {
+          const file = {
+            _name: fileName,
+            _content: content,
+            _mimeType: mimeType,
+            getName: function () { return file._name; },
+            getUrl: function () { return 'https://drive.google.com/mock/' + encodeURIComponent(fileName); },
+          };
+          folder._files.push(file);
+          return file;
+        },
+      };
+      folders[name] = folder;
+      return folder;
+    },
+  };
+  return drive;
+}
+
 // ============================== Mock GmailApp / Gmail (Advanced Service) ==============================
 
 // Reset at the start of every runXyzTests() — see TestEnv_setUp_. Captures

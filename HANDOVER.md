@@ -328,6 +328,28 @@ incident, not standing functionality.
 
 ### 4.4 GitHub repo access
 
+### 4.3.1 Standing Drive-CSV archival (2026-09-21) — every prune, not just a one-off
+
+`archiveRowsToDriveCsv_` (`Core.gs`) generalizes
+`removeEarlyCorruptedMovementLogDataNow`'s one-off backup pattern above into
+something both `pruneMovementLog_` (`MovementTracker.gs`) and
+`pruneDailyRmIssueLog_` (`DailyRmIssueLog.gs`) now call automatically, every
+single time either function actually drops rows past its retention window —
+not a manual/one-time thing. Each writes a dated CSV
+(`Movement_Log_<timestamp>.csv` / `Daily_RM_Issues_<timestamp>.csv`) into its
+own Drive folder (`MOVEMENT_LOG_ARCHIVE_FOLDER_` /
+`DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_`, created on first use) containing
+exactly the rows that just aged out — before they're gone from the sheet for
+good. Same zero-cell-cost reasoning as the one-off version: a Drive file's
+size has nothing to do with the workbook's 10,000,000-cell ceiling, so this
+turns "7 days retained in-workbook" into "kept indefinitely, just not
+counted against that ceiling." Reading it back is a script job (parse the
+relevant day's CSV), not a live formula/filter — this is a cold archive, not
+a second live table. No new trigger or setup function needed; it rides
+inside the two prune functions' existing nightly call sites.
+
+### 4.4 GitHub repo access
+
 Push access to `github.com/snehilchhimwal-stack/leads-dashboard` is needed to
 change `dashboard.html`/`js/*.js` (the deployed frontend) or to keep this
 repo's copies of the `.gs` files in sync with what's actually pasted into the

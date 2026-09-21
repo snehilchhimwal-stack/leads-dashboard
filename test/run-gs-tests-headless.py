@@ -183,6 +183,11 @@ SANDBOX_SHIM_JS = r"""
     },
   };
   window.ScriptApp = {};
+  // archiveRowsToDriveCsv_ (Core.gs) references both — real objects here
+  // (not left undeclared) so tests exercising it can swap in a mock the
+  // same way SpreadsheetApp/GmailApp/ScriptApp already do above.
+  window.DriveApp = {};
+  window.MimeType = { CSV: 'CSV' };
   window.__ghtLogLines__ = [];
   window.Logger = { log: function () { window.__ghtLogLines__.push(Array.prototype.map.call(arguments, String).join(' ')); } };
 })();

@@ -150,6 +150,11 @@ function buildSandbox() {
       },
     },
     ScriptApp: {},
+    // archiveRowsToDriveCsv_ (Core.gs) references both — real objects here
+    // (not left undeclared) so tests exercising it can swap in a mock the
+    // same way SpreadsheetApp/GmailApp/ScriptApp already do.
+    DriveApp: {},
+    MimeType: { CSV: 'CSV' },
     Logger: { log: function () { console.log.apply(console, arguments); } },
   };
   vm.createContext(sandbox);

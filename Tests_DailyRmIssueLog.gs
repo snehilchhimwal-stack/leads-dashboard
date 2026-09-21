@@ -192,6 +192,12 @@ function runDailyRmIssueLogTests_() {
     // the shrink branch.
     prSheet._maxRows = 10000;
     prSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = prSheet;
+    // Shared across every pruneDailyRmIssueLog_ call in this whole test
+    // group (below too) — restored once at the end, same "one swap covers
+    // several sequential calls" shape as this file's other prune tests.
+    const realDriveForDailyPrune = DriveApp;
+    const mockDriveForDailyPrune = TestMockDriveApp_();
+    DriveApp = mockDriveForDailyPrune;
     pruneDailyRmIssueLog_(prSs);
     const prKeptRows = prSheet.getRange(2, 1, prSheet.getLastRow() - 1, prLogHeader.length).getValues();
     const prKeptTags = prKeptRows.map(function (r) { return r[1]; });
@@ -202,6 +208,13 @@ function runDailyRmIssueLogTests_() {
     TestAssertEqual_(prKeptTags.length, 2, 'pruneDailyRmIssueLog_: exactly the 2 recent rows survive, nothing extra');
     TestAssert_(prSheet.getMaxRows() < 10000, 'pruneDailyRmIssueLog_: shrinks an over-allocated sheet\'s row count back down toward kept-rows + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_');
     TestAssert_(prSheet.getMaxRows() >= 1 + 2 + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_, 'pruneDailyRmIssueLog_: never shrinks below what the kept rows + headroom actually need');
+    // 2026-09-21 addition: archiveRowsToDriveCsv_ (Core.gs) — the 2 dropped
+    // rows ('old-date'/'old-string') must land in a Drive CSV first.
+    const dailyArchiveFolder = mockDriveForDailyPrune._folders[DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_];
+    TestAssert_(!!dailyArchiveFolder, 'pruneDailyRmIssueLog_: archives dropped rows to Drive before removing them from the sheet');
+    const dailyArchivedContent = dailyArchiveFolder._files[0]._content;
+    TestAssert_(dailyArchivedContent.indexOf('old-date') >= 0 && dailyArchivedContent.indexOf('old-string') >= 0, 'pruneDailyRmIssueLog_: the archived CSV contains BOTH dropped rows');
+    TestAssert_(dailyArchivedContent.indexOf('recent-date') === -1 && dailyArchivedContent.indexOf('recent-string') === -1, 'pruneDailyRmIssueLog_: the archived CSV does NOT contain either kept row');
 
     // ---- pruneDailyRmIssueLog_(ss, incomingRowCount): 2026-09-19 fix for
     // the SECOND real "10,000,000 cells" incident — the sheet must be
@@ -243,6 +256,7 @@ function runDailyRmIssueLogTests_() {
       prNoIncSheet.getMaxRows() < 1 + 2 + prIncomingRowCount + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_,
       'pruneDailyRmIssueLog_: omitting incomingRowCount (the manual-recovery call shape) does not over-allocate as if a large write were pending'
     );
+    DriveApp = realDriveForDailyPrune;
 
     // ---- pruneDailyRmIssueLogNow(): the one-off manual recovery entry
     // point resolves SpreadsheetApp.getActiveSpreadsheet() itself, same
@@ -251,12 +265,17 @@ function runDailyRmIssueLogTests_() {
     const prNowSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader, prRow_(prOldDateCell, 'old-date')]);
     prNowSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = prNowSheet;
     const realSsForPruneNow = SpreadsheetApp;
+    const realDriveForPruneNow = DriveApp;
+    const mockDriveForPruneNow = TestMockDriveApp_();
     SpreadsheetApp = { getActiveSpreadsheet: function () { return prNowSs; }, flush: function () {} };
+    DriveApp = mockDriveForPruneNow;
     try {
       pruneDailyRmIssueLogNow();
       TestAssertEqual_(prNowSheet.getLastRow(), 1, 'pruneDailyRmIssueLogNow: manual recovery entry point prunes the ACTIVE spreadsheet\'s Daily_RM_Issues, dropping the old row down to header-only');
+      TestAssert_(!!mockDriveForPruneNow._folders[DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_], 'pruneDailyRmIssueLogNow: the manual recovery path archives the dropped row too, same as the nightly path');
     } finally {
       SpreadsheetApp = realSsForPruneNow;
+      DriveApp = realDriveForPruneNow;
     }
 
     // ---- integration: captureDailyRmIssues_ prunes BEFORE writing, so a
@@ -273,7 +292,10 @@ function runDailyRmIssueLogTests_() {
     intLogSheet._maxRows = 10000;
     intSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = intLogSheet;
     const realSsForInt = SpreadsheetApp;
+    const realDriveForInt = DriveApp;
+    const mockDriveForInt = TestMockDriveApp_();
     SpreadsheetApp = { getActiveSpreadsheet: function () { return intSs; }, flush: function () {} };
+    DriveApp = mockDriveForInt;
     try {
       captureDailyRmIssuesNow();
       const intRows = intLogSheet.getRange(2, 1, intLogSheet.getLastRow() - 1, prLogHeader.length).getValues();
@@ -281,8 +303,12 @@ function runDailyRmIssueLogTests_() {
       TestAssertEqual_(intTags.filter(function (t) { return String(t).indexOf('stale-') === 0; }).length, 0, 'captureDailyRmIssuesNow: the 50 stale rows from before tonight are pruned as part of the same run');
       TestAssert_(intTags.indexOf('Test RM One') >= 0, 'captureDailyRmIssuesNow: tonight\'s real flagged row is still written correctly in the same run pruning happened');
       TestAssert_(intLogSheet.getMaxRows() < 10000, 'captureDailyRmIssuesNow: row allocation is shrunk as part of the same run, not left over-allocated');
+      const intArchiveFolder = mockDriveForInt._folders[DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_];
+      TestAssert_(!!intArchiveFolder, 'captureDailyRmIssuesNow: the 50 pruned stale rows are archived to Drive as part of the same run');
+      TestAssertEqual_(intArchiveFolder._files[0]._content.split('\n').length, 51, 'captureDailyRmIssuesNow: the archive contains all 50 stale rows plus a header line');
     } finally {
       SpreadsheetApp = realSsForInt;
+      DriveApp = realDriveForInt;
     }
 
     // ---- RM Performance (Phase 4): reconstructRmPerformanceObservationsGs_

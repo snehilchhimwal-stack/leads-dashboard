@@ -135,12 +135,27 @@ function runMovementTrackerTests_() {
     // its cutoff, not the injected `now` — a 10-day-old fixture row will
     // always be outside MOVEMENT_LOG_RETENTION_DAYS (7) regardless of
     // when this suite actually runs, so this stays deterministic.
-    pruneMovementLog_(pruneSs);
-    const keptRows = pruneSheet.getRange(2, 1, pruneSheet.getLastRow() - 1, pruneHeader.length).getValues();
+    const realDriveForPrune = DriveApp;
+    const mockDriveForPrune = TestMockDriveApp_();
+    DriveApp = mockDriveForPrune;
+    let keptRows;
+    try {
+      pruneMovementLog_(pruneSs);
+      keptRows = pruneSheet.getRange(2, 1, pruneSheet.getLastRow() - 1, pruneHeader.length).getValues();
+    } finally {
+      DriveApp = realDriveForPrune;
+    }
     TestAssertEqual_(keptRows.filter(function (r) { return r[1] === 'old'; }).length, 0, 'pruneMovementLog_: a row older than the retention window is dropped');
     TestAssertEqual_(keptRows.filter(function (r) { return r[1] === 'recent'; }).length, 1, 'pruneMovementLog_: a row within the retention window is kept');
     TestAssert_(pruneSheet.getMaxRows() < 20000, 'pruneMovementLog_: shrinks an over-allocated sheet\'s row count back down toward kept-rows + MOVEMENT_LOG_ROW_HEADROOM_');
     TestAssert_(pruneSheet.getMaxRows() >= 1 + 1 + MOVEMENT_LOG_ROW_HEADROOM_, 'pruneMovementLog_: never shrinks below what the kept rows + headroom actually need');
+    // 2026-09-21 addition: archiveRowsToDriveCsv_ (Core.gs) — the dropped
+    // 'old' row must land in a Drive CSV before it's gone from the sheet.
+    const pruneArchiveFolder = mockDriveForPrune._folders[MOVEMENT_LOG_ARCHIVE_FOLDER_];
+    TestAssert_(!!pruneArchiveFolder, 'pruneMovementLog_: archives dropped rows to Drive before removing them from the sheet');
+    TestAssertEqual_(pruneArchiveFolder._files.length, 1, 'pruneMovementLog_: writes exactly one archive CSV per prune run');
+    TestAssert_(pruneArchiveFolder._files[0]._content.indexOf('L-OLD') >= 0, 'pruneMovementLog_: the archived CSV actually contains the dropped row\'s data');
+    TestAssert_(pruneArchiveFolder._files[0]._content.indexOf('L-RECENT') === -1, 'pruneMovementLog_: the archived CSV does NOT contain a row that was kept, not dropped');
 
     // ---- pruneMovementLog_: real production incident, 2026-09-12 —
     // write-before-clear safety + skip-when-nothing-to-prune ----
@@ -169,11 +184,15 @@ function runMovementTrackerTests_() {
       const allRecentSheet = TestMockSheet_('Movement_Log', [allRecentHeader].concat(allRecentRows));
       allRecentSheet._maxRows = 20000;
       allRecentSs._sheets['Movement_Log'] = allRecentSheet;
+      const realDriveForPrune2 = DriveApp;
+      const mockDriveForPrune2 = TestMockDriveApp_();
+      DriveApp = mockDriveForPrune2;
       const beforeValues = allRecentSheet.getRange(1, 1, allRecentSheet.getLastRow(), allRecentHeader.length).getValues();
       pruneMovementLog_(allRecentSs);
       const afterValues = allRecentSheet.getRange(1, 1, allRecentSheet.getLastRow(), allRecentHeader.length).getValues();
       TestAssertEqual_(afterValues, beforeValues, 'pruneMovementLog_: when every row is still within retention, the sheet\'s content is left completely untouched (early-return, no clear/write at all)');
       TestAssertEqual_(allRecentSheet.getMaxRows(), 20000, 'pruneMovementLog_: the row-allocation shrink is also skipped on the nothing-to-prune path — it never runs when nothing was pruned');
+      TestAssertEqual_(Object.keys(mockDriveForPrune2._folders).length, 0, 'pruneMovementLog_: the nothing-to-prune early-return also skips archiving — no Drive folder/file created when nothing was dropped');
 
       const mixedSs = TestMockSpreadsheet_({});
       const mixedHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
@@ -197,6 +216,15 @@ function runMovementTrackerTests_() {
       const keptLeadIds = mixedKept.map(function (r) { return r[SNAPSHOT_COLUMNS_.indexOf('lead_id') + 2]; });
       TestAssertEqual_(keptLeadIds.sort(), ['L-RA', 'L-RB', 'L-RC'].sort(), 'pruneMovementLog_ (multi-row kept): the 3 surviving rows are exactly the 3 recent ones, correctly written to their new positions — never a stale leftover or a dropped real row');
       TestAssert_(mixedKept.every(function (r) { return r[0] instanceof Date; }), 'pruneMovementLog_ (multi-row kept): every surviving row still has a real Date in snapshot_at — write-then-clear never corrupts the column being written');
+      // 2026-09-21 addition: archiveRowsToDriveCsv_ (Core.gs) — both
+      // dropped rows land in the SAME archive file, and none of the 3 kept
+      // rows leak into it.
+      const mixedArchiveFolder = mockDriveForPrune2._folders[MOVEMENT_LOG_ARCHIVE_FOLDER_];
+      TestAssert_(!!mixedArchiveFolder, 'pruneMovementLog_ (multi-row kept): archives the 2 dropped rows to Drive');
+      const mixedArchivedContent = mixedArchiveFolder._files[mixedArchiveFolder._files.length - 1]._content;
+      TestAssert_(mixedArchivedContent.indexOf('L-OLD1') >= 0 && mixedArchivedContent.indexOf('L-OLD2') >= 0, 'pruneMovementLog_ (multi-row kept): the archive contains BOTH dropped rows\' lead_ids');
+      TestAssert_(mixedArchivedContent.indexOf('L-RA') === -1 && mixedArchivedContent.indexOf('L-RB') === -1 && mixedArchivedContent.indexOf('L-RC') === -1, 'pruneMovementLog_ (multi-row kept): the archive does NOT contain any of the 3 kept rows\' lead_ids');
+      DriveApp = realDriveForPrune2;
     })();
 
     // ---- setupMovementTracking: installs exactly SNAPSHOT_HOURS_.length triggers, cleans up old ones first ----

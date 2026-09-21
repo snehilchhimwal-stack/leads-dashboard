@@ -83,6 +83,9 @@ const MOVEMENT_LOG_RETENTION_DAYS = 7;
 // immediately have to re-expand it for the very next snapshot's rows —
 // see pruneMovementLog_'s own comment for why the sheet gets shrunk at all.
 const MOVEMENT_LOG_ROW_HEADROOM_ = 5000;
+// Drive folder pruneMovementLog_ archives dropped rows into before they're
+// gone from the sheet for good — see archiveRowsToDriveCsv_ (Core.gs).
+const MOVEMENT_LOG_ARCHIVE_FOLDER_ = 'Leads Dashboard Archive — Movement_Log';
 // Four separate fixed-hour daily triggers (IST), not one
 // .timeBased().everyHours(6) trigger — see setupMovementTracking's own
 // comment for why: everyHours() only loosely targets its interval and can
@@ -625,12 +628,21 @@ function pruneMovementLog_(ss) {
   const lastCol = logSheet.getLastColumn();
   const values = logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   const cutoff = new Date(Date.now() - MOVEMENT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  const kept = values.filter(function (row) {
+  const isKeptRow_ = function (row) {
     const ts = row[0];
     return ts instanceof Date && ts >= cutoff;
-  });
+  };
+  const kept = values.filter(isKeptRow_);
 
   if (kept.length === values.length) return; // nothing to prune — don't touch the sheet at all
+
+  // Archive what's about to be dropped, before it's gone for good — see
+  // archiveRowsToDriveCsv_'s own comment (Core.gs) for why this is a Drive
+  // CSV rather than an in-workbook backup, and why it runs on every prune
+  // now instead of only removeEarlyCorruptedMovementLogDataNow's one-off.
+  const dropped = values.filter(function (row) { return !isKeptRow_(row); });
+  const header = logSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  archiveRowsToDriveCsv_(MOVEMENT_LOG_ARCHIVE_FOLDER_, 'Movement_Log', header, dropped);
 
   if (kept.length) {
     logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept);

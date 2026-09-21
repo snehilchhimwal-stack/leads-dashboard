@@ -212,3 +212,41 @@ function esc_(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// Shared by pruneMovementLog_ (MovementTracker.gs) and pruneDailyRmIssueLog_
+// (DailyRmIssueLog.gs) — archives rows about to be dropped from a sheet to
+// a dated CSV in a named Drive folder, BEFORE they're gone for good. Same
+// pattern removeEarlyCorruptedMovementLogDataNow's one-off cleanup already
+// used (a Drive file, not a second in-workbook sheet/backup), generalized
+// here so it runs automatically on every routine prune instead of only a
+// manual one-off — this is what actually turns "7 days retained in the
+// sheet" into "kept forever, just not in the workbook," at zero cost
+// against the workbook's 10,000,000-cell ceiling (a Drive file's size has
+// nothing to do with that cap).
+//
+// folderName: Drive folder to file the CSV under, created on first use if
+// it doesn't already exist — one folder per archived table, so years of
+// nightly files stay browsable rather than dumped loose into "My Drive".
+// filePrefix: forms the filename together with a capture timestamp, e.g.
+// "Movement_Log_2026-09-21_225003.csv".
+// header/rows: plain arrays, exactly as read via getRange(...).getValues()
+// — no transformation expected from the caller.
+//
+// No-ops (returns null, writes nothing) when rows is empty, so a prune run
+// that drops nothing never leaves a pointless empty file behind. Returns
+// the created File otherwise.
+function archiveRowsToDriveCsv_(folderName, filePrefix, header, rows) {
+  if (!rows || !rows.length) return null;
+  const folders = DriveApp.getFoldersByName(folderName);
+  const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+  const csvEscape = function (cell) {
+    if (cell instanceof Date) return cell.toISOString();
+    const s = String(cell == null ? '' : cell);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = [header].concat(rows).map(function (row) {
+    return row.map(csvEscape).join(',');
+  }).join('\n');
+  const fileName = filePrefix + '_' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmmss') + '.csv';
+  return folder.createFile(fileName, csv, MimeType.CSV);
+}
