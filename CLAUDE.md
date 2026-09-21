@@ -80,7 +80,12 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   the sandbox, so `runAllTests()` can't resolve the name (real incident,
   CHECKLIST-006, 2026-09-09). Add it to: `Tests_RunAll.gs`'s `suites`
   array, `test/run-gs-tests.js`'s file lists, AND paste it into the live
-  Apps Script editor per the point above.
+  Apps Script editor per the point above. **Run `python3
+  test/check-gs-registration.py`** (added 2026-09-21) after adding or
+  renaming any `.gs`/`Tests_*.gs` file — it cross-checks disk, both
+  `test/run-gs-tests.js` lists, and `Tests_RunAll.gs`'s `suites` array
+  against each other in one command, catching exactly the CHECKLIST-006
+  gap instead of relying on remembering all three places by eye.
 - **`RmHierarchy.private.gs` is never in git** (`.gitignore`) — real
   employee emails. Get it directly from whoever last had it, out of band.
   Its absence doesn't crash anything; routing just silently degrades to a
