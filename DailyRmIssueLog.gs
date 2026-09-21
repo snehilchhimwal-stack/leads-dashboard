@@ -97,9 +97,6 @@ const DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ = 7;
 // only a small smoothing buffer on top of an exact calculation, not the
 // thing standing between a normal night and a crash.
 const DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ = 5000;
-// Drive folder pruneDailyRmIssueLog_ archives dropped rows into before
-// they're gone from the sheet for good — see archiveRowsToDriveCsv_ (Core.gs).
-const DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_ = 'Leads Dashboard Archive — Daily_RM_Issues';
 
 function ensureDailyRmIssueLogSheet_(ss) {
   let sheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
@@ -285,7 +282,17 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount) {
     // see archiveRowsToDriveCsv_'s own comment (Core.gs).
     const dropped = values.filter(function (row) { return !isKeptRow_(row); });
     const header = withRetry_(function () { return logSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Daily_RM_Issues header for archiving');
-    archiveRowsToDriveCsv_(DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_, 'Daily_RM_Issues', header, dropped);
+    // date (column 0) can be a real Date OR a 'yyyy-MM-dd' string (see this
+    // function's own header comment) — normalize the same way isKeptRow_
+    // already does, then sort lexicographically (valid for 'yyyy-MM-dd').
+    const droppedDateKeys = dropped.map(function (row) {
+      const cell = row[0];
+      return cell instanceof Date ? istDayKeyGs_(cell) : String(cell || '');
+    }).filter(function (k) { return k; }).sort();
+    const rowDateRangeLabel = droppedDateKeys.length
+      ? droppedDateKeys[0] + '_to_' + droppedDateKeys[droppedDateKeys.length - 1]
+      : 'unknown-dates';
+    archiveRowsToDriveCsv_('Daily_RM_Issues', header, dropped, rowDateRangeLabel);
 
     withRetry_(function () { logSheet.getRange(2, 1, lastRow - 1, lastCol).clearContent(); }, 'clear Daily_RM_Issues before pruned rewrite');
     if (kept.length) {

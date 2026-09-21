@@ -326,8 +326,6 @@ the live data already needs room in. Safe to re-run; not wired to any
 trigger or button on purpose — it's remediation for one specific
 incident, not standing functionality.
 
-### 4.4 GitHub repo access
-
 ### 4.3.1 Standing Drive-CSV archival (2026-09-21) — every prune, not just a one-off
 
 `archiveRowsToDriveCsv_` (`Core.gs`) generalizes
@@ -335,18 +333,28 @@ incident, not standing functionality.
 something both `pruneMovementLog_` (`MovementTracker.gs`) and
 `pruneDailyRmIssueLog_` (`DailyRmIssueLog.gs`) now call automatically, every
 single time either function actually drops rows past its retention window —
-not a manual/one-time thing. Each writes a dated CSV
-(`Movement_Log_<timestamp>.csv` / `Daily_RM_Issues_<timestamp>.csv`) into its
-own Drive folder (`MOVEMENT_LOG_ARCHIVE_FOLDER_` /
-`DAILY_RM_ISSUE_LOG_ARCHIVE_FOLDER_`, created on first use) containing
-exactly the rows that just aged out — before they're gone from the sheet for
-good. Same zero-cell-cost reasoning as the one-off version: a Drive file's
-size has nothing to do with the workbook's 10,000,000-cell ceiling, so this
-turns "7 days retained in-workbook" into "kept indefinitely, just not
-counted against that ceiling." Reading it back is a script job (parse the
-relevant day's CSV), not a live formula/filter — this is a cold archive, not
-a second live table. No new trigger or setup function needed; it rides
-inside the two prune functions' existing nightly call sites.
+not a manual/one-time thing. Everything lands in ONE shared Drive folder,
+**"Leads Dashboard Archive"** (`ARCHIVE_ROOT_FOLDER_`, created on first use,
+in whichever Google account owns the nightly trigger — i.e. whoever last ran
+`setupMovementTracking()`/`setupDailyRmIssueLog()`), with a subfolder per
+table (`Movement_Log`, `Daily_RM_Issues`). Each archived file's name encodes
+the ACTUAL row-date range it covers, not just when the archive ran — e.g.
+`Movement_Log_rows_2026-09-01_to_2026-09-07_archived_2026-09-21_225003.csv`
+— so what's inside is readable without opening the file. A single
+append-only ledger, `archive_log.csv`, sits in the root folder itself
+(`archived_at,table,filename,row_date_range,row_count` — one line per
+archive event across BOTH tables) as one place to see the full archive
+history without browsing subfolders. Every archive also logs its Drive URL
+via `Logger.log`, visible in that run's execution log.
+
+Same zero-cell-cost reasoning as the one-off version: a Drive file's size
+has nothing to do with the workbook's 10,000,000-cell ceiling, so this turns
+"7 days retained in-workbook" into "kept indefinitely, just not counted
+against that ceiling." Reading it back is a script job (parse the relevant
+CSV, or check `archive_log.csv` first to find which file covers a given
+date), not a live formula/filter — this is a cold archive, not a second live
+table. No new trigger or setup function needed; it rides inside the two
+prune functions' existing nightly call sites.
 
 ### 4.4 GitHub repo access
 

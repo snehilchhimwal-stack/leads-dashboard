@@ -213,32 +213,53 @@ function esc_(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Single shared parent every archived table's own subfolder lives under —
+// one place in Drive, not tables scattered as separate top-level folders.
+// Lives in whichever Google account owns the nightly trigger (whoever last
+// ran setupMovementTracking()/setupDailyRmIssueLog()), since DriveApp calls
+// from a time-driven trigger execute as that trigger's owner.
+const ARCHIVE_ROOT_FOLDER_ = 'Leads Dashboard Archive';
+// One manifest file in ARCHIVE_ROOT_FOLDER_ itself (not per-subfolder) — a
+// single append-only ledger of every archive event across every table, so
+// "what got archived, when, covering which row-dates" is answerable
+// without opening individual CSVs or browsing subfolders.
+const ARCHIVE_MANIFEST_FILE_ = 'archive_log.csv';
+
 // Shared by pruneMovementLog_ (MovementTracker.gs) and pruneDailyRmIssueLog_
 // (DailyRmIssueLog.gs) — archives rows about to be dropped from a sheet to
-// a dated CSV in a named Drive folder, BEFORE they're gone for good. Same
-// pattern removeEarlyCorruptedMovementLogDataNow's one-off cleanup already
-// used (a Drive file, not a second in-workbook sheet/backup), generalized
-// here so it runs automatically on every routine prune instead of only a
-// manual one-off — this is what actually turns "7 days retained in the
-// sheet" into "kept forever, just not in the workbook," at zero cost
-// against the workbook's 10,000,000-cell ceiling (a Drive file's size has
-// nothing to do with that cap).
+// a dated CSV in Drive, BEFORE they're gone for good. Same pattern
+// removeEarlyCorruptedMovementLogDataNow's one-off cleanup already used (a
+// Drive file, not a second in-workbook sheet/backup), generalized here so
+// it runs automatically on every routine prune instead of only a manual
+// one-off — this is what actually turns "7 days retained in the sheet"
+// into "kept forever, just not in the workbook," at zero cost against the
+// workbook's 10,000,000-cell ceiling (a Drive file's size has nothing to
+// do with that cap).
 //
-// folderName: Drive folder to file the CSV under, created on first use if
-// it doesn't already exist — one folder per archived table, so years of
-// nightly files stay browsable rather than dumped loose into "My Drive".
-// filePrefix: forms the filename together with a capture timestamp, e.g.
-// "Movement_Log_2026-09-21_225003.csv".
-// header/rows: plain arrays, exactly as read via getRange(...).getValues()
-// — no transformation expected from the caller.
+// tableName: doubles as both the Drive subfolder name (under
+// ARCHIVE_ROOT_FOLDER_) and the file prefix — every call site already uses
+// the same value for both ('Movement_Log' / 'Daily_RM_Issues'), so one
+// parameter instead of two.
+// header/rows: plain arrays, exactly as read via getRange(...).getValues().
+// rowDateRangeLabel: the caller's own precomputed "earliest_to_latest" date
+// span the DATA in `rows` actually covers (not when this archive run
+// happens) — e.g. "2026-09-01_to_2026-09-07". Baked into the filename so
+// what's inside is readable without opening the file, and also written
+// into the manifest row. Callers derive this from their own date column
+// since its type/format differs per table (Movement_Log's snapshot_at is
+// always a real Date; Daily_RM_Issues' date can be a Date OR a
+// 'yyyy-MM-dd' string — see pruneDailyRmIssueLog_'s own comment).
 //
-// No-ops (returns null, writes nothing) when rows is empty, so a prune run
-// that drops nothing never leaves a pointless empty file behind. Returns
-// the created File otherwise.
-function archiveRowsToDriveCsv_(folderName, filePrefix, header, rows) {
+// No-ops (returns null, writes nothing, no manifest row) when rows is
+// empty, so a prune run that drops nothing never leaves a pointless empty
+// file behind. Returns the created File otherwise.
+function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel) {
   if (!rows || !rows.length) return null;
-  const folders = DriveApp.getFoldersByName(folderName);
-  const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+  const rootFolders = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_);
+  const root = rootFolders.hasNext() ? rootFolders.next() : DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+  const subFolders = root.getFoldersByName(tableName);
+  const folder = subFolders.hasNext() ? subFolders.next() : root.createFolder(tableName);
+
   const csvEscape = function (cell) {
     if (cell instanceof Date) return cell.toISOString();
     const s = String(cell == null ? '' : cell);
@@ -247,6 +268,37 @@ function archiveRowsToDriveCsv_(folderName, filePrefix, header, rows) {
   const csv = [header].concat(rows).map(function (row) {
     return row.map(csvEscape).join(',');
   }).join('\n');
-  const fileName = filePrefix + '_' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmmss') + '.csv';
-  return folder.createFile(fileName, csv, MimeType.CSV);
+  const label = rowDateRangeLabel || 'unknown-dates';
+  const archivedAtStamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmmss');
+  const fileName = tableName + '_rows_' + label + '_archived_' + archivedAtStamp + '.csv';
+  const file = folder.createFile(fileName, csv, MimeType.CSV);
+
+  archiveAppendManifestRow_(root, [
+    Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+    tableName, fileName, label, String(rows.length),
+  ]);
+
+  Logger.log('Archived ' + rows.length + ' ' + tableName + ' row(s) (dates ' + label + ') to Drive: ' + file.getUrl());
+  return file;
+}
+
+// Appends one line to ARCHIVE_MANIFEST_FILE_ in rootFolder, creating it
+// (with a header row) on first use. Drive has no native "append to file"
+// call — this reads the whole current content back, adds one line, and
+// rewrites via setContent(), which is fine at this file's realistic size
+// (one line per prune run, not per row).
+function archiveAppendManifestRow_(rootFolder, rowValues) {
+  const csvEscape = function (v) {
+    const s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const line = rowValues.map(csvEscape).join(',');
+  const existing = rootFolder.getFilesByName(ARCHIVE_MANIFEST_FILE_);
+  if (existing.hasNext()) {
+    const file = existing.next();
+    file.setContent(file.getBlob().getDataAsString() + '\n' + line);
+  } else {
+    const header = 'archived_at,table,filename,row_date_range,row_count';
+    rootFolder.createFile(ARCHIVE_MANIFEST_FILE_, header + '\n' + line, MimeType.CSV);
+  }
 }

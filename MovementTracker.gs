@@ -83,9 +83,6 @@ const MOVEMENT_LOG_RETENTION_DAYS = 7;
 // immediately have to re-expand it for the very next snapshot's rows —
 // see pruneMovementLog_'s own comment for why the sheet gets shrunk at all.
 const MOVEMENT_LOG_ROW_HEADROOM_ = 5000;
-// Drive folder pruneMovementLog_ archives dropped rows into before they're
-// gone from the sheet for good — see archiveRowsToDriveCsv_ (Core.gs).
-const MOVEMENT_LOG_ARCHIVE_FOLDER_ = 'Leads Dashboard Archive — Movement_Log';
 // Four separate fixed-hour daily triggers (IST), not one
 // .timeBased().everyHours(6) trigger — see setupMovementTracking's own
 // comment for why: everyHours() only loosely targets its interval and can
@@ -642,7 +639,14 @@ function pruneMovementLog_(ss) {
   // now instead of only removeEarlyCorruptedMovementLogDataNow's one-off.
   const dropped = values.filter(function (row) { return !isKeptRow_(row); });
   const header = logSheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  archiveRowsToDriveCsv_(MOVEMENT_LOG_ARCHIVE_FOLDER_, 'Movement_Log', header, dropped);
+  // snapshot_at (column 0) is always a real Date here — pruneMovementLog_'s
+  // own cutoff check above already assumes this (`ts instanceof Date`).
+  const droppedTimestamps = dropped.map(function (row) { return row[0]; }).filter(function (d) { return d instanceof Date; });
+  const rowDateRangeLabel = droppedTimestamps.length
+    ? Utilities.formatDate(new Date(Math.min.apply(null, droppedTimestamps.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
+      + '_to_' + Utilities.formatDate(new Date(Math.max.apply(null, droppedTimestamps.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
+    : 'unknown-dates';
+  archiveRowsToDriveCsv_('Movement_Log', header, dropped, rowDateRangeLabel);
 
   if (kept.length) {
     logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept);

@@ -151,11 +151,17 @@ function runMovementTrackerTests_() {
     TestAssert_(pruneSheet.getMaxRows() >= 1 + 1 + MOVEMENT_LOG_ROW_HEADROOM_, 'pruneMovementLog_: never shrinks below what the kept rows + headroom actually need');
     // 2026-09-21 addition: archiveRowsToDriveCsv_ (Core.gs) — the dropped
     // 'old' row must land in a Drive CSV before it's gone from the sheet.
-    const pruneArchiveFolder = mockDriveForPrune._folders[MOVEMENT_LOG_ARCHIVE_FOLDER_];
-    TestAssert_(!!pruneArchiveFolder, 'pruneMovementLog_: archives dropped rows to Drive before removing them from the sheet');
-    TestAssertEqual_(pruneArchiveFolder._files.length, 1, 'pruneMovementLog_: writes exactly one archive CSV per prune run');
-    TestAssert_(pruneArchiveFolder._files[0]._content.indexOf('L-OLD') >= 0, 'pruneMovementLog_: the archived CSV actually contains the dropped row\'s data');
-    TestAssert_(pruneArchiveFolder._files[0]._content.indexOf('L-RECENT') === -1, 'pruneMovementLog_: the archived CSV does NOT contain a row that was kept, not dropped');
+    const pruneArchiveRoot = mockDriveForPrune._folders[ARCHIVE_ROOT_FOLDER_];
+    TestAssert_(!!pruneArchiveRoot, 'pruneMovementLog_: archives dropped rows under the shared ARCHIVE_ROOT_FOLDER_');
+    const pruneArchiveFolder = pruneArchiveRoot && pruneArchiveRoot._folders['Movement_Log'];
+    TestAssert_(!!pruneArchiveFolder, 'pruneMovementLog_: archives dropped rows into a Movement_Log subfolder before removing them from the sheet');
+    TestAssertEqual_(pruneArchiveFolder._filesList.length, 1, 'pruneMovementLog_: writes exactly one archive CSV per prune run');
+    TestAssert_(pruneArchiveFolder._filesList[0]._content.indexOf('L-OLD') >= 0, 'pruneMovementLog_: the archived CSV actually contains the dropped row\'s data');
+    TestAssert_(pruneArchiveFolder._filesList[0]._content.indexOf('L-RECENT') === -1, 'pruneMovementLog_: the archived CSV does NOT contain a row that was kept, not dropped');
+    TestAssert_(/^Movement_Log_rows_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2}_archived_/.test(pruneArchiveFolder._filesList[0]._name), 'pruneMovementLog_: the archive filename encodes the actual row-date range, not just the run timestamp');
+    const pruneManifest = pruneArchiveRoot._files[ARCHIVE_MANIFEST_FILE_];
+    TestAssert_(!!pruneManifest, 'pruneMovementLog_: writes a manifest row into the shared archive_log.csv');
+    TestAssert_(pruneManifest._content.indexOf('Movement_Log') >= 0, 'pruneMovementLog_: the manifest entry names the table');
 
     // ---- pruneMovementLog_: real production incident, 2026-09-12 —
     // write-before-clear safety + skip-when-nothing-to-prune ----
@@ -219,9 +225,9 @@ function runMovementTrackerTests_() {
       // 2026-09-21 addition: archiveRowsToDriveCsv_ (Core.gs) — both
       // dropped rows land in the SAME archive file, and none of the 3 kept
       // rows leak into it.
-      const mixedArchiveFolder = mockDriveForPrune2._folders[MOVEMENT_LOG_ARCHIVE_FOLDER_];
+      const mixedArchiveFolder = mockDriveForPrune2._folders[ARCHIVE_ROOT_FOLDER_] && mockDriveForPrune2._folders[ARCHIVE_ROOT_FOLDER_]._folders['Movement_Log'];
       TestAssert_(!!mixedArchiveFolder, 'pruneMovementLog_ (multi-row kept): archives the 2 dropped rows to Drive');
-      const mixedArchivedContent = mixedArchiveFolder._files[mixedArchiveFolder._files.length - 1]._content;
+      const mixedArchivedContent = mixedArchiveFolder._filesList[mixedArchiveFolder._filesList.length - 1]._content;
       TestAssert_(mixedArchivedContent.indexOf('L-OLD1') >= 0 && mixedArchivedContent.indexOf('L-OLD2') >= 0, 'pruneMovementLog_ (multi-row kept): the archive contains BOTH dropped rows\' lead_ids');
       TestAssert_(mixedArchivedContent.indexOf('L-RA') === -1 && mixedArchivedContent.indexOf('L-RB') === -1 && mixedArchivedContent.indexOf('L-RC') === -1, 'pruneMovementLog_ (multi-row kept): the archive does NOT contain any of the 3 kept rows\' lead_ids');
       DriveApp = realDriveForPrune2;

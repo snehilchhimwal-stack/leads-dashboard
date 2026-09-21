@@ -261,46 +261,73 @@ function TestMockSpreadsheet_(sheetsByName) {
 
 // ============================== Mock DriveApp ==============================
 
-// Mocks the two DriveApp calls archiveRowsToDriveCsv_ (Core.gs) makes —
-// getFoldersByName/createFolder (find-or-create) and folder.createFile.
-// Nothing ever touches a real Drive; every created folder/file is kept
-// in-memory so a test can assert on exactly what was archived (name,
-// content, mime type) via the returned drive's _folders map.
-function TestMockDriveApp_() {
-  const folders = {}; // name -> folder object, same shape createFolder returns
-  const drive = {
-    _folders: folders, // exposed for test assertions
-    getFoldersByName: function (name) {
-      const existing = folders[name];
+// A mock Drive file — supports the read/write pair archiveAppendManifestRow_
+// (Core.gs) needs (getBlob().getDataAsString() / setContent()) as well as
+// getUrl() for the Logger.log line archiveRowsToDriveCsv_ writes.
+function TestMockDriveFile_(fileName, content, mimeType) {
+  const file = {
+    _name: fileName,
+    _content: content,
+    _mimeType: mimeType,
+    getName: function () { return file._name; },
+    getUrl: function () { return 'https://drive.google.com/mock/' + encodeURIComponent(fileName); },
+    getBlob: function () { return { getDataAsString: function () { return file._content; } }; },
+    setContent: function (newContent) { file._content = newContent; return file; },
+  };
+  return file;
+}
+
+// A mock Drive folder — genuinely hierarchical (getFoldersByName/
+// createFolder return the SAME shape recursively), since
+// archiveRowsToDriveCsv_ (Core.gs) now nests a per-table subfolder inside
+// one shared ARCHIVE_ROOT_FOLDER_ parent, and TestMockDriveApp_ below is
+// just this same factory standing in for the Drive root. _filesList keeps
+// insertion order (unlike the _files by-name map) so a test can assert on
+// "the Nth file created" without depending on object-key iteration order.
+function TestMockDriveFolder_(name) {
+  const folder = {
+    _name: name,
+    _folders: {}, // name -> folder, same shape as this function returns
+    _files: {}, // name -> file, for getFilesByName lookups (e.g. the manifest)
+    _filesList: [], // insertion order
+    getName: function () { return folder._name; },
+    getFoldersByName: function (n) {
+      const existing = folder._folders[n];
       let handed = false;
       return {
         hasNext: function () { return !!existing && !handed; },
         next: function () { handed = true; return existing; },
       };
     },
-    createFolder: function (name) {
-      if (folders[name]) return folders[name]; // idempotent, matches real Drive's own effective behavior for this codebase's find-or-create usage
-      const folder = {
-        _name: name,
-        _files: [],
-        getName: function () { return folder._name; },
-        createFile: function (fileName, content, mimeType) {
-          const file = {
-            _name: fileName,
-            _content: content,
-            _mimeType: mimeType,
-            getName: function () { return file._name; },
-            getUrl: function () { return 'https://drive.google.com/mock/' + encodeURIComponent(fileName); },
-          };
-          folder._files.push(file);
-          return file;
-        },
+    createFolder: function (n) {
+      if (folder._folders[n]) return folder._folders[n]; // idempotent, matches real Drive's own effective behavior for this codebase's find-or-create usage
+      const child = TestMockDriveFolder_(n);
+      folder._folders[n] = child;
+      return child;
+    },
+    getFilesByName: function (n) {
+      const existing = folder._files[n];
+      let handed = false;
+      return {
+        hasNext: function () { return !!existing && !handed; },
+        next: function () { handed = true; return existing; },
       };
-      folders[name] = folder;
-      return folder;
+    },
+    createFile: function (fileName, content, mimeType) {
+      const file = TestMockDriveFile_(fileName, content, mimeType);
+      folder._files[fileName] = file;
+      folder._filesList.push(file);
+      return file;
     },
   };
-  return drive;
+  return folder;
+}
+
+// DriveApp itself behaves exactly like a folder for this codebase's only
+// two top-level calls (getFoldersByName/createFolder on ARCHIVE_ROOT_FOLDER_)
+// — so it's just this same factory, named as the Drive root.
+function TestMockDriveApp_() {
+  return TestMockDriveFolder_('(My Drive root)');
 }
 
 // ============================== Mock GmailApp / Gmail (Advanced Service) ==============================
