@@ -142,7 +142,17 @@ const RM_HIERARCHY_RAW_ = [
   // they fall straight through to that existing ch value as the backup.
   ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Loan','City Lead','Mayur Panjari','','','',''],
-  ['Central','A1','Mukesh Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  // Mukesh Yadav left the company, confirmed by the user 2026-09-21 (same
+  // handling as Krishna Murthy, 2026-09-17) -- row removed. His direct
+  // reports below (Zeya Shaikh, Karan Shinde, Mayuresh Chavan) were
+  // already reassigned to Kumar Babu per the 2026-09-21 HR Live export
+  // (Role/Team Change date 2026-06-29) -- Kumar Babu already has his own
+  // row below with his other direct reports, so this just brings these 3
+  // in line with that existing entry rather than falling through blank.
+  // Vivek Yadav (below) doesn't appear anywhere in that same fresh export
+  // -- unclear whether he also left or is a name-variant miss; his tl is
+  // cleared to fall through to rh (already on his own row) pending
+  // confirmation, same conservative handling as an unconfirmed departure.
   ['Central','TM','Akash A Ugale','','','','Sanjyota Bhosale'], // 2026-09-16: role formalized from A1 to TM (see the Yash Sharma row's own comment for the promotion this confirms) -- his 8 direct Central S1 reports (Prajwal Shetty, Purvesh Ugawekar, Mustakim Sayyad, Kishan Patel, Sumeet Pal, Farid Shaikh, Shreyang Chudasama, Shresth Bhuwania) are unaffected: their own rows already carry tl:'Akash A Ugale' directly, so this role-label change only affects the primaryRole shown when HE is the resolved primary (his own reports, or Harbour's Yash Sharma) -- it never gates chain resolution itself (see resolveRecipientBucketsForRms_'s own docblock).
   ['Central','S1','Prajwal Shetty','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Navi Mumbai','S1','Ashish Kadam','Avinash Kumar','','','Vidya Jadhav'],
@@ -253,7 +263,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','S1','Eknidhi Chabra','','Minas Patel','','Rahul Gandhi'],
   ['Western','S1','Gajanan Jadhav','','Minas Patel','','Rahul Gandhi'],
   ['Western','TM','Minas Patel','','','','Rahul Gandhi'],
-  ['Central','S1','Zeya Shaikh','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Zeya Shaikh','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left); real current manager per HR export is Kumar Babu
   ['Thane','S1','Vishal Chavan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Gaurav Gunjal','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Arpita Varte','','Ayaz Bagwan','','Sourabh Sareen'],
@@ -262,11 +272,11 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Gouttam Aicha','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Sagar Mahamuni','','','Swapnil Gowalkar','Bipin More'],
   ['Bangalore','S1','Neelam Singh','Chaithanya M','','Romen Singh','Mukesh Mishra'],
-  ['Central','S1','Karan Shinde','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Karan Shinde','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left); real current manager per HR export is Kumar Babu
   ['HNI','S1','Yashodeep Kubavat','','','','Abhhijjit Gandhii'],
   ['Western','S1','Riya Yadav','','Minas Patel','','Rahul Gandhi'],
-  ['Central','S1','Mayuresh Chavan','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
-  ['Central','S1','Vivek Yadav','Mukesh Yadav','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Mayuresh Chavan','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left); real current manager per HR export is Kumar Babu
+  ['Central','S1','Vivek Yadav','','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl Mukesh Yadav left; no confirmed replacement found for Vivek Yadav specifically (he's absent from the fresh HR export too) -- falls through to rh (already Rajkumar Ombase)
   ['Sourcing - Pune','S3','Anagha Sangole','','Yash Kalal','','Sourabh Sareen'],
   ['Hyderabad','S1','Peddapally Veera Shivaji','Vemula Ajay','','','Mukesh Mishra'],
   ['Thane','S1','Hitesh Jaiswar','Amit Upadhyay','','','Bipin More'],
@@ -373,9 +383,11 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Kavya Gowda','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   // Confirmed by the user directly (not a guess) — same person as "Nikhil Goud".
   ['Hyderabad','S1','Shamakuri Goud','Vemula Ajay','','','Mukesh Mishra'],
-  // Confirmed by the user directly (2026-09-16) — same person as "Mamtaben
-  // Sosa" (leads sheet drops the surname and appends "S 1").
-  ['Thane','S1','Mamtaben S 1','Amit Upadhyay','','','Bipin More'],
+  // Confirmed by the user directly (2026-09-16, corrected 2026-09-21 --
+  // the full leads-sheet string is "Mamtaben S 1 Account", not "Mamtaben
+  // S 1") — same person as "Mamtaben Sosa" (leads sheet drops the surname
+  // and appends "S 1 Account", her band + "Account").
+  ['Thane','S1','Mamtaben S 1 Account','Amit Upadhyay','','','Bipin More'],
   // 3 new hires, found 2026-09-09 via a fresher HR Live export (231-person
   // roster vs. the 2026-08-31 export's; same "regenerate when the roster
   // changes meaningfully" process this file's own header documents).

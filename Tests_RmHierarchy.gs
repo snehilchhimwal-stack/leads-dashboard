@@ -226,16 +226,17 @@ function runRmHierarchyTests_() {
     // manager -- see RmHierarchy.gs's own docblock on resolveRecipientBucketsForRms_.
     TestAssert_(TM_STILL_CC_.indexOf('akash a ugale') !== -1, 'TM_STILL_CC_: includes Akash A Ugale (2026-09-16), so he still appears in Cc on his own A1/TL reports\' buckets');
 
-    // "Mamtaben S 1" -- confirmed by the user directly (2026-09-16) as the
-    // same person as the existing "Mamtaben Sosa" row; must resolve to
-    // that EXACT chain. Not covered by stripRoleSuffix_'s fallback (that
-    // strips a trailing "S <digit>..." suffix but the leads sheet's
-    // spelling here also drops the surname "Sosa" entirely), hence a real
-    // alias row rather than relying on the generic suffix-strip.
+    // "Mamtaben S 1 Account" -- confirmed by the user directly (2026-09-16,
+    // corrected 2026-09-21 to the full string) as the same person as the
+    // existing "Mamtaben Sosa" row; must resolve to that EXACT chain. Not
+    // covered by stripRoleSuffix_'s fallback (that strips a trailing
+    // "S <digit>..." suffix but the leads sheet's spelling here also drops
+    // the surname "Sosa" and appends "Account"), hence a real alias row
+    // rather than relying on the generic suffix-strip.
     const mamtabenSosa = realResolved.find(function (p) { return p.name === 'Mamtaben Sosa'; });
-    const mamtabenS1 = realResolved.find(function (p) { return p.name === 'Mamtaben S 1'; });
-    TestAssert_(!!mamtabenSosa && !!mamtabenS1, 'resolveRmHierarchy_: both "Mamtaben Sosa" and its alias "Mamtaben S 1" have rows');
-    TestAssertEqual_(JSON.stringify({ tl: mamtabenS1.tl, tm: mamtabenS1.tm, rh: mamtabenS1.rh, ch: mamtabenS1.ch }), JSON.stringify({ tl: mamtabenSosa.tl, tm: mamtabenSosa.tm, rh: mamtabenSosa.rh, ch: mamtabenSosa.ch }), 'resolveRmHierarchy_: "Mamtaben S 1" resolves to the exact same chain as "Mamtaben Sosa"');
+    const mamtabenS1 = realResolved.find(function (p) { return p.name === 'Mamtaben S 1 Account'; });
+    TestAssert_(!!mamtabenSosa && !!mamtabenS1, 'resolveRmHierarchy_: both "Mamtaben Sosa" and its alias "Mamtaben S 1 Account" have rows');
+    TestAssertEqual_(JSON.stringify({ tl: mamtabenS1.tl, tm: mamtabenS1.tm, rh: mamtabenS1.rh, ch: mamtabenS1.ch }), JSON.stringify({ tl: mamtabenSosa.tl, tm: mamtabenSosa.tm, rh: mamtabenSosa.rh, ch: mamtabenSosa.ch }), 'resolveRmHierarchy_: "Mamtaben S 1 Account" resolves to the exact same chain as "Mamtaben Sosa"');
 
     // ---- rebuildRmHierarchy: preserves manual edits across a rebuild ----
     // rebuildRmHierarchy() (unlike everything above) takes no `ss`
