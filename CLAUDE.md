@@ -185,6 +185,24 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
     loop — `DOCUMENTATION_PROJECT_PLAN.md` Change-Control Mechanism steps
     7–10). `test/check-docs-coverage.js`'s WARN-ONLY graduation is now
     moot — `check-catalog.py` B is the blocking coverage check.
+  - **Resolve check D's drift notes for records YOUR OWN session's
+    changes caused, before ending that session** — real incident,
+    2026-09-21: 3 records (`GS-002`/`GS-003`/`GS-008`, all touched by
+    commits made earlier the same day) sat drifted through this whole
+    session's other work until a dedicated pass finally closed them, plus
+    a *second*, self-inflicted version of the same gap — 5 records
+    (`TAB-009`/`JS-025`/`GS-011`/`SHEET-016`/`SHEET-017`) got their `##
+    Last Verified` set to a `(pending commit)` placeholder before the
+    commit landed, and nobody circled back to swap in the real sha
+    afterward, so they read as permanently unverified. **Never leave
+    `(pending commit)` as a final state** — if you must write a record
+    before committing, come back immediately after and replace it with
+    the real sha in the same turn. D staying advisory (not
+    `CATALOG_STRICT=1`) is deliberate — it can't distinguish drift your
+    own session caused from pre-existing drift from other work, so making
+    it hard-blocking would fail CI on unrelated debt — but that only
+    works if a session treats "advisory" as "still mine to act on,"
+    not as permission to ignore it.
 - **Changing automatic email, RM hierarchy routing, or worst-performing-RM
   logic specifically** (`OvernightEmailer.gs`/`AllIssuesEmailer.gs`,
   `RmHierarchy.gs`, RM Performance/`DailyRmIssueLog.gs`): run

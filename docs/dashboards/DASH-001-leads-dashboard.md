@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Last Verified** | 2026-09-21 against commit `f853a1c` |
 
 ## Purpose / reason to exist
 
@@ -265,14 +265,18 @@ architecture snapshot.
   (a new tab + its own tab-switch/render wiring), nothing existing in
   this record's own description changed.
 - **Evidence:** `HANDOVER.md` §1–§3; `LOGIC_AUDIT.md` Part 1;
-  `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-18.
+  `tests/frontend-harness.html`; commit `f853a1c`.
+- **Status:** Validated 2026-09-21.
 
 ## Version / change reference
 
 Verified at commit `c82ec67` (Phase 2 of the Documentation Project);
 record created by DOC-025. Revalidated 2026-09-18 (`4bbb58c`) for
-`TAB-009`'s addition.
+`TAB-009`'s addition. Revalidated 2026-09-21 (`f853a1c`) — orthogonal
+change: `TAB-009`'s own intro text gained an explicit Scope line; nothing
+this record describes changed. (This record's own catalog-drift note sat
+unresolved from `f853a1c` until this pass — see `CLAUDE.md`'s
+drift-discipline rule, added the same day.)
 
 ## Revalidation trigger
 

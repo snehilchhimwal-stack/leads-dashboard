@@ -157,7 +157,7 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | DATA-001, EXT-001, JS-001, JS-003, JS-004, SHEET-001, SHEET-011, TAB-001, TAB-002, TAB-003, TAB-004, TAB-005, TAB-006, TAB-007, TAB-008, TAB-009 | none | 2026-09-18 (`4bbb58c`) |
+| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | DATA-001, EXT-001, JS-001, JS-003, JS-004, SHEET-001, SHEET-011, TAB-001, TAB-002, TAB-003, TAB-004, TAB-005, TAB-006, TAB-007, TAB-008, TAB-009 | none | 2026-09-21 (`f853a1c`) |
 
 ### `TAB-` — dashboard UI tabs (confirm the tab↔`JS-` mapping in `DOC-026`)
 
@@ -171,7 +171,7 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 | TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Closed + Monitored | JS-004, JS-006, JS-007, JS-019 | DASH-001 | 2026-09-10 (`c82ec67`) |
 | TAB-007 | TAB- | Movement | `js/tab-movement.js` (JS-021) | Closed + Monitored | DATA-005, EXT-001, EXT-002, JS-003, JS-009, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-002, SHEET-004, SHEET-011, SHEET-015 | DASH-001 | 2026-09-17 (`641398e`) |
 | TAB-008 | TAB- | Tracking | `js/tab-tracking.js` (JS-024) | Closed + Monitored | EXT-001, JS-004, JS-014, JS-018, JS-021, JS-024, SHEET-002, SHEET-005, SHEET-008 | DASH-001 | 2026-09-10 (`c82ec67`) |
-| TAB-009 | TAB- | Opp Monitor | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` (JS-025) | Validated | EXT-001, JS-025, SHEET-016, SHEET-017 | DASH-001 | 2026-09-18 (pending commit) |
+| TAB-009 | TAB- | Opp Monitor | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` (JS-025) | Validated | EXT-001, JS-025, SHEET-016, SHEET-017 | DASH-001 | 2026-09-18 (`f853a1c`) |
 
 ### `BTN-` / `UI-` — tab sub-components (detail lives in the owning `TAB-XXX` record, no own file)
 
@@ -234,23 +234,23 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | JS-022 | JS- | tab-repeat-offenders | `js/tab-repeat-offenders.js` | Closed + Monitored | EXT-001, EXT-003, JS-003, JS-008, JS-009, JS-010, JS-014, JS-017, JS-021, SHEET-002, SHEET-003, SHEET-006 | JS-003, JS-008, JS-012, JS-013, TAB-004 | 2026-09-15 (`9e55e36`) |
 | JS-023 | JS- | tab-rmtimeline | `js/tab-rmtimeline.js` | Closed + Monitored | JS-003, JS-005, JS-006, JS-007, JS-011, JS-014, JS-019, JS-021, JS-024, SHEET-002 | JS-011, JS-012, TAB-005 | 2026-09-10 (`c82ec67`) |
 | JS-024 | JS- | tab-tracking | `js/tab-tracking.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-014, JS-018, JS-021, SHEET-002, SHEET-005, SHEET-008 | JS-012, JS-023, JS-025, TAB-005, TAB-008 | 2026-09-18 (`4bbb58c`) |
-| JS-025 | JS- | tab-oppmonitor | `js/tab-oppmonitor.js` | Validated | JS-005, JS-006, JS-009, JS-010, JS-024, EXT-001, SHEET-016, SHEET-017 | JS-003, JS-012, TAB-009 | 2026-09-18 (pending commit) |
+| JS-025 | JS- | tab-oppmonitor | `js/tab-oppmonitor.js` | Validated | JS-005, JS-006, JS-009, JS-010, JS-024, EXT-001, SHEET-016, SHEET-017 | JS-003, JS-012, TAB-009 | 2026-09-18 (`f853a1c`) |
 
 ### `GS-` — Apps Script backend modules (production; `Tests_*.gs` excluded per `DOC-007`)
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013 | DATA-005, SHEET-013 | 2026-09-10 (`c82ec67`) |
-| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-010, GS-011, GS-012, GS-013 | 2026-09-10 (`c82ec67`) |
-| GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-004, GS-008, GS-012, SHEET-001, SHEET-002, SHEET-003 | DATA-002, SHEET-003 | 2026-09-10 (`c82ec67`) |
+| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-010, GS-011, GS-012, GS-013 | 2026-09-21 (`2a05c84`) |
+| GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-004, GS-008, GS-012, SHEET-001, SHEET-002, SHEET-003 | DATA-002, SHEET-003 | 2026-09-21 (`2a05c84`) |
 | GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-013, SHEET-012 | 2026-09-10 (`c82ec67`) |
 | GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | DATA-003, GS-001, GS-006, GS-010, GS-012, GS-013, SHEET-010 | 2026-09-10 (`c82ec67`) |
 | GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-009 | DATA-003, GS-008, SHEET-009 | 2026-09-10 (`c82ec67`) |
 | GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none | 2026-09-10 (`c82ec67`) |
-| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-09-18 (`2d4a573`) |
+| GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-09-21 (`2a05c84`) |
 | GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Closed + Monitored | EXT-002, GS-004, GS-008, GS-011, SHEET-002, SHEET-006, SHEET-007 | none | 2026-09-10 (`c82ec67`) |
 | GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | DATA-002, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, SHEET-001, SHEET-002, SHEET-004, SHEET-006, SHEET-007, SHEET-012, SHEET-014 | DATA-003, SHEET-004, SHEET-014 | 2026-09-10 (`c82ec67`) |
-| GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, SHEET-006, SHEET-007 | 2026-09-21 (pending commit) |
+| GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, SHEET-006, SHEET-007 | 2026-09-21 (`69623d2`) |
 | GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Closed + Monitored | GS-002, GS-005 | DATA-002, DATA-004, GS-001, GS-003, GS-008, GS-010 | 2026-09-10 (`c82ec67`) |
 | GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-010 | DATA-003, GS-008, SHEET-010 | 2026-09-10 (`c82ec67`) |
 
@@ -276,8 +276,8 @@ emails, never in this repo (`DOC-007`).
 | SHEET-013 | SHEET- | AllIssues_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / contact-emails) | EXT-001, EXT-002, GS-001 | GS-001 | 2026-09-10 (`c82ec67`) |
 | SHEET-014 | SHEET- | Overnight_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: IMPORTANT / contact-emails) | EXT-001, EXT-002, GS-010 | GS-010 | 2026-09-10 (`c82ec67`) |
 | SHEET-015 | SHEET- | Movement_Log_Runs | Google Sheet | Closed + Monitored (lifecycle none enforced -> TBD; DOC-038: MEDIUM / operational) | EXT-001, GS-008, JS-018, JS-021 | GS-008, JS-018, JS-021, TAB-007 | 2026-09-17 (`641398e`) |
-| SHEET-016 | SHEET- | Opp_Monitor_Period | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (pending commit) |
-| SHEET-017 | SHEET- | Opp_Monitor_Month | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (pending commit) |
+| SHEET-016 | SHEET- | Opp_Monitor_Period | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`f853a1c`) |
+| SHEET-017 | SHEET- | Opp_Monitor_Month | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`f853a1c`) |
 
 **Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
 `Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and

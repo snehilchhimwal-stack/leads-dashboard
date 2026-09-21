@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `Core.gs` (214 lines) |
+| **Location** | `Core.gs` (304 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-21 against commit `3a19bdb` |
 
 ## Purpose / reason to exist
 
@@ -30,6 +30,14 @@ and "what IST day is this instant."
 - `istDayKeyGs_` / `pad2Gs_` — the canonical IST-day key.
 - `businessMinutesBetweenGs_` — business-hour math.
 - `esc_` — HTML escaping for the email templates.
+- `archiveRowsToDriveCsv_` / `archiveAppendManifestRow_` (added
+  2026-09-21) — the shared Drive-CSV archival mechanism `pruneMovementLog_`
+  (`GS-008`) and `pruneDailyRmIssueLog_` (`GS-003`) both call before
+  dropping rows from their sheet, so pruned data is archived to Drive (zero
+  cost against the workbook's 10,000,000-cell ceiling) instead of lost.
+  One shared `ARCHIVE_ROOT_FOLDER_` ("Leads Dashboard Archive") with a
+  per-table subfolder, plus one append-only `ARCHIVE_MANIFEST_FILE_`
+  (`archive_log.csv`) logging every archive event across both tables.
 
 ## Trigger schedule
 
@@ -51,6 +59,8 @@ Never — it has no `setupXxx()` and no schedule.
 | FN-184 | `buildColIndex_(headerRow)` / `getVal_(row, colIndex, key)` / `resolveTabName_(ss)` `#L156/#L172/#L150` | a header row / a row + key / a spreadsheet | column-index map / a cell value / the leads tab name | none | `HEADER_ALIASES_` (`GS-004`) | every file that reads a leads row | reusable |
 | FN-185 | `businessMinutesBetweenGs_(start, end)` / `pad2Gs_(n)` `#L191/#L183` | two dates / a number | business minutes / a 2-char string | none | — | `computeSlaFlags_` (`GS-012`), FN-180 | reusable — twin of `JS-006` `businessMinutesBetween` |
 | FN-186 | `esc_(s)` `#L211` | any value | HTML-escaped string | none | — | `renderOvernightReportEmailHTML_` (`GS-004`), all email builders | reusable — the backend `esc` |
+| FN-265 | `archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel)` (added 2026-09-21) | table name + header/rows arrays + a date-range label | the created Drive `File`, or `null` if `rows` is empty | creates/reuses `ARCHIVE_ROOT_FOLDER_`/a per-table subfolder, writes a dated CSV, appends a manifest row | `archiveAppendManifestRow_` (FN-266) | `pruneMovementLog_` (`GS-008`), `pruneDailyRmIssueLog_` (`GS-003`) | reusable — the shared archive mechanism both prune functions call |
+| FN-266 | `archiveAppendManifestRow_(rootFolder, rowValues)` (added 2026-09-21) | the root folder + a row's values | none | reads + rewrites `ARCHIVE_MANIFEST_FILE_`'s whole content (no native Drive append) | — | FN-265 | reusable |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -60,6 +70,7 @@ Never — it has no `setupXxx()` and no schedule.
 | CFG-028 | `STAGE_ALIASES_` | alias map | raw stage → canonical | `canonicalStage_`; twin `CONFIG.STAGE_ALIASES` (`JS-005`) |
 | CFG-029 | `CLOSED_STAGE_EXACT_` / `CLOSED_STAGE_STEMS_` | `['won','lost','junk','dead','not interested']` / `['cancel','close','reject']` | closed-stage detection | `isClosedStage_`; twins in `JS-005` |
 | CFG-030 | IST offset | `+05:30` literal (no DST) | `istDayKeyGs_`'s day boundary | every backend IST computation (`LOGIC_AUDIT.md` Part 4 §4.6 — verified equivalent to the client mechanism) |
+| CFG-065 | `ARCHIVE_ROOT_FOLDER_` / `ARCHIVE_MANIFEST_FILE_` (added 2026-09-21) | `'Leads Dashboard Archive'` / `'archive_log.csv'` | the shared Drive folder name and manifest filename `archiveRowsToDriveCsv_` creates/reuses | every archived-row destination; lives in whichever account owns the nightly trigger (`DriveApp` calls execute as the trigger owner) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -79,7 +90,7 @@ etc. are the backend half of the cross-runtime config pairs audited in
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
-| — | — | — | `Core.gs` touches no sheet directly; `resolveTabName_` reads sheet metadata only |
+| — | — | — | `Core.gs` touches no Sheet directly; `resolveTabName_` reads sheet metadata only. `archiveRowsToDriveCsv_`/`archiveAppendManifestRow_` (2026-09-21) write to Drive, not a Sheet — see `CFG-065`. |
 
 ## Failure / error behaviour
 
@@ -136,21 +147,31 @@ in `LOGIC_AUDIT.md` Part 1 §1. Every other `GS-XXX` depends on it.
 - **Method:** full read at `c82ec67`; function list verified by grep;
   the `FUNNEL_ORDER_` / IST-key logic cross-checked against
   `LOGIC_AUDIT.md` Part 3 §3.1 (the reproduced config) + Part 4 §4.6
-  (IST equivalence). `Tests_Core.gs` runs in CI.
+  (IST equivalence). `Tests_Core.gs` runs in CI. Revalidated 2026-09-21
+  (`3a19bdb`): read `archiveRowsToDriveCsv_`/`archiveAppendManifestRow_`
+  directly in source; confirmed via that commit's own message that
+  `Tests_Core.gs` gained archive assertions and all 778 local tests pass
+  (`python3 test/run-gs-tests-headless.py`, reconfirmed clean this session).
 - **Evidence:** `.github/workflows/test.yml` (`Tests_Core.gs`, last green
-  run); `LOGIC_AUDIT.md` Part 3 §3.1, Part 4 §4.6.
-- **Status:** Validated 2026-09-10.
+  run); `LOGIC_AUDIT.md` Part 3 §3.1, Part 4 §4.6; commit `3a19bdb`.
+- **Status:** Validated 2026-09-21.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-029.
+Verified at `c82ec67`; record created by DOC-029. Revalidated 2026-09-21
+(`3a19bdb`) for the `archiveRowsToDriveCsv_`/`archiveAppendManifestRow_`
+addition (this record's own catalog-drift note went unresolved for 2
+commits before this pass — see `CLAUDE.md`'s drift-discipline rule, added
+the same day).
 
 ## Revalidation trigger
 
 Any commit touching `Core.gs` or `Tests_Core.gs`; **any of `FUNNEL_ORDER_`
 / `STAGE_ALIASES_` / `CLOSED_STAGE_*` changes** (requires the `JS-005`
 twin to change — `HANDOVER.md` §6); `istDayKeyGs_`'s offset logic
-changes; `buildColIndex_` / `HEADER_ALIASES_` mapping changes.
+changes; `buildColIndex_` / `HEADER_ALIASES_` mapping changes;
+`ARCHIVE_ROOT_FOLDER_`/`ARCHIVE_MANIFEST_FILE_` or the archive CSV shape
+changes.
 
 ## Handover relationship
 

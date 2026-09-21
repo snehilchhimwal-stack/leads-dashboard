@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `MovementTracker.gs` (1260 lines) |
+| **Location** | `MovementTracker.gs` (1276 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-18 against commit `2d4a573` |
+| **Last Verified** | 2026-09-21 against commit `3a19bdb` |
 
 ## Purpose / reason to exist
 
@@ -52,7 +52,11 @@ writes the per-snapshot `SLA_History` row and (guarded) persists
   tail (interruption-safe — a mid-run kill never lands between an
   unconditional clear and the rewrite), and skips the whole
   clear/write/shrink sequence when every row is already within
-  retention.
+  retention. **Archives dropped rows to Drive** (2026-09-21,
+  `archiveRowsToDriveCsv_`, `GS-002`) before clearing them — the same
+  generalized mechanism `DailyRmIssueLog.gs`'s `EXC-097` fix uses,
+  applied here too so pruned `Movement_Log` history is kept indefinitely
+  in Drive instead of lost once it ages out of the sheet.
 - `writeSlaHistorySnapshot_` — the per-snapshot `SLA_History` row.
 - `buildTodayCallBaselineGs_` / `lastSnapshotBeforeGs_` /
   `buildMovementLogMapsGs_` — the maps every other scheduled file reads.
@@ -86,7 +90,7 @@ scheduled fire (`CLAUDE.md` gotcha).
 |---|---|---|---|---|---|---|---|
 | FN-218 | `snapshotOpenLeads_(label)` `#L469` | `leads` tab | appends a `Movement_Log` row (the `SNAPSHOT_COLUMNS_` shape + `content_hash`) **only for a lead whose content hash differs from its latest known hash** — an unchanged lead is skipped (no duplicate row) though still counted in `leadCountSeen`; always appends one `Movement_Log_Runs` row (`run_at`, `run_label`, `lead_count_seen`, `leads_changed`) regardless of whether any lead changed (2026-09-11 content-hash dedup, Lead History & Versioning Review Phase 6 — `641398e`) | Sheets write; **each side-effect (SLA_History write, unmatched-comment scan, interaction-history log, cohort-history persist, Movement_Log_Runs write) is independently try/catch-wrapped so one failing never blocks the core capture** | `readLeadsTab_` (`GS-004`), `isOpenLead_` (`GS-002`), `computeSlaFlags_` (`GS-012`), `writeSlaHistorySnapshot_` (FN-221), `scanUnmatchedCommentsGs_` (`GS-013`), `logInteractionHistoryGs_` (`GS-006`), `persistDailyCohortHistoryGs_` (FN-223), `_leadContentHashGs_` / `_latestContentHashByKeyGs_` / `ensureMovementLogRunsSheet_` (dedup + run-log helpers) | `snapshotPeriodic` (FN-219), `snapshotNow` (FN-219) | specific — the hub capture |
 | FN-219 | `snapshotPeriodic()` / `snapshotNow()` / `setupMovementTracking()` `#L1074/#L1120/#L1079` | — | scheduled capture / manual capture / installs the 4 triggers | Sheets writes / creates triggers | FN-218 / `ScriptApp` | the 4 triggers / editor | specific |
-| FN-220 | `pruneMovementLog_(ss)` / `pruneMovementLogNow()` `#L620/#L676` | spreadsheet | deletes rows older than the retention cutoff **and shrinks the sheet's row allocation via `deleteRows`**; writes kept rows first, clears only the leftover tail after, and no-ops entirely when nothing is outside retention (2026-09-12 interruption-safety fix — see `EXC-091`) | Sheets structural change (skipped when nothing to prune) | — | FN-218 (after each capture) | specific — "to avoid the 10M-cell workbook ceiling this project has hit once before" |
+| FN-220 | `pruneMovementLog_(ss)` / `pruneMovementLogNow()` `#L620/#L676` | spreadsheet | deletes rows older than the retention cutoff **and shrinks the sheet's row allocation via `deleteRows`**; writes kept rows first, clears only the leftover tail after, and no-ops entirely when nothing is outside retention (2026-09-12 interruption-safety fix — see `EXC-091`); **archives dropped rows to Drive before clearing them (2026-09-21)** | Sheets structural change (skipped when nothing to prune); Drive write via `archiveRowsToDriveCsv_` (`GS-002`) when there's anything to drop | `archiveRowsToDriveCsv_` (`GS-002`) | FN-218 (after each capture) | specific — "to avoid the 10M-cell workbook ceiling this project has hit once before" |
 | FN-221 | `ensureSlaHistorySheet_(ss)` / `writeSlaHistorySnapshot_(ss, dataRows, colIndex, now)` `#L404/#L434` | the snapshot rows | one `SLA_History` row per run | Sheets write | `computeSlaFlags_` (`GS-012`) | FN-218 | specific — **schema matches `js/sheets-writeback.js`'s `SLA_History` writer exactly** (`LOGIC_AUDIT.md` Part 4 §4.7) |
 | FN-222 | `_collapseLatestByKeyGs_` `#L293` / `_lastMovementLogSnapshotByKeyGs_` `#L310` / `buildTodayCallBaselineGs_(ss, beforeDate)` `#L363` / `lastSnapshotBeforeGs_(ss, beforeDate)` `#L382` / `buildMovementLogMapsGs_(ss, now)` `#L395` | `Movement_Log` rows | the baseline / last-snapshot / combined maps every scheduled emailer reads | none | `_readMovementLogRowsGs_` (FN-224) | `GS-001`, `GS-010`, `GS-003` | reusable — the hub's read API |
 | FN-223 | `eligibleDailyCohortDatesGs_` `#L824` / `computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now)` `#L881` / `upsertDailyCohortHistoryRowsGs_` `#L955` / `_readArchivedDailyCohortDatesGs_` `#L1004` / `persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now)` `#L1018` | history rows + a date | per-region cohort outcomes; upserts `Daily_Cohort_History` | Sheets write (`RAW`); **never re-writes an archived date** | `_evidenceAtDeadlineGs_` (FN-225), `_effectiveRegionGs_` (FN-225) | FN-218, `persistDailyCohortHistoryNow()` (manual) | specific — **`.gs` twin of `JS-024`'s cohort persist** |
@@ -129,7 +133,7 @@ guarded. Full flow: `DATA-004`.
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
 | `SHEET-001` `leads` | Read | FN-218 (via `readLeadsTab_`) | the source |
-| `SHEET-002` `Movement_Log` | Write (append, **skipped for a lead whose `content_hash` is unchanged**) + prune/shrink + ensure | FN-218 / FN-220 / FN-224 | the core output; 7-day retention |
+| `SHEET-002` `Movement_Log` | Write (append, **skipped for a lead whose `content_hash` is unchanged**) + prune/shrink + ensure | FN-218 / FN-220 / FN-224 | the core output; 7-day retention. Pruned rows archived to Drive (not a Sheet) since 2026-09-21 — see `GS-002` `CFG-065`. |
 | `SHEET-005` `SLA_History` | Write (append) + ensure | FN-221 | schema matches the client writer |
 | `SHEET-008` `Daily_Cohort_History` | Write (upsert, `RAW`) + ensure | FN-223 | never re-writes an archived date |
 | `SHEET-010` `Unmatched_Comments_Log` | Write (via `GS-013`) | FN-218 → `GS-013` | piggyback |
@@ -213,8 +217,14 @@ trigger.
   (`2d4a573`): read `removeEarlyCorruptedMovementLogDataNow`'s current
   source directly to confirm the `deleteRows()` fix; real-world cause
   confirmed via the `captureDailyRmIssues_` crash report the user shared
-  (`DailyRmIssueLog.gs:219`, same 10M-cell ceiling error).
-- **Status:** Validated 2026-09-18.
+  (`DailyRmIssueLog.gs:219`, same 10M-cell ceiling error). Revalidated
+  again 2026-09-21 (`3a19bdb`, authored 10:30 that day — this record's
+  own catalog-drift note going unresolved for 2 commits until this pass):
+  read the Drive-archive addition to `pruneMovementLog_` directly in
+  source; confirmed via the commit's own message that all 778 local
+  tests pass, reconfirmed independently this session via `python3
+  test/run-gs-tests-headless.py`.
+- **Status:** Validated 2026-09-21.
 
 ## Version / change reference
 
@@ -225,7 +235,8 @@ since the 2026-09-05 audit (cohort-history persist helpers), then
 1000L → 1186L since the 2026-09-10 (`c82ec67`) verification: the Lead
 History & Versioning content-hash dedup work (Phases 6-8) and the
 2026-09-12 `pruneMovementLog_` interruption-safety fix (`16a9ec6`,
-`EXC-091`).
+`EXC-091`). 1260L → 1276L by 2026-09-21 (`3a19bdb`, the Drive-archive
+addition to `pruneMovementLog_`).
 
 ## Revalidation trigger
 

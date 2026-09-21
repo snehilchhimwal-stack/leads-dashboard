@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-18 (pending commit) |
+| **Last Verified** | 2026-09-18 against commit `f853a1c` |
 
 ## Purpose / reason to exist
 

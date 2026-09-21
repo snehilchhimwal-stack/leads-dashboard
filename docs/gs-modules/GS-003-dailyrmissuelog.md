@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `DailyRmIssueLog.gs` (1127 lines) |
+| **Location** | `DailyRmIssueLog.gs` (1264 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-11 against commit `74107f7` |
+| **Last Verified** | 2026-09-21 against commit `3a19bdb` |
 
 ## Purpose / reason to exist
 
@@ -27,7 +27,10 @@ scoring from the editor.
 - `captureDailyRmIssues` / `captureDailyRmIssues_` — the nightly
   census.
 - `pruneDailyRmIssueLog_` — 7-day retention (added 2026-09-07 after a
-  cell-limit incident).
+  cell-limit incident; **fixed again 2026-09-19/21** — see `EXC-097`).
+  Now archives dropped rows to Drive via `archiveRowsToDriveCsv_`
+  (`GS-002`) before clearing them, and both shrinks AND grows the sheet's
+  row grid to fit `kept.length + incomingRowCount` exactly.
 - `backfillDailyRmIssuesFromMovementLog_` / `backfillOneDayFromMovementLog_`
   — rebuild past days from `Movement_Log`.
 - `computeRmPerformanceGs_` + `reconstructRmPerformanceObservationsGs_` /
@@ -55,8 +58,8 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-187 | `captureDailyRmIssues()` / `captureDailyRmIssues_()` `#L128/#L140` | `leads` tab, `Movement_Log` | appends a row per open SLA-flagged lead to `Daily_RM_Issues` | Sheets write in **chunks of `BACKFILL_CHUNK_SIZE_ = 5000`** (after a real 2026-09-01 incident where one oversized `setValues()` silently failed for a whole night) | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `ensureDailyRmIssueLogSheet_` (FN-188) | the 22:50 trigger; `captureDailyRmIssuesNow()` (manual) | specific — scheduled |
-| FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss)` / `pruneDailyRmIssueLogNow()` `#L94/#L252/#L292` | spreadsheet | ensures the tab; prunes rows older than 7 days | may create the tab; deletes rows | — | FN-187 | specific — retention added 2026-09-07 |
+| FN-187 | `captureDailyRmIssues()` / `captureDailyRmIssues_()` `#L128/#L140` | `leads` tab, `Movement_Log` | appends a row per open SLA-flagged lead to `Daily_RM_Issues` | Sheets write in **chunks of `BACKFILL_CHUNK_SIZE_ = 5000`** (after a real 2026-09-01 incident where one oversized `setValues()` silently failed for a whole night); idempotency check now runs FIRST (2026-09-19), before pruning, so a double-fire bails out cheaply | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `ensureDailyRmIssueLogSheet_` (FN-188), `pruneDailyRmIssueLog_` (FN-188, now called AFTER `rows.length` is known, passing it in) | the 22:50 trigger; `captureDailyRmIssuesNow()` (manual) | specific — scheduled |
+| FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss, incomingRowCount)` / `pruneDailyRmIssueLogNow()` `#L94/#L252/#L292` | spreadsheet (+ the caller's about-to-be-written row count, added 2026-09-19) | ensures the tab; prunes rows older than 7 days, sizing the sheet's row grid to `kept.length + incomingRowCount + headroom` exactly (shrinks OR grows, `#L323`) | may create the tab; deletes/inserts rows; archives dropped rows to Drive via `archiveRowsToDriveCsv_` (`GS-002` FN-265) before clearing them | `archiveRowsToDriveCsv_` (`GS-002` FN-265) | FN-187 | specific — retention added 2026-09-07, the incoming-count sizing + archive fix added 2026-09-19/21 (`EXC-097`) |
 | FN-189 | `backfillDailyRmIssuesFromMovementLog_(ss)` / `backfillOneDayFromMovementLog_(ss, dayKey)` / `repairDailyRmIssuesMissingFieldsNow()` `#L331/#L473/#L603` | `Movement_Log` history | rebuilds past `Daily_RM_Issues` days | chunked Sheets writes | `_evidenceAtDeadlineGs_` (`GS-008`), `computeSlaFlags_` (`GS-012`) | manual recovery | specific |
 | FN-190 | `computeRmPerformanceGs_(ss)` `#L1071` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
 | FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L869/#L940` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
@@ -83,6 +86,7 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 | EXC-060 | an oversized `setValues()` write | **chunked into 5000-row batches** | (historical) a whole night's capture silently lost — fixed |
 | EXC-061 | `Daily_RM_Issues` grows past the workbook cell ceiling | `pruneDailyRmIssueLog_` trims to 7 days | (historical) a real cell-limit incident — fixed 2026-09-07 |
 | EXC-062 | a run takes very long / writes nothing | shows in Apps Script Executions; a documented past incident (~8 min, wrote nothing — `HANDOVER.md` §2/§9) | Repeat Offenders shows stale data until the next successful capture |
+| EXC-097 | `Daily_RM_Issues` hits the workbook's 10,000,000-cell ceiling again (2026-09-19, second real occurrence of the same bug class `GS-008`'s `EXC-XXX` first hit) | root cause: `pruneDailyRmIssueLog_` used to prune BEFORE `rows.length` was known, sizing the sheet to `kept.length` + a small FIXED headroom regardless of tonight's real volume (~26,660 rows/night) — the write right after had to expand the grid, which is what pushed the workbook over. Fixed: prune now runs AFTER `rows.length` is known, passed in as `incomingRowCount`, and the sheet is sized to fit exactly (shrinking OR growing) so the write never touches the grid | the nightly capture no longer crashes; dropped rows are also now archived to Drive (`archiveRowsToDriveCsv_`, `GS-002`) instead of just deleted |
 
 ## Data lineage
 
@@ -99,7 +103,7 @@ read by `js/tab-repeat-offenders.js` (`JS-022`). The leaderboard side:
 |---|---|---|---|
 | `SHEET-001` `leads` | Read | FN-187 | the source |
 | `SHEET-002` `Movement_Log` | Read | FN-187, FN-190, FN-191 | baselines + observation reconstruction |
-| `SHEET-003` `Daily_RM_Issues` | Write (append, chunked) + prune | FN-187 / FN-188 | the audit trail; `DAILY_RM_ISSUE_LOG_COLUMNS_` |
+| `SHEET-003` `Daily_RM_Issues` | Write (append, chunked) + prune | FN-187 / FN-188 | the audit trail; `DAILY_RM_ISSUE_LOG_COLUMNS_`. Pruned rows also archived to Drive (not a Sheet) since 2026-09-21 — see `GS-002` `CFG-065`. |
 
 ## Failure / error behaviour
 
@@ -175,18 +179,27 @@ drift); `LOGIC_AUDIT.md` Part 1 §4b/§4d/§5, Part 3 §3.6.
   for the same suite). The user confirmed pasting the fix into the live
   Apps Script editor this session (`reportRmPerformanceNow()` is
   console-callable, not trigger-based, so no `setupXxx()` re-run needed).
+  **Revalidated 2026-09-21** (`3a19bdb`, commit authored 2026-09-21
+  10:13-10:30, this record's own catalog-drift note going unresolved for
+  those 2 commits until this pass): read the `EXC-097` fix
+  (`incomingRowCount` sizing + Drive archive) directly in
+  `pruneDailyRmIssueLog_`/`captureDailyRmIssues_` source; confirmed via
+  the commit's own message that all 778 local tests pass, reconfirmed
+  independently this session via `python3 test/run-gs-tests-headless.py`.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_DailyRmIssueLog.gs`,
   last green run); `LOGIC_AUDIT.md` Part 1 §4d, Part 3 §3.6; the user's
   Apps Script test confirmation this session; commits `8eb4b85`/`95305fb`
   (leadership-exclusion mirror + its Scenario D tests); the user's
   confirmation of pasting the fix into the live Apps Script editor,
-  2026-09-11.
-- **Status:** Validated 2026-09-11.
+  2026-09-11; commit `3a19bdb` (`EXC-097` fix).
+- **Status:** Validated 2026-09-21.
 
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-029. File grew 980L →
-1127L since the 2026-09-05 audit (retention prune + backfill helpers).
+1127L since the 2026-09-05 audit (retention prune + backfill helpers),
+then 1127L → 1264L by 2026-09-21 (`EXC-097`'s incoming-count sizing +
+Drive archive call).
 
 ## Revalidation trigger
 
