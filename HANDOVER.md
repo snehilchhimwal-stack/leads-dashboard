@@ -421,6 +421,18 @@ one-line fix in one file is complete:
 (This table mirrors `docs/RELATIONSHIP_MAP.md` §2, which carries the exact
 `CFG-`/`RULE-` sub-IDs and `LOGIC_AUDIT.md` Part 4 section for each pair.)
 
+**Run `python3 test/check-runtime-parity.py`** (added 2026-09-21) to diff
+the DATA in most of the rows above (keyword lists, weights, region/header
+maps, `FUNNEL_ORDER`'s order) directly between the two files, instead of
+relying on a session remembering to eyeball both sides after an edit. It
+compares the data these rules carry, not the matching algorithm itself
+(a `test`/`eligible` function body's logic isn't diffed) — a first real
+run found `HEADER_ALIASES` carrying 2 browser-only keys
+(`lead_closing_comment`, `project_region`) absent from `HEADER_ALIASES_`,
+confirmed intentional (no `.gs` file reads either column) rather than
+drift, which is the expected shape of its output: a lead to verify, not
+an automatic verdict.
+
 A new comment pattern found via `Unmatched_Comments_Log` (§5) needs a keyword
 added to **both** `OUTCOME_RULES` (dashboard) and `OUTCOME_RULES_GS_`
 (automatic emails) — adding it to only one means the dashboard and the

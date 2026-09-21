@@ -41,7 +41,14 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   `import` Apps Script and vice versa) — `HANDOVER.md` §6 has the exact
   pairs (SLA rules, comment-classification keywords, row parsing). Editing
   one side only means the dashboard and the automatic emails will silently
-  disagree about the same lead.
+  disagree about the same lead. **Run `python3 test/check-runtime-parity.py`
+  after touching any pair in that table** — it diffs the actual data
+  (keyword lists, weights, maps) between the two files instead of relying
+  on memory to catch a one-sided edit. Not run in CI yet (`--strict` exits
+  1 on a mismatch, once the pairs prove stable day-to-day); treat a
+  mismatch as a lead to verify, not an automatic bug — it can legitimately
+  differ when one runtime genuinely doesn't need a field the other does
+  (confirmed for real: `HEADER_ALIASES`'s 2 browser-only keys).
 - **Everything date/time-sensitive is pinned to IST explicitly, never to
   whatever timezone the browser or the machine running a script happens to
   be in.** The dashboard uses `istDateKey`/`IST_TZ`-style helpers
