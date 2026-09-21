@@ -16,7 +16,14 @@
  * applies identically to this newer export — re-export and regenerate
  * both RM_HIERARCHY_RAW_ here and EMPLOYEE_EMAIL_BY_NAME_RAW_
  * (RmHierarchy.private.gs) together whenever the roster changes
- * meaningfully; there's no live sync. The 2026-09-09 refresh: 9
+ * meaningfully; there's no live sync. BEFORE hand-editing this table off a
+ * fresh export, run `python3 test/check-rm-hierarchy-drift.py
+ * <export.csv>` — it catches a name whose tl/tm/rh/ch still resolves fine
+ * but no longer matches that person's CURRENT chain in the export (the
+ * 2026-09-21 Mukesh Yadav incident: 3 of his reports had already moved to
+ * Kumar Babu 3 months earlier and nothing here caught it, since
+ * auditUnresolvedRmsNow() only flags names that don't resolve at all, not
+ * ones that resolve to the wrong, stale manager). The 2026-09-09 refresh: 9
  * departures, 3 new hires, 1 name formalization (Pranav Vilas Mhatale ->
  * Pranav Mhatale, same person), and one confirmed real promotion (Akash A
  * Ugale now sits above Yash Sharma in Harbour) — see each row's own

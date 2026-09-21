@@ -135,7 +135,12 @@ Apps Script backend. Layer 18 (backend infra / routing) in
 
 `HANDOVER.md` §2, §4.3; **`OPS_CHECKLIST.md`** (RM-hierarchy gaps,
 `Manager_Directory` email gaps); `LOGIC_AUDIT.md` Part 1 §4d, Part 3
-§3.7; `CLAUDE.md` (the private-file gotcha).
+§3.7; `CLAUDE.md` (the private-file gotcha; the `check-rm-hierarchy-
+drift.py` pre-edit step, added 2026-09-21). `test/check-rm-hierarchy-
+drift.py` — not part of this file's own code, but a standing companion
+check to run against a fresh HR export before hand-editing
+`RM_HIERARCHY_RAW_` off of it (catches the Mukesh Yadav-class staleness
+bug `auditUnresolvedRmsNow()` can't see).
 
 ## Relationships
 

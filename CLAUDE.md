@@ -173,6 +173,19 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   correct-but-silently-incomplete (an unthreaded new argument, a
   rolling-vs-calendar-day window, a drifted constant between the two
   runtimes).
+- **Whenever you get a fresh "HR Live" roster export** (before hand-editing
+  `RM_HIERARCHY_RAW_` off of it): run `python3
+  test/check-rm-hierarchy-drift.py <path-to-export.csv>` first. It's the
+  check that would have caught a real incident (2026-09-21) — Zeya Shaikh/
+  Karan Shinde/Mayuresh Chavan's `tl` field kept pointing at Mukesh Yadav
+  for ~3 months after they were actually reassigned to Kumar Babu, silent
+  because a stale-but-still-resolving name is invisible to
+  `auditUnresolvedRmsNow()` (that only catches names that don't resolve at
+  all). Not run in CI — the export is out-of-band, real employee data,
+  never committed (same reasoning as `RmHierarchy.private.gs`). Its `ch`-
+  field findings run noisier than `tl`/`tm`/`rh` (several legitimate named
+  overrides live there — see `RmHierarchy.gs`'s own header docblock) — the
+  script separates them into their own section for exactly that reason.
 - **Changing anything that reads or writes `Lead_Followups`**
   (`js/sheets-writeback.js`, `js/reports-ui.js`, `js/tab-movement.js`,
   `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_`/
