@@ -86,6 +86,22 @@ function runMovementTrackerTests_() {
     const runsAfterChanged = runsAfterUnchanged.getRange(4, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
     TestAssertEqual_(runsAfterChanged[3], 1, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs.leads_changed correctly reports 1 for this run');
 
+    // ---- opp_at content-hash sensitivity (added 2026-09-21) ----
+    // L-2 has been captured twice already (both with opp_at blank, never
+    // deduped-away since it was always identical to itself). A lead
+    // reaching Opportunity between captures is exactly the real-world
+    // case CONTENT_HASH_DATE_FIELDS_ must not silently ignore -- if
+    // opp_at weren't correctly folded into the hash, this capture would
+    // wrongly dedup away as "unchanged" and the transition would never
+    // land in Movement_Log at all.
+    const oppAtNow = new Date('2026-08-17T15:00:00+05:30');
+    leadsSheet.getRange(5, 1, 1, leadsHeader.length).setValues([leadRow({ lead_id: 'L-2', client_id: 'C-2', RM: 'Test RM Two', current_stage: 'Opportunity', opp_at: oppAtNow })]);
+    snapshotOpenLeads_('test snapshot label — opp_at set');
+    TestAssertEqual_(afterSnap.getLastRow(), 5, 'snapshotOpenLeads_ (dedup): L-2 reaching Opportunity (opp_at blank -> set) is NOT deduped away -- writes a real new row');
+    const oppAtColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('opp_at');
+    const oppAtRow = afterSnap.getRange(5, 1, 1, afterSnap.getLastColumn()).getValues()[0];
+    TestAssert_(oppAtRow[oppAtColIdx] instanceof Date, 'snapshotOpenLeads_: opp_at lands in Movement_Log as a real Date value, matching lead_assigned_at/last_connect_time\'s own handling');
+
     // ---- buildTodayCallBaselineGs_ / lastSnapshotBeforeGs_ ----
     // Seed Movement_Log with a snapshot from clearly BEFORE today, to test the baseline reads.
     const priorSs = TestMockSpreadsheet_({

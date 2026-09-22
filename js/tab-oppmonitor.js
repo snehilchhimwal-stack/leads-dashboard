@@ -1,14 +1,25 @@
-// Opp Monitor tab — read-only display of the recurring Google Non-UTM/Search
+// Opp Monitor tab — display of the recurring Google Non-UTM/Search
 // Same-day/48h Opp% workflow (12 steps/month: 3 periods x 3 steps + 3
 // month-level steps, tracked as its own recurring cycle in a separate
-// To-Do Dashboard tool this file has no connection to). This app never
-// computes any of these numbers — an external analytics session writes
-// completed results into Opp_Monitor_Period / Opp_Monitor_Month by hand;
-// this file only fetches and renders whatever is already there. Unlike
-// every other tab, this one reads neither `leads` nor `filterState` — its
-// data is a fixed monthly aggregate, not sliceable by Project/Region/TL/
-// Source/Sub-source (see the filter-bar-hiding block in
-// overview-distribution-people-ops.js's tab-switch handler).
+// To-Do Dashboard tool this file has no connection to). This tab still
+// reads neither `filterState` nor the shared date-range filter — its
+// official numbers are a fixed monthly aggregate an external analytics
+// session writes into Opp_Monitor_Period / Opp_Monitor_Month by hand, not
+// sliceable by Project/Region/TL/Source/Sub-source (see the
+// filter-bar-hiding block in overview-distribution-people-ops.js's
+// tab-switch handler).
+//
+// It DOES now read the global `leads` array (added 2026-09-21, once the
+// source `leads` tab gained a real `opp_at` column — HEADER_ALIASES,
+// core-sheets-fetch.js): for any period/month slot with no
+// externally-sourced row yet, it computes the same metrics itself,
+// straight from lead_assigned_at vs opp_at, and renders that as a
+// clearly-labeled "Live" row instead of leaving the slot empty. A slot
+// that already has a real Opp_Monitor_Period/Month row is never
+// overridden by a live computation — the external session's number is
+// always the one shown once it exists, live rows only fill genuine gaps
+// (most usefully the current, in-progress period/month, which never has
+// an official row until its own cycle completes).
 
 const OPP_MONITOR_PERIOD_TAB_NAME = 'Opp_Monitor_Period';
 const OPP_MONITOR_MONTH_TAB_NAME = 'Opp_Monitor_Month';
@@ -113,6 +124,107 @@ function _oppMonitorMonthName(yearMonth){
   return `${OPP_MONITOR_MONTH_NAMES_[mo - 1]} ${y}`;
 }
 
+// --------------------------- Live computation (2026-09-21) ---------------------------
+// Everything below computes the SAME metrics Opp_Monitor_Period/Month
+// store, directly from the in-memory `leads` array, for whichever
+// period/month slots don't have a real externally-sourced row yet. Method
+// matches the external analytics session's own methodology exactly (same
+// scoping the Opp Monitor workflow was designed around): same-day = the
+// lead's first Opportunity-stage transition (opp_at) falls on the same
+// IST calendar day as lead_assigned_at; within-48h = the gap is <=48
+// hours; a lead that never reached Opportunity (opp_at blank) counts
+// toward total_leads but neither the same-day nor the 48h count. Negative
+// gaps (opp_at before lead_assigned_at — a data anomaly, not a real
+// conversion) are excluded from every metric, the same defensive guard a
+// real incident (2026-09-21, the ClickHouse epoch-zero sentinel bug)
+// showed is genuinely necessary, not theoretical, for this exact
+// calculation shape.
+
+function _oppMonitorOrdinal(n){
+  if (n % 100 >= 11 && n % 100 <= 13) return n + 'th';
+  const last = n % 10;
+  return n + (last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th');
+}
+
+// {fromDay, toDay, label} for one of a month's 3 periods — label matches
+// the exact "1st–10th" / "21st–31st" style already used for
+// externally-sourced period_label values, so a live row's date range
+// reads identically to a real one.
+function _oppMonitorPeriodDayRange(yearMonth, periodNumber){
+  const [y, mo] = String(yearMonth).split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate(); // day 0 of next month = last day of this one
+  if (periodNumber === 1) return { fromDay: 1, toDay: 10, label: `${_oppMonitorOrdinal(1)}–${_oppMonitorOrdinal(10)}` };
+  if (periodNumber === 2) return { fromDay: 11, toDay: 20, label: `${_oppMonitorOrdinal(11)}–${_oppMonitorOrdinal(20)}` };
+  return { fromDay: 21, toDay: lastDay, label: `${_oppMonitorOrdinal(21)}–${_oppMonitorOrdinal(lastDay)}` };
+}
+
+function _oppMonitorDateStr(yearMonth, day){
+  const [y, mo] = String(yearMonth).split('-').map(Number);
+  return `${y}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// The actual metrics, scoped to leads whose lead_assigned_at (IST
+// calendar day) falls in [fromDay, toDay] of yearMonth. Returns null (not
+// a zeroed object) when there are no leads in scope at all, so callers
+// can tell "genuinely nothing happened" apart from "0 of 0."
+function _oppMonitorComputeLiveMetrics(leadsArr, yearMonth, fromDay, toDay){
+  const [ty, tmo] = String(yearMonth).split('-').map(Number);
+  let total = 0, sameDay = 0, h48 = 0, hoursSum = 0, hoursCount = 0;
+  (leadsArr || []).forEach(l => {
+    const created = parseDate(l.lead_assigned_at);
+    if (!created) return;
+    const p = istParts(created);
+    if (p.y !== ty || (p.mo + 1) !== tmo || p.d < fromDay || p.d > toDay) return;
+    total++;
+    const opp = parseDate(l.opp_at);
+    if (!opp) return;
+    const hours = (opp - created) / 36e5;
+    if (hours < 0) return; // data anomaly — never a real conversion
+    if (istSameDay(created, opp)) sameDay++;
+    if (hours <= 48) h48++;
+    hoursSum += hours;
+    hoursCount++;
+  });
+  if (!total) return null;
+  const avgHrs = hoursCount ? hoursSum / hoursCount : null;
+  return {
+    total_leads: total,
+    same_day_count: sameDay,
+    h48_count: h48,
+    same_day_pct: +(sameDay / total * 100).toFixed(1),
+    h48_pct: +(h48 / total * 100).toFixed(1),
+    avg_hrs_to_opp: avgHrs === null ? '' : +avgHrs.toFixed(2),
+    avg_days_to_opp: avgHrs === null ? '' : +(avgHrs / 24).toFixed(2),
+    _live: true,
+  };
+}
+
+// Synthesizes a period/month row in the exact shape a real
+// Opp_Monitor_Period/Month row has, so the existing render code (built
+// for sheet-sourced rows) can display a live one identically, only the
+// `_live` flag and `source` differ.
+function _oppMonitorLivePeriodRow(yearMonth, periodNumber, leadsArr){
+  const { fromDay, toDay, label } = _oppMonitorPeriodDayRange(yearMonth, periodNumber);
+  const metrics = _oppMonitorComputeLiveMetrics(leadsArr, yearMonth, fromDay, toDay);
+  if (!metrics) return null;
+  return Object.assign({
+    period_key: `${yearMonth}_P${periodNumber}`, year_month: yearMonth, period_number: periodNumber,
+    period_label: label, date_from: _oppMonitorDateStr(yearMonth, fromDay), date_to: _oppMonitorDateStr(yearMonth, toDay),
+    source: 'live',
+  }, metrics);
+}
+
+function _oppMonitorLiveMonthRow(yearMonth, leadsArr){
+  const [y, mo] = String(yearMonth).split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const metrics = _oppMonitorComputeLiveMetrics(leadsArr, yearMonth, 1, lastDay);
+  if (!metrics) return null;
+  return Object.assign({
+    month_key: yearMonth, year_month: yearMonth, month_label: _oppMonitorMonthName(yearMonth),
+    source: 'live',
+  }, metrics);
+}
+
 function _oppMonitorStepDone(status){
   return String(status || '').trim().toLowerCase() === 'done';
 }
@@ -214,14 +326,12 @@ function _renderOppMonitorPeriodTable(){
   const thead = tableEl.querySelector('thead');
   const tbody = tableEl.querySelector('tbody');
 
-  if (oppMonitorPeriodFetchState === 'missing' || oppMonitorPeriodFetchState === 'error') {
+  if (oppMonitorPeriodFetchState === 'error') {
     thead.innerHTML = '';
     tbody.innerHTML = '';
     if (noticeEl) {
       noticeEl.style.display = 'block';
-      noticeEl.textContent = oppMonitorPeriodFetchState === 'error'
-        ? 'Could not read Opp_Monitor_Period — check the sheet tab exists and is shared correctly.'
-        : 'No periods recorded yet.';
+      noticeEl.textContent = 'Could not read Opp_Monitor_Period — check the sheet tab exists and is shared correctly.';
     }
     if (countEl) countEl.textContent = '';
     return;
@@ -229,17 +339,25 @@ function _renderOppMonitorPeriodTable(){
   if (noticeEl) noticeEl.style.display = 'none';
 
   const slots = _oppMonitorOrderedPeriodSlots();
-  const rowsBySlot = slots.map(slot => oppMonitorPeriodRows.find(r => r.year_month === slot.year_month && String(r.period_number) === String(slot.period_number)) || null);
+  // A missing sheet tab reads as an empty oppMonitorPeriodRows, same as a
+  // present-but-empty one — either way, every slot below falls straight
+  // through to its own live computation instead of a separate early return.
+  const rowsBySlot = slots.map(slot => {
+    const sourced = oppMonitorPeriodRows.find(r => r.year_month === slot.year_month && String(r.period_number) === String(slot.period_number));
+    if (sourced) return sourced;
+    return _oppMonitorLivePeriodRow(slot.year_month, slot.period_number, leads);
+  });
 
   thead.innerHTML = '<tr><th>Month</th><th>Period</th><th>Date range</th><th>Total Leads</th><th>Same-Day Opps</th><th>Same-Day Opp%</th><th>48h Opps</th><th>Within-48h Opp%</th><th>Avg Days to Opp</th><th>Avg Hrs to Opp</th></tr>';
 
   const bodyRows = [];
   rowsBySlot.forEach((row, i) => {
-    if (!row) return; // no backfill — absent slots are simply not shown, never a dash placeholder
+    if (!row) return; // no backfill AND no leads in scope yet — genuinely nothing to show
     const prevRow = i > 0 ? rowsBySlot[i - 1] : null;
+    const liveTag = row._live ? ' <span class="chip dim-chip" style="font-size:10px; padding:1px 6px;" title="Computed live from the leads tab — not yet the official recorded figure">Live</span>' : '';
     bodyRows.push(`<tr>
       <td>${esc(_oppMonitorMonthName(row.year_month))}</td>
-      <td>${esc(row.period_label || `P${row.period_number}`)}</td>
+      <td>${esc(row.period_label || `P${row.period_number}`)}${liveTag}</td>
       <td>${esc(row.date_from)} – ${esc(row.date_to)}</td>
       <td>${esc(String(row.total_leads || ''))}</td>
       <td>${esc(String(row.same_day_count || ''))}</td>
@@ -254,7 +372,7 @@ function _renderOppMonitorPeriodTable(){
   tbody.innerHTML = bodyRows.length ? bodyRows.join('') : '';
   if (!bodyRows.length && noticeEl) {
     noticeEl.style.display = 'block';
-    noticeEl.textContent = 'No periods recorded yet for the current or previous 2 months.';
+    noticeEl.textContent = 'No periods recorded yet for the current or previous 2 months, and no leads in that window to compute live either.';
   }
   if (countEl) countEl.textContent = bodyRows.length ? String(bodyRows.length) : '';
 }
@@ -269,14 +387,12 @@ function _renderOppMonitorMonthTable(){
   const thead = tableEl.querySelector('thead');
   const tbody = tableEl.querySelector('tbody');
 
-  if (oppMonitorMonthFetchState === 'missing' || oppMonitorMonthFetchState === 'error') {
+  if (oppMonitorMonthFetchState === 'error') {
     thead.innerHTML = '';
     tbody.innerHTML = '';
     if (noticeEl) {
       noticeEl.style.display = 'block';
-      noticeEl.textContent = oppMonitorMonthFetchState === 'error'
-        ? 'Could not read Opp_Monitor_Month — check the sheet tab exists and is shared correctly.'
-        : 'No monthly rollups recorded yet.';
+      noticeEl.textContent = 'Could not read Opp_Monitor_Month — check the sheet tab exists and is shared correctly.';
     }
     if (countEl) countEl.textContent = '';
     return;
@@ -289,16 +405,21 @@ function _renderOppMonitorMonthTable(){
     _oppMonitorShiftYearMonth(currentYm, -1),
     currentYm,
   ];
-  const rowsByMonth = months.map(ym => oppMonitorMonthRows.find(r => r.month_key === ym) || null);
+  const rowsByMonth = months.map(ym => {
+    const sourced = oppMonitorMonthRows.find(r => r.month_key === ym);
+    if (sourced) return sourced;
+    return _oppMonitorLiveMonthRow(ym, leads);
+  });
 
   thead.innerHTML = '<tr><th>Month</th><th>Total Leads</th><th>Same-Day Opps</th><th>Same-Day Opp%</th><th>48h Opps</th><th>Within-48h Opp%</th><th>Avg Days to Opp</th><th>Avg Hrs to Opp</th></tr>';
 
   const bodyRows = [];
   rowsByMonth.forEach((row, i) => {
-    if (!row) return; // no backfill
+    if (!row) return; // no backfill AND no leads in scope yet
     const prevRow = i > 0 ? rowsByMonth[i - 1] : null;
+    const liveTag = row._live ? ' <span class="chip dim-chip" style="font-size:10px; padding:1px 6px;" title="Computed live from the leads tab — not yet the official recorded figure">Live</span>' : '';
     bodyRows.push(`<tr>
-      <td>${esc(row.month_label || _oppMonitorMonthName(row.month_key))}</td>
+      <td>${esc(row.month_label || _oppMonitorMonthName(row.month_key))}${liveTag}</td>
       <td>${esc(String(row.total_leads || ''))}</td>
       <td>${esc(String(row.same_day_count || ''))}</td>
       <td>${_oppMonitorPctCellHtml(row.same_day_pct, prevRow ? prevRow.same_day_pct : null)}</td>
@@ -312,7 +433,7 @@ function _renderOppMonitorMonthTable(){
   tbody.innerHTML = bodyRows.length ? bodyRows.join('') : '';
   if (!bodyRows.length && noticeEl) {
     noticeEl.style.display = 'block';
-    noticeEl.textContent = 'No monthly rollups recorded yet for the current or previous 2 months.';
+    noticeEl.textContent = 'No monthly rollups recorded yet for the current or previous 2 months, and no leads in that window to compute live either.';
   }
   if (countEl) countEl.textContent = bodyRows.length ? String(bodyRows.length) : '';
 }

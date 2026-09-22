@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -54,6 +54,7 @@ Written by **two independent writers with an identical schema**:
 | `call_attempts`, `call_count`, `duration` | number | cumulative call figures at capture | |
 | `stage_comments` | text | stage comment copy | |
 | `rm_is_active`, `lead_closing_reason` | text | **appended 2026-09-01** — rows captured before then have neither column at all | for `backfillDailyRmIssuesFromMovementLog_` to reconstruct past SLA flags |
+| `opp_at` | datetime | first Opportunity-stage transition timestamp | **appended 2026-09-21** — rows captured before then have neither column at all. Part of the content-hash (`CONTENT_HASH_DATE_FIELDS_`, `GS-008`/`JS-018`) — a lead reaching Opportunity between two captures is a real content change, correctly triggers a new row, not a dedup skip. Read by `js/tab-oppmonitor.js`'s live same-day/48h Opp% computation via the live `leads` array — Movement_Log itself is not that computation's data source, this column is captured here purely for historical retention, same reasoning as `rm_is_active`/`lead_closing_reason` above. |
 
 Exact list: `MovementTracker.gs` `SNAPSHOT_COLUMNS_` `#L105` (+
 `snapshot_at`, `snapshot_label` prefixed).
@@ -168,7 +169,9 @@ The live `Movement_Log` tab; schema defined by `SNAPSHOT_COLUMNS_`
   the `LOGIC_AUDIT.md` Part 4 §4.7 diff; retention read from
   `MOVEMENT_LOG_RETENTION_DAYS`.
 - **Evidence:** `LOGIC_AUDIT.md` Part 4 §4.7; `.github/workflows/test.yml`
-  (`Tests_MovementTracker.gs`, last green run).
+  (`Tests_MovementTracker.gs`, last green run); `Tests_MovementTracker.gs`'s
+  new opp_at content-hash sensitivity assertion (2026-09-21 — proves a lead
+  reaching Opportunity between captures is NOT deduped away).
 - **Status:** Validated 2026-09-10 (**including** lifecycle — this tab is
   a confirmed worked example).
 

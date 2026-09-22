@@ -996,6 +996,14 @@
       return [];
     };
 
+    // This block's tables now also read the global `leads` array (live
+    // computation, added 2026-09-21) — pin it to empty here so every
+    // assertion below is deliberately testing "no sourced row AND no
+    // leads to compute live from" rather than accidentally inheriting
+    // whatever the earlier main-flow fixture happened to leave behind.
+    const _oppMonitorPriorLeads = leads;
+    leads = [];
+
     let oppThrew = null;
     try {
       await fetchOppMonitorData('harness-sheet-id');
@@ -1027,6 +1035,43 @@
       const monthTableText = oppTextOf('oppMonitorMonthTable');
       assert('Monthly trend table lists July and August but not the absent September row', monthTableText.indexOf('July 2026') !== -1 && monthTableText.indexOf('August 2026') !== -1 && monthTableText.indexOf('2026-09') === -1);
       assert('Monthly trend table shows opp counts and Avg Days/Hrs to Opp', monthTableText.indexOf('960') !== -1 && monthTableText.indexOf('0.93') !== -1 && monthTableText.indexOf('22.3') !== -1); // July month row
+
+      // ---- Live computation (2026-09-21): Sep P3 has no sourced row —
+      // give it 4 synthetic leads inside its 21st-30th window and confirm
+      // a correctly-computed "Live" row now fills that gap.
+      // A: same-day (6h) and within-48h. B: exactly 48h -- boundary, must
+      // count as within-48h. C: never reached Opportunity (opp_at blank)
+      // -- counts toward total only. D: 96h -- neither same-day nor
+      // within-48h, still counts toward the average.
+      // Expected: total=4, same_day=1 (25.0%), h48=2 (50.0%),
+      // avg_hrs=(6+48+96)/3=50.0, avg_days=50/24=2.08.
+      leads = [
+        { lead_id: 'live-a', lead_assigned_at: '2026-09-21T04:00:00.000Z', opp_at: '2026-09-21T10:00:00.000Z' },
+        { lead_id: 'live-b', lead_assigned_at: '2026-09-22T04:00:00.000Z', opp_at: '2026-09-24T04:00:00.000Z' },
+        { lead_id: 'live-c', lead_assigned_at: '2026-09-25T04:00:00.000Z', opp_at: '' },
+        { lead_id: 'live-d', lead_assigned_at: '2026-09-28T04:00:00.000Z', opp_at: '2026-10-02T04:00:00.000Z' },
+      ];
+      renderOppMonitorTab();
+      const livePeriodText = oppTextOf('oppMonitorPeriodTable');
+      assert('Live computation: Sep P3 now shows a Live-tagged row', /Live/.test(livePeriodText) && livePeriodText.indexOf('21st') !== -1);
+      // 25.0%/50.0% only arise from total=4, same_day=1, h48=2 — a
+      // narrower, more precise check than asserting "4" appears somewhere
+      // in concatenated cell text.
+      assert('Live computation: same-day% = 25.0, 48h% = 50.0 (implies total=4, same_day=1, h48=2)', livePeriodText.indexOf('25.0%') !== -1 && livePeriodText.indexOf('50.0%') !== -1);
+      assert('Live computation: avg hrs/days to Opp = 50 / 2.08', livePeriodText.indexOf('50') !== -1 && livePeriodText.indexOf('2.08') !== -1);
+
+      // A slot that already has a real Opp_Monitor_Period row must never
+      // be overridden by a live computation, even with qualifying leads
+      // in scope — give July P1's exact window a synthetic lead too and
+      // confirm July P1 still shows the SOURCED 37.7%-style figures
+      // (300/400 counts from the fixture above), not a live recompute.
+      leads.push({ lead_id: 'live-e', lead_assigned_at: '2026-07-05T04:00:00.000Z', opp_at: '2026-07-05T05:00:00.000Z' });
+      renderOppMonitorTab();
+      const sourcedStillWinsText = oppTextOf('oppMonitorPeriodTable');
+      assert('Live computation never overrides an existing sourced row (July P1 still shows its real 300/400 counts)', sourcedStillWinsText.indexOf('300') !== -1 && sourcedStillWinsText.indexOf('400') !== -1);
+
+      leads = _oppMonitorPriorLeads;
+      renderOppMonitorTab();
 
       // Filter-bar hiding — the one behavior this tab uniquely owns.
       const filterBarEl = document.getElementById('filterBar');

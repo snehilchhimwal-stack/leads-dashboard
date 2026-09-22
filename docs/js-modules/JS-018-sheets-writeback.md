@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `641398e` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -56,7 +56,7 @@ Loads with the tab group, before `main.js` (`LOGIC_AUDIT.md` Part 1 §4a).
 | FN-128 | `upsertSlaHistoryRows(entries)` / `sortSlaHistorySheet_()` / `backfillSlaHistoryFromMovementLog()` `#L335/#L380/#L423` | SLA entries / — | upserts by `snapshot_at` (never duplicates); sorts; rebuilds from Movement_Log | Sheets write, **`RAW` value-input** (stops Sheets date-text→serial coercion) | FN-122, `movementSnapshots` (`JS-021`) | `snapshotSlaHistory` (`JS-004`), `MovementTracker`-equivalent checkpoints, `#backfillSlaHistoryBtn` (`BTN-019`) | specific |
 | FN-129 | `upsertDailyCohortHistoryRows(entries)` + `ensureDailyCohortHistorySheet_` / `sortDailyCohortHistorySheet_` / `backfillDailyCohortHistoryFromMovementLog` / `clearDailyCohortHistory` / `fetchDailyCohortHistoryForDate` / `fetchAllDailyCohortHistoryRows` `#L506`, `#L479`–`#L690` | cohort entries / a date key | upserts / reads / clears `Daily_Cohort_History` | Sheets write (`RAW`); self-healing header | FN-122/FN-123 | `persistDailyCohortHistory` (`JS-024`), `#backfillDailyCohortHistoryBtn` (`BTN-021`), `#clearDailyCohortHistoryBtn` (`BTN-022`) | specific |
 | FN-130 | `logEmailSend(report, to, cc)` + `ensureSendLogSheet_()` `#L147/#L124` | a sent report + recipients | appends a `Send_Log` row (fire-and-forget) | Sheets write; creates the tab if missing | FN-122 | `performGmailSend` (`JS-015`), the mailto path | specific |
-| FN-131 | `initAutoSnapshotCheckbox()` / `autoSnapshotEnabled()` / `istDateTimeValue(date)` / `movementCellValue(l, key)` `#L15/#L26/#L37/#L47` | — / a lead + column key | wires the checkbox / a cell value | DOM listener / none | — | `initMovementUI` (`JS-021`), FN-121 | reusable |
+| FN-131 | `initAutoSnapshotCheckbox()` / `autoSnapshotEnabled()` / `istDateTimeValue(date)` / `movementCellValue(l, key)` `#L15/#L26/#L37/#L47` | — / a lead + column key | wires the checkbox / a cell value | DOM listener / none | — | `initMovementUI` (`JS-021`), FN-121 | reusable — `movementCellValue`'s date-field branch gained `opp_at` 2026-09-21, alongside `lead_assigned_at`/`last_connect_time` |
 
 ## Data lineage — the full write table (`DOC-028` deliverable)
 

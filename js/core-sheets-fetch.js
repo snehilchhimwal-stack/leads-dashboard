@@ -24,6 +24,13 @@ const HEADER_ALIASES = {
   project_region: ['project_region','project region'],
   client: ['client'],
   lead_assigned_at: ['lead_assigned_at','lead assigned at','assigned_at','assigned at','lead assigned','date assigned'],
+  // Added 2026-09-21 — the timestamp of the lead's first Opportunity-stage
+  // transition, straight from the source tab (blank for a lead that never
+  // reached Opportunity). Lets same-day/within-48h Opp% and avg time-to-Opp
+  // be computed natively against lead_assigned_at, instead of only via the
+  // external analytics session the Opp Monitor workflow used before this
+  // column existed — see computeOppMetrics (core-lead-model.js).
+  opp_at: ['opp_at','opp at'],
   group_source: ['group_source','group source','source'],
   source_bucket: ['source_bucket','source bucket','sub_source','sub source'],
   current_stage: ['current_stage','current stage','stage'],

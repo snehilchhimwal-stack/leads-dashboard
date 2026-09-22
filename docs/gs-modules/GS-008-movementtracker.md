@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `MovementTracker.gs` (1276 lines) |
+| **Location** | `MovementTracker.gs` (1285 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `3a19bdb` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -94,7 +94,7 @@ scheduled fire (`CLAUDE.md` gotcha).
 | FN-221 | `ensureSlaHistorySheet_(ss)` / `writeSlaHistorySnapshot_(ss, dataRows, colIndex, now)` `#L404/#L434` | the snapshot rows | one `SLA_History` row per run | Sheets write | `computeSlaFlags_` (`GS-012`) | FN-218 | specific — **schema matches `js/sheets-writeback.js`'s `SLA_History` writer exactly** (`LOGIC_AUDIT.md` Part 4 §4.7) |
 | FN-222 | `_collapseLatestByKeyGs_` `#L293` / `_lastMovementLogSnapshotByKeyGs_` `#L310` / `buildTodayCallBaselineGs_(ss, beforeDate)` `#L363` / `lastSnapshotBeforeGs_(ss, beforeDate)` `#L382` / `buildMovementLogMapsGs_(ss, now)` `#L395` | `Movement_Log` rows | the baseline / last-snapshot / combined maps every scheduled emailer reads | none | `_readMovementLogRowsGs_` (FN-224) | `GS-001`, `GS-010`, `GS-003` | reusable — the hub's read API |
 | FN-223 | `eligibleDailyCohortDatesGs_` `#L824` / `computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now)` `#L881` / `upsertDailyCohortHistoryRowsGs_` `#L955` / `_readArchivedDailyCohortDatesGs_` `#L1004` / `persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now)` `#L1018` | history rows + a date | per-region cohort outcomes; upserts `Daily_Cohort_History` | Sheets write (`RAW`); **never re-writes an archived date** | `_evidenceAtDeadlineGs_` (FN-225), `_effectiveRegionGs_` (FN-225) | FN-218, `persistDailyCohortHistoryNow()` (manual) | specific — **`.gs` twin of `JS-024`'s cohort persist** |
-| FN-224 | `ensureMovementLogSheet_(ss)` / `_readMovementLogRowsGs_(ss)` / `_readMovementLogHistoryRowsGs_(ss)` `#L189/#L262/#L757` | spreadsheet | ensures the tab (self-healing header — new columns **appended** to `SNAPSHOT_COLUMNS_`, never inserted mid-array); reads rows | may create the tab | — | FN-218, FN-222, FN-223 | reusable |
+| FN-224 | `ensureMovementLogSheet_(ss)` / `_readMovementLogRowsGs_(ss)` / `_readMovementLogHistoryRowsGs_(ss)` `#L196/#L271/#L782` | spreadsheet | ensures the tab (self-healing header — new columns **appended** to `SNAPSHOT_COLUMNS_`, never inserted mid-array; forces a datetime cell format on `lead_assigned_at`/`last_connect_time`/`opp_at` explicitly by name — see `EXC-XXX` risk note); reads rows | may create the tab | — | FN-218, FN-222, FN-223 | reusable |
 | FN-225 | `_effectiveRegionGs_(groupSource, region)` `#L797` / `_evidenceAtDeadlineGs_(historyForKey, deadlineMs, liveEvidence)` `#L807` / `_buildLiveLeadIndexGs_` `#L855` | a lead's history + a deadline | status as of the deadline / the effective region | none | — | FN-223, `GS-003` | reusable — twin of `evidenceAtDeadline` (`JS-024` FN-162); `_effectiveRegionGs_` is the **reduced** Loan override (`group_source` only — `SNAPSHOT_COLUMNS_` has no `project_region`) |
 | FN-226 | `checkMovementLogFreshness_(ss, now)` / `checkMovementLogFreshnessNow()` `#L1154/#L1171` | spreadsheet + now | `{status, ageHours, label}` — stale if age > `MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_` (8h); **reads `Movement_Log_Runs`' last row, not `Movement_Log`'s own last row** (changed 2026-09-11 alongside the content-hash dedup — a capture run that changes no leads no longer writes a new `Movement_Log` row at all, so `Movement_Log`'s own last-row timestamp stopped being a reliable freshness signal; `Movement_Log_Runs` gets a row every run regardless) | none | — | `OpsChecklistRunner.gs` (`GS-009`), manual | reusable |
 
@@ -106,7 +106,7 @@ scheduled fire (`CLAUDE.md` gotcha).
 | CFG-048 | `SNAPSHOT_HOURS_` (a.k.a. `SNAPSHOT_HOURS_`) | `[0, 6, 12, 18]` | the 4 IST capture hours | the trigger cadence — **requires `setupMovementTracking()` re-run** |
 | CFG-049 | `MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_` `#L1153` | `8` | max age before `Movement_Log` reads "stale" (covers the `[0,6,12,18]` gap + `atHour()` slack) | `checkMovementLogFreshness_` / `OpsChecklistRunner.gs`'s freshness check (this is the constant behind the CI drift `runWeeklyOpsChecklist_(ss, now)` was split to fix) |
 | CFG-050 | `SNAPSHOT_COLUMNS_` `#L105` | the snapshot column list — has `region` + `group_source`, **NOT `project_region`** | the `Movement_Log` write schema | every `Movement_Log` reader; the reduced Loan override (FN-225); **matches `js/sheets-writeback.js`'s writer** (`LOGIC_AUDIT.md` Part 4 §4.7) |
-| CFG-063 | `CONTENT_HASH_COLUMN_` `#L132` | `'content_hash'` | trailing `Movement_Log` bookkeeping column — a SHA-256 digest computed over the `SNAPSHOT_COLUMNS_` fields (NUL-joined, excluding `snapshot_at`/`snapshot_label`/itself); a separate column, outside the `SNAPSHOT_COLUMNS_` array | `FN-218`'s dedup skip; must hash identically to `js/sheets-writeback.js`'s twin or dedup silently breaks across runtimes |
+| CFG-063 | `CONTENT_HASH_COLUMN_` `#L132` | `'content_hash'` | trailing `Movement_Log` bookkeeping column — a SHA-256 digest computed over the `SNAPSHOT_COLUMNS_` fields (NUL-joined, excluding `snapshot_at`/`snapshot_label`/itself); a separate column, outside the `SNAPSHOT_COLUMNS_` array | `FN-218`'s dedup skip; must hash identically to `js/sheets-writeback.js`'s twin or dedup silently breaks across runtimes. `CONTENT_HASH_DATE_FIELDS_` (`#L150`) — the sub-set of `SNAPSHOT_COLUMNS_` needing IST-string normalization before hashing so both runtimes hash an identical instant identically — gained `opp_at` 2026-09-21 alongside `lead_assigned_at`/`last_connect_time`; a lead reaching Opportunity between two captures now correctly registers as a real content change (`Tests_MovementTracker.gs`'s new dedup-sensitivity assertion proves this, not just that the field is present). |
 
 ## Exceptions — `EXC-XXX` sub-table
 

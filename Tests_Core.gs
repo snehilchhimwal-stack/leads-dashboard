@@ -74,6 +74,14 @@ function runCoreTests_() {
     const colIndexNoLeadId = buildColIndex_(['Something Else', 'RM']);
     TestAssertEqual_(colIndexNoLeadId.lead_id, 0, 'buildColIndex_: falls back to column 0 for lead_id when no header matches');
 
+    // ---- opp_at (added 2026-09-21) ----
+    const headerWithOppAt = ['Lead ID', 'RM', 'Region', 'Current Stage', 'opp_at'];
+    const colIndexWithOppAt = buildColIndex_(headerWithOppAt);
+    TestAssertEqual_(colIndexWithOppAt.opp_at, 4, 'buildColIndex_: matches "opp_at" header');
+    const rowWithOppAt = ['L-1', 'Test RM One', 'Test Region', 'Opportunity', '2026-09-21 10:00:00'];
+    TestAssertEqual_(getVal_(rowWithOppAt, colIndexWithOppAt, 'opp_at'), '2026-09-21 10:00:00', 'getVal_: reads opp_at by its HEADER_ALIASES_ key');
+    TestAssertEqual_(colIndex.opp_at, -1, 'buildColIndex_: a leads-tab header predating opp_at resolves it to -1, not a throw');
+
     // ---- istDayKeyGs_ / pad2Gs_ ----
     const knownDate = new Date('2026-08-15T10:30:00+05:30');
     TestAssertEqual_(istDayKeyGs_(knownDate), '2026-08-15', 'istDayKeyGs_: formats a known IST date correctly');

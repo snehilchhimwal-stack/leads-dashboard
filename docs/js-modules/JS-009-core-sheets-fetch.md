@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-sheets-fetch.js` (183 lines) |
+| **Location** | `js/core-sheets-fetch.js` (190 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -52,7 +52,7 @@ core-auth → …`). CLAUDE.md's documented list pair-swaps it with
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-022 | `HEADER_ALIASES` `#L17` | column → `[accepted header names]` map (`lead_id`, `RM`, `TL`, `project`, `region`, `project_region`, `group_source`, `source_bucket`, `current_stage`, `call_attempts`, `call_count`, `duration`, …) | the parser's column vocabulary — tolerant of header-name variation | every field `enrichLead` / renderers read; **twin `HEADER_ALIASES_` on the backend** (`EmailInfra.gs`) — `LOGIC_AUDIT.md` Part 4 §4.8 |
+| CFG-022 | `HEADER_ALIASES` `#L17` | column → `[accepted header names]` map (`lead_id`, `RM`, `TL`, `project`, `region`, `project_region`, `group_source`, `source_bucket`, `current_stage`, `call_attempts`, `call_count`, `duration`, `opp_at` (added 2026-09-21), …) | the parser's column vocabulary — tolerant of header-name variation | every field `enrichLead` / renderers read; **twin `HEADER_ALIASES_` on the backend** (`Core.gs` CFG-066 — corrected 2026-09-21, this record previously mis-cited it as `EmailInfra.gs`) — `LOGIC_AUDIT.md` Part 4 §4.8 |
 
 ## State declared here (written elsewhere)
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `3a19bdb` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -71,6 +71,7 @@ Never — it has no `setupXxx()` and no schedule.
 | CFG-029 | `CLOSED_STAGE_EXACT_` / `CLOSED_STAGE_STEMS_` | `['won','lost','junk','dead','not interested']` / `['cancel','close','reject']` | closed-stage detection | `isClosedStage_`; twins in `JS-005` |
 | CFG-030 | IST offset | `+05:30` literal (no DST) | `istDayKeyGs_`'s day boundary | every backend IST computation (`LOGIC_AUDIT.md` Part 4 §4.6 — verified equivalent to the client mechanism) |
 | CFG-065 | `ARCHIVE_ROOT_FOLDER_` / `ARCHIVE_MANIFEST_FILE_` (added 2026-09-21) | `'Leads Dashboard Archive'` / `'archive_log.csv'` | the shared Drive folder name and manifest filename `archiveRowsToDriveCsv_` creates/reuses | every archived-row destination; lives in whichever account owns the nightly trigger (`DriveApp` calls execute as the trigger owner) |
+| CFG-066 | `HEADER_ALIASES_` `#L37` (added to the catalog 2026-09-21 — the constant itself is original to this file, just never had its own `CFG-XXX` entry before now) | ~24 keys, each an array of accepted header-text variants | maps the `leads` tab's real (tolerant) header text to canonical field keys | `buildColIndex_`/`getVal_` (FN-184) and everything that reads a `leads` row on the backend; **twin `HEADER_ALIASES` (`JS-009` `js/core-sheets-fetch.js`) — must be kept in sync, per `SHEET-001`'s own "Risks of changing this tab's structure"**. `SHEET-001`'s doc previously mis-cited this as `GS-004 CFG-037` — corrected 2026-09-21; `HEADER_ALIASES_` has always lived here (`GS-002`), never in `EmailInfra.gs`. |
 
 ## Exceptions — `EXC-XXX` sub-table
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -42,7 +42,7 @@ Seventh in the real order — after every core parsing/model file, before
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-015 | `fetchAndRender()` `#L27` | reads `#sheetIdInput` / `#tabNameInput` | writes `allParsedLeads`; triggers `renderAll()` and dependent tab renders | Sheets read, DOM overlay, `_currentSheetId` set via callee, source-mix computation | `gateTokenValid` (`JS-001`), `sheetsApiValuesGet` (`JS-009`), `valuesToGvizShape` (`JS-009`), `enrichLead` (`JS-006`), `applyFiltersAndRender` (`JS-004`), `fetchMovementLog` (`JS-021`), `fetchRmHierarchyForRollup` (`JS-022`), `renderAll` (`JS-012`) | `handleGateSignInClick` (`JS-001`), `#refreshBtn` / `#changeSourceBtn` (`DASH-001`) | specific (the app entry pipeline) |
+| FN-015 | `fetchAndRender()` `#L27` | reads `#sheetIdInput` / `#tabNameInput` | writes `allParsedLeads`; triggers `renderAll()` and dependent tab renders. Each parsed lead now also carries `opp_at` (added 2026-09-21, ISO string or `''` — mirrors `lead_assigned_at`'s `getDate()`/`toISOString()` pattern), read via `js/tab-oppmonitor.js`'s live same-day/48h Opp% computation. | Sheets read, DOM overlay, `_currentSheetId` set via callee, source-mix computation | `gateTokenValid` (`JS-001`), `sheetsApiValuesGet` (`JS-009`), `valuesToGvizShape` (`JS-009`), `enrichLead` (`JS-006`), `applyFiltersAndRender` (`JS-004`), `fetchMovementLog` (`JS-021`), `fetchRmHierarchyForRollup` (`JS-022`), `renderAll` (`JS-012`) | `handleGateSignInClick` (`JS-001`), `#refreshBtn` / `#changeSourceBtn` (`DASH-001`) | specific (the app entry pipeline) |
 | FN-016 | `mergeRowsIntoOneLead(rows)` `#L347` (internal) | array of raw rows for one family | one merged lead: `collatedFrom` (distinct `lead_id` count), `collatedRMs`, `collatedLeadIds`, `collatedRegions`, MAX'd counters, furthest stage | none (pure) | `canonicalStage` / `isClosedStage` (`JS-006`), region helpers | `fetchAndRender` (FN-015) only | specific |
 | FN-017 | `_ufFind(x)` / `_ufUnion(a,b)` `#L280/#L284` (internal) | row indices | union-find structure over rows sharing `lead_id` OR `client_id`+similar-region | none | — | `fetchAndRender` (FN-015) | specific |
 | FN-018 | `showError(html)` / `hideError()` `#L13/#L19` | HTML string | toggles `#errorBanner` | DOM write | — | `fetchAndRender` (FN-015), other modules on a caught error | reusable |
@@ -124,9 +124,10 @@ collation, refresh-after-mutation wiring).
   `renderOppMonitorTab` — called directly, independent of the
   `Promise.all` above), `SHEET-001`, `EXT-001`
 - **Used By:** `DASH-001`, `TAB-004`, `TAB-007`, `JS-001`, `JS-002`,
-  `JS-018`, `JS-021`, `JS-022`, `JS-023`, `DATA-001` — transitively
-  every tab (all read `allParsedLeads` / `leads` / `issueLeads` it
-  produces)
+  `JS-018`, `JS-021`, `JS-022`, `JS-023`, `JS-025` (reads the global
+  `leads` this file populates, for its 2026-09-21 live-computation
+  gap-fill), `DATA-001` — transitively every tab (all read
+  `allParsedLeads` / `leads` / `issueLeads` it produces)
 - **Related:** `JS-002` (display side of the merge), `JS-018` (write
   paths re-invoke `fetchAndRender` / dependent renders after a write)
 

@@ -151,6 +151,7 @@ async function fetchAndRender(){
       .map(c => {
         const createdDate = getDate(c, 'lead_assigned_at');
         const connectDate = getDate(c, 'last_connect_time');
+        const oppDate = getDate(c, 'opp_at');
         return {
           lead_id: getVal(c, 'lead_id'),
           RM: getVal(c, 'RM') || 'Unassigned',
@@ -168,6 +169,11 @@ async function fetchAndRender(){
           project_region: getVal(c, 'project_region') || '',
           client: getVal(c, 'client') || '',
           lead_assigned_at: createdDate ? createdDate.toISOString() : getVal(c, 'lead_assigned_at'),
+          // '' (not null) when the lead never reached Opportunity — matches
+          // every other optional string field here, so callers can use the
+          // same falsy check everywhere rather than a special null case
+          // just for this one.
+          opp_at: oppDate ? oppDate.toISOString() : '',
           group_source: getVal(c, 'group_source'),
           source_bucket: getVal(c, 'source_bucket') || '',
           current_stage: getVal(c, 'current_stage'),

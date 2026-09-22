@@ -95,6 +95,7 @@ branch-deploy signature) runs green on `master`;
 | `js/core-*.js` (9 load first; 10 exist) | Loaded first, in this order: `core-foundation.js` (CONFIG, ISSUE_PRIORITY, IST date helpers) → `core-sheets-fetch.js` (HEADER_ALIASES, the `leads`/`issueLeads`/`filterState` module state, Sheets API v4 read + gviz parsing) → `core-auth.js` (the sign-in gate, `GATE_SCOPE`) → `core-lead-model.js` (stage classifiers + `enrichLead`, the single source of truth for a lead's derived state — SLA flags, stage, funnel position) → `core-collation.js` (multi-RM-copy dedup/collation display) → `core-outcome-engine.js` (comment classification, `OUTCOME_RULES`/`inferOutcome`) → `core-fetch-and-render.js` (`fetchAndRender` itself) → `core-ui.js` (generic UI chrome: `esc`, loading overlay, alert cards) → `core-filters.js` (`applyFiltersAndRender`, the filter-bar UI). Formerly one `js/core.js` file (3,120 lines) — split in the 2026-09 modularity refactor (pure code motion, no logic changed; see git history). Everything else still depends on this whole group exactly as it depended on the single file before — order AMONG the 9 mostly doesn't matter (see `core-foundation.js`'s own header comment for why), but all 9 must load before every other `js/*.js` file below. A 10th `core-*.js` file, `core-rm-performance.js`, loads *later* — interleaved among the tab files at position 15 of 23 — which is harmless because nothing at parse time calls into it. |
 | `js/tab-audit.js` | Audit tab — "when was a lead last touched." |
 | `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
+| `js/tab-oppmonitor.js` | Opp Monitor tab (added 2026-09-18) — Google Non-UTM/Search Same-day/48h Opp% workflow: a 12-step checklist + Period/Month results tables reading two externally-populated Sheet tabs (`Opp_Monitor_Period`/`Month`, no writer in this codebase). As of 2026-09-21 also computes the same metrics LIVE from `leads`' new `opp_at` column for any slot without an official row yet (tagged "Live", never overriding a real one) — see `TAB-009`/`JS-025`. The one tab hiding the shared filter bar. |
 | `js/tab-rmtimeline.js` | RM Timeline tab — per-RM daily calendar and day timeline. |
 | `js/tab-movement.js` | Movement tab — reads the `Movement_Log` sheet tab that `MovementTracker.gs` populates; stalled leads, overnight cohort, RM stall leaderboard, time-to-Opportunity. |
 | `js/tab-repeat-offenders.js` | Repeat Offenders tab (own top-level tab, added 2026-09-01) — reads the `Daily_RM_Issues` sheet tab that `DailyRmIssueLog.gs` populates nightly; RM/A1-TM/RH/Region leaderboards ranked by the empirical-Bayes composite RM-performance score (`computeRmPerformance`, `js/core-rm-performance.js`), which **replaced** the old "Avg Flagged" ratio in the §9.7 redesign. See §9 for the whole subsystem, including a real Time-range filtering gotcha worth reading before touching this file. |
@@ -121,20 +122,27 @@ branch-deploy signature) runs green on `master`;
 | `design/live-ops-redesign.html` | A standalone visual mockup from an earlier exploration pass — not wired to real data, not part of the live app. |
 
 **Load order matters** for the `<script src>` tags in `dashboard.html`.
-The real order (23 `<script src>` tags, post the 2026-09 split of `core.js`
-into 9 and `reports.js` into 3) is: the **9 `core-*.js` files** in the order
-listed above → `tab-audit.js` → `tab-tracking.js` → `tab-rmtimeline.js` →
-`tab-movement.js` → `tab-repeat-offenders.js` → `core-rm-performance.js` →
-`repeat-offenders-pdf.js` → `tab-morning.js` → `reports-build.js` →
-`reports-gmail.js` → `reports-ui.js` → `sheets-writeback.js` →
-`overview-distribution-people-ops.js` → `main.js`. (A 24th file,
-`js/rm-performance-worker.js`, is not a `<script>` tag — `tab-repeat-offenders.js`
-loads it with `new Worker()`.) Read `dashboard.html`'s own tag list as the
-authority. These are classic `<script>` tags (no modules, no bundler)
-sharing one global scope — a function or `let`/`const` defined in one file
-is a bare global every later file can call directly. If you add a new
-`js/*.js` file, add its `<script src>` tag in the right position (after
-whatever it depends on, before `main.js`).
+The real order (24 `<script src>` tags as of 2026-09-21, one more than the
+23 this section stated from 2026-09-18 through 2026-09-20 — a new tab file
+was added `TAB-XXX`-side but this list was never updated for it, exactly
+the kind of drift `test/check-catalog.py` check O only partially catches,
+since it samples rather than fully diffing) is: the **9 `core-*.js`
+files** in the order listed above → `tab-audit.js` → `tab-tracking.js` →
+`tab-oppmonitor.js` → `tab-rmtimeline.js` → `tab-movement.js` →
+`tab-repeat-offenders.js` →
+`core-rm-performance.js` → `repeat-offenders-pdf.js` → `tab-morning.js` →
+`reports-build.js` → `reports-gmail.js` → `reports-ui.js` →
+`sheets-writeback.js` → `overview-distribution-people-ops.js` → `main.js`.
+(A 25th file, `js/rm-performance-worker.js`, is not a `<script>` tag —
+`tab-repeat-offenders.js` loads it with `new Worker()`.) Read
+`dashboard.html`'s own tag list as the authority. These are classic
+`<script>` tags (no modules, no bundler) sharing one global scope — a
+function or `let`/`const` defined in one file is a bare global every later
+file can call directly. If you add a new `js/*.js` file, add its
+`<script src>` tag in the right position (after whatever it depends on,
+before `main.js`) **and update this list in the same commit** — it's a
+prose description with nothing mechanically checking it stays accurate
+beyond `check-catalog.py`'s check O sample.
 
 The `.gs` files work the same way inside one Apps Script project: **every
 file in an Apps Script project shares one global namespace**, regardless of

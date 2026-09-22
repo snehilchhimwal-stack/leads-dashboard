@@ -122,6 +122,13 @@ const SNAPSHOT_COLUMNS_ = [
   // neither column at all (not even blank) — only rows captured from
   // here on carry real values.
   'rm_is_active', 'lead_closing_reason',
+  // Added 2026-09-21 — the lead's Opportunity-transition timestamp
+  // (HEADER_ALIASES_.opp_at above), mirroring js/tab-movement.js's
+  // MOVEMENT_LOG_COLUMNS. Captured historically the same way
+  // lead_assigned_at already is. Appended at the end, same "never insert"
+  // rule as every other column here — see ensureMovementLogSheet_'s
+  // self-healing header comment.
+  'opp_at',
 ];
 
 // ==================== Content-hash dedup (Lead History & Versioning
@@ -147,7 +154,7 @@ const CONTENT_HASH_COLUMN_ = 'content_hash';
 // identical instant. This is NOT cosmetic: the two writers must hash an
 // identical lead to an identical digest, or dedup silently breaks across
 // runtimes (each treats the other's capture as "different" forever).
-const CONTENT_HASH_DATE_FIELDS_ = { lead_assigned_at: true, last_connect_time: true };
+const CONTENT_HASH_DATE_FIELDS_ = { lead_assigned_at: true, last_connect_time: true, opp_at: true };
 function _leadContentHashGs_(getFieldValue) {
   const parts = SNAPSHOT_COLUMNS_.map(function (key) {
     const v = getFieldValue(key);
@@ -228,8 +235,10 @@ function ensureMovementLogSheet_(ss) {
   sheet.getRange(2, 1, formatRows, 1).setNumberFormat(DATETIME_FORMAT); // snapshot_at
   const leadAssignedCol = 3 + SNAPSHOT_COLUMNS_.indexOf('lead_assigned_at');
   const lastConnectTimeCol = 3 + SNAPSHOT_COLUMNS_.indexOf('last_connect_time');
+  const oppAtCol = 3 + SNAPSHOT_COLUMNS_.indexOf('opp_at');
   sheet.getRange(2, leadAssignedCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
   sheet.getRange(2, lastConnectTimeCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
+  sheet.getRange(2, oppAtCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
 
   return sheet;
 }

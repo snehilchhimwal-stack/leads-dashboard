@@ -84,6 +84,12 @@ const MOVEMENT_LOG_COLUMNS = [
   // neither column (idx resolves to -1 for both, read as '' below), so
   // this stays safe against older history.
   'rm_is_active', 'lead_closing_reason',
+  // Added 2026-09-21, mirroring MovementTracker.gs's SNAPSHOT_COLUMNS_ —
+  // the lead's Opportunity-transition timestamp (HEADER_ALIASES.opp_at,
+  // core-sheets-fetch.js), captured historically the same way
+  // lead_assigned_at/last_connect_time already are. A row captured before
+  // this date has neither this column nor a real value for it.
+  'opp_at',
 ];
 // Same list minus the two metadata columns — the fields read directly off
 // a live lead record when the browser writes its own snapshot.
@@ -91,7 +97,7 @@ const SNAPSHOT_FIELD_KEYS = MOVEMENT_LOG_COLUMNS.slice(2);
 
 let _currentSheetId = ''; // set once a fetch succeeds — needed by the Sheets-write path, which can fire from a button click outside fetchAndRender's own scope
 
-const MOVEMENT_LOG_DATE_KEYS = new Set(['snapshot_at', 'lead_assigned_at', 'last_connect_time']);
+const MOVEMENT_LOG_DATE_KEYS = new Set(['snapshot_at', 'lead_assigned_at', 'last_connect_time', 'opp_at']);
 
 // customer-key -> call_attempts as of the LATEST Movement_Log snapshot
 // captured before the IST calendar day `asOf` falls in — the baseline

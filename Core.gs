@@ -42,6 +42,9 @@ const HEADER_ALIASES_ = {
   region: ['region'],
   client: ['client'],
   lead_assigned_at: ['lead_assigned_at', 'lead assigned at', 'assigned_at', 'assigned at', 'lead assigned', 'date assigned'],
+  // Added 2026-09-21 — twin of the same key in js/core-sheets-fetch.js's
+  // HEADER_ALIASES. Blank for a lead that never reached Opportunity.
+  opp_at: ['opp_at', 'opp at'],
   group_source: ['group_source', 'group source', 'source'],
   source_bucket: ['source_bucket', 'source bucket', 'sub_source', 'sub source'],
   current_stage: ['current_stage', 'current stage', 'stage'],

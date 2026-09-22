@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `641398e` |
+| **Last Verified** | 2026-09-21 (pending commit — fill in the real sha immediately after committing, same session) |
 
 ## Purpose / reason to exist
 
@@ -45,6 +45,12 @@ In the tab group before `main.js`; `initMovementUI()` is one of
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-140 | `fetchMovementLog(sheetId)` `#L138` | sheet id | populates `movementSnapshots`; sets `movementFetchState` / `_currentSheetId`; each record now also carries `content_hash` (trailing column, read via `getRaw(c, 'content_hash')`; `MOVEMENT_LOG_COLUMNS` itself deliberately excludes it — that array also derives `SNAPSHOT_FIELD_KEYS`, and `content_hash` is computed, never read off a live lead — Lead History & Versioning Review Phase 6, `641398e`) | one Sheets read; state writes | `sheetsApiValuesGet` / `valuesToGvizShape` (`JS-009`) | `fetchAndRender` (`JS-003`), refresh paths | specific — the hub's loader |
+
+`MOVEMENT_LOG_COLUMNS`/`SNAPSHOT_FIELD_KEYS`/`MOVEMENT_LOG_DATE_KEYS`
+(`#L74`/`#L90`/`#L94`) gained `opp_at` 2026-09-21 (mirrors
+`MovementTracker.gs`'s `SNAPSHOT_COLUMNS_`) — twin of `HEADER_ALIASES`'s
+new key (`JS-009`), captured into `Movement_Log` history going forward
+and correctly parsed back as a date when reading historical rows.
 | FN-258 | `latestMovementLogHashByKey()` `#L306` | `movementSnapshots` | `{ [client_id or 'l:'+lead_id]: latest content_hash }` | none | — | `browserSnapshotOpenLeads` (`JS-018`, content-hash dedup) | specific — the browser-writer counterpart of `MovementTracker.gs`'s `_latestContentHashByKeyGs_`; deliberately not memoised like FN-141, since `browserSnapshotOpenLeads` calls `fetchMovementLog` immediately before this specifically to see a capture the Apps Script trigger already made since this tab was last loaded |
 | FN-141 | `buildMovementHistories()` / `enrichSnapshotCached(rec)` / `enrichLeadAsOf(rawRecord, asOfDate)` `#L293/#L341/#L320` | `movementSnapshots` | per-lead ordered snapshot history; per-snapshot enriched record | memoisation caches | `enrichLead` (`JS-006`), `parseDate` | Stalled/leaderboard/time-to-opp compute here, `JS-008`, `JS-024`, `JS-023` | reusable — hub API |
 | FN-142 | `passesMovementFilters(rec, opts)` `#L384` | a record + options | bool | none | `mainRegionFor` / `effectiveRegion` (`JS-014`) | Movement/Tracking renders, `JS-024`, `JS-023` | reusable — **not** the same predicate as `passesRepeatOffenderFilters` (`JS-008`); this one *does* run `effectiveRegion`'s Loan inference |

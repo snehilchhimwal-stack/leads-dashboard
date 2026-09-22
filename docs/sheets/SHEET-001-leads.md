@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-21 (pending commit — see note in CLAUDE.md's drift-discipline rule; will be filled in with the real sha immediately after committing, in this same session) |
 
 ## Purpose / reason to exist
 
@@ -51,8 +51,10 @@ An **external CRM export** — manual/scheduled outside this project. No
 ## Columns / fields
 
 Column names are matched **tolerantly** via `HEADER_ALIASES` (`JS-009`
-CFG-022) / `HEADER_ALIASES_` (`GS-004` CFG-037) — the tab's real header
-text may vary; the canonical keys are:
+CFG-022) / `HEADER_ALIASES_` (`GS-002` CFG-066 — corrected 2026-09-21;
+this record previously mis-cited it as `GS-004`, but the constant has
+always lived in `Core.gs`) — the tab's real header text may vary; the
+canonical keys are:
 
 | Canonical key | Meaning | Notes |
 |---|---|---|
@@ -64,6 +66,7 @@ text may vary; the canonical keys are:
 | `group_source` / `source_bucket` | lead source / sub-source | filters + the Google-Non-UTM/Search scheduled-email scope |
 | `current_stage` | funnel stage (raw text) | `canonicalStage` → `FUNNEL_ORDER` |
 | `lead_assigned_at` | assignment timestamp | SLA clocks start here |
+| `opp_at` | first Opportunity-stage transition timestamp (added 2026-09-21) | blank for a lead that never reached Opportunity; lets same-day/48h Opp% + avg time-to-Opp be computed natively (`js/tab-oppmonitor.js`'s live computation) instead of only via an external analytics session |
 | `last_connect` / `last_connect_time` | last successful contact + its time | first-contact + not-connected rules |
 | `last_comment` / `internal_status_comments` / `stage_comments` | RM free-text | `parseActionLog` + `inferOutcome` |
 | `closing_reason` / `lead_closing_reason` / `lead_closing_comment` | close metadata | `isLeadClosed` / `isOpenLead_` |
@@ -169,7 +172,7 @@ EXC-004/005). A malformed row is parsed best-effort and kept.
 The live `leads` tab in the production Google Sheet
 (`1QmYB1VqLMisiQXoed6-vSQqgA9nroGIMHsBInZafKGU`); its column vocabulary
 is defined by `HEADER_ALIASES` (`js/core-sheets-fetch.js`) /
-`HEADER_ALIASES_` (`EmailInfra.gs`).
+`HEADER_ALIASES_` (`Core.gs`).
 
 ## Validation
 

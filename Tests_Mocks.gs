@@ -533,6 +533,7 @@ function TestFixture_leadsHeader_() {
     'last_connect', 'last_connect_time', 'last_comment',
     'internal_status_comments', 'stage_comments', 'closing_reason',
     'lead_closing_reason', 'rm_is_active', 'call_attempts', 'call_count', 'duration',
+    'opp_at',
   ];
 }
 
