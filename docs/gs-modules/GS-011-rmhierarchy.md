@@ -210,7 +210,7 @@ prose was updated same-day. Re-grepped every citation against current
 source and corrected; no functional/behavioral change, `Record Status`
 unaffected.
 
-**Revalidated 2026-09-22** (pending commit): added `test/refresh-rm-hierarchy.py`
+**Revalidated 2026-09-22** (`187450a`): added `test/refresh-rm-hierarchy.py`
 — the first tool that actually PERFORMS a refresh instead of only detecting
 drift (see its own docstring and the header docblock's updated pointer);
 `check-rm-hierarchy-drift.py` is unchanged and still imported by the new
