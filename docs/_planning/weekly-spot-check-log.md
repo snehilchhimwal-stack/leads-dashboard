@@ -117,3 +117,80 @@ already tolerated by that check as advisory); `node
 test/check-docs-coverage.js` full coverage; `node test/run-gs-tests.js`
 751/751 passing (untouched by this doc-only change). GitHub Actions
 confirmed green on the commit after push.
+
+---
+
+## Cycle 3 — 2026-09-22 (run by Claude)
+
+Checked `GS-011` (`RmHierarchy.gs`), `GS-003` (`DailyRmIssueLog.gs`),
+`TAB-009` (Opp Monitor), `JS-025` (`tab-oppmonitor.js`) — none checked in
+cycles 1 or 2. Two records (`GS-011`, `GS-003`) had real, fixed drift;
+`TAB-009` and `JS-025` were clean against current source, with one
+doc-internal inconsistency flagged (not fixed) on `TAB-009`.
+
+**`GS-011`** — every `#Lnn` anchor in the record (`## Trigger schedule`,
+all of `FN-240`..`FN-247`, `CFG-064`'s two citations) had drifted by
+roughly 36 lines. `RmHierarchy.gs` grew 1139L → 1161L via `d71c492`
+(2026-09-21, the Mukesh Yadav departure / Kumar Babu staleness-fix
+comment block) — the record's own `## Version / change reference`
+correctly narrates that commit's *content* change (it was genuinely
+revalidated for `RM_HIERARCHY_RAW_`'s data), but the added comment lines
+pushed every function below them down and the per-`FN-XXX` line anchors
+were never re-grepped to match. Fixed: header `Location` line count
+(1139 → 1161), all 13 line-anchor citations, `Last Verified` and
+`docs/INDEX.md`'s row bumped to `2026-09-22 (2943ec9)`.
+
+**`GS-003`** — same drift class, worse magnitude. Every `FN-187`..`FN-195`
+anchor and the `## Trigger schedule` anchor were stale — the record's own
+`## Version / change reference` already states the file grew 1127L →
+1264L for the 2026-09-21 `EXC-097` fix (incoming-count sizing + Drive
+archive), but, like `GS-011`, that growth was never propagated into the
+per-function citations. Drift ranged ~48 lines for functions defined
+before the growth to ~137 lines for functions after it — the larger gap
+for the later functions is consistent with the record's own `##
+Validation` section, which separately documents an earlier
+leadership-exclusion mirror addition (`t-rmperf-leadexcl01`, commits
+`8eb4b85`/`95305fb`) that added a `RM_PERF_NON_RM_ROLES_GS_` /
+`rmPerfIsLeadershipExcludedGs_` block earlier in the file; that addition
+was captured in prose but, like `EXC-097`, never propagated into the
+line anchors either.
+Also dropped one anchor (`pruneDailyRmIssueLog_`'s "shrinks OR grows"
+parenthetical used to cite `#L323`) rather than re-verifying and
+re-citing a specific sub-line inside that function — kept the claim, cut
+the now-unverifiable line pointer. Fixed: all 9 line-anchor citations,
+`Last Verified` and `docs/INDEX.md`'s row bumped to
+`2026-09-22 (2943ec9)`.
+
+**`TAB-009`** — no code-vs-doc mismatch found (line anchors live on the
+owning `JS-025` record, checked clean below; the "hides `#filterBar` via
+`TABS_HIDING_FILTER_BAR`" claim was re-verified directly against
+`js/overview-distribution-people-ops.js` — still exactly
+`new Set(['tab-oppmonitor'])`). **Flagged for human review, not fixed**
+(a doc-internal inconsistency, not a code/doc mismatch, so out of this
+check's remit to silently pick a side): the record's own `## Closure
+evidence` section still reads "Not yet closed — `Record Status: Drafted`,
+pending the live-data check noted above," but the header table and
+`docs/INDEX.md` both already say `Record Status: Validated`, and
+`JS-025`'s own `## Validation` section states the live-data check (real
+signed-in dashboard against the live `Opp_Monitor_Period`/
+`Opp_Monitor_Month` tabs, confirmed via screenshot) was already done
+2026-09-18 — i.e. `TAB-009`'s own stated precondition for closing may
+already be satisfied, but that's a judgment call for whoever owns the
+record, not something to guess at here.
+
+**`JS-025`** — fully clean. All 10 `#Lnn` citations across
+`FN-259`..`FN-264` checked directly against `js/tab-oppmonitor.js`
+(currently 324 lines, matching the record's header) and every one
+pointed at the exact right line, including the two `async function`
+declarations (`fetchOppMonitorData` `#L69`, `_fetchOppMonitorTab` `#L38`)
+that a naive `^function ` grep would have missed. No drift.
+
+Verified before push: `python3 test/check-catalog.py` clean (all
+blocking checks A-C, plus F-P; only the same pre-existing advisory notes
+as prior cycles — `Movement_Log_Runs` coverage (L, not applicable here)
+and the `c82ec67`-not-in-history last-verified-drift notes (D, now 32,
+unrelated to this cycle's edits) — remain, both already tolerated as
+advisory); `node test/check-docs-coverage.js` full coverage (25/25 `js/`,
+13/13 `.gs`). No `.gs`/`js/` source touched, so `node
+test/run-gs-tests.js` was not re-run for this change. GitHub Actions
+confirmed green on the commit after push.
