@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-21 against commit `55bf870` |
 
 ## Purpose / reason to exist
 
@@ -169,3 +169,9 @@ none — Closed + Monitored.
 Record committed for `DOC-033`; `docs/INDEX.md` `EXT-001` → `Closed +
 Monitored`, `Last Verified` 2026-09-10, real call-site references
 recorded. No `docs/changes/` record (`DOC-033`).
+
+Revalidated 2026-09-21 (`55bf870`): `js/core-sheets-fetch.js`'s
+`HEADER_ALIASES` (the column vocabulary this integration's reads are
+parsed through) gained `opp_at` — orthogonal to this record's own scope
+(the integration mechanism itself is unchanged); see `SHEET-001`/`JS-009`
+for the real detail.

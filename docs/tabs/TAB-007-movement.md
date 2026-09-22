@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `641398e` |
+| **Last Verified** | 2026-09-21 against commit `55bf870` |
 
 ## Purpose / reason to exist
 
@@ -214,3 +214,8 @@ validation evidence as above. No `docs/changes/` record (DOC-026).
 Revalidated 2026-09-17: `Last Verified` bumped to `641398e`; BTN-014,
 write table, and Important logic updated for content-hash dedup +
 `SHEET-015`; `docs/INDEX.md` row bumped to match.
+Revalidated 2026-09-21 (`55bf870`): `js/tab-movement.js`'s
+`MOVEMENT_LOG_COLUMNS`/`MOVEMENT_LOG_DATE_KEYS` gained `opp_at` (mirrors
+`MovementTracker.gs`'s `SNAPSHOT_COLUMNS_`) — orthogonal to this tab's
+own UI/logic, which is unchanged; see `SHEET-002`/`JS-021` for the real
+detail.

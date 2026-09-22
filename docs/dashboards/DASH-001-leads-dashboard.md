@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `f853a1c` |
+| **Last Verified** | 2026-09-21 against commit `55bf870` |
 
 ## Purpose / reason to exist
 
@@ -274,9 +274,11 @@ Verified at commit `c82ec67` (Phase 2 of the Documentation Project);
 record created by DOC-025. Revalidated 2026-09-18 (`4bbb58c`) for
 `TAB-009`'s addition. Revalidated 2026-09-21 (`f853a1c`) — orthogonal
 change: `TAB-009`'s own intro text gained an explicit Scope line; nothing
-this record describes changed. (This record's own catalog-drift note sat
-unresolved from `f853a1c` until this pass — see `CLAUDE.md`'s
-drift-discipline rule, added the same day.)
+this record describes changed. Revalidated again 2026-09-21 (`55bf870`):
+the `leads` tab gained a real `opp_at` column and `TAB-009` gained a
+live-computation capability from it — the client file count (25) and
+tab list are unchanged, this is a behavior change inside an existing
+file/tab, not a new module.
 
 ## Revalidation trigger
 

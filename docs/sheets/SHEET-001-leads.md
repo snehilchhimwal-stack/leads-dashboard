@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 (pending commit — see note in CLAUDE.md's drift-discipline rule; will be filled in with the real sha immediately after committing, in this same session) |
+| **Last Verified** | 2026-09-21 against commit `55bf870` |
 
 ## Purpose / reason to exist
 
