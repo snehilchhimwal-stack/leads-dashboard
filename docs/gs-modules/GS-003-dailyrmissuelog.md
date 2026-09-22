@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `3a19bdb` |
+| **Last Verified** | 2026-09-22 against commit `2943ec9` (line-anchor resync only — weekly spot-check cycle 3) |
 
 ## Purpose / reason to exist
 
@@ -41,7 +41,7 @@ scoring from the editor.
 
 ## Trigger schedule
 
-`setupDailyRmIssueLog()` (`#L715`) installs `captureDailyRmIssues` on
+`setupDailyRmIssueLog()` (`#L763`) installs `captureDailyRmIssues` on
 `atHour(22).nearMinute(50).everyDays(1).inTimezone('Asia/Kolkata')`
 (`LOGIC_AUDIT.md` Part 1 §5). The leaderboard side
 (`reportRmPerformanceNow`) has **no trigger** — it is manual, editor-run.
@@ -58,15 +58,15 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-187 | `captureDailyRmIssues()` / `captureDailyRmIssues_()` `#L128/#L140` | `leads` tab, `Movement_Log` | appends a row per open SLA-flagged lead to `Daily_RM_Issues` | Sheets write in **chunks of `BACKFILL_CHUNK_SIZE_ = 5000`** (after a real 2026-09-01 incident where one oversized `setValues()` silently failed for a whole night); idempotency check now runs FIRST (2026-09-19), before pruning, so a double-fire bails out cheaply | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `ensureDailyRmIssueLogSheet_` (FN-188), `pruneDailyRmIssueLog_` (FN-188, now called AFTER `rows.length` is known, passing it in) | the 22:50 trigger; `captureDailyRmIssuesNow()` (manual) | specific — scheduled |
-| FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss, incomingRowCount)` / `pruneDailyRmIssueLogNow()` `#L94/#L252/#L292` | spreadsheet (+ the caller's about-to-be-written row count, added 2026-09-19) | ensures the tab; prunes rows older than 7 days, sizing the sheet's row grid to `kept.length + incomingRowCount + headroom` exactly (shrinks OR grows, `#L323`) | may create the tab; deletes/inserts rows; archives dropped rows to Drive via `archiveRowsToDriveCsv_` (`GS-002` FN-265) before clearing them | `archiveRowsToDriveCsv_` (`GS-002` FN-265) | FN-187 | specific — retention added 2026-09-07, the incoming-count sizing + archive fix added 2026-09-19/21 (`EXC-097`) |
-| FN-189 | `backfillDailyRmIssuesFromMovementLog_(ss)` / `backfillOneDayFromMovementLog_(ss, dayKey)` / `repairDailyRmIssuesMissingFieldsNow()` `#L331/#L473/#L603` | `Movement_Log` history | rebuilds past `Daily_RM_Issues` days | chunked Sheets writes | `_evidenceAtDeadlineGs_` (`GS-008`), `computeSlaFlags_` (`GS-012`) | manual recovery | specific |
-| FN-190 | `computeRmPerformanceGs_(ss)` `#L1071` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
-| FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L869/#L940` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
-| FN-192 | `rmPerfCanonicalRmNameGs_(rawName)` / `rmPerformanceDrivenByGs_(r)` / `sortRmPerformanceByPriorityGs_(list)` `#L815/#L1081/#L1097` | RM name / a result row | canonical name / driver list / sorted list | none | — | FN-190 | reusable — twin of `JS-008` `rmPerfCanonicalRmName` etc. |
-| FN-193 | `computeRmPerfEligibilityGs_(row, colIndex, now)` / `_rmPerfDaysBetweenKeysGs_(a, b)` `#L836/#L824` | a row + now | the eligibility window (separately implemented — it does **not** reuse `computeSlaFlags_` for eligibility, only for pass/fail) | none | `istDayKeyGs_` (`GS-002`) | FN-191 | specific |
-| FN-194 | `computeRmPerfPeerAveragesGs_(byGroup)` / `classifyRmPerformanceGs_(byGroup)` `#L987/#L1014` | per-group aggregates | peer-average baseline per rule → classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score | none | `RM_PERF_*_GS_` constants | FN-190 | specific — mirrors `JS-008` FN-055/FN-056 |
-| FN-195 | `reportRmPerformanceNow()` / `setupDailyRmIssueLog()` `#L1108/#L715` | — | **`Logger.log()` console output only** — no sheet write, no email / installs the trigger | console log / creates a trigger | FN-190 / `ScriptApp` | Apps Script editor (manual) / editor | specific |
+| FN-187 | `captureDailyRmIssues()` / `captureDailyRmIssues_()` `#L135/#L147` | `leads` tab, `Movement_Log` | appends a row per open SLA-flagged lead to `Daily_RM_Issues` | Sheets write in **chunks of `BACKFILL_CHUNK_SIZE_ = 5000`** (after a real 2026-09-01 incident where one oversized `setValues()` silently failed for a whole night); idempotency check now runs FIRST (2026-09-19), before pruning, so a double-fire bails out cheaply | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `ensureDailyRmIssueLogSheet_` (FN-188), `pruneDailyRmIssueLog_` (FN-188, now called AFTER `rows.length` is known, passing it in) | the 22:50 trigger; `captureDailyRmIssuesNow()` (manual) | specific — scheduled |
+| FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss, incomingRowCount)` / `pruneDailyRmIssueLogNow()` `#L101/#L260/#L340` | spreadsheet (+ the caller's about-to-be-written row count, added 2026-09-19) | ensures the tab; prunes rows older than 7 days, sizing the sheet's row grid to `kept.length + incomingRowCount + headroom` exactly (shrinks OR grows) | may create the tab; deletes/inserts rows; archives dropped rows to Drive via `archiveRowsToDriveCsv_` (`GS-002` FN-265) before clearing them | `archiveRowsToDriveCsv_` (`GS-002` FN-265) | FN-187 | specific — retention added 2026-09-07, the incoming-count sizing + archive fix added 2026-09-19/21 (`EXC-097`) |
+| FN-189 | `backfillDailyRmIssuesFromMovementLog_(ss)` / `backfillOneDayFromMovementLog_(ss, dayKey)` / `repairDailyRmIssuesMissingFieldsNow()` `#L379/#L521/#L651` | `Movement_Log` history | rebuilds past `Daily_RM_Issues` days | chunked Sheets writes | `_evidenceAtDeadlineGs_` (`GS-008`), `computeSlaFlags_` (`GS-012`) | manual recovery | specific |
+| FN-190 | `computeRmPerformanceGs_(ss)` `#L1208` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
+| FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L991/#L1077` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
+| FN-192 | `rmPerfCanonicalRmNameGs_(rawName)` / `rmPerformanceDrivenByGs_(r)` / `sortRmPerformanceByPriorityGs_(list)` `#L863/#L1218/#L1234` | RM name / a result row | canonical name / driver list / sorted list | none | — | FN-190 | reusable — twin of `JS-008` `rmPerfCanonicalRmName` etc. |
+| FN-193 | `computeRmPerfEligibilityGs_(row, colIndex, now)` / `_rmPerfDaysBetweenKeysGs_(a, b)` `#L958/#L946` | a row + now | the eligibility window (separately implemented — it does **not** reuse `computeSlaFlags_` for eligibility, only for pass/fail) | none | `istDayKeyGs_` (`GS-002`) | FN-191 | specific |
+| FN-194 | `computeRmPerfPeerAveragesGs_(byGroup)` / `classifyRmPerformanceGs_(byGroup)` `#L1124/#L1151` | per-group aggregates | peer-average baseline per rule → classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score | none | `RM_PERF_*_GS_` constants | FN-190 | specific — mirrors `JS-008` FN-055/FN-056 |
+| FN-195 | `reportRmPerformanceNow()` / `setupDailyRmIssueLog()` `#L1245/#L763` | — | **`Logger.log()` console output only** — no sheet write, no email / installs the trigger | console log / creates a trigger | FN-190 / `ScriptApp` | Apps Script editor (manual) / editor | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -199,7 +199,15 @@ drift); `LOGIC_AUDIT.md` Part 1 §4b/§4d/§5, Part 3 §3.6.
 Verified at `c82ec67`; record created by DOC-029. File grew 980L →
 1127L since the 2026-09-05 audit (retention prune + backfill helpers),
 then 1127L → 1264L by 2026-09-21 (`EXC-097`'s incoming-count sizing +
-Drive archive call).
+Drive archive call). **Line-anchor resync 2026-09-22** (weekly
+spot-check cycle 3, against `2943ec9`): every `#Lnn` citation in
+`## Trigger schedule` and `FN-187`..`FN-195` still pointed at the
+pre-`EXC-097` line numbers — the 1127L → 1264L growth noted above was
+recorded in prose but never propagated into the per-function anchors.
+Re-grepped every citation against current source and corrected (drift
+ranged from ~48 lines for functions before the growth to ~137 lines for
+functions after it); no functional/behavioral change, `Record Status`
+unaffected.
 
 ## Revalidation trigger
 
