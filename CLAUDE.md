@@ -214,17 +214,30 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   runtimes).
 - **Whenever you get a fresh "HR Live" roster export** (before hand-editing
   `RM_HIERARCHY_RAW_` off of it): run `python3
-  test/check-rm-hierarchy-drift.py <path-to-export.csv>` first. It's the
-  check that would have caught a real incident (2026-09-21) — Zeya Shaikh/
-  Karan Shinde/Mayuresh Chavan's `tl` field kept pointing at Mukesh Yadav
-  for ~3 months after they were actually reassigned to Kumar Babu, silent
-  because a stale-but-still-resolving name is invisible to
+  test/refresh-rm-hierarchy.py <path-to-export.csv>` first (dry run by
+  default; add `--apply` once you've read the report). It supersedes
+  running `check-rm-hierarchy-drift.py` by hand — it runs that script's own
+  checks internally (imported, not copy-pasted, so they can't drift apart)
+  plus the one direction that script structurally can't see: it only ever
+  walks RM_HIERARCHY_RAW_'s EXISTING rows asking "is this still accurate",
+  never the export asking "is every person here represented at all". That
+  gap is what let Zoya Fathima (H6556, Cluster Head, joined 2026-09-16) go
+  completely missing from RM_Hierarchy for ~13 days (2026-09-22 incident) —
+  nothing ever looked for her, no matter how many times the old script ran.
+  `refresh-rm-hierarchy.py` adds that missing check plus safe, automatic
+  resolution for the unambiguous subset of both new joiners and stale
+  fields (see its own docstring for exactly what "unambiguous" means and
+  why most `ch` values still need a human — the export's chain columns are
+  positional, not per-role, so blind auto-resolution would reproduce
+  exactly this class of bug in a different, harder-to-spot shape). The
+  older, narrower incident it was originally built for is the same class:
+  Zeya Shaikh/Karan Shinde/Mayuresh Chavan's `tl` field kept pointing at
+  Mukesh Yadav for ~3 months after they were reassigned to Kumar Babu,
+  silent because a stale-but-still-resolving name is invisible to
   `auditUnresolvedRmsNow()` (that only catches names that don't resolve at
-  all). Not run in CI — the export is out-of-band, real employee data,
-  never committed (same reasoning as `RmHierarchy.private.gs`). Its `ch`-
-  field findings run noisier than `tl`/`tm`/`rh` (several legitimate named
-  overrides live there — see `RmHierarchy.gs`'s own header docblock) — the
-  script separates them into their own section for exactly that reason.
+  all). Neither script runs in CI — the export is out-of-band, real
+  employee data, never committed (same reasoning as
+  `RmHierarchy.private.gs`).
 - **Changing anything that reads or writes `Lead_Followups`**
   (`js/sheets-writeback.js`, `js/reports-ui.js`, `js/tab-movement.js`,
   `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_`/

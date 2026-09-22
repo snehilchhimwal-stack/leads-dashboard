@@ -210,6 +210,20 @@ prose was updated same-day. Re-grepped every citation against current
 source and corrected; no functional/behavioral change, `Record Status`
 unaffected.
 
+**Revalidated 2026-09-22** (pending commit): added `test/refresh-rm-hierarchy.py`
+— the first tool that actually PERFORMS a refresh instead of only detecting
+drift (see its own docstring and the header docblock's updated pointer);
+`check-rm-hierarchy-drift.py` is unchanged and still imported by the new
+script, not replaced. Used it against the 2026-09-21 HR export to add Zoya
+Fathima's own row plus 2 other unambiguous new hires, and correct 7 rows'
+`ch` from the old Mukesh-Mishra override to her (Vemula Ajay's Hyderabad
+sub-cluster). `RM_HIERARCHY_RAW_` grew by ~35 lines (228 → 231 rows plus a
+multi-line explanatory comment for the Zoya Fathima addition) — every
+`#Lnn` citation in this record below that insertion point (around the old
+line 135) needs the same kind of resync the 2026-09-22 spot-check above
+already did once; re-grep before trusting any of this record's line
+anchors until that resync lands.
+
 ## Revalidation trigger
 
 Any commit touching `RmHierarchy.gs` or `Tests_RmHierarchy.gs`;
