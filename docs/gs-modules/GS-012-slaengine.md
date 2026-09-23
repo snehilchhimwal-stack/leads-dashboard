@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 5, `filterAllIssuesCheckpoint2ForEmailGs_` added (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `efc6137` — Step 5, `filterAllIssuesCheckpoint2ForEmailGs_` added (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -182,7 +182,7 @@ there is no dashboard equivalent of "compare a persisted snapshot to
 now"). `Tests_SlaEngine.gs` gained a dedicated block covering all 6
 `state` values + the "reused on its own output" case.
 
-**Revalidated 2026-09-23** (pending commit): added
+**Revalidated 2026-09-23** `efc6137`: added
 `filterAllIssuesCheckpoint2ForEmailGs_` (FN-271, `#L296`) — Step 5/11 of
 the same redesign. Pure function, no Sheets I/O, no dependency on
 FN-270 beyond consuming its output shape. `Tests_SlaEngine.gs` gained a
