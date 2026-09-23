@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) (schema addition — see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `65df46c` (schema addition — see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -154,7 +154,7 @@ The live `AllIssues_Log` tab; header authored in `AllIssuesEmailer.gs`
 ## Validation
 
 - **Method:** header read from `AllIssuesEmailer.gs` `#L131` at
-  (pending commit); the self-healing behaviour confirmed in the same
+  `65df46c`; the self-healing behaviour confirmed in the same
   function. `Tests_AllIssuesEmailer.gs` in CI.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_AllIssuesEmailer.gs`,
   last green run).
@@ -165,7 +165,7 @@ The live `AllIssues_Log` tab; header authored in `AllIssuesEmailer.gs`
 
 Verified at `c82ec67`; record created by `DOC-032`.
 
-**Revalidated 2026-09-23** (pending commit): 5 columns added
+**Revalidated 2026-09-23** `65df46c`: 5 columns added
 (`issue_snapshot_json`, `checkpoint1_json`, `checkpoint1_sent_at`,
 `checkpoint2_json`, `checkpoint2_sent_at`) — Step 2/11 of the
 two-checkpoint email lifecycle redesign

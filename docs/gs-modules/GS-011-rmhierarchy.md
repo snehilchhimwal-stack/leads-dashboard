@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) (line-anchor resync only, +39-line offset from the 2026-09-22 refresh — see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `65df46c` (line-anchor resync only, +39-line offset from the 2026-09-22 refresh — see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

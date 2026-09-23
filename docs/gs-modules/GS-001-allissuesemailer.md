@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) (schema-only change — see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `65df46c` (schema-only change — see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -161,7 +161,7 @@ The Apps Script backend half (peer of `DASH-001`, sharing only
 
 Verified at `c82ec67`; record created by DOC-029.
 
-**Revalidated 2026-09-23** (pending commit): `ensureAllIssuesLogSheet_`
+**Revalidated 2026-09-23** `65df46c`: `ensureAllIssuesLogSheet_`
 (FN-178) gained 5 new columns — `issue_snapshot_json`,
 `checkpoint1_json`, `checkpoint1_sent_at`, `checkpoint2_json`,
 `checkpoint2_sent_at` — Step 2/11 of the two-checkpoint email lifecycle
