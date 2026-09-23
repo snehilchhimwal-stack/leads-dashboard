@@ -167,6 +167,85 @@ function runSlaEngineTests_() {
 
     flags = { isOpenLead: true, inactiveRmNewLead: false, isNotUpdated: false, followupOverdue: false, underCalledToday: false, stageStuck48h: false };
     TestAssertEqual_(primaryIssueGs_(flags), null, 'primaryIssueGs_: returns null when nothing is flagged');
+
+    // ---- computeAllIssuesCheckpointGs_ (Step 4/11, two-checkpoint email
+    // lifecycle redesign) — one leads-tab mock covering all 7 states.
+    // Uses TestAIE_leadRow_/TestFixture_leadsHeader_ (Tests_AllIssuesEmailer.gs)
+    // since this needs a shared-header sheet mock, not the per-call
+    // colIndex TestSla_buildRow_ builds above — same global namespace,
+    // reused rather than duplicated. ----
+    const ckHeader = TestFixture_leadsHeader_();
+    const ckBanner = ckHeader.map(function () { return ''; });
+    const ckRows = [
+      ckBanner, ckHeader,
+      // resolved (closed) — the prior issue no longer matters once closed.
+      TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-CLOSEDNOW', client_id: 'C-CK-CLOSEDNOW', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }),
+      // resolved (issue cleared, still open) — connected, recent comment, plenty of calls.
+      TestAIE_leadRow_(ckHeader, {
+        lead_id: 'L-CK-CLEARED', client_id: 'C-CK-CLEARED', lead_assigned_at: TestFixture_hoursAgo_(now, 10),
+        last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5),
+        internal_status_comments: 'Test RM One: Ringing - ' + TestSla_isoMinusHours_(now, 0.5), call_attempts: 6,
+      }),
+      // still_open — same underCalledToday issue as the prior entry.
+      // last_connect/last_connect_time set (same pattern
+      // Tests_AllIssuesEmailer.gs's own L-UNDERCALLED fixture uses) so
+      // isNotUpdated's never-connected-past-10-minutes rule can't ALSO
+      // fire and outrank underCalledToday here.
+      TestAIE_leadRow_(ckHeader, {
+        lead_id: 'L-CK-STILLOPEN', client_id: 'C-CK-STILLOPEN', lead_assigned_at: TestFixture_hoursAgo_(now, 5),
+        call_attempts: 2, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5),
+      }),
+      // category_changed (non-escalation) — was Follow-up Overdue (rank 2),
+      // now past 48h so only stageStuck48h (rank 4) can fire; a fixture
+      // baseline keeps underCalledToday from also firing and confounding
+      // which single issue wins.
+      TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-CATCHANGE', client_id: 'C-CK-CATCHANGE', lead_assigned_at: TestFixture_hoursAgo_(now, 50), call_attempts: 15 }),
+      // escalated — currently flags isNotUpdated (rank 1); prior entry
+      // (below) is a synthetic 'Stuck 48h+' (rank 4) to isolate the
+      // ranking-comparison logic itself, same reasoning Tests_SlaEngine.gs
+      // already uses above for primaryIssueGs_'s own forced-flag checks.
+      TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-ESCALATE', client_id: 'C-CK-ESCALATE', lead_assigned_at: TestFixture_hoursAgo_(now, 1), current_stage: 'Suspect' }),
+      // reopened — flagged again now; the PRIOR entry (below) is shaped
+      // like a checkpoint RESULT with state:'resolved', proving this can
+      // only be reached via a checkpoint's own prior output, not a raw
+      // 17:00 snapshot entry.
+      TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-REOPEN', client_id: 'C-CK-REOPEN', lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 2 }),
+      // L-CK-GONE deliberately has NO row at all — not_found.
+    ];
+    const ckSs = TestMockSpreadsheet_({});
+    ckSs._sheets['leads'] = TestMockSheet_('leads', ckRows);
+
+    const ckPriorEntries = [
+      { lead_id: 'L-CK-CLOSEDNOW', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Stuck 48h+', followup: 'f' },
+      { lead_id: 'L-CK-CLEARED', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'f' },
+      { lead_id: 'L-CK-STILLOPEN', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: "Behind on Today's Calls", followup: 'f' },
+      { lead_id: 'L-CK-CATCHANGE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'f' },
+      { lead_id: 'L-CK-ESCALATE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Stuck 48h+', followup: 'f' },
+      { lead_id: 'L-CK-REOPEN', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+      { lead_id: 'L-CK-GONE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'f' },
+    ];
+    const ckBaselineMap = { 'C-CK-CATCHANGE': 10 }; // 15 - 10 = 5 today, clears MIN_CALLS_PER_DAY_ so underCalledToday can't also fire on L-CK-CATCHANGE
+    const ckResults = computeAllIssuesCheckpointGs_(ckSs, ckPriorEntries, now, ckBaselineMap);
+    const ckByLeadId = {};
+    ckResults.forEach(function (r) { ckByLeadId[r.lead_id] = r; });
+
+    TestAssertEqual_(ckResults.length, 7, 'computeAllIssuesCheckpointGs_: returns exactly one entry per prior entry, in any order');
+    TestAssertEqual_(ckByLeadId['L-CK-CLOSEDNOW'].state, 'resolved', 'computeAllIssuesCheckpointGs_: a closed lead is resolved');
+    TestAssertEqual_(ckByLeadId['L-CK-CLEARED'].state, 'resolved', 'computeAllIssuesCheckpointGs_: an open lead whose issue cleared is ALSO resolved, not still_open');
+    TestAssertEqual_(ckByLeadId['L-CK-STILLOPEN'].state, 'still_open', 'computeAllIssuesCheckpointGs_: same issue label as the prior entry is still_open');
+    TestAssertEqual_(ckByLeadId['L-CK-STILLOPEN'].currentIssueLabel, "Behind on Today's Calls", 'computeAllIssuesCheckpointGs_: still_open carries the current (unchanged) issue label');
+    TestAssertEqual_(ckByLeadId['L-CK-CATCHANGE'].state, 'category_changed', 'computeAllIssuesCheckpointGs_: a DIFFERENT, lower-priority issue label is category_changed, not escalated');
+    TestAssertEqual_(ckByLeadId['L-CK-CATCHANGE'].currentIssueLabel, 'Stuck 48h+', 'computeAllIssuesCheckpointGs_: category_changed carries the NEW issue label');
+    TestAssertEqual_(ckByLeadId['L-CK-ESCALATE'].state, 'escalated', 'computeAllIssuesCheckpointGs_: a DIFFERENT, higher-priority issue label is escalated');
+    TestAssertEqual_(ckByLeadId['L-CK-REOPEN'].state, 'reopened', 'computeAllIssuesCheckpointGs_: a lead whose PRIOR entry was already resolved, but is open+flagged again, is reopened (only reachable via a checkpoint-shaped prior entry)');
+    TestAssertEqual_(ckByLeadId['L-CK-GONE'].state, 'not_found', 'computeAllIssuesCheckpointGs_: a lead_id no longer in the leads tab is not_found, never silently treated as resolved');
+    TestAssertEqual_(ckByLeadId['L-CK-GONE'].currentIssueLabel, null, 'computeAllIssuesCheckpointGs_: not_found carries no current issue label');
+
+    // Reused verbatim for a "second checkpoint" pass — feed one of THIS
+    // call's own still_open results back in as the prior entry, proving
+    // the function accepts its own output shape without special-casing.
+    const ckSecondPass = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap);
+    TestAssertEqual_(ckSecondPass[0].state, 'still_open', 'computeAllIssuesCheckpointGs_: reused verbatim on its own prior output (a checkpoint-shaped entry, not a raw snapshot entry) — proves the "reused for both checkpoints" design intent');
   } finally {
     TestEnv_tearDown_();
   }

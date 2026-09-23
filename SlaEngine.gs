@@ -157,3 +157,105 @@ function primaryIssueGs_(flags) {
   }
   return null;
 }
+
+// Two-checkpoint email lifecycle redesign (Step 4/11 -- see
+// docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md Part 6 for
+// the full state model this implements) -- compares a set of "prior"
+// per-lead entries against the CURRENT live leads tab and returns one
+// {lead_id, state, currentIssueLabel, currentStatus} per entry.
+//
+// `priorEntries` deliberately accepts EITHER shape this function's own
+// two callers use, so it is reused VERBATIM for both checkpoints rather
+// than copy-pasted:
+//   - a raw AllIssues_Log issue_snapshot_json array (Checkpoint 1's
+//     input) -- each entry has `issueLabel` directly, no `state` field
+//     at all, since it was never itself a checkpoint result;
+//   - this function's OWN previous return value (Checkpoint 2's input)
+//     -- each entry has `state` + `currentIssueLabel` instead.
+// allIssuesCheckpointPriorLabel_/allIssuesCheckpointPriorWasActive_
+// below normalize over that difference; nothing else in this function
+// needs to know which shape it was actually handed.
+//
+// `state` is one of:
+//   'not_found'       -- the lead_id no longer exists in the leads tab.
+//   'resolved'        -- closed / past Opportunity+ / no longer flagged
+//                        by computeSlaFlags_+primaryIssueGs_. Disappearing
+//                        from a read is NEVER treated as resolved on its
+//                        own -- that is 'not_found', a different state,
+//                        per the design doc's explicit "disappearance !=
+//                        resolution" rule.
+//   'still_open'      -- open, flagged, SAME issue label as the prior entry.
+//   'category_changed'-- open, flagged, DIFFERENT issue label, and the
+//                        new one is not higher-priority than the old one.
+//   'escalated'        -- same as category_changed, but the new issue
+//                        outranks the old one in ISSUE_PRIORITY_GS_ (a
+//                        display distinction only -- no new SLA rule).
+//   'reopened'         -- the PRIOR entry was itself 'resolved' or
+//                        'not_found', but the lead is open and flagged
+//                        again now. Only ever reachable when this
+//                        function is called with another checkpoint's
+//                        own output as `priorEntries` (Checkpoint 2+) --
+//                        a raw 17:00 snapshot entry is by definition
+//                        always an active issue, so Checkpoint 1 itself
+//                        can never produce this state, but the check
+//                        stays in this ONE shared function rather than
+//                        being bolted on one level up at Checkpoint 2.
+//
+// `baselineMap` is threaded straight through to computeSlaFlags_ — same
+// Movement_Log-derived baseline the 17:00 job itself already built via
+// buildMovementLogMapsGs_, needed for underCalledToday's isCreatedToday
+// === false branch (true for nearly every lead by the time a checkpoint
+// runs, since the snapshot itself is never from earlier today).
+function allIssuesCheckpointPriorLabel_(entry) {
+  return entry.state !== undefined ? entry.currentIssueLabel : entry.issueLabel;
+}
+function allIssuesCheckpointPriorWasActive_(entry) {
+  return entry.state !== 'resolved' && entry.state !== 'not_found';
+}
+function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap) {
+  if (!priorEntries || !priorEntries.length) return [];
+  const wantedIds = new Set(priorEntries.map(function (e) { return e.lead_id; }));
+  const { colIndex, dataRows } = readLeadsTab_(ss);
+  const byLeadId = {};
+  dataRows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    // First match wins -- same "don't let a duplicate customer row
+    // silently overwrite the one already found" caution the 17:00 job's
+    // own byIdentity dedupe already applies, just simpler here since a
+    // checkpoint only ever looks up a FIXED, already-known lead_id list
+    // rather than building a fresh candidate set.
+    if (leadId && wantedIds.has(leadId) && !byLeadId[leadId]) byLeadId[leadId] = row;
+  });
+
+  const priorityIndexOf = function (label) {
+    for (let i = 0; i < ISSUE_PRIORITY_GS_.length; i++) {
+      if (ISSUE_PRIORITY_GS_[i].label === label) return i;
+    }
+    return -1;
+  };
+
+  return priorEntries.map(function (entry) {
+    const row = byLeadId[entry.lead_id];
+    if (!row) return { lead_id: entry.lead_id, state: 'not_found', currentIssueLabel: null, currentStatus: null };
+
+    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+    const stillOpen = isOpenLead_(stage, getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'));
+    const currentStatus = overnightStatusLabelGs_(stage);
+    if (!stillOpen) return { lead_id: entry.lead_id, state: 'resolved', currentIssueLabel: null, currentStatus: currentStatus };
+
+    const issue = primaryIssueGs_(computeSlaFlags_(row, colIndex, now, baselineMap));
+    if (!issue) return { lead_id: entry.lead_id, state: 'resolved', currentIssueLabel: null, currentStatus: currentStatus };
+
+    if (!allIssuesCheckpointPriorWasActive_(entry)) {
+      return { lead_id: entry.lead_id, state: 'reopened', currentIssueLabel: issue.label, currentStatus: currentStatus };
+    }
+    const priorLabel = allIssuesCheckpointPriorLabel_(entry);
+    if (issue.label === priorLabel) {
+      return { lead_id: entry.lead_id, state: 'still_open', currentIssueLabel: issue.label, currentStatus: currentStatus };
+    }
+    const wasRank = priorityIndexOf(priorLabel);
+    const isRank = priorityIndexOf(issue.label);
+    const escalated = wasRank !== -1 && isRank !== -1 && isRank < wasRank; // lower index = higher priority
+    return { lead_id: entry.lead_id, state: escalated ? 'escalated' : 'category_changed', currentIssueLabel: issue.label, currentStatus: currentStatus };
+  });
+}
