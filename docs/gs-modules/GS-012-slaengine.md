@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 7, FN-270/271 now both fully wired into `GS-010`'s 13:00 job too (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `7aa9786` — Step 7, FN-270/271 now both fully wired into `GS-010`'s 13:00 job too (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -198,7 +198,7 @@ relationship updated to reflect it (`GS-010` was already listed as a
 `Used By` before this — that edge existed at the file level already,
 this just makes it concrete for FN-270 specifically).
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 7/11 — `GS-010`
+**Revalidated 2026-09-23** `7aa9786`: Step 7/11 — `GS-010`
 now ALSO calls `computeAllIssuesCheckpointGs_` (FN-270) a SECOND time
 (Checkpoint 2, from the new `sendCombinedFollowupEmail_`, with
 Checkpoint 1's own result as `priorEntries` — proving the "accepts its

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 7, all 5 columns now fully wired end to end (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `7aa9786` — Step 7, all 5 columns now fully wired end to end (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -191,7 +191,7 @@ reading yesterday's un-checkpointed rows
 (`sendCombinedMorningEmail_`, FN-275) — `checkpoint2_json`/
 `checkpoint2_sent_at` remain unwritten until Step 7.
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 7/11 — the last two
+**Revalidated 2026-09-23** `7aa9786`: Step 7/11 — the last two
 columns are now live too. `GS-010`'s `loadTodaysCheckpoint1PendingGs_`
 (FN-279) reads today's Checkpoint-1-done-but-Checkpoint-2-pending rows
 (`checkpoint1_sent_at` dated today, `checkpoint2_sent_at` blank); its

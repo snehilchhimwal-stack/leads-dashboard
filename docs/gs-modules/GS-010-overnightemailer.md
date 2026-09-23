@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 7/11 (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `7aa9786` — Step 7/11 (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -276,7 +276,7 @@ for this specific pain is worth considering if it recurs much more).
 Harbour (Section-2-only) bucket now gets an `Overnight_Log` row with a
 correctly-empty `issueLog`. 833/833 local .gs tests pass (+2 new).
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 7/11 — the 13:00
+**Revalidated 2026-09-23** `7aa9786`: Step 7/11 — the 13:00
 follow-up (`sendOvernightFollowupEmails_`, FN-232) is now ALSO a
 combined send, same shape as the 10:00 job: Section 1 (unresolved leads,
 unchanged logic) + Section 2 (Checkpoint 2, new). Added
