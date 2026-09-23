@@ -1265,6 +1265,188 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
  * above and sendAllIssuesEmails (AllIssuesEmailer.gs) — see that one's
  * own comment for why this matters.
  */
+// ============================================================
+// Two-checkpoint email lifecycle redesign (Step 7/11) -- see
+// docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md for the
+// full design. Everything below builds the 13:00 COMBINED email:
+// Section 1 = Overnight Follow-up (sendOvernightFollowupEmails_'s own
+// existing Pass 1/Pass 2 classification, unchanged logic), Section 2 =
+// Checkpoint 2 (this morning's Checkpoint 1 AllIssues_Log rows compared
+// to right now, via computeAllIssuesCheckpointGs_ /
+// filterAllIssuesCheckpoint2ForEmailGs_ -- SlaEngine.gs). Unlike Step 6,
+// Section 2's bucket set here is ALWAYS a SUBSET of Section 1's own
+// `perRegion` set: whenever sendCombinedMorningEmail_ (Step 6) sets
+// checkpoint1_json/checkpoint1_sent_at on an AllIssues_Log row, it ALSO
+// writes an Overnight_Log row for that SAME recipient in that SAME call
+// (see that function's own comment on why its write condition changed to
+// `if (!sendFailureReason)`) -- so no separate "union of two
+// independently-derived bucket sets" is needed the way Step 6 needed one;
+// this just augments the EXISTING perRegion iteration with a lookup.
+// ============================================================
+
+// Section 1 opts extraction -- same pattern as buildOvernightSectionOptsGs_
+// (Step 6), pulled out of sendOvernightFollowupEmails_'s own inline object
+// so it can be reused unchanged whether or not Section 2 rides alongside it.
+function buildOvernightFollowupSectionOptsGs_(region, unresolvedRows) {
+  return {
+    title: '1pm Follow-up',
+    region: region,
+    subtitle: "Re-checking this morning's flagged leads",
+    kpis: [
+      { value: unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
+    ],
+    sections: [{
+      heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
+      columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
+      rows: unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
+    }],
+    footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
+  };
+}
+
+// Section 1 placeholder for a bucket that has Checkpoint 2 content but
+// nothing still unresolved from this morning's flags -- same shape
+// renderOvernightReportEmailHTML_ always expects.
+function buildOvernightFollowupSectionEmptyStateOptsGs_(region, reasonText) {
+  return { title: '1pm Follow-up', region: region, subtitle: reasonText, kpis: [], action: '', sections: [], footerNote: '' };
+}
+
+// Reads AllIssues_Log for TODAY's (IST) rows that already have a
+// Checkpoint 1 (checkpoint1_sent_at dated today -- i.e. this morning's
+// 10am run) but no Checkpoint 2 yet (checkpoint2_sent_at blank -- the
+// idempotency guard for THIS function, same role checkpoint1_sent_at
+// plays for loadYesterdaysAllIssuesBucketsGs_). Keyed directly by
+// recipient email (not by region first) since the caller looks these up
+// per-bucket against `perRegion`'s own `to`, already known to be the SAME
+// address (see this block's own header comment). Returns
+// { lowercasedEmail -> {rowNumbers, to, cc, bucketLabel, primaryRole,
+// snapshotEntries (original 17:00), checkpoint1Entries (this morning's
+// Checkpoint 1 result -- the PRIOR checkpoint computeAllIssuesCheckpointGs_
+// needs as its own input, design doc Part 4: the function accepts its own
+// output shape)} }.
+function loadTodaysCheckpoint1PendingGs_(ss, now) {
+  const todayKey = istDayKeyGs_(now);
+  const logSheet = ensureAllIssuesLogSheet_(ss);
+  const lastRow = logSheet.getLastRow();
+  const byEmail = {};
+  if (lastRow < 2) return byEmail;
+
+  const rows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 14).getValues(); }, 'read AllIssues_Log for Checkpoint 2');
+  rows.forEach(function (r, i) {
+    const checkpoint1SentAtCell = r[11]; // checkpoint1_sent_at, col L, 0-indexed 11
+    if (!checkpoint1SentAtCell) return; // Checkpoint 1 not done yet -- nothing for Checkpoint 2 to build on
+    const checkpoint1Key = checkpoint1SentAtCell instanceof Date ? istDayKeyGs_(checkpoint1SentAtCell) : String(checkpoint1SentAtCell || '').slice(0, 10);
+    if (checkpoint1Key !== todayKey) return; // Checkpoint 1 happened on a different day -- not this morning's run
+    if (r[13]) return; // checkpoint2_sent_at, col N, 0-indexed 13 -- already set, skip
+    const snapshotRaw = r[9]; // issue_snapshot_json, col J
+    const checkpoint1Raw = r[10]; // checkpoint1_json, col K
+    if (!snapshotRaw || !checkpoint1Raw) return;
+    let snapshotEntries, checkpoint1Entries;
+    try {
+      snapshotEntries = JSON.parse(snapshotRaw);
+      checkpoint1Entries = JSON.parse(checkpoint1Raw);
+    } catch (e) {
+      Logger.log('loadTodaysCheckpoint1PendingGs_: could not parse JSON on AllIssues_Log row ' + (i + 2) + ' -- skipping this row: ' + e);
+      return;
+    }
+    if (!checkpoint1Entries || !checkpoint1Entries.length) return;
+    const to = String(r[4] || '').trim();
+    if (!to) return;
+    const key = to.toLowerCase();
+    if (!byEmail[key]) {
+      byEmail[key] = { to: to, cc: String(r[5] || ''), bucketLabel: String(r[2] || ''), primaryRole: String(r[3] || ''), rowNumbers: [], snapshotEntries: [], checkpoint1Entries: [] };
+    }
+    byEmail[key].rowNumbers.push(i + 2);
+    byEmail[key].snapshotEntries = byEmail[key].snapshotEntries.concat(snapshotEntries);
+    byEmail[key].checkpoint1Entries = byEmail[key].checkpoint1Entries.concat(checkpoint1Entries);
+  });
+  return byEmail;
+}
+
+// Sends ONE combined 13:00 email for a bucket (by recipient email -- same
+// principle as sendCombinedMorningEmail_) and writes back Checkpoint 2's
+// own state. `section1UnresolvedRows` is Pass 1's own classification
+// output for this region (already computed above, suggestions already
+// filled in by the caller). `section2Input` is either
+// { to, cc, bucketLabel, primaryRole, rowNumbers, snapshotEntries,
+// checkpoint1Entries } (from loadTodaysCheckpoint1PendingGs_) or null
+// (nothing pending from this morning's Checkpoint 1 for this recipient).
+// Threads into `threadId` via the EXISTING sendThreadedGmailReply_ (with
+// its existing plain-fallback) -- unlike Step 6, there is no separate
+// "resolve recipient" step here, since BOTH sections' recipients are
+// already frozen (Section 1 from Overnight_Log, Section 2 from
+// AllIssues_Log) -- routing was decided once, either this morning or
+// yesterday at 17:00, never re-derived here.
+function sendCombinedFollowupEmail_(ss, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap) {
+  const section1Opts = section1UnresolvedRows.length
+    ? buildOvernightFollowupSectionOptsGs_(region, section1UnresolvedRows)
+    : buildOvernightFollowupSectionEmptyStateOptsGs_(region, 'Nothing still unresolved from this morning — all clear.');
+
+  const checkpointTitle = 'Previous Day 17:00 All-Issues Follow-up — Checkpoint 2';
+  let checkpoint2Results = null;
+  let section2Opts;
+  if (section2Input) {
+    const rawCheckpoint2 = computeAllIssuesCheckpointGs_(ss, section2Input.checkpoint1Entries, now, baselineMap);
+    checkpoint2Results = filterAllIssuesCheckpoint2ForEmailGs_(section2Input.checkpoint1Entries, rawCheckpoint2);
+    const originalDateLabel = Utilities.formatDate(new Date(now.getTime() - 24 * 3600 * 1000), 'Asia/Kolkata', 'd MMM yyyy');
+    section2Opts = checkpoint2Results.length
+      ? buildAllIssuesCheckpointSectionOptsGs_(region, checkpointTitle, originalDateLabel, section2Input.snapshotEntries, checkpoint2Results)
+      : buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing changed since this morning's Checkpoint 1 — no news to report.");
+  } else {
+    section2Opts = buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing pending from this morning's Checkpoint 1.");
+  }
+
+  const html = (testModeBanner ? testModeBanner.html : '') + renderTwoSectionEmailHTML_(section1Opts, section2Opts);
+  const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + region + ': Section 1 (Overnight Follow-up) ' +
+    section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + (checkpoint2Results ? checkpoint2Results.length : 0) +
+    ' lead(s) with news. Open this email in Gmail for the full breakdown.';
+
+  // sendThreadedGmailReply_ retries its own send step internally
+  // (withSendRetry_ — only a definitive rejection, never an ambiguous
+  // timeout). The plain fallback below gets the same treatment
+  // explicitly, for the same reason. Same try/catch shape as this
+  // function's pre-Step-7 inline predecessor.
+  try {
+    sendThreadedGmailReply_(threadId, sendTo, sendCc || '', subject, plainBody, html);
+  } catch (threadErr) {
+    Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
+    try {
+      withSendRetry_(function () {
+        return GmailApp.createDraft(sendTo, subject, plainBody, { cc: sendCc, htmlBody: html, name: 'Homesfy Lead Ops' }).send();
+      }, 'send fallback follow-up (' + region + ')');
+    } catch (fallbackErr) {
+      Logger.log('Overnight follow-up reply failed entirely for ' + region + ' (thread ' + threadId + ', to ' + sendTo + '): ' + fallbackErr);
+      notifyOpsAlertGs_('1pm follow-up failed for ' + region, [
+        'Region: ' + region,
+        'Thread: ' + threadId,
+        'Intended recipient: ' + sendTo + (sendCc ? (' (cc: ' + sendCc + ')') : ''),
+        'Section 1 still-unresolved leads (' + section1UnresolvedRows.length + '): ' + section1UnresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
+        'Section 2 Checkpoint 2 leads (' + (section2Input ? section2Input.checkpoint1Entries.length : 0) + '): ' + (section2Input ? section2Input.checkpoint1Entries.map(function (e) { return e.lead_id; }).join(', ') : '(none)'),
+        '',
+        'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded.',
+        'Error: ' + fallbackErr,
+      ]);
+    }
+  }
+
+  // checkpoint2_json/checkpoint2_sent_at -- written back even on a total
+  // send failure, same reasoning as Checkpoint 1's own write in
+  // sendCombinedMorningEmail_ (an un-checkpointed row silently falls out
+  // of loadTodaysCheckpoint1PendingGs_'s own "today" scope once the
+  // calendar day rolls over, since it only ever looks at TODAY's
+  // checkpoint1_sent_at -- leaving it unwritten on failure wouldn't
+  // create a retry opportunity tomorrow, it would just lose the row
+  // forever with no record it was ever attempted). The ops alert above
+  // already surfaces the failure for manual follow-up.
+  if (section2Input) {
+    withRetry_(function () {
+      section2Input.rowNumbers.forEach(function (rowNumber) {
+        allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[JSON.stringify(checkpoint2Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+      });
+    }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
+  }
+}
+
 function sendOvernightFollowupEmails() {
   try {
     sendOvernightFollowupEmails_();
@@ -1326,8 +1508,18 @@ function sendOvernightFollowupEmails_() {
     const subject = String(run[7] || '').trim();
     let issueLog;
     try { issueLog = JSON.parse(run[3] || '[]'); } catch (e) { issueLog = []; }
-    if (!issueLog.length) return; // nothing to follow up on for this region
-
+    // Deliberately NOT an early-return on an empty issueLog (unlike this
+    // block's pre-Step-7 version) — this row still needs to reach
+    // `perRegion` so Pass 2 can look it up by `to` and find its threadId,
+    // even with zero Section 1 content: a bucket that got a Section-2-only
+    // combined 10am email (sendCombinedMorningEmail_, Step 6's own fix)
+    // logs an Overnight_Log row with an empty issueLog on purpose, and
+    // that row's thread is exactly where a real, pending Checkpoint 2
+    // needs to reply. issueLog.forEach below is a no-op on an empty array,
+    // so resolvedRows/unresolvedRows simply stay empty — no behavior
+    // change for the ordinary case where issueLog really is empty AND
+    // nothing is pending from Checkpoint 1 (Pass 2's own union-aware
+    // guard still skips sending anything for that bucket).
     const resolvedRows = [];
     const unresolvedRows = [];
     issueLog.forEach(function (entry) {
@@ -1364,16 +1556,26 @@ function sendOvernightFollowupEmails_() {
     }
   }
 
+  // ---- Section 2: this morning's Checkpoint 1 rows still awaiting
+  // Checkpoint 2, keyed by recipient email — see this block's own header
+  // comment above buildOvernightFollowupSectionOptsGs_ for why this is
+  // always a SUBSET of perRegion's own buckets, not an independent union
+  // the way Step 6 needed. ----
+  const allIssuesLogSheet = ensureAllIssuesLogSheet_(ss);
+  const checkpoint1PendingByEmail = loadTodaysCheckpoint1PendingGs_(ss, now);
+
   // Pass 2: send, now that suggestions (if any came back in time) are known.
   // Same renderOvernightReportEmailHTML_ shell the 10am email uses (see its
   // own comment). Red "Still Unresolved" only — same scoping as the
   // dashboard's own Stalled Leads section, which shows only what's
-  // currently outstanding, not a resolved/unresolved comparison. A region
-  // with nothing still unresolved gets no follow-up reply at all, same
-  // reasoning as the morning email dropping Opportunity+/closed leads
-  // entirely rather than showing them as a separate "already handled" list.
+  // currently outstanding, not a resolved/unresolved comparison. A bucket
+  // with nothing still unresolved AND nothing pending from Checkpoint 1
+  // gets no follow-up reply at all, same reasoning as the morning email
+  // dropping Opportunity+/closed leads entirely rather than showing them
+  // as a separate "already handled" list.
   perRegion.forEach(function (r) {
-    if (!r.unresolvedRows.length) return; // everything from this morning's flags is resolved — nothing to send
+    const section2Input = r.to ? (checkpoint1PendingByEmail[r.to.trim().toLowerCase()] || null) : null;
+    if (!r.unresolvedRows.length && !section2Input) return; // nothing in EITHER section — nothing to send
     if (!r.to) {
       // This row predates the recipient-storing fix (Overnight_Log only
       // had 5 columns, no to/cc/subject) — GmailThread.reply() on
@@ -1402,12 +1604,6 @@ function sendOvernightFollowupEmails_() {
         : overnightFollowupHintGs_(row.sourceRow, colIndex, now, row.baselineEntry);
     });
 
-    const sections = [{
-      heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
-      columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
-      rows: r.unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
-    }];
-
     // TEST_MODE_OVERRIDE_EMAIL_ redirects the morning send, but r.to/r.cc
     // here come straight from whatever was ALREADY STORED in
     // Overnight_Log — if that row was logged by a REAL (non-test) morning
@@ -1415,7 +1611,10 @@ function sendOvernightFollowupEmails_() {
     // the real people, defeating the whole point of the override. Same
     // "never reach a real recipient during a test run" guarantee as the
     // morning path, applied here explicitly since this function reads
-    // stored recipients rather than re-resolving them.
+    // stored recipients rather than re-resolving them. section2Input's own
+    // `to` is always the SAME address (see the header comment above
+    // buildOvernightFollowupSectionOptsGs_), so this single override
+    // covers both sections.
     const sendTo = TEST_MODE_OVERRIDE_EMAIL_ || r.to;
     const sendCc = TEST_MODE_OVERRIDE_EMAIL_ ? undefined : (r.cc || undefined);
     const testModeBanner = TEST_MODE_OVERRIDE_EMAIL_ ? {
@@ -1426,48 +1625,8 @@ function sendOvernightFollowupEmails_() {
       plain: 'TEST MODE — real send suppressed. This would really have gone to: ' + r.to + (r.cc ? ' (cc: ' + r.cc + ')' : ' (no cc)') + '\n\n',
     } : null;
 
-    const bodyHtml = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_({
-      title: '1pm Follow-up',
-      region: r.region,
-      subtitle: "Re-checking this morning's flagged leads",
-      kpis: [
-        { value: r.unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
-      ],
-      sections: sections,
-      footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
-    });
-    const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + r.region + ': ' + r.unresolvedRows.length + ' still unresolved. Open in Gmail for the full breakdown.';
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
-
-    // sendThreadedGmailReply_ retries its own send step internally
-    // (withSendRetry_ — only a definitive rejection, never an ambiguous
-    // timeout). The plain fallback below gets the same treatment
-    // explicitly, for the same reason.
-    try {
-      sendThreadedGmailReply_(r.threadId, sendTo, sendCc || '', subject, plainBody, bodyHtml);
-    } catch (threadErr) {
-      Logger.log('Threaded send failed for ' + r.region + ' (thread ' + r.threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
-      try {
-        withSendRetry_(function () {
-          return GmailApp.createDraft(sendTo, subject, plainBody, {
-            cc: sendCc,
-            htmlBody: bodyHtml,
-            name: 'Homesfy Lead Ops',
-          }).send();
-        }, 'send fallback follow-up (' + r.region + ')');
-      } catch (fallbackErr) {
-        Logger.log('Overnight follow-up reply failed entirely for ' + r.region + ' (thread ' + r.threadId + ', to ' + r.to + '): ' + fallbackErr);
-        notifyOpsAlertGs_('1pm follow-up failed for ' + r.region, [
-          'Region: ' + r.region,
-          'Thread: ' + r.threadId,
-          'Intended recipient: ' + r.to + (r.cc ? (' (cc: ' + r.cc + ')') : ''),
-          'Still-unresolved leads affected (' + r.unresolvedRows.length + '): ' + r.unresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
-          '',
-          'No follow-up email went out for this region this run — neither the threaded send nor the plain fallback succeeded.',
-          'Error: ' + fallbackErr,
-        ]);
-      }
-    }
+    sendCombinedFollowupEmail_(ss, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap);
   });
 }
 

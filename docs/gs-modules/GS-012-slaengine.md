@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `c7e22ae` — Step 6, FN-270's "Called by" now names `GS-010` (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 7, FN-270/271 now both fully wired into `GS-010`'s 13:00 job too (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -55,8 +55,8 @@ gotcha).
 |---|---|---|---|---|---|---|---|
 | FN-248 | `computeSlaFlags_(row, colIndex, now, baselineMap)` `#L46` | a leads row + column index + `now` + a `Movement_Log` call-count baseline map | `{firstContactBreach, neverConnected…, isNotUpdated, stageStuck48h, followupOverdue, …}` | none (pure) | `canonicalStage_` / `businessMinutesBetweenGs_` / `istDayKeyGs_` (`GS-002`), `latestCommentTimestamp_` / `countTodayCommentEntries_` (`GS-005`) | `MovementTracker.gs`, `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `DailyRmIssueLog.gs` | reusable — **the `.gs` twin of `enrichLead` (`JS-006` FN-034)** |
 | FN-249 | `primaryIssueGs_(flags)` `#L154` | the SLA flags | the single headline issue key | none | `ISSUE_PRIORITY`-order | the emailers (subject line + sort) | reusable — shares the tie-break order with `CONFIG.ISSUE_PRIORITY` (`JS-005` CFG-012) |
-| FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L215` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s `sendCombinedMorningEmail_` (`GS-010` FN-275, wired into the 10:00 job as of Step 6/11); the 13:00 job's own Checkpoint 2 call is still Step 7/11 | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment) |
-| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L296` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s 13:00 job (Step 7 of the redesign; not yet wired as of this record's own commit) | specific — **the "incremental, not a re-diff" rule**: suppresses only a lead that was ALREADY closed out (resolved/not_found) at Checkpoint 1 and is STILL closed out now; the full unfiltered `checkpoint2Results` is what gets persisted to `checkpoint2_json`, this filter is presentation-only |
+| FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L215` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s `sendCombinedMorningEmail_` (`GS-010` FN-275, Checkpoint 1, 10:00 job, Step 6/11) AND `sendCombinedFollowupEmail_` (`GS-010` FN-280, Checkpoint 2 — called a SECOND time with Checkpoint 1's own output as `priorEntries`, 13:00 job, Step 7/11) | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment; now proven by both real call sites, not just design) |
+| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L296` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s `sendCombinedFollowupEmail_` (`GS-010` FN-280, 13:00 job, wired 2026-09-23 Step 7/11) | specific — **the "incremental, not a re-diff" rule**: suppresses only a lead that was ALREADY closed out (resolved/not_found) at Checkpoint 1 and is STILL closed out now; the full unfiltered `checkpoint2Results` is what gets persisted to `checkpoint2_json`, this filter is presentation-only |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -197,6 +197,19 @@ FN-270's own "Called by" column and the `## Depends On`/`## Used By`
 relationship updated to reflect it (`GS-010` was already listed as a
 `Used By` before this — that edge existed at the file level already,
 this just makes it concrete for FN-270 specifically).
+
+**Revalidated 2026-09-23** `(pending commit)`: Step 7/11 — `GS-010`
+now ALSO calls `computeAllIssuesCheckpointGs_` (FN-270) a SECOND time
+(Checkpoint 2, from the new `sendCombinedFollowupEmail_`, with
+Checkpoint 1's own result as `priorEntries` — proving the "accepts its
+own output shape" design point for real) and calls
+`filterAllIssuesCheckpoint2ForEmailGs_` (FN-271) for the first time
+ever, live. No change to this file itself — both functions were
+already fully built and tested (Steps 4/5); this revalidation is purely
+FN-270/271's own "Called by" columns catching up to reality. No new
+`Tests_SlaEngine.gs` assertions needed for the same reason — coverage of
+these two functions' own logic is unchanged; the new coverage belongs
+to `Tests_OvernightEmailer.gs` (the caller), not here.
 
 ## Revalidation trigger
 

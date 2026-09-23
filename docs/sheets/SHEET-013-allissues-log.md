@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `c7e22ae` — Step 6, `GS-010` now a second reader/writer (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 7, all 5 columns now fully wired end to end (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -51,10 +51,10 @@ debug). No dashboard reader.
 | `sent_at` | datetime | send instant |
 | `thread_id` | text | the Gmail thread |
 | `issue_snapshot_json` | text (JSON) | added 2026-09-23, **written as of Step 3/11**: the exact per-lead population this bucket's 17:00 email reported: `[{lead_id, RM, TL, status, issueLabel, followup}, ...]`. Written at send time by `sendOneAllIssuesEmail_`; blank on any row from before Step 3. |
-| `checkpoint1_json` | text (JSON) | added 2026-09-23 — written by the next day's 10:00 job (not yet wired — Steps 4/6): `[{lead_id, state, currentIssueLabel, currentStatus}, ...]`. |
-| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job (not yet wired — Steps 4/6/8). |
-| `checkpoint2_json` | text (JSON) | added 2026-09-23 — written by that day's 13:00 job (not yet wired — Steps 5/7), same shape as `checkpoint1_json`, computed incrementally against it. |
-| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job (not yet wired — Steps 5/7/8). |
+| `checkpoint1_json` | text (JSON) | added 2026-09-23 — written by the next day's 10:00 job: `[{lead_id, state, currentIssueLabel, currentStatus}, ...]`. Wired as of Step 6/11: `sendCombinedMorningEmail_` (`GS-010` FN-275). |
+| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job. Wired as of Step 6/11 (same writer as above); a fuller retry story beyond this basic guard is Step 8/11. |
+| `checkpoint2_json` | text (JSON) | added 2026-09-23 — written by that day's 13:00 job, same shape as `checkpoint1_json`, computed incrementally against it. Wired as of Step 7/11: `sendCombinedFollowupEmail_` (`GS-010` FN-280). |
+| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job. Wired as of Step 7/11 (same writer as above); a fuller retry story beyond this basic guard is Step 8/11. |
 
 Exact list: `AllIssuesEmailer.gs` `#L131`
 (`['date','region','bucket_label','primary_role','to','cc','lead_count','sent_at','thread_id','issue_snapshot_json','checkpoint1_json','checkpoint1_sent_at','checkpoint2_json','checkpoint2_sent_at']`).
@@ -69,6 +69,7 @@ email lifecycle redesign, goal `g-tf-fc7cc3383b`.
 | `GS-001` | `sendOneAllIssuesEmail_` (FN-176) | append (one per send) |
 | `GS-001` | `ensureAllIssuesLogSheet_` (FN-178) | header + self-healing (appends missing columns) |
 | `GS-010` | `sendCombinedMorningEmail_` (FN-275) | added 2026-09-23 — writes `checkpoint1_json`/`checkpoint1_sent_at` (cols K/L) back onto the exact row(s) its snapshot came from |
+| `GS-010` | `sendCombinedFollowupEmail_` (FN-280) | added 2026-09-23 (Step 7) — writes `checkpoint2_json`/`checkpoint2_sent_at` (cols M/N) back onto the exact row(s) its Checkpoint 1 input came from |
 
 ## Readers
 
@@ -76,6 +77,7 @@ email lifecycle redesign, goal `g-tf-fc7cc3383b`.
 |---|---|---|
 | `GS-001` | `sendAllIssuesEmails_` (FN-174) | dedupe within a run / debug |
 | `GS-010` | `loadYesterdaysAllIssuesBucketsGs_` (FN-276) | added 2026-09-23 — finds yesterday's un-checkpointed rows for Section 2/Checkpoint 1 of the combined 10:00 email |
+| `GS-010` | `loadTodaysCheckpoint1PendingGs_` (FN-279) | added 2026-09-23 (Step 7) — finds today's Checkpoint-1-done-but-Checkpoint-2-pending rows for Section 2/Checkpoint 2 of the combined 13:00 reply |
 
 ## Automation / triggers touching it
 
@@ -125,11 +127,11 @@ Self-healing header (append-only), same pattern as `Movement_Log` /
 `Daily_RM_Issues`. `thread_id` is captured even though `AllIssuesEmailer`
 itself still only sends at 17:00 — kept for manual reference. As of
 2026-09-23 this row's grain (one per manager bucket per 17:00 run) is
-also the persistence layer for a real follow-up mechanism under active
-build (`issue_snapshot_json`/`checkpoint1_json`/`checkpoint2_json`
-above) — the follow-up SEND itself happens from `OvernightEmailer.gs`'s
-10:00/13:00 jobs, not from this file, once Steps 3-5 of the redesign
-wire it up (not yet done as of this row's own commit).
+also the persistence layer for a real follow-up mechanism
+(`issue_snapshot_json`/`checkpoint1_json`/`checkpoint2_json` above,
+fully wired end to end as of Step 7/11) — the follow-up SEND itself
+happens from `OvernightEmailer.gs`'s 10:00/13:00 jobs, not from this
+file.
 
 ## Exceptions & error handling
 
@@ -188,6 +190,15 @@ reading yesterday's un-checkpointed rows
 `checkpoint1_json`/`checkpoint1_sent_at` back onto them
 (`sendCombinedMorningEmail_`, FN-275) — `checkpoint2_json`/
 `checkpoint2_sent_at` remain unwritten until Step 7.
+
+**Revalidated 2026-09-23** `(pending commit)`: Step 7/11 — the last two
+columns are now live too. `GS-010`'s `loadTodaysCheckpoint1PendingGs_`
+(FN-279) reads today's Checkpoint-1-done-but-Checkpoint-2-pending rows
+(`checkpoint1_sent_at` dated today, `checkpoint2_sent_at` blank); its
+`sendCombinedFollowupEmail_` (FN-280) writes `checkpoint2_json`/
+`checkpoint2_sent_at` (cols M/N) back onto them. All 5 columns added in
+Step 2 are now written and read by a real caller — this sheet's role in
+the two-checkpoint redesign is fully wired end to end.
 
 ## Revalidation trigger
 

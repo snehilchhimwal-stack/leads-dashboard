@@ -12,6 +12,23 @@
  * rather than being flaky around the 5pm/9am window edges.
  */
 
+// sendThreadedGmailReply_ hands Gmail.Users.Messages.send a single
+// web-safe-base64 `raw` MIME blob (no Content-Transfer-Encoding header on
+// either part, so the html/plain bodies are embedded as literal text, not
+// themselves base64) — TestMockGmailAdvanced_ only ever stores that raw
+// string (Tests_Mocks.gs), not a separate htmlBody field the way
+// TestGmailLog_.drafts/sent do. Decode it back to plain text here so
+// Step 7's threaded-reply tests can assert on its content the same way
+// the draft-based tests already assert on draft.htmlBody.
+function TestOE_decodeRawMime_(raw) {
+  const b64 = String(raw || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '==='.slice((b64.length + 3) % 4);
+  const bin = atob(padded);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 function TestOE_leadRow_(header, overrides) {
   const defaults = {
     lead_id: 'L-X', client_id: 'C-X', RM: 'Test RM One', TL: 'Test A1 One', project: 'P', region: 'Pune',
@@ -258,11 +275,32 @@ function runOvernightEmailerTests_() {
     ]);
     followupLogSheet.appendRow([istDayKeyGs_(now), 'Pune', 'thread_seed_1', issueLog, Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), TEST_EMAIL_PRIMARY_, '', 'Pune Google Overnight Leads - test']);
 
+    // ---- Two-checkpoint email lifecycle redesign (Step 7/11) — Section 2
+    // (Checkpoint 2) riding the SAME reply as Section 1, into the SAME
+    // thread_id Overnight_Log already stored — proves the two sections
+    // compose into ONE email for a bucket that has content in BOTH, not
+    // two separate replies. L-CKPT2's checkpoint1_json says 'still_open';
+    // its CURRENT leads-tab stage ('Won', added below) makes Checkpoint 2
+    // compute 'resolved' — a real transition, so filterAllIssuesCheckpoint2ForEmailGs_
+    // keeps it (not one of the closed-out-at-both-checkpoints leads it
+    // suppresses), proving Checkpoint 2 is genuinely RE-computed here, not
+    // just echoing checkpoint1_json back.
+    const allIssuesHeaderFollowup = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
+      'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
+    const todayTs = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+    followupSs._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [allIssuesHeaderFollowup,
+      [now, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, now, 'thread_seed_1',
+        JSON.stringify([{ lead_id: 'L-CKPT2', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' }]),
+        JSON.stringify([{ lead_id: 'L-CKPT2', state: 'still_open', currentIssueLabel: 'Follow-up Overdue', currentStatus: 'Suspect' }]),
+        todayTs, '', ''],
+    ]);
+    followupSs._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT2', client_id: 'C-CKPT2', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 40) }));
+
     const realSs1 = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return followupSs; }, flush: function () {} };
     try {
       sendOvernightFollowupEmails();
-      TestAssertEqual_(TestGmailLog_.threadReplies.length, 1, 'sendOvernightFollowupEmails: sends exactly one threaded reply (Advanced Gmail Service succeeds)');
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, 1, 'sendOvernightFollowupEmails: sends exactly one threaded reply (Advanced Gmail Service succeeds) — Section 1 + Section 2 combine into the SAME reply, not two');
       // Guarded access — an empty threadReplies array here means the
       // assertion above already failed and reported why; indexing [0] on
       // it directly would throw and abort every later assertion in this
@@ -270,8 +308,91 @@ function runOvernightEmailerTests_() {
       const reply = TestGmailLog_.threadReplies[0];
       TestAssertEqual_(reply && reply.threadId, 'thread_seed_1', 'sendOvernightFollowupEmails: threads into the SAME thread_id stored from the morning send');
       TestAssert_(!!(reply && reply.raw), 'sendOvernightFollowupEmails: the threaded reply carries a real base64 MIME payload');
+
+      const replyHtml = TestOE_decodeRawMime_(reply && reply.raw);
+      TestAssertContains_(replyHtml, 'Section 1', 'sendOvernightFollowupEmails: reply is explicitly labeled Section 1 (Overnight Follow-up)');
+      TestAssertContains_(replyHtml, 'Section 2', 'sendOvernightFollowupEmails: reply is explicitly labeled Section 2 (Checkpoint 2)');
+      TestAssertContains_(replyHtml, 'L-CKPT2', 'sendOvernightFollowupEmails: Section 2 lists the Checkpoint 2 lead');
+      TestAssertContains_(replyHtml, 'Resolved', 'sendCombinedFollowupEmail_: L-CKPT2 (now Won) shows as Resolved — Checkpoint 2 genuinely re-computed, not just echoing checkpoint1_json');
+
+      const allIssuesAfterFollowup = followupSs._sheets['AllIssues_Log'].getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!!allIssuesAfterFollowup[12], 'sendCombinedFollowupEmail_: checkpoint2_json written back to AllIssues_Log (col M)');
+      TestAssert_(!!allIssuesAfterFollowup[13], 'sendCombinedFollowupEmail_: checkpoint2_sent_at written back to AllIssues_Log (col N)');
+      const checkpoint2Written = JSON.parse(allIssuesAfterFollowup[12]);
+      TestAssertEqual_(checkpoint2Written[0].state, 'resolved', 'sendCombinedFollowupEmail_: persisted checkpoint2_json matches what the email itself showed');
+
+      // No re-run/idempotency check here — Section 1's own unresolved-lead
+      // classification has NO per-day-once guard (a re-run always resends
+      // whatever is CURRENTLY still unresolved, and L-UNRESOLVED's fixture
+      // never changes state), so a second call to
+      // sendOvernightFollowupEmails() legitimately sends ANOTHER reply for
+      // this bucket — that gap is real but is explicitly Step 8/11's job
+      // ("idempotency for 10:00/13:00/17:00 jobs"), not Step 7's. Only
+      // Checkpoint 2's own idempotency (checkpoint2_sent_at) is this
+      // step's concern — covered below on the Section-2-only bucket,
+      // which has no such Section-1 confound (its issueLog is always
+      // empty, so it never has anything in unresolvedRows to re-send).
     } finally {
       SpreadsheetApp = realSs1;
+    }
+
+    // ---- Two-checkpoint email lifecycle redesign (Step 7/11) — a
+    // Section-2-ONLY bucket: an Overnight_Log row with an EMPTY issueLog
+    // (exactly the shape sendCombinedMorningEmail_'s own Step 6 fix
+    // produces for a bucket with zero overnight leads but real Checkpoint
+    // 1 content — see that function's own comment, and the Harbour
+    // scenario in the sendOvernightMorningEmails test above), paired with
+    // an AllIssues_Log row still awaiting Checkpoint 2. Regression
+    // coverage for a real gap this same session found and fixed: Pass 1's
+    // ORIGINAL `if (!issueLog.length) return;` skipped pushing this row to
+    // `perRegion` entirely, so Pass 2 could never find this bucket's own
+    // thread to reply Checkpoint 2 into — silently dropping Checkpoint 2
+    // for every Section-2-only bucket. Without that fix this test sends 0
+    // threaded replies instead of 1. ----
+    const checkpoint2OnlySs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+    });
+    checkpoint2OnlySs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+      TestOE_leadRow_(header, { lead_id: 'L-CKPT3', client_id: 'C-CKPT3', RM: 'Harbour RM', region: 'Harbour', current_stage: 'Not Updated', lead_assigned_at: TestFixture_hoursAgo_(now, 6) }),
+    ]);
+    const checkpoint2OnlyLogSheet = ensureOvernightLogSheet_(checkpoint2OnlySs);
+    checkpoint2OnlyLogSheet.appendRow([istDayKeyGs_(now), 'Harbour', 'thread_harbour_2', '[]',
+      Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), TEST_EMAIL_SECONDARY_, '', 'Harbour Google Overnight + Follow-up Digest - test']);
+    checkpoint2OnlySs._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [allIssuesHeaderFollowup,
+      [now, 'Harbour', 'Harbour Manager', 'A1', TEST_EMAIL_SECONDARY_, '', 1, now, 'thread_harbour_2',
+        JSON.stringify([{ lead_id: 'L-CKPT3', RM: 'Harbour RM', TL: 'Harbour Manager', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }]),
+        JSON.stringify([{ lead_id: 'L-CKPT3', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' }]),
+        Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), '', ''],
+    ]);
+
+    const realSs1b = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return checkpoint2OnlySs; }, flush: function () {} };
+    try {
+      // TestGmailLog_.threadReplies is a GLOBAL log, not reset between
+      // scenarios in this file (the followupSs block above already added
+      // its own entry) — so this asserts a DELTA of exactly one NEW reply,
+      // and finds the actual new one by threadId rather than assuming
+      // index 0 or an absolute length.
+      const repliesBefore = TestGmailLog_.threadReplies.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore + 1, 'sendOvernightFollowupEmails: a Section-2-only bucket (empty issueLog) still gets its Checkpoint 2 reply sent — was silently dropped before the Pass 1 perRegion fix');
+      const reply2 = TestGmailLog_.threadReplies.filter(function (r) { return r.threadId === 'thread_harbour_2'; }).pop();
+      TestAssert_(!!reply2, 'sendOvernightFollowupEmails: Section-2-only bucket replies into the SAME thread Overnight_Log stored this morning');
+      const reply2Html = TestOE_decodeRawMime_(reply2 && reply2.raw);
+      TestAssertContains_(reply2Html, 'Nothing still unresolved from this morning', 'sendCombinedFollowupEmail_: Section 1 shows its own empty-state text — genuinely had nothing, not a fake resolved list');
+      TestAssertContains_(reply2Html, 'L-CKPT3', 'sendCombinedFollowupEmail_: Section 2 lists the pending Checkpoint 2 lead');
+      TestAssertContains_(reply2Html, 'Still open — Not Updated', 'sendCombinedFollowupEmail_: L-CKPT3 (still flagged, same issue) shows as still_open with its current issue label');
+
+      const allIssuesAfterCkpt2Only = checkpoint2OnlySs._sheets['AllIssues_Log'].getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!!allIssuesAfterCkpt2Only[12] && !!allIssuesAfterCkpt2Only[13], 'sendCombinedFollowupEmail_: Section-2-only bucket also gets checkpoint2_json/checkpoint2_sent_at written back');
+
+      // ---- idempotency: a second run sends nothing new (checkpoint2_sent_at set, still nothing in Section 1) ----
+      const repliesBeforeRerun2 = TestGmailLog_.threadReplies.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun2, 'sendOvernightFollowupEmails: a second run sends nothing new for the Section-2-only bucket either');
+    } finally {
+      SpreadsheetApp = realSs1b;
     }
 
     // ---- threaded reply failure -> falls back to a plain new message ----
