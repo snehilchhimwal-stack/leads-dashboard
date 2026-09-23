@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `SlaEngine.gs` (159 lines) |
+| **Location** | `SlaEngine.gs` (261 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-23 against commit `51eb0ee` — Step 4, `computeAllIssuesCheckpointGs_` added (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -27,6 +27,12 @@ would undermine both.
 - `primaryIssueGs_(flags)` — pick the headline issue via the shared
   priority order.
 - Hold the threshold constants (`LEAD_GRACE_HOURS_` etc.).
+- `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` —
+  added 2026-09-23: compares a set of prior per-lead entries (a raw
+  17:00 `AllIssues_Log` snapshot, or a previous checkpoint's own output)
+  against the current live leads tab; the comparison engine for the
+  two-checkpoint email lifecycle redesign
+  (`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`).
 
 ## Trigger schedule
 
@@ -45,6 +51,7 @@ gotcha).
 |---|---|---|---|---|---|---|---|
 | FN-248 | `computeSlaFlags_(row, colIndex, now, baselineMap)` `#L46` | a leads row + column index + `now` + a `Movement_Log` call-count baseline map | `{firstContactBreach, neverConnected…, isNotUpdated, stageStuck48h, followupOverdue, …}` | none (pure) | `canonicalStage_` / `businessMinutesBetweenGs_` / `istDayKeyGs_` (`GS-002`), `latestCommentTimestamp_` / `countTodayCommentEntries_` (`GS-005`) | `MovementTracker.gs`, `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `DailyRmIssueLog.gs` | reusable — **the `.gs` twin of `enrichLead` (`JS-006` FN-034)** |
 | FN-249 | `primaryIssueGs_(flags)` `#L154` | the SLA flags | the single headline issue key | none | `ISSUE_PRIORITY`-order | the emailers (subject line + sort) | reusable — shares the tie-break order with `CONFIG.ISSUE_PRIORITY` (`JS-005` CFG-012) |
+| FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L215` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s 10:00/13:00 jobs (Steps 4-7 of the redesign; not yet wired as of this record's own commit) | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -85,13 +92,17 @@ Movement hub's `SLA_History` write (`GS-008`), and the nightly census
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
-| — | — | — | `SlaEngine.gs` operates on rows/maps passed in; it touches no sheet directly |
+| `SHEET-001` `leads` | Read | FN-270 (via `readLeadsTab_`, `GS-004`) | added 2026-09-23 — `computeSlaFlags_`/`primaryIssueGs_` (FN-248/249) still only operate on rows/maps passed in, no sheet access of their own |
 
 ## Failure / error behaviour
 
-Pure computation — a missing baseline degrades one sub-check
-gracefully (EXC-087), never a throw. Nothing here shows as Failed in
-Executions on its own.
+`computeSlaFlags_`/`primaryIssueGs_` (FN-248/249) are pure computation —
+a missing baseline degrades one sub-check gracefully (EXC-087), never a
+throw. `computeAllIssuesCheckpointGs_` (FN-270, added 2026-09-23) is the
+one exception: it calls `readLeadsTab_` (`GS-004`), which CAN throw
+after retries are exhausted — same failure mode as any other real
+Sheets read in this project, propagated to whichever caller invokes it
+(the 10:00/13:00 jobs, once wired).
 
 ## Cross-runtime duplication
 
@@ -126,8 +137,9 @@ MEDIUM #2; `CLAUDE.md` (duplication gotcha).
 ## Relationships
 
 - **Depends On:** `GS-002` (`Core.gs`), `GS-005` (`FollowupEngine.gs` —
-  `latestCommentTimestamp_`, `countTodayCommentEntries_`) — the only two
-  dependencies
+  `latestCommentTimestamp_`, `countTodayCommentEntries_`), `GS-004`
+  (`EmailInfra.gs` — `readLeadsTab_`, added 2026-09-23 for FN-270 —
+  `computeSlaFlags_`/`primaryIssueGs_` still have no dependency on it)
 - **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-003`
   (`DailyRmIssueLog.gs`), `GS-008` (`MovementTracker.gs`), `GS-010`
   (`OvernightEmailer.gs`), `DATA-002`, `DATA-004`
@@ -152,6 +164,18 @@ MEDIUM #2; `CLAUDE.md` (duplication gotcha).
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-029.
+
+**Revalidated 2026-09-23** `51eb0ee`: added
+`computeAllIssuesCheckpointGs_` (FN-270, `#L215`) — Step 4/11 of the
+two-checkpoint email lifecycle redesign
+(`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 6,
+goal `g-tf-fc7cc3383b`). Pure new addition after `primaryIssueGs_` —
+`computeSlaFlags_`/`primaryIssueGs_` and all 6 threshold constants are
+UNCHANGED (no rule/threshold change, so no `enrichLead`/`CONFIG` twin
+update needed — this function itself has no browser-side twin, since
+there is no dashboard equivalent of "compare a persisted snapshot to
+now"). `Tests_SlaEngine.gs` gained a dedicated block covering all 6
+`state` values + the "reused on its own output" case.
 
 ## Revalidation trigger
 
