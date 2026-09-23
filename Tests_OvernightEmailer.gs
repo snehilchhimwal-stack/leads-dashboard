@@ -104,6 +104,80 @@ function runOvernightEmailerTests_() {
 
     TestAssertOnlyTestEmails_();
 
+    // ---- Two-checkpoint email lifecycle redesign (Step 6/11) — Section 2
+    // (Checkpoint 1) wired into the SAME combined 10am send. Seeds
+    // AllIssues_Log with two pending rows: one for 'Pune' (same region/
+    // recipient the test above already sent Section 1 for today — this
+    // exercises the "Section 1 already sent, Section 2 proceeds
+    // separately" empty-state path), one for a brand-new 'Harbour'
+    // region with NO overnight leads at all today (exercises the plain
+    // "no overnight leads" empty-state path instead). ----
+    const allIssuesHeader = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
+      'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
+    const yesterday = TestFixture_daysAgo_(now, 1);
+    const allIssuesRows = [allIssuesHeader,
+      [yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, yesterday, 'thread-pune',
+        JSON.stringify([{ lead_id: 'L-CKPT-PUNE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' }]),
+        '', '', '', ''],
+      [yesterday, 'Harbour', 'Harbour Manager', 'A1', TEST_EMAIL_SECONDARY_, '', 1, yesterday, 'thread-harbour',
+        JSON.stringify([{ lead_id: 'L-CKPT-HARBOUR', RM: 'Harbour RM', TL: 'Harbour Manager', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }]),
+        '', '', '', ''],
+    ];
+    ss._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', allIssuesRows);
+
+    // Checkpoint leads' CURRENT state, appended directly to the SAME
+    // leads tab already in use — L-CKPT-PUNE closed (-> resolved),
+    // L-CKPT-HARBOUR still open with the literal 'Not Updated' stage
+    // text (-> still_open; deliberately NOT relying on the
+    // never-connected-past-10-minutes business-hours-gated path, which
+    // Tests_SlaEngine.gs already covers with a fixed clock — this file
+    // uses the real wall clock, so only a time-of-day-independent
+    // trigger belongs in a fixture here).
+    ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT-PUNE', client_id: 'C-CKPT-PUNE', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
+    ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT-HARBOUR', client_id: 'C-CKPT-HARBOUR', RM: 'Harbour RM', current_stage: 'Not Updated', lead_assigned_at: TestFixture_hoursAgo_(now, 5) }));
+
+    sendOvernightMorningEmails();
+    TestAssertEqual_(TestGmailLog_.drafts.length, 4, 'sendOvernightMorningEmails: 2 new combined emails this run — Pune (Section 2 only) and Harbour (Section 2 only)');
+
+    // .filter(...).pop() -- NOT .find(), which would return run 1's
+    // ORIGINAL Pune draft (same recipient, and its subject ALSO matches
+    // "Follow-up Digest" since every combined send uses that format
+    // regardless of whether Section 2 has content) instead of run 3's
+    // new one. Sends happen in order, so the LAST matching draft for a
+    // given recipient is always the most recent.
+    const puneCombined = TestGmailLog_.drafts.filter(function (d) { return d.to === TEST_EMAIL_PRIMARY_; }).pop();
+    const harbourCombined = TestGmailLog_.drafts.filter(function (d) { return d.to === TEST_EMAIL_SECONDARY_; }).pop();
+    TestAssert_(!!puneCombined, 'sendOvernightMorningEmails: Pune combined email sent to the SAME frozen recipient AllIssues_Log stored yesterday');
+    TestAssert_(!!harbourCombined, 'sendOvernightMorningEmails: Harbour combined email sent even though it has zero overnight leads today — Section 2 alone is enough to trigger a send');
+
+    TestAssertContains_(puneCombined.htmlBody, 'Section 1', 'sendCombinedMorningEmail_: Pune email is explicitly labeled Section 1');
+    TestAssertContains_(puneCombined.htmlBody, 'Already sent separately earlier today', 'sendCombinedMorningEmail_: Pune Section 1 correctly explains overnight leads existed and already went out — not a generic "none" message');
+    TestAssertContains_(puneCombined.htmlBody, 'Section 2', 'sendCombinedMorningEmail_: Pune email is explicitly labeled Section 2');
+    TestAssertContains_(puneCombined.htmlBody, 'L-CKPT-PUNE', 'sendCombinedMorningEmail_: Pune Section 2 lists the checkpoint lead');
+    TestAssertContains_(puneCombined.htmlBody, 'Resolved', 'sendCombinedMorningEmail_: L-CKPT-PUNE (now closed) shows as Resolved in Section 2');
+
+    TestAssertContains_(harbourCombined.htmlBody, 'No overnight leads for your team today', 'sendCombinedMorningEmail_: Harbour Section 1 shows the plain "no leads" text, NOT the "already sent" text — it genuinely had none, was never sent separately');
+    TestAssertContains_(harbourCombined.htmlBody, 'L-CKPT-HARBOUR', 'sendCombinedMorningEmail_: Harbour Section 2 lists its checkpoint lead');
+    TestAssertContains_(harbourCombined.htmlBody, 'Still open — Not Updated', 'sendCombinedMorningEmail_: L-CKPT-HARBOUR (still flagged, same issue) shows as still_open with its current issue label');
+
+    // ---- checkpoint1_json/checkpoint1_sent_at written back to the
+    // EXACT AllIssues_Log rows the snapshots came from ----
+    const allIssuesLogAfter = ss._sheets['AllIssues_Log'].getRange(2, 1, 2, 14).getValues();
+    const puneRow = allIssuesLogAfter[0];
+    const harbourRow = allIssuesLogAfter[1];
+    TestAssert_(!!puneRow[10], 'AllIssues_Log: Pune row gets a checkpoint1_json value written back (col K)');
+    TestAssert_(!!puneRow[11], 'AllIssues_Log: Pune row gets a checkpoint1_sent_at timestamp written back (col L)');
+    const puneCheckpoint1 = JSON.parse(puneRow[10]);
+    TestAssertEqual_(puneCheckpoint1[0].state, 'resolved', 'AllIssues_Log: Pune row\'s persisted checkpoint1_json matches what the email itself showed');
+    TestAssert_(!!harbourRow[10] && !!harbourRow[11], 'AllIssues_Log: Harbour row ALSO gets checkpoint1_json/checkpoint1_sent_at written back');
+
+    // ---- idempotency: the NEXT run does not reprocess either checkpoint
+    // (checkpoint1_sent_at now set on both rows) ----
+    sendOvernightMorningEmails();
+    TestAssertEqual_(TestGmailLog_.drafts.length, 4, 'sendOvernightMorningEmails: the next run sends nothing new — both Section 1 (Overnight_Log) and Section 2 (checkpoint1_sent_at) are now fully logged for every region touched so far');
+
+    TestAssertOnlyTestEmails_();
+
     // ---- sendOneOvernightEmail_: Gmail-blocked failure path (direct call) ----
     const realGmailApp = GmailApp;
     GmailApp = TestMockGmailApp_({ failSendCountFor: {} });

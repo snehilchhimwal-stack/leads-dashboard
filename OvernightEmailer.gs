@@ -296,9 +296,17 @@ function ensureOvernightLogSheet_(ss) {
 // this bucket to the consolidated per-lead "not sent" report (see
 // notifyLeadSendFailuresGs_) in addition to the immediate ops alert
 // this function still sends below on failure.
-function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
-  if (!leads.length) return null;
-
+// Builds Section 1's ("Overnight") full renderOvernightReportEmailHTML_
+// opts (title/region/subtitle/kpis/action/sections/footerNote) from a
+// bucket's own leads. Extracted from sendOneOvernightEmail_'s own inline
+// object (2026-09-23, two-checkpoint email lifecycle redesign) so BOTH a
+// standalone overnight email (sendOneOvernightEmail_, unchanged output)
+// and Section 1 of the new combined 10am email
+// (sendCombinedMorningEmail_) share the SAME opts-building logic — one
+// source of truth for what "Section 1 — Overnight" actually shows, never
+// duplicated. Pure function, no behavior change from the extraction
+// itself.
+function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
   const byRM = {}; // RM -> { TL, leads: [] }
   leads.forEach(function (l) {
     if (!byRM[l.RM]) byRM[l.RM] = { TL: l.TL, leads: [] };
@@ -306,6 +314,37 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   });
   const rmKeys = Object.keys(byRM).sort();
   const statusTypeCount = Array.from(new Set(leads.map(function (l) { return l.status; }))).length;
+
+  return {
+    title: 'Overnight Leads',
+    region: region,
+    subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
+    kpis: [
+      { value: leads.length, label: leads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
+      { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+      { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
+    ],
+    action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+    sections: rmKeys.map(function (rm) {
+      return {
+        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
+        columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
+        rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
+      };
+    }),
+    footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
+  };
+}
+
+function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
+  if (!leads.length) return null;
+
+  const byRM = {}; // RM -> { TL, leads: [] } — still needed below for rmKeys.length in the plain-text body
+  leads.forEach(function (l) {
+    if (!byRM[l.RM]) byRM[l.RM] = { TL: l.TL, leads: [] };
+    byRM[l.RM].leads.push(l);
+  });
+  const rmKeys = Object.keys(byRM).sort();
 
   const tierQualifier = (rec.primaryRole && rec.primaryRole !== 'A1') ? ' - ' + rec.primaryRole : '';
   const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + tierQualifier + ') ' : '';
@@ -330,25 +369,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     plain: 'TEST MODE — real send suppressed. This would really have gone to: ' + rec.originalTo + (rec.originalCc ? ' (cc: ' + rec.originalCc + ')' : ' (no cc)') + '\n\n',
   } : null;
 
-  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_({
-    title: 'Overnight Leads',
-    region: region,
-    subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
-    kpis: [
-      { value: leads.length, label: leads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
-      { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
-      { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
-    ],
-    action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
-    sections: rmKeys.map(function (rm) {
-      return {
-        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
-        columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
-        rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
-      };
-    }),
-    footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
-  });
+  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(buildOvernightSectionOptsGs_(region, leads, dateLabel, win));
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Overnight leads for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
     ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
 
@@ -415,6 +436,295 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       rec.to, rec.cc || '', subject,
     ]);
   }, 'log Overnight_Log row (' + region + bucketNote + ')');
+  return null;
+}
+
+// ============================================================
+// Two-checkpoint email lifecycle redesign (Step 6/11) -- see
+// docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md for the
+// full design. Everything below builds the 10am COMBINED email:
+// Section 1 = Overnight (buildOvernightSectionOptsGs_ above, unchanged
+// logic), Section 2 = Checkpoint 1 (yesterday's 17:00 AllIssues_Log
+// snapshot compared to right now, via computeAllIssuesCheckpointGs_ /
+// SlaEngine.gs). sendOneOvernightEmail_ itself is untouched and still
+// works standalone -- these are ADDITIVE, composing around it, not a
+// replacement.
+// ============================================================
+
+// Section 1 placeholder for a union bucket that has Checkpoint 1
+// content but no overnight leads today (or Section 1 already went out
+// in an earlier, separate run this same day -- see
+// alreadyLoggedRegionsToday's own comment below). Same opts shape
+// renderOvernightReportEmailHTML_ always expects; empty kpis/sections
+// render as nothing, not an error.
+function buildOvernightSectionEmptyStateOptsGs_(region, reasonText) {
+  return { title: 'Overnight Leads', region: region, subtitle: reasonText, kpis: [], action: '', sections: [], footerNote: '' };
+}
+
+// Section 2 placeholder for a union bucket that has overnight leads
+// today but nothing pending from yesterday's 17:00 report (the common
+// case -- most days, most buckets).
+function buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointLabel, reasonText) {
+  return { title: checkpointLabel, region: region, subtitle: reasonText, kpis: [], action: '', sections: [], footerNote: '' };
+}
+
+// Per-lead display text for Checkpoint 1/2's "Current State" column --
+// see docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md Part 6
+// for what each SlaEngine.gs `state` value means. Deliberately does NOT
+// attempt to re-derive a fresh Suggested Follow-up hint the way Section
+// 1 does (overnightFollowupHintGs_ needs a Movement_Log baseline entry
+// computeAllIssuesCheckpointGs_'s own signature doesn't carry) -- the
+// state label itself is the actionable signal here; Section 1's own
+// Suggested Follow-up column already covers any lead that's ALSO part
+// of tonight's overnight population.
+function allIssuesCheckpointStateLabelGs_(entry) {
+  switch (entry.state) {
+    case 'resolved': return 'Resolved';
+    case 'not_found': return 'No longer found on the leads sheet';
+    case 'still_open': return 'Still open — ' + entry.currentIssueLabel;
+    case 'category_changed': return 'Now: ' + entry.currentIssueLabel;
+    case 'escalated': return 'ESCALATED — now: ' + entry.currentIssueLabel;
+    case 'reopened': return 'REOPENED — now: ' + entry.currentIssueLabel;
+    default: return entry.state;
+  }
+}
+
+// Builds Section 2's full renderOvernightReportEmailHTML_ opts, grouped
+// by RM the same visual way Section 1 is (buildOvernightSectionOptsGs_)
+// for consistency, but with its own distinct purple accent (vs Section
+// 1's default indigo) so the two are never confused for one continuous
+// table even mid-scroll. `snapshotEntries` is the ORIGINAL 17:00
+// population for this bucket (has RM/TL/issueLabel per lead);
+// `checkpointResults` is computeAllIssuesCheckpointGs_'s output for the
+// SAME lead_ids -- joined here by lead_id since the two carry
+// complementary fields (design doc Part 7: the comparison engine itself
+// doesn't need to know about RM/TL, only the email-rendering layer does).
+function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, originalDateLabel, snapshotEntries, checkpointResults) {
+  const resultByLeadId = {};
+  checkpointResults.forEach(function (r) { resultByLeadId[r.lead_id] = r; });
+
+  const byRM = {}; // RM -> { TL, rows: [] }
+  snapshotEntries.forEach(function (entry) {
+    const result = resultByLeadId[entry.lead_id];
+    if (!result) return; // computeAllIssuesCheckpointGs_ always returns one entry per input -- defensive only
+    const rmKey = entry.RM || 'Unassigned';
+    if (!byRM[rmKey]) byRM[rmKey] = { TL: entry.TL, rows: [] };
+    byRM[rmKey].rows.push([entry.lead_id, entry.issueLabel, allIssuesCheckpointStateLabelGs_(result)]);
+  });
+  const rmKeys = Object.keys(byRM).sort();
+
+  const closedOutStates = { resolved: true, not_found: true };
+  const resolvedCount = checkpointResults.filter(function (r) { return closedOutStates[r.state]; }).length;
+  const stillActiveCount = checkpointResults.length - resolvedCount;
+
+  return {
+    title: checkpointLabel,
+    region: region,
+    subtitle: "Following up on the " + originalDateLabel + ' 17:00 All-Issues report',
+    kpis: [
+      { value: checkpointResults.length, label: checkpointResults.length === 1 ? 'Lead In This Follow-up' : 'Leads In This Follow-up', bg: '#ede9fe', fg: '#6d28d9' },
+      { value: stillActiveCount, label: 'Still Active', bg: '#fee2e2', fg: '#b91c1c' },
+      { value: resolvedCount, label: 'Resolved', bg: '#d1fae5', fg: '#047857' },
+    ],
+    action: stillActiveCount ? "The leads below are still active from yesterday's 17:00 report — prioritize the ones still open or newly escalated." : '',
+    sections: rmKeys.map(function (rm) {
+      return {
+        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
+        columns: ['Lead ID', 'Original Issue (17:00)', 'Current State'],
+        rows: byRM[rm].rows,
+        accent: { fg: '#6d28d9', headerBg: '#f5f3ff', bg: '#faf9ff' },
+      };
+    }),
+    footerNote: "Comparing yesterday's 17:00 All-Issues report against the CURRENT live sheet. A lead shown as \"Resolved\" or no longer found is dropped from this afternoon's follow-up; anything still active will be checked again then.",
+  };
+}
+
+// Composes Section 1 + Section 2 into ONE email body -- two full,
+// independent renderOvernightReportEmailHTML_ calls (each keeps its own
+// banner/KPIs/action/footer/signature) concatenated with a clear
+// divider, rather than changing that shared function's signature (it
+// also backs AllIssuesEmailer.gs's own single-section emails, so its
+// shape stays exactly as every other caller already expects — design
+// doc Part 8's own "wrap, don't modify" plan). Each half is explicitly
+// labeled "Section N — <title>" so the two-section contract is visually
+// unambiguous even to someone skimming, not just implied by position.
+function renderTwoSectionEmailHTML_(section1Opts, section2Opts) {
+  const FONT = 'font-family:Arial,Helvetica,sans-serif;';
+  const sectionLabel = function (n, title) {
+    return '<div style="' + FONT + ' font-size:11px; letter-spacing:1.2px; text-transform:uppercase; font-weight:700; color:#9ca3af; margin:' +
+      (n === 1 ? '0 0 6px 0' : '30px 0 6px 0') + ';">Section ' + n + ' — ' + esc_(title) + '</div>';
+  };
+  const divider = '<div style="margin:22px 0; border-top:2px solid #e5e7eb;"></div>';
+  return sectionLabel(1, section1Opts.title) + renderOvernightReportEmailHTML_(section1Opts) +
+    divider +
+    sectionLabel(2, section2Opts.title) + renderOvernightReportEmailHTML_(section2Opts);
+}
+
+// Reads AllIssues_Log for yesterday's (IST) rows that haven't had a
+// Checkpoint 1 computed yet (checkpoint1_sent_at blank -- the
+// idempotency guard for THIS function; a fuller retry story is Step
+// 8/11's job, this is the basic "don't recompute/resend what's already
+// done" check). Returns { region -> [{rowNumber, to, cc, bucketLabel,
+// primaryRole, snapshotEntries}] } -- rowNumber is the real 1-indexed
+// sheet row, needed to write checkpoint1_json/checkpoint1_sent_at back
+// onto the EXACT row the snapshot came from (design doc Part 5: one
+// wide row per original 17:00 send, not a second table).
+function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
+  const yesterdayKey = istDayKeyGs_(new Date(now.getTime() - 24 * 3600 * 1000));
+  const logSheet = ensureAllIssuesLogSheet_(ss); // AllIssuesEmailer.gs -- already a required file for this project (see this file's own header)
+  const lastRow = logSheet.getLastRow();
+  const byRegion = {};
+  if (lastRow < 2) return byRegion;
+
+  const rows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 14).getValues(); }, 'read AllIssues_Log for Checkpoint 1');
+  rows.forEach(function (r, i) {
+    const dateCell = r[0];
+    const dateKey = dateCell instanceof Date ? istDayKeyGs_(dateCell) : String(dateCell || '');
+    if (dateKey !== yesterdayKey) return;
+    if (r[11]) return; // checkpoint1_sent_at (col L, 0-indexed 11) already set -- skip, already checkpointed
+    const snapshotRaw = r[9]; // issue_snapshot_json, col J, 0-indexed 9
+    if (!snapshotRaw) return; // a pre-Step-3 row (or a bucket that somehow logged with no leads) -- nothing to compare
+    let snapshotEntries;
+    try {
+      snapshotEntries = JSON.parse(snapshotRaw);
+    } catch (e) {
+      Logger.log('loadYesterdaysAllIssuesBucketsGs_: could not parse issue_snapshot_json on AllIssues_Log row ' + (i + 2) + ' -- skipping this row: ' + e);
+      return;
+    }
+    if (!snapshotEntries || !snapshotEntries.length) return;
+    const region = String(r[1] || '').trim();
+    if (!region) return;
+    if (!byRegion[region]) byRegion[region] = [];
+    byRegion[region].push({
+      rowNumber: i + 2, bucketLabel: String(r[2] || ''), primaryRole: String(r[3] || ''),
+      to: String(r[4] || ''), cc: String(r[5] || ''), snapshotEntries: snapshotEntries,
+    });
+  });
+  return byRegion;
+}
+
+// Sends ONE combined email for a union bucket (by recipient email — see
+// design doc Part 7) and writes back both halves' own state.
+// `section1` is either { rec, leads } (a real today's-overnight bucket,
+// same shape sendOneOvernightEmail_ already takes) or null (no overnight
+// leads today for this recipient, OR Section 1 already went out
+// separately earlier today — see the caller's own
+// alreadyLoggedRegionsToday handling). `section2` is either
+// { to, cc, bucketLabel, primaryRole, rowNumbers: [...],
+// snapshotEntries: [...] } (merged across every yesterday's AllIssues_Log
+// row for this SAME recipient — normally exactly one) or null (nothing
+// pending from yesterday's 17:00 report).
+// Returns null on success, or { reason, section1Leads, section2 } on
+// send failure — same shape sendOneOvernightEmail_ returns, so the
+// caller's existing failedLeadEntries aggregation needs no changes.
+function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason) {
+  const to = (section1 && section1.rec.to) || (section2 && section2.to);
+  const cc = (section1 && section1.rec.cc) || (section2 && section2.cc) || '';
+  const bucketLabel = (section1 && section1.rec.bucketLabel) || (section2 && section2.bucketLabel) || '';
+  const primaryRole = (section1 && section1.rec.primaryRole) || (section2 && section2.primaryRole) || '';
+
+  const section1Leads = section1 ? section1.leads : [];
+  // `section1SkippedReason` distinguishes two genuinely different facts
+  // (design doc Part 2's empty-state rule) — 'already_sent' means real
+  // overnight leads existed and already went out in an earlier, separate
+  // run today (this bucket is here only because Section 2 has content);
+  // anything else means there simply were none.
+  const section1EmptyText = section1SkippedReason === 'already_sent'
+    ? "Already sent separately earlier today — see this morning's earlier Overnight email for this team."
+    : 'No overnight leads for your team today.';
+  const section1Opts = section1
+    ? buildOvernightSectionOptsGs_(region, section1Leads, dateLabel, win)
+    : buildOvernightSectionEmptyStateOptsGs_(region, section1EmptyText);
+
+  const checkpointTitle = 'Previous Day 17:00 All-Issues Follow-up — Checkpoint 1';
+  let checkpoint1Results = null;
+  let section2Opts;
+  if (section2) {
+    checkpoint1Results = computeAllIssuesCheckpointGs_(ss, section2.snapshotEntries, now, baselineMap);
+    const originalDateLabel = Utilities.formatDate(new Date(now.getTime() - 24 * 3600 * 1000), 'Asia/Kolkata', 'd MMM yyyy');
+    section2Opts = buildAllIssuesCheckpointSectionOptsGs_(region, checkpointTitle, originalDateLabel, section2.snapshotEntries, checkpoint1Results);
+  } else {
+    section2Opts = buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing pending from yesterday's 17:00 report.");
+  }
+
+  const tierQualifier = (primaryRole && primaryRole !== 'A1') ? ' - ' + primaryRole : '';
+  const subjectPrefix = bucketLabel ? '(' + bucketLabel + tierQualifier + ') ' : '';
+  const subject = subjectPrefix + region + ' Google Overnight + Follow-up Digest - ' + dateLabel;
+  const bucketNote = bucketLabel ? ' (' + bucketLabel + tierQualifier + ')' : '';
+
+  const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
+  const plainBody = 'Combined morning digest for ' + region + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
+    section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + (checkpoint1Results ? checkpoint1Results.length : 0) +
+    ' lead(s). Open this email in Gmail for the full breakdown.';
+
+  let sentMessage = null;
+  let sendFailureReason = null;
+  try {
+    sentMessage = withSendRetry_(function () {
+      return GmailApp.createDraft(to, subject, plainBody, { cc: cc || undefined, htmlBody: html, name: 'Homesfy Lead Ops' }).send();
+    }, 'send combined morning email (' + region + bucketNote + ')');
+  } catch (e) {
+    Logger.log('Combined morning email failed for ' + region + bucketNote + ': ' + e);
+    const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
+    sendFailureReason = isSendBlocked
+      ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + to + ' with subject "' + subject + '"'
+      : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so the draft may already exist)';
+    notifyOpsAlertGs_('Combined morning email FAILED - ' + region + bucketNote, [
+      'Region: ' + region + bucketNote,
+      'Intended recipient: ' + to + (cc ? (' (cc: ' + cc + ')') : ''),
+      'Section 1 (Overnight) leads (' + section1Leads.length + '): ' + section1Leads.map(function (l) { return l.lead_id; }).join(', '),
+      'Section 2 (Checkpoint 1) leads (' + (section2 ? section2.snapshotEntries.length : 0) + '): ' + (section2 ? section2.snapshotEntries.map(function (l) { return l.lead_id; }).join(', ') : '(none)'),
+      '',
+      sendFailureReason,
+    ]);
+  }
+
+  // Section 1's Overnight_Log row -- SAME columns sendOneOvernightEmail_
+  // always writes, so the EXISTING, unchanged 13:00 Overnight-thread
+  // lookup (sendOvernightFollowupEmails_) keeps working regardless of
+  // whether this run also carried a Section 2. Only written on a
+  // successful send AND when Section 1 had real content -- an empty-
+  // state Section 1 needs no Overnight-thread continuation, and a
+  // failed send must NOT be logged as sent (same "no log row = safe to
+  // retry" philosophy sendOneOvernightEmail_'s own failure path already
+  // relies on for Section 1's region-level idempotency guard).
+  if (section1 && !sendFailureReason) {
+    const issueLog = [];
+    section1Leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
+    const threadId = sentMessage.getThread().getId();
+    withRetry_(function () {
+      overnightLogSheet.appendRow([
+        todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+        to, cc || '', subject,
+      ]);
+    }, 'log Overnight_Log row (' + region + bucketNote + ')');
+  }
+
+  // Section 2's checkpoint1_json/checkpoint1_sent_at -- written back
+  // onto EVERY AllIssues_Log row this bucket's snapshot came from
+  // (design doc Part 5: the row IS the state; spans more than one row
+  // only in the rare case AllIssuesEmailer.gs logged twice for the same
+  // recipient in one run). Deliberately written even when the SEND
+  // failed, unlike Section 1's own choice above -- the content was
+  // still correctly computed (only delivery failed, and the ops alert
+  // above already surfaced that), and unlike Section 1's region-level
+  // guard, an un-checkpointed row falls out of "yesterday" scope
+  // entirely once a full day passes (loadYesterdaysAllIssuesBucketsGs_
+  // only ever looks at ONE day back) -- leaving it un-checkpointed on a
+  // transient failure would silently lose that checkpoint forever, not
+  // just delay it. A more complete retry-until-success story is Step
+  // 8/11's job; this is the safer default until then.
+  if (section2) {
+    withRetry_(function () {
+      section2.rowNumbers.forEach(function (rowNumber) {
+        allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[JSON.stringify(checkpoint1Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+      });
+    }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
+  }
+
+  if (sendFailureReason) {
+    return { reason: sendFailureReason, section1Leads: section1Leads, section2: section2 };
+  }
   return null;
 }
 
@@ -572,6 +882,13 @@ function sendOvernightMorningEmails_() {
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
   const todayKey = istDayKeyGs_(now);
 
+  // Two-checkpoint email lifecycle redesign (Step 6/11) — yesterday's
+  // 17:00 AllIssues_Log rows still awaiting Checkpoint 1, grouped by
+  // region. Loaded ONCE here, same "don't reload per-region" discipline
+  // the hierarchy/movement loads above already follow.
+  const allIssuesLogSheet = ensureAllIssuesLogSheet_(ss);
+  const yesterdaysAllIssuesByRegion = loadYesterdaysAllIssuesBucketsGs_(ss, now);
+
   // Idempotency guard: a region that already has AT LEAST ONE Overnight_Log
   // row dated today is skipped entirely — no re-resolving, no re-sending,
   // no re-alerting. Protects against a rare Apps Script trigger double-fire
@@ -601,43 +918,106 @@ function sendOvernightMorningEmails_() {
   // single consolidated report rather than several small alerts.
   const failedLeadEntries = [];
 
-  Object.keys(byRegion).sort().forEach(function (region) {
-    const openLeads = byRegion[region];
-    if (!openLeads.length) return; // nothing still-open overnight for this region
-    if (alreadyLoggedRegionsToday[region]) {
-      Logger.log('Skipping ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '); not re-sending. If this region genuinely needs a fresh send today, that has to be a deliberate manual decision, not an automatic one.');
-      return;
+  // Region union (design doc Part 7): today's Overnight regions and
+  // yesterday's still-pending AllIssues_Log regions are two
+  // independently-derived sets, not guaranteed to match — a region can
+  // have Checkpoint 1 content pending with zero overnight leads today,
+  // or vice versa. Both need to reach the loop below.
+  const allRegionsForThisRun = Object.keys(byRegion).concat(Object.keys(yesterdaysAllIssuesByRegion))
+    .filter(function (v, i, a) { return a.indexOf(v) === i; }).sort();
+
+  allRegionsForThisRun.forEach(function (region) {
+    const openLeads = byRegion[region] || [];
+    const checkpointRows = yesterdaysAllIssuesByRegion[region] || [];
+    if (!openLeads.length && !checkpointRows.length) return; // shouldn't happen given how the union above was built, but defensive
+
+    // ---- Section 1 buckets: EXACTLY the existing resolution logic,
+    // only skipped when there are no overnight leads at all, or when
+    // this region already has a today-dated Overnight_Log row (the
+    // EXISTING region-level idempotency guard, unchanged) — in that
+    // second case Section 1 already went out in an earlier, separate
+    // run today; Section 2 (if any) still proceeds on its own below,
+    // via sendCombinedMorningEmail_'s own empty-state handling. ----
+    const section1ByEmail = {}; // lowercased 'to' -> { rec, leads }
+    // Distinguishes WHY a union bucket ends up with no Section 1 content
+    // — "genuinely no overnight leads" vs "leads existed but already
+    // went out in an earlier, separate run today" are different facts a
+    // reader shouldn't have to guess between (sendCombinedMorningEmail_'s
+    // own empty-state text uses this).
+    let section1SkippedReason = null;
+    if (openLeads.length) {
+      if (alreadyLoggedRegionsToday[region]) {
+        section1SkippedReason = 'already_sent';
+        Logger.log('Section 1 (Overnight) skipped for ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '). Section 2 (Checkpoint 1), if any, still proceeds separately below.');
+      } else {
+        const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
+        // RM -> its own full lead objects this region/run (same shape
+        // sendOneOvernightEmail_ gets) — notifyChLevelLeadsGs_ needs the
+        // real lead_id/status/followup, not just IDs, to send a full
+        // per-lead report for CH-held leads; see
+        // resolveRecipientEmailsForRegion_'s own comment on opts.rmToLeads.
+        const rmToLeads = {};
+        openLeads.forEach(function (l) {
+          if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
+          rmToLeads[l.RM].push(l);
+        });
+        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData });
+
+        // RMs with no resolvable recipient anywhere AND no
+        // Region_Recipients fallback either — their leads got no
+        // automated email at all this run. To/Cc are genuinely blank
+        // here (there was none to compute).
+        resolution.trulyUnresolved.forEach(function (u) {
+          (rmToLeads[u.rmName] || []).forEach(function (l) {
+            failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
+          });
+        });
+
+        resolution.results.forEach(function (rec) {
+          const rmSet = new Set(rec.rmNames);
+          const bucketLeads = openLeads.filter(function (l) { return rmSet.has(l.RM); });
+          section1ByEmail[String(rec.to || '').trim().toLowerCase()] = { rec: rec, leads: bucketLeads };
+        });
+      }
     }
 
-    const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
-    // RM -> its own full lead objects this region/run (same shape
-    // sendOneOvernightEmail_ gets) — notifyChLevelLeadsGs_ needs the
-    // real lead_id/status/followup, not just IDs, to send a full
-    // per-lead report for CH-held leads; see
-    // resolveRecipientEmailsForRegion_'s own comment on opts.rmToLeads.
-    const rmToLeads = {};
-    openLeads.forEach(function (l) {
-      if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
-      rmToLeads[l.RM].push(l);
+    // ---- Section 2 buckets: yesterday's AllIssues_Log rows for this
+    // region, keyed by their OWN STORED recipient — routing frozen at
+    // 17:00, never re-resolved (design doc Part 7's answer to "manager
+    // changes between checkpoints"). Merges more than one row for the
+    // same recipient (rare — AllIssuesEmailer.gs logs one row per bucket
+    // per run, so this only matters if that ever logs twice in one day
+    // for the same person). ----
+    const section2ByEmail = {}; // lowercased 'to' -> { to, cc, bucketLabel, primaryRole, rowNumbers, snapshotEntries }
+    checkpointRows.forEach(function (row) {
+      const key = String(row.to || '').trim().toLowerCase();
+      if (!key) return; // no recipient to send to — shouldn't happen given AllIssuesEmailer.gs's own logging, defensive only
+      if (!section2ByEmail[key]) {
+        section2ByEmail[key] = { to: row.to, cc: row.cc, bucketLabel: row.bucketLabel, primaryRole: row.primaryRole, rowNumbers: [], snapshotEntries: [] };
+      }
+      section2ByEmail[key].rowNumbers.push(row.rowNumber);
+      section2ByEmail[key].snapshotEntries = section2ByEmail[key].snapshotEntries.concat(row.snapshotEntries);
     });
-    const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData });
 
-    // RMs with no resolvable recipient anywhere AND no Region_Recipients
-    // fallback either — their leads got no automated email at all this
-    // run. To/Cc are genuinely blank here (there was none to compute).
-    resolution.trulyUnresolved.forEach(function (u) {
-      (rmToLeads[u.rmName] || []).forEach(function (l) {
-        failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
+    // ---- Union by recipient email (not bucket label/primary name —
+    // the true recipient identity, design doc Part 7) — one combined
+    // send per bucket. ----
+    const unionEmails = Object.keys(section1ByEmail).concat(Object.keys(section2ByEmail))
+      .filter(function (v, i, a) { return a.indexOf(v) === i; });
+
+    unionEmails.forEach(function (emailKey) {
+      const s1 = section1ByEmail[emailKey] || null;
+      const s2 = section2ByEmail[emailKey] || null;
+      const failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason);
+      if (!failure) return;
+      const failedTo = (s1 && s1.rec.to) || (s2 && s2.to) || '';
+      const failedCc = (s1 && s1.rec.cc) || (s2 && s2.cc) || '';
+      failure.section1Leads.forEach(function (l) {
+        failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: failedTo, cc: failedCc, reason: failure.reason });
       });
-    });
-
-    resolution.results.forEach(function (rec) {
-      const rmSet = new Set(rec.rmNames);
-      const bucketLeads = openLeads.filter(function (l) { return rmSet.has(l.RM); });
-      const failure = sendOneOvernightEmail_(ss, logSheet, region, rec, bucketLeads, dateLabel, todayKey, now, win);
-      if (failure) {
-        bucketLeads.forEach(function (l) {
-          failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: rec.to, cc: rec.cc || '', reason: failure.reason });
+      if (failure.section2) {
+        failure.section2.snapshotEntries.forEach(function (l) {
+          failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: failedTo, cc: failedCc, reason: failure.reason + ' (Checkpoint 1 follow-up)' });
         });
       }
     });

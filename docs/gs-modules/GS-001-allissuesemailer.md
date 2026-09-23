@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `51a6498` — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 6, new `GS-010` dependency (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -137,7 +137,9 @@ The Apps Script backend half (peer of `DASH-001`, sharing only
   `GS-011` (`RmHierarchy.gs`), `GS-012` (`SlaEngine.gs`), `SHEET-001`,
   `SHEET-002`, `SHEET-006`, `SHEET-007`, `SHEET-012`, `SHEET-013`,
   `EXT-002`, `DATA-002`, `DATA-004`
-- **Used By:** `SHEET-013`, `DATA-005`
+- **Used By:** `SHEET-013`, `DATA-005`, `GS-010` (`OvernightEmailer.gs` —
+  `ensureAllIssuesLogSheet_`/`ALL_ISSUES_LOG_SHEET_`, added 2026-09-23
+  for the two-checkpoint email lifecycle redesign)
 - **Related:** `TAB-003` (the on-demand equivalent), `GS-010`
   (`OvernightEmailer.gs` — the other scheduled emailer), `JS-014` (the
   client report builder it parallels)
@@ -182,6 +184,14 @@ issueLabel matches the email body). `sendOneAllIssuesEmail_`'s own
 citation (`#L450`) is unchanged — the edit landed inside the function
 body, not before it — but `FN-179`'s citations shifted +13 (the new
 comment+code pushed everything after it down); corrected.
+
+**Revalidated 2026-09-23** (pending commit): Step 6/11 of the same
+redesign — `GS-010` (`OvernightEmailer.gs`) now calls
+`ensureAllIssuesLogSheet_` (FN-178) and reads `AllIssues_Log` directly,
+a genuinely new caller/dependency edge (`GS-010` already listed this
+file as a required paste-dependency for the shared Apps Script project,
+but had no actual code dependency until now). No change to this file
+itself — `Used By` updated to name the new caller.
 
 ## Revalidation trigger
 

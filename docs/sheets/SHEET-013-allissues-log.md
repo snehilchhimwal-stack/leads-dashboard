@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `51a6498` — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 6, `GS-010` now a second reader/writer (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -68,12 +68,14 @@ email lifecycle redesign, goal `g-tf-fc7cc3383b`.
 |---|---|---|
 | `GS-001` | `sendOneAllIssuesEmail_` (FN-176) | append (one per send) |
 | `GS-001` | `ensureAllIssuesLogSheet_` (FN-178) | header + self-healing (appends missing columns) |
+| `GS-010` | `sendCombinedMorningEmail_` (FN-275) | added 2026-09-23 — writes `checkpoint1_json`/`checkpoint1_sent_at` (cols K/L) back onto the exact row(s) its snapshot came from |
 
 ## Readers
 
 | Reader | `FN-XXX` | For |
 |---|---|---|
 | `GS-001` | `sendAllIssuesEmails_` (FN-174) | dedupe within a run / debug |
+| `GS-010` | `loadYesterdaysAllIssuesBucketsGs_` (FN-276) | added 2026-09-23 — finds yesterday's un-checkpointed rows for Section 2/Checkpoint 1 of the combined 10:00 email |
 
 ## Automation / triggers touching it
 
@@ -141,8 +143,8 @@ the tab if missing.
 
 ## Relationships
 
-- **Depends On:** `GS-001`, `EXT-001`, `EXT-002`
-- **Used By:** `GS-001` only
+- **Depends On:** `GS-001`, `GS-010`, `EXT-001`, `EXT-002`
+- **Used By:** `GS-001`, `GS-010` (added 2026-09-23, two-checkpoint email lifecycle redesign)
 - **Related:** `SHEET-011` (`Send_Log`), `SHEET-014` (`Overnight_Log`) —
   the other send logs
 
@@ -178,6 +180,14 @@ writer of the existing 9 columns changed.
 now actually written (Step 3/11) — `sendOneAllIssuesEmail_` (`GS-001`
 FN-176) appends it at send time. The other 4 columns remain unwritten
 until Steps 4-7.
+
+**Revalidated 2026-09-23** (pending commit): Step 6/11 — `GS-010`
+(`OvernightEmailer.gs`) is now a second component touching this sheet,
+reading yesterday's un-checkpointed rows
+(`loadYesterdaysAllIssuesBucketsGs_`, FN-276) and writing
+`checkpoint1_json`/`checkpoint1_sent_at` back onto them
+(`sendCombinedMorningEmail_`, FN-275) — `checkpoint2_json`/
+`checkpoint2_sent_at` remain unwritten until Step 7.
 
 ## Revalidation trigger
 
