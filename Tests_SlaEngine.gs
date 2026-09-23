@@ -246,6 +246,37 @@ function runSlaEngineTests_() {
     // the function accepts its own output shape without special-casing.
     const ckSecondPass = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap);
     TestAssertEqual_(ckSecondPass[0].state, 'still_open', 'computeAllIssuesCheckpointGs_: reused verbatim on its own prior output (a checkpoint-shaped entry, not a raw snapshot entry) — proves the "reused for both checkpoints" design intent');
+
+    // ---- filterAllIssuesCheckpoint2ForEmailGs_ (Step 5/11) — pure
+    // function, plain fixtures, no mock spreadsheet needed. ----
+    const ckC1 = [
+      { lead_id: 'L-BOTH-RESOLVED', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+      { lead_id: 'L-RESOLVED-THEN-GONE', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+      { lead_id: 'L-STILL-ACTIVE-SAME', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' },
+      { lead_id: 'L-NEWLY-RESOLVED', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' },
+      { lead_id: 'L-REOPENED-SINCE-C1', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+      { lead_id: 'L-PROGRESSED', state: 'category_changed', currentIssueLabel: 'Follow-up Overdue', currentStatus: 'Suspect' },
+    ];
+    const ckC2 = [
+      { lead_id: 'L-BOTH-RESOLVED', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+      { lead_id: 'L-RESOLVED-THEN-GONE', state: 'not_found', currentIssueLabel: null, currentStatus: null },
+      { lead_id: 'L-STILL-ACTIVE-SAME', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' },
+      { lead_id: 'L-NEWLY-RESOLVED', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+      { lead_id: 'L-REOPENED-SINCE-C1', state: 'reopened', currentIssueLabel: 'Stuck 48h+', currentStatus: 'Suspect' },
+      { lead_id: 'L-PROGRESSED', state: 'escalated', currentIssueLabel: 'Inactive-RM Lead Added', currentStatus: 'Suspect' },
+      { lead_id: 'L-UNKNOWN-TO-C1', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' }, // no matching ckC1 entry at all
+    ];
+    const ckFiltered = filterAllIssuesCheckpoint2ForEmailGs_(ckC1, ckC2);
+    const ckFilteredIds = ckFiltered.map(function (r) { return r.lead_id; }).sort();
+
+    TestAssert_(ckFilteredIds.indexOf('L-BOTH-RESOLVED') === -1, 'filterAllIssuesCheckpoint2ForEmailGs_: resolved at C1, still resolved at C2 -- suppressed (no news)');
+    TestAssert_(ckFilteredIds.indexOf('L-RESOLVED-THEN-GONE') === -1, 'filterAllIssuesCheckpoint2ForEmailGs_: resolved at C1, not_found at C2 -- BOTH are closed-out states, still suppressed');
+    TestAssert_(ckFilteredIds.indexOf('L-STILL-ACTIVE-SAME') !== -1, 'filterAllIssuesCheckpoint2ForEmailGs_: still_open at BOTH checkpoints is shown anyway -- an unresolved breach staying unresolved all day is itself the news');
+    TestAssert_(ckFilteredIds.indexOf('L-NEWLY-RESOLVED') !== -1, 'filterAllIssuesCheckpoint2ForEmailGs_: still_open at C1, resolved at C2 -- shown (real progression)');
+    TestAssert_(ckFilteredIds.indexOf('L-REOPENED-SINCE-C1') !== -1, 'filterAllIssuesCheckpoint2ForEmailGs_: resolved at C1, reopened at C2 -- shown (reopening is never suppressed)');
+    TestAssert_(ckFilteredIds.indexOf('L-PROGRESSED') !== -1, 'filterAllIssuesCheckpoint2ForEmailGs_: category_changed at C1, escalated at C2 -- shown (neither endpoint is closed-out)');
+    TestAssert_(ckFilteredIds.indexOf('L-UNKNOWN-TO-C1') !== -1, 'filterAllIssuesCheckpoint2ForEmailGs_: no matching prior entry at all -- fails open (shown), never silently dropped');
+    TestAssertEqual_(ckFiltered.length, 5, 'filterAllIssuesCheckpoint2ForEmailGs_: exactly the 2 closed-out-both-times leads are suppressed, all 5 others pass through');
   } finally {
     TestEnv_tearDown_();
   }

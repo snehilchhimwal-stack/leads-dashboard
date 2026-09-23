@@ -259,3 +259,49 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap) {
     return { lead_id: entry.lead_id, state: escalated ? 'escalated' : 'category_changed', currentIssueLabel: issue.label, currentStatus: currentStatus };
   });
 }
+
+// Two-checkpoint email lifecycle redesign (Step 5/11 -- see the design
+// doc's Part 6/8: "Part 6's incremental diff is a second pass over this
+// same function's output plus the prior checkpoint"). Checkpoint 2 is
+// produced by calling computeAllIssuesCheckpointGs_ AGAIN, with
+// Checkpoint 1's own result array as `priorEntries` (already proven to
+// work by Tests_SlaEngine.gs's own "reused on its own output" case) --
+// that call alone is the full comparison, nothing new needed there.
+// What IS new here is deciding which of THOSE results are worth a
+// human seeing again at 13:00, since blindly showing the whole
+// population a second time would be exactly the "recreate the 17:00
+// table" the design doc explicitly says not to do.
+//
+// The rule: suppress ONLY a lead that was ALREADY closed out
+// (resolved/not_found) at Checkpoint 1 AND is STILL closed out now --
+// that pairing carries no news. Everything else is shown: still
+// genuinely active (still_open/category_changed/escalated, even with
+// an UNCHANGED label -- an unresolved SLA breach staying unresolved
+// all day is itself the news, same reasoning the EXISTING Overnight
+// Follow-up already applies: "still flagged for the SAME issue =
+// unresolved, shown in red", never suppressed for being unchanged) OR
+// any transition into/out of closed-out (newly resolved this leg, or
+// reopened after appearing resolved at the prior checkpoint).
+//
+// `checkpoint1Entries`: Checkpoint 1's own result array (what
+// computeAllIssuesCheckpointGs_ returned when first called with the raw
+// 17:00 issue_snapshot_json) -- i.e. checkpoint1_json's parsed content.
+// `checkpoint2Results`: computeAllIssuesCheckpointGs_'s output from
+// calling it a second time with `checkpoint1Entries` as its own
+// `priorEntries` argument -- the caller computes this (not done inside
+// this function) so the FULL, unfiltered array is still what gets
+// persisted to checkpoint2_json (col M) -- the design doc's state model
+// needs the complete record, not just what a human ends up seeing;
+// filtering is a presentation concern layered on top, kept separate.
+function filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results) {
+  const checkpoint1ByLeadId = {};
+  (checkpoint1Entries || []).forEach(function (e) { checkpoint1ByLeadId[e.lead_id] = e; });
+  const closedOutStates = { resolved: true, not_found: true };
+
+  return (checkpoint2Results || []).filter(function (r) {
+    const priorState = (checkpoint1ByLeadId[r.lead_id] || {}).state;
+    const wasClosedOut = closedOutStates[priorState] === true;
+    const stillClosedOut = closedOutStates[r.state] === true;
+    return !(wasClosedOut && stillClosedOut);
+  });
+}

@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `SlaEngine.gs` (261 lines) |
+| **Location** | `SlaEngine.gs` (307 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `51eb0ee` — Step 4, `computeAllIssuesCheckpointGs_` added (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 5, `filterAllIssuesCheckpoint2ForEmailGs_` added (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -33,6 +33,10 @@ would undermine both.
   against the current live leads tab; the comparison engine for the
   two-checkpoint email lifecycle redesign
   (`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`).
+- `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` —
+  added 2026-09-23: pure filter deciding which of Checkpoint 2's
+  results are worth a human seeing again at 13:00 (suppresses only a
+  lead already closed out at Checkpoint 1 that's still closed out now).
 
 ## Trigger schedule
 
@@ -52,6 +56,7 @@ gotcha).
 | FN-248 | `computeSlaFlags_(row, colIndex, now, baselineMap)` `#L46` | a leads row + column index + `now` + a `Movement_Log` call-count baseline map | `{firstContactBreach, neverConnected…, isNotUpdated, stageStuck48h, followupOverdue, …}` | none (pure) | `canonicalStage_` / `businessMinutesBetweenGs_` / `istDayKeyGs_` (`GS-002`), `latestCommentTimestamp_` / `countTodayCommentEntries_` (`GS-005`) | `MovementTracker.gs`, `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `DailyRmIssueLog.gs` | reusable — **the `.gs` twin of `enrichLead` (`JS-006` FN-034)** |
 | FN-249 | `primaryIssueGs_(flags)` `#L154` | the SLA flags | the single headline issue key | none | `ISSUE_PRIORITY`-order | the emailers (subject line + sort) | reusable — shares the tie-break order with `CONFIG.ISSUE_PRIORITY` (`JS-005` CFG-012) |
 | FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L215` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s 10:00/13:00 jobs (Steps 4-7 of the redesign; not yet wired as of this record's own commit) | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment) |
+| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L296` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s 13:00 job (Step 7 of the redesign; not yet wired as of this record's own commit) | specific — **the "incremental, not a re-diff" rule**: suppresses only a lead that was ALREADY closed out (resolved/not_found) at Checkpoint 1 and is STILL closed out now; the full unfiltered `checkpoint2Results` is what gets persisted to `checkpoint2_json`, this filter is presentation-only |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -176,6 +181,13 @@ update needed — this function itself has no browser-side twin, since
 there is no dashboard equivalent of "compare a persisted snapshot to
 now"). `Tests_SlaEngine.gs` gained a dedicated block covering all 6
 `state` values + the "reused on its own output" case.
+
+**Revalidated 2026-09-23** (pending commit): added
+`filterAllIssuesCheckpoint2ForEmailGs_` (FN-271, `#L296`) — Step 5/11 of
+the same redesign. Pure function, no Sheets I/O, no dependency on
+FN-270 beyond consuming its output shape. `Tests_SlaEngine.gs` gained a
+plain-fixture block (no mock spreadsheet needed) covering all 7 named
+cases from the function's own header comment.
 
 ## Revalidation trigger
 
