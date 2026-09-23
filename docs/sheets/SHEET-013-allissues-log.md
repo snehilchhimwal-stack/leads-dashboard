@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `51a6498` — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -174,7 +174,7 @@ goal `g-tf-fc7cc3383b`). Append-only, via `ensureAllIssuesLogSheet_`'s
 existing self-healing header logic (`GS-001` FN-178) — no reader or
 writer of the existing 9 columns changed.
 
-**Revalidated 2026-09-23** (pending commit): `issue_snapshot_json` is
+**Revalidated 2026-09-23** `51a6498`: `issue_snapshot_json` is
 now actually written (Step 3/11) — `sendOneAllIssuesEmail_` (`GS-001`
 FN-176) appends it at send time. The other 4 columns remain unwritten
 until Steps 4-7.

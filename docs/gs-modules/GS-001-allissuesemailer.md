@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `51a6498` — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -174,7 +174,7 @@ function are unchanged. Re-grepped and corrected every `#Lnn` citation
 in this record below `ensureAllIssuesLogSheet_`'s insertion point (a
 uniform +30 shift, confirmed per-function, not assumed).
 
-**Revalidated 2026-09-23** (pending commit): `sendOneAllIssuesEmail_`
+**Revalidated 2026-09-23** `51a6498`: `sendOneAllIssuesEmail_`
 (FN-176) now writes `issue_snapshot_json` at send time — Step 3/11 of
 the same redesign. `Tests_AllIssuesEmailer.gs` gained 4 new assertions
 (snapshot lead count, lead_ids, per-entry shape, priority-picked
