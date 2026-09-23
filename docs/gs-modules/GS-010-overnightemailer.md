@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `OvernightEmailer.gs` (1959 lines) |
+| **Location** | `OvernightEmailer.gs` (2032 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `7aa9786` — Step 7/11 (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 8/11 (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -44,6 +44,21 @@ thread list (never an independent union the way the 10:00 job needed),
 because `sendCombinedMorningEmail_` always logs an `Overnight_Log` row
 for any bucket it sets `checkpoint1_json` on, in that same call.
 
+**Step 8/11** (same day): a real gap found while auditing idempotency
+across all three daily jobs — Section 2 (Checkpoint 2) was already
+guarded against a duplicate resend (`AllIssues_Log`'s `checkpoint2_sent_at`,
+Step 7), but Section 1 (the unresolved-lead follow-up) had NO per-day
+guard at all, so a trigger retry or manual re-run resent a duplicate
+reply into the same Gmail thread every time. Fixed by adding
+`Overnight_Log`'s own `followup_sent_at` column — the idempotency guard
+for the WHOLE combined 13:00 reply. The 10:00 job (Section 1 via the
+existing region-level `alreadyLoggedRegionsToday`, Section 2 via
+`checkpoint1_sent_at`) and the 17:00 job (region-level
+`alreadyLoggedRegionsToday` in `AllIssuesEmailer.gs`, covering both the
+email and `issue_snapshot_json`) were both already correctly guarded —
+confirmed by direct audit, not assumed — so this step's only real code
+change is the one new column and its guard.
+
 ## Responsibilities
 
 - `sendOvernightMorningEmails` / `_` — the 10:00 per-region email; now
@@ -71,6 +86,9 @@ for any bucket it sets `checkpoint1_json` on, in that same call.
 - `loadTodaysCheckpoint1PendingGs_` — added 2026-09-23 (Step 7): reads
   today's Checkpoint-1-done-but-Checkpoint-2-pending `AllIssues_Log`
   rows, keyed by recipient email.
+- `ensureOvernightLogSheet_` — extended 2026-09-23 (Step 8): now
+  self-heals a missing header column on an existing sheet, same pattern
+  `ensureAllIssuesLogSheet_` already used; this sheet had none before.
 - `sendThreadedGmailReply_` — a raw Advanced Gmail Service reply (works
   around `GmailThread.reply()` hard-coding the recipient).
 - `pushUnresolvedToLeadFollowups_` / `waitForFollowupSuggestions_` — the
@@ -84,7 +102,7 @@ for any bucket it sets `checkpoint1_json` on, in that same call.
 
 ## Trigger schedule
 
-`setupOvernightEmailer()` (`#L1728`) installs `sendOvernightMorningEmails`
+`setupOvernightEmailer()` (`#L1799`) installs `sendOvernightMorningEmails`
 on `atHour(10).nearMinute(0).everyDays(1)` and
 `sendOvernightFollowupEmails` on `atHour(13).nearMinute(0).everyDays(1)`
 — **both WITHOUT an explicit `.inTimezone('Asia/Kolkata')`**. This is
@@ -106,24 +124,24 @@ their own.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-231 | `sendOvernightMorningEmails()` / `_()` `#L774/#L786` | `leads` tab, prior `Overnight_Log`, prior `AllIssues_Log` | one combined email per union bucket (10:00) | Gmail sends; `Overnight_Log` rows; `AllIssues_Log` checkpoint writes; calls the `Lead_Followups` bridge | `readLeadsTab_` (`GS-004`), `computeSlaFlags_` (`GS-012`), `overnightWindowGs_` (FN-234), `loadYesterdaysAllIssuesBucketsGs_` (FN-276), `sendCombinedMorningEmail_` (FN-275), `resolveRecipientEmailsForRegion_` (`GS-004`) | the 10:00 trigger; `sendOvernightMorningEmailsNow()` | specific — scheduled |
-| FN-232 | `sendOvernightFollowupEmails()` / `_()` `#L1450/#L1462` | prior day's `Overnight_Log` thread ids; today's Checkpoint-1-pending `AllIssues_Log` rows | a same-thread combined reply per bucket (13:00): Section 1 (still unresolved) + Section 2 (Checkpoint 2) | threaded Gmail replies; `AllIssues_Log` `checkpoint2_json`/`checkpoint2_sent_at` write-back (via FN-280) | `sendThreadedGmailReply_` (FN-236), `computeSlaFlags_` (`GS-012`), `formatFollowupAgeGs_` (FN-237), `loadTodaysCheckpoint1PendingGs_` (FN-279), `sendCombinedFollowupEmail_` (FN-280) | the 13:00 trigger; `sendOvernightFollowupEmailsNow()` | specific — scheduled — **Step 7/11: now combined, same "one thread per bucket per day" principle as FN-231/FN-275** |
-| FN-233 | `sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L339` | one region's data | that region's STANDALONE morning email (still used directly by tests/manual calls) | Gmail send; `Overnight_Log` row | `renderOvernightReportEmailHTML_` (`GS-004`), `buildOvernightSectionOptsGs_` (FN-272), `overnightFollowupHintGs_` (`GS-005`), `withSendRetry_` (`GS-004`) | tests, manual calls — **no longer called by FN-231's own loop**, which now always goes through FN-275 | specific |
-| FN-234 | `overnightWindowGs_(asOf)` / `ensureOvernightLogSheet_(ss)` `#L245/#L258` | as-of date | the overnight window `{start, end}`; ensures `Overnight_Log` | may create the tab | `istDayKeyGs_` (`GS-002`) | FN-231, FN-232 | specific |
-| FN-235 | `pushUnresolvedToLeadFollowups_(ss, entries)` / `waitForFollowupSuggestions_(ss, leadIds)` `#L1061/#L1122` | flagged-lead entries | upserts `Lead_Followups`; **polls up to ~2 minutes for a human/dashboard-generated follow-up suggestion before falling back to the keyword engine** | Sheets write; polling read | `noCommentFollowUpGs_` / `overnightFollowupHintGs_` (`GS-005`) | FN-231 | specific — **the backend side of the same `Lead_Followups` bridge the client's Generate cycle writes into** (`JS-016` / `JS-018`) |
-| FN-236 | `sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)` `#L1192` | a thread id + content | a reply on that Gmail thread | raw **Advanced Gmail Service** call | — | FN-232, FN-280, `backfillTodaysOvernightLogRecipientsNow` | specific — uses the raw API because `GmailThread.reply()`/`replyAll()` hard-code the recipient to "sender of the last message" (a real production bug this works around) |
-| FN-237 | `formatFollowupAgeGs_(updatedAt, now)` / `overnightStatusLabelGs_` (in `GS-005`) `#L1154` | a timestamp | a human age string | none | — | FN-232 | reusable |
-| FN-238 | `notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel)` `#L134` | CH-level RMs + leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-231 | specific |
-| FN-239 | `setupOvernightEmailer()` `#L1728` | — | installs the 10:00 + 13:00 triggers; **also calls `setupRmHierarchy()`** | creates triggers; runs `GS-011` setup | `ScriptApp`, `setupRmHierarchy` (`GS-011`) | Apps Script editor (manual) | specific |
-| FN-272 | `buildOvernightSectionOptsGs_(region, leads, dateLabel, win)` `#L309` | a bucket's leads | Section 1's full `renderOvernightReportEmailHTML_` opts | none (pure) | — | FN-233, FN-275 | reusable — **extracted 2026-09-23 so a standalone overnight email and Section 1 of the combined email share one source of truth** |
-| FN-273 | `buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, originalDateLabel, snapshotEntries, checkpointResults)` `#L502` | the 17:00 snapshot + a checkpoint's comparison results | Section 2's full `renderOvernightReportEmailHTML_` opts, grouped by RM | none (pure) | `allIssuesCheckpointStateLabelGs_` `#L480` (private helper, same file) | FN-275, FN-280 | reusable — **joins `computeAllIssuesCheckpointGs_`'s output (`GS-012` FN-270, no RM/TL) back to the original snapshot entries (which have RM/TL) by `lead_id`; reused UNCHANGED for Checkpoint 2 (Step 7), just a different `checkpointLabel`/`checkpointResults`** |
-| FN-274 | `renderTwoSectionEmailHTML_(section1Opts, section2Opts)` `#L551` | both sections' opts | the combined email HTML — two full `renderOvernightReportEmailHTML_` renders concatenated with a labeled divider | none (pure) | `renderOvernightReportEmailHTML_` (`GS-004`) ×2 | FN-275, FN-280 | reusable — **deliberately does NOT modify `renderOvernightReportEmailHTML_`'s own signature** (design doc Part 8: "wrap, don't modify" — that function also backs every `GS-001` single-section email) |
-| FN-275 | `sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason)` `#L620` | one union bucket's Section 1/2 inputs | the combined 10:00 email | Gmail send; `Overnight_Log` row (if Section 1 sent); `AllIssues_Log` `checkpoint1_json`/`checkpoint1_sent_at` write-back (if Section 2 present, even on send failure — see its own comment on why that differs from Section 1's choice) | `buildOvernightSectionOptsGs_`/`buildOvernightSectionEmptyStateOptsGs_`/`buildAllIssuesCheckpointSectionOptsGs_`/`buildAllIssuesCheckpointEmptyStateOptsGs_`/`renderTwoSectionEmailHTML_` (all same file), `computeAllIssuesCheckpointGs_` (`GS-012` FN-270), `withSendRetry_`/`notifyOpsAlertGs_` (`GS-004`) | FN-231 | specific |
-| FN-276 | `loadYesterdaysAllIssuesBucketsGs_(ss, now)` `#L572` | spreadsheet + now | `{region -> [{rowNumber, to, cc, bucketLabel, primaryRole, snapshotEntries}]}` for yesterday's un-checkpointed `AllIssues_Log` rows | reads `AllIssues_Log` (`GS-001`/`SHEET-013`) | `ensureAllIssuesLogSheet_` (`GS-001`), `istDayKeyGs_` (`GS-002`) | FN-231 | specific — **the idempotency check for Section 2 (`checkpoint1_sent_at` blank) — a fuller retry story is Step 8/11** |
-| FN-277 | `buildOvernightFollowupSectionOptsGs_(region, unresolvedRows)` `#L1290` | this morning's still-unresolved rows | Section 1's full `renderOvernightReportEmailHTML_` opts for the 13:00 reply | none (pure) | — | FN-280 | reusable — **added 2026-09-23 (Step 7), extracted from `sendOvernightFollowupEmails_`'s own former inline object, same pattern as FN-272** |
-| FN-278 | `buildOvernightFollowupSectionEmptyStateOptsGs_(region, reasonText)` `#L1310` | a reason string | Section 1's empty-state opts (nothing still unresolved) | none (pure) | — | FN-280 | reusable — same shape/role as FN-278's 10:00 sibling `buildOvernightSectionEmptyStateOptsGs_` `#L460` |
-| FN-279 | `loadTodaysCheckpoint1PendingGs_(ss, now)` `#L1327` | spreadsheet + now | `{lowercasedEmail -> {rowNumbers, to, cc, bucketLabel, primaryRole, snapshotEntries, checkpoint1Entries}}` for today's Checkpoint-1-done-but-Checkpoint-2-pending `AllIssues_Log` rows | reads `AllIssues_Log` (`GS-001`/`SHEET-013`) | `ensureAllIssuesLogSheet_` (`GS-001`), `istDayKeyGs_` (`GS-002`) | FN-232 | specific — **the idempotency check for Checkpoint 2 (`checkpoint2_sent_at` blank); keyed by EMAIL directly, not region-then-email like FN-276, since the caller (FN-232's own `perRegion`) already has one entry per recipient** |
-| FN-280 | `sendCombinedFollowupEmail_(ss, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap)` `#L1380` | one bucket's Section 1/2 inputs | the combined 13:00 reply | threaded Gmail reply (with plain-fallback); `AllIssues_Log` `checkpoint2_json`/`checkpoint2_sent_at` write-back (even on total send failure — same reasoning `GS-012`'s comment on `computeAllIssuesCheckpointGs_` gives, and FN-275's own Checkpoint 1 write, since an un-checkpointed row silently falls out of FN-279's own "today" scope once the day rolls over) | `buildOvernightFollowupSectionOptsGs_`/`buildOvernightFollowupSectionEmptyStateOptsGs_`/`buildAllIssuesCheckpointSectionOptsGs_`/`buildAllIssuesCheckpointEmptyStateOptsGs_`/`renderTwoSectionEmailHTML_` (all same file), `computeAllIssuesCheckpointGs_` (`GS-012` FN-270), `filterAllIssuesCheckpoint2ForEmailGs_` (`GS-012` FN-271), `sendThreadedGmailReply_` (FN-236), `withSendRetry_`/`notifyOpsAlertGs_` (`GS-004`) | FN-232 | specific — **unlike FN-275, no separate "resolve recipient" step — both sections' routing is already frozen (Section 1 from `Overnight_Log`, Section 2 from `AllIssues_Log`), never re-derived here** |
+| FN-231 | `sendOvernightMorningEmails()` / `_()` `#L802/#L814` | `leads` tab, prior `Overnight_Log`, prior `AllIssues_Log` | one combined email per union bucket (10:00) | Gmail sends; `Overnight_Log` rows; `AllIssues_Log` checkpoint writes; calls the `Lead_Followups` bridge | `readLeadsTab_` (`GS-004`), `computeSlaFlags_` (`GS-012`), `overnightWindowGs_` (FN-234), `loadYesterdaysAllIssuesBucketsGs_` (FN-276), `sendCombinedMorningEmail_` (FN-275), `resolveRecipientEmailsForRegion_` (`GS-004`) | the 10:00 trigger; `sendOvernightMorningEmailsNow()` | specific — scheduled |
+| FN-232 | `sendOvernightFollowupEmails()` / `_()` `#L1500/#L1512` | prior day's `Overnight_Log` thread ids; today's Checkpoint-1-pending `AllIssues_Log` rows | a same-thread combined reply per bucket (13:00): Section 1 (still unresolved) + Section 2 (Checkpoint 2) | threaded Gmail replies; `Overnight_Log` `followup_sent_at` write-back (via FN-280, Step 8/11); `AllIssues_Log` `checkpoint2_json`/`checkpoint2_sent_at` write-back (via FN-280) | `sendThreadedGmailReply_` (FN-236), `computeSlaFlags_` (`GS-012`), `formatFollowupAgeGs_` (FN-237), `loadTodaysCheckpoint1PendingGs_` (FN-279), `sendCombinedFollowupEmail_` (FN-280) | the 13:00 trigger; `sendOvernightFollowupEmailsNow()` | specific — scheduled — **Step 8/11: Pass 1 now skips a row outright when `Overnight_Log`'s own `followup_sent_at` is already set — the idempotency guard a trigger retry needs** |
+| FN-233 | `sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L367` | one region's data | that region's STANDALONE morning email (still used directly by tests/manual calls) | Gmail send; `Overnight_Log` row | `renderOvernightReportEmailHTML_` (`GS-004`), `buildOvernightSectionOptsGs_` (FN-272), `overnightFollowupHintGs_` (`GS-005`), `withSendRetry_` (`GS-004`) | tests, manual calls — **no longer called by FN-231's own loop**, which now always goes through FN-275 | specific |
+| FN-234 | `overnightWindowGs_(asOf)` / `ensureOvernightLogSheet_(ss)` `#L245/#L282` | as-of date | the overnight window `{start, end}`; ensures `Overnight_Log` | may create the tab; **Step 8/11: now self-heals a missing header column on an EXISTING sheet too**, same pattern `ensureAllIssuesLogSheet_` uses (this sheet had no self-healing before) | `istDayKeyGs_` (`GS-002`) | FN-231, FN-232 | specific |
+| FN-235 | `pushUnresolvedToLeadFollowups_(ss, entries)` / `waitForFollowupSuggestions_(ss, leadIds)` `#L1089/#L1150` | flagged-lead entries | upserts `Lead_Followups`; **polls up to ~2 minutes for a human/dashboard-generated follow-up suggestion before falling back to the keyword engine** | Sheets write; polling read | `noCommentFollowUpGs_` / `overnightFollowupHintGs_` (`GS-005`) | FN-231 | specific — **the backend side of the same `Lead_Followups` bridge the client's Generate cycle writes into** (`JS-016` / `JS-018`); already idempotent by construction (upsert by `lead_id`, never appends a duplicate row — confirmed during the Step 8/11 idempotency audit, no code change needed here) |
+| FN-236 | `sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)` `#L1220` | a thread id + content | a reply on that Gmail thread | raw **Advanced Gmail Service** call | — | FN-232, FN-280, `backfillTodaysOvernightLogRecipientsNow` | specific — uses the raw API because `GmailThread.reply()`/`replyAll()` hard-code the recipient to "sender of the last message" (a real production bug this works around) |
+| FN-237 | `formatFollowupAgeGs_(updatedAt, now)` / `overnightStatusLabelGs_` (in `GS-005`) `#L1182` | a timestamp | a human age string | none | — | FN-232 | reusable |
+| FN-238 | `notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel)` `#L134` | CH-level RMs + leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-231 | specific — called from inside `resolveRecipientEmailsForRegion_` (`GS-004` FN-…, `fireAlerts:true`), itself only reached from FN-231's `alreadyLoggedRegionsToday`-guarded branch — confirmed already idempotent during the Step 8/11 audit |
+| FN-239 | `setupOvernightEmailer()` `#L1799` | — | installs the 10:00 + 13:00 triggers; **also calls `setupRmHierarchy()`** | creates triggers; runs `GS-011` setup | `ScriptApp`, `setupRmHierarchy` (`GS-011`) | Apps Script editor (manual) | specific |
+| FN-272 | `buildOvernightSectionOptsGs_(region, leads, dateLabel, win)` `#L337` | a bucket's leads | Section 1's full `renderOvernightReportEmailHTML_` opts | none (pure) | — | FN-233, FN-275 | reusable — **extracted 2026-09-23 so a standalone overnight email and Section 1 of the combined email share one source of truth** |
+| FN-273 | `buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, originalDateLabel, snapshotEntries, checkpointResults)` `#L530` | the 17:00 snapshot + a checkpoint's comparison results | Section 2's full `renderOvernightReportEmailHTML_` opts, grouped by RM | none (pure) | `allIssuesCheckpointStateLabelGs_` `#L508` (private helper, same file) | FN-275, FN-280 | reusable — **joins `computeAllIssuesCheckpointGs_`'s output (`GS-012` FN-270, no RM/TL) back to the original snapshot entries (which have RM/TL) by `lead_id`; reused UNCHANGED for Checkpoint 2 (Step 7), just a different `checkpointLabel`/`checkpointResults`** |
+| FN-274 | `renderTwoSectionEmailHTML_(section1Opts, section2Opts)` `#L579` | both sections' opts | the combined email HTML — two full `renderOvernightReportEmailHTML_` renders concatenated with a labeled divider | none (pure) | `renderOvernightReportEmailHTML_` (`GS-004`) ×2 | FN-275, FN-280 | reusable — **deliberately does NOT modify `renderOvernightReportEmailHTML_`'s own signature** (design doc Part 8: "wrap, don't modify" — that function also backs every `GS-001` single-section email) |
+| FN-275 | `sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason)` `#L648` | one union bucket's Section 1/2 inputs | the combined 10:00 email | Gmail send; `Overnight_Log` row (if Section 1 sent); `AllIssues_Log` `checkpoint1_json`/`checkpoint1_sent_at` write-back (if Section 2 present, even on send failure — see its own comment on why that differs from Section 1's choice) | `buildOvernightSectionOptsGs_`/`buildOvernightSectionEmptyStateOptsGs_`/`buildAllIssuesCheckpointSectionOptsGs_`/`buildAllIssuesCheckpointEmptyStateOptsGs_`/`renderTwoSectionEmailHTML_` (all same file), `computeAllIssuesCheckpointGs_` (`GS-012` FN-270), `withSendRetry_`/`notifyOpsAlertGs_` (`GS-004`) | FN-231 | specific |
+| FN-276 | `loadYesterdaysAllIssuesBucketsGs_(ss, now)` `#L600` | spreadsheet + now | `{region -> [{rowNumber, to, cc, bucketLabel, primaryRole, snapshotEntries}]}` for yesterday's un-checkpointed `AllIssues_Log` rows | reads `AllIssues_Log` (`GS-001`/`SHEET-013`) | `ensureAllIssuesLogSheet_` (`GS-001`), `istDayKeyGs_` (`GS-002`) | FN-231 | specific — **the idempotency check for Section 2 (`checkpoint1_sent_at` blank)** |
+| FN-277 | `buildOvernightFollowupSectionOptsGs_(region, unresolvedRows)` `#L1318` | this morning's still-unresolved rows | Section 1's full `renderOvernightReportEmailHTML_` opts for the 13:00 reply | none (pure) | — | FN-280 | reusable — **added 2026-09-23 (Step 7), extracted from `sendOvernightFollowupEmails_`'s own former inline object, same pattern as FN-272** |
+| FN-278 | `buildOvernightFollowupSectionEmptyStateOptsGs_(region, reasonText)` `#L1338` | a reason string | Section 1's empty-state opts (nothing still unresolved) | none (pure) | — | FN-280 | reusable — same shape/role as its 10:00 sibling `buildOvernightSectionEmptyStateOptsGs_` `#L488` |
+| FN-279 | `loadTodaysCheckpoint1PendingGs_(ss, now)` `#L1355` | spreadsheet + now | `{lowercasedEmail -> {rowNumbers, to, cc, bucketLabel, primaryRole, snapshotEntries, checkpoint1Entries}}` for today's Checkpoint-1-done-but-Checkpoint-2-pending `AllIssues_Log` rows | reads `AllIssues_Log` (`GS-001`/`SHEET-013`) | `ensureAllIssuesLogSheet_` (`GS-001`), `istDayKeyGs_` (`GS-002`) | FN-232 | specific — **the idempotency check for Checkpoint 2 (`checkpoint2_sent_at` blank); keyed by EMAIL directly, not region-then-email like FN-276, since the caller (FN-232's own `perRegion`) already has one entry per recipient** |
+| FN-280 | `sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap)` `#L1408` | one bucket's Section 1/2 inputs + its `Overnight_Log` row number | the combined 13:00 reply | threaded Gmail reply (with plain-fallback); `Overnight_Log` `followup_sent_at` write-back (**success ONLY** — Step 8/11, so a total failure stays retryable on the next run); `AllIssues_Log` `checkpoint2_json`/`checkpoint2_sent_at` write-back (even on total send failure — same reasoning `GS-012`'s comment on `computeAllIssuesCheckpointGs_` gives, and FN-275's own Checkpoint 1 write, since an un-checkpointed row silently falls out of FN-279's own "today" scope once the day rolls over — a DIFFERENT tradeoff from `followup_sent_at`'s, see this function's own comment on why) | `buildOvernightFollowupSectionOptsGs_`/`buildOvernightFollowupSectionEmptyStateOptsGs_`/`buildAllIssuesCheckpointSectionOptsGs_`/`buildAllIssuesCheckpointEmptyStateOptsGs_`/`renderTwoSectionEmailHTML_` (all same file), `computeAllIssuesCheckpointGs_` (`GS-012` FN-270), `filterAllIssuesCheckpoint2ForEmailGs_` (`GS-012` FN-271), `sendThreadedGmailReply_` (FN-236), `withSendRetry_`/`notifyOpsAlertGs_` (`GS-004`) | FN-232 | specific — **unlike FN-275, no separate "resolve recipient" step — both sections' routing is already frozen (Section 1 from `Overnight_Log`, Section 2 from `AllIssues_Log`), never re-derived here** |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -160,7 +178,7 @@ records thread ids for the 13:00 reply. Full flow: `DATA-005` +
 |---|---|---|---|
 | `SHEET-001` `leads` | Read | FN-231 | source |
 | `SHEET-004` `Lead_Followups` | Write (upsert A–E,G) + poll-read col F | FN-235 | shares the bridge + `_generateCycleOwner`-style contention with the client (`JS-018`) |
-| `Overnight_Log` | Write (append) + ensure | FN-233 / FN-234 / FN-275 | thread ids for the 13:00 reply — id TBD (DOC-010/032) |
+| `SHEET-014` `Overnight_Log` | Write (append) + ensure (self-healing header as of Step 8/11) + Read (`followup_sent_at`, col I) | FN-233 / FN-234 / FN-275 (write); FN-232 (read); FN-280 (write `followup_sent_at`, success only, Step 8/11) | thread ids for the 13:00 reply; `followup_sent_at` is the 13:00 job's own per-day idempotency guard, added 2026-09-23 |
 | `SHEET-006` `RM_Hierarchy` / `SHEET-007` `Manager_Directory` / `SHEET-012` `Region_Recipients` | Read | FN-231 (via `GS-004` / `GS-011`) | routing |
 | `SHEET-013` `AllIssues_Log` | Read (`GS-001`'s own 17:00 rows; also `checkpoint1_json`, col K) + Write (`checkpoint1_json`/`checkpoint1_sent_at` cols K/L; `checkpoint2_json`/`checkpoint2_sent_at` cols M/N) | FN-276 / FN-275 (Checkpoint 1); FN-279 / FN-280 (Checkpoint 2, added 2026-09-23 Step 7) | Checkpoint 1/2's own state; routing (`to`/`cc`) is read from this table's STORED values, never re-resolved (design doc Part 7) |
 
@@ -319,6 +337,58 @@ payload, not a separate `htmlBody` field the way drafts/sent do).
 Section 1 specifically (a still-unresolved lead is resent every run,
 by design — no per-day-once guard exists for it) — that gap is real
 but explicitly out of this step's scope, tracked as Step 8/11's job.
+
+**Revalidated 2026-09-23** `(pending commit)`: Step 8/11 — idempotency
+across all three daily jobs. Direct audit (not assumed) confirmed the
+10:00 job (Section 1 via the existing region-level
+`alreadyLoggedRegionsToday`, Section 2 via `checkpoint1_sent_at`, both
+including their own CH-level diversions — those are called from inside
+`resolveRecipientEmailsForRegion_`'s `fireAlerts:true` path, itself only
+reached from the SAME guarded branch) and the 17:00 job
+(`AllIssuesEmailer.gs`'s own `alreadyLoggedRegionsToday`, covering the
+email, `issue_snapshot_json`, and its own CH-level diversion the same
+way) were already correctly guarded. `Lead_Followups` (`pushUnresolvedToLeadFollowups_`)
+is idempotent by construction — an upsert by `lead_id` can never create
+a duplicate row, so a re-run just re-writes the same (or updated) value,
+never duplicates.
+
+The one real, confirmed gap: the 13:00 job's own Section 1
+(unresolved-lead follow-up) had NO per-day guard at all — a trigger
+retry or manual re-run always resent a duplicate reply into the same
+Gmail thread for every still-unresolved lead (the exact gap flagged in
+Step 7's own revalidation note above). Fixed by adding `Overnight_Log`'s
+own `followup_sent_at` column (col I) — `ensureOvernightLogSheet_`
+gained a self-healing header (append-missing-columns, mirroring
+`ensureAllIssuesLogSheet_`'s pattern; this sheet had none before), Pass
+1 (`sendOvernightFollowupEmails_`) now captures each row's real sheet
+row number and skips a row outright when `followup_sent_at` is already
+set, and `sendCombinedFollowupEmail_` (FN-280) writes it back —
+deliberately **success-only** (unlike `AllIssues_Log`'s checkpoint
+columns, which are written even on failure for a different reason — see
+that function's own comment) so a failed send stays retryable on the
+next run instead of being permanently marked done.
+
+This one new column is a deliberate, documented deviation from
+`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's
+original "`Overnight_Log` gets no new columns" statement — refined, not
+violated: that statement was about not letting Chain B (checkpoint)
+CONTENT leak into `Overnight_Log`, and `followup_sent_at` carries none —
+it is a Chain-A-internal idempotency flag Section 1's own classification
+logic is entirely unaware of. `Overnight_Log` already gained columns
+once before this redesign (`to`/`cc`/`subject`, the recipient-storing
+fix) for the exact same kind of Chain-A-only operational reason. Full
+reasoning in that doc's own Part 5/Part 9 notes. File grew 1959L →
+2032L (+73). Every `#Lnn` citation in this record re-grepped and
+corrected. `Tests_OvernightEmailer.gs` gained 12 new assertions:
+`ensureOvernightLogSheet_`'s self-healing (fresh sheet has the column;
+an existing 8-column sheet gets healed to 9; healing twice doesn't
+duplicate); the same-bucket-both-sections scenario now also asserts
+`followup_sent_at` gets written and that a genuine re-run sends nothing
+new; the Section-2-only scenario gained the same `followup_sent_at`
+assertion; and two new scenarios cover a total send failure (both the
+threaded reply and the plain fallback fail) leaving `followup_sent_at`
+blank, followed by a real retry once Gmail works again. 859/859 local
+`.gs` tests pass (+12 new).
 
 ## Revalidation trigger
 

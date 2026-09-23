@@ -255,21 +255,49 @@ function overnightWindowGs_(asOf) {
 // after insertSheet — see ensureRegionRecipientsSheet_'s identical
 // comment (EmailInfra.gs). This is the exact function that produced the
 // original "Service Spreadsheets timed out" error in production.
-function ensureOvernightLogSheet_(ss) {
-  const existing = withRetry_(function () { return ss.getSheetByName(OVERNIGHT_LOG_SHEET_); }, 'check for existing Overnight_Log');
-  if (existing) return existing;
+// to/cc/subject: the ACTUAL resolved recipients + subject line from the
+// 10am send, needed so the 1pm follow-up can send to the same real
+// people explicitly — see sendOvernightFollowupEmails' own comment for
+// why it can no longer just GmailThread.reply() on thread_id.
+// followup_sent_at: added 2026-09-23 (two-checkpoint email lifecycle
+// redesign, Step 8/11) — idempotency guard for the 13:00 job's own
+// combined reply (Section 1 + Section 2 together, see
+// sendCombinedFollowupEmail_'s own comment). A real gap this closes:
+// unlike Section 2 (guarded by AllIssues_Log's own checkpoint2_sent_at),
+// Section 1's unresolved-lead follow-up had NO per-day-once guard at
+// all — a trigger retry (or a manual re-run) the same day resent a
+// duplicate threaded reply into the SAME Gmail thread for every
+// still-unresolved lead. Design doc Part 9's own contract text said
+// "Overnight_Log is untouched" — true only through Step 7; this is the
+// one column Step 8 needs to add to actually deliver "a trigger retry
+// must reconcile the existing cycle, not create a duplicate email."
+const OVERNIGHT_LOG_HEADERS_ = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject', 'followup_sent_at'];
 
-  // to/cc/subject: the ACTUAL resolved recipients + subject line from the
-  // 10am send, needed so the 1pm follow-up can send to the same real
-  // people explicitly — see sendOvernightFollowupEmails' own comment for
-  // why it can no longer just GmailThread.reply() on thread_id.
-  const headers = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject'];
-  const sheet = withRetry_(function () { return ss.insertSheet(OVERNIGHT_LOG_SHEET_); }, 'insert Overnight_Log');
-  SpreadsheetApp.flush();
-  withRetry_(function () {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.setFrozenRows(1);
-  }, 'write Overnight_Log header');
+// Self-healing header, same pattern as ensureAllIssuesLogSheet_
+// (AllIssuesEmailer.gs) — appends any column missing from an EXISTING
+// sheet (the live one predates followup_sent_at) rather than requiring a
+// manual migration. Append-only: a genuinely new column must be added to
+// the END of OVERNIGHT_LOG_HEADERS_, never inserted/reordered, or this
+// heal silently misaligns every already-written row's columns.
+function ensureOvernightLogSheet_(ss) {
+  let sheet = withRetry_(function () { return ss.getSheetByName(OVERNIGHT_LOG_SHEET_); }, 'check for existing Overnight_Log');
+  if (!sheet) {
+    sheet = withRetry_(function () { return ss.insertSheet(OVERNIGHT_LOG_SHEET_); }, 'insert Overnight_Log');
+    SpreadsheetApp.flush();
+    withRetry_(function () {
+      sheet.getRange(1, 1, 1, OVERNIGHT_LOG_HEADERS_.length).setValues([OVERNIGHT_LOG_HEADERS_]);
+      sheet.setFrozenRows(1);
+    }, 'write Overnight_Log header');
+    return sheet;
+  }
+  const lastCol = withRetry_(function () { return sheet.getLastColumn(); }, 'read Overnight_Log header width');
+  const existingHeaders = lastCol > 0 ? withRetry_(function () { return sheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Overnight_Log header') : [];
+  const existingSet = {};
+  existingHeaders.forEach(function (h) { existingSet[String(h || '').trim()] = true; });
+  const missing = OVERNIGHT_LOG_HEADERS_.filter(function (h) { return !existingSet[h]; });
+  if (missing.length) {
+    withRetry_(function () { sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]); }, 'heal Overnight_Log header');
+  }
   return sheet;
 }
 
@@ -1377,7 +1405,7 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
 // already frozen (Section 1 from Overnight_Log, Section 2 from
 // AllIssues_Log) -- routing was decided once, either this morning or
 // yesterday at 17:00, never re-derived here.
-function sendCombinedFollowupEmail_(ss, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap) {
+function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap) {
   const section1Opts = section1UnresolvedRows.length
     ? buildOvernightFollowupSectionOptsGs_(region, section1UnresolvedRows)
     : buildOvernightFollowupSectionEmptyStateOptsGs_(region, 'Nothing still unresolved from this morning — all clear.');
@@ -1405,15 +1433,21 @@ function sendCombinedFollowupEmail_(ss, allIssuesLogSheet, region, threadId, sen
   // (withSendRetry_ — only a definitive rejection, never an ambiguous
   // timeout). The plain fallback below gets the same treatment
   // explicitly, for the same reason. Same try/catch shape as this
-  // function's pre-Step-7 inline predecessor.
+  // function's pre-Step-7 inline predecessor. `sendSucceeded` tracks
+  // whether EITHER leg got the reply out — it gates the Step 8/11
+  // followup_sent_at write below, so a total failure stays retryable on
+  // the next run instead of being permanently marked done.
+  let sendSucceeded = false;
   try {
     sendThreadedGmailReply_(threadId, sendTo, sendCc || '', subject, plainBody, html);
+    sendSucceeded = true;
   } catch (threadErr) {
     Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
     try {
       withSendRetry_(function () {
         return GmailApp.createDraft(sendTo, subject, plainBody, { cc: sendCc, htmlBody: html, name: 'Homesfy Lead Ops' }).send();
       }, 'send fallback follow-up (' + region + ')');
+      sendSucceeded = true;
     } catch (fallbackErr) {
       Logger.log('Overnight follow-up reply failed entirely for ' + region + ' (thread ' + threadId + ', to ' + sendTo + '): ' + fallbackErr);
       notifyOpsAlertGs_('1pm follow-up failed for ' + region, [
@@ -1423,7 +1457,7 @@ function sendCombinedFollowupEmail_(ss, allIssuesLogSheet, region, threadId, sen
         'Section 1 still-unresolved leads (' + section1UnresolvedRows.length + '): ' + section1UnresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
         'Section 2 Checkpoint 2 leads (' + (section2Input ? section2Input.checkpoint1Entries.length : 0) + '): ' + (section2Input ? section2Input.checkpoint1Entries.map(function (e) { return e.lead_id; }).join(', ') : '(none)'),
         '',
-        'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded.',
+        'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded. This bucket will be retried on the next run (followup_sent_at is only written on success).',
         'Error: ' + fallbackErr,
       ]);
     }
@@ -1444,6 +1478,22 @@ function sendCombinedFollowupEmail_(ss, allIssuesLogSheet, region, threadId, sen
         allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[JSON.stringify(checkpoint2Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
       });
     }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
+  }
+
+  // followup_sent_at (Overnight_Log col I) -- Step 8/11's idempotency
+  // guard for the WHOLE combined reply (Section 1 + Section 2 together,
+  // since Step 7 made them ride in one email). Deliberately WRITTEN ONLY
+  // ON SUCCESS, unlike checkpoint2_json above -- a send failure here
+  // must stay retryable (the next run's Pass 1 skips a row only when
+  // this column is truthy), whereas Section 2's own checkpoint write is
+  // "write regardless" for a different reason (see that block's own
+  // comment: no future run ever re-looks at an un-checkpointed row once
+  // the day rolls over, so leaving it blank on failure would lose it
+  // forever rather than enabling a retry).
+  if (sendSucceeded) {
+    withRetry_(function () {
+      overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+    }, 'write followup_sent_at back to Overnight_Log (' + region + ')');
   }
 }
 
@@ -1467,7 +1517,9 @@ function sendOvernightFollowupEmails_() {
   const lastRow = logSheet.getLastRow();
   if (lastRow < 2) return;
 
-  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'read Overnight_Log');
+  // 9 columns, not 8 — col I (index 8) is followup_sent_at (Step 8/11's
+  // idempotency guard, see ensureOvernightLogSheet_'s own comment).
+  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 9).getValues(); }, 'read Overnight_Log');
   // Column A was written as a plain "yyyy-MM-dd" string (todayKey), but
   // Sheets auto-detects strings that look like dates and silently stores
   // the cell as a real Date instead — read back, that comes through here
@@ -1476,11 +1528,17 @@ function sendOvernightFollowupEmails_() {
   // returned zero rows, so the whole function silently no-op'd on every
   // run). Normalize through istDayKeyGs_ for a Date cell, same as every
   // other date-key comparison in this codebase (e.g. MovementTracker.gs).
-  const todaysRuns = logRows.filter(function (r) {
-    const cell = r[0];
-    const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
-    return key === todayKey;
-  });
+  // rowNumber captured alongside each row (index + 2, header is row 1) —
+  // needed to write followup_sent_at back onto the EXACT row a combined
+  // reply came from, same pattern AllIssues_Log's own checkpoint columns
+  // already use.
+  const todaysRuns = logRows
+    .map(function (r, i) { return { r: r, rowNumber: i + 2 }; })
+    .filter(function (entry) {
+      const cell = entry.r[0];
+      const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
+      return key === todayKey;
+    });
   if (!todaysRuns.length) return;
 
   const { colIndex, dataRows } = readLeadsTab_(ss);
@@ -1499,8 +1557,21 @@ function sendOvernightFollowupEmails_() {
   // Pass 1: classify every region's issue leads into resolved/unresolved
   // WITHOUT sending anything yet — every region's still-unresolved leads
   // get pushed to Lead_Followups and waited on together, once, below.
-  const perRegion = []; // { region, threadId, to, cc, subject, resolvedRows, unresolvedRows }
-  todaysRuns.forEach(function (run) {
+  const perRegion = []; // { region, threadId, to, cc, subject, rowNumber, resolvedRows, unresolvedRows }
+  todaysRuns.forEach(function (entry) {
+    const run = entry.r;
+    const rowNumber = entry.rowNumber;
+    // Step 8/11 idempotency guard: followup_sent_at (col I) already set
+    // means the combined 13:00 reply for this bucket already went out
+    // today — skip the row entirely (classification, Lead_Followups
+    // push, AND send), so a trigger retry or manual re-run reconciles
+    // with the existing cycle instead of resending a duplicate reply
+    // into the same thread. Only ever set on a CONFIRMED successful send
+    // (see sendCombinedFollowupEmail_'s own comment) — a row whose send
+    // failed stays blank here and IS retried on the next run, unlike
+    // AllIssues_Log's checkpoint columns which are written even on
+    // failure for a different reason (see that function's own comment).
+    if (run[8]) return;
     const region = run[1];
     const threadId = run[2];
     const to = String(run[5] || '').trim();
@@ -1540,7 +1611,7 @@ function sendOvernightFollowupEmails_() {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
     });
-    perRegion.push({ region: region, threadId: threadId, to: to, cc: cc, subject: subject, resolvedRows: resolvedRows, unresolvedRows: unresolvedRows });
+    perRegion.push({ region: region, threadId: threadId, to: to, cc: cc, subject: subject, rowNumber: rowNumber, resolvedRows: resolvedRows, unresolvedRows: unresolvedRows });
   });
 
   const allUnresolved = [];
@@ -1626,7 +1697,7 @@ function sendOvernightFollowupEmails_() {
     } : null;
 
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
-    sendCombinedFollowupEmail_(ss, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap);
+    sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap);
   });
 }
 
@@ -1855,7 +1926,7 @@ function debugFollowupStatusNow() {
   const lastRow = logSheet.getLastRow();
   if (lastRow < 2) { Logger.log('Overnight_Log has NO rows at all (lastRow=' + lastRow + '). The 10am morning email has never logged anything in this sheet — check whether sendOvernightMorningEmails has ever run (Executions log).'); return; }
 
-  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'debug: read Overnight_Log');
+  const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 9).getValues(); }, 'debug: read Overnight_Log');
   Logger.log('Overnight_Log has ' + logRows.length + ' total row(s). Last 3 rows\' date cells: ' +
     logRows.slice(-3).map(function (r) { const c = r[0]; return c instanceof Date ? istDayKeyGs_(c) + ' (Date)' : JSON.stringify(c) + ' (' + typeof c + ')'; }).join(', '));
 
@@ -1884,8 +1955,10 @@ function debugFollowupStatusNow() {
     const to = String(run[5] || '').trim();
     const cc = String(run[6] || '').trim();
     const subject = String(run[7] || '').trim();
+    const followupSentAt = run[8];
     Logger.log('--- Row ' + (idx + 1) + '/' + todaysRuns.length + ': region=' + region + ', thread=' + threadId + ' ---');
     Logger.log('  stored to="' + to + '"  cc="' + cc + '"  subject="' + subject + '"' + (to ? '' : '  <<< EMPTY — this row predates the recipient-storing fix, or resolveRecipientEmailsForRegion_ returned nothing for it. sendOvernightFollowupEmails SKIPS this row entirely (see its own comment). Run backfillTodaysOvernightLogRecipientsNow to fix today\'s rows, or wait for tomorrow\'s fresh 10am run.'));
+    Logger.log('  followup_sent_at=' + (followupSentAt ? JSON.stringify(followupSentAt) + '  <<< already sent today — sendOvernightFollowupEmails SKIPS this row entirely (Step 8/11 idempotency guard)' : '(blank — not yet sent, or a prior attempt failed and will be retried)'));
 
     let issueLog;
     try { issueLog = JSON.parse(run[3] || '[]'); } catch (e) { issueLog = []; }

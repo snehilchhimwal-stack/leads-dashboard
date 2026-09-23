@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 8/11, gained `followup_sent_at` (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -53,23 +53,31 @@ threaded follow-up.
 | `sent_at` | datetime | 10:00 send instant |
 | `to` / `cc` | text | the **actual resolved** recipients (so the 13:00 reply reaches the same people explicitly) |
 | `subject` | text | the 10:00 subject line |
+| `followup_sent_at` | datetime | added 2026-09-23 (Step 8/11) — idempotency guard for the 13:00 job's own combined reply (Section 1 unresolved-leads + Section 2 Checkpoint 2 together). Written ONLY on a confirmed successful send (threaded reply OR its plain fallback) — a failed send leaves it blank so the next run retries, unlike `AllIssues_Log`'s checkpoint columns which are written even on failure for a different reason (see `GS-010` FN-280's own comment). Chain-A-internal only — carries no Chain-B/checkpoint content (see `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's own note on why this doesn't violate "the two chains stay separate"). |
 
-Exact list: `OvernightEmailer.gs` `#L266`
-(`['date','region','thread_id','lead_ids_json','sent_at','to','cc','subject']`).
+Exact list: `OvernightEmailer.gs` `#L274`
+(`['date','region','thread_id','lead_ids_json','sent_at','to','cc','subject','followup_sent_at']`).
+Self-healing header as of Step 8/11 (`ensureOvernightLogSheet_`, `#L282`)
+— same append-missing-columns pattern `AllIssuesEmailer.gs`'s
+`ensureAllIssuesLogSheet_` already used; before Step 8 this sheet had NO
+self-healing at all (an existing sheet was returned as-is with whatever
+columns it already had).
 
 ## Writers
 
 | Writer | `FN-XXX` | Mode |
 |---|---|---|
 | `GS-010` | `sendOneOvernightEmail_` (FN-233) | append (one per 10:00 send) |
-| `GS-010` | `ensureOvernightLogSheet_` (FN-234) | header, on first use |
+| `GS-010` | `sendCombinedMorningEmail_` (FN-275) | append (one per 10:00 combined send, Step 6/11) |
+| `GS-010` | `ensureOvernightLogSheet_` (FN-234) | header, on first use; self-heals missing columns on an existing sheet (Step 8/11) |
 | `GS-010` | `backfillTodaysOvernightLogRecipientsNow` | in-place `to`/`cc` repair (manual) |
+| `GS-010` | `sendCombinedFollowupEmail_` (FN-280) | added 2026-09-23 (Step 8/11) — writes `followup_sent_at` (col I) back onto the exact row its reply came from, success only |
 
 ## Readers
 
 | Reader | `FN-XXX` | For |
 |---|---|---|
-| `GS-010` | `sendOvernightFollowupEmails_` (FN-232) | **functional** — find the thread + recipients for the 13:00 reply |
+| `GS-010` | `sendOvernightFollowupEmails_` (FN-232) | **functional** — find the thread + recipients for the 13:00 reply; also reads `followup_sent_at` (col I) as of Step 8/11 to skip a bucket already replied to today |
 
 ## Automation / triggers touching it
 
@@ -80,7 +88,8 @@ Written by `setupOvernightEmailer()`'s `atHour(10)` trigger; read by its
 ## Apps Script functions touching it
 
 `ensureOvernightLogSheet_`, `sendOneOvernightEmail_`,
-`sendOvernightFollowupEmails_`, `backfillTodaysOvernightLogRecipientsNow`
+`sendCombinedMorningEmail_`, `sendOvernightFollowupEmails_`,
+`sendCombinedFollowupEmail_`, `backfillTodaysOvernightLogRecipientsNow`
 (all `GS-010`).
 
 ## Data Lifecycle (DOC-019 — completed by `DOC-036`, 2026-09-10)
@@ -125,7 +134,11 @@ real code reader.
 The 13:00 run **must** use the stored `to`/`cc` and `thread_id` for a raw
 threaded reply — `GmailThread.reply()` would misroute (`GS-010` FN-236 /
 EXC-080). `lead_ids_json` tells the 13:00 run which leads to re-check for
-resolution.
+resolution. As of Step 8/11, `followup_sent_at` gates the WHOLE 13:00
+reply (Section 1 + Section 2 together) — a row with it already set is
+skipped entirely by `sendOvernightFollowupEmails_`'s Pass 1, so a trigger
+retry or manual re-run reconciles with the existing cycle instead of
+sending a second reply into the same thread.
 
 ## Exceptions & error handling
 
@@ -167,6 +180,25 @@ The live `Overnight_Log` tab; header authored in `OvernightEmailer.gs`
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-032`.
+
+**Revalidated 2026-09-23** `(pending commit)`: Step 8/11 (two-checkpoint
+email lifecycle redesign, `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`,
+goal `g-tf-fc7cc3383b`) — gained `followup_sent_at` (col I), the
+idempotency guard for the 13:00 job's own combined reply. A real gap
+this closes: unlike Section 2 (already guarded by `AllIssues_Log`'s
+`checkpoint2_sent_at` since Step 7), Section 1's unresolved-lead
+follow-up had no per-day-once guard at all — a trigger retry resent a
+duplicate reply into the same thread every time. `ensureOvernightLogSheet_`
+gained a self-healing header (append-missing-columns), mirroring
+`ensureAllIssuesLogSheet_`'s own pattern — this sheet had none before.
+Also caught and fixed while revalidating: this record's own Writers
+table was missing `sendCombinedMorningEmail_` (`GS-010` FN-275), the
+ACTUAL primary writer since Step 6/11 — pre-existing drift, unrelated to
+Step 8 itself, closed in the same pass. See `GS-010`'s own revalidation
+entry for the full reasoning on why this deviates from
+`EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's original "gets no
+new columns" statement (refined, not violated — that statement was about
+Chain-B content specifically).
 
 ## Revalidation trigger
 

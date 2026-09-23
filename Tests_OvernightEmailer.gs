@@ -87,7 +87,23 @@ function runOvernightEmailerTests_() {
     // ---- ensureOvernightLogSheet_ ----
     const logSheet = ensureOvernightLogSheet_(ss);
     TestAssertEqual_(logSheet.getLastRow(), 1, 'ensureOvernightLogSheet_: a fresh sheet has just the header row');
-    TestAssertContains_(logSheet.getRange(1, 1, 1, 8).getValues()[0].join(','), 'thread_id', 'ensureOvernightLogSheet_: header includes thread_id');
+    TestAssertContains_(logSheet.getRange(1, 1, 1, 9).getValues()[0].join(','), 'thread_id', 'ensureOvernightLogSheet_: header includes thread_id');
+    TestAssertContains_(logSheet.getRange(1, 1, 1, 9).getValues()[0].join(','), 'followup_sent_at', 'ensureOvernightLogSheet_: header includes followup_sent_at (Step 8/11)');
+
+    // Self-healing: an EXISTING sheet that predates followup_sent_at (the
+    // live sheet's own real state until this change is pasted in) gets the
+    // missing column appended, not silently ignored — same pattern
+    // ensureAllIssuesLogSheet_ already uses.
+    const legacySs = TestMockSpreadsheet_({});
+    const legacySheet = legacySs.insertSheet(OVERNIGHT_LOG_SHEET_);
+    legacySheet.getRange(1, 1, 1, 8).setValues([['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject']]);
+    const healedSheet = ensureOvernightLogSheet_(legacySs);
+    TestAssertEqual_(healedSheet.getLastColumn(), 9, 'ensureOvernightLogSheet_: heals an existing 8-column sheet up to 9 columns');
+    TestAssertContains_(healedSheet.getRange(1, 1, 1, 9).getValues()[0].join(','), 'followup_sent_at', 'ensureOvernightLogSheet_: the healed header includes followup_sent_at, appended at the end');
+    // Idempotent: healing an already-healed sheet is a no-op, not a
+    // second append that would duplicate the column.
+    ensureOvernightLogSheet_(legacySs);
+    TestAssertEqual_(legacySs.getSheetByName(OVERNIGHT_LOG_SHEET_).getLastColumn(), 9, 'ensureOvernightLogSheet_: healing an already-9-column sheet does not append a duplicate column');
 
     // ---- sendOvernightMorningEmails: end to end ----
     sendOvernightMorningEmails();
@@ -321,17 +337,22 @@ function runOvernightEmailerTests_() {
       const checkpoint2Written = JSON.parse(allIssuesAfterFollowup[12]);
       TestAssertEqual_(checkpoint2Written[0].state, 'resolved', 'sendCombinedFollowupEmail_: persisted checkpoint2_json matches what the email itself showed');
 
-      // No re-run/idempotency check here — Section 1's own unresolved-lead
-      // classification has NO per-day-once guard (a re-run always resends
-      // whatever is CURRENTLY still unresolved, and L-UNRESOLVED's fixture
-      // never changes state), so a second call to
-      // sendOvernightFollowupEmails() legitimately sends ANOTHER reply for
-      // this bucket — that gap is real but is explicitly Step 8/11's job
-      // ("idempotency for 10:00/13:00/17:00 jobs"), not Step 7's. Only
-      // Checkpoint 2's own idempotency (checkpoint2_sent_at) is this
-      // step's concern — covered below on the Section-2-only bucket,
-      // which has no such Section-1 confound (its issueLog is always
-      // empty, so it never has anything in unresolvedRows to re-send).
+      const overnightLogAfterFollowup = followupLogSheet.getRange(2, 1, 1, 9).getValues()[0];
+      TestAssert_(!!overnightLogAfterFollowup[8], 'sendCombinedFollowupEmail_: followup_sent_at (col I) written back to Overnight_Log on a successful send');
+
+      // ---- Two-checkpoint email lifecycle redesign (Step 8/11) —
+      // idempotency: a second run the SAME day sends NOTHING new for this
+      // bucket. Before Step 8, this was a real, confirmed gap — Section 1's
+      // own unresolved-lead classification had NO per-day-once guard (a
+      // re-run always resent whatever was CURRENTLY still unresolved, and
+      // L-UNRESOLVED's fixture never changes state, so a bare re-run of
+      // sendOvernightFollowupEmails() used to send ANOTHER reply for this
+      // exact bucket). followup_sent_at (written just above) now makes
+      // Pass 1 skip this row entirely on a re-run — reconciling with the
+      // existing cycle instead of resending. ----
+      const repliesBeforeRerun = TestGmailLog_.threadReplies.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun, 'sendOvernightFollowupEmails: a second run the same day sends nothing new for this bucket — followup_sent_at guard (Step 8/11) skips it entirely, even though L-UNRESOLVED is still genuinely unresolved');
     } finally {
       SpreadsheetApp = realSs1;
     }
@@ -387,7 +408,15 @@ function runOvernightEmailerTests_() {
       const allIssuesAfterCkpt2Only = checkpoint2OnlySs._sheets['AllIssues_Log'].getRange(2, 1, 1, 14).getValues()[0];
       TestAssert_(!!allIssuesAfterCkpt2Only[12] && !!allIssuesAfterCkpt2Only[13], 'sendCombinedFollowupEmail_: Section-2-only bucket also gets checkpoint2_json/checkpoint2_sent_at written back');
 
-      // ---- idempotency: a second run sends nothing new (checkpoint2_sent_at set, still nothing in Section 1) ----
+      const overnightLogAfterCkpt2Only = checkpoint2OnlyLogSheet.getRange(2, 1, 1, 9).getValues()[0];
+      TestAssert_(!!overnightLogAfterCkpt2Only[8], 'sendCombinedFollowupEmail_: followup_sent_at (col I) also written back for the Section-2-only bucket');
+
+      // ---- Step 8/11 idempotency: a second run sends nothing new — now
+      // driven by followup_sent_at (Overnight_Log), the SAME guard as the
+      // other scenario above; checkpoint2_sent_at (AllIssues_Log) is
+      // still independently true too, but followup_sent_at alone is
+      // enough to skip this row at Pass 1 before Section 2 is even looked
+      // up. ----
       const repliesBeforeRerun2 = TestGmailLog_.threadReplies.length;
       sendOvernightFollowupEmails();
       TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun2, 'sendOvernightFollowupEmails: a second run sends nothing new for the Section-2-only bucket either');
@@ -421,9 +450,62 @@ function runOvernightEmailerTests_() {
       TestAssert_(TestGmailLog_.drafts.length > draftsBefore, 'sendOvernightFollowupEmails: when the Advanced Gmail Service fails, falls back to a plain new message');
       const fallbackDraft = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
       TestAssertContains_(fallbackDraft.subject, 'Re:', 'sendOvernightFollowupEmails: the plain fallback subject is still a "Re: ..." reply');
+      const overnightLogAfterFallback = staleLogSheet.getRange(2, 1, 1, 9).getValues()[0];
+      TestAssert_(!!overnightLogAfterFallback[8], 'sendCombinedFollowupEmail_: followup_sent_at IS written when the plain fallback succeeds, even though the threaded reply itself failed — the reply still reached the recipient');
     } finally {
       Gmail = realGmail;
       SpreadsheetApp = realSs2;
+    }
+
+    // ---- Step 8/11: a TOTAL failure (both the threaded reply AND the
+    // plain fallback fail) must leave followup_sent_at blank, so the next
+    // run retries rather than silently giving up forever. ----
+    const totalFailSs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+    });
+    totalFailSs._sheets[monthShort] = TestMockSheet_(monthShort, rows.concat([
+      TestOE_leadRow_(header, {
+        lead_id: 'L-UNRESOLVED3', client_id: 'C-UNRESOLVED3', RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: TestFixture_hoursAgo_(now, 20),
+        last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+        internal_status_comments: 'Test RM One: Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+      }),
+    ]));
+    const totalFailLogSheet = ensureOvernightLogSheet_(totalFailSs);
+    totalFailLogSheet.appendRow([istDayKeyGs_(now), 'Pune', 'thread_seed_totalfail', JSON.stringify([{ lead_id: 'L-UNRESOLVED3', issueKey: 'followupOverdue', issueLabel: 'Follow-up Overdue' }]),
+      Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), TEST_EMAIL_PRIMARY_, '', 'Pune Google Overnight Leads - test totalfail']);
+
+    const realGmail2 = Gmail;
+    const realGmailApp2 = GmailApp;
+    Gmail = TestMockGmailAdvanced_({ shouldFail: true });
+    GmailApp = TestMockGmailApp_({ failSendCountFor: {} });
+    GmailApp.createDraft = function () {
+      return { send: function () { throw new Error('simulated total failure — neither threaded nor fallback can send'); } };
+    };
+    const realSs2b = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return totalFailSs; }, flush: function () {} };
+    try {
+      sendOvernightFollowupEmails();
+      const overnightLogAfterTotalFail = totalFailLogSheet.getRange(2, 1, 1, 9).getValues()[0];
+      TestAssertEqual_(overnightLogAfterTotalFail[8], '', 'sendCombinedFollowupEmail_: followup_sent_at stays BLANK after a total send failure — this bucket must be retried, not permanently marked done');
+      TestAssert_(TestGmailLog_.sent.some(function (e) { return /1pm follow-up failed/.test(e.subject); }), 'sendCombinedFollowupEmail_: a total failure fires its own ops alert');
+    } finally {
+      Gmail = realGmail2;
+      GmailApp = realGmailApp2;
+    }
+
+    // ---- ...and the NEXT run (Gmail working again) actually retries it,
+    // proving the blank followup_sent_at genuinely re-enables a resend
+    // rather than just being cosmetically blank. ----
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return totalFailSs; }, flush: function () {} };
+    try {
+      const repliesBeforeRetry = TestGmailLog_.threadReplies.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRetry + 1, 'sendOvernightFollowupEmails: the bucket that totally failed IS retried and sends successfully once Gmail is working again');
+      const overnightLogAfterRetry = totalFailLogSheet.getRange(2, 1, 1, 9).getValues()[0];
+      TestAssert_(!!overnightLogAfterRetry[8], 'sendCombinedFollowupEmail_: followup_sent_at is now written after the successful retry');
+    } finally {
+      SpreadsheetApp = realSs2b;
     }
 
     // ---- row with no stored recipient is skipped, not sent blind ----

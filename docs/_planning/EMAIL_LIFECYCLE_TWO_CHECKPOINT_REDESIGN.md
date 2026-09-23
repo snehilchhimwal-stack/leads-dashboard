@@ -165,9 +165,29 @@ own `lead_ids_json` (an array of `{lead_id, issueKey, issueLabel}`,
 `OvernightEmailer.gs:411`) exactly, just widened to two checkpoints
 instead of one.
 
-**Overnight's own state is untouched.** `Overnight_Log` gets no new
-columns — Chain A's tracking stays exactly as it is today, per spec
-Section 8's explicit instruction to keep the two lifecycles separate.
+**Overnight's own state is untouched — by Chain B.** `Overnight_Log`
+gets no CHECKPOINT columns — no `checkpoint*_json`, no Chain-B content
+of any kind — per spec Section 8's explicit instruction to keep the two
+lifecycles separate. **Refined 2026-09-23 (Step 8/11):** this does not
+mean Chain A's own tracking is frozen forever. Chain A already gained
+columns once before this redesign even started (`to`/`cc`/`subject`,
+the recipient-storing fix `OvernightEmailer.gs` mentions throughout) for
+a purely Chain-A-internal operational need, and Step 8 adds one more —
+`followup_sent_at` (col I) — for the SAME reason: the 13:00 job's own
+Section 1 (unresolved-lead follow-up) had no per-day-once guard at all,
+so a trigger retry resent a duplicate reply into the same thread. This
+column carries no Chain-B data, doesn't change what Chain A tracks about
+a LEAD, and Section 1's own classification logic is completely unaware
+of it — it only gates whether Pass 2 sends at all. "The two chains are
+independent" is about not letting Chain B's CONTENT drive Chain A's
+logic (or vice versa); it was never a promise that Chain A's own schema
+would never evolve for Chain A's own needs, and reading it that way
+would have left a real duplicate-email bug unfixable without inventing
+an entirely separate state mechanism (PropertiesService, etc.) for one
+boolean flag — considered and rejected as disproportionate given
+Overnight_Log is already the established, self-healing, proven template
+this exact idempotency pattern is built on (see this doc's own opening
+paragraph).
 
 ---
 
@@ -333,8 +353,11 @@ code — this is a backend-only, Apps-Script-only change.
 
 Repeats daily. Checkpoint routing is frozen at 17:00 (Part 7). One
 Gmail thread per manager bucket per day (the Overnight thread) carries
-both sections at 10:00 and 13:00. AllIssues_Log columns J–N are the
-only new persistent state; Overnight_Log is untouched.
+both sections at 10:00 and 13:00. AllIssues_Log columns J–N carry all
+of Chain B's persistent state — Overnight_Log gains no Chain-B content,
+but does gain ONE Chain-A-internal idempotency column of its own,
+`followup_sent_at` (col I, Step 8/11), for the 13:00 job's own resend
+guard (Part 5's own note has the full reasoning).
 ```
 
 This satisfies the spec's own stated contract exactly, and is the
