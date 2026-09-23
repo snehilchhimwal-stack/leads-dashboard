@@ -679,16 +679,27 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     ]);
   }
 
-  // Section 1's Overnight_Log row -- SAME columns sendOneOvernightEmail_
-  // always writes, so the EXISTING, unchanged 13:00 Overnight-thread
-  // lookup (sendOvernightFollowupEmails_) keeps working regardless of
-  // whether this run also carried a Section 2. Only written on a
-  // successful send AND when Section 1 had real content -- an empty-
-  // state Section 1 needs no Overnight-thread continuation, and a
-  // failed send must NOT be logged as sent (same "no log row = safe to
-  // retry" philosophy sendOneOvernightEmail_'s own failure path already
-  // relies on for Section 1's region-level idempotency guard).
-  if (section1 && !sendFailureReason) {
+  // Overnight_Log row -- SAME columns sendOneOvernightEmail_ always
+  // writes, so the EXISTING, unchanged 13:00 Overnight-thread lookup
+  // (sendOvernightFollowupEmails_) keeps working regardless of whether
+  // this run also carried a Section 2. Written on ANY successful
+  // combined send, not just when Section 1 had real content --
+  // correction from this function's first version, which only logged
+  // when section1 was truthy: that left a Section-2-only bucket (no
+  // overnight leads today, but real Checkpoint 1 content) with NO
+  // thread reference at all, breaking the design's own "one Gmail
+  // thread per bucket per day carries both sections" principle
+  // (design doc Part 7) for Checkpoint 2's reply at 13:00. An empty
+  // issueLog (Section 1 had nothing) is harmless here --
+  // sendOvernightFollowupEmails_'s own Pass 1 already treats a row
+  // with `if (!issueLog.length) return;` as "nothing to follow up on
+  // for Section 1 specifically", which is exactly correct; Section 2's
+  // own follow-up for that same bucket is a separate, independent
+  // lookup against AllIssues_Log, not this row's issueLog. A failed
+  // send must still NOT be logged (same "no log row = safe to retry"
+  // philosophy sendOneOvernightEmail_'s own failure path already
+  // relies on).
+  if (!sendFailureReason) {
     const issueLog = [];
     section1Leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
     const threadId = sentMessage.getThread().getId();

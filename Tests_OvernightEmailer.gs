@@ -171,6 +171,18 @@ function runOvernightEmailerTests_() {
     TestAssertEqual_(puneCheckpoint1[0].state, 'resolved', 'AllIssues_Log: Pune row\'s persisted checkpoint1_json matches what the email itself showed');
     TestAssert_(!!harbourRow[10] && !!harbourRow[11], 'AllIssues_Log: Harbour row ALSO gets checkpoint1_json/checkpoint1_sent_at written back');
 
+    // ---- Overnight_Log gets a row for Harbour too, even though it had
+    // NO overnight leads today (Section 2-only) -- this is the fix for a
+    // real gap found while planning Step 7: without a thread reference
+    // for a Section-2-only bucket, the 13:00 job would have no thread to
+    // reply Checkpoint 2 into for it, breaking "one Gmail thread per
+    // bucket per day" (design doc Part 7). An empty issueLog is
+    // correct/expected here -- Section 1 genuinely had nothing. ----
+    const overnightLogAfterCombined = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, 8).getValues();
+    const harbourOvernightLogRow = overnightLogAfterCombined.filter(function (r) { return r[1] === 'Harbour'; })[0];
+    TestAssert_(!!harbourOvernightLogRow, 'sendCombinedMorningEmail_: Harbour (Section 2-only, zero overnight leads) STILL gets an Overnight_Log row -- the thread reference Checkpoint 2 will need at 13:00');
+    TestAssertEqual_(harbourOvernightLogRow[3], '[]', 'sendCombinedMorningEmail_: Harbour\'s Overnight_Log row correctly logs an EMPTY issueLog -- Section 1 had nothing, that fact is preserved, not faked');
+
     // ---- idempotency: the NEXT run does not reprocess either checkpoint
     // (checkpoint1_sent_at now set on both rows) ----
     sendOvernightMorningEmails();
