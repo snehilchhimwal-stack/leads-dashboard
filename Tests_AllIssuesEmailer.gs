@@ -160,6 +160,22 @@ function runAllIssuesEmailerTests_() {
     // ---- normal bucket subject format: "<bucketLabel> (<primaryRole>) google Leads With Issue (<range>)" ----
     TestAssertContains_(normalDraft.subject, 'Test A1 One (A1) google Leads With Issue', 'sendAllIssuesEmails: normal bucket subject matches the documented format exactly');
 
+    // ---- issue_snapshot_json (col J, two-checkpoint email lifecycle
+    // redesign Step 3) persists the bucket's exact reported population --
+    // notifyChLevelIssuesGs_ writes no log row at all (confirmed by
+    // reading its source directly — no logSheet reference in that
+    // function), so the ONE row in AllIssues_Log at this point is the
+    // normal bucket's own, making getLastRow() unambiguous here. ----
+    const logSheetForSnapshot = ensureAllIssuesLogSheet_(ss);
+    const logRow = logSheetForSnapshot.getRange(logSheetForSnapshot.getLastRow(), 1, 1, 10).getValues()[0];
+    const snapshot = JSON.parse(logRow[9]);
+    TestAssertEqual_(snapshot.length, 4, 'sendOneAllIssuesEmail_: issue_snapshot_json persists exactly the 4 leads this bucket reported');
+    const snapshotIds = snapshot.map(function (l) { return l.lead_id; }).sort();
+    TestAssertEqual_(JSON.stringify(snapshotIds), JSON.stringify(['L-INACTIVE', 'L-MULTI', 'L-NOTUPDATED', 'L-UNDERCALLED']), 'sendOneAllIssuesEmail_: issue_snapshot_json lists exactly the same lead_ids as the email body');
+    TestAssert_(snapshot.every(function (l) { return l.lead_id && l.RM && l.status && l.issueLabel; }), 'sendOneAllIssuesEmail_: every issue_snapshot_json entry carries lead_id/RM/status/issueLabel per the design shape');
+    const multiSnapshotEntry = snapshot.filter(function (l) { return l.lead_id === 'L-MULTI'; })[0];
+    TestAssertEqual_(multiSnapshotEntry.issueLabel, 'Inactive-RM Lead Added', 'sendOneAllIssuesEmail_: issue_snapshot_json records the SAME priority-picked issueLabel the email itself shows for a multi-issue lead');
+
     // ---- idempotency guard ----
     sendAllIssuesEmails();
     TestAssertEqual_(TestGmailLog_.drafts.length, 2, 'sendAllIssuesEmails: a second run the same day sends nothing new (region already logged today)');

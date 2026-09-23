@@ -539,8 +539,21 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
 
   try {
     const threadId = sentMessage ? sentMessage.getThread().getId() : '';
+    // issue_snapshot_json (col J, two-checkpoint email lifecycle redesign,
+    // docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md Part 5/8) --
+    // `leads` here IS the bucket's exact reported population, already in
+    // the {lead_id, RM, TL, status, issueLabel, followup} shape the design
+    // calls for (see byRegion's construction above) -- no re-derivation,
+    // just persisting what this email already sent. Same unguarded
+    // JSON.stringify-into-one-cell pattern Overnight_Log's own
+    // lead_ids_json already uses (OvernightEmailer.gs) -- a manager
+    // bucket's flagged-lead count has never approached the ~50,000-char
+    // Sheets cell limit in practice, so this follows that existing
+    // precedent rather than adding a new defensive check nothing else
+    // here has. Columns K-N (checkpoint1/2) are left blank -- written
+    // later by the 10:00/13:00 jobs (Steps 4-7).
     withRetry_(function () {
-      logSheet.appendRow([now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId]);
+      logSheet.appendRow([now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, JSON.stringify(leads)]);
     }, 'append AllIssues_Log row (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('AllIssues_Log write failed for ' + region + bucketNote + ' (email itself sent fine): ' + e);
