@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 6 follow-up fix (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `c8c5976` — Step 6 follow-up fix (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -231,7 +231,7 @@ a brand-new region with Section 2 content but zero overnight leads),
 the checkpoint1_json/checkpoint1_sent_at write-back, and idempotency
 across a third run. 831/831 local .gs tests pass (+17 new).
 
-**Revalidated 2026-09-23** (pending commit): follow-up fix, found while
+**Revalidated 2026-09-23** `c8c5976`: follow-up fix, found while
 planning Step 7 — `sendCombinedMorningEmail_`'s `Overnight_Log` write
 now fires on ANY successful combined send, not just when Section 1 had
 real content. The original Step 6 version only logged when `section1`
