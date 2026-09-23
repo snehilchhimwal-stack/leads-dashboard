@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 6, new `GS-010` dependency (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `c7e22ae` — Step 6, new `GS-010` dependency (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -185,7 +185,7 @@ citation (`#L450`) is unchanged — the edit landed inside the function
 body, not before it — but `FN-179`'s citations shifted +13 (the new
 comment+code pushed everything after it down); corrected.
 
-**Revalidated 2026-09-23** (pending commit): Step 6/11 of the same
+**Revalidated 2026-09-23** `c7e22ae`: Step 6/11 of the same
 redesign — `GS-010` (`OvernightEmailer.gs`) now calls
 `ensureAllIssuesLogSheet_` (FN-178) and reads `AllIssues_Log` directly,
 a genuinely new caller/dependency edge (`GS-010` already listed this

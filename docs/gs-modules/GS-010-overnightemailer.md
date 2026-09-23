@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 6, combined 10am email (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `c7e22ae` — Step 6, combined 10am email (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -211,7 +211,7 @@ Part 1 §1.
 Verified at `c82ec67`; record created by DOC-029. File grew 1374L →
 1409L since the 2026-09-05 audit.
 
-**Revalidated 2026-09-23** (pending commit): Step 6/11 of the
+**Revalidated 2026-09-23** `c7e22ae`: Step 6/11 of the
 two-checkpoint email lifecycle redesign
 (`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`, goal
 `g-tf-fc7cc3383b`) — `sendOvernightMorningEmails_` now unions today's

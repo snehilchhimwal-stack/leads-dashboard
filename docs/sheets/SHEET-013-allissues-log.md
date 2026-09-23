@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 6, `GS-010` now a second reader/writer (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `c7e22ae` — Step 6, `GS-010` now a second reader/writer (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -181,7 +181,7 @@ now actually written (Step 3/11) — `sendOneAllIssuesEmail_` (`GS-001`
 FN-176) appends it at send time. The other 4 columns remain unwritten
 until Steps 4-7.
 
-**Revalidated 2026-09-23** (pending commit): Step 6/11 — `GS-010`
+**Revalidated 2026-09-23** `c7e22ae`: Step 6/11 — `GS-010`
 (`OvernightEmailer.gs`) is now a second component touching this sheet,
 reading yesterday's un-checkpointed rows
 (`loadYesterdaysAllIssuesBucketsGs_`, FN-276) and writing
