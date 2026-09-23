@@ -97,9 +97,39 @@ function allIssuesDateRangeLabelGs_(win) {
   return '(' + fmt(win.from) + ' to ' + fmt(win.to) + ')';
 }
 
+// Columns J-N (added 2026-09-23, two-checkpoint email lifecycle redesign
+// -- see docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md Part 5
+// for the full design) persist enough per-bucket state that the SAME
+// 17:00 population this row already represents (one row per manager
+// bucket per run, same grain columns A-I already use) can be followed
+// up TWICE -- once at the next day's 10:00 (Checkpoint 1) and again at
+// 13:00 (Checkpoint 2) -- without a second sheet or a join. Mirrors
+// Overnight_Log's own lead_ids_json pattern (OvernightEmailer.gs), just
+// widened to two checkpoints instead of one:
+//   issue_snapshot_json  -- written by the 17:00 job at send time:
+//     [{lead_id, RM, TL, status, issueLabel, followup}, ...] -- the
+//     EXACT population this bucket's email reported, straight from the
+//     bucketLeads array sendOneAllIssuesEmail_ already has in scope.
+//   checkpoint1_json     -- written by the 10:00 job:
+//     [{lead_id, state, currentIssueLabel, currentStatus}, ...] where
+//     state is one of 'resolved' / 'still_open' / 'category_changed' /
+//     'escalated' / 'not_found' (see the design doc's Part 6 for exactly
+//     how each is derived from computeSlaFlags_/primaryIssueGs_).
+//   checkpoint1_sent_at  -- timestamp; also the idempotency guard a
+//     retried 10:00 run checks before recomputing/resending this row's
+//     Checkpoint 1 (design doc Part 10).
+//   checkpoint2_json     -- written by the 13:00 job, same shape as
+//     checkpoint1_json, computed incrementally against it (not a fresh
+//     re-diff from issue_snapshot_json) -- see design doc Part 6.
+//   checkpoint2_sent_at  -- idempotency guard, same role as checkpoint1_sent_at.
+// All 5 are blank until the corresponding job actually runs for this
+// row; a row from BEFORE this change (or a 17:00 run where nothing
+// happened to populate them) simply has 5 blank cells, same as any
+// other missing-header backfill this function already tolerates.
 function ensureAllIssuesLogSheet_(ss) {
   let sheet = ss.getSheetByName(ALL_ISSUES_LOG_SHEET_);
-  const headers = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id'];
+  const headers = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
+    'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
   if (!sheet) {
     sheet = ss.insertSheet(ALL_ISSUES_LOG_SHEET_);
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
