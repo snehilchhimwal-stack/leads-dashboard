@@ -247,6 +247,30 @@ intermediate tier, or a CH personally holding a lead, still diverts to
 normal bucket flow. Normal buckets still CC `ALWAYS_CC_EMAILS_` (Ashish
 Kukreja + Saurabh Mishra).
 
+**Known limitation, confirmed during Step 9/11's failure/edge-case
+audit: CH-level-diverted leads get NO Checkpoint 1/2 follow-up.** A lead
+whose chain resolves all the way to a CH (or a CH personally holding it)
+never enters a normal bucket's `resolution.results` — it goes to
+`notifyChLevelIssuesGs_` (17:00) instead, which sends its own one-off
+report and never appends a row to `AllIssues_Log`. Since Checkpoint
+1/2's whole mechanism (`loadYesterdaysAllIssuesBucketsGs_`/
+`loadTodaysCheckpoint1PendingGs_`) only ever reads FROM `AllIssues_Log`,
+a CH-escalated lead simply has no row to build a checkpoint from — it
+gets the immediate 17:00 alert and nothing more, while every OTHER
+flagged lead gets 2 additional touchpoints. This was deliberately NOT
+fixed here: `notifyChLevelIssuesGs_` sends ONE email per CH covering
+potentially several regions/RMs, always to the SAME fixed pair of
+addresses (`OPS_ALERT_EMAIL_` + `CH_LEVEL_EMAIL_`) regardless of WHICH
+CH — giving it real checkpoint eligibility would require a different
+recipient-identity key than the "union by recipient email" pattern
+Steps 6-8 are built around (every CH's report currently shares the same
+`to`, so keying by email alone would silently merge different CHs'
+leads into one combined checkpoint bucket), which is a genuine
+structural redesign, not an edge-case fix. Flagged here as a known,
+intentional scope boundary rather than a silent gap — worth a dedicated
+follow-up if CH-level escalations turn out to need the same follow-up
+rigor as everything else in practice.
+
 **Checkpoint routing is frozen at 17:00, not re-resolved.** Checkpoint 1
 and 2 go to the `to`/`cc` already stored in that bucket's `AllIssues_Log`
 row (columns E/F) — the same person who received the original 17:00
@@ -362,3 +386,105 @@ guard (Part 5's own note has the full reasoning).
 
 This satisfies the spec's own stated contract exactly, and is the
 architecture the remaining 10 tracked steps build against.
+
+---
+
+## Part 10 — Idempotency (Step 8/11)
+
+Direct code audit (not assumed) of all three daily jobs against "a
+trigger retry must reconcile the existing cycle, not create a duplicate
+email, snapshot, or follow-up record":
+
+- **17:00** (`AllIssuesEmailer.gs`): already correctly guarded — its own
+  region-level `alreadyLoggedRegionsToday` (mirroring `Overnight_Log`'s
+  established pattern) covers the email, `issue_snapshot_json`, and its
+  CH-level diversion (`notifyChLevelIssuesGs_`, called from inside the
+  same guarded branch).
+- **10:00** (`sendOvernightMorningEmails_`): Section 1 already guarded
+  the same way (region-level, deliberately not per-bucket — a partial
+  failure needs a human decision to re-run, not a silent automatic
+  retry, per that function's own existing comment). Section 2
+  (Checkpoint 1) already guarded via `checkpoint1_sent_at`
+  (`AllIssues_Log` col L).
+- **13:00** (`sendOvernightFollowupEmails_`): Section 2 (Checkpoint 2)
+  already guarded via `checkpoint2_sent_at` (col N). **Section 1 (the
+  unresolved-lead follow-up) had NO guard at all** — the one real,
+  confirmed gap. A trigger retry resent a duplicate threaded reply into
+  the same Gmail thread for every still-unresolved lead, every time.
+- **`Lead_Followups`** (`pushUnresolvedToLeadFollowups_`): idempotent by
+  construction — an upsert by `lead_id` can never create a duplicate
+  row.
+
+**Fix**: `Overnight_Log` gained `followup_sent_at` (col I) — the
+idempotency guard for the 13:00 job's own combined reply, written
+success-only so a failed send stays retryable. This is a deliberate,
+documented deviation from Part 5's original "`Overnight_Log` gets no
+new columns" statement — refined to mean no Chain-B content, not a
+schema freeze; see Part 5's own note for the full reasoning.
+
+**On true concurrent double-fires** (two trigger executions running at
+literally the same instant, both passing a check-then-act guard before
+either writes): this project's own established convention, confirmed by
+direct precedent search (`MovementTracker.gs`'s `writeSlaHistorySnapshot_`
+explicitly declines to add one-sided defensive code for exactly this
+risk, calling it "a rare trigger double-fire"), is check-then-act via
+logged/dated state — never `LockService`, which is not used anywhere in
+this codebase. The guards above (sequential-retry reconciliation) match
+that existing risk tolerance exactly; a true simultaneous-execution race
+remains a theoretical, accepted, already-documented platform risk, not
+a gap this redesign introduces or needs to close beyond what the rest
+of the project already accepts.
+
+## Part 11 — Failure and Edge-Case Handling (Step 9/11)
+
+Audited against the scenario list this step was scoped against — job
+failures at any of the 3 times, Gmail API unavailable, hierarchy
+unresolved, manager changes mid-cycle, a lead crossing 48h, CH-level
+diversion interacting with 2-section emails, empty overnight/17:00
+populations, duplicate scheduled execution:
+
+- **Job failures / Gmail API unavailable**: all three trigger entry
+  points already wrap their real run in try/catch + `notifyOpsAlertGs_`
+  + re-throw (so Executions correctly shows Failed, never silently
+  swallowed). Every real send already retries via `withSendRetry_` (safe
+  failure classes only) and falls back to a plain message when the
+  Advanced Gmail Service isn't enabled for a threaded reply — Section
+  2's inclusion inside those same emails needed no separate handling.
+- **Hierarchy unresolved**: pre-existing, unchanged by this redesign —
+  the `CH_LEVEL_EMAIL_` backstop + `Region_Recipients` fallback +
+  `notifyLeadSendFailuresGs_` consolidated report already cover it.
+  Checkpoint routing (Part 7) never re-resolves hierarchy at all, so
+  this scenario doesn't even apply to Section 2's own code path.
+- **Manager changes mid-cycle**: by design (Part 7, "frozen at 17:00") —
+  confirmed the code actually implements this (Section 2's `to`/`cc`
+  always read from `AllIssues_Log`'s stored values, never re-resolved).
+- **Lead crosses 48h**: already correct — every checkpoint recomputes
+  SLA flags fresh against `now` at whichever time it actually runs, not
+  against the original 17:00 flags.
+- **CH-level diversion interacting with 2-section emails**: a REAL,
+  confirmed limitation — CH-escalated leads get no Checkpoint 1/2
+  follow-up at all. Documented above (Part 7) as an intentional scope
+  boundary, not fixed — properly supporting it needs a different
+  recipient-identity model than "union by email" (every CH currently
+  shares the same fixed `to`), a genuine redesign, not an edge case.
+- **Empty overnight/17:00 populations**: already handled cleanly at
+  every level — `notifyLeadSendFailuresGs_`/`sendOvernightFollowupEmails_`
+  both no-op on nothing to report, an empty union produces an empty
+  `.forEach()`, and a missing sheet is created fresh with just a header.
+- **Duplicate scheduled execution**: see Part 10 above.
+- **A real, NEW gap this audit found**: the checkpoint/log write-backs
+  added in Steps 6-8 (`Overnight_Log` append, `checkpoint1_json`,
+  `checkpoint2_json`, `followup_sent_at`) were NOT wrapped in their own
+  try/catch, unlike the established precedent
+  (`sendOneAllIssuesEmail_`'s own `issue_snapshot_json` write already
+  wraps its `appendRow` and explicitly reasons about the ~50,000-char
+  Sheets cell limit in its own comment). An uncaught write failure on
+  ANY one bucket — most plausibly an oversized JSON blob on a very large
+  bucket, but any Sheets error qualifies — would have propagated out of
+  `sendCombinedMorningEmail_`/`sendCombinedFollowupEmail_` and aborted
+  the caller's per-bucket loop entirely, silently skipping every OTHER
+  region/bucket still left to process that run, even though each of
+  those already-sent emails had nothing wrong with them. Fixed by
+  wrapping all 4 write sites in their own try/catch, matching the
+  existing precedent exactly: log and continue, never let a
+  logging/tracking failure take down sends that already succeeded.

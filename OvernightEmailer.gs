@@ -731,12 +731,27 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     const issueLog = [];
     section1Leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
     const threadId = sentMessage.getThread().getId();
-    withRetry_(function () {
-      overnightLogSheet.appendRow([
-        todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
-        to, cc || '', subject,
-      ]);
-    }, 'log Overnight_Log row (' + region + bucketNote + ')');
+    // Step 9/11: wrapped in its own try/catch, matching
+    // sendOneAllIssuesEmail_'s own established precedent for this exact
+    // shape of write (AllIssuesEmailer.gs) — this JSON blob is
+    // unbounded in size (this bucket's whole overnight population), and
+    // an uncaught write failure here (e.g. exceeding Sheets' ~50,000-char
+    // cell limit on a very large bucket) would otherwise propagate out of
+    // this function and abort sendOvernightMorningEmails_'s per-bucket
+    // loop entirely — silently skipping every OTHER region/bucket still
+    // left to process that run, even though the email above already sent
+    // successfully. Logging is best-effort on top of a real send, not the
+    // other way around.
+    try {
+      withRetry_(function () {
+        overnightLogSheet.appendRow([
+          todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+          to, cc || '', subject,
+        ]);
+      }, 'log Overnight_Log row (' + region + bucketNote + ')');
+    } catch (logErr) {
+      Logger.log('Overnight_Log write failed for ' + region + bucketNote + ' (email itself sent fine): ' + logErr);
+    }
   }
 
   // Section 2's checkpoint1_json/checkpoint1_sent_at -- written back
@@ -754,11 +769,19 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   // just delay it. A more complete retry-until-success story is Step
   // 8/11's job; this is the safer default until then.
   if (section2) {
-    withRetry_(function () {
-      section2.rowNumbers.forEach(function (rowNumber) {
-        allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[JSON.stringify(checkpoint1Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
-      });
-    }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
+    // Step 9/11: own try/catch, same reasoning as the Overnight_Log write
+    // above — a write failure here (e.g. an oversized checkpoint1Results
+    // blob) must not abort the caller's per-bucket loop for every OTHER
+    // region/bucket still left to process. The send already happened.
+    try {
+      withRetry_(function () {
+        section2.rowNumbers.forEach(function (rowNumber) {
+          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[JSON.stringify(checkpoint1Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+        });
+      }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
+    } catch (logErr) {
+      Logger.log('checkpoint1_json write failed for ' + region + bucketNote + ' (email itself sent fine): ' + logErr);
+    }
   }
 
   if (sendFailureReason) {
@@ -1473,11 +1496,18 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   // forever with no record it was ever attempted). The ops alert above
   // already surfaces the failure for manual follow-up.
   if (section2Input) {
-    withRetry_(function () {
-      section2Input.rowNumbers.forEach(function (rowNumber) {
-        allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[JSON.stringify(checkpoint2Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
-      });
-    }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
+    // Step 9/11: own try/catch — same reasoning as sendCombinedMorningEmail_'s
+    // checkpoint1_json write above. A failure here must not abort the
+    // caller's per-bucket loop for every OTHER bucket still left this run.
+    try {
+      withRetry_(function () {
+        section2Input.rowNumbers.forEach(function (rowNumber) {
+          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[JSON.stringify(checkpoint2Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+        });
+      }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
+    } catch (logErr) {
+      Logger.log('checkpoint2_json write failed for ' + region + ' (reply itself sent fine): ' + logErr);
+    }
   }
 
   // followup_sent_at (Overnight_Log col I) -- Step 8/11's idempotency
@@ -1491,9 +1521,21 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   // the day rolls over, so leaving it blank on failure would lose it
   // forever rather than enabling a retry).
   if (sendSucceeded) {
-    withRetry_(function () {
-      overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
-    }, 'write followup_sent_at back to Overnight_Log (' + region + ')');
+    // Step 9/11: own try/catch, consistent with every other write in this
+    // function — even though this value is a small fixed-width timestamp
+    // (never at real risk of the oversized-cell class of failure the
+    // JSON writes above guard against), a failure here for any OTHER
+    // reason must not abort the caller's per-bucket loop for every other
+    // bucket still left this run either. The reply already sent
+    // successfully; a lost followup_sent_at write only means this bucket
+    // is (harmlessly) resent on the next run, not that anything breaks.
+    try {
+      withRetry_(function () {
+        overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+      }, 'write followup_sent_at back to Overnight_Log (' + region + ')');
+    } catch (logErr) {
+      Logger.log('followup_sent_at write failed for ' + region + ' (reply itself sent fine — this bucket will be re-sent, harmlessly, on the next run): ' + logErr);
+    }
   }
 }
 

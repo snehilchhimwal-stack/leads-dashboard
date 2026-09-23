@@ -619,6 +619,66 @@ function runOvernightEmailerTests_() {
 
     TestAssertOnlyTestEmails_();
 
+    // ---- Step 9/11: a log/checkpoint WRITE failure (e.g. an oversized
+    // JSON cell past Sheets' ~50,000-char limit, or any other Sheets
+    // error) must degrade gracefully, not crash the whole send — the
+    // email/reply has ALREADY gone out by the time these writes happen,
+    // so losing the write-back is a tracking gap, never a lost send, and
+    // must never propagate up to abort the caller's per-bucket loop for
+    // every OTHER bucket still left that run. Direct calls to
+    // sendCombinedMorningEmail_/sendCombinedFollowupEmail_ (not through
+    // the full orchestrators) — isolates the write-failure behavior
+    // without needing a second full multi-bucket scenario. ----
+    {
+      const writeFailSs = TestMockSpreadsheet_({});
+      const writeFailOvernightLog = ensureOvernightLogSheet_(writeFailSs);
+      writeFailOvernightLog.appendRow = function () { throw new Error('simulated: value exceeds the maximum number of characters allowed (50000)'); };
+      const dummyAllIssuesLog = TestMockSheet_('AllIssues_Log', [['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id', 'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at']]);
+      const section1ForWriteFail = {
+        rec: { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+        leads: [{ lead_id: 'L-WRITEFAIL', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', followup: 'call now', issue: null }],
+      };
+      const draftsBeforeWriteFail = TestGmailLog_.drafts.length;
+      let threwOnWriteFail = false;
+      try {
+        sendCombinedMorningEmail_(writeFailSs, writeFailOvernightLog, dummyAllIssuesLog, 'Pune', section1ForWriteFail, null, 'test date', istDayKeyGs_(now), now, win, {}, null);
+      } catch (e) {
+        threwOnWriteFail = true;
+      }
+      TestAssert_(!threwOnWriteFail, 'sendCombinedMorningEmail_: a throwing Overnight_Log.appendRow does NOT propagate out — the caller\'s per-bucket loop must be able to continue to the next bucket');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBeforeWriteFail + 1, 'sendCombinedMorningEmail_: the email itself still sent successfully despite the log write failing afterward');
+      TestAssertEqual_(writeFailOvernightLog.getLastRow(), 1, 'sendCombinedMorningEmail_: Overnight_Log correctly has NO new row — the write genuinely failed, this is a real (logged) degradation, not silently faked success');
+    }
+
+    {
+      const writeFail2Ss = TestMockSpreadsheet_({});
+      const writeFail2OvernightLog = ensureOvernightLogSheet_(writeFail2Ss);
+      writeFail2OvernightLog.appendRow([istDayKeyGs_(now), 'Pune', 'thread_writefail2', JSON.stringify([{ lead_id: 'L-WRITEFAIL2', issueKey: 'followupOverdue', issueLabel: 'Follow-up Overdue' }]),
+        Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), TEST_EMAIL_PRIMARY_, '', 'Pune Google Overnight Leads - test writefail2']);
+      // Break ONLY the followup_sent_at write (col I, row 2) by overriding
+      // getRange for that exact call shape — leaves the rest of the sheet
+      // (including the row this test seeded above) fully functional, so
+      // the test isolates just this one write path.
+      const realGetRange = writeFail2OvernightLog.getRange;
+      writeFail2OvernightLog.getRange = function (row, col, numRows, numCols) {
+        if (row === 2 && col === 9) { throw new Error('simulated: Sheets write error'); }
+        return realGetRange.call(writeFail2OvernightLog, row, col, numRows, numCols);
+      };
+      const dummyAllIssuesLog2 = TestMockSheet_('AllIssues_Log', [['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id', 'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at']]);
+      const unresolvedForWriteFail2 = [{ lead_id: 'L-WRITEFAIL2', RM: 'Test RM One', detail: 'Still: Follow-up Overdue', suggestion: 'call now' }];
+      const repliesBeforeWriteFail2 = TestGmailLog_.threadReplies.length;
+      let threwOnWriteFail2 = false;
+      try {
+        sendCombinedFollowupEmail_(writeFail2Ss, writeFail2OvernightLog, 2, dummyAllIssuesLog2, 'Pune', 'thread_writefail2', TEST_EMAIL_PRIMARY_, '', 'Re: test writefail2', null, unresolvedForWriteFail2, null, now, {});
+      } catch (e) {
+        threwOnWriteFail2 = true;
+      }
+      TestAssert_(!threwOnWriteFail2, 'sendCombinedFollowupEmail_: a throwing followup_sent_at write does NOT propagate out — the caller\'s per-bucket loop must be able to continue');
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeWriteFail2 + 1, 'sendCombinedFollowupEmail_: the reply itself still sent successfully despite the followup_sent_at write failing afterward');
+    }
+
+    TestAssertOnlyTestEmails_();
+
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either
     // real run must alert ops before it aborts, not fail silently — same
     // reasoning/pattern as sendAllIssuesEmails' own wrapper
