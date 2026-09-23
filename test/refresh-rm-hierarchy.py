@@ -120,6 +120,22 @@ SALES_TRACK_ROLES = {
     "cluster head", "city lead", "commercial head",
 }
 
+# Magnet carries its own separate lead flow, never Google-sourced -- the
+# SAME reason RmHierarchy.gs's own auditUnresolvedRmsNow_ already gates out
+# Magnet-team names before ever needing RM resolution (see its scope-gate
+# comment, "a first version of this audit... flagged several Magnet-team
+# names with dozens of 'unresolved' leads each -- all non-Google leads that
+# never needed routing in the first place"). Magnet staff carry the SAME
+# role labels (S1/S2/S3/TL/RM/RH) as real Google-lead RMs though, so
+# SALES_TRACK_ROLES alone can't tell them apart -- this first version of
+# THIS script missed that and flagged all 18 of them as new-joiner
+# candidates needing a decision nobody was ever going to make (confirmed
+# 2026-09-23: explicitly out of scope, not our concern -- leave them out
+# entirely, the same way the sales-track role filter already leaves out
+# Finance/HR/Marketing). Match by team name (export's own "Team" column),
+# not role, since role can't distinguish them.
+OUT_OF_SCOPE_TEAMS = {"magnet (mumbai)", "magnet pune"}
+
 # An already-resolved row's own `role` -> which RM_HIERARCHY_RAW_ field a
 # name with that role belongs in when it shows up as someone ELSE's
 # manager. Roles not listed here (S1/S2/S3/BDM/Manager/Executive/...) never
@@ -221,6 +237,8 @@ def classify_new_joiner(hr_entry, role_lookup):
     role_key = hr_entry["role"].strip().lower()
     if role_key not in SALES_TRACK_ROLES:
         return None  # out of this table's documented scope entirely
+    if hr_entry["team"].strip().lower() in OUT_OF_SCOPE_TEAMS:
+        return None  # Magnet -- see OUT_OF_SCOPE_TEAMS' own comment
 
     if not hr_entry["chain_names"]:
         return ("LOW", {}, "every current-chain column is blank; only "
