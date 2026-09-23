@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 8/11 (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `4df2dd7` — Step 8/11 (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -338,7 +338,7 @@ Section 1 specifically (a still-unresolved lead is resent every run,
 by design — no per-day-once guard exists for it) — that gap is real
 but explicitly out of this step's scope, tracked as Step 8/11's job.
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 8/11 — idempotency
+**Revalidated 2026-09-23** `4df2dd7`: Step 8/11 — idempotency
 across all three daily jobs. Direct audit (not assumed) confirmed the
 10:00 job (Section 1 via the existing region-level
 `alreadyLoggedRegionsToday`, Section 2 via `checkpoint1_sent_at`, both

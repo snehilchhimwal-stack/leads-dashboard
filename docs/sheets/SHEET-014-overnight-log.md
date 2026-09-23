@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 8/11, gained `followup_sent_at` (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `4df2dd7` — Step 8/11, gained `followup_sent_at` (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -181,7 +181,7 @@ The live `Overnight_Log` tab; header authored in `OvernightEmailer.gs`
 
 Verified at `c82ec67`; record created by `DOC-032`.
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 8/11 (two-checkpoint
+**Revalidated 2026-09-23** `4df2dd7`: Step 8/11 (two-checkpoint
 email lifecycle redesign, `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`,
 goal `g-tf-fc7cc3383b`) — gained `followup_sent_at` (col I), the
 idempotency guard for the 13:00 job's own combined reply. A real gap
