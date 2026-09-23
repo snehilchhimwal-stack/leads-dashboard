@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-23 against commit (pending commit) (schema addition — see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -50,9 +50,17 @@ debug). No dashboard reader.
 | `lead_count` | number | leads in the digest |
 | `sent_at` | datetime | send instant |
 | `thread_id` | text | the Gmail thread |
+| `issue_snapshot_json` | text (JSON) | added 2026-09-23 — the exact per-lead population this bucket's 17:00 email reported: `[{lead_id, RM, TL, status, issueLabel, followup}, ...]`. Written at send time; blank on any row from before this change. |
+| `checkpoint1_json` | text (JSON) | added 2026-09-23 — written by the next day's 10:00 job (not yet wired, Step 3/11): `[{lead_id, state, currentIssueLabel, currentStatus}, ...]`. |
+| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job. |
+| `checkpoint2_json` | text (JSON) | added 2026-09-23 — written by that day's 13:00 job (not yet wired), same shape as `checkpoint1_json`, computed incrementally against it. |
+| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job. |
 
-Exact list: `AllIssuesEmailer.gs` `#L102`
-(`['date','region','bucket_label','primary_role','to','cc','lead_count','sent_at','thread_id']`).
+Exact list: `AllIssuesEmailer.gs` `#L131`
+(`['date','region','bucket_label','primary_role','to','cc','lead_count','sent_at','thread_id','issue_snapshot_json','checkpoint1_json','checkpoint1_sent_at','checkpoint2_json','checkpoint2_sent_at']`).
+See `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5
+for the full design these 5 columns serve — the two-checkpoint daily
+email lifecycle redesign, goal `g-tf-fc7cc3383b`.
 
 ## Writers
 
@@ -113,8 +121,13 @@ Records sends of digests built from `SHEET-001` (`leads`). Sibling to
 
 Self-healing header (append-only), same pattern as `Movement_Log` /
 `Daily_RM_Issues`. `thread_id` is captured even though `AllIssuesEmailer`
-has no follow-up run (`GS-001` is 17:00-only) — kept for manual
-reference / a possible future follow-up.
+itself still only sends at 17:00 — kept for manual reference. As of
+2026-09-23 this row's grain (one per manager bucket per 17:00 run) is
+also the persistence layer for a real follow-up mechanism under active
+build (`issue_snapshot_json`/`checkpoint1_json`/`checkpoint2_json`
+above) — the follow-up SEND itself happens from `OvernightEmailer.gs`'s
+10:00/13:00 jobs, not from this file, once Steps 3-5 of the redesign
+wire it up (not yet done as of this row's own commit).
 
 ## Exceptions & error handling
 
@@ -136,13 +149,13 @@ the tab if missing.
 ## Source of truth
 
 The live `AllIssues_Log` tab; header authored in `AllIssuesEmailer.gs`
-`#L102`.
+`#L131`.
 
 ## Validation
 
-- **Method:** header read from `AllIssuesEmailer.gs` `#L102` at
-  `c82ec67`; the self-healing behaviour confirmed in the same function.
-  `Tests_AllIssuesEmailer.gs` in CI.
+- **Method:** header read from `AllIssuesEmailer.gs` `#L131` at
+  (pending commit); the self-healing behaviour confirmed in the same
+  function. `Tests_AllIssuesEmailer.gs` in CI.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_AllIssuesEmailer.gs`,
   last green run).
 - **Status:** Validated 2026-09-10 (non-lifecycle); lifecycle `TBD`
@@ -151,6 +164,15 @@ The live `AllIssues_Log` tab; header authored in `AllIssuesEmailer.gs`
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-032`.
+
+**Revalidated 2026-09-23** (pending commit): 5 columns added
+(`issue_snapshot_json`, `checkpoint1_json`, `checkpoint1_sent_at`,
+`checkpoint2_json`, `checkpoint2_sent_at`) — Step 2/11 of the
+two-checkpoint email lifecycle redesign
+(`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5,
+goal `g-tf-fc7cc3383b`). Append-only, via `ensureAllIssuesLogSheet_`'s
+existing self-healing header logic (`GS-001` FN-178) — no reader or
+writer of the existing 9 columns changed.
 
 ## Revalidation trigger
 

@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `AllIssuesEmailer.gs` (561 lines) |
+| **Location** | `AllIssuesEmailer.gs` (591 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-23 against commit (pending commit) (schema-only change — see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -33,7 +33,7 @@ scheduled counterpart of the Operations tab's on-demand region reports
 
 ## Trigger schedule
 
-`setupAllIssuesEmailTrigger()` (`#L549`) installs `sendAllIssuesEmails`
+`setupAllIssuesEmailTrigger()` (`#L579`) installs `sendAllIssuesEmails`
 on `atHour(17).nearMinute(0).everyDays(1).inTimezone('Asia/Kolkata')`
 (`LOGIC_AUDIT.md` Part 1 §5). The `.nearMinute(0)` is load-bearing —
 the function's own comment documents a real incident where, without it,
@@ -51,12 +51,12 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L133/#L153` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
+| FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L163/#L183` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
 | FN-175 | `allIssuesWindowGs_(asOf)` / `allIssuesDateRangeLabelGs_(win)` `#L85/#L95` | as-of date | `{start, end}` IST-midnight-anchored 3-calendar-day window + a label | none | `istDayKeyGs_` (`GS-002`) | FN-174 | specific — **not rolling-hours** (documented undercount fix) |
-| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L420` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
-| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L341` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
-| FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L100` | spreadsheet | ensures `AllIssues_Log` exists | may create the tab | — | FN-174 | specific |
-| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L522/#L549` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
+| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L450` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
+| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L371` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
+| FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
+| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L552/#L579` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -160,6 +160,19 @@ The Apps Script backend half (peer of `DASH-001`, sharing only
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-029.
+
+**Revalidated 2026-09-23** (pending commit): `ensureAllIssuesLogSheet_`
+(FN-178) gained 5 new columns — `issue_snapshot_json`,
+`checkpoint1_json`, `checkpoint1_sent_at`, `checkpoint2_json`,
+`checkpoint2_sent_at` — Step 2/11 of the two-checkpoint email lifecycle
+redesign (`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`
+Part 5, goal `g-tf-fc7cc3383b`). Purely additive to `AllIssues_Log`'s
+schema via the function's existing missing-header backfill logic —
+nothing reads or writes the new columns yet (that lands in Steps 3-5),
+so `sendAllIssuesEmails`'s own behavior, scope, and every other cited
+function are unchanged. Re-grepped and corrected every `#Lnn` citation
+in this record below `ensureAllIssuesLogSheet_`'s insertion point (a
+uniform +30 shift, confirmed per-function, not assumed).
 
 ## Revalidation trigger
 
