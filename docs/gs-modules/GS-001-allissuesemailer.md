@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `AllIssuesEmailer.gs` (591 lines) |
+| **Location** | `AllIssuesEmailer.gs` (604 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `65df46c` (schema-only change — see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -33,7 +33,7 @@ scheduled counterpart of the Operations tab's on-demand region reports
 
 ## Trigger schedule
 
-`setupAllIssuesEmailTrigger()` (`#L579`) installs `sendAllIssuesEmails`
+`setupAllIssuesEmailTrigger()` (`#L592`) installs `sendAllIssuesEmails`
 on `atHour(17).nearMinute(0).everyDays(1).inTimezone('Asia/Kolkata')`
 (`LOGIC_AUDIT.md` Part 1 §5). The `.nearMinute(0)` is load-bearing —
 the function's own comment documents a real incident where, without it,
@@ -56,7 +56,7 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 | FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L450` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
 | FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L371` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
 | FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
-| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L552/#L579` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
+| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L565/#L592` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -173,6 +173,15 @@ so `sendAllIssuesEmails`'s own behavior, scope, and every other cited
 function are unchanged. Re-grepped and corrected every `#Lnn` citation
 in this record below `ensureAllIssuesLogSheet_`'s insertion point (a
 uniform +30 shift, confirmed per-function, not assumed).
+
+**Revalidated 2026-09-23** (pending commit): `sendOneAllIssuesEmail_`
+(FN-176) now writes `issue_snapshot_json` at send time — Step 3/11 of
+the same redesign. `Tests_AllIssuesEmailer.gs` gained 4 new assertions
+(snapshot lead count, lead_ids, per-entry shape, priority-picked
+issueLabel matches the email body). `sendOneAllIssuesEmail_`'s own
+citation (`#L450`) is unchanged — the edit landed inside the function
+body, not before it — but `FN-179`'s citations shifted +13 (the new
+comment+code pushed everything after it down); corrected.
 
 ## Revalidation trigger
 

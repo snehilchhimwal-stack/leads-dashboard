@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `65df46c` (schema addition — see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit (pending commit) — Step 3, `issue_snapshot_json` now written (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -50,11 +50,11 @@ debug). No dashboard reader.
 | `lead_count` | number | leads in the digest |
 | `sent_at` | datetime | send instant |
 | `thread_id` | text | the Gmail thread |
-| `issue_snapshot_json` | text (JSON) | added 2026-09-23 — the exact per-lead population this bucket's 17:00 email reported: `[{lead_id, RM, TL, status, issueLabel, followup}, ...]`. Written at send time; blank on any row from before this change. |
-| `checkpoint1_json` | text (JSON) | added 2026-09-23 — written by the next day's 10:00 job (not yet wired, Step 3/11): `[{lead_id, state, currentIssueLabel, currentStatus}, ...]`. |
-| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job. |
-| `checkpoint2_json` | text (JSON) | added 2026-09-23 — written by that day's 13:00 job (not yet wired), same shape as `checkpoint1_json`, computed incrementally against it. |
-| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job. |
+| `issue_snapshot_json` | text (JSON) | added 2026-09-23, **written as of Step 3/11**: the exact per-lead population this bucket's 17:00 email reported: `[{lead_id, RM, TL, status, issueLabel, followup}, ...]`. Written at send time by `sendOneAllIssuesEmail_`; blank on any row from before Step 3. |
+| `checkpoint1_json` | text (JSON) | added 2026-09-23 — written by the next day's 10:00 job (not yet wired — Steps 4/6): `[{lead_id, state, currentIssueLabel, currentStatus}, ...]`. |
+| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job (not yet wired — Steps 4/6/8). |
+| `checkpoint2_json` | text (JSON) | added 2026-09-23 — written by that day's 13:00 job (not yet wired — Steps 5/7), same shape as `checkpoint1_json`, computed incrementally against it. |
+| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job (not yet wired — Steps 5/7/8). |
 
 Exact list: `AllIssuesEmailer.gs` `#L131`
 (`['date','region','bucket_label','primary_role','to','cc','lead_count','sent_at','thread_id','issue_snapshot_json','checkpoint1_json','checkpoint1_sent_at','checkpoint2_json','checkpoint2_sent_at']`).
@@ -173,6 +173,11 @@ two-checkpoint email lifecycle redesign
 goal `g-tf-fc7cc3383b`). Append-only, via `ensureAllIssuesLogSheet_`'s
 existing self-healing header logic (`GS-001` FN-178) — no reader or
 writer of the existing 9 columns changed.
+
+**Revalidated 2026-09-23** (pending commit): `issue_snapshot_json` is
+now actually written (Step 3/11) — `sendOneAllIssuesEmail_` (`GS-001`
+FN-176) appends it at send time. The other 4 columns remain unwritten
+until Steps 4-7.
 
 ## Revalidation trigger
 
