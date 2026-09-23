@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 9/11 (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `e119115` — Step 9/11 (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -390,7 +390,7 @@ threaded reply and the plain fallback fail) leaving `followup_sent_at`
 blank, followed by a real retry once Gmail works again. 859/859 local
 `.gs` tests pass (+12 new).
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 9/11 — failure and
+**Revalidated 2026-09-23** `e119115`: Step 9/11 — failure and
 edge-case audit across the full two-checkpoint cycle. Full reasoning
 for every scenario checked (job failures, Gmail unavailable, hierarchy
 unresolved, manager changes mid-cycle, a lead crossing 48h, CH-level
