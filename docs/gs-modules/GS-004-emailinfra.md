@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-24 against commit `(pending commit)` — CH-level backstop Cc fix (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-24 against commit `8fe9714` — CH-level backstop Cc fix (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -158,7 +158,7 @@ gaps); `LOGIC_AUDIT.md` Part 1 §4d, Part 3 §3.7, Part 4 §4.3/§4.8, Part
 
 Verified at `c82ec67`; record created by DOC-029.
 
-**Revalidated 2026-09-24** `(pending commit)`: real production bug fix,
+**Revalidated 2026-09-24** `8fe9714`: real production bug fix,
 reported directly by the user off a real email
 ("(Unmatched RMs (backstop)) Navi Mumbai Google Overnight Leads")
 that landed with `cc: ashish.kukreja@homesfy.in, saurabh.mishra@homesfy.in`
