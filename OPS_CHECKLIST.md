@@ -164,6 +164,16 @@ departure, promotion, reporting-line change).
 
 ### Automatic email
 
+Since 2026-09-24 this is a **two-checkpoint lifecycle**, not three
+independent sends: 17:00 `AllIssuesEmailer.gs` opens one Gmail thread per
+region bucket for the day; 10:00 and 13:00 `OvernightEmailer.gs` (the
+combined-send path, `sendOvernightMorningEmails`/
+`sendOvernightFollowupEmails`) each reply into that SAME thread rather than
+starting a new one — see `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`
+and `HANDOVER.md` §2. A check that only confirms "an email went out" no
+longer proves the lifecycle is healthy — it also has to still be the same
+thread.
+
 - [ ] **Manual.** Spot-check the last few days' `Overnight_Log`/
       `AllIssues_Log` rows — does every region that should have had
       flagged leads that day actually have a row? A silent per-region
@@ -171,11 +181,25 @@ departure, promotion, reporting-line change).
       zero buckets when it shouldn't have) wouldn't otherwise surface on
       its own. (Not automated: "should have had flagged leads" needs a
       human's read of what actually happened that day, not a fixed rule.)
+- [ ] **Manual.** For a few of those rows, confirm the 10:00/13:00
+      `Overnight_Log` entries actually threaded onto the 17:00
+      `AllIssues_Log` send for the same region/day (same Gmail thread in
+      the inbox, not three separate emails) — and that `Overnight_Log`'s
+      `followup_sent_at` column is populated once the 13:00 checkpoint has
+      run, not left blank. A threading failure (e.g. the stored
+      message-id/thread-id for that bucket/day going stale or unresolved)
+      degrades silently to a new, disconnected email rather than an error
+      — nothing else in this checklist would catch it.
 - [ ] **Manual.** Confirm `OPS_ALERT_EMAIL_`/`CH_LEVEL_EMAIL_`
       (`EmailInfra.gs`) are still the right, actively-monitored addresses.
       Every failure mode above degrades to "silently nothing happened" if
       nobody is actually reading whatever inbox these route to — including
-      the weekly automated email itself.
+      the weekly automated email itself. Since 2026-09-24 the CH-level
+      backstop branch (`bucketLabel: 'Unmatched RMs (backstop)'` — nobody
+      resolves in `RM_Hierarchy` OR `Region_Recipients`) deliberately does
+      **not** Cc `ALWAYS_CC_EMAILS_` (fixed real mis-routing, `GS-004`
+      commit `8fe9714`) — if a future change reintroduces that Cc, it's a
+      regression of this specific fix, not a new feature.
 
 ---
 

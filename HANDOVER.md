@@ -109,8 +109,8 @@ branch-deploy signature) runs green on `master`;
 | `FollowupEngine.gs` | Comment classification + Suggested Follow-up text, ported from `js/core.js`'s `OUTCOME_RULES`/`inferOutcome`. |
 | `EmailInfra.gs` | Shared email plumbing: retry wrappers, the leads-tab reader, region-name mapping, ops alerting, the HTML email template. |
 | `MovementTracker.gs` | The 4x/day (00:00/06:00/12:00/18:00 IST) snapshot trigger — writes `Movement_Log` and `SLA_History` rows. |
-| `OvernightEmailer.gs` | 10:00 IST daily region email (overnight leads/issues) + 13:00 IST same-thread follow-up showing what got resolved. |
-| `AllIssuesEmailer.gs` | 17:00 IST daily email covering all 5 Operations SLA checks for Google Non-UTM/Search leads assigned in the last 3 calendar days. |
+| `OvernightEmailer.gs` | **Since 2026-09-24 (two-checkpoint email lifecycle redesign — full design: `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`):** the 10:00 IST and 13:00 IST sends are each now a COMBINED email — Section 1 is the original overnight-leads / still-unresolved content (unchanged logic), Section 2 is a follow-up on yesterday's 17:00 `AllIssues_Log` report (`AllIssuesEmailer.gs`): "Checkpoint 1" at 10:00, "Checkpoint 2" (incremental vs Checkpoint 1) at 13:00, both riding the SAME Gmail thread as Section 1 rather than a separate reply chain. `sendOneOvernightEmail_` (the pre-redesign standalone send) still exists and still works, just no longer called by the live send loop — `sendCombinedMorningEmail_`/`sendCombinedFollowupEmail_` are the real entry points now. |
+| `AllIssuesEmailer.gs` | 17:00 IST daily email covering all 5 Operations SLA checks for Google Non-UTM/Search leads assigned in the last 3 calendar days. **Since 2026-09-24:** also persists a JSON snapshot of what it sent (`issue_snapshot_json`, `AllIssues_Log`) — the state `OvernightEmailer.gs`'s two checkpoints above compare against. |
 | `RmHierarchy.gs` | Resolves each RM's manager chain (A1/TM/RH/CH) from the HR export, so issue emails route to the right specific managers. |
 | `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. |
@@ -287,7 +287,7 @@ re-running after an edit never leaves a duplicate):
 | Run this function... | ...from this file | Installs |
 |---|---|---|
 | `setupMovementTracking()` | `MovementTracker.gs` | 4 daily triggers at 00:00, 06:00, 12:00, 18:00 IST (`SNAPSHOT_HOURS_`) → `snapshotPeriodic` → snapshot + SLA_History row. Also removes any stale legacy `snapshotEvening` trigger. |
-| `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
+| `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). **Since 2026-09-24:** each of these is now a combined send — Section 1 (unchanged) + Section 2 (a Checkpoint on yesterday's 17:00 `AllIssuesEmailer.gs` report — see §2's own row for the full picture). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
 | `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 3 automatable checks. Sends every week regardless of outcome — see §8. |
@@ -308,7 +308,7 @@ real people/addresses, hardcoded — update on personnel change):
 |---|---|---|---|
 | `OPS_ALERT_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | Where ops/failure alerts (e.g. a send failure) go. |
 | `CH_LEVEL_EMAIL_` | `EmailInfra.gs` | `ashish.ivlekar@homesfy.in` | Fallback CH-level routing address — used both for a real top-of-org person personally holding a lead, and (since 2026-09-01) as the last-resort backstop when an RM name doesn't resolve anywhere (departed employee, unaliased spelling variant) AND that region has no `Region_Recipients` fallback configured either, so a broken chain still reaches someone instead of the lead being silently dropped. See `resolveRecipientEmailsForRegion_`'s own comment (`EmailInfra.gs`). |
-| `ALWAYS_CC_EMAILS_` | `RmHierarchy.gs` | `ashish.kukreja@homesfy.in`, `saurabh.mishra@homesfy.in` | CC'd on every region issue email, regardless of region. |
+| `ALWAYS_CC_EMAILS_` | `RmHierarchy.gs` | `ashish.kukreja@homesfy.in`, `saurabh.mishra@homesfy.in` | CC'd on every region issue email, regardless of region — **except** the `CH_LEVEL_EMAIL_` backstop above when NEITHER `RM_Hierarchy` nor `Region_Recipients` resolves an RM at all (fixed 2026-09-24, real production case — see `EmailInfra.gs`'s own comment on `resolveRecipientEmailsForRegion_`): that specific "couldn't route this at all" email deliberately excludes leadership, matching the sibling CH-level-personally-holds-a-lead backstop's own long-standing rule. |
 | `TEST_MODE_OVERRIDE_EMAIL_` | `EmailInfra.gs` | `''` (empty) | Safety valve: if set to a real address, **every** real send (not just tests) redirects there instead of real recipients. Leave empty in production; useful for a live smoke-test without running the mock suite. |
 
 Also worth knowing: **console-only utilities**, callable from the Apps
@@ -478,6 +478,36 @@ coverage, and past gaps in this project were closed reactively (see git
 history around 2026-08-29) specifically because a change shipped without a
 matching test.
 
+**One exception to "one `Tests_<File>.gs` per production file"**:
+`Tests_EmailLifecycleFullCycle.gs` (added 2026-09-24), which chains REAL
+calls to `sendAllIssuesEmails`/`sendOvernightMorningEmails`/
+`sendOvernightFollowupEmails` against ONE shared mock spreadsheet — an
+INTEGRATION test across `AllIssuesEmailer.gs` + `OvernightEmailer.gs`, not
+a new module's own suite. It has no matching production `.gs` file by
+design; `test/check-gs-registration.py` prints one expected false positive
+for it, documented in the file's own header comment.
+
+**Real gotcha (2026-09-24): the Node CI harness (`test/run-gs-tests.js`)
+does not inherit Node's own globals.** `vm.createContext()` builds a
+genuinely isolated sandbox — `atob`/`TextDecoder`/`TextEncoder`, used
+directly by `TestOE_decodeRawMime_` (`Tests_OvernightEmailer.gs`, added
+Step 7 of the two-checkpoint redesign), were simply undefined there, so
+every test calling it threw a bare `ReferenceError`. **3 consecutive CI
+runs were red with no readable log** (the Actions log-download endpoint
+403s for this repo — same gap the "no local Node" note above already
+covers) before this was found by directly querying the Actions API's
+check-run/job/annotation endpoints (all accessible unauthenticated for a
+public repo, unlike the log-download endpoint) to get the failing
+step name, then reasoning from there — `test/run-gs-tests-headless.py`
+(the local pre-push check) never caught it because it drives a REAL
+Chrome browser, where these are real globals. Fixed by forwarding Node
+20's own `atob`/`TextDecoder`/`TextEncoder` into the sandbox (no
+reimplementation needed). **Lesson for the next browser-only global a
+test file reaches for**: it needs adding to `buildSandbox()` in
+`test/run-gs-tests.js` too, not just working locally in the headless
+Python/Chrome runner — the two harnesses' mock globals are maintained
+as two separate files and can drift apart silently, exactly like this.
+
 ### 7.2 Dashboard (browser JS) — `tests/frontend-harness.html` (own CI job, blocking)
 
 The persisted browser-JS suite is **`tests/frontend-harness.html`** at the
@@ -608,6 +638,22 @@ test) Sheet, and use the browser console directly.
   Script editor; re-check per-snapshot row counts afterward to confirm
   dedup recovered (should drop back toward only-changed-leads volume, not
   a near-full-table rewrite every run).
+- **A CH-level "backstop" issue email CC's people it shouldn't** (subject
+  prefixed `(Unmatched RMs (backstop))` — the specific case of an RM
+  matching NEITHER `RM_Hierarchy` NOR `Region_Recipients` at all): this
+  was a real, confirmed bug through 2026-09-24 — reported by a maintainer
+  off a real "(Unmatched RMs (backstop)) Navi Mumbai Google Overnight
+  Leads" email that CC'd `ashish.kukreja@homesfy.in` /
+  `saurabh.mishra@homesfy.in` (`ALWAYS_CC_EMAILS_`). Fixed in
+  `EmailInfra.gs`'s `resolveRecipientEmailsForRegion_` — this ONE branch
+  no longer adds that CC, matching the sibling CH-level backstop
+  (`notifyChLevelLeadsGs_`/`notifyChLevelIssuesGs_`, used when someone
+  personally holds a lead with nobody below them), which already
+  deliberately excludes leadership from this class of email. The
+  DIFFERENT "Unmatched RMs" legacy `Region_Recipients` fallback (a
+  human HAS configured an address for that region) still CC's leadership,
+  unchanged — only the total-backstop case was wrong. See §4.3's own
+  `ALWAYS_CC_EMAILS_` row.
 - **This whole §8 list is reactive** — real incidents, found after the
   fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
   counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`
