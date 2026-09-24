@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-24 against commit `8fe9714` — checked, unaffected by the `GS-004` CC fix (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -138,6 +138,17 @@ Part 3 §3.9, Part 6 findings; `CLAUDE.md`.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-033`.
+
+**Revalidated 2026-09-24** `8fe9714`: `check-catalog.py`'s own change-impact
+tracker flagged this record as behind after `EmailInfra.gs` advanced —
+checked directly against this record's own "Revalidation trigger" list
+below (scope/Client-ID, raw MIME encoding, bulk-send model, Advanced
+Gmail Service usage, `TEST_MODE_OVERRIDE_EMAIL`/`_` handling). The
+actual change (`GS-004`'s own Version/change reference has the full
+story) only touches WHICH address one narrow recipient-resolution
+branch CCs — none of this record's own triggers, so genuinely
+unaffected. No content change needed; this entry exists so the drift
+note doesn't read as ignored.
 
 ## Revalidation trigger
 
