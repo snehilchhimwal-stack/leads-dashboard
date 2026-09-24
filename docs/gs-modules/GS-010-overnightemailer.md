@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 10/11, test-coverage half (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `f1a2519` — Step 10/11, test-coverage half (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -431,7 +431,7 @@ full reasoning on why every CH currently sharing the same fixed `to`
 makes this incompatible with the "union by recipient email" pattern
 without a real redesign. 865/865 local `.gs` tests pass (+6 new).
 
-**Revalidated 2026-09-23** `(pending commit)`: Step 10/11 (test-coverage
+**Revalidated 2026-09-23** `f1a2519`: Step 10/11 (test-coverage
 half — the live `TEST_MODE_OVERRIDE_EMAIL_` verification is tracked
 separately, see the task's own record). Added
 `Tests_EmailLifecycleFullCycle.gs` — a new, dedicated test file
