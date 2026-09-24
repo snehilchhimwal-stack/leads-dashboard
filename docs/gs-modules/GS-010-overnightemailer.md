@@ -454,6 +454,25 @@ idempotency guard (`alreadyLoggedRegionsToday` ×2,
 together, not just individually. 898/898 local `.gs` tests pass (+33
 new, all in the one new file).
 
+**Deployed live 2026-09-24**: Step 10/11's own live verification —
+pasted into the Sheet's Apps Script editor (full-file replace, verified
+byte-for-byte via the editor's own Monaco model length against the
+local file before saving — `git`'s own commit history is NOT what runs
+live, per this project's own standing gotcha). `TEST_MODE_OVERRIDE_EMAIL_`
+set temporarily, then `sendAllIssuesEmails`/`sendOvernightMorningEmails`/
+`sendOvernightFollowupEmails` each run for real against the live
+spreadsheet and confirmed clean (0 errors across all three; `sendAllIssuesEmails`
+sent 28 real bucket emails, correctly redirected). Real production state
+at the time meant Section 1 (Overnight) was already sent earlier that
+day for every region (confirmed the `alreadyLoggedRegionsToday` skip
+path firing correctly on real data) and there was no "yesterday" `AllIssues_Log`
+row to exercise Checkpoint 1/2 against live (a separate finding: no
+`AllIssues_Log` rows existed dated the day before this deployment at
+all — the real 17:00 job does not appear to have run recently; flagged
+to the user as its own follow-up, not fixed here). `TEST_MODE_OVERRIDE_EMAIL_`
+reverted to `''` and confirmed persisted via a fresh page reload before
+ending the session.
+
 ## Revalidation trigger
 
 Any commit touching `OvernightEmailer.gs` or `Tests_OvernightEmailer.gs`;

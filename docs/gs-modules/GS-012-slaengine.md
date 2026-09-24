@@ -211,6 +211,14 @@ FN-270/271's own "Called by" columns catching up to reality. No new
 these two functions' own logic is unchanged; the new coverage belongs
 to `Tests_OvernightEmailer.gs` (the caller), not here.
 
+**Deployed to the live Apps Script editor 2026-09-24**: pasted as part
+of Step 10/11's live verification pass (distinct from the "live" in the
+entry above, which meant "in the real code path," not "deployed" — this
+file had been fully wired since Step 7 but not yet actually pasted into
+the Sheet's Apps Script project until now). See `GS-010`'s own
+Version/change reference for the full deployment + verification
+narrative. No `Tests_SlaEngine.gs` changes.
+
 ## Revalidation trigger
 
 Any commit touching `SlaEngine.gs` or `Tests_SlaEngine.gs`; **any of the

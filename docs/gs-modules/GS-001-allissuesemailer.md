@@ -193,6 +193,15 @@ file as a required paste-dependency for the shared Apps Script project,
 but had no actual code dependency until now). No change to this file
 itself — `Used By` updated to name the new caller.
 
+**Deployed live 2026-09-24**: pasted into the Sheet's Apps Script editor
+as part of Step 10/11's live verification pass — see `GS-010`'s own
+Version/change reference for the full deployment + verification
+narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
+`SlaEngine.gs` — deployed and verified together in one session).
+`sendAllIssuesEmails` run for real under `TEST_MODE_OVERRIDE_EMAIL_`:
+28 bucket emails sent (all correctly redirected), 0 errors, real
+`issue_snapshot_json` confirmed written to `AllIssues_Log`.
+
 ## Revalidation trigger
 
 Any commit touching `AllIssuesEmailer.gs` or `Tests_AllIssuesEmailer.gs`;
