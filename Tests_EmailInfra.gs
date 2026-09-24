@@ -171,6 +171,11 @@ function runEmailInfraTests_() {
     TestAssertEqual_(resolution.results[0].to, TEST_EMAIL_CH_, 'resolveRecipientEmailsForRegion_: CH-level backstop goes to CH_LEVEL_EMAIL_');
     TestAssertContains_(resolution.results[0].source, 'backstop', 'resolveRecipientEmailsForRegion_: backstop entry\'s source names it as a backstop, not a normal RM_Hierarchy/legacy match');
     TestAssertEqual_(resolution.trulyUnresolved.length, 0, 'resolveRecipientEmailsForRegion_: no longer truly unresolved — the CH-level backstop always covers this case now');
+    // Fixed 2026-09-24 (real production case): this branch used to also Cc
+    // ALWAYS_CC_EMAILS_ (leadership), inconsistent with the sibling
+    // CH-level backstop (notifyChLevelLeadsGs_/notifyChLevelIssuesGs_)
+    // which deliberately excludes leadership from this class of email.
+    TestAssertEqual_(resolution.results[0].cc, undefined, 'resolveRecipientEmailsForRegion_: CH-level backstop no longer Cc\'s ALWAYS_CC_EMAILS_ (leadership) — matches the sibling backstop\'s own "not leadership" rule');
 
     // ---- resolveRecipientEmailsForRegion_: opts.hierarchyData + the new
     // chLevelRms field on its own result (perf pass, 2026-08-28) — a

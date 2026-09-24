@@ -376,11 +376,18 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       // NOT fix the underlying gap (the alias/reassignment still needs
       // doing — auditUnresolvedRmsNow() still surfaces it for that), it
       // just means nothing silently falls through the floor while that's
-      // pending.
-      const chCcSet = new Set();
-      ALWAYS_CC_EMAILS_.forEach(function (e) { chCcSet.add(e); });
+      // pending. Deliberately NO Cc here (fixed 2026-09-24, real
+      // production case — this branch was cc'ing ALWAYS_CC_EMAILS_
+      // (Ashish Kukreja + Saurabh Mishra) on a raw "couldn't route this at
+      // all" backstop email, inconsistent with the SAME company-wide
+      // backstop's other trigger (notifyChLevelLeadsGs_/
+      // notifyChLevelIssuesGs_, OvernightEmailer.gs/AllIssuesEmailer.gs),
+      // which already deliberately excludes leadership from this specific
+      // kind of email — see that function's own comment: "per explicit
+      // request, this goes only to OPS_ALERT_EMAIL_ + CH_LEVEL_EMAIL_, not
+      // leadership". This branch now matches that same rule.
       const chUnresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
-      results.push({ to: CH_LEVEL_EMAIL_, cc: Array.from(chCcSet).join(',') || undefined, rmNames: chUnresolvedNames, source: 'CH-level backstop (no RM_Hierarchy match and no Region_Recipients fallback for ' + region + ': ' + chUnresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs (backstop)', primaryRole: '' });
+      results.push({ to: CH_LEVEL_EMAIL_, cc: undefined, rmNames: chUnresolvedNames, source: 'CH-level backstop (no RM_Hierarchy match and no Region_Recipients fallback for ' + region + ': ' + chUnresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs (backstop)', primaryRole: '' });
     }
   }
 

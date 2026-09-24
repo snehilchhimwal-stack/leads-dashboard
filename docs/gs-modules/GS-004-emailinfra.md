@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `EmailInfra.gs` (552 lines) |
+| **Location** | `EmailInfra.gs` (559 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-24 against commit `(pending commit)` — CH-level backstop Cc fix (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -49,14 +49,14 @@ Never — no `setupXxx()`, no schedule.
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-196 | `withRetry_(fn, label)` / `withSendRetry_(fn, label)` `#L193/#L239` | a fn + a label | the fn's result, retried on transient failure with backoff | logs each retry; may raise after exhausting attempts | — | every scheduled read/send in `GS-001` / `GS-008` / `GS-010` / `GS-011` | reusable — the retry backbone |
-| FN-197 | `readLeadsTab_(ss)` `#L431` | spreadsheet | the parsed `leads` rows + a column index | one Sheets read | `buildColIndex_` (`GS-002`), `HEADER_ALIASES_` | every scheduled emailer | reusable — the one backend leads read |
+| FN-197 | `readLeadsTab_(ss)` `#L438` | spreadsheet | the parsed `leads` rows + a column index | one Sheets read | `buildColIndex_` (`GS-002`), `HEADER_ALIASES_` | every scheduled emailer | reusable — the one backend leads read |
 | FN-198 | `resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts)` `#L336` | region + RM names | the `{to, cc}` for that region's email | reads `Region_Recipients` + `RM_Hierarchy` / `Manager_Directory` | `loadRegionRecipients_` (FN-199), `resolveRecipientBucketsForRms_` (`GS-011`) | `GS-001`, `GS-010` | reusable — **the single recipient-resolution point for every scheduled email** |
-| FN-199 | `loadRegionRecipients_(ss)` / `ensureRegionRecipientsSheet_(ss)` `#L407/#L273` | spreadsheet | the region→recipients map; ensures the tab | may create `Region_Recipients` | — | FN-198 | reusable |
+| FN-199 | `loadRegionRecipients_(ss)` / `ensureRegionRecipientsSheet_(ss)` `#L414/#L273` | spreadsheet | the region→recipients map; ensures the tab | may create `Region_Recipients` | — | FN-198 | reusable |
 | FN-200 | `mainRegionForGs_(rawRegion)` / `normRegionKeyGs_(s)` `#L149/#L144` | a raw region | the normalised main region | none | `REGION_GROUP_MAP_` | every scheduled emailer, `GS-008` | reusable — **twin of `mainRegionFor` / `normRegionKey` (`JS-014`)** |
 | FN-201 | `passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw)` `#L166` | source fields | bool | none | — | `GS-001`, `GS-010`, `GS-011` | reusable — the source filter for the scheduled digests |
-| FN-202 | `renderOvernightReportEmailHTML_(opts)` `#L502` | report options | the HTML email body | none | `esc_` (`GS-002`) | `GS-001`, `GS-010` | reusable — the shared email template |
+| FN-202 | `renderOvernightReportEmailHTML_(opts)` `#L509` | report options | the HTML email body | none | `esc_` (`GS-002`) | `GS-001`, `GS-010` | reusable — the shared email template |
 | FN-203 | `notifyOpsAlertGs_(subject, bodyLines)` / `notifyLeadSendFailuresGs_(entries)` `#L72/#L94` | alert content | sends an ops-alert email | Gmail send | `withSendRetry_` (FN-196) | error paths in every scheduled file | reusable |
-| FN-204 | `groupChLevelRmsByCh_(chLevelRms)` / `splitSelfAndReportingRmNames_(chName, rmNames)` / `groupLeadsByRmAndFlatten_(rmNames, rmToLeads)` `#L456/#L470/#L481` | RM/CH names + leads | CH-level grouping for the "blank chain" rollup emails | none | — | `GS-001`, `GS-010` | reusable |
+| FN-204 | `groupChLevelRmsByCh_(chLevelRms)` / `splitSelfAndReportingRmNames_(chName, rmNames)` / `groupLeadsByRmAndFlatten_(rmNames, rmToLeads)` `#L463/#L477/#L488` | RM/CH names + leads | CH-level grouping for the "blank chain" rollup emails | none | — | `GS-001`, `GS-010` | reusable |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -65,7 +65,7 @@ Never — no `setupXxx()`, no schedule.
 | CFG-037 | `HEADER_ALIASES_` | column → `[accepted header names]` | the backend's column vocabulary | `readLeadsTab_` / `buildColIndex_`; **twin `HEADER_ALIASES` (`JS-009` CFG-022)** — `LOGIC_AUDIT.md` Part 4 §4.8 (small diff; **`project_region` missing here** feeds the HIGH Loan finding) |
 | CFG-038 | `REGION_GROUP_MAP_` | region-group map | region normalisation | `mainRegionForGs_`; **twin `REGION_GROUP_MAP` (`JS-014` RULE-017)** — audited consistent (`LOGIC_AUDIT.md` Part 4 §4.3) |
 | CFG-039 | `TEST_MODE_OVERRIDE_EMAIL_` `#L43` | `''` (unset) | if set, redirects **every** scheduled-email recipient to one address, silently | `resolveRecipientEmailsForRegion_` — the backend twin of the `reports-ui.js` footgun (`JS-016` CFG-024); `LOGIC_AUDIT.md` Part 1 §4d / Part 6 |
-| CFG-040 | `ALWAYS_CC_EMAILS_` | a CC list | addresses CC'd on every scheduled email | recipient resolution |
+| CFG-040 | `ALWAYS_CC_EMAILS_` | a CC list | addresses CC'd on every scheduled email — **except** the CH-level backstop path (`bucketLabel: 'Unmatched RMs (backstop)'`, no `RM_Hierarchy` match and no `Region_Recipients` fallback either), fixed 2026-09-24 to deliberately exclude leadership, matching the sibling `notifyChLevelLeadsGs_`/`notifyChLevelIssuesGs_` backstop's own "not leadership" rule | recipient resolution |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -157,6 +157,30 @@ gaps); `LOGIC_AUDIT.md` Part 1 §4d, Part 3 §3.7, Part 4 §4.3/§4.8, Part
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-029.
+
+**Revalidated 2026-09-24** `(pending commit)`: real production bug fix,
+reported directly by the user off a real email
+("(Unmatched RMs (backstop)) Navi Mumbai Google Overnight Leads")
+that landed with `cc: ashish.kukreja@homesfy.in, saurabh.mishra@homesfy.in`
+(`ALWAYS_CC_EMAILS_`). `resolveRecipientEmailsForRegion_`'s CH-level
+backstop branch (`bucketLabel: 'Unmatched RMs (backstop)'` — no
+`RM_Hierarchy` match AND no `Region_Recipients` fallback either) was
+Cc'ing leadership on a raw "couldn't route this at all" email,
+inconsistent with the SAME company-wide backstop's other trigger
+(`notifyChLevelLeadsGs_`/`notifyChLevelIssuesGs_`, `OvernightEmailer.gs`/
+`AllIssuesEmailer.gs`), which already deliberately excludes leadership
+from this class of email ("per explicit request, this goes only to
+`OPS_ALERT_EMAIL_` + `CH_LEVEL_EMAIL_`, not leadership" — that
+function's own comment). Fixed by removing the `ALWAYS_CC_EMAILS_` Cc
+from this ONE branch only — the legacy `Region_Recipients` fallback
+branch (`bucketLabel: 'Unmatched RMs'`, a DIFFERENT, less-severe case
+where a human HAS configured a fallback address) still Cc's leadership,
+unchanged, since the user's report and this fix are both scoped
+specifically to the backstop path. `CFG-040`'s own row updated to note
+the exception. File grew 552L → 559L (+7); every `#Lnn` citation in
+this record re-grepped and corrected. `Tests_EmailInfra.gs` gained 1 new
+assertion locking in `cc === undefined` for this exact branch. 899/899
+local `.gs` tests pass (+1 new).
 
 ## Revalidation trigger
 
