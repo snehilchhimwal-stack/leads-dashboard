@@ -69,6 +69,7 @@ const TEST_FILES = [
   'Tests_DailyRmIssueLog.gs',
   'Tests_OpsChecklistRunner.gs',
   'Tests_LeadFollowupsStaleness.gs',
+  'Tests_EmailLifecycleFullCycle.gs',
   'Tests_RunAll.gs',
 ];
 

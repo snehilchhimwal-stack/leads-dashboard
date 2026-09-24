@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `e119115` — Step 9/11 (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-23 against commit `(pending commit)` — Step 10/11, test-coverage half (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -430,6 +430,29 @@ enter `AllIssues_Log` — see the design doc's own Part 7 note for the
 full reasoning on why every CH currently sharing the same fixed `to`
 makes this incompatible with the "union by recipient email" pattern
 without a real redesign. 865/865 local `.gs` tests pass (+6 new).
+
+**Revalidated 2026-09-23** `(pending commit)`: Step 10/11 (test-coverage
+half — the live `TEST_MODE_OVERRIDE_EMAIL_` verification is tracked
+separately, see the task's own record). Added
+`Tests_EmailLifecycleFullCycle.gs` — a new, dedicated test file
+(registered in `Tests_RunAll.gs`'s `suites` array and
+`test/run-gs-tests.js`'s `TEST_FILES` list; no matching production
+`.gs` file, by design — it tests the INTEGRATION of `GS-001` +
+`GS-010`, not a new module) that chains REAL calls to
+`sendAllIssuesEmails()` (17:00), `sendOvernightMorningEmails()` (10:00),
+and `sendOvernightFollowupEmails()` (13:00) against ONE shared mock
+spreadsheet, for the first time letting each job's own real code produce
+the state the next job reads, rather than hand-constructing an
+`AllIssues_Log`/`Overnight_Log` fixture row the way every earlier
+single-file test necessarily did. Proves the real 17:00 writer
+(`sendOneAllIssuesEmail_`) and the real 10:00/13:00 readers
+(`loadYesterdaysAllIssuesBucketsGs_`/`loadTodaysCheckpoint1PendingGs_`)
+actually agree on `AllIssues_Log`'s column shape end to end — including
+a full second pass of all 3 real jobs the same day proving every
+idempotency guard (`alreadyLoggedRegionsToday` ×2,
+`checkpoint1_sent_at`, `checkpoint2_sent_at`, `followup_sent_at`) holds
+together, not just individually. 898/898 local `.gs` tests pass (+33
+new, all in the one new file).
 
 ## Revalidation trigger
 

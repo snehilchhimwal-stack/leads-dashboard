@@ -7,8 +7,9 @@
  * runMovementTrackerTestsNow, runUnmatchedCommentLoggerTestsNow,
  * runInteractionHistoryLoggerTestsNow, runOvernightEmailerTestsNow,
  * runAllIssuesEmailerTestsNow, runDailyRmIssueLogTestsNow,
- * runOpsChecklistRunnerTestsNow, runLeadFollowupsStalenessTestsNow) when
- * you only want to check one concern after a change to just that file.
+ * runOpsChecklistRunnerTestsNow, runLeadFollowupsStalenessTestsNow,
+ * runEmailLifecycleFullCycleTestsNow) when you only want to check one
+ * concern after a change to just that file.
  *
  * NOTHING here sends a real email or touches your real spreadsheet — see
  * Tests_Mocks.gs's own header for exactly why that's true. Every test
@@ -31,6 +32,7 @@ function runAllTests() {
     runDailyRmIssueLogTests_,
     runOpsChecklistRunnerTests_,
     runLeadFollowupsStalenessTests_,
+    runEmailLifecycleFullCycleTests_,
   ];
 
   Logger.log('=========================================');
