@@ -157,6 +157,23 @@ function buildSandbox() {
     DriveApp: {},
     MimeType: { CSV: 'CSV' },
     Logger: { log: function () { console.log.apply(console, arguments); } },
+    // atob/TextDecoder/TextEncoder: a `vm.createContext()` sandbox is
+    // genuinely isolated — it does NOT inherit ANY of Node's own globals
+    // (unlike a browser tab, where every page shares the same window).
+    // Real production bug this caused (found 2026-09-24, 3 CI runs red
+    // with no readable log — the Actions log-download endpoint 403s for
+    // this repo, same gap CLAUDE.md's own gotchas already document):
+    // TestOE_decodeRawMime_ (Tests_OvernightEmailer.gs, added Step 7/11)
+    // calls atob()/new TextDecoder() directly, which are real GLOBAL
+    // functions in a browser (and in test/run-gs-tests-headless.py's own
+    // real-Chrome environment, which is exactly why that harness never
+    // caught this) but were simply undefined in here — every test calling
+    // it threw a bare ReferenceError. Node 20 (this project's pinned CI
+    // version) already HAS all three as its own globals; forwarding them
+    // into the sandbox is the fix, not reimplementing them.
+    atob,
+    TextDecoder,
+    TextEncoder,
   };
   vm.createContext(sandbox);
   return sandbox;
