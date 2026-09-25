@@ -317,6 +317,62 @@ function runDailyRmIssueLogTests_() {
       DriveApp = realDriveForInt;
     }
 
+    // ---- 2026-09-25 (3rd 10M-cell incident): captureDailyRmIssues_ prunes
+    // Movement_Log UP FRONT, before the company scan and any write ----
+    const mlHeader = ['snapshot_at', 'snapshot_label', 'lead_id'];
+    function mlRow_(dateCell, tag) { return [dateCell, tag, 'L-' + tag]; }
+    const upFrontNow = new Date();
+    const realSsUp = SpreadsheetApp;
+    const realDriveUp = DriveApp;
+    const realReadLeadsTabUp = readLeadsTab_;
+    const realPruneMovementLogUp = pruneMovementLog_;
+    try {
+      // (a) Runs before the scan: the scan is made to throw, and the stale
+      // Movement_Log row must be gone anyway.
+      const upSs = TestMockSpreadsheet_({});
+      upSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      const upMl = TestMockSheet_('Movement_Log', [mlHeader, mlRow_(TestFixture_daysAgo_(upFrontNow, 10), 'ml-old'), mlRow_(TestFixture_daysAgo_(upFrontNow, 1), 'ml-recent')]);
+      upMl._maxRows = 20000;
+      upSs._sheets['Movement_Log'] = upMl;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return upSs; }, flush: function () {} };
+      DriveApp = TestMockDriveApp_();
+      readLeadsTab_ = function () { throw new Error('simulated scan failure'); };
+      TestAssertThrows_(function () { captureDailyRmIssues_(); }, 'captureDailyRmIssues_: the simulated scan failure still propagates (this fixture really does crash after the up-front prune)');
+      const upTags = upMl.getRange(2, 1, upMl.getLastRow() - 1, mlHeader.length).getValues().map(function (r) { return r[1]; });
+      TestAssertEqual_(upTags.indexOf('ml-old'), -1, 'captureDailyRmIssues_: Movement_Log\'s stale row is pruned BEFORE the company scan, so it is gone even though the scan then crashed');
+      TestAssert_(upTags.indexOf('ml-recent') >= 0, 'captureDailyRmIssues_: the up-front Movement_Log prune keeps rows still inside the retention window');
+      TestAssert_(upMl.getMaxRows() < 20000, 'captureDailyRmIssues_: the up-front prune also shrinks Movement_Log\'s row allocation, freeing workbook cells before the scan');
+      readLeadsTab_ = realReadLeadsTabUp;
+
+      // (b) A double-fire (Daily_RM_Issues already has today's rows) bails at
+      // the idempotency guard BEFORE paying for the Movement_Log prune.
+      const gdSs = TestMockSpreadsheet_({});
+      gdSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      gdSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader, prRow_(istDayKeyGs_(upFrontNow), 'already-today')]);
+      const gdMl = TestMockSheet_('Movement_Log', [mlHeader, mlRow_(TestFixture_daysAgo_(upFrontNow, 10), 'ml-old-guard')]);
+      gdMl._maxRows = 20000;
+      gdSs._sheets['Movement_Log'] = gdMl;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return gdSs; }, flush: function () {} };
+      captureDailyRmIssues_();
+      TestAssertEqual_(gdMl.getLastRow(), 2, 'captureDailyRmIssues_: an idempotency-guard early return does NOT run the Movement_Log prune (a double-fire stays cheap)');
+      TestAssertEqual_(gdMl.getMaxRows(), 20000, 'captureDailyRmIssues_: an idempotency-guard early return leaves Movement_Log\'s grid untouched');
+
+      // (c) A failing up-front prune must not block tonight's capture.
+      const pfSs = TestMockSpreadsheet_({});
+      pfSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return pfSs; }, flush: function () {} };
+      pruneMovementLog_ = function () { throw new Error('simulated Drive archive failure'); };
+      captureDailyRmIssues_();
+      const pfLog = pfSs.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
+      const pfTags = pfLog.getRange(2, 1, pfLog.getLastRow() - 1, prLogHeader.length).getValues().map(function (r) { return r[1]; });
+      TestAssert_(pfTags.indexOf('Test RM One') >= 0, 'captureDailyRmIssues_: a throwing up-front Movement_Log prune does not stop tonight\'s capture from being written');
+    } finally {
+      SpreadsheetApp = realSsUp;
+      DriveApp = realDriveUp;
+      readLeadsTab_ = realReadLeadsTabUp;
+      pruneMovementLog_ = realPruneMovementLogUp;
+    }
+
     // ---- RM Performance (Phase 4): reconstructRmPerformanceObservationsGs_
     // / aggregateRmPerformanceGs_ / classifyRmPerformanceGs_ against a
     // hand-seeded Movement_Log ----

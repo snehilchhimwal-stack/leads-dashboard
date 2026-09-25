@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `DailyRmIssueLog.gs` (1264 lines) |
+| **Location** | `DailyRmIssueLog.gs` (1272 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-22 against commit `2943ec9` (line-anchor resync only — weekly spot-check cycle 3) |
+| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — up-front Movement_Log prune added to `captureDailyRmIssues_` (see `EXC-099`) |
 
 ## Purpose / reason to exist
 
@@ -25,7 +25,9 @@ scoring from the editor.
 ## Responsibilities
 
 - `captureDailyRmIssues` / `captureDailyRmIssues_` — the nightly
-  census.
+  census. Since 2026-09-25 it first calls `pruneMovementLog_` (`GS-008`)
+  — after the idempotency guard, before the company scan — to free
+  Movement_Log's stale rows/grid before anything else runs (`EXC-099`).
 - `pruneDailyRmIssueLog_` — 7-day retention (added 2026-09-07 after a
   cell-limit incident; **fixed again 2026-09-19/21** — see `EXC-097`).
   Now archives dropped rows to Drive via `archiveRowsToDriveCsv_`
@@ -41,7 +43,7 @@ scoring from the editor.
 
 ## Trigger schedule
 
-`setupDailyRmIssueLog()` (`#L763`) installs `captureDailyRmIssues` on
+`setupDailyRmIssueLog()` (`#L771`) installs `captureDailyRmIssues` on
 `atHour(22).nearMinute(50).everyDays(1).inTimezone('Asia/Kolkata')`
 (`LOGIC_AUDIT.md` Part 1 §5). The leaderboard side
 (`reportRmPerformanceNow`) has **no trigger** — it is manual, editor-run.
@@ -59,14 +61,14 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-187 | `captureDailyRmIssues()` / `captureDailyRmIssues_()` `#L135/#L147` | `leads` tab, `Movement_Log` | appends a row per open SLA-flagged lead to `Daily_RM_Issues` | Sheets write in **chunks of `BACKFILL_CHUNK_SIZE_ = 5000`** (after a real 2026-09-01 incident where one oversized `setValues()` silently failed for a whole night); idempotency check now runs FIRST (2026-09-19), before pruning, so a double-fire bails out cheaply | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `ensureDailyRmIssueLogSheet_` (FN-188), `pruneDailyRmIssueLog_` (FN-188, now called AFTER `rows.length` is known, passing it in) | the 22:50 trigger; `captureDailyRmIssuesNow()` (manual) | specific — scheduled |
-| FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss, incomingRowCount)` / `pruneDailyRmIssueLogNow()` `#L101/#L260/#L340` | spreadsheet (+ the caller's about-to-be-written row count, added 2026-09-19) | ensures the tab; prunes rows older than 7 days, sizing the sheet's row grid to `kept.length + incomingRowCount + headroom` exactly (shrinks OR grows) | may create the tab; deletes/inserts rows; archives dropped rows to Drive via `archiveRowsToDriveCsv_` (`GS-002` FN-265) before clearing them | `archiveRowsToDriveCsv_` (`GS-002` FN-265) | FN-187 | specific — retention added 2026-09-07, the incoming-count sizing + archive fix added 2026-09-19/21 (`EXC-097`) |
-| FN-189 | `backfillDailyRmIssuesFromMovementLog_(ss)` / `backfillOneDayFromMovementLog_(ss, dayKey)` / `repairDailyRmIssuesMissingFieldsNow()` `#L379/#L521/#L651` | `Movement_Log` history | rebuilds past `Daily_RM_Issues` days | chunked Sheets writes | `_evidenceAtDeadlineGs_` (`GS-008`), `computeSlaFlags_` (`GS-012`) | manual recovery | specific |
-| FN-190 | `computeRmPerformanceGs_(ss)` `#L1208` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
-| FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L991/#L1077` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
-| FN-192 | `rmPerfCanonicalRmNameGs_(rawName)` / `rmPerformanceDrivenByGs_(r)` / `sortRmPerformanceByPriorityGs_(list)` `#L863/#L1218/#L1234` | RM name / a result row | canonical name / driver list / sorted list | none | — | FN-190 | reusable — twin of `JS-008` `rmPerfCanonicalRmName` etc. |
-| FN-193 | `computeRmPerfEligibilityGs_(row, colIndex, now)` / `_rmPerfDaysBetweenKeysGs_(a, b)` `#L958/#L946` | a row + now | the eligibility window (separately implemented — it does **not** reuse `computeSlaFlags_` for eligibility, only for pass/fail) | none | `istDayKeyGs_` (`GS-002`) | FN-191 | specific |
-| FN-194 | `computeRmPerfPeerAveragesGs_(byGroup)` / `classifyRmPerformanceGs_(byGroup)` `#L1124/#L1151` | per-group aggregates | peer-average baseline per rule → classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score | none | `RM_PERF_*_GS_` constants | FN-190 | specific — mirrors `JS-008` FN-055/FN-056 |
-| FN-195 | `reportRmPerformanceNow()` / `setupDailyRmIssueLog()` `#L1245/#L763` | — | **`Logger.log()` console output only** — no sheet write, no email / installs the trigger | console log / creates a trigger | FN-190 / `ScriptApp` | Apps Script editor (manual) / editor | specific |
+| FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss, incomingRowCount)` / `pruneDailyRmIssueLogNow()` `#L101/#L268/#L348` | spreadsheet (+ the caller's about-to-be-written row count, added 2026-09-19) | ensures the tab; prunes rows older than 7 days, sizing the sheet's row grid to `kept.length + incomingRowCount + headroom` exactly (shrinks OR grows) | may create the tab; deletes/inserts rows; archives dropped rows to Drive via `archiveRowsToDriveCsv_` (`GS-002` FN-265) before clearing them | `archiveRowsToDriveCsv_` (`GS-002` FN-265) | FN-187 | specific — retention added 2026-09-07, the incoming-count sizing + archive fix added 2026-09-19/21 (`EXC-097`) |
+| FN-189 | `backfillDailyRmIssuesFromMovementLog_(ss)` / `backfillOneDayFromMovementLog_(ss, dayKey)` / `repairDailyRmIssuesMissingFieldsNow()` `#L387/#L529/#L659` | `Movement_Log` history | rebuilds past `Daily_RM_Issues` days | chunked Sheets writes | `_evidenceAtDeadlineGs_` (`GS-008`), `computeSlaFlags_` (`GS-012`) | manual recovery | specific |
+| FN-190 | `computeRmPerformanceGs_(ss)` `#L1216` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
+| FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L999/#L1085` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
+| FN-192 | `rmPerfCanonicalRmNameGs_(rawName)` / `rmPerformanceDrivenByGs_(r)` / `sortRmPerformanceByPriorityGs_(list)` `#L871/#L1226/#L1242` | RM name / a result row | canonical name / driver list / sorted list | none | — | FN-190 | reusable — twin of `JS-008` `rmPerfCanonicalRmName` etc. |
+| FN-193 | `computeRmPerfEligibilityGs_(row, colIndex, now)` / `_rmPerfDaysBetweenKeysGs_(a, b)` `#L966/#L954` | a row + now | the eligibility window (separately implemented — it does **not** reuse `computeSlaFlags_` for eligibility, only for pass/fail) | none | `istDayKeyGs_` (`GS-002`) | FN-191 | specific |
+| FN-194 | `computeRmPerfPeerAveragesGs_(byGroup)` / `classifyRmPerformanceGs_(byGroup)` `#L1132/#L1159` | per-group aggregates | peer-average baseline per rule → classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score | none | `RM_PERF_*_GS_` constants | FN-190 | specific — mirrors `JS-008` FN-055/FN-056 |
+| FN-195 | `reportRmPerformanceNow()` / `setupDailyRmIssueLog()` `#L1253/#L771` | — | **`Logger.log()` console output only** — no sheet write, no email / installs the trigger | console log / creates a trigger | FN-190 / `ScriptApp` | Apps Script editor (manual) / editor | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -87,6 +89,7 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 | EXC-061 | `Daily_RM_Issues` grows past the workbook cell ceiling | `pruneDailyRmIssueLog_` trims to 7 days | (historical) a real cell-limit incident — fixed 2026-09-07 |
 | EXC-062 | a run takes very long / writes nothing | shows in Apps Script Executions; a documented past incident (~8 min, wrote nothing — `HANDOVER.md` §2/§9) | Repeat Offenders shows stale data until the next successful capture |
 | EXC-097 | `Daily_RM_Issues` hits the workbook's 10,000,000-cell ceiling again (2026-09-19, second real occurrence of the same bug class `GS-008`'s `EXC-XXX` first hit) | root cause: `pruneDailyRmIssueLog_` used to prune BEFORE `rows.length` was known, sizing the sheet to `kept.length` + a small FIXED headroom regardless of tonight's real volume (~26,660 rows/night) — the write right after had to expand the grid, which is what pushed the workbook over. Fixed: prune now runs AFTER `rows.length` is known, passed in as `incomingRowCount`, and the sheet is sized to fit exactly (shrinking OR growing) so the write never touches the grid | the nightly capture no longer crashes; dropped rows are also now archived to Drive (`archiveRowsToDriveCsv_`, `GS-002`) instead of just deleted |
+| EXC-099 | third 10,000,000-cell crash (2026-09-24 22:53 IST, thrown from `pruneDailyRmIssueLog_`'s own `insertRowsAfter` grow step): the workbook had no cell budget left. `snapshotOpenLeads_` (`GS-008`) writes new Movement_Log rows FIRST and prunes AFTER, and `snapshotPeriodic` had been failing/timing out since 2026-09-23 evening, so Movement_Log was likely going unpruned | `captureDailyRmIssues_` now calls `pruneMovementLog_` up front (after the idempotency guard so a double-fire stays cheap, before `readLeadsTab_`), wrapped in try/catch so a failing prune never blocks tonight's capture. Frees space only if Movement_Log actually holds rows older than its 7-day retention — `pruneMovementLog_` returns early (touches nothing) when nothing is stale, so an over-allocated-but-within-retention grid is NOT shrunk by this | the nightly capture gets a chance to free the biggest tab before it needs to grow `Daily_RM_Issues`; does not by itself cap the workbook's steady-state size (see `HANDOVER.md` §9.2) |
 
 ## Data lineage
 
@@ -208,6 +211,8 @@ Re-grepped every citation against current source and corrected (drift
 ranged from ~48 lines for functions before the growth to ~137 lines for
 functions after it); no functional/behavioral change, `Record Status`
 unaffected.
+
+**2026-09-25** (`SHA_PLACEHOLDER`): third 10M-cell incident — `captureDailyRmIssues_` now prunes Movement_Log up front (`EXC-099`); +8 lines (1264L → 1272L), every `#Lnn` anchor after the insertion point (line ~171) shifted +8 and was re-grepped. `Tests_DailyRmIssueLog.gs` gained 7 assertions (prune runs before the scan, skipped on an idempotency-guard early return, a throwing prune doesn't block the capture).
 
 ## Revalidation trigger
 

@@ -787,6 +787,33 @@ missed capture (2026-09-06) can still be recovered via
 `backfillOneDayFromMovementLogNow('2026-09-06')` as long as
 `Movement_Log`'s 7-day retention still covers that date.
 
+**2026-09-24 incident — third occurrence, and why pruning order matters
+across BOTH logs**: `captureDailyRmIssues` crashed again (22:53 IST,
+`DailyRmIssueLog.gs`'s `pruneDailyRmIssueLog_` → `insertRowsAfter`, the
+"grow to fit tonight" step added in the 2026-09-19 fix — it fails there BY
+DESIGN when the workbook has no budget left, rather than mid-write). The
+real cause was elsewhere: `snapshotOpenLeads_` (`MovementTracker.gs`)
+writes new `Movement_Log` rows FIRST and prunes AFTER, and `snapshotPeriodic`
+had been failing/timing out (Executions: last clean run 2026-09-23 12:44,
+then 6 failures + a 30-minute timeout), so `Movement_Log` — the largest tab
+— was likely going unpruned and the shared 10M budget kept shrinking. Same
+"an after-write prune can't self-heal" trap as §9.2 above, in the other log.
+**Fix**: `captureDailyRmIssues_` now calls `pruneMovementLog_` up front —
+after the idempotency guard (a double-fire stays cheap), before the company
+scan — in a try/catch so a failing prune never blocks tonight's capture.
+**Known limits, not fixed here**: (1) it only frees space if `Movement_Log`
+has rows older than its 7-day retention — `pruneMovementLog_` returns early,
+touching nothing, when none are stale, so an over-allocated grid within
+retention is not shrunk; (2) `snapshotOpenLeads_` itself still writes before
+it prunes (moving it needs an incoming-row-count sizing step like
+`pruneDailyRmIssueLog_`'s, since one run can write more than the 5000-row
+headroom); (3) nothing caps the workbook's steady-state size — the durable
+options are a separate log spreadsheet and a cell-budget alert in the
+Monday ops email. Recovery if it recurs: `pruneMovementLogNow()` then
+`pruneDailyRmIssueLogNow()` from the editor. Like every `.gs` change this
+must be pasted into the live Apps Script project; no `setupXxx()` re-run
+needed (no trigger changed).
+
 ### 9.3 Utility functions (console-callable, `DailyRmIssueLog.gs`)
 
 | Function | What it does |

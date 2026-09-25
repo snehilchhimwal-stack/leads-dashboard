@@ -169,6 +169,14 @@ function captureDailyRmIssues_() {
     }
   }
 
+  // Free Movement_Log's stale rows/grid BEFORE the scan or any write (2026-09-25, 3rd 10M-cell incident):
+  // snapshotOpenLeads_ prunes only AFTER its own write, so once it starts failing nothing ever shrinks it.
+  try {
+    pruneMovementLog_(ss);
+  } catch (e) {
+    Logger.log('Up-front Movement_Log prune failed (capture continues): ' + e);
+  }
+
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
   const baselineMap = movementMaps.baselineMap;
