@@ -338,8 +338,12 @@ incident, not standing functionality.
 what has been pasted into the editor, so `docs/STALENESS_TRACKER.md` carries
 a per-file **deploy register** (last commit confirmed pasted, and when).
 `python3 test/check-staleness.py` compares it against `git log` and flags any
-`.gs` commit newer than its confirmed paste as PENDING — update the row every
-time a paste is confirmed. The same tracker and script also catch drifted
+`.gs` commit newer than its confirmed paste as PENDING. Refresh the register
+by reading the live editor directly (`python3 test/match-live-gs.py`, hashes
+taken in Chrome — procedure in the tracker) rather than from memory. **The live
+project is the "Dashboard Google Leads" one owned by Sakshi Sonawane**; two
+identically named projects under Snehil's own account are stale 2026-09-12
+copies, so pasting into them changes nothing. The same tracker and script also catch drifted
 `#Lnn` anchors in `docs/` records, stale stated facts in `CLAUDE.md`/this file,
 and overdue recurring chores; the recurring `[Stale Sweep]` To-Do tasks
 (1st/11th/21st of each month) work through it.

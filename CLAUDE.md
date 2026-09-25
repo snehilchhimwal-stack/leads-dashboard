@@ -54,10 +54,16 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   edit in this repo is not live until you manually paste its full contents
   over the matching file there and save — this has caused more than one
   real "the fix is committed but the bug is still happening live" incident.
-  **Record every confirmed paste in the deploy register in
-  `docs/STALENESS_TRACKER.md`** (file, commit sha, date) — that table is how
-  a later session knows a `.gs` change is still undeployed; without it the
-  knowledge lives only in whoever pasted it.
+  **`docs/STALENESS_TRACKER.md` has a deploy register** (per file: last
+  commit confirmed live) — that table is how a later session knows a `.gs`
+  change is still undeployed. Don't trust it from memory: **read the live
+  editor directly from Chrome and match it to git with
+  `python3 test/match-live-gs.py`** (procedure in the tracker; only hashes
+  leave the browser). The live project is the one owned by Sakshi Sonawane —
+  the two identically named projects under Snehil's own account are stale
+  copies. Raw control characters in a `.gs` file (a NUL was silently turned
+  into a space on paste) are flagged by `check-staleness.py`; write them as
+  escapes.
   If you touched anything with a time trigger, re-run that file's
   `setupXxx()` once too (`HANDOVER.md` §4.3 for the full list).
 - **Logic is duplicated across the two runtimes on purpose** (browser can't

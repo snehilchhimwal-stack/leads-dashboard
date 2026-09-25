@@ -27,6 +27,12 @@ Detectors (each one exists because a real incident of that class happened):
   E  watch register           time-based items nothing else would notice
   F  uncommitted code         a code file modified with no matching record edit
   G  HANDOVER.md lag          code commits / days since HANDOVER.md last changed
+  H  raw control characters   a .gs source holding a raw NUL etc. -- pasting it into
+                              the Apps Script editor silently changes it (real
+                              incident: MovementTracker.gs, hash-separator NUL -> space)
+
+Companion: test/match-live-gs.py reads what is REALLY live (hashes taken from the
+editor in Chrome) and refreshes the deploy register that detector D compares against.
 """
 import os, re, sys, subprocess, datetime, importlib.util
 
@@ -269,8 +275,12 @@ def scan_deploys(tracker_text):
 
 
 # ------------------------------------------------------------------ E: watch register
-def _last_done(spec):
+def _last_done(spec, tracker_text=""):
     spec = spec.strip("` ")
+    if spec == "auto:deploy-register":
+        ds = [parse_date(r.get("Confirmed on", "")) for r in md_table(tracker_text, "Apps Script deploy register")]
+        ds = [d for d in ds if d]
+        return max(ds) if ds else None
     if spec.startswith("auto:git:"):
         return parse_date(git("log", "-1", "--format=%cs", "--", spec[len("auto:git:"):]))
     if spec == "auto:log:weekly-spot-check":
@@ -288,7 +298,7 @@ def scan_watch(tracker_text, today):
             ttl = int(re.sub(r'\D', '', r.get("TTL (days)", "")) or 0)
         except ValueError:
             ttl = 0
-        last = _last_done(r.get("Last done", ""))
+        last = _last_done(r.get("Last done", ""), tracker_text)
         if not item or not ttl:
             continue
         if last is None:
@@ -323,6 +333,15 @@ def scan_uncommitted(rows):
     return out
 
 
+def scan_control_chars():
+    out = []
+    for f in sorted(x for x in os.listdir(ROOT) if x.endswith(".gs") and ".private." not in x):
+        data = open(os.path.join(ROOT, f), "rb").read()
+        for m in re.finditer(rb'[\x00-\x08\x0b\x0c\x0e-\x1f]', data):
+            out.append(dict(file=f, line=data.count(b"\n", 0, m.start()) + 1, code="U+%04X" % m.group(0)[0]))
+    return out
+
+
 def scan_handover_lag(today):
     sha = git("log", "-1", "--format=%h", "--", "HANDOVER.md")
     if not sha:
@@ -348,12 +367,13 @@ def build(today):
     return dict(rows=rows, anchors=anchors, astats=astats, drift_notes=drift_notes, recs=recs,
                 drifted_ids=drifted_ids, facts=scan_facts(), deploys=scan_deploys(tracker),
                 watch=scan_watch(tracker, today), uncommitted=scan_uncommitted(rows),
-                handover=scan_handover_lag(today))
+                handover=scan_handover_lag(today), ctrl=scan_control_chars())
 
 
 def summarize(R):
     stale = (len([a for a in R["anchors"]]) + len([n for n in R["drift_notes"] if re.match(r'[A-Z]{2,6}-\d{3}:', n)])
-             + len(R["facts"]) + len([d for d in R["deploys"] if d["state"] in ("PENDING", "BAD-SHA", "NO-ROW")])
+             + len(R["facts"]) + len(R["ctrl"])
+             + len([d for d in R["deploys"] if d["state"] in ("PENDING", "BAD-SHA", "NO-ROW")])
              + len([w for w in R["watch"] if w["state"] == "OVERDUE"])
              + (1 if R["handover"] and R["handover"]["state"] == "OVERDUE" else 0))
     overdue = [r for r in R["recs"] if r["left"] < 0 and r["cid"] not in R["drifted_ids"]]
@@ -413,6 +433,11 @@ def lines_report(R, today, cap=12):
     if h:
         L.append("G. HANDOVER.md: last changed %s (%s); %d code commit(s) and %dd since -> %s" % (
             h["sha"], h["date"], h["commits"], h["days"], h["state"]))
+    L.append("")
+    L.append("H. Raw control characters in .gs sources: %d" % len(R["ctrl"]))
+    for c in R["ctrl"]:
+        L.append("   STALE  %s line %d holds a raw %s -- the editor changes it on paste; write it as an escape" % (
+            c["file"], c["line"], c["code"]))
     L.append("")
     L.append("SUMMARY: STALE %d | OVERDUE-records %d | AT-RISK %d" % (stale, n_over, risk))
     return L, stale
