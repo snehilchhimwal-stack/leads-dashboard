@@ -154,7 +154,14 @@ const CONTENT_HASH_COLUMN_ = 'content_hash';
 // identical instant. This is NOT cosmetic: the two writers must hash an
 // identical lead to an identical digest, or dedup silently breaks across
 // runtimes (each treats the other's capture as "different" forever).
-const CONTENT_HASH_DATE_FIELDS_ = { lead_assigned_at: true, last_connect_time: true, opp_at: true };
+//
+// The separator is written as the escape '\u0000', NEVER a literal NUL
+// byte in this file: pasting a raw NUL into the Apps Script editor
+// silently turns it into a space, and until 2026-09-25 that is what the
+// live copy was hashing with — so its digests differed from the
+// browser's ('\0') for every lead. test/check-staleness.py (detector H)
+// flags any raw control character in a .gs file for this reason.
+const CONTENT_HASH_DATE_FIELDS_ ={ lead_assigned_at: true, last_connect_time: true, opp_at: true };
 function _leadContentHashGs_(getFieldValue) {
   const parts = SNAPSHOT_COLUMNS_.map(function (key) {
     const v = getFieldValue(key);
@@ -163,7 +170,7 @@ function _leadContentHashGs_(getFieldValue) {
     }
     return v === null || v === undefined ? '' : String(v);
   });
-  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, parts.join(' '));
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, parts.join('\u0000'));
   return bytes.map(function (b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
 }
 
@@ -207,17 +214,32 @@ function ensureMovementLogSheet_(ss) {
     // start writing values into that trailing column position — without
     // this, the dashboard's header-label lookup (and this script's own
     // buildColIndex_) would never find the label and read every value in
-    // that column as blank. Appends whatever's missing at the end, which
-    // stays correctly aligned as long as new fields are always appended
-    // to SNAPSHOT_COLUMNS_ rather than inserted mid-array (see its
-    // comment). Re-checked on every call — cheap, idempotent.
+    // that column as blank. New fields are always appended to
+    // SNAPSHOT_COLUMNS_ rather than inserted mid-array (see its comment),
+    // so a missing field belongs immediately BEFORE content_hash — the
+    // writers put every field first and the hash last. When the hash
+    // column already exists the header is therefore INSERTED there, which
+    // also shifts every old row's hash right with its header. Appending
+    // at the end instead put the new label AFTER content_hash while the
+    // writers put the value BEFORE it: a one-column offset that made the
+    // dedup read opp_at where it expected the hash, so every lead was
+    // re-appended on every run (2026-09-22 to 09-25; see HANDOVER.md §8).
+    // Re-checked on every call — cheap, idempotent.
     const lastCol = sheet.getLastColumn();
     const existingHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
     const existingSet = {};
-    existingHeaders.forEach(function (h) { existingSet[String(h || '').trim()] = true; });
+    const trimmedHeaders = existingHeaders.map(function (h) { return String(h || '').trim(); });
+    trimmedHeaders.forEach(function (h) { existingSet[h] = true; });
     const missing = fullHeaders.filter(function (h) { return !existingSet[h]; });
     if (missing.length) {
-      sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+      const hashPos = trimmedHeaders.indexOf(CONTENT_HASH_COLUMN_) + 1; // 1-based; 0 = no hash column yet
+      const fieldsMissing = missing.filter(function (h) { return h !== CONTENT_HASH_COLUMN_; });
+      if (hashPos > 0 && fieldsMissing.length) {
+        sheet.insertColumnsBefore(hashPos, fieldsMissing.length);
+        sheet.getRange(1, hashPos, 1, fieldsMissing.length).setValues([fieldsMissing]);
+      } else {
+        sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+      }
     }
   }
 
@@ -241,6 +263,27 @@ function ensureMovementLogSheet_(ss) {
   sheet.getRange(2, oppAtCol, formatRows, 1).setNumberFormat(DATETIME_FORMAT);
 
   return sheet;
+}
+
+// Refuses to append into a Movement_Log whose header is not laid out the
+// way the writers lay rows out (snapshot_at, snapshot_label, every
+// SNAPSHOT_COLUMNS_ field in order, then content_hash). A misaligned
+// header does not fail loudly on its own: rows still append, the dedup
+// just reads the wrong column and re-appends every lead on every run —
+// which is how ~52k junk rows accumulated over 09-22..09-23 before
+// anyone noticed. Failing the run instead is visible (Execution log,
+// checkMovementLogFreshness_) and loses nothing: the next run captures
+// the same leads once the header is fixed.
+function assertMovementLogHeaderAligned_(sheet) {
+  const want = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_).concat([CONTENT_HASH_COLUMN_]);
+  const got = sheet.getRange(1, 1, 1, want.length).getValues()[0];
+  for (let i = 0; i < want.length; i++) {
+    const actual = String(got[i] === undefined || got[i] === null ? '' : got[i]).trim();
+    if (actual !== want[i]) {
+      throw new Error('Movement_Log header column ' + (i + 1) + ' is "' + actual + '" but the writers put "' + want[i] +
+        '" there - refusing to append rows into a misaligned sheet (see HANDOVER.md section 8, 2026-09-25 incident).');
+    }
+  }
 }
 
 // ==================== SLA_History (automatic, no dashboard needed) ====================
@@ -554,6 +597,7 @@ function snapshotOpenLeads_(label) {
 
   if (out.length) {
     const logSheet = ensureMovementLogSheet_(ss);
+    assertMovementLogHeaderAligned_(logSheet);
     const startRow = logSheet.getLastRow() + 1;
     logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
   }

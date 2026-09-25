@@ -1084,6 +1084,19 @@
     }
   }
 
+  // ---- Cross-runtime content-hash parity (2026-09-25 incident) ----
+  // The SAME known-answer vector Tests_MovementTracker.gs asserts against
+  // _leadContentHashGs_: SHA-256 over SNAPSHOT_FIELD_KEYS' values joined with
+  // a real NUL, lead_id 'L-1', call_attempts 7, every other field blank. The
+  // live Apps Script copy hashed with a space here until 2026-09-25, so the
+  // two runtimes disagreed on every lead and dedup broke across writers.
+  // Recompute BOTH copies together whenever SNAPSHOT_COLUMNS_ changes.
+  if (typeof leadContentHash === 'function') {
+    const parityHash = await leadContentHash({ lead_id: 'L-1', call_attempts: 7 });
+    assert('leadContentHash matches the shared known-answer vector Tests_MovementTracker.gs asserts against the Apps Script twin',
+      parityHash === 'd692122a3012092b490e4d7bf0a0e6a19c617af2d8f0d69672ac0d7f5bce5210', 'got ' + parityHash);
+  }
+
   statusEl.textContent = 'Done: ' + results.pass + ' passed, ' + results.fail + ' failed.';
   statusEl.style.color = results.fail ? '#ff5d5d' : '#4ade80';
   window.__harnessResults = results;

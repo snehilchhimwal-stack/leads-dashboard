@@ -38,6 +38,47 @@ function runMovementTrackerTests_() {
     const healedHeader = healedSheet.getRange(1, 1, 1, healedSheet.getLastColumn()).getValues()[0];
     TestAssertContains_(healedHeader.join(','), SNAPSHOT_COLUMNS_[SNAPSHOT_COLUMNS_.length - 1], 'ensureMovementLogSheet_: self-heals a missing trailing header column on an existing sheet');
 
+    // ---- 2026-09-25 regression: content_hash ALREADY exists and a NEW
+    // SNAPSHOT_COLUMNS_ field is missing (the exact shape opp_at hit in
+    // production). The old self-heal appended the new header AFTER
+    // content_hash while every writer puts the value BEFORE it, so the
+    // dedup read the wrong column and re-appended every lead on every
+    // run (~52k junk rows, 09-22..09-23). The test above only covered a
+    // sheet with NO content_hash column yet, which is why this slipped. ----
+    const legacyHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_.slice(0, -1)).concat(['content_hash']);
+    const legacyRow = function (hash) { return [now, 'legacy'].concat(SNAPSHOT_COLUMNS_.slice(0, -1).map(function () { return 'v'; })).concat([hash]); };
+    const legacySs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [legacyHeader, legacyRow('HASH-A'), legacyRow('HASH-B')]) });
+    const legacyHealed = ensureMovementLogSheet_(legacySs);
+    const canonicalHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_).concat(['content_hash']);
+    TestAssertEqual_(legacyHealed.getRange(1, 1, 1, canonicalHeader.length).getValues()[0].join(','), canonicalHeader.join(','), 'ensureMovementLogSheet_ (2026-09-25 regression): a sheet that already has content_hash gets the missing field header INSERTED before it — the exact canonical order every writer uses, not appended after the hash');
+    TestAssertEqual_(legacyHealed.getLastColumn(), canonicalHeader.length, 'ensureMovementLogSheet_ (2026-09-25 regression): no stray extra column is left behind');
+    const healedRow2 = legacyHealed.getRange(2, 1, 1, canonicalHeader.length).getValues()[0];
+    TestAssertEqual_(healedRow2[canonicalHeader.length - 1], 'HASH-A', 'ensureMovementLogSheet_ (2026-09-25 regression): an existing row keeps its hash under content_hash (shifted right together with its header)');
+    TestAssertEqual_(healedRow2[2 + SNAPSHOT_COLUMNS_.indexOf('opp_at')], '', 'ensureMovementLogSheet_ (2026-09-25 regression): the newly inserted column is blank for a row written before it existed');
+
+    // assertMovementLogHeaderAligned_: the canonical header passes; the
+    // exact broken shape (content_hash, then the appended opp_at) throws.
+    let canonicalThrew = false;
+    try { assertMovementLogHeaderAligned_(legacyHealed); } catch (e) { canonicalThrew = true; }
+    TestAssert_(!canonicalThrew, 'assertMovementLogHeaderAligned_: a canonical header passes');
+    const misalignedSheet = TestMockSheet_('Movement_Log', [legacyHeader.concat(['opp_at'])]);
+    let misalignedMsg = '';
+    try { assertMovementLogHeaderAligned_(misalignedSheet); } catch (e) { misalignedMsg = String(e); }
+    TestAssertContains_(misalignedMsg, 'refusing to append', 'assertMovementLogHeaderAligned_: the 2026-09-22 shape (opp_at header appended after content_hash) is refused, not silently written into');
+
+    // Cross-runtime hash parity: a fixed known-answer vector, asserted
+    // identically against js/sheets-writeback.js's leadContentHash in
+    // tests/frontend-harness.html. Derived independently (Python, SHA-256
+    // over the field list joined with a real NUL, lead_id 'L-1',
+    // call_attempts 7, everything else blank). It changes whenever
+    // SNAPSHOT_COLUMNS_ changes -- recompute it AND update the harness
+    // copy together. The second value is what the live copy computed
+    // until 2026-09-25 (a space where the NUL belongs), pinned so the
+    // separator cannot silently regress to it.
+    const hashVector = _leadContentHashGs_(function (k) { return ({ lead_id: 'L-1', call_attempts: 7 })[k]; });
+    TestAssertEqual_(hashVector, 'd692122a3012092b490e4d7bf0a0e6a19c617af2d8f0d69672ac0d7f5bce5210', '_leadContentHashGs_: known-answer vector (NUL-joined) matches the independently computed digest — and the browser\'s leadContentHash asserts the SAME value');
+    TestAssert_(hashVector !== 'e13e3a113deee08175291af6284d5fafea98b0621cddcdcd7668c8ce6230b99f', '_leadContentHashGs_: does not hash with a space in place of the NUL (the 2026-09-25 live-copy corruption)');
+
     // ---- _leadContentHashGs_ / Utilities.computeDigest: correctness
     // against real, external NIST SHA-256 test vectors, not just "the
     // mock doesn't crash" — a subtly-wrong hash implementation would
@@ -101,6 +142,27 @@ function runMovementTrackerTests_() {
     const oppAtColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('opp_at');
     const oppAtRow = afterSnap.getRange(5, 1, 1, afterSnap.getLastColumn()).getValues()[0];
     TestAssert_(oppAtRow[oppAtColIdx] instanceof Date, 'snapshotOpenLeads_: opp_at lands in Movement_Log as a real Date value, matching lead_assigned_at/last_connect_time\'s own handling');
+
+    // ---- 2026-09-25 regression, end to end: a Movement_Log whose header
+    // has content_hash and opp_at in the WRONG order (what production had
+    // for three days) must make the capture fail loudly and append
+    // nothing — not re-append every lead. Then, with the header restored,
+    // an unchanged repeat capture must write zero rows again. ----
+    const misalignedLog = ss.getSheetByName('Movement_Log');
+    const goodHeaderRow = misalignedLog.getRange(1, 1, 1, misalignedLog.getLastColumn()).getValues()[0];
+    const badHeaderRow = goodHeaderRow.slice();
+    const lastTwo = badHeaderRow.length - 2;
+    badHeaderRow[lastTwo] = 'content_hash';
+    badHeaderRow[lastTwo + 1] = 'opp_at';
+    misalignedLog.getRange(1, 1, 1, badHeaderRow.length).setValues([badHeaderRow]);
+    const rowsBeforeMisaligned = misalignedLog.getLastRow();
+    let misalignedRunMsg = '';
+    try { snapshotOpenLeads_('test snapshot label — misaligned header'); } catch (e) { misalignedRunMsg = String(e); }
+    TestAssertContains_(misalignedRunMsg, 'refusing to append', 'snapshotOpenLeads_ (2026-09-25 regression): with content_hash/opp_at in the wrong header order the capture FAILS LOUDLY instead of silently re-appending every lead');
+    TestAssertEqual_(misalignedLog.getLastRow(), rowsBeforeMisaligned, 'snapshotOpenLeads_ (2026-09-25 regression): the refused capture appended nothing');
+    misalignedLog.getRange(1, 1, 1, goodHeaderRow.length).setValues([goodHeaderRow]);
+    snapshotOpenLeads_('test snapshot label — header restored, unchanged');
+    TestAssertEqual_(misalignedLog.getLastRow(), rowsBeforeMisaligned, 'snapshotOpenLeads_ (2026-09-25 regression): once the header is restored an unchanged repeat capture writes ZERO rows again (dedup reads the real hash column)');
 
     // ---- buildTodayCallBaselineGs_ / lastSnapshotBeforeGs_ ----
     // Seed Movement_Log with a snapshot from clearly BEFORE today, to test the baseline reads.

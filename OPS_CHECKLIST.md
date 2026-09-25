@@ -99,6 +99,14 @@ clean pass/fail, or genuinely can't be automated (a live cross-runtime
 **immediately after any RM-roster or org-chart change** (new hire,
 departure, promotion, reporting-line change).
 
+### Movement_Log dedup health (manual, added 2026-09-25)
+
+Movement_Log's content-hash dedup fails *silently* — rows still append, there is just one for every lead every run. Weekly, and after any change to `MovementTracker.gs` / `js/sheets-writeback.js` / `SNAPSHOT_COLUMNS_`:
+
+1. Read `Movement_Log_Runs` (small tab): `leads_changed` should be a small fraction of `lead_count_seen` on ordinary runs. **~100% on consecutive runs = broken** (the 2026-09-22 → 09-25 incident: ~52k junk rows before anyone noticed). From a signed-in Chrome tab on docs.google.com: `fetch('/spreadsheets/d/<id>/gviz/tq?tqx=out:csv&sheet=Movement_Log_Runs&tq=select *', {credentials:'include'})`.
+2. Confirm `Movement_Log`'s header ends `…, opp_at, content_hash` (last two columns, in that order) and that a newest row has a date/blank under `opp_at` and a 64-character hash under `content_hash`.
+3. After any change to `SNAPSHOT_COLUMNS_`, the known-answer hash vector in `Tests_MovementTracker.gs` and `tests/frontend-harness.html` must be recomputed **together**.
+
 ### RM hierarchy routing
 
 - [ ] **`auditUnresolvedRmsNow()`** (`RmHierarchy.gs`, pre-existing,
