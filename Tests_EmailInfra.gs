@@ -177,6 +177,28 @@ function runEmailInfraTests_() {
     // which deliberately excludes leadership from this class of email.
     TestAssertEqual_(resolution.results[0].cc, undefined, 'resolveRecipientEmailsForRegion_: CH-level backstop no longer Cc\'s ALWAYS_CC_EMAILS_ (leadership) — matches the sibling backstop\'s own "not leadership" rule');
 
+    // ---- Futwork override (2026-09-25): any RM whose name contains
+    // "Futwork" is emailed ONLY at FUTWORK_ROUTE_EMAIL_ — never a manager
+    // chain, the legacy Region_Recipients fallback, the CH backstop, or a Cc ----
+    TestAssert_(isFutworkRmNameGs_('Kajal Futwork') && isFutworkRmNameGs_('Deepali Tharwani Futwork') && isFutworkRmNameGs_('foram FUTWORK') && isFutworkRmNameGs_('Futwork Agent 1'), 'isFutworkRmNameGs_: matches "Futwork" anywhere in the name, case-insensitively');
+    TestAssert_(!isFutworkRmNameGs_('Test RM One') && !isFutworkRmNameGs_('') && !isFutworkRmNameGs_(null) && !isFutworkRmNameGs_(undefined), 'isFutworkRmNameGs_: does not match ordinary, blank, or missing names');
+    resolution = resolveRecipientEmailsForRegion_(ss, 'Pune', ['Test RM One', 'Kajal Futwork', 'foram FUTWORK'], loadRegionRecipients_(ss), { fireAlerts: false });
+    const fwBuckets = resolution.results.filter(function (r) { return r.bucketLabel === 'Futwork'; });
+    TestAssertEqual_(fwBuckets.length, 1, 'resolveRecipientEmailsForRegion_: every Futwork-named RM in a region lands in ONE dedicated Futwork bucket');
+    TestAssertEqual_(fwBuckets[0].to, FUTWORK_ROUTE_EMAIL_, 'resolveRecipientEmailsForRegion_: the Futwork bucket goes to FUTWORK_ROUTE_EMAIL_');
+    TestAssertEqual_(fwBuckets[0].cc, undefined, 'resolveRecipientEmailsForRegion_: the Futwork bucket has NO Cc (not even ALWAYS_CC_EMAILS_)');
+    TestAssertEqual_(JSON.stringify(fwBuckets[0].rmNames.slice().sort()), JSON.stringify(['Kajal Futwork', 'foram FUTWORK']), 'resolveRecipientEmailsForRegion_: the Futwork bucket carries exactly the Futwork RM names');
+    const fwOthers = resolution.results.filter(function (r) { return r.bucketLabel !== 'Futwork'; });
+    TestAssertEqual_(fwOthers.length, 1, 'resolveRecipientEmailsForRegion_: a non-Futwork RM in the same call still resolves normally alongside the Futwork bucket');
+    TestAssert_(fwOthers.every(function (r) { return r.rmNames.every(function (n) { return !isFutworkRmNameGs_(n); }); }), 'resolveRecipientEmailsForRegion_: no Futwork RM leaks into any regular bucket');
+    resolution = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Kajal Futwork'], {}, { fireAlerts: false });
+    TestAssertEqual_(resolution.results.length, 1, 'resolveRecipientEmailsForRegion_: a Futwork RM alone yields exactly one result');
+    TestAssertEqual_(resolution.results[0].bucketLabel, 'Futwork', 'resolveRecipientEmailsForRegion_: with no fallback configured, a Futwork RM still goes to the Futwork bucket — NOT the CH-level backstop');
+    TestAssertEqual_(resolution.trulyUnresolved.length, 0, 'resolveRecipientEmailsForRegion_: a Futwork RM is never reported as truly unresolved');
+    resolution = resolveRecipientEmailsForRegion_(ss, 'Pune', ['Kajal Futwork'], loadRegionRecipients_(ss), { fireAlerts: false });
+    TestAssertEqual_(resolution.results.length, 1, 'resolveRecipientEmailsForRegion_: a configured Region_Recipients fallback does not add a second bucket for a Futwork RM');
+    TestAssertEqual_(resolution.results[0].cc, undefined, 'resolveRecipientEmailsForRegion_: a configured Region_Recipients fallback never adds a Cc to a Futwork RM');
+
     // ---- resolveRecipientEmailsForRegion_: opts.hierarchyData + the new
     // chLevelRms field on its own result (perf pass, 2026-08-28) — a
     // caller that loads RM_Hierarchy/Manager_Directory once per run and

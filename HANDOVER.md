@@ -309,6 +309,7 @@ real people/addresses, hardcoded — update on personnel change):
 | `OPS_ALERT_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | Where ops/failure alerts (e.g. a send failure) go. |
 | `CH_LEVEL_EMAIL_` | `EmailInfra.gs` | `ashish.ivlekar@homesfy.in` | Fallback CH-level routing address — used both for a real top-of-org person personally holding a lead, and (since 2026-09-01) as the last-resort backstop when an RM name doesn't resolve anywhere (departed employee, unaliased spelling variant) AND that region has no `Region_Recipients` fallback configured either, so a broken chain still reaches someone instead of the lead being silently dropped. See `resolveRecipientEmailsForRegion_`'s own comment (`EmailInfra.gs`). |
 | `ALWAYS_CC_EMAILS_` | `RmHierarchy.gs` | `ashish.kukreja@homesfy.in`, `saurabh.mishra@homesfy.in` | CC'd on every region issue email, regardless of region — **except** the `CH_LEVEL_EMAIL_` backstop above when NEITHER `RM_Hierarchy` nor `Region_Recipients` resolves an RM at all (fixed 2026-09-24, real production case — see `EmailInfra.gs`'s own comment on `resolveRecipientEmailsForRegion_`): that specific "couldn't route this at all" email deliberately excludes leadership, matching the sibling CH-level-personally-holds-a-lead backstop's own long-standing rule. |
+| `FUTWORK_ROUTE_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | The ONLY recipient for any RM whose name contains "Futwork" (tele-calling vendor agents, added 2026-09-25) — one dedicated `Futwork` bucket per region, no Cc, bypassing `RM_Hierarchy`, `Region_Recipients`, the `CH_LEVEL_EMAIL_` backstop and `ALWAYS_CC_EMAILS_`. Applied inside `resolveRecipientEmailsForRegion_`, so both the 17:00 and 10:00 emails inherit it. |
 | `TEST_MODE_OVERRIDE_EMAIL_` | `EmailInfra.gs` | `''` (empty) | Safety valve: if set to a real address, **every** real send (not just tests) redirects there instead of real recipients. Leave empty in production; useful for a live smoke-test without running the mock suite. |
 
 Also worth knowing: **console-only utilities**, callable from the Apps
@@ -668,6 +669,15 @@ test) Sheet, and use the browser console directly.
   human HAS configured an address for that region) still CC's leadership,
   unchanged — only the total-backstop case was wrong. See §4.3's own
   `ALWAYS_CC_EMAILS_` row.
+- **A "Futwork" RM's leads reach someone other than Snehil** (the RM's name
+  contains "Futwork", e.g. "Kajal Futwork"): by rule they go ONLY to
+  `FUTWORK_ROUTE_EMAIL_` (`EmailInfra.gs`), one `Futwork` bucket per region.
+  Before 2026-09-25 they fell into the "Unmatched RMs (backstop)" email to
+  `CH_LEVEL_EMAIL_` because they aren't in `RM_Hierarchy`. If one still
+  lands elsewhere, check that the live `EmailInfra.gs` has been re-pasted
+  (a `.gs` edit isn't live until then), and remember Section 2 / 13:00
+  follow-ups reuse the recipient STORED at 17:00, so rows logged before the
+  rule was live keep their old routing.
 - **This whole §8 list is reactive** — real incidents, found after the
   fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
   counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`

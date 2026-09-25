@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `EmailInfra.gs` (559 lines) |
+| **Location** | `EmailInfra.gs` (570 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-24 against commit `8fe9714` — CH-level backstop Cc fix (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — Futwork routing override (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -48,15 +48,16 @@ Never — no `setupXxx()`, no schedule.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-196 | `withRetry_(fn, label)` / `withSendRetry_(fn, label)` `#L193/#L239` | a fn + a label | the fn's result, retried on transient failure with backoff | logs each retry; may raise after exhausting attempts | — | every scheduled read/send in `GS-001` / `GS-008` / `GS-010` / `GS-011` | reusable — the retry backbone |
-| FN-197 | `readLeadsTab_(ss)` `#L438` | spreadsheet | the parsed `leads` rows + a column index | one Sheets read | `buildColIndex_` (`GS-002`), `HEADER_ALIASES_` | every scheduled emailer | reusable — the one backend leads read |
-| FN-198 | `resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts)` `#L336` | region + RM names | the `{to, cc}` for that region's email | reads `Region_Recipients` + `RM_Hierarchy` / `Manager_Directory` | `loadRegionRecipients_` (FN-199), `resolveRecipientBucketsForRms_` (`GS-011`) | `GS-001`, `GS-010` | reusable — **the single recipient-resolution point for every scheduled email** |
-| FN-199 | `loadRegionRecipients_(ss)` / `ensureRegionRecipientsSheet_(ss)` `#L414/#L273` | spreadsheet | the region→recipients map; ensures the tab | may create `Region_Recipients` | — | FN-198 | reusable |
-| FN-200 | `mainRegionForGs_(rawRegion)` / `normRegionKeyGs_(s)` `#L149/#L144` | a raw region | the normalised main region | none | `REGION_GROUP_MAP_` | every scheduled emailer, `GS-008` | reusable — **twin of `mainRegionFor` / `normRegionKey` (`JS-014`)** |
-| FN-201 | `passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw)` `#L166` | source fields | bool | none | — | `GS-001`, `GS-010`, `GS-011` | reusable — the source filter for the scheduled digests |
-| FN-202 | `renderOvernightReportEmailHTML_(opts)` `#L509` | report options | the HTML email body | none | `esc_` (`GS-002`) | `GS-001`, `GS-010` | reusable — the shared email template |
-| FN-203 | `notifyOpsAlertGs_(subject, bodyLines)` / `notifyLeadSendFailuresGs_(entries)` `#L72/#L94` | alert content | sends an ops-alert email | Gmail send | `withSendRetry_` (FN-196) | error paths in every scheduled file | reusable |
-| FN-204 | `groupChLevelRmsByCh_(chLevelRms)` / `splitSelfAndReportingRmNames_(chName, rmNames)` / `groupLeadsByRmAndFlatten_(rmNames, rmToLeads)` `#L463/#L477/#L488` | RM/CH names + leads | CH-level grouping for the "blank chain" rollup emails | none | — | `GS-001`, `GS-010` | reusable |
+| FN-196 | `withRetry_(fn, label)` / `withSendRetry_(fn, label)` `#L198/#L244` | a fn + a label | the fn's result, retried on transient failure with backoff | logs each retry; may raise after exhausting attempts | — | every scheduled read/send in `GS-001` / `GS-008` / `GS-010` / `GS-011` | reusable — the retry backbone |
+| FN-197 | `readLeadsTab_(ss)` `#L449` | spreadsheet | the parsed `leads` rows + a column index | one Sheets read | `buildColIndex_` (`GS-002`), `HEADER_ALIASES_` | every scheduled emailer | reusable — the one backend leads read |
+| FN-198 | `resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients, opts)` `#L341` | region + RM names | the `{to, cc}` for that region's email | reads `Region_Recipients` + `RM_Hierarchy` / `Manager_Directory` | `loadRegionRecipients_` (FN-199), `resolveRecipientBucketsForRms_` (`GS-011`) | `GS-001`, `GS-010` | reusable — **the single recipient-resolution point for every scheduled email** |
+| FN-199 | `loadRegionRecipients_(ss)` / `ensureRegionRecipientsSheet_(ss)` `#L425/#L278` | spreadsheet | the region→recipients map; ensures the tab | may create `Region_Recipients` | — | FN-198 | reusable |
+| FN-200 | `mainRegionForGs_(rawRegion)` / `normRegionKeyGs_(s)` `#L154/#L149` | a raw region | the normalised main region | none | `REGION_GROUP_MAP_` | every scheduled emailer, `GS-008` | reusable — **twin of `mainRegionFor` / `normRegionKey` (`JS-014`)** |
+| FN-201 | `passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw)` `#L171` | source fields | bool | none | — | `GS-001`, `GS-010`, `GS-011` | reusable — the source filter for the scheduled digests |
+| FN-202 | `renderOvernightReportEmailHTML_(opts)` `#L520` | report options | the HTML email body | none | `esc_` (`GS-002`) | `GS-001`, `GS-010` | reusable — the shared email template |
+| FN-203 | `notifyOpsAlertGs_(subject, bodyLines)` / `notifyLeadSendFailuresGs_(entries)` `#L77/#L99` | alert content | sends an ops-alert email | Gmail send | `withSendRetry_` (FN-196) | error paths in every scheduled file | reusable |
+| FN-204 | `groupChLevelRmsByCh_(chLevelRms)` / `splitSelfAndReportingRmNames_(chName, rmNames)` / `groupLeadsByRmAndFlatten_(rmNames, rmToLeads)` `#L474/#L488/#L499` | RM/CH names + leads | CH-level grouping for the "blank chain" rollup emails | none | — | `GS-001`, `GS-010` | reusable |
+| FN-281 | `isFutworkRmNameGs_(name)` `#L70` | an RM name | bool — does the name contain "Futwork" (case-insensitive)? | none | — | FN-198 | reusable — the single definition of "is this a Futwork-named RM" (added 2026-09-25) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -66,6 +67,7 @@ Never — no `setupXxx()`, no schedule.
 | CFG-038 | `REGION_GROUP_MAP_` | region-group map | region normalisation | `mainRegionForGs_`; **twin `REGION_GROUP_MAP` (`JS-014` RULE-017)** — audited consistent (`LOGIC_AUDIT.md` Part 4 §4.3) |
 | CFG-039 | `TEST_MODE_OVERRIDE_EMAIL_` `#L43` | `''` (unset) | if set, redirects **every** scheduled-email recipient to one address, silently | `resolveRecipientEmailsForRegion_` — the backend twin of the `reports-ui.js` footgun (`JS-016` CFG-024); `LOGIC_AUDIT.md` Part 1 §4d / Part 6 |
 | CFG-040 | `ALWAYS_CC_EMAILS_` | a CC list | addresses CC'd on every scheduled email — **except** the CH-level backstop path (`bucketLabel: 'Unmatched RMs (backstop)'`, no `RM_Hierarchy` match and no `Region_Recipients` fallback either), fixed 2026-09-24 to deliberately exclude leadership, matching the sibling `notifyChLevelLeadsGs_`/`notifyChLevelIssuesGs_` backstop's own "not leadership" rule | recipient resolution |
+| CFG-067 | `FUTWORK_ROUTE_EMAIL_` `#L69` | `snehil.chhimwal@homesfy.in` | the ONLY address any RM whose name contains "Futwork" (tele-calling vendor agents) is ever emailed — never their manager chain, `Region_Recipients`, the CH backstop, or `ALWAYS_CC_EMAILS_`; a `let`, overridden in `Tests_Mocks.gs` like `OPS_ALERT_EMAIL_` (added 2026-09-25) | recipient resolution (`resolveRecipientEmailsForRegion_`, so both `GS-001`'s 17:00 and `GS-010`'s 10:00 sends) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -181,6 +183,8 @@ the exception. File grew 552L → 559L (+7); every `#Lnn` citation in
 this record re-grepped and corrected. `Tests_EmailInfra.gs` gained 1 new
 assertion locking in `cc === undefined` for this exact branch. 899/899
 local `.gs` tests pass (+1 new).
+
+**2026-09-25** (`SHA_PLACEHOLDER`): any RM whose name contains "Futwork" is now pulled OUT of `resolveRecipientBucketsForRms_` and emailed only at `FUTWORK_ROUTE_EMAIL_` (`CFG-067`, `FN-281`), as ONE dedicated bucket per region (`bucketLabel: 'Futwork'`, no Cc, no `Region_Recipients`/CH-backstop/`ALWAYS_CC_EMAILS_`). Motivation: Futwork agents (e.g. "Kajal Futwork", manager "Deepali Tharwani Futwork") aren't in `RM_Hierarchy`, so they were falling into the "Unmatched RMs (backstop)" email to `CH_LEVEL_EMAIL_`. Applied at the one choke point, so it covers the 17:00 and 10:00 sends; the 10:00 Checkpoint-1 Section 2 inherits it because it reuses the 17:00 stored recipient. Not re-resolved for already-logged rows (routing is frozen at 17:00). File grew 559L → 570L (+11); every `#Lnn` after line 65 re-mapped. `Tests_EmailInfra.gs` +13 assertions; `Tests_Mocks.gs` save/sets/restores `FUTWORK_ROUTE_EMAIL_`. Not yet pasted live at time of writing — see the live-deploy note below if added.
 
 ## Revalidation trigger
 

@@ -64,6 +64,11 @@ let OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 // reason as OPS_ALERT_EMAIL_ above.
 let CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
 
+// Any RM whose name contains "Futwork" (tele-calling vendor agents) is emailed ONLY here — never their
+// manager chain, Region_Recipients, the CH backstop, or ALWAYS_CC_EMAILS_. `let` for test-overridability.
+let FUTWORK_ROUTE_EMAIL_ = 'snehil.chhimwal@homesfy.in';
+function isFutworkRmNameGs_(name) { return /futwork/i.test(String(name || '')); }
+
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real run it's reporting on. Kept deliberately
@@ -338,7 +343,9 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   const rmToLeads = (opts && opts.rmToLeads) || {};
   const dateLabel = (opts && opts.dateLabel) || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   const hierarchyData = opts && opts.hierarchyData;
-  const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
+  const futworkRmNames = rmNames.filter(isFutworkRmNameGs_);
+  const regularRmNames = rmNames.filter(function (n) { return !isFutworkRmNameGs_(n); });
+  const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, regularRmNames, hierarchyData); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
     return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
@@ -389,6 +396,10 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       const chUnresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
       results.push({ to: CH_LEVEL_EMAIL_, cc: undefined, rmNames: chUnresolvedNames, source: 'CH-level backstop (no RM_Hierarchy match and no Region_Recipients fallback for ' + region + ': ' + chUnresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs (backstop)', primaryRole: '' });
     }
+  }
+
+  if (futworkRmNames.length) {
+    results.push({ to: FUTWORK_ROUTE_EMAIL_, cc: undefined, rmNames: futworkRmNames, source: 'Futwork override (RM name contains "Futwork": ' + futworkRmNames.join(', ') + ')', bucketLabel: 'Futwork', primaryRole: '' });
   }
 
   // Single choke point every path above funnels through — see
