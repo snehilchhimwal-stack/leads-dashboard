@@ -42,11 +42,11 @@ core-auth → …`). CLAUDE.md's documented list pair-swaps it with
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-065 | `sheetsApiValuesGet(sheetId, range)` `#L100` | sheet ID, A1 range | the v4 `values` payload | one `fetch` with `Authorization: Bearer ${gateAccessToken}`, `valueRenderOption=UNFORMATTED_VALUE`, `dateTimeRenderOption=SERIAL_NUMBER`; throws `{status}` on `!resp.ok` | `gateAccessToken` (`JS-001`, read by name `#L103`) | `fetchAndRender` (`JS-003`), `fetchMovementLog` (`JS-021`), `fetchRmHierarchyForRollup` (`JS-022`), `core-filters.js` | reusable — the one Sheets read |
-| FN-066 | `valuesToGvizShape(values, isDateColumnLabel)` `#L138` | v4 `values`, a date-column predicate | `{cols, rows}` gviz-shaped | none | `serialToGvizDateString` (FN-068) | `fetchAndRender` (`JS-003`), Movement/RM-hierarchy parsers | reusable |
-| FN-067 | `gvizCellRaw(cell)` / `gvizCellDate(cell)` `#L162/#L167` | a gviz cell | raw value / a `Date` | none | `parseDate` (`JS-006`) | row parsers across modules | reusable |
-| FN-068 | `serialToGvizDateString(serial)` `#L123` | a Sheets serial number | a gviz `Date(...)` string | none | — | FN-066 | reusable |
-| FN-069 | `extractSheetId(raw)` `#L87` | a pasted URL or bare ID | the sheet ID | none | — | `fetchAndRender` (`JS-003`), `#changeSourceBtn` handler | reusable |
+| FN-065 | `sheetsApiValuesGet(sheetId, range)` `#L107` | sheet ID, A1 range | the v4 `values` payload | one `fetch` with `Authorization: Bearer ${gateAccessToken}`, `valueRenderOption=UNFORMATTED_VALUE`, `dateTimeRenderOption=SERIAL_NUMBER`; throws `{status}` on `!resp.ok` | `gateAccessToken` (`JS-001`, read by name `#L103`) | `fetchAndRender` (`JS-003`), `fetchMovementLog` (`JS-021`), `fetchRmHierarchyForRollup` (`JS-022`), `core-filters.js` | reusable — the one Sheets read |
+| FN-066 | `valuesToGvizShape(values, isDateColumnLabel)` `#L145` | v4 `values`, a date-column predicate | `{cols, rows}` gviz-shaped | none | `serialToGvizDateString` (FN-068) | `fetchAndRender` (`JS-003`), Movement/RM-hierarchy parsers | reusable |
+| FN-067 | `gvizCellRaw(cell)` / `gvizCellDate(cell)` `#L169/#L174` | a gviz cell | raw value / a `Date` | none | `parseDate` (`JS-006`) | row parsers across modules | reusable |
+| FN-068 | `serialToGvizDateString(serial)` `#L130` | a Sheets serial number | a gviz `Date(...)` string | none | — | FN-066 | reusable |
+| FN-069 | `extractSheetId(raw)` `#L94` | a pasted URL or bare ID | the sheet ID | none | — | `fetchAndRender` (`JS-003`), `#changeSourceBtn` handler | reusable |
 
 ## Config constants — `CFG-XXX` sub-table
 

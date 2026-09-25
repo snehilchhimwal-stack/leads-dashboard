@@ -92,7 +92,7 @@ branch-deploy signature) runs green on `master`;
 | File | Role |
 |---|---|
 | `dashboard.html` | The page shell: `<style>` block (dark theme), all markup/tab containers, the sign-in gate UI, and `<script src>` tags loading the `js/*.js` files below **in order** (order matters — see §3). |
-| `js/core-*.js` (9 load first; 10 exist) | Loaded first, in this order: `core-foundation.js` (CONFIG, ISSUE_PRIORITY, IST date helpers) → `core-sheets-fetch.js` (HEADER_ALIASES, the `leads`/`issueLeads`/`filterState` module state, Sheets API v4 read + gviz parsing) → `core-auth.js` (the sign-in gate, `GATE_SCOPE`) → `core-lead-model.js` (stage classifiers + `enrichLead`, the single source of truth for a lead's derived state — SLA flags, stage, funnel position) → `core-collation.js` (multi-RM-copy dedup/collation display) → `core-outcome-engine.js` (comment classification, `OUTCOME_RULES`/`inferOutcome`) → `core-fetch-and-render.js` (`fetchAndRender` itself) → `core-ui.js` (generic UI chrome: `esc`, loading overlay, alert cards) → `core-filters.js` (`applyFiltersAndRender`, the filter-bar UI). Formerly one `js/core.js` file (3,120 lines) — split in the 2026-09 modularity refactor (pure code motion, no logic changed; see git history). Everything else still depends on this whole group exactly as it depended on the single file before — order AMONG the 9 mostly doesn't matter (see `core-foundation.js`'s own header comment for why), but all 9 must load before every other `js/*.js` file below. A 10th `core-*.js` file, `core-rm-performance.js`, loads *later* — interleaved among the tab files at position 15 of 23 — which is harmless because nothing at parse time calls into it. |
+| `js/core-*.js` (9 load first; 10 exist) | Loaded first, in this order: `core-foundation.js` (CONFIG, ISSUE_PRIORITY, IST date helpers) → `core-sheets-fetch.js` (HEADER_ALIASES, the `leads`/`issueLeads`/`filterState` module state, Sheets API v4 read + gviz parsing) → `core-auth.js` (the sign-in gate, `GATE_SCOPE`) → `core-lead-model.js` (stage classifiers + `enrichLead`, the single source of truth for a lead's derived state — SLA flags, stage, funnel position) → `core-collation.js` (multi-RM-copy dedup/collation display) → `core-outcome-engine.js` (comment classification, `OUTCOME_RULES`/`inferOutcome`) → `core-fetch-and-render.js` (`fetchAndRender` itself) → `core-ui.js` (generic UI chrome: `esc`, loading overlay, alert cards) → `core-filters.js` (`applyFiltersAndRender`, the filter-bar UI). Formerly one `js/core.js` file (3,120 lines) — split in the 2026-09 modularity refactor (pure code motion, no logic changed; see git history). Everything else still depends on this whole group exactly as it depended on the single file before — order AMONG the 9 mostly doesn't matter (see `core-foundation.js`'s own header comment for why), but all 9 must load before every other `js/*.js` file below. A 10th `core-*.js` file, `core-rm-performance.js`, loads *later* — interleaved among the tab files at position 16 of 24 — which is harmless because nothing at parse time calls into it. |
 | `js/tab-audit.js` | Audit tab — "when was a lead last touched." |
 | `js/tab-tracking.js` | Tracking tab — issue-count-over-time chart, cohort comparison. |
 | `js/tab-oppmonitor.js` | Opp Monitor tab (added 2026-09-18) — Google Non-UTM/Search Same-day/48h Opp% workflow: a 12-step checklist + Period/Month results tables reading two externally-populated Sheet tabs (`Opp_Monitor_Period`/`Month`, no writer in this codebase). As of 2026-09-21 also computes the same metrics LIVE from `leads`' new `opp_at` column for any slot without an official row yet (tagged "Live", never overriding a real one) — see `TAB-009`/`JS-025`. The one tab hiding the shared filter bar. |
@@ -333,6 +333,16 @@ a ~100k-row sheet competes for the same finite per-workbook cell budget
 the live data already needs room in. Safe to re-run; not wired to any
 trigger or button on purpose — it's remediation for one specific
 incident, not standing functionality.
+
+**Which `.gs` files are actually live (2026-09-25).** Nothing in git records
+what has been pasted into the editor, so `docs/STALENESS_TRACKER.md` carries
+a per-file **deploy register** (last commit confirmed pasted, and when).
+`python3 test/check-staleness.py` compares it against `git log` and flags any
+`.gs` commit newer than its confirmed paste as PENDING — update the row every
+time a paste is confirmed. The same tracker and script also catch drifted
+`#Lnn` anchors in `docs/` records, stale stated facts in `CLAUDE.md`/this file,
+and overdue recurring chores; the recurring `[Stale Sweep]` To-Do tasks
+(1st/11th/21st of each month) work through it.
 
 ### 4.3.1 Standing Drive-CSV archival (2026-09-21) — every prune, not just a one-off
 

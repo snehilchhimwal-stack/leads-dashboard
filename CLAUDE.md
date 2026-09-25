@@ -24,7 +24,7 @@ other directly:
 9 of the 10 `js/core-*.js` files load first (`HANDOVER.md` §2 for the exact
 order), then the tab files, then `main.js` last. The exception is
 `core-rm-performance.js`, which loads later — interleaved among the tab files
-(position 15 of 23) — and that's harmless because nothing at parse time calls
+(position 16 of 24) — and that's harmless because nothing at parse time calls
 into it. Every `.gs` file shares ONE global namespace regardless of filename
 — the split is purely organizational.
 
@@ -39,11 +39,25 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   open-the-record. A surprising amount of "the session missed something"
   in this project has been exactly this — a record already existed and
   said the answer, nobody thought to look.
+- **Ask "what's stale?" the mechanical way: `python3 test/check-staleness.py`**
+  (added 2026-09-25; `docs/STALENESS_TRACKER.md` is the tracker it reads and
+  refreshes). One report of what is already stale (drifted `#Lnn` anchors,
+  stated facts in this file/`HANDOVER.md` that no longer match reality,
+  `.gs` commits newer than their confirmed live paste, overdue chores) and
+  what is about to be. `--fix-anchors` repairs anchor drift in `docs/`
+  automatically. The recurring **`[Stale Sweep]`** To-Do tasks (1st/11th/21st)
+  work it end to end. When you find a NEW kind of stale stated fact by hand,
+  add a row to `FACT_CLAIMS` in that script instead of just fixing the one
+  instance.
 - **Apps Script does not auto-deploy from git.** The authoritative running
   copy is inside the Sheet's own Extensions → Apps Script editor. A `.gs`
   edit in this repo is not live until you manually paste its full contents
   over the matching file there and save — this has caused more than one
   real "the fix is committed but the bug is still happening live" incident.
+  **Record every confirmed paste in the deploy register in
+  `docs/STALENESS_TRACKER.md`** (file, commit sha, date) — that table is how
+  a later session knows a `.gs` change is still undeployed; without it the
+  knowledge lives only in whoever pasted it.
   If you touched anything with a time trigger, re-run that file's
   `setupXxx()` once too (`HANDOVER.md` §4.3 for the full list).
 - **Logic is duplicated across the two runtimes on purpose** (browser can't

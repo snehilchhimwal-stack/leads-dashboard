@@ -116,7 +116,7 @@ cross-references.
 
 ## Maintaining this catalog (`DOC-044`)
 
-Four short guides — reachable from here so you don't need to know their
+Five short guides — reachable from here so you don't need to know their
 filenames:
 
 | Guide | When |
@@ -125,6 +125,7 @@ filenames:
 | **[`HOW_TO_REGISTER_A_COMPONENT.md`](HOW_TO_REGISTER_A_COMPONENT.md)** | you added a real new tab / JS or `.gs` module / function / button / Sheet tab / integration / data flow |
 | **[`HOW_TO_UPDATE_A_COMPONENT.md`](HOW_TO_UPDATE_A_COMPONENT.md)** | code changed and an existing record needs correcting — includes **the duplicated-pair rule**, **"Recording a new dependency edge"** (`DOC-045`), and a real worked example (`DOC-047`) |
 | **[`HOW_TO_RETIRE_A_COMPONENT.md`](HOW_TO_RETIRE_A_COMPONENT.md)** | a component is obsolete — preserve the record (`_archive/`), never delete; IDs are never reused |
+| **[`STALENESS_TRACKER.md`](STALENESS_TRACKER.md)** | asking "what here is stale, or about to be?" — the watch register, the Apps Script deploy register, and the auto-generated status from `python3 test/check-staleness.py` (worked on the 1st / 11th / 21st by the `[Stale Sweep]` tasks) |
 
 And before shipping any feature:
 **[`PRE_SHIP_DOCUMENTATION_CHECKLIST.md`](PRE_SHIP_DOCUMENTATION_CHECKLIST.md)**
