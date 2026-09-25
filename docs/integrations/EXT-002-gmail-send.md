@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `57e5545` — backend TEST MODE handling changed (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `684956b` — checked, unaffected by the single-Futwork-email change (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -153,6 +153,8 @@ note doesn't read as ignored.
 **Revalidated 2026-09-25** `ff91419`: `check-catalog.py` flagged this record again after `EmailInfra.gs` advanced. Checked against this record's own "Revalidation trigger" list below — the change (`GS-004`'s Version/change reference has the full story) adds one recipient bucket for RMs named "Futwork" inside `resolveRecipientEmailsForRegion_`; it doesn't touch scope/Client-ID, raw MIME encoding, the bulk-send model, Advanced Gmail Service usage, or `TEST_MODE_OVERRIDE_EMAIL`/`_` handling (the Futwork bucket still passes through the same TEST_MODE block). The browser send path (`recipientsForReport`, `js/reports-ui.js`) is region-level via the Region Recipients panel, not per-RM, so the rule doesn't apply there. Genuinely unaffected; this entry exists so the drift note doesn't read as ignored.
 
 **Revalidated + updated 2026-09-25** `57e5545`: `GS-004`'s TEST MODE hardening changed the backend side of this record's own "Revalidation trigger" item (`TEST_MODE_OVERRIDE_EMAIL`/`_` handling): the two CH-level report sends (`GS-001`/`GS-010`) and Section-2-only buckets used to ignore it and could email real addresses during a test, and a test run wrote real-looking log/checkpoint rows that a later real run then honored (real incident, 2026-09-24/25 — `GS-004`'s Version/change reference has the full story). Known-failure-modes row updated. Nothing else here changed: scope/Client-ID, MIME encoding, bulk-send model, Advanced Gmail Service usage are untouched; the browser send path (`recipientsForReport`, `js/reports-ui.js`) has its own separate `TEST_MODE_OVERRIDE_EMAIL` and is unchanged.
+
+**Revalidated 2026-09-25 (later)** `684956b`: `check-catalog.py` flagged this record after `EmailInfra.gs` advanced again. Checked against this record's own "Revalidation trigger" list below — the change (`GS-004`'s Version/change reference has the full story) groups Futwork leads under one key and adds region bands/labels to the email renderer; it touches none of scope/Client-ID, raw MIME encoding, the bulk-send model, Advanced Gmail Service usage, or `TEST_MODE_OVERRIDE_EMAIL`/`_` handling. Genuinely unaffected; this entry exists so the drift note doesn't read as ignored.
 
 ## Revalidation trigger
 

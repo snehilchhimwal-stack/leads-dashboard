@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — single Futwork email across regions (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `684956b` — single Futwork email across regions (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -475,7 +475,7 @@ ending the session.
 
 **2026-09-25** (`57e5545`): TEST MODE hardening — the `Overnight_Log` append, checkpoint1/2 write-backs and `followup_sent_at` all go through `writeUnlessTestModeGs_`; `sendCombinedMorningEmail_` sends a Section-2-only bucket to the tester (not the stored 17:00 recipient) and tags the subject `[TEST MODE]`; Section 1 buckets are keyed by `originalTo` so TEST MODE keeps the same per-recipient structure as production; the region + `followup_sent_at` guards are bypassed in TEST MODE; `notifyChLevelLeadsGs_` sends to `chLevelReportToGs_()`. +3 lines (2074L → 2077L, anchors re-mapped). Full incident narrative + the helper functions are in `GS-004`'s Version/change reference (`FN-283`/`FN-284`).
 
-**2026-09-25, later** (`SHA_PLACEHOLDER`): single Futwork email across regions — the 10:00 grouping and Section 1/Section 2/13:00 builders (`buildOvernightSectionOptsGs_`, `buildAllIssuesCheckpointSectionOptsGs_`, `buildOvernightFollowupSectionOptsGs_`) render the Futwork group region-by-region with bands and every region spelled out; `sendCombinedMorningEmail_`'s subject spells the regions out; `loadYesterdaysAllIssuesBucketsGs_` re-keys legacy per-region Futwork rows into the single group (stamping each entry's real region) and both Section-2 merges (`section2ByEmail`, `loadTodaysCheckpoint1PendingGs_`) are de-duplicated by `lead_id`; the 13:00 unresolved rows carry the lead's real region. Full narrative and the helper functions are in `GS-004`'s Version/change reference (`FN-290`..`FN-294`, `CFG-068`).
+**2026-09-25, later** (`684956b`): single Futwork email across regions — the 10:00 grouping and Section 1/Section 2/13:00 builders (`buildOvernightSectionOptsGs_`, `buildAllIssuesCheckpointSectionOptsGs_`, `buildOvernightFollowupSectionOptsGs_`) render the Futwork group region-by-region with bands and every region spelled out; `sendCombinedMorningEmail_`'s subject spells the regions out; `loadYesterdaysAllIssuesBucketsGs_` re-keys legacy per-region Futwork rows into the single group (stamping each entry's real region) and both Section-2 merges (`section2ByEmail`, `loadTodaysCheckpoint1PendingGs_`) are de-duplicated by `lead_id`; the 13:00 unresolved rows carry the lead's real region. Full narrative and the helper functions are in `GS-004`'s Version/change reference (`FN-290`..`FN-294`, `CFG-068`).
 
 ## Revalidation trigger
 
