@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — up-front Movement_Log prune added to `captureDailyRmIssues_` (see `EXC-099`) |
+| **Last Verified** | 2026-09-25 against commit `26bf0cf` — up-front Movement_Log prune added to `captureDailyRmIssues_` (see `EXC-099`) |
 
 ## Purpose / reason to exist
 
@@ -212,7 +212,7 @@ ranged from ~48 lines for functions before the growth to ~137 lines for
 functions after it); no functional/behavioral change, `Record Status`
 unaffected.
 
-**2026-09-25** (`SHA_PLACEHOLDER`): third 10M-cell incident — `captureDailyRmIssues_` now prunes Movement_Log up front (`EXC-099`); +8 lines (1264L → 1272L), every `#Lnn` anchor after the insertion point (line ~171) shifted +8 and was re-grepped. `Tests_DailyRmIssueLog.gs` gained 7 assertions (prune runs before the scan, skipped on an idempotency-guard early return, a throwing prune doesn't block the capture).
+**2026-09-25** (`26bf0cf`): third 10M-cell incident — `captureDailyRmIssues_` now prunes Movement_Log up front (`EXC-099`); +8 lines (1264L → 1272L), every `#Lnn` anchor after the insertion point (line ~171) shifted +8 and was re-grepped. `Tests_DailyRmIssueLog.gs` gained 7 assertions (prune runs before the scan, skipped on an idempotency-guard early return, a throwing prune doesn't block the capture).
 
 ## Revalidation trigger
 
