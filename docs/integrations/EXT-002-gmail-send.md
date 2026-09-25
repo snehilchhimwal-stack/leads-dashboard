@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-24 against commit `8fe9714` — checked, unaffected by the `GS-004` CC fix (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `ff91419` — checked, unaffected by the `GS-004` Futwork routing change (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -149,6 +149,8 @@ story) only touches WHICH address one narrow recipient-resolution
 branch CCs — none of this record's own triggers, so genuinely
 unaffected. No content change needed; this entry exists so the drift
 note doesn't read as ignored.
+
+**Revalidated 2026-09-25** `ff91419`: `check-catalog.py` flagged this record again after `EmailInfra.gs` advanced. Checked against this record's own "Revalidation trigger" list below — the change (`GS-004`'s Version/change reference has the full story) adds one recipient bucket for RMs named "Futwork" inside `resolveRecipientEmailsForRegion_`; it doesn't touch scope/Client-ID, raw MIME encoding, the bulk-send model, Advanced Gmail Service usage, or `TEST_MODE_OVERRIDE_EMAIL`/`_` handling (the Futwork bucket still passes through the same TEST_MODE block). The browser send path (`recipientsForReport`, `js/reports-ui.js`) is region-level via the Region Recipients panel, not per-RM, so the rule doesn't apply there. Genuinely unaffected; this entry exists so the drift note doesn't read as ignored.
 
 ## Revalidation trigger
 
