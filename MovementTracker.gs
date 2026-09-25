@@ -1327,3 +1327,71 @@ function removeEarlyCorruptedMovementLogDataNow() {
 
   Logger.log('Kept ' + kept.length + ' of ' + values.length + ' rows (removed everything before 12 Sep 2026 IST). Row allocation shrunk to ' + sheet.getMaxRows() + '. Backup (' + removed.length + ' rows): ' + backupFile.getUrl());
 }
+
+// ==================== One-off: remove the 2026-09-22..09-25 dedup-incident rows ====================
+// Remediation for the Movement_Log dedup incident (assertMovementLogHeaderAligned_,
+// HANDOVER.md section 8): the five captures from 2026-09-22 12:44 to 2026-09-23 12:44 IST each appended EVERY open
+// lead (52,060 rows, ~1.35M cells) because the dedup read the wrong column, and the sheet has been too big for a
+// capture to finish since. Archives exactly those rows to a Drive CSV, checks the archive, then deletes them.
+//
+// Touches NOTHING unless every guard holds: the header is aligned; the rows inside the window form ONE contiguous
+// block; and their count equals the sum of leads_changed that Movement_Log_Runs recorded for the same runs (so a row
+// written by anything else inside the window, e.g. a browser snapshot, makes it abort instead of deleting real data).
+// The archive is written and verified BEFORE any deletion. Not wired to any trigger; safe to re-run (a second run
+// finds nothing in the window and does nothing). Precedent: removeEarlyCorruptedMovementLogDataNow above.
+const DEDUP_INCIDENT_FROM_ = new Date('2026-09-22T12:30:00+05:30');
+const DEDUP_INCIDENT_TO_ = new Date('2026-09-23T13:30:00+05:30');
+function removeDedupIncidentRowsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!sheet) throw new Error('Movement_Log sheet not found.');
+  assertMovementLogHeaderAligned_(sheet);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Movement_Log has no data rows - nothing to remove.'); return; }
+  const times = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  let first = -1, last = -1, count = 0;
+  times.forEach(function (r, i) {
+    const ts = r[0];
+    if (ts instanceof Date && ts >= DEDUP_INCIDENT_FROM_ && ts <= DEDUP_INCIDENT_TO_) {
+      if (first < 0) first = i;
+      last = i;
+      count++;
+    }
+  });
+  if (!count) { Logger.log('No Movement_Log rows inside the incident window - nothing to remove (already done?).'); return; }
+  if (last - first + 1 !== count) {
+    throw new Error('Rows inside the incident window are not one contiguous block (' + count + ' rows spread over ' +
+      (last - first + 1) + ' positions) - refusing to delete anything.');
+  }
+
+  const runsSheet = ss.getSheetByName(MOVEMENT_LOG_RUNS_SHEET_);
+  if (!runsSheet || runsSheet.getLastRow() < 2) throw new Error('Movement_Log_Runs is missing or empty - cannot cross-check the row count; refusing to delete.');
+  let expected = 0;
+  runsSheet.getRange(2, 1, runsSheet.getLastRow() - 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues().forEach(function (r) {
+    if (r[0] instanceof Date && r[0] >= DEDUP_INCIDENT_FROM_ && r[0] <= DEDUP_INCIDENT_TO_) expected += Number(r[3]) || 0;
+  });
+  if (expected !== count) {
+    throw new Error('Movement_Log has ' + count + ' rows in the incident window but Movement_Log_Runs says those runs appended ' +
+      expected + ' - they do not match, so something else wrote here; refusing to delete.');
+  }
+
+  const startRow = first + 2; // times[] starts at sheet row 2
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const rows = sheet.getRange(startRow, 1, count, lastCol).getValues();
+
+  const file = archiveRowsToDriveCsv_(MOVEMENT_LOG_SHEET, header, rows, '2026-09-22_to_2026-09-23');
+  if (!file) throw new Error('Drive archive was not created - refusing to delete.');
+  // Every data row starts with the snapshot_at Date rendered as an ISO timestamp (see archiveRowsToDriveCsv_'s
+  // csvEscape); count those line starts instead of parsing the ~25 MB file.
+  const archived = (file.getBlob().getDataAsString().match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length;
+  if (archived !== count) {
+    throw new Error('Drive archive holds ' + archived + ' data rows but ' + count + ' were expected - refusing to delete. Archive: ' + file.getUrl());
+  }
+
+  sheet.deleteRows(startRow, count);
+  Logger.log('Removed ' + count + ' Movement_Log rows (sheet rows ' + startRow + '-' + (startRow + count - 1) + ', ' +
+    '2026-09-22 12:44 to 2026-09-23 12:45 IST), archived first to ' + file.getUrl() + '. Movement_Log now has ' +
+    (sheet.getLastRow() - 1) + ' data rows; row allocation ' + sheet.getMaxRows() + '.');
+}

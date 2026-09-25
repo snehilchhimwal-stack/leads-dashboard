@@ -164,6 +164,57 @@ function runMovementTrackerTests_() {
     snapshotOpenLeads_('test snapshot label — header restored, unchanged');
     TestAssertEqual_(misalignedLog.getLastRow(), rowsBeforeMisaligned, 'snapshotOpenLeads_ (2026-09-25 regression): once the header is restored an unchanged repeat capture writes ZERO rows again (dedup reads the real hash column)');
 
+    // ---- removeDedupIncidentRowsNow (one-off remediation, 2026-09-25) ----
+    // Destructive, so every abort guard is asserted to leave the sheet untouched.
+    const incidentLog = ss.getSheetByName('Movement_Log');
+    const incidentRuns = ss.getSheetByName('Movement_Log_Runs');
+    const incidentWidth = incidentLog.getLastColumn();
+    const incidentRow = function (whenIso, leadId) {
+      const r = []; for (let c = 0; c < incidentWidth; c++) r.push('');
+      r[0] = new Date(whenIso); r[1] = 'incident'; r[2] = leadId; // col 3 is lead_id
+      r[incidentWidth - 1] = 'hash-' + leadId;
+      return r;
+    };
+    const rowsBeforeIncident = incidentLog.getLastRow();
+    const runsBeforeIncident = incidentRuns.getLastRow();
+    const appendIncident = function (rowsArr) { incidentLog.getRange(incidentLog.getLastRow() + 1, 1, rowsArr.length, incidentWidth).setValues(rowsArr); };
+    const realDriveForIncident = DriveApp;
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (a) count mismatch: 3 rows in the window, Runs says 2 -> abort, nothing deleted
+      appendIncident([incidentRow('2026-09-22T13:00:00+05:30', 'X1'), incidentRow('2026-09-22T13:00:00+05:30', 'X2'), incidentRow('2026-09-23T06:00:00+05:30', 'X3')]);
+      incidentRuns.getRange(incidentRuns.getLastRow() + 1, 1, 2, 4).setValues([[new Date('2026-09-22T13:00:00+05:30'), 'r1', 100, 2], [new Date('2026-09-23T06:00:00+05:30'), 'r2', 100, 0]]);
+      let incidentMsg = '';
+      try { removeDedupIncidentRowsNow(); } catch (e) { incidentMsg = String(e); }
+      TestAssertContains_(incidentMsg, 'do not match', 'removeDedupIncidentRowsNow: refuses when the rows in the window do not match what Movement_Log_Runs recorded');
+      TestAssertEqual_(incidentLog.getLastRow(), rowsBeforeIncident + 3, 'removeDedupIncidentRowsNow: a refused run deletes nothing');
+      // (b) non-contiguous: a row from outside the window sits between window rows -> abort
+      incidentRuns.getRange(incidentRuns.getLastRow(), 4, 1, 1).setValues([[1]]); // now Runs sums to 3 (matches count)
+      incidentLog.getRange(rowsBeforeIncident + 2, 1, 1, 1).setValues([[new Date('2026-09-25T09:00:00+05:30')]]); // middle row falls outside the window
+      // window now has 2 rows but Runs says 3 -> mismatch OR non-contiguous; both abort. Make it a pure contiguity case:
+      incidentRuns.getRange(incidentRuns.getLastRow(), 4, 1, 1).setValues([[0]]); // Runs sums to 2, window has 2 (first and third) with a gap
+      let gapMsg = '';
+      try { removeDedupIncidentRowsNow(); } catch (e) { gapMsg = String(e); }
+      TestAssertContains_(gapMsg, 'contiguous', 'removeDedupIncidentRowsNow: refuses when the window rows are not one contiguous block');
+      TestAssertEqual_(incidentLog.getLastRow(), rowsBeforeIncident + 3, 'removeDedupIncidentRowsNow: the contiguity abort also deletes nothing');
+      // (c) happy path: restore the middle row into the window, Runs sums to 3 -> archived, verified, deleted
+      incidentLog.getRange(rowsBeforeIncident + 2, 1, 1, 1).setValues([[new Date('2026-09-22T18:00:00+05:30')]]);
+      incidentRuns.getRange(incidentRuns.getLastRow(), 4, 1, 1).setValues([[1]]);
+      const keptFirstRow = incidentLog.getRange(2, 1, 1, incidentWidth).getValues()[0];
+      removeDedupIncidentRowsNow();
+      TestAssertEqual_(incidentLog.getLastRow(), rowsBeforeIncident, 'removeDedupIncidentRowsNow: removes exactly the window rows and nothing else');
+      TestAssertEqual_(incidentLog.getRange(2, 1, 1, incidentWidth).getValues()[0], keptFirstRow, 'removeDedupIncidentRowsNow: rows outside the window are untouched');
+      const incidentRoot = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_).next();
+      const incidentFolder = incidentRoot.getFoldersByName('Movement_Log').next();
+      TestAssertEqual_(incidentFolder._filesList.length, 1, 'removeDedupIncidentRowsNow: wrote exactly one archive CSV, only on the successful run');
+      TestAssertEqual_((incidentFolder._filesList[0]._content.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length, 3, 'removeDedupIncidentRowsNow: the archive holds all 3 removed rows');
+      const rowsAfterRemoval = incidentLog.getLastRow();
+      removeDedupIncidentRowsNow();
+      TestAssertEqual_(incidentLog.getLastRow(), rowsAfterRemoval, 'removeDedupIncidentRowsNow: safe to re-run (finds nothing in the window)');
+    } finally {
+      DriveApp = realDriveForIncident;
+    }
+
     // ---- buildTodayCallBaselineGs_ / lastSnapshotBeforeGs_ ----
     // Seed Movement_Log with a snapshot from clearly BEFORE today, to test the baseline reads.
     const priorSs = TestMockSpreadsheet_({
