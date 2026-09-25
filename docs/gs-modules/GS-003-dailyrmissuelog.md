@@ -212,7 +212,7 @@ ranged from ~48 lines for functions before the growth to ~137 lines for
 functions after it); no functional/behavioral change, `Record Status`
 unaffected.
 
-**2026-09-25** (`26bf0cf`): third 10M-cell incident — `captureDailyRmIssues_` now prunes Movement_Log up front (`EXC-099`); +8 lines (1264L → 1272L), every `#Lnn` anchor after the insertion point (line ~171) shifted +8 and was re-grepped. `Tests_DailyRmIssueLog.gs` gained 7 assertions (prune runs before the scan, skipped on an idempotency-guard early return, a throwing prune doesn't block the capture).
+**2026-09-25** (`26bf0cf`): third 10M-cell incident — `captureDailyRmIssues_` now prunes Movement_Log up front (`EXC-099`); +8 lines (1264L → 1272L), every `#Lnn` anchor after the insertion point (line ~171) shifted +8 and was re-grepped. `Tests_DailyRmIssueLog.gs` gained 7 assertions (prune runs before the scan, skipped on an idempotency-guard early return, a throwing prune doesn't block the capture). **Deployed live 2026-09-25**: applied to the Sheet's Apps Script editor as the same 8-line insertion, then verified after a full page reload that the saved file's SHA-256 equals the committed file's (`3aaf93a3…d287`, 69,980 chars LF-normalized). No `setupXxx()` re-run needed (no trigger changed); takes effect at the next 22:50 IST fire.
 
 ## Revalidation trigger
 
