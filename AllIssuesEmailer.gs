@@ -306,7 +306,7 @@ function sendAllIssuesEmails_() {
   Object.keys(byRegion).sort().forEach(function (region) {
     const flaggedLeads = byRegion[region];
     if (!flaggedLeads.length) return;
-    if (alreadyLoggedRegionsToday[region]) {
+    if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_) {
       Logger.log('Skipping ' + region + ' — already has an AllIssues_Log row dated today (' + todayKey + '); not re-sending.');
       return;
     }
@@ -430,7 +430,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
 
     try {
       withSendRetry_(function () {
-        return GmailApp.createDraft(OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_, subject, plainBody, {
+        return GmailApp.createDraft(chLevelReportToGs_(), subject, plainBody, {
           htmlBody: html, name: 'Homesfy Lead Ops',
         }).send();
       }, 'send CH-level issues report (' + chName + ', ' + region + ')');
@@ -552,7 +552,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // precedent rather than adding a new defensive check nothing else
     // here has. Columns K-N (checkpoint1/2) are left blank -- written
     // later by the 10:00/13:00 jobs (Steps 4-7).
-    withRetry_(function () {
+    writeUnlessTestModeGs_(function () {
       logSheet.appendRow([now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, JSON.stringify(leads)]);
     }, 'append AllIssues_Log row (' + region + bucketNote + ')');
   } catch (e) {

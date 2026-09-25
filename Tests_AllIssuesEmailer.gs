@@ -180,6 +180,20 @@ function runAllIssuesEmailerTests_() {
     sendAllIssuesEmails();
     TestAssertEqual_(TestGmailLog_.drafts.length, 2, 'sendAllIssuesEmails: a second run the same day sends nothing new (region already logged today)');
 
+    // ---- TEST MODE (2026-09-25): must not honor/consume the region idempotency guard, write a production
+    // log row, or send the CH-level report to a real inbox. Today's real rows already exist here. ----
+    const testModeRowsBefore = ensureAllIssuesLogSheet_(ss).getLastRow();
+    const testModeDraftsBefore = TestGmailLog_.drafts.length;
+    TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+    try {
+      sendAllIssuesEmails();
+    } finally {
+      TEST_MODE_OVERRIDE_EMAIL_ = '';
+    }
+    TestAssertEqual_(TestGmailLog_.drafts.length, testModeDraftsBefore + 2, 'sendAllIssuesEmails (TEST MODE): ignores the region idempotency guard — still sends (1 bucket + 1 CH-level) although today\'s real rows exist');
+    TestAssertEqual_(ensureAllIssuesLogSheet_(ss).getLastRow(), testModeRowsBefore, 'sendAllIssuesEmails (TEST MODE): writes NO AllIssues_Log row, so a test run can never poison production state');
+    TestAssert_(TestGmailLog_.drafts.slice(testModeDraftsBefore).every(function (d) { return d.to === TEST_EMAIL_PRIMARY_; }), 'sendAllIssuesEmails (TEST MODE): every send, including the CH-level report, goes ONLY to the tester — never to CH_LEVEL_EMAIL_');
+
     TestAssertOnlyTestEmails_();
 
     // ---- sendOneAllIssuesEmail_: Gmail-blocked failure path (direct call) ----

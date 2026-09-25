@@ -69,6 +69,16 @@ let CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
 let FUTWORK_ROUTE_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 function isFutworkRmNameGs_(name) { return /futwork/i.test(String(name || '')); }
 
+// TEST MODE must never write production state (log rows, checkpoint state) — a 2026-09-24 test run's rows
+// made the real 17:00 job skip every region and later sent Checkpoint 1 to the tester instead of managers.
+function writeUnlessTestModeGs_(fn, label) {
+  if (TEST_MODE_OVERRIDE_EMAIL_) { Logger.log('TEST MODE — skipped production write: ' + label); return undefined; }
+  return withRetry_(fn, label);
+}
+
+// CH-level reports go to OPS + CH, or only the tester in TEST MODE (both sends used to ignore TEST MODE).
+function chLevelReportToGs_() { return TEST_MODE_OVERRIDE_EMAIL_ || (OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_); }
+
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real run it's reporting on. Kept deliberately

@@ -679,6 +679,24 @@ test) Sheet, and use the browser console directly.
   (a `.gs` edit isn't live until then), and remember Section 2 / 13:00
   follow-ups reuse the recipient STORED at 17:00, so rows logged before the
   rule was live keep their old routing.
+- **A test run made the real send skip, or emailed the wrong people**
+  (2026-09-24/25 incident, from the Step 10 live verification): with
+  `TEST_MODE_OVERRIDE_EMAIL_` set, a live `sendAllIssuesEmails` run wrote
+  real-looking `AllIssues_Log` rows (recipient = the tester), so that
+  afternoon's real 17:00 run skipped every region (managers never got the
+  report) and the next morning's Checkpoint 1 — which reuses the STORED
+  17:00 recipient, never re-resolved — went to the tester instead of the
+  managers (9 of 26 digests). Also found: the CH-level reports and a
+  Section-2-only bucket ignored TEST MODE entirely and used real addresses.
+  Fixed 2026-09-25: TEST MODE now writes NO production state
+  (`writeUnlessTestModeGs_` — `AllIssues_Log`/`Overnight_Log` rows,
+  checkpoint1/2, `followup_sent_at`), bypasses the region/follow-up
+  idempotency guards so a test is repeatable, routes EVERY send (CH-level via
+  `chLevelReportToGs_`, and Section-2-only) to the tester, and tags the
+  digest subject `[TEST MODE]`. Limits: a TEST MODE 10:00 only sees Section 2
+  for rows the real run hasn't already checkpointed, and the 13:00 job's
+  `Lead_Followups` push still happens (an idempotent upsert). If polluted
+  rows ever recur, delete that day's `AllIssues_Log` rows from the sheet.
 - **This whole §8 list is reactive** — real incidents, found after the
   fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
   counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`

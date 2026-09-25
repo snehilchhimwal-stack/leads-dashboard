@@ -178,8 +178,82 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun, 'Full cycle: a full second pass of all 3 real jobs the same day sends no new threaded replies');
     }
 
+    {
+      // ==== TEST MODE must never poison production state (2026-09-25 incident): a TEST MODE run of each
+      // job first, THEN the real job — the real one must still behave exactly as if no test had run. ====
+      const ss2 = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ss2._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        TestEFC_leadRow_(header, {
+          lead_id: 'L-CYCLE', client_id: 'C-CYCLE', RM: 'Test RM One', current_stage: 'Suspect',
+          lead_assigned_at: TestFixture_hoursAgo_(now, 40),
+          last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+          internal_status_comments: 'Test RM One: Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+        }),
+      ]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ss2; }, flush: function () {} };
+      const setTestMode_ = function (on) { TEST_MODE_OVERRIDE_EMAIL_ = on ? TEST_EMAIL_PRIMARY_ : ''; };
+      const dataRows_ = function (name) { const s = ss2.getSheetByName(name); return s ? Math.max(0, s.getLastRow() - 1) : 0; };
+
+      // -- 17:00: a TEST MODE run first, then the real one --
+      let d0 = TestGmailLog_.drafts.length;
+      setTestMode_(true);
+      sendAllIssuesEmails();
+      setTestMode_(false);
+      TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, 'TEST MODE 17:00: sends its one bucket email');
+      TestAssertEqual_(TestGmailLog_.drafts[d0].to, TEST_EMAIL_PRIMARY_, 'TEST MODE 17:00: goes to the tester');
+      TestAssertEqual_(dataRows_('AllIssues_Log'), 0, 'TEST MODE 17:00: writes NO AllIssues_Log row');
+      d0 = TestGmailLog_.drafts.length;
+      sendAllIssuesEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, 'Real 17:00 AFTER a TEST MODE run still sends — the test run did not consume the region idempotency guard (the real 2026-09-24 incident)');
+      TestAssertEqual_(dataRows_('AllIssues_Log'), 1, 'Real 17:00 AFTER a TEST MODE run writes its row normally');
+
+      // Stand in for "yesterday's real 17:00 went to a real manager": a stored recipient that is NOT the tester.
+      const log2 = ss2.getSheetByName('AllIssues_Log');
+      log2.getRange(2, 1, 1, 1).setValues([[TestFixture_daysAgo_(now, 1)]]);
+      log2.getRange(2, 5, 1, 1).setValues([[TEST_EMAIL_CH_]]);
+
+      // -- 10:00 Checkpoint 1: TEST MODE run first, then the real one --
+      d0 = TestGmailLog_.drafts.length;
+      setTestMode_(true);
+      sendOvernightMorningEmails();
+      setTestMode_(false);
+      TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, 'TEST MODE 10:00: sends its one combined email');
+      TestAssertEqual_(TestGmailLog_.drafts[d0].to, TEST_EMAIL_PRIMARY_, 'TEST MODE 10:00: a Section-2-only bucket goes to the TESTER, never to the stored real recipient');
+      TestAssertEqual_(TestGmailLog_.drafts[d0].cc, '', 'TEST MODE 10:00: no Cc');
+      TestAssertContains_(TestGmailLog_.drafts[d0].subject, '[TEST MODE]', 'TEST MODE 10:00: the subject is visibly tagged so it cannot be mistaken for a real send');
+      const afterTest10 = log2.getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!afterTest10[10] && !afterTest10[11], 'TEST MODE 10:00: does NOT consume Checkpoint 1 (checkpoint1_json/sent_at stay blank)');
+      TestAssertEqual_(dataRows_('Overnight_Log'), 0, 'TEST MODE 10:00: writes NO Overnight_Log row');
+      d0 = TestGmailLog_.drafts.length;
+      sendOvernightMorningEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, 'Real 10:00 AFTER a TEST MODE run still sends its Checkpoint 1');
+      TestAssertEqual_(TestGmailLog_.drafts[d0].to, TEST_EMAIL_CH_, 'Real 10:00 goes to the STORED 17:00 recipient (not the tester)');
+      const afterReal10 = log2.getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!!afterReal10[10] && !!afterReal10[11], 'Real 10:00 writes Checkpoint 1 normally');
+      TestAssertEqual_(dataRows_('Overnight_Log'), 1, 'Real 10:00 logs its Overnight_Log row normally');
+
+      // -- 13:00 Checkpoint 2: TEST MODE run first, then the real one --
+      const overnightLog2 = ss2.getSheetByName('Overnight_Log');
+      const r0 = TestGmailLog_.threadReplies.length;
+      setTestMode_(true);
+      sendOvernightFollowupEmails();
+      setTestMode_(false);
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, r0 + 1, 'TEST MODE 13:00: still sends its reply (the followup_sent_at guard is bypassed)');
+      const afterTest13 = log2.getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!afterTest13[12] && !afterTest13[13], 'TEST MODE 13:00: does NOT consume Checkpoint 2');
+      TestAssert_(!overnightLog2.getRange(2, 9, 1, 1).getValues()[0][0], 'TEST MODE 13:00: does NOT write followup_sent_at');
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, r0 + 2, 'Real 13:00 AFTER a TEST MODE run still sends its reply');
+      const afterReal13 = log2.getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!!afterReal13[12] && !!afterReal13[13], 'Real 13:00 writes Checkpoint 2 normally');
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
+    TEST_MODE_OVERRIDE_EMAIL_ = '';
     TestEnv_tearDown_();
   }
   return TestResults_;

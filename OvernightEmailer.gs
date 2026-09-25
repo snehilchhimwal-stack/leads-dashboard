@@ -226,7 +226,7 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
     // morning-send loop it's reporting alongside.
     try {
       withSendRetry_(function () {
-        return GmailApp.createDraft(OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_, subject, plainBody, {
+        return GmailApp.createDraft(chLevelReportToGs_(), subject, plainBody, {
           htmlBody: html,
           name: 'Homesfy Lead Ops',
         }).send();
@@ -646,8 +646,9 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
 // send failure — same shape sendOneOvernightEmail_ returns, so the
 // caller's existing failedLeadEntries aggregation needs no changes.
 function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason) {
-  const to = (section1 && section1.rec.to) || (section2 && section2.to);
-  const cc = (section1 && section1.rec.cc) || (section2 && section2.cc) || '';
+  // TEST MODE: a Section-2-only bucket's `to` is the STORED 17:00 recipient (a real manager) — never route it there.
+  const to = TEST_MODE_OVERRIDE_EMAIL_ || (section1 && section1.rec.to) || (section2 && section2.to);
+  const cc = TEST_MODE_OVERRIDE_EMAIL_ ? '' : ((section1 && section1.rec.cc) || (section2 && section2.cc) || '');
   const bucketLabel = (section1 && section1.rec.bucketLabel) || (section2 && section2.bucketLabel) || '';
   const primaryRole = (section1 && section1.rec.primaryRole) || (section2 && section2.primaryRole) || '';
 
@@ -677,7 +678,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
 
   const tierQualifier = (primaryRole && primaryRole !== 'A1') ? ' - ' + primaryRole : '';
   const subjectPrefix = bucketLabel ? '(' + bucketLabel + tierQualifier + ') ' : '';
-  const subject = subjectPrefix + region + ' Google Overnight + Follow-up Digest - ' + dateLabel;
+  const subject = (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + subjectPrefix + region + ' Google Overnight + Follow-up Digest - ' + dateLabel;
   const bucketNote = bucketLabel ? ' (' + bucketLabel + tierQualifier + ')' : '';
 
   const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
@@ -743,7 +744,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     // successfully. Logging is best-effort on top of a real send, not the
     // other way around.
     try {
-      withRetry_(function () {
+      writeUnlessTestModeGs_(function () {
         overnightLogSheet.appendRow([
           todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
           to, cc || '', subject,
@@ -774,7 +775,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     // blob) must not abort the caller's per-bucket loop for every OTHER
     // region/bucket still left to process. The send already happened.
     try {
-      withRetry_(function () {
+      writeUnlessTestModeGs_(function () {
         section2.rowNumbers.forEach(function (rowNumber) {
           allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[JSON.stringify(checkpoint1Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
         });
@@ -1008,7 +1009,7 @@ function sendOvernightMorningEmails_() {
     // own empty-state text uses this).
     let section1SkippedReason = null;
     if (openLeads.length) {
-      if (alreadyLoggedRegionsToday[region]) {
+      if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_) {
         section1SkippedReason = 'already_sent';
         Logger.log('Section 1 (Overnight) skipped for ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '). Section 2 (Checkpoint 1), if any, still proceeds separately below.');
       } else {
@@ -1038,7 +1039,9 @@ function sendOvernightMorningEmails_() {
         resolution.results.forEach(function (rec) {
           const rmSet = new Set(rec.rmNames);
           const bucketLeads = openLeads.filter(function (l) { return rmSet.has(l.RM); });
-          section1ByEmail[String(rec.to || '').trim().toLowerCase()] = { rec: rec, leads: bucketLeads };
+          // originalTo (set only in TEST MODE) keeps the REAL recipient identity as the key, so buckets stay
+          // separate and still union with Section 2's stored (real) recipient — same structure as production.
+          section1ByEmail[String(rec.originalTo || rec.to || '').trim().toLowerCase()] = { rec: rec, leads: bucketLeads };
         });
       }
     }
@@ -1500,7 +1503,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     // checkpoint1_json write above. A failure here must not abort the
     // caller's per-bucket loop for every OTHER bucket still left this run.
     try {
-      withRetry_(function () {
+      writeUnlessTestModeGs_(function () {
         section2Input.rowNumbers.forEach(function (rowNumber) {
           allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[JSON.stringify(checkpoint2Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
         });
@@ -1530,7 +1533,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     // successfully; a lost followup_sent_at write only means this bucket
     // is (harmlessly) resent on the next run, not that anything breaks.
     try {
-      withRetry_(function () {
+      writeUnlessTestModeGs_(function () {
         overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
       }, 'write followup_sent_at back to Overnight_Log (' + region + ')');
     } catch (logErr) {
@@ -1613,7 +1616,7 @@ function sendOvernightFollowupEmails_() {
     // failed stays blank here and IS retried on the next run, unlike
     // AllIssues_Log's checkpoint columns which are written even on
     // failure for a different reason (see that function's own comment).
-    if (run[8]) return;
+    if (run[8] && !TEST_MODE_OVERRIDE_EMAIL_) return;
     const region = run[1];
     const threadId = run[2];
     const to = String(run[5] || '').trim();
