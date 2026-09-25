@@ -697,6 +697,21 @@ test) Sheet, and use the browser console directly.
   for rows the real run hasn't already checkpointed, and the 13:00 job's
   `Lead_Followups` push still happens (an idempotent upsert). If polluted
   rows ever recur, delete that day's `AllIssues_Log` rows from the sheet.
+- **The 13:00 follow-up crashed after only a few buckets** (2026-09-25,
+  alert "sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were
+  sent", error "Your input contains more than the maximum of 50000
+  characters in a single cell"): a Checkpoint 2 write of ~81,000 characters
+  (9 test rows sharing one recipient, each already holding the full merged
+  list, re-merged into 9 copies). Sheets reports a bad write on the NEXT
+  sheet call, which was outside the try/catch around the write, so one
+  bucket aborted the whole run — only the 3 buckets before it got a
+  follow-up. Fixed: the merges are de-duplicated by `lead_id`;
+  `writeUnlessTestModeGs_` flushes inside the guarded write; every JSON
+  log-cell write is capped (`jsonForCellGs_`, 45,000 chars, ops alert on
+  truncation); and the 10:00/13:00 loops isolate a throwing bucket (reported,
+  the rest still send). Recovery for a missed 13:00: delete any polluted
+  rows first, then re-run `sendOvernightFollowupEmails()` — buckets that
+  already have `followup_sent_at` are skipped.
 - **This whole §8 list is reactive** — real incidents, found after the
   fact. `OPS_CHECKLIST.md` (repo root, added 2026-09-09) is the proactive
   counterpart: periodic checks for RM-hierarchy gaps, `Manager_Directory`

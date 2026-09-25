@@ -778,7 +778,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     try {
       writeUnlessTestModeGs_(function () {
         overnightLogSheet.appendRow([
-          todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+          todayKey, region, threadId, jsonForCellGs_(issueLog, 'Overnight_Log lead_ids_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
           to, cc || '', subject,
         ]);
       }, 'log Overnight_Log row (' + region + bucketNote + ')');
@@ -809,7 +809,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     try {
       writeUnlessTestModeGs_(function () {
         section2.rowNumbers.forEach(function (rowNumber) {
-          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[JSON.stringify(checkpoint1Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[jsonForCellGs_(checkpoint1Results, 'checkpoint1_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
         });
       }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
     } catch (logErr) {
@@ -1106,7 +1106,15 @@ function sendOvernightMorningEmails_() {
     unionEmails.forEach(function (emailKey) {
       const s1 = section1ByEmail[emailKey] || null;
       const s2 = section2ByEmail[emailKey] || null;
-      const failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason);
+      // One bucket throwing (a bad read/write, an oversize cell) must not stop every OTHER bucket — it is reported
+      // like any failed send instead (the consolidated "leads not sent" alert below).
+      let failure;
+      try {
+        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason);
+      } catch (bucketErr) {
+        Logger.log('Combined morning email threw for ' + region + ' (' + emailKey + '): ' + bucketErr);
+        failure = { reason: 'Unexpected error: ' + bucketErr, section1Leads: s1 ? s1.leads : [], section2: s2 };
+      }
       if (!failure) return;
       const failedTo = (s1 && s1.rec.to) || (s2 && s2.to) || '';
       const failedCc = (s1 && s1.rec.cc) || (s2 && s2.cc) || '';
@@ -1547,7 +1555,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     try {
       writeUnlessTestModeGs_(function () {
         section2Input.rowNumbers.forEach(function (rowNumber) {
-          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[JSON.stringify(checkpoint2Results), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[jsonForCellGs_(checkpoint2Results, 'checkpoint2_json (' + region + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
         });
       }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
     } catch (logErr) {
@@ -1734,6 +1742,7 @@ function sendOvernightFollowupEmails_() {
   // gets no follow-up reply at all, same reasoning as the morning email
   // dropping Opportunity+/closed leads entirely rather than showing them
   // as a separate "already handled" list.
+  const followupBucketFailures = [];
   perRegion.forEach(function (r) {
     const section2Input = r.to ? (checkpoint1PendingByEmail[r.to.trim().toLowerCase()] || null) : null;
     if (!r.unresolvedRows.length && !section2Input) return; // nothing in EITHER section — nothing to send
@@ -1787,8 +1796,17 @@ function sendOvernightFollowupEmails_() {
     } : null;
 
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
-    sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap);
+    // One bucket throwing (2026-09-25: an oversize checkpoint cell) must not stop every OTHER bucket's follow-up.
+    try {
+      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap);
+    } catch (bucketErr) {
+      Logger.log('Combined follow-up threw for ' + r.region + ' (thread ' + r.threadId + '): ' + bucketErr);
+      followupBucketFailures.push(r.region + ' — ' + r.subject + ' — to ' + r.to + ': ' + bucketErr);
+    }
   });
+  if (followupBucketFailures.length) {
+    notifyOpsAlertGs_('1pm follow-up: ' + followupBucketFailures.length + ' bucket(s) failed — every other bucket was still sent', followupBucketFailures);
+  }
 }
 
 // ONE-OFF: backfills to/cc/subject into TODAY's Overnight_Log rows that

@@ -324,6 +324,85 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssert_(afterB13[0][12].length < 2000 && afterB13[1][12].length < 2000, 'Futwork legacy rows 13:00: the Checkpoint 2 cell stays small (no multiplied copies)');
     }
 
+    {
+      // ==== One bucket throwing must NOT stop the others (2026-09-25: an oversize checkpoint cell aborted the whole
+      // 13:00 run after only 3 buckets). L-BOOM's bucket throws inside the checkpoint compute; L-OK's must still go. ====
+      const realFutworkRoute = FUTWORK_ROUTE_EMAIL_;
+      const realCompute = computeAllIssuesCheckpointGs_;
+      const boom = { armed: false };
+      const flaggedIso_ = function (id, rm) {
+        return TestEFC_leadRow_(header, {
+          lead_id: id, client_id: 'C-' + id, RM: rm, region: 'Pune', current_stage: 'Suspect',
+          lead_assigned_at: TestFixture_hoursAgo_(now, 40),
+          last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+          internal_status_comments: rm + ': Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+        });
+      };
+      const newIsoSs_ = function () {
+        const s = TestMockSpreadsheet_({
+          'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+          'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        });
+        s._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header, flaggedIso_('L-OK', 'Test RM One'), flaggedIso_('L-BOOM', 'Kajal Futwork')]);
+        return s;
+      };
+      const yesterdayIso = TestFixture_daysAgo_(now, 1);
+      const bucketRow_ = function (sheet, label) {
+        return sheet.getRange(2, 1, sheet.getLastRow() - 1, 14).getValues().filter(function (r) { return r[2] === label; })[0];
+      };
+      FUTWORK_ROUTE_EMAIL_ = TEST_EMAIL_CH_; // a different recipient from the ordinary bucket, so they are two separate buckets
+      computeAllIssuesCheckpointGs_ = function (s, entries, n, b) {
+        if (boom.armed && entries.some(function (e) { return e.lead_id === 'L-BOOM'; })) {
+          throw new Error('simulated: Your input contains more than the maximum of 50000 characters in a single cell.');
+        }
+        return realCompute(s, entries, n, b);
+      };
+      try {
+        // -- 10:00: the Futwork bucket throws, the ordinary bucket must still send --
+        const ssC = newIsoSs_();
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return ssC; }, flush: function () {} };
+        sendAllIssuesEmails();
+        const logC = ssC.getSheetByName('AllIssues_Log');
+        TestAssertEqual_(logC.getLastRow(), 3, 'Isolation setup: two buckets logged at 17:00');
+        logC.getRange(2, 1, 2, 1).setValues([[yesterdayIso], [yesterdayIso]]);
+        boom.armed = true;
+        const dC = TestGmailLog_.drafts.length;
+        let threwC = false;
+        try { sendOvernightMorningEmails(); } catch (e) { threwC = true; }
+        boom.armed = false;
+        TestAssert_(!threwC, 'Isolation 10:00: one bucket throwing does NOT abort the run');
+        TestAssertEqual_(TestGmailLog_.drafts.length, dC + 1, 'Isolation 10:00: the OTHER bucket\'s email still went out');
+        TestAssertEqual_(TestGmailLog_.drafts[dC].to, TEST_EMAIL_PRIMARY_, 'Isolation 10:00: it is the ordinary bucket that sent');
+        TestAssert_(TestGmailLog_.sent.some(function (e) { return /Leads NOT sent/.test(e.subject) && /Unexpected error/.test(e.htmlBody || ''); }), 'Isolation 10:00: the failed bucket\'s leads are reported in the "Leads NOT sent" alert');
+        TestAssert_(!!bucketRow_(logC, 'Test A1 One')[10], 'Isolation 10:00: the ordinary bucket\'s Checkpoint 1 was written');
+        TestAssert_(!bucketRow_(logC, 'Futwork')[10], 'Isolation 10:00: the failed bucket\'s Checkpoint 1 stays unwritten (nothing half-recorded)');
+
+        // -- 13:00: same, at the follow-up --
+        const ssD = newIsoSs_();
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return ssD; }, flush: function () {} };
+        sendAllIssuesEmails();
+        const logD = ssD.getSheetByName('AllIssues_Log');
+        logD.getRange(2, 1, 2, 1).setValues([[yesterdayIso], [yesterdayIso]]);
+        const d10 = TestGmailLog_.drafts.length;
+        sendOvernightMorningEmails();
+        TestAssertEqual_(TestGmailLog_.drafts.length, d10 + 2, 'Isolation 13:00 setup: both buckets got their 10:00 email');
+        boom.armed = true;
+        const rD = TestGmailLog_.threadReplies.length;
+        const alertsD = TestGmailLog_.sent.length;
+        let threwD = false;
+        try { sendOvernightFollowupEmails(); } catch (e) { threwD = true; }
+        boom.armed = false;
+        TestAssert_(!threwD, 'Isolation 13:00: one bucket throwing does NOT abort the run');
+        TestAssertEqual_(TestGmailLog_.threadReplies.length, rD + 1, 'Isolation 13:00: the OTHER bucket\'s follow-up still went out');
+        TestAssert_(TestGmailLog_.sent.slice(alertsD).some(function (e) { return /1pm follow-up: 1 bucket\(s\) failed/.test(e.subject); }), 'Isolation 13:00: ops is told which bucket failed');
+        TestAssert_(!!bucketRow_(logD, 'Test A1 One')[12], 'Isolation 13:00: the ordinary bucket\'s Checkpoint 2 was written');
+        TestAssert_(!bucketRow_(logD, 'Futwork')[12], 'Isolation 13:00: the failed bucket\'s Checkpoint 2 stays unwritten');
+      } finally {
+        FUTWORK_ROUTE_EMAIL_ = realFutworkRoute;
+        computeAllIssuesCheckpointGs_ = realCompute;
+      }
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TEST_MODE_OVERRIDE_EMAIL_ = '';

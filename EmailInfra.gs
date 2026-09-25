@@ -73,7 +73,28 @@ function isFutworkRmNameGs_(name) { return /futwork/i.test(String(name || '')); 
 // made the real 17:00 job skip every region and later sent Checkpoint 1 to the tester instead of managers.
 function writeUnlessTestModeGs_(fn, label) {
   if (TEST_MODE_OVERRIDE_EMAIL_) { Logger.log('TEST MODE — skipped production write: ' + label); return undefined; }
-  return withRetry_(fn, label);
+  // flush() inside the retry: Sheets reports a bad write (e.g. a cell over 50,000 chars) only on the NEXT sheet call,
+  // which was outside every caller's try/catch and aborted the whole 2026-09-25 13:00 run.
+  return withRetry_(function () { const result = fn(); SpreadsheetApp.flush(); return result; }, label);
+}
+
+// Sheets rejects a cell over 50,000 characters. Serializes entries for one cell, dropping trailing entries (and alerting
+// ops) rather than ever attempting an oversize write.
+const MAX_CELL_JSON_CHARS_ = 45000;
+function jsonForCellGs_(entries, label) {
+  let list = entries || [];
+  let json = JSON.stringify(list);
+  if (json.length <= MAX_CELL_JSON_CHARS_) return json;
+  const total = list.length;
+  while (list.length > 0 && json.length > MAX_CELL_JSON_CHARS_) {
+    list = list.slice(0, Math.floor(list.length * 0.9));
+    json = JSON.stringify(list);
+  }
+  notifyOpsAlertGs_('A log cell was too large and was truncated (' + label + ')', [
+    label + ': ' + total + ' entries did not fit in one cell (limit 50,000 characters); kept the first ' + list.length + '.',
+    'The email itself was not affected — only the stored copy used by the later follow-up checkpoints is shorter.',
+  ]);
+  return json;
 }
 
 // CH-level reports go to OPS + CH, or only the tester in TEST MODE (both sends used to ignore TEST MODE).

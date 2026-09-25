@@ -566,7 +566,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // here has. Columns K-N (checkpoint1/2) are left blank -- written
     // later by the 10:00/13:00 jobs (Steps 4-7).
     writeUnlessTestModeGs_(function () {
-      logSheet.appendRow([now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, JSON.stringify(leads)]);
+      logSheet.appendRow([now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, jsonForCellGs_(leads, 'issue_snapshot_json (' + region + bucketNote + ')')]);
     }, 'append AllIssues_Log row (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('AllIssues_Log write failed for ' + region + bucketNote + ' (email itself sent fine): ' + e);

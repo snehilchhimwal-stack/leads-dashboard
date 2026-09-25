@@ -225,6 +225,32 @@ function runEmailInfraTests_() {
     TestAssertContains_(bandHtml, 'Bangalore — 1 lead', 'renderOvernightReportEmailHTML_: a section regionBand is drawn above the section');
     TestAssert_(bandHtml.indexOf('Region: Bangalore, Pune') === -1, 'renderOvernightReportEmailHTML_: the default "Region:" line is not also printed when a regionLabel is given');
 
+    // ---- Cell-size safety (2026-09-25 13:00 crash: a 81,000-character checkpoint cell, reported one sheet call late) ----
+    TestAssertEqual_(jsonForCellGs_([{ lead_id: 'A' }], 'x'), '[{"lead_id":"A"}]', 'jsonForCellGs_: a small list is serialized unchanged');
+    TestAssertEqual_(jsonForCellGs_(null, 'x'), '[]', 'jsonForCellGs_: a missing list becomes an empty JSON array');
+    const cellAlertsBefore = TestGmailLog_.sent.length;
+    const bigCellList = [];
+    for (let i = 0; i < 2000; i++) bigCellList.push({ lead_id: 'L-' + i, state: 'still_open', currentIssueLabel: 'Follow-up Overdue', currentStatus: 'Suspect' });
+    const bigCellJson = jsonForCellGs_(bigCellList, 'checkpoint2_json (Test)');
+    TestAssert_(bigCellJson.length > 0 && bigCellJson.length <= MAX_CELL_JSON_CHARS_, 'jsonForCellGs_: an oversize list is cut down to fit under the cell limit');
+    TestAssert_(JSON.parse(bigCellJson).length < 2000 && JSON.parse(bigCellJson)[0].lead_id === 'L-0', 'jsonForCellGs_: it keeps the LEADING entries and drops the tail');
+    TestAssertEqual_(TestGmailLog_.sent.length, cellAlertsBefore + 1, 'jsonForCellGs_: truncating alerts ops once');
+    TestAssertContains_(TestGmailLog_.sent[cellAlertsBefore].subject, 'A log cell was too large', 'jsonForCellGs_: the alert names the problem');
+    let flushCalls = 0;
+    const realFlushFn = SpreadsheetApp.flush;
+    SpreadsheetApp.flush = function () { flushCalls++; };
+    writeUnlessTestModeGs_(function () {}, 'ok write');
+    TestAssertEqual_(flushCalls, 1, 'writeUnlessTestModeGs_: flushes after the write so a bad cell errors HERE, inside the caller\'s try/catch');
+    SpreadsheetApp.flush = function () { throw new Error('Your input contains more than the maximum of 50000 characters in a single cell.'); };
+    TestAssertThrows_(function () { writeUnlessTestModeGs_(function () {}, 'oversize write'); }, 'writeUnlessTestModeGs_: a deferred oversize-cell error surfaces inside the write instead of on the next unrelated sheet call');
+    SpreadsheetApp.flush = realFlushFn;
+    let ranInTestMode = false;
+    TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+    writeUnlessTestModeGs_(function () { ranInTestMode = true; }, 'test-mode write');
+    TEST_MODE_OVERRIDE_EMAIL_ = '';
+    TestAssert_(!ranInTestMode, 'writeUnlessTestModeGs_: TEST MODE still skips the write entirely');
+    TestGmailLog_reset_(); // this block's own truncation alert must not shift the exact send counts asserted further down
+
     // ---- resolveRecipientEmailsForRegion_: opts.hierarchyData + the new
     // chLevelRms field on its own result (perf pass, 2026-08-28) — a
     // caller that loads RM_Hierarchy/Manager_Directory once per run and
