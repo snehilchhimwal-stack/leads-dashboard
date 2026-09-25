@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — TEST MODE hardening (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `57e5545` — TEST MODE hardening (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -202,7 +202,7 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 28 bucket emails sent (all correctly redirected), 0 errors, real
 `issue_snapshot_json` confirmed written to `AllIssues_Log`.
 
-**2026-09-25** (`SHA_PLACEHOLDER`): TEST MODE hardening — the `AllIssues_Log` append now goes through `writeUnlessTestModeGs_` (a TEST MODE run writes no row), the per-region idempotency guard is bypassed in TEST MODE (so a test is repeatable and can never consume the real run's guard), and `notifyChLevelIssuesGs_` sends to `chLevelReportToGs_()` (tester only in TEST MODE). Line count unchanged. Full incident narrative + the helper functions are in `GS-004`'s Version/change reference (`FN-283`/`FN-284`).
+**2026-09-25** (`57e5545`): TEST MODE hardening — the `AllIssues_Log` append now goes through `writeUnlessTestModeGs_` (a TEST MODE run writes no row), the per-region idempotency guard is bypassed in TEST MODE (so a test is repeatable and can never consume the real run's guard), and `notifyChLevelIssuesGs_` sends to `chLevelReportToGs_()` (tester only in TEST MODE). Line count unchanged. Full incident narrative + the helper functions are in `GS-004`'s Version/change reference (`FN-283`/`FN-284`).
 
 ## Revalidation trigger
 

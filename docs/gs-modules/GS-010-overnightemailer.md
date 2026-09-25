@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — TEST MODE hardening (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `57e5545` — TEST MODE hardening (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -473,7 +473,7 @@ to the user as its own follow-up, not fixed here). `TEST_MODE_OVERRIDE_EMAIL_`
 reverted to `''` and confirmed persisted via a fresh page reload before
 ending the session.
 
-**2026-09-25** (`SHA_PLACEHOLDER`): TEST MODE hardening — the `Overnight_Log` append, checkpoint1/2 write-backs and `followup_sent_at` all go through `writeUnlessTestModeGs_`; `sendCombinedMorningEmail_` sends a Section-2-only bucket to the tester (not the stored 17:00 recipient) and tags the subject `[TEST MODE]`; Section 1 buckets are keyed by `originalTo` so TEST MODE keeps the same per-recipient structure as production; the region + `followup_sent_at` guards are bypassed in TEST MODE; `notifyChLevelLeadsGs_` sends to `chLevelReportToGs_()`. +3 lines (2074L → 2077L, anchors re-mapped). Full incident narrative + the helper functions are in `GS-004`'s Version/change reference (`FN-283`/`FN-284`).
+**2026-09-25** (`57e5545`): TEST MODE hardening — the `Overnight_Log` append, checkpoint1/2 write-backs and `followup_sent_at` all go through `writeUnlessTestModeGs_`; `sendCombinedMorningEmail_` sends a Section-2-only bucket to the tester (not the stored 17:00 recipient) and tags the subject `[TEST MODE]`; Section 1 buckets are keyed by `originalTo` so TEST MODE keeps the same per-recipient structure as production; the region + `followup_sent_at` guards are bypassed in TEST MODE; `notifyChLevelLeadsGs_` sends to `chLevelReportToGs_()`. +3 lines (2074L → 2077L, anchors re-mapped). Full incident narrative + the helper functions are in `GS-004`'s Version/change reference (`FN-283`/`FN-284`).
 
 ## Revalidation trigger
 

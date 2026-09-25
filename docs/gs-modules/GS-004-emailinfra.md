@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — Futwork routing + TEST MODE hardening (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `57e5545` — Futwork routing + TEST MODE hardening (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -188,7 +188,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-09-25** (`ff91419`): any RM whose name contains "Futwork" is now pulled OUT of `resolveRecipientBucketsForRms_` and emailed only at `FUTWORK_ROUTE_EMAIL_` (`CFG-067`, `FN-281`), as ONE dedicated bucket per region (`bucketLabel: 'Futwork'`, no Cc, no `Region_Recipients`/CH-backstop/`ALWAYS_CC_EMAILS_`). Motivation: Futwork agents (e.g. "Kajal Futwork", manager "Deepali Tharwani Futwork") aren't in `RM_Hierarchy`, so they were falling into the "Unmatched RMs (backstop)" email to `CH_LEVEL_EMAIL_`. Applied at the one choke point, so it covers the 17:00 and 10:00 sends; the 10:00 Checkpoint-1 Section 2 inherits it because it reuses the 17:00 stored recipient. Not re-resolved for already-logged rows (routing is frozen at 17:00). File grew 559L → 570L (+11); every `#Lnn` after line 65 re-mapped. `Tests_EmailInfra.gs` +13 assertions; `Tests_Mocks.gs` save/sets/restores `FUTWORK_ROUTE_EMAIL_`. **Deployed live 2026-09-25**: applied to the Sheet's Apps Script editor as the same three edits, then verified after a full page reload that the saved file's SHA-256 equals the committed file's (`6cf083fa…28d6`, 34,611 chars LF-normalized). No `setupXxx()` re-run needed (no trigger changed). `Tests_Mocks.gs`/`Tests_EmailInfra.gs` were NOT re-pasted into the live project (only matters if `runAllTests` is run there).
 
-**2026-09-25** (`SHA_PLACEHOLDER`): TEST MODE hardening after a real incident — a Step 10 live verification run (TEST MODE, 2026-09-24 10:16) wrote real-looking `AllIssues_Log` rows with the TESTER as recipient, so that day's real 17:00 run skipped every region (managers never got the report) and the next morning's Checkpoint 1 (which reuses the STORED 17:00 recipient) went to the tester instead of managers — 9 of 26 digests. Also found: the CH-level reports and a Section-2-only bucket ignored TEST MODE (real addresses). Added `FN-283`/`FN-284` (+10 lines, 570L → 580L; every `#Lnn` after line 71 re-mapped). Behaviour changes live in `GS-001`/`GS-010`; `Tests_AllIssuesEmailer.gs` +3 and `Tests_EmailLifecycleFullCycle.gs` +23 assertions (verified to fail against the pre-fix code).
+**2026-09-25** (`57e5545`): TEST MODE hardening after a real incident — a Step 10 live verification run (TEST MODE, 2026-09-24 10:16) wrote real-looking `AllIssues_Log` rows with the TESTER as recipient, so that day's real 17:00 run skipped every region (managers never got the report) and the next morning's Checkpoint 1 (which reuses the STORED 17:00 recipient) went to the tester instead of managers — 9 of 26 digests. Also found: the CH-level reports and a Section-2-only bucket ignored TEST MODE (real addresses). Added `FN-283`/`FN-284` (+10 lines, 570L → 580L; every `#Lnn` after line 71 re-mapped). Behaviour changes live in `GS-001`/`GS-010`; `Tests_AllIssuesEmailer.gs` +3 and `Tests_EmailLifecycleFullCycle.gs` +23 assertions (verified to fail against the pre-fix code).
 
 ## Revalidation trigger
 
