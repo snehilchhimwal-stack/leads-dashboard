@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — 13:00 crash hardening (oversize cell + per-bucket isolation; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `b3a58f9` — 13:00 crash hardening (oversize cell + per-bucket isolation; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -206,7 +206,7 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-09-25, later** (`684956b`): single Futwork email across regions — Futwork RMs' leads from every region are grouped under the one `Futwork` key (`regionKeyForRmGs_`), each lead keeping its real `region` (so the log's `issue_snapshot_json` entries carry it); `sendOneAllIssuesEmail_` renders that email region-by-region with bands, the regions spelled out in the subject and the header line, and no longer prints empty brackets for it. Ordinary buckets are unchanged. Full narrative and the helper functions are in `GS-004`'s Version/change reference (`FN-290`..`FN-294`, `CFG-068`).
 
-**2026-09-25, evening** (`SHA_PLACEHOLDER`): 13:00 crash hardening — the `issue_snapshot_json` cell now goes through `jsonForCellGs_` (never over 45,000 characters). Line count unchanged. Full narrative in `GS-004`'s Version/change reference (`FN-283`, `FN-295`, `CFG-069`).
+**2026-09-25, evening** (`b3a58f9`): 13:00 crash hardening — the `issue_snapshot_json` cell now goes through `jsonForCellGs_` (never over 45,000 characters). Line count unchanged. Full narrative in `GS-004`'s Version/change reference (`FN-283`, `FN-295`, `CFG-069`).
 
 ## Revalidation trigger
 

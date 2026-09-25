@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — 13:00 crash hardening (oversize cell + per-bucket isolation; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `b3a58f9` — 13:00 crash hardening (oversize cell + per-bucket isolation; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -477,7 +477,7 @@ ending the session.
 
 **2026-09-25, later** (`684956b`): single Futwork email across regions — the 10:00 grouping and Section 1/Section 2/13:00 builders (`buildOvernightSectionOptsGs_`, `buildAllIssuesCheckpointSectionOptsGs_`, `buildOvernightFollowupSectionOptsGs_`) render the Futwork group region-by-region with bands and every region spelled out; `sendCombinedMorningEmail_`'s subject spells the regions out; `loadYesterdaysAllIssuesBucketsGs_` re-keys legacy per-region Futwork rows into the single group (stamping each entry's real region) and both Section-2 merges (`section2ByEmail`, `loadTodaysCheckpoint1PendingGs_`) are de-duplicated by `lead_id`; the 13:00 unresolved rows carry the lead's real region. Full narrative and the helper functions are in `GS-004`'s Version/change reference (`FN-290`..`FN-294`, `CFG-068`).
 
-**2026-09-25, evening** (`SHA_PLACEHOLDER`): 13:00 crash hardening — the `lead_ids_json`, `checkpoint1_json` and `checkpoint2_json` cells go through `jsonForCellGs_`; the 10:00 union loop and the 13:00 per-bucket loop catch a per-bucket throw (10:00: reported through the existing "Leads NOT sent" alert; 13:00: one ops alert listing the failed buckets) so one bad bucket can no longer stop the rest. +18 lines, anchors re-mapped. Full narrative in `GS-004`'s Version/change reference (`FN-283`, `FN-295`, `CFG-069`).
+**2026-09-25, evening** (`b3a58f9`): 13:00 crash hardening — the `lead_ids_json`, `checkpoint1_json` and `checkpoint2_json` cells go through `jsonForCellGs_`; the 10:00 union loop and the 13:00 per-bucket loop catch a per-bucket throw (10:00: reported through the existing "Leads NOT sent" alert; 13:00: one ops alert listing the failed buckets) so one bad bucket can no longer stop the rest. +18 lines, anchors re-mapped. Full narrative in `GS-004`'s Version/change reference (`FN-283`, `FN-295`, `CFG-069`).
 
 ## Revalidation trigger
 
