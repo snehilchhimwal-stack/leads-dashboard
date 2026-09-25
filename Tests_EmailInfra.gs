@@ -199,6 +199,32 @@ function runEmailInfraTests_() {
     TestAssertEqual_(resolution.results.length, 1, 'resolveRecipientEmailsForRegion_: a configured Region_Recipients fallback does not add a second bucket for a Futwork RM');
     TestAssertEqual_(resolution.results[0].cc, undefined, 'resolveRecipientEmailsForRegion_: a configured Region_Recipients fallback never adds a Cc to a Futwork RM');
 
+    // ---- Futwork single-email helpers (2026-09-25): one pseudo-region across every real region ----
+    TestAssertEqual_(regionKeyForRmGs_('Kajal Futwork', 'Pune'), FUTWORK_REGION_KEY_, 'regionKeyForRmGs_: a Futwork RM groups under the single Futwork key whatever its real region');
+    TestAssertEqual_(regionKeyForRmGs_('Test RM One', 'Pune'), 'Pune', 'regionKeyForRmGs_: any other RM keeps its own region');
+    const fwItems = [{ region: 'Pune' }, { region: 'Bangalore' }, { region: 'Pune' }, {}];
+    const fwSummary = regionSummaryGs_(fwItems);
+    TestAssertEqual_(JSON.stringify(fwSummary.regions), JSON.stringify(['Bangalore', 'Pune']), 'regionSummaryGs_: real regions, sorted, items without a region ignored');
+    TestAssertEqual_(fwSummary.label, 'Bangalore (1) · Pune (2)', 'regionSummaryGs_: label spells out each region with its lead count');
+    TestAssertEqual_(JSON.stringify(regionHeaderOptsGs_('Pune', fwItems)), JSON.stringify({ region: 'Pune' }), 'regionHeaderOptsGs_: an ordinary region is unchanged');
+    const fwHeader = regionHeaderOptsGs_(FUTWORK_REGION_KEY_, fwItems);
+    TestAssertEqual_(fwHeader.region, 'Bangalore, Pune', 'regionHeaderOptsGs_: the Futwork key expands to every real region, spelled out');
+    TestAssertEqual_(fwHeader.regionLabel, 'Regions: Bangalore (1) · Pune (2)', 'regionHeaderOptsGs_: the header line names every region with its count');
+    TestAssertEqual_(regionHeaderOptsGs_(FUTWORK_REGION_KEY_, [{ region: 'Pune' }]).regionLabel, 'Region: Pune (1)', 'regionHeaderOptsGs_: a single Futwork region reads "Region:", not "Regions:"');
+    TestAssertEqual_(regionHeaderOptsGs_(FUTWORK_REGION_KEY_, []).region, FUTWORK_REGION_KEY_, 'regionHeaderOptsGs_: with no items the header falls back to the Futwork key');
+    const banded = sectionsByRegionGs_([{ region: 'Pune', RM: 'a' }, { region: 'Bangalore', RM: 'b' }, { region: 'Pune', RM: 'c' }], function (r, regionItems) {
+      return regionItems.map(function (i) { return { heading: i.RM, columns: [], rows: [] }; });
+    });
+    TestAssertEqual_(banded.map(function (s) { return s.heading; }).join(','), 'b,a,c', 'sectionsByRegionGs_: regions sorted, each region\'s sections kept together');
+    TestAssertEqual_(banded[0].regionBand, 'Bangalore — 1 lead', 'sectionsByRegionGs_: the first section of a region carries its band (singular lead)');
+    TestAssertEqual_(banded[1].regionBand, 'Pune — 2 leads', 'sectionsByRegionGs_: band counts the region\'s items (plural leads)');
+    TestAssert_(banded[2].regionBand === undefined, 'sectionsByRegionGs_: only the FIRST section of a region carries the band');
+    TestAssertEqual_(dedupeByLeadIdGs_([{ lead_id: 'A', v: 1 }, { lead_id: 'B' }, { lead_id: 'A', v: 2 }]).map(function (e) { return e.lead_id + (e.v || ''); }).join(','), 'A1,B', 'dedupeByLeadIdGs_: the first occurrence of each lead wins');
+    const bandHtml = renderOvernightReportEmailHTML_({ title: 'T', region: 'Bangalore, Pune', regionLabel: 'Regions: Bangalore (1) · Pune (2)', subtitle: 's', kpis: [], action: '', footerNote: '', sections: [{ heading: 'RM X', columns: ['c'], rows: [['r']], regionBand: 'Bangalore — 1 lead' }] });
+    TestAssertContains_(bandHtml, 'Regions: Bangalore (1) · Pune (2)', 'renderOvernightReportEmailHTML_: a custom regionLabel replaces the "Region:" line');
+    TestAssertContains_(bandHtml, 'Bangalore — 1 lead', 'renderOvernightReportEmailHTML_: a section regionBand is drawn above the section');
+    TestAssert_(bandHtml.indexOf('Region: Bangalore, Pune') === -1, 'renderOvernightReportEmailHTML_: the default "Region:" line is not also printed when a regionLabel is given');
+
     // ---- resolveRecipientEmailsForRegion_: opts.hierarchyData + the new
     // chLevelRms field on its own result (perf pass, 2026-08-28) — a
     // caller that loads RM_Hierarchy/Manager_Directory once per run and

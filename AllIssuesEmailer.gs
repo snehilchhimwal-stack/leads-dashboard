@@ -273,11 +273,12 @@ function sendAllIssuesEmails_() {
     Logger.log(dupedAwayCount + ' duplicate customer row(s) collapsed to a single copy each for this run — kept whichever had progressed furthest.');
   }
 
-  const byRegion = {}; // mainRegion -> flagged leads[]
+  const byRegion = {}; // mainRegion -> flagged leads[]; Futwork RMs' leads from EVERY region share one 'Futwork' key (regionKeyForRmGs_)
   byIdentity.forEach(function (l) {
-    if (!byRegion[l.region]) byRegion[l.region] = [];
-    byRegion[l.region].push({
-      lead_id: l.lead_id, RM: l.RM, TL: l.TL,
+    const groupKey = regionKeyForRmGs_(l.RM, l.region);
+    if (!byRegion[groupKey]) byRegion[groupKey] = [];
+    byRegion[groupKey].push({
+      lead_id: l.lead_id, RM: l.RM, TL: l.TL, region: l.region,
       status: l.status, issueLabel: l.issueLabel, followup: l.followup,
     });
   });
@@ -458,7 +459,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const rmKeys = Object.keys(byRM).sort();
   const issueTypeCount = Array.from(new Set(leads.map(function (l) { return l.issueLabel; }))).length;
 
-  const subject = rec.bucketLabel + ' (' + rec.primaryRole + ') google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
+  const headerOpts = regionHeaderOptsGs_(region, leads);
+  // A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
+  const subject = rec.bucketLabel + ' (' + (region === FUTWORK_REGION_KEY_ ? headerOpts.region : rec.primaryRole) + ') google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
   const bucketNote = ' (' + rec.primaryRole + '/' + rec.bucketLabel + ')';
 
   const testModeBanner = rec.originalTo ? {
@@ -468,9 +471,25 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     plain: 'TEST MODE — real send suppressed. This would really have gone to: ' + rec.originalTo + (rec.originalCc ? ' (cc: ' + rec.originalCc + ')' : ' (no cc)') + '\n\n',
   } : null;
 
+  const makeRmSection_ = function (rm, rmLeads) {
+    return {
+      heading: rm, subheading: 'Manager: ' + (rmLeads[0].TL || '—'),
+      columns: ['Lead ID', 'Issue', 'Status', 'Suggested Follow-up'],
+      rows: rmLeads.map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
+    };
+  };
+  const sections = region === FUTWORK_REGION_KEY_
+    ? sectionsByRegionGs_(leads, function (r, regionLeads) {
+      const byRm = {};
+      regionLeads.forEach(function (l) { (byRm[l.RM] = byRm[l.RM] || []).push(l); });
+      return Object.keys(byRm).sort().map(function (rm) { return makeRmSection_(rm, byRm[rm]); });
+    })
+    : rmKeys.map(function (rm) { return makeRmSection_(rm, byRM[rm].leads); });
+
   const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_({
     title: 'Leads With Issue',
-    region: region,
+    region: headerOpts.region,
+    regionLabel: headerOpts.regionLabel,
     subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST · Google, Non-UTM/Search',
     kpis: [
       { value: leads.length, label: leads.length === 1 ? 'Lead Flagged' : 'Leads Flagged', bg: '#dbeafe', fg: '#2563eb' },
@@ -478,13 +497,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       { value: issueTypeCount, label: issueTypeCount === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
     ],
     action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, Follow-up Overdue, Behind on Today\'s Calls, Stuck 48h+).',
-    sections: rmKeys.map(function (rm) {
-      return {
-        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
-        columns: ['Lead ID', 'Issue', 'Status', 'Suggested Follow-up'],
-        rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
-      };
-    }),
+    sections: sections,
     footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
   });
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +

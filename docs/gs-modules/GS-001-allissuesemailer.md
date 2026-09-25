@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `57e5545` — TEST MODE hardening (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — single Futwork email across regions (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -33,7 +33,7 @@ scheduled counterpart of the Operations tab's on-demand region reports
 
 ## Trigger schedule
 
-`setupAllIssuesEmailTrigger()` (`#L592`) installs `sendAllIssuesEmails`
+`setupAllIssuesEmailTrigger()` (`#L605`) installs `sendAllIssuesEmails`
 on `atHour(17).nearMinute(0).everyDays(1).inTimezone('Asia/Kolkata')`
 (`LOGIC_AUDIT.md` Part 1 §5). The `.nearMinute(0)` is load-bearing —
 the function's own comment documents a real incident where, without it,
@@ -53,10 +53,10 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 |---|---|---|---|---|---|---|---|
 | FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L163/#L183` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
 | FN-175 | `allIssuesWindowGs_(asOf)` / `allIssuesDateRangeLabelGs_(win)` `#L85/#L95` | as-of date | `{start, end}` IST-midnight-anchored 3-calendar-day window + a label | none | `istDayKeyGs_` (`GS-002`) | FN-174 | specific — **not rolling-hours** (documented undercount fix) |
-| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L450` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
-| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L371` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
+| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L451` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
+| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L372` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
 | FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
-| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L565/#L592` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
+| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L578/#L605` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -181,7 +181,7 @@ uniform +30 shift, confirmed per-function, not assumed).
 the same redesign. `Tests_AllIssuesEmailer.gs` gained 4 new assertions
 (snapshot lead count, lead_ids, per-entry shape, priority-picked
 issueLabel matches the email body). `sendOneAllIssuesEmail_`'s own
-citation (`#L450`) is unchanged — the edit landed inside the function
+citation (`#L451`) is unchanged — the edit landed inside the function
 body, not before it — but `FN-179`'s citations shifted +13 (the new
 comment+code pushed everything after it down); corrected.
 
@@ -203,6 +203,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 `issue_snapshot_json` confirmed written to `AllIssues_Log`.
 
 **2026-09-25** (`57e5545`): TEST MODE hardening — the `AllIssues_Log` append now goes through `writeUnlessTestModeGs_` (a TEST MODE run writes no row), the per-region idempotency guard is bypassed in TEST MODE (so a test is repeatable and can never consume the real run's guard), and `notifyChLevelIssuesGs_` sends to `chLevelReportToGs_()` (tester only in TEST MODE). Line count unchanged. Full incident narrative + the helper functions are in `GS-004`'s Version/change reference (`FN-283`/`FN-284`).
+
+**2026-09-25, later** (`SHA_PLACEHOLDER`): single Futwork email across regions — Futwork RMs' leads from every region are grouped under the one `Futwork` key (`regionKeyForRmGs_`), each lead keeping its real `region` (so the log's `issue_snapshot_json` entries carry it); `sendOneAllIssuesEmail_` renders that email region-by-region with bands, the regions spelled out in the subject and the header line, and no longer prints empty brackets for it. Ordinary buckets are unchanged. Full narrative and the helper functions are in `GS-004`'s Version/change reference (`FN-290`..`FN-294`, `CFG-068`).
 
 ## Revalidation trigger
 

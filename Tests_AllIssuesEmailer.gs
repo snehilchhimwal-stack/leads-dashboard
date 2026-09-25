@@ -194,6 +194,61 @@ function runAllIssuesEmailerTests_() {
     TestAssertEqual_(ensureAllIssuesLogSheet_(ss).getLastRow(), testModeRowsBefore, 'sendAllIssuesEmails (TEST MODE): writes NO AllIssues_Log row, so a test run can never poison production state');
     TestAssert_(TestGmailLog_.drafts.slice(testModeDraftsBefore).every(function (d) { return d.to === TEST_EMAIL_PRIMARY_; }), 'sendAllIssuesEmails (TEST MODE): every send, including the CH-level report, goes ONLY to the tester — never to CH_LEVEL_EMAIL_');
 
+    // ---- Futwork single email (2026-09-25): Futwork RMs' leads from EVERY region go in ONE email, regions kept
+    // as separate bands with every region spelled out at the top; other RMs are unaffected. ----
+    const fwSs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+    });
+    fwSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+      TestAIE_leadRow_(header, { lead_id: 'L-FW-PUNE', client_id: 'C-FW-PUNE', RM: 'Kajal Futwork', TL: 'Deepali Tharwani Futwork', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+      TestAIE_leadRow_(header, { lead_id: 'L-FW-BLR1', client_id: 'C-FW-BLR1', RM: 'Meera Futwork', TL: 'Deepali Tharwani Futwork', region: 'Bangalore', lead_assigned_at: now, rm_is_active: false }),
+      TestAIE_leadRow_(header, { lead_id: 'L-FW-BLR2', client_id: 'C-FW-BLR2', RM: 'Meera Futwork', TL: 'Deepali Tharwani Futwork', region: 'Bangalore 2', lead_assigned_at: now, rm_is_active: false }),
+      TestAIE_leadRow_(header, { lead_id: 'L-NOT-FW', client_id: 'C-NOT-FW', RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+    ]);
+    const realSsFw = SpreadsheetApp;
+    const fwDraftsBefore = TestGmailLog_.drafts.length;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return fwSs; }, flush: function () {} };
+    try {
+      sendAllIssuesEmails();
+      const fwNew = TestGmailLog_.drafts.slice(fwDraftsBefore);
+      const fwEmails = fwNew.filter(function (d) { return d.subject.indexOf('Futwork') === 0; });
+      TestAssertEqual_(fwEmails.length, 1, 'Futwork: leads from two different regions arrive in exactly ONE Futwork email, not one per region');
+      const fwEmail = fwEmails[0];
+      TestAssertContains_(fwEmail.subject, 'Futwork (Bangalore, Pune) google Leads With Issue', 'Futwork: the subject spells out every region');
+      TestAssert_(fwEmail.subject.indexOf('()') === -1, 'Futwork: the subject has no empty brackets');
+      TestAssertEqual_(fwEmail.to, FUTWORK_ROUTE_EMAIL_, 'Futwork: the single email goes to FUTWORK_ROUTE_EMAIL_');
+      TestAssertEqual_(fwEmail.cc, '', 'Futwork: no Cc');
+      TestAssertContains_(fwEmail.htmlBody, 'Regions: Bangalore (2) · Pune (1)', 'Futwork: the top of the email names every region with its lead count');
+      TestAssert_(fwEmail.htmlBody.indexOf('Region: Futwork') === -1, 'Futwork: the pseudo-region key is never shown as a region');
+      const bangaloreAt = fwEmail.htmlBody.indexOf('Bangalore — 2 leads');
+      const puneAt = fwEmail.htmlBody.indexOf('Pune — 1 lead');
+      TestAssert_(bangaloreAt !== -1 && puneAt !== -1 && bangaloreAt < puneAt, 'Futwork: each region gets its own band, in region order');
+      ['L-FW-PUNE', 'L-FW-BLR1', 'L-FW-BLR2'].forEach(function (id) {
+        TestAssertContains_(fwEmail.htmlBody, id, 'Futwork: ' + id + ' is in the single Futwork email');
+      });
+      TestAssert_(fwEmail.htmlBody.indexOf('L-NOT-FW') === -1, 'Futwork: a non-Futwork lead never appears in the Futwork email');
+      const normalFw = fwNew.filter(function (d) { return d.subject.indexOf('Futwork') !== 0; });
+      TestAssertEqual_(normalFw.length, 1, 'Futwork: the ordinary RM still gets their own normal email');
+      TestAssertContains_(normalFw[0].htmlBody, 'L-NOT-FW', 'Futwork: the ordinary email carries the ordinary lead');
+      TestAssert_(['L-FW-PUNE', 'L-FW-BLR1', 'L-FW-BLR2'].every(function (id) { return normalFw[0].htmlBody.indexOf(id) === -1; }), 'Futwork: no Futwork lead leaks into the ordinary email');
+
+      const fwLog = fwSs.getSheetByName('AllIssues_Log');
+      const fwLogRows = fwLog.getRange(2, 1, fwLog.getLastRow() - 1, 10).getValues();
+      const fwLogRow = fwLogRows.filter(function (r) { return r[2] === 'Futwork'; });
+      TestAssertEqual_(fwLogRow.length, 1, 'Futwork: ONE AllIssues_Log row for the single email');
+      TestAssertEqual_(fwLogRow[0][1], FUTWORK_REGION_KEY_, 'Futwork: that row is keyed by the Futwork pseudo-region');
+      const fwSnapshot = JSON.parse(fwLogRow[0][9]);
+      TestAssertEqual_(fwSnapshot.length, 3, 'Futwork: the snapshot holds all three leads');
+      TestAssertEqual_(fwSnapshot.map(function (e) { return e.region; }).sort().join(','), 'Bangalore,Bangalore,Pune', 'Futwork: each snapshot entry keeps its REAL region (so later checkpoints can show regions separately)');
+
+      const fwDraftsAfterFirst = TestGmailLog_.drafts.length;
+      sendAllIssuesEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, fwDraftsAfterFirst, 'Futwork: a second run the same day sends nothing new — the single Futwork row satisfies the per-region guard');
+    } finally {
+      SpreadsheetApp = realSsFw;
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- sendOneAllIssuesEmail_: Gmail-blocked failure path (direct call) ----

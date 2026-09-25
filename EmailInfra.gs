@@ -79,6 +79,47 @@ function writeUnlessTestModeGs_(fn, label) {
 // CH-level reports go to OPS + CH, or only the tester in TEST MODE (both sends used to ignore TEST MODE).
 function chLevelReportToGs_() { return TEST_MODE_OVERRIDE_EMAIL_ || (OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_); }
 
+// Futwork leads from EVERY region are grouped under this one pseudo-region, so each job (17:00 / 10:00 / 13:00)
+// sends ONE Futwork email; each lead keeps its real region (.region) and the email shows them as separate bands.
+const FUTWORK_REGION_KEY_ = 'Futwork';
+function regionKeyForRmGs_(rmName, region) { return isFutworkRmNameGs_(rmName) ? FUTWORK_REGION_KEY_ : region; }
+
+// Real regions (sorted) + lead counts for items carrying .region, e.g. { regions: ['Pune','Thane'], label: 'Pune (3) · Thane (1)' }.
+function regionSummaryGs_(items) {
+  const counts = {};
+  (items || []).forEach(function (i) { if (i && i.region) counts[i.region] = (counts[i.region] || 0) + 1; });
+  const regions = Object.keys(counts).sort();
+  return { regions: regions, counts: counts, label: regions.map(function (r) { return r + ' (' + counts[r] + ')'; }).join(' · ') };
+}
+
+// Header opts for an email: the region itself, or — for the Futwork pseudo-region — every real region spelled out.
+function regionHeaderOptsGs_(regionKey, items) {
+  if (regionKey !== FUTWORK_REGION_KEY_) return { region: regionKey };
+  const s = regionSummaryGs_(items);
+  if (!s.regions.length) return { region: FUTWORK_REGION_KEY_ };
+  return { region: s.regions.join(', '), regionLabel: (s.regions.length === 1 ? 'Region: ' : 'Regions: ') + s.label };
+}
+
+// Splits items by real region (sorted) and lets sectionsForRegion(region, regionItems) build that region's sections;
+// the first section of each region carries a region band so regions stay visibly separate inside one email.
+function sectionsByRegionGs_(items, sectionsForRegion) {
+  const byRegion = {};
+  items.forEach(function (i) { const r = i.region || 'Unknown region'; (byRegion[r] = byRegion[r] || []).push(i); });
+  const out = [];
+  Object.keys(byRegion).sort().forEach(function (region) {
+    const secs = sectionsForRegion(region, byRegion[region]);
+    if (secs.length) secs[0].regionBand = region + ' — ' + byRegion[region].length + (byRegion[region].length === 1 ? ' lead' : ' leads');
+    out.push.apply(out, secs);
+  });
+  return out;
+}
+
+// First occurrence of each lead_id wins — merged buckets must not repeat a lead.
+function dedupeByLeadIdGs_(entries) {
+  const seen = {};
+  return (entries || []).filter(function (e) { const id = e && e.lead_id; if (id === undefined || seen[id]) return false; seen[id] = true; return true; });
+}
+
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real run it's reporting on. Kept deliberately
@@ -558,7 +599,10 @@ function renderOvernightReportEmailHTML_(opts) {
         row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(String(cell)) + '</td>'; }).join('') +
         '</tr>';
     }).join('');
-    return '<div style="margin-top:16px; border-left:4px solid ' + accentFg + '; background:' + accentBg + '; border-radius:0 8px 8px 0; padding:12px 16px;">' +
+    const regionBandHtml = sec.regionBand
+      ? '<div style="margin-top:22px; background:#1f2937; color:#ffffff; border-radius:6px; padding:8px 14px; font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; ' + FONT + '">' + esc_(sec.regionBand) + '</div>'
+      : '';
+    return regionBandHtml + '<div style="margin-top:' + (sec.regionBand ? '8' : '16') + 'px; border-left:4px solid ' + accentFg + '; background:' + accentBg + '; border-radius:0 8px 8px 0; padding:12px 16px;">' +
       '<div style="' + FONT + ' font-weight:700; font-size:14px; color:#1f2937;">' + esc_(sec.heading) + '</div>' +
       (sec.subheading ? '<div style="' + FONT + ' font-size:11.5px; color:#6b7280; margin-bottom:8px;">' + esc_(sec.subheading) + '</div>' : '') +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; border:1px solid #e5e7eb; font-size:12px; border-collapse:collapse; margin-top:6px;">' +
@@ -569,7 +613,7 @@ function renderOvernightReportEmailHTML_(opts) {
     '<div style="background:#4338ca; padding:22px 26px;">' +
     '<div style="color:#c7d2fe; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; margin-bottom:6px; ' + FONT + '">Lead Funnel · SLA Monitor</div>' +
     '<div style="color:#ffffff; font-size:21px; font-weight:700; margin-bottom:4px; ' + FONT + '">' + esc_(opts.title) + '</div>' +
-    '<div style="color:#ffffff; font-size:13px; font-weight:600; margin-bottom:2px; ' + FONT + '">Region: ' + esc_(opts.region) + '</div>' +
+    '<div style="color:#ffffff; font-size:13px; font-weight:600; margin-bottom:2px; ' + FONT + '">' + esc_(opts.regionLabel || ('Region: ' + opts.region)) + '</div>' +
     '<div style="color:#e0e7ff; font-size:12.5px; ' + FONT + '">' + esc_(opts.subtitle) + '</div>' +
     '</div>' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;"><tr>' + kpiCells + '</tr></table>' +

@@ -251,6 +251,79 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssert_(!!afterReal13[12] && !!afterReal13[13], 'Real 13:00 writes Checkpoint 2 normally');
     }
 
+    {
+      // ==== Futwork: ONE email per job across every region (2026-09-25) ====
+      const flaggedFw_ = function (id, rm, region) {
+        return TestEFC_leadRow_(header, {
+          lead_id: id, client_id: 'C-' + id, RM: rm, TL: 'Deepali Tharwani Futwork', region: region, current_stage: 'Suspect',
+          lead_assigned_at: TestFixture_hoursAgo_(now, 40),
+          last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+          internal_status_comments: rm + ': Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+        });
+      };
+      const newFwSs_ = function (leadRows) {
+        const s = TestMockSpreadsheet_({
+          'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+          'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        });
+        s._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header].concat(leadRows));
+        return s;
+      };
+      const countOf_ = function (html, needle) { return (html.match(new RegExp(needle, 'g')) || []).length; };
+      const yesterdayFw = TestFixture_daysAgo_(now, 1);
+
+      // -- A: the whole cycle with new-format rows: 17:00 -> 10:00 -> 13:00 --
+      const ssA = newFwSs_([flaggedFw_('L-FW-A', 'Kajal Futwork', 'Pune'), flaggedFw_('L-FW-B', 'Meera Futwork', 'Bangalore')]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ssA; }, flush: function () {} };
+      let dA = TestGmailLog_.drafts.length;
+      sendAllIssuesEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, dA + 1, 'Futwork cycle 17:00: two regions, ONE email');
+      const logA = ssA.getSheetByName('AllIssues_Log');
+      TestAssertEqual_(logA.getLastRow(), 2, 'Futwork cycle 17:00: ONE AllIssues_Log row');
+      logA.getRange(2, 1, 1, 1).setValues([[yesterdayFw]]);
+      dA = TestGmailLog_.drafts.length;
+      sendOvernightMorningEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, dA + 1, 'Futwork cycle 10:00: ONE combined email for both regions');
+      const morningA = TestGmailLog_.drafts[dA];
+      TestAssertContains_(morningA.subject, 'Bangalore, Pune Google Overnight + Follow-up Digest', 'Futwork cycle 10:00: the subject spells out every region');
+      TestAssertContains_(morningA.htmlBody, 'Regions: Bangalore (1) · Pune (1)', 'Futwork cycle 10:00: Checkpoint 1 header names every region');
+      TestAssert_(morningA.htmlBody.indexOf('Bangalore — 1 lead') !== -1 && morningA.htmlBody.indexOf('Pune — 1 lead') !== -1, 'Futwork cycle 10:00: Checkpoint 1 keeps the regions as separate bands');
+      TestAssertContains_(morningA.htmlBody, 'L-FW-A', 'Futwork cycle 10:00: lists the Pune lead');
+      TestAssertContains_(morningA.htmlBody, 'L-FW-B', 'Futwork cycle 10:00: lists the Bangalore lead');
+      TestAssertEqual_(ssA.getSheetByName('Overnight_Log').getLastRow(), 2, 'Futwork cycle 10:00: ONE Overnight_Log row for the single email');
+      const rA = TestGmailLog_.threadReplies.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, rA + 1, 'Futwork cycle 13:00: ONE threaded reply for both regions');
+      const replyA = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[rA].raw);
+      TestAssert_(replyA.indexOf('L-FW-A') !== -1 && replyA.indexOf('L-FW-B') !== -1, 'Futwork cycle 13:00: the reply lists both leads');
+      TestAssertContains_(replyA, 'Bangalore — 1 lead', 'Futwork cycle 13:00: the reply keeps the regions as separate bands');
+
+      // -- B: rows logged BEFORE the consolidation (one per real region, bucket_label Futwork): the next 10:00 / 13:00
+      // must merge them into ONE email and must not repeat any lead --
+      const ssB = newFwSs_([flaggedFw_('L-LEG-A', 'Kajal Futwork', 'Pune'), flaggedFw_('L-LEG-B', 'Meera Futwork', 'Bangalore')]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ssB; }, flush: function () {} };
+      const logB = ensureAllIssuesLogSheet_(ssB);
+      const legacySnap_ = function (id, rm) { return JSON.stringify([{ lead_id: id, RM: rm, TL: 'Deepali Tharwani Futwork', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 't' }]); };
+      logB.appendRow([yesterdayFw, 'Pune', 'Futwork', '', FUTWORK_ROUTE_EMAIL_, '', 1, yesterdayFw, 'thr-legacy-1', legacySnap_('L-LEG-A', 'Kajal Futwork')]);
+      logB.appendRow([yesterdayFw, 'Bangalore', 'Futwork', '', FUTWORK_ROUTE_EMAIL_, '', 1, yesterdayFw, 'thr-legacy-2', legacySnap_('L-LEG-B', 'Meera Futwork')]);
+      let dB = TestGmailLog_.drafts.length;
+      sendOvernightMorningEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, dB + 1, 'Futwork legacy rows 10:00: two old per-region rows become ONE email');
+      const morningB = TestGmailLog_.drafts[dB];
+      TestAssert_(morningB.htmlBody.indexOf('Bangalore — 1 lead') !== -1 && morningB.htmlBody.indexOf('Pune — 1 lead') !== -1, 'Futwork legacy rows 10:00: each old row\'s entry is placed under its REAL region (stamped from the row)');
+      TestAssertEqual_(countOf_(morningB.htmlBody, 'L-LEG-A'), 1, 'Futwork legacy rows 10:00: each lead appears exactly once');
+      const afterB = logB.getRange(2, 1, 2, 14).getValues();
+      TestAssert_(!!afterB[0][10] && !!afterB[1][10], 'Futwork legacy rows 10:00: Checkpoint 1 is written back onto BOTH old rows');
+      const rB = TestGmailLog_.threadReplies.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, rB + 1, 'Futwork legacy rows 13:00: ONE reply');
+      const replyB = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[rB].raw);
+      TestAssertEqual_(countOf_(replyB, 'L-LEG-A'), 1, 'Futwork legacy rows 13:00: a lead is NOT repeated once per row (the merged lists are de-duplicated)');
+      TestAssertEqual_(countOf_(replyB, 'L-LEG-B'), 1, 'Futwork legacy rows 13:00: the other lead appears exactly once too');
+      const afterB13 = logB.getRange(2, 1, 2, 14).getValues();
+      TestAssert_(afterB13[0][12].length < 2000 && afterB13[1][12].length < 2000, 'Futwork legacy rows 13:00: the Checkpoint 2 cell stays small (no multiplied copies)');
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TEST_MODE_OVERRIDE_EMAIL_ = '';

@@ -343,9 +343,23 @@ function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
   const rmKeys = Object.keys(byRM).sort();
   const statusTypeCount = Array.from(new Set(leads.map(function (l) { return l.status; }))).length;
 
-  return {
+  const makeRmSection_ = function (rm, rmLeads) {
+    return {
+      heading: rm, subheading: 'Manager: ' + (rmLeads[0].TL || '—'),
+      columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
+      rows: rmLeads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
+    };
+  };
+  const sections = region === FUTWORK_REGION_KEY_
+    ? sectionsByRegionGs_(leads, function (r, regionLeads) {
+      const byRm = {};
+      regionLeads.forEach(function (l) { (byRm[l.RM] = byRm[l.RM] || []).push(l); });
+      return Object.keys(byRm).sort().map(function (rm) { return makeRmSection_(rm, byRm[rm]); });
+    })
+    : rmKeys.map(function (rm) { return makeRmSection_(rm, byRM[rm].leads); });
+
+  return Object.assign({
     title: 'Overnight Leads',
-    region: region,
     subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
     kpis: [
       { value: leads.length, label: leads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
@@ -353,15 +367,9 @@ function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
       { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
     ],
     action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
-    sections: rmKeys.map(function (rm) {
-      return {
-        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
-        columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
-        rows: byRM[rm].leads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
-      };
-    }),
+    sections: sections,
     footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
-  };
+  }, regionHeaderOptsGs_(region, leads));
 }
 
 function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
@@ -545,9 +553,29 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
   const resolvedCount = checkpointResults.filter(function (r) { return closedOutStates[r.state]; }).length;
   const stillActiveCount = checkpointResults.length - resolvedCount;
 
-  return {
+  const makeRmSection_ = function (rm, rmRows, tl) {
+    return {
+      heading: rm, subheading: 'Manager: ' + (tl || '—'),
+      columns: ['Lead ID', 'Original Issue (17:00)', 'Current State'],
+      rows: rmRows,
+      accent: { fg: '#6d28d9', headerBg: '#f5f3ff', bg: '#faf9ff' },
+    };
+  };
+  // Futwork: one email spans several regions, so keep each region's RMs together under a region band.
+  const sections = region === FUTWORK_REGION_KEY_
+    ? sectionsByRegionGs_(snapshotEntries.filter(function (e) { return !!resultByLeadId[e.lead_id]; }), function (r, regionEntries) {
+      const byRm = {};
+      regionEntries.forEach(function (e) {
+        const k = e.RM || 'Unassigned';
+        if (!byRm[k]) byRm[k] = { TL: e.TL, rows: [] };
+        byRm[k].rows.push([e.lead_id, e.issueLabel, allIssuesCheckpointStateLabelGs_(resultByLeadId[e.lead_id])]);
+      });
+      return Object.keys(byRm).sort().map(function (rm) { return makeRmSection_(rm, byRm[rm].rows, byRm[rm].TL); });
+    })
+    : rmKeys.map(function (rm) { return makeRmSection_(rm, byRM[rm].rows, byRM[rm].TL); });
+
+  return Object.assign({
     title: checkpointLabel,
-    region: region,
     subtitle: "Following up on the " + originalDateLabel + ' 17:00 All-Issues report',
     kpis: [
       { value: checkpointResults.length, label: checkpointResults.length === 1 ? 'Lead In This Follow-up' : 'Leads In This Follow-up', bg: '#ede9fe', fg: '#6d28d9' },
@@ -555,16 +583,9 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
       { value: resolvedCount, label: 'Resolved', bg: '#d1fae5', fg: '#047857' },
     ],
     action: stillActiveCount ? "The leads below are still active from yesterday's 17:00 report — prioritize the ones still open or newly escalated." : '',
-    sections: rmKeys.map(function (rm) {
-      return {
-        heading: rm, subheading: 'Manager: ' + (byRM[rm].TL || '—'),
-        columns: ['Lead ID', 'Original Issue (17:00)', 'Current State'],
-        rows: byRM[rm].rows,
-        accent: { fg: '#6d28d9', headerBg: '#f5f3ff', bg: '#faf9ff' },
-      };
-    }),
+    sections: sections,
     footerNote: "Comparing yesterday's 17:00 All-Issues report against the CURRENT live sheet. A lead shown as \"Resolved\" or no longer found is dropped from this afternoon's follow-up; anything still active will be checked again then.",
-  };
+  }, regionHeaderOptsGs_(region, snapshotEntries));
 }
 
 // Composes Section 1 + Section 2 into ONE email body -- two full,
@@ -620,8 +641,13 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
       return;
     }
     if (!snapshotEntries || !snapshotEntries.length) return;
-    const region = String(r[1] || '').trim();
-    if (!region) return;
+    const realRegion = String(r[1] || '').trim();
+    if (!realRegion) return;
+    // Rows logged before Futwork was consolidated (one per real region, bucket_label 'Futwork') join the single Futwork
+    // group, each entry keeping its real region so the email can still show regions as separate bands.
+    const isFutworkRow = String(r[2] || '') === FUTWORK_REGION_KEY_;
+    const region = isFutworkRow ? FUTWORK_REGION_KEY_ : realRegion;
+    if (isFutworkRow) snapshotEntries.forEach(function (e) { if (!e.region) e.region = realRegion; });
     if (!byRegion[region]) byRegion[region] = [];
     byRegion[region].push({
       rowNumber: i + 2, bucketLabel: String(r[2] || ''), primaryRole: String(r[3] || ''),
@@ -678,11 +704,17 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
 
   const tierQualifier = (primaryRole && primaryRole !== 'A1') ? ' - ' + primaryRole : '';
   const subjectPrefix = bucketLabel ? '(' + bucketLabel + tierQualifier + ') ' : '';
-  const subject = (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + subjectPrefix + region + ' Google Overnight + Follow-up Digest - ' + dateLabel;
+  // The Futwork email spans several regions — spell them all out (real region names) instead of the pseudo-region key,
+  // in the subject and on any empty-state section header.
+  const combinedHeaderOpts = regionHeaderOptsGs_(region, section1Leads.concat(section2 ? section2.snapshotEntries : []));
+  if (!section1) Object.assign(section1Opts, combinedHeaderOpts);
+  if (!section2) Object.assign(section2Opts, combinedHeaderOpts);
+  const regionDisplay = combinedHeaderOpts.region;
+  const subject = (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + subjectPrefix + regionDisplay + ' Google Overnight + Follow-up Digest - ' + dateLabel;
   const bucketNote = bucketLabel ? ' (' + bucketLabel + tierQualifier + ')' : '';
 
   const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
-  const plainBody = 'Combined morning digest for ' + region + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
+  const plainBody = 'Combined morning digest for ' + regionDisplay + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
     section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + (checkpoint1Results ? checkpoint1Results.length : 0) +
     ' lead(s). Open this email in Gmail for the full breakdown.';
 
@@ -932,11 +964,12 @@ function sendOvernightMorningEmails_() {
     Logger.log(dupedAwayCount + ' duplicate customer row(s) (same client_id held by more than one RM, possibly across different regions) collapsed to a single copy each for this run — kept whichever had progressed furthest.');
   }
 
-  const byRegion = {}; // mainRegion -> openLeads[] (each carries its own .issue)
+  const byRegion = {}; // mainRegion -> openLeads[] (each carries its own .issue); Futwork RMs' leads from EVERY region share one 'Futwork' key
   byIdentity.forEach(function (l) {
-    if (!byRegion[l.region]) byRegion[l.region] = [];
-    byRegion[l.region].push({
-      lead_id: l.lead_id, RM: l.RM, TL: l.TL,
+    const groupKey = regionKeyForRmGs_(l.RM, l.region);
+    if (!byRegion[groupKey]) byRegion[groupKey] = [];
+    byRegion[groupKey].push({
+      lead_id: l.lead_id, RM: l.RM, TL: l.TL, region: l.region,
       status: l.status, followup: l.followup, issue: l.issue,
     });
   });
@@ -1061,7 +1094,7 @@ function sendOvernightMorningEmails_() {
         section2ByEmail[key] = { to: row.to, cc: row.cc, bucketLabel: row.bucketLabel, primaryRole: row.primaryRole, rowNumbers: [], snapshotEntries: [] };
       }
       section2ByEmail[key].rowNumbers.push(row.rowNumber);
-      section2ByEmail[key].snapshotEntries = section2ByEmail[key].snapshotEntries.concat(row.snapshotEntries);
+      section2ByEmail[key].snapshotEntries = dedupeByLeadIdGs_(section2ByEmail[key].snapshotEntries.concat(row.snapshotEntries));
     });
 
     // ---- Union by recipient email (not bucket label/primary name —
@@ -1342,20 +1375,24 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
 // (Step 6), pulled out of sendOvernightFollowupEmails_'s own inline object
 // so it can be reused unchanged whether or not Section 2 rides alongside it.
 function buildOvernightFollowupSectionOptsGs_(region, unresolvedRows) {
-  return {
+  const makeSection_ = function (rows) {
+    return {
+      heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
+      columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
+      rows: rows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
+    };
+  };
+  return Object.assign({
     title: '1pm Follow-up',
-    region: region,
     subtitle: "Re-checking this morning's flagged leads",
     kpis: [
       { value: unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
     ],
-    sections: [{
-      heading: 'Still Unresolved', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
-      columns: ['Lead ID', 'RM', 'Issue', 'Suggested Follow-up'],
-      rows: unresolvedRows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
-    }],
+    sections: region === FUTWORK_REGION_KEY_
+      ? sectionsByRegionGs_(unresolvedRows, function (r, regionRows) { return [makeSection_(regionRows)]; })
+      : [makeSection_(unresolvedRows)],
     footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
-  };
+  }, regionHeaderOptsGs_(region, unresolvedRows));
 }
 
 // Section 1 placeholder for a bucket that has Checkpoint 2 content but
@@ -1404,6 +1441,9 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
       return;
     }
     if (!checkpoint1Entries || !checkpoint1Entries.length) return;
+    if (String(r[2] || '') === FUTWORK_REGION_KEY_ && String(r[1] || '') !== FUTWORK_REGION_KEY_) {
+      snapshotEntries.forEach(function (e) { if (!e.region) e.region = String(r[1] || '').trim(); }); // legacy per-region Futwork row
+    }
     const to = String(r[4] || '').trim();
     if (!to) return;
     const key = to.toLowerCase();
@@ -1411,8 +1451,10 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
       byEmail[key] = { to: to, cc: String(r[5] || ''), bucketLabel: String(r[2] || ''), primaryRole: String(r[3] || ''), rowNumbers: [], snapshotEntries: [], checkpoint1Entries: [] };
     }
     byEmail[key].rowNumbers.push(i + 2);
-    byEmail[key].snapshotEntries = byEmail[key].snapshotEntries.concat(snapshotEntries);
-    byEmail[key].checkpoint1Entries = byEmail[key].checkpoint1Entries.concat(checkpoint1Entries);
+    // Deduped by lead_id: every row sharing a recipient already holds the FULL merged Checkpoint 1 list, so a plain
+    // concat repeated each lead once per row (and pushed one cell past Sheets' 50,000-character limit on 2026-09-25).
+    byEmail[key].snapshotEntries = dedupeByLeadIdGs_(byEmail[key].snapshotEntries.concat(snapshotEntries));
+    byEmail[key].checkpoint1Entries = dedupeByLeadIdGs_(byEmail[key].checkpoint1Entries.concat(checkpoint1Entries));
   });
   return byEmail;
 }
@@ -1651,7 +1693,10 @@ function sendOvernightFollowupEmails_() {
       if (flags[entry.issueKey]) {
         const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
         const baselineEntry = lastSnapshotMap[clientId || ('l:' + entry.lead_id)];
-        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: region, issue: entry.issueLabel, sourceRow: row, baselineEntry: baselineEntry });
+        // Real region of THIS lead (the log row's region can be the 'Futwork' pseudo-region) — used for the region bands
+        // and the Lead_Followups push.
+        const leadRegion = region === FUTWORK_REGION_KEY_ ? (mainRegionForGs_(getVal_(row, colIndex, 'region')) || region) : region;
+        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: leadRegion, issue: entry.issueLabel, sourceRow: row, baselineEntry: baselineEntry });
       } else {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
       }
