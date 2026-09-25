@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `SHA_PLACEHOLDER` — Futwork routing override (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-25 against commit `ff91419` — Futwork routing override (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -184,7 +184,7 @@ this record re-grepped and corrected. `Tests_EmailInfra.gs` gained 1 new
 assertion locking in `cc === undefined` for this exact branch. 899/899
 local `.gs` tests pass (+1 new).
 
-**2026-09-25** (`SHA_PLACEHOLDER`): any RM whose name contains "Futwork" is now pulled OUT of `resolveRecipientBucketsForRms_` and emailed only at `FUTWORK_ROUTE_EMAIL_` (`CFG-067`, `FN-281`), as ONE dedicated bucket per region (`bucketLabel: 'Futwork'`, no Cc, no `Region_Recipients`/CH-backstop/`ALWAYS_CC_EMAILS_`). Motivation: Futwork agents (e.g. "Kajal Futwork", manager "Deepali Tharwani Futwork") aren't in `RM_Hierarchy`, so they were falling into the "Unmatched RMs (backstop)" email to `CH_LEVEL_EMAIL_`. Applied at the one choke point, so it covers the 17:00 and 10:00 sends; the 10:00 Checkpoint-1 Section 2 inherits it because it reuses the 17:00 stored recipient. Not re-resolved for already-logged rows (routing is frozen at 17:00). File grew 559L → 570L (+11); every `#Lnn` after line 65 re-mapped. `Tests_EmailInfra.gs` +13 assertions; `Tests_Mocks.gs` save/sets/restores `FUTWORK_ROUTE_EMAIL_`. Not yet pasted live at time of writing — see the live-deploy note below if added.
+**2026-09-25** (`ff91419`): any RM whose name contains "Futwork" is now pulled OUT of `resolveRecipientBucketsForRms_` and emailed only at `FUTWORK_ROUTE_EMAIL_` (`CFG-067`, `FN-281`), as ONE dedicated bucket per region (`bucketLabel: 'Futwork'`, no Cc, no `Region_Recipients`/CH-backstop/`ALWAYS_CC_EMAILS_`). Motivation: Futwork agents (e.g. "Kajal Futwork", manager "Deepali Tharwani Futwork") aren't in `RM_Hierarchy`, so they were falling into the "Unmatched RMs (backstop)" email to `CH_LEVEL_EMAIL_`. Applied at the one choke point, so it covers the 17:00 and 10:00 sends; the 10:00 Checkpoint-1 Section 2 inherits it because it reuses the 17:00 stored recipient. Not re-resolved for already-logged rows (routing is frozen at 17:00). File grew 559L → 570L (+11); every `#Lnn` after line 65 re-mapped. `Tests_EmailInfra.gs` +13 assertions; `Tests_Mocks.gs` save/sets/restores `FUTWORK_ROUTE_EMAIL_`. Not yet pasted live at time of writing — see the live-deploy note below if added.
 
 ## Revalidation trigger
 
