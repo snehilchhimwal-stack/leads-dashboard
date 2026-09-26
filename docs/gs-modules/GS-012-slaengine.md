@@ -235,6 +235,8 @@ update. `Tests_SlaEngine.gs`: a newly-resolved lead is now excluded (result
 length 4, not 5) and the helper has its own cases. Not live until pasted
 into the Sheet's Apps Script editor.
 
+**Deployed live 2026-09-26** (~13:45 IST) together with `GS-010`'s `OvernightEmailer.gs`: applied as exact diff edits, saved, and the saved file's SHA-256 re-read in a fresh editor tab equals the committed file (`44a6a9f8…`).
+
 ## Revalidation trigger
 
 Any commit touching `SlaEngine.gs` or `Tests_SlaEngine.gs`; **any of the
