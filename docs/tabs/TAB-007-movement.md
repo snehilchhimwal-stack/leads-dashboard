@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-09-26 against commit `29b7146` |
 
 ## Purpose / reason to exist
 
@@ -219,3 +219,5 @@ Revalidated 2026-09-21 (`55bf870`): `js/tab-movement.js`'s
 `MovementTracker.gs`'s `SNAPSHOT_COLUMNS_`) — orthogonal to this tab's
 own UI/logic, which is unchanged; see `SHEET-002`/`JS-021` for the real
 detail.
+
+Revalidated 2026-09-26 (`29b7146`): `js/tab-movement.js` gained `movementDedupKey` and `latestMovementLogHashByKey` now keys the content-hash dedup by `lead_id|RM` instead of `client_id` (`JS-021` FN-297) — this affects only which rows the snapshot writer skips, not what this tab reads or displays; the tab's own logic is unchanged.
