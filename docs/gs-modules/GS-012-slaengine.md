@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `SHA_PLACEHOLDER` — checkpoint emails list only unresolved leads (FN-271 rewritten, `allIssuesCheckpointIsActiveGs_` added; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-26 against commit `87114a3` — checkpoint emails list only unresolved leads (FN-271 rewritten, `allIssuesCheckpointIsActiveGs_` added; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -224,7 +224,7 @@ the Sheet's Apps Script project until now). See `GS-010`'s own
 Version/change reference for the full deployment + verification
 narrative. No `Tests_SlaEngine.gs` changes.
 
-**Revalidated 2026-09-26** `SHA_PLACEHOLDER`: user request "no need to send
+**Revalidated 2026-09-26** `87114a3`: user request "no need to send
 email for resolved status, only if not resolved then send email".
 `filterAllIssuesCheckpoint2ForEmailGs_` (FN-271) now returns only
 still-unresolved results and a new pure helper
