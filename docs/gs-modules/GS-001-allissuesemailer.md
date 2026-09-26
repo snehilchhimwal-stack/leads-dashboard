@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `SHA_PLACEHOLDER` — guarded one-off removal of the 2026-09-24 TEST MODE rows (`FN-299`; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-26 against commit `5aafbd4` — guarded one-off removal of the 2026-09-24 TEST MODE rows (`FN-299`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -209,7 +209,7 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-09-25, evening** (`b3a58f9`): 13:00 crash hardening — the `issue_snapshot_json` cell now goes through `jsonForCellGs_` (never over 45,000 characters). Line count unchanged. Full narrative in `GS-004`'s Version/change reference (`FN-283`, `FN-295`, `CFG-069`).
 
-**2026-09-26** (`SHA_PLACEHOLDER`): added the guarded one-off `removeTestModeAllIssuesRowsNow` (`FN-299`) to delete the 28 `AllIssues_Log` rows the 2026-09-24 TEST MODE run left behind (user request "remove test rows"). +74 lines (604L → 678L). Also: `sendOneAllIssuesEmail_` now receives a Cc that includes the region's P&L head when one is configured (`GS-004` `FN-298`) — no change to this file for that; the Cc is stored in col F as before. Tests: `Tests_AllIssuesEmailer.gs` (count / contiguity / header aborts, happy path with archive, re-run). Not live until pasted; the function is run once by hand.
+**2026-09-26** (`5aafbd4`): added the guarded one-off `removeTestModeAllIssuesRowsNow` (`FN-299`) to delete the 28 `AllIssues_Log` rows the 2026-09-24 TEST MODE run left behind (user request "remove test rows"). +74 lines (604L → 678L). Also: `sendOneAllIssuesEmail_` now receives a Cc that includes the region's P&L head when one is configured (`GS-004` `FN-298`) — no change to this file for that; the Cc is stored in col F as before. Tests: `Tests_AllIssuesEmailer.gs` (count / contiguity / header aborts, happy path with archive, re-run). Not live until pasted; the function is run once by hand.
 
 ## Revalidation trigger
 
