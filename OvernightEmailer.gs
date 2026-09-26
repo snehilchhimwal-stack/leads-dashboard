@@ -543,15 +543,16 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
   snapshotEntries.forEach(function (entry) {
     const result = resultByLeadId[entry.lead_id];
     if (!result) return; // computeAllIssuesCheckpointGs_ always returns one entry per input -- defensive only
+    if (!allIssuesCheckpointIsActiveGs_(result)) return; // resolved / no longer found: never listed (2026-09-26)
     const rmKey = entry.RM || 'Unassigned';
     if (!byRM[rmKey]) byRM[rmKey] = { TL: entry.TL, rows: [] };
     byRM[rmKey].rows.push([entry.lead_id, entry.issueLabel, allIssuesCheckpointStateLabelGs_(result)]);
   });
   const rmKeys = Object.keys(byRM).sort();
 
-  const closedOutStates = { resolved: true, not_found: true };
-  const resolvedCount = checkpointResults.filter(function (r) { return closedOutStates[r.state]; }).length;
-  const stillActiveCount = checkpointResults.length - resolvedCount;
+  // Only still-unresolved leads are listed or counted (2026-09-26) — resolved ones are never emailed.
+  const activeEntries = snapshotEntries.filter(function (e) { return allIssuesCheckpointIsActiveGs_(resultByLeadId[e.lead_id]); });
+  const stillActiveCount = activeEntries.length;
 
   const makeRmSection_ = function (rm, rmRows, tl) {
     return {
@@ -563,7 +564,7 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
   };
   // Futwork: one email spans several regions, so keep each region's RMs together under a region band.
   const sections = region === FUTWORK_REGION_KEY_
-    ? sectionsByRegionGs_(snapshotEntries.filter(function (e) { return !!resultByLeadId[e.lead_id]; }), function (r, regionEntries) {
+    ? sectionsByRegionGs_(activeEntries, function (r, regionEntries) {
       const byRm = {};
       regionEntries.forEach(function (e) {
         const k = e.RM || 'Unassigned';
@@ -578,14 +579,12 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
     title: checkpointLabel,
     subtitle: "Following up on the " + originalDateLabel + ' 17:00 All-Issues report',
     kpis: [
-      { value: checkpointResults.length, label: checkpointResults.length === 1 ? 'Lead In This Follow-up' : 'Leads In This Follow-up', bg: '#ede9fe', fg: '#6d28d9' },
-      { value: stillActiveCount, label: 'Still Active', bg: '#fee2e2', fg: '#b91c1c' },
-      { value: resolvedCount, label: 'Resolved', bg: '#d1fae5', fg: '#047857' },
+      { value: stillActiveCount, label: stillActiveCount === 1 ? 'Lead Still Unresolved' : 'Leads Still Unresolved', bg: '#fee2e2', fg: '#b91c1c' },
     ],
-    action: stillActiveCount ? "The leads below are still active from yesterday's 17:00 report — prioritize the ones still open or newly escalated." : '',
+    action: stillActiveCount ? "The leads below are still unresolved from yesterday's 17:00 report — prioritize the ones still open or newly escalated." : '',
     sections: sections,
-    footerNote: "Comparing yesterday's 17:00 All-Issues report against the CURRENT live sheet. A lead shown as \"Resolved\" or no longer found is dropped from this afternoon's follow-up; anything still active will be checked again then.",
-  }, regionHeaderOptsGs_(region, snapshotEntries));
+    footerNote: "Comparing yesterday's 17:00 All-Issues report against the CURRENT live sheet. Only leads that are still unresolved are listed — resolved leads are not emailed.",
+  }, regionHeaderOptsGs_(region, activeEntries));
 }
 
 // Composes Section 1 + Section 2 into ONE email body -- two full,
@@ -693,11 +692,15 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
 
   const checkpointTitle = 'Previous Day 17:00 All-Issues Follow-up — Checkpoint 1';
   let checkpoint1Results = null;
+  let activeCheckpoint1Count = 0; // leads STILL UNRESOLVED — the only Checkpoint 1 leads ever emailed (2026-09-26)
   let section2Opts;
   if (section2) {
     checkpoint1Results = computeAllIssuesCheckpointGs_(ss, section2.snapshotEntries, now, baselineMap);
+    activeCheckpoint1Count = checkpoint1Results.filter(allIssuesCheckpointIsActiveGs_).length;
     const originalDateLabel = Utilities.formatDate(new Date(now.getTime() - 24 * 3600 * 1000), 'Asia/Kolkata', 'd MMM yyyy');
-    section2Opts = buildAllIssuesCheckpointSectionOptsGs_(region, checkpointTitle, originalDateLabel, section2.snapshotEntries, checkpoint1Results);
+    section2Opts = activeCheckpoint1Count
+      ? buildAllIssuesCheckpointSectionOptsGs_(region, checkpointTitle, originalDateLabel, section2.snapshotEntries, checkpoint1Results)
+      : buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing pending from yesterday's 17:00 report — every flagged lead is already resolved.");
   } else {
     section2Opts = buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing pending from yesterday's 17:00 report.");
   }
@@ -713,10 +716,34 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   const subject = (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + subjectPrefix + regionDisplay + ' Google Overnight + Follow-up Digest - ' + dateLabel;
   const bucketNote = bucketLabel ? ' (' + bucketLabel + tierQualifier + ')' : '';
 
+  // Section 2's checkpoint1_json/checkpoint1_sent_at write-back — see the long comment where it is called below.
+  const writeCheckpoint1State_ = function (emailNote) {
+    if (!section2) return;
+    // Step 9/11: own try/catch — a write failure here (e.g. an oversized checkpoint1Results blob) must not abort the
+    // caller's per-bucket loop for every OTHER region/bucket still left to process.
+    try {
+      writeUnlessTestModeGs_(function () {
+        section2.rowNumbers.forEach(function (rowNumber) {
+          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[jsonForCellGs_(checkpoint1Results, 'checkpoint1_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+        });
+      }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
+    } catch (logErr) {
+      Logger.log('checkpoint1_json write failed for ' + region + bucketNote + ' (' + emailNote + '): ' + logErr);
+    }
+  };
+
+  // Nothing to say (2026-09-26, "no need to send email for resolved status"): no overnight leads AND every Checkpoint 1
+  // lead is already resolved -> no email at all. The state is still recorded so the rows are not retried.
+  if (!section1 && !activeCheckpoint1Count) {
+    writeCheckpoint1State_('no email was needed');
+    Logger.log('Combined morning email skipped for ' + region + bucketNote + ': no overnight leads and no Checkpoint 1 lead is still unresolved.');
+    return null;
+  }
+
   const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   const plainBody = 'Combined morning digest for ' + regionDisplay + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
-    section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + (checkpoint1Results ? checkpoint1Results.length : 0) +
-    ' lead(s). Open this email in Gmail for the full breakdown.';
+    section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + activeCheckpoint1Count +
+    ' unresolved lead(s). Open this email in Gmail for the full breakdown.';
 
   let sentMessage = null;
   let sendFailureReason = null;
@@ -801,21 +828,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   // transient failure would silently lose that checkpoint forever, not
   // just delay it. A more complete retry-until-success story is Step
   // 8/11's job; this is the safer default until then.
-  if (section2) {
-    // Step 9/11: own try/catch, same reasoning as the Overnight_Log write
-    // above — a write failure here (e.g. an oversized checkpoint1Results
-    // blob) must not abort the caller's per-bucket loop for every OTHER
-    // region/bucket still left to process. The send already happened.
-    try {
-      writeUnlessTestModeGs_(function () {
-        section2.rowNumbers.forEach(function (rowNumber) {
-          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[jsonForCellGs_(checkpoint1Results, 'checkpoint1_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
-        });
-      }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
-    } catch (logErr) {
-      Logger.log('checkpoint1_json write failed for ' + region + bucketNote + ' (email itself sent fine): ' + logErr);
-    }
-  }
+  writeCheckpoint1State_('email itself sent fine');
 
   if (sendFailureReason) {
     return { reason: sendFailureReason, section1Leads: section1Leads, section2: section2 };
@@ -1495,15 +1508,40 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     const originalDateLabel = Utilities.formatDate(new Date(now.getTime() - 24 * 3600 * 1000), 'Asia/Kolkata', 'd MMM yyyy');
     section2Opts = checkpoint2Results.length
       ? buildAllIssuesCheckpointSectionOptsGs_(region, checkpointTitle, originalDateLabel, section2Input.snapshotEntries, checkpoint2Results)
-      : buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing changed since this morning's Checkpoint 1 — no news to report.");
+      : buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing still unresolved from yesterday's 17:00 report.");
   } else {
     section2Opts = buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing pending from this morning's Checkpoint 1.");
   }
 
+  // Section 2's checkpoint2_json/checkpoint2_sent_at write-back — see the long comment where it is called below.
+  const writeCheckpoint2State_ = function (emailNote) {
+    if (!section2Input) return;
+    // Step 9/11: own try/catch — same reasoning as sendCombinedMorningEmail_'s checkpoint1_json write. A failure here
+    // must not abort the caller's per-bucket loop for every OTHER bucket still left this run.
+    try {
+      writeUnlessTestModeGs_(function () {
+        section2Input.rowNumbers.forEach(function (rowNumber) {
+          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[jsonForCellGs_(checkpoint2Results, 'checkpoint2_json (' + region + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+        });
+      }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
+    } catch (logErr) {
+      Logger.log('checkpoint2_json write failed for ' + region + ' (' + emailNote + '): ' + logErr);
+    }
+  };
+
+  // Nothing unresolved in EITHER section (2026-09-26, "no need to send email for resolved status") -> no reply at all.
+  // Checkpoint 2 is still recorded; followup_sent_at stays blank, exactly like a bucket with nothing to follow up on.
+  const activeCheckpoint2Count = checkpoint2Results ? checkpoint2Results.length : 0;
+  if (!section1UnresolvedRows.length && !activeCheckpoint2Count) {
+    writeCheckpoint2State_('no reply was needed');
+    Logger.log('1pm follow-up skipped for ' + region + ' (thread ' + threadId + '): nothing is still unresolved.');
+    return;
+  }
+
   const html = (testModeBanner ? testModeBanner.html : '') + renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + region + ': Section 1 (Overnight Follow-up) ' +
-    section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + (checkpoint2Results ? checkpoint2Results.length : 0) +
-    ' lead(s) with news. Open this email in Gmail for the full breakdown.';
+    section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count +
+    ' unresolved lead(s). Open this email in Gmail for the full breakdown.';
 
   // sendThreadedGmailReply_ retries its own send step internally
   // (withSendRetry_ — only a definitive rejection, never an ambiguous
@@ -1548,20 +1586,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   // create a retry opportunity tomorrow, it would just lose the row
   // forever with no record it was ever attempted). The ops alert above
   // already surfaces the failure for manual follow-up.
-  if (section2Input) {
-    // Step 9/11: own try/catch — same reasoning as sendCombinedMorningEmail_'s
-    // checkpoint1_json write above. A failure here must not abort the
-    // caller's per-bucket loop for every OTHER bucket still left this run.
-    try {
-      writeUnlessTestModeGs_(function () {
-        section2Input.rowNumbers.forEach(function (rowNumber) {
-          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[jsonForCellGs_(checkpoint2Results, 'checkpoint2_json (' + region + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
-        });
-      }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
-    } catch (logErr) {
-      Logger.log('checkpoint2_json write failed for ' + region + ' (reply itself sent fine): ' + logErr);
-    }
-  }
+  writeCheckpoint2State_('reply itself sent fine');
 
   // followup_sent_at (Overnight_Log col I) -- Step 8/11's idempotency
   // guard for the WHOLE combined reply (Section 1 + Section 2 together,

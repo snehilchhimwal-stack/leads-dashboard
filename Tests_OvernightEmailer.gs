@@ -144,33 +144,50 @@ function runOvernightEmailerTests_() {
     // exercises the "Section 1 already sent, Section 2 proceeds
     // separately" empty-state path), one for a brand-new 'Harbour'
     // region with NO overnight leads at all today (exercises the plain
-    // "no overnight leads" empty-state path instead). ----
+    // "no overnight leads" empty-state path instead).
+    //
+    // 2026-09-26 ("no need to send email for resolved status"): a resolved
+    // lead is NEVER listed, and a bucket whose every checkpoint lead is
+    // resolved gets no email at all. So Pune's snapshot carries TWO
+    // leads — L-CKPT-PUNE (still open -> listed) and L-PUNE-RESOLVED
+    // (closed -> must not appear) — and a THIRD row (a second Pune
+    // recipient) carries only a closed lead, proving the no-email path
+    // while its checkpoint state is still recorded. ----
     const allIssuesHeader = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
       'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
     const yesterday = TestFixture_daysAgo_(now, 1);
     const allIssuesRows = [allIssuesHeader,
-      [yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, yesterday, 'thread-pune',
-        JSON.stringify([{ lead_id: 'L-CKPT-PUNE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' }]),
+      [yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 2, yesterday, 'thread-pune',
+        JSON.stringify([
+          { lead_id: 'L-CKPT-PUNE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' },
+          { lead_id: 'L-PUNE-RESOLVED', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' },
+        ]),
         '', '', '', ''],
       [yesterday, 'Harbour', 'Harbour Manager', 'A1', TEST_EMAIL_SECONDARY_, '', 1, yesterday, 'thread-harbour',
         JSON.stringify([{ lead_id: 'L-CKPT-HARBOUR', RM: 'Harbour RM', TL: 'Harbour Manager', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }]),
+        '', '', '', ''],
+      [yesterday, 'Pune', 'Test CH Self', 'A1', TEST_EMAIL_CH_, '', 1, yesterday, 'thread-pune-alldone',
+        JSON.stringify([{ lead_id: 'L-ALLDONE', RM: 'Test RM Two', TL: 'Test CH Self', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' }]),
         '', '', '', ''],
     ];
     ss._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', allIssuesRows);
 
     // Checkpoint leads' CURRENT state, appended directly to the SAME
-    // leads tab already in use — L-CKPT-PUNE closed (-> resolved),
-    // L-CKPT-HARBOUR still open with the literal 'Not Updated' stage
-    // text (-> still_open; deliberately NOT relying on the
-    // never-connected-past-10-minutes business-hours-gated path, which
-    // Tests_SlaEngine.gs already covers with a fixed clock — this file
-    // uses the real wall clock, so only a time-of-day-independent
+    // leads tab already in use — L-PUNE-RESOLVED and L-ALLDONE closed
+    // (-> resolved), L-CKPT-PUNE / L-CKPT-HARBOUR still open with the
+    // literal 'Not Updated' stage text (-> still_open; deliberately NOT
+    // relying on the never-connected-past-10-minutes business-hours-gated
+    // path, which Tests_SlaEngine.gs already covers with a fixed clock —
+    // this file uses the real wall clock, so only a time-of-day-independent
     // trigger belongs in a fixture here).
-    ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT-PUNE', client_id: 'C-CKPT-PUNE', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
+    ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT-PUNE', client_id: 'C-CKPT-PUNE', RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: TestFixture_hoursAgo_(now, 5) }));
+    ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-PUNE-RESOLVED', client_id: 'C-PUNE-RESOLVED', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
+    ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-ALLDONE', client_id: 'C-ALLDONE', RM: 'Test RM Two', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
     ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT-HARBOUR', client_id: 'C-CKPT-HARBOUR', RM: 'Harbour RM', current_stage: 'Not Updated', lead_assigned_at: TestFixture_hoursAgo_(now, 5) }));
 
     sendOvernightMorningEmails();
-    TestAssertEqual_(TestGmailLog_.drafts.length, 4, 'sendOvernightMorningEmails: 2 new combined emails this run — Pune (Section 2 only) and Harbour (Section 2 only)');
+    TestAssertEqual_(TestGmailLog_.drafts.length, 4, 'sendOvernightMorningEmails: 2 new combined emails this run — Pune (Section 2 only) and Harbour (Section 2 only); the all-resolved third bucket sends NOTHING');
+    TestAssert_(TestGmailLog_.drafts.slice(2).every(function (d) { return d.to === TEST_EMAIL_PRIMARY_ || d.to === TEST_EMAIL_SECONDARY_; }), 'sendOvernightMorningEmails: this run\'s new drafts went only to Pune\'s and Harbour\'s recipients — the bucket whose every Checkpoint 1 lead is resolved got no email (2026-09-26)');
 
     // .filter(...).pop() -- NOT .find(), which would return run 1's
     // ORIGINAL Pune draft (same recipient, and its subject ALSO matches
@@ -186,8 +203,10 @@ function runOvernightEmailerTests_() {
     TestAssertContains_(puneCombined.htmlBody, 'Section 1', 'sendCombinedMorningEmail_: Pune email is explicitly labeled Section 1');
     TestAssertContains_(puneCombined.htmlBody, 'Already sent separately earlier today', 'sendCombinedMorningEmail_: Pune Section 1 correctly explains overnight leads existed and already went out — not a generic "none" message');
     TestAssertContains_(puneCombined.htmlBody, 'Section 2', 'sendCombinedMorningEmail_: Pune email is explicitly labeled Section 2');
-    TestAssertContains_(puneCombined.htmlBody, 'L-CKPT-PUNE', 'sendCombinedMorningEmail_: Pune Section 2 lists the checkpoint lead');
-    TestAssertContains_(puneCombined.htmlBody, 'Resolved', 'sendCombinedMorningEmail_: L-CKPT-PUNE (now closed) shows as Resolved in Section 2');
+    TestAssertContains_(puneCombined.htmlBody, 'L-CKPT-PUNE', 'sendCombinedMorningEmail_: Pune Section 2 lists the still-unresolved checkpoint lead');
+    TestAssertContains_(puneCombined.htmlBody, 'Still open — Not Updated', 'sendCombinedMorningEmail_: L-CKPT-PUNE (still flagged, same issue) shows as still_open with its current issue label');
+    TestAssert_(puneCombined.htmlBody.indexOf('L-PUNE-RESOLVED') === -1, 'sendCombinedMorningEmail_: L-PUNE-RESOLVED (now closed) is NEVER listed — a resolved lead is not emailed (2026-09-26)');
+    TestAssertContains_(puneCombined.htmlBody, 'Lead Still Unresolved', 'sendCombinedMorningEmail_: Section 2 headline counts only the still-unresolved lead (1), not the resolved one');
 
     TestAssertContains_(harbourCombined.htmlBody, 'No overnight leads for your team today', 'sendCombinedMorningEmail_: Harbour Section 1 shows the plain "no leads" text, NOT the "already sent" text — it genuinely had none, was never sent separately');
     TestAssertContains_(harbourCombined.htmlBody, 'L-CKPT-HARBOUR', 'sendCombinedMorningEmail_: Harbour Section 2 lists its checkpoint lead');
@@ -195,14 +214,20 @@ function runOvernightEmailerTests_() {
 
     // ---- checkpoint1_json/checkpoint1_sent_at written back to the
     // EXACT AllIssues_Log rows the snapshots came from ----
-    const allIssuesLogAfter = ss._sheets['AllIssues_Log'].getRange(2, 1, 2, 14).getValues();
+    const allIssuesLogAfter = ss._sheets['AllIssues_Log'].getRange(2, 1, 3, 14).getValues();
     const puneRow = allIssuesLogAfter[0];
     const harbourRow = allIssuesLogAfter[1];
+    const allDoneRow = allIssuesLogAfter[2];
     TestAssert_(!!puneRow[10], 'AllIssues_Log: Pune row gets a checkpoint1_json value written back (col K)');
     TestAssert_(!!puneRow[11], 'AllIssues_Log: Pune row gets a checkpoint1_sent_at timestamp written back (col L)');
     const puneCheckpoint1 = JSON.parse(puneRow[10]);
-    TestAssertEqual_(puneCheckpoint1[0].state, 'resolved', 'AllIssues_Log: Pune row\'s persisted checkpoint1_json matches what the email itself showed');
+    const puneCheckpoint1ById = {};
+    puneCheckpoint1.forEach(function (r) { puneCheckpoint1ById[r.lead_id] = r; });
+    TestAssertEqual_(puneCheckpoint1ById['L-CKPT-PUNE'].state, 'still_open', 'AllIssues_Log: Pune row\'s persisted checkpoint1_json records the still-open lead');
+    TestAssertEqual_(puneCheckpoint1ById['L-PUNE-RESOLVED'].state, 'resolved', 'AllIssues_Log: the persisted checkpoint1_json still RECORDS the resolved lead — it is only kept out of the email, not out of the state Checkpoint 2 reads');
     TestAssert_(!!harbourRow[10] && !!harbourRow[11], 'AllIssues_Log: Harbour row ALSO gets checkpoint1_json/checkpoint1_sent_at written back');
+    TestAssert_(!!allDoneRow[10] && !!allDoneRow[11], 'AllIssues_Log: the all-resolved bucket\'s row STILL gets checkpoint1_json/checkpoint1_sent_at written even though no email was sent — otherwise it would be retried (and re-checked) on every later run');
+    TestAssertEqual_(JSON.parse(allDoneRow[10])[0].state, 'resolved', 'AllIssues_Log: the all-resolved bucket\'s persisted checkpoint records the lead as resolved');
 
     // ---- Overnight_Log gets a row for Harbour too, even though it had
     // NO overnight leads today (Section 2-only) -- this is the fix for a
@@ -215,6 +240,7 @@ function runOvernightEmailerTests_() {
     const harbourOvernightLogRow = overnightLogAfterCombined.filter(function (r) { return r[1] === 'Harbour'; })[0];
     TestAssert_(!!harbourOvernightLogRow, 'sendCombinedMorningEmail_: Harbour (Section 2-only, zero overnight leads) STILL gets an Overnight_Log row -- the thread reference Checkpoint 2 will need at 13:00');
     TestAssertEqual_(harbourOvernightLogRow[3], '[]', 'sendCombinedMorningEmail_: Harbour\'s Overnight_Log row correctly logs an EMPTY issueLog -- Section 1 had nothing, that fact is preserved, not faked');
+    TestAssertEqual_(overnightLogAfterCombined.filter(function (r) { return r[4] === TEST_EMAIL_CH_ || r[5] === TEST_EMAIL_CH_; }).length, 0, 'sendCombinedMorningEmail_: the all-resolved bucket (no email sent) writes NO Overnight_Log row — nothing was sent, so there is no thread for 13:00 to reply into');
 
     // ---- idempotency: the NEXT run does not reprocess either checkpoint
     // (checkpoint1_sent_at now set on both rows) ----
@@ -296,21 +322,31 @@ function runOvernightEmailerTests_() {
     // thread_id Overnight_Log already stored — proves the two sections
     // compose into ONE email for a bucket that has content in BOTH, not
     // two separate replies. L-CKPT2's checkpoint1_json says 'still_open';
-    // its CURRENT leads-tab stage ('Won', added below) makes Checkpoint 2
-    // compute 'resolved' — a real transition, so filterAllIssuesCheckpoint2ForEmailGs_
-    // keeps it (not one of the closed-out-at-both-checkpoints leads it
-    // suppresses), proving Checkpoint 2 is genuinely RE-computed here, not
-    // just echoing checkpoint1_json back.
+    // its CURRENT leads-tab stage ('Not Updated', added below) keeps
+    // Checkpoint 2 at 'still_open' — so it is listed, proving Checkpoint 2
+    // is genuinely RE-computed here, not just echoing checkpoint1_json back.
+    //
+    // 2026-09-26 ("no need to send email for resolved status"): the
+    // snapshot ALSO carries L-C2-CLOSED, whose current stage is 'Won'
+    // (-> resolved) — it must NOT be listed, though Checkpoint 2 still
+    // records it in checkpoint2_json.
     const allIssuesHeaderFollowup = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
       'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
     const todayTs = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
     followupSs._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [allIssuesHeaderFollowup,
-      [now, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, now, 'thread_seed_1',
-        JSON.stringify([{ lead_id: 'L-CKPT2', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' }]),
-        JSON.stringify([{ lead_id: 'L-CKPT2', state: 'still_open', currentIssueLabel: 'Follow-up Overdue', currentStatus: 'Suspect' }]),
+      [now, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 2, now, 'thread_seed_1',
+        JSON.stringify([
+          { lead_id: 'L-CKPT2', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' },
+          { lead_id: 'L-C2-CLOSED', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' },
+        ]),
+        JSON.stringify([
+          { lead_id: 'L-CKPT2', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' },
+          { lead_id: 'L-C2-CLOSED', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' },
+        ]),
         todayTs, '', ''],
     ]);
-    followupSs._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT2', client_id: 'C-CKPT2', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 40) }));
+    followupSs._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT2', client_id: 'C-CKPT2', RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: TestFixture_hoursAgo_(now, 5) }));
+    followupSs._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-C2-CLOSED', client_id: 'C-C2-CLOSED', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 40) }));
 
     const realSs1 = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return followupSs; }, flush: function () {} };
@@ -329,13 +365,16 @@ function runOvernightEmailerTests_() {
       TestAssertContains_(replyHtml, 'Section 1', 'sendOvernightFollowupEmails: reply is explicitly labeled Section 1 (Overnight Follow-up)');
       TestAssertContains_(replyHtml, 'Section 2', 'sendOvernightFollowupEmails: reply is explicitly labeled Section 2 (Checkpoint 2)');
       TestAssertContains_(replyHtml, 'L-CKPT2', 'sendOvernightFollowupEmails: Section 2 lists the Checkpoint 2 lead');
-      TestAssertContains_(replyHtml, 'Resolved', 'sendCombinedFollowupEmail_: L-CKPT2 (now Won) shows as Resolved — Checkpoint 2 genuinely re-computed, not just echoing checkpoint1_json');
+      TestAssertContains_(replyHtml, 'Still open — Not Updated', 'sendCombinedFollowupEmail_: L-CKPT2 (still flagged) shows as still_open — Checkpoint 2 genuinely re-computed, not just echoing checkpoint1_json');
+      TestAssert_(replyHtml.indexOf('L-C2-CLOSED') === -1, 'sendCombinedFollowupEmail_: L-C2-CLOSED (now Won) is NEVER listed — a resolved lead is not emailed (2026-09-26)');
 
       const allIssuesAfterFollowup = followupSs._sheets['AllIssues_Log'].getRange(2, 1, 1, 14).getValues()[0];
       TestAssert_(!!allIssuesAfterFollowup[12], 'sendCombinedFollowupEmail_: checkpoint2_json written back to AllIssues_Log (col M)');
       TestAssert_(!!allIssuesAfterFollowup[13], 'sendCombinedFollowupEmail_: checkpoint2_sent_at written back to AllIssues_Log (col N)');
       const checkpoint2Written = JSON.parse(allIssuesAfterFollowup[12]);
-      TestAssertEqual_(checkpoint2Written[0].state, 'resolved', 'sendCombinedFollowupEmail_: persisted checkpoint2_json matches what the email itself showed');
+      TestAssertEqual_(checkpoint2Written.length, 1, 'sendCombinedFollowupEmail_: persisted checkpoint2_json holds exactly what the email showed — only the still-unresolved lead');
+      TestAssertEqual_(checkpoint2Written[0].lead_id, 'L-CKPT2', 'sendCombinedFollowupEmail_: persisted checkpoint2_json is the still-unresolved lead');
+      TestAssertEqual_(checkpoint2Written[0].state, 'still_open', 'sendCombinedFollowupEmail_: persisted checkpoint2_json state matches what the email itself showed');
 
       const overnightLogAfterFollowup = followupLogSheet.getRange(2, 1, 1, 9).getValues()[0];
       TestAssert_(!!overnightLogAfterFollowup[8], 'sendCombinedFollowupEmail_: followup_sent_at (col I) written back to Overnight_Log on a successful send');
@@ -422,6 +461,52 @@ function runOvernightEmailerTests_() {
       TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun2, 'sendOvernightFollowupEmails: a second run sends nothing new for the Section-2-only bucket either');
     } finally {
       SpreadsheetApp = realSs1b;
+    }
+
+    // ---- 2026-09-26 ("no need to send email for resolved status"): a
+    // Section-2-only bucket whose ONLY checkpoint lead has since closed
+    // (current stage 'Won') has nothing left to say — NO reply at all.
+    // Checkpoint 2 is still recorded (so the row is never re-processed),
+    // but followup_sent_at stays blank: nothing was sent. Also covers the
+    // moment-of-resolution case: the lead was still_open at Checkpoint 1
+    // and resolved by 13:00 — that is exactly the "resolved" email the
+    // user asked to stop sending. ----
+    const allResolvedSs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+    });
+    allResolvedSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+      TestOE_leadRow_(header, { lead_id: 'L-C2-ALLDONE', client_id: 'C-C2-ALLDONE', RM: 'Harbour RM', region: 'Harbour', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 30) }),
+    ]);
+    const allResolvedLogSheet = ensureOvernightLogSheet_(allResolvedSs);
+    allResolvedLogSheet.appendRow([istDayKeyGs_(now), 'Harbour', 'thread_harbour_alldone', '[]',
+      Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), TEST_EMAIL_SECONDARY_, '', 'Harbour Google Overnight + Follow-up Digest - test']);
+    allResolvedSs._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [allIssuesHeaderFollowup,
+      [now, 'Harbour', 'Harbour Manager', 'A1', TEST_EMAIL_SECONDARY_, '', 1, now, 'thread_harbour_alldone',
+        JSON.stringify([{ lead_id: 'L-C2-ALLDONE', RM: 'Harbour RM', TL: 'Harbour Manager', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }]),
+        JSON.stringify([{ lead_id: 'L-C2-ALLDONE', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' }]),
+        Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), '', ''],
+    ]);
+
+    const realSs1c = SpreadsheetApp;
+    SpreadsheetApp = { getActiveSpreadsheet: function () { return allResolvedSs; }, flush: function () {} };
+    try {
+      const repliesBeforeAllResolved = TestGmailLog_.threadReplies.length;
+      const draftsBeforeAllResolved = TestGmailLog_.drafts.length;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeAllResolved, 'sendOvernightFollowupEmails: a bucket with nothing still unresolved in EITHER section sends NO reply (2026-09-26)');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBeforeAllResolved, 'sendOvernightFollowupEmails: ...and no plain-fallback message either');
+
+      const allIssuesAfterAllResolved = allResolvedSs._sheets['AllIssues_Log'].getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!!allIssuesAfterAllResolved[12] && !!allIssuesAfterAllResolved[13], 'sendCombinedFollowupEmail_: checkpoint2_json/checkpoint2_sent_at are STILL written when no reply was needed — otherwise the row would be re-checked on every later run');
+      TestAssertEqual_(JSON.parse(allIssuesAfterAllResolved[12]).length, 0, 'sendCombinedFollowupEmail_: the persisted Checkpoint 2 is empty — the resolved lead is not carried as an email-worthy result');
+      TestAssert_(!allResolvedLogSheet.getRange(2, 1, 1, 9).getValues()[0][8], 'sendCombinedFollowupEmail_: followup_sent_at stays BLANK when nothing was sent — it records a send, not a check');
+
+      // Idempotent: a re-run finds Checkpoint 2 already recorded and does nothing.
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeAllResolved, 'sendOvernightFollowupEmails: a re-run after an all-resolved skip still sends nothing');
+    } finally {
+      SpreadsheetApp = realSs1c;
     }
 
     // ---- threaded reply failure -> falls back to a plain new message ----

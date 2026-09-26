@@ -139,12 +139,10 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssertEqual_(overnightRowAfter10[3], '[]', 'Full cycle 10:00: Overnight_Log correctly logs an EMPTY issueLog — Section 1 genuinely had nothing');
       TestAssert_(!overnightRowAfter10[8], 'Full cycle 10:00: followup_sent_at is still blank — the 13:00 job has not run yet');
 
-      // Simulate the lead getting resolved between 10am and 1pm — the
-      // ONLY leads-tab edit this test makes, directly mutating the same
-      // mock row sendAllIssuesEmails/sendOvernightMorningEmails already
-      // read, the same way a real RM updating the sheet between runs
-      // would change what the 13:00 job sees.
-      ss._sheets[monthShort].getRange(3, header.indexOf('current_stage') + 1, 1, 1).setValues([['Opportunity']]);
+      // The lead is deliberately left UNRESOLVED through 13:00 here (block
+      // "resolved before the reply" below covers the resolving case): since
+      // 2026-09-26 a resolved lead is never emailed, so this is the path
+      // that still produces a Checkpoint 2 reply.
 
       // ==== 13:00: real sendOvernightFollowupEmails() ====
       sendOvernightFollowupEmails();
@@ -154,29 +152,89 @@ function runEmailLifecycleFullCycleTests_() {
       const thirteenHtml = TestOE_decodeRawMime_(thirteenReply.raw);
       TestAssertContains_(thirteenHtml, 'Nothing still unresolved from this morning', 'Full cycle 13:00: Section 1 still correctly shows its own empty state');
       TestAssertContains_(thirteenHtml, 'L-CYCLE', 'Full cycle 13:00: Section 2 (Checkpoint 2) lists L-CYCLE');
-      TestAssertContains_(thirteenHtml, 'Resolved', 'Full cycle 13:00: L-CYCLE (now Opportunity) shows as Resolved — a real transition the real code recomputed, not an echo of checkpoint1_json');
+      TestAssertContains_(thirteenHtml, 'Still open', 'Full cycle 13:00: L-CYCLE (still unresolved) shows as still open — a real state the real code recomputed, not an echo of checkpoint1_json');
 
       const rowAfter13 = allIssuesLog.getRange(2, 1, 1, 14).getValues()[0];
       TestAssert_(!!rowAfter13[12], 'Full cycle 13:00: checkpoint2_json (col M) now written by the REAL sendCombinedFollowupEmail_');
       TestAssert_(!!rowAfter13[13], 'Full cycle 13:00: checkpoint2_sent_at (col N) now written');
       const checkpoint2Written = JSON.parse(rowAfter13[12]);
-      TestAssertEqual_(checkpoint2Written[0].state, 'resolved', 'Full cycle 13:00: the real checkpoint2_json records resolved');
+      TestAssertEqual_(checkpoint2Written[0].state, 'still_open', 'Full cycle 13:00: the real checkpoint2_json records still_open');
 
       const overnightRowAfter13 = overnightLog.getRange(2, 1, 1, 9).getValues()[0];
       TestAssert_(!!overnightRowAfter13[8], 'Full cycle 13:00: followup_sent_at now written — Step 8\'s own idempotency guard, exercised end to end');
 
-      // ==== Idempotency, end to end: a full second pass of all 3 real
-      // entry points the same day sends NOTHING new for this bucket —
-      // every guard (alreadyLoggedRegionsToday ×2, checkpoint1/2_sent_at,
+      // ==== Idempotency, end to end: a second pass of the real 10:00 and
+      // 13:00 entry points the same day sends NOTHING new for this bucket —
+      // every guard (alreadyLoggedRegionsToday, checkpoint1/2_sent_at,
       // followup_sent_at) proven together, not just individually. ====
       const draftsBeforeRerun = TestGmailLog_.drafts.length;
       const repliesBeforeRerun = TestGmailLog_.threadReplies.length;
-      sendAllIssuesEmails();
       sendOvernightMorningEmails();
       sendOvernightFollowupEmails();
-      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBeforeRerun, 'Full cycle: a full second pass of all 3 real jobs the same day sends no new drafts');
-      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun, 'Full cycle: a full second pass of all 3 real jobs the same day sends no new threaded replies');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBeforeRerun, 'Full cycle: a second pass of the 10:00 and 13:00 jobs the same day sends no new drafts');
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun, 'Full cycle: a second pass of the 10:00 and 13:00 jobs the same day sends no new threaded replies');
+      // The 17:00 job is deliberately NOT re-run here: the lead is still unresolved (it must be, for 13:00 to reply), and
+      // this test aged the 17:00 row to "yesterday" to simulate the next morning, so the 17:00 same-day guard rightly finds
+      // no row for today. That guard is covered by Tests_AllIssuesEmailer.gs.
     }
+
+    // ==== 2026-09-26 ("no need to send email for resolved status"): the SAME real 17:00 -> 10:00 -> 13:00 chain, but the
+    // lead is closed at a different point. Two runs, each on a fresh sheet; counts are RELATIVE to the shared Gmail log. ====
+    ['before10', 'between10and13'].forEach(function (resolveWhen) {
+      const ssR = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ssR._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        TestEFC_leadRow_(header, {
+          lead_id: 'L-CYCLE-R', client_id: 'C-CYCLE-R', RM: 'Test RM One', current_stage: 'Suspect',
+          lead_assigned_at: TestFixture_hoursAgo_(now, 40),
+          last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+          internal_status_comments: 'Test RM One: Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+        }),
+      ]);
+      const realSsR = SpreadsheetApp;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ssR; }, flush: function () {} };
+      try {
+        const tag = 'Full cycle, lead resolved ' + resolveWhen + ': ';
+        const stageCol = header.indexOf('current_stage') + 1;
+        const d0 = TestGmailLog_.drafts.length;
+        const r0 = TestGmailLog_.threadReplies.length;
+        sendAllIssuesEmails();
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, tag + '17:00 still emails the lead — it was unresolved then');
+        const logR = ssR.getSheetByName('AllIssues_Log');
+        logR.getRange(2, 1, 1, 1).setValues([[TestFixture_daysAgo_(now, 1)]]);
+
+        if (resolveWhen === 'before10') ssR._sheets[monthShort].getRange(3, stageCol, 1, 1).setValues([['Opportunity']]);
+        sendOvernightMorningEmails();
+        const rowAfter10R = logR.getRange(2, 1, 1, 14).getValues()[0];
+        const overnightLogR = ssR.getSheetByName('Overnight_Log');
+
+        if (resolveWhen === 'before10') {
+          TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, tag + '10:00 sends NOTHING — the only Checkpoint 1 lead is already resolved');
+          TestAssert_(!!rowAfter10R[10] && !!rowAfter10R[11], tag + 'checkpoint1_json/checkpoint1_sent_at are still recorded, so the row is not re-checked');
+          TestAssertEqual_(JSON.parse(rowAfter10R[10])[0].state, 'resolved', tag + 'checkpoint1_json records resolved');
+          TestAssert_(!overnightLogR || overnightLogR.getLastRow() < 2, tag + 'no Overnight_Log row — nothing was sent, so there is no thread');
+          sendOvernightFollowupEmails();
+          TestAssertEqual_(TestGmailLog_.threadReplies.length, r0, tag + '13:00 sends nothing either');
+        } else {
+          TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 2, tag + '10:00 emails the lead — it was still unresolved then');
+          ssR._sheets[monthShort].getRange(3, stageCol, 1, 1).setValues([['Opportunity']]);
+          sendOvernightFollowupEmails();
+          TestAssertEqual_(TestGmailLog_.threadReplies.length, r0, tag + '13:00 sends NO reply — the lead resolved in between, and a resolved lead is never emailed');
+          const rowAfter13R = logR.getRange(2, 1, 1, 14).getValues()[0];
+          TestAssert_(!!rowAfter13R[12] && !!rowAfter13R[13], tag + 'checkpoint2_json/checkpoint2_sent_at are still recorded');
+          TestAssertEqual_(JSON.parse(rowAfter13R[12]).length, 0, tag + 'checkpoint2_json holds no unresolved lead');
+          TestAssert_(!overnightLogR.getRange(2, 1, 1, 9).getValues()[0][8], tag + 'followup_sent_at stays blank — nothing was sent');
+          const draftsBeforeRerunR = TestGmailLog_.drafts.length;
+          sendOvernightFollowupEmails();
+          TestAssertEqual_(TestGmailLog_.threadReplies.length, r0, tag + 'a re-run of the 13:00 job still sends nothing');
+          TestAssertEqual_(TestGmailLog_.drafts.length, draftsBeforeRerunR, tag + 'a re-run of the 13:00 job creates no fallback message either');
+        }
+      } finally {
+        SpreadsheetApp = realSsR;
+      }
+    });
 
     {
       // ==== TEST MODE must never poison production state (2026-09-25 incident): a TEST MODE run of each

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `7aa9786` — Step 7, FN-270/271 now both fully wired into `GS-010`'s 13:00 job too (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-26 against commit `SHA_PLACEHOLDER` — checkpoint emails list only unresolved leads (FN-271 rewritten, `allIssuesCheckpointIsActiveGs_` added; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -35,8 +35,13 @@ would undermine both.
   (`docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md`).
 - `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` —
   added 2026-09-23: pure filter deciding which of Checkpoint 2's
-  results are worth a human seeing again at 13:00 (suppresses only a
-  lead already closed out at Checkpoint 1 that's still closed out now).
+  results are worth a human seeing again at 13:00. **Since 2026-09-26 it
+  keeps only still-unresolved leads** (resolved / not_found are dropped,
+  including a lead that resolved since Checkpoint 1).
+- `allIssuesCheckpointIsActiveGs_(result)` — added 2026-09-26: the single
+  "is this checkpoint result still unresolved" rule (`state` is neither
+  `resolved` nor `not_found`) that both checkpoint emails use to decide
+  what to list and whether to send at all.
 
 ## Trigger schedule
 
@@ -56,7 +61,7 @@ gotcha).
 | FN-248 | `computeSlaFlags_(row, colIndex, now, baselineMap)` `#L46` | a leads row + column index + `now` + a `Movement_Log` call-count baseline map | `{firstContactBreach, neverConnected…, isNotUpdated, stageStuck48h, followupOverdue, …}` | none (pure) | `canonicalStage_` / `businessMinutesBetweenGs_` / `istDayKeyGs_` (`GS-002`), `latestCommentTimestamp_` / `countTodayCommentEntries_` (`GS-005`) | `MovementTracker.gs`, `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `DailyRmIssueLog.gs` | reusable — **the `.gs` twin of `enrichLead` (`JS-006` FN-034)** |
 | FN-249 | `primaryIssueGs_(flags)` `#L154` | the SLA flags | the single headline issue key | none | `ISSUE_PRIORITY`-order | the emailers (subject line + sort) | reusable — shares the tie-break order with `CONFIG.ISSUE_PRIORITY` (`JS-005` CFG-012) |
 | FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L215` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s `sendCombinedMorningEmail_` (`GS-010` FN-275, Checkpoint 1, 10:00 job, Step 6/11) AND `sendCombinedFollowupEmail_` (`GS-010` FN-280, Checkpoint 2 — called a SECOND time with Checkpoint 1's own output as `priorEntries`, 13:00 job, Step 7/11) | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment; now proven by both real call sites, not just design) |
-| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L296` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s `sendCombinedFollowupEmail_` (`GS-010` FN-280, 13:00 job, wired 2026-09-23 Step 7/11) | specific — **the "incremental, not a re-diff" rule**: suppresses only a lead that was ALREADY closed out (resolved/not_found) at Checkpoint 1 and is STILL closed out now; the full unfiltered `checkpoint2Results` is what gets persisted to `checkpoint2_json`, this filter is presentation-only |
+| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L297` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s `sendCombinedFollowupEmail_` (`GS-010` FN-280, 13:00 job, wired 2026-09-23 Step 7/11) | specific — **2026-09-26: keeps ONLY still-unresolved leads** (via private helper `allIssuesCheckpointIsActiveGs_` `#L305`, also used by `GS-010`'s `buildAllIssuesCheckpointSectionOptsGs_` / `sendCombinedMorningEmail_`); previously it suppressed only a lead closed out at BOTH checkpoints, so a lead that had just resolved was listed once. Its output is what `sendCombinedFollowupEmail_` persists to `checkpoint2_json` (resolved leads stay in `checkpoint1_json`) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -183,7 +188,7 @@ now"). `Tests_SlaEngine.gs` gained a dedicated block covering all 6
 `state` values + the "reused on its own output" case.
 
 **Revalidated 2026-09-23** `efc6137`: added
-`filterAllIssuesCheckpoint2ForEmailGs_` (FN-271, `#L296`) — Step 5/11 of
+`filterAllIssuesCheckpoint2ForEmailGs_` (FN-271, `#L296` when added; `#L297` now) — Step 5/11 of
 the same redesign. Pure function, no Sheets I/O, no dependency on
 FN-270 beyond consuming its output shape. `Tests_SlaEngine.gs` gained a
 plain-fixture block (no mock spreadsheet needed) covering all 7 named
@@ -218,6 +223,17 @@ file had been fully wired since Step 7 but not yet actually pasted into
 the Sheet's Apps Script project until now). See `GS-010`'s own
 Version/change reference for the full deployment + verification
 narrative. No `Tests_SlaEngine.gs` changes.
+
+**Revalidated 2026-09-26** `SHA_PLACEHOLDER`: user request "no need to send
+email for resolved status, only if not resolved then send email".
+`filterAllIssuesCheckpoint2ForEmailGs_` (FN-271) now returns only
+still-unresolved results and a new pure helper
+`allIssuesCheckpointIsActiveGs_` holds the one rule; `GS-010` uses the
+same helper for the 10:00 Section 2 and for deciding whether to send at
+all. No SLA rule/threshold change, so no `enrichLead`/`CONFIG` twin
+update. `Tests_SlaEngine.gs`: a newly-resolved lead is now excluded (result
+length 4, not 5) and the helper has its own cases. Not live until pasted
+into the Sheet's Apps Script editor.
 
 ## Revalidation trigger
 

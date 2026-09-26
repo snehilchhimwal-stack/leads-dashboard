@@ -272,16 +272,16 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap) {
 // population a second time would be exactly the "recreate the 17:00
 // table" the design doc explicitly says not to do.
 //
-// The rule: suppress ONLY a lead that was ALREADY closed out
-// (resolved/not_found) at Checkpoint 1 AND is STILL closed out now --
-// that pairing carries no news. Everything else is shown: still
-// genuinely active (still_open/category_changed/escalated, even with
-// an UNCHANGED label -- an unresolved SLA breach staying unresolved
+// The rule (changed 2026-09-26 at the user's request -- "no need to send
+// email for resolved status, only if not resolved"): show ONLY leads that
+// are still genuinely active (still_open/category_changed/escalated, even
+// with an UNCHANGED label -- an unresolved SLA breach staying unresolved
 // all day is itself the news, same reasoning the EXISTING Overnight
 // Follow-up already applies: "still flagged for the SAME issue =
-// unresolved, shown in red", never suppressed for being unchanged) OR
-// any transition into/out of closed-out (newly resolved this leg, or
-// reopened after appearing resolved at the prior checkpoint).
+// unresolved, shown in red", never suppressed for being unchanged) or
+// reopened after appearing resolved at the prior checkpoint. A lead that
+// is resolved / no longer found is never shown -- including one that was
+// newly resolved this leg, which used to be listed once as news.
 //
 // `checkpoint1Entries`: Checkpoint 1's own result array (what
 // computeAllIssuesCheckpointGs_ returned when first called with the raw
@@ -289,19 +289,19 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap) {
 // `checkpoint2Results`: computeAllIssuesCheckpointGs_'s output from
 // calling it a second time with `checkpoint1Entries` as its own
 // `priorEntries` argument -- the caller computes this (not done inside
-// this function) so the FULL, unfiltered array is still what gets
-// persisted to checkpoint2_json (col M) -- the design doc's state model
-// needs the complete record, not just what a human ends up seeing;
-// filtering is a presentation concern layered on top, kept separate.
+// this function). The caller persists this function's OUTPUT (the still-
+// unresolved leads that were emailed) to checkpoint2_json (col M), not the
+// full raw array: keeping resolved leads out also keeps that cell small (a
+// 2026-09-25 oversized checkpoint2 write crashed the 13:00 job).
+// checkpoint1_json (col K) still records every lead's state, resolved included.
 function filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results) {
-  const checkpoint1ByLeadId = {};
-  (checkpoint1Entries || []).forEach(function (e) { checkpoint1ByLeadId[e.lead_id] = e; });
-  const closedOutStates = { resolved: true, not_found: true };
+  // 2026-09-26: only leads that are STILL UNRESOLVED are ever emailed — a lead that just got resolved is no longer
+  // "news" (previously shown once as Resolved). checkpoint1Entries is kept in the signature for the existing callers.
+  return (checkpoint2Results || []).filter(allIssuesCheckpointIsActiveGs_);
+}
 
-  return (checkpoint2Results || []).filter(function (r) {
-    const priorState = (checkpoint1ByLeadId[r.lead_id] || {}).state;
-    const wasClosedOut = closedOutStates[priorState] === true;
-    const stillClosedOut = closedOutStates[r.state] === true;
-    return !(wasClosedOut && stillClosedOut);
-  });
+// A checkpoint result is "active" (worth emailing about) only while its lead still has an open SLA issue; resolved and
+// not_found never trigger an email and are never listed in one.
+function allIssuesCheckpointIsActiveGs_(result) {
+  return !!result && result.state !== 'resolved' && result.state !== 'not_found';
 }

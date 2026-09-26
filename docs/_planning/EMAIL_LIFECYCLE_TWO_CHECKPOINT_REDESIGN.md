@@ -114,6 +114,18 @@ alongside a new Section 2 in the same message.
 
 ---
 
+> **Amended 2026-09-26 (user request: "no need to send email for resolved status,
+> only if not resolved then send email").** Wherever this document says a
+> checkpoint shows a lead as `resolved` / "newly resolved" (Parts 2, 3, 6), read
+> it as superseded: a checkpoint email lists ONLY leads that are still
+> unresolved (`still_open` / `category_changed` / `escalated` / `reopened`);
+> `resolved` and `not_found` are never listed, and a bucket with nothing
+> unresolved in either section gets no email at all. The states are still
+> COMPUTED and `checkpoint1_json` still records every lead (resolved included) —
+> only the email changed. `checkpoint2_json` holds just the still-unresolved
+> leads that were emailed. The single rule is `allIssuesCheckpointIsActiveGs_`
+> (`SlaEngine.gs`).
+
 ## Part 4 — 17:00 Email Structure
 
 **Unchanged**: scope, the 5 SLA rules and their priority order, the
