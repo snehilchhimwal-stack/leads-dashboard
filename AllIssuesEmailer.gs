@@ -615,3 +615,64 @@ function setupAllIssuesEmailTrigger() {
     .create();
   Logger.log('All-Issues Emailer trigger installed — runs daily near ' + ALL_ISSUES_RUN_HOUR_ + ':00 IST.');
 }
+
+// ==================== One-off: remove the 2026-09-24 TEST MODE rows ====================
+// Remediation (2026-09-26, "remove test rows"): a TEST MODE run at 10:16 IST on 2026-09-24 wrote 28 real-looking rows
+// (recipient = the tester) into AllIssues_Log before writeUnlessTestModeGs_ existed. They made the real 17:00 job skip
+// every region that day and later sent Checkpoint 1 to the tester instead of managers (HANDOVER.md section 8).
+//
+// Touches NOTHING unless every guard holds: the header is as expected; the matching rows (date inside the window AND
+// recipient = the tester) form ONE contiguous block; and there are exactly the expected number of them. The rows are
+// archived to a Drive CSV and the archive is checked BEFORE anything is deleted. Not wired to any trigger; safe to
+// re-run (a second run finds nothing and does nothing). Precedent: removeDedupIncidentRowsNow (MovementTracker.gs).
+const TEST_MODE_ROWS_FROM_ = new Date('2026-09-24T10:00:00+05:30');
+const TEST_MODE_ROWS_TO_ = new Date('2026-09-24T10:30:00+05:30');
+const TEST_MODE_ROWS_RECIPIENT_ = 'snehil.chhimwal@homesfy.in';
+const TEST_MODE_ROWS_EXPECTED_ = 28;
+function removeTestModeAllIssuesRowsNow() {
+  removeAllIssuesLogRowsInWindowGs_(SpreadsheetApp.getActiveSpreadsheet(), TEST_MODE_ROWS_FROM_, TEST_MODE_ROWS_TO_, TEST_MODE_ROWS_RECIPIENT_, TEST_MODE_ROWS_EXPECTED_);
+}
+
+function removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount) {
+  const sheet = ss.getSheetByName(ALL_ISSUES_LOG_SHEET_);
+  if (!sheet) throw new Error(ALL_ISSUES_LOG_SHEET_ + ' sheet not found.');
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (String(header[0]).trim() !== 'date' || String(header[4]).trim() !== 'to') {
+    throw new Error(ALL_ISSUES_LOG_SHEET_ + ' header is not as expected (col A "date", col E "to") - refusing to delete anything.');
+  }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log(ALL_ISSUES_LOG_SHEET_ + ' has no data rows - nothing to remove.'); return; }
+
+  const keys = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const wanted = String(recipient).trim().toLowerCase();
+  let first = -1, last = -1, count = 0;
+  keys.forEach(function (r, i) {
+    const when = r[0];
+    if (when instanceof Date && when >= from && when <= to && String(r[4]).trim().toLowerCase() === wanted) {
+      if (first < 0) first = i;
+      last = i;
+      count++;
+    }
+  });
+  if (!count) { Logger.log('No ' + ALL_ISSUES_LOG_SHEET_ + ' rows match the test-mode window - nothing to remove (already done?).'); return; }
+  if (last - first + 1 !== count) {
+    throw new Error('Matching rows are not one contiguous block (' + count + ' rows spread over ' + (last - first + 1) + ' positions) - refusing to delete anything.');
+  }
+  if (count !== expectedCount) {
+    throw new Error('Found ' + count + ' matching rows but expected ' + expectedCount + ' - refusing to delete anything.');
+  }
+
+  const startRow = first + 2; // keys[] starts at sheet row 2
+  const rows = sheet.getRange(startRow, 1, count, lastCol).getValues();
+  const file = archiveRowsToDriveCsv_(ALL_ISSUES_LOG_SHEET_, header, rows, 'test_mode_2026-09-24');
+  if (!file) throw new Error('Drive archive was not created - refusing to delete.');
+  // Every data row starts with its date rendered as an ISO timestamp (see archiveRowsToDriveCsv_'s csvEscape).
+  const archived = (file.getBlob().getDataAsString().match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length;
+  if (archived !== count) {
+    throw new Error('Drive archive holds ' + archived + ' data rows but ' + count + ' were expected - refusing to delete. Archive: ' + file.getUrl());
+  }
+
+  sheet.deleteRows(startRow, count);
+  Logger.log('Removed ' + count + ' ' + ALL_ISSUES_LOG_SHEET_ + ' rows (sheet rows ' + startRow + '-' + (startRow + count - 1) + '), archived first to ' + file.getUrl() + '. ' + ALL_ISSUES_LOG_SHEET_ + ' now has ' + (sheet.getLastRow() - 1) + ' data rows.');
+}

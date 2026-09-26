@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `AllIssuesEmailer.gs` (604 lines) |
+| **Location** | `AllIssuesEmailer.gs` (678 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `b3a58f9` — 13:00 crash hardening (oversize cell + per-bucket isolation; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-26 against commit `SHA_PLACEHOLDER` — guarded one-off removal of the 2026-09-24 TEST MODE rows (`FN-299`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -57,6 +57,7 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 | FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L372` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
 | FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
 | FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L578/#L605` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
+| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L636` / `removeTestModeAllIssuesRowsNow()` `#L632` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -207,6 +208,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-09-25, later** (`684956b`): single Futwork email across regions — Futwork RMs' leads from every region are grouped under the one `Futwork` key (`regionKeyForRmGs_`), each lead keeping its real `region` (so the log's `issue_snapshot_json` entries carry it); `sendOneAllIssuesEmail_` renders that email region-by-region with bands, the regions spelled out in the subject and the header line, and no longer prints empty brackets for it. Ordinary buckets are unchanged. Full narrative and the helper functions are in `GS-004`'s Version/change reference (`FN-290`..`FN-294`, `CFG-068`).
 
 **2026-09-25, evening** (`b3a58f9`): 13:00 crash hardening — the `issue_snapshot_json` cell now goes through `jsonForCellGs_` (never over 45,000 characters). Line count unchanged. Full narrative in `GS-004`'s Version/change reference (`FN-283`, `FN-295`, `CFG-069`).
+
+**2026-09-26** (`SHA_PLACEHOLDER`): added the guarded one-off `removeTestModeAllIssuesRowsNow` (`FN-299`) to delete the 28 `AllIssues_Log` rows the 2026-09-24 TEST MODE run left behind (user request "remove test rows"). +74 lines (604L → 678L). Also: `sendOneAllIssuesEmail_` now receives a Cc that includes the region's P&L head when one is configured (`GS-004` `FN-298`) — no change to this file for that; the Cc is stored in col F as before. Tests: `Tests_AllIssuesEmailer.gs` (count / contiguity / header aborts, happy path with archive, re-run). Not live until pasted; the function is run once by hand.
 
 ## Revalidation trigger
 

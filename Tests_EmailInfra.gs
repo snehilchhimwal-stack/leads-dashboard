@@ -199,6 +199,69 @@ function runEmailInfraTests_() {
     TestAssertEqual_(resolution.results.length, 1, 'resolveRecipientEmailsForRegion_: a configured Region_Recipients fallback does not add a second bucket for a Futwork RM');
     TestAssertEqual_(resolution.results[0].cc, undefined, 'resolveRecipientEmailsForRegion_: a configured Region_Recipients fallback never adds a Cc to a Futwork RM');
 
+    // ---- Region P&L head Cc (2026-09-26, "add pnl head of Hyderabad and Bangalore in cc for emails"). The config holds a
+    // NAME (this repo is public); the address is looked up in Manager_Directory. Synthetic names/addresses only here. ----
+    const pnlHead = TEST_EMAIL_SECONDARY_;
+    const ssPnl = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_().concat([
+        ['Test PnL Head', 'Head', 'Test Region', pnlHead, 0, 'manual'],
+      ])),
+    });
+    REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Test PnL Head', ' bangalore ': 'test pnl head' };
+    try {
+      const ccList = function (r) { return String((r && r.cc) || '').split(',').filter(Boolean); };
+      const resolveIn = function (region, rms, legacy) { return resolveRecipientEmailsForRegion_(ssPnl, region, rms, legacy || {}, { fireAlerts: false }).results[0]; };
+      const pnlPune = resolveIn('Pune', ['Test RM One']);
+      const pnlHyd = resolveIn('Hyderabad', ['Test RM One']);
+      const pnlBlr = resolveIn('Bangalore', ['Test RM One']);
+      TestAssert_(ccList(pnlPune).indexOf(pnlHead) === -1, 'resolveRecipientEmailsForRegion_: a region with no P&L head configured (Pune) gets no extra Cc');
+      TestAssert_(ccList(pnlHyd).indexOf(pnlHead) !== -1, 'resolveRecipientEmailsForRegion_: Hyderabad emails Cc the P&L head, address looked up by name in Manager_Directory');
+      TestAssert_(ccList(pnlBlr).indexOf(pnlHead) !== -1, 'resolveRecipientEmailsForRegion_: Bangalore emails Cc the P&L head (region key and name matched case- and space-insensitively)');
+      TestAssertEqual_(JSON.stringify(ccList(pnlHyd).filter(function (e) { return e !== pnlHead; })), JSON.stringify(ccList(pnlPune)), 'resolveRecipientEmailsForRegion_: the P&L head is ADDED to the existing Cc chain — nothing already Cc\'d is dropped or reordered');
+      TestAssertEqual_(pnlHyd.to, pnlPune.to, 'resolveRecipientEmailsForRegion_: adding the P&L head never changes the To');
+
+      // The P&L head is already the To of the email (their own bucket) -> not also Cc'd.
+      REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Test A1 One' }; // resolves to TEST_EMAIL_PRIMARY_, which is Test RM One's To
+      TestAssert_(ccList(resolveIn('Hyderabad', ['Test RM One'])).indexOf(pnlHyd.to) === -1, 'resolveRecipientEmailsForRegion_: a P&L head who is already the To of the email is not also Cc\'d');
+      // Already present in the Cc chain (the CH) -> not duplicated.
+      REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Test CH Self' }; // resolves to TEST_EMAIL_CH_, already in the Cc chain
+      const dupeCc = ccList(resolveIn('Hyderabad', ['Test RM One']));
+      TestAssertEqual_(dupeCc.filter(function (e) { return e === TEST_EMAIL_CH_; }).length, 1, 'resolveRecipientEmailsForRegion_: a P&L head already in the Cc chain is not duplicated');
+      // No address on record for the configured name -> no Cc added, no throw.
+      REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Test A1 NoMail' };
+      TestAssertEqual_(JSON.stringify(ccList(resolveIn('Hyderabad', ['Test RM One']))), JSON.stringify(ccList(pnlPune)), 'resolveRecipientEmailsForRegion_: a P&L head with no address in Manager_Directory adds nothing and does not throw');
+      REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Someone Not In The Directory' };
+      TestAssertEqual_(JSON.stringify(ccList(resolveIn('Hyderabad', ['Test RM One']))), JSON.stringify(ccList(pnlPune)), 'resolveRecipientEmailsForRegion_: a P&L head name Manager_Directory does not know adds nothing and does not throw');
+
+      REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Test PnL Head' };
+      const legacyPnl = resolveIn('Hyderabad', ['Some Totally Unknown RM'], { 'Hyderabad': { to: TEST_EMAIL_PRIMARY_, cc: '' } });
+      TestAssert_(ccList(legacyPnl).indexOf(pnlHead) !== -1, 'resolveRecipientEmailsForRegion_: the legacy Region_Recipients fallback bucket also Cc\'s the P&L head');
+      const backstopPnl = resolveIn('Hyderabad', ['Some Totally Unknown RM']);
+      TestAssertEqual_(backstopPnl.cc, undefined, 'resolveRecipientEmailsForRegion_: the CH-level backstop still has NO Cc, P&L head included');
+      const futworkPnl = resolveIn('Hyderabad', ['Kajal Futwork']);
+      TestAssertEqual_(futworkPnl.cc, undefined, 'resolveRecipientEmailsForRegion_: the Futwork bucket still has NO Cc, P&L head included (it goes to FUTWORK_ROUTE_EMAIL_ only)');
+
+      TestAssertEqual_(regionPnlHeadEmailGs_(ssPnl, 'Pune', undefined), '', 'regionPnlHeadEmailGs_: an unconfigured region has no P&L head');
+      TestAssertEqual_(regionPnlHeadEmailGs_(ssPnl, undefined, undefined), '', 'regionPnlHeadEmailGs_: a missing region never throws');
+      TestAssertEqual_(regionPnlHeadEmailGs_(ssPnl, 'Hyderabad', { emailByManagerNameLower: { 'test pnl head': 'given@x.com' } }), 'given@x.com', 'regionPnlHeadEmailGs_: uses hierarchy data the caller already loaded instead of reading the sheets again');
+      TestAssertEqual_(withRegionPnlHeadCcGs_('', 'a@x.com', 'b@x.com'), 'b@x.com', 'withRegionPnlHeadCcGs_: no P&L head passes the Cc through unchanged');
+      TestAssertEqual_(withRegionPnlHeadCcGs_('', 'a@x.com', ''), undefined, 'withRegionPnlHeadCcGs_: no P&L head and no Cc stays undefined');
+      TestAssertEqual_(withRegionPnlHeadCcGs_('p@x.com', 'a@x.com', ''), 'p@x.com', 'withRegionPnlHeadCcGs_: with no other Cc the result is just the P&L head');
+      TestAssertEqual_(withRegionPnlHeadCcGs_('p@x.com', 'a@x.com', 'b@x.com, c@x.com'), 'b@x.com,c@x.com,p@x.com', 'withRegionPnlHeadCcGs_: appended after the existing Cc, whitespace tidied');
+      TestAssertEqual_(withRegionPnlHeadCcGs_('P@X.com', 'a@x.com', 'p@x.com'), 'p@x.com', 'withRegionPnlHeadCcGs_: an address already present in a different case is not duplicated');
+
+      REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Test PnL Head' };
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_CH_;
+      const testModePnl = resolveIn('Hyderabad', ['Test RM One']);
+      TEST_MODE_OVERRIDE_EMAIL_ = '';
+      TestAssertEqual_(testModePnl.cc, undefined, 'resolveRecipientEmailsForRegion_: in TEST MODE the P&L head is NOT Cc\'d — real recipients are suppressed, shown only as originalCc');
+      TestAssert_(ccList({ cc: testModePnl.originalCc }).indexOf(pnlHead) !== -1, 'resolveRecipientEmailsForRegion_: TEST MODE\'s originalCc still shows the P&L head, so a tester sees what a real send would do');
+    } finally {
+      TEST_MODE_OVERRIDE_EMAIL_ = '';
+      REGION_PNL_HEAD_CC_ = {};
+    }
+
     // ---- Futwork single-email helpers (2026-09-25): one pseudo-region across every real region ----
     TestAssertEqual_(regionKeyForRmGs_('Kajal Futwork', 'Pune'), FUTWORK_REGION_KEY_, 'regionKeyForRmGs_: a Futwork RM groups under the single Futwork key whatever its real region');
     TestAssertEqual_(regionKeyForRmGs_('Test RM One', 'Pune'), 'Pune', 'regionKeyForRmGs_: any other RM keeps its own region');

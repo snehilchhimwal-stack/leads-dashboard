@@ -573,7 +573,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
     TEST_MODE_OVERRIDE_EMAIL_: TEST_MODE_OVERRIDE_EMAIL_, OPS_ALERT_EMAIL_: OPS_ALERT_EMAIL_,
     CH_LEVEL_EMAIL_: CH_LEVEL_EMAIL_, ALWAYS_CC_EMAILS_: ALWAYS_CC_EMAILS_,
     LEADERSHIP_NAME_TO_EMAIL_: LEADERSHIP_NAME_TO_EMAIL_,
-    FUTWORK_ROUTE_EMAIL_: FUTWORK_ROUTE_EMAIL_,
+    FUTWORK_ROUTE_EMAIL_: FUTWORK_ROUTE_EMAIL_, REGION_PNL_HEAD_CC_: REGION_PNL_HEAD_CC_,
   };
 
   SpreadsheetApp = {
@@ -607,6 +607,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
   OPS_ALERT_EMAIL_ = TEST_EMAIL_PRIMARY_;
   CH_LEVEL_EMAIL_ = TEST_EMAIL_CH_;
   FUTWORK_ROUTE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+  REGION_PNL_HEAD_CC_ = {}; // no real P&L-head Cc during tests; tests that exercise it set their own synthetic map
   ALWAYS_CC_EMAILS_ = []; // no extra real leadership Cc during tests — see TestAssertOnlyTestEmails_
   LEADERSHIP_NAME_TO_EMAIL_ = { 'test ceo self': TEST_EMAIL_CH_ }; // synthetic — see TestFixture_rmHierarchyRows_' own comment on "Test Ceo Self"
 
@@ -624,7 +625,7 @@ function TestEnv_tearDown_() {
   TEST_MODE_OVERRIDE_EMAIL_ = g.TEST_MODE_OVERRIDE_EMAIL_; OPS_ALERT_EMAIL_ = g.OPS_ALERT_EMAIL_;
   CH_LEVEL_EMAIL_ = g.CH_LEVEL_EMAIL_; ALWAYS_CC_EMAILS_ = g.ALWAYS_CC_EMAILS_;
   LEADERSHIP_NAME_TO_EMAIL_ = g.LEADERSHIP_NAME_TO_EMAIL_;
-  FUTWORK_ROUTE_EMAIL_ = g.FUTWORK_ROUTE_EMAIL_;
+  FUTWORK_ROUTE_EMAIL_ = g.FUTWORK_ROUTE_EMAIL_; REGION_PNL_HEAD_CC_ = g.REGION_PNL_HEAD_CC_;
 
   const r = TestResults_;
   Logger.log(r.file + ': ' + r.pass + ' passed, ' + r.fail + ' failed' + (r.fail ? (' — ' + r.failures.join('; ')) : ''));

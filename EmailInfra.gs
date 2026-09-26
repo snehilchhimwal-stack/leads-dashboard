@@ -69,6 +69,40 @@ let CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
 let FUTWORK_ROUTE_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 function isFutworkRmNameGs_(name) { return /futwork/i.test(String(name || '')); }
 
+// P&L head Cc'd on every automatic email for a region (2026-09-26, "add pnl head of Hyderabad and Bangalore in cc").
+// Holds NAMES, not addresses — this repo is public, so the address is looked up at send time from Manager_Directory
+// (filled from RmHierarchy.private.gs, which is never committed). Source of the names: the HR export's P&L column.
+// Keyed by region; `let` for test-overridability.
+let REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Mukesh Mishra', 'Bangalore': 'Mukesh Mishra' };
+
+// The email address of a region's P&L head, or '' when the region has none configured or Manager_Directory has no
+// address for that name (logged, never thrown — a missing Cc must not stop an email).
+function regionPnlHeadEmailGs_(ss, region, hierarchyData) {
+  const key = String(region || '').trim().toLowerCase();
+  let name = '';
+  Object.keys(REGION_PNL_HEAD_CC_).forEach(function (r) {
+    if (r.trim().toLowerCase() === key) name = String(REGION_PNL_HEAD_CC_[r] || '').trim();
+  });
+  if (!name) return '';
+  const data = hierarchyData || loadRmHierarchyAndEmails_(ss);
+  const email = String((data.emailByManagerNameLower || {})[name.toLowerCase()] || '').trim();
+  if (!email) Logger.log('No email on record in Manager_Directory for the ' + region + ' P&L head "' + name + '" - so no P&L Cc was added.');
+  return email;
+}
+
+// Adds a P&L head's address to a Cc list (comma text in, comma text or undefined out). Never Cc's someone who is
+// already the To of this email, and never duplicates an address already present.
+function withRegionPnlHeadCcGs_(pnlHeadEmail, to, cc) {
+  const list = String(cc || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+  const head = String(pnlHeadEmail || '').trim();
+  if (head) {
+    const taken = {};
+    list.concat(String(to || '').split(',')).forEach(function (e) { taken[String(e).trim().toLowerCase()] = true; });
+    if (!taken[head.toLowerCase()]) list.push(head);
+  }
+  return list.join(',') || undefined;
+}
+
 // TEST MODE must never write production state (log rows, checkpoint state) — a 2026-09-24 test run's rows
 // made the real 17:00 job skip every region and later sent Checkpoint 1 to the tester instead of managers.
 function writeUnlessTestModeGs_(fn, label) {
@@ -417,9 +451,10 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   const hierarchyData = opts && opts.hierarchyData;
   const futworkRmNames = rmNames.filter(isFutworkRmNameGs_);
   const regularRmNames = rmNames.filter(function (n) { return !isFutworkRmNameGs_(n); });
+  const pnlHeadEmail = regionPnlHeadEmailGs_(ss, region, hierarchyData);
   const resolved = withRetry_(function () { return resolveRecipientBucketsForRms_(ss, regularRmNames, hierarchyData); }, 'resolveRecipientBucketsForRms_ (' + region + ')');
   const results = resolved.buckets.map(function (b) {
-    return { to: b.primaryEmail, cc: b.cc.join(',') || undefined, rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
+    return { to: b.primaryEmail, cc: withRegionPnlHeadCcGs_(pnlHeadEmail, b.primaryEmail, b.cc.join(',')), rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
 
   if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel);
@@ -434,7 +469,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
       ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
       const unresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
-      results.push({ to: legacy.to, cc: Array.from(ccSet).join(',') || undefined, rmNames: unresolvedNames, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + unresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
+      results.push({ to: legacy.to, cc: withRegionPnlHeadCcGs_(pnlHeadEmail, legacy.to, Array.from(ccSet).join(',')), rmNames: unresolvedNames, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + unresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
     } else {
       // No recipient configured anywhere for these RMs — used to mean
       // their leads got no automated email at all this run (trulyUnresolved

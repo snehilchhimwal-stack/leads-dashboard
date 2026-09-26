@@ -301,6 +301,71 @@ function runAllIssuesEmailerTests_() {
       readLeadsTab_ = realReadLeadsTab;
     }
     TestAssertOnlyTestEmails_();
+
+    // ---- removeAllIssuesLogRowsInWindowGs_ (one-off remediation, 2026-09-26) ----
+    // Destructive, so every abort guard is asserted to leave the sheet untouched.
+    const rmHeader = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
+      'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
+    const rmRow = function (whenIso, region, to) {
+      return [new Date(whenIso), region, 'Bucket ' + region, 'A1', to, '', 1, new Date(whenIso), 'thread-' + region, '[{"lead_id":"L-1","followup":"a, b"}]', '', '', '', ''];
+    };
+    const rmFrom = new Date('2026-09-24T10:00:00+05:30'), rmTo = new Date('2026-09-24T10:30:00+05:30');
+    const rmKeep = [
+      rmRow('2026-09-23T17:04:00+05:30', 'Pune', TEST_EMAIL_PRIMARY_),                // before the window, same recipient
+      rmRow('2026-09-24T09:00:00+05:30', 'Thane', TEST_EMAIL_CH_),                    // before the window, real recipient
+      rmRow('2026-09-24T10:16:33+05:30', 'Hyderabad', TEST_EMAIL_CH_),                // INSIDE the window but a real recipient: must survive
+    ];
+    const rmMatch = [
+      rmRow('2026-09-24T10:16:33+05:30', 'Pune', TEST_EMAIL_PRIMARY_),
+      rmRow('2026-09-24T10:16:33+05:30', 'Thane', TEST_EMAIL_PRIMARY_.toUpperCase()), // recipient compare is case-insensitive
+      rmRow('2026-09-24T10:16:33+05:30', 'Harbour', TEST_EMAIL_PRIMARY_),
+    ];
+    const rmAfter = [
+      rmRow('2026-09-25T17:04:00+05:30', 'Western', TEST_EMAIL_PRIMARY_),             // a legitimate Futwork-style row: same recipient, outside the window
+    ];
+    const rmBuild = function (rows) {
+      return TestMockSpreadsheet_({ 'AllIssues_Log': TestMockSheet_('AllIssues_Log', [rmHeader].concat(rows)) });
+    };
+    const realDriveForRm = DriveApp;
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (a) count mismatch -> abort, nothing deleted
+      const ssCount = rmBuild(rmKeep.concat(rmMatch, rmAfter));
+      let countMsg = '';
+      try { removeAllIssuesLogRowsInWindowGs_(ssCount, rmFrom, rmTo, TEST_EMAIL_PRIMARY_, 4); } catch (e) { countMsg = String(e); }
+      TestAssertContains_(countMsg, 'expected 4', 'removeAllIssuesLogRowsInWindowGs_: refuses when the number of matching rows differs from the expected count');
+      TestAssertEqual_(ssCount.getSheetByName('AllIssues_Log').getLastRow(), 1 + rmKeep.length + rmMatch.length + rmAfter.length, 'removeAllIssuesLogRowsInWindowGs_: a refused run deletes nothing');
+      // (b) not contiguous -> abort
+      const ssGap = rmBuild([rmMatch[0], rmKeep[0], rmMatch[1], rmMatch[2]]);
+      let gapMsg = '';
+      try { removeAllIssuesLogRowsInWindowGs_(ssGap, rmFrom, rmTo, TEST_EMAIL_PRIMARY_, 3); } catch (e) { gapMsg = String(e); }
+      TestAssertContains_(gapMsg, 'contiguous', 'removeAllIssuesLogRowsInWindowGs_: refuses when the matching rows are not one contiguous block');
+      TestAssertEqual_(ssGap.getSheetByName('AllIssues_Log').getLastRow(), 5, 'removeAllIssuesLogRowsInWindowGs_: the contiguity abort also deletes nothing');
+      // (c) unexpected header -> abort
+      const ssHeader = rmBuild(rmKeep.concat(rmMatch));
+      ssHeader.getSheetByName('AllIssues_Log').getRange(1, 5, 1, 1).setValues([['recipient']]);
+      let headerMsg = '';
+      try { removeAllIssuesLogRowsInWindowGs_(ssHeader, rmFrom, rmTo, TEST_EMAIL_PRIMARY_, 3); } catch (e) { headerMsg = String(e); }
+      TestAssertContains_(headerMsg, 'header is not as expected', 'removeAllIssuesLogRowsInWindowGs_: refuses when the header is not the expected shape');
+      TestAssertEqual_(ssHeader.getSheetByName('AllIssues_Log').getLastRow(), 1 + rmKeep.length + rmMatch.length, 'removeAllIssuesLogRowsInWindowGs_: the header abort deletes nothing');
+      // (d) happy path: exactly the window rows go, everything else stays, and they are archived first
+      const ssOk = rmBuild(rmKeep.concat(rmMatch, rmAfter));
+      const okSheet = ssOk.getSheetByName('AllIssues_Log');
+      removeAllIssuesLogRowsInWindowGs_(ssOk, rmFrom, rmTo, TEST_EMAIL_PRIMARY_, 3);
+      TestAssertEqual_(okSheet.getLastRow(), 1 + rmKeep.length + rmAfter.length, 'removeAllIssuesLogRowsInWindowGs_: removes exactly the matching rows');
+      const okRegions = okSheet.getRange(2, 2, okSheet.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; });
+      TestAssertEqual_(okRegions.join(','), 'Pune,Thane,Hyderabad,Western', 'removeAllIssuesLogRowsInWindowGs_: the rows before the window, the in-window row for a real recipient, and the same-recipient row after the window are all untouched, in order');
+      const rmFolder = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_).next().getFoldersByName('AllIssues_Log').next();
+      TestAssertEqual_(rmFolder._filesList.length, 1, 'removeAllIssuesLogRowsInWindowGs_: wrote exactly one archive CSV, only on the successful run');
+      TestAssertEqual_((rmFolder._filesList[0]._content.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length, 3, 'removeAllIssuesLogRowsInWindowGs_: the archive holds all 3 removed rows');
+      // (e) safe to re-run
+      const rowsAfterRm = okSheet.getLastRow();
+      removeAllIssuesLogRowsInWindowGs_(ssOk, rmFrom, rmTo, TEST_EMAIL_PRIMARY_, 3);
+      TestAssertEqual_(okSheet.getLastRow(), rowsAfterRm, 'removeAllIssuesLogRowsInWindowGs_: safe to re-run (finds nothing)');
+      TestAssertEqual_(rmFolder._filesList.length, 1, 'removeAllIssuesLogRowsInWindowGs_: a re-run writes no second archive');
+    } finally {
+      DriveApp = realDriveForRm;
+    }
   } finally {
     TestEnv_tearDown_();
   }

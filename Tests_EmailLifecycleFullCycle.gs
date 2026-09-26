@@ -89,11 +89,18 @@ function runEmailLifecycleFullCycleTests_() {
   TestEnv_setUp_('Tests_EmailLifecycleFullCycle', ss);
   try {
     {
+      // Region P&L head (2026-09-26): configured for THIS bucket's region so the whole chain proves it is Cc'd at 17:00,
+      // stored, and carried through the 10:00 and 13:00 emails. Reset at the end of this block.
+      // The config holds a NAME; its address comes from Manager_Directory, so a directory row is added for it.
+      ss.getSheetByName('Manager_Directory').appendRow(['Test PnL Head', 'Head', 'Pune', TEST_EMAIL_SECONDARY_, 0, 'manual']);
+      REGION_PNL_HEAD_CC_ = { 'Pune': 'Test PnL Head' };
+
       // ==== 17:00: real sendAllIssuesEmails() ====
       sendAllIssuesEmails();
       TestAssertEqual_(TestGmailLog_.drafts.length, 1, 'Full cycle 17:00: sendAllIssuesEmails sends exactly one bucket email for L-CYCLE\'s RM');
       const seventeenDraft = TestGmailLog_.drafts[0];
       TestAssertContains_(seventeenDraft.htmlBody, 'L-CYCLE', 'Full cycle 17:00: the all-issues email lists L-CYCLE');
+      TestAssertContains_(seventeenDraft.cc, TEST_EMAIL_SECONDARY_, 'Full cycle 17:00: the region P&L head is Cc\'d');
 
       const allIssuesLog = ss.getSheetByName('AllIssues_Log');
       TestAssert_(!!allIssuesLog, 'Full cycle 17:00: AllIssues_Log exists after a real send');
@@ -105,6 +112,7 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssertEqual_(snapshotWritten[0].lead_id, 'L-CYCLE', 'Full cycle 17:00: the real snapshot names L-CYCLE');
       TestAssertEqual_(snapshotWritten[0].issueLabel, 'Follow-up Overdue', 'Full cycle 17:00: the real snapshot records the correct issue label');
       TestAssert_(!rowAfter17[10] && !rowAfter17[11], 'Full cycle 17:00: checkpoint1_json/checkpoint1_sent_at are still blank — not written until the 10:00 job runs');
+      TestAssertContains_(rowAfter17[5], TEST_EMAIL_SECONDARY_, 'Full cycle 17:00: the stored Cc (col F) includes the P&L head, so the next-day checkpoints carry it too');
 
       // Simulate a day passing: this row's OWN date cell (col A) is the
       // ONLY thing this test edits — every other cell, and every
@@ -124,6 +132,7 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssertContains_(tenAmDraft.htmlBody, 'No overnight leads for your team today', 'Full cycle 10:00: Section 1 correctly shows the empty state — L-CYCLE was never an overnight lead');
       TestAssertContains_(tenAmDraft.htmlBody, 'L-CYCLE', 'Full cycle 10:00: Section 2 (Checkpoint 1) lists L-CYCLE');
       TestAssertContains_(tenAmDraft.htmlBody, 'Still open', 'Full cycle 10:00: L-CYCLE (unchanged since 17:00) shows as still_open');
+      TestAssertContains_(tenAmDraft.cc, TEST_EMAIL_SECONDARY_, 'Full cycle 10:00: the Section-2-only email uses the STORED 17:00 Cc, so the P&L head is Cc\'d');
 
       const rowAfter10 = allIssuesLog.getRange(2, 1, 1, 14).getValues()[0];
       TestAssert_(!!rowAfter10[10], 'Full cycle 10:00: checkpoint1_json (col K) now written by the REAL sendCombinedMorningEmail_');
@@ -151,6 +160,8 @@ function runEmailLifecycleFullCycleTests_() {
       TestAssertEqual_(thirteenReply.threadId, tenAmDraft._threadId, 'Full cycle 13:00: the reply threads into the SAME Gmail thread the real 10:00 send created — the actual thread_id, not a hand-seeded one');
       const thirteenHtml = TestOE_decodeRawMime_(thirteenReply.raw);
       TestAssertContains_(thirteenHtml, 'Nothing still unresolved from this morning', 'Full cycle 13:00: Section 1 still correctly shows its own empty state');
+      const thirteenCcLine = thirteenHtml.split('\n').filter(function (l) { return l.indexOf('Cc:') === 0; })[0] || '';
+      TestAssertContains_(thirteenCcLine, TEST_EMAIL_SECONDARY_, 'Full cycle 13:00: the threaded reply Cc\'s the P&L head');
       TestAssertContains_(thirteenHtml, 'L-CYCLE', 'Full cycle 13:00: Section 2 (Checkpoint 2) lists L-CYCLE');
       TestAssertContains_(thirteenHtml, 'Still open', 'Full cycle 13:00: L-CYCLE (still unresolved) shows as still open — a real state the real code recomputed, not an echo of checkpoint1_json');
 
@@ -173,6 +184,7 @@ function runEmailLifecycleFullCycleTests_() {
       sendOvernightFollowupEmails();
       TestAssertEqual_(TestGmailLog_.drafts.length, draftsBeforeRerun, 'Full cycle: a second pass of the 10:00 and 13:00 jobs the same day sends no new drafts');
       TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeRerun, 'Full cycle: a second pass of the 10:00 and 13:00 jobs the same day sends no new threaded replies');
+      REGION_PNL_HEAD_CC_ = {};
       // The 17:00 job is deliberately NOT re-run here: the lead is still unresolved (it must be, for 13:00 to reply), and
       // this test aged the 17:00 row to "yesterday" to simulate the next morning, so the 17:00 same-day guard rightly finds
       // no row for today. That guard is covered by Tests_AllIssuesEmailer.gs.
