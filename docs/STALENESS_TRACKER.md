@@ -78,19 +78,19 @@ confirm the paste took.
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `6a69364` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `Core.gs` | `55bf870` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `EmailInfra.gs` | `ff91419` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `InteractionHistoryLogger.gs` | `42a896c` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `MovementTracker.gs` | `7d2b4bc` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `OpsChecklistRunner.gs` | `daba775` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `OvernightEmailer.gs` | `e119115` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `RmHierarchy.gs` | `187450a` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `SlaEngine.gs` | `efc6137` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
-| `UnmatchedCommentLogger.gs` | `cc7910b` | 2026-09-25 | read directly from the live editor by hash-match (2026-09-25) |
+| `AllIssuesEmailer.gs` | `b3a58f9` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `Core.gs` | `55bf870` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `EmailInfra.gs` | `b3a58f9` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `InteractionHistoryLogger.gs` | `42a896c` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `MovementTracker.gs` | `29b7146` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `OpsChecklistRunner.gs` | `daba775` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `OvernightEmailer.gs` | `b3a58f9` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `RmHierarchy.gs` | `187450a` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `SlaEngine.gs` | `efc6137` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `UnmatchedCommentLogger.gs` | `cc7910b` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
 
 ### Known live-vs-repo differences
 
@@ -142,7 +142,7 @@ One line per sweep: date — what was found — what was fixed / left open.
 
 - 2026-09-25 (16:28 IST) — **junk-row cleanup done.** After the fix was live the 12:44 capture **succeeded** (180 s; `leads_changed` = 12,648 = every open lead, the expected one-time re-append from the hash change; `Movement_Log` 78,050 → 90,698). Then `removeDedupIncidentRowsNow` (new one-off, `GS-008` FN-285; tested; every guard held) archived the 52,060 junk rows of 09-22 12:44 → 09-23 12:45 to a Drive CSV (folder `Leads Dashboard Archive/Movement_Log`, listed in `archive_log.csv`), verified the archive, and deleted them: `Movement_Log` is now 38,638 data rows, header still `…opp_at, content_hash`. **Still to verify:** the ~18:51 IST capture should show `leads_changed` far below `lead_count_seen` (dedup working); ~100% again means the fix failed. **Also noticed, not investigated:** `sendOvernightFollowupEmails` FAILED at 13:01 IST (142 s) — unrelated to this work.
 
-- 2026-09-26 — **dedup identity fixed.** After the 09-25 fixes captures succeeded (09-25 18:51 / 09-26 00:18 / 06:08 appended 8,631 / 6,154 / 5,473 of ~13k) but 44-62% is still far too many: keyed by `client_id`, a customer's several rows could match only one stored hash. In the last batch ~2,000 of 5,473 rows were identical to their previous row, and `lead_id|RM` was unique across all of them. Both runtimes now key by `lead_id|RM` (`_dedupKeyGs_` / `movementDedupKey`, shared test literals); no migration, no burst expected. **Verify** after the next capture: `leads_changed` should fall well below ~35% of `lead_count_seen`. Also cleaned up: raw NULs my own doc edits had written into this file, `GS-008` and `HANDOVER.md` (detector H now scans `.md` files too). **Open, minor:** a lead with a blank RM or region hashes `Unassigned` in the browser but blank in Apps Script, so the two writers disagree on those rows.
+- 2026-09-26 — **dedup identity fixed.** After the 09-25 fixes captures succeeded (09-25 18:51 / 09-26 00:18 / 06:08 appended 8,631 / 6,154 / 5,473 of ~13k) but 44-62% is still far too many: keyed by `client_id`, a customer's several rows could match only one stored hash. In the last batch ~2,000 of 5,473 rows were identical to their previous row, and `lead_id|RM` was unique across all of them. Both runtimes now key by `lead_id|RM` (`_dedupKeyGs_` / `movementDedupKey`, shared test literals); no migration, no burst expected. **Deployed 2026-09-26 ~13:45 IST:** `MovementTracker.gs` (`29b7146`) pasted and re-read after a reload (hash matches); the browser side is live on Pages (`movementDedupKey` served in `tab-movement.js` and `sheets-writeback.js`). **Verify** after the next capture: `leads_changed` should fall well below ~35% of `lead_count_seen`. Also cleaned up: raw NULs my own doc edits had written into this file, `GS-008` and `HANDOVER.md` (detector H now scans `.md` files too). **Open, minor:** a lead with a blank RM or region hashes `Unassigned` in the browser but blank in Apps Script, so the two writers disagree on those rows.
 
 ## Current status
 
@@ -150,13 +150,12 @@ One line per sweep: date — what was found — what was fixed / left open.
 
 _Generated by `python3 test/check-staleness.py --write` -- do not edit by hand._
 
-**HEAD `29b7146`, 2026-09-26 IST -- STALE 5 | OVERDUE records 0 | AT-RISK 11**
+**HEAD `74df6ab`, 2026-09-26 IST -- STALE 0 | OVERDUE records 0 | AT-RISK 11**
 
 ```text
 A. Line anchors: 456 checked, 455 ok, 0 DRIFTED (40 anchors not machine-checkable: prose / multi-name cells)
 
-B. Records: 1 DRIFTED (source moved since Last Verified), 0 OVERDUE (> TTL), 5 DUE-SOON (<= 10d)
-   STALE  TAB-007: verified at 55bf870 but js/tab-movement.js advanced 1 commit(s) since — revalidate
+B. Records: 0 DRIFTED (source moved since Last Verified), 0 OVERDUE (> TTL), 5 DUE-SOON (<= 10d)
    AT-RISK  DASH-001 (dashboard.html) goes overdue in 9d (verified 2026-09-21, TTL 14d) [hot]
    AT-RISK  GS-002 (Core.gs) goes overdue in 9d (verified 2026-09-21, TTL 14d) [hot]
    AT-RISK  JS-025 (js/tab-oppmonitor.js) goes overdue in 9d (verified 2026-09-21, TTL 14d) [hot]
@@ -166,22 +165,22 @@ B. Records: 1 DRIFTED (source moved since Last Verified), 0 OVERDUE (> TTL), 5 D
 C. Stated facts: 0 STALE (of 4 registered claims)
 
 D. Apps Script deploy register (git does NOT deploy -- see CLAUDE.md):
-   STALE    AllIssuesEmailer.gs              PENDING 3 commit(s) since confirmed-live 6a69364; newest: b3a58f9 2026-09-25 Fix: harden the 10:00/13:00 jobs so one bad cell or bucket can't stop t
-   ok       Core.gs                          OK matches confirmed-live 55bf870 (2026-09-25)
-   ok       DailyRmIssueLog.gs               OK matches confirmed-live 26bf0cf (2026-09-25)
-   STALE    EmailInfra.gs                    PENDING 3 commit(s) since confirmed-live ff91419; newest: b3a58f9 2026-09-25 Fix: harden the 10:00/13:00 jobs so one bad cell or bucket can't stop t
-   ok       FollowupEngine.gs                OK matches confirmed-live cba3a82 (2026-09-25)
-   ok       InteractionHistoryLogger.gs      OK matches confirmed-live 42a896c (2026-09-25)
-   ok       LeadFollowupsStaleness.gs        OK matches confirmed-live 6e4c904 (2026-09-25)
-   STALE    MovementTracker.gs               PENDING 1 commit(s) since confirmed-live 7d2b4bc; newest: 29b7146 2026-09-26 Movement_Log dedup: key by lead_id + RM instead of client_id, in both r
-   ok       OpsChecklistRunner.gs            OK matches confirmed-live daba775 (2026-09-25)
-   STALE    OvernightEmailer.gs              PENDING 3 commit(s) since confirmed-live e119115; newest: b3a58f9 2026-09-25 Fix: harden the 10:00/13:00 jobs so one bad cell or bucket can't stop t
-   ok       RmHierarchy.gs                   OK matches confirmed-live 187450a (2026-09-25)
-   ok       SlaEngine.gs                     OK matches confirmed-live efc6137 (2026-09-25)
-   ok       UnmatchedCommentLogger.gs        OK matches confirmed-live cc7910b (2026-09-25)
+   ok       AllIssuesEmailer.gs              OK matches confirmed-live b3a58f9 (2026-09-26)
+   ok       Core.gs                          OK matches confirmed-live 55bf870 (2026-09-26)
+   ok       DailyRmIssueLog.gs               OK matches confirmed-live 26bf0cf (2026-09-26)
+   ok       EmailInfra.gs                    OK matches confirmed-live b3a58f9 (2026-09-26)
+   ok       FollowupEngine.gs                OK matches confirmed-live cba3a82 (2026-09-26)
+   ok       InteractionHistoryLogger.gs      OK matches confirmed-live 42a896c (2026-09-26)
+   ok       LeadFollowupsStaleness.gs        OK matches confirmed-live 6e4c904 (2026-09-26)
+   ok       MovementTracker.gs               OK matches confirmed-live 29b7146 (2026-09-26)
+   ok       OpsChecklistRunner.gs            OK matches confirmed-live daba775 (2026-09-26)
+   ok       OvernightEmailer.gs              OK matches confirmed-live b3a58f9 (2026-09-26)
+   ok       RmHierarchy.gs                   OK matches confirmed-live 187450a (2026-09-26)
+   ok       SlaEngine.gs                     OK matches confirmed-live efc6137 (2026-09-26)
+   ok       UnmatchedCommentLogger.gs        OK matches confirmed-live cc7910b (2026-09-26)
 
 E. Watch register:
-   AT-RISK  Deploy register refreshed from the live editor -- last 2026-09-25, due 2026-10-05 (+9d)
+   AT-RISK  Deploy register refreshed from the live editor -- last 2026-09-26, due 2026-10-06 (+10d)
    AT-RISK  Movement_Log dedup health -- last 2026-09-25, due 2026-10-02 (+6d)
    AT-RISK  RM_HIERARCHY_RAW_ vs the HR Live roster export -- last 2026-09-22, due 2026-10-06 (+10d)
    AT-RISK  `leads` tab header vs `HEADER_ALIASES` / `HEADER_ALIASES_` -- last 2026-09-22, due 2026-10-02 (+6d)
