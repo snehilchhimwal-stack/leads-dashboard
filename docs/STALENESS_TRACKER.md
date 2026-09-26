@@ -78,10 +78,10 @@ confirm the paste took.
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `b3a58f9` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
 | `Core.gs` | `55bf870` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
 | `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `EmailInfra.gs` | `b3a58f9` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `EmailInfra.gs` | `5aafbd4` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
 | `InteractionHistoryLogger.gs` | `42a896c` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |

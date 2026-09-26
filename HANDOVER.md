@@ -697,7 +697,10 @@ test) Sheet, and use the browser console directly.
   digest subject `[TEST MODE]`. Limits: a TEST MODE 10:00 only sees Section 2
   for rows the real run hasn't already checkpointed, and the 13:00 job's
   `Lead_Followups` push still happens (an idempotent upsert). If polluted
-  rows ever recur, delete that day's `AllIssues_Log` rows from the sheet.
+  rows ever recur, delete that day's `AllIssues_Log` rows from the sheet
+  (or adapt `removeTestModeAllIssuesRowsNow`, `AllIssuesEmailer.gs` - a guarded one-off
+  that archives to Drive first). The 28 rows of the 2026-09-24 test run were removed
+  that way on 2026-09-26 (archive: Drive `Leads Dashboard Archive/AllIssues_Log`).
 - **The 13:00 follow-up crashed after only a few buckets** (2026-09-25,
   alert "sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were
   sent", error "Your input contains more than the maximum of 50000
