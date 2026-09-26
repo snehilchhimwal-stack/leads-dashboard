@@ -383,7 +383,7 @@ function _latestContentHashByKeyGs_(ss) {
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const snapAtCol = headers.indexOf('snapshot_at');
   const leadIdCol = headers.indexOf('lead_id');
-  const clientIdCol = headers.indexOf('client_id');
+  const rmCol = headers.indexOf('RM');
   const hashCol = headers.indexOf(CONTENT_HASH_COLUMN_);
   if (snapAtCol === -1 || hashCol === -1) return map; // not upgraded yet
 
@@ -393,9 +393,7 @@ function _latestContentHashByKeyGs_(ss) {
     if (!(ts instanceof Date)) return;
     const hash = String(row[hashCol] || '').trim();
     if (!hash) return; // a pre-upgrade row has no hash to compare against
-    const clientId = String(row[clientIdCol] || '').trim();
-    const leadId = String(row[leadIdCol] || '').trim();
-    const key = clientId || ('l:' + leadId);
+    const key = _dedupKeyGs_(row[leadIdCol], rmCol === -1 ? '' : row[rmCol]);
     const cur = map[key];
     if (!cur || ts.getTime() > cur.atMs) map[key] = { atMs: ts.getTime(), hash: hash };
   });
@@ -403,6 +401,23 @@ function _latestContentHashByKeyGs_(ss) {
   const out = {};
   Object.keys(map).forEach(function (k) { out[k] = map[k].hash; });
   return out;
+}
+
+// Content-hash dedup identity of ONE leads-tab row: lead_id + RM. NOT client_id:
+// a customer's several rows (one per RM/assignment) all share a client_id, so only
+// one of them could ever match the single hash stored under that key and every
+// other row was re-appended on every capture (2026-09-26 analysis: ~2,000 of one
+// capture's 5,473 rows were byte-identical to their previous row; lead_id + RM was
+// unique across all of them). No stored hash needs migrating - each Movement_Log
+// row already carries its own lead_id, RM and hash. js/tab-movement.js's
+// movementDedupKey MUST build the identical string (both are asserted against the
+// same literal in Tests_MovementTracker.gs and tests/frontend-harness.html).
+//
+// A blank RM is keyed as 'Unassigned', the same value the browser's parse gives it
+// (js/core-fetch-and-render.js) and its Movement_Log reader gives a blank cell.
+function _dedupKeyGs_(leadId, rm) {
+  return String(leadId === null || leadId === undefined ? '' : leadId).trim() + '|' +
+    (String(rm === null || rm === undefined ? '' : rm).trim() || 'Unassigned');
 }
 
 // Each lead's call_attempts as of the latest snapshot strictly before
@@ -582,8 +597,7 @@ function snapshotOpenLeads_(label) {
     if (!leadId) return;
     leadCountSeen++;
 
-    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
-    const key = clientId || ('l:' + leadId);
+    const key = _dedupKeyGs_(leadId, getVal_(row, colIndex, 'RM'));
     const hash = _leadContentHashGs_(function (fieldKey) { return getVal_(row, colIndex, fieldKey); });
     if (latestHashByKey[key] === hash) return; // unchanged since the last capture — no new row
 

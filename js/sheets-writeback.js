@@ -868,7 +868,7 @@ async function browserSnapshotOpenLeads(){
   const rows = [];
   for (const l of leadsToSnapshot) {
     const hash = await leadContentHash(l);
-    const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
+    const key = movementDedupKey(l.lead_id, l.RM);
     if (latestHashByKey[key] === hash) continue; // unchanged since the last capture (either writer) — no new row
     const row = [snapshotAtValue, label];
     SNAPSHOT_FIELD_KEYS.forEach(fieldKey => row.push(movementCellValue(l, fieldKey)));

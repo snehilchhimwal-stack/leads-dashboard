@@ -215,6 +215,29 @@ function runMovementTrackerTests_() {
       DriveApp = realDriveForIncident;
     }
 
+    // ---- 2026-09-26: dedup identity is lead_id + RM, NOT client_id ----
+    // A customer's several rows (one per RM/assignment) share a client_id.
+    // Keyed by client_id only one of them could ever match the single hash
+    // stored under that key, so every other row was re-appended on EVERY
+    // capture (~2,000 identical rows per capture in production). The same
+    // literals are asserted against movementDedupKey in tests/frontend-harness.html.
+    TestAssertEqual_(_dedupKeyGs_(' L-1 ', ' Test RM One '), 'L-1|Test RM One', '_dedupKeyGs_: trims both parts and joins them lead_id|RM (shared vector with the browser twin)');
+    TestAssertEqual_(_dedupKeyGs_('L-2', ''), 'L-2|Unassigned', '_dedupKeyGs_: a blank RM is keyed Unassigned, matching the browser parse (shared vector)');
+    TestAssertEqual_(_dedupKeyGs_(2180637, null), '2180637|Unassigned', '_dedupKeyGs_: a numeric lead_id and a null RM key cleanly (shared vector)');
+    const rowsBeforeMulti = afterSnap.getLastRow();
+    const multiStart = leadsSheet.getLastRow() + 1;
+    leadsSheet.getRange(multiStart, 1, 2, leadsHeader.length).setValues([
+      leadRow({ lead_id: 'L-M', client_id: 'C-M', RM: 'Test RM One', current_stage: 'Suspect' }),
+      leadRow({ lead_id: 'L-M', client_id: 'C-M', RM: 'Test RM Two', current_stage: 'Prospect' }),
+    ]);
+    snapshotOpenLeads_('test snapshot label — two rows share client_id and lead_id, first capture');
+    TestAssertEqual_(afterSnap.getLastRow(), rowsBeforeMulti + 2, 'snapshotOpenLeads_ (2026-09-26): two leads-tab rows sharing client_id AND lead_id (different RM, different content) are BOTH captured the first time');
+    snapshotOpenLeads_('test snapshot label — two rows share client_id and lead_id, unchanged repeat');
+    TestAssertEqual_(afterSnap.getLastRow(), rowsBeforeMulti + 2, 'snapshotOpenLeads_ (2026-09-26): an unchanged repeat capture writes ZERO rows for them — keyed by client_id the second row re-appended on every run');
+    leadsSheet.getRange(multiStart + 1, 1, 1, leadsHeader.length).setValues([leadRow({ lead_id: 'L-M', client_id: 'C-M', RM: 'Test RM Two', current_stage: 'Opportunity' })]);
+    snapshotOpenLeads_('test snapshot label — only the second row changed');
+    TestAssertEqual_(afterSnap.getLastRow(), rowsBeforeMulti + 3, 'snapshotOpenLeads_ (2026-09-26): a real change to ONE of the shared-client rows writes exactly one new row, not two');
+
     // ---- buildTodayCallBaselineGs_ / lastSnapshotBeforeGs_ ----
     // Seed Movement_Log with a snapshot from clearly BEFORE today, to test the baseline reads.
     const priorSs = TestMockSpreadsheet_({

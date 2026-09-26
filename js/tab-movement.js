@@ -318,11 +318,21 @@ function movementUnavailableReason(){
 // seen here too — comparing against a stale client-side cache would
 // silently under-dedupe (or, worse, over-write) relative to whatever the
 // OTHER writer most recently recorded.
+// Content-hash dedup identity of ONE leads-tab row: lead_id + RM — NOT client_id.
+// A customer's several rows (one per RM/assignment) share a client_id, so only one
+// of them could ever match the single hash stored under that key and every other
+// row was re-appended on every capture (2026-09-26: ~2,000 of one capture's 5,473
+// rows were identical to their previous row). MUST build the identical string as
+// MovementTracker.gs's _dedupKeyGs_ — both are asserted against the same literal.
+function movementDedupKey(leadId, rm){
+  return String(leadId == null ? '' : leadId).trim() + '|' + (String(rm == null ? '' : rm).trim() || 'Unassigned');
+}
+
 function latestMovementLogHashByKey(){
   const map = new Map();
   movementSnapshots.forEach(rec => {
     if (!rec.content_hash) return; // a pre-upgrade row has none
-    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    const key = movementDedupKey(rec.lead_id, rec.RM);
     const cur = map.get(key);
     if (!cur || rec.snapshot_at > cur.atMs) map.set(key, { atMs: rec.snapshot_at, hash: rec.content_hash });
   });

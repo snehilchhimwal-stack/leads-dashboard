@@ -339,6 +339,18 @@ def scan_control_chars():
         data = open(os.path.join(ROOT, f), "rb").read()
         for m in re.finditer(rb'[\x00-\x08\x0b\x0c\x0e-\x1f]', data):
             out.append(dict(file=f, line=data.count(b"\n", 0, m.start()) + 1, code="U+%04X" % m.group(0)[0]))
+    # A raw NUL in a markdown file (usually an escape sequence interpreted by whatever wrote the
+    # file) makes grep and other tools treat the WHOLE file as binary and skip it.
+    for base, _dirs, files in os.walk(ROOT):
+        if any(s in base for s in (os.sep + ".git", "node_modules", "working files")):
+            continue
+        for f in files:
+            if f.endswith(".md"):
+                path = os.path.join(base, f)
+                data = open(path, "rb").read()
+                if b"\x00" in data:
+                    out.append(dict(file=os.path.relpath(path, ROOT).replace("\\", "/"),
+                                    line=data.count(b"\n", 0, data.index(b"\x00")) + 1, code="U+0000"))
     return out
 
 
@@ -434,9 +446,9 @@ def lines_report(R, today, cap=12):
         L.append("G. HANDOVER.md: last changed %s (%s); %d code commit(s) and %dd since -> %s" % (
             h["sha"], h["date"], h["commits"], h["days"], h["state"]))
     L.append("")
-    L.append("H. Raw control characters in .gs sources: %d" % len(R["ctrl"]))
+    L.append("H. Raw control characters in .gs sources and .md docs: %d" % len(R["ctrl"]))
     for c in R["ctrl"]:
-        L.append("   STALE  %s line %d holds a raw %s -- the editor changes it on paste; write it as an escape" % (
+        L.append("   STALE  %s line %d holds a raw %s -- write it as an escape sequence (the Apps Script editor changes it on paste; grep treats a file holding one as binary)" % (
             c["file"], c["line"], c["code"]))
     L.append("")
     L.append("SUMMARY: STALE %d | OVERDUE-records %d | AT-RISK %d" % (stale, n_over, risk))

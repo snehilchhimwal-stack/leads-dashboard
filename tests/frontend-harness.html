@@ -1097,6 +1097,26 @@
       parityHash === 'd692122a3012092b490e4d7bf0a0e6a19c617af2d8f0d69672ac0d7f5bce5210', 'got ' + parityHash);
   }
 
+  // ---- Content-hash dedup identity is lead_id + RM, not client_id (2026-09-26) ----
+  // Same literals Tests_MovementTracker.gs asserts against _dedupKeyGs_. A customer's
+  // several rows share a client_id; keyed by it only one could ever match its stored
+  // hash and the rest were re-appended on every capture.
+  if (typeof movementDedupKey === 'function' && typeof latestMovementLogHashByKey === 'function') {
+    assert('movementDedupKey trims and joins lead_id|RM (shared vector with the Apps Script twin)', movementDedupKey(' L-1 ', ' Test RM One ') === 'L-1|Test RM One', movementDedupKey(' L-1 ', ' Test RM One '));
+    assert('movementDedupKey keys a blank RM as Unassigned (shared vector)', movementDedupKey('L-2', '') === 'L-2|Unassigned');
+    assert('movementDedupKey keys a numeric lead_id and null RM cleanly (shared vector)', movementDedupKey(2180637, null) === '2180637|Unassigned');
+    const priorMovementSnapshots = movementSnapshots;
+    movementSnapshots = [
+      { snapshot_at: 1000, client_id: 'C-M', lead_id: 'L-M', RM: 'Test RM One', content_hash: 'h1' },
+      { snapshot_at: 1000, client_id: 'C-M', lead_id: 'L-M', RM: 'Test RM Two', content_hash: 'h2' },
+      { snapshot_at: 500, client_id: 'C-M', lead_id: 'L-M', RM: 'Test RM Two', content_hash: 'h-old' },
+    ];
+    const dedupMap = latestMovementLogHashByKey();
+    assert('latestMovementLogHashByKey keeps one latest hash PER ROW (two rows sharing a client_id stay distinct)',
+      Object.keys(dedupMap).length === 2 && dedupMap['L-M|Test RM One'] === 'h1' && dedupMap['L-M|Test RM Two'] === 'h2', JSON.stringify(dedupMap));
+    movementSnapshots = priorMovementSnapshots;
+  }
+
   statusEl.textContent = 'Done: ' + results.pass + ' passed, ' + results.fail + ' failed.';
   statusEl.style.color = results.fail ? '#ff5d5d' : '#4ade80';
   window.__harnessResults = results;
