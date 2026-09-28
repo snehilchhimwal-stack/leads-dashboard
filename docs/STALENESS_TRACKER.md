@@ -78,19 +78,19 @@ confirm the paste took.
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `Core.gs` | `55bf870` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `EmailInfra.gs` | `5aafbd4` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `InteractionHistoryLogger.gs` | `42a896c` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `MovementTracker.gs` | `29b7146` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `OpsChecklistRunner.gs` | `daba775` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `OvernightEmailer.gs` | `87114a3` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `RmHierarchy.gs` | `187450a` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `SlaEngine.gs` | `87114a3` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
-| `UnmatchedCommentLogger.gs` | `cc7910b` | 2026-09-26 | read directly from the live editor by hash-match (2026-09-26) |
+| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `Core.gs` | `4c99f7f` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `EmailInfra.gs` | `5aafbd4` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `InteractionHistoryLogger.gs` | `42a896c` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `MovementTracker.gs` | `d98efbb` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `OvernightEmailer.gs` | `87114a3` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `RmHierarchy.gs` | `187450a` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `SlaEngine.gs` | `87114a3` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
+| `UnmatchedCommentLogger.gs` | `cc7910b` | 2026-09-28 | read directly from the live editor by hash-match (2026-09-28) |
 
 ### Known live-vs-repo differences
 
@@ -146,16 +146,18 @@ One line per sweep: date — what was found — what was fixed / left open.
 
 - 2026-09-28 — **cell-budget diagnostic + Monday alert built and deployed** (`Core.gs`/`OpsChecklistRunner.gs`, commit 4c99f7f/543e267), live and re-verified after a reload. First real run: **workbook at 98.2% (9,822,618 / 10,000,000 cells) — CRITICAL.** Found immediately: a leftover `Movement_Log_backup_2026-09-17_1115` tab alone holds 2,860,000 cells (29% of the entire budget) — flagged to Snehil, not deleted (destructive, unclear ownership). Also found: `Comment_History` (1,048,164 cells) and `Unmatched_Comments_Log` (383,058 cells) have no retention at all by original design (`InteractionHistoryLogger.gs`'s own docblock argued they'd stay a small fraction of Movement_Log's volume — no longer true at current scale) — flagged, not changed. Two small unrecognized tabs (`Opp_Conversion_Tracking`, `Debug_NoIssueLeads`, 26,000 cells each) also surfaced, likely scratch/leftover.
 
+- 2026-09-28 (later same day) — **stale backup tab removed, real Drive file-size ceiling hit and fixed along the way.** Snehil authorized deleting `Movement_Log_backup_2026-09-17_1115` specifically (confirmed via git archaeology: created same-day by a bug in `9413f6a`, fixed same-day by `834d7ea` — a leftover artifact, not a real backup), while explicitly leaving the actual Movement_Log backup mechanism untouched and holding `Opp_Conversion_Tracking` for further review (it checked out clean — zero code references anywhere in the repo or live project, genuinely empty — still awaiting explicit go-ahead to delete). Built `removeStaleMovementLogBackupTabNow()` (guarded: header-shape check, archive-then-verify-count-then-delete, re-run-safe) with full test coverage. **First live run failed for real**: `archiveRowsToDriveCsv_` (the shared archive helper every prune function uses) had never been exercised at this tab's actual scale (109,999 rows) and hit Drive's file-size ceiling on the single-CSV write — caught by the guard before any deletion happened, nothing lost. Fixed by chunking the archive into 5,000-row pieces at the call site (`d98efbb`), added a regression test for the chunking itself (mutation-checked), redeployed `MovementTracker.gs` to the live editor and hash-verified after reload (`311afc5f96fa5648`). Re-ran `removeStaleMovementLogBackupTabNow()` live: succeeded in 35s, archived all 109,999 rows to 22 Drive CSVs (`…superseded_backup_part1`…`part22`, first at `https://drive.google.com/file/d/1XBPwuyTk-TiMo2UsSpK8pDQDmHE-anAZ/view`), then deleted the tab. **Verified via `reportWorkbookCellUsageNow()`: workbook cell usage dropped from 98.2% to 69.6% (6,962,618 / 10,000,000)** — `Movement_Log` (the real, current, untouched tab) is now the largest at 2,016,924 cells. One real near-miss during the run: the first attempt actually executed `pruneMovementLogNow` instead (a stray Escape keypress reverted the Apps Script function-picker's pending selection) — harmless (a normal, already-scheduled prune of the live Movement_Log, not the backup), caught immediately by checking the Executions list rather than trusting the in-editor panel's generic "Execution completed" text, and the correct function was re-selected and re-verified by screenshot before running again.
+
 ## Current status
 
 <!-- AUTO:BEGIN -->
 
 _Generated by `python3 test/check-staleness.py --write` -- do not edit by hand._
 
-**HEAD `543e267`, 2026-09-28 IST -- STALE 2 | OVERDUE records 0 | AT-RISK 9**
+**HEAD `3499b6a`, 2026-09-28 IST -- STALE 0 | OVERDUE records 0 | AT-RISK 9**
 
 ```text
-A. Line anchors: 464 checked, 463 ok, 0 DRIFTED (41 anchors not machine-checkable: prose / multi-name cells)
+A. Line anchors: 465 checked, 464 ok, 0 DRIFTED (41 anchors not machine-checkable: prose / multi-name cells)
 
 B. Records: 0 DRIFTED (source moved since Last Verified), 0 OVERDUE (> TTL), 4 DUE-SOON (<= 10d)
    AT-RISK  DASH-001 (dashboard.html) goes overdue in 7d (verified 2026-09-21, TTL 14d) [hot]
@@ -166,22 +168,22 @@ B. Records: 0 DRIFTED (source moved since Last Verified), 0 OVERDUE (> TTL), 4 D
 C. Stated facts: 0 STALE (of 4 registered claims)
 
 D. Apps Script deploy register (git does NOT deploy -- see CLAUDE.md):
-   ok       AllIssuesEmailer.gs              OK matches confirmed-live 5aafbd4 (2026-09-26)
-   STALE    Core.gs                          PENDING 1 commit(s) since confirmed-live 55bf870; newest: 4c99f7f 2026-09-28 Add per-tab cell-budget diagnostic + Monday alert (10M-cell crash follo
-   ok       DailyRmIssueLog.gs               OK matches confirmed-live 26bf0cf (2026-09-26)
-   ok       EmailInfra.gs                    OK matches confirmed-live 5aafbd4 (2026-09-26)
-   ok       FollowupEngine.gs                OK matches confirmed-live cba3a82 (2026-09-26)
-   ok       InteractionHistoryLogger.gs      OK matches confirmed-live 42a896c (2026-09-26)
-   ok       LeadFollowupsStaleness.gs        OK matches confirmed-live 6e4c904 (2026-09-26)
-   ok       MovementTracker.gs               OK matches confirmed-live 29b7146 (2026-09-26)
-   STALE    OpsChecklistRunner.gs            PENDING 1 commit(s) since confirmed-live daba775; newest: 4c99f7f 2026-09-28 Add per-tab cell-budget diagnostic + Monday alert (10M-cell crash follo
-   ok       OvernightEmailer.gs              OK matches confirmed-live 87114a3 (2026-09-26)
-   ok       RmHierarchy.gs                   OK matches confirmed-live 187450a (2026-09-26)
-   ok       SlaEngine.gs                     OK matches confirmed-live 87114a3 (2026-09-26)
-   ok       UnmatchedCommentLogger.gs        OK matches confirmed-live cc7910b (2026-09-26)
+   ok       AllIssuesEmailer.gs              OK matches confirmed-live 5aafbd4 (2026-09-28)
+   ok       Core.gs                          OK matches confirmed-live 4c99f7f (2026-09-28)
+   ok       DailyRmIssueLog.gs               OK matches confirmed-live 26bf0cf (2026-09-28)
+   ok       EmailInfra.gs                    OK matches confirmed-live 5aafbd4 (2026-09-28)
+   ok       FollowupEngine.gs                OK matches confirmed-live cba3a82 (2026-09-28)
+   ok       InteractionHistoryLogger.gs      OK matches confirmed-live 42a896c (2026-09-28)
+   ok       LeadFollowupsStaleness.gs        OK matches confirmed-live 6e4c904 (2026-09-28)
+   ok       MovementTracker.gs               OK matches confirmed-live d98efbb (2026-09-28)
+   ok       OpsChecklistRunner.gs            OK matches confirmed-live 4c99f7f (2026-09-28)
+   ok       OvernightEmailer.gs              OK matches confirmed-live 87114a3 (2026-09-28)
+   ok       RmHierarchy.gs                   OK matches confirmed-live 187450a (2026-09-28)
+   ok       SlaEngine.gs                     OK matches confirmed-live 87114a3 (2026-09-28)
+   ok       UnmatchedCommentLogger.gs        OK matches confirmed-live cc7910b (2026-09-28)
 
 E. Watch register:
-   AT-RISK  Deploy register refreshed from the live editor -- last 2026-09-26, due 2026-10-06 (+8d)
+   AT-RISK  Deploy register refreshed from the live editor -- last 2026-09-28, due 2026-10-08 (+10d)
    AT-RISK  Movement_Log dedup health -- last 2026-09-25, due 2026-10-02 (+4d)
    AT-RISK  RM_HIERARCHY_RAW_ vs the HR Live roster export -- last 2026-09-22, due 2026-10-06 (+8d)
    AT-RISK  `leads` tab header vs `HEADER_ALIASES` / `HEADER_ALIASES_` -- last 2026-09-22, due 2026-10-02 (+4d)
@@ -192,7 +194,7 @@ E. Watch register:
 
 F. Uncommitted code changes with no matching record edit: 0
 
-G. HANDOVER.md: last changed 4c99f7f (2026-09-28); 0 code commit(s) and 0d since -> OK
+G. HANDOVER.md: last changed f2900c7 (2026-09-28); 1 code commit(s) and 0d since -> OK
 
 H. Raw control characters in .gs sources and .md docs: 0
 ```
