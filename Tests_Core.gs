@@ -110,6 +110,34 @@ function runCoreTests_() {
     TestAssertEqual_(esc_('<b>Tom & "Jerry"</b>'), '&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt;', 'esc_: escapes <, >, &, " for safe HTML embedding');
     TestAssertEqual_(esc_(null), '', 'esc_: null becomes empty string, not the literal text "null"');
     TestAssertEqual_(esc_(42), '42', 'esc_: non-string input is coerced to string first');
+
+    // ---- fmtCellsGs_ ----
+    TestAssertEqual_(fmtCellsGs_(0), '0', 'fmtCellsGs_: zero has no separators');
+    TestAssertEqual_(fmtCellsGs_(999), '999', 'fmtCellsGs_: under 1000 has no separators');
+    TestAssertEqual_(fmtCellsGs_(1000), '1,000', 'fmtCellsGs_: exactly 1000 gets one separator');
+    TestAssertEqual_(fmtCellsGs_(1234567), '1,234,567', 'fmtCellsGs_: 7 digits get two separators, grouped from the right');
+    TestAssertEqual_(fmtCellsGs_(10000000), '10,000,000', 'fmtCellsGs_: the real 10M ceiling formats correctly (4-digit leading group)');
+
+    // ---- computeWorkbookCellUsageGs_ ----
+    // Real Sheets semantics: getMaxRows()*getMaxColumns() is the DECLARED
+    // grid, independent of how much of it actually holds data — a sheet
+    // with a 5000-row headroom (MOVEMENT_LOG_ROW_HEADROOM_ etc.) counts
+    // all 5000 rows here even if only 3 have real values. The mock's
+    // _maxRows/_maxCols model exactly this split from _data's own length.
+    const cellUsageSs = TestMockSpreadsheet_({
+      'Small': TestMockSheet_('Small', [['a', 'b']]),
+      'Big': TestMockSheet_('Big', [['a', 'b', 'c']]),
+    });
+    cellUsageSs._sheets['Small']._maxRows = 1000;
+    cellUsageSs._sheets['Small']._maxCols = 10;
+    cellUsageSs._sheets['Big']._maxRows = 50000;
+    cellUsageSs._sheets['Big']._maxCols = 26;
+    const usage = computeWorkbookCellUsageGs_(cellUsageSs);
+    TestAssertEqual_(usage.totalCells, 1000 * 10 + 50000 * 26, 'computeWorkbookCellUsageGs_: totalCells sums getMaxRows()*getMaxColumns() across every real tab, not just data-bearing cells');
+    TestAssertEqual_(usage.sheets[0].name, 'Big', 'computeWorkbookCellUsageGs_: sheets is sorted largest-cells-first');
+    TestAssertEqual_(usage.sheets[0].cells, 50000 * 26, 'computeWorkbookCellUsageGs_: per-sheet cells is rows*cols for that one tab');
+    TestAssertEqual_(usage.ceiling, 10000000, 'computeWorkbookCellUsageGs_: ceiling is the real Sheets constant, not a guess');
+    TestAssert_(Math.abs(usage.pctUsed - usage.totalCells / 10000000) < 1e-9, 'computeWorkbookCellUsageGs_: pctUsed is totalCells/ceiling');
   } finally {
     TestEnv_tearDown_();
   }

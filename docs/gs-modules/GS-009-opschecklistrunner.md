@@ -7,14 +7,15 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-28 against commit (pending commit) |
 
 ## Purpose / reason to exist
 
-A weekly (Monday ~09:00 IST) automated summary email that runs 3 of
+A weekly (Monday ~09:00 IST) automated summary email that runs 4 of
 `OPS_CHECKLIST.md`'s periodic checks an unattended script *can* judge —
-RM-hierarchy resolution gaps, `Manager_Directory` email gaps, and
-`Movement_Log` capture freshness — and reduces each to a pass/fail. It
+RM-hierarchy resolution gaps, `Manager_Directory` email gaps,
+`Movement_Log` capture freshness, and (added 2026-09-28) the workbook's
+shared 10M-cell budget — and reduces each to a pass/fail. It
 sends **every week, issues or not**, on purpose: an absent email would
 be ambiguous ("did it not run, or was everything fine?"). Added
 2026-09-09. It exists to catch this project's slow-drift failure class
@@ -23,7 +24,7 @@ incidents.
 
 ## Responsibilities
 
-- `buildWeeklyOpsChecklistSummary_(ss, now)` — run the 3 checks, build
+- `buildWeeklyOpsChecklistSummary_(ss, now)` — run the 4 checks, build
   the pass/fail summary.
 - `runWeeklyOpsChecklist_(ss, now)` — the testable core: build the
   summary and send the email.
@@ -50,10 +51,10 @@ automatically.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-227 | `runWeeklyOpsChecklist_(ss, now)` `#L111` | an injected spreadsheet + a fixed `now` | builds the summary and sends one email | Gmail send | `buildWeeklyOpsChecklistSummary_` (FN-228), `withSendRetry_` (`GS-004`) | `runWeeklyOpsChecklistNow` (FN-229), `Tests_OpsChecklistRunner.gs` | reusable — **the testable core** (split out this session, `daba775`, so tests pass a fixed `now` instead of drifting `new Date()`) |
-| FN-228 | `buildWeeklyOpsChecklistSummary_(ss, now)` `#L43` | spreadsheet + now | the 3-check pass/fail summary text | none (reads sheets) | `auditUnresolvedRms_` / `auditManagerDirectoryEmailGaps_` (`GS-011`), `checkMovementLogFreshness_` (`GS-008`) | FN-227 | reusable |
-| FN-229 | `runWeeklyOpsChecklistNow()` `#L130` | — | thin wrapper: `runWeeklyOpsChecklist_(SpreadsheetApp.getActiveSpreadsheet(), new Date())` | Gmail send (via FN-227) | FN-227 | the Monday trigger; Apps Script editor (manual) | specific — the production entry point |
-| FN-230 | `setupWeeklyOpsChecklistTrigger()` `#L141` | — | installs the Monday ~09:00 IST trigger (deleting any prior one for `runWeeklyOpsChecklistNow`) | creates a trigger | `ScriptApp` | Apps Script editor (manual) | specific |
+| FN-227 | `runWeeklyOpsChecklist_(ss, now)` `#L140` | an injected spreadsheet + a fixed `now` | builds the summary and sends one email | Gmail send | `buildWeeklyOpsChecklistSummary_` (FN-228), `withSendRetry_` (`GS-004`) | `runWeeklyOpsChecklistNow` (FN-229), `Tests_OpsChecklistRunner.gs` | reusable — **the testable core** (split out this session, `daba775`, so tests pass a fixed `now` instead of drifting `new Date()`) |
+| FN-228 | `buildWeeklyOpsChecklistSummary_(ss, now)` `#L46` | spreadsheet + now | the 4-check pass/fail summary text | none (reads sheets) | `auditUnresolvedRms_` / `auditManagerDirectoryEmailGaps_` (`GS-011`), `checkMovementLogFreshness_` (`GS-008`), `computeWorkbookCellUsageGs_`/`fmtCellsGs_` (`GS-002` FN-301/302, added 2026-09-28) | FN-227 | reusable |
+| FN-229 | `runWeeklyOpsChecklistNow()` `#L159` | — | thin wrapper: `runWeeklyOpsChecklist_(SpreadsheetApp.getActiveSpreadsheet(), new Date())` | Gmail send (via FN-227) | FN-227 | the Monday trigger; Apps Script editor (manual) | specific — the production entry point |
+| FN-230 | `setupWeeklyOpsChecklistTrigger()` `#L170` | — | installs the Monday ~09:00 IST trigger (deleting any prior one for `runWeeklyOpsChecklistNow`) | creates a trigger | `ScriptApp` | Apps Script editor (manual) | specific |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -62,14 +63,17 @@ automatically.
 | EXC-076 | `Movement_Log` capture drifted past `MOVEMENT_LOG_FRESHNESS_GRACE_HOURS_` (8h) | `checkMovementLogFreshness_` (`GS-008`) returns stale → that check reads FAIL | the Monday email flags a stale-capture problem |
 | EXC-077 | a fixture / real-clock mismatch (the CI failure this session) | fixed by FN-227 taking `now` as a parameter — tests pass the fixed anchor, not `new Date()` (`daba775`) | CI is green; the production path still uses real `new Date()` |
 | EXC-078 | a send fails | `withSendRetry_` (`GS-004`) retries; persistent failure raises | shows as Failed in Executions; the check summary is still logged |
+| EXC-101 | the workbook's total declared cell usage crosses `WORKBOOK_CELL_ALERT_WARN_PCT_`/`WORKBOOK_CELL_ALERT_CRITICAL_PCT_` (`GS-002` CFG-071) — added 2026-09-28 after 3 real 10M-cell crashes (`HANDOVER.md` §9.2/9.3, 09-06/09-19/09-24) | `issueCount` incremented once (WARN and CRITICAL are mutually exclusive, never both); the summary names the top 3 tabs by cell count | the Monday email reads "Cell budget WARNING" or "CELL BUDGET CRITICAL" with the largest tabs named; CRITICAL also names `pruneMovementLogNow()`/`pruneDailyRmIssueLogNow()` as the immediate recovery |
 
 ## Data lineage
 
 `RM_Hierarchy` / `Manager_Directory` (`SHEET-006` / `SHEET-007`, via
 `GS-011` audit functions) + `Movement_Log` freshness (`SHEET-002`, via
-`GS-008` `checkMovementLogFreshness_`) → `buildWeeklyOpsChecklistSummary_`
-→ a pass/fail text → one weekly email (`EXT-002`). Reads only; the only
-side effect is the send.
+`GS-008` `checkMovementLogFreshness_`) + (added 2026-09-28) every tab's
+declared grid size via `GS-002` `computeWorkbookCellUsageGs_` (reads
+`ss.getSheets()` — the whole workbook, not one named tab) →
+`buildWeeklyOpsChecklistSummary_` → a pass/fail text → one weekly email
+(`EXT-002`). Reads only; the only side effect is the send.
 
 ## Sheets touched
 
@@ -78,6 +82,7 @@ side effect is the send.
 | `SHEET-006` `RM_Hierarchy` | Read | FN-228 (via `GS-011` `auditUnresolvedRms_`) | resolution-gap check |
 | `SHEET-007` `Manager_Directory` | Read | FN-228 (via `GS-011` `auditManagerDirectoryEmailGaps_`) | email-gap check |
 | `SHEET-002` `Movement_Log` | Read | FN-228 (via `GS-008` `checkMovementLogFreshness_`) | freshness check |
+| every tab (whole workbook) | Read | FN-228 (via `GS-002` `computeWorkbookCellUsageGs_`, added 2026-09-28) | cell-budget check reads `getMaxRows()`/`getMaxColumns()` on every sheet, not one named tab |
 
 ## Failure / error behaviour
 
@@ -121,7 +126,9 @@ automates); `CLAUDE.md` (the three-registration rule, `CHECKLIST-006`);
 - **Depends On:** `GS-011` (`RmHierarchy.gs` — `auditUnresolvedRms_`,
   `auditManagerDirectoryEmailGaps_`), `GS-008` (`MovementTracker.gs` —
   `checkMovementLogFreshness_`), `GS-004` (`EmailInfra.gs` —
-  `withSendRetry_`), `SHEET-002`, `SHEET-006`, `SHEET-007`, `EXT-002`
+  `withSendRetry_`), `GS-002` (`Core.gs` — `computeWorkbookCellUsageGs_`/
+  `fmtCellsGs_`, added 2026-09-28), `SHEET-002`, `SHEET-006`, `SHEET-007`,
+  `EXT-002`
 - **Used By:** `none` — leaf, scheduled
 - **Related:** `OPS_CHECKLIST.md` (the human checklist), `GS-007`
   (`LeadFollowupsStaleness.gs` — the other 2026-09-09 addition)

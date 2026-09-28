@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-09-28 against commit (pending commit) |
 
 ## Purpose / reason to exist
 
@@ -61,6 +61,9 @@ Never — it has no `setupXxx()` and no schedule.
 | FN-186 | `esc_(s)` `#L214` | any value | HTML-escaped string | none | — | `renderOvernightReportEmailHTML_` (`GS-004`), all email builders | reusable — the backend `esc` |
 | FN-265 | `archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel)` (added 2026-09-21) | table name + header/rows arrays + a date-range label | the created Drive `File`, or `null` if `rows` is empty | creates/reuses `ARCHIVE_ROOT_FOLDER_`/a per-table subfolder, writes a dated CSV, appends a manifest row | `archiveAppendManifestRow_` (FN-266) | `pruneMovementLog_` (`GS-008`), `pruneDailyRmIssueLog_` (`GS-003`) | reusable — the shared archive mechanism both prune functions call |
 | FN-266 | `archiveAppendManifestRow_(rootFolder, rowValues)` (added 2026-09-21) | the root folder + a row's values | none | reads + rewrites `ARCHIVE_MANIFEST_FILE_`'s whole content (no native Drive append) | — | FN-265 | reusable |
+| FN-301 | `computeWorkbookCellUsageGs_(ss)` `#L328` (added 2026-09-28) | a spreadsheet | `{sheets, totalCells, ceiling, pctUsed}` — every tab's `getMaxRows()*getMaxColumns()` (the DECLARED grid, not data-bearing cells; see `pruneMovementLog_`'s own comment, `GS-008`), largest first | none (reads `ss.getSheets()`) | — | `reportWorkbookCellUsageNow` (FN-303), `buildWeeklyOpsChecklistSummary_` (`GS-009` FN-228) | reusable — the shared computation so the console report and the Monday alert can never disagree |
+| FN-302 | `fmtCellsGs_(n)` `#L341` (added 2026-09-28) | a number | `'1,234,567'`-style comma-grouped string | none (pure) | — | FN-301's callers | reusable — no locale dependency, unlike `toLocaleString()` |
+| FN-303 | `reportWorkbookCellUsageNow()` `#L348` (added 2026-09-28) | — | none | `Logger.log`s the full per-tab breakdown, largest first | FN-301, FN-302 | Apps Script editor (manual) | specific — the console-callable diagnostic |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -72,6 +75,7 @@ Never — it has no `setupXxx()` and no schedule.
 | CFG-030 | IST offset | `+05:30` literal (no DST) | `istDayKeyGs_`'s day boundary | every backend IST computation (`LOGIC_AUDIT.md` Part 4 §4.6 — verified equivalent to the client mechanism) |
 | CFG-065 | `ARCHIVE_ROOT_FOLDER_` / `ARCHIVE_MANIFEST_FILE_` (added 2026-09-21) | `'Leads Dashboard Archive'` / `'archive_log.csv'` | the shared Drive folder name and manifest filename `archiveRowsToDriveCsv_` creates/reuses | every archived-row destination; lives in whichever account owns the nightly trigger (`DriveApp` calls execute as the trigger owner) |
 | CFG-066 | `HEADER_ALIASES_` `#L37` (added to the catalog 2026-09-21 — the constant itself is original to this file, just never had its own `CFG-XXX` entry before now) | ~24 keys, each an array of accepted header-text variants | maps the `leads` tab's real (tolerant) header text to canonical field keys | `buildColIndex_`/`getVal_` (FN-184) and everything that reads a `leads` row on the backend; **twin `HEADER_ALIASES` (`JS-009` `js/core-sheets-fetch.js`) — must be kept in sync, per `SHEET-001`'s own "Risks of changing this tab's structure"**. `SHEET-001`'s doc previously mis-cited this as `GS-004 CFG-037` — corrected 2026-09-21; `HEADER_ALIASES_` has always lived here (`GS-002`), never in `EmailInfra.gs`. |
+| CFG-071 | `WORKBOOK_CELL_CEILING_` / `WORKBOOK_CELL_ALERT_WARN_PCT_` / `WORKBOOK_CELL_ALERT_CRITICAL_PCT_` `#L321` (added 2026-09-28) | `10000000` / `0.70` / `0.85` | the real Sheets 10M-cell-per-workbook ceiling, and the WARN/CRITICAL percentage-of-ceiling thresholds `GS-009`'s Monday alert reads | `computeWorkbookCellUsageGs_` (FN-301, the ceiling); `buildWeeklyOpsChecklistSummary_` (`GS-009` FN-228, the two thresholds) — see `HANDOVER.md` §9.2/9.3 for the three real crashes (09-06/09-19/09-24) this exists to give advance warning of |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -133,7 +137,7 @@ in `LOGIC_AUDIT.md` Part 1 §1. Every other `GS-XXX` depends on it.
 - **Depends On:** `GS-004` (`HEADER_ALIASES_` for `buildColIndex_`),
   `EXT-001` — the only dependency
 - **Used By:** `GS-001`, `GS-003`, `GS-004`, `GS-005`, `GS-006`,
-  `GS-008`, `GS-010`, `GS-011`, `GS-012`, `GS-013`, `DATA-002`,
+  `GS-008`, `GS-009`, `GS-010`, `GS-011`, `GS-012`, `GS-013`, `DATA-002`,
   `DATA-003`, `DATA-004` — every other production `.gs`
 - **Related:** `JS-005` (`core-foundation.js`) + `JS-006`
   (`core-lead-model.js`) — the client twins of this file's config and

@@ -14,10 +14,13 @@
  * reasoning applied to Lead_Followups snapshot staleness specifically). A
  * missing weekly email is itself the alarm for "this stopped running."
  *
- * SCOPE — only the 3 checks that reduce to a clean pass/fail an
- * unattended script can judge on its own: auditUnresolvedRms_
- * (RmHierarchy.gs), auditManagerDirectoryEmailGaps_ (RmHierarchy.gs),
- * checkMovementLogFreshness_ (MovementTracker.gs). reportRmPerformanceNow()
+ * SCOPE — the 4 checks that reduce to a clean pass/fail an unattended
+ * script can judge on its own: auditUnresolvedRms_ (RmHierarchy.gs),
+ * auditManagerDirectoryEmailGaps_ (RmHierarchy.gs),
+ * checkMovementLogFreshness_ (MovementTracker.gs), and (added 2026-09-28,
+ * HANDOVER.md section 9.2/9.3's "not fixed here" item — the workbook hit
+ * its 10M-cell ceiling for real 3 times, 09-06/09-19/09-24)
+ * computeWorkbookCellUsageGs_ (Core.gs). reportRmPerformanceNow()
  * (a full leaderboard, not a boolean) and the RM_PERF_* constant-parity
  * check (can't be done live — Apps Script can't read a .js file) stay
  * manual, per OPS_CHECKLIST.md — the email ends with a plain-text
@@ -76,6 +79,32 @@ function buildWeeklyOpsChecklistSummary_(ss, now) {
   } else {
     issueCount++;
     lines.push('Movement_Log: ' + freshness.status + ' — run checkMovementLogFreshnessNow for full detail.');
+  }
+
+  // Cell-budget check (Core.gs) — the workbook's shared 10M-cell ceiling,
+  // summed across every tab's DECLARED grid, not just Movement_Log/
+  // Daily_RM_Issues' own retention windows. WARN/CRITICAL thresholds are
+  // percentages of the ceiling (WORKBOOK_CELL_ALERT_WARN_PCT_/
+  // WORKBOOK_CELL_ALERT_CRITICAL_PCT_), not an absolute row count, since
+  // the mix of tabs and their per-row width both drift over time. Always
+  // names the top 3 tabs by cell count — Movement_Log/Daily_RM_Issues have
+  // their own scheduled prune, but a CRITICAL reading means their normal
+  // 7-day cadence hasn't kept up (same "an after-write prune can't
+  // self-heal" trap as the 09-24 incident) and pruneMovementLogNow() /
+  // pruneDailyRmIssueLogNow() need running by hand now, not next capture.
+  const cellUsage = computeWorkbookCellUsageGs_(ss);
+  const cellPct = (cellUsage.pctUsed * 100).toFixed(1) + '%';
+  const topTabsLine = cellUsage.sheets.slice(0, 3).map(function (s) { return s.name + ' (' + fmtCellsGs_(s.cells) + ')'; }).join(', ');
+  if (cellUsage.pctUsed >= WORKBOOK_CELL_ALERT_CRITICAL_PCT_) {
+    issueCount++;
+    lines.push('CELL BUDGET CRITICAL: ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct +
+      ') — a capture WILL crash soon (HANDOVER.md section 9.2/9.3). Run pruneMovementLogNow() / pruneDailyRmIssueLogNow() now. Largest tabs: ' + topTabsLine + '.');
+  } else if (cellUsage.pctUsed >= WORKBOOK_CELL_ALERT_WARN_PCT_) {
+    issueCount++;
+    lines.push('Cell budget WARNING: ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct +
+      '). Largest tabs: ' + topTabsLine + '. Not urgent yet — worth a look before it is (run reportWorkbookCellUsageNow() for the full breakdown).');
+  } else {
+    lines.push('Cell budget: healthy — ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct + '). Largest: ' + topTabsLine + '.');
   }
 
   lines.push('');

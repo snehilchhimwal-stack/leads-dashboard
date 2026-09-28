@@ -853,18 +853,30 @@ then 6 failures + a 30-minute timeout), so `Movement_Log` — the largest tab
 **Fix**: `captureDailyRmIssues_` now calls `pruneMovementLog_` up front —
 after the idempotency guard (a double-fire stays cheap), before the company
 scan — in a try/catch so a failing prune never blocks tonight's capture.
-**Known limits, not fixed here**: (1) it only frees space if `Movement_Log`
+**Known limits**: (1) it only frees space if `Movement_Log`
 has rows older than its 7-day retention — `pruneMovementLog_` returns early,
 touching nothing, when none are stale, so an over-allocated grid within
 retention is not shrunk; (2) `snapshotOpenLeads_` itself still writes before
 it prunes (moving it needs an incoming-row-count sizing step like
 `pruneDailyRmIssueLog_`'s, since one run can write more than the 5000-row
 headroom); (3) nothing caps the workbook's steady-state size — the durable
-options are a separate log spreadsheet and a cell-budget alert in the
-Monday ops email. Recovery if it recurs: `pruneMovementLogNow()` then
-`pruneDailyRmIssueLogNow()` from the editor. Like every `.gs` change this
+fix would be a separate log spreadsheet (not built; a real architectural
+change, not a follow-up-sized item). Recovery if it recurs: `pruneMovementLogNow()`
+then `pruneDailyRmIssueLogNow()` from the editor. Like every `.gs` change this
 must be pasted into the live Apps Script project; no `setupXxx()` re-run
 needed (no trigger changed).
+
+**2026-09-28 follow-up — advance warning, not a capacity fix**:
+`snapshotOpenLeads_` now also prunes right after its own write (closing
+half of limit (2) above — it still writes before pruning, but no longer
+*only* relies on the next `snapshotPeriodic` run to catch up), and the
+Monday `[Ops Checklist]` email (`GS-009`) now reports the whole workbook's
+declared cell usage every week — `computeWorkbookCellUsageGs_`/
+`reportWorkbookCellUsageNow()` (`Core.gs`) sum `getMaxRows()*getMaxColumns()`
+across every tab, WARN at 70% of the 10M ceiling, CRITICAL at 85% (naming
+the top 3 tabs and, at CRITICAL, the exact recovery functions to run). This
+gives days of lead time instead of finding out via a crash — it does not
+reduce the workbook's actual steady-state size, so limit (3) is still open.
 
 ### 9.3 Utility functions (console-callable, `DailyRmIssueLog.gs`)
 

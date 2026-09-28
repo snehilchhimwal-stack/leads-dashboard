@@ -85,9 +85,10 @@ Run these *after* pasting a `.gs` change into the live Apps Script editor.
 
 ## Tier 3 — Periodic operational
 
-**3 of the checks below are now genuinely automated** (CHECKLIST-006,
-2026-09-09) — `OpsChecklistRunner.gs`'s `runWeeklyOpsChecklistNow()` runs
-them every Monday ~9am IST and emails `OPS_ALERT_EMAIL_` a summary,
+**4 of the checks below are now genuinely automated** (CHECKLIST-006,
+2026-09-09; the 4th, the workbook cell-budget check, added 2026-09-28) —
+`OpsChecklistRunner.gs`'s `runWeeklyOpsChecklistNow()` runs them every
+Monday ~9am IST and emails `OPS_ALERT_EMAIL_` a summary,
 **whether or not anything is flagged**. That "always send" choice is
 deliberate: an only-alert-when-wrong design makes a silently broken or
 deleted trigger look identical to "all clear" — the exact class of risk
@@ -98,6 +99,21 @@ clean pass/fail, or genuinely can't be automated (a live cross-runtime
 (or Claude) to actually run them, on the same weekly cadence, plus
 **immediately after any RM-roster or org-chart change** (new hire,
 departure, promotion, reporting-line change).
+
+### Workbook cell budget (automated, added 2026-09-28)
+
+Google Sheets caps a workbook at 10,000,000 cells total, summed across
+every tab's DECLARED grid size — the exact mechanism behind 3 real
+crashes (`HANDOVER.md` §9.2/9.3, 09-06/09-19/09-24). The Monday email now
+reports total usage and flags WARNING at 70% / CRITICAL at 85% of the
+ceiling, naming the largest tabs by cell count
+(`computeWorkbookCellUsageGs_`, `Core.gs`). For the full breakdown any
+time, run `reportWorkbookCellUsageNow()` from the Apps Script editor. A
+CRITICAL reading means `pruneMovementLogNow()` / `pruneDailyRmIssueLogNow()`
+need running by hand now, not waiting for the next scheduled capture —
+same "an after-write prune can't self-heal" trap as the 09-24 incident.
+This is advance warning, not a capacity fix — the durable fix (a separate
+log spreadsheet) is still open, see `HANDOVER.md` §9.3.
 
 ### Movement_Log dedup health (manual, added 2026-09-25)
 

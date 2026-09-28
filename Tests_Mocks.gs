@@ -193,7 +193,13 @@ function TestMockSheet_(name, initialRows) {
     _name: name,
     _data: (initialRows || []).map(function (r) { return r.slice(); }),
     _maxRows: (initialRows || []).length + 200, // headroom, mirrors a real sheet always having more allocated rows than data
+    // Added 2026-09-28 for computeWorkbookCellUsageGs_ (Core.gs). Defaults
+    // to the widest seeded row (min 1, matching a real brand-new sheet's
+    // single default column) — tests that need a specific declared column
+    // count poke sheet._maxCols directly, same pattern as _maxRows above.
+    _maxCols: Math.max(1, (initialRows || []).reduce(function (max, r) { return Math.max(max, r.length); }, 0)),
     getName: function () { return sheet._name; },
+    getMaxColumns: function () { return sheet._maxCols; },
     // Matches real Google Sheets semantics: a row that clearContent()
     // left fully blank (and nothing rewrote) does NOT count toward
     // getLastRow() — real production code (e.g. pruneMovementLog_,
@@ -261,6 +267,11 @@ function TestMockSpreadsheet_(sheetsByName) {
   const sheets = Object.assign({}, sheetsByName || {});
   return {
     getSheetByName: function (name) { return sheets[name] || null; },
+    // Added 2026-09-28 for computeWorkbookCellUsageGs_ (Core.gs) — real
+    // Spreadsheet.getSheets() order isn't insertion order, and nothing here
+    // depends on it (the caller sorts by cell count), so object insertion
+    // order is fine for the mock.
+    getSheets: function () { return Object.keys(sheets).map(function (k) { return sheets[k]; }); },
     insertSheet: function (name) {
       if (sheets[name]) throw new Error('TestMockSpreadsheet_: sheet "' + name + '" already exists');
       sheets[name] = TestMockSheet_(name, []);

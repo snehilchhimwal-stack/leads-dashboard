@@ -90,6 +90,48 @@ function runOpsChecklistRunnerTests_() {
     TestAssertEqual_(TestGmailLog_.sent.length, 1, 'runWeeklyOpsChecklist_: still sends exactly one email on the dirty run');
     TestAssertContains_(TestGmailLog_.sent[0].subject, 'item(s) to review', 'runWeeklyOpsChecklist_: subject names a nonzero item count when issues exist, not "all clear"');
 
+    // ---- Cell-budget check (Core.gs computeWorkbookCellUsageGs_), added
+    // 2026-09-28 — healthy / WARN / CRITICAL, each verified against the
+    // real percentage thresholds rather than a made-up row count, plus
+    // that issueCount only moves for WARN/CRITICAL, never for healthy. ----
+    const budgetLeadsHeader = TestFixture_leadsHeader_();
+    const budgetBannerRow = budgetLeadsHeader.map(function () { return ''; });
+    const budgetSs = TestMockSpreadsheet_({
+      'leads': TestMockSheet_('leads', [budgetBannerRow, budgetLeadsHeader]),
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', [
+        ['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source'],
+        ['Test A1 One', 'TL', 'Test Region', TEST_EMAIL_PRIMARY_, 2, 'manual'],
+      ]),
+      'Movement_Log_Runs': TestMockSheet_('Movement_Log_Runs', [
+        MOVEMENT_LOG_RUNS_COLUMNS_,
+        [new Date(now.getTime() - 2 * 3600000), 'clean test', 1, 0],
+      ]),
+      // The one huge tab — everything else above stays tiny (fixture-sized)
+      // so it alone drives total usage, same as Movement_Log dominating a
+      // real workbook.
+      'Movement_Log': TestMockSheet_('Movement_Log', [['snapshot_at']]),
+    });
+    budgetSs._sheets['Movement_Log']._maxRows = 100;
+    budgetSs._sheets['Movement_Log']._maxCols = 1; // 100 cells: healthy, well under 70% of 10,000,000
+    const healthySummary = buildWeeklyOpsChecklistSummary_(budgetSs, now);
+    TestAssertContains_(healthySummary.lines.join('\n'), 'Cell budget: healthy', 'buildWeeklyOpsChecklistSummary_: near-empty workbook reads as healthy cell budget');
+    TestAssertEqual_(healthySummary.issueCount, 0, 'buildWeeklyOpsChecklistSummary_: a healthy cell budget contributes 0 to issueCount');
+
+    budgetSs._sheets['Movement_Log']._maxRows = 7500000;
+    budgetSs._sheets['Movement_Log']._maxCols = 1; // 7,500,000 / 10,000,000 = 75% -> WARN (>= 70%, < 85%)
+    const warnSummary = buildWeeklyOpsChecklistSummary_(budgetSs, now);
+    TestAssertContains_(warnSummary.lines.join('\n'), 'Cell budget WARNING', 'buildWeeklyOpsChecklistSummary_: 75% usage reads as WARNING, not healthy or CRITICAL');
+    TestAssertContains_(warnSummary.lines.join('\n'), 'Movement_Log (7,500,000)', 'buildWeeklyOpsChecklistSummary_: names the largest tab and its exact, comma-formatted cell count');
+    TestAssertEqual_(warnSummary.issueCount, 1, 'buildWeeklyOpsChecklistSummary_: a WARNING cell budget contributes exactly 1 to issueCount');
+
+    budgetSs._sheets['Movement_Log']._maxRows = 9000000;
+    budgetSs._sheets['Movement_Log']._maxCols = 1; // 90% -> CRITICAL (>= 85%)
+    const criticalSummary = buildWeeklyOpsChecklistSummary_(budgetSs, now);
+    TestAssertContains_(criticalSummary.lines.join('\n'), 'CELL BUDGET CRITICAL', 'buildWeeklyOpsChecklistSummary_: 90% usage reads as CRITICAL');
+    TestAssertContains_(criticalSummary.lines.join('\n'), 'pruneMovementLogNow', 'buildWeeklyOpsChecklistSummary_: CRITICAL names the actual recovery function to run, not just "do something"');
+    TestAssertEqual_(criticalSummary.issueCount, 1, 'buildWeeklyOpsChecklistSummary_: a CRITICAL cell budget contributes exactly 1 to issueCount (not double-counted with WARNING)');
+
     // ---- runWeeklyOpsChecklistNow: trigger-target wrapper, smoke test
     // only (real new Date() inside — same reason checkMovementLogFreshnessNow's
     // own test, Tests_MovementTracker.gs, only checks "does not throw"

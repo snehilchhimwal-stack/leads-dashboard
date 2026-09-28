@@ -305,3 +305,51 @@ function archiveAppendManifestRow_(rootFolder, rowValues) {
     rootFolder.createFile(ARCHIVE_MANIFEST_FILE_, header + '\n' + line, MimeType.CSV);
   }
 }
+
+// ==================== Workbook cell-budget diagnostic ====================
+// Google Sheets caps a workbook at 10,000,000 cells TOTAL, summed across
+// every tab's DECLARED grid size (getMaxRows() * getMaxColumns()) — not on
+// cells holding real content; clearContent() alone never shrinks it, only
+// deleteRows()/deleteColumns() do. See pruneMovementLog_'s own comment
+// (MovementTracker.gs) for the full mechanism, and HANDOVER.md section 9.2/
+// 9.3 for the three real incidents this ceiling has caused (2026-09-06,
+// -19, -24). The two heaviest tabs (Movement_Log, Daily_RM_Issues) already
+// prune on a schedule; this is the missing piece HANDOVER.md's 09-24
+// writeup named as still open — visibility into the whole workbook's
+// budget BEFORE it's gone, not just after each tab prunes itself.
+//
+// Shared by reportWorkbookCellUsageNow() (console, full per-tab breakdown)
+// and OpsChecklistRunner.gs's weekly alert, so the two can never compute
+// this differently.
+const WORKBOOK_CELL_CEILING_ = 10000000;
+const WORKBOOK_CELL_ALERT_WARN_PCT_ = 0.70;
+const WORKBOOK_CELL_ALERT_CRITICAL_PCT_ = 0.85;
+
+function computeWorkbookCellUsageGs_(ss) {
+  const sheets = ss.getSheets().map(function (sheet) {
+    const rows = sheet.getMaxRows(), cols = sheet.getMaxColumns();
+    return { name: sheet.getName(), rows: rows, cols: cols, cells: rows * cols };
+  }).sort(function (a, b) { return b.cells - a.cells; });
+  const totalCells = sheets.reduce(function (sum, s) { return sum + s.cells; }, 0);
+  return { sheets: sheets, totalCells: totalCells, ceiling: WORKBOOK_CELL_CEILING_, pctUsed: totalCells / WORKBOOK_CELL_CEILING_ };
+}
+
+// '1234567' -> '1,234,567' — Utilities.formatString has no thousands-group
+// verb, and toLocaleString() depends on the runtime's default locale
+// (untested, and not worth pinning just for a log line); rolled by hand so
+// the digit grouping is identical however this runs.
+function fmtCellsGs_(n) {
+  const s = String(Math.round(n));
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// Console-callable — full per-tab breakdown, largest first, so whoever
+// reads it knows exactly which tab to prune, not just that something's big.
+function reportWorkbookCellUsageNow() {
+  const usage = computeWorkbookCellUsageGs_(SpreadsheetApp.getActiveSpreadsheet());
+  Logger.log('Workbook cell usage: ' + fmtCellsGs_(usage.totalCells) + ' / ' + fmtCellsGs_(usage.ceiling) +
+    ' (' + (usage.pctUsed * 100).toFixed(1) + '%)');
+  usage.sheets.forEach(function (s) {
+    Logger.log('  ' + s.name + ': ' + fmtCellsGs_(s.cells) + ' cells (' + s.rows + ' rows x ' + s.cols + ' cols)');
+  });
+}
