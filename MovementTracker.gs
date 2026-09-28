@@ -1409,3 +1409,48 @@ function removeDedupIncidentRowsNow() {
     '2026-09-22 12:44 to 2026-09-23 12:45 IST), archived first to ' + file.getUrl() + '. Movement_Log now has ' +
     (sheet.getLastRow() - 1) + ' data rows; row allocation ' + sheet.getMaxRows() + '.');
 }
+
+// ==================== One-off: remove the leftover 2026-09-17 in-workbook backup tab ====================
+// removeEarlyCorruptedMovementLogDataNow's FIRST version (commit 9413f6a, 2026-09-17 ~11:15 IST) backed up
+// Movement_Log by duplicating the whole ~100k-row sheet into a new in-workbook tab -- exactly what pushed the
+// workbook toward its 10M-cell ceiling, and got fixed 20 minutes later (834d7ea, same day) to archive only the
+// removed rows to a Drive CSV instead, same as every prune function since. The fix landed same-day and has been
+// stable for 11 days; the ONE backup tab the buggy version already created before the fix was never deleted, and
+// has sat costing ~2,860,000 cells (29% of the workbook) ever since -- found by computeWorkbookCellUsageGs_
+// (Core.gs) on 2026-09-28 at 98.2% total usage.
+//
+// Archives the tab's own content to a Drive CSV before deleting it (belt and suspenders -- the data is also
+// still reconstructable from Movement_Log's live history up to 2026-09-17, but this costs nothing and matches
+// the same archive-then-delete discipline as every other cleanup here). Refuses to touch anything unless the
+// tab's header matches the exact schema the original backup copied, and the archive's own row count matches
+// what was about to be deleted -- same two-guard shape as removeDedupIncidentRowsNow above.
+const STALE_MOVEMENT_LOG_BACKUP_TAB_ = 'Movement_Log_backup_2026-09-17_1115';
+function removeStaleMovementLogBackupTabNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(STALE_MOVEMENT_LOG_BACKUP_TAB_);
+  if (!sheet) { Logger.log(STALE_MOVEMENT_LOG_BACKUP_TAB_ + ' not found - nothing to remove (already done?).'); return; }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error(STALE_MOVEMENT_LOG_BACKUP_TAB_ + ' has no data rows - refusing to touch a tab that does not look like the expected backup.');
+  const lastCol = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  // The exact schema the FIRST version of removeEarlyCorruptedMovementLogDataNow copied (Movement_Log's own
+  // header as of 2026-09-17 -- no opp_at, added 2026-09-21, after this backup was made).
+  if (String(header[0]).trim() !== 'snapshot_at' || String(header[2]).trim() !== 'lead_id') {
+    throw new Error(STALE_MOVEMENT_LOG_BACKUP_TAB_ + '\'s header does not look like the expected Movement_Log backup shape - refusing to delete.');
+  }
+  const rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const file = archiveRowsToDriveCsv_('Movement_Log', header, rows, '2026-09-10_to_2026-09-17_superseded_backup');
+  if (!file) throw new Error('Drive archive was not created - refusing to delete.');
+  // Every data row starts with the snapshot_at Date rendered as an ISO timestamp (see archiveRowsToDriveCsv_'s
+  // csvEscape); count those line starts instead of parsing a multi-MB file.
+  const archived = (file.getBlob().getDataAsString().match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length;
+  if (archived !== rows.length) {
+    throw new Error('Drive archive holds ' + archived + ' data rows but ' + rows.length + ' were expected - refusing to delete. Archive: ' + file.getUrl());
+  }
+
+  ss.deleteSheet(sheet);
+  Logger.log('Removed the stale ' + STALE_MOVEMENT_LOG_BACKUP_TAB_ + ' tab (' + rows.length + ' rows), archived first to ' + file.getUrl() +
+    '. This tab was a leftover artifact of a bug fixed same-day it was created (834d7ea, 2026-09-17) - see this function\'s own header comment.');
+}

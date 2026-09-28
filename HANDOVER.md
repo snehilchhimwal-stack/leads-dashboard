@@ -336,6 +336,19 @@ the live data already needs room in. Safe to re-run; not wired to any
 trigger or button on purpose — it's remediation for one specific
 incident, not standing functionality.
 
+**The full-sheet-duplicate bug above was real, not hypothetical** — the
+FIRST version of this function (`9413f6a`, 2026-09-17 ~11:15 IST) shipped
+with exactly that full-sheet-duplicate backup, was run live, and did push
+the workbook toward its cell ceiling; fixed 20 minutes later (`834d7ea`).
+The fix landed same-day, but the one backup tab the buggy version had
+already created (`Movement_Log_backup_2026-09-17_1115`) was never
+deleted — it sat costing 2,860,000 cells (29% of the workbook) for 11
+days until the cell-budget diagnostic (§9.3, below) found it 2026-09-28.
+Removed by the one-off `removeStaleMovementLogBackupTabNow()`
+(`MovementTracker.gs`), same archive-then-delete discipline, once
+confirmed via direct read that the tab genuinely held nothing but that
+one incident's duplicate data and nothing in this project ever reads it.
+
 **Which `.gs` files are actually live (2026-09-25).** Nothing in git records
 what has been pasted into the editor, so `docs/STALENESS_TRACKER.md` carries
 a per-file **deploy register** (last commit confirmed pasted, and when).

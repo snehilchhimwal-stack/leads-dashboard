@@ -215,6 +215,80 @@ function runMovementTrackerTests_() {
       DriveApp = realDriveForIncident;
     }
 
+    // ---- removeStaleMovementLogBackupTabNow (one-off, 2026-09-28) ----
+    // Destructive (deletes a whole tab), so every guard is asserted, same
+    // discipline as removeDedupIncidentRowsNow above.
+    const staleBackupHeader = ['snapshot_at', 'snapshot_label', 'lead_id', 'client_id', 'RM', 'TL', 'project', 'region', 'client', 'lead_assigned_at'];
+    const staleBackupRow = function (whenIso, leadId) {
+      const r = []; for (let c = 0; c < staleBackupHeader.length; c++) r.push('');
+      r[0] = new Date(whenIso); r[1] = 'backup'; r[2] = leadId;
+      return r;
+    };
+    const realDriveForStaleBackup = DriveApp;
+    const realSpreadsheetAppForStaleBackup = SpreadsheetApp;
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (a) not found at all -> no-op, does not throw.
+      const noTabSs = TestMockSpreadsheet_({});
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return noTabSs; } };
+      let missingThrew = false;
+      try { removeStaleMovementLogBackupTabNow(); } catch (e) { missingThrew = true; }
+      TestAssertEqual_(missingThrew, false, 'removeStaleMovementLogBackupTabNow: the tab genuinely not existing is a clean no-op, not a throw');
+
+      // (b) wrong header shape -> refuses, deletes nothing.
+      const wrongShapeSs = TestMockSpreadsheet_({});
+      wrongShapeSs._sheets[STALE_MOVEMENT_LOG_BACKUP_TAB_] = TestMockSheet_(STALE_MOVEMENT_LOG_BACKUP_TAB_, [
+        ['not_snapshot_at', 'x', 'not_lead_id'],
+        ['a', 'b', 'c'],
+      ]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return wrongShapeSs; } };
+      let shapeMsg = '';
+      try { removeStaleMovementLogBackupTabNow(); } catch (e) { shapeMsg = String(e); }
+      TestAssertContains_(shapeMsg, 'does not look like', 'removeStaleMovementLogBackupTabNow: refuses a tab whose header does not match the expected backup shape');
+      TestAssertEqual_(!!wrongShapeSs.getSheetByName(STALE_MOVEMENT_LOG_BACKUP_TAB_), true, 'removeStaleMovementLogBackupTabNow: a shape-refused tab is left untouched, not deleted');
+
+      // (b2) right header shape, but a row with a non-Date snapshot_at (a
+      // corrupted row that would silently under-count in the archive's own
+      // ISO-timestamp-line check) -> the archived-count guard catches it
+      // and refuses, same as removeDedupIncidentRowsNow's own count guard.
+      // Own isolated DriveApp mock so its (expected) partial archive file
+      // doesn't skew the happy-path test's folder-file-count assertion below.
+      const corruptRowSs = TestMockSpreadsheet_({});
+      const corruptRow = staleBackupRow('2026-09-12T00:00:00+05:30', 'B-3');
+      corruptRow[0] = 'not a real date'; // breaks archiveRowsToDriveCsv_'s ISO-timestamp rendering for this one row
+      corruptRowSs._sheets[STALE_MOVEMENT_LOG_BACKUP_TAB_] = TestMockSheet_(STALE_MOVEMENT_LOG_BACKUP_TAB_, [staleBackupHeader, corruptRow]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return corruptRowSs; } };
+      const driveForCorruptRow = DriveApp;
+      DriveApp = TestMockDriveApp_();
+      let countMsg = '';
+      try { removeStaleMovementLogBackupTabNow(); } catch (e) { countMsg = String(e); } finally { DriveApp = driveForCorruptRow; }
+      TestAssertContains_(countMsg, 'were expected', 'removeStaleMovementLogBackupTabNow: refuses when the archive does not hold the same row count as the sheet, even with the right header shape');
+      TestAssertEqual_(!!corruptRowSs.getSheetByName(STALE_MOVEMENT_LOG_BACKUP_TAB_), true, 'removeStaleMovementLogBackupTabNow: a count-mismatch-refused tab is left untouched, not deleted');
+
+      // (c) happy path: right shape, archived, verified, deleted.
+      const realBackupSs = TestMockSpreadsheet_({});
+      realBackupSs._sheets[STALE_MOVEMENT_LOG_BACKUP_TAB_] = TestMockSheet_(STALE_MOVEMENT_LOG_BACKUP_TAB_, [
+        staleBackupHeader,
+        staleBackupRow('2026-09-10T12:00:00+05:30', 'B-1'),
+        staleBackupRow('2026-09-17T09:00:00+05:30', 'B-2'),
+      ]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return realBackupSs; } };
+      removeStaleMovementLogBackupTabNow();
+      TestAssertEqual_(realBackupSs.getSheetByName(STALE_MOVEMENT_LOG_BACKUP_TAB_), null, 'removeStaleMovementLogBackupTabNow: deletes the tab once archived and verified');
+      const staleBackupRoot = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_).next();
+      const staleBackupFolder = staleBackupRoot.getFoldersByName('Movement_Log').next();
+      TestAssertEqual_(staleBackupFolder._filesList.length, 1, 'removeStaleMovementLogBackupTabNow: archives to the SAME shared Movement_Log Drive folder every other Movement_Log archive uses');
+      TestAssertEqual_((staleBackupFolder._filesList[0]._content.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length, 2, 'removeStaleMovementLogBackupTabNow: the archive holds both rows before the tab is deleted');
+
+      // (d) re-run safety: the tab is already gone -> clean no-op again.
+      let rerunThrew = false;
+      try { removeStaleMovementLogBackupTabNow(); } catch (e) { rerunThrew = true; }
+      TestAssertEqual_(rerunThrew, false, 'removeStaleMovementLogBackupTabNow: safe to re-run once the tab is already gone');
+    } finally {
+      DriveApp = realDriveForStaleBackup;
+      SpreadsheetApp = realSpreadsheetAppForStaleBackup;
+    }
+
     // ---- 2026-09-26: dedup identity is lead_id + RM, NOT client_id ----
     // A customer's several rows (one per RM/assignment) share a client_id.
     // Keyed by client_id only one of them could ever match the single hash
