@@ -1441,16 +1441,39 @@ function removeStaleMovementLogBackupTabNow() {
   }
   const rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
-  const file = archiveRowsToDriveCsv_('Movement_Log', header, rows, '2026-09-10_to_2026-09-17_superseded_backup');
-  if (!file) throw new Error('Drive archive was not created - refusing to delete.');
+  // Archived in chunks, not one archiveRowsToDriveCsv_ call for all 109,999
+  // rows -- real failure, 2026-09-28: DriveApp.createFile threw "exceeds
+  // the maximum file size" on the full-size CSV. archiveRowsToDriveCsv_
+  // never hits this in its NORMAL callers (pruneMovementLog_/
+  // pruneDailyRmIssueLog_ only ever archive one retention window's worth
+  // per run, far smaller than a full-sheet one-off backup) so the shared
+  // helper itself is untouched; this call site chunks instead. A smaller
+  // chunk than this file's usual 10000 (sheet read/write quota headroom)
+  // on purpose -- this is a Drive file-SIZE ceiling, a different
+  // constraint, and this backup's rows carry long free-text comment
+  // fields that make each row heavier than a typical Movement_Log row.
+  const ARCHIVE_CHUNK = 5000;
+  const files = [];
+  for (let i = 0; i < rows.length; i += ARCHIVE_CHUNK) {
+    const chunkRows = rows.slice(i, i + ARCHIVE_CHUNK);
+    const partLabel = '2026-09-10_to_2026-09-17_superseded_backup_part' + (files.length + 1);
+    const file = archiveRowsToDriveCsv_('Movement_Log', header, chunkRows, partLabel);
+    if (!file) throw new Error('Drive archive chunk ' + (files.length + 1) + ' was not created - refusing to delete.');
+    files.push(file);
+  }
+
   // Every data row starts with the snapshot_at Date rendered as an ISO timestamp (see archiveRowsToDriveCsv_'s
-  // csvEscape); count those line starts instead of parsing a multi-MB file.
-  const archived = (file.getBlob().getDataAsString().match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length;
+  // csvEscape); count those line starts instead of parsing multi-MB files. Summed across every chunk file.
+  let archived = 0;
+  files.forEach(function (file) {
+    archived += (file.getBlob().getDataAsString().match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length;
+  });
   if (archived !== rows.length) {
-    throw new Error('Drive archive holds ' + archived + ' data rows but ' + rows.length + ' were expected - refusing to delete. Archive: ' + file.getUrl());
+    throw new Error('Drive archive holds ' + archived + ' data rows across ' + files.length + ' file(s) but ' + rows.length + ' were expected - refusing to delete.');
   }
 
   ss.deleteSheet(sheet);
-  Logger.log('Removed the stale ' + STALE_MOVEMENT_LOG_BACKUP_TAB_ + ' tab (' + rows.length + ' rows), archived first to ' + file.getUrl() +
+  Logger.log('Removed the stale ' + STALE_MOVEMENT_LOG_BACKUP_TAB_ + ' tab (' + rows.length + ' rows), archived first to ' + files.length +
+    ' Drive CSV file(s) starting with ' + files[0].getUrl() +
     '. This tab was a leftover artifact of a bug fixed same-day it was created (834d7ea, 2026-09-17) - see this function\'s own header comment.');
 }

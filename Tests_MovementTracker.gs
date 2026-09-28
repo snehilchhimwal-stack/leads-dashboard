@@ -284,6 +284,26 @@ function runMovementTrackerTests_() {
       let rerunThrew = false;
       try { removeStaleMovementLogBackupTabNow(); } catch (e) { rerunThrew = true; }
       TestAssertEqual_(rerunThrew, false, 'removeStaleMovementLogBackupTabNow: safe to re-run once the tab is already gone');
+
+      // (e) 2026-09-28 regression: more than ARCHIVE_CHUNK (5000) rows must
+      // span multiple Drive files, not one -- the real production run this
+      // was built for (109,999 rows) failed with "exceeds the maximum file
+      // size" on a single-file archive. 5,002 rows forces exactly 2 chunks
+      // (5000 + 2); own isolated DriveApp mock, same reasoning as (b2).
+      const manyRows = [];
+      for (let n = 0; n < 5002; n++) manyRows.push(staleBackupRow('2026-09-1' + (n % 7) + 'T00:00:00+05:30', 'B-' + n));
+      const manyRowsSs = TestMockSpreadsheet_({});
+      manyRowsSs._sheets[STALE_MOVEMENT_LOG_BACKUP_TAB_] = TestMockSheet_(STALE_MOVEMENT_LOG_BACKUP_TAB_, [staleBackupHeader].concat(manyRows));
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return manyRowsSs; } };
+      const driveForManyRows = DriveApp;
+      DriveApp = TestMockDriveApp_();
+      removeStaleMovementLogBackupTabNow();
+      const manyRowsFolder = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_).next().getFoldersByName('Movement_Log').next();
+      DriveApp = driveForManyRows;
+      TestAssertEqual_(manyRowsFolder._filesList.length, 2, 'removeStaleMovementLogBackupTabNow: 5,002 rows (> the 5000 chunk size) archive to exactly 2 Drive files, not 1');
+      const manyRowsArchived = manyRowsFolder._filesList.reduce(function (sum, f) { return sum + (f._content.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z,/gm) || []).length; }, 0);
+      TestAssertEqual_(manyRowsArchived, 5002, 'removeStaleMovementLogBackupTabNow: the two chunk files together hold all 5,002 rows, none lost or duplicated at the chunk boundary');
+      TestAssertEqual_(manyRowsSs.getSheetByName(STALE_MOVEMENT_LOG_BACKUP_TAB_), null, 'removeStaleMovementLogBackupTabNow: still deletes the tab once every chunk is archived and the total is verified');
     } finally {
       DriveApp = realDriveForStaleBackup;
       SpreadsheetApp = realSpreadsheetAppForStaleBackup;
