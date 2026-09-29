@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-29 against commit `b21849e` — reviewed after `js/tab-tracking.js` lost `evidenceAtDeadline` (moved to `js/tab-movement.js`, see `JS-024`, `HANDOVER.md` §9.7.3); a global function, still called identically by this file's own cohort computations regardless of which file defines it — no behavior change to the Tracking tab |
 
 ## Purpose / reason to exist
 

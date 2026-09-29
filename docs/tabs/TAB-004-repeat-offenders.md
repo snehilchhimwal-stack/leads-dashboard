@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | (pending commit) — Same-Day/48h Opp% columns + doubleFlag chip added 2026-09-29, see `JS-008` §9.7.3 |
+| **Last Verified** | 2026-09-29 against commit `b21849e` |
 
 ## Purpose / reason to exist
 

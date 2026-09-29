@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | (pending commit) against `rmOppDisplayCells` (FN-316) |
+| **Last Verified** | 2026-09-29 against commit `b21849e` |
 
 ## Purpose / reason to exist
 

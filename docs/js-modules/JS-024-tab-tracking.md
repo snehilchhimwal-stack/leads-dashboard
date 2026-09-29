@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | (pending commit) against the `evidenceAtDeadline` move to `JS-021` |
+| **Last Verified** | 2026-09-29 against commit `b21849e` |
 
 ## Purpose / reason to exist
 

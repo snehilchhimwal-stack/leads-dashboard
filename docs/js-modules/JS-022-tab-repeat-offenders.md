@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | (pending commit) — `rmPerformanceTableHtml` gained 2 Opp% columns + the doubleFlag chip, see `JS-008` §9.7.3 |
+| **Last Verified** | 2026-09-29 against commit `b21849e` |
 
 ## Purpose / reason to exist
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-09-29 against commit `b21849e` — reviewed after `dashboard.html` gained a description paragraph for `TAB-004`'s new Opp-conversion columns (see `TAB-004`, `JS-008` §9.7.3); no structural/DASH-001-level change |
 
 ## Purpose / reason to exist
 

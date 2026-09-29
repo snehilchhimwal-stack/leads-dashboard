@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `29b7146` |
+| **Last Verified** | 2026-09-29 against commit `b21849e` — reviewed after `js/tab-movement.js` gained `evidenceAtDeadline` (moved verbatim from `js/tab-tracking.js`, see `JS-021`, `HANDOVER.md` §9.7.3); a global function addition with no callers/side-effects touching the Movement tab's own UI or behavior — no content change here |
 
 ## Purpose / reason to exist
 
