@@ -49,6 +49,20 @@ STRICT = "--strict" in sys.argv
 EXCLUDED_FROM_DISK_SCAN = {"RmHierarchy.private.gs"}
 INFRA_TEST_FILES = {"Tests_Mocks.gs", "Tests_RunAll.gs"}
 
+# Test files that deliberately have NO matching production X.gs -- an
+# integration/end-to-end suite exercising two or more EXISTING production
+# files chained together, not a new module of its own. Each entry's own
+# file header explains why (search that file for "REGISTRATION NOTE").
+# Tests_EmailLifecycleFullCycle.gs added 2026-09-29: chains real calls to
+# sendAllIssuesEmails() (AllIssuesEmailer.gs) + sendOvernightMorningEmails()/
+# sendOvernightFollowupEmails() (OvernightEmailer.gs) against one shared
+# mock spreadsheet -- proving the real 17:00 writer and the real 10:00/13:00
+# readers actually agree on AllIssues_Log's column shape. Its own two real
+# registrations (Tests_RunAll.gs's `suites` array, this script's own
+# TEST_FILES list) are still fully checked below -- only the "must have a
+# matching X.gs" check (#3) is skipped for files in this set.
+INTEGRATION_TEST_FILES_WITHOUT_OWN_PRODUCTION_FILE = {"Tests_EmailLifecycleFullCycle.gs"}
+
 
 def extract_file_list(js_source, const_name):
     """Same technique run-gs-tests-headless.py already uses: regex-extract
@@ -133,7 +147,7 @@ def main():
     suite_fn_set = set(suite_fns)
     for tf in sorted(test_files - INFRA_TEST_FILES):
         prod = test_file_to_production_file(tf)
-        if prod and prod not in production_files:
+        if prod and prod not in production_files and tf not in INTEGRATION_TEST_FILES_WITHOUT_OWN_PRODUCTION_FILE:
             findings.append("REGISTRATION GAP: %s is in TEST_FILES but its production file %s is not in PRODUCTION_FILES" % (tf, prod))
         expected_fn = test_file_to_suite_fn(tf)
         if expected_fn and expected_fn not in suite_fn_set:
