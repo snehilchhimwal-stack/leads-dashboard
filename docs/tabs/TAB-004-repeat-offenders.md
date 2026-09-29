@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `(pending commit)` — Futwork vendor + admin exclusion (`HANDOVER.md` §9.7.4) |
+| **Last Verified** | 2026-09-29 against commit `a589d62` — Futwork vendor + admin exclusion (`HANDOVER.md` §9.7.4) |
 
 ## Purpose / reason to exist
 

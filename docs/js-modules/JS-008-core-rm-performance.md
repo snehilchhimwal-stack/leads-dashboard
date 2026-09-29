@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-29 against commit `(pending commit)` — added `RM_PERF_VENDOR_NAME_PATTERN`/`RM_PERF_ADMIN_NAME_EXCLUSIONS` (Futwork vendor + admin exclusion, FN-060/CFG-075) |
+| **Last Verified** | 2026-09-29 against commit `a589d62` — added `RM_PERF_VENDOR_NAME_PATTERN`/`RM_PERF_ADMIN_NAME_EXCLUSIONS` (Futwork vendor + admin exclusion, FN-060/CFG-075) |
 
 ## Purpose / reason to exist
 
