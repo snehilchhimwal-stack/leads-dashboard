@@ -79,9 +79,21 @@
  * remembering (a candidate new keyword, "same person every time",
  * whatever) in the "note" column. Once a batch is reviewed and dealt
  * with, run clearReviewedUnmatchedCommentsNow (function dropdown) to
- * clear out every reviewed=true row and keep the sheet from growing
- * unbounded — this is a manual step, not automatic, since only a human
- * should decide a review cycle is actually done. See dedupeUnmatchedCommentsNow
+ * clear out every reviewed=true row — this stays a manual, human-gated
+ * step, unchanged: only a human should decide a review cycle is done.
+ *
+ * AGE-BASED PRUNING (added 2026-09-29, on top of the manual clear above,
+ * not instead of it): pruneUnmatchedCommentsLog_ archives-then-removes
+ * ANY row (reviewed or not) older than
+ * UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ (30), on the same 4x/day
+ * snapshot trigger. This is a real, deliberate tradeoff Snehil confirmed
+ * 2026-09-29: a comment nobody reviewed within 30 days is archived to
+ * Drive (never hard-deleted — a human can still pull it from there) and
+ * removed from the live review queue, rather than sitting unreviewed
+ * forever. Added because the cell-budget diagnostic (Core.gs) found this
+ * tab at 383,058 cells 2026-09-28 with no age-based ceiling at all — only
+ * the reviewed=true clear existed, which does nothing for a backlog of
+ * rows nobody ever got to. See dedupeUnmatchedCommentsNow
  * for the one-off backlog cleanup needed after the 2026-09-03 fix above.
  * ================================================================================
  */
@@ -300,4 +312,98 @@ function dedupeUnmatchedCommentsNow() {
     sheet.getRange(2, 9, kept.length, 1).insertCheckboxes();
   }
   Logger.log('Deduped: removed ' + clearedCount + ' duplicate row(s) out of ' + values.length + ' total; ' + kept.length + ' unique row(s) kept.');
+}
+
+// Added 2026-09-29 — see this file's own header "AGE-BASED PRUNING" note.
+// Independent of `reviewed`: a row this old is archived-and-removed either
+// way, since the whole point is "nobody dealt with this in time", not
+// "nobody CHECKED it in time". Same headroom/chunk reasoning as
+// COMMENT_HISTORY_ROW_HEADROOM_/COMMENT_HISTORY_ARCHIVE_CHUNK_
+// (InteractionHistoryLogger.gs).
+const UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ = 30;
+const UNMATCHED_COMMENTS_LOG_ROW_HEADROOM_ = 2000;
+const UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_ = 5000;
+
+// Archives (chunked) and removes Unmatched_Comments_Log rows older than
+// UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_, regardless of `reviewed`.
+// Same crash-safety ordering as pruneCommentHistory_
+// (InteractionHistoryLogger.gs) / pruneMovementLog_ (MovementTracker.gs):
+// archive BEFORE any deletion, write `kept` to its final position FIRST,
+// THEN clear the leftover tail. Re-inserts checkboxes on the reviewed
+// column after rewriting `kept` — same as clearReviewedUnmatchedCommentsNow
+// above, since clearContent() strips the column's checkbox validation and
+// a plain setValues() of booleans does not restore the interactive UI.
+function pruneUnmatchedCommentsLog_(ss) {
+  const sheet = ss.getSheetByName(UNMATCHED_COMMENTS_LOG_SHEET_);
+  if (!sheet) return;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const lastCol = UNMATCHED_COMMENTS_LOG_COLUMNS_.length;
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const cutoff = new Date(Date.now() - UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ * 24 * 60 * 60 * 1000);
+  // date (column 0) is written by istDayKeyGs_ — see
+  // parseIstDayKeyOrDateGs_'s own comment (Core.gs). An unparseable date
+  // is KEPT, never guessed into pruning.
+  const isKeptRow_ = function (row) {
+    const d = parseIstDayKeyOrDateGs_(row[0]);
+    return !d || d >= cutoff;
+  };
+  const kept = values.filter(isKeptRow_);
+  if (kept.length === values.length) return; // nothing old enough to prune — don't touch the sheet at all
+
+  const dropped = values.filter(function (row) { return !isKeptRow_(row); });
+  const droppedDates = dropped.map(function (row) { return parseIstDayKeyOrDateGs_(row[0]); }).filter(function (d) { return !!d; });
+  const rowDateRangeLabel = droppedDates.length
+    ? Utilities.formatDate(new Date(Math.min.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
+      + '_to_' + Utilities.formatDate(new Date(Math.max.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
+    : 'unknown-dates';
+
+  const files = [];
+  for (let i = 0; i < dropped.length; i += UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_) {
+    const chunkRows = dropped.slice(i, i + UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_);
+    const file = archiveRowsToDriveCsv_(UNMATCHED_COMMENTS_LOG_SHEET_, UNMATCHED_COMMENTS_LOG_COLUMNS_, chunkRows, rowDateRangeLabel + '_part' + (files.length + 1));
+    if (!file) throw new Error('Drive archive chunk ' + (files.length + 1) + ' was not created - refusing to prune ' + UNMATCHED_COMMENTS_LOG_SHEET_ + '.');
+    files.push(file);
+  }
+  let archivedLines = 0;
+  files.forEach(function (file) { archivedLines += file.getBlob().getDataAsString().split('\n').length; });
+  const archivedRows = archivedLines - files.length;
+  if (archivedRows !== dropped.length) {
+    throw new Error('Drive archive holds ' + archivedRows + ' row(s) across ' + files.length + ' file(s) but ' + dropped.length +
+      ' were expected - refusing to prune ' + UNMATCHED_COMMENTS_LOG_SHEET_ + '.');
+  }
+
+  // Write kept rows to their final position FIRST, THEN clear only the
+  // leftover tail beyond them — never clear-then-write. An interruption
+  // between these two steps must never land on a sheet with real,
+  // still-in-retention data already erased and nothing written back yet
+  // (the exact real incident pruneMovementLog_'s own header documents,
+  // MovementTracker.gs). This intentionally does NOT reuse
+  // clearReviewedUnmatchedCommentsNow's simpler clear-then-write shape
+  // above — that function only ever drops REVIEWED rows a human just
+  // finished with, so losing a few to an interruption is recoverable by
+  // re-checking them; this prunes on AGE alone and must not risk losing
+  // an unreviewed comment nobody has seen yet.
+  if (kept.length) {
+    sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
+    sheet.getRange(2, 9, kept.length, 1).insertCheckboxes();
+  }
+  if (lastRow - 1 > kept.length) {
+    sheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent();
+  }
+
+  const neededRows = 1 + kept.length + UNMATCHED_COMMENTS_LOG_ROW_HEADROOM_;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > neededRows) {
+    sheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  }
+
+  Logger.log('Pruned ' + dropped.length + ' ' + UNMATCHED_COMMENTS_LOG_SHEET_ + ' row(s) older than ' + UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ +
+    ' days (reviewed or not), archived to ' + files.length + ' Drive CSV file(s) starting with ' + files[0].getUrl() + '. ' + kept.length + ' row(s) kept.');
+}
+
+// Run manually (function dropdown) to prune right now without waiting
+// for the next snapshot trigger.
+function pruneUnmatchedCommentsLogNow() {
+  pruneUnmatchedCommentsLog_(SpreadsheetApp.getActiveSpreadsheet());
 }

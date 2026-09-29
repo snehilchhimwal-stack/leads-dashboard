@@ -50,13 +50,20 @@
  * purpose is real interaction CADENCE, so every genuinely new
  * owner-logged comment counts, regardless of what it classifies as.
  *
- * NO AUTOMATIC PRUNING (unlike Movement_Log/Unmatched_Comments_Log):
- * write volume here is bounded by how often RMs actually log a NEW
- * comment, not by a fixed clock cadence, so growth should be an order of
- * magnitude slower than Movement_Log's. Revisit if that assumption turns
- * out wrong once real volume is observed — see pruneMovementLog_'s own
- * precedent for the pattern to copy if a manual prune ever becomes
- * necessary.
+ * PRUNING (added 2026-09-29): this file shipped 2026-09-05 with NO
+ * automatic pruning, on the stated assumption that write volume here —
+ * bounded by how often RMs actually log a NEW comment, not by a fixed
+ * clock cadence — would grow an order of magnitude slower than
+ * Movement_Log's. That assumption held on RATE but not on absolute scale:
+ * by 2026-09-28 this tab alone was 1,048,164 cells (~10.5% of the whole
+ * workbook's 10,000,000-cell ceiling), found by the cell-budget
+ * diagnostic (Core.gs). Snehil confirmed pruning should apply (30-day
+ * retention) — see pruneCommentHistory_ below, which follows
+ * pruneMovementLog_'s own precedent (MovementTracker.gs) exactly as this
+ * comment originally anticipated. This does NOT reverse the tab's
+ * forward-capture PURPOSE (still every genuinely new comment, still no
+ * outcome filter) — only how long a row stays in the live sheet before
+ * being archived to Drive (never hard-deleted) and removed from it.
  *
  * Depends on Core.gs (getVal_, isOpenLead_, istDayKeyGs_),
  * FollowupEngine.gs (latestOutcomeGs_), EmailInfra.gs (withRetry_,
@@ -174,4 +181,104 @@ function logInteractionHistoryNow() {
   const { colIndex, dataRows } = readLeadsTab_(ss);
   const count = logInteractionHistoryGs_(ss, dataRows, colIndex, new Date());
   Logger.log('logInteractionHistoryNow: logged ' + count + ' new comment(s) to "' + COMMENT_HISTORY_SHEET_ + '".');
+}
+
+// 30-day retention, added 2026-09-29 — see this file's own header
+// "PRUNING" note for why. Extra rows left allocated beyond what's
+// actually needed after a prune, same reasoning as
+// MOVEMENT_LOG_ROW_HEADROOM_ (MovementTracker.gs) but smaller, since this
+// tab's write volume is a fraction of Movement_Log's.
+const COMMENT_HISTORY_RETENTION_DAYS_ = 30;
+const COMMENT_HISTORY_ROW_HEADROOM_ = 2000;
+// Smaller than MovementTracker.gs's usual 10000-row read/write batches on
+// purpose — a Drive file-SIZE ceiling, not a Sheets quota, and this tab's
+// rows carry long free-text comment fields that make each row heavier
+// than a typical structured row. Real precedent for exactly this failure:
+// removeStaleMovementLogBackupTabNow_'s first live run (MovementTracker.gs,
+// 2026-09-28) hit "exceeds the maximum file size" archiving 109,999 rows
+// in one Drive file — this tab has never been pruned before, so its
+// FIRST run here could face a similarly large backlog in one call.
+const COMMENT_HISTORY_ARCHIVE_CHUNK_ = 5000;
+
+// Archives (chunked — see COMMENT_HISTORY_ARCHIVE_CHUNK_'s own comment)
+// and removes Comment_History rows older than
+// COMMENT_HISTORY_RETENTION_DAYS_. Follows pruneMovementLog_'s own
+// crash-safety ordering (MovementTracker.gs) exactly: archive BEFORE any
+// deletion, write `kept` to its final position FIRST, THEN clear only the
+// leftover tail — an interruption at any point never loses data, at
+// worst leaves some already-expired rows stale until the next run
+// re-prunes them. Skips the whole clear/write/shrink sequence entirely
+// when nothing is old enough to prune (the common case on every run
+// after the first).
+function pruneCommentHistory_(ss) {
+  const sheet = ss.getSheetByName(COMMENT_HISTORY_SHEET_);
+  if (!sheet) return;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const lastCol = sheet.getLastColumn();
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const cutoff = new Date(Date.now() - COMMENT_HISTORY_RETENTION_DAYS_ * 24 * 60 * 60 * 1000);
+  // date (column 0) is written by istDayKeyGs_ — see
+  // parseIstDayKeyOrDateGs_'s own comment (Core.gs) for why the cell can
+  // come back as either a string or a Date. An unparseable date is KEPT,
+  // never guessed into pruning.
+  const isKeptRow_ = function (row) {
+    const d = parseIstDayKeyOrDateGs_(row[0]);
+    return !d || d >= cutoff;
+  };
+  const kept = values.filter(isKeptRow_);
+  if (kept.length === values.length) return; // nothing old enough to prune — don't touch the sheet at all
+
+  const dropped = values.filter(function (row) { return !isKeptRow_(row); });
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const droppedDates = dropped.map(function (row) { return parseIstDayKeyOrDateGs_(row[0]); }).filter(function (d) { return !!d; });
+  const rowDateRangeLabel = droppedDates.length
+    ? Utilities.formatDate(new Date(Math.min.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
+      + '_to_' + Utilities.formatDate(new Date(Math.max.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
+    : 'unknown-dates';
+
+  const files = [];
+  for (let i = 0; i < dropped.length; i += COMMENT_HISTORY_ARCHIVE_CHUNK_) {
+    const chunkRows = dropped.slice(i, i + COMMENT_HISTORY_ARCHIVE_CHUNK_);
+    const file = archiveRowsToDriveCsv_(COMMENT_HISTORY_SHEET_, header, chunkRows, rowDateRangeLabel + '_part' + (files.length + 1));
+    if (!file) throw new Error('Drive archive chunk ' + (files.length + 1) + ' was not created - refusing to prune ' + COMMENT_HISTORY_SHEET_ + '.');
+    files.push(file);
+  }
+  // Total lines across every chunk file, minus one header line PER chunk
+  // (archiveRowsToDriveCsv_ writes [header].concat(rows) into every file
+  // it creates) — a general row-count proof that works regardless of
+  // what shape column 0 happens to be, unlike a format-specific regex.
+  let archivedLines = 0;
+  files.forEach(function (file) { archivedLines += file.getBlob().getDataAsString().split('\n').length; });
+  const archivedRows = archivedLines - files.length;
+  if (archivedRows !== dropped.length) {
+    throw new Error('Drive archive holds ' + archivedRows + ' row(s) across ' + files.length + ' file(s) but ' + dropped.length +
+      ' were expected - refusing to prune ' + COMMENT_HISTORY_SHEET_ + '.');
+  }
+
+  if (kept.length) {
+    sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
+  }
+  if (lastRow - 1 > kept.length) {
+    sheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent();
+  }
+
+  // Shrinks the sheet's declared row allocation, same reasoning as
+  // pruneMovementLog_'s own final step (MovementTracker.gs) — clearContent
+  // above only empties cell VALUES, never the workbook's declared grid
+  // size that the 10,000,000-cell ceiling actually counts against.
+  const neededRows = 1 + kept.length + COMMENT_HISTORY_ROW_HEADROOM_;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > neededRows) {
+    sheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  }
+
+  Logger.log('Pruned ' + dropped.length + ' ' + COMMENT_HISTORY_SHEET_ + ' row(s) older than ' + COMMENT_HISTORY_RETENTION_DAYS_ +
+    ' days, archived to ' + files.length + ' Drive CSV file(s) starting with ' + files[0].getUrl() + '. ' + kept.length + ' row(s) kept.');
+}
+
+// Run manually (function dropdown) to prune right now without waiting
+// for the next snapshot trigger.
+function pruneCommentHistoryNow() {
+  pruneCommentHistory_(SpreadsheetApp.getActiveSpreadsheet());
 }

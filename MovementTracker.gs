@@ -628,6 +628,23 @@ function snapshotOpenLeads_(label) {
   // aren't kept genuinely independent.
   pruneMovementLog_(ss);
 
+  // Added 2026-09-29 — same "wrapped so it can never block the core
+  // capture" treatment as scanUnmatchedCommentsGs_/logInteractionHistoryGs_
+  // above. See each file's own header ("PRUNING" / "AGE-BASED PRUNING")
+  // for why these exist now: the cell-budget diagnostic (Core.gs) found
+  // both tabs large enough (2026-09-28) that Snehil confirmed a 30-day
+  // retention window for both, on 2026-09-29.
+  try {
+    pruneCommentHistory_(ss);
+  } catch (e) {
+    Logger.log('Comment_History prune failed (Movement_Log capture continues): ' + e);
+  }
+  try {
+    pruneUnmatchedCommentsLog_(ss);
+  } catch (e) {
+    Logger.log('Unmatched_Comments_Log prune failed (Movement_Log capture continues): ' + e);
+  }
+
   try {
     const runsSheet = ensureMovementLogRunsSheet_(ss);
     runsSheet.getRange(runsSheet.getLastRow() + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length)

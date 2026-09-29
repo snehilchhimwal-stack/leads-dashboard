@@ -119,6 +119,100 @@ function runInteractionHistoryLoggerTests_() {
     } finally {
       SpreadsheetApp = realSs;
     }
+    // ---- pruneCommentHistory_ (added 2026-09-29) ----
+    // Own isolated DriveApp mock — TestEnv_setUp_ does not swap DriveApp
+    // (only Tests_MovementTracker.gs-style tests that actually archive do
+    // this themselves), so each sub-block below swaps/restores it.
+    const realDriveForPrune_ = DriveApp;
+    const commentHistoryRow_ = function (dateStr, leadId) {
+      return [dateStr, leadId, 'C-' + leadId, 'Test RM One', 'Pune', 'P', 'some real comment text', '', '2026-01-01 00:00:00'];
+    };
+
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (a) mixed ages: 30-day cutoff from a fixed "now", old rows archived
+      // + removed, recent rows kept untouched.
+      const pruneNow = new Date('2026-09-29T12:00:00+05:30');
+      const pruneSs = TestMockSpreadsheet_({});
+      const pruneSheet = TestMockSheet_(COMMENT_HISTORY_SHEET_, [COMMENT_HISTORY_COLUMNS_,
+        commentHistoryRow_('2026-08-01', 'L-OLD1'),  // ~59 days old -> dropped
+        commentHistoryRow_('2026-08-20', 'L-OLD2'),  // ~40 days old -> dropped
+        commentHistoryRow_('2026-09-10', 'L-RECENT1'), // ~19 days old -> kept
+        commentHistoryRow_('2026-09-25', 'L-RECENT2'), // ~4 days old -> kept
+      ]);
+      pruneSs._sheets[COMMENT_HISTORY_SHEET_] = pruneSheet;
+      const realNowFn = Date.now;
+      Date.now = function () { return pruneNow.getTime(); };
+      try {
+        pruneCommentHistory_(pruneSs);
+      } finally {
+        Date.now = realNowFn;
+      }
+      TestAssertEqual_(pruneSheet.getLastRow(), 3, 'pruneCommentHistory_: 2 old rows dropped, header + 2 kept rows remain');
+      const survivingIds = pruneSheet.getRange(2, 1, 2, 9).getValues().map(function (r) { return r[1]; });
+      TestAssert_(survivingIds.indexOf('L-RECENT1') !== -1 && survivingIds.indexOf('L-RECENT2') !== -1, 'pruneCommentHistory_: both recent rows survive, in order');
+      TestAssert_(survivingIds.indexOf('L-OLD1') === -1 && survivingIds.indexOf('L-OLD2') === -1, 'pruneCommentHistory_: both old rows are gone from the live sheet');
+      const rootFolder = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+      const chSubfolder = rootFolder && rootFolder._folders[COMMENT_HISTORY_SHEET_];
+      TestAssert_(!!chSubfolder && chSubfolder._filesList.length === 1, 'pruneCommentHistory_: exactly 1 archive CSV created for the 2 dropped rows');
+      const archivedCsv = chSubfolder._filesList[0].getBlob().getDataAsString();
+      TestAssertEqual_(archivedCsv.split('\n').length, 3, 'pruneCommentHistory_: archive CSV has 1 header + 2 data lines');
+      TestAssertContains_(archivedCsv, 'L-OLD1', 'pruneCommentHistory_: archived CSV actually contains the dropped row data, not just a count');
+
+      // (b) re-run safety: nothing left to prune is a clean no-op.
+      const beforeLastRow = pruneSheet.getLastRow();
+      Date.now = function () { return pruneNow.getTime(); };
+      try { pruneCommentHistory_(pruneSs); } finally { Date.now = realNowFn; }
+      TestAssertEqual_(pruneSheet.getLastRow(), beforeLastRow, 'pruneCommentHistory_: running again with nothing old enough to prune is a no-op');
+      TestAssertEqual_(chSubfolder._filesList.length, 1, 'pruneCommentHistory_: the no-op re-run creates no additional archive file');
+    } finally {
+      DriveApp = realDriveForPrune_;
+    }
+
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (c) an unparseable date cell is KEPT, never guessed into pruning —
+      // proves parseIstDayKeyOrDateGs_'s null case actually protects data,
+      // not just that it returns null in isolation.
+      const badDateSs = TestMockSpreadsheet_({});
+      const badDateSheet = TestMockSheet_(COMMENT_HISTORY_SHEET_, [COMMENT_HISTORY_COLUMNS_,
+        ['not a real date', 'L-BADDATE', 'C-BADDATE', 'Test RM One', 'Pune', 'P', 'comment', '', '2026-01-01 00:00:00'],
+        commentHistoryRow_('2026-08-01', 'L-OLD3'), // genuinely old -> still dropped
+      ]);
+      badDateSs._sheets[COMMENT_HISTORY_SHEET_] = badDateSheet;
+      const realNowFn2 = Date.now;
+      Date.now = function () { return new Date('2026-09-29T12:00:00+05:30').getTime(); };
+      try { pruneCommentHistory_(badDateSs); } finally { Date.now = realNowFn2; }
+      TestAssertEqual_(badDateSheet.getLastRow(), 2, 'pruneCommentHistory_: unparseable-date row survives, genuinely-old row is dropped (1 header + 1 kept row)');
+      TestAssertEqual_(badDateSheet.getRange(2, 2, 1, 1).getValues()[0][0], 'L-BADDATE', 'pruneCommentHistory_: the surviving row is specifically the unparseable-date one');
+    } finally {
+      DriveApp = realDriveForPrune_;
+    }
+
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (d) chunking regression — same real-incident coverage as
+      // removeStaleMovementLogBackupTabNow_'s own test (MovementTracker.gs,
+      // 2026-09-28): 12,000 rows to drop must split into 3 archive files
+      // (5000 + 5000 + 2000) via COMMENT_HISTORY_ARCHIVE_CHUNK_, not one.
+      const chunkRows = [COMMENT_HISTORY_COLUMNS_];
+      for (let i = 0; i < 12000; i++) chunkRows.push(commentHistoryRow_('2026-01-01', 'L-CHUNK' + i));
+      const chunkSs = TestMockSpreadsheet_({});
+      const chunkSheet = TestMockSheet_(COMMENT_HISTORY_SHEET_, chunkRows);
+      chunkSs._sheets[COMMENT_HISTORY_SHEET_] = chunkSheet;
+      const realNowFn3 = Date.now;
+      Date.now = function () { return new Date('2026-09-29T12:00:00+05:30').getTime(); };
+      try { pruneCommentHistory_(chunkSs); } finally { Date.now = realNowFn3; }
+      const chunkRoot = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+      const chunkSubfolder = chunkRoot && chunkRoot._folders[COMMENT_HISTORY_SHEET_];
+      TestAssertEqual_(chunkSubfolder._filesList.length, 3, 'pruneCommentHistory_: 12,000 dropped rows archive as exactly 3 chunk files (5000+5000+2000)');
+      let totalArchivedLines = 0;
+      chunkSubfolder._filesList.forEach(function (f) { totalArchivedLines += f.getBlob().getDataAsString().split('\n').length; });
+      TestAssertEqual_(totalArchivedLines - 3, 12000, 'pruneCommentHistory_: total archived data rows across all chunks (minus 1 header line each) equals every dropped row');
+      TestAssertEqual_(chunkSheet.getLastRow(), 1, 'pruneCommentHistory_: all 12,000 rows were old enough to drop — only the header remains');
+    } finally {
+      DriveApp = realDriveForPrune_;
+    }
   } finally {
     TestEnv_tearDown_();
   }

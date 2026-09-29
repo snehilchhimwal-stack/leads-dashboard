@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `Core.gs` (395 lines) |
+| **Location** | `Core.gs` (417 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `642d006` |
+| **Last Verified** | (pending commit) against `parseIstDayKeyOrDateGs_` (FN-306) |
 
 ## Purpose / reason to exist
 
@@ -58,6 +58,7 @@ Never — it has no `setupXxx()` and no schedule.
 | FN-183 | `isClosedStage_(stage)` / `isOpenLead_(stage, closingReason, leadClosingReason)` `#L125/#L141` | stage + reasons | bool | none | FN-181 | every emailer + logger (open-lead filter) | reusable — **`isOpenLead_` is the twin of `JS-006` `isLeadClosed`** (`LOGIC_AUDIT.md` Part 1 §4b) |
 | FN-184 | `buildColIndex_(headerRow)` / `getVal_(row, colIndex, key)` / `resolveTabName_(ss)` `#L159/#L175/#L153` | a header row / a row + key / a spreadsheet | column-index map / a cell value / the leads tab name | none | `HEADER_ALIASES_` (`GS-004`) | every file that reads a leads row | reusable |
 | FN-185 | `businessMinutesBetweenGs_(start, end)` / `pad2Gs_(n)` `#L194/#L186` | two dates / a number | business minutes / a 2-char string | none | — | `computeSlaFlags_` (`GS-012`), FN-180 | reusable — twin of `JS-006` `businessMinutesBetween` |
+| FN-306 | `parseIstDayKeyOrDateGs_(cell)` `#L202` (added 2026-09-29) | a Sheet cell value | the parsed `Date` (day-level, local midnight), or `null` if unparseable | none (pure) | — | `pruneCommentHistory_` (`GS-006` FN-307), `pruneUnmatchedCommentsLog_` (`GS-013` FN-309) | reusable — handles a cell written by `istDayKeyGs_` (FN-180) coming back as EITHER the original string or a Sheets-auto-converted Date, same coercion class as `EXC-068`/`EXC-089` |
 | FN-186 | `esc_(s)` `#L214` | any value | HTML-escaped string | none | — | `renderOvernightReportEmailHTML_` (`GS-004`), all email builders | reusable — the backend `esc` |
 | FN-265 | `archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel)` (added 2026-09-21) | table name + header/rows arrays + a date-range label | the created Drive `File`, or `null` if `rows` is empty | creates/reuses `ARCHIVE_ROOT_FOLDER_`/a per-table subfolder, writes a dated CSV, appends a manifest row | `archiveAppendManifestRow_` (FN-266) | `pruneMovementLog_` (`GS-008`), `pruneDailyRmIssueLog_` (`GS-003`) | reusable — the shared archive mechanism both prune functions call |
 | FN-266 | `archiveAppendManifestRow_(rootFolder, rowValues)` (added 2026-09-21) | the root folder + a row's values | none | reads + rewrites `ARCHIVE_MANIFEST_FILE_`'s whole content (no native Drive append) | — | FN-265 | reusable |

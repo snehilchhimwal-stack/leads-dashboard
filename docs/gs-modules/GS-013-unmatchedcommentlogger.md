@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `UnmatchedCommentLogger.gs` (303 lines) |
+| **Location** | `UnmatchedCommentLogger.gs` (409 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | (pending commit) against `pruneUnmatchedCommentsLog_` (FN-309) |
 
 ## Purpose / reason to exist
 
@@ -17,7 +17,13 @@ review. It exists as the **feedback loop that surfaces classifier gaps**:
 the comment-classification keyword table can only be improved if someone
 sees which real RM comments it fails to interpret. Without this, a
 growing blind spot in `FollowupEngine.gs` (`GS-005`) / `core-outcome-engine.js`
-(`JS-007`) would be invisible.
+(`JS-007`) would be invisible. **Update 2026-09-29:** the cell-budget
+diagnostic (`GS-002` FN-301) found this tab at 383,058 cells 2026-09-28,
+and the pre-existing `clearReviewedUnmatchedCommentsNow` — manual,
+review-gated — does nothing for a backlog of rows nobody ever reviewed.
+Snehil confirmed adding a 30-day AGE-based prune (`pruneUnmatchedCommentsLog_`)
+ALONGSIDE that manual clear, not instead of it — see Lifecycle /
+retention below for the real tradeoff this accepts.
 
 ## Responsibilities
 
@@ -27,9 +33,13 @@ growing blind spot in `FollowupEngine.gs` (`GS-005`) / `core-outcome-engine.js`
   dedup key.
 - `ensureUnmatchedCommentsLogSheet_` — create/repair the tab.
 - `scanUnmatchedCommentsNow` — a manual run.
-- `clearReviewedUnmatchedCommentsNow` — clear rows marked reviewed.
+- `clearReviewedUnmatchedCommentsNow` — clear rows marked reviewed
+  (manual, human-gated — unchanged).
 - `dedupeUnmatchedCommentsNow` — an incident-recovery function for a
   real 2026-09-03 bug (see Exceptions).
+- `pruneUnmatchedCommentsLog_` / `pruneUnmatchedCommentsLogNow` (added
+  2026-09-29) — archive-then-remove rows older than
+  `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_` (30), regardless of `reviewed`.
 
 ## Trigger schedule
 
@@ -54,6 +64,14 @@ Movement hub fire.
 | FN-252 | `ensureUnmatchedCommentsLogSheet_(ss)` / `scanUnmatchedCommentsNow()` `#L95/#L215` | spreadsheet / — | ensures the tab / runs FN-250 once by hand | may create the tab / Sheets append | FN-250 | FN-250 / Apps Script editor | specific |
 | FN-253 | `clearReviewedUnmatchedCommentsNow()` `#L229` | — | removes rows flagged reviewed | Sheets delete | — | Apps Script editor (manual, after a review pass) | specific |
 | FN-254 | `dedupeUnmatchedCommentsNow()` `#L264` | — | removes duplicate rows caused by the 2026-09-03 Date-coercion bug | Sheets delete | — | Apps Script editor (incident recovery) | specific — **a documented incident-recovery function** |
+| FN-309 | `pruneUnmatchedCommentsLog_(ss)` `#L336` (added 2026-09-29) | a spreadsheet | none | archives (chunked) then removes rows older than `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_` (30) — REGARDLESS of `reviewed`; no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneUnmatchedCommentsLogNow` | specific — re-inserts checkboxes on the `reviewed` column after rewriting, same discipline as FN-253 |
+| FN-310 | `pruneUnmatchedCommentsLogNow()` `#L407` (added 2026-09-29) | — | runs FN-309 once by hand | as FN-309 | FN-309 | Apps Script editor (manual) | specific |
+
+## Config constants — `CFG-XXX` sub-table
+
+| ID | Constant | Value | Meaning | Changing it affects |
+|---|---|---|---|---|
+| CFG-073 | `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_` / `UNMATCHED_COMMENTS_LOG_ROW_HEADROOM_` / `UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_` (added 2026-09-29) | `30` / `2000` / `5000` | how far back `Unmatched_Comments_Log` keeps live rows regardless of review status; extra allocated-row buffer after a prune; max rows archived per Drive CSV | `pruneUnmatchedCommentsLog_` (FN-309); a shorter retention means more genuinely-unreviewed comments get archived before a human ever sees them (Snehil's explicit tradeoff, 2026-09-29) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -61,6 +79,7 @@ Movement hub fire.
 |---|---|---|---|
 | EXC-089 | Sheets silently auto-converts a **string-typed `comment_at`** cell to a **Date-typed** cell, defeating the string-equality de-dup (real 2026-09-03 bug) | recovery via `dedupeUnmatchedCommentsNow()` (FN-254); the dedup key also considers the comment text, not just `comment_at` | duplicate rows can appear; a one-command cleanup exists (`HANDOVER.md` §8) |
 | EXC-090 | the scan throws inside `snapshotOpenLeads_` | that call is **independently try/catch-wrapped** by `GS-008` | the core `Movement_Log` capture still completes; the scan failure is logged, not fatal |
+| EXC-105 | the archive's own row count doesn't match the number of rows about to be dropped (added 2026-09-29) | `pruneUnmatchedCommentsLog_` throws, refuses to touch the sheet | a human sees the error in Executions rather than silently losing an unreviewed comment |
 
 ## Data lineage
 
@@ -70,14 +89,16 @@ latest comment → if it matches no rule → append `(lead_id, RM,
 comment_at, comment, …)` to `Unmatched_Comments_Log` (`SHEET-010`),
 de-duped → a human reviews the tab and improves `OUTCOME_RULES_GS_` /
 `OUTCOME_RULES`. Full flow: a `DATA-003` side-channel (the
-classifier-improvement loop).
+classifier-improvement loop). Since 2026-09-29, a row older than 30 days
+— reviewed or not — is archived to a Drive CSV then removed, independent
+of the human-review flow above.
 
 ## Sheets touched
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
 | `SHEET-001` `leads` | Read (indirect — rows passed in) | FN-250 | via `snapshotOpenLeads_` |
-| `SHEET-010` `Unmatched_Comments_Log` | Write (append) + ensure + clear/dedupe | FN-250 / FN-252 / FN-253 / FN-254 | de-duped by `(lead_id, comment_at-or-comment)` |
+| `SHEET-010` `Unmatched_Comments_Log` | Write (append) + ensure + clear/dedupe/prune | FN-250 / FN-252 / FN-253 / FN-254 / FN-309 (added 2026-09-29) | de-duped by `(lead_id, comment_at-or-comment)`; 30-day age-based retention since 2026-09-29, on top of the pre-existing manual reviewed-clear |
 
 ## Failure / error behaviour
 
@@ -153,24 +174,34 @@ Verified at `c82ec67`; record created by DOC-029.
 ## Revalidation trigger
 
 Any commit touching `UnmatchedCommentLogger.gs` or its `Tests_` file;
-the dedup-key logic changes; `latestOutcomeGs_` (`GS-005`) changes;
-`Unmatched_Comments_Log` (`SHEET-010`) columns change; `snapshotOpenLeads_`
-(`GS-008`) stops calling it.
+the dedup-key logic changes; the retention window
+(`UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_`) changes; `latestOutcomeGs_`
+(`GS-005`) changes; `Unmatched_Comments_Log` (`SHEET-010`) columns
+change; `snapshotOpenLeads_` (`GS-008`) stops calling it.
 
 ## Handover relationship
 
 `HANDOVER.md` §2 names the file ("Logs every RM comment the
 classification keywords fail to match … for periodic human review"); §8
-has the 2026-09-03 dedup incident. Current as of 2026-09-09. A change to
-the scan condition or the dedup key should update `HANDOVER.md` §2 and
-§8.
+has the 2026-09-03 dedup incident. Updated 2026-09-29 (same commit as
+the age-based prune) to note the new retention behavior alongside the
+still-unchanged manual reviewed-clear.
 
 ## Lifecycle / retention
 
-`Unmatched_Comments_Log` (`SHEET-010`): **no automatic pruning** —
-`clearReviewedUnmatchedCommentsNow()` removes rows *after a human marks
-them reviewed*, so it is manually curated rather than time-limited.
-Confirmed, not `TBD`.
+`Unmatched_Comments_Log` (`SHEET-010`): shipped with **no automatic
+pruning** — `clearReviewedUnmatchedCommentsNow()` removes rows *after a
+human marks them reviewed*, manually curated rather than time-limited.
+**Changed 2026-09-29:** `pruneUnmatchedCommentsLog_` (FN-309) ADDS a
+30-day age-based prune on top of that — a row this old is archived to
+Drive and removed **whether or not a human ever reviewed it**. This is a
+real, deliberate tradeoff Snehil confirmed: a comment nobody got to
+within 30 days is archived rather than sitting in the live review queue
+forever. `clearReviewedUnmatchedCommentsNow()` itself is UNCHANGED — it
+still exists and still only removes reviewed=true rows, on its own
+manual schedule. Confirmed policy, not `TBD`. See
+`docs/_planning/DB_ARCHITECTURE_REVIEW.md`'s own "unmatched_comments_log"
+section for the pre-2026-09-29 reasoning this partially supersedes.
 
 ## Next action
 

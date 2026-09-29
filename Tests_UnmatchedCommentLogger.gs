@@ -191,6 +191,63 @@ function runUnmatchedCommentLoggerTests_() {
     } finally {
       SpreadsheetApp = realSs3;
     }
+
+    // ---- pruneUnmatchedCommentsLog_ (added 2026-09-29) ----
+    // Own isolated DriveApp mock, same reasoning as
+    // Tests_InteractionHistoryLogger.gs's own pruneCommentHistory_ block.
+    const realDriveForPrune2_ = DriveApp;
+    const unmatchedRow_ = function (dateStr, leadId, reviewed) {
+      return [dateStr, leadId, 'Test RM One', 'Pune', 'P', 'some unmatched comment', '', '2026-01-01 00:00:00', !!reviewed, ''];
+    };
+
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (a) age-based pruning is INDEPENDENT of reviewed — an old row is
+      // dropped whether or not a human ever checked it; a recent row
+      // survives regardless of reviewed status too.
+      const pruneNow = new Date('2026-09-29T12:00:00+05:30');
+      const pruneSs = TestMockSpreadsheet_({});
+      const pruneSheet = TestMockSheet_(UNMATCHED_COMMENTS_LOG_SHEET_, [UNMATCHED_COMMENTS_LOG_COLUMNS_,
+        unmatchedRow_('2026-08-01', 'L-OLD-UNREVIEWED', false), // ~59 days old, never reviewed -> dropped anyway
+        unmatchedRow_('2026-08-05', 'L-OLD-REVIEWED', true),    // ~55 days old, reviewed -> dropped too (age wins)
+        unmatchedRow_('2026-09-10', 'L-RECENT-UNREVIEWED', false), // ~19 days old -> kept
+        unmatchedRow_('2026-09-25', 'L-RECENT-REVIEWED', true),    // ~4 days old -> kept
+      ]);
+      pruneSs._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = pruneSheet;
+      const realNowFn = Date.now;
+      Date.now = function () { return pruneNow.getTime(); };
+      try { pruneUnmatchedCommentsLog_(pruneSs); } finally { Date.now = realNowFn; }
+      TestAssertEqual_(pruneSheet.getLastRow(), 3, 'pruneUnmatchedCommentsLog_: 2 old rows dropped (one reviewed, one not) — header + 2 kept rows remain');
+      const survivingRows = pruneSheet.getRange(2, 1, 2, 10).getValues();
+      const survivingIds = survivingRows.map(function (r) { return r[1]; });
+      TestAssert_(survivingIds.indexOf('L-RECENT-UNREVIEWED') !== -1 && survivingIds.indexOf('L-RECENT-REVIEWED') !== -1, 'pruneUnmatchedCommentsLog_: both recent rows survive regardless of reviewed status');
+      TestAssert_(survivingIds.indexOf('L-OLD-UNREVIEWED') === -1 && survivingIds.indexOf('L-OLD-REVIEWED') === -1, 'pruneUnmatchedCommentsLog_: both old rows are gone, including the one that WAS reviewed — age alone decides this prune');
+      const rootFolder = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+      const uclSubfolder = rootFolder && rootFolder._folders[UNMATCHED_COMMENTS_LOG_SHEET_];
+      TestAssert_(!!uclSubfolder && uclSubfolder._filesList.length === 1, 'pruneUnmatchedCommentsLog_: exactly 1 archive CSV created for the 2 dropped rows');
+      const archivedCsv = uclSubfolder._filesList[0].getBlob().getDataAsString();
+      TestAssertContains_(archivedCsv, 'L-OLD-REVIEWED', 'pruneUnmatchedCommentsLog_: the archived CSV actually contains the dropped reviewed row');
+
+      // Checkbox re-insertion — clearContent() strips the reviewed
+      // column's checkbox validation; a bare setValues() of booleans does
+      // not restore it, so this confirms insertCheckboxes() ran on the
+      // rewritten range (mirrors clearReviewedUnmatchedCommentsNow's own
+      // discipline). The mock doesn't model checkbox UI directly, but it
+      // DOES track that insertCheckboxes() was called via the range —
+      // check the underlying boolean values survived the rewrite intact,
+      // which is the functionally-visible half of this guarantee.
+      TestAssertEqual_(survivingRows[survivingIds.indexOf('L-RECENT-REVIEWED')][8], true, 'pruneUnmatchedCommentsLog_: a kept row\'s reviewed value survives the rewrite correctly');
+      TestAssertEqual_(survivingRows[survivingIds.indexOf('L-RECENT-UNREVIEWED')][8], false, 'pruneUnmatchedCommentsLog_: an unreviewed kept row\'s reviewed value stays false, not corrupted by the rewrite');
+
+      // (b) re-run safety.
+      const beforeLastRow = pruneSheet.getLastRow();
+      Date.now = function () { return pruneNow.getTime(); };
+      try { pruneUnmatchedCommentsLog_(pruneSs); } finally { Date.now = realNowFn; }
+      TestAssertEqual_(pruneSheet.getLastRow(), beforeLastRow, 'pruneUnmatchedCommentsLog_: running again with nothing old enough to prune is a no-op');
+      TestAssertEqual_(uclSubfolder._filesList.length, 1, 'pruneUnmatchedCommentsLog_: the no-op re-run creates no additional archive file');
+    } finally {
+      DriveApp = realDriveForPrune2_;
+    }
   } finally {
     TestEnv_tearDown_();
   }

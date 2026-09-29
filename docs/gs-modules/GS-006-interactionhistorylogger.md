@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `InteractionHistoryLogger.gs` (177 lines) |
+| **Location** | `InteractionHistoryLogger.gs` (284 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | (pending commit) against `pruneCommentHistory_` (FN-307) |
 
 ## Purpose / reason to exist
 
@@ -15,10 +15,15 @@ A forward-looking capture: every time an open lead gets a **genuinely
 new** comment (any outcome, not just SLA-relevant ones), one row is
 appended to `Comment_History`. Added 2026-09-05. It exists so the
 project builds an interaction record it did not previously keep — useful
-for later analysis of how RMs actually work a lead. It deliberately has
-**no pruning** (unlike `Movement_Log`): writes only happen on a real new
-comment, an order of magnitude rarer than `Movement_Log`'s unconditional
-4×/day snapshot.
+for later analysis of how RMs actually work a lead. It shipped with **no
+pruning** (unlike `Movement_Log`) on the stated assumption that write
+volume — comment-triggered, not clock-driven — would stay an order of
+magnitude below `Movement_Log`'s. **Update 2026-09-29:** that assumption
+held on rate but not on absolute scale — the cell-budget diagnostic
+(`GS-002` FN-301) found this tab at 1,048,164 cells 2026-09-28. Snehil
+confirmed a 30-day retention policy; `pruneCommentHistory_` now
+archives-then-removes anything older, on the same 4×/day trigger. See
+Lifecycle / retention below.
 
 ## Responsibilities
 
@@ -28,6 +33,9 @@ comment, an order of magnitude rarer than `Movement_Log`'s unconditional
 - `ensureCommentHistorySheet_` — create/repair the `Comment_History`
   tab.
 - `logInteractionHistoryNow` — a manual trigger for the same.
+- `pruneCommentHistory_` / `pruneCommentHistoryNow` (added 2026-09-29) —
+  archive-then-remove rows older than
+  `COMMENT_HISTORY_RETENTION_DAYS_` (30).
 
 ## Trigger schedule
 
@@ -52,28 +60,40 @@ Movement hub fire.
 | FN-213 | `commentHistoryDedupKeyGs_(leadId, outcomeEntry)` `#L98` | lead id + a comment entry | a dedup key | none | — | FN-212 | specific |
 | FN-214 | `ensureCommentHistorySheet_(ss)` `#L80` | spreadsheet | ensures `Comment_History` exists with the right header | may create/repair the tab | — | FN-212 | specific |
 | FN-215 | `logInteractionHistoryNow()` `#L172` | — | runs FN-212 once by hand | Sheets append | FN-212 | Apps Script editor (manual) | specific |
+| FN-307 | `pruneCommentHistory_(ss)` `#L213` (added 2026-09-29) | a spreadsheet | none | archives (chunked, `COMMENT_HISTORY_ARCHIVE_CHUNK_`) then removes rows older than `COMMENT_HISTORY_RETENTION_DAYS_` (30); no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneCommentHistoryNow` | specific — follows `pruneMovementLog_`'s crash-safety ordering (`GS-008`) exactly |
+| FN-308 | `pruneCommentHistoryNow()` `#L282` (added 2026-09-29) | — | runs FN-307 once by hand | as FN-307 | FN-307 | Apps Script editor (manual) | specific |
+
+## Config constants — `CFG-XXX` sub-table
+
+| ID | Constant | Value | Meaning | Changing it affects |
+|---|---|---|---|---|
+| CFG-072 | `COMMENT_HISTORY_RETENTION_DAYS_` / `COMMENT_HISTORY_ROW_HEADROOM_` / `COMMENT_HISTORY_ARCHIVE_CHUNK_` (added 2026-09-29) | `30` / `2000` / `5000` | how far back `Comment_History` keeps live rows; extra allocated-row buffer after a prune; max rows archived per Drive CSV (file-size ceiling, not a Sheets quota — see `EXC-102`, `GS-008`) | `pruneCommentHistory_` (FN-307); a smaller retention shrinks the tab faster but loses more recent history for future analysis (Snehil's call, 2026-09-29) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
 | EXC-068 | a comment's `comment_at` is Sheets-coerced from string to Date (defeating string-equality dedup) | the dedup key is comment-text-based, not purely timestamp-based | reduced exposure to the coercion class that bit `UnmatchedCommentLogger.gs` (`GS-013`) |
-| EXC-069 | `Comment_History` grows large | **no pruning by design** — writes are comment-triggered, far rarer than `Movement_Log`'s | the tab grows slowly; monitored, not auto-trimmed |
+| EXC-069 | `Comment_History` grows large (updated 2026-09-29 — see Purpose) | **pruned automatically since 2026-09-29** — `pruneCommentHistory_` (FN-307) archives-then-removes rows older than 30 days on the same 4×/day trigger | the live tab stays bounded; nothing is lost — everything pruned is archived to Drive first |
+| EXC-104 | the archive's own row count doesn't match the number of rows about to be dropped (added 2026-09-29) | `pruneCommentHistory_` throws, refuses to touch the sheet | a human sees the error in Executions rather than silently losing rows — same discipline as `EXC-102` (`GS-008`) |
 
 ## Data lineage
 
 Open-lead rows (from `leads`, `SHEET-001`, passed in by
 `snapshotOpenLeads_`) → `latestOutcomeGs_` (`GS-005`) classifies the
 latest comment → if genuinely new (dedup miss) → one row appended to
-`Comment_History` (`SHEET-009`). Never re-derived or pruned. Full flow:
-`DATA-003` (a downstream sink).
+`Comment_History` (`SHEET-009`). Never re-derived. Since 2026-09-29, a
+row older than 30 days is archived to a Drive CSV (`GS-002`'s
+`ARCHIVE_ROOT_FOLDER_` / `Comment_History` subfolder) then removed from
+the live tab — see Lifecycle / retention. Full flow: `DATA-003` (a
+downstream sink).
 
 ## Sheets touched
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
 | `SHEET-001` `leads` | Read (indirect — rows passed in) | FN-212 | via `snapshotOpenLeads_` |
-| `SHEET-009` `Comment_History` | Write (append) + ensure | FN-212 / FN-214 | append-only, no pruning |
+| `SHEET-009` `Comment_History` | Write (append) + ensure + prune (added 2026-09-29) | FN-212 / FN-214 / FN-307 | 30-day retention since 2026-09-29; pruned rows archived to Drive first, never hard-lost |
 
 ## Failure / error behaviour
 
@@ -144,21 +164,28 @@ newest scheduled subsystem at the time of the 2026-09-07 audit.
 ## Revalidation trigger
 
 Any commit touching `InteractionHistoryLogger.gs` or its `Tests_` file;
-the dedup-key logic changes; a pruning policy is added; `latestOutcomeGs_`
-(`GS-005`) changes; `Comment_History` (`SHEET-009`) columns change;
-`snapshotOpenLeads_` (`GS-008`) stops calling it.
+the dedup-key logic changes; the retention window (`COMMENT_HISTORY_RETENTION_DAYS_`)
+changes; `latestOutcomeGs_` (`GS-005`) changes; `Comment_History`
+(`SHEET-009`) columns change; `snapshotOpenLeads_` (`GS-008`) stops
+calling it.
 
 ## Handover relationship
 
-`HANDOVER.md` §2 names the file. Current as of 2026-09-09. A change to
-the capture condition or the (currently absent) pruning policy should
-update `HANDOVER.md` §2 and §9.
+`HANDOVER.md` §2 and its sheet-lifecycle table (§4-area) both updated in
+the SAME commit as this record and the pruning code itself (2026-09-29),
+per `CLAUDE.md`'s own "real architectural change" rule.
 
 ## Lifecycle / retention
 
-`Comment_History` (`SHEET-009`): **no retention limit — append-only by
-design** (writes are comment-triggered, far rarer than `Movement_Log`).
-Confirmed, not `TBD`. Monitored for size, not auto-pruned.
+`Comment_History` (`SHEET-009`): shipped 2026-09-05 with **no retention
+limit — append-only by design**. **Changed 2026-09-29** — Snehil
+confirmed 30-day retention (`COMMENT_HISTORY_RETENTION_DAYS_`) after the
+cell-budget diagnostic found this tab at 1,048,164 cells (2026-09-28).
+`pruneCommentHistory_` (FN-307) archives every row past the window to
+Drive, then removes it, on the same 4×/day trigger `logInteractionHistoryGs_`
+already runs on. Confirmed policy, not `TBD` — see `docs/_planning/DB_ARCHITECTURE_REVIEW.md`'s
+own "comment_history" section for the pre-2026-09-29 reasoning this
+supersedes.
 
 ## Next action
 

@@ -88,6 +88,16 @@ function runCoreTests_() {
     TestAssertEqual_(pad2Gs_(3), '03', 'pad2Gs_: single digit gets zero-padded');
     TestAssertEqual_(pad2Gs_(13), '13', 'pad2Gs_: double digit passes through unpadded');
 
+    // ---- parseIstDayKeyOrDateGs_ (added 2026-09-29) ----
+    const realDateCell = new Date('2026-08-15T00:00:00');
+    TestAssertEqual_(parseIstDayKeyOrDateGs_(realDateCell), realDateCell, 'parseIstDayKeyOrDateGs_: a real Date cell passes through unchanged');
+    const parsedFromString = parseIstDayKeyOrDateGs_('2026-08-15');
+    TestAssert_(parsedFromString instanceof Date && parsedFromString.getFullYear() === 2026 && parsedFromString.getMonth() === 7 && parsedFromString.getDate() === 15,
+      'parseIstDayKeyOrDateGs_: parses an istDayKeyGs_-shaped "YYYY-MM-DD" string into the matching Date');
+    TestAssertEqual_(parseIstDayKeyOrDateGs_('not a date at all'), null, 'parseIstDayKeyOrDateGs_: an unparseable string returns null (caller keeps the row, never guesses)');
+    TestAssertEqual_(parseIstDayKeyOrDateGs_(''), null, 'parseIstDayKeyOrDateGs_: blank returns null');
+    TestAssertEqual_(parseIstDayKeyOrDateGs_(null), null, 'parseIstDayKeyOrDateGs_: null input returns null, not a throw');
+
     // ---- businessMinutesBetweenGs_ ----
     // Entirely within one working day (9am-7pm IST, WORK_START_HOUR_/
     // WORK_END_HOUR_ from SlaEngine.gs): 10am -> 11am = 60 real minutes,

@@ -185,6 +185,28 @@ function istDayKeyGs_(date) {
 
 function pad2Gs_(n) { return (n < 10 ? '0' : '') + n; }
 
+// Parses a cell written by istDayKeyGs_ (a plain 'YYYY-MM-DD' string) back
+// into a comparable Date, handling BOTH shapes the cell can actually come
+// back as: a real JS Date (Sheets silently type-converts a date-shaped
+// string on write — the exact same gotcha InteractionHistoryLogger.gs and
+// UnmatchedCommentLogger.gs already document for their own comment_at
+// columns), or the original string if it somehow stayed one. Returns null
+// for anything that parses to neither, so a caller's cutoff comparison
+// treats an unparseable cell as "keep, don't guess" rather than pruning
+// it by accident. Added 2026-09-29 for pruneCommentHistory_
+// (InteractionHistoryLogger.gs) / pruneUnmatchedCommentsLog_
+// (UnmatchedCommentLogger.gs), whose own `date` column is written with
+// istDayKeyGs_ — a day-level column, so the returned Date is always at
+// local midnight; that is precisely enough resolution for a 30-day
+// retention cutoff.
+function parseIstDayKeyOrDateGs_(cell) {
+  if (cell instanceof Date) return cell;
+  const s = String(cell || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 // Same day-by-day working-hours walk as dashboard.html's
 // businessMinutesBetween — day boundaries come from Apps Script's own
 // timezone-aware formatting instead of hand-rolled IST math, which makes
