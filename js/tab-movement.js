@@ -398,6 +398,48 @@ function enrichSnapshotCached(rec){
   return enriched;
 }
 
+// Moved here from js/tab-tracking.js (2026-09-29, RM Performance
+// Opp-conversion join) — this file has no DOM code at module-parse time, so
+// js/rm-performance-worker.js can importScripts() it; tab-tracking.js can't
+// (it runs document.addEventListener at module scope). Behavior unchanged —
+// still used by tab-tracking.js's computeZeroTo48hCohort/
+// computeDailyCohortByRegion (global function, called at runtime only, so
+// the file it lives in doesn't matter to either caller), and now also by
+// core-rm-performance.js's reconstructRmOppCohort.
+//
+// Status "as of" a specific deadline for one lead's retained history —
+// prefers the latest snapshot AT OR BEFORE the deadline, falls back to the
+// first one AFTER it (both carry up to ~6h resolution slack), and finally
+// falls back to the live current sheet when the history has nothing on
+// either side (deadline outside Movement_Log's retention window). Returns
+// null when there's truly no evidence either way (unresolved AND no longer
+// in the live sheet) — callers decide how to count that, never guess.
+//
+// KNOWN BUG in the liveLead fallback (found 2026-09-29, not fixed here —
+// see HANDOVER.md §9.7.3's "explicitly out of scope" list): it reads
+// liveLead.oppOrAbove/.isOpenLead, which only enrichLead's OWN return value
+// sets — nothing wires those fields back onto a raw allParsedLeads row, so
+// a caller passing one of those straight through gets {undefined,
+// undefined} here, not a real answer. core-rm-performance.js's
+// reconstructRmOppCohort always passes liveLead=null specifically to avoid
+// depending on this path at all (it has no allParsedLeads-shaped row
+// available anyway, running inside the Worker).
+function evidenceAtDeadline(history, deadlineMs, liveLead){
+  let atOrBefore = null, firstAfter = null;
+  history.forEach(rec => {
+    const atMs = rec.snapshot_at.getTime();
+    if (atMs <= deadlineMs) { if (!atOrBefore || atMs > atOrBefore.snapshot_at.getTime()) atOrBefore = rec; }
+    else if (!firstAfter || atMs < firstAfter.snapshot_at.getTime()) firstAfter = rec;
+  });
+  const evidence = atOrBefore || firstAfter;
+  if (evidence) {
+    const enriched = enrichSnapshotCached(evidence);
+    return { oppOrAbove: enriched.oppOrAbove, isOpenLead: enriched.isOpenLead, evidence };
+  }
+  if (liveLead) return { oppOrAbove: liveLead.oppOrAbove, isOpenLead: liveLead.isOpenLead, evidence: null };
+  return null;
+}
+
 // Same six-dimension filter (Project/Region/TL/Source/Sub-source/Assigned
 // date range) applyMovementFilters below checks, matched against a single
 // snapshot record — used by the whole-history walks (RM Stall Leaderboard,

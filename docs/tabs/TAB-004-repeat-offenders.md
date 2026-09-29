@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-17 against commit `a74a65f` |
+| **Last Verified** | (pending commit) — Same-Day/48h Opp% columns + doubleFlag chip added 2026-09-29, see `JS-008` §9.7.3 |
 
 ## Purpose / reason to exist
 
@@ -28,6 +28,17 @@ tab, because "repeat" is a claim about the past, not the present.
 - Independently fetch `RM_Hierarchy` for the display rollup (read-only,
   browser-side — separate from the Apps Script routing read).
 - Export a filter-matching PDF.
+- **Same-Day Opp% / 48h Opp% + the combined "doubleFlag" chip** (added
+  2026-09-29) — a SEPARATE, parallel conversion-outcome signal joined
+  onto every row, not folded into the violation Score/Status. A row
+  showing both an elevated Status AND meaningfully-below-peer conversion
+  gets a red "+ Low conversion" chip — the strongest available
+  "needs coaching" signal this tab has. Full design record:
+  `js/core-rm-performance.js`'s own header comment + `HANDOVER.md`
+  §9.7.3. Respects this tab's own Source/Sub-source filter exactly like
+  every other column — no new/dedicated filter UI was added for this
+  (explicit constraint from the request this shipped under: "only work
+  with global filters in dashboard").
 
 ## Who / what uses it
 

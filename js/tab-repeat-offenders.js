@@ -383,7 +383,7 @@ function runRepeatOffendersRecalculation(ctx){
   const onFail = (reason) => {
     if (runId !== _repeatOffendersRunId) return;
     clear('Recalculation failed (' + esc(reason) + ') — falling back to a direct, non-worker calculation.');
-    _runRepeatOffendersSynchronously({ dateKeys, hierarchyMissing, filters }, onDone);
+    _runRepeatOffendersSynchronously({ dateKeys, hierarchyMissing, filters, now }, onDone);
   };
 
   let worker;
@@ -418,6 +418,11 @@ function runRepeatOffendersRecalculation(ctx){
     dateKeys: dateKeys,
     filters: filters,
     rmHierarchyByNameLower: hierarchyMissing ? null : rmHierarchyByNameLower,
+    // Added 2026-09-29 for the Opp-conversion join — the Worker runs on
+    // its own real clock and never sees the main thread's frozen test
+    // Date, so "now" must be handed across explicitly (see
+    // js/rm-performance-worker.js's own message-contract comment).
+    nowMs: now.getTime(),
   });
 }
 
@@ -426,20 +431,30 @@ function runRepeatOffendersRecalculation(ctx){
 // exact same `msg` shape onDone expects, so the result renderer can't
 // tell (and doesn't need to) which path actually ran.
 function _runRepeatOffendersSynchronously(ctx, onDone){
-  const { dateKeys, hierarchyMissing, filters } = ctx;
+  const { dateKeys, hierarchyMissing, filters, now } = ctx;
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const stage1FilteredCount = movementSnapshots.filter(rec => passesRepeatOffenderFilters(rec, filters)).length;
 
   const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters, rmHierarchyByNameLower);
   const rmByGroup = aggregateRmPerformance(rmObservations);
   const rmPeerAvg = computeRmPerfPeerAverages(rmByGroup);
-  const rm = classifyRmPerformance(rmByGroup);
-  const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
-  const a1tm = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
-  const rh = hierarchyMissing ? [] : computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
+  const rmPerf = classifyRmPerformance(rmByGroup);
+
+  // Opp-conversion join (added 2026-09-29) — mirrors js/rm-performance-worker.js's
+  // onmessage handler line for line, so the fallback path and the Worker
+  // path can never quietly disagree. See core-rm-performance.js's own "RM
+  // Opp-Conversion engine" header for the full design.
+  const oppCohort = reconstructRmOppCohort(dateKeys, filters, rmHierarchyByNameLower, now.getTime());
+  const rmOppByGroup = aggregateRmOppConversion(oppCohort, undefined);
+  const rmOppClassified = classifyRmOppConversion(rmOppByGroup);
+  const rm = joinRmOppConversion(rmPerf, rmOppClassified);
+
+  const region = computeRmPerformanceWithOpp(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower, oppCohort);
+  const a1tm = hierarchyMissing ? [] : computeRmPerformanceWithOpp(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower, oppCohort);
+  const rh = hierarchyMissing ? [] : computeRmPerformanceWithOpp(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower, oppCohort);
   // ADDITIONAL to the 4 above, not a replacement for any — see
   // computeRmPerformanceByRegion's own header comment (core-rm-performance.js).
-  const byRegion = computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower);
+  const byRegion = computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower, { oppCohort });
 
   const composites = rm.map(r => r.composite);
   const compositeRange = composites.length
@@ -459,6 +474,9 @@ function _runRepeatOffendersSynchronously(ctx, onDone){
       stage6CompositeRange: compositeRange,
       stage7ClassificationCounts: { rm: classCounts(rm), region: classCounts(region), a1tm: classCounts(a1tm), rh: classCounts(rh) },
       stage8RollupCounts: { rm: rm.length, region: region.length, a1tm: a1tm.length, rh: rh.length },
+      stage9OppCohortCount: oppCohort.length,
+      stage9OppBasis: rmOppClassified.basis,
+      stage9OppPeer: rmOppClassified.peer,
       computeMs: ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0,
     },
   });
@@ -525,7 +543,9 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
   const regionRanked = sortRmPerformanceByScore(filterRmPerformanceRankable(regionFull));
 
   const rmBelowCount = filterRmPerformanceWorst(rmFull).length;
-  if (countEl) countEl.textContent = `${rmBelowCount} RM${rmBelowCount === 1 ? '' : 's'} below expectations`;
+  const rmDoubleFlagCount = rmFull.filter(r => r.doubleFlag).length;
+  if (countEl) countEl.textContent = `${rmBelowCount} RM${rmBelowCount === 1 ? '' : 's'} below expectations` +
+    (rmDoubleFlagCount ? ` · ${rmDoubleFlagCount} elevated + low-conversion` : '');
 
   const emptyMsg = 'No RM/region/manager has enough eligible data to rank for the current filters/range.';
   // ADDITIONAL section, 2026-09-09 ("Region wise repeat offender list") —
@@ -559,7 +579,7 @@ function _renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall){
 // completion timestamp + time taken. Per explicit request (§11.8): "The
 // 'Recalculate' button should... Display the recalculation timestamp and
 // active filter set."
-const _REPEAT_OFFENDERS_PROGRESS_LABEL = { rm: 'RMs', region: 'Regions', a1tm: 'A1/TM managers', rh: 'RHs', byRegion: 'per-region RM breakdown' };
+const _REPEAT_OFFENDERS_PROGRESS_LABEL = { rm: 'RMs', region: 'Regions', a1tm: 'A1/TM managers', rh: 'RHs', byRegion: 'per-region RM breakdown', opp: 'Same-Day/48h Opp% cohort' };
 function _repeatOffendersStatusHtml(opts){
   const { phase, filters, sourceRecordCount, startedAtWall, elapsedMs, stage } = opts;
   const filterLine = `<div class="dim" style="font-size:11px; margin-top:3px;">Filters — ${esc(_repeatOffendersFilterSummaryText(filters))}</div>`;
@@ -635,6 +655,14 @@ function _repeatOffendersDebugPanelHtml(sc, hierarchyMissing){
           All four re-run Stage 1-4 from scratch with their own grouping key — none is derived by averaging another level's already-computed scores.
         </div>
       </div>
+      <div>
+        <div class="repeat-offenders-subtitle">Stage 9 — Same-Day/48h Opp% cohort (added 2026-09-29)</div>
+        <div class="dim" style="font-size:12px; line-height:1.6;">
+          ${esc(sc.stage9OppCohortCount)} Movement_Log lead-copies in the cohort (own first snapshot within 12h of lead_assigned_at, same filters/exclusions as the violation side above) — table-wide basis: <b>${sc.stage9OppBasis === 'h48' ? '48h' : 'Same-Day'}</b> (48h used once ≥50% of the RM table's cohort leads are cohort-complete, else Same-Day).<br>
+          Company-wide (this filtered population) peer rates — Same-Day: ${(((sc.stage9OppPeer && sc.stage9OppPeer.sameDay) || 0) * 100).toFixed(1)}%, 48h: ${(((sc.stage9OppPeer && sc.stage9OppPeer.h48) || 0) * 100).toFixed(1)}%.<br>
+          lowConversion = shrunk rate (n/(n+8) × raw + 8/(n+8) × peer, same shrinkage shape as Stage 5) ≤ 0.5 × the table's own peer rate above, with n ≥ 5 — a separate, parallel signal from the violation Score column, never folded into it. The "+ Low conversion" chip on a row means BOTH an elevated classification above AND this flag are true.
+        </div>
+      </div>
       <div class="dim" style="font-size:11px;">Worker compute time: ${sc.computeMs.toFixed(1)}ms (Stage 1-4 + all rollups, excludes structured-clone/message-passing overhead).</div>
     </div>
   </details>`;
@@ -672,6 +700,8 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage, rmH
       <th title="${esc(RM_PERF_CLASSIFICATION_TITLE)}">Status</th>
       <th style="text-align:right" title="Severity-weighted, workload-adjusted composite score across Not Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+ (Inactive-RM Lead Added is tracked separately, never scored here — it's a routing/assignment issue, not an execution one). Shrunk toward the peer average so a tiny sample can't dominate the ranking. Higher = worse; shown against the peer composite for scale.">Score<br><span class="dim" style="font-weight:400; font-size:9.5px;">(vs peer)</span></th>
       <th style="text-align:right" title="Total violation-day INSTANCES across the 4 scored rules (Not Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+) — e.g. one lead flagged Not Updated on 3 different days counts as 3 instances. Movement_Log-based, the same real eligible-population methodology as the Score column, not the old Daily_RM_Issues violations-only log.">Instances</th>
+      <th style="text-align:right" title="Of leads ASSIGNED in the current time range/filters, % that reached Opportunity+ the SAME calendar day (IST) they were assigned. Movement_Log-based (added 2026-09-29) — attributed to whoever held the lead on its own first captured snapshot, so a later reassignment never shifts credit/blame. Red text = meaningfully below this table's own peer average (shrunk toward peer; a tiny sample is never enough alone). Deliberately NOT the same number as the Opp Monitor tab's own Same-Day Opp% — that's a company-wide monthly aggregate off a different, live-leads-array method; see HANDOVER.md §9.7.3 for why they're not meant to match.">Same-Day Opp%</th>
+      <th style="text-align:right" title="Of leads whose OWN 48h window has fully elapsed by now, % that reached Opportunity+ within it. 'pending (N)' means none of this row's leads have hit their own 48h mark yet. Same Movement_Log basis and red-text rule as Same-Day Opp% — not the Opp Monitor tab's own 48h Opp% number, see that column's own tooltip.">48h Opp%</th>
       <th title="The region this row's eligible leads are actually concentrated in most.">Region</th>
       <th title="The RM(s) behind this row — the RM's own name for an RM row; a count for a Region/A1-TM/RH row that spans more than one.">RMs</th>
       <th title="The A1/TM manager(s) behind this row — a name when unambiguous, a count when this row spans more than one manager. — when RM_Hierarchy isn't loaded.">A1/TM</th>
@@ -680,22 +710,31 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage, rmH
 
   let rows;
   if (hierarchyMissing) {
-    rows = `<tr><td colspan="10" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
+    rows = `<tr><td colspan="12" class="empty-row">RM_Hierarchy could not be read — rollup unavailable. Every other view on this dashboard works fine without it; only this rollup needs it.</td></tr>`;
   } else if (!list.length) {
-    rows = `<tr><td colspan="10" class="empty-row">${esc(emptyMessage || 'No one has enough eligible data to rank for the current filters/range.')}</td></tr>`;
+    rows = `<tr><td colspan="12" class="empty-row">${esc(emptyMessage || 'No one has enough eligible data to rank for the current filters/range.')}</td></tr>`;
   } else {
     rows = list.map((r, i) => {
       const chipClass = RM_PERF_CLASSIFICATION_CHIP_CLASS[r.classification] || 'dim-chip';
       const routingNote = r.routingIssueDays > 0
         ? `<div class="dim" style="font-size:10px; margin-top:2px;">+${esc(r.routingIssueDays)} Inactive-RM Lead Added day(s) — a routing issue, not scored here</div>` : '';
       const hc = rmPerformanceHierarchyCells(r, rmHierarchyByNameLower);
+      // Added 2026-09-29 — see core-rm-performance.js's rmOppDisplayCells/
+      // joinRmOppConversion for the join this reads. doubleFlag ("BOTH
+      // signals bad") only ever appears alongside an already-elevated
+      // classification chip — never shown on its own.
+      const oc = (typeof rmOppDisplayCells === 'function') ? rmOppDisplayCells(r) : { sameDay: '—', h48: '—', lowConversion: false };
+      const doubleFlagChip = r.doubleFlag
+        ? `<span class="chip red-chip" style="margin-left:4px;" title="Elevated violation score AND meaningfully-below-peer conversion — both signals bad, the strongest available signal this RM needs coaching.">+ Low conversion</span>` : '';
       return `<tr>
         <td class="num dim">${i + 1}</td>
         <td>${esc(r.name)}${routingNote}</td>
         <td class="num">${esc(r.distinctLeads)}</td>
-        <td><span class="chip ${chipClass}">${esc(r.classification)}</span></td>
+        <td><span class="chip ${chipClass}">${esc(r.classification)}</span>${doubleFlagChip}</td>
         <td class="num">${r.composite.toFixed(2)} <span class="dim" style="font-size:10px;">/ ${r.peerComposite.toFixed(2)}</span></td>
         <td class="num">${esc(r.totalInstances)}</td>
+        <td class="num"${oc.lowConversion ? ' style="color:var(--red);"' : ''}>${esc(oc.sameDay)}</td>
+        <td class="num"${oc.lowConversion ? ' style="color:var(--red);"' : ''}>${esc(oc.h48)}</td>
         <td>${esc(hc.region)}</td>
         <td>${esc(hc.rms)}</td>
         <td>${esc(hc.a1tm)}</td>

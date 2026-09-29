@@ -215,31 +215,56 @@ function _repeatOffendersPdfFilterSummaryLine(filters){
   return parts.length ? parts.join(' · ') : null;
 }
 
-// Converts one computeRmPerformance() row into the PDF's own 6 columns
-// (#, Name, Unique Leads, Score, Instances, Region) — plain strings for
-// autoTable, no HTML/markup involved. PDF-ONLY column set, explicit
-// request 2026-09-07: "remove the following from table in pdf only:
-// Status, RMs, A1/TM, RH" — the live tab KEEPS all 10 columns
-// unchanged (rmPerformanceTableHtml, tab-repeat-offenders.js); this is
-// a display-only trim for the printed report, not a change to what data
-// exists. Region still reuses rmPerformanceHierarchyCells
-// (core-rm-performance.js, shared with the live tab) for the one
-// hierarchy column that DOES stay, so it can't disagree with what the
-// live tab would show for the same row. "Driven by" was removed from
-// both surfaces 2026-09-07 — see rmPerformanceDrivenBy's own comment
-// (still defined, just unused by either renderer now).
+// Converts one computeRmPerformance() row into the PDF's own 8 columns
+// (#, Name, Unique Leads, Score, Instances, Same-Day Opp%, 48h Opp%,
+// Region) — plain strings for autoTable, no HTML/markup involved.
+// PDF-ONLY column set, explicit request 2026-09-07: "remove the
+// following from table in pdf only: Status, RMs, A1/TM, RH" — the live
+// tab KEEPS all 12 columns unchanged (rmPerformanceTableHtml,
+// tab-repeat-offenders.js); this is a display-only trim for the printed
+// report, not a change to what data exists. Region still reuses
+// rmPerformanceHierarchyCells (core-rm-performance.js, shared with the
+// live tab) for the one hierarchy column that DOES stay, so it can't
+// disagree with what the live tab would show for the same row. "Driven
+// by" was removed from both surfaces 2026-09-07 — see
+// rmPerformanceDrivenBy's own comment (still defined, just unused by
+// either renderer now). The two Opp% columns (added 2026-09-29) reuse
+// rmOppDisplayCells (core-rm-performance.js) — same shared-helper
+// reasoning, so the PDF's numbers can never drift from what the live tab
+// shows for the same row. doubleFlag ("BOTH signals bad" — see
+// core-rm-performance.js's joinRmOppConversion) is appended to the Name
+// cell as a second line, the same way the routing-issue note already is.
 function _repeatOffendersPdfTableRows(list, rmHierarchyByNameLower){
   return list.map(function (r, i) {
     const score = r.composite.toFixed(2) + ' / ' + r.peerComposite.toFixed(2);
     const hc = rmPerformanceHierarchyCells(r, rmHierarchyByNameLower);
+    const oc = rmOppDisplayCells(r);
     let name = r.name;
     if (r.routingIssueDays > 0) name += '\n+' + r.routingIssueDays + ' Inactive-RM routing day(s)';
-    return [String(i + 1), name, String(r.distinctLeads), score, String(r.totalInstances), hc.region];
+    if (r.doubleFlag) name += '\nBOTH: elevated score + low conversion';
+    return [String(i + 1), name, String(r.distinctLeads), score, String(r.totalInstances), oc.sameDay, oc.h48, hc.region];
   });
 }
 
 const REPEAT_OFFENDERS_PDF_MARGIN_ = 40;
 const REPEAT_OFFENDERS_PDF_TABLE_GAP_ = 20;
+// 7 fixed widths + Region as 'auto' — portrait A4 usable width is
+// 595.28 - 2*40(margin) ≈ 515pt. Fixed columns sum to 449pt here, leaving
+// ~66pt for Region (enough for most single-word region names at this
+// font size; a long one wraps via `overflow: 'linebreak'` above rather
+// than being cut). Name/Unique Leads/Instances trimmed from their
+// pre-2026-09-29 values (140/65/65) to make room for the 2 new Opp%
+// columns without going landscape.
+const REPEAT_OFFENDERS_PDF_COLUMN_WIDTHS_ = {
+  0: { cellWidth: 24, halign: 'right' },  // #
+  1: { cellWidth: 125 },                  // Name
+  2: { cellWidth: 55, halign: 'right' },  // Unique Leads
+  3: { cellWidth: 80, halign: 'right' },  // Score (vs peer)
+  4: { cellWidth: 55, halign: 'right' },  // Instances
+  5: { cellWidth: 55, halign: 'right' },  // Same-Day Opp%
+  6: { cellWidth: 55, halign: 'right' },  // 48h Opp%
+  7: { cellWidth: 'auto' },               // Region
+};
 
 // Starts a fresh page if fewer than minSpace points remain below the
 // current cursor — used before a date heading and before a table's own
@@ -281,10 +306,12 @@ function _repeatOffendersPdfEstimateTableHeight(rowCount, compact){
 // spirit. Orientation: portrait (reverted 2026-09-07 — briefly landscape
 // on 2026-09-06 while this table had 10 columns/hierarchy detail; those 4
 // columns were then dropped from the PDF specifically, see
-// _repeatOffendersPdfTableRows' own comment, so the 6 remaining columns
-// fit portrait's ~515pt usable width fine again, same as before that
-// addition). Still uniformly ONE orientation for every page — addPage
-// below also requests 'portrait', not a mix.
+// _repeatOffendersPdfTableRows' own comment, so the columns left fit
+// portrait's ~515pt usable width fine again, same as before that
+// addition — re-budgeted again 2026-09-29 for 2 new Opp% columns, still
+// fits, see REPEAT_OFFENDERS_PDF_COLUMN_WIDTHS_). Still uniformly ONE
+// orientation for every page — addPage below also requests 'portrait',
+// not a mix.
 function _repeatOffendersPdfRenderPages(specs, filterInfo){
   const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (!jsPDFCtor) throw new Error('PDF library failed to load — check your connection and try again.');
@@ -329,7 +356,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
   doc.setFontSize(8);
   doc.setTextColor(165, 169, 177);
   const methodologyNoteLines = doc.splitTextToSize(
-    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse (not printed here, but still what every row is ranked by -- see the live dashboard for the full Status/RMs/A1-TM/RH breakdown per row). Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Region shows the region this row\'s leads are actually concentrated in. A note under the Name column flags Inactive-RM Lead Added days when they apply (tracked but never scored -- a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount. ADDITIONAL tables follow, one per region, titled "{Region} -- worst 5 RMs": that region\'s own worst 5 RMs, ranked against ONLY each other (not company-wide) -- a different peer baseline than the RM/A1-TM/RH tables above, by design.',
+    'Every table shows the WORST performers first, by Score, regardless of classification (RMs -- worst 20, A1/TM -- worst 10, RH -- worst 5, Region -- worst first, all shown) -- once there are fewer genuine Below Expectations rows than a table\'s own cap, the next-worst Watch/On Track rows fill the rest so the table always shows a full worst-N list. The one row NEVER printed, in any table, is Insufficient Data (fewer than 5 distinct eligible leads -- too little evidence to rank at all). A table with no rows means nobody had enough data to rank, not that nothing could be computed. Unique Leads = exact distinct-lead count eligible for at least one scored SLA rule. Score = severity-weighted composite vs. the peer average it\'s shrunk toward -- higher is worse (not printed here, but still what every row is ranked by -- see the live dashboard for the full Status/RMs/A1-TM/RH breakdown per row). Instances = total violation-DAY count across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues -- that log has no real eligible-population denominator, same reason it was dropped as this report\'s data source in the 2026-09-04 redesign). Same-Day Opp% / 48h Opp% (added 2026-09-29) = a SEPARATE, parallel signal, not folded into Score: of this row\'s leads assigned in range, the share reaching Opportunity+ the same calendar day (IST) / within their own 48h window, Movement_Log-based and attributed to whoever held the lead on its own first captured snapshot (a later reassignment never shifts credit) -- deliberately NOT the same figure as the Opp Monitor tab\'s own company-wide monthly Same-Day/48h Opp%, which uses a different method. A "BOTH: elevated score + low conversion" note under the Name column means this row is both an elevated Status above AND meaningfully below this table\'s own peer conversion rate -- the strongest available signal here. Region shows the region this row\'s leads are actually concentrated in. A note under the Name column also flags Inactive-RM Lead Added days when they apply (tracked but never scored -- a routing issue, not an execution one). Built from Movement_Log, which retains only a rolling 7 days -- a Custom range or "From when history began" reaching further back can undercount. ADDITIONAL tables follow, one per region, titled "{Region} -- worst 5 RMs": that region\'s own worst 5 RMs, ranked against ONLY each other (not company-wide) -- a different peer baseline than the RM/A1-TM/RH tables above, by design.',
     pageW - REPEAT_OFFENDERS_PDF_MARGIN_ * 2
   );
   doc.text(methodologyNoteLines, REPEAT_OFFENDERS_PDF_MARGIN_, y);
@@ -372,7 +399,7 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
     y += 12;
     doc.autoTable({
       startY: y,
-      head: [['#', 'Name', 'Unique Leads', 'Score (vs peer)', 'Instances', 'Region']],
+      head: [['#', 'Name', 'Unique Leads', 'Score (vs peer)', 'Instances', 'Same-Day Opp%', '48h Opp%', 'Region']],
       body: rows,
       theme: 'grid',
       styles: {
@@ -381,19 +408,13 @@ function _repeatOffendersPdfRenderPages(specs, filterInfo){
       },
       headStyles: { fillColor: [23, 27, 33], textColor: [235, 237, 240], fontStyle: 'bold', fontSize: compact ? 7 : 8.5 },
       alternateRowStyles: { fillColor: [246, 247, 249] },
-      // 6 columns (Status/RMs/A1-TM/RH dropped 2026-09-07, PDF-only) —
-      // widths tuned for portrait A4's ~515pt usable width, back to what
-      // this table used before the 2026-09-06 hierarchy-column addition
-      // (see _repeatOffendersPdfRenderPages' own comment on the
-      // portrait/landscape switch).
-      columnStyles: {
-        0: { cellWidth: 24, halign: 'right' },
-        1: { cellWidth: 140 },
-        2: { cellWidth: 65, halign: 'right' },
-        3: { cellWidth: 80, halign: 'right' },
-        4: { cellWidth: 65, halign: 'right' },
-        5: { cellWidth: 'auto' },
-      },
+      // 8 columns (Status/RMs/A1-TM/RH dropped 2026-09-07, PDF-only; the
+      // 2 Opp% columns added 2026-09-29) — widths re-budgeted for portrait
+      // A4's ~515pt usable width (595.28 - 2*40 margin): Name/Unique
+      // Leads/Instances trimmed slightly from their pre-2026-09-29 values
+      // to make room, named as a constant for maintainability rather than
+      // inlined magic numbers.
+      columnStyles: REPEAT_OFFENDERS_PDF_COLUMN_WIDTHS_,
       margin: { left: REPEAT_OFFENDERS_PDF_MARGIN_, right: REPEAT_OFFENDERS_PDF_MARGIN_, bottom: REPEAT_OFFENDERS_PDF_MARGIN_ },
       pageBreak: 'avoid',    // the whole table moves to a fresh page if it doesn't fit — never split mid-table
       rowPageBreak: 'avoid', // a single row's own text is never cut across a page boundary either

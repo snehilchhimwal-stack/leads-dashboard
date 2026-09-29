@@ -727,19 +727,290 @@ function computeRmPerformance(dateKeys, keyFn, filters, rmHierarchyByNameLower){
 // as everywhere else), region names sorted alphabetically, `list` already
 // sorted worst-first and capped to REPEAT_OFFENDERS_REGION_RM_CAP.
 const REPEAT_OFFENDERS_REGION_RM_CAP = 5;
-function computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower){
+// opts.oppCohort (added 2026-09-29): an already-built reconstructRmOppCohort(...)
+// result — when passed, each region's RM-keyed rollup is joined with its
+// own region-restricted Opp-conversion peer average (via the SAME
+// region-restricted keyFn used for the violation side, built once and
+// reused for both — see joinRmOppConversion's own header) BEFORE the
+// worst-5 cap is applied, so the cap never discards a joined row. Omitting
+// opts preserves today's exact behavior (existing callers/tests
+// unaffected) — see HANDOVER.md §9.7.3.
+function computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower, opts){
+  const oppCohort = opts && opts.oppCohort;
   const regionRollup = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
   const regionNames = regionRollup.map(r => r.name).sort();
   return regionNames.map(regionName => {
-    const rmInRegion = computeRmPerformance(
-      dateKeys,
-      rec => (repeatOffendersRegionKey(rec) === regionName) ? (rmPerfCanonicalRmName(rec.RM) || 'Unassigned') : null,
-      filters,
-      rmHierarchyByNameLower
-    );
+    const regionKeyFn = rec => (repeatOffendersRegionKey(rec) === regionName) ? (rmPerfCanonicalRmName(rec.RM) || 'Unassigned') : null;
+    let rmInRegion = computeRmPerformance(dateKeys, regionKeyFn, filters, rmHierarchyByNameLower);
+    if (oppCohort) {
+      const oppByGroup = aggregateRmOppConversion(oppCohort, regionKeyFn);
+      rmInRegion = joinRmOppConversion(rmInRegion, classifyRmOppConversion(oppByGroup));
+    }
     const ranked = sortRmPerformanceByScore(filterRmPerformanceRankable(rmInRegion)).slice(0, REPEAT_OFFENDERS_REGION_RM_CAP);
     return { region: regionName, list: ranked };
   }).filter(entry => entry.list.length > 0);
+}
+
+// ============================================================
+// RM Opp-Conversion engine (added 2026-09-29) — a SEPARATE, parallel
+// signal from the violation-rate engine above, joined onto its output at
+// DISPLAY time rather than folded into classifyRmPerformance's own 4
+// tiers. Full design record: HANDOVER.md §9.7.3 — in short: (1) a 5th
+// tier would touch classifyRmPerformance's `.gs` twin, its parity check
+// (test/check-runtime-parity.py), and every consumer of the 4-value
+// classification (sort order, chip styling, PDF) for a fully-verified,
+// real-production-data-checked engine (HANDOVER.md §9.7.2) — too much
+// blast radius for a first cut; (2) Movement_Log-based, NOT
+// opp_at-vs-live-`leads`-array (the Opp Monitor tab's own live-computation
+// method, js/tab-oppmonitor.js) — that method reads a lead's CURRENT RM,
+// silently misattributing a reassigned lead's outcome to whoever holds it
+// NOW rather than whoever actually worked it during the window being
+// judged, which is disqualifying for an RM-attribution feature. This
+// engine attributes each lead-copy to the RM shown on its OWN first
+// captured snapshot instead — historically accurate, and the exact same
+// attribution the violation engine already uses, so the two joined
+// signals are GUARANTEED to share one peer population (same filter, same
+// leadership exclusion, same name canonicalization) rather than two
+// subtly different ones.
+//
+// Deliberately named RM_OPP_*, not RM_PERF_* — every RM_PERF_* constant
+// has a `.gs` twin that must stay numerically identical
+// (HANDOVER.md §6); RM_OPP_* has none by design (DailyRmIssueLog.gs's
+// console leaderboard stays narrower than the dashboard by existing
+// precedent, HANDOVER.md §9.7 Phase 4 — and its own
+// reconstructRmPerformanceObservationsGs_ is UNFILTERED by design, so it
+// structurally can't express the Google/UTM/Search scoping this exists
+// for anyway). Browser-only, same precedent as REPEAT_OFFENDERS_REGION_RM_CAP.
+//
+// A known, deliberate difference from Opp Monitor's own "official"
+// Same-Day/48h Opp% numbers for the same filter selection: THIS
+// methodology is scoped to leads whose Movement_Log evidence exists
+// (7-day retention), keyed per lead-COPY not per customer, and excludes
+// any copy whose first snapshot lagged its own assignment by more than
+// RM_OPP_MAX_FIRST_CAPTURE_LAG_HOURS. Not intended to reconcile exactly —
+// documented, not "fixed" to match.
+const RM_OPP_MIN_RESOLVED_LEADS = 5; // same meaning as RM_PERF_MIN_VOLUME_LEADS — below this, "—", never flagged
+const RM_OPP_SHRINKAGE_K = 8; // same meaning as RM_PERF_SHRINKAGE_K, in distinct-lead units
+// shrunk rate <= this fraction of the peer rate triggers lowConversion.
+// NOT a literal mirror of RM_PERF_FLAG_RATIO (1.25, i.e. ~0.8 inverted) —
+// each lead here gives ONE yes/no outcome, far less evidence per lead than
+// a violation rate built from many lead-days. At peer=20% and ratio=0.8,
+// an RM converting at EXACTLY the peer rate still false-flags ~33% of the
+// time at n=10 (barely improves with more data). At 0.5 that drops to
+// ~11% at n=10, ~7% at n=20, and keeps falling; with K=8 an RM needs >=8
+// leads before a 0%-raw rate can even reach the threshold at all, so tiny
+// samples can't trigger it alone; a genuinely bad RM (true rate 5% vs
+// peer 20%) is still caught ~74% of the time at n=20.
+const RM_OPP_LOW_RATIO = 0.5;
+// Per TABLE (not per row — everyone in one table judged on the same
+// metric), switch from same-day to 48h once at least this share of the
+// table's total cohort leads are cohort-complete (48h window elapsed).
+// "Yesterday" has none yet, so it falls back to same-day automatically.
+const RM_OPP_48H_BASIS_MIN_SHARE = 0.5;
+// Excludes a cohort lead whose first Movement_Log snapshot lagged its own
+// lead_assigned_at by more than this — 2x the 6h capture cadence
+// (SNAPSHOT_HOURS_, MovementTracker.gs), allowing one missed run. A
+// larger lag means the true assignment happened before Movement_Log's
+// retention window reached back far enough to catch it; INCLUDING it
+// would silently make "same-day conversion" unanswerable (no evidence
+// near the actual assignment moment) rather than correctly reading as
+// "excluded, not enough evidence" the way this guard makes it read.
+const RM_OPP_MAX_FIRST_CAPTURE_LAG_HOURS = 12;
+const RM_OPP_ELEVATED_CLASSIFICATIONS = new Set(['Below Expectations', 'Watch — concentrated']);
+
+// Stage 1 (outcome side) — one entry per Movement_Log lead-copy whose
+// FIRST captured snapshot (the closest available proxy for "when this RM
+// actually received the lead" — Movement_Log captures periodic snapshots,
+// never an assignment EVENT) passes the same filter/exclusion checks the
+// violation engine uses (passesRepeatOffenderFilters,
+// rmPerfIsLeadershipExcluded) and clears the capture-lag guard above.
+//
+// dateKeys/filters/rmHierarchyByNameLower: identical contract to
+// reconstructRmPerformanceObservations. nowMs: REQUIRED, explicit — never
+// Date.now() directly inside this function, so a frozen test clock (main
+// thread) and the Worker's own real clock can never silently disagree
+// (js/rm-performance-worker.js must pass nowMs through in its message
+// payload — see that file's own header comment).
+function reconstructRmOppCohort(dateKeys, filters, rmHierarchyByNameLower, nowMs){
+  const cohort = [];
+  if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return cohort;
+
+  const byLead = buildMovementHistories();
+  byLead.forEach(history => {
+    splitHistoryByCopy(history).forEach(copyHistory => {
+      const first = copyHistory[0];
+      if (!first) return;
+      if (!passesRepeatOffenderFilters(first, filters)) return;
+      if (rmPerfIsLeadershipExcluded(first.RM, rmHierarchyByNameLower)) return;
+
+      const created = parseDate(first.lead_assigned_at);
+      if (!created) return;
+      const createdMs = created.getTime();
+      const dayKey = istDateKey(created);
+      if (dateKeys && !dateKeys.has(dayKey)) return;
+
+      const lagHours = (first.snapshot_at.getTime() - createdMs) / 3600000;
+      if (lagHours < 0 || lagHours > RM_OPP_MAX_FIRST_CAPTURE_LAG_HOURS) return;
+
+      // Same-day evidence ALWAYS resolves to something real: `first` is
+      // itself a real snapshot of this copy, so evidenceAtDeadline finds
+      // it (via the atOrBefore branch when the deadline falls same-day-or-
+      // later, otherwise via the firstAfter fallback) — never null here.
+      // liveLead is always null (see evidenceAtDeadline's own header,
+      // js/tab-movement.js, for the live-fallback bug this deliberately
+      // avoids depending on).
+      const dayEndMs = parseDate(dayKey + ' 23:59:59').getTime();
+      const sameDayDeadlineMs = Math.min(dayEndMs, nowMs);
+      const sameDay = evidenceAtDeadline(copyHistory, sameDayDeadlineMs, null);
+
+      const deadline48hMs = createdMs + CONFIG.LEAD_LIFECYCLE_HOURS * 3600000;
+      const windowComplete = nowMs >= deadline48hMs;
+      const at48h = windowComplete ? evidenceAtDeadline(copyHistory, deadline48hMs, null) : null;
+
+      cohort.push({
+        rec: first,
+        lead_id: String(first.lead_id || '').trim(),
+        createdMs,
+        sameDayOpp: !!(sameDay && sameDay.oppOrAbove),
+        windowComplete,
+        opp48h: !!(at48h && at48h.oppOrAbove),
+      });
+    });
+  });
+
+  return cohort;
+}
+
+// Stage 2 (outcome side) — rolls the cohort up to group (RM/Region/A1-TM/
+// RH, via keyFn) x {same-day, 48h} counts. Mirrors aggregateRmPerformance's
+// own keyFn convention exactly — a null/'' key excludes the entry, the
+// same "unresolvable, excluded" population every rollup in this file uses.
+// sameDayResolved is always === cohortLeads (see reconstructRmOppCohort's
+// own comment on why same-day evidence never resolves to null) — tracked
+// as its own field anyway, for the same denominator-naming convention
+// computeDailyCohortByRegion (tab-tracking.js) already established.
+function aggregateRmOppConversion(cohort, keyFn){
+  // keyFn takes a RAW RECORD, same convention as reconstructRmPerformanceObservations'
+  // own default (core-rm-performance.js) and every keyFn passed around this
+  // file — called below as getKey(entry.rec), never getKey(entry) directly.
+  const getKey = keyFn || (rec => rmPerfCanonicalRmName(rec.RM) || 'Unassigned');
+  const byGroup = new Map();
+  cohort.forEach(entry => {
+    const key = getKey(entry.rec);
+    if (!key) return;
+    if (!byGroup.has(key)) {
+      byGroup.set(key, { cohortLeads: 0, sameDayResolved: 0, sameDayOpp: 0, windowComplete: 0, resolved48h: 0, opp48h: 0 });
+    }
+    const g = byGroup.get(key);
+    g.cohortLeads++;
+    g.sameDayResolved++;
+    if (entry.sameDayOpp) g.sameDayOpp++;
+    if (entry.windowComplete) {
+      g.windowComplete++;
+      g.resolved48h++;
+      if (entry.opp48h) g.opp48h++;
+    }
+  });
+  return byGroup;
+}
+
+// Company-wide (population currently in byGroup) peer conversion rate per
+// basis — volume-weighted, same pattern as computeRmPerfPeerAverages (a
+// group with 200 cohort leads should influence the baseline more than one
+// with 3).
+function computeRmOppPeerAverages(byGroup){
+  let sameDayOpp = 0, sameDayTotal = 0, opp48h = 0, resolved48hTotal = 0;
+  byGroup.forEach(g => {
+    sameDayOpp += g.sameDayOpp; sameDayTotal += g.sameDayResolved;
+    opp48h += g.opp48h; resolved48hTotal += g.resolved48h;
+  });
+  return {
+    sameDay: sameDayTotal ? sameDayOpp / sameDayTotal : 0,
+    h48: resolved48hTotal ? opp48h / resolved48hTotal : 0,
+  };
+}
+
+// Stage 3+4 (outcome side) — picks ONE basis for the WHOLE table
+// (RM_OPP_48H_BASIS_MIN_SHARE — every row in a table judged on the same
+// metric), shrinks each group's rate toward the peer average
+// (empirical-Bayes, same shrinkage formula/reasoning as
+// classifyRmPerformance's own shrunkRate), and flags "meaningfully below
+// peer" per RM_OPP_LOW_RATIO (see that constant's own comment for the
+// false-alarm-rate reasoning).
+function classifyRmOppConversion(byGroup){
+  const peer = computeRmOppPeerAverages(byGroup);
+  let totalCohort = 0, totalWindowComplete = 0;
+  byGroup.forEach(g => { totalCohort += g.cohortLeads; totalWindowComplete += g.windowComplete; });
+  const basis = (totalCohort > 0 && totalWindowComplete >= RM_OPP_48H_BASIS_MIN_SHARE * totalCohort) ? 'h48' : 'sameDay';
+  const peerRate = basis === 'h48' ? peer.h48 : peer.sameDay;
+
+  const byName = new Map();
+  byGroup.forEach((g, name) => {
+    const n = basis === 'h48' ? g.resolved48h : g.sameDayResolved;
+    const opp = basis === 'h48' ? g.opp48h : g.sameDayOpp;
+    const raw = n ? opp / n : 0;
+    const shrunk = (n / (n + RM_OPP_SHRINKAGE_K)) * raw + (RM_OPP_SHRINKAGE_K / (n + RM_OPP_SHRINKAGE_K)) * peerRate;
+    const sufficient = n >= RM_OPP_MIN_RESOLVED_LEADS;
+    const lowConversion = sufficient && peerRate > 0 && shrunk <= RM_OPP_LOW_RATIO * peerRate;
+    byName.set(name, {
+      cohortLeads: g.cohortLeads,
+      sameDayResolved: g.sameDayResolved, sameDayOpp: g.sameDayOpp,
+      windowComplete: g.windowComplete, resolved48h: g.resolved48h, opp48h: g.opp48h,
+      pending48h: g.cohortLeads - g.resolved48h,
+      n, raw, shrunk, sufficient, lowConversion,
+    });
+  });
+
+  return { basis, peer: { sameDay: peer.sameDay, h48: peer.h48 }, byName };
+}
+
+// Pure join — every field classifyRmPerformance already produced is
+// copied through UNCHANGED (the "no 5th tier" decision, this section's own
+// header comment); adds opp/oppBasis/oppPeer/doubleFlag. A row with no
+// matching Opp-conversion entry (zero cohort leads under this keyFn for
+// that name) gets opp:null, doubleFlag:false — never guessed into either
+// state. doubleFlag requires BOTH signals bad: an elevated violation
+// classification (RM_OPP_ELEVATED_CLASSIFICATIONS) AND lowConversion.
+function joinRmOppConversion(perfRows, oppClassified){
+  return perfRows.map(r => {
+    const opp = oppClassified.byName.get(r.name) || null;
+    const doubleFlag = !!(opp && opp.lowConversion && RM_OPP_ELEVATED_CLASSIFICATIONS.has(r.classification));
+    return Object.assign({}, r, { opp, oppBasis: oppClassified.basis, oppPeer: oppClassified.peer, doubleFlag });
+  });
+}
+
+// Top-level convenience mirroring computeRmPerformance's own orchestration
+// shape. `oppCohort`: an ALREADY-BUILT reconstructRmOppCohort(...) result —
+// never rebuilt here, so the caller builds it exactly once per run (see
+// js/rm-performance-worker.js) and threads the SAME cohort through every
+// rollup level, guaranteeing one consistent nowMs/filters/dateKeys across
+// all of them.
+function computeRmPerformanceWithOpp(dateKeys, keyFn, filters, rmHierarchyByNameLower, oppCohort){
+  const perfRows = computeRmPerformance(dateKeys, keyFn, filters, rmHierarchyByNameLower);
+  const oppByGroup = aggregateRmOppConversion(oppCohort, keyFn);
+  const oppClassified = classifyRmOppConversion(oppByGroup);
+  return joinRmOppConversion(perfRows, oppClassified);
+}
+
+// Shared display helper for one joined row's Opp-conversion cells — used
+// by BOTH the live tab (js/tab-repeat-offenders.js) and the PDF export
+// (js/repeat-offenders-pdf.js), same "can never drift between surfaces"
+// reasoning as rmPerformanceHierarchyCells above. Always shows the RAW
+// rate with its real fraction (e.g. "10% (1/10)") — the shrunk rate only
+// ever drives the lowConversion flag internally, never displayed directly,
+// so what's on screen is always real, checkable numbers. '—' when there's
+// no cohort data for this row at all (opp === null); "pending (N)" for
+// the 48h cell when the window hasn't elapsed for any of this row's leads
+// yet (distinct from '—', which means no cohort data existed at all).
+function rmOppDisplayCells(r){
+  if (!r.opp) return { sameDay: '—', h48: '—', lowConversion: false, basis: r.oppBasis || null };
+  const o = r.opp;
+  const sameDay = o.sameDayResolved ? `${Math.round(o.sameDayOpp / o.sameDayResolved * 100)}% (${o.sameDayOpp}/${o.sameDayResolved})` : '—';
+  let h48;
+  if (o.resolved48h) h48 = `${Math.round(o.opp48h / o.resolved48h * 100)}% (${o.opp48h}/${o.resolved48h})`;
+  else if (o.pending48h) h48 = `pending (${o.pending48h})`;
+  else h48 = '—';
+  return { sameDay, h48, lowConversion: !!o.lowConversion, basis: r.oppBasis || null };
 }
 
 // Shared display helpers — used by BOTH the live tab

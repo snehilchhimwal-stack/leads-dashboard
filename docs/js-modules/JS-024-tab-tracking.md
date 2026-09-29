@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/tab-tracking.js` (1478 lines) |
+| **Location** | `js/tab-tracking.js` (1458 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | (pending commit) against the `evidenceAtDeadline` move to `JS-021` |
 
 ## Purpose / reason to exist
 
@@ -26,7 +26,14 @@ snapshot at-or-before its deadline — so it does not silently drift as
 - `computeZeroTo48hCohort` / `computeCohortComparison` /
   `computeDailyCohortByRegion` / `computeWeekOverWeekCohort` — the
   cohort computations.
-- `evidenceAtDeadline` — the shared "status as of a deadline" lookup.
+- `evidenceAtDeadline` — **moved to `js/tab-movement.js` (`JS-021`,
+  FN-162 there now) 2026-09-29**, so `js/rm-performance-worker.js`
+  (`JS-017`) could `importScripts()` it for the RM Opp-Conversion join
+  (this file runs DOM code — `document.addEventListener` — at
+  module-parse time, so it can never be Worker-loadable; see
+  HANDOVER.md §9.7.3). Still called from this file's own cohort
+  computations below, unchanged — a global function, callable
+  regardless of which file it's defined in.
 - `persistDailyCohortHistory` — archive daily cohorts, **never
   re-writing** an already-archived date.
 - `buildTrackingChartSvg` (+ `_ensureChartHoverTip`) — the chart
@@ -44,18 +51,17 @@ tab-rmtimeline → …`), so `buildTrackingChartSvg` is defined before
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-162 | `evidenceAtDeadline(history, deadlineMs, liveLead)` `#L205` | a lead's snapshot history + a deadline | the lead's status **as of that deadline** — nearest snapshot at-or-before, else forward, else `null` (never a guess) | none | — | every cohort computation here, `debugDailyCohortEvidence` | reusable — the shared as-of-deadline lookup |
-| FN-163 | `computeZeroTo48hCohort()` / `computeCohortComparison(regionFilter, fromAt, toAt)` `#L282/#L110` | `movementSnapshots` | the 0–48h cohort outcome / a windowed cohort comparison | none | FN-162, `buildMovementHistories` (`JS-021`), `passesMovementFilters` (`JS-021`) | `render48hCohort` (FN-167), `renderTrackingTab` (FN-166) | specific |
-| FN-164 | `computeDailyCohortByRegion(dateKey, opts)` / `eligibleDailyCohortDates()` / `_dailyCohortLiveByKeyCache(leadsArr)` `#L947/#L1058/#L931` | a date key | per-region cohort outcomes for that day; the dates it is valid to compute live | memoisation cache | FN-162, `mainRegionFor` / `effectiveRegion` (`JS-014`) | `renderDailyCohortByRegion` (FN-168), `persistDailyCohortHistory` (FN-169) | specific — **refuses live recompute past retention** (shows "NA") |
-| FN-165 | `buildTrackingChartSvg(allRuns, fromAt, toAt)` / `_ensureChartHoverTip()` / `splitDailyAndScatter(runs)` `#L364/#L506/#L336` | issue-tally runs + a window | the trend-chart SVG (native `<title>` tooltips today) | injects one shared hover-tip element | `computeIssueTalliesByRun` (FN-170) | `renderTrackingTab` (FN-166), **`JS-023` `renderRMIssueHistory` (verbatim reuse)** | reusable |
-| FN-166 | `renderTrackingTab()` `#L662` | `movementSnapshots` | renders every Tracking section | DOM writes | FN-163..FN-165, `getPickedTrackingWindow` (FN-171) | `renderAll` (`JS-012`) | specific |
-| FN-167 | `render48hCohort()` / `renderWeekOverWeekCohort()` `#L842/#L1414` | computed cohorts | the 0–48h + week-over-week tables | DOM writes | FN-163, `computeWeekOverWeekCohort` (FN-172), `wowPctCellHtml` / `wowDeltaBadgeHtml` | FN-166 | specific |
-| FN-168 | `renderDailyCohortByRegion()` `#L1177` | a picked date | the Daily Cohort by Region table | DOM write; **staleness guard** — refuses live recomputation past `Movement_Log` retention, shows "NA" | FN-164 | FN-166 | specific |
-| FN-169 | `persistDailyCohortHistory()` `#L1132` | eligible dates | upserts `Daily_Cohort_History` rows | Sheets write via `upsertDailyCohortHistoryRows` (`JS-018`); **never re-writes an already-archived date** | `eligibleDailyCohortDates` (FN-164), `JS-018` | auto after a snapshot; `#backfillDailyCohortHistoryBtn` (`BTN-021`) | specific |
-| FN-170 | `computeIssueTalliesByRun(regionFilter)` / `findRunTally(runs, at)` `#L31/#L93` | `movementSnapshots` | per-run issue tallies | none | FN-162 | FN-165, RM Timeline (`JS-023`) | reusable |
-| FN-171 | `getPickedTrackingWindow()` / `trackingPopulateSnapshotSelectors()` `#L648/#L626` | the snapshot pickers | the selected From/To window | DOM | `populateMovementDateSelect` etc. (`JS-021`) | FN-166 | specific |
-| FN-172 | `computeWeekOverWeekCohort()` / `weekOverWeekDateKeys()` / `wowPctDelta` / `wowDeltaBadgeHtml` / `wowPctCellHtml` `#L1336`–`#L1403` | two week windows | the week-over-week cohort deltas + badge/cell HTML | none | FN-164, FN-162 | FN-167 | specific |
-| FN-173 | `setSlaHistoryAdminStatus(text, color)` / `setDailyCohortHistoryAdminStatus(text, color)` `#L534/#L580` | status text | writes the admin button status lines | DOM | — | the admin button handlers | specific — the buttons' write logic is in `JS-018` / `JS-004` |
+| FN-163 | `computeZeroTo48hCohort()` / `computeCohortComparison(regionFilter, fromAt, toAt)` `#L262/#L110` | `movementSnapshots` | the 0–48h cohort outcome / a windowed cohort comparison | none | `evidenceAtDeadline` (`JS-021` FN-162, moved there 2026-09-29), `buildMovementHistories` (`JS-021`), `passesMovementFilters` (`JS-021`) | `render48hCohort` (FN-167), `renderTrackingTab` (FN-166) | specific |
+| FN-164 | `computeDailyCohortByRegion(dateKey, opts)` / `eligibleDailyCohortDates()` / `_dailyCohortLiveByKeyCache(leadsArr)` `#L927/#L1038/#L911` | a date key | per-region cohort outcomes for that day; the dates it is valid to compute live | memoisation cache | `evidenceAtDeadline` (`JS-021` FN-162), `mainRegionFor` / `effectiveRegion` (`JS-014`) | `renderDailyCohortByRegion` (FN-168), `persistDailyCohortHistory` (FN-169) | specific — **refuses live recompute past retention** (shows "NA") |
+| FN-165 | `buildTrackingChartSvg(allRuns, fromAt, toAt)` / `_ensureChartHoverTip()` / `splitDailyAndScatter(runs)` `#L344/#L486/#L316` | issue-tally runs + a window | the trend-chart SVG (native `<title>` tooltips today) | injects one shared hover-tip element | `computeIssueTalliesByRun` (FN-170) | `renderTrackingTab` (FN-166), **`JS-023` `renderRMIssueHistory` (verbatim reuse)** | reusable |
+| FN-166 | `renderTrackingTab()` `#L642` | `movementSnapshots` | renders every Tracking section | DOM writes | FN-163..FN-165, `getPickedTrackingWindow` (FN-171) | `renderAll` (`JS-012`) | specific |
+| FN-167 | `render48hCohort()` / `renderWeekOverWeekCohort()` `#L822/#L1394` | computed cohorts | the 0–48h + week-over-week tables | DOM writes | FN-163, `computeWeekOverWeekCohort` (FN-172), `wowPctCellHtml` / `wowDeltaBadgeHtml` | FN-166 | specific |
+| FN-168 | `renderDailyCohortByRegion()` `#L1157` | a picked date | the Daily Cohort by Region table | DOM write; **staleness guard** — refuses live recomputation past `Movement_Log` retention, shows "NA" | FN-164 | FN-166 | specific |
+| FN-169 | `persistDailyCohortHistory()` `#L1112` | eligible dates | upserts `Daily_Cohort_History` rows | Sheets write via `upsertDailyCohortHistoryRows` (`JS-018`); **never re-writes an already-archived date** | `eligibleDailyCohortDates` (FN-164), `JS-018` | auto after a snapshot; `#backfillDailyCohortHistoryBtn` (`BTN-021`) | specific |
+| FN-170 | `computeIssueTalliesByRun(regionFilter)` / `findRunTally(runs, at)` `#L31/#L93` | `movementSnapshots` | per-run issue tallies | none | `JS-021` FN-162 | FN-165, RM Timeline (`JS-023`) | reusable |
+| FN-171 | `getPickedTrackingWindow()` / `trackingPopulateSnapshotSelectors()` `#L628/#L606` | the snapshot pickers | the selected From/To window | DOM | `populateMovementDateSelect` etc. (`JS-021`) | FN-166 | specific |
+| FN-172 | `computeWeekOverWeekCohort()` / `weekOverWeekDateKeys()` / `wowPctDelta` / `wowDeltaBadgeHtml` / `wowPctCellHtml` `#L1336`–`#L1403` | two week windows | the week-over-week cohort deltas + badge/cell HTML | none | FN-164, `JS-021` FN-162 | FN-167 | specific |
+| FN-173 | `setSlaHistoryAdminStatus(text, color)` / `setDailyCohortHistoryAdminStatus(text, color)` `#L514/#L560` | status text | writes the admin button status lines | DOM | — | the admin button handlers | specific — the buttons' write logic is in `JS-018` / `JS-004` |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
@@ -63,7 +69,7 @@ tab-rmtimeline → …`), so `buildTrackingChartSvg` is defined before
 |---|---|---|---|---|
 | RULE-029 | `persistDailyCohortHistory()` **never re-writes an already-archived date** — "not optional": re-deriving a stale archived day from `Movement_Log`'s 7-day window would substitute wrong late evidence | FN-169 | `MovementTracker.gs`'s cohort-history persist has the same rule (`GS-008`) | `LOGIC_AUDIT.md` Part 1 §4c |
 | RULE-030 | `renderDailyCohortByRegion` refuses live recomputation past `Movement_Log` retention — shows "NA", not a wrong number | FN-168 | — | staleness guard |
-| RULE-031 | `evidenceAtDeadline` prefers the nearest snapshot at-or-before the deadline, falls forward, else returns `null` — never guesses | FN-162 | conceptually mirrors the backend's cohort evidence lookup | `LOGIC_AUDIT.md` Part 1 §4c |
+| RULE-031 | `evidenceAtDeadline` prefers the nearest snapshot at-or-before the deadline, falls forward, else returns `null` — never guesses | `JS-021` FN-162 | conceptually mirrors the backend's cohort evidence lookup | `LOGIC_AUDIT.md` Part 1 §4c |
 | RULE-032 | `upsert*` writes (via `JS-018`) use `RAW` value-input to stop Sheets auto-converting date-text to a serial number | FN-169 → `JS-018` FN-129 | same on the backend cohort writer | documented Sheets bug class |
 
 ## Exceptions — `EXC-XXX` sub-table
@@ -77,7 +83,7 @@ tab-rmtimeline → …`), so `buildTrackingChartSvg` is defined before
 ## Data lineage
 
 `Movement_Log` (`SHEET-002`) → `movementSnapshots` (`JS-021`) →
-`buildMovementHistories` → `evidenceAtDeadline` (FN-162) per cohort
+`buildMovementHistories` → `evidenceAtDeadline` (`JS-021` FN-162) per cohort
 member → cohort tables + trend chart → screen. Archive path: computed
 daily cohorts → `persistDailyCohortHistory` (FN-169) →
 `upsertDailyCohortHistoryRows` (`JS-018`) → `Daily_Cohort_History`

@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/rm-performance-worker.js` (153 lines) |
+| **Location** | `js/rm-performance-worker.js` (189 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | (pending commit) — message contract gained `nowMs` + the Opp-conversion join, see `JS-008` §9.7.3 |
 
 ## Purpose / reason to exist
 
@@ -42,8 +42,8 @@ Not in `dashboard.html`'s `<script src>` list — it is loaded as a
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-119 | `onmessage(e)` `#L77` | `{dateKeys, filters, rmHierarchyByNameLower}` | `postMessage` a series of `{type:'progress', stage}` then one `{type:'done', rm, region, a1tm, rh, byRegion, stageCounts}` (or `{type:'error', message, stack}`) | runs the compute; posts messages | `passesRepeatOffenderFilters`, `computeRmPerformance`, `computeRmPerformanceByRegion`, `repeatOffendersRegionKey`, `rmPerfPrimaryManagerFor`, `rmPerfRhFor` (all `JS-008`, loaded via `importScripts`) | the `Worker` instance in `JS-022` | specific — the worker entry |
-| FN-120 | `_rmPerfWorkerClassificationCounts(list)` `#L73` | a result list | `{classification: count}` map | none | — | FN-119 (for `stageCounts`) | specific — a debug/telemetry helper |
+| FN-119 | `onmessage(e)` `#L98` | `{dateKeys, filters, rmHierarchyByNameLower, nowMs}` (`nowMs` added 2026-09-29 — REQUIRED, the Worker runs on its own real clock and never sees the main thread's frozen test `Date`) | `postMessage` a series of `{type:'progress', stage}` (now including `'opp'`) then one `{type:'done', rm, region, a1tm, rh, byRegion, stageCounts}` — `rm`/`region`/`a1tm`/`rh` rows now also carry `opp`/`oppBasis`/`oppPeer`/`doubleFlag` — (or `{type:'error', message, stack}`) | runs the compute; posts messages | `passesRepeatOffenderFilters`, `computeRmPerformance`, `computeRmPerformanceByRegion`, `computeRmPerformanceWithOpp`, `reconstructRmOppCohort`, `aggregateRmOppConversion`, `classifyRmOppConversion`, `joinRmOppConversion`, `repeatOffendersRegionKey`, `rmPerfPrimaryManagerFor`, `rmPerfRhFor` (all `JS-008`, loaded via `importScripts`) | the `Worker` instance in `JS-022` | specific — the worker entry |
+| FN-120 | `_rmPerfWorkerClassificationCounts(list)` `#L94` | a result list | `{classification: count}` map | none | — | FN-119 (for `stageCounts`) | specific — a debug/telemetry helper |
 
 ## Message contract
 

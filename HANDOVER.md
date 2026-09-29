@@ -18,7 +18,8 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-09-10. This file went a full week
+Written 2026-08-31, updated 2026-09-29 (§9.7.3, RM Opp-Conversion join).
+This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
 redesign's alias/leadership-exclusion fixes, the region-wise worst-5-RM
@@ -1487,3 +1488,154 @@ specifically exercising the new elapsed-time poll (confirms it shows 0s
 immediately, ticks up on its own without any external re-render call,
 never stacks more than one pending timer, and — critically — stops
 rescheduling itself once loading finishes, rather than looping forever).
+
+### 9.7.3 RM Opp-Conversion join — Same-Day/48h Opp% as a second signal, 2026-09-29
+
+**Why**: the violation-rate composite score (§9.7) measures process
+compliance — did the RM follow the 5 SLA rules — but never whether their
+leads actually *converted*. A user request to think about better logic
+for finding a problematic RM specifically on Google leads led to this:
+join the existing violation engine with a NEW, RM-level Same-Day/48h
+Opp-conversion signal, so a manager can see who is **both** high-violation
+**and** low-conversion — a materially stronger "needs coaching" signal
+than either alone, since a high violation rate that still converts fine
+might just mean the SLA rules don't fit that RM's real working style,
+while low conversion with a clean violation record might be a lead-quality/
+territory problem, not a coaching one. Two are needed together to be
+confident it's genuinely the RM.
+
+**Two constraints confirmed by Snehil before building anything, closing
+off two directions an initial audit raised:** (1) Non-UTM and Search (and
+whatever else is in the active Sub-source filter selection) are pooled
+into ONE peer group — never split into separate per-bucket peer pools;
+(2) no new filter UI of any kind — no quick-preset button, no dedicated
+Google view. The feature works exclusively through whatever the existing
+shared Project/Region/TL/Source/Sub-source filter bar already has
+selected, same as every other column in this section already does.
+
+**Why Movement_Log-based, not `opp_at`-vs-live-`leads`-array (the Opp
+Monitor tab's own live-computation method, `js/tab-oppmonitor.js`
+`_oppMonitorComputeLiveMetrics`)**: that method reads a lead's CURRENT
+RM off the live sheet — if a lead was ever reassigned, it would silently
+credit/blame whoever holds it NOW, not whoever actually worked it during
+the window being judged, which is disqualifying for an RM-attribution
+feature. This join instead attributes each Movement_Log lead-copy to the
+RM shown on its OWN first captured snapshot — historically accurate, and
+the exact same attribution the violation engine already uses, so the two
+joined signals are guaranteed to share one peer population (same filter,
+same leadership exclusion, same name canonicalization) rather than two
+subtly different ones. **A real, deliberate consequence: these numbers
+will not exactly match the Opp Monitor tab's own company-wide monthly
+Same-Day/48h Opp% for the same segment** — different method, different
+population (Movement_Log's 7-day retention + per-copy attribution vs.
+Opp Monitor's live-leads-array, whole-history method) — documented, not
+"fixed" to reconcile.
+
+**Design decision: a parallel signal, joined at display time — NOT a 5th
+classification tier.** `classifyRmPerformance` has a `.gs` twin with a
+numeric-parity check (`test/check-runtime-parity.py`), and its 4
+classification strings drive sort order, chip styling, and the PDF —
+touching them would be high-risk for an engine already verified against
+real production data (§9.7.2). Instead: `reconstructRmOppCohort` →
+`aggregateRmOppConversion` → `classifyRmOppConversion` computes the
+conversion side entirely independently, and `joinRmOppConversion` merges
+it onto each violation-engine row afterward, copying every existing field
+through completely unchanged and adding `opp`/`oppBasis`/`oppPeer`/
+`doubleFlag`. `doubleFlag` requires BOTH an elevated violation
+classification (Below Expectations or Watch — concentrated) AND
+`lowConversion` — neither alone is enough.
+
+**No `DailyRmIssueLog.gs` port** — existing precedent (§9.7 Phase 4): the
+console leaderboard is "a quick sanity check, not a duplicate delivery
+surface" and already deliberately skips the Region/A1-TM/RH rollups the
+live tab has. Stronger reason here: `reconstructRmPerformanceObservationsGs_`
+is UNFILTERED by design (its own comment: "no dashboard top-bar filter
+concept applies to a console function") — the Source/Sub-source scoping
+this feature exists for can't even be expressed there. New constants are
+named `RM_OPP_*`, not `RM_PERF_*` — every `RM_PERF_*` constant has a `.gs`
+twin that must stay numerically identical (§6); `RM_OPP_*` has none, by
+design, same precedent as the browser-only `REPEAT_OFFENDERS_REGION_RM_CAP`.
+
+**The threshold math, and why `RM_OPP_LOW_RATIO=0.5` is not a literal
+mirror of `RM_PERF_FLAG_RATIO` (1.25):**
+
+```
+per table:  basis = (Σ 48h-complete leads >= 0.5 x Σ leads assigned in range) ? '48h' : 'sameDay'
+            peer[basis] = Σ opp / Σ resolved, pooled over every group (volume-weighted)
+per group:  n = leads with evidence on that basis; raw = opp / n
+            shrunk = n/(n+8) * raw + 8/(n+8) * peer[basis]
+            lowConversion = n >= 5 && peer[basis] > 0 && shrunk <= 0.5 * peer[basis]
+doubleFlag = classification in {Below Expectations, Watch — concentrated} && lowConversion
+```
+
+Each lead here gives ONE yes/no outcome — far less evidence per lead than
+a violation rate built from many lead-days. At peer=20% and a literal
+0.8-style ratio, an RM converting at EXACTLY the peer rate still
+false-flags ~33% of the time even at n=10 (barely improves with more
+data). At 0.5 that drops to ~11% at n=10, ~7% at n=20, and keeps falling;
+with K=8 an RM needs ≥8 leads before a 0%-raw rate can even reach the
+threshold at all, so tiny samples can't trigger it alone; a genuinely bad
+RM (true rate 5% vs peer 20%) is still caught ~74% of the time at n=20.
+
+**Real constraint found and worked around during planning, not
+discovered live:** `evidenceAtDeadline` (the shared "status as of a
+deadline" lookup the Tracking tab's cohort computations already used)
+lived in `js/tab-tracking.js`, which runs `document.addEventListener` at
+module-parse time — `js/rm-performance-worker.js`'s `importScripts()`
+would throw immediately trying to load it in the Worker. Moved verbatim
+to `js/tab-movement.js` (no DOM code at parse time, already
+`importScripts`-able), same relocation reasoning `core-rm-performance.js`
+itself was moved for on 2026-09-06. Its own callers (`computeZeroTo48hCohort`/
+`computeDailyCohortByRegion`, `js/tab-tracking.js`) are unaffected — a
+global function, callable regardless of which file defines it. **A
+known, separate bug in its `liveLead` fallback was found, not fixed**:
+it reads `liveLead.oppOrAbove`/`.isOpenLead`, fields only `enrichLead`'s
+own return value sets — nothing wires them onto a raw `allParsedLeads`
+row, so a caller passing one through gets `{undefined, undefined}`, not
+a real answer. `reconstructRmOppCohort` always passes `liveLead=null`
+specifically to avoid depending on this path at all; the Tracking tab's
+own pre-existing calls are unaffected either way (same behavior as
+before this session). Flagged as a real follow-up task, not fixed here.
+
+**The Worker needs `nowMs` passed in explicitly, never `Date.now()`
+internally** — `tests/frontend-harness.html` freezes `Date` on the main
+thread only (§7.2); a Worker runs on its own real wall clock and would
+silently disagree with both the synchronous fallback path and the test
+harness if it ever called `Date.now()` itself. `runRepeatOffendersRecalculation`
+(`js/tab-repeat-offenders.js`) now sends `nowMs` in the Worker's
+`postMessage` payload; `_runRepeatOffendersSynchronously` receives the
+same `now` via its own `ctx`.
+
+**Verified**: `tests/frontend-harness.html` §2g, 9 sub-tests covering the
+cohort/lag guard, the peer-average arithmetic and low-conversion
+threshold exactly (mutation-checked by hand — disabling either the
+0.5-ratio threshold or the 12h lag guard makes the matching assertion
+fail, confirmed then reverted), the `doubleFlag` truth table, same-filter
+population parity between the two engines, no regression on any existing
+field, region-restricted peer averages, and a real-Worker async test
+proving `nowMs` threading actually works (a lead created at the frozen
+test "now" reads as pending48h, not resolved — it would read resolved if
+the Worker silently used its own real clock instead). Full suite:
+132/132 pass.
+
+**Real bug caught before this ever ran live**: `aggregateRmOppConversion`'s
+default `keyFn` initially read `entry.rec.RM` inside a lambda that was
+actually called as `getKey(entry.rec)` — i.e. it read `.rec.RM` off an
+ALREADY-unwrapped record, throwing `Cannot read properties of undefined
+(reading 'RM')` the moment any table without an explicit `keyFn` (the RM
+level, and the synchronous fallback path) tried to run. Caught by the
+`tests/frontend-harness.html` run itself (a real Worker construction
+failure cascading into the synchronous fallback, which then threw) before
+ever reaching a live signed-in session. Fixed to `rec => rmPerfCanonicalRmName(rec.RM)`,
+matching `reconstructRmPerformanceObservations`'s own default exactly.
+
+**Follow-up tasks flagged, not part of this change:** (1) the
+`evidenceAtDeadline` live-fallback bug above; (2) whether Movement_Log's
+content-hash dedup (fully effective since 2026-09-25/26) is thinning the
+violation engine's own observations for days with no real change — found
+worth checking, not confirmed broken, does not affect the Opp-conversion
+side; (3) `js/tab-oppmonitor.js`'s own live-computation fallback
+(`_oppMonitorComputeLiveMetrics`) has no Google/Non-UTM/Search filter in
+its code at all, despite its header comment claiming it matches the
+external workflow's scoping — found while researching this change,
+unrelated to it.

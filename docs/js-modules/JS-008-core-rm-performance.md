@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-rm-performance.js` (869 lines) |
+| **Location** | `js/core-rm-performance.js` (1140 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-15 against commit `9e55e36` |
+| **Last Verified** | (pending commit) against `rmOppDisplayCells` (FN-316) |
 
 ## Purpose / reason to exist
 
@@ -31,6 +31,14 @@ means "consistently and disproportionately off-SLA," not "busy."
   leadership exclusion (`rmPerfIsLeadershipExcluded`).
 - Sort/filter helpers (`sortRmPerformanceByPriority`/`ByScore`,
   `filterRmPerformanceWorst`/`Rankable`, `rmPerformanceDrivenBy`).
+- **RM Opp-Conversion engine** (added 2026-09-29, HANDOVER.md §9.7.3) —
+  `reconstructRmOppCohort` → `aggregateRmOppConversion` →
+  `computeRmOppPeerAverages` → `classifyRmOppConversion` →
+  `joinRmOppConversion`/`computeRmPerformanceWithOpp`: a SEPARATE,
+  parallel Same-Day/48h Opp-conversion signal joined onto the violation
+  engine's output at display time (`doubleFlag` when BOTH are bad).
+  Browser-only, no `.gs` twin by design — see this file's own "RM
+  Opp-Conversion engine" header comment.
 
 ## Load order / position
 
@@ -48,13 +56,19 @@ harmless — nothing at parse time calls into it).
 | FN-055 | `computeRmPerfPeerAverages(byGroup)` `#L561` | grouped totals | peer-average baseline per rule | none | — | FN-052 | specific |
 | FN-056 | `classifyRmPerformance(byGroup)` `#L598` | grouped totals + peer averages | classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score + chronic-streak flag | none | `RM_PERF_*` constants | FN-052 | specific |
 | FN-057 | `passesRepeatOffenderFilters(rec, filters)` `#L186` | a record + this report's filter set | bool | none | `mainRegionFor` (`JS-014`) | FN-053 | specific — **not** `passesMovementFilters`; no `effectiveRegion` Loan inference (`LOGIC_AUDIT.md` Part 4/6) |
-| FN-058 | `computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower)` `#L730` | date keys, filters, hierarchy map | `[{region, list}]` — worst-5 RMs per region, region-scoped peer average, regions with ≥1 rankable RM only | none | FN-052 (Region pass to discover regions, then RM pass per region), `mainRegionFor` (`JS-014`) | worker (`JS-017`), sync path (`JS-022`) | specific — added this session |
+| FN-058 | `computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower, opts)` `#L738` | date keys, filters, hierarchy map, optional `{oppCohort}` (added 2026-09-29) | `[{region, list}]` — worst-5 RMs per region, region-scoped peer average, regions with ≥1 rankable RM only; each row also carries `opp`/`doubleFlag` when `opts.oppCohort` is passed | none | FN-052 (Region pass to discover regions, then RM pass per region), `mainRegionFor` (`JS-014`), FN-312/FN-315 when `opts.oppCohort` given | worker (`JS-017`), sync path (`JS-022`) | specific — `opts` optional, omitting it preserves pre-2026-09-29 behavior exactly |
+| FN-311 | `reconstructRmOppCohort(dateKeys, filters, rmHierarchyByNameLower, nowMs)` `#L834` (added 2026-09-29) | date keys, filters, hierarchy map, explicit "now" in ms | `[{rec, lead_id, createdMs, sameDayOpp, windowComplete, opp48h}]` — one entry per Movement_Log lead-copy assigned in range, first-capture-lag-guarded | none (pure) | `buildMovementHistories`/`splitHistoryByCopy`/`evidenceAtDeadline` (`JS-021`), FN-057, FN-060 | FN-312, FN-315 (via `computeRmPerformanceWithOpp`) | specific — `nowMs` REQUIRED, never `Date.now()` internally (Worker clock mismatch, see HANDOVER.md §9.7.3) |
+| FN-312 | `aggregateRmOppConversion(cohort, keyFn)` `#L892` (added 2026-09-29) | FN-311's cohort + optional group-key fn | `Map<name, {cohortLeads, sameDayResolved, sameDayOpp, windowComplete, resolved48h, opp48h}>` | none | — | FN-314, FN-315 | specific — same `keyFn(rawRecord)` convention as FN-053 |
+| FN-313 | `computeRmOppPeerAverages(byGroup)` `#L921` (added 2026-09-29) | FN-312's grouped totals | `{sameDay, h48}` volume-weighted pooled rates | none | — | FN-314 | specific |
+| FN-314 | `classifyRmOppConversion(byGroup)` `#L940` (added 2026-09-29) | FN-312's grouped totals | `{basis, peer, byName: Map<name, {…, shrunk, sufficient, lowConversion}>}` | none | FN-313, `RM_OPP_*` constants | FN-315 | specific |
+| FN-315 | `joinRmOppConversion(perfRows, oppClassified)` / `computeRmPerformanceWithOpp(dateKeys, keyFn, filters, rmHierarchyByNameLower, oppCohort)` `#L974/#L988` (added 2026-09-29) | violation-engine rows + FN-314's classification / same params as FN-052 plus a pre-built cohort | rows with `opp`/`oppBasis`/`oppPeer`/`doubleFlag` added, every existing field unchanged | none (pure) | FN-052, FN-312, FN-314 | worker (`JS-017`), sync path (`JS-022`), FN-058 | specific — deliberately does NOT touch `classifyRmPerformance`'s own 4-tier output (see HANDOVER.md §9.7.3's "parallel signal, not a 5th tier" decision) |
+| FN-316 | `rmOppDisplayCells(r)` `#L1005` (added 2026-09-29) | a joined row | `{sameDay, h48, lowConversion, basis}` display strings | none (pure) | — | table (`JS-022`) + PDF (`JS-013`) renderers | reusable — shared so the two surfaces can't disagree, same precedent as FN-063 |
 | FN-059 | `rmPerfCanonicalRmName(rawName)` `#L320` | a raw RM name | canonical name (via `RM_PERF_NAME_ALIASES`) | none | — | FN-053, FN-060 | reusable |
 | FN-060 | `rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower)` `#L360` | RM name + hierarchy map | bool — true for A1/TM/RH/Cluster Head/City Lead/Commercial Head roles or the name-based leadership set | none | `RM_PERF_NON_RM_ROLES`, `RM_PERF_LEADERSHIP_NAME_EXCLUSIONS` | FN-053, FN-058 — **no longer `JS-013`** (that PDF no longer calls this directly since the 2026-09-12 cache-read redesign, `9dea24a`) | reusable |
 | FN-061 | `rmPerfPrimaryManagerFor` / `rmPerfRhFor(rmName, map)` `#L203/#L208` | RM name + map | manager / RH name | none | — | `rmPerformanceHierarchyCells` (FN-063) | reusable |
 | FN-062 | `repeatOffendersRegionKey(rec)` `#L222` | a record | region bucket — Loan iff `group_source` says Loan, else `mainRegionFor(rec.region)` | none | `normRegionKey` / `mainRegionFor` (`JS-014`) | FN-058 — **no longer `JS-013`** (that PDF no longer calls this directly since the 2026-09-12 cache-read redesign, `9dea24a`) | reusable — Loan detection via `group_source` ONLY (Movement_Log has no `project_region`) |
-| FN-063 | `rmPerformanceDrivenBy(r)` / `rmPerformanceHierarchyCells(r, map)` `#L770/#L798` | a result row | the "driven by" contributor list / hierarchy cells | none | FN-061 | table + PDF renderers | reusable |
-| FN-064 | `sortRmPerformanceByPriority` / `ByScore` / `filterRmPerformanceWorst` / `filterRmPerformanceRankable(list)` `#L826/#L839/#L851/#L867` | a result list | sorted / filtered list | none | — | `JS-022`, `JS-013` | reusable |
+| FN-063 | `rmPerformanceDrivenBy(r)` / `rmPerformanceHierarchyCells(r, map)` `#L1041/#L1069` | a result row | the "driven by" contributor list / hierarchy cells | none | FN-061 | table + PDF renderers | reusable |
+| FN-064 | `sortRmPerformanceByPriority` / `ByScore` / `filterRmPerformanceWorst` / `filterRmPerformanceRankable(list)` `#L1097/#L839/#L1122/#L1138` | a result list | sorted / filtered list | none | — | `JS-022`, `JS-013` | reusable |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -69,6 +83,7 @@ harmless — nothing at parse time calls into it).
 | CFG-019 | `REPEAT_OFFENDERS_REGION_RM_CAP` `#L729` | `5` | worst-N per region in `computeRmPerformanceByRegion` | `TAB-004`'s per-region breakdown only (client, no `.gs` twin) |
 | CFG-020 | `RM_PERF_NON_RM_ROLES` `#L344` | `{a1, tm, rh, cluster head, city lead, commercial head}` | roles excluded from "RM" | `rmPerfIsLeadershipExcluded` (FN-060); mirrors `RmHierarchy.gs` `TOP_OF_ORG_ROLES_` |
 | CFG-021 | `RM_PERF_NAME_ALIASES` `#L306` / `RM_PERF_LEADERSHIP_NAME_EXCLUSIONS` `#L257` | name→canonical map / name set | RM identity normalisation + name-based leadership exclusion | ranking membership |
+| CFG-074 | `RM_OPP_MIN_RESOLVED_LEADS` / `RM_OPP_SHRINKAGE_K` / `RM_OPP_LOW_RATIO` / `RM_OPP_48H_BASIS_MIN_SHARE` / `RM_OPP_MAX_FIRST_CAPTURE_LAG_HOURS` / `RM_OPP_ELEVATED_CLASSIFICATIONS` `#L792-818` (added 2026-09-29) | `5` / `8` / `0.5` / `0.5` / `12` / `{Below Expectations, Watch — concentrated}` | Opp-conversion engine thresholds — see HANDOVER.md §9.7.3 for the false-alarm-rate reasoning behind `RM_OPP_LOW_RATIO=0.5` specifically (not a literal mirror of `RM_PERF_FLAG_RATIO`) | `classifyRmOppConversion` (FN-314), `reconstructRmOppCohort` (FN-311), `joinRmOppConversion` (FN-315) — deliberately **no `.gs` twin** (see this file's own "RM Opp-Conversion engine" header) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -76,6 +91,7 @@ harmless — nothing at parse time calls into it).
 |---|---|---|---|
 | EXC-014 | `movementSnapshots` undefined / empty at compute time | `reconstructRmPerformanceObservations` returns `[]` `#L408` | Repeat Offenders shows "no data"; PDF export refuses (`JS-013` EXC) |
 | EXC-015 | RM below `RM_PERF_MIN_VOLUME_LEADS` | classified "Insufficient Data", excluded from worst-first lists | RM not shown in the leaderboard |
+| EXC-106 | a lead-copy's first Movement_Log snapshot lags its own `lead_assigned_at` by more than `RM_OPP_MAX_FIRST_CAPTURE_LAG_HOURS` (12) (added 2026-09-29) | `reconstructRmOppCohort` silently excludes it from the Opp-conversion cohort entirely (FN-311) | that lead contributes nothing to Same-Day/48h Opp% for any row — never guessed at, never distorts the rate |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
@@ -85,6 +101,7 @@ harmless — nothing at parse time calls into it).
 | RULE-014 | "RM" = anyone **not** A1/TM/RH/Cluster Head/City Lead/Commercial Head and not in the name-based leadership set | FN-060 | partial — `RmHierarchy.gs` `TOP_OF_ORG_ROLES_` = the last 3 | broadened this session (`7ef26db`) after managers appeared in the per-region worst-5 |
 | RULE-015 | Per-region worst-5 uses a **region-scoped** peer average and lists only regions with ≥1 rankable RM | FN-058 | No — client-only feature | added this session (`812a3cb`) |
 | RULE-016 | Loan bucket is decided by `group_source` only; `Movement_Log` has no `project_region`, so Loan leads tagged via `project_region` never bucket as "Loan" here | FN-062 | related to the HIGH finding in `GS-*` (`LOGIC_AUDIT.md` Part 4 §4.4) | known gap |
+| RULE-036 | `doubleFlag` = an elevated violation classification (Below Expectations or Watch — concentrated) AND `lowConversion` (shrunk Opp-conversion rate ≤ `RM_OPP_LOW_RATIO` × the table's own peer rate, with ≥`RM_OPP_MIN_RESOLVED_LEADS` resolved leads) — BOTH required, neither alone is enough (added 2026-09-29) | FN-315 | No — browser-only, see CFG-074 | HANDOVER.md §9.7.3 has the false-alarm-rate reasoning behind the exact `0.5` ratio |
 
 ## Data lineage
 
@@ -93,7 +110,12 @@ harmless — nothing at parse time calls into it).
 (FN-053) → `aggregateRmPerformance` → peer averages → `classifyRmPerformance`
 → result rows → `TAB-004` tables / `JS-013` PDF. Runs off-thread in
 `JS-017`. Full flow: `DATA-002` (SLA-flag pipeline, history side) +
-`DATA-004`.
+`DATA-004`. **Second, parallel lineage (added 2026-09-29):** the same
+`movementSnapshots` → `evidenceAtDeadline` (`JS-021`) → `reconstructRmOppCohort`
+(FN-311) → `aggregateRmOppConversion`/`classifyRmOppConversion` →
+`joinRmOppConversion` merges onto the classification-engine's own rows —
+two independent readings of the same source data, joined only at the
+very end, never sharing intermediate state.
 
 ## Data sources accessed
 
@@ -116,7 +138,13 @@ Returns `[]` on missing input rather than throwing. Runs in a Web Worker
 `RM_PERF_*_GS_` + `reportRmPerformanceNow` (`GS-003`). The backend's own
 comment says the constants "must stay numerically identical." The
 per-region worst-5 (`FN-058`, `CFG-019`) has **no** `.gs` twin — it is
-client-only.
+client-only. **The entire RM Opp-Conversion engine (`RM_OPP_*`, FN-311..316,
+added 2026-09-29) also has no `.gs` twin, by deliberate design** — see
+HANDOVER.md §9.7.3: `DailyRmIssueLog.gs`'s console leaderboard stays
+narrower than the dashboard by existing precedent (HANDOVER.md §9.7 Phase
+4), and its own `reconstructRmPerformanceObservationsGs_` is unfiltered,
+so it structurally can't express the Source/Sub-source scoping this
+feature exists for.
 
 ## UI relationships
 
@@ -131,10 +159,10 @@ recompute via the worker.
 
 ## Related documentation
 
-`HANDOVER.md` §6, §9 (Repeat Offenders subsystem); `OPS_CHECKLIST.md`
-(worst-performer methodology drift); `LOGIC_AUDIT.md` Part 1 §4b, Part 3
-§3.6, Part 4 §4.4; this session's fix commits `fef04b0` / `7ef26db` /
-`812a3cb` / `8d9acbc`.
+`HANDOVER.md` §6, §9, **§9.7.3** (RM Opp-Conversion join, 2026-09-29);
+`OPS_CHECKLIST.md` (worst-performer methodology drift); `LOGIC_AUDIT.md`
+Part 1 §4b, Part 3 §3.6, Part 4 §4.4; this session's fix commits
+`fef04b0` / `7ef26db` / `812a3cb` / `8d9acbc`.
 
 ## Relationships
 

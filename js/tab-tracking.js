@@ -191,32 +191,12 @@ function computeCohortComparison(regionFilter, fromAt, toAt){
 // predate the "capture closed leads too" behavior) does this fall back to
 // the live current sheet's status. A lead with neither is excluded
 // entirely rather than guessed.
-// Status "as of" a specific deadline for one lead's retained history —
-// prefers the latest snapshot AT OR BEFORE the deadline, falls back to the
-// first one AFTER it (both carry up to ~6h resolution slack, same as
-// computeZeroTo48hCohort's own original inline version of this), and
-// finally falls back to the live current sheet when the history has
-// nothing on either side (deadline outside Movement_Log's retention
-// window). Returns null when there's truly no evidence either way
-// (unresolved AND no longer in the live sheet) — callers decide how to
-// count that, never guess. Shared by computeZeroTo48hCohort (deadline =
-// each lead's own 48h mark) and computeDailyCohortByRegion (deadline =
-// either end-of-day or the 48h mark, per lead, per metric).
-function evidenceAtDeadline(history, deadlineMs, liveLead){
-  let atOrBefore = null, firstAfter = null;
-  history.forEach(rec => {
-    const atMs = rec.snapshot_at.getTime();
-    if (atMs <= deadlineMs) { if (!atOrBefore || atMs > atOrBefore.snapshot_at.getTime()) atOrBefore = rec; }
-    else if (!firstAfter || atMs < firstAfter.snapshot_at.getTime()) firstAfter = rec;
-  });
-  const evidence = atOrBefore || firstAfter;
-  if (evidence) {
-    const enriched = enrichSnapshotCached(evidence);
-    return { oppOrAbove: enriched.oppOrAbove, isOpenLead: enriched.isOpenLead, evidence };
-  }
-  if (liveLead) return { oppOrAbove: liveLead.oppOrAbove, isOpenLead: liveLead.isOpenLead, evidence: null };
-  return null;
-}
+// evidenceAtDeadline moved to js/tab-movement.js (2026-09-29, RM Performance
+// Opp-conversion join) — that file has no DOM code at module-parse time, so
+// js/rm-performance-worker.js can importScripts() it; this file does
+// (document.addEventListener at module scope below), so it can't be. Global
+// function, called at runtime only — this move has no behavior effect on
+// computeZeroTo48hCohort/computeDailyCohortByRegion below, both unchanged.
 
 // ONE-OFF DIAGNOSTIC (browser console) — for one date (optionally scoped
 // to one main region), lists every lead assigned that day with its

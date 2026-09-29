@@ -21,13 +21,18 @@
 //   - reports-build.js      (normRegionKey, mainRegionFor, effectiveRegion)
 //   - tab-movement.js       (movementSnapshots, buildMovementHistories,
 //                             splitHistoryByCopy, enrichSnapshotCached,
-//                             enrichLeadAsOf — this file DOES define many
-//                             DOM-touching functions too, e.g. renderStalled
-//                             Leads, but none of them execute at module-
-//                             parse time, only when called, and this worker
-//                             never calls those; confirmed zero top-level
-//                             document./window. references anywhere in the
-//                             file before relying on this)
+//                             enrichLeadAsOf, evidenceAtDeadline — the last
+//                             one moved here from tab-tracking.js 2026-09-29
+//                             specifically so this worker could use it for
+//                             the Opp-conversion join below, same reasoning
+//                             as core-rm-performance.js's own 2026-09-06
+//                             relocation just below. This file DOES define
+//                             many DOM-touching functions too, e.g.
+//                             renderStalledLeads, but none of them execute
+//                             at module-parse time, only when called, and
+//                             this worker never calls those; confirmed zero
+//                             top-level document./window. references
+//                             anywhere in the file before relying on this)
 //   - core-rm-performance.js (the actual Stage 1-4 pipeline, plus
 //                             passesRepeatOffenderFilters/
 //                             rmPerfPrimaryManagerFor/rmPerfRhFor/
@@ -46,11 +51,27 @@
 //   IN  (postMessage from tab-repeat-offenders.js):
 //     { snapshots: Array, dateKeys: Set<string>|null,
 //       filters: {project,region,TL,source,bucket: Set<string>},
-//       rmHierarchyByNameLower: Map|null }
+//       rmHierarchyByNameLower: Map|null,
+//       nowMs: number }  -- added 2026-09-29 for the Opp-conversion join
+//                            below; REQUIRED, never Date.now() inside this
+//                            file — the main thread's test harness freezes
+//                            Date on itself only, so the Worker must be
+//                            handed "now" explicitly or it silently runs on
+//                            the real wall clock and disagrees with the
+//                            synchronous fallback path and with CI (see
+//                            HANDOVER.md §9.7.3)
 //   OUT (postMessage back):
-//     { type: 'progress', stage: 'rm'|'region'|'a1tm'|'rh'|'byRegion' } -- 3-5 of these
+//     { type: 'progress', stage: 'rm'|'region'|'a1tm'|'rh'|'byRegion'|'opp' } -- 4-6 of these
 //     { type: 'done', rm, region, a1tm, rh, byRegion, stageCounts }     -- exactly one
 //     { type: 'error', message, stack }                       -- OR this, exactly one
+//
+// Opp-conversion join (added 2026-09-29): reconstructRmOppCohort(...) is
+// built ONCE per run (core-rm-performance.js) and threaded through every
+// rollup level via computeRmPerformanceWithOpp/joinRmOppConversion — see
+// that file's own "RM Opp-Conversion engine" header comment and
+// HANDOVER.md §9.7.3 for the full design record. rm/region/a1tm/rh below
+// all carry the extra opp/oppBasis/oppPeer/doubleFlag fields now; byRegion
+// gets them too via computeRmPerformanceByRegion's new opts.oppCohort.
 //
 // byRegion (added 2026-09-09, "Region wise repeat offender list" —
 // ADDITIONAL to rm/region/a1tm/rh above, doesn't replace or resize any of
@@ -77,7 +98,7 @@ function _rmPerfWorkerClassificationCounts(list){
 onmessage = function(e){
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   try {
-    const { snapshots, dateKeys, filters, rmHierarchyByNameLower } = e.data;
+    const { snapshots, dateKeys, filters, rmHierarchyByNameLower, nowMs } = e.data;
 
     // Worker-local assignment to the SAME `movementSnapshots` global
     // tab-movement.js declares (`let movementSnapshots = []`) — every
@@ -103,21 +124,33 @@ onmessage = function(e){
     const rmObservations = reconstructRmPerformanceObservations(dateKeys, undefined, filters, rmHierarchyByNameLower);
     const rmByGroup = aggregateRmPerformance(rmObservations);
     const rmPeerAvg = computeRmPerfPeerAverages(rmByGroup);
-    const rm = classifyRmPerformance(rmByGroup);
+    const rmPerf = classifyRmPerformance(rmByGroup);
+
+    // Opp-conversion join (added 2026-09-29) — the cohort is built ONCE
+    // here and threaded through every rollup level below via
+    // computeRmPerformanceWithOpp/computeRmPerformanceByRegion's
+    // opts.oppCohort, so all 5 tables share exactly one nowMs/filters/
+    // dateKeys. See core-rm-performance.js's own "RM Opp-Conversion
+    // engine" header for the full design.
+    postMessage({ type: 'progress', stage: 'opp' });
+    const oppCohort = reconstructRmOppCohort(dateKeys, filters, rmHierarchyByNameLower, nowMs);
+    const rmOppByGroup = aggregateRmOppConversion(oppCohort, undefined);
+    const rmOppClassified = classifyRmOppConversion(rmOppByGroup);
+    const rm = joinRmOppConversion(rmPerf, rmOppClassified);
 
     postMessage({ type: 'progress', stage: 'region' });
-    const region = computeRmPerformance(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower);
+    const region = computeRmPerformanceWithOpp(dateKeys, rec => repeatOffendersRegionKey(rec), filters, rmHierarchyByNameLower, oppCohort);
 
     let a1tm = [], rh = [];
     if (rmHierarchyByNameLower) {
       postMessage({ type: 'progress', stage: 'a1tm' });
-      a1tm = computeRmPerformance(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
+      a1tm = computeRmPerformanceWithOpp(dateKeys, rec => rmPerfPrimaryManagerFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower, oppCohort);
       postMessage({ type: 'progress', stage: 'rh' });
-      rh = computeRmPerformance(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower);
+      rh = computeRmPerformanceWithOpp(dateKeys, rec => rmPerfRhFor(rec.RM, rmHierarchyByNameLower), filters, rmHierarchyByNameLower, oppCohort);
     }
 
     postMessage({ type: 'progress', stage: 'byRegion' });
-    const byRegion = computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower);
+    const byRegion = computeRmPerformanceByRegion(dateKeys, filters, rmHierarchyByNameLower, { oppCohort });
 
     const composites = rm.map(r => r.composite);
     const compositeRange = composites.length
@@ -144,6 +177,9 @@ onmessage = function(e){
           rh: _rmPerfWorkerClassificationCounts(rh),
         },
         stage8RollupCounts: { rm: rm.length, region: region.length, a1tm: a1tm.length, rh: rh.length },
+        stage9OppCohortCount: oppCohort.length,
+        stage9OppBasis: rmOppClassified.basis,
+        stage9OppPeer: rmOppClassified.peer,
         computeMs: t1 - t0,
       },
     });

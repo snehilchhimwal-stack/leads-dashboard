@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/tab-repeat-offenders.js` (764 lines) |
+| **Location** | `js/tab-repeat-offenders.js` (803 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-15 against commit `9e55e36` |
+| **Last Verified** | (pending commit) — `rmPerformanceTableHtml` gained 2 Opp% columns + the doubleFlag chip, see `JS-008` §9.7.3 |
 
 ## Purpose / reason to exist
 
@@ -56,9 +56,9 @@ compute file loads late). `LOGIC_AUDIT.md` Part 1 §4c.
 | FN-150 | `fetchRmHierarchyForRollup(sheetId)` `#L61` | sheet id | populates `rmHierarchyByNameLower`; sets `rmHierarchyFetchState` (`idle`→`loading`→`ready`/`error`) | one Sheets read; state write | `sheetsApiValuesGet` / `valuesToGvizShape` (`JS-009`) | `fetchAndRender` (`JS-003`, in the `Promise.all` gate ~`#L624`) | specific — the browser-side hierarchy read |
 | FN-151 | `renderRepeatOffenders()` `#L268` | this report's filters + Time range, `movementSnapshots` | dispatches compute + renders the tab | constructs the `Worker` (`JS-017`) or falls back to FN-153; DOM writes | `captureRepeatOffendersFilterSnapshot` (FN-152), `runRepeatOffendersRecalculation` (FN-153) | `renderAll` (`JS-012`), `#repeatOffendersRecalculateBtn` (`BTN-010`) | specific |
 | FN-152 | `captureRepeatOffendersFilterSnapshot()` / `_repeatOffendersFilterSummaryText(filters)` / `repeatOffendersDateKeysForRange(range, now)` / `repeatOffendersResolvedDateRange(dateKeys)` / `_repeatOffendersUpdateRangeDisplay` `#L124`–`#L230` | the tab's filter inputs, a range, `now` | a frozen filter snapshot / a summary string / the resolved date keys | DOM range display | `repeatOffendersFormatDate` | FN-151, FN-153 | specific — this report's private filter model |
-| FN-153 | `runRepeatOffendersRecalculation(ctx)` / `_runRepeatOffendersSynchronously(ctx, onDone)` / `_renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall)` `#L355/#L428/#L470` | a recalc context; a worker `done` message | drives the recalc; renders RM / Region / A1-TM / RH tables + the **`byRegion`** "Worst 5 RMs by Region" section; **disables/re-enables `#repeatOffendersDownloadPdfBtn` and writes `_repeatOffendersLastResult`/bumps `_repeatOffendersRunId`** (added `9dea24a`) | posts to / receives from the Worker; DOM writes; progress label; the canonical result cache write | `computeRmPerformance` / `computeRmPerformanceByRegion` (`JS-008`, sync path), `rmPerformanceTableHtml` (FN-155) | FN-151 | specific — handles both worker and sync results |
-| FN-154 | `_repeatOffendersStatusHtml(opts)` / `_repeatOffendersDebugPanelHtml(sc, hierarchyMissing)` / `_repeatOffendersSyncCustomRangeVisibility()` `#L563/#L583/#L717` | worker `stageCounts`, hierarchy-missing flag | the status line / debug panel / custom-range visibility | DOM | — | FN-153 | specific |
-| FN-155 | `rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage, rmHierarchyByNameLower)` `#L668` | a result list + a hierarchy map | one leaderboard table's HTML | none | `rmPerformanceDrivenBy` / `rmPerformanceHierarchyCells` (`JS-008`), `esc` (`JS-010`) | FN-153, `JS-013` reuses `rmPerformanceHierarchyCells` (no longer `rmPerformanceDrivenBy`, unused by either renderer since 2026-09-07) | reusable |
+| FN-153 | `runRepeatOffendersRecalculation(ctx)` / `_runRepeatOffendersSynchronously(ctx, onDone)` / `_renderRepeatOffendersResult(ctx, msg, elapsedMs, startedAtWall)` `#L355/#L433/#L488` | a recalc context; a worker `done` message | drives the recalc; renders RM / Region / A1-TM / RH tables + the **`byRegion`** "Worst 5 RMs by Region" section; **disables/re-enables `#repeatOffendersDownloadPdfBtn` and writes `_repeatOffendersLastResult`/bumps `_repeatOffendersRunId`** (added `9dea24a`) | posts to / receives from the Worker (now including `nowMs`, 2026-09-29); DOM writes; progress label; the canonical result cache write | `computeRmPerformance` / `computeRmPerformanceByRegion` / `computeRmPerformanceWithOpp` / `reconstructRmOppCohort` (`JS-008`, sync path), `rmPerformanceTableHtml` (FN-155) | FN-151 | specific — handles both worker and sync results; both paths build the Opp cohort ONCE and thread it through every rollup identically |
+| FN-154 | `_repeatOffendersStatusHtml(opts)` / `_repeatOffendersDebugPanelHtml(sc, hierarchyMissing)` / `_repeatOffendersSyncCustomRangeVisibility()` `#L583/#L603/#L756` | worker `stageCounts`, hierarchy-missing flag | the status line / debug panel / custom-range visibility | DOM | — | FN-153 | specific |
+| FN-155 | `rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage, rmHierarchyByNameLower)` `#L696` | a result list + a hierarchy map | one leaderboard table's HTML — **12 columns since 2026-09-29** (Same-Day Opp% / 48h Opp% added after Instances; `colspan` on the empty-state branches bumped 10→12; a red "+ Low conversion" chip appears in Status when `r.doubleFlag`) | none | `rmPerformanceDrivenBy` / `rmPerformanceHierarchyCells` / `rmOppDisplayCells` (`JS-008`, the last one added 2026-09-29), `esc` (`JS-010`) | FN-153, `JS-013` reuses `rmPerformanceHierarchyCells` (no longer `rmPerformanceDrivenBy`, unused by either renderer since 2026-09-07) | reusable |
 
 ## State owned here
 

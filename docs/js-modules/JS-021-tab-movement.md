@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/tab-movement.js` (1365 lines) |
+| **Location** | `js/tab-movement.js` (1423 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `29b7146` |
+| **Last Verified** | (pending commit) against the `evidenceAtDeadline` move (FN-162) |
 
 ## Purpose / reason to exist
 
@@ -27,6 +27,9 @@ one module that loads and owns it.
   / `_currentSheetId` (module state).
 - `buildMovementHistories` / `enrichSnapshotCached` / `enrichLeadAsOf` —
   per-lead snapshot history + as-of enrichment.
+- `evidenceAtDeadline` (moved here from `JS-024` 2026-09-29) — the
+  shared "status as of a deadline" lookup, now also used by `JS-008`'s
+  RM Opp-Conversion engine via the Worker.
 - `passesMovementFilters` — the Movement/Tracking filter predicate
   (distinct from `passesRepeatOffenderFilters`).
 - Stalled Leads / RM Stall Leaderboard / Time-to-Opportunity / Unmatched
@@ -54,12 +57,13 @@ and correctly parsed back as a date when reading historical rows.
 | FN-258 | `latestMovementLogHashByKey()` `#L331` | `movementSnapshots` | `{ [lead_id|RM (FN-297)]: latest content_hash }` | none | — | `browserSnapshotOpenLeads` (`JS-018`, content-hash dedup) | specific — the browser-writer counterpart of `MovementTracker.gs`'s `_latestContentHashByKeyGs_`; deliberately not memoised like FN-141, since `browserSnapshotOpenLeads` calls `fetchMovementLog` immediately before this specifically to see a capture the Apps Script trigger already made since this tab was last loaded |
 | FN-297 | `movementDedupKey(leadId, rm)` `#L327` | a lead_id and an RM | `lead_id|RM` (trimmed; a blank RM is `Unassigned`) — the content-hash dedup identity of ONE leads-tab row | none (pure) | — | FN-258, `browserSnapshotOpenLeads` (`JS-018` FN-121) | specific — added 2026-09-26, twin of `MovementTracker.gs` `_dedupKeyGs_` (`GS-008` FN-296); keyed by `client_id` before, which several rows share, so all but one re-appended every capture |
 | FN-141 | `buildMovementHistories()` / `enrichSnapshotCached(rec)` / `enrichLeadAsOf(rawRecord, asOfDate)` `#L346/#L394/#L373` | `movementSnapshots` | per-lead ordered snapshot history; per-snapshot enriched record | memoisation caches | `enrichLead` (`JS-006`), `parseDate` | Stalled/leaderboard/time-to-opp compute here, `JS-008`, `JS-024`, `JS-023` | reusable — hub API |
-| FN-142 | `passesMovementFilters(rec, opts)` `#L437` | a record + options | bool | none | `mainRegionFor` / `effectiveRegion` (`JS-014`) | Movement/Tracking renders, `JS-024`, `JS-023` | reusable — **not** the same predicate as `passesRepeatOffenderFilters` (`JS-008`); this one *does* run `effectiveRegion`'s Loan inference |
-| FN-143 | `computeStalledLeads()` / `currentStalledRowsByRegion()` `#L596/#L644` | histories | leads ≥2 days old AND (comments but none in 6h, OR never commented + `call_attempts` unchanged vs a ~6h-old snapshot) | none | FN-141 | `renderStalledFlaggedLeadsOps` (FN-146), `overview-…` (`JS-012`), `reports-build.js` (`JS-014`) | reusable |
-| FN-144 | `computeRmStallLeaderboard()` / `computeTimeToOpportunity()` / `summarizeTimeToRemediate(episodes)` `#L754/#L800/#L832` | histories | per-RM stall counts / time-to-Opportunity episodes | none | FN-141, `splitHistoryByCopy` | `renderRmStallLeaderboard` / `renderTimeToOpportunity` (FN-146) | reusable |
-| FN-145 | `computeUnmatchedMovementComments()` / `downloadUnmatchedCommentsCSV()` / `renderUnmatchedCommentsCount()` `#L881/#L920/#L912` | histories | the unmatched-comment list / a CSV / a count badge | download | `inferOutcome` (`JS-007`), `csvEscape` (`JS-012`) | `#downloadUnmatchedCommentsBtn` (`BTN-018`), `renderMovementTab` (FN-147) | reusable |
+| FN-162 | `evidenceAtDeadline(history, deadlineMs, liveLead)` `#L427` (**moved here from `js/tab-tracking.js` `JS-024`, 2026-09-29**) | a lead's snapshot history + a deadline | the lead's status **as of that deadline** — nearest snapshot at-or-before, else forward, else `null` (never a guess) | none | `enrichSnapshotCached` (FN-141, above) | `JS-024`'s cohort computations (unchanged callers), `reconstructRmOppCohort` (`JS-008` FN-311, new 2026-09-29) | reusable — moved specifically so `js/rm-performance-worker.js` (`JS-017`) could `importScripts()` it: `JS-024` runs `document.addEventListener` at module-parse time, so it can never be Worker-loadable, while this file has no DOM code at parse time (confirmed, same discipline as this file's own 2026-09-06 relocation precedent for `JS-008`'s filter helpers). **Known bug in the `liveLead` fallback, not fixed by the move** — see this function's own header comment; `JS-008`'s `reconstructRmOppCohort` always passes `liveLead=null` specifically to avoid it. |
+| FN-142 | `passesMovementFilters(rec, opts)` `#L479` | a record + options | bool | none | `mainRegionFor` / `effectiveRegion` (`JS-014`) | Movement/Tracking renders, `JS-024`, `JS-023` | reusable — **not** the same predicate as `passesRepeatOffenderFilters` (`JS-008`); this one *does* run `effectiveRegion`'s Loan inference |
+| FN-143 | `computeStalledLeads()` / `currentStalledRowsByRegion()` `#L638/#L686` | histories | leads ≥2 days old AND (comments but none in 6h, OR never commented + `call_attempts` unchanged vs a ~6h-old snapshot) | none | FN-141 | `renderStalledFlaggedLeadsOps` (FN-146), `overview-…` (`JS-012`), `reports-build.js` (`JS-014`) | reusable |
+| FN-144 | `computeRmStallLeaderboard()` / `computeTimeToOpportunity()` / `summarizeTimeToRemediate(episodes)` `#L796/#L842/#L874` | histories | per-RM stall counts / time-to-Opportunity episodes | none | FN-141, `splitHistoryByCopy` | `renderRmStallLeaderboard` / `renderTimeToOpportunity` (FN-146) | reusable |
+| FN-145 | `computeUnmatchedMovementComments()` / `downloadUnmatchedCommentsCSV()` / `renderUnmatchedCommentsCount()` `#L923/#L962/#L954` | histories | the unmatched-comment list / a CSV / a count badge | download | `inferOutcome` (`JS-007`), `csvEscape` (`JS-012`) | `#downloadUnmatchedCommentsBtn` (`BTN-018`), `renderMovementTab` (FN-147) | reusable |
 | FN-146 | `computeOvernightCohort(asOf)` / `overnightStatusLabel(l)` / `overnightEmailableLeads(cohortLeads)` / `buildOvernightRegionReports(...)` / `renderOvernightCohort(asOf)` / `renderOvernightRegionReports()` `#L964`–`#L1167` | as-of date, cohort leads, a follow-up lookup | the overnight cohort + its per-region reports + the write cycle | Overnight cycle: `clearLeadFollowupsTab` → `pushLeadsToFollowups` → `waitForAllFollowups` (`JS-018`); `renderMorningBrief` at checkpoints | `JS-018`, `buildRegionReports` (`JS-014`), `JS-020` | `#overnightGenerateReportsBtn` (`BTN-016`), `#overnightFollowupsWaitCancelBtn` (`BTN-017`) | specific — uses **live** `allParsedLeads`, not a frozen snapshot |
-| FN-147 | `renderMovementTab()` / `initMovementUI()` `#L1318/#L1341` | — | renders every Movement section; wires the tab controls | DOM writes / listeners; wires `#snapshotNowBtn` → `browserSnapshotOpenLeads` (`JS-018`) | all the compute + render fns here | `renderAll` (`JS-012`), `main.js` (`JS-011`) | specific |
+| FN-147 | `renderMovementTab()` / `initMovementUI()` `#L1360/#L1383` | — | renders every Movement section; wires the tab controls | DOM writes / listeners; wires `#snapshotNowBtn` → `browserSnapshotOpenLeads` (`JS-018`) | all the compute + render fns here | `renderAll` (`JS-012`), `main.js` (`JS-011`) | specific |
 | FN-148 | `buildTodayCallBaseline(asOf)` / `lastSnapshotBefore(asOf)` `#L108/#L135` | as-of date | the `_todayCallBaselineByKey` / `_lastSnapshotByKey` seeds that `enrichLead` (`JS-006`) reads for `underCalledToday` | populates `JS-006`'s baseline Maps | FN-141 | called during the fetch/enrich pipeline | reusable — the seam between Movement history and `enrichLead` |
 | FN-149 | snapshot-selector helpers: `populateMovementDateSelect` / `populateMovementTimeSelect` / `getSelectedMovementSnapshot` / `distinctMovementSnapshotRuns` / `movementDatesAvailable` `#L444`–`#L503` | — | the From/To snapshot pickers | DOM writes | `istTimeLabel` | Movement + Tracking pickers | reusable |
 

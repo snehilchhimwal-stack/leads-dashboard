@@ -768,6 +768,263 @@
     }
   })();
 
+  // ---- 2g. RM Opp-Conversion join (added 2026-09-29, HANDOVER.md §9.7.3) ----
+  // One lead-copy (1+ Movement_Log rows sharing a lead_id) with an explicit
+  // assignment time and a sequence of {hOffset (hours after createdAt),
+  // stage} snapshots — createdAt real Date, snaps ascending by hOffset (not
+  // enforced here; every fixture below already writes them in order).
+  function _roOppLead(rmName, leadId, createdAt, snaps) {
+    return snaps.map(s => _roFilterTestRow({
+      lead_id: leadId, client_id: 'C-' + leadId, RM: rmName,
+      lead_assigned_at: createdAt.toISOString(),
+      snapshot_at: new Date(createdAt.getTime() + s.hOffset * 3600000),
+      current_stage: s.stage,
+    }));
+  }
+
+  // 1. Cohort/lag-guard correctness — a lead whose first snapshot lags its
+  // own assignment by more than RM_OPP_MAX_FIRST_CAPTURE_LAG_HOURS (12) is
+  // excluded from the cohort entirely (not "included but unresolved") —
+  // its evidence says nothing reliable about same-day conversion. A lead
+  // still under 48h old counts toward the cohort but as pending, not
+  // resolved.
+  (function () {
+    const createdAt = new Date(Date.now() - 5 * 24 * 3600000); // 5 days ago — old enough for 48h to have elapsed
+    const recentCreatedAt = new Date(Date.now() - 10 * 3600000); // 10h ago — well under 48h
+    const rows = [
+      ..._roOppLead('LagTest RM', 'LAG-OK', createdAt, [{ hOffset: 1, stage: 'Suspect' }]), // 1h lag — within guard
+      ..._roOppLead('LagTest RM', 'LAG-TOOLATE', createdAt, [{ hOffset: 20, stage: 'Suspect' }]), // 20h lag — excluded
+      ..._roOppLead('LagTest RM', 'LAG-RECENT', recentCreatedAt, [{ hOffset: 1, stage: 'Suspect' }]), // in cohort, not yet 48h
+    ];
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    try {
+      const c = reconstructRmOppCohort(null, _roEmptyFilters(), null, Date.now());
+      assert('reconstructRmOppCohort: excludes a lead whose first snapshot lagged assignment by >12h',
+        c.every(e => e.lead_id !== 'LAG-TOOLATE'), 'cohort lead_ids=' + JSON.stringify(c.map(e => e.lead_id)));
+      assert('reconstructRmOppCohort: includes a lead within the 12h lag guard',
+        c.some(e => e.lead_id === 'LAG-OK'), 'cohort lead_ids=' + JSON.stringify(c.map(e => e.lead_id)));
+      const recent = c.find(e => e.lead_id === 'LAG-RECENT');
+      assert('reconstructRmOppCohort: a <48h-old lead is in the cohort but windowComplete=false (pending, not resolved)',
+        !!recent && recent.windowComplete === false, 'recent=' + JSON.stringify(recent));
+    } finally { movementSnapshots = savedSnapshots; }
+  })();
+
+  // 2. Peer-average arithmetic exactly, and the low-conversion threshold
+  // actually has teeth — the one test in this section most worth
+  // mutation-checking by hand (see HANDOVER.md §9.7.3 for the exact
+  // reasoning behind RM_OPP_LOW_RATIO=0.5, not a literal RM_PERF_FLAG_RATIO
+  // mirror). All 20 leads created 5 days ago (past their own 48h mark, so
+  // the whole table's basis resolves to '48h') — single snapshot each for
+  // non-converters (evidenceAtDeadline's firstAfter/atOrBefore fallback
+  // still finds real evidence), a second Opportunity-stage snapshot at
+  // +40h for converters.
+  (function () {
+    const createdAt = new Date(Date.now() - 5 * 24 * 3600000);
+    const rows = [];
+    for (let i = 1; i <= 10; i++) {
+      const snaps = i <= 8 // OppGood: 8 of 10 convert
+        ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }]
+        : [{ hOffset: 1, stage: 'Suspect' }];
+      rows.push(..._roOppLead('OppGood', 'GOOD-' + i, createdAt, snaps));
+    }
+    for (let i = 1; i <= 10; i++) {
+      rows.push(..._roOppLead('OppBad', 'BAD-' + i, createdAt, [{ hOffset: 1, stage: 'Suspect' }])); // 0 of 10 convert
+    }
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    try {
+      const cohort = reconstructRmOppCohort(null, _roEmptyFilters(), null, Date.now());
+      assert('G2 fixture: cohort has exactly 20 leads (no lag/date exclusions)', cohort.length === 20, 'cohortLength=' + cohort.length);
+      const byGroup = aggregateRmOppConversion(cohort, undefined);
+      const classified = classifyRmOppConversion(byGroup);
+      assert('classifyRmOppConversion: basis resolves to h48 once every lead is past its own 48h mark',
+        classified.basis === 'h48', 'basis=' + classified.basis);
+      // Pooled peer h48 rate: (8 + 0) opp / (10 + 10) resolved = 0.4 exactly.
+      assert('classifyRmOppConversion: pooled peer h48 rate is exactly 8/20 = 0.4 (volume-weighted, not an unweighted mean of the two groups\' own rates)',
+        Math.abs(classified.peer.h48 - 0.4) < 1e-9, 'peer.h48=' + classified.peer.h48);
+      const good = classified.byName.get('OppGood'), bad = classified.byName.get('OppBad');
+      assert('classifyRmOppConversion: OppGood (8/10, well above peer) is NOT lowConversion',
+        !!good && good.lowConversion === false, 'good=' + JSON.stringify(good));
+      // shrunk = 10/(10+8) * 0 + 8/(10+8) * 0.4 = 8/45 ≈ 0.1778 <= 0.5*0.4=0.2 -> flagged.
+      assert('classifyRmOppConversion: OppBad (0/10) IS lowConversion — shrunk rate 8/45≈0.178 <= 0.5×peer(0.4)=0.2',
+        !!bad && bad.lowConversion === true, 'bad=' + JSON.stringify(bad));
+      assert('classifyRmOppConversion: OppBad\'s shrunk rate matches hand computation (8/45) exactly',
+        Math.abs(bad.shrunk - 8 / 45) < 1e-9, 'bad.shrunk=' + bad.shrunk);
+    } finally { movementSnapshots = savedSnapshots; }
+  })();
+
+  // 3. doubleFlag truth table — requires BOTH an elevated violation
+  // classification AND lowConversion; neither alone is enough.
+  (function () {
+    const oppClassified = { basis: 'h48', peer: { sameDay: 0, h48: 0.4 }, byName: new Map([
+      ['Below+Low', { lowConversion: true }], ['Below+NotLow', { lowConversion: false }],
+      ['Watch+Low', { lowConversion: true }], ['OnTrack+Low', { lowConversion: true }],
+      ['Insufficient+Low', { lowConversion: true }],
+    ]) };
+    const perfRows = [
+      { name: 'Below+Low', classification: 'Below Expectations' },
+      { name: 'Below+NotLow', classification: 'Below Expectations' },
+      { name: 'Watch+Low', classification: 'Watch — concentrated' },
+      { name: 'OnTrack+Low', classification: 'On Track' },
+      { name: 'Insufficient+Low', classification: 'Insufficient Data' },
+      { name: 'NoOppData', classification: 'Below Expectations' }, // not in byName at all
+    ];
+    const joined = joinRmOppConversion(perfRows, oppClassified);
+    const flagOf = name => joined.find(r => r.name === name).doubleFlag;
+    assert('joinRmOppConversion: Below Expectations + lowConversion -> doubleFlag true', flagOf('Below+Low') === true);
+    assert('joinRmOppConversion: Below Expectations + NOT lowConversion -> doubleFlag false', flagOf('Below+NotLow') === false);
+    assert('joinRmOppConversion: Watch — concentrated + lowConversion -> doubleFlag true', flagOf('Watch+Low') === true);
+    assert('joinRmOppConversion: On Track + lowConversion -> doubleFlag false (violation side not elevated)', flagOf('OnTrack+Low') === false);
+    assert('joinRmOppConversion: Insufficient Data + lowConversion -> doubleFlag false (never flagged regardless)', flagOf('Insufficient+Low') === false);
+    assert('joinRmOppConversion: a row with no matching Opp entry gets opp:null, doubleFlag false, never guessed',
+      joined.find(r => r.name === 'NoOppData').opp === null && flagOf('NoOppData') === false);
+    assert('joinRmOppConversion: every existing field is copied through unchanged',
+      joined[0].classification === perfRows[0].classification);
+  })();
+
+  // 4. Same Project/Region/TL/Source/Sub-source filter produces the same
+  // population on both the violation engine and the conversion cohort —
+  // the one requirement this whole design exists to satisfy. Fixture
+  // deliberately single-snapshot-per-lead, single-day, so "eligible
+  // lead-days observed in range" (violation side) and "leads assigned in
+  // range" (conversion side) collapse onto the exact same 3 leads for
+  // this narrow case — NOT a general claim that the two counts always
+  // match (they measure different things by design, see
+  // core-rm-performance.js's own header comment), just that the SAME
+  // filter predicate excludes the SAME records on both sides.
+  (function () {
+    const createdAt = new Date(Date.now() - 10 * 3600000); // 10h ago (lead_assigned_at)
+    const rows = [
+      // hOffset:4 — 4h after assignment: past CONFIG.LEAD_GRACE_HOURS (3h,
+      // so the violation engine's pastGrace-gated rules are eligible) and
+      // within the 12h lag guard (so the cohort includes it too).
+      ..._roOppLead('FilterJoin RM', 'FJ-G1', createdAt, [{ hOffset: 4, stage: 'Suspect' }]).map(r => Object.assign(r, { group_source: 'Google', source_bucket: 'UTM' })),
+      ..._roOppLead('FilterJoin RM', 'FJ-G2', createdAt, [{ hOffset: 4, stage: 'Suspect' }]).map(r => Object.assign(r, { group_source: 'Google', source_bucket: 'Search' })),
+      ..._roOppLead('FilterJoin RM', 'FJ-G3', createdAt, [{ hOffset: 4, stage: 'Suspect' }]).map(r => Object.assign(r, { group_source: 'Google', source_bucket: 'Non-UTM' })),
+      ..._roOppLead('FilterJoin RM', 'FJ-F1', createdAt, [{ hOffset: 4, stage: 'Suspect' }]).map(r => Object.assign(r, { group_source: 'Facebook', source_bucket: 'UTM' })),
+    ];
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    try {
+      const filters = Object.assign(_roEmptyFilters(), { source: new Set(['Google']) });
+      const perf = computeRmPerformance(null, undefined, filters, null);
+      const row = perf.find(r => r.name === 'FilterJoin RM');
+      const cohort = reconstructRmOppCohort(null, filters, null, Date.now());
+      assert('Same Source=Google filter: violation engine sees exactly 3 eligible leads (the 3 Google leads; Facebook excluded)',
+        !!row && row.distinctLeads === 3, 'distinctLeads=' + (row && row.distinctLeads));
+      assert('Same Source=Google filter: conversion cohort sees exactly the same 3 leads',
+        cohort.length === 3 && cohort.every(e => e.rec.group_source === 'Google'), 'cohortLength=' + cohort.length);
+      const bucketFilters = Object.assign(_roEmptyFilters(), { source: new Set(['Google']), bucket: new Set(['UTM', 'Search']) });
+      const cohortUtmSearch = reconstructRmOppCohort(null, bucketFilters, null, Date.now());
+      assert('Source=Google + Sub-source=UTM,Search: conversion cohort correctly narrows to 2 (excludes the Non-UTM one)',
+        cohortUtmSearch.length === 2, 'cohortLength=' + cohortUtmSearch.length);
+    } finally { movementSnapshots = savedSnapshots; }
+  })();
+
+  // 5. No regression — every field classifyRmPerformance already produced
+  // is copied through computeRmPerformanceWithOpp unchanged (the "parallel
+  // signal, not a 5th tier" decision, HANDOVER.md §9.7.3).
+  (function () {
+    const createdAt = new Date(Date.now() - 5 * 24 * 3600000);
+    const rows = [];
+    // hOffset:4 — past the 3h grace, so this RM has real, nonzero
+    // eligible/violation data (distinctLeads>0), not a trivial 0===0
+    // equality check.
+    for (let i = 1; i <= 6; i++) rows.push(..._roOppLead('Regression RM', 'REG-' + i, createdAt, [{ hOffset: 4, stage: 'Suspect' }]));
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    try {
+      const filters = _roEmptyFilters();
+      const plain = computeRmPerformance(null, undefined, filters, null).find(r => r.name === 'Regression RM');
+      const cohort = reconstructRmOppCohort(null, filters, null, Date.now());
+      const joined = computeRmPerformanceWithOpp(null, undefined, filters, null, cohort).find(r => r.name === 'Regression RM');
+      assert('Regression fixture: distinctLeads is genuinely nonzero (this test actually exercises real data, not two empty results agreeing trivially)',
+        !!plain && plain.distinctLeads > 0, 'plain.distinctLeads=' + (plain && plain.distinctLeads));
+      ['name', 'composite', 'peerComposite', 'classification', 'distinctLeads', 'totalInstances', 'routingIssueDays'].forEach(k => {
+        assert('computeRmPerformanceWithOpp: field "' + k + '" is byte-identical to plain computeRmPerformance',
+          JSON.stringify(joined[k]) === JSON.stringify(plain[k]), k + ': joined=' + JSON.stringify(joined[k]) + ' plain=' + JSON.stringify(plain[k]));
+      });
+      assert('computeRmPerformanceWithOpp: adds opp/oppBasis/oppPeer/doubleFlag on top, not instead',
+        joined.opp !== undefined && joined.oppBasis !== undefined && joined.oppPeer !== undefined && typeof joined.doubleFlag === 'boolean');
+    } finally { movementSnapshots = savedSnapshots; }
+  })();
+
+  // 6. Region-restricted conversion peers — computeRmPerformanceByRegion's
+  // opts.oppCohort must compute each region's Opp-conversion peer average
+  // against ONLY that region's own RMs, same as the violation side already
+  // does (repeatOffendersRegionKey-restricted keyFn, reused for both).
+  (function () {
+    const createdAt = new Date(Date.now() - 5 * 24 * 3600000);
+    const rows = [];
+    // RegionHigh: 2 RMs, both converting 4/5 (80%).
+    ['RH-RM1', 'RH-RM2'].forEach(rm => {
+      for (let i = 1; i <= 5; i++) {
+        const snaps = i <= 4 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+        rows.push(..._roOppLead(rm, rm + '-' + i, createdAt, snaps).map(r => Object.assign(r, { region: 'RegionHigh' })));
+      }
+    });
+    // RegionLow: 2 RMs, both converting 1/5 (20%).
+    ['RL-RM1', 'RL-RM2'].forEach(rm => {
+      for (let i = 1; i <= 5; i++) {
+        const snaps = i <= 1 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+        rows.push(..._roOppLead(rm, rm + '-' + i, createdAt, snaps).map(r => Object.assign(r, { region: 'RegionLow' })));
+      }
+    });
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    try {
+      const filters = _roEmptyFilters();
+      const cohort = reconstructRmOppCohort(null, filters, null, Date.now());
+      const byRegion = computeRmPerformanceByRegion(null, filters, null, { oppCohort: cohort });
+      const high = byRegion.find(e => e.region === 'RegionHigh');
+      const low = byRegion.find(e => e.region === 'RegionLow');
+      assert('computeRmPerformanceByRegion opts.oppCohort: RegionHigh\'s own peer h48 is 0.8 (its own 2 RMs only, not company-wide)',
+        !!high && high.list.length && Math.abs(high.list[0].oppPeer.h48 - 0.8) < 1e-9, 'high peer=' + (high && high.list[0] && high.list[0].oppPeer.h48));
+      assert('computeRmPerformanceByRegion opts.oppCohort: RegionLow\'s own peer h48 is 0.2, independently of RegionHigh\'s',
+        !!low && low.list.length && Math.abs(low.list[0].oppPeer.h48 - 0.2) < 1e-9, 'low peer=' + (low && low.list[0] && low.list[0].oppPeer.h48));
+      assert('computeRmPerformanceByRegion: omitting opts still returns rows with no opp field at all (backward compatible)',
+        computeRmPerformanceByRegion(null, filters, null).every(e => e.list.every(r => r.opp === undefined)));
+    } finally { movementSnapshots = savedSnapshots; }
+  })();
+
+  // 7. Real Worker path: nowMs must be threaded through explicitly, since
+  // the Worker runs on its OWN real wall clock and never sees the harness's
+  // frozen Date (HANDOVER.md §9.7.3, verified during planning). A lead
+  // created exactly "now" (frozen, 2026-09-09) must read as pending48h —
+  // if the Worker silently fell back to its own real Date.now() (today's
+  // actual date, ~3 weeks later), this same lead would incorrectly read
+  // as 48h-resolved instead. Also confirms the rendered DOM has the new
+  // columns with no undefined/NaN.
+  await (async function () {
+    const savedSnapshots = movementSnapshots, savedFetch = movementFetchState, savedHier = rmHierarchyFetchState;
+    const savedLastResult = _repeatOffendersLastResult;
+    const rangeSel = document.getElementById('repeatOffendersRangeSelect');
+    const savedRange = rangeSel ? rangeSel.value : null;
+    try {
+      if (rangeSel) rangeSel.value = 'allTime';
+      movementFetchState = 'ok'; rmHierarchyFetchState = 'missing';
+      const createdAt = new Date(); // frozen "now" itself — 0h old, nowhere near 48h
+      movementSnapshots = _roOppLead('WorkerNow RM', 'WN-1', createdAt, [{ hOffset: 0, stage: 'Suspect' }])
+        .concat(_roCacheTestFixture('WorkerNow RM', 5)); // pad past RM_PERF_MIN_VOLUME_LEADS so it actually classifies
+      _repeatOffendersLastResult = null;
+      renderRepeatOffenders();
+      await _roWaitForCache();
+      const cached = _repeatOffendersLastResult;
+      const row = cached && cached.rm && cached.rm.find(r => r.name === 'WorkerNow RM');
+      assert('Real Worker path: nowMs was passed through correctly — a lead created at the frozen "now" reads as NOT 48h-resolved (pending), proving the Worker did not fall back to its own real wall clock',
+        !!row && !!row.opp && row.opp.pending48h >= 1, 'row.opp=' + JSON.stringify(row && row.opp));
+      const bodyEl = document.getElementById('repeatOffendersBody');
+      const html = bodyEl ? bodyEl.innerHTML : '';
+      assert('Real Worker path: rendered Repeat Offenders body contains no undefined/NaN after the Opp-conversion join',
+        !/undefined|NaN/.test(html), 'contains undefined/NaN: ' + /undefined|NaN/.test(html));
+    } finally {
+      movementSnapshots = savedSnapshots; movementFetchState = savedFetch; rmHierarchyFetchState = savedHier;
+      _repeatOffendersLastResult = savedLastResult;
+      if (rangeSel && savedRange !== null) rangeSel.value = savedRange;
+    }
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),
