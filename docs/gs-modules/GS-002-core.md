@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `Core.gs` (304 lines) |
+| **Location** | `Core.gs` (395 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-28 against commit `4c99f7f` |
+| **Last Verified** | (pending commit) against `removeOppConversionTrackingTabNow` (FN-305) |
 
 ## Purpose / reason to exist
 
@@ -64,6 +64,7 @@ Never — it has no `setupXxx()` and no schedule.
 | FN-301 | `computeWorkbookCellUsageGs_(ss)` `#L328` (added 2026-09-28) | a spreadsheet | `{sheets, totalCells, ceiling, pctUsed}` — every tab's `getMaxRows()*getMaxColumns()` (the DECLARED grid, not data-bearing cells; see `pruneMovementLog_`'s own comment, `GS-008`), largest first | none (reads `ss.getSheets()`) | — | `reportWorkbookCellUsageNow` (FN-303), `buildWeeklyOpsChecklistSummary_` (`GS-009` FN-228) | reusable — the shared computation so the console report and the Monday alert can never disagree |
 | FN-302 | `fmtCellsGs_(n)` `#L341` (added 2026-09-28) | a number | `'1,234,567'`-style comma-grouped string | none (pure) | — | FN-301's callers | reusable — no locale dependency, unlike `toLocaleString()` |
 | FN-303 | `reportWorkbookCellUsageNow()` `#L348` (added 2026-09-28) | — | none | `Logger.log`s the full per-tab breakdown, largest first | FN-301, FN-302 | Apps Script editor (manual) | specific — the console-callable diagnostic |
+| FN-305 | `removeOppConversionTrackingTabNow()` `#L372` (added 2026-09-29) | — | none | refuses (throws) if `Opp_Conversion_Tracking` has any data row below its header; deletes the tab outright otherwise (no Drive archive — an empty tab has nothing to archive) | — | Apps Script editor (manual) | specific — one-off cleanup of a dead scratch tab the cell-budget diagnostic (FN-301/303) surfaced 2026-09-28, confirmed zero code references anywhere, authorized for deletion by Snehil 2026-09-29 |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -83,6 +84,7 @@ Never — it has no `setupXxx()` and no schedule.
 |---|---|---|---|
 | EXC-058 | an unknown stage string | `canonicalStage_` returns `null`; callers treat it as pre-funnel | the lead classifies as "not updated" / earliest stage rather than erroring |
 | EXC-059 | a header row missing an expected column | `buildColIndex_` leaves that key unmapped; `getVal_` returns `''` | the dependent flag is skipped, not a crash |
+| EXC-103 | `removeOppConversionTrackingTabNow` finds a data row below `Opp_Conversion_Tracking`'s header (added 2026-09-29) | throws `Error`, tab left untouched | a human sees the error in the Executions log and investigates why a tab confirmed empty/dead on 2026-09-28 now has real data, instead of it being silently deleted |
 
 ## Data lineage
 

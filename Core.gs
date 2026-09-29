@@ -353,3 +353,43 @@ function reportWorkbookCellUsageNow() {
     Logger.log('  ' + s.name + ': ' + fmtCellsGs_(s.cells) + ' cells (' + s.rows + ' rows x ' + s.cols + ' cols)');
   });
 }
+
+// ========================= One-off dead-tab removal =========================
+// removeOppConversionTrackingTabNow — Opp_Conversion_Tracking surfaced by
+// the cell-budget diagnostic above (2026-09-28 sweep) as an unrecognized
+// tab. Confirmed via a full repo + live-Apps-Script-project search: ZERO
+// code references anywhere, and the tab itself is empty (no data rows) —
+// a leftover scratch tab, not a real backup like
+// Movement_Log_backup_2026-09-17_1115 was. Snehil authorized deletion
+// 2026-09-29.
+//
+// Unlike removeStaleMovementLogBackupTabNow_ (MovementTracker.gs), this
+// does NOT archive-then-delete: an empty tab has nothing to archive. The
+// guard instead refuses outright the moment it finds any real data row —
+// "someone started using this tab for something real since it was last
+// checked" is a fact worth a human's attention, not something to silently
+// archive-and-remove out from under them.
+function removeOppConversionTrackingTabNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = 'Opp_Conversion_Tracking';
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) { Logger.log(sheetName + ' not found - nothing to remove (already done?).'); return; }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow > 1) {
+    throw new Error(sheetName + ' has ' + (lastRow - 1) + ' data row(s) below its header - refusing to delete a ' +
+      'tab that was confirmed empty and unreferenced on 2026-09-28/29. Investigate before deleting.');
+  }
+
+  if (lastRow === 1 && lastCol > 0) {
+    const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    Logger.log(sheetName + ' has only a header row ' + JSON.stringify(header) + ' and no data rows - safe to delete.');
+  } else {
+    Logger.log(sheetName + ' is completely empty - safe to delete.');
+  }
+
+  ss.deleteSheet(sheet);
+  Logger.log('Removed the dead ' + sheetName + ' tab. Confirmed zero code references anywhere in the repo or the ' +
+    'live Apps Script project (2026-09-28), authorized for deletion by Snehil (2026-09-29).');
+}

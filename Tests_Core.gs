@@ -138,6 +138,62 @@ function runCoreTests_() {
     TestAssertEqual_(usage.sheets[0].cells, 50000 * 26, 'computeWorkbookCellUsageGs_: per-sheet cells is rows*cols for that one tab');
     TestAssertEqual_(usage.ceiling, 10000000, 'computeWorkbookCellUsageGs_: ceiling is the real Sheets constant, not a guess');
     TestAssert_(Math.abs(usage.pctUsed - usage.totalCells / 10000000) < 1e-9, 'computeWorkbookCellUsageGs_: pctUsed is totalCells/ceiling');
+
+    // ---- removeOppConversionTrackingTabNow ----
+    // This function reaches SpreadsheetApp.getActiveSpreadsheet() directly
+    // (same shape as reportWorkbookCellUsageNow above and
+    // removeStaleMovementLogBackupTabNow_ in MovementTracker.gs), so each
+    // case below swaps the global SpreadsheetApp itself rather than
+    // passing a mock in as a parameter, then restores it — mirroring
+    // Tests_MovementTracker.gs's own pattern for the same reason.
+    const realSpreadsheetAppForOppConv_ = SpreadsheetApp;
+    try {
+      // (a) tab not found -> no-op, does not throw.
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return TestMockSpreadsheet_({}); } };
+      removeOppConversionTrackingTabNow();
+      TestAssert_(true, 'removeOppConversionTrackingTabNow: missing tab is a silent no-op, not a throw');
+
+      // (b) tab exists with only a header row (no data) -> deleted.
+      const headerOnlySs = TestMockSpreadsheet_({
+        'Opp_Conversion_Tracking': TestMockSheet_('Opp_Conversion_Tracking', [['a', 'b', 'c']]),
+      });
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return headerOnlySs; } };
+      removeOppConversionTrackingTabNow();
+      TestAssertEqual_(headerOnlySs.getSheetByName('Opp_Conversion_Tracking'), null, 'removeOppConversionTrackingTabNow: header-only tab (no data rows) is deleted');
+
+      // (c) tab exists completely empty (not even a header) -> deleted.
+      const fullyEmptySs = TestMockSpreadsheet_({
+        'Opp_Conversion_Tracking': TestMockSheet_('Opp_Conversion_Tracking', []),
+      });
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return fullyEmptySs; } };
+      removeOppConversionTrackingTabNow();
+      TestAssertEqual_(fullyEmptySs.getSheetByName('Opp_Conversion_Tracking'), null, 'removeOppConversionTrackingTabNow: completely empty tab is deleted');
+
+      // (d) tab exists WITH real data rows -> refuses, tab untouched.
+      // Proves the guard actually has teeth, not just a happy path.
+      const hasDataSs = TestMockSpreadsheet_({
+        'Opp_Conversion_Tracking': TestMockSheet_('Opp_Conversion_Tracking', [
+          ['lead_id', 'stage'],
+          ['L1', 'Opportunity'],
+        ]),
+      });
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return hasDataSs; } };
+      let threwForRealData = false;
+      try { removeOppConversionTrackingTabNow(); } catch (e) { threwForRealData = /1 data row/.test(e.message); }
+      TestAssert_(threwForRealData, 'removeOppConversionTrackingTabNow: refuses (throws) when the tab has real data rows instead of silently deleting them');
+      TestAssert_(hasDataSs.getSheetByName('Opp_Conversion_Tracking') !== null, 'removeOppConversionTrackingTabNow: tab with real data survives the refused call untouched');
+
+      // (e) re-run safety: deleting twice in a row is a clean no-op the
+      // second time — re-target the SAME spreadsheet object that just had
+      // a real deletion happen in it (fullyEmptySs from (c)), not a fresh
+      // mock, and not hasDataSs from (d) (whose delete was refused, so it
+      // still has the tab and would throw again here).
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return fullyEmptySs; } };
+      removeOppConversionTrackingTabNow();
+      TestAssert_(true, 'removeOppConversionTrackingTabNow: running again immediately after a successful delete is a clean no-op');
+    } finally {
+      SpreadsheetApp = realSpreadsheetAppForOppConv_;
+    }
   } finally {
     TestEnv_tearDown_();
   }
