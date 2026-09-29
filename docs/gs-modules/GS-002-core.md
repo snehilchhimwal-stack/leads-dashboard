@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | (pending commit) against `removeOppConversionTrackingTabNow` (FN-305) |
+| **Last Verified** | 2026-09-29 against commit `642d006` |
 
 ## Purpose / reason to exist
 
