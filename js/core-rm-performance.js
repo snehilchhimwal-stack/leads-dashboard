@@ -343,23 +343,57 @@ function rmPerfCanonicalRmName(rawName){
 // tiers the request actually named.
 const RM_PERF_NON_RM_ROLES = new Set(['a1', 'tm', 'rh', 'cluster head', 'city lead', 'commercial head']);
 
+// Non-RM identities excluded from the RM Performance engine ENTIRELY, for
+// reasons distinct from RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above (those
+// are real leadership people who don't resolve to a leadership ROLE in
+// RM_Hierarchy; the two below were never front-line RMs in the first
+// place -- "no resolvable role" isn't even the right frame for them).
+//   Futwork agents    -- tele-calling vendor staff, matched by NAME
+//                         PATTERN below (RM_PERF_VENDOR_NAME_PATTERN),
+//                         not a fixed list, since vendor agents rotate in
+//                         and out. Mirrors EmailInfra.gs's own
+//                         isFutworkRmNameGs_ convention exactly: any
+//                         Movement_Log RM name containing "Futwork"
+//                         (case-insensitive) is a vendor agent, never a
+//                         real RM on this team's headcount.
+//   'Snehil Chhimwal' -- the dashboard's own account holder/admin.
+//                        Explicit request, 2026-09-29: "remove Snehil
+//                        Chhimwal from list" -- not a front-line RM,
+//                        should never appear as a ranked/coached name in
+//                        this leaderboard.
+// RM_PERF_VENDOR_NAME_PATTERN is a regex literal, not a plain-data
+// literal -- test/check-runtime-parity.py's tolerant JS-literal parser
+// only understands object/array/Set/scalar literals, so this constant is
+// (deliberately) NOT one of its checked pairs; RM_PERF_ADMIN_NAME_EXCLUSIONS
+// (a plain Set) is.
+const RM_PERF_VENDOR_NAME_PATTERN = /futwork/i;
+const RM_PERF_ADMIN_NAME_EXCLUSIONS = new Set([
+  'Snehil Chhimwal',
+]);
+
 // True when `rmName` (Movement_Log's raw RM field) should be excluded
 // from the RM Performance engine ENTIRELY -- not just hidden from the RM
 // table's display, but dropped from Stage 1 before any observation is
-// ever emitted, so a leadership/manager person's leads can't inflate a
-// region's totals, distinct-RM count, or peer average either. Two paths:
+// ever emitted, so a leadership/manager/vendor/admin person's leads can't
+// inflate a region's totals, distinct-RM count, or peer average either.
+// Four paths (function name predates the last two -- kept as-is since
+// many callers/tests/docs already reference it by this name):
 //   1. RM_Hierarchy role is one of RM_PERF_NON_RM_ROLES above -- covers
 //      every A1/TM/RH/CH-tier person, present or future, without a
 //      hardcoded name list.
-//   2. RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above, for names with no
-//      resolvable RM_Hierarchy row at all.
+//   2. RM_PERF_LEADERSHIP_NAME_EXCLUSIONS above, for leadership names
+//      with no resolvable RM_Hierarchy row at all.
+//   3. RM_PERF_ADMIN_NAME_EXCLUSIONS above -- the account holder/admin.
+//   4. RM_PERF_VENDOR_NAME_PATTERN above -- any Futwork vendor agent.
 // rmHierarchyByNameLower may be null/missing (RM_Hierarchy failed to
 // load) -- path 1 then simply can't fire, degrading gracefully to
-// path 2 only, same "unavailable, not broken" convention the A1-TM/RH
+// paths 2-4 only, same "unavailable, not broken" convention the A1-TM/RH
 // rollups already use elsewhere in this file.
 function rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower){
   const name = String(rmName || '').trim();
   if (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS.has(name)) return true;
+  if (RM_PERF_ADMIN_NAME_EXCLUSIONS.has(name)) return true;
+  if (RM_PERF_VENDOR_NAME_PATTERN.test(name)) return true;
   if (rmHierarchyByNameLower) {
     const row = rmHierarchyByNameLower.get(name.toLowerCase());
     if (row && RM_PERF_NON_RM_ROLES.has(String(row.role || '').trim().toLowerCase())) return true;

@@ -352,6 +352,23 @@
   assert('rmPerfIsLeadershipExcluded: a Loan-vertical BDM is NOT excluded (front-line, not management)',
     rmPerfIsLeadershipExcluded('Test BDM', new Map([['test bdm', { role: 'BDM' }]])) === false);
 
+  // ---- 2d-2. rmPerfIsLeadershipExcluded: vendor (Futwork) + admin
+  // (Snehil Chhimwal) exclusions (2026-09-29) ----
+  // Explicit request: "remove agents that have 'futwork' in their name
+  // from list, also remove Snehil Chhimwal from list". Both are excluded
+  // ENTIRELY (Stage 1, same as leadership), not merely hidden -- so
+  // neither can inflate a peer average or a region's distinctRMs count.
+  assert('rmPerfIsLeadershipExcluded: a Futwork vendor agent is excluded (name contains "Futwork")',
+    rmPerfIsLeadershipExcluded('Futwork Agent 12', null) === true);
+  assert('rmPerfIsLeadershipExcluded: Futwork match is case-insensitive (real data may vary casing)',
+    rmPerfIsLeadershipExcluded('FUTWORK Agent Lower', null) === true);
+  assert('rmPerfIsLeadershipExcluded: "Futwork" mid-string still matches (not anchored to the start)',
+    rmPerfIsLeadershipExcluded('Team Futwork Caller 3', null) === true);
+  assert('rmPerfIsLeadershipExcluded: the account holder/admin "Snehil Chhimwal" is excluded',
+    rmPerfIsLeadershipExcluded('Snehil Chhimwal', null) === true);
+  assert('rmPerfIsLeadershipExcluded: a genuine front-line RM whose name merely contains neither pattern is NOT excluded',
+    rmPerfIsLeadershipExcluded('Ramesh Kumar', null) === false);
+
   // Real integration proof, mirroring the alias-fix test's own pattern:
   // a mixed dataset (2 genuine RMs + 1 A1 + 1 RH, each with their own
   // distinct leads) run through the SAME computeRmPerformance/

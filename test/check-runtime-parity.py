@@ -263,6 +263,10 @@ PLAIN_PAIRS = [
     ("RM_PERF_NAME_ALIASES", "js/core-rm-performance.js", "RM_PERF_NAME_ALIASES", "DailyRmIssueLog.gs", "RM_PERF_NAME_ALIASES_GS_"),
     ("RM_PERF_LEADERSHIP_NAME_EXCLUSIONS", "js/core-rm-performance.js", "RM_PERF_LEADERSHIP_NAME_EXCLUSIONS", "DailyRmIssueLog.gs", "RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_"),
     ("RM_PERF_NON_RM_ROLES", "js/core-rm-performance.js", "RM_PERF_NON_RM_ROLES", "DailyRmIssueLog.gs", "RM_PERF_NON_RM_ROLES_GS_"),
+    ("RM_PERF_ADMIN_NAME_EXCLUSIONS", "js/core-rm-performance.js", "RM_PERF_ADMIN_NAME_EXCLUSIONS", "DailyRmIssueLog.gs", "RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_"),
+    # RM_PERF_VENDOR_NAME_PATTERN / _GS_ (both `/futwork/i`) are deliberately
+    # NOT here -- a regex literal isn't one of this parser's supported plain-
+    # data shapes (see its module docstring). Kept in parity by hand.
 ]
 
 # TEST_MODE_OVERRIDE_EMAIL: compared like a plain pair AND separately

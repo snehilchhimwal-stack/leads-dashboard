@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `b21849e` |
+| **Last Verified** | 2026-09-29 against commit `(pending commit)` — Futwork vendor + admin exclusion (`HANDOVER.md` §9.7.4) |
 
 ## Purpose / reason to exist
 
@@ -125,6 +125,11 @@ each.
 - "RM" excludes A1 / TM / RH / Cluster Head / City Lead / Commercial
   Head roles and the name-based leadership set (`RM_PERF_NON_RM_ROLES`,
   `rmPerfIsLeadershipExcluded`, broadened this session `7ef26db`).
+  **Added 2026-09-29**: the same exclusion also drops any Futwork vendor
+  agent (name pattern `/futwork/i`) and the account holder/admin 'Snehil
+  Chhimwal' (`RM_PERF_VENDOR_NAME_PATTERN`/`RM_PERF_ADMIN_NAME_EXCLUSIONS`,
+  `HANDOVER.md` §9.7.4) — entirely, from every rollup this tab renders,
+  not just hidden from display.
 - Per-region worst-5 uses `REPEAT_OFFENDERS_REGION_RM_CAP = 5`, a
   region-scoped peer average, and only lists regions with ≥1 rankable RM
   (`computeRmPerformanceByRegion`).

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-25 against commit `26bf0cf` — up-front Movement_Log prune added to `captureDailyRmIssues_` (see `EXC-099`) |
+| **Last Verified** | 2026-09-29 against commit `(pending commit)` — added `RM_PERF_VENDOR_NAME_PATTERN_GS_`/`RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_` (Futwork vendor + admin exclusion, CFG-037) |
 
 ## Purpose / reason to exist
 
@@ -63,12 +63,12 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 | FN-187 | `captureDailyRmIssues()` / `captureDailyRmIssues_()` `#L135/#L147` | `leads` tab, `Movement_Log` | appends a row per open SLA-flagged lead to `Daily_RM_Issues` | Sheets write in **chunks of `BACKFILL_CHUNK_SIZE_ = 5000`** (after a real 2026-09-01 incident where one oversized `setValues()` silently failed for a whole night); idempotency check now runs FIRST (2026-09-19), before pruning, so a double-fire bails out cheaply | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `ensureDailyRmIssueLogSheet_` (FN-188), `pruneDailyRmIssueLog_` (FN-188, now called AFTER `rows.length` is known, passing it in) | the 22:50 trigger; `captureDailyRmIssuesNow()` (manual) | specific — scheduled |
 | FN-188 | `ensureDailyRmIssueLogSheet_(ss)` / `pruneDailyRmIssueLog_(ss, incomingRowCount)` / `pruneDailyRmIssueLogNow()` `#L101/#L268/#L348` | spreadsheet (+ the caller's about-to-be-written row count, added 2026-09-19) | ensures the tab; prunes rows older than 7 days, sizing the sheet's row grid to `kept.length + incomingRowCount + headroom` exactly (shrinks OR grows) | may create the tab; deletes/inserts rows; archives dropped rows to Drive via `archiveRowsToDriveCsv_` (`GS-002` FN-265) before clearing them | `archiveRowsToDriveCsv_` (`GS-002` FN-265) | FN-187 | specific — retention added 2026-09-07, the incoming-count sizing + archive fix added 2026-09-19/21 (`EXC-097`) |
 | FN-189 | `backfillDailyRmIssuesFromMovementLog_(ss)` / `backfillOneDayFromMovementLog_(ss, dayKey)` / `repairDailyRmIssuesMissingFieldsNow()` `#L387/#L529/#L659` | `Movement_Log` history | rebuilds past `Daily_RM_Issues` days | chunked Sheets writes | `_evidenceAtDeadlineGs_` (`GS-008`), `computeSlaFlags_` (`GS-012`) | manual recovery | specific |
-| FN-190 | `computeRmPerformanceGs_(ss)` `#L1216` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
-| FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L999/#L1085` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
-| FN-192 | `rmPerfCanonicalRmNameGs_(rawName)` / `rmPerformanceDrivenByGs_(r)` / `sortRmPerformanceByPriorityGs_(list)` `#L871/#L1226/#L1242` | RM name / a result row | canonical name / driver list / sorted list | none | — | FN-190 | reusable — twin of `JS-008` `rmPerfCanonicalRmName` etc. |
-| FN-193 | `computeRmPerfEligibilityGs_(row, colIndex, now)` / `_rmPerfDaysBetweenKeysGs_(a, b)` `#L966/#L954` | a row + now | the eligibility window (separately implemented — it does **not** reuse `computeSlaFlags_` for eligibility, only for pass/fail) | none | `istDayKeyGs_` (`GS-002`) | FN-191 | specific |
-| FN-194 | `computeRmPerfPeerAveragesGs_(byGroup)` / `classifyRmPerformanceGs_(byGroup)` `#L1132/#L1159` | per-group aggregates | peer-average baseline per rule → classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score | none | `RM_PERF_*_GS_` constants | FN-190 | specific — mirrors `JS-008` FN-055/FN-056 |
-| FN-195 | `reportRmPerformanceNow()` / `setupDailyRmIssueLog()` `#L1253/#L771` | — | **`Logger.log()` console output only** — no sheet write, no email / installs the trigger | console log / creates a trigger | FN-190 / `ScriptApp` | Apps Script editor (manual) / editor | specific |
+| FN-190 | `computeRmPerformanceGs_(ss)` `#L1232` | `Movement_Log` | the scored per-RM leaderboard (in memory) | none | FN-191..FN-194 | `reportRmPerformanceNow` (FN-195) | specific — **the `.gs` mirror of `computeRmPerformance` (`JS-008`)** |
+| FN-191 | `reconstructRmPerformanceObservationsGs_(ss)` / `aggregateRmPerformanceGs_(observations)` `#L1015/#L1101` | `Movement_Log` rows / observations | per-(lead,day,rule) observations → per-group aggregates | none | `computeRmPerfEligibilityGs_` (FN-193), `computeSlaFlags_` (`GS-012`) | FN-190 | specific — mirrors `JS-008` FN-053/FN-054 |
+| FN-192 | `rmPerfCanonicalRmNameGs_(rawName)` / `rmPerformanceDrivenByGs_(r)` / `sortRmPerformanceByPriorityGs_(list)` `#L871/#L1242/#L1258` | RM name / a result row | canonical name / driver list / sorted list | none | — | FN-190 | reusable — twin of `JS-008` `rmPerfCanonicalRmName` etc. |
+| FN-193 | `computeRmPerfEligibilityGs_(row, colIndex, now)` / `_rmPerfDaysBetweenKeysGs_(a, b)` `#L982/#L970` | a row + now | the eligibility window (separately implemented — it does **not** reuse `computeSlaFlags_` for eligibility, only for pass/fail) | none | `istDayKeyGs_` (`GS-002`) | FN-191 | specific |
+| FN-194 | `computeRmPerfPeerAveragesGs_(byGroup)` / `classifyRmPerformanceGs_(byGroup)` `#L1148/#L1175` | per-group aggregates | peer-average baseline per rule → classification (`Below Expectations` / `Insufficient Data` / …) + shrunk score | none | `RM_PERF_*_GS_` constants | FN-190 | specific — mirrors `JS-008` FN-055/FN-056 |
+| FN-195 | `reportRmPerformanceNow()` / `setupDailyRmIssueLog()` `#L1269/#L771` | — | **`Logger.log()` console output only** — no sheet write, no email / installs the trigger | console log / creates a trigger | FN-190 / `ScriptApp` | Apps Script editor (manual) / editor | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -80,6 +80,7 @@ run) automatically — no `setupDailyRmIssueLog()` re-run needed
 | CFG-034 | `RM_PERF_CHRONIC_STREAK_DAYS_GS_` / `RM_PERF_FLAG_RATIO_GS_` / `RM_PERF_CONCENTRATION_BREADTH_CEILING_GS_` | `3` / `1.25` / `0.25` | chronic / classification / concentration | twins `CFG-016`..`CFG-018` (`JS-008`) |
 | CFG-035 | `BACKFILL_CHUNK_SIZE_` | `5000` | max rows per `setValues()` write | write reliability — the 2026-09-01 incident fix |
 | CFG-036 | retention | 7 days | how far back `Daily_RM_Issues` is kept | `pruneDailyRmIssueLog_` (added 2026-09-07) |
+| CFG-076 | `RM_PERF_VENDOR_NAME_PATTERN_GS_` / `RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_` (added 2026-09-29) | `/futwork/i` / `{Snehil Chhimwal}` | non-RM identities excluded entirely from `rmPerfIsLeadershipExcludedGs_` | twin `RM_PERF_VENDOR_NAME_PATTERN` / `RM_PERF_ADMIN_NAME_EXCLUSIONS` (`JS-008` CFG-075) |
 
 ## Exceptions — `EXC-XXX` sub-table
 

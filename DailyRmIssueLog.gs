@@ -900,6 +900,18 @@ const RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_ = new Set([
 // only the management/leadership tiers the JS side already excludes.
 const RM_PERF_NON_RM_ROLES_GS_ = new Set(['a1', 'tm', 'rh', 'cluster head', 'city lead', 'commercial head']);
 
+// Non-RM identities excluded entirely -- mirrors js/core-rm-performance.js's
+// RM_PERF_VENDOR_NAME_PATTERN / RM_PERF_ADMIN_NAME_EXCLUSIONS byte-for-byte
+// (that file's own comment has the full reasoning). RM_PERF_VENDOR_NAME_PATTERN_GS_
+// is a regex literal, not plain data, so it's NOT one of
+// test/check-runtime-parity.py's checked pairs; RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_
+// (a plain Set) is. KEEP IN SYNC with the JS copy -- add a name/pattern to
+// both, same commit, whenever a new one is confirmed.
+const RM_PERF_VENDOR_NAME_PATTERN_GS_ = /futwork/i;
+const RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_ = new Set([
+  'Snehil Chhimwal',
+]);
+
 // Reads the live RM_Hierarchy sheet (RmHierarchy.gs's RM_HIERARCHY_SHEET_)
 // into a Map<lowercased name, role> for rmPerfIsLeadershipExcludedGs_
 // below — the server-side equivalent of js/tab-repeat-offenders.js's
@@ -933,13 +945,17 @@ function buildRmHierarchyRoleByNameLowerGs_(ss) {
 // the RM Performance engine ENTIRELY — direct port of
 // js/core-rm-performance.js's rmPerfIsLeadershipExcluded (that file's own
 // comment has the full reasoning: dropped before any observation is ever
-// emitted, not just hidden downstream, so a leadership person's leads
-// can't inflate a peer average either). `roleByNameLower`: a
-// Map<lowercased name, role> from buildRmHierarchyRoleByNameLowerGs_ above
-// (or null — degrades to the name-list path only).
+// emitted, not just hidden downstream, so a leadership/manager/vendor/admin
+// person's leads can't inflate a peer average either — name kept as-is even
+// though it now also covers vendor + admin exclusions, same reasoning as
+// the JS side). `roleByNameLower`: a Map<lowercased name, role> from
+// buildRmHierarchyRoleByNameLowerGs_ above (or null — degrades to the
+// name-list/pattern paths only).
 function rmPerfIsLeadershipExcludedGs_(rmName, roleByNameLower) {
   const name = String(rmName || '').trim();
   if (RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_.has(name)) return true;
+  if (RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_.has(name)) return true;
+  if (RM_PERF_VENDOR_NAME_PATTERN_GS_.test(name)) return true;
   if (roleByNameLower) {
     const role = roleByNameLower.get(name.toLowerCase());
     if (role && RM_PERF_NON_RM_ROLES_GS_.has(role.toLowerCase())) return true;

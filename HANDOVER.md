@@ -1639,3 +1639,38 @@ side; (3) `js/tab-oppmonitor.js`'s own live-computation fallback
 its code at all, despite its header comment claiming it matches the
 external workflow's scoping — found while researching this change,
 unrelated to it.
+
+### 9.7.4 Vendor (Futwork) + admin exclusion — added 2026-09-29
+
+**Request**: "remove agents that have 'futwork' in their name from
+list, also remove Snehil Chhimwal from list." Both are excluded
+ENTIRELY from the RM Performance engine (RM table, Region/A1-TM/RH
+rollups, the §9.7.3 Opp-Conversion join, the console leaderboard) — the
+same Stage-1 drop `rmPerfIsLeadershipExcluded` already applies to
+leadership, not merely hidden from display, so neither can inflate a
+peer average or a region's distinct-RM count either:
+
+- **Futwork agents** — tele-calling vendor staff. `EmailInfra.gs`
+  already treats any Movement_Log RM name containing "Futwork"
+  (case-insensitive) as a vendor agent for email-routing purposes
+  (`isFutworkRmNameGs_`, §6); `RM_PERF_VENDOR_NAME_PATTERN`/`_GS_`
+  (`/futwork/i`) reuses that exact same convention here, matched by
+  pattern (not a fixed name list) since vendor agents rotate.
+- **'Snehil Chhimwal'** — the dashboard's own account holder/admin, not
+  a front-line RM. `RM_PERF_ADMIN_NAME_EXCLUSIONS`/`_GS_`, an exact-name
+  Set (parity-checked, unlike the regex constant above — see its own
+  code comment for why a regex literal isn't one of
+  `check-runtime-parity.py`'s checkable shapes).
+
+Both constants are OR'd into `rmPerfIsLeadershipExcluded`/
+`rmPerfIsLeadershipExcludedGs_` alongside the existing leadership-role
+and leadership-name paths (`js/core-rm-performance.js` FN-060,
+`DailyRmIssueLog.gs` — the function's name predates this broader scope
+and was deliberately kept, since callers/tests/docs already reference
+it by that name). Because §9.7.3's Opp-Conversion cohort reuses this
+same function, the exclusion applies there automatically too — no
+separate change needed on that side. Docs: `JS-008` CFG-075/FN-060,
+`GS-003` CFG-076. Tests: `tests/frontend-harness.html` §2d-2 (5 new
+assertions) + `Tests_DailyRmIssueLog.gs` (5 new assertions) — full
+suites 137/137 (frontend) and 1192/1192 (backend, via
+`test/run-gs-tests-headless.py`) after the change.

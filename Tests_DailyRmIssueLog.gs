@@ -598,6 +598,17 @@ function runDailyRmIssueLogTests_() {
     TestAssert_(!rmPerfIsLeadershipExcludedGs_('Someone Unlisted', null), 'rmPerfIsLeadershipExcludedGs_: degrades to false (not a throw) with no role map and a name not on the leadership list');
     TestAssertEqual_(buildRmHierarchyRoleByNameLowerGs_(TestMockSpreadsheet_({})), null, 'buildRmHierarchyRoleByNameLowerGs_: returns null (not an empty Map) when RM_Hierarchy does not exist');
 
+    // -- vendor (Futwork) + admin (Snehil Chhimwal) exclusions, 2026-09-29 --
+    // Explicit request: "remove agents that have 'futwork' in their name
+    // from list, also remove Snehil Chhimwal from list". Excluded ENTIRELY
+    // (same Stage-1 drop as leadership), mirrors the JS-side test block
+    // byte-for-byte.
+    TestAssert_(rmPerfIsLeadershipExcludedGs_('Futwork Agent 12', null), 'rmPerfIsLeadershipExcludedGs_: a Futwork vendor agent is excluded (name contains "Futwork")');
+    TestAssert_(rmPerfIsLeadershipExcludedGs_('FUTWORK Agent Lower', null), 'rmPerfIsLeadershipExcludedGs_: Futwork match is case-insensitive');
+    TestAssert_(rmPerfIsLeadershipExcludedGs_('Team Futwork Caller 3', null), 'rmPerfIsLeadershipExcludedGs_: "Futwork" mid-string still matches');
+    TestAssert_(rmPerfIsLeadershipExcludedGs_('Snehil Chhimwal', null), 'rmPerfIsLeadershipExcludedGs_: the account holder/admin "Snehil Chhimwal" is excluded');
+    TestAssert_(!rmPerfIsLeadershipExcludedGs_('Ramesh Kumar', null), 'rmPerfIsLeadershipExcludedGs_: a genuine front-line RM matching neither new pattern is NOT excluded');
+
     // ---- reportRmPerformanceNow(): console-callable wrapper, smoke test ----
     const realSs2 = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return TestMockSpreadsheet_({}); }, flush: function () {} };
