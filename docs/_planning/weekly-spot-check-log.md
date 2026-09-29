@@ -194,3 +194,76 @@ advisory); `node test/check-docs-coverage.js` full coverage (25/25 `js/`,
 13/13 `.gs`). No `.gs`/`js/` source touched, so `node
 test/run-gs-tests.js` was not re-run for this change. GitHub Actions
 confirmed green on the commit after push.
+
+---
+
+## Cycle 4 — 2026-09-29 (run by Claude, scheduled cloud routine)
+
+Checked `GS-006` (`InteractionHistoryLogger.gs`), `GS-013`
+(`UnmatchedCommentLogger.gs`), `JS-002` (`core-collation.js`), `SHEET-009`
+(`Comment_History`), `TAB-006` (Audit) — none checked in cycles 1-3, and
+the oldest still-unrevisited `Last Verified` dates in the catalog
+(all five still `2026-09-10 (c82ec67)` going in). 3/5 fully clean;
+2 real (both minor) findings, fixed.
+
+**`GS-006`** — fully clean. File length (177 lines) and all 4 `#Lnn`
+`FN-XXX` anchors (`#L80`/`#L98`/`#L109`/`#L172`) matched exactly; the
+dedup-key logic, the "no own trigger, piggybacks on `snapshotOpenLeads_`"
+claim, and the `Depends On` set (`Core.gs`/`FollowupEngine.gs`/
+`EmailInfra.gs`) all verified against the real file header + body. No
+drift.
+
+**`GS-013`** — fully clean. File length (303 lines) and all 6 `#Lnn`
+citations (`#L95`/`#L116`/`#L128`/`#L215`/`#L229`/`#L264`) matched
+exactly. No drift.
+
+**`SHEET-009`** — fully clean. The `COMMENT_HISTORY_COLUMNS_` `#L76`
+citation and the full 9-column list matched
+`InteractionHistoryLogger.gs` exactly. No drift.
+
+**`JS-002`** — real drift, fixed. `## Data lineage` and `##
+Revalidation trigger` both described the post-`JS-003` lead object as
+carrying only `collatedFrom`/`siblingLeadIds`/`siblingRMs`. Real current
+`js/core-fetch-and-render.js` sets two distinct field groups: the
+genuine-merge fields `collatedFrom`/`collatedLeadIds`/`collatedRMs`/
+`collatedRegions` (what `collationBadge` — this module's primary,
+first-documented function — actually reads) and the separate copySplit
+"sibling" fields `siblingLeadIds`/`siblingRMs` (read by `siblingNote`/
+`familyKeyOf` instead). The record had never named the `collated*`
+fields despite `collationBadge` being its headline responsibility —
+fixed both sections to name all five fields and which function reads
+which. All 8 `#Lnn` `FN-XXX` anchors themselves (`#L19`/`#L42`/`#L54`/
+`#L66`/`#L81`/`#L99`/`#L115`/`#L148`/`#L155`) matched exactly — this was
+a described-behavior mismatch, not a line-anchor one.
+
+**`TAB-006`** — real drift, fixed. Two independent issues: (1) the
+`#tab-audit` line anchor had drifted `#L1233` → real `#L1234` (a one-line
+shift from an intervening commit not otherwise touching this record);
+(2) `BTN-012`'s "What it does" cell read "Copies the audit result table
+to the clipboard" — real `copyAuditIds()` (`js/tab-audit.js` `#L241`)
+copies only the matched leads' `lead_id`s, one per line, not the table.
+The dashboard's own button label ("Copy lead IDs") was never wrong, only
+this record's row text was. Fixed the location line anchor and the
+BTN-012 `Label`/`What it does`/`Invokes` cells.
+
+Also found, outside the 5 sampled records but in the same pass over
+`docs/INDEX.md`: two stray unsubstituted `%s` template placeholders in
+the `Last Verified` column (`GS-002`, `GS-009` rows) instead of a real
+commit sha. Not a "correct value unknown" case — both components' own
+record files (`docs/gs-modules/GS-002-core.md`,
+`docs/gs-modules/GS-009-opschecklistrunner.md`) already stated the real
+verifying sha (`4c99f7f`), so this was a mechanical INDEX.md sync gap,
+not a judgment call. Fixed both `INDEX.md` cells to match.
+
+Verified before push: `python3 test/check-catalog.py` clean (all
+blocking checks A-C, plus F-P; the `GS-002`/`GS-009` rows dropped out of
+check D's drift-note list once the `%s` placeholders were fixed,
+confirming `4c99f7f` is a real, in-history sha; remaining D notes are the
+same pre-existing `c82ec67`/other-sha-not-in-history drift as prior
+cycles, unrelated to this cycle's edits); `node
+test/check-docs-coverage.js` full coverage (25/25 `js/`, 13/13 `.gs`). No
+`.gs`/`js/` source touched, so `node test/run-gs-tests.js` was not
+re-run for this change. Pushed as `4a06803` (fixes) +
+`31f3217` (placeholder-sha swap); GitHub Actions run 227 triggered on
+`31f3217` — status at time of this log entry pending, see the Actions
+tab / run 227 for the final result.
