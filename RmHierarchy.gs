@@ -440,6 +440,11 @@ const RM_HIERARCHY_RAW_ = [
   ['Sourcing - Pune','S3','Pranali Dalavi','','Yash Kalal','','Sourabh Sareen'],
   // AUTO-REFRESH 2026-09-22 from HR Live  - Sheet1 (2).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Hyderabad','S1','Chandrababu Seenathur','Vemula Ajay','','','Zoya Fathima'],
+  // AUTO-REFRESH 2026-09-29 from HR Live  - Sheet1 (4).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
+  ['Central','S1','Ajay Gupta','','','','Sanjyota Bhosale'],
+  ['Thane','S1','Disha Singh','','','','Bipin More'],
+  ['Thane','S1','Pratik Singh','','','','Bipin More'],
+  ['Central','S1','Shruti Sharma','','','','Sanjyota Bhosale'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
