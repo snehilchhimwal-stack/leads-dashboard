@@ -59,11 +59,11 @@ Movement hub fire.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-250 | `scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now)` `#L128` | open-lead rows + column index + now | appends one row per open lead with an unclassifiable latest comment (de-duped) | Sheets append; dedup read against existing rows | `latestOutcomeGs_` (`GS-005`), `unmatchedCommentDedupKeyGs_` (FN-251) | `snapshotOpenLeads_` (`GS-008`), `scanUnmatchedCommentsNow` (FN-252) | specific |
-| FN-251 | `unmatchedCommentDedupKeyGs_(leadId, outcomeEntry)` `#L116` | lead id + a comment entry | a dedup key, de-duped by `(lead_id, comment_at-or-comment)` | none | — | FN-250 | specific |
-| FN-252 | `ensureUnmatchedCommentsLogSheet_(ss)` / `scanUnmatchedCommentsNow()` `#L95/#L215` | spreadsheet / — | ensures the tab / runs FN-250 once by hand | may create the tab / Sheets append | FN-250 | FN-250 / Apps Script editor | specific |
-| FN-253 | `clearReviewedUnmatchedCommentsNow()` `#L229` | — | removes rows flagged reviewed | Sheets delete | — | Apps Script editor (manual, after a review pass) | specific |
-| FN-254 | `dedupeUnmatchedCommentsNow()` `#L264` | — | removes duplicate rows caused by the 2026-09-03 Date-coercion bug | Sheets delete | — | Apps Script editor (incident recovery) | specific — **a documented incident-recovery function** |
+| FN-250 | `scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now)` `#L140` | open-lead rows + column index + now | appends one row per open lead with an unclassifiable latest comment (de-duped) | Sheets append; dedup read against existing rows | `latestOutcomeGs_` (`GS-005`), `unmatchedCommentDedupKeyGs_` (FN-251) | `snapshotOpenLeads_` (`GS-008`), `scanUnmatchedCommentsNow` (FN-252) | specific |
+| FN-251 | `unmatchedCommentDedupKeyGs_(leadId, outcomeEntry)` `#L128` | lead id + a comment entry | a dedup key, de-duped by `(lead_id, comment_at-or-comment)` | none | — | FN-250 | specific |
+| FN-252 | `ensureUnmatchedCommentsLogSheet_(ss)` / `scanUnmatchedCommentsNow()` `#L107/#L227` | spreadsheet / — | ensures the tab / runs FN-250 once by hand | may create the tab / Sheets append | FN-250 | FN-250 / Apps Script editor | specific |
+| FN-253 | `clearReviewedUnmatchedCommentsNow()` `#L241` | — | removes rows flagged reviewed | Sheets delete | — | Apps Script editor (manual, after a review pass) | specific |
+| FN-254 | `dedupeUnmatchedCommentsNow()` `#L276` | — | removes duplicate rows caused by the 2026-09-03 Date-coercion bug | Sheets delete | — | Apps Script editor (incident recovery) | specific — **a documented incident-recovery function** |
 | FN-309 | `pruneUnmatchedCommentsLog_(ss)` `#L336` (added 2026-09-29) | a spreadsheet | none | archives (chunked) then removes rows older than `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_` (30) — REGARDLESS of `reviewed`; no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneUnmatchedCommentsLogNow` | specific — re-inserts checkboxes on the `reviewed` column after rewriting, same discipline as FN-253 |
 | FN-310 | `pruneUnmatchedCommentsLogNow()` `#L407` (added 2026-09-29) | — | runs FN-309 once by hand | as FN-309 | FN-309 | Apps Script editor (manual) | specific |
 

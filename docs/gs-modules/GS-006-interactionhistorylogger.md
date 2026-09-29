@@ -56,10 +56,10 @@ Movement hub fire.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-212 | `logInteractionHistoryGs_(ss, dataRows, colIndex, now)` `#L109` | the open-lead rows + column index + now | appends one `Comment_History` row per genuinely-new comment | Sheets append; dedup against existing rows | `latestOutcomeGs_` (`GS-005`), `commentHistoryDedupKeyGs_` (FN-213) | `snapshotOpenLeads_` (`GS-008`), `logInteractionHistoryNow` (FN-215) | specific |
-| FN-213 | `commentHistoryDedupKeyGs_(leadId, outcomeEntry)` `#L98` | lead id + a comment entry | a dedup key | none | — | FN-212 | specific |
-| FN-214 | `ensureCommentHistorySheet_(ss)` `#L80` | spreadsheet | ensures `Comment_History` exists with the right header | may create/repair the tab | — | FN-212 | specific |
-| FN-215 | `logInteractionHistoryNow()` `#L172` | — | runs FN-212 once by hand | Sheets append | FN-212 | Apps Script editor (manual) | specific |
+| FN-212 | `logInteractionHistoryGs_(ss, dataRows, colIndex, now)` `#L116` | the open-lead rows + column index + now | appends one `Comment_History` row per genuinely-new comment | Sheets append; dedup against existing rows | `latestOutcomeGs_` (`GS-005`), `commentHistoryDedupKeyGs_` (FN-213) | `snapshotOpenLeads_` (`GS-008`), `logInteractionHistoryNow` (FN-215) | specific |
+| FN-213 | `commentHistoryDedupKeyGs_(leadId, outcomeEntry)` `#L105` | lead id + a comment entry | a dedup key | none | — | FN-212 | specific |
+| FN-214 | `ensureCommentHistorySheet_(ss)` `#L87` | spreadsheet | ensures `Comment_History` exists with the right header | may create/repair the tab | — | FN-212 | specific |
+| FN-215 | `logInteractionHistoryNow()` `#L179` | — | runs FN-212 once by hand | Sheets append | FN-212 | Apps Script editor (manual) | specific |
 | FN-307 | `pruneCommentHistory_(ss)` `#L213` (added 2026-09-29) | a spreadsheet | none | archives (chunked, `COMMENT_HISTORY_ARCHIVE_CHUNK_`) then removes rows older than `COMMENT_HISTORY_RETENTION_DAYS_` (30); no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneCommentHistoryNow` | specific — follows `pruneMovementLog_`'s crash-safety ordering (`GS-008`) exactly |
 | FN-308 | `pruneCommentHistoryNow()` `#L282` (added 2026-09-29) | — | runs FN-307 once by hand | as FN-307 | FN-307 | Apps Script editor (manual) | specific |
 
