@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | (pending commit) against `pruneCommentHistory_` (FN-307) |
+| **Last Verified** | 2026-09-29 against commit `c9c0b66` |
 
 ## Purpose / reason to exist
 

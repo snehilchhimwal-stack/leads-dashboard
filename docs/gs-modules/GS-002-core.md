@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | (pending commit) against `parseIstDayKeyOrDateGs_` (FN-306) |
+| **Last Verified** | 2026-09-29 against commit `c9c0b66` |
 
 ## Purpose / reason to exist
 
