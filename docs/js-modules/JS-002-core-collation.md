@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-29 against commit `(pending commit)` |
 
 ## Purpose / reason to exist
 
@@ -50,9 +50,15 @@ Fifth in the real order (`… core-auth → core-lead-model → **core-collation
 
 ## Data lineage
 
-Input: a lead object *after* the real collation merge in `JS-003`
-(`collatedFrom`, `siblingLeadIds`, `siblingRMs` fields already set) →
-transformation: pure string/label formatting → output: HTML fragments
+Input: a lead object *after* `JS-003` has run, carrying two distinct
+field groups it sets: the genuine-merge fields (`collatedFrom`,
+`collatedLeadIds`, `collatedRMs`, `collatedRegions`) that `collationBadge`
+(FN-007) reads, and the separate copySplit "sibling" fields
+(`siblingLeadIds`, `siblingRMs`) that `siblingNote` (FN-008) and
+`familyKeyOf` (FN-010) read — a copySplit is one RM's own row of a
+multi-copy customer judged on its own issues, not the merged record
+itself, so it carries the sibling fields instead of the `collated*` ones.
+Transformation: pure string/label formatting → output: HTML fragments
 consumed by renderers. Persists nothing.
 
 ## Data sources accessed
@@ -108,19 +114,25 @@ nearly every tab's card/table rows (`TAB-002`..`TAB-008`).
   cross-check `LOGIC_AUDIT.md` Part 1 §4b. Exercised end-to-end by
   `tests/frontend-harness.html` — synthetic multi-copy families run
   through `fetchAndRender` and the badges/labels appear in rendered
-  output.
+  output. Re-verified 2026-09-29 (weekly doc-content spot-check, cycle
+  4): `## Data lineage`'s field-name claim was checked directly against
+  `js/core-fetch-and-render.js` (where `JS-003` sets these fields) and
+  corrected — see Closure evidence.
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4b; `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-10; re-verified 2026-09-29.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-027.
+Verified at `c82ec67`; record created by DOC-027. Data-lineage field-name
+drift fixed 2026-09-29 (`docs/_planning/weekly-spot-check-log.md` cycle
+4) — no underlying code change, doc-only correction.
 
 ## Revalidation trigger
 
 Any commit touching `js/core-collation.js`; the merged-lead field shape
-from `JS-003` changes (`collatedFrom` / `siblingLeadIds` / `siblingRMs`);
-`esc` (`JS-010`) signature changes.
+from `JS-003` changes (`collatedFrom` / `collatedLeadIds` / `collatedRMs`
+/ `collatedRegions` / `siblingLeadIds` / `siblingRMs`); `esc` (`JS-010`)
+signature changes.
 
 ## Handover relationship
 
@@ -142,3 +154,16 @@ none — Closed + Monitored.
 Record committed for DOC-027; `docs/INDEX.md` `JS-002` → `Closed +
 Monitored`, `Last Verified` 2026-09-10, links filled; validation
 evidence as above. No `docs/changes/` record (DOC-027).
+
+**2026-09-29 spot-check fix:** `## Data lineage` and `## Revalidation
+trigger` both described the post-merge lead object as carrying
+`collatedFrom`/`siblingLeadIds`/`siblingRMs` only. Real current
+`js/core-fetch-and-render.js` (`JS-003`) sets two distinct field groups:
+`collatedFrom`/`collatedLeadIds`/`collatedRMs`/`collatedRegions` for a
+genuine merge (what `collationBadge` actually reads) and
+`siblingLeadIds`/`siblingRMs` separately for a copySplit entry (what
+`siblingNote`/`familyKeyOf` read). The record had never named the
+`collated*` fields at all despite `collationBadge` being this module's
+primary function and its first documented responsibility — fixed both
+sections to name all five fields and which function reads which. No code
+changed.
