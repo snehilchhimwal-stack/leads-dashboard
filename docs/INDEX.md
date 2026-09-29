@@ -169,7 +169,7 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 | TAB-003 | TAB- | Operations | `js/overview-distribution-people-ops.js` (JS-012) + reports-*.js (JS-014/15/16) + JS-018 | Closed + Monitored | DATA-003, DATA-005, EXT-002, JS-006, JS-012, JS-014, JS-015, JS-016, JS-018, SHEET-004, SHEET-011 | DASH-001 | 2026-09-18 (`4bbb58c`) |
 | TAB-004 | TAB- | Repeat Offenders | `js/tab-repeat-offenders.js` (JS-022) + `js/repeat-offenders-pdf.js` (JS-013) + worker (JS-017) | Closed + Monitored | DATA-004, EXT-004, JS-003, JS-008, JS-013, JS-014, JS-017, JS-021, JS-022, SHEET-002, SHEET-003, SHEET-006 | DASH-001 | 2026-09-17 (`a74a65f`) |
 | TAB-005 | TAB- | People | `js/overview-distribution-people-ops.js` (JS-012) + `js/tab-rmtimeline.js` (JS-023) | Closed + Monitored | JS-011, JS-012, JS-014, JS-019, JS-021, JS-023, JS-024 | DASH-001 | 2026-09-18 (`4bbb58c`) |
-| TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Closed + Monitored | JS-004, JS-006, JS-007, JS-019 | DASH-001 | 2026-09-10 (`c82ec67`) |
+| TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Closed + Monitored | JS-004, JS-006, JS-007, JS-019 | DASH-001 | 2026-09-29 (`4a06803`) |
 | TAB-007 | TAB- | Movement | `js/tab-movement.js` (JS-021) | Closed + Monitored | DATA-005, EXT-001, EXT-002, JS-003, JS-009, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-002, SHEET-004, SHEET-011, SHEET-015 | DASH-001 | 2026-09-26 (`29b7146`) |
 | TAB-008 | TAB- | Tracking | `js/tab-tracking.js` (JS-024) | Closed + Monitored | EXT-001, JS-004, JS-014, JS-018, JS-021, JS-024, SHEET-002, SHEET-005, SHEET-008 | DASH-001 | 2026-09-10 (`c82ec67`) |
 | TAB-009 | TAB- | Opp Monitor | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` (JS-025) | Validated | EXT-001, JS-025, SHEET-001, SHEET-016, SHEET-017 | DASH-001 | 2026-09-21 (`55bf870`) |
@@ -212,7 +212,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | JS-001 | JS- | core-auth | `js/core-auth.js` | Closed + Monitored | EXT-003, JS-003, JS-004, JS-015 | DASH-001, JS-003, JS-004, JS-009, JS-011, JS-015, JS-018 | 2026-09-10 (`c82ec67`) |
-| JS-002 | JS- | core-collation | `js/core-collation.js` | Closed + Monitored | JS-003, JS-010 | DATA-001, JS-004, JS-010, JS-012, JS-014, JS-019, JS-021, JS-024 | 2026-09-10 (`c82ec67`) |
+| JS-002 | JS- | core-collation | `js/core-collation.js` | Closed + Monitored | JS-003, JS-010 | DATA-001, JS-004, JS-010, JS-012, JS-014, JS-019, JS-021, JS-024 | 2026-09-29 (`4a06803`) |
 | JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | EXT-001, JS-001, JS-004, JS-006, JS-007, JS-009, JS-010, JS-012, JS-014, JS-021, JS-022, JS-025, SHEET-001 | DASH-001, DATA-001, JS-001, JS-002, JS-018, JS-021, JS-022, JS-023, JS-025, TAB-004, TAB-007 | 2026-09-21 (`55bf870`) |
 | JS-004 | JS- | core-filters | `js/core-filters.js` | Closed + Monitored | EXT-001, EXT-003, JS-001, JS-002, JS-005, JS-006, JS-009, JS-010, JS-012, JS-014, JS-018, SHEET-005 | DASH-001, DATA-001, JS-001, JS-003, JS-012, JS-014, JS-019, JS-020, JS-024, TAB-002, TAB-006, TAB-008 | 2026-09-10 (`c82ec67`) |
 | JS-005 | JS- | core-foundation | `js/core-foundation.js` | Closed + Monitored | none | DATA-001, DATA-002, JS-004, JS-006, JS-007, JS-008, JS-009, JS-010, JS-012, JS-014, JS-017, JS-019, JS-020, JS-021, JS-023, JS-024, JS-025 | 2026-09-18 (`4bbb58c`) |

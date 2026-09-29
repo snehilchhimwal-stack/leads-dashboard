@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `TAB-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `dashboard.html` `#tab-audit` (`#L1233`); `js/tab-audit.js` |
+| **Location** | `dashboard.html` `#tab-audit` (`#L1234`); `js/tab-audit.js` |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-29 against commit `4a06803` |
 
 ## Purpose / reason to exist
 
@@ -65,7 +65,7 @@ Its `updateEventsFor()` is **also** read by RM Timeline (`TAB-005` /
 
 | ID | Label | Element id | What it does | Invokes (`FN-XXX`) | Confirm/irreversible? | Failure behaviour |
 |---|---|---|---|---|---|---|
-| BTN-012 | Copy | `#auditCopyBtn` | Copies the audit result table to the clipboard | audit copy handler (`JS-019`) | no | clipboard-API failure → no-op, button text unchanged |
+| BTN-012 | Copy lead IDs | `#auditCopyBtn` | Copies the matched leads' lead IDs (one per line) to the clipboard, via `copyAuditIds` | `copyAuditIds` (`JS-019`) | no | clipboard-API failure → no-op, button text unchanged |
 | BTN-013 | Download CSV | `#auditCsvBtn` | Exports the audit result rows as CSV | audit CSV handler (`JS-019`) | no (local download) | inert in a sandboxed viewer |
 
 ## Non-button UI elements — `UI-XXX` sub-table
@@ -123,12 +123,18 @@ action-log fields).
 - **Method:** read of `js/tab-audit.js` + `#tab-audit` markup at
   `c82ec67`; cross-check `LOGIC_AUDIT.md` Part 1 §4c;
   `tests/frontend-harness.html` runs `renderAudit` on synthetic leads.
+  Re-verified 2026-09-29 (weekly doc-content spot-check, cycle 4): the
+  `#tab-audit` line anchor and BTN-012's description were re-checked
+  directly against current `dashboard.html` / `js/tab-audit.js` and
+  corrected (see Closure evidence).
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c; `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-10; re-verified 2026-09-29.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-026.
+Verified at `c82ec67`; record created by DOC-026. Line-anchor + BTN-012
+drift fixed 2026-09-29 (`docs/_planning/weekly-spot-check-log.md` cycle 4)
+— no underlying code change, doc-only correction.
 
 ## Revalidation trigger
 
@@ -155,3 +161,12 @@ none — Closed + Monitored.
 Record committed for DOC-026; `docs/INDEX.md` `TAB-006` → `Closed +
 Monitored`, `Last Verified` 2026-09-10; `BTN-012`/`BTN-013` rows added;
 validation evidence as above. No `docs/changes/` record (DOC-026).
+
+**2026-09-29 spot-check fix:** `#tab-audit`'s line anchor had drifted
+`#L1233` → real `#L1234` (off by one — a blank line was inserted above
+it by an intervening commit not otherwise touching this record). BTN-012
+also mis-described the Copy button's real behaviour: it copies only the
+matched leads' `lead_id`s (one per line, via `copyAuditIds`), not "the
+audit result table" — the dashboard's own button label already reads
+"Copy lead IDs" and was never wrong, only this record's `## Buttons /
+actions` row text was. No code changed.
