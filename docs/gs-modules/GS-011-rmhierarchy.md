@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `SHA_PLACEHOLDER` — 15 confirmed departures removed (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-30 against commit `d09d51e` — 15 confirmed departures removed (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -250,7 +250,7 @@ pre-edit state, since the private file carries no git history to diff against), 
 SHA-verified in a fresh editor tab, then `rebuildRmHierarchy()` run from the editor: "RM_Hierarchy
 rebuilt: 236 people. Manager_Directory refreshed (emails preserved)."
 
-**2026-09-30** (`SHA_PLACEHOLDER`): user-confirmed departures removed from `RM_HIERARCHY_RAW_`, same handling as
+**2026-09-30** (`d09d51e`): user-confirmed departures removed from `RM_HIERARCHY_RAW_`, same handling as
 Prathamesh A Pande/Mukesh Yadav above (row removed, no downstream reassignment needed -- none had reports). Two
 batches: 6 people last active in the 2026-09-21/23 HR export, gone by 2026-09-29 (Dhiraj Chhoda, Vishal Chavan,
 Chandni Khatoon, Pranav Deshmukh, Darshana Javeri, Amit Dere); 8 more stale since 2026-09-21 (Purvesh Ugawekar,
