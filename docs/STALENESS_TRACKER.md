@@ -80,17 +80,17 @@ confirm the paste took.
 |---|---|---|---|
 | `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `Core.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `DailyRmIssueLog.gs` | `5802f35` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `EmailInfra.gs` | `a1a21b4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `MovementTracker.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `OvernightEmailer.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `RmHierarchy.gs` | `2af4b48` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `RmHierarchy.gs` | `d09d51e` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `SlaEngine.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 
 ### Known live-vs-repo differences
 
@@ -149,6 +149,32 @@ One line per sweep: date — what was found — what was fixed / left open.
 - 2026-09-28 (later same day) — **stale backup tab removed, real Drive file-size ceiling hit and fixed along the way.** Snehil authorized deleting `Movement_Log_backup_2026-09-17_1115` specifically (confirmed via git archaeology: created same-day by a bug in `9413f6a`, fixed same-day by `834d7ea` — a leftover artifact, not a real backup), while explicitly leaving the actual Movement_Log backup mechanism untouched and holding `Opp_Conversion_Tracking` for further review (it checked out clean — zero code references anywhere in the repo or live project, genuinely empty — still awaiting explicit go-ahead to delete). Built `removeStaleMovementLogBackupTabNow()` (guarded: header-shape check, archive-then-verify-count-then-delete, re-run-safe) with full test coverage. **First live run failed for real**: `archiveRowsToDriveCsv_` (the shared archive helper every prune function uses) had never been exercised at this tab's actual scale (109,999 rows) and hit Drive's file-size ceiling on the single-CSV write — caught by the guard before any deletion happened, nothing lost. Fixed by chunking the archive into 5,000-row pieces at the call site (`d98efbb`), added a regression test for the chunking itself (mutation-checked), redeployed `MovementTracker.gs` to the live editor and hash-verified after reload (`311afc5f96fa5648`). Re-ran `removeStaleMovementLogBackupTabNow()` live: succeeded in 35s, archived all 109,999 rows to 22 Drive CSVs (`…superseded_backup_part1`…`part22`, first at `https://drive.google.com/file/d/1XBPwuyTk-TiMo2UsSpK8pDQDmHE-anAZ/view`), then deleted the tab. **Verified via `reportWorkbookCellUsageNow()`: workbook cell usage dropped from 98.2% to 69.6% (6,962,618 / 10,000,000)** — `Movement_Log` (the real, current, untouched tab) is now the largest at 2,016,924 cells. One real near-miss during the run: the first attempt actually executed `pruneMovementLogNow` instead (a stray Escape keypress reverted the Apps Script function-picker's pending selection) — harmless (a normal, already-scheduled prune of the live Movement_Log, not the backup), caught immediately by checking the Executions list rather than trusting the in-editor panel's generic "Execution completed" text, and the correct function was re-selected and re-verified by screenshot before running again.
 
 - 2026-09-29 — **the two remaining flagged tabs resolved.** `Opp_Conversion_Tracking` (`Core.gs`'s new `removeOppConversionTrackingTabNow()`, guarded to refuse if it ever finds real data) deleted after Snehil's explicit go-ahead — confirmed empty, zero references, removed cleanly. For `Comment_History`/`Unmatched_Comments_Log`, an initial "prune old rows" request got a clarifying pass first: both tabs turned out to have **real, prior, deliberate design decisions on record** (`InteractionHistoryLogger.gs`'s own "NO AUTOMATIC PRUNING" docblock, `docs/_planning/DB_ARCHITECTURE_REVIEW.md`'s "unbounded by explicit design" / "manually curated" classification, and `Unmatched_Comments_Log`'s pre-existing human-gated `clearReviewedUnmatchedCommentsNow()`) — surfaced to Snehil before building anything, since an automatic prune would have reversed those on the spot. Snehil confirmed: 30-day retention for both, age-based for `Unmatched_Comments_Log` **independent of `reviewed`** (an explicit tradeoff — an unreviewed comment can now age out). Built `pruneCommentHistory_`/`pruneUnmatchedCommentsLog_`, following `pruneMovementLog_`'s crash-safety ordering and the chunked-archive lesson from the day before; caught and fixed a real ordering bug pre-commit (a first draft used clear-then-write despite the doc comment already claiming the safer order). Both wired into `snapshotOpenLeads_`'s existing trigger, deployed live, hash-verified, and run for real: both came back a clean no-op (neither tab has data older than 30 days yet — both started in late Aug/early Sep 2026), confirming the code path works without erroring. Final live cell usage: 69.4% (6,943,430 / 10,000,000), consistent with the prior day's reading. Deploy register refreshed (`c9c0b66` confirmed live for `Core.gs`/`MovementTracker.gs`/`InteractionHistoryLogger.gs`/`UnmatchedCommentLogger.gs`) — 12 `Tests_*.gs` files remain behind their newest commit, pre-existing drift, not part of this change.
+
+- 2026-09-30 — **posterior-confidence flagging deployed.** Pasted
+  `DailyRmIssueLog.gs` and `Tests_DailyRmIssueLog.gs` (`5802f35`, the
+  small-sample confidence-gate fix, `HANDOVER.md` §9.7.5) into the live
+  project on Snehil's instruction. Caught a real corruption risk before
+  saving: the first clipboard copy (`Get-Content -Raw | Set-Clipboard` in
+  PowerShell) silently mangled every multi-byte UTF-8 character (em-dashes
+  etc. — this file's own comments use them constantly) — the pasted
+  editor content's normalized hash didn't match the local file's, a
+  288-character gap traced to exactly the file's UTF-8 multi-byte
+  overhead. Fixed by reading with explicit `-Encoding UTF8` and writing
+  the clipboard via `[System.Windows.Forms.Clipboard]::SetText(...,
+  UnicodeText)` instead of the PowerShell pipeline default — re-verified
+  hash-exact before saving either file. Also caught, same session: the
+  second file's first paste attempt silently landed on the sidebar (a
+  stray Ctrl+A selected the file list, not the editor) rather than the
+  code pane — caught by re-checking the *focused* editor's model hash
+  before saving, not just trusting the click sequence completed. Saved
+  both, reloaded, re-read all 29 files: both at `5802f35` matching HEAD,
+  the other 27 unchanged. `RM_PERF_CONFIDENCE_THRESHOLD_GS_` has no
+  trigger dependency, so no `setupXxx()` re-run needed. Deploy register
+  refreshed via `match-live-gs.py --apply` — also picked up `RmHierarchy.gs`
+  (`d09d51e`) and four files' confirmed-on dates (`InteractionHistoryLogger.gs`/
+  `LeadFollowupsStaleness.gs`/`OpsChecklistRunner.gs`/`UnmatchedCommentLogger.gs`,
+  all still at their prior sha) that had drifted from a concurrent
+  session's own deploy work this same day.
 
 ## Current status
 
