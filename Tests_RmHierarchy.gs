@@ -161,12 +161,12 @@ function runRmHierarchyTests_() {
     TestAssert_(!!kavyaBR && !!kavyaGowda, 'resolveRmHierarchy_: both "Kavya B R" and its alias "Kavya Gowda" have rows');
     TestAssertEqual_(JSON.stringify({ tl: kavyaGowda.tl, tm: kavyaGowda.tm, rh: kavyaGowda.rh, ch: kavyaGowda.ch }), JSON.stringify({ tl: kavyaBR.tl, tm: kavyaBR.tm, rh: kavyaBR.rh, ch: kavyaBR.ch }), 'resolveRmHierarchy_: "Kavya Gowda" resolves to the exact same chain as "Kavya B R"');
 
-    // "Shamakuri Goud" -- confirmed by the user directly as the same
-    // person as the existing "Nikhil Goud" row; must resolve identically.
-    const nikhilGoud = realResolved.find(function (p) { return p.name === 'Nikhil Goud'; });
-    const shamakuriGoud = realResolved.find(function (p) { return p.name === 'Shamakuri Goud'; });
-    TestAssert_(!!nikhilGoud && !!shamakuriGoud, 'resolveRmHierarchy_: both "Nikhil Goud" and its alias "Shamakuri Goud" have rows');
-    TestAssertEqual_(JSON.stringify({ tl: shamakuriGoud.tl, tm: shamakuriGoud.tm, rh: shamakuriGoud.rh, ch: shamakuriGoud.ch }), JSON.stringify({ tl: nikhilGoud.tl, tm: nikhilGoud.tm, rh: nikhilGoud.rh, ch: nikhilGoud.ch }), 'resolveRmHierarchy_: "Shamakuri Goud" resolves to the exact same chain as "Nikhil Goud"');
+    // "Shamakuri Goud" was confirmed by the user directly as the same person as "Nikhil Goud" (his full HR name is
+    // "Nikhil Shamakuri Goud") -- unlike "Kavya Gowda"/"Kavya B R" above, that person had ALSO independently been
+    // confirmed departed (absent from HR Live since the 2026-09-21 export), so both rows were removed together
+    // 2026-09-30, not kept as a resolving alias pair.
+    TestAssert_(!realResolved.some(function (p) { return p.name === 'Nikhil Goud'; }), 'resolveRmHierarchy_: real production data no longer has a "Nikhil Goud" row (departed, confirmed 2026-09-30)');
+    TestAssert_(!realResolved.some(function (p) { return p.name === 'Shamakuri Goud'; }), 'resolveRmHierarchy_: real production data no longer has a "Shamakuri Goud" row (same departed person as "Nikhil Goud", confirmed 2026-09-30)');
 
     // ---- 2026-09-09 fresher HR Live export refresh ----
     // 9 people confirmed departed (compared against the prior export
@@ -183,9 +183,9 @@ function runRmHierarchyTests_() {
     TestAssert_(!!pranavMhatale, 'resolveRmHierarchy_: renamed to "Pranav Mhatale" with a row present');
     TestAssertEqual_(JSON.stringify({ tl: pranavMhatale && pranavMhatale.tl, tm: pranavMhatale && pranavMhatale.tm, rh: pranavMhatale && pranavMhatale.rh, ch: pranavMhatale && pranavMhatale.ch }), JSON.stringify({ tl: '', tm: 'Ayaz Bagwan', rh: '', ch: 'Sourabh Sareen' }), 'resolveRmHierarchy_: renamed row keeps the exact same chain as before the rename');
 
-    // 3 new hires, each resolved by their OWN immediate manager's real
-    // role (not raw column position) -- see RmHierarchy.gs's own header
-    // on why that distinction matters.
+    // 2 new hires (a 3rd, Amit Dere, also resolved correctly at the time -- see the departure block below for why
+    // he's no longer asserted here), each resolved by their OWN immediate manager's real role (not raw column
+    // position) -- see RmHierarchy.gs's own header on why that distinction matters.
     const ayesha = realResolved.find(function (p) { return p.name === 'Ayesha Shaikh'; });
     TestAssert_(!!ayesha, 'resolveRmHierarchy_: new hire "Ayesha Shaikh" has a row');
     TestAssertEqual_(JSON.stringify({ tl: ayesha && ayesha.tl, rh: ayesha && ayesha.rh, ch: ayesha && ayesha.ch }), JSON.stringify({ tl: '', rh: 'Swapnil Gowalkar', ch: 'Bipin More' }), 'resolveRmHierarchy_: Ayesha Shaikh reports straight to RH Swapnil Gowalkar, no A1 between');
@@ -194,9 +194,15 @@ function runRmHierarchyTests_() {
     TestAssert_(!!tisha, 'resolveRmHierarchy_: new hire "Tisha Valecha" has a row');
     TestAssertEqual_(JSON.stringify({ tm: tisha && tisha.tm, ch: tisha && tisha.ch }), JSON.stringify({ tm: 'Sanket Yadav', ch: 'Bipin More' }), 'resolveRmHierarchy_: Tisha Valecha resolves through TM Sanket Yadav (her nearest manager is TM-tier by role, despite landing in the export A1 column)');
 
-    const amitDere = realResolved.find(function (p) { return p.name === 'Amit Dere'; });
-    TestAssert_(!!amitDere, 'resolveRmHierarchy_: new hire "Amit Dere" has a row');
-    TestAssertEqual_(JSON.stringify({ tl: amitDere && amitDere.tl, rh: amitDere && amitDere.rh, ch: amitDere && amitDere.ch }), JSON.stringify({ tl: 'Rohit Rathod', rh: 'Sachindra Wadane', ch: 'Sourabh Sareen' }), 'resolveRmHierarchy_: Amit Dere resolves through A1 Rohit Rathod, continuing Rohit\'s own chain');
+    // ---- 2026-09-30: 15 people confirmed departed against the 2026-09-29 HR Live export (compared against the
+    // prior 2026-09-21/23 exports before touching anything, not guessed from a blind re-derive; same discipline as
+    // the 2026-09-09 block above). Amit Dere was a genuine new hire as of an earlier refresh (see the block this
+    // replaces) but has since left too -- included here, not above. ----
+    ['Dhiraj Chhoda', 'Vishal Chavan', 'Chandni Khatoon', 'Pranav Deshmukh', 'Darshana Javeri', 'Amit Dere',
+      'Purvesh Ugawekar', 'Mustakim Sayyad', 'Akshay Kakade', 'Ritik Minekar', 'Vivek Yadav', 'Saurabh Pacharne',
+      'Shresth Bhuwania'].forEach(function (name) {
+      TestAssert_(!realResolved.some(function (p) { return p.name === name; }), 'resolveRmHierarchy_: real production data no longer has a "' + name + '" row (departed, 2026-09-30 refresh)');
+    });
 
     // Confirmed real promotion (not export noise) -- Akash A Ugale now
     // sits above Yash Sharma. Yash Sharma's own 6 reports are

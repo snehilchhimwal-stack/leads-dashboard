@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `RmHierarchy.gs` (1205 lines) |
+| **Location** | `RmHierarchy.gs` (1207 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `2af4b48` — 4 new joiners from the 2026-09-29 HR Live export (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-30 against commit `SHA_PLACEHOLDER` — 15 confirmed departures removed (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -55,14 +55,14 @@ data-rebuild.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L498/#L922` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
-| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1097` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
-| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L478/#L455/#L1069` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
-| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1078` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
-| FN-244 | `isTopOfOrgRole_(role)` `#L993` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
-| FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L553/#L518/#L848/#L911` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | — | `setupRmHierarchy` (FN-247), manual | specific |
-| FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` `#L774/#L826/#L699/#L721/#L629/#L657` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs | reusable |
-| FN-247 | `setupRmHierarchy()` `#L1195` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
+| FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L500/#L924` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
+| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1099` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
+| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L480/#L457/#L1071` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
+| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1080` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
+| FN-244 | `isTopOfOrgRole_(role)` `#L995` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
+| FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L555/#L520/#L850/#L913` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | — | `setupRmHierarchy` (FN-247), manual | specific |
+| FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` `#L776/#L828/#L701/#L723/#L631/#L659` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs | reusable |
+| FN-247 | `setupRmHierarchy()` `#L1197` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -249,6 +249,22 @@ shape existing tests already exercise; no new code path). **Deployed live and ru
 pre-edit state, since the private file carries no git history to diff against), both saved and
 SHA-verified in a fresh editor tab, then `rebuildRmHierarchy()` run from the editor: "RM_Hierarchy
 rebuilt: 236 people. Manager_Directory refreshed (emails preserved)."
+
+**2026-09-30** (`SHA_PLACEHOLDER`): user-confirmed departures removed from `RM_HIERARCHY_RAW_`, same handling as
+Prathamesh A Pande/Mukesh Yadav above (row removed, no downstream reassignment needed -- none had reports). Two
+batches: 6 people last active in the 2026-09-21/23 HR export, gone by 2026-09-29 (Dhiraj Chhoda, Vishal Chavan,
+Chandni Khatoon, Pranav Deshmukh, Darshana Javeri, Amit Dere); 8 more stale since 2026-09-21 (Purvesh Ugawekar,
+Mustakim Sayyad, Akshay Kakade, Ritik Minekar, Vivek Yadav, Saurabh Pacharne, Shresth Bhuwania, Nikhil Goud) plus
+"Shamakuri Goud", a partial-name duplicate row for the same Nikhil Goud (full HR name "Nikhil Shamakuri Goud",
+confirmed by the user) -- 15 rows total. Checked first that none of the 15 are referenced as anyone else's
+tl/tm/rh/ch, and that none currently have any leads assigned in the live `leads` tab (a lead naming a departed RM
+would still route safely via the region fallback/CH backstop either way -- EmailInfra.gs -- this was just belt and
+braces). Separately confirmed (not touched): "Kavya Gowda" is a pre-existing, already-tested alias of the
+still-active "Kavya B R" (identical chain, `Tests_RmHierarchy.gs` already asserted this from an earlier session) --
+NOT a departure, despite never matching any HR export by name; she has 51 real leads. +2 lines net (1205L -> 1207L:
+-15 departure rows, but the explanatory comment block is longer than a single-line removal). `Tests_RmHierarchy.gs`
+updated: the stale "Shamakuri Goud"/"Nikhil Goud" alias-identity assertions and the "Amit Dere new hire" assertion
+replaced with departure-absence checks (same pattern the 2026-09-09 refresh block already established).
 
 ## Revalidation trigger
 
