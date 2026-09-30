@@ -78,18 +78,18 @@ confirm the paste took.
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `Core.gs` | `c9c0b66` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `Core.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `DailyRmIssueLog.gs` | `26bf0cf` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `EmailInfra.gs` | `5aafbd4` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `EmailInfra.gs` | `a1a21b4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `MovementTracker.gs` | `c9c0b66` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `MovementTracker.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `OvernightEmailer.gs` | `87114a3` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `RmHierarchy.gs` | `187450a` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
-| `SlaEngine.gs` | `87114a3` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
+| `OvernightEmailer.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `RmHierarchy.gs` | `2af4b48` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `SlaEngine.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-09-29 | read directly from the live editor by hash-match (2026-09-29) |
 
 ### Known live-vs-repo differences
