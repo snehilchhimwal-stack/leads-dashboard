@@ -69,11 +69,12 @@ let CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
 let FUTWORK_ROUTE_EMAIL_ = 'snehil.chhimwal@homesfy.in';
 function isFutworkRmNameGs_(name) { return /futwork/i.test(String(name || '')); }
 
-// P&L head Cc'd on every automatic email for a region (2026-09-26, "add pnl head of Hyderabad and Bangalore in cc").
+// P&L head Cc'd on every automatic email for a region (2026-09-26, "add pnl head of Hyderabad and Bangalore in cc";
+// 2026-09-30, "also add pnl head in cc for both the region of each email" [Thane, Navi Mumbai]).
 // Holds NAMES, not addresses — this repo is public, so the address is looked up at send time from Manager_Directory
 // (filled from RmHierarchy.private.gs, which is never committed). Source of the names: the HR export's P&L column.
 // Keyed by region; `let` for test-overridability.
-let REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Mukesh Mishra', 'Bangalore': 'Mukesh Mishra' };
+let REGION_PNL_HEAD_CC_ = { 'Hyderabad': 'Mukesh Mishra', 'Bangalore': 'Mukesh Mishra', 'Thane': 'Shitij Kaushal', 'Navi Mumbai': 'Shitij Kaushal' };
 
 // The email address of a region's P&L head, or '' when the region has none configured or Manager_Directory has no
 // address for that name (logged, never thrown — a missing Cc must not stop an email).

@@ -262,6 +262,14 @@ function runEmailInfraTests_() {
       REGION_PNL_HEAD_CC_ = {};
     }
 
+    // ---- Real production REGION_PNL_HEAD_CC_ config sanity (2026-09-30) — TestEnv_realGlobals_ captured the actual
+    // production map before TestEnv_setUp_ reset it to {} above; this catches a region silently dropped from it. ----
+    const realPnlMap = {};
+    Object.keys(TestEnv_realGlobals_.REGION_PNL_HEAD_CC_ || {}).forEach(function (r) { realPnlMap[r.trim().toLowerCase()] = TestEnv_realGlobals_.REGION_PNL_HEAD_CC_[r]; });
+    ['Hyderabad', 'Bangalore', 'Thane', 'Navi Mumbai'].forEach(function (region) {
+      TestAssert_(!!realPnlMap[region.toLowerCase()], 'REGION_PNL_HEAD_CC_ (production): ' + region + ' has a configured P&L head');
+    });
+
     // ---- Futwork single-email helpers (2026-09-25): one pseudo-region across every real region ----
     TestAssertEqual_(regionKeyForRmGs_('Kajal Futwork', 'Pune'), FUTWORK_REGION_KEY_, 'regionKeyForRmGs_: a Futwork RM groups under the single Futwork key whatever its real region');
     TestAssertEqual_(regionKeyForRmGs_('Test RM One', 'Pune'), 'Pune', 'regionKeyForRmGs_: any other RM keeps its own region');
