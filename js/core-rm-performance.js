@@ -101,6 +101,54 @@ const RM_PERF_CHRONIC_STREAK_DAYS = 3;
 // excess over average isn't "below expectations", it's normal variance.
 const RM_PERF_FLAG_RATIO = 1.25;
 
+// Posterior-confidence flagging threshold — added 2026-09-30, HANDOVER.md
+// §9.7.5 has the full derivation. Investigating why a narrow filter (e.g.
+// Source=Google + Sub-source=Non-UTM/Search) showed ZERO RMs "Below
+// Expectations" surfaced a real gap: `composite` above is already a
+// Bayesian-shrinkage POSTERIOR MEAN (confirmed algebraically — the
+// shrunkRate formula below is exactly the posterior mean of a
+// Beta(K*peer+n*raw, K*(1-peer)+n*(1-raw)) distribution), but
+// classifyRmPerformance only ever compared that MEAN to
+// peerComposite*RM_PERF_FLAG_RATIO — at small n (5-16 leads, the exact
+// range a narrow filter collapses each RM's book to) the shrinkage weight
+// (K/(n+K), 44-62% at that range) pulls the mean back toward peer
+// regardless of how extreme the observed rate is, so nobody ever crosses
+// the ratio line even when the evidence would be quite improbable under
+// the peer rate by chance.
+//
+// THE FIX ALSO COMPUTES THE POSTERIOR'S VARIANCE (not just its mean, see
+// rmPerfBetaPosteriorVariance below) and changes the decision rule from
+// "is the point estimate above the ratio" to "does a z-score against the
+// ratio line, run through a normal-CDF approximation, clear this
+// confidence bar" — classifyRmPerformance's own comment has the exact
+// formula.
+//
+// CRITICAL, COUNTER-INTUITIVE PROPERTY — READ BEFORE CHANGING THIS NUMBER:
+// because the z-score is centered exactly at peerComposite*RM_PERF_FLAG_RATIO,
+// confidence >= 0.5 is MATHEMATICALLY IDENTICAL to the old point-estimate
+// rule (same comparison, just via the sign of z instead of the raw
+// composite) — proven both by hand and independently by a planning
+// subagent this session. Raising this toward 0.8-0.9 (the "feels right"
+// instinct for something named "confidence") would make flagging STRICTLY
+// MORE conservative than today, the opposite of the goal. To actually
+// catch more small-sample problems this constant MUST sit BELOW 0.5 — it
+// stops meaning "how sure are we" in the everyday sense and means "does
+// the weight of evidence lean far enough past pure noise to act on it,
+// even before the point estimate itself has fully crossed the line."
+// Calibration worked out and confirmed with the user this session (catch
+// rate for a genuinely-1.5x-peer RM vs. false-flag rate for an
+// at-peer-rate clean RM, both at n=5-16 — see HANDOVER §9.7.5 for the full
+// table and the Monte Carlo/closed-form method used to produce it):
+//   0.50 (= no change from the old rule): ~6-7% false-flag, 36.5%/68.2% catch (n=5/n=16)
+//   0.40 (CHOSEN):                        ~10-13% false-flag, 50.6%/78.1% catch (n=5/n=16)
+//   0.35:                                 ~13-18% false-flag, 58.6%/82.3% catch (n=5/n=16)
+//   0.30:                                 ~17-23% false-flag, 65.4%/86.0% catch (n=5/n=16)
+// 0.40 was chosen over the more aggressive 0.35/0.30 because the composite
+// variance below is a documented ANTI-CONSERVATIVE approximation (see its
+// own comment) — the more conservative of the two new confidence
+// thresholds in this file partially offsets that.
+const RM_PERF_CONFIDENCE_THRESHOLD = 0.40;
+
 // A rule's elevated rate is "concentrated" (a case-management question —
 // go check those specific leads) rather than "broad" (a coaching
 // question — the RM's whole book is affected) when at least one violated
@@ -414,6 +462,47 @@ function _rmPerfDaysBetweenKeys(a, b){
   return Math.round((db - da) / 86400000);
 }
 
+// Standard normal CDF, Abramowitz & Stegun 7.1.26 erf approximation (max
+// abs error ~1.5e-7) — added 2026-09-30 for posterior-confidence flagging
+// (RM_PERF_CONFIDENCE_THRESHOLD / RM_OPP_CONFIDENCE_THRESHOLD above, see
+// their comments and HANDOVER.md §9.7.5). No external stats library
+// exists anywhere in this codebase (confirmed by grep before writing
+// this), and none is needed for a one-shot closed-form approximation.
+// Ported BYTE-FOR-BYTE to DailyRmIssueLog.gs's rmPerfNormalCdfGs_ — being
+// a function, not a plain-data literal, it's invisible to
+// test/check-runtime-parity.py's parser (same as RM_PERF_VENDOR_NAME_PATTERN
+// above), so BOTH sides carry identical reference-value unit tests
+// instead (tests/frontend-harness.html + Tests_DailyRmIssueLog.gs) to
+// catch a porting typo the automated checker structurally cannot.
+function rmPerfNormalCdf(z){
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
+    a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const t = 1 / (1 + p * x);
+  const erf = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sign * erf);
+}
+
+// The Beta-posterior VARIANCE behind an empirical-Bayes shrunk rate —
+// added 2026-09-30, sibling to the shrinkage formula every call site below
+// already computes for the MEAN (`(n/(n+K))*raw + (K/(n+K))*peer`, which
+// is exactly the posterior mean of Beta(K*peer+n*raw, K*(1-peer)+n*(1-raw))
+// — confirmed algebraically). `n` is in whatever unit the caller's own
+// shrinkage weight already uses (distinct-lead units for the violation
+// composite, resolved-lead count for Opp-conversion — see each call
+// site's own comment for why). Returns 0 (a degenerate, zero-width
+// posterior) when alpha+beta is 0, which callers must guard against
+// before dividing by it — see RM_PERF_CONFIDENCE_THRESHOLD's classifier
+// for the fallback.
+function rmPerfBetaPosteriorVariance(peer, raw, n, K){
+  const alpha = K * peer + n * raw;
+  const beta = K * (1 - peer) + n * (1 - raw);
+  const total = alpha + beta;
+  if (total <= 0) return 0;
+  return (alpha * beta) / (total * total * (total + 1));
+}
+
 // Stage 1 — walk every retained Movement_Log lead-copy history and emit
 // one {name, lead_id, dayKey, rule, violated} record for every (lead, day,
 // rule) combination where the lead was actually ELIGIBLE for that rule.
@@ -637,6 +726,7 @@ function classifyRmPerformance(byGroup){
   const results = [];
   byGroup.forEach(groupEntry => {
     let composite = 0;
+    let compositeVariance = 0; // added 2026-09-30 — see RM_PERF_CONFIDENCE_THRESHOLD's comment
     const allEligibleLeads = new Set();
     let anyConcentrated = false;
     let totalInstances = 0; // sum of violationDays across the 4 SCORED rules only — see result comment below
@@ -657,6 +747,14 @@ function classifyRmPerformance(byGroup){
         && (distinctViolatedLeads / distinctEligibleLeads) <= RM_PERF_CONCENTRATION_BREADTH_CEILING;
 
       composite += RM_PERF_RULE_WEIGHTS[ruleKey] * shrunkRate;
+      // Independence-across-rules approximation — the 4 scored rules
+      // plausibly correlate positively (a neglected lead trips several on
+      // the same bad days), so this UNDERSTATES true variance and runs
+      // confidence numbers somewhat hot (anti-conservative, not
+      // conservative — see RM_PERF_CONFIDENCE_THRESHOLD's own comment on
+      // why that constant is the more conservative of its two siblings).
+      const ruleVariance = rmPerfBetaPosteriorVariance(peerAvg[ruleKey] || 0, rawRate, distinctEligibleLeads, RM_PERF_SHRINKAGE_K);
+      compositeVariance += RM_PERF_RULE_WEIGHTS[ruleKey] * RM_PERF_RULE_WEIGHTS[ruleKey] * ruleVariance;
       if (r) r.eligibleLeads.forEach(id => allEligibleLeads.add(id));
       if (concentrated) anyConcentrated = true;
 
@@ -669,11 +767,31 @@ function classifyRmPerformance(byGroup){
     const inactiveRmRule = groupEntry.rules.get('inactiveRmNewLead');
     const nLeads = allEligibleLeads.size;
 
+    // Posterior-confidence decision rule — added 2026-09-30, see
+    // RM_PERF_CONFIDENCE_THRESHOLD's comment for the full derivation and
+    // the calibration table. `confidence` = P(true composite exceeds the
+    // ratio line | data), via a normal approximation to the (variance-
+    // weighted-sum) posterior. Degenerate guard: when compositeVariance
+    // isn't a usable positive finite number (all 4 rules degenerate —
+    // zero eligible leads and zero peer rate throughout, vanishingly rare
+    // in practice), fall back to the ORIGINAL point-estimate comparison
+    // rather than divide by zero or guess.
     let classification;
-    if (nLeads < RM_PERF_MIN_VOLUME_LEADS) classification = 'Insufficient Data';
-    else if (composite <= peerComposite * RM_PERF_FLAG_RATIO) classification = 'On Track';
-    else if (anyConcentrated) classification = 'Watch — concentrated';
-    else classification = 'Below Expectations';
+    let confidence = null;
+    if (nLeads < RM_PERF_MIN_VOLUME_LEADS) {
+      classification = 'Insufficient Data';
+    } else if (compositeVariance > 0 && isFinite(compositeVariance)) {
+      confidence = rmPerfNormalCdf((composite - peerComposite * RM_PERF_FLAG_RATIO) / Math.sqrt(compositeVariance));
+      if (confidence < RM_PERF_CONFIDENCE_THRESHOLD) classification = 'On Track';
+      else if (anyConcentrated) classification = 'Watch — concentrated';
+      else classification = 'Below Expectations';
+    } else if (composite <= peerComposite * RM_PERF_FLAG_RATIO) {
+      classification = 'On Track';
+    } else if (anyConcentrated) {
+      classification = 'Watch — concentrated';
+    } else {
+      classification = 'Below Expectations';
+    }
 
     // Dominant region among this group's OWN observations — the most
     // frequently observed region wins ties by insertion order (Map
@@ -696,6 +814,8 @@ function classifyRmPerformance(byGroup){
       rules: perRuleOut,
       routingIssueDays: inactiveRmRule ? inactiveRmRule.violationDays : 0,
       classification: classification,
+      confidence: confidence, // added 2026-09-30 — null when the degenerate fallback fired (see RM_PERF_CONFIDENCE_THRESHOLD)
+      compositeVariance: compositeVariance, // added 2026-09-30
       // 2026-09-07 additions, replacing the "Driven by" column on every
       // table with real hierarchy/volume figures instead:
       totalInstances: totalInstances, // total violation-day INSTANCES across the 4 scored rules (Movement_Log-based, not Daily_RM_Issues — that log was removed as a data source in the 2026-09-04 redesign for having no real eligible-population denominator; this is the same real methodology's own instance count instead)
@@ -836,6 +956,20 @@ const RM_OPP_SHRINKAGE_K = 8; // same meaning as RM_PERF_SHRINKAGE_K, in distinc
 // samples can't trigger it alone; a genuinely bad RM (true rate 5% vs
 // peer 20%) is still caught ~74% of the time at n=20.
 const RM_OPP_LOW_RATIO = 0.5;
+
+// Posterior-confidence flagging threshold for lowConversion — added
+// 2026-09-30, sibling of RM_PERF_CONFIDENCE_THRESHOLD above (that
+// constant's own comment has the full derivation, the "must sit below 0.5"
+// property, and the calibration table — read it first). Same idea applied
+// to a SINGLE proportion (sameDay/48h Opp%) instead of a 4-rule weighted
+// composite: no cross-rule independence approximation applies here, so
+// this can sit closer to its true calibration than the violation side —
+// chosen at 0.35 (vs 0.40 for RM_PERF_CONFIDENCE_THRESHOLD) specifically
+// because it doesn't inherit that other constant's anti-conservative bias.
+// z is centered at RM_OPP_LOW_RATIO*peerRate, testing the LOW-conversion
+// direction (opposite sign from the violation side's "is it elevated").
+const RM_OPP_CONFIDENCE_THRESHOLD = 0.35;
+
 // Per TABLE (not per row — everyone in one table judged on the same
 // metric), switch from same-day to 48h once at least this share of the
 // table's total cohort leads are cohort-complete (48h window elapsed).
@@ -985,13 +1119,29 @@ function classifyRmOppConversion(byGroup){
     const raw = n ? opp / n : 0;
     const shrunk = (n / (n + RM_OPP_SHRINKAGE_K)) * raw + (RM_OPP_SHRINKAGE_K / (n + RM_OPP_SHRINKAGE_K)) * peerRate;
     const sufficient = n >= RM_OPP_MIN_RESOLVED_LEADS;
-    const lowConversion = sufficient && peerRate > 0 && shrunk <= RM_OPP_LOW_RATIO * peerRate;
+    // Posterior-confidence flagging — added 2026-09-30, see
+    // RM_OPP_CONFIDENCE_THRESHOLD's own comment (sibling of
+    // RM_PERF_CONFIDENCE_THRESHOLD, same "must sit below 0.5" property,
+    // same derivation). Direction is FLIPPED from the violation side: z is
+    // centered at RM_OPP_LOW_RATIO*peerRate testing whether the true rate
+    // is BELOW it, not above. Degenerate guard mirrors the violation side.
+    let confidence = null;
+    let lowConversion = false;
+    if (sufficient && peerRate > 0) {
+      const variance = rmPerfBetaPosteriorVariance(peerRate, raw, n, RM_OPP_SHRINKAGE_K);
+      if (variance > 0 && isFinite(variance)) {
+        confidence = rmPerfNormalCdf((RM_OPP_LOW_RATIO * peerRate - shrunk) / Math.sqrt(variance));
+        lowConversion = confidence >= RM_OPP_CONFIDENCE_THRESHOLD;
+      } else {
+        lowConversion = shrunk <= RM_OPP_LOW_RATIO * peerRate;
+      }
+    }
     byName.set(name, {
       cohortLeads: g.cohortLeads,
       sameDayResolved: g.sameDayResolved, sameDayOpp: g.sameDayOpp,
       windowComplete: g.windowComplete, resolved48h: g.resolved48h, opp48h: g.opp48h,
       pending48h: g.cohortLeads - g.resolved48h,
-      n, raw, shrunk, sufficient, lowConversion,
+      n, raw, shrunk, sufficient, lowConversion, confidence,
     });
   });
 
@@ -1045,6 +1195,22 @@ function rmOppDisplayCells(r){
   else if (o.pending48h) h48 = `pending (${o.pending48h})`;
   else h48 = '—';
   return { sameDay, h48, lowConversion: !!o.lowConversion, basis: r.oppBasis || null };
+}
+
+// Shared display helper for the posterior-confidence annotation — added
+// 2026-09-30, used by BOTH the live tab and the PDF export, same
+// never-drift-between-surfaces reasoning as rmOppDisplayCells above. Only
+// meaningful for an elevated row (Below Expectations / Watch — the
+// classifications that used the confidence gate at all); returns '' for
+// On Track / Insufficient Data, and also '' when r.confidence is null
+// (the degenerate fallback fired — that row behaved exactly like the old
+// point-estimate rule and shouldn't claim a confidence number it doesn't
+// have). See RM_PERF_CONFIDENCE_THRESHOLD's comment for what the
+// percentage means (NOT everyday "how sure are we" — see that comment).
+function rmPerfConfidenceLabel(r){
+  if (r.confidence == null) return '';
+  if (!RM_OPP_ELEVATED_CLASSIFICATIONS.has(r.classification)) return '';
+  return Math.round(r.confidence * 100) + '% confidence';
 }
 
 // Shared display helpers — used by BOTH the live tab

@@ -829,6 +829,13 @@ const RM_PERF_MIN_VOLUME_LEADS_GS_ = 5;
 const RM_PERF_CHRONIC_STREAK_DAYS_GS_ = 3;
 const RM_PERF_FLAG_RATIO_GS_ = 1.25;
 const RM_PERF_CONCENTRATION_BREADTH_CEILING_GS_ = 0.25;
+// Posterior-confidence flagging threshold — twin of js/core-rm-performance.js's
+// RM_PERF_CONFIDENCE_THRESHOLD, added 2026-09-30. That constant's own
+// comment has the full derivation, the "must sit below 0.5" property (NOT
+// a typo), and the calibration table — read it before touching this
+// value. KEEP NUMERICALLY IDENTICAL to the JS side (parity-checked,
+// test/check-runtime-parity.py).
+const RM_PERF_CONFIDENCE_THRESHOLD_GS_ = 0.40;
 
 // Eligibility gate + display label per rule — ported from
 // js/core-rm-performance.js's RM_PERF_RULES (same keys, same conditions,
@@ -1143,6 +1150,35 @@ function aggregateRmPerformanceGs_(observations) {
   return byGroup;
 }
 
+// Standard normal CDF, Abramowitz & Stegun 7.1.26 erf approximation — BYTE-
+// FOR-BYTE port of js/core-rm-performance.js's rmPerfNormalCdf, added
+// 2026-09-30 for posterior-confidence flagging (RM_PERF_CONFIDENCE_THRESHOLD_GS_
+// above). Being a function, not a plain-data literal, it's invisible to
+// test/check-runtime-parity.py's parser — kept in parity by hand, backed
+// by identical reference-value assertions on both sides (Tests_DailyRmIssueLog.gs
+// / tests/frontend-harness.html) instead.
+function rmPerfNormalCdfGs_(z) {
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
+    a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const t = 1 / (1 + p * x);
+  const erf = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sign * erf);
+}
+
+// The Beta-posterior VARIANCE behind an empirical-Bayes shrunk rate —
+// direct port of js/core-rm-performance.js's rmPerfBetaPosteriorVariance,
+// added 2026-09-30. Returns 0 (degenerate) when alpha+beta is 0; callers
+// must guard before dividing by it.
+function rmPerfBetaPosteriorVarianceGs_(peer, raw, n, K) {
+  const alpha = K * peer + n * raw;
+  const beta = K * (1 - peer) + n * (1 - raw);
+  const total = alpha + beta;
+  if (total <= 0) return 0;
+  return (alpha * beta) / (total * total * (total + 1));
+}
+
 // Company-wide (every group currently in byGroup) violation rate per rule,
 // weighted by lead-days. Direct port of computeRmPerfPeerAverages.
 function computeRmPerfPeerAveragesGs_(byGroup) {
@@ -1181,6 +1217,7 @@ function classifyRmPerformanceGs_(byGroup) {
   Object.keys(byGroup).forEach(function (name) {
     const groupEntry = byGroup[name];
     let composite = 0;
+    let compositeVariance = 0; // added 2026-09-30 — see RM_PERF_CONFIDENCE_THRESHOLD_GS_'s comment
     const allEligibleLeads = {};
     let anyConcentrated = false;
     const perRuleOut = {};
@@ -1199,6 +1236,11 @@ function classifyRmPerformanceGs_(byGroup) {
         && (distinctViolatedLeads / distinctEligibleLeads) <= RM_PERF_CONCENTRATION_BREADTH_CEILING_GS_;
 
       composite += RM_PERF_RULE_WEIGHTS_GS_[ruleKey] * shrunkRate;
+      // Independence-across-rules approximation — anti-conservative, see
+      // js/core-rm-performance.js's classifyRmPerformance comment (byte-
+      // for-byte reasoning applies here too).
+      const ruleVariance = rmPerfBetaPosteriorVarianceGs_(peerAvg[ruleKey] || 0, rawRate, distinctEligibleLeads, RM_PERF_SHRINKAGE_K_GS_);
+      compositeVariance += RM_PERF_RULE_WEIGHTS_GS_[ruleKey] * RM_PERF_RULE_WEIGHTS_GS_[ruleKey] * ruleVariance;
       if (r) Object.keys(r.eligibleLeads).forEach(function (id) { allEligibleLeads[id] = true; });
       if (concentrated) anyConcentrated = true;
 
@@ -1212,16 +1254,31 @@ function classifyRmPerformanceGs_(byGroup) {
     const inactiveRmRule = groupEntry.rules.inactiveRmNewLead;
     const nLeads = Object.keys(allEligibleLeads).length;
 
+    // Posterior-confidence decision rule — direct port of
+    // js/core-rm-performance.js's classifyRmPerformance, added 2026-09-30.
+    // See RM_PERF_CONFIDENCE_THRESHOLD_GS_'s comment for the full
+    // derivation and the degenerate-fallback reasoning.
     let classification;
-    if (nLeads < RM_PERF_MIN_VOLUME_LEADS_GS_) classification = 'Insufficient Data';
-    else if (composite <= peerComposite * RM_PERF_FLAG_RATIO_GS_) classification = 'On Track';
-    else if (anyConcentrated) classification = 'Watch — concentrated';
-    else classification = 'Below Expectations';
+    let confidence = null;
+    if (nLeads < RM_PERF_MIN_VOLUME_LEADS_GS_) {
+      classification = 'Insufficient Data';
+    } else if (compositeVariance > 0 && isFinite(compositeVariance)) {
+      confidence = rmPerfNormalCdfGs_((composite - peerComposite * RM_PERF_FLAG_RATIO_GS_) / Math.sqrt(compositeVariance));
+      if (confidence < RM_PERF_CONFIDENCE_THRESHOLD_GS_) classification = 'On Track';
+      else if (anyConcentrated) classification = 'Watch — concentrated';
+      else classification = 'Below Expectations';
+    } else if (composite <= peerComposite * RM_PERF_FLAG_RATIO_GS_) {
+      classification = 'On Track';
+    } else if (anyConcentrated) {
+      classification = 'Watch — concentrated';
+    } else {
+      classification = 'Below Expectations';
+    }
 
     results.push({
       name: name, distinctLeads: nLeads, composite: composite, peerComposite: peerComposite,
       rules: perRuleOut, routingIssueDays: inactiveRmRule ? inactiveRmRule.violationDays : 0,
-      classification: classification,
+      classification: classification, confidence: confidence, compositeVariance: compositeVariance,
     });
   });
 
@@ -1281,6 +1338,7 @@ function reportRmPerformanceNow() {
       return d.label + ' (rate ' + Math.round(d.rawRate * 100) + '%, ' + d.distinctViolatedLeads + '/' + d.distinctEligibleLeads + ' lead(s)' + (d.concentrated ? ', concentrated' : '') + ')';
     }).join('; ');
     Logger.log('  ' + r.name + ' — ' + r.classification + ' — workload ' + r.distinctLeads + ' lead(s), score ' + r.composite.toFixed(2) + ' vs peer ' + r.peerComposite.toFixed(2) +
+      (r.confidence != null ? ', ' + Math.round(r.confidence * 100) + '% confidence' : '') +
       (r.routingIssueDays ? ', ' + r.routingIssueDays + ' inactive-RM routing day(s) (not scored)' : '') +
       (drivenBy ? ' — driven by: ' + drivenBy : ''));
   });

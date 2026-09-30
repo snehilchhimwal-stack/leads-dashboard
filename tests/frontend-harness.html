@@ -1042,6 +1042,225 @@
     }
   })();
 
+  // ---- 2h. Posterior-confidence flagging (added 2026-09-30, HANDOVER.md
+  // §9.7.5) ----
+  // Investigating why a narrow filter (Source=Google + Sub-source=Non-UTM/
+  // Search) showed ZERO RMs "Below Expectations" surfaced a real gap: the
+  // composite score is already a Bayesian-shrinkage posterior MEAN, but
+  // classification only ever compared that mean to a fixed ratio — at
+  // small n the shrinkage weight pulls the mean back toward peer
+  // regardless of how extreme the evidence is. The fix computes the
+  // posterior's VARIANCE too and flags on confidence (a z-score through a
+  // normal-CDF approximation) instead of the raw point estimate.
+  //
+  // Every fixture below was tuned empirically against the REAL running
+  // engine (not hand-derived) — the 4 scored rules have different
+  // weights AND different eligibility gates (stageStuck48h and
+  // followupOverdue are mutually exclusive by lead age; isNotUpdated
+  // keys off canonicalStage; underCalledToday off call_attempts), so a
+  // pure pen-and-paper composite/variance calculation would be fragile.
+  // These exact fixture shapes/counts reproduce specific, comfortably-
+  // separated (not razor-thin) confidence values against real code —
+  // change any of them and re-verify against the real engine before
+  // trusting new numbers.
+  function _confBadRow(rmName, leadId) {
+    // "Connected but neglected" — Suspect stage (isNotUpdated violated),
+    // marked Connected 6h ago with no comments since (followupOverdue
+    // violated, >4h stale), zero calls (underCalledToday violated). NOT
+    // past48h, so stageStuck48h is deliberately not in play (mutually
+    // exclusive with followupOverdue by age — see file header above).
+    return _roFilterTestRow({
+      lead_id: leadId, client_id: 'C-' + leadId, RM: rmName,
+      last_connect: 'Connected',
+      last_connect_time: new Date(new Date('2026-09-01T18:00:00+05:30').getTime() - 6 * 3600000).toISOString(),
+    });
+  }
+  function _confCleanRow(rmName, leadId) {
+    return _roFilterTestRow({
+      lead_id: leadId, client_id: 'C-' + leadId, RM: rmName,
+      current_stage: 'Connected', last_connect: 'Connected',
+      last_connect_time: new Date(new Date('2026-09-01T18:00:00+05:30').getTime() - 3600000).toISOString(),
+      last_comment: 'ok', internal_status_comments: 'RM: call 1 - 2026-09-01 09:00',
+      call_attempts: 10, call_count: 10,
+    });
+  }
+
+  // 1. Large-n regression — old point-estimate rule and new confidence
+  // rule must AGREE once n is large enough for the posterior to sharpen.
+  // Peer pool: 60 RMs x (1 bad + 4 clean) = 300 leads, ~20% baseline.
+  // BigBelow: 100 leads, 15 bad — comfortably under the ratio line.
+  // BigAbove: 100 leads, 80 bad — comfortably over it.
+  (function () {
+    const snaps = [];
+    for (let rmN = 1; rmN <= 60; rmN++) {
+      snaps.push(_confBadRow('ConfPeer' + rmN, 'CP-' + rmN + '-B'));
+      for (let leadN = 1; leadN <= 4; leadN++) snaps.push(_confCleanRow('ConfPeer' + rmN, 'CP-' + rmN + '-C' + leadN));
+    }
+    for (let leadN = 1; leadN <= 15; leadN++) snaps.push(_confBadRow('BigBelow', 'BB-' + leadN));
+    for (let leadN = 1; leadN <= 85; leadN++) snaps.push(_confCleanRow('BigBelow', 'BBc-' + leadN));
+    for (let leadN = 1; leadN <= 80; leadN++) snaps.push(_confBadRow('BigAbove', 'BA-' + leadN));
+    for (let leadN = 1; leadN <= 20; leadN++) snaps.push(_confCleanRow('BigAbove', 'BAc-' + leadN));
+    const saved = movementSnapshots;
+    movementSnapshots = snaps;
+    let result;
+    try { result = computeRmPerformance(null, undefined, _roEmptyFilters(), null); }
+    finally { movementSnapshots = saved; }
+    const below = result.find(r => r.name === 'BigBelow');
+    const above = result.find(r => r.name === 'BigAbove');
+    assert('Posterior-confidence, large-n regression: BigBelow (ratio ~0.90, well under 1.25) — old rule would not flag, new confidence is near-zero, both agree On Track',
+      !!below && below.composite <= below.peerComposite * RM_PERF_FLAG_RATIO && below.confidence < 0.01 && below.classification === 'On Track',
+      'below=' + JSON.stringify(below && { composite: below.composite, peerComposite: below.peerComposite, confidence: below.confidence, classification: below.classification }));
+    assert('Posterior-confidence, large-n regression: BigAbove (ratio ~1.30, well over 1.25) — old rule would flag, new confidence is near-certain, both agree Below Expectations',
+      !!above && above.composite > above.peerComposite * RM_PERF_FLAG_RATIO && above.confidence > 0.90 && above.classification === 'Below Expectations',
+      'above=' + JSON.stringify(above && { composite: above.composite, peerComposite: above.peerComposite, confidence: above.confidence, classification: above.classification }));
+  })();
+
+  // 2. THE key test — small-n new capability. Peer pool: 5 RMs x 5 clean
+  // leads = 25 leads. SmallBad: 5 fully "bad" leads. The old point-
+  // estimate rule would NOT flag this (composite stays just under
+  // peerComposite*1.25 — shrinkage at n=5 pulls it back too far) but the
+  // new confidence rule DOES (~44% confidence >= the 0.40 threshold) —
+  // this is the literal reproduction of the originally-reported bug
+  // (0 RMs "Below Expectations" under a narrow filter).
+  (function () {
+    const snaps = [];
+    for (let rmN = 1; rmN <= 5; rmN++) {
+      for (let leadN = 1; leadN <= 5; leadN++) snaps.push(_confCleanRow('ConfSmallPeer' + rmN, 'CSP-' + rmN + '-' + leadN));
+    }
+    for (let leadN = 1; leadN <= 5; leadN++) snaps.push(_confBadRow('SmallBad', 'SB-' + leadN));
+    const saved = movementSnapshots;
+    movementSnapshots = snaps;
+    let result;
+    try { result = computeRmPerformance(null, undefined, _roEmptyFilters(), null); }
+    finally { movementSnapshots = saved; }
+    const t = result.find(r => r.name === 'SmallBad');
+    assert('Posterior-confidence, small-n: OLD point-estimate rule would NOT flag SmallBad (composite stays under peerComposite*1.25 despite 5/5 bad leads)',
+      !!t && t.composite <= t.peerComposite * RM_PERF_FLAG_RATIO,
+      't=' + JSON.stringify(t && { composite: t.composite, peerComposite: t.peerComposite, ratio: t.composite / t.peerComposite }));
+    assert('Posterior-confidence, small-n: NEW confidence rule DOES flag SmallBad as Below Expectations (~44% confidence clears the 0.40 threshold)',
+      !!t && t.classification === 'Below Expectations' && t.confidence >= RM_PERF_CONFIDENCE_THRESHOLD,
+      't=' + JSON.stringify(t && { classification: t.classification, confidence: t.confidence }));
+
+    // 2b. Rendered-row check — the confidence annotation appears for this
+    // flagged row and is absent for an On Track row in the same table.
+    const html = rmPerformanceTableHtml('RM', result, false, 'no data', null);
+    assert('Posterior-confidence: rendered table HTML shows a confidence percentage for the flagged Below-Expectations row',
+      html.indexOf('SmallBad') !== -1 && /SmallBad[\s\S]{0,400}\d+% confidence/.test(html), 'html snippet around SmallBad missing confidence label');
+    const cleanName = 'ConfSmallPeer1';
+    const cleanIdx = html.indexOf(cleanName);
+    const cleanRowHtml = cleanIdx === -1 ? '' : html.slice(cleanIdx, cleanIdx + 400);
+    assert('Posterior-confidence: rendered table HTML shows NO confidence percentage for an On Track row',
+      cleanIdx !== -1 && cleanRowHtml.indexOf('% confidence') === -1, 'cleanRowHtml=' + cleanRowHtml);
+  })();
+
+  // 3. Degenerate-variance fallback — a lone RM with no real peers (its
+  // own self-inclusive peer group of one) makes every rule's raw rate
+  // land exactly on its own peer average (0 or 1, not fractional, since
+  // there's no other RM to diverge from) — alpha or beta is exactly 0 for
+  // every rule, so compositeVariance is exactly 0. Confirms the fallback
+  // to the literal point-estimate comparison fires cleanly (no NaN, no
+  // throw) rather than dividing by zero.
+  (function () {
+    const snaps = [];
+    for (let leadN = 1; leadN <= 5; leadN++) snaps.push(_confCleanRow('AllClean', 'AC-' + leadN));
+    const saved = movementSnapshots;
+    movementSnapshots = snaps;
+    let result;
+    try { result = computeRmPerformance(null, undefined, _roEmptyFilters(), null); }
+    finally { movementSnapshots = saved; }
+    const t = result.find(r => r.name === 'AllClean');
+    assert('Posterior-confidence: degenerate single-member peer group falls back cleanly — compositeVariance is exactly 0, confidence is null, no NaN',
+      !!t && t.compositeVariance === 0 && t.confidence === null && !isNaN(t.composite) && !isNaN(t.peerComposite),
+      't=' + JSON.stringify(t && { compositeVariance: t.compositeVariance, confidence: t.confidence, composite: t.composite, peerComposite: t.peerComposite }));
+    assert('Posterior-confidence: the fallback classification is still correct (composite equals peerComposite exactly here, so On Track)',
+      !!t && t.classification === 'On Track', 'classification=' + (t && t.classification));
+  })();
+
+  // 4. Opp-Conversion large-n regression mirror (RM_OPP_CONFIDENCE_THRESHOLD).
+  // Peer: 200 leads, 80 convert (40%). BigBelow: 60 leads, 24 convert
+  // (40%, right at peer — comfortably not low). BigAbove: 60 leads, 6
+  // convert (10%, well under half of peer — comfortably low).
+  (function () {
+    const createdAt = new Date(Date.now() - 5 * 24 * 3600000); // past 48h, basis resolves to h48
+    const rows = [];
+    for (let i = 1; i <= 200; i++) {
+      const snaps = i <= 80 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+      rows.push(..._roOppLead('OppConfPeer' + i, 'OCP-' + i, createdAt, snaps));
+    }
+    for (let i = 1; i <= 60; i++) {
+      const snaps = i <= 24 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+      rows.push(..._roOppLead('OppBigBelow', 'OBB-' + i, createdAt, snaps));
+    }
+    for (let i = 1; i <= 60; i++) {
+      const snaps = i <= 6 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+      rows.push(..._roOppLead('OppBigAbove', 'OBA-' + i, createdAt, snaps));
+    }
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    let classified;
+    try {
+      const cohort = reconstructRmOppCohort(null, _roEmptyFilters(), null, Date.now());
+      classified = classifyRmOppConversion(aggregateRmOppConversion(cohort, undefined));
+    } finally { movementSnapshots = savedSnapshots; }
+    const below = classified.byName.get('OppBigBelow');
+    const above = classified.byName.get('OppBigAbove');
+    const peerRate = classified.peer[classified.basis];
+    assert('Opp-conversion posterior-confidence, large-n regression: OppBigBelow (40% conversion, at peer) — old rule would not flag, new confidence near-zero, both agree',
+      !!below && below.shrunk > RM_OPP_LOW_RATIO * peerRate && below.confidence < 0.01 && !below.lowConversion,
+      'below=' + JSON.stringify(below && { shrunk: below.shrunk, confidence: below.confidence, lowConversion: below.lowConversion }));
+    assert('Opp-conversion posterior-confidence, large-n regression: OppBigAbove (10% conversion, well under half of peer) — old rule would flag, new confidence near-certain, both agree',
+      !!above && above.shrunk <= RM_OPP_LOW_RATIO * peerRate && above.confidence > 0.80 && above.lowConversion,
+      'above=' + JSON.stringify(above && { shrunk: above.shrunk, confidence: above.confidence, lowConversion: above.lowConversion }));
+  })();
+
+  // 5. Opp-Conversion small-n new-capability mirror. Peer: 20 leads, 8
+  // convert (peerRate lands at 0.32 once OppSmallBad's own 0/5 dilutes
+  // the self-inclusive pool). OppSmallBad: 5 leads, 0 conversions — at
+  // n=5 with K=8, the OLD rule can NEVER catch a 0%-raw small sample at
+  // all (shrunk = 8/13*peerRate > 0.5*peerRate always, for K=8 > n=5's
+  // own contribution — see RM_OPP_LOW_RATIO's own comment, "an RM needs
+  // >=8 leads before a 0%-raw rate can even reach the threshold at all").
+  // The new confidence rule (~36%) clears RM_OPP_CONFIDENCE_THRESHOLD (0.35).
+  (function () {
+    const createdAt = new Date(Date.now() - 5 * 24 * 3600000);
+    const rows = [];
+    for (let i = 1; i <= 20; i++) {
+      const snaps = i <= 8 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+      rows.push(..._roOppLead('OppConfSmallPeer' + i, 'OCSP-' + i, createdAt, snaps));
+    }
+    for (let i = 1; i <= 5; i++) rows.push(..._roOppLead('OppSmallBad', 'OSB-' + i, createdAt, [{ hOffset: 1, stage: 'Suspect' }]));
+    const savedSnapshots = movementSnapshots;
+    movementSnapshots = rows;
+    let classified;
+    try {
+      const cohort = reconstructRmOppCohort(null, _roEmptyFilters(), null, Date.now());
+      classified = classifyRmOppConversion(aggregateRmOppConversion(cohort, undefined));
+    } finally { movementSnapshots = savedSnapshots; }
+    const t = classified.byName.get('OppSmallBad');
+    const peerRate = classified.peer[classified.basis];
+    assert('Opp-conversion posterior-confidence, small-n: OLD rule would NOT flag OppSmallBad (0/5 conversions, but n=5 < 8 means shrinkage alone can never reach the ratio)',
+      !!t && t.shrunk > RM_OPP_LOW_RATIO * peerRate,
+      't=' + JSON.stringify(t && { shrunk: t.shrunk, peerRate: peerRate }));
+    assert('Opp-conversion posterior-confidence, small-n: NEW confidence rule DOES flag OppSmallBad as lowConversion (~36% confidence clears the 0.35 threshold)',
+      !!t && t.lowConversion === true && t.confidence >= RM_OPP_CONFIDENCE_THRESHOLD,
+      't=' + JSON.stringify(t && { lowConversion: t.lowConversion, confidence: t.confidence }));
+  })();
+
+  // 6. rmPerfNormalCdf reference values (Abramowitz & Stegun 7.1.26
+  // approximation — max abs error ~1.5e-7; the z-values themselves are
+  // only accurate to ~4 decimal places, so a 1e-4 tolerance is generous
+  // but appropriate). Ported byte-for-byte to DailyRmIssueLog.gs's
+  // rmPerfNormalCdfGs_ — Tests_DailyRmIssueLog.gs carries the same 4
+  // reference values to catch a porting typo the automated
+  // check-runtime-parity.py structurally cannot (it's a function, not a
+  // plain-data literal).
+  (function () {
+    assert('rmPerfNormalCdf(0) is 0.5', Math.abs(rmPerfNormalCdf(0) - 0.5) < 1e-6, 'got ' + rmPerfNormalCdf(0));
+    assert('rmPerfNormalCdf(0.8416) is ~0.80', Math.abs(rmPerfNormalCdf(0.8416) - 0.80) < 1e-4, 'got ' + rmPerfNormalCdf(0.8416));
+    assert('rmPerfNormalCdf(1.2816) is ~0.90', Math.abs(rmPerfNormalCdf(1.2816) - 0.90) < 1e-4, 'got ' + rmPerfNormalCdf(1.2816));
+    assert('rmPerfNormalCdf(-1.2816) is ~0.10', Math.abs(rmPerfNormalCdf(-1.2816) - 0.10) < 1e-4, 'got ' + rmPerfNormalCdf(-1.2816));
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

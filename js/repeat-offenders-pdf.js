@@ -234,6 +234,10 @@ function _repeatOffendersPdfFilterSummaryLine(filters){
 // shows for the same row. doubleFlag ("BOTH signals bad" — see
 // core-rm-performance.js's joinRmOppConversion) is appended to the Name
 // cell as a second line, the same way the routing-issue note already is.
+// The posterior-confidence annotation (added 2026-09-30, see
+// core-rm-performance.js's rmPerfConfidenceLabel/RM_PERF_CONFIDENCE_THRESHOLD)
+// follows the same pattern via the same shared helper, so the two
+// surfaces can never disagree on what confidence a row shows.
 function _repeatOffendersPdfTableRows(list, rmHierarchyByNameLower){
   return list.map(function (r, i) {
     const score = r.composite.toFixed(2) + ' / ' + r.peerComposite.toFixed(2);
@@ -242,6 +246,8 @@ function _repeatOffendersPdfTableRows(list, rmHierarchyByNameLower){
     let name = r.name;
     if (r.routingIssueDays > 0) name += '\n+' + r.routingIssueDays + ' Inactive-RM routing day(s)';
     if (r.doubleFlag) name += '\nBOTH: elevated score + low conversion';
+    const confidenceLabel = rmPerfConfidenceLabel(r);
+    if (confidenceLabel) name += '\n' + confidenceLabel;
     return [String(i + 1), name, String(r.distinctLeads), score, String(r.totalInstances), oc.sameDay, oc.h48, hc.region];
   });
 }

@@ -1674,3 +1674,131 @@ separate change needed on that side. Docs: `JS-008` CFG-075/FN-060,
 assertions) + `Tests_DailyRmIssueLog.gs` (5 new assertions) — full
 suites 137/137 (frontend) and 1192/1192 (backend, via
 `test/run-gs-tests-headless.py`) after the change.
+
+### 9.7.5 Posterior-confidence flagging — added 2026-09-30
+
+**Why**: signed into the live dashboard to investigate a direct user
+question ("why does Google Non-UTM/Search show 0 RMs Below Expectations")
+and found a real, structural gap. `classifyRmPerformance`'s `composite`
+is already an empirical-Bayes shrinkage POSTERIOR MEAN — confirmed
+algebraically, `shrunkRate = (n/(n+K))*raw + (K/(n+K))*peer` is exactly
+the posterior mean of `Beta(K*peer+n*raw, K*(1-peer)+n*(1-raw))` with
+`n = distinctEligibleLeads` — but classification only ever compared that
+MEAN to `peerComposite * RM_PERF_FLAG_RATIO (1.25)`. Under a narrow
+filter (confirmed live: Source=Google + Sub-source=Non-UTM/Search, Last 7
+Days), per-RM `n` collapses to 5-16 leads; the shrinkage weight
+(`K/(n+K)`, 44-62% at that range) pulls the mean back toward the peer
+average regardless of how extreme the observed rate is, so nobody ever
+crossed the ratio line — even RMs whose actual evidence would be quite
+improbable under the peer rate by chance (several sat at 1.12-1.18x peer
+on n=5-16, all reading "On Track").
+
+**The fix** also computes the posterior's VARIANCE (not just its mean —
+`rmPerfBetaPosteriorVariance`, the standard Beta variance formula) and
+changes the decision rule from "is the point estimate above the ratio" to
+"does a z-score against the ratio line, run through a normal-CDF
+approximation (`rmPerfNormalCdf`, Abramowitz & Stegun 7.1.26, no library
+needed), clear a confidence bar." Every existing field (`composite`,
+`peerComposite`, `shrunkRate` per rule, etc.) is computed EXACTLY as
+before — this only adds `compositeVariance`/`confidence` and changes the
+one comparison that decides `classification`.
+
+**Critical, counter-intuitive property — the threshold MUST sit below
+0.5, this is not a typo.** Because `z` is centered exactly at
+`peerComposite * RM_PERF_FLAG_RATIO`, `confidence >= 0.5` is
+MATHEMATICALLY IDENTICAL to the old point-estimate rule (same
+comparison, just via the sign of `z` instead of the raw composite) —
+proven by hand and independently by a planning subagent. Raising the
+threshold toward 0.8-0.9 (the "feels right" instinct for something named
+"confidence") would make flagging STRICTLY MORE conservative than
+today — the opposite of the goal. To actually catch more small-sample
+problems the threshold has to sit below 0.5: it stops meaning "how sure
+are we" in the everyday sense and means "does the weight of evidence lean
+far enough past pure noise to act on it, even before the point estimate
+itself has fully crossed the line." A future reader "fixing" this
+constant back up above 0.5 would silently revert the whole feature to
+today's behavior — see the constant's own prominent code comment in
+`js/core-rm-performance.js`.
+
+**Calibration, confirmed with the user via AskUserQuestion** (catch rate
+for a genuinely-1.5x-peer RM vs. false-flag rate for an at-peer-rate
+clean RM, both at n=5-16 — worked out by a planning subagent's Monte
+Carlo / closed-form method):
+
+| threshold | false-flag rate (clean RM) | catch rate (bad RM, n=5) | catch rate (bad RM, n=16) |
+|---|---|---|---|
+| 0.50 (= old rule, no change) | 6-7% | 36.5% | 68.2% |
+| **0.40 — CHOSEN (violation composite)** | **10-13%** | **50.6%** | **78.1%** |
+| **0.35 — CHOSEN (Opp-conversion)** | 13-18% | 58.6% | 82.3% |
+
+`RM_PERF_CONFIDENCE_THRESHOLD = 0.40` for the violation composite (4
+scored rules); `RM_OPP_CONFIDENCE_THRESHOLD = 0.35` for the §9.7.3
+Opp-conversion signal (a single proportion). They're deliberately
+different: the violation composite's `compositeVariance` is a documented
+**anti-conservative** approximation (see next paragraph) — its threshold
+is the more conservative of the two to partially offset that; the
+Opp-conversion side has no such bias and can sit closer to its true
+calibration.
+
+**Known limitation, confirmed algebraically**: `compositeVariance = Σ
+w_k² * var_k` treats the 4 scored rules as independent. They plausibly
+correlate positively (a neglected lead trips several rules on the same
+bad days), so this UNDERSTATES true variance — confidence numbers run
+somewhat hot (anti-conservative), not the reverse. Not fixed here (would
+need real covariance data this codebase doesn't have); documented as a
+reason the violation-side threshold is the more conservative pick above.
+
+**`.gs` port**: unlike the browser-only §9.7.3 Opp-Conversion engine,
+this DOES get a full `.gs` port (`RM_PERF_CONFIDENCE_THRESHOLD_GS_`,
+`rmPerfNormalCdfGs_`, `rmPerfBetaPosteriorVarianceGs_`,
+`classifyRmPerformanceGs_` updated) — `RM_PERF_FLAG_RATIO` and its
+sibling constants are already in `test/check-runtime-parity.py`'s
+parity-checked pairs, meaning the project's own convention is that the
+dashboard's classification and the console leaderboard's
+(`reportRmPerformanceNow`) should agree, not just share constant values.
+`RM_PERF_CONFIDENCE_THRESHOLD` is registered there too (a plain scalar,
+parseable); `rmPerfNormalCdf`/`rmPerfBetaPosteriorVariance` (functions)
+are not — kept in parity by hand, backed by identical reference-value
+unit tests on both sides instead (4 known z→confidence values each).
+
+**Fixture methodology, worth noting for future test-writers**: the
+`tests/frontend-harness.html` fixtures were tuned EMPIRICALLY against the
+real running engine (built a candidate fixture, called
+`computeRmPerformance` directly via the browser console, read the actual
+composite/confidence numbers, iterated) rather than hand-derived on
+paper — the 4 scored rules have different weights AND different
+eligibility gates (`stageStuck48h` and `followupOverdue` are mutually
+exclusive by lead age; `isNotUpdated` keys off `canonicalStage`), so a
+pure pen-and-paper calculation would have been fragile and error-prone.
+The `Tests_DailyRmIssueLog.gs` fixtures, by contrast, reuse the file's
+own existing `rmPerfBadRow_`/`rmPerfCleanRow_` helpers, which already
+isolate `isNotUpdated` as the only rule that ever differs from its peer
+average for any group in those fixtures — that reduces to a clean
+single-rule Beta-Binomial problem, hand-derived by closed-form algebra
+and confirmed correct on the first real test run (0 failures).
+
+**Verified**: `tests/frontend-harness.html` +16 assertions (large-n
+regression pair, the small-n reproduction of the originally-reported bug,
+a degenerate-variance fallback check, an Opp-conversion mirror of the
+first two, `rmPerfNormalCdf` reference values, and a rendered-HTML check
+that the confidence annotation appears only on elevated rows) — full
+suite 153/153. `Tests_DailyRmIssueLog.gs` +12 assertions (the same
+large-n/small-n pair via `rmPerfBadRow_`/`rmPerfCleanRow_`, plus
+`rmPerfNormalCdfGs_` reference values) — full suite 1204/1204 via
+`test/run-gs-tests-headless.py`. `test/check-runtime-parity.py`: 15 plain
+pairs checked, `RM_PERF_CONFIDENCE_THRESHOLD` clean.
+
+**UI/PDF**: the computed confidence percentage is surfaced now (user
+confirmed, not deferred) — `js/tab-repeat-offenders.js`'s
+`rmPerformanceTableHtml` appends it next to the Status chip, and
+`js/repeat-offenders-pdf.js`'s `_repeatOffendersPdfTableRows` appends it
+to the Name cell's second line — both via the shared
+`rmPerfConfidenceLabel` helper (`js/core-rm-performance.js`), only ever
+shown for an elevated (Below Expectations / Watch) row, never for On
+Track / Insufficient Data, and never when the degenerate fallback fired
+(`confidence === null`).
+
+**Not part of this change**: the §9.7.3 Opp-Conversion engine's own
+`RM_OPP_*` constants stay browser-only (no `.gs` twin), same as before —
+this change only added a confidence gate to its existing `lowConversion`
+decision, it didn't change which runtime owns it.

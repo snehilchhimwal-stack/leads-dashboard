@@ -726,11 +726,18 @@ function rmPerformanceTableHtml(title, list, hierarchyMissing, emptyMessage, rmH
       const oc = (typeof rmOppDisplayCells === 'function') ? rmOppDisplayCells(r) : { sameDay: '—', h48: '—', lowConversion: false };
       const doubleFlagChip = r.doubleFlag
         ? `<span class="chip red-chip" style="margin-left:4px;" title="Elevated violation score AND meaningfully-below-peer conversion — both signals bad, the strongest available signal this RM needs coaching.">+ Low conversion</span>` : '';
+      // Added 2026-09-30 — see core-rm-performance.js's rmPerfConfidenceLabel/
+      // RM_PERF_CONFIDENCE_THRESHOLD for what this number means (a
+      // posterior-confidence gate, NOT the everyday "how sure are we" a
+      // reader might assume — deliberately calibrated below 50%).
+      const confidenceLabel = (typeof rmPerfConfidenceLabel === 'function') ? rmPerfConfidenceLabel(r) : '';
+      const confidenceNote = confidenceLabel
+        ? `<span class="dim" style="font-size:10px; margin-left:4px;" title="Posterior-confidence flagging threshold — see HANDOVER.md §9.7.5. Not the everyday 'how sure are we' — this bar is deliberately below 50%.">(${esc(confidenceLabel)})</span>` : '';
       return `<tr>
         <td class="num dim">${i + 1}</td>
         <td>${esc(r.name)}${routingNote}</td>
         <td class="num">${esc(r.distinctLeads)}</td>
-        <td><span class="chip ${chipClass}">${esc(r.classification)}</span>${doubleFlagChip}</td>
+        <td><span class="chip ${chipClass}">${esc(r.classification)}</span>${doubleFlagChip}${confidenceNote}</td>
         <td class="num">${r.composite.toFixed(2)} <span class="dim" style="font-size:10px;">/ ${r.peerComposite.toFixed(2)}</span></td>
         <td class="num">${esc(r.totalInstances)}</td>
         <td class="num"${oc.lowConversion ? ' style="color:var(--red);"' : ''}>${esc(oc.sameDay)}</td>

@@ -264,9 +264,17 @@ PLAIN_PAIRS = [
     ("RM_PERF_LEADERSHIP_NAME_EXCLUSIONS", "js/core-rm-performance.js", "RM_PERF_LEADERSHIP_NAME_EXCLUSIONS", "DailyRmIssueLog.gs", "RM_PERF_LEADERSHIP_NAME_EXCLUSIONS_GS_"),
     ("RM_PERF_NON_RM_ROLES", "js/core-rm-performance.js", "RM_PERF_NON_RM_ROLES", "DailyRmIssueLog.gs", "RM_PERF_NON_RM_ROLES_GS_"),
     ("RM_PERF_ADMIN_NAME_EXCLUSIONS", "js/core-rm-performance.js", "RM_PERF_ADMIN_NAME_EXCLUSIONS", "DailyRmIssueLog.gs", "RM_PERF_ADMIN_NAME_EXCLUSIONS_GS_"),
+    ("RM_PERF_CONFIDENCE_THRESHOLD", "js/core-rm-performance.js", "RM_PERF_CONFIDENCE_THRESHOLD", "DailyRmIssueLog.gs", "RM_PERF_CONFIDENCE_THRESHOLD_GS_"),
     # RM_PERF_VENDOR_NAME_PATTERN / _GS_ (both `/futwork/i`) are deliberately
     # NOT here -- a regex literal isn't one of this parser's supported plain-
     # data shapes (see its module docstring). Kept in parity by hand.
+    # RM_OPP_CONFIDENCE_THRESHOLD has no .gs twin at all (RM_OPP_* is
+    # browser-only by design, same as every other RM_OPP_* constant --
+    # see js/core-rm-performance.js's "RM Opp-Conversion engine" header).
+    # rmPerfNormalCdf/rmPerfBetaPosteriorVariance (+ their _Gs_ twins) are
+    # functions, also invisible to this parser -- kept in parity by hand,
+    # backed by identical reference-value unit tests on both sides instead
+    # (tests/frontend-harness.html / Tests_DailyRmIssueLog.gs).
 ]
 
 # TEST_MODE_OVERRIDE_EMAIL: compared like a plain pair AND separately

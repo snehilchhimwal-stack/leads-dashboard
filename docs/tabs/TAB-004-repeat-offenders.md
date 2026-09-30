@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `a589d62` — Futwork vendor + admin exclusion (`HANDOVER.md` §9.7.4) |
+| **Last Verified** | 2026-09-30 against commit `(pending commit)` — posterior-confidence flagging (`HANDOVER.md` §9.7.5): new confidence annotation in the RM table |
 
 ## Purpose / reason to exist
 
@@ -120,8 +120,18 @@ each.
 - Shrinkage / severity constants (`RM_PERF_SHRINKAGE_K`,
   `RM_PERF_RULE_WEIGHTS`, `RM_PERF_MIN_VOLUME_LEADS`,
   `RM_PERF_CHRONIC_STREAK_DAYS`, `RM_PERF_FLAG_RATIO`,
-  `RM_PERF_CONCENTRATION_BREADTH_CEILING`) **must stay numerically
-  identical** to `GS-003`'s `RM_PERF_*_GS_` (`LOGIC_AUDIT.md` Part 1 §4b).
+  `RM_PERF_CONCENTRATION_BREADTH_CEILING`, `RM_PERF_CONFIDENCE_THRESHOLD`)
+  **must stay numerically identical** to `GS-003`'s `RM_PERF_*_GS_`
+  (`LOGIC_AUDIT.md` Part 1 §4b).
+- **Added 2026-09-30**: classification is gated on posterior confidence,
+  not a raw point estimate — a small-sample RM (a narrow filter can
+  collapse per-RM `n` to 5-16 leads) that the old rule would silently
+  read as "On Track" despite an improbable-looking rate can now
+  genuinely flag as Below Expectations. `RM_PERF_CONFIDENCE_THRESHOLD`
+  (0.40) is deliberately **below 0.5** — see its own code comment and
+  `HANDOVER.md` §9.7.5 before touching this number. The computed
+  confidence % is shown next to the Status chip for an elevated row
+  (`rmPerfConfidenceLabel`, `core-rm-performance.js`).
 - "RM" excludes A1 / TM / RH / Cluster Head / City Lead / Commercial
   Head roles and the name-based leadership set (`RM_PERF_NON_RM_ROLES`,
   `rmPerfIsLeadershipExcluded`, broadened this session `7ef26db`).

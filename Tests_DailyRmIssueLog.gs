@@ -609,6 +609,79 @@ function runDailyRmIssueLogTests_() {
     TestAssert_(rmPerfIsLeadershipExcludedGs_('Snehil Chhimwal', null), 'rmPerfIsLeadershipExcludedGs_: the account holder/admin "Snehil Chhimwal" is excluded');
     TestAssert_(!rmPerfIsLeadershipExcludedGs_('Ramesh Kumar', null), 'rmPerfIsLeadershipExcludedGs_: a genuine front-line RM matching neither new pattern is NOT excluded');
 
+    // -- Scenario E: posterior-confidence flagging, added 2026-09-30 --
+    // HANDOVER.md §9.7.5 has the full derivation. Unlike the JS-side
+    // browser test (tests/frontend-harness.html, tuned empirically
+    // against the real multi-rule engine), these fixtures are built with
+    // rmPerfBadRow_/rmPerfCleanRow_ specifically because THOSE isolate
+    // isNotUpdated as the only rule that ever differs from its own peer
+    // average (matched call_attempts/call_count/connect state means
+    // followupOverdue/underCalledToday/stageStuck48h are either not
+    // eligible at all, or eligible-and-never-violated, for EVERY group in
+    // these fixtures — their peerAvg is exactly 0 and their shrunk rate is
+    // exactly 0 for every group too, so they contribute EXACTLY 0 to both
+    // composite and peerComposite here). That makes this a clean single-
+    // rule Beta-Binomial problem, hand-verified by closed-form algebra
+    // (not empirical browser tuning, unlike the JS-side multi-rule test —
+    // both are legitimate given the underlying models differ).
+    const rmPerfEDay = rmPerfDay_('2026-02-01');
+
+    // E1. Large-n regression — old point-estimate rule and new confidence
+    // rule must AGREE once n is large. Peer: 1000 leads, 200 violated
+    // (20% raw). GsBigBelow: 100 leads, 10 violated (10%). GsBigAbove:
+    // 100 leads, 50 violated (50%). Pooled peerAvg (self-inclusive) =
+    // (200+10+50)/1200 = 0.216667 exactly. Hand-derived via the Beta
+    // posterior formulas (alpha=K*peer+n*raw, beta=K*(1-peer)+n*(1-raw)):
+    // GsBigBelow z ~= -5.44 (confidence ~0), GsBigAbove z ~= +4.35
+    // (confidence ~0.999993) — both comfortably saturated, both agree
+    // with what composite<=peerComposite*1.25 alone would already say.
+    const rmPerfE = rmPerfMakeSheet_();
+    for (let i = 1; i <= 200; i++) rmPerfE.sheet.appendRow(rmPerfBadRow_(rmPerfE.header, 'E-PEER-BAD-' + i, 'GsPeer', rmPerfEDay));
+    for (let i = 1; i <= 800; i++) rmPerfE.sheet.appendRow(rmPerfCleanRow_(rmPerfE.header, 'E-PEER-CLEAN-' + i, 'GsPeer', rmPerfEDay));
+    for (let i = 1; i <= 10; i++) rmPerfE.sheet.appendRow(rmPerfBadRow_(rmPerfE.header, 'E-BB-BAD-' + i, 'GsBigBelow', rmPerfEDay));
+    for (let i = 1; i <= 90; i++) rmPerfE.sheet.appendRow(rmPerfCleanRow_(rmPerfE.header, 'E-BB-CLEAN-' + i, 'GsBigBelow', rmPerfEDay));
+    for (let i = 1; i <= 50; i++) rmPerfE.sheet.appendRow(rmPerfBadRow_(rmPerfE.header, 'E-BA-BAD-' + i, 'GsBigAbove', rmPerfEDay));
+    for (let i = 1; i <= 50; i++) rmPerfE.sheet.appendRow(rmPerfCleanRow_(rmPerfE.header, 'E-BA-CLEAN-' + i, 'GsBigAbove', rmPerfEDay));
+    const rmPerfEResults = computeRmPerformanceGs_(rmPerfE.ss);
+    const rmPerfEByName = {}; rmPerfEResults.forEach(function (r) { rmPerfEByName[r.name] = r; });
+    TestAssert_(rmPerfEByName['GsBigBelow'].composite <= rmPerfEByName['GsBigBelow'].peerComposite * RM_PERF_FLAG_RATIO_GS_
+      && rmPerfEByName['GsBigBelow'].confidence < 0.01 && rmPerfEByName['GsBigBelow'].classification === 'On Track',
+      'classifyRmPerformanceGs_ large-n regression: GsBigBelow (10% raw, well under peer*1.25) -- old rule would not flag, new confidence near-zero, both agree On Track. Got: ' + JSON.stringify({ composite: rmPerfEByName['GsBigBelow'].composite, peerComposite: rmPerfEByName['GsBigBelow'].peerComposite, confidence: rmPerfEByName['GsBigBelow'].confidence }));
+    TestAssert_(rmPerfEByName['GsBigAbove'].composite > rmPerfEByName['GsBigAbove'].peerComposite * RM_PERF_FLAG_RATIO_GS_
+      && rmPerfEByName['GsBigAbove'].confidence > 0.90 && rmPerfEByName['GsBigAbove'].classification === 'Below Expectations',
+      'classifyRmPerformanceGs_ large-n regression: GsBigAbove (50% raw, well over peer*1.25) -- old rule would flag, new confidence near-certain, both agree Below Expectations. Got: ' + JSON.stringify({ composite: rmPerfEByName['GsBigAbove'].composite, peerComposite: rmPerfEByName['GsBigAbove'].peerComposite, confidence: rmPerfEByName['GsBigAbove'].confidence }));
+
+    // E2. THE key test -- small-n new capability. GsPeer2: 95 leads, 58
+    // violated + 37 clean. GsSmallBad: 5 leads, all 5 violated. Pooled
+    // peerAvg (self-inclusive) = (58+5)/(95+5) = 63/100 = 0.63 exactly.
+    // Hand-derived: shrunk = (5/13)*1 + (8/13)*0.63 = 0.772308, ratio =
+    // 1.2259 (OLD rule: composite <= peerComposite*1.25, NOT flagged --
+    // margin 0.024). z = (0.772308 - 0.63*1.25)/sd = -0.1356, confidence
+    // ~= 0.4461 (NEW rule: >= RM_PERF_CONFIDENCE_THRESHOLD_GS_ 0.40 --
+    // margin 0.046, flagged Below Expectations). This is the literal .gs
+    // mirror of the originally-reported bug (0 RMs "Below Expectations"
+    // under a narrow filter).
+    const rmPerfE2 = rmPerfMakeSheet_();
+    for (let i = 1; i <= 58; i++) rmPerfE2.sheet.appendRow(rmPerfBadRow_(rmPerfE2.header, 'E2-PEER-BAD-' + i, 'GsPeer2', rmPerfEDay));
+    for (let i = 1; i <= 37; i++) rmPerfE2.sheet.appendRow(rmPerfCleanRow_(rmPerfE2.header, 'E2-PEER-CLEAN-' + i, 'GsPeer2', rmPerfEDay));
+    for (let i = 1; i <= 5; i++) rmPerfE2.sheet.appendRow(rmPerfBadRow_(rmPerfE2.header, 'E2-SB-' + i, 'GsSmallBad', rmPerfEDay));
+    const rmPerfE2Results = computeRmPerformanceGs_(rmPerfE2.ss);
+    const gsSmallBad = rmPerfE2Results.filter(function (r) { return r.name === 'GsSmallBad'; })[0];
+    TestAssert_(!!gsSmallBad && gsSmallBad.composite <= gsSmallBad.peerComposite * RM_PERF_FLAG_RATIO_GS_,
+      'classifyRmPerformanceGs_ small-n: OLD point-estimate rule would NOT flag GsSmallBad (5/5 violated, but shrinkage at n=5 keeps composite under peerComposite*1.25). Got: ' + JSON.stringify(gsSmallBad && { composite: gsSmallBad.composite, peerComposite: gsSmallBad.peerComposite }));
+    TestAssert_(!!gsSmallBad && gsSmallBad.classification === 'Below Expectations' && gsSmallBad.confidence >= RM_PERF_CONFIDENCE_THRESHOLD_GS_,
+      'classifyRmPerformanceGs_ small-n: NEW confidence rule DOES flag GsSmallBad as Below Expectations (~44.6% confidence clears the 0.40 threshold). Got: ' + JSON.stringify(gsSmallBad && { classification: gsSmallBad.classification, confidence: gsSmallBad.confidence }));
+
+    // E3. rmPerfNormalCdfGs_ reference values -- byte-for-byte port of
+    // js/core-rm-performance.js's rmPerfNormalCdf; tests/frontend-harness.html
+    // carries the identical 4 values to catch a porting typo
+    // check-runtime-parity.py structurally cannot (a function, not a
+    // plain-data literal).
+    TestAssert_(Math.abs(rmPerfNormalCdfGs_(0) - 0.5) < 1e-6, 'rmPerfNormalCdfGs_(0) is 0.5, got ' + rmPerfNormalCdfGs_(0));
+    TestAssert_(Math.abs(rmPerfNormalCdfGs_(0.8416) - 0.80) < 1e-4, 'rmPerfNormalCdfGs_(0.8416) is ~0.80, got ' + rmPerfNormalCdfGs_(0.8416));
+    TestAssert_(Math.abs(rmPerfNormalCdfGs_(1.2816) - 0.90) < 1e-4, 'rmPerfNormalCdfGs_(1.2816) is ~0.90, got ' + rmPerfNormalCdfGs_(1.2816));
+    TestAssert_(Math.abs(rmPerfNormalCdfGs_(-1.2816) - 0.10) < 1e-4, 'rmPerfNormalCdfGs_(-1.2816) is ~0.10, got ' + rmPerfNormalCdfGs_(-1.2816));
+
     // ---- reportRmPerformanceNow(): console-callable wrapper, smoke test ----
     const realSs2 = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return TestMockSpreadsheet_({}); }, flush: function () {} };
