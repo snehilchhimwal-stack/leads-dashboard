@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `c82ec67` — source unchanged since creation; corrected a real content error found in this sweep: the "~30-vs-~110 rule-count gap, unresolved" claim was stale — `LOGIC_AUDIT.md` §4.1 already resolved it (31/31 exact match) 3 days before this record was even created, never corrected here since |
 
 ## Purpose / reason to exist
 
@@ -22,7 +22,8 @@ dashboard would confuse everyone reading both.
 
 ## Responsibilities
 
-- `inferOutcomeGs_` + `OUTCOME_RULES_GS_` — the classifier (~30 rules).
+- `inferOutcomeGs_` + `OUTCOME_RULES_GS_` — the classifier (31 rules,
+  exact match with the client — see CFG-041).
 - The typo-tolerant matcher (`_editDistanceGs_`, `_typoBudgetGs_`,
   `_wordsMatchGs_`, `_signalMatchesGs_`) — mirrors the client matcher.
 - `overnightFollowupHintGs_` / `noCommentFollowUpGs_` /
@@ -59,7 +60,7 @@ next trigger fire of whatever calls it (`GS-010` / `GS-001` / `GS-013` /
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-041 | `OUTCOME_RULES_GS_` `#L147`–`#L401` | ~30 ordered rules | the comment classifier | **twin `OUTCOME_RULES` (`JS-007` RULE-009, ~110 signals)**. The count gap is flagged unverified-explained in `LOGIC_AUDIT.md` Part 4 §4.1 |
+| CFG-041 | `OUTCOME_RULES_GS_` `#L147`–`#L401` | 31 ordered rules | the comment classifier | **twin `OUTCOME_RULES` (`JS-007` RULE-009)** — full pairwise diff (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): all 31 rules match exactly, same order, byte-identical `test()` bodies — zero drift, confirmed |
 | CFG-042 | `FOLLOWUP_SUGGESTIONS_GS_` | outcome → advisory text | the algorithmic follow-up fallback | **twin `FOLLOWUP_SUGGESTIONS` (`JS-007` RULE-012)** |
 | CFG-043 | typo budget thresholds | 0 / 1 / 2 by length | typo tolerance | matcher behaviour; mirrors `JS-007` RULE-010 |
 
@@ -94,10 +95,15 @@ string, never an error. No throw paths of its own.
 **The single largest duplicated-logic surface with the client.**
 `OUTCOME_RULES_GS_` ↔ `OUTCOME_RULES` (`JS-007`); `FOLLOWUP_SUGGESTIONS_GS_`
 ↔ `FOLLOWUP_SUGGESTIONS` (`JS-007`); the typo matcher is re-implemented.
-The ~30-vs-~110 rule-count gap needs a maintainer determination (does the
-backend implement genuinely fewer outcomes, or are the counts not
-measuring the same thing) — `LOGIC_AUDIT.md` Part 4 §4.1. Every rule
-change must be made on both sides (`HANDOVER.md` §6).
+Resolved (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): both sides define
+the same 31 outcome categories in the identical priority order — the
+"~110 signals" figure some earlier tally used was counting individual
+keyword strings across all 31 rules, not a different category count;
+"~30" simply undercounted by one on the other side. A direct pairwise
+diff (every outcome name, signal list, and `test()` body) confirmed zero
+drift. Every rule change must still be made on both sides (`HANDOVER.md`
+§6) — this resolution says the two sides currently agree, not that they
+can drift apart safely.
 
 ## Not live until pasted
 
@@ -170,9 +176,10 @@ N/A — code.
 
 ## Next action
 
-Resolve the ~30-vs-~110 rule-count gap (`LOGIC_AUDIT.md` Part 4 §4.1) —
-a maintainer determination, tracked via the revalidation trigger, not
-this record's to make.
+none — the rule-count gap this action used to point at was already
+resolved in `LOGIC_AUDIT.md` Part 4 §4.1 (2026-09-07, before this record
+existed); this record just hadn't been corrected to say so until the
+2026-09-30 revalidation sweep found the mismatch.
 
 ## Closure evidence
 

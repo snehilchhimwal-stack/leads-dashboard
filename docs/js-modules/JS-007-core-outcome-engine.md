@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `c82ec67` — source unchanged since creation; corrected a real content error found in this sweep alongside its twin `GS-005`: the "~110-vs-~30 rule-count gap, unresolved" framing was stale — `LOGIC_AUDIT.md` §4.1 already resolved it (31/31 exact match) 3 days before this record was even created, never corrected here since |
 
 ## Purpose / reason to exist
 
@@ -58,7 +58,7 @@ core-fetch-and-render → …`).
 
 | ID | Rule | Where | Duplicated in (`GS-XXX`)? | Notes |
 |---|---|---|---|---|
-| RULE-009 | `OUTCOME_RULES` — ordered ~110-signal table; first match wins | `OUTCOME_RULES` `#L230`–`#L556` + FN-043 | **Yes — `FollowupEngine.gs` `OUTCOME_RULES_GS_` (~30 rules)** (`GS-005`). Full diff + the count-gap explanation: `LOGIC_AUDIT.md` Part 4 §4.1 | the single largest duplicated-logic surface in the app |
+| RULE-009 | `OUTCOME_RULES` — 31 ordered rules (~110 individual keyword signals across them); first match wins | `OUTCOME_RULES` `#L230`–`#L556` + FN-043 | **Yes — `FollowupEngine.gs` `OUTCOME_RULES_GS_` (`GS-005`), also 31 rules** — full pairwise diff (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): zero drift, byte-identical `test()` bodies, confirmed | the single largest duplicated-logic surface in the app |
 | RULE-010 | Length-scaled typo tolerance: 0 typos for signals ≤4 chars, 1 for ≤8, 2 above | FN-045 | Yes — `FollowupEngine.gs` mirrors the matcher | documented false-positive: "busy"/"buy"/"bus" |
 | RULE-011 | A blank / punctuation-only comment classifies as `No Real Update` | FN-043 `#L586` | Yes | — |
 | RULE-012 | `FOLLOWUP_SUGGESTIONS[outcome]` is pure advisory text; a human overwrites `Lead_Followups` col F if they review in time | `FOLLOWUP_SUGGESTIONS` `#L607` + FN-048 | Yes — `FOLLOWUP_SUGGESTIONS_GS_` (`FollowupEngine.gs`) | `LOGIC_AUDIT.md` Part 3 §3.4 |
@@ -98,9 +98,13 @@ are cleared by `fetchAndRender` (`JS-003`).
 ## Cross-runtime duplication
 
 `OUTCOME_RULES` ↔ `OUTCOME_RULES_GS_` (`GS-005`) — the single largest
-duplicated surface; the ~110-vs-~30 count gap is flagged
-unverified-explained in `LOGIC_AUDIT.md` Part 4 §4.1. `FOLLOWUP_SUGGESTIONS`
-↔ `FOLLOWUP_SUGGESTIONS_GS_`. The typo matcher is re-implemented on the
+duplicated surface; resolved (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07):
+both sides define the same 31 outcome categories in the identical
+priority order, zero drift on a full pairwise diff. (The earlier "~110
+vs ~30" framing wasn't actually a disagreement — one tally was counting
+individual keyword strings across all 31 rules, the other the rule count
+itself, undercounted by one.) `FOLLOWUP_SUGGESTIONS` ↔
+`FOLLOWUP_SUGGESTIONS_GS_`. The typo matcher is re-implemented on the
 backend. All must be kept in sync (`HANDOVER.md` §6).
 
 ## UI relationships

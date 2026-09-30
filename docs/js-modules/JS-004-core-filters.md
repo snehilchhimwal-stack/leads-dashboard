@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `d358cb9` — revalidated in this sweep (every function's line anchor, CFG-002, EXC-008/009 guards re-checked against source); file moved past the prior cited commit but no claim this record makes was affected
 
 ## Purpose / reason to exist
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `87114a3` — checkpoint emails list only unresolved leads and are skipped when nothing is unresolved (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-30 against commit `87114a3` — revalidated in this sweep (all ~18 FN-XXX line anchors, both trigger schedules incl. the no-`.inTimezone()` outlier, `OVERNIGHT_LOG_HEADERS_`, poll-budget math re-checked against source), no drift found; prior note: checkpoint emails list only unresolved leads and are skipped when nothing is unresolved (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

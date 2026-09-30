@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `71162ff` — revalidated in this sweep (all 9 FN-XXX line anchors, REGION_GROUP_MAP's 11-region count, the Loan-region-override gap re-checked against source); file moved past the prior cited commit but no claim this record makes was affected
 
 ## Purpose / reason to exist
 

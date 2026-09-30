@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `c82ec67` — revalidated in this sweep (GATE_SCOPE, every function's line anchor, module-state claims re-checked against source), no drift found |
 
 ## Purpose / reason to exist
 

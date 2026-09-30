@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `87114a3` — checkpoint emails list only unresolved leads (FN-271 rewritten, `allIssuesCheckpointIsActiveGs_` added; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-30 against commit `87114a3` — revalidated in this sweep (all 5 function line anchors, all 6 threshold constants re-checked against source), no drift found; prior note: checkpoint emails list only unresolved leads (FN-271 rewritten, `allIssuesCheckpointIsActiveGs_` added; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

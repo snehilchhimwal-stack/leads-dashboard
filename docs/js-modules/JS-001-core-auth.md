@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `c82ec67` — revalidated in this sweep (same source as EXT-003, function/constant line anchors re-checked), no drift found |
 
 ## Purpose / reason to exist
 

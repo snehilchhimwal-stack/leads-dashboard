@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `6e4c904` — revalidated in this sweep (rule specs, all threshold constants, formatting-range claim re-checked against source), no drift found |
 
 ## Purpose / reason to exist
 

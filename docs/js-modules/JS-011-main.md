@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `5790788` — revalidated in this sweep (the 4-call bootstrap order re-checked verbatim against source); file moved past the prior cited commit but no claim this record makes was affected
 
 ## Purpose / reason to exist
 

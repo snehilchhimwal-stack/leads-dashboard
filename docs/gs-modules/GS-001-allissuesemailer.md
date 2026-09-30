@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `5aafbd4` — guarded one-off removal of the 2026-09-24 TEST MODE rows (`FN-299`; see `## Version / change reference`) |
+| **Last Verified** | 2026-09-30 against commit `5aafbd4` — revalidated in this sweep (14-column header, trigger schedule, TEST_MODE_* constants, Loan-region-override gap re-checked against source), no drift found; prior note: guarded one-off removal of the 2026-09-24 TEST MODE rows (`FN-299`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

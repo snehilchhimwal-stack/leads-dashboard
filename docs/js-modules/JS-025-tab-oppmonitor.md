@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-09-30 against commit `55bf870` — revalidated in this sweep (all function/constant line anchors, live-computation methodology re-checked against source), no drift found |
 
 ## Purpose / reason to exist
 
