@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `c1f8bf9` — revalidated in this sweep (both FN anchors, all 10 cards' field/predicate reuse, the full Called-by list re-checked against source), no drift found |
 
 ## Purpose / reason to exist
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `c1f8bf9` (js/tab-morning.js) / `b21849e` (dashboard.html) — revalidated in this sweep; dashboard.html moved (Opp Monitor tab added) but touches zero lines inside the #tab-morning block itself, confirmed via git diff — no drift found |
 
 ## Purpose / reason to exist
 

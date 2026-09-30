@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `71162ff` — revalidated in this sweep (all 8 FN anchors, CFG-024, the _allReports cross-file let claim, EXC-029/030/031 re-checked against source), no drift found |
 
 ## Purpose / reason to exist
 

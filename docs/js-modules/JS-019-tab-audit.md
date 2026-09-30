@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `fc956a0` — revalidated in this sweep; corrected a real content error: EXC-040 claimed clipboard failure "silently no-ops," but the real code (`#L241`) has no guard or `.catch()` at all — it throws an uncaught `TypeError`, not a graceful no-op (inaccurate since authoring, not caused by a recent change) |
 
 ## Purpose / reason to exist
 
@@ -51,7 +51,7 @@ First of the tab files in the real `<script src>` order (`… core-filters
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
 | EXC-039 | no period selected | `auditMatches` returns `[]` | empty table, no error |
-| EXC-040 | clipboard API unavailable | `copyAuditIds` silently no-ops | copy button does nothing rather than throwing |
+| EXC-040 | clipboard API unavailable (`navigator.clipboard` undefined — non-HTTPS context, older browser, a sandboxed iframe without clipboard permission) | **unguarded — `copyAuditIds` throws** a synchronous `TypeError` calling `.writeText` on `undefined`; no `.catch()`, no existence check, no global error handler anywhere in this codebase to soften it | the click silently does nothing FROM THE USER'S perspective (the button's own text never updates, since that happens inside the `.then()` that's never reached), but it's a real uncaught exception, not a graceful no-op — found inaccurate in the 2026-09-30 revalidation sweep, corrected here; not caused by a recent code change (file unchanged since authoring) |
 | EXC-041 | a lead with no dated events | excluded from all periods | not shown — correct |
 
 ## Data lineage

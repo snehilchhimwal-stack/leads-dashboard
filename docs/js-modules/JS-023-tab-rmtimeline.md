@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-09-30 against commit `fc956a0` — revalidated in this sweep (all 6 FN anchors, the no-date-filter bug-fix claim, the buildTrackingChartSvg reuse re-checked against source), no drift found |
 
 ## Purpose / reason to exist
 
