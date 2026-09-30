@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `5aafbd4` — checked, unaffected by the region P&L head Cc (see `## Version / change reference`) |
+| **Last Verified** | 2026-09-30 against commit `a1a21b4` — checked, unaffected by the region P&L head Cc extension to Thane/Navi Mumbai (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -159,6 +159,8 @@ note doesn't read as ignored.
 **Revalidated 2026-09-25 (evening)** `b3a58f9`: flagged again after `EmailInfra.gs` advanced. Checked against this record's own "Revalidation trigger" list below — the change (`GS-004`'s Version/change reference has the full story) adds a flush inside the write helper, a cell-size cap for JSON log cells, and per-bucket error isolation in `GS-010`'s loops; none of scope/Client-ID, raw MIME encoding, the bulk-send model, Advanced Gmail Service usage, or `TEST_MODE_OVERRIDE_EMAIL`/`_` handling changed. Genuinely unaffected; this entry exists so the drift note doesn't read as ignored.
 
 **Revalidated 2026-09-26** `5aafbd4`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-298`/`CFG-070`, region P&L head Cc for Hyderabad and Bangalore). Checked against this record's own "Revalidation trigger" list below: only WHO is Cc'd changed (one more address on those regions' emails); the send mechanics (`GmailApp`/Advanced Gmail Service, `withSendRetry_`, threaded replies, TEST MODE redirection) are untouched, and TEST MODE still sends with no Cc. No change to this record's content.
+
+**Revalidated 2026-09-30** `a1a21b4`: flagged again after `EmailInfra.gs` advanced (`GS-004` `CFG-070`, same P&L head Cc mechanism extended to Thane and Navi Mumbai, no code change beyond the config map). Checked against this record's own "Revalidation trigger" list below: same conclusion as 2026-09-26 — only WHO is Cc'd changed, on two more regions; send mechanics untouched. No change to this record's content.
 
 ## Revalidation trigger
 
