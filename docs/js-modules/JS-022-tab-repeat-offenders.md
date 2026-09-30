@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `(pending commit)` — posterior-confidence annotation added to `rmPerformanceTableHtml`'s Status chip (`JS-008` FN-318, HANDOVER.md §9.7.5) |
+| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence annotation added to `rmPerformanceTableHtml`'s Status chip (`JS-008` FN-318, HANDOVER.md §9.7.5) |
 
 ## Purpose / reason to exist
 

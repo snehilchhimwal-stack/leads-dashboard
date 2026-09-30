@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `(pending commit)` — posterior-confidence flagging (`HANDOVER.md` §9.7.5): new confidence annotation in the RM table |
+| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence flagging (`HANDOVER.md` §9.7.5): new confidence annotation in the RM table |
 
 ## Purpose / reason to exist
 

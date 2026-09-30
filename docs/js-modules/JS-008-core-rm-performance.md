@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-30 against commit `(pending commit)` — posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
+| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
 
 ## Purpose / reason to exist
 

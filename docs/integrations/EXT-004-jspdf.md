@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `(pending commit)` — reviewed after `js/repeat-offenders-pdf.js` gained a posterior-confidence annotation on the Name cell's second line (`JS-013` FN-089, `JS-008` §9.7.5) using the SAME already-documented `autoTable` API; no new column, no width change, no jsPDF integration/loading-mechanism change |
+| **Last Verified** | 2026-09-30 against commit `5802f35` — reviewed after `js/repeat-offenders-pdf.js` gained a posterior-confidence annotation on the Name cell's second line (`JS-013` FN-089, `JS-008` §9.7.5) using the SAME already-documented `autoTable` API; no new column, no width change, no jsPDF integration/loading-mechanism change |
 
 ## Purpose / reason to exist
 

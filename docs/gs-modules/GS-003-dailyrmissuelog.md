@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `(pending commit)` — posterior-confidence flagging ported from `JS-008` (HANDOVER.md §9.7.5, FN-194/FN-195/FN-319, CFG-079) |
+| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence flagging ported from `JS-008` (HANDOVER.md §9.7.5, FN-194/FN-195/FN-319, CFG-079) |
 
 ## Purpose / reason to exist
 
