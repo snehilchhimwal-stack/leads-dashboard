@@ -88,7 +88,7 @@ confirm the paste took.
 | `MovementTracker.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `OvernightEmailer.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `RmHierarchy.gs` | `79ceeee` | 2026-10-01 | applied as an exact SHA-verified diff edit via the live Monaco editor, saved, confirmed on a fresh tab reload (sha16 `78ce342e070f96a7` matches `git show HEAD:RmHierarchy.gs`); `rebuildRmHierarchy()` run from the editor immediately after: "RM_Hierarchy rebuilt: 230 people. Manager_Directory refreshed (emails preserved)." (2026-10-01) |
+| `RmHierarchy.gs` | `b5b595d` | 2026-10-01 | applied as an exact SHA-verified diff edit via the live Monaco editor, saved, confirmed on a fresh tab reload (sha16 `76eb0ae852838304` matches `git show HEAD:RmHierarchy.gs`); `Tests_RmHierarchy.gs` synced the same way (live was 2 commits behind, `d71c492` -> `b5b595d`, full-value replace instead of a diff) and `runRmHierarchyTestsNow()` run live: 116/116. `rebuildRmHierarchy()` re-run from the editor to exercise the new self-audit for real: "RM_Hierarchy rebuilt: 230 people" + a genuine `COVERAGE GAP: 5 RM name(s)...` (4 Futwork — expected, routed via `FUTWORK_ROUTE_EMAIL_` not `RM_Hierarchy` — plus "Kapil Bhagat", a real small gap not yet investigated) + "every manager ... has an email". `listExcludedRmsNow()`: 0 excluded. |
 | `SlaEngine.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 
