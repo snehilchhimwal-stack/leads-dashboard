@@ -88,7 +88,7 @@ confirm the paste took.
 | `MovementTracker.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `OvernightEmailer.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `RmHierarchy.gs` | `d09d51e` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `RmHierarchy.gs` | `79ceeee` | 2026-10-01 | applied as an exact SHA-verified diff edit via the live Monaco editor, saved, confirmed on a fresh tab reload (sha16 `78ce342e070f96a7` matches `git show HEAD:RmHierarchy.gs`); `rebuildRmHierarchy()` run from the editor immediately after: "RM_Hierarchy rebuilt: 230 people. Manager_Directory refreshed (emails preserved)." (2026-10-01) |
 | `SlaEngine.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 | `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
 
