@@ -633,6 +633,58 @@ function rebuildRmHierarchy() {
 
   ensureManagerDirectorySheetInternal_(ss, true);
   Logger.log('RM_Hierarchy rebuilt: ' + rows.length + ' people. Manager_Directory refreshed (emails preserved).');
+  logPostRebuildCoverageAudit_(ss);
+}
+
+// Runs automatically at the end of every rebuildRmHierarchy() call. Folds
+// the two OPS_CHECKLIST.md "RM hierarchy routing" items that say to run
+// right after any RM-roster/org-chart change (auditUnresolvedRmsNow,
+// auditManagerDirectoryEmailGapsNow) into the rebuild itself, instead of
+// leaving them as a separate manual step someone has to remember to run
+// afterward. Real motivating case: the 2026-10-01 Pre Sales team
+// (Manisha rathod, Rajesh Muni, Jagruti Borude, Nishant Lambe, Shivani
+// Pathak, Suresh Rajoriya, Priya Chaubey) had 25-498 real leads each --
+// some genuinely Google Non-UTM/Search, so a real SLA-issue email WOULD
+// have hit them -- with zero RM_Hierarchy row, for an unknown stretch of
+// time. Both audits already existed and would have caught this the moment
+// anyone ran them, but nothing forced that to happen as part of actually
+// making the hierarchy change; the checklist step existed only in writing.
+// Reuses the exact same tested `_` functions the standalone *Now()
+// wrappers call (no reimplemented logic, so this can't drift from what a
+// manual run would report) -- just always runs them, unconditionally, as
+// part of the one action every RM_Hierarchy change already has to take.
+//
+// Each half is independently try/caught: rebuildRmHierarchy()'s actual
+// job (writing the sheet) has ALREADY succeeded by the time this runs, so
+// a problem here (e.g. the leads tab briefly unavailable, a read timeout)
+// must never make the rebuild itself look like it failed — it only means
+// this one coverage check couldn't complete, which gets logged honestly
+// rather than thrown.
+function logPostRebuildCoverageAudit_(ss) {
+  try {
+    const unresolved = auditUnresolvedRms_(ss);
+    if (unresolved.length) {
+      Logger.log('COVERAGE GAP: ' + unresolved.length + ' RM name(s) on open Google Non-UTM/Search lead(s) still do not resolve in RM_Hierarchy -- run auditUnresolvedRmsNow() for lead IDs and next steps:');
+      unresolved.forEach(function (r) {
+        Logger.log('  "' + r.name + '" -- ' + r.count + ' open lead(s)');
+      });
+    } else {
+      Logger.log('Coverage check: every open Google Non-UTM/Search lead\'s RM resolves in RM_Hierarchy.');
+    }
+  } catch (e) {
+    Logger.log('Coverage check (unresolved RMs) could not run: ' + e + ' -- run auditUnresolvedRmsNow() by hand to retry.');
+  }
+
+  try {
+    const emailGaps = auditManagerDirectoryEmailGaps_(ss);
+    if (emailGaps && emailGaps.length) {
+      Logger.log('COVERAGE GAP: ' + emailGaps.length + ' manager(s) with real reports but no email in Manager_Directory -- run auditManagerDirectoryEmailGapsNow() for the full list, then fill in Manager_Directory directly.');
+    } else if (emailGaps) {
+      Logger.log('Coverage check: every manager with a real report has an email in Manager_Directory.');
+    }
+  } catch (e) {
+    Logger.log('Coverage check (Manager_Directory email gaps) could not run: ' + e + ' -- run auditManagerDirectoryEmailGapsNow() by hand to retry.');
+  }
 }
 
 // ONE-OFF DIAGNOSTIC — read-only, lists every row currently checked

@@ -363,6 +363,28 @@ function runRmHierarchyTests_() {
     let dirGapsNowThrew = null;
     try { auditManagerDirectoryEmailGapsNow(); } catch (e) { dirGapsNowThrew = e; }
     TestAssertEqual_(dirGapsNowThrew, null, 'auditManagerDirectoryEmailGapsNow: the console wrapper runs without throwing');
+
+    // ---- logPostRebuildCoverageAudit_: runs automatically inside rebuildRmHierarchy (2026-10-01) ----
+    // Reuses the SAME fixtures auditUnresolvedRms_ and
+    // auditManagerDirectoryEmailGaps_ already set up above (the 'leads'
+    // mock sheet with 'Ghost RM Nobody Knows'/'Test RM Excl' gaps, and
+    // Manager_Directory's 'Test A1 NoMail' email gap) -- confirms the
+    // wrapper runs cleanly against real gap data, not just a clean fixture.
+    let coverageAuditThrew = null;
+    try { logPostRebuildCoverageAudit_(ss); } catch (e) { coverageAuditThrew = e; }
+    TestAssertEqual_(coverageAuditThrew, null, 'logPostRebuildCoverageAudit_: runs without throwing against a spreadsheet with real coverage gaps present');
+
+    // The whole reason each half is try/caught internally: by the time
+    // this runs, rebuildRmHierarchy() has ALREADY written the sheet
+    // successfully, so a missing/unreadable leads tab or Manager_Directory
+    // must never make the rebuild itself look like it failed. A bare
+    // spreadsheet with neither sheet at all is the sharpest version of
+    // that case -- the same shape the real rebuildRmHierarchy test above
+    // (rebuildSs, no leads tab) now also exercises every time it runs.
+    const bareSs = TestMockSpreadsheet_({});
+    let bareAuditThrew = null;
+    try { logPostRebuildCoverageAudit_(bareSs); } catch (e) { bareAuditThrew = e; }
+    TestAssertEqual_(bareAuditThrew, null, 'logPostRebuildCoverageAudit_: never throws even when the leads tab and Manager_Directory are both completely missing (defensive try/catch around each half)');
   } finally {
     TestEnv_tearDown_();
   }
