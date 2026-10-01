@@ -1847,3 +1847,49 @@ Track / Insufficient Data, and never when the degenerate fallback fired
 `RM_OPP_*` constants stay browser-only (no `.gs` twin), same as before —
 this change only added a confidence gate to its existing `lowConversion`
 decision, it didn't change which runtime owns it.
+
+### 9.8 "Behind on Today's Calls" could UNDERCOUNT a real interaction — fixed 2026-10-01
+
+Root-caused via a read-only diagnostic against the live production sheet,
+triggered by lead 2245665 (Riya Yadav, Minas Patel's Western team)
+receiving a real, incorrect "Still open — Behind on Today's Calls"
+follow-up email (`OvernightEmailer.gs` Checkpoint 1+2).
+
+**What was wrong**: `computeSlaFlags_`/`enrichLead`'s `attemptsToday`, for
+a lead not created today, is normally `call_attempts - baseline` (today's
+real delta against the most recent pre-today `Movement_Log` snapshot — see
+§6's own entry for why this exists at all: it was itself a 2026-0X fix for
+the OPPOSITE failure mode, undercounting a lead that was called but never
+commented on). Lead 2245665's `call_attempts` was identical to its own
+pre-today baseline (11 = 11) despite a real, dated, TODAY-timestamped
+"Calling Status/Comment : Not Reachable" entry in
+`internal_status_comments` — a genuine interaction happened, it just never
+incremented `call_attempts` for whatever reason on the CRM side. The delta
+read 0, so the lead was flagged (and emailed) as behind, when a real
+RM action had actually happened that day.
+
+**The fix**: `attemptsToday` (both `SlaEngine.gs`'s `computeSlaFlags_` and
+`js/core-lead-model.js`'s `enrichLead`, kept in sync as always) now takes
+`MAX(delta, today's dated comment count)` instead of the delta alone. The
+comment-count side (`countTodayCommentEntries_`/`loggedToday`) already
+existed as the no-baseline-yet fallback; it's now computed unconditionally
+and folded into the baseline branch via `Math.max`, rather than only ever
+running when there's no baseline at all. This doesn't reopen the original
+undercount problem the delta itself was built to fix — an uncommented real
+call still wins via the delta, completely unaffected — and it closes the
+new failure mode: a commented interaction the counter failed to increment
+for can no longer be invisible to this check.
+
+**Verified**: `Tests_SlaEngine.gs` +3 assertions (the exact incident shape
+— 5 today-dated comments with a zero delta correctly clears the daily
+minimum; 4 comments alone still correctly falls short of it, proving this
+is a MAX, not an automatic pass; a real delta with zero same-day comments
+still clears via the delta alone, unaffected) — full suite 1220/1220 via
+`test/run-gs-tests-headless.py`. `tests/frontend-harness.html` +3
+assertions, same 3 scenarios, calling `enrichLead` directly with
+`_todayCallBaselineByKey` set by hand (the harness's own mocked
+Movement_Log always comes back empty, so the full `fetchAndRender()`
+pipeline alone can never populate a baseline and exercise this branch) —
+full suite 156/156. Not tracked by `test/check-runtime-parity.py` (full
+function logic, not a parseable constant — same category as
+`rmPerfNormalCdf` in §9.7.5, kept in parity by hand instead).

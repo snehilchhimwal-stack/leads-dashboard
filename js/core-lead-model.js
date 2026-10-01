@@ -331,6 +331,19 @@ function enrichLead(l){
   // to the comment-log proxy only when no pre-today snapshot exists yet
   // for this lead (fresh Movement_Log setup, or gaps in capture history),
   // or while enriching a past snapshot itself (see _enrichingHistorical).
+  //
+  // 2026-10-01 fix (real incident — lead 2245665/Riya Yadav, Minas Patel's
+  // Western team, confirmed live): the delta alone can go the OTHER way
+  // too — a real, dated, TODAY-timestamped "Calling Status/Comment : Not
+  // Reachable" entry existed in internal_status_comments, but call_attempts
+  // was identical to its own pre-today baseline (11 = 11), so the delta
+  // read 0 despite a genuine logged interaction today. The delta branch now
+  // takes MAX(delta, loggedToday) instead of the delta alone — this doesn't
+  // reopen the original undercount problem above (an uncommented real call
+  // still wins via the delta, unaffected) and ALSO can't be fooled by a
+  // commented interaction the counter failed to increment for. Sent a real,
+  // incorrect "Still open — Behind on Today's Calls" follow-up email
+  // (OvernightEmailer.gs Checkpoint 1+2) before this fix.
   const loggedToday = actionLogEntries.filter(e => {
     if (!e.ts) return false;
     const d = parseDate(e.ts);
@@ -342,7 +355,7 @@ function enrichLead(l){
   } else if (!_enrichingHistorical) {
     const baselineKey = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
     const baseline = _todayCallBaselineByKey.get(baselineKey);
-    attemptsToday = baseline !== undefined ? Math.max(0, (Number(l.call_attempts) || 0) - baseline) : loggedToday;
+    attemptsToday = baseline !== undefined ? Math.max(0, (Number(l.call_attempts) || 0) - baseline, loggedToday) : loggedToday;
   } else {
     attemptsToday = loggedToday;
   }

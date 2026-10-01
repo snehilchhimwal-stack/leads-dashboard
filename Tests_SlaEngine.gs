@@ -128,6 +128,41 @@ function runSlaEngineTests_() {
     flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 5 }); // 12 - 5 = 7 today, not under 5
     TestAssert_(flags.underCalledToday === false, 'underCalledToday: correctly NOT flagged once (current - baseline) clears the daily minimum');
 
+    // 2026-10-01 fix: the delta-vs-baseline can UNDERCOUNT when a real
+    // interaction was logged as a dated comment but call_attempts itself
+    // never incremented (real incident: lead 2245665/Riya Yadav —
+    // call_attempts identical to its own pre-today baseline, 11 = 11,
+    // despite a genuine today-dated "Not Reachable" comment; a real,
+    // incorrect "Still open — Behind on Today's Calls" follow-up email
+    // went out before this fix). attemptsToday now takes MAX(delta,
+    // today's comment count), not the delta alone.
+    const underCalledComments5 = [0, 1, 2, 3, 4].map(function (h) {
+      return 'Test RM One: Not Reachable - ' + TestSla_isoMinusHours_(now, h);
+    }).join(' | ');
+    f = TestSla_buildRow_({
+      lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
+      internal_status_comments: underCalledComments5,
+    });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // delta = 10-10 = 0, but 5 dated comments logged today
+    TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix: 5 today-dated comment entries clear the daily minimum even though call_attempts never moved off its own baseline (the real Riya Yadav incident shape)');
+
+    const underCalledComments4 = [0, 1, 2, 3].map(function (h) {
+      return 'Test RM One: Not Reachable - ' + TestSla_isoMinusHours_(now, h);
+    }).join(' | ');
+    f = TestSla_buildRow_({
+      lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
+      internal_status_comments: underCalledComments4,
+    });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // delta = 0, only 4 comments today -- still under the daily minimum
+    TestAssert_(flags.underCalledToday === true, 'underCalledToday 2026-10-01 fix: still correctly fires when even the comment count alone has not cleared the daily minimum (MAX, not an automatic pass)');
+
+    // The fix must not weaken the ORIGINAL case the delta already
+    // handled correctly: a real logged call that pushed call_attempts
+    // up, with zero comments today, still clears via the delta alone.
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 15 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // delta = 5, no comments at all today
+    TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix sanity: a real call-attempts delta with zero same-day comments still clears the minimum via the delta alone, unaffected by the fix');
+
     // ---- stageStuck48h ----
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 50) });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});

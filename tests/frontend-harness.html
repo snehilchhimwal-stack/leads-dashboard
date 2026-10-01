@@ -1261,6 +1261,61 @@
     assert('rmPerfNormalCdf(-1.2816) is ~0.10', Math.abs(rmPerfNormalCdf(-1.2816) - 0.10) < 1e-4, 'got ' + rmPerfNormalCdf(-1.2816));
   })();
 
+  // ---- 2i. "Behind on Today's Calls" MAX(delta, loggedToday) fix (2026-10-01) ----
+  // Real incident: lead 2245665/Riya Yadav, Minas Patel's Western team —
+  // call_attempts was identical to its own pre-today baseline (11 = 11)
+  // despite a genuine today-dated "Not Reachable" comment logged, so the
+  // plain delta read 0 and the lead was incorrectly flagged/emailed as
+  // "Behind on Today's Calls". attemptsToday now takes MAX(delta,
+  // loggedToday) instead of the delta alone. Calls enrichLead directly
+  // (not through the full fetchAndRender() pipeline below — that pipeline's
+  // own mocked Movement_Log always comes back empty, so it can never
+  // populate _todayCallBaselineByKey and exercise this specific branch)
+  // with the module's own baseline map set directly, mirroring exactly
+  // what core-filters.js's applyFiltersAndRender does before calling
+  // enrichLead for real. Byte-for-byte mirror of SlaEngine.gs's
+  // computeSlaFlags_ fix — Tests_SlaEngine.gs carries the same 3 scenarios.
+  (function () {
+    const savedBaseline = _todayCallBaselineByKey;
+    const savedRenderNow = _renderNow;
+    _renderNow = new Date(); // resolves to the frozen clock (top of file)
+    try {
+      _todayCallBaselineByKey = new Map([['C-UCT-1', 10]]);
+      const baseLead = {
+        lead_id: 'L-UCT-1', client_id: 'C-UCT-1', current_stage: 'Suspect',
+        lead_assigned_at: new Date(_renderNow.getTime() - 48 * 3600000),
+        call_attempts: 10, rm_is_active: true,
+      };
+
+      // 5 distinct today-dated comment entries, delta = 0 (call_attempts
+      // === its own baseline) — the exact Riya Yadav incident shape.
+      const comments5 = [9, 10, 11, 12, 13].map(h =>
+        'Test RM: Not Reachable - 2026-09-09 ' + String(h).padStart(2, '0') + ':00').join(' | ');
+      let l = enrichLead(Object.assign({}, baseLead, { internal_status_comments: comments5 }));
+      assert('underCalledToday 2026-10-01 fix: 5 today-dated comments clear the daily minimum even though call_attempts never moved off its own baseline (real Riya Yadav incident shape)',
+        l.underCalledToday === false, 'expected cleared; got ' + l.underCalledToday);
+
+      // Only 4 comments today — still under the daily minimum
+      // (CONFIG.MIN_CALLS_PER_DAY = 5), so the fix must NOT over-correct
+      // into never flagging anything.
+      const comments4 = [9, 10, 11, 12].map(h =>
+        'Test RM: Not Reachable - 2026-09-09 ' + String(h).padStart(2, '0') + ':00').join(' | ');
+      l = enrichLead(Object.assign({}, baseLead, { internal_status_comments: comments4 }));
+      assert('underCalledToday 2026-10-01 fix: still fires when even the comment count alone has not cleared the daily minimum (MAX, not an automatic pass)',
+        l.underCalledToday === true, 'expected still flagged; got ' + l.underCalledToday);
+
+      // Sanity: the fix must not weaken the ORIGINAL delta-based detection
+      // — a real call-attempts increment with zero same-day comments still
+      // clears the minimum via the delta alone, exactly as before.
+      l = enrichLead(Object.assign({}, baseLead, { call_attempts: 15, internal_status_comments: '' }));
+      assert('underCalledToday 2026-10-01 fix sanity: a real call-attempts delta (15-10=5) with zero same-day comments still clears the minimum via the delta alone, unaffected by the fix',
+        l.underCalledToday === false, 'expected cleared via delta alone; got ' + l.underCalledToday);
+    } finally {
+      _todayCallBaselineByKey = savedBaseline;
+      _renderNow = savedRenderNow;
+    }
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

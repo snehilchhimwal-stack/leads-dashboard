@@ -124,7 +124,27 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   flags.followupOverdue = isUnder48h && pastGrace && hasConnected && followupStaleHours > FOLLOWUP_REVIEW_HOURS_;
 
   // Behind on Today's Calls.
+  //
+  // 2026-10-01 fix (real incident — lead 2245665/Riya Yadav, Minas Patel's
+  // Western team, confirmed live via a read-only diagnostic against the
+  // production sheet): the delta-vs-baseline approach alone can
+  // UNDERCOUNT — a real, dated, TODAY-timestamped "Calling Status/Comment
+  // : Not Reachable" entry existed in internal_status_comments, but
+  // call_attempts was identical to its own pre-today baseline (11 = 11),
+  // so the delta read 0 despite a genuine logged interaction today. The
+  // comment-count fallback (countTodayCommentEntries_) used to run ONLY
+  // when no baseline existed at all — now it's computed unconditionally
+  // (mirrors js/core-lead-model.js's loggedToday, always computed up
+  // front) and the delta branch takes MAX(delta, commentCount) instead of
+  // the delta alone. This doesn't reopen the original problem the delta
+  // was built to fix (an uncommented real call still wins via the delta,
+  // unaffected) and also can't be fooled by a commented interaction the
+  // counter failed to increment for. Sent a real, incorrect "Still open —
+  // Behind on Today's Calls" follow-up email (OvernightEmailer.gs
+  // Checkpoint 1+2) before this fix. Byte-for-byte mirror of the JS fix —
+  // keep both in sync (HANDOVER.md §6).
   const callAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
+  const commentCountToday = countTodayCommentEntries_(internalComments, stageComments, now);
   let attemptsToday;
   if (isCreatedToday) {
     attemptsToday = callAttempts;
@@ -134,8 +154,8 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
     const baselineKey = clientId || ('l:' + leadId);
     const baseline = baselineMap[baselineKey];
     attemptsToday = baseline !== undefined
-      ? Math.max(0, callAttempts - baseline)
-      : countTodayCommentEntries_(internalComments, stageComments, now); // no pre-today baseline yet — same fallback as enrichLead's loggedToday
+      ? Math.max(0, callAttempts - baseline, commentCountToday)
+      : commentCountToday; // no pre-today baseline yet — same fallback as enrichLead's loggedToday
   }
   flags.underCalledToday = pastGrace && attemptsToday < MIN_CALLS_PER_DAY_;
 
