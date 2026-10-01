@@ -293,7 +293,7 @@ re-running after an edit never leaves a duplicate):
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
 | `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 3 automatable checks. Sends every week regardless of outcome — see §8. |
-| `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). |
+| `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). **Since 2026-10-01:** `rebuildRmHierarchy()` (the function this calls under the hood when re-run) now automatically runs `auditUnresolvedRms_`/`auditManagerDirectoryEmailGaps_` at the end of every rebuild and logs the result — see §4.3.2. |
 | `setupLeadFollowupsStalenessFormatting()` | `LeadFollowupsStaleness.gs` | **No trigger** — applies the amber/red conditional formatting to `Lead_Followups` (a row 12h/24h stale on its `updated_at` column). Runs immediately; re-run only if the rule changes (`GS-007`, `LEAD_FOLLOWUPS_STALENESS.md`). |
 
 The **full, source-verified trigger set** (schedules, handlers, timezone
@@ -394,6 +394,41 @@ CSV, or check `archive_log.csv` first to find which file covers a given
 date), not a live formula/filter — this is a cold archive, not a second live
 table. No new trigger or setup function needed; it rides inside the two
 prune functions' existing nightly call sites.
+
+### 4.3.2 RM_Hierarchy rebuild now self-audits for coverage gaps (2026-10-01)
+
+**Why:** `OPS_CHECKLIST.md`'s "RM hierarchy routing" section has always said
+to run `auditUnresolvedRmsNow()` and `auditManagerDirectoryEmailGapsNow()`
+"immediately after any RM-roster or org-chart change" — but that was a
+manual reminder, easy to skip, and nothing enforced it. Real incident: the
+2026-10-01 Pre Sales team (Manisha rathod, Rajesh Muni, Jagruti Borude,
+Nishant Lambe, Shivani Pathak, Suresh Rajoriya, Priya Chaubey) had 25-498
+real leads each — a meaningful share genuinely `google`/Non-UTM/Search, so
+a real `AllIssuesEmailer.gs`/`OvernightEmailer.gs` send WOULD have hit
+them — with literally no `RM_Hierarchy` row at all, for an unknown stretch
+of time before this was found by hand while investigating an unrelated
+"wrong manager shown in an email" report. Both audit functions already
+existed and would have caught this instantly; nobody had separately run
+either one since this team started appearing in the `leads` tab.
+
+**Fix:** `rebuildRmHierarchy()` (`RmHierarchy.gs`) now calls a new
+`logPostRebuildCoverageAudit_(ss)` at the end of every rebuild — it runs
+`auditUnresolvedRms_` and `auditManagerDirectoryEmailGaps_` (the SAME
+tested functions the standalone `*Now()` wrappers call, not a
+reimplementation) and logs a plain "COVERAGE GAP: ..." or "Coverage
+check: all clear" line either way, same "always report, don't wait for a
+threshold" philosophy `OpsChecklistRunner.gs`'s weekly email already uses
+(a missing report is itself the alarm). Each half is independently
+try/caught — `rebuildRmHierarchy()` has already finished writing the sheet
+by the time this runs, so a transient read problem on `leads` or
+`Manager_Directory` logs a note instead of making the rebuild itself look
+like it failed. Net effect: **any session (human or Claude) that adds,
+removes, or re-points a row in `RM_HIERARCHY_RAW_` and then runs
+`rebuildRmHierarchy()` — which is the normal way to apply that change —
+automatically sees the coverage report in the same execution log, with no
+separate step to remember.** `OPS_CHECKLIST.md`'s two checklist items stay
+listed (they're still useful to run standalone, anytime, not just after a
+rebuild) but now note this automatic side-effect.
 
 ### 4.4 GitHub repo access
 
@@ -597,6 +632,16 @@ test) Sheet, and use the browser console directly.
   actual current manager, and confirm `RmHierarchy.private.gs` is present
   and current in the Apps Script project (§4.3) — a missing or stale entry
   there is the most common cause.
+- **A real RM/team with real leads has NO row in `RM_Hierarchy` at all**
+  (not stale — just never added, e.g. a team that never appears in any HR
+  export this project refreshes from): real incident, 2026-10-01 — the
+  Pre Sales team (7 people, 25-498 leads each) went unnoticed this way.
+  `auditUnresolvedRmsNow()` now runs automatically at the end of every
+  `rebuildRmHierarchy()` call (§4.3.2) and logs any such gap — check the
+  execution log from the last rebuild first. A lead naming an unresolved
+  RM still routes safely to the `Region_Recipients`/CH-level fallback in
+  the meantime (never silently dropped), it just doesn't reach that RM's
+  actual manager.
 - **A real RM comment produced a generic/wrong Suggested Follow-up**: check
   `Unmatched_Comments_Log` — if the exact phrasing shows up there, the
   keyword engine genuinely doesn't recognize it yet; that's the signal to

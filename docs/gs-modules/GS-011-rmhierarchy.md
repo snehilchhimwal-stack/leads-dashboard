@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-01 against commit `79ceeee` — Pre Sales team added + 3rd Mohammad Azaz alias (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-01 against commit `b5b595d` — self-audit on every rebuild (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -55,14 +55,14 @@ data-rebuild.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L519/#L943` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
-| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1118` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
-| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L499/#L476/#L1090` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
-| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1099` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
-| FN-244 | `isTopOfOrgRole_(role)` `#L1014` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
-| FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L574/#L539/#L869/#L932` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | — | `setupRmHierarchy` (FN-247), manual | specific |
-| FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` `#L795/#L847/#L720/#L742/#L650/#L678` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs | reusable |
-| FN-247 | `setupRmHierarchy()` `#L1216` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
+| FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L519/#L995` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
+| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1170` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
+| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L499/#L476/#L1142` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
+| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1151` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
+| FN-244 | `isTopOfOrgRole_(role)` `#L1066` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
+| FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L574/#L539/#L921/#L984` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | `logPostRebuildCoverageAudit_` (FN-246, since 2026-10-01 — see that row) | `setupRmHierarchy` (FN-247), manual | specific |
+| FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` / `logPostRebuildCoverageAudit_(ss)` `#L847/#L899/#L772/#L794/#L702/#L730/#L663` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs, `rebuildRmHierarchy()` (FN-245, automatically, since 2026-10-01) | reusable — **`logPostRebuildCoverageAudit_` (2026-10-01) calls the first two audits above unconditionally at the end of every rebuild, each wrapped in its own try/catch so a read failure logs a note instead of making the rebuild itself look like it failed (`HANDOVER.md` §4.3.2)** |
+| FN-247 | `setupRmHierarchy()` `#L1268` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -289,6 +289,21 @@ from 2026-09-30 stands as-is. +19 lines (1207L -> 1226L: 9 new rows + explanator
 `Tests_RmHierarchy.gs` unchanged (same row shape existing tests already exercise; full suite re-run clean,
 1215/1215). `rebuildRmHierarchy()` still needs a live re-run after deploy to pick up the 9 new rows in the
 `RM_Hierarchy` sheet itself (tracked in the deploy register, not yet live as of this doc edit).
+
+**2026-10-01** (`b5b595d`): the Pre Sales gap above sat undiscovered because `OPS_CHECKLIST.md`'s
+"run `auditUnresolvedRmsNow()`/`auditManagerDirectoryEmailGapsNow()` after any RM-roster change" was a
+manual-only reminder nobody separately acted on. Added `logPostRebuildCoverageAudit_(ss)` (new, `#L663`),
+called unconditionally at the end of `rebuildRmHierarchy()` (FN-245) -- runs both audits (FN-246) via the
+same tested `_` functions the standalone `*Now()` wrappers already call (no reimplemented logic) and logs
+a `COVERAGE GAP: ...` or `Coverage check: all clear` line either way, same "always report" philosophy
+`OpsChecklistRunner.gs`'s weekly email already uses. Each half independently try/caught -- the rebuild has
+already finished writing the sheet by the time this runs, so a transient `leads`/`Manager_Directory` read
+problem logs a note instead of making the whole rebuild throw. `Tests_RmHierarchy.gs`: 2 new assertions --
+confirms it runs clean against the existing gap fixtures (`Ghost RM Nobody Knows`, `Test A1 NoMail`), and
+confirms it NEVER throws even against a bare spreadsheet with neither sheet present (the specific case the
+try/catch exists for) -- full suite 1217/1217. `OPS_CHECKLIST.md`'s two items annotated to note the new
+automatic side-effect; `HANDOVER.md` gained a new §4.3.2 and a §8 "RM with real leads but no row at all"
+entry (same commit, per this project's own architectural-change discipline).
 
 ## Revalidation trigger
 

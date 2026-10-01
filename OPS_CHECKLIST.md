@@ -125,12 +125,27 @@ Movement_Log's content-hash dedup fails *silently* — rows still append, there 
 
 ### RM hierarchy routing
 
+**Since 2026-10-01, the two checks below also run automatically** at the
+end of every `rebuildRmHierarchy()` call (`logPostRebuildCoverageAudit_`,
+`HANDOVER.md` §4.3.2) — check that run's execution log before manually
+re-running either one. They stay listed here because they're still useful
+to run standalone, anytime, and because the automatic version is
+try/caught and silently logs-and-continues on a transient read failure
+rather than retrying — a manual run is the way to actually retry one that
+didn't complete. The real gap this closed: a checklist item that only
+existed in writing ("run this after any RM-roster change") is easy to
+skip — the 2026-10-01 Pre Sales team (7 people, 25-498 real leads each)
+sat with zero `RM_Hierarchy` row for an unknown stretch of time because
+nobody separately ran either check after they started appearing in the
+`leads` tab.
+
 - [ ] **`auditUnresolvedRmsNow()`** (`RmHierarchy.gs`, pre-existing,
-      2026-08-31) — **automated weekly.** Finds every RM name on a
-      currently-open lead that doesn't resolve in `RM_Hierarchy` at all
-      (missing row, or found but hand-marked Excluded). Each one silently
-      falls back to the legacy `Region_Recipients` catch-all instead of
-      reaching that RM's real manager chain.
+      2026-08-31) — **automated weekly, and automatically after every
+      `rebuildRmHierarchy()` call (since 2026-10-01).** Finds every RM
+      name on a currently-open lead that doesn't resolve in `RM_Hierarchy`
+      at all (missing row, or found but hand-marked Excluded). Each one
+      silently falls back to the legacy `Region_Recipients` catch-all
+      instead of reaching that RM's real manager chain.
 - [ ] **`listExcludedRmsNow()`** (`RmHierarchy.gs`, pre-existing) —
       **manual.** Lists every row currently hand-flagged Excluded in
       `RM_Hierarchy`, so an old flag from months ago doesn't sit forgotten
@@ -141,8 +156,9 @@ Movement_Log's content-hash dedup fails *silently* — rows still append, there 
       with `clearAllRmHierarchyExclusionsNow()` if any turn out to be
       wrong.
 - [ ] **`auditManagerDirectoryEmailGapsNow()`** (`RmHierarchy.gs`, NEW —
-      built 2026-09-09) — **automated weekly.** The gap the two tools
-      above don't cover: a manager who resolves fine in `RM_Hierarchy` but
+      built 2026-09-09) — **automated weekly, and automatically after
+      every `rebuildRmHierarchy()` call (since 2026-10-01).** The gap the
+      two tools above don't cover: a manager who resolves fine in `RM_Hierarchy` but
       has no email in `Manager_Directory` doesn't show up as an
       "unresolved RM" anywhere, since the RM side of the lookup succeeds.
       Every RM reporting to that manager silently falls back to
