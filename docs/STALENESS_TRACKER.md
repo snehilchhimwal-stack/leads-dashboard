@@ -91,19 +91,19 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `Core.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `DailyRmIssueLog.gs` | `5802f35` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `EmailInfra.gs` | `a1a21b4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `MovementTracker.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `OpsChecklistRunner.gs` | `4c99f7f` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `OvernightEmailer.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `RmHierarchy.gs` | `b5b595d` | 2026-10-01 | applied as an exact SHA-verified diff edit via the live Monaco editor, saved, confirmed on a fresh tab reload (sha16 `76eb0ae852838304` matches `git show HEAD:RmHierarchy.gs`); `Tests_RmHierarchy.gs` synced the same way (live was 2 commits behind, `d71c492` -> `b5b595d`, full-value replace instead of a diff) and `runRmHierarchyTestsNow()` run live: 116/116. `rebuildRmHierarchy()` re-run from the editor to exercise the new self-audit for real: "RM_Hierarchy rebuilt: 230 people" + a genuine `COVERAGE GAP: 5 RM name(s)...` (4 Futwork — expected, routed via `FUTWORK_ROUTE_EMAIL_` not `RM_Hierarchy` — plus "Kapil Bhagat", a real small gap not yet investigated) + "every manager ... has an email". `listExcludedRmsNow()`: 0 excluded. |
-| `SlaEngine.gs` | `87114a3` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
-| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
+| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `Core.gs` | `c9c0b66` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `DailyRmIssueLog.gs` | `5802f35` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `EmailInfra.gs` | `a1a21b4` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `MovementTracker.gs` | `c9c0b66` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `OpsChecklistRunner.gs` | `4c99f7f` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `OvernightEmailer.gs` | `87114a3` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `RmHierarchy.gs` | `b5b595d` | 2026-10-01 | applied as an exact SHA-verified diff edit via the live Monaco editor, saved, confirmed on a fresh tab reload (sha16 `76eb0ae852838304` matches `git show HEAD:RmHierarchy.gs`); `Tests_RmHierarchy.gs` synced the same way (live was 2 commits behind, `d71c492` -> `b5b595d`, full-value replace instead of a diff) and `runRmHierarchyTestsNow()` run live: 116/116. `rebuildRmHierarchy()` re-run from the editor to exercise the new self-audit for real: "RM_Hierarchy rebuilt: 230 people" + a genuine `COVERAGE GAP: 5 RM name(s)...` (4 Futwork — expected, routed via `FUTWORK_ROUTE_EMAIL_` not `RM_Hierarchy` — plus "Kapil Bhagat", a real small gap not yet investigated) + "every manager ... has an email". `listExcludedRmsNow()`: 0 excluded. **2026-10-01 whole-project sweep:** every other production/Tests_*.gs file in the project was found behind HEAD (12 Tests_*.gs files, plus `DailyRmIssueLog.gs` itself despite the deploy register claiming it was already confirmed live) and pushed to HEAD in one `--push` payload, batched into 5 `javascript_tool` calls — see each file's own row below for its confirmed sha. |
+| `SlaEngine.gs` | `87114a3` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
+| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-10-01 | read directly from the live editor by hash-match (2026-10-01) |
 
 ### Known live-vs-repo differences
 

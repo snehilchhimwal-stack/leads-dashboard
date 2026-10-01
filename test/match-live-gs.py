@@ -180,7 +180,15 @@ def main():
             if var != "exact":
                 basis += "; the file's raw NUL byte became a space when pasted - live differs from repo by that one character"
             row = "| `%s` | `%s` | %s | %s |" % (f, sha, today, basis)
-            new, k = re.subn(r'^\| `' + re.escape(f) + r'` \|.*\|$', lambda m: row, text, flags=re.M)
+            # \r?$ -- TRACKER is opened with newline="" (raw bytes preserved),
+            # and this repo's checkout has shown up with real CRLF line
+            # endings (git's own core.autocrlf, confirmed 2026-10-01: a run
+            # against a CRLF-checked-out copy silently matched and rewrote
+            # ZERO rows with a bare \|$, since $ in MULTILINE mode sits right
+            # before \n, and \r was still sitting between the literal `|`
+            # and that point). Tolerate either line ending so this doesn't
+            # silently no-op again depending on how the file was last saved.
+            new, k = re.subn(r'^\| `' + re.escape(f) + r'` \|.*\|\r?$', lambda m: row, text, flags=re.M)
             if k:
                 text, n_rows = new, n_rows + 1
         open(TRACKER, "w", encoding="utf-8", newline="").write(text)
@@ -196,43 +204,47 @@ def main():
 # verifies the whole-file post-edit SHA, and returns one JSON summary line
 # per file. Does NOT save -- Ctrl+S each changed tab by hand afterward (this
 # tool has no way to know which tabs are actually open/visible to save).
-PUSH_SNIPPET_TEMPLATE = """(async () => {
-  const b64 = "__PAYLOAD__";
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const ds = new DecompressionStream('gzip');
-  const buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
-  const payload = JSON.parse(new TextDecoder('utf-8').decode(buf));
+#   NOTE: deliberately NOT wrapped in `(async () => { ... })()`. The
+#   javascript_tool environment this is meant for returns `{}` for a
+#   top-level IIFE call expression -- its result-capture only works with a
+#   bare top-level-await script whose LAST EXPRESSION is the value wanted
+#   (REPL semantics), confirmed by hand 2026-10-01 after an IIFE silently
+#   produced `{}` with the edit never actually applied. Keep it this way.
+PUSH_SNIPPET_TEMPLATE = """const b64 = "__PAYLOAD__";
+const bin = atob(b64);
+const bytes = new Uint8Array(bin.length);
+for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+const ds = new DecompressionStream('gzip');
+const buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+const payload = JSON.parse(new TextDecoder('utf-8').decode(buf));
 
-  async function sha16(norm) {
-    const enc = new TextEncoder().encode(norm);
-    const digest = await crypto.subtle.digest('SHA-256', enc);
-    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
-  }
+async function sha16(norm) {
+  const enc = new TextEncoder().encode(norm);
+  const digest = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+}
 
-  const models = monaco.editor.getModels();
-  const results = [];
-  for (const e of payload.entries) {
-    const target = models[e.liveIndex - 1];
-    if (!target) { results.push({ name: e.name, error: 'no model at live index ' + e.liveIndex }); continue; }
-    const beforeNorm = target.getValue().replace(/\\r\\n/g, '\\n').replace(/\\n+$/, '');
-    const beforeSha = await sha16(beforeNorm);
-    if (beforeSha !== e.oldsha) { results.push({ name: e.name, error: 'PRE-EDIT SHA MISMATCH: ' + beforeSha + ' vs expected ' + e.oldsha }); continue; }
-    const startPos = target.getPositionAt(e.prefixLen);
-    const endPos = target.getPositionAt(e.prefixLen + e.oldMidLen);
-    const range = new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column);
-    target.pushEditOperations([], [{ range: range, text: e.newMid }], () => null);
-    const afterNorm = target.getValue().replace(/\\r\\n/g, '\\n').replace(/\\n+$/, '');
-    const afterSha = await sha16(afterNorm);
-    results.push({
-      name: e.name, beforeSha, afterSha, expectedNewSha: e.newsha,
-      afterLen: target.getValueLength(), expectedNewLen: e.newlen,
-      match: afterSha === e.newsha && target.getValueLength() === e.newlen,
-    });
-  }
-  return JSON.stringify(results, null, 1);
-})()
+const models = monaco.editor.getModels();
+const results = [];
+for (const e of payload.entries) {
+  const target = models[e.liveIndex - 1];
+  if (!target) { results.push({ name: e.name, error: 'no model at live index ' + e.liveIndex }); continue; }
+  const beforeNorm = target.getValue().replace(/\\r\\n/g, '\\n').replace(/\\n+$/, '');
+  const beforeSha = await sha16(beforeNorm);
+  if (beforeSha !== e.oldsha) { results.push({ name: e.name, error: 'PRE-EDIT SHA MISMATCH: ' + beforeSha + ' vs expected ' + e.oldsha }); continue; }
+  const startPos = target.getPositionAt(e.prefixLen);
+  const endPos = target.getPositionAt(e.prefixLen + e.oldMidLen);
+  const range = new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column);
+  target.pushEditOperations([], [{ range: range, text: e.newMid }], () => null);
+  const afterNorm = target.getValue().replace(/\\r\\n/g, '\\n').replace(/\\n+$/, '');
+  const afterSha = await sha16(afterNorm);
+  results.push({
+    name: e.name, beforeSha, afterSha, expectedNewSha: e.newsha,
+    afterLen: target.getValueLength(), expectedNewLen: e.newlen,
+    match: afterSha === e.newsha && target.getValueLength() === e.newlen,
+  });
+}
+JSON.stringify(results, null, 1);
 """
 
 
