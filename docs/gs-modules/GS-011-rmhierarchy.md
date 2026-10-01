@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `RmHierarchy.gs` (1207 lines) |
+| **Location** | `RmHierarchy.gs` (1297 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-01 against commit `b5b595d` — self-audit on every rebuild (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-01 against commit `c80fabc` — Rajesh Muni/Manisha rathod restricted cc (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -56,13 +56,13 @@ data-rebuild.
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L519/#L995` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
-| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1170` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
-| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L499/#L476/#L1142` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
-| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1151` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
-| FN-244 | `isTopOfOrgRole_(role)` `#L1066` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
+| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1180` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
+| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L499/#L476/#L1152` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
+| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1161` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
+| FN-244 | `isTopOfOrgRole_(role)` `#L1076` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
 | FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L574/#L539/#L921/#L984` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | `logPostRebuildCoverageAudit_` (FN-246, since 2026-10-01 — see that row) | `setupRmHierarchy` (FN-247), manual | specific |
 | FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` / `logPostRebuildCoverageAudit_(ss)` `#L847/#L899/#L772/#L794/#L702/#L730/#L663` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs, `rebuildRmHierarchy()` (FN-245, automatically, since 2026-10-01) | reusable — **`logPostRebuildCoverageAudit_` (2026-10-01) calls the first two audits above unconditionally at the end of every rebuild, each wrapped in its own try/catch so a read failure logs a note instead of making the rebuild itself look like it failed (`HANDOVER.md` §4.3.2)** |
-| FN-247 | `setupRmHierarchy()` `#L1268` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
+| FN-247 | `setupRmHierarchy()` `#L1287` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -72,6 +72,7 @@ data-rebuild.
 | CFG-055 | `TOP_OF_ORG_ROLES_` | `['cluster head', 'city lead', 'commercial head']` | roles that get the CH-level backstop, not a normal bucket primary | `isTopOfOrgRole_`; **overlaps `RM_PERF_NON_RM_ROLES` (`JS-008` CFG-020)** — the same 3 roles |
 | CFG-056 | `CH_LEVEL_EMAIL_` / `ALWAYS_CC_EMAILS_` | fallback addresses | where routing degrades to when a chain is blank / who is always CC'd | recipient resolution when the private file is absent |
 | CFG-064 | `TM_STILL_CC_` | `['ayaz bagwan', 'rahul poudel', 'akash a ugale']` (`#L1052`) | lowercased names of TMs who are also, for specific named exceptions, the direct manager of some of their own reports (not just a `tl`-level report of someone else) — `resolveRecipientBucketsForRms_` (FN-241, `#L1167`) CCs a matching TM even when they're not the resolved primary, since a person's direct manager already IS the "To" and would otherwise never see it. Renamed from `PUNE_TM_STILL_CC_` and generalized (no longer Pune-exclusive) when Akash A Ugale was added `42ebfaf` — the exception now names a mechanism, not a region | who gets CC'd on issue emails for these 3 TMs' own direct reports |
+| CFG-080 | `RESTRICTED_CC_PRIMARY_NAMES_` | `['rajesh muni', 'manisha rathod']` (`#L1056`, lowercased — matches bucket keys) | added 2026-10-01 per the user directly: these two primaries' issue emails must cc ONLY Snehil Chhimwal, never `ALWAYS_CC_EMAILS_` or anything else their own chain's rh/ch/tm would otherwise pull in. `resolveRecipientBucketsForRms_` (FN-241) checks this list in its final bucket-mapping step — a HARD REPLACEMENT of `ccSet` (looked up fresh via `data.emailByManagerNameLower['snehil chhimwal']`), not a conditional skip of `ALWAYS_CC_EMAILS_` alone, so it stays correct even if either person's own row ever grows a real rh/ch later | cc on every issue email whose resolved primary is Rajesh Muni or Manisha rathod (their Pre Sales reports' issues, `CFG-054`) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -304,6 +305,19 @@ confirms it NEVER throws even against a bare spreadsheet with neither sheet pres
 try/catch exists for) -- full suite 1217/1217. `OPS_CHECKLIST.md`'s two items annotated to note the new
 automatic side-effect; `HANDOVER.md` gained a new §4.3.2 and a §8 "RM with real leads but no row at all"
 entry (same commit, per this project's own architectural-change discipline).
+
+**2026-10-01** (`c80fabc`, CC restriction): confirmed by the user directly — Rajesh Muni and Manisha rathod's
+issue emails (their Pre Sales reports' SLA issues, routed to them as primary via `CFG-054`'s rows) must
+cc ONLY Snehil Chhimwal, never the standing leadership cc (`ALWAYS_CC_EMAILS_`) or anything else. New
+`RESTRICTED_CC_PRIMARY_NAMES_` (`CFG-080`); `resolveRecipientBucketsForRms_` (FN-241)'s final
+bucket-mapping step now checks it and, when the resolved primary matches, hard-replaces `ccSet` with just
+Snehil Chhimwal's looked-up email instead of the normal `ALWAYS_CC_EMAILS_` branch — see `CFG-080`'s own
+entry for why this is a replacement, not a conditional skip. `Tests_RmHierarchy.gs`: 5 new assertions,
+same self-contained-mock + temporary-push/splice pattern as the existing `TM_STILL_CC_` test (synthetic
+names, no real employee data in the fixture itself — 'Snehil Chhimwal' is the one real name referenced,
+unavoidably, since the production override hardcodes that exact lookup key) — proves a real rh that would
+normally cc fine is dropped once restricted, leaving exactly one cc entry. Full suite 1225/1225 via
+`run-gs-tests-headless.py`. Not live until pasted into the Sheet's Apps Script editor.
 
 ## Revalidation trigger
 
