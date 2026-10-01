@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `87114a3` — revalidated in this sweep (all 5 function line anchors, all 6 threshold constants re-checked against source), no drift found; prior note: checkpoint emails list only unresolved leads (FN-271 rewritten, `allIssuesCheckpointIsActiveGs_` added; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-01 against commit `20cfec4` — `underCalledToday` (FN-248) fixed to take `MAX(delta, commentCountToday)` instead of delta alone (real incident, lead 2245665/Riya Yadav); see `## Version / change reference` |
 
 ## Purpose / reason to exist
 
@@ -59,9 +59,9 @@ gotcha).
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-248 | `computeSlaFlags_(row, colIndex, now, baselineMap)` `#L46` | a leads row + column index + `now` + a `Movement_Log` call-count baseline map | `{firstContactBreach, neverConnected…, isNotUpdated, stageStuck48h, followupOverdue, …}` | none (pure) | `canonicalStage_` / `businessMinutesBetweenGs_` / `istDayKeyGs_` (`GS-002`), `latestCommentTimestamp_` / `countTodayCommentEntries_` (`GS-005`) | `MovementTracker.gs`, `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `DailyRmIssueLog.gs` | reusable — **the `.gs` twin of `enrichLead` (`JS-006` FN-034)** |
-| FN-249 | `primaryIssueGs_(flags)` `#L154` | the SLA flags | the single headline issue key | none | `ISSUE_PRIORITY`-order | the emailers (subject line + sort) | reusable — shares the tie-break order with `CONFIG.ISSUE_PRIORITY` (`JS-005` CFG-012) |
-| FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L215` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s `sendCombinedMorningEmail_` (`GS-010` FN-275, Checkpoint 1, 10:00 job, Step 6/11) AND `sendCombinedFollowupEmail_` (`GS-010` FN-280, Checkpoint 2 — called a SECOND time with Checkpoint 1's own output as `priorEntries`, 13:00 job, Step 7/11) | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment; now proven by both real call sites, not just design) |
-| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L297` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s `sendCombinedFollowupEmail_` (`GS-010` FN-280, 13:00 job, wired 2026-09-23 Step 7/11) | specific — **2026-09-26: keeps ONLY still-unresolved leads** (via private helper `allIssuesCheckpointIsActiveGs_` `#L305`, also used by `GS-010`'s `buildAllIssuesCheckpointSectionOptsGs_` / `sendCombinedMorningEmail_`); previously it suppressed only a lead closed out at BOTH checkpoints, so a lead that had just resolved was listed once. Its output is what `sendCombinedFollowupEmail_` persists to `checkpoint2_json` (resolved leads stay in `checkpoint1_json`) |
+| FN-249 | `primaryIssueGs_(flags)` `#L174` | the SLA flags | the single headline issue key | none | `ISSUE_PRIORITY`-order | the emailers (subject line + sort) | reusable — shares the tie-break order with `CONFIG.ISSUE_PRIORITY` (`JS-005` CFG-012) |
+| FN-270 | `computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap)` `#L235` | prior per-lead entries (raw snapshot OR a checkpoint's own prior output) + `now` + baseline map | `[{lead_id, state, currentIssueLabel, currentStatus}]` — `state` ∈ `not_found`/`resolved`/`still_open`/`category_changed`/`escalated`/`reopened` | reads the `leads` tab (`readLeadsTab_`, `GS-004`) | `computeSlaFlags_` (FN-248), `primaryIssueGs_` (FN-249), `isOpenLead_` (`GS-002`), `overnightStatusLabelGs_` (`GS-005`), `allIssuesCheckpointPriorLabel_`/`allIssuesCheckpointPriorWasActive_` `#L209/#L212` (private helpers, same file) | `OvernightEmailer.gs`'s `sendCombinedMorningEmail_` (`GS-010` FN-275, Checkpoint 1, 10:00 job, Step 6/11) AND `sendCombinedFollowupEmail_` (`GS-010` FN-280, Checkpoint 2 — called a SECOND time with Checkpoint 1's own output as `priorEntries`, 13:00 job, Step 7/11) | reusable — **deliberately accepts its own output shape as input, so one function serves both checkpoints** (see its own header comment; now proven by both real call sites, not just design) |
+| FN-271 | `filterAllIssuesCheckpoint2ForEmailGs_(checkpoint1Entries, checkpoint2Results)` `#L317` | Checkpoint 1's result array + Checkpoint 2's result array (from a second FN-270 call, priorEntries=Checkpoint 1's output) | the filtered subset of `checkpoint2Results` worth showing at 13:00 | none (pure) | — | `OvernightEmailer.gs`'s `sendCombinedFollowupEmail_` (`GS-010` FN-280, 13:00 job, wired 2026-09-23 Step 7/11) | specific — **2026-09-26: keeps ONLY still-unresolved leads** (via private helper `allIssuesCheckpointIsActiveGs_` `#L305`, also used by `GS-010`'s `buildAllIssuesCheckpointSectionOptsGs_` / `sendCombinedMorningEmail_`); previously it suppressed only a lead closed out at BOTH checkpoints, so a lead that had just resolved was listed once. Its output is what `sendCombinedFollowupEmail_` persists to `checkpoint2_json` (resolved leads stay in `checkpoint1_json`) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -236,6 +236,28 @@ length 4, not 5) and the helper has its own cases. Not live until pasted
 into the Sheet's Apps Script editor.
 
 **Deployed live 2026-09-26** (~13:45 IST) together with `GS-010`'s `OvernightEmailer.gs`: applied as exact diff edits, saved, and the saved file's SHA-256 re-read in a fresh editor tab equals the committed file (`44a6a9f8…`).
+
+**Revalidated 2026-10-01** `20cfec4`: real incident — lead 2245665/Riya
+Yadav, Minas Patel's Western team — had a today-dated "Not Reachable"
+comment logged in `internal_status_comments`, but `call_attempts` was
+identical to its own pre-today `Movement_Log` baseline, so the
+delta-vs-baseline check for `underCalledToday` (FN-248, the "Behind on
+Today's Calls" rule) read 0 and silently missed a genuine interaction.
+Fix: when a baseline exists, `attemptsToday` is now `Math.max(0,
+callAttempts - baseline, commentCountToday)` instead of the delta alone
+— `commentCountToday` already existed via
+`countTodayCommentEntries_` (`GS-005`), just wasn't being compared
+against. `enrichLead` (`JS-006` FN-034) got the matching
+`Math.max(delta, loggedToday)` change same commit — RULE-033's
+cross-runtime parity preserved. `Tests_SlaEngine.gs`: 3 new assertions
+(5-comment case clears the minimum, 4-comment case still flags, a
+delta-alone sanity case is unaffected) — full suite 1220/1220 via
+`run-gs-tests-headless.py`. `tests/frontend-harness.html` section 2i:
+matching 3 assertions against `enrichLead` — full suite 156/156. Not
+tracked by `test/check-runtime-parity.py` (full function logic, not a
+parseable constant — same category as `rmPerfNormalCdf`, kept in parity
+by hand). See `HANDOVER.md` §9.8 for the full incident writeup. Not live
+until pasted into the Sheet's Apps Script editor.
 
 ## Revalidation trigger
 

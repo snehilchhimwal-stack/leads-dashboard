@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-01 against commit `20cfec4` — `underCalledToday` (FN-034) fixed to take `MAX(delta, loggedToday)` instead of delta alone (real incident, lead 2245665/Riya Yadav); see `## Version / change reference` |
 
 ## Purpose / reason to exist
 
@@ -144,6 +144,23 @@ the KPI strip (`TAB-002`), People score tables (`TAB-005`), the reports
 
 Verified at `c82ec67`; record created by DOC-027. File grew from 435L
 (2026-09-05 audit) to 449L — minor.
+
+**Revalidated 2026-10-01** `20cfec4`: real incident — lead 2245665/Riya
+Yadav, Minas Patel's Western team — had a today-dated "Not Reachable"
+comment in `internal_status_comments`, but `call_attempts` was identical
+to its own pre-today `_todayCallBaselineByKey` baseline, so the
+delta-vs-baseline check for `underCalledToday` (RULE-006) read 0 and
+silently missed a genuine interaction. Fix: `attemptsToday` is now
+`Math.max(0, (call_attempts - baseline), loggedToday)` instead of the
+delta alone — `loggedToday` already existed (derived from
+`actionLogEntries`/`istSameDay`), just wasn't being compared against.
+`SlaEngine.gs`'s `computeSlaFlags_` (`GS-012` FN-248) got the matching
+`Math.max` change same commit — RULE-005's cross-runtime parity
+preserved. `tests/frontend-harness.html` section 2i: 3 new assertions
+(5-comment case clears the minimum, 4-comment case still flags, a
+delta-alone sanity case is unaffected) — full suite 156/156. Not tracked
+by `test/check-runtime-parity.py` (full function logic, not a parseable
+constant). See `HANDOVER.md` §9.8 for the full incident writeup.
 
 ## Revalidation trigger
 
