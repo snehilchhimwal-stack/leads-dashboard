@@ -146,7 +146,8 @@ const MANAGER_DIRECTORY_SHEET_ = 'Manager_Directory';
 // same export RmHierarchy.private.gs's EMPLOYEE_EMAIL_BY_NAME_RAW_ comes
 // from. Scoped to sales-track people only (S1/S2/S3/A1/TL/TM/RH/RM/BDM/
 // Cluster Head/City Lead/Commercial Head, across the 11 real lead-
-// assignment regions plus Sourcing - Pune) — a Finance/HR/Marketing/
+// assignment regions plus Sourcing - Pune and Pre Sales, added 2026-10-01
+// — see its own rows' comment near the end of the table) — a Finance/HR/Marketing/
 // Technology/Magnet/Post Sales/Customer Experience person never appears
 // as anyone's "RM" on a real first-sale Google lead, so their row would
 // just be noise this table was never meant to carry (same scope the
@@ -447,6 +448,24 @@ const RM_HIERARCHY_RAW_ = [
   // of 5 HR exports going back to 2026-08-31 by name at all (unlike the above, never even a stale prior match), yet
   // she has 51 real leads (36 still Suspect) in the live leads tab right now -- needs a direct check with HR/the
   // region, not a mechanical "absent from export = departed" call the way the rest of this batch was.
+  // Pre Sales team, added 2026-10-01 per the user directly -- not from any HR export (a small distinct team the
+  // regular roster refresh doesn't cover, same bespoke-but-real status as the Loan/Sourcing - Pune overrides
+  // higher up). Snehil Chhimwal is the team's reporting manager; Rajesh Muni and Manisha rathod are his two direct
+  // reports, each with their own reports below them. This also closes a real gap this same investigation found:
+  // all 7 of these names carried real live leads (25-498 each) with literally no RM_Hierarchy row at all, so any
+  // SLA-issue email for them was silently falling all the way back to the generic region recipient.
+  ['Pre Sales','City Lead','Snehil Chhimwal','','','',''],
+  ['Pre Sales','A1','Rajesh Muni','','','Snehil Chhimwal',''],
+  ['Pre Sales','A1','Manisha rathod','','','Snehil Chhimwal',''],
+  ['Pre Sales','S1','Jagruti Borude','Rajesh Muni','','Snehil Chhimwal',''],
+  ['Pre Sales','S1','Nishant Lambe','Rajesh Muni','','Snehil Chhimwal',''],
+  ['Pre Sales','S1','Shivani Pathak','Rajesh Muni','','Snehil Chhimwal',''],
+  ['Pre Sales','S1','Suresh Rajoriya','Manisha rathod','','Snehil Chhimwal',''],
+  ['Pre Sales','S1','Priya Chaubey','Manisha rathod','','Snehil Chhimwal',''],
+  // A THIRD spelling of Mohammad Azaz Izhar Ansari, found live in the leads sheet 2026-10-01 -- distinct from both
+  // existing rows above (the real "Mohammad Azaz Izhar Ansari" and the earlier-known alias "Mohmmad Azaz Izhar
+  // Anasair") -- same person, same resolved chain, confirmed by the user directly.
+  ['Loan','BDM','Mohmmad Azaz izhar ansari','','','','Mayur Panjari'],
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
