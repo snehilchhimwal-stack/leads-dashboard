@@ -1050,6 +1050,16 @@ let LEADERSHIP_NAME_TO_EMAIL_ = {
   'saurabh mishra': 'saurabh.mishra@homesfy.in',
 };
 
+// Rajesh Muni and Manisha rathod (Pre Sales team leads) — confirmed by the
+// user directly 2026-10-01: their issue emails must go ONLY to them, cc'd
+// ONLY to Snehil Chhimwal, never the standing leadership cc
+// (ALWAYS_CC_EMAILS_) or anyone else their chain would otherwise pull in
+// (rh/ch/tm — moot for these two today since both are blank, but the
+// override is a hard replacement of ccSet, not a conditional skip, so it
+// stays correct even if their own row ever grows an rh/ch later). Keyed
+// lowercase to match resolveRecipientBucketsForRms_'s own bucket keys.
+let RESTRICTED_CC_PRIMARY_NAMES_ = ['rajesh muni', 'manisha rathod'];
+
 
 // A real allowlist of the genuine top-of-org labels actually used in
 // RM_Hierarchy today (found by auditing every row whose own tl/tm/rh/ch
@@ -1255,7 +1265,16 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
 
   const bucketList = Object.keys(buckets).sort().map(function (key) {
     const b = buckets[key];
-    ALWAYS_CC_EMAILS_.forEach(function (e) { b.ccSet.add(e); });
+    if (RESTRICTED_CC_PRIMARY_NAMES_.indexOf(key) !== -1) {
+      // Hard override, not a conditional skip -- see this constant's own
+      // comment. Replaces whatever ccCandidates/ALWAYS_CC_EMAILS_ would
+      // otherwise have produced.
+      b.ccSet = new Set();
+      const snehilEmail = data.emailByManagerNameLower['snehil chhimwal'];
+      if (snehilEmail) b.ccSet.add(snehilEmail);
+    } else {
+      ALWAYS_CC_EMAILS_.forEach(function (e) { b.ccSet.add(e); });
+    }
     b.ccSet.delete(b.primaryEmail); // don't cc someone already in To
     return { primaryName: b.primaryName, primaryEmail: b.primaryEmail, primaryRole: b.primaryRole, cc: Array.from(b.ccSet), rmNames: b.rmNames };
   });

@@ -79,6 +79,46 @@ function runRmHierarchyTests_() {
     }
     TestAssert_(TM_STILL_CC_.indexOf('test tm cccase') === -1, 'TM_STILL_CC_: test entry cleaned up, never leaks into a later test');
 
+    // ---- RESTRICTED_CC_PRIMARY_NAMES_: Rajesh Muni/Manisha rathod's
+    // hard-override cc (confirmed by the user directly, 2026-10-01) --
+    // same self-contained-mock + temporary-push/splice pattern as
+    // TM_STILL_CC_ above, so the test doesn't depend on the real
+    // 'rajesh muni'/'manisha rathod' strings staying in the production
+    // list. Unlike TM_STILL_CC_ (which only ADDS to cc), this is a HARD
+    // REPLACEMENT -- a real rh that would normally cc fine (Test RH
+    // RestrictedCc) must disappear once restricted, leaving ONLY Snehil
+    // Chhimwal's email (looked up by that literal name, same as the
+    // production override) -- 'Snehil Chhimwal' is referenced directly
+    // here, not anonymized, because the production code itself hardcodes
+    // that exact lookup key (same category as the real
+    // Ashish Kukreja/Saurabh Mishra names LEADERSHIP_NAME_TO_EMAIL_
+    // hardcodes elsewhere in this file).
+    const restrictedCcSs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', [
+        ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'],
+        ['Test Region', 'S1', 'Test RM RestrictedCc', 'Test A1 RestrictedCc', '', '', '', false, '', ''],
+        ['Test Region', 'A1', 'Test A1 RestrictedCc', '', '', 'Test RH RestrictedCc', '', false, '', ''],
+      ]),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', [
+        ['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source'],
+        ['Test A1 RestrictedCc', 'TL', 'Test Region', TEST_EMAIL_PRIMARY_, 1, 'manual'],
+        ['Test RH RestrictedCc', 'RH', 'Test Region', TEST_EMAIL_SECONDARY_, 1, 'manual'],
+        ['Snehil Chhimwal', 'RH', 'Test Region', TEST_EMAIL_CH_, 1, 'manual'],
+      ]),
+    });
+    const beforeRestrictedCc = resolveRecipientBucketsForRms_(restrictedCcSs, ['Test RM RestrictedCc']);
+    TestAssert_(beforeRestrictedCc.buckets[0].cc.indexOf(TEST_EMAIL_SECONDARY_) !== -1, 'RESTRICTED_CC_PRIMARY_NAMES_: before the primary is in the allowlist, the normal rh cc is present (baseline)');
+    RESTRICTED_CC_PRIMARY_NAMES_.push('test a1 restrictedcc');
+    try {
+      const afterRestrictedCc = resolveRecipientBucketsForRms_(restrictedCcSs, ['Test RM RestrictedCc']);
+      TestAssertEqual_(afterRestrictedCc.buckets[0].primaryName, 'Test A1 RestrictedCc', 'RESTRICTED_CC_PRIMARY_NAMES_: the primary (To) is unaffected -- only cc changes');
+      TestAssertEqual_(afterRestrictedCc.buckets[0].cc.length, 1, 'RESTRICTED_CC_PRIMARY_NAMES_: once restricted, cc has exactly one entry');
+      TestAssertEqual_(afterRestrictedCc.buckets[0].cc[0], TEST_EMAIL_CH_, 'RESTRICTED_CC_PRIMARY_NAMES_: that one entry is Snehil Chhimwal\'s email specifically -- the chain\'s own real rh (Test RH RestrictedCc) is dropped, not kept alongside it');
+    } finally {
+      RESTRICTED_CC_PRIMARY_NAMES_.splice(RESTRICTED_CC_PRIMARY_NAMES_.indexOf('test a1 restrictedcc'), 1);
+    }
+    TestAssert_(RESTRICTED_CC_PRIMARY_NAMES_.indexOf('test a1 restrictedcc') === -1, 'RESTRICTED_CC_PRIMARY_NAMES_: test entry cleaned up, never leaks into a later test');
+
     resolved = resolveRecipientBucketsForRms_(ss, ['Test RM Excl']);
     TestAssertEqual_(resolved.buckets.length, 0, 'resolveRecipientBucketsForRms_: an Excluded RM produces no bucket');
     TestAssertEqual_(resolved.unresolved.length, 1, 'resolveRecipientBucketsForRms_: an Excluded RM is reported unresolved');
