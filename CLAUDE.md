@@ -59,7 +59,16 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   change is still undeployed. Don't trust it from memory: **read the live
   editor directly from Chrome and match it to git with
   `python3 test/match-live-gs.py`** (procedure in the tracker; only hashes
-  leave the browser). The live project is the one owned by Sakshi Sonawane —
+  leave the browser) — **always the bulk hash-collection snippet (every
+  open file in one pass), never just the one file you're about to edit.**
+  Real incident, 2026-10-01: `RmHierarchy.gs` was pushed and verified live,
+  but its own `Tests_RmHierarchy.gs` sat 2 commits behind, unnoticed,
+  because only `RmHierarchy.gs`'s own hash got checked. **`--push`** turns
+  that same bulk-hash string into ONE combined, ready-to-paste browser
+  snippet that brings every file behind HEAD — production and its
+  `Tests_*.gs` sibling alike — up to date in a single call, SHA-verified
+  per file; no hand-written diff/gzip/base64 script per file or session.
+  The live project is the one owned by Sakshi Sonawane —
   the two identically named projects under Snehil's own account are stale
   copies. Raw control characters in a `.gs` file (a NUL was silently turned
   into a space on paste) are flagged by `check-staleness.py`; write them as

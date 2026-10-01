@@ -76,6 +76,19 @@ hashes leave the browser, never source). Do this at each sweep instead of
 trusting anyone's memory of what was pasted. After a paste, re-run it to
 confirm the paste took.
 
+**Before pasting ANY `.gs` change by hand, run the snippet above and pass its
+output to `--push` instead** (added 2026-10-01, after `RmHierarchy.gs` was
+pushed and confirmed live while its own `Tests_RmHierarchy.gs` sat 2 commits
+behind, unnoticed, because only the one file being edited was checked). `--push`
+reports every open file's status exactly like a plain run, AND — for every file
+behind HEAD, production or `Tests_*.gs` alike — writes ONE combined,
+ready-to-paste `javascript_tool` snippet (path printed; written outside the
+repo) that range-edits and SHA-verifies all of them in a single call. Paste it,
+confirm every entry reports `match:true`, Ctrl+S each changed tab, then re-run
+step 1 (no `--push`) to confirm, and `--apply` to update the table below. The
+snippet text itself is the same every time — only the embedded payload changes
+— so this never needs a fresh hand-written diff script per file or per session.
+
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
 | `AllIssuesEmailer.gs` | `5aafbd4` | 2026-09-30 | read directly from the live editor by hash-match (2026-09-30) |
