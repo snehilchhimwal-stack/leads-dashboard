@@ -376,6 +376,16 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','S1','Farid Shaikh','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Thane','S1','Riyan Jamadar','','Sanket Yadav','','Bipin More'],
   ['Loan','Executive','Mohd Ali Khan','Zahid Shaikh','','','Mayur Panjari'],
+  // Mohd Ali Abdul Gaffar, added 2026-10-03 per the user directly, naming
+  // the full current loan-BDM roster -- a distinct person from "Mohd Ali
+  // Khan" directly above (different surname), zero current leads of his
+  // own so no data to infer a role/tl from; role 'BDM' + direct ch (no
+  // tl) matches the shape of the other blank-chain BDM rows (Swapnil B
+  // Bhosale, Yogesh Choudhari, Angad Yadav, Husen Shaikh, Krishna Nayak)
+  // rather than the tl:'Zahid Shaikh' Executive shape. Same reasoning as
+  // the Pre Sales team addition -- closes a gap before it has a chance to
+  // cause a real "no recipient" miss, not in response to one yet.
+  ['Loan','BDM','Mohd Ali Abdul Gaffar','','','','Mayur Panjari'],
   ['Thane','S1','Rahul Chauhan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Central','S1','Shreyang Chudasama','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Bangalore','S1','Kavya B R','Mainuddin T','','Romen Singh','Mukesh Mishra'],
@@ -1058,7 +1068,30 @@ let LEADERSHIP_NAME_TO_EMAIL_ = {
 // override is a hard replacement of ccSet, not a conditional skip, so it
 // stays correct even if their own row ever grows an rh/ch later). Keyed
 // lowercase to match resolveRecipientBucketsForRms_'s own bucket keys.
+// Scope: the user asked this apply only to Google Non-UTM/Search leads —
+// already true for free, not something this constant has to enforce
+// itself, since resolveRecipientBucketsForRms_ has exactly two real
+// callers (OvernightEmailer.gs, AllIssuesEmailer.gs) and BOTH gate every
+// candidate lead through passesGoogleNonUtmSearchGs_ (EmailInfra.gs)
+// before an RM name is ever collected to pass in here — confirmed
+// 2026-10-03, no other .gs file sends a per-RM issue email at all
+// (DailyRmIssueLog.gs's reportRmPerformanceNow only Logger.logs).
 let RESTRICTED_CC_PRIMARY_NAMES_ = ['rajesh muni', 'manisha rathod'];
+
+// Loan team (Mayur Panjari's reports — CFG-054's 'Loan' region rows):
+// confirmed by the user directly 2026-10-03 — a loan-team RM's issue
+// email must go straight to Mayur Panjari, with NO cc at all (not even
+// ALWAYS_CC_EMAILS_), scoped the same "already Google Non-UTM/Search
+// only" way RESTRICTED_CC_PRIMARY_NAMES_ above is. Checked against the
+// REPORTING RM's own chain.ch (not the resolved primary) — see the two
+// call sites below for what that changes: a loan Executive whose row
+// carries tl:'Zahid Shaikh' (the Loan team's own A1) now routes straight
+// to Mayur Panjari instead of to Zahid Shaikh with Mayur Panjari only in
+// cc; a loan BDM/Manager/A1 row (tl/tm/rh already blank, ch already the
+// nearest tier) is unaffected — it already resolved to Mayur Panjari as
+// primary before this existed, this just makes that explicit instead of
+// incidental. Lowercased to match a chain's own ch field after trimming.
+let LOAN_TEAM_CH_NAME_ = 'mayur panjari';
 
 
 // A real allowlist of the genuine top-of-org labels actually used in
@@ -1238,7 +1271,10 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
       // alert with; falls through to the normal unresolved path below.
     }
 
-    const primaryName = chain.tl || chain.tm || chain.rh || chain.ch || '';
+    // Loan team: force straight to Mayur Panjari (ch), bypassing any
+    // tl/tm/rh in between — see LOAN_TEAM_CH_NAME_'s own comment.
+    const isLoanTeamRm = chain.ch && String(chain.ch).trim().toLowerCase() === LOAN_TEAM_CH_NAME_;
+    const primaryName = isLoanTeamRm ? chain.ch : (chain.tl || chain.tm || chain.rh || chain.ch || '');
     if (!primaryName) { unresolved.push({ rmName: rmName, reason: 'Found in RM_Hierarchy, but has no TL/TM/RH/CH on record at all' }); return; }
     const primaryEmail = data.emailByManagerNameLower[primaryName.toLowerCase()];
     if (!primaryEmail) { unresolved.push({ rmName: rmName, reason: 'Reports to "' + primaryName + '", but that manager has no email in Manager_Directory' }); return; }
@@ -1265,7 +1301,13 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
 
   const bucketList = Object.keys(buckets).sort().map(function (key) {
     const b = buckets[key];
-    if (RESTRICTED_CC_PRIMARY_NAMES_.indexOf(key) !== -1) {
+    if (key === LOAN_TEAM_CH_NAME_) {
+      // No cc at all -- see LOAN_TEAM_CH_NAME_'s own comment. ccCandidates
+      // above would already be empty for Mayur Panjari's own (blank-chain)
+      // row, but this blocks ALWAYS_CC_EMAILS_ explicitly rather than
+      // relying on that coincidence.
+      b.ccSet = new Set();
+    } else if (RESTRICTED_CC_PRIMARY_NAMES_.indexOf(key) !== -1) {
       // Hard override, not a conditional skip -- see this constant's own
       // comment. Replaces whatever ccCandidates/ALWAYS_CC_EMAILS_ would
       // otherwise have produced.

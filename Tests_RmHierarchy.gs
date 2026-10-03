@@ -119,6 +119,45 @@ function runRmHierarchyTests_() {
     }
     TestAssert_(RESTRICTED_CC_PRIMARY_NAMES_.indexOf('test a1 restrictedcc') === -1, 'RESTRICTED_CC_PRIMARY_NAMES_: test entry cleaned up, never leaks into a later test');
 
+    // ---- LOAN_TEAM_CH_NAME_: loan-team RMs bypass their tl/tm/rh straight
+    // to their ch, with no cc at all (confirmed by the user directly,
+    // 2026-10-03) -- a self-contained mock with a 3-tier chain (RM ->
+    // "A1" -> "CH", mirroring the real Zahid Shaikh -> Mayur Panjari
+    // shape), `let`-reassigned (not push/splice -- this constant is a
+    // single string, not a list) so the test doesn't depend on the real
+    // 'mayur panjari' string.
+    const loanTeamSs = TestMockSpreadsheet_({
+      'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', [
+        ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'],
+        ['Test Region', 'Executive', 'Test Exec LoanTeam', 'Test A1 LoanTeam', '', '', 'Test CH LoanTeam', false, '', ''],
+        ['Test Region', 'A1', 'Test A1 LoanTeam', '', '', '', 'Test CH LoanTeam', false, '', ''],
+        ['Test Region', 'BDM', 'Test Bdm LoanTeam', '', '', '', 'Test CH LoanTeam', false, '', ''],
+      ]),
+      'Manager_Directory': TestMockSheet_('Manager_Directory', [
+        ['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source'],
+        ['Test A1 LoanTeam', 'TL', 'Test Region', TEST_EMAIL_PRIMARY_, 1, 'manual'],
+        ['Test CH LoanTeam', 'CH', 'Test Region', TEST_EMAIL_CH_, 2, 'manual'],
+      ]),
+    });
+    const beforeLoanTeam = resolveRecipientBucketsForRms_(loanTeamSs, ['Test Exec LoanTeam']);
+    TestAssertEqual_(beforeLoanTeam.buckets[0].primaryName, 'Test A1 LoanTeam', 'LOAN_TEAM_CH_NAME_: before the override, an Executive\'s own tl (its A1) is still the normal primary (baseline)');
+    const savedLoanTeamChName = LOAN_TEAM_CH_NAME_;
+    LOAN_TEAM_CH_NAME_ = 'test ch loanteam';
+    try {
+      const execResolved = resolveRecipientBucketsForRms_(loanTeamSs, ['Test Exec LoanTeam']);
+      TestAssertEqual_(execResolved.buckets[0].primaryName, 'Test CH LoanTeam', 'LOAN_TEAM_CH_NAME_: once active, an Executive\'s tl (its A1) is bypassed -- primary goes straight to ch');
+      TestAssertEqual_(execResolved.buckets[0].cc.length, 0, 'LOAN_TEAM_CH_NAME_: no cc at all, not even ALWAYS_CC_EMAILS_');
+
+      const bdmResolved = resolveRecipientBucketsForRms_(loanTeamSs, ['Test Bdm LoanTeam']);
+      TestAssertEqual_(bdmResolved.buckets[0].primaryName, 'Test CH LoanTeam', 'LOAN_TEAM_CH_NAME_: a blank-tl BDM (already resolving to ch via the normal cascade) is unaffected -- still ch as primary');
+      TestAssertEqual_(bdmResolved.buckets[0].cc.length, 0, 'LOAN_TEAM_CH_NAME_: the already-ch-primary BDM case also gets the no-cc treatment, not just the bypassed-tl case');
+
+      TestAssertEqual_(execResolved.buckets.length, 1, 'LOAN_TEAM_CH_NAME_: the Executive and BDM resolve into the SAME bucket (both primary = Test CH LoanTeam), confirmed separately -- each call above returns exactly one bucket');
+    } finally {
+      LOAN_TEAM_CH_NAME_ = savedLoanTeamChName;
+    }
+    TestAssertEqual_(LOAN_TEAM_CH_NAME_, savedLoanTeamChName, 'LOAN_TEAM_CH_NAME_: restored to its real value, never leaks into a later test');
+
     resolved = resolveRecipientBucketsForRms_(ss, ['Test RM Excl']);
     TestAssertEqual_(resolved.buckets.length, 0, 'resolveRecipientBucketsForRms_: an Excluded RM produces no bucket');
     TestAssertEqual_(resolved.unresolved.length, 1, 'resolveRecipientBucketsForRms_: an Excluded RM is reported unresolved');
