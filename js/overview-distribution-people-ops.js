@@ -174,15 +174,14 @@ function renderAll(){
     _refreshMorningBriefOnNextRender = false;
   }
 
-  // Single pass instead of five separate .filter() traversals — on a
+  // Single pass instead of four separate .filter() traversals — on a
   // 7.5k-lead sheet this runs on every filter change, so the extra
-  // full-array walks add up with no benefit. Opportunity+/Total/No-Attempts
-  // are customer-level counts (leads, one card per customer); the two
-  // issue counts read from issueLeads instead, so a multi-copy customer
-  // with two independently-behind RM copies counts as two, not one.
-  const oppPlusLeads = [], noCallsLeads = [];
+  // full-array walks add up with no benefit. Total/No-Attempts are
+  // customer-level counts (leads, one card per customer); the two issue
+  // counts read from issueLeads instead, so a multi-copy customer with
+  // two independently-behind RM copies counts as two, not one.
+  const noCallsLeads = [];
   for (const l of leads) {
-    if (l.oppOrAbove) oppPlusLeads.push(l);
     if (l.isOpenLead && l.call_attempts === 0) noCallsLeads.push(l);
   }
   // Distinct customers, not rows — a customer whose two RM copies are each
@@ -197,7 +196,6 @@ function renderAll(){
   const dueTodayCounts = countUniqueAndCloned(dueTodayLeads);
   const notConnCounts = countUniqueAndCloned(notConnLeads);
   const totalCounts = countCollatedAmong(leads);
-  const oppPlusCounts = countCollatedAmong(oppPlusLeads);
   const noCallsCounts = countCollatedAmong(noCallsLeads);
 
   // Shared by every KPI tile below: the big digit stays the primary count,
@@ -210,29 +208,14 @@ function renderAll(){
   // hoisted so other render functions (e.g. the Operations stuck-by-stage
   // breakdown) can reuse them too, not just this one.
   const totalBreakdown = topBreakdown(leads, l => l.group_source, { color: 'var(--blue)' });
-  const oppBreakdown = topBreakdown(oppPlusLeads, l => l.current_stage, { color: 'var(--green)' });
   const dueTodayBreakdown = topBreakdown(dueTodayLeads, l => l.region, { color: 'var(--red)' });
   const notConnBreakdown = topBreakdown(notConnLeads, l => l.RM, { color: 'var(--amber)' });
   const noCallsBreakdown = topBreakdown(noCallsLeads, l => l.region, { color: 'var(--purple)' });
-
-  // Org-wide first-contact speed as a real distribution rather than the
-  // single MAX value ("Most Delayed") that was previously the only
-  // aggregate reading of businessMinsToConnect anywhere in the app.
-  const sortedContactMinsAll = [];
-  for (const l of leads) { if (l.businessMinsToConnect != null) sortedContactMinsAll.push(l.businessMinsToConnect); }
-  sortedContactMinsAll.sort((a, b) => a - b);
-  const medianContactAll = medianOfSorted(sortedContactMinsAll);
-  const p90ContactAll = percentileOfSorted(sortedContactMinsAll, 90);
 
   document.getElementById('kpiStrip').innerHTML =
     kpiTile({
       label: 'Total Leads', accent: 'var(--blue)', numHtml: kpiNumHtml(totalCounts.total, totalCounts.collated),
       detailLabel: 'By source', detailHtml: totalBreakdown.html, top: totalBreakdown.top,
-    }) +
-    kpiTile({
-      label: 'Opportunity+', accent: 'var(--green)', numColor: 'var(--green)',
-      numHtml: kpiNumHtml(oppPlusCounts.total, oppPlusCounts.collated),
-      detailLabel: 'By stage', detailHtml: oppBreakdown.html, top: oppBreakdown.top,
     }) +
     kpiTile({
       label: "Behind on Today's Calls", accent: 'var(--red)', critical: true,
@@ -248,14 +231,6 @@ function renderAll(){
       label: 'No Attempts Yet', accent: 'var(--purple)',
       numHtml: kpiNumHtml(noCallsCounts.total, noCallsCounts.collated),
       detailLabel: 'By region', detailHtml: noCallsBreakdown.html, top: noCallsBreakdown.top,
-    }) +
-    kpiTile({
-      label: 'Median 1st Contact', accent: 'var(--teal)',
-      numHtml: medianContactAll == null ? '—' : `${medianContactAll.toFixed(0)}<span style="font-size:14px; color:var(--text-faint); font-weight:400;">m</span>`,
-      detailLabel: 'Distribution',
-      detailHtml: medianContactAll == null
-        ? `<div style="font-size:11.5px; color:var(--text-faint);">No connected leads in the current filters.</div>`
-        : `<div style="font-size:11.5px; color:var(--text-dim); line-height:1.5;">p90: ${p90ContactAll.toFixed(0)} min &middot; n = ${sortedContactMinsAll.length} connected lead${sortedContactMinsAll.length === 1 ? '' : 's'}<br>Business-hours minutes from lead_assigned_at to first connect (open or closed leads).</div>`,
     });
 
   renderFunnel();
