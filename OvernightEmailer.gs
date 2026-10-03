@@ -372,6 +372,20 @@ function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
   }, regionHeaderOptsGs_(region, leads));
 }
 
+// STATUS (confirmed 2026-10-03, dead-code audit): superseded in the real
+// production send path since 2026-09-23 (`c7e22ae`) — sendOvernightMorningEmails'
+// own loop now always goes through sendCombinedMorningEmail_ (FN-275) instead,
+// which wraps this same per-region HTML/send logic alongside the Section 2
+// (yesterday's 17:00 follow-up) checkpoint. Deliberately KEPT, not an
+// oversight: it's still the one place a genuinely standalone, single-region,
+// Section-1-only overnight email can be sent by hand (editor "Run", or a
+// future manual/ops call) without pulling in Section 2 at all, and
+// Tests_OvernightEmailer.gs's Gmail-failure-path coverage (the
+// "operation not allowed" / non-standard-error branches) exercises it
+// directly rather than via the combined-email wrapper. Not wired to any
+// trigger. If this standalone-send capability is ever confirmed unwanted,
+// retire this function AND its 2 dedicated Tests_OvernightEmailer.gs blocks
+// together, not just one side.
 function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
   if (!leads.length) return null;
 
