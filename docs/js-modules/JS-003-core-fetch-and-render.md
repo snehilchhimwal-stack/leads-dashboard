@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-10-03 against commit `aa6f71b` |
 
 ## Purpose / reason to exist
 
@@ -157,6 +157,14 @@ collation, refresh-after-mutation wiring).
 
 Verified at `c82ec67`; record created by DOC-027. Revalidated 2026-09-18
 (`4bbb58c`) for the `TAB-009` fetch-kickoff addition.
+
+**2026-10-03** (`aa6f71b`, dead-code-audit Part 3): one line added
+right after `dashboardContent`'s `display = 'block'` — records usage of
+whichever tab is currently active (`recordComponentUsage`, `JS-018`
+FN-321) on every successful `fetchAndRender()`, so the tab a user lands
+on by default, or is already viewing when they hit Refresh, counts as
+used too, not just an explicit tab-switch click. Fire-and-forget,
+never throws, no change to this function's own pipeline/error handling.
 
 ## Revalidation trigger
 

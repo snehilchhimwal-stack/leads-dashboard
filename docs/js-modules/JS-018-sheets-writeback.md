@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `29b7146` |
+| **Last Verified** | 2026-10-03 against commit `aa6f71b` |
 
 ## Purpose / reason to exist
 
@@ -57,6 +57,7 @@ Loads with the tab group, before `main.js` (`LOGIC_AUDIT.md` Part 1 §4a).
 | FN-129 | `upsertDailyCohortHistoryRows(entries)` + `ensureDailyCohortHistorySheet_` / `sortDailyCohortHistorySheet_` / `backfillDailyCohortHistoryFromMovementLog` / `clearDailyCohortHistory` / `fetchDailyCohortHistoryForDate` / `fetchAllDailyCohortHistoryRows` `#L506`, `#L479`–`#L690` | cohort entries / a date key | upserts / reads / clears `Daily_Cohort_History` | Sheets write (`RAW`); self-healing header | FN-122/FN-123 | `persistDailyCohortHistory` (`JS-024`), `#backfillDailyCohortHistoryBtn` (`BTN-021`), `#clearDailyCohortHistoryBtn` (`BTN-022`) | specific |
 | FN-130 | `logEmailSend(report, to, cc)` + `ensureSendLogSheet_()` `#L168/#L145` | a sent report + recipients | appends a `Send_Log` row (fire-and-forget) | Sheets write; creates the tab if missing | FN-122 | `performGmailSend` (`JS-015`), the mailto path | specific |
 | FN-131 | `initAutoSnapshotCheckbox()` / `autoSnapshotEnabled()` / `istDateTimeValue(date)` / `movementCellValue(l, key)` `#L15/#L26/#L37/#L47` | — / a lead + column key | wires the checkbox / a cell value | DOM listener / none | — | `initMovementUI` (`JS-021`), FN-121 | reusable — `movementCellValue`'s date-field branch gained `opp_at` 2026-09-21, alongside `lead_assigned_at`/`last_connect_time` |
+| FN-321 | `recordComponentUsage(componentId)` / `computeFeatureUsageUpsert_(existingValues, componentId, nowIstString)` (pure) / `ensureFeatureUsageSheet_()` `#L1008/#L990/#L957` (added 2026-10-03) | a component id | upserts `Feature_Usage` (`SHEET-018`) by `component_id` | Sheets write (`RAW`); mutates the in-session throttle `Set` `_componentUsageRecordedThisSession` | FN-122/FN-123, `istDateTimeValue` (FN-131) | tab-switch click handler (`JS-012`), once per successful `fetchAndRender` (`JS-003`) | specific — the 2026-10-03 dead-code-audit follow-up's client-side usage-tracking write path (Part 3); `computeFeatureUsageUpsert_` is deliberately pure so the decision logic is testable without mocking `fetch` (`tests/frontend-harness.html` section 2j) |
 
 ## Data lineage — the full write table (`DOC-028` deliverable)
 
@@ -71,6 +72,7 @@ Loads with the tab group, before `main.js` (`LOGIC_AUDIT.md` Part 1 §4a).
 | `SHEET-005` `SLA_History` | W (rebuild) | FN-128 `backfillSlaHistoryFromMovementLog` | `#backfillSlaHistoryBtn` (`BTN-019`) | rebuilt from every loaded `Movement_Log` snapshot | upsert by `snapshot_at`, safe to re-run |
 | `SHEET-008` `Daily_Cohort_History` | W (upsert) + sort, R, clear | FN-129 family | `persistDailyCohortHistory` (`JS-024`), `#backfillDailyCohortHistoryBtn` (`BTN-021`), `#clearDailyCohortHistoryBtn` (`BTN-022`) | per-date per-region cohort outcomes | **`RAW`** value-input; matching schema to the Apps Script cohort writer (`LOGIC_AUDIT.md` Part 1 §4d) |
 | `SHEET-011` `Send_Log` | W (append), + create-if-missing | FN-130 `logEmailSend` / `ensureSendLogSheet_` | after a Gmail / mailto send (`JS-015`) | subject, to, cc, timestamp | **fire-and-forget** — a failure here is not surfaced |
+| `SHEET-018` `Feature_Usage` | W (upsert by `component_id`), + create-if-missing | FN-321 `recordComponentUsage` / `ensureFeatureUsageSheet_` | tab-switch click (`JS-012`) / once per successful `fetchAndRender` (`JS-003`) | `component_id`, `last_used_at`, `use_count`, `first_seen_at` | **fire-and-forget**, same pattern as `SHEET-011` — a failure here never blocks the tab switch/render it rode in on. Added 2026-10-03, write-only so far (no reader yet — see `SHEET-018`'s own record) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -92,8 +94,8 @@ reads `Lead_Followups` (`SHEET-004`, poll), `SLA_History` /
 ## Data written / modified
 
 `SHEET-002`, `SHEET-004`, `SHEET-005`, `SHEET-008`, `SHEET-011`,
-`SHEET-015` — see the write table. No email send (that is `JS-015`), but
-`logEmailSend` logs one.
+`SHEET-015`, `SHEET-018` — see the write table. No email send (that is
+`JS-015`), but `logEmailSend` logs one.
 
 ## Failure / error behaviour
 
@@ -197,6 +199,26 @@ Mermaid), Part 3 §3.8, Part 4 §4.7, Part 6 §6.1 rows 2/5, §6.5, Part 7
 Verified at `641398e`; record created by DOC-028, revalidated 2026-09-17
 for the content-hash dedup pair (FN-257 `leadContentHash` added,
 `SHEET-015` write added to the write table).
+
+**2026-10-03** (`aa6f71b`, Part 3 of the dead-code-audit follow-up,
+`docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md`): added client-side
+runtime usage tracking — `recordComponentUsage`/
+`computeFeatureUsageUpsert_`/`ensureFeatureUsageSheet_` (FN-321), a new
+`Feature_Usage` tab (`SHEET-018`, new record), fired from the tab-switch
+click handler (`JS-012`) and once per successful `fetchAndRender`
+(`JS-003`). `tests/frontend-harness.html` section 2j: 12 new assertions
+covering `computeFeatureUsageUpsert_`'s pure upsert-decision logic
+exhaustively plus `recordComponentUsage`'s input-validation/throttle/
+no-sheet-no-op guards — required adding `getSheetIdByTabName`/
+`appendSheetRows`/`sheetsApiValuesBatchUpdate` mocks to the harness's
+full-pipeline fixture (previously only `sheetsApiValuesGet` was mocked;
+without the new mocks this new code's own write path made real,
+unauthenticated calls to the live Sheets API from inside the test
+harness — confirmed via real 401s before the fix). Full suite 168/168;
+confirmed zero `googleapis.com` network calls on a fresh page load via
+direct `read_network_requests` inspection, both with and against
+unmodified `git stash`ed code (ruling out a pre-existing unrelated 401
+as a regression this change introduced).
 
 ## Revalidation trigger
 
