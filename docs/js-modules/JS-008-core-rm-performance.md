@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-03, doc-accuracy fix only (no source commit — `js/core-rm-performance.js` unchanged) — `FN-063` split into `FN-063`/`FN-320` to correct a false "Called by" claim (see `## Version / change reference`); prior: 2026-09-30 against commit `5802f35`, posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
+| **Last Verified** | 2026-10-03 against commit `5802f35` — source unchanged since this sha (doc-accuracy fix only: `FN-063` split into `FN-063`/`FN-320` to correct a false "Called by" claim, see `## Version / change reference`); prior note: posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
 
 ## Purpose / reason to exist
 
