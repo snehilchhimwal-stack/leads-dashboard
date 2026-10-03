@@ -907,3 +907,122 @@ async function browserSnapshotOpenLeads(){
     setSnapshotStatus('Snapshot failed: ' + err.message, 'var(--red)');
   }
 }
+
+/* ============ CLIENT-SIDE FEATURE USAGE TRACKING (dead-code audit, Part 3, 2026-10-03) ============
+ * Low-overhead runtime usage tracking for the CLIENT dashboard JS side only
+ * (the user's own scope decision this session — the .gs backend is a
+ * separate question, not covered here). Records, per tracked COMPONENT
+ * (currently: the 9 real dashboard tabs — see TRACKED_COMPONENT_IDS
+ * below), the most recent timestamp anyone actually viewed it, plus a
+ * running use count. Durable across restarts/deploys by construction:
+ * it's a row in the same Google Sheet every other write-back in this file
+ * already targets, not anything stored in the browser.
+ * OpsChecklistRunner.gs's existing weekly job (GS-009) reads this tab
+ * server-side to build the 30-day stale-component report (see that
+ * file's own comment for the read side).
+ *
+ * Deliberately does NOT record who viewed something, their session, or
+ * any per-visit detail — just component_id + aggregate
+ * last_used_at/use_count, per the brief's own "avoid unnecessary user
+ * data" instruction. Multiple concurrent browser tabs/users are safe:
+ * each write is a single-row upsert keyed by component_id, not an
+ * append-only log, so the sheet never grows past one row per tracked
+ * component regardless of traffic — no retention/cleanup job is needed
+ * for THIS tab specifically (contrast Movement_Log, which does need
+ * pruning).
+ *
+ * Known limitation: this only proves a TAB was opened, not that every
+ * feature inside it was exercised — a tab with stale sub-features but
+ * regular visits won't be flagged. It also can't see anything
+ * server-side-only (.gs functions, triggers) — that's explicitly out of
+ * scope per the user's own answer to the 2026-10-03 scope question.
+ */
+const FEATURE_USAGE_TAB_NAME = 'Feature_Usage';
+const FEATURE_USAGE_COLUMNS = ['component_id', 'last_used_at', 'use_count', 'first_seen_at'];
+
+// The fixed, known set of tracked components — kept here (not inferred
+// from the DOM) so the 30-day checker's "never observed" bucket can be
+// computed from a real roster, not just "whatever happens to have a row
+// already". Mirrored in OpsChecklistRunner.gs's own TRACKED_COMPONENT_IDS_GS_
+// — not auto-synced, same "duplicated across runtimes on purpose, kept in
+// sync by hand" convention CLAUDE.md already documents for everything
+// else in this project. If a component is ever added/removed here, update
+// that list too in the same commit.
+const TRACKED_COMPONENT_IDS = [
+  'tab-morning', 'tab-overview', 'tab-operations', 'tab-repeatoffenders',
+  'tab-people', 'tab-audit', 'tab-movement', 'tab-tracking', 'tab-oppmonitor',
+];
+
+let _featureUsageSheetEnsured = false;
+async function ensureFeatureUsageSheet_(){
+  if (_featureUsageSheetEnsured) return;
+  const existingId = await getSheetIdByTabName(FEATURE_USAGE_TAB_NAME);
+  if (existingId == null) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${_currentSheetId}:batchUpdate`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${gateAccessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: FEATURE_USAGE_TAB_NAME } } }] }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error((errBody.error && errBody.error.message) || `Sheets API error ${resp.status}`);
+    }
+    await appendSheetRows(FEATURE_USAGE_TAB_NAME, [FEATURE_USAGE_COLUMNS], 'RAW');
+  }
+  _featureUsageSheetEnsured = true;
+}
+
+// One component per page load/session at most — a user flipping back and
+// forth between tabs they've already visited this session doesn't need a
+// fresh Sheets write every click; the 30-day window this feeds has no use
+// for minute-level resolution. Cleared on a hard page reload (module
+// state), which is fine — the next load just re-records once more.
+let _componentUsageRecordedThisSession = new Set();
+
+// Pure — given the Feature_Usage sheet's current data rows (as
+// sheetsApiValuesGet returns A2:D) plus the componentId being recorded
+// and "now" as an already-formatted IST string, decides the row to write
+// and whether it's an UPDATE (existing rowNum, 1-indexed real sheet row)
+// or an APPEND (rowNum null). Pulled out of recordComponentUsage below so
+// the actual decision logic — not the network calls — is independently
+// testable (tests/frontend-harness.html) without mocking fetch.
+function computeFeatureUsageUpsert_(existingValues, componentId, nowIstString){
+  let rowNum = null, prevCount = 0, firstSeenAt = null;
+  (existingValues || []).forEach((r, i) => {
+    if (String((r && r[0]) || '').trim() === componentId) {
+      rowNum = i + 2; // +2: row 1 is the header, existingValues is 0-indexed from row 2
+      prevCount = Number(r[2]) || 0;
+      firstSeenAt = r[3] || null;
+    }
+  });
+  return { rowNum, rowValues: [componentId, nowIstString, prevCount + 1, firstSeenAt || nowIstString] };
+}
+
+// Best-effort, fire-and-forget by design: a usage-tracking write must
+// NEVER surface an error to the user or block any real UI action. Called
+// from the tab-switch click handler (overview-distribution-people-ops.js)
+// and once per successful fetchAndRender (core-fetch-and-render.js), so
+// the tab the user lands on / is already viewing when they hit Refresh
+// also counts, not just an explicit switch.
+async function recordComponentUsage(componentId){
+  if (!componentId || !TRACKED_COMPONENT_IDS.includes(componentId)) return;
+  if (_componentUsageRecordedThisSession.has(componentId)) return;
+  _componentUsageRecordedThisSession.add(componentId);
+  if (!_currentSheetId || !gateAccessToken) return; // not signed in / no sheet yet -- nothing to write to
+
+  try {
+    await ensureFeatureUsageSheet_();
+    const existingValues = await sheetsApiValuesGet(_currentSheetId, `${FEATURE_USAGE_TAB_NAME}!A2:D`);
+    const { rowNum, rowValues } = computeFeatureUsageUpsert_(existingValues, componentId, istDateTimeValue(new Date()));
+    if (rowNum) {
+      await sheetsApiValuesBatchUpdate([{ range: `${FEATURE_USAGE_TAB_NAME}!A${rowNum}:D${rowNum}`, values: [rowValues] }], 'RAW');
+    } else {
+      await appendSheetRows(FEATURE_USAGE_TAB_NAME, [rowValues], 'RAW');
+    }
+  } catch (e) {
+    // Never let a tracking failure be visible to the user or affect
+    // anything else -- see this function's own header comment.
+    console.warn('recordComponentUsage: write failed (non-fatal):', componentId, e);
+  }
+}

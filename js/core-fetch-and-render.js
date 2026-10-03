@@ -641,6 +641,12 @@ async function fetchAndRender(){
     document.getElementById('changeSourceBtn').style.display = 'inline-block';
     document.getElementById('dashboardContent').style.display = 'block';
     document.getElementById('filterBar').style.display = 'flex';
+    // Whichever tab is already active (the default on first load, or
+    // wherever the user was when they hit Refresh) counts as viewed too —
+    // recordComponentUsage's own in-session throttle means this is a
+    // no-op on every refresh after the first. js/sheets-writeback.js
+    const activePanel = document.querySelector('.tab-panel.active');
+    if (activePanel) recordComponentUsage(activePanel.id);
     const now = new Date();
     document.getElementById('lastRefreshed').textContent =
       'Last refreshed: ' + istStamp(now);

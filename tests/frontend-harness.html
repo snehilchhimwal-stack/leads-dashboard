@@ -1316,6 +1316,82 @@
     }
   })();
 
+  // ---- 2j. Client-side feature usage tracking (dead-code audit Part 3, 2026-10-03) ----
+  // js/sheets-writeback.js: computeFeatureUsageUpsert_ (pure) + recordComponentUsage
+  // (the async wrapper). No fetch-mocking exists anywhere in this harness yet (the
+  // other upsert*Rows functions in sheets-writeback.js are likewise untested here) --
+  // scoped to what's safely testable without one: the pure decision logic exhaustively,
+  // plus recordComponentUsage's input-validation/throttle/no-sheet-no-op guards, none
+  // of which should ever reach a real fetch() call in this harness's default state
+  // (_currentSheetId stays '' here — never set to a real id, unlike gateAccessToken).
+  await (async function () {
+    const savedSession = _componentUsageRecordedThisSession;
+    try {
+      // computeFeatureUsageUpsert_: brand-new component, no existing rows at all.
+      let r = computeFeatureUsageUpsert_([], 'tab-overview', '2026-10-03 12:00:00');
+      assert('computeFeatureUsageUpsert_: a component with zero existing rows appends (rowNum null)',
+        r.rowNum === null, 'expected rowNum null; got ' + r.rowNum);
+      assert('computeFeatureUsageUpsert_: a brand-new component starts use_count at 1',
+        r.rowValues[2] === 1, 'expected use_count 1; got ' + r.rowValues[2]);
+      assert('computeFeatureUsageUpsert_: a brand-new component sets first_seen_at to now (nothing to inherit)',
+        r.rowValues[3] === '2026-10-03 12:00:00', 'expected first_seen_at = now; got ' + r.rowValues[3]);
+
+      // Existing rows present, none matching this componentId -- still an append.
+      const existingOther = [['tab-people', '2026-09-20 08:00:00', 5, '2026-08-01 09:00:00']];
+      r = computeFeatureUsageUpsert_(existingOther, 'tab-overview', '2026-10-03 12:00:00');
+      assert('computeFeatureUsageUpsert_: existing rows for OTHER components still append for a new one (rowNum null)',
+        r.rowNum === null, 'expected rowNum null; got ' + r.rowNum);
+
+      // Existing row for THIS component (at sheet row 3, i.e. existingValues[1]) --
+      // an update, count incremented from its prior value, first_seen_at PRESERVED
+      // (not overwritten with "now").
+      const existingSame = [
+        ['tab-people', '2026-09-20 08:00:00', 5, '2026-08-01 09:00:00'],
+        ['tab-overview', '2026-09-25 10:00:00', 41, '2026-08-05 07:30:00'],
+      ];
+      r = computeFeatureUsageUpsert_(existingSame, 'tab-overview', '2026-10-03 12:00:00');
+      assert('computeFeatureUsageUpsert_: an existing component updates the right sheet row (header at row 1, data 0-indexed from row 2 -> row 3)',
+        r.rowNum === 3, 'expected rowNum 3; got ' + r.rowNum);
+      assert('computeFeatureUsageUpsert_: use_count increments from its prior stored value, not reset to 1',
+        r.rowValues[2] === 42, 'expected use_count 42 (41+1); got ' + r.rowValues[2]);
+      assert('computeFeatureUsageUpsert_: first_seen_at is PRESERVED from the existing row, never overwritten with "now"',
+        r.rowValues[3] === '2026-08-05 07:30:00', 'expected first_seen_at preserved; got ' + r.rowValues[3]);
+      assert('computeFeatureUsageUpsert_: last_used_at (column B) IS updated to "now"',
+        r.rowValues[1] === '2026-10-03 12:00:00', 'expected last_used_at = now; got ' + r.rowValues[1]);
+
+      // Existing row has a blank/missing first_seen_at (pre-this-feature data
+      // shape, or a malformed row) -- falls back to "now" rather than storing
+      // a blank, same as the brand-new-component case.
+      const existingBlankFirstSeen = [['tab-overview', '2026-09-25 10:00:00', 3, '']];
+      r = computeFeatureUsageUpsert_(existingBlankFirstSeen, 'tab-overview', '2026-10-03 12:00:00');
+      assert('computeFeatureUsageUpsert_: a blank existing first_seen_at falls back to "now", never stored blank',
+        r.rowValues[3] === '2026-10-03 12:00:00', 'expected fallback to now; got ' + JSON.stringify(r.rowValues[3]));
+
+      // recordComponentUsage: input validation -- an unknown componentId is a
+      // complete no-op, never even touches the session-throttle Set.
+      _componentUsageRecordedThisSession = new Set();
+      await recordComponentUsage('tab-does-not-exist');
+      assert('recordComponentUsage: an unrecognized componentId is rejected before the throttle Set is touched',
+        _componentUsageRecordedThisSession.size === 0, 'expected empty Set; got size ' + _componentUsageRecordedThisSession.size);
+
+      // recordComponentUsage: a KNOWN componentId is recorded in the
+      // in-session throttle Set -- and with no real sheet connected in
+      // this harness (_currentSheetId stays '' here), it resolves without
+      // throwing and without attempting any network call (the awaited
+      // call completing at all, with no mocked fetch to catch it, is
+      // itself proof no real network call was made).
+      _componentUsageRecordedThisSession = new Set();
+      await recordComponentUsage('tab-overview');
+      assert('recordComponentUsage: a known componentId is added to the in-session throttle Set',
+        _componentUsageRecordedThisSession.has('tab-overview'), 'expected "tab-overview" in the throttle Set');
+      assert('recordComponentUsage: TRACKED_COMPONENT_IDS lists exactly the 9 real dashboard tabs',
+        TRACKED_COMPONENT_IDS.length === 9 && TRACKED_COMPONENT_IDS.includes('tab-oppmonitor'),
+        'expected 9 tracked ids incl. tab-oppmonitor; got ' + JSON.stringify(TRACKED_COMPONENT_IDS));
+    } finally {
+      _componentUsageRecordedThisSession = savedSession;
+    }
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),
@@ -1423,6 +1499,18 @@
     if (/!A2:AZ$/.test(range)) return values; // the Leads tab read
     return []; // Movement_Log / Daily_RM_Issues / RM_Hierarchy / etc. — exercises the "no history yet" degrade path
   };
+  // recordComponentUsage (js/sheets-writeback.js, 2026-10-03) fires for real
+  // off this pipeline's own fetchAndRender() call (the active tab counts as
+  // viewed) — these three raw-fetch() write helpers must be mocked too, or
+  // this harness makes REAL unauthenticated calls to the live Sheets API
+  // (confirmed: real 401s from accounts.google.com showed up here before
+  // these mocks existed). Return values are never read by
+  // recordComponentUsage itself, so any non-throwing shape is fine; a
+  // non-null getSheetIdByTabName keeps ensureFeatureUsageSheet_ out of its
+  // sheet-creation branch (one fewer thing to mock).
+  getSheetIdByTabName = async function () { return 999; };
+  appendSheetRows = async function () { return {}; };
+  sheetsApiValuesBatchUpdate = async function () { return {}; };
   gateAccessToken = 'test-token';
   gateTokenExpiresAt = Date.now() + 3600000;
 

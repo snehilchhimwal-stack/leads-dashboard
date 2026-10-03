@@ -375,6 +375,7 @@ document.getElementById('tabBar').addEventListener('click', (e) => {
   btn.classList.add('active');
   const panel = document.getElementById(btn.dataset.tab);
   if (panel) panel.classList.add('active');
+  recordComponentUsage(btn.dataset.tab); // best-effort, never blocks the tab switch — js/sheets-writeback.js
 
   // Gated on #dashboardContent (set 'block' once on successful sign-in,
   // core-fetch-and-render.js, right before filterBar's own one-time 'flex'

@@ -238,9 +238,21 @@ def git(*args):
         # layer of safety: a genuinely malformed byte substitutes one
         # replacement character instead of losing the whole command's
         # output.
+        # rstrip(), NOT strip() -- a leading space is semantically significant
+        # in at least one real caller's output: `git status --porcelain`'s
+        # first two columns are literal status-code characters, and an
+        # unstaged-modification line starts " M <path>" (leading space =
+        # "no staged change"). A plain .strip() strips that leading space off
+        # the FIRST line of a multi-line porcelain listing (python's str.strip()
+        # only touches the whole string's own start/end, not each line) --
+        # silently shifting that one line's path by one character and
+        # breaking check-staleness.py's scan_uncommitted() path-matching for
+        # whichever file happened to sort first (real bug, found 2026-10-03
+        # investigating a false "JS-003 not touched" AT-RISK that persisted
+        # after the doc record genuinely had been edited).
         return subprocess.run(["git", "-C", ROOT, *args], capture_output=True,
                               text=True, encoding="utf-8", errors="replace",
-                              check=False).stdout.strip()
+                              check=False).stdout.rstrip()
     except Exception as e:
         return ""
 
