@@ -102,7 +102,7 @@ branch-deploy signature) runs green on `master`;
 | `js/tab-repeat-offenders.js` | Repeat Offenders tab (own top-level tab, added 2026-09-01) — reads the `Daily_RM_Issues` sheet tab that `DailyRmIssueLog.gs` populates nightly; RM/A1-TM/RH/Region leaderboards ranked by the empirical-Bayes composite RM-performance score (`computeRmPerformance`, `js/core-rm-performance.js`), which **replaced** the old "Avg Flagged" ratio in the §9.7 redesign. See §9 for the whole subsystem, including a real Time-range filtering gotcha worth reading before touching this file. |
 | `js/tab-morning.js` | Morning Brief tab — 10 summary cards, all backed by data other tabs already compute (no new logic). |
 | `js/reports-build.js` / `js/reports-gmail.js` / `js/reports-ui.js` | Formerly one `js/reports.js` file (2,246 lines) — split in the 2026-09 modularity refactor (pure code motion; see git history). `reports-build.js` builds report content (region grouping, email templates); `reports-gmail.js` is the real one-click Gmail-API send flow (separate OAuth grant — see §4); `reports-ui.js` is the mailto flow + all render/copy/download UI, and loads LAST of the three (see its own header comment for why). |
-| `js/sheets-writeback.js` | Every write path back to the Sheet: on-demand Movement_Log snapshot, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`. |
+| `js/sheets-writeback.js` | Every write path back to the Sheet: on-demand Movement_Log snapshot, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, and (added 2026-10-03, dead-code-audit follow-up Part 3) `Feature_Usage` — per-tab client-side usage tracking (`recordComponentUsage`), read by `OpsChecklistRunner.gs`'s weekly stale-component check (Part 4, below). |
 | `js/overview-distribution-people-ops.js` | The main Overview: `renderAll()` orchestrator, tab switching, KPI/trend/RM-score tables, Operations issue lists (the 5 SLA checks), CSV export. |
 | `js/main.js` | Loaded last. Just the couple of top-level bootstrap calls that must run after every other file has defined its functions. |
 | `Core.gs` | Apps Script shared foundation — row parsing/stage classification, ported from `js/core.js`. Every other `.gs` file depends on it. |
@@ -117,7 +117,7 @@ branch-deploy signature) runs green on `master`;
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. Since 2026-09-29 also age-prunes (30 days, regardless of review status) alongside the pre-existing manual `clearReviewedUnmatchedCommentsNow()`. |
 | `InteractionHistoryLogger.gs` | Logs every open lead's genuinely NEW owner-logged comment (any outcome) into `Comment_History` — a forward-capture interaction-history dataset, no dashboard reader. Since 2026-09-29 age-prunes at 30 days (was unbounded-by-design before that). |
 | `DailyRmIssueLog.gs` | Nightly (22:50 IST) full-company SLA-issue census — feeds `js/tab-repeat-offenders.js`. Added 2026-09-01. See §9 — this one has real operational quirks (unbounded nightly row growth, a real incident where a run took ~8min and wrote nothing) worth knowing before you're debugging it live. |
-| `OpsChecklistRunner.gs` | Weekly (Monday ~9am IST) automated summary email — 3 of `OPS_CHECKLIST.md`'s periodic checks (RM-hierarchy gaps, `Manager_Directory` email gaps, `Movement_Log` freshness) reduced to a pass/fail an unattended script can judge; sends EVERY week, issues or not, on purpose (see §8). Added 2026-09-09. |
+| `OpsChecklistRunner.gs` | Weekly (Monday ~9am IST) automated summary email — 5 of `OPS_CHECKLIST.md`'s periodic checks reduced to a pass/fail an unattended script can judge: RM-hierarchy gaps, `Manager_Directory` email gaps, `Movement_Log` freshness, the workbook's shared 10M-cell budget (added 2026-09-28), and (added 2026-10-03, dead-code-audit follow-up Part 4) a 30-day stale-dashboard-tab check against `Feature_Usage` (written by `js/sheets-writeback.js`'s Part 3 client-side usage tracking) — a tab the browser side has never recorded a visit to is reported separately as "too early to tell" until `Feature_Usage` itself has existed for 30+ days, then promoted into the same flagged bucket (see `GS-009`'s own doc record / `checkStaleComponents_`'s header comment for why). Sends EVERY week, issues or not, on purpose (see §8). Added 2026-09-09. |
 | `LeadFollowupsStaleness.gs` | One-time conditional-formatting setup — highlights any `Lead_Followups` row amber/red once its `updated_at` (column G) is 12h/24h old, so a person directly opening the sheet (the actual surface of the lead 2229674 incident) can't miss a stale row. See `LEAD_FOLLOWUPS_STALENESS.md`. No trigger — applies immediately when run. Added 2026-09-09. |
 | `Tests_*.gs` | The Apps Script mock test suite — see §7. |
 | `working files on 28th for automatic email/` | **Not in git**, and not authoritative — a manual backup snapshot of a few `.gs` files from mid-development. The root-level `.gs` files are always the source of truth; this folder is safe to ignore or delete. |
@@ -292,7 +292,7 @@ re-running after an edit never leaves a duplicate):
 | `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). **Since 2026-09-24:** each of these is now a combined send — Section 1 (unchanged) + Section 2 (a Checkpoint on yesterday's 17:00 `AllIssuesEmailer.gs` report — see §2's own row for the full picture). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
-| `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 3 automatable checks. Sends every week regardless of outcome — see §8. |
+| `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 5 automatable checks (added 2026-10-03: a 30-day stale-dashboard-tab check against `Feature_Usage`). Sends every week regardless of outcome — see §8. |
 | `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). **Since 2026-10-01:** `rebuildRmHierarchy()` (the function this calls under the hood when re-run) now automatically runs `auditUnresolvedRms_`/`auditManagerDirectoryEmailGaps_` at the end of every rebuild and logs the result — see §4.3.2. |
 | `setupLeadFollowupsStalenessFormatting()` | `LeadFollowupsStaleness.gs` | **No trigger** — applies the amber/red conditional formatting to `Lead_Followups` (a row 12h/24h stale on its `updated_at` column). Runs immediately; re-run only if the rule changes (`GS-007`, `LEAD_FOLLOWUPS_STALENESS.md`). |
 
@@ -511,6 +511,7 @@ Beyond the leads tab itself (one fixed tab, named `leads` — see
 | `SLA_History` | `MovementTracker.gs` (same 4×/day trigger) + the dashboard on refresh | Trend/history views |
 | `Lead_Followups` | `OvernightEmailer.gs`'s send paths + the dashboard's Operations "Generate" flow | The follow-up email content itself |
 | `Daily_Cohort_History` | `js/sheets-writeback.js` | Tracking tab's cohort comparison |
+| `Feature_Usage` | `js/sheets-writeback.js` (`recordComponentUsage`, fire-and-forget — per-tab client-side usage tracking, added 2026-10-03) | `OpsChecklistRunner.gs`'s weekly `checkStaleComponents_` (30-day stale-dashboard-tab check, same date) |
 | `Unmatched_Comments_Log` | `UnmatchedCommentLogger.gs` (piggybacks on every `snapshotOpenLeads_` run); pruned (30-day, age-based, independent of `reviewed`) by the same file's `pruneUnmatchedCommentsLog_` since 2026-09-29 | Manual human review — the source for deciding what to add to `OUTCOME_RULES`/`OUTCOME_RULES_GS_` next |
 | `RM_Hierarchy`, `Manager_Directory` | `setupRmHierarchy()` (one-time, then manually maintained) | `RmHierarchy.gs`'s recipient routing |
 | `Daily_RM_Issues` | `DailyRmIssueLog.gs` (nightly, 22:50 IST) + its own backfill/repair utilities | `js/tab-repeat-offenders.js` (Repeat Offenders tab) — see §9 |
@@ -521,7 +522,7 @@ Beyond the leads tab itself (one fixed tab, named `leads` — see
 | `Overnight_Log` | `OvernightEmailer.gs` (10:00 IST run) | `OvernightEmailer.gs`'s 13:00 follow-up run (same-day thread handoff) — older rows are dead weight |
 
 Full per-tab detail (columns, retention, sensitivity, every reader/writer)
-is in `docs/sheets/SHEET-001`..`SHEET-014`; this table is the onboarding
+is in `docs/sheets/SHEET-001`..`SHEET-018`; this table is the onboarding
 overview.
 
 ---
@@ -548,6 +549,7 @@ one-line fix in one file is complete:
 | RM-performance tuning constants | `RM_PERF_*` (`js/core-rm-performance.js`) | `RM_PERF_*_GS_` (`DailyRmIssueLog.gs`) — must stay numerically identical |
 | IST day boundary | `istDateKey` (`js/core-foundation.js`) | `istDayKeyGs_` (`Core.gs`) |
 | Test-mode email override (must be `''` in prod) | `TEST_MODE_OVERRIDE_EMAIL` (`js/reports-ui.js`) | `TEST_MODE_OVERRIDE_EMAIL_` (`EmailInfra.gs`) |
+| Tracked dashboard tab roster (added 2026-10-03) | `TRACKED_COMPONENT_IDS` (`js/sheets-writeback.js`) | `TRACKED_COMPONENT_IDS_GS_` (`OpsChecklistRunner.gs`) — the browser side writes `Feature_Usage` rows for exactly these 9 tabs, the Apps Script side judges 30-day staleness against the same list |
 
 (This table mirrors `docs/RELATIONSHIP_MAP.md` §2, which carries the exact
 `CFG-`/`RULE-` sub-IDs and `LOGIC_AUDIT.md` Part 4 section for each pair.)
@@ -839,10 +841,13 @@ test) Sheet, and use the browser console directly.
   email gaps, `Movement_Log` capture freshness, and worst-performer
   methodology drift between `js/core-rm-performance.js` and
   `DailyRmIssueLog.gs` — the class of silent, slow-drifting gap that tends
-  to surface HERE only once it's already caused a real symptom. Three of
-  its checks now also run unattended, weekly — see `OpsChecklistRunner.gs`
-  in §4.3's trigger table below. `LEAD_FOLLOWUPS_STALENESS.md` is the same
-  idea for one specific sheet — see the bullet just above.
+  to surface HERE only once it's already caused a real symptom. Five of
+  its checks now also run unattended, weekly (RM-hierarchy gaps,
+  `Manager_Directory` email gaps, `Movement_Log` freshness, the workbook
+  cell budget, and — added 2026-10-03 — a 30-day stale-dashboard-tab
+  check) — see `OpsChecklistRunner.gs` in §4.3's trigger table below.
+  `LEAD_FOLLOWUPS_STALENESS.md` is the same idea for one specific sheet —
+  see the bullet just above.
 
 ---
 
