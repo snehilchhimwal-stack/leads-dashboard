@@ -101,7 +101,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `MovementTracker.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `OpsChecklistRunner.gs` | `4c99f7f` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `OvernightEmailer.gs` | `87114a3` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `RmHierarchy.gs` | `ca7802c` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
+| `RmHierarchy.gs` | `ca7802c` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03); `rebuildRmHierarchy()` re-run live afterward to materialize Mohd Ali Abdul Gaffar's new row into the `RM_Hierarchy` sheet (confirmed by direct gviz read: `ch` = Mayur Panjari) — coverage audit at end of run reported 5 pre-existing unresolved names (Kapil Bhagat, 3 Futwork names), none new, none related to this change |
 | `SlaEngine.gs` | `20cfec4` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 
