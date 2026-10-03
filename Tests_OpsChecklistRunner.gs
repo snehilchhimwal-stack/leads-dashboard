@@ -6,6 +6,14 @@
  */
 function runOpsChecklistRunnerTests_() {
   const now = new Date('2026-09-09T09:00:00+05:30');
+  // Header row only, for Feature_Usage test fixtures below — the
+  // production reader (checkStaleComponents_) reads this tab positionally
+  // (component_id, last_used_at, use_count, first_seen_at), same as every
+  // other Movement_Log-style reader in this project, so the header's exact
+  // text is never actually checked; it only needs to occupy row 1 so
+  // getLastRow()/the data-row slice below line up the same way a real
+  // Feature_Usage sheet (header + data) would.
+  const FEATURE_USAGE_HEADER_TEST_ = ['component_id', 'last_used_at', 'use_count', 'first_seen_at'];
 
   // ---- buildWeeklyOpsChecklistSummary_: clean case, nothing flagged ----
   const cleanLeadsHeader = TestFixture_leadsHeader_();
@@ -131,6 +139,80 @@ function runOpsChecklistRunnerTests_() {
     TestAssertContains_(criticalSummary.lines.join('\n'), 'CELL BUDGET CRITICAL', 'buildWeeklyOpsChecklistSummary_: 90% usage reads as CRITICAL');
     TestAssertContains_(criticalSummary.lines.join('\n'), 'pruneMovementLogNow', 'buildWeeklyOpsChecklistSummary_: CRITICAL names the actual recovery function to run, not just "do something"');
     TestAssertEqual_(criticalSummary.issueCount, 1, 'buildWeeklyOpsChecklistSummary_: a CRITICAL cell budget contributes exactly 1 to issueCount (not double-counted with WARNING)');
+
+    // ---- checkStaleComponents_ / Part 4 (2026-10-03): Feature_Usage
+    // missing entirely, but `now` is still within STALE_COMPONENT_DAYS_GS_
+    // of FEATURE_USAGE_TRACKING_STARTED_GS_ (2026-10-03) -- this mirrors
+    // the EXISTING cleanSs/dirtySs fixtures above, neither of which seeds
+    // a Feature_Usage sheet at all, with the suite's own `now` of
+    // 2026-09-09 (BEFORE tracking even started) -- confirms the rollout
+    // grace period reads as "too early to tell", not as 9 flagged issues,
+    // so neither the clean nor dirty case's issueCount assertions above
+    // were silently relying on checkStaleComponents_ being unreachable. ----
+    const earlyUsage = checkStaleComponents_(cleanSs, now);
+    TestAssertEqual_(earlyUsage.status, 'missing', 'checkStaleComponents_: reports "missing" when Feature_Usage does not exist yet');
+    TestAssertEqual_(earlyUsage.stale.length, 0, 'checkStaleComponents_: a missing sheet within the rollout grace period flags nothing as stale');
+    TestAssertEqual_(earlyUsage.neverObserved.length, TRACKED_COMPONENT_IDS_GS_.length, 'checkStaleComponents_: every tracked component reads as neverObserved (not stale) during the rollout grace period');
+
+    // ---- checkStaleComponents_: Feature_Usage exists with a real mix --
+    // one genuinely stale (45 days), one freshly used, and (since `now`
+    // here is deliberately set well past FEATURE_USAGE_TRACKING_STARTED_GS_
+    // + 30 days) every OTHER tracked component with no row at all is
+    // promoted from neverObserved into stale — the "had a full 30-day
+    // window and still never showed up" case. ----
+    const usageNow = new Date('2026-11-15T09:00:00+05:30'); // well past 2026-10-03 + 30d
+    const usageSs = TestMockSpreadsheet_({
+      'Feature_Usage': TestMockSheet_('Feature_Usage', [
+        FEATURE_USAGE_HEADER_TEST_,
+        ['tab-overview', '2026-11-14 10:00:00', 5, '2026-09-20 08:00:00'], // ~1 day ago -> recent
+        ['tab-morning', '2026-09-25 08:00:00', 3, '2026-09-20 08:00:00'], // ~51 days ago -> stale
+      ]),
+    });
+    const mixedUsage = checkStaleComponents_(usageSs, usageNow);
+    TestAssertEqual_(mixedUsage.status, 'ok', 'checkStaleComponents_: reports "ok" once Feature_Usage has real rows');
+    TestAssert_(mixedUsage.recent.some(function (c) { return c.id === 'tab-overview'; }), 'checkStaleComponents_: a recently-used component lands in recent, not stale');
+    const staleMorning = mixedUsage.stale.find(function (c) { return c.id === 'tab-morning'; });
+    TestAssert_(!!staleMorning && !staleMorning.neverUsed, 'checkStaleComponents_: tab-morning (45+ days since last use) is flagged stale with a real ageDays, not neverUsed');
+    TestAssert_(staleMorning.ageDays > 30, 'checkStaleComponents_: tab-morning\'s computed ageDays genuinely exceeds the 30-day threshold');
+    const neverUsedPromoted = mixedUsage.stale.filter(function (c) { return c.neverUsed; });
+    TestAssertEqual_(neverUsedPromoted.length, TRACKED_COMPONENT_IDS_GS_.length - 2, 'checkStaleComponents_: every other tracked component (no row at all) is promoted into stale once the rollout grace period has passed, not left in neverObserved');
+    TestAssertEqual_(mixedUsage.neverObserved.length, 0, 'checkStaleComponents_: neverObserved is empty once the rollout grace period has passed — those components are all in stale instead');
+
+    // ---- checkStaleComponents_: every tracked component used recently --
+    // confirms "all clear" reads cleanly with zero stale/neverObserved. ----
+    const allRecentRows = [FEATURE_USAGE_HEADER_TEST_].concat(TRACKED_COMPONENT_IDS_GS_.map(function (id) {
+      return [id, '2026-11-14 10:00:00', 1, '2026-09-20 08:00:00'];
+    }));
+    const allRecentSs = TestMockSpreadsheet_({ 'Feature_Usage': TestMockSheet_('Feature_Usage', allRecentRows) });
+    const allRecentUsage = checkStaleComponents_(allRecentSs, usageNow);
+    TestAssertEqual_(allRecentUsage.stale.length, 0, 'checkStaleComponents_: zero stale when every tracked component was used within 30 days');
+    TestAssertEqual_(allRecentUsage.neverObserved.length, 0, 'checkStaleComponents_: zero neverObserved when every tracked component has a row');
+    TestAssertEqual_(allRecentUsage.recent.length, TRACKED_COMPONENT_IDS_GS_.length, 'checkStaleComponents_: every tracked component lands in recent');
+
+    // ---- buildWeeklyOpsChecklistSummary_ wiring: the stale-component
+    // lines actually reach the email summary, and issueCount reflects
+    // them (reusing the budgetSs fixture above, which has no leads/
+    // RM_Hierarchy/Manager_Directory gaps of its own, so any issueCount
+    // here is attributable to the stale-component check alone). ----
+    budgetSs._sheets['Movement_Log']._maxRows = 100;
+    budgetSs._sheets['Movement_Log']._maxCols = 1;
+    // Re-anchored to usageNow (not the suite's shared `now`), since this
+    // sub-test calls buildWeeklyOpsChecklistSummary_ with usageNow —
+    // otherwise Movement_Log_Runs' existing row (seeded 2h before `now`,
+    // 2026-09-09) would also read as stale 2+ months later and the
+    // issueCount>0 assertion below would stop proving what it claims to.
+    budgetSs._sheets['Movement_Log_Runs'] = TestMockSheet_('Movement_Log_Runs', [
+      MOVEMENT_LOG_RUNS_COLUMNS_,
+      [new Date(usageNow.getTime() - 2 * 3600000), 'clean test', 1, 0],
+    ]);
+    budgetSs._sheets['Feature_Usage'] = TestMockSheet_('Feature_Usage', [
+      FEATURE_USAGE_HEADER_TEST_,
+      ['tab-morning', '2026-09-25 08:00:00', 3, '2026-09-20 08:00:00'],
+    ]);
+    const staleComponentSummary = buildWeeklyOpsChecklistSummary_(budgetSs, usageNow);
+    TestAssertContains_(staleComponentSummary.lines.join('\n'), 'tab-morning', 'buildWeeklyOpsChecklistSummary_: names the stale component by id');
+    TestAssertContains_(staleComponentSummary.lines.join('\n'), 'not used in 30+ days', 'buildWeeklyOpsChecklistSummary_: the stale-component section reads clearly');
+    TestAssert_(staleComponentSummary.issueCount > 0, 'buildWeeklyOpsChecklistSummary_: stale/never-used components contribute to issueCount');
 
     // ---- runWeeklyOpsChecklistNow: trigger-target wrapper, smoke test
     // only (real new Date() inside — same reason checkMovementLogFreshnessNow's
