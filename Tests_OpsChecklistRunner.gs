@@ -14,6 +14,23 @@ function runOpsChecklistRunnerTests_() {
   // getLastRow()/the data-row slice below line up the same way a real
   // Feature_Usage sheet (header + data) would.
   const FEATURE_USAGE_HEADER_TEST_ = ['component_id', 'last_used_at', 'use_count', 'first_seen_at'];
+  // Formats a Date into the SAME local-timezone 'YYYY-MM-DD HH:mm:ss' shape
+  // parseFeatureUsageTimestampGs_ parses, using the runtime's own local-time
+  // field getters both ways -- so a boundary built as e.g. "usageNow minus
+  // exactly 30 days" round-trips to the exact same getTime() regardless of
+  // what timezone this test runtime actually runs in (Node vm vs headless
+  // Chrome vs CI). A hardcoded IST-looking string literal would NOT have
+  // this property -- it would silently assume the runtime's local zone IS
+  // IST, which is exactly the class of bug this project's own "pin to IST
+  // explicitly" CLAUDE.md gotcha warns about, and would make a tight
+  // (1-minute-margin) boundary test flaky or simply wrong depending on
+  // where it runs. Coarser (multi-day-margin) fixtures elsewhere in this
+  // file don't need this -- only the exact-30-day boundary test below does.
+  function opsTestLocalDateString_(d) {
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' +
+      p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  }
 
   // ---- buildWeeklyOpsChecklistSummary_: clean case, nothing flagged ----
   const cleanLeadsHeader = TestFixture_leadsHeader_();
@@ -188,6 +205,62 @@ function runOpsChecklistRunnerTests_() {
     TestAssertEqual_(allRecentUsage.stale.length, 0, 'checkStaleComponents_: zero stale when every tracked component was used within 30 days');
     TestAssertEqual_(allRecentUsage.neverObserved.length, 0, 'checkStaleComponents_: zero neverObserved when every tracked component has a row');
     TestAssertEqual_(allRecentUsage.recent.length, TRACKED_COMPONENT_IDS_GS_.length, 'checkStaleComponents_: every tracked component lands in recent');
+
+    // ---- checkStaleComponents_ / Part 6 (2026-10-03) boundary coverage:
+    // exactly-30-days is NOT stale (the rule is strictly "> 30", matching
+    // STALE_COMPONENT_DAYS_GS_'s own comment); 30 days + 1 minute IS. Built
+    // via opsTestLocalDateString_ (see its own header) so this holds
+    // regardless of the test runtime's local timezone. ----
+    const exactly30 = new Date(usageNow.getTime() - 30 * 86400000);
+    const just30Plus1Min = new Date(usageNow.getTime() - (30 * 86400000 + 60000));
+    const boundarySs = TestMockSpreadsheet_({
+      'Feature_Usage': TestMockSheet_('Feature_Usage', [
+        FEATURE_USAGE_HEADER_TEST_,
+        ['tab-overview', opsTestLocalDateString_(exactly30), 9, '2026-09-01 00:00:00'],
+        ['tab-morning', opsTestLocalDateString_(just30Plus1Min), 9, '2026-09-01 00:00:00'],
+      ]),
+    });
+    const boundaryUsage = checkStaleComponents_(boundarySs, usageNow);
+    TestAssert_(boundaryUsage.recent.some(function (c) { return c.id === 'tab-overview'; }),
+      'checkStaleComponents_: a component last used EXACTLY 30 days ago is NOT stale (strictly-greater-than rule)');
+    TestAssert_(!boundaryUsage.stale.some(function (c) { return c.id === 'tab-overview'; }),
+      'checkStaleComponents_: the exactly-30-day component does not also appear in stale');
+    TestAssert_(boundaryUsage.stale.some(function (c) { return c.id === 'tab-morning' && !c.neverUsed; }),
+      'checkStaleComponents_: a component last used 30 days + 1 minute ago IS stale (just past the boundary)');
+
+    // ---- checkStaleComponents_: "missing tracking data" -- a row EXISTS
+    // for a component but last_used_at is blank/malformed (a hand-edited
+    // cell, a partial write, or data predating this column). Must be
+    // treated exactly like "no row at all" (neverObserved, or promoted to
+    // stale past the rollout grace period) -- never throw, never silently
+    // misparse into a bogus ageDays. ----
+    const malformedSs = TestMockSpreadsheet_({
+      'Feature_Usage': TestMockSheet_('Feature_Usage', [
+        FEATURE_USAGE_HEADER_TEST_,
+        ['tab-overview', '', 0, ''], // blank last_used_at
+        ['tab-morning', 'not-a-real-date', 2, '2026-09-01 00:00:00'], // malformed
+      ]),
+    });
+    let malformedThrew = null;
+    let malformedUsage = null;
+    try { malformedUsage = checkStaleComponents_(malformedSs, usageNow); } catch (e) { malformedThrew = e; }
+    TestAssertEqual_(malformedThrew, null, 'checkStaleComponents_: a blank/malformed last_used_at never throws');
+    const malformedOverview = malformedUsage.stale.find(function (c) { return c.id === 'tab-overview'; });
+    const malformedMorning = malformedUsage.stale.find(function (c) { return c.id === 'tab-morning'; });
+    TestAssert_(!!malformedOverview && malformedOverview.neverUsed, 'checkStaleComponents_: a blank last_used_at is treated as never-used (promoted to stale past the grace period), not a parse crash');
+    TestAssert_(!!malformedMorning && malformedMorning.neverUsed, 'checkStaleComponents_: a malformed (non-date) last_used_at is also treated as never-used, not misparsed into a fake ageDays');
+
+    // ---- checkStaleComponents_: "repeated alerts" / "restarts" -- this
+    // function is a pure read with no module-level mutable state (unlike
+    // the browser's _componentUsageRecordedThisSession throttle), so two
+    // independent calls against the SAME persistently-stale data -- the
+    // real shape of "the same tab is still stale next Monday" or "the
+    // script cold-starts between runs" -- must return IDENTICAL results
+    // both times, never suppress a repeat, never need any hidden warm-up. ----
+    const repeatUsage1 = checkStaleComponents_(usageSs, usageNow);
+    const repeatUsage2 = checkStaleComponents_(usageSs, usageNow);
+    TestAssertEqual_(JSON.stringify(repeatUsage1), JSON.stringify(repeatUsage2),
+      'checkStaleComponents_: two independent calls (simulating a repeat weekly run / a script restart) against the same data return identical results -- no silent dedup or hidden state');
 
     // ---- buildWeeklyOpsChecklistSummary_ wiring: the stale-component
     // lines actually reach the email summary, and issueCount reflects

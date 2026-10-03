@@ -1387,6 +1387,22 @@
       assert('recordComponentUsage: TRACKED_COMPONENT_IDS lists exactly the 9 real dashboard tabs',
         TRACKED_COMPONENT_IDS.length === 9 && TRACKED_COMPONENT_IDS.includes('tab-oppmonitor'),
         'expected 9 tracked ids incl. tab-oppmonitor; got ' + JSON.stringify(TRACKED_COMPONENT_IDS));
+
+      // Part 6 (2026-10-03) -- "repeated alerts" / "restarts" boundary
+      // coverage. Same session, called again (no reset): the throttle
+      // must stay at exactly one entry, not grow or re-process.
+      await recordComponentUsage('tab-overview');
+      assert('recordComponentUsage: a second call in the SAME session for an already-recorded component is a no-op (Set stays at one entry)',
+        _componentUsageRecordedThisSession.size === 1, 'expected Set size 1; got ' + _componentUsageRecordedThisSession.size);
+
+      // "Restart" -- a hard page reload resets this module-level Set (by
+      // design, see its own declaration comment in sheets-writeback.js).
+      // The same component must be recorded again after that, not stay
+      // permanently throttled by state that no longer exists post-reload.
+      _componentUsageRecordedThisSession = new Set();
+      await recordComponentUsage('tab-overview');
+      assert('recordComponentUsage: after a simulated restart (fresh throttle Set), a previously-recorded component is recorded again, not silently skipped',
+        _componentUsageRecordedThisSession.has('tab-overview'), 'expected "tab-overview" recorded again after restart');
     } finally {
       _componentUsageRecordedThisSession = savedSession;
     }
