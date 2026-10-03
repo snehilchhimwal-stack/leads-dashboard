@@ -430,6 +430,63 @@ separate step to remember.** `OPS_CHECKLIST.md`'s two checklist items stay
 listed (they're still useful to run standalone, anytime, not just after a
 rebuild) but now note this automatic side-effect.
 
+### 4.3.3 Per-manager cc overrides — restricted cc + loan-team routing (2026-10-01 / 2026-10-03)
+
+**Why:** Two routing requests, both from the user directly, both scoped to
+the SAME place — `resolveRecipientBucketsForRms_`'s final per-bucket cc
+step (`RmHierarchy.gs`) — rather than the Rajesh Muni/Manisha rathod CC
+restriction and the loan-team routing change feeling unrelated enough to
+scatter across the file.
+
+**Restricted cc (`c80fabc`, 2026-10-01):** Rajesh Muni and Manisha
+rathod's (the Pre Sales team leads, §4.3.2 above) issue emails must cc
+ONLY Snehil Chhimwal — never the standing leadership cc
+(`ALWAYS_CC_EMAILS_`, Ashish Kukreja/Saurabh Mishra) or anything else
+their own chain would otherwise pull in. `RESTRICTED_CC_PRIMARY_NAMES_`
+(`GS-011` CFG-080) is checked by name against the resolved bucket's own
+key; when it matches, `ccSet` is hard-replaced with just Snehil's looked-up
+email — a replacement, not a conditional skip of `ALWAYS_CC_EMAILS_`
+alone, so it stays correct even if either person's row later grows a real
+rh/ch.
+
+**Loan-team routing (`ca7802c`, 2026-10-03):** a loan-team RM's issue
+email (Mayur Panjari's reports — `GS-011` CFG-054's 'Loan' region rows)
+must go straight to Mayur Panjari as primary, bypassing any tl/tm/rh in
+between (6 of the 17 loan-team rows carry `tl:'Zahid Shaikh'`, the Loan
+team's own A1), with no cc at all. `LOAN_TEAM_CH_NAME_` (`GS-011`
+CFG-081) is checked against the REPORTING RM's own `chain.ch` — not the
+resolved primary's — before the normal `tl‖tm‖rh‖ch` cascade runs, so it
+can override which tier becomes primary, not just filter cc afterward.
+Also closed the one gap in the user's full 16-name loan-BDM roster:
+`Mohd Ali Abdul Gaffar` (distinct from the already-present `Mohd Ali
+Khan`) added to `RM_HIERARCHY_RAW_`; a 16th name, "Mohammad Azar Izhar
+Ansari", confirmed a typo for the already-known "Mohammad Azaz Izhar
+Ansari" (3 existing spelling-alias rows already route to Mayur Panjari).
+
+**Both confirmed scoped to Google Non-UTM/Search leads only — already
+true for free, no extra filtering code needed.** `resolveRecipientBucketsForRms_`
+has exactly two real callers that ever route a per-RM issue email —
+`AllIssuesEmailer.gs`'s `sendAllIssuesEmails_` (`GS-001`) and
+`OvernightEmailer.gs`'s `sendOvernightMorningEmails`/
+`sendOvernightFollowupEmails` (`GS-010`) — and BOTH gate every candidate
+lead through `passesGoogleNonUtmSearchGs_` (`EmailInfra.gs`) before an RM
+name is ever collected to pass into this function at all. Confirmed by
+auditing every `.gs` file that sends mail at all
+(`DailyRmIssueLog.gs`'s `reportRmPerformanceNow` only `Logger.log`s,
+sends nothing) — there is no third, non-Google-scoped path either
+override could leak onto. A useful side effect worth knowing: this whole
+project's entire automated per-lead SLA-issue email system has never
+covered anything but Google Non-UTM/Search leads — a non-Google lead's
+SLA issue currently has no automatic email path at all, only the
+dashboard's own live view.
+
+**Verified:** `Tests_RmHierarchy.gs` — 5 assertions for the restricted-cc
+override, 7 for the loan-team override, both the same self-contained-mock
++ temporary-reassignment pattern already established by the file's own
+`TM_STILL_CC_` test (synthetic names; real names referenced only where
+the production code itself hardcodes them — 'Snehil Chhimwal', the loan
+team's shape). Full suite 1232/1232 via `run-gs-tests-headless.py`.
+
 ### 4.4 GitHub repo access
 
 Push access to `github.com/snehilchhimwal-stack/leads-dashboard` is needed to
