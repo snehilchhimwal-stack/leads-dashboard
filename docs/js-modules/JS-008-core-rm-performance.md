@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
+| **Last Verified** | 2026-10-03, doc-accuracy fix only (no source commit — `js/core-rm-performance.js` unchanged) — `FN-063` split into `FN-063`/`FN-320` to correct a false "Called by" claim (see `## Version / change reference`); prior: 2026-09-30 against commit `5802f35`, posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
 
 ## Purpose / reason to exist
 
@@ -76,7 +76,8 @@ harmless — nothing at parse time calls into it).
 | FN-060 | `rmPerfIsLeadershipExcluded(rmName, rmHierarchyByNameLower)` `#L440` | RM name + hierarchy map | bool — true for A1/TM/RH/Cluster Head/City Lead/Commercial Head roles, the name-based leadership set, a Futwork vendor-name pattern match, or the admin name set (added 2026-09-29; function name predates these last two, kept as-is) | none | `RM_PERF_NON_RM_ROLES`, `RM_PERF_LEADERSHIP_NAME_EXCLUSIONS`, `RM_PERF_VENDOR_NAME_PATTERN`, `RM_PERF_ADMIN_NAME_EXCLUSIONS` | FN-053, FN-058, FN-311 (the Opp-conversion cohort reuses this same exclusion) — **no longer `JS-013`** (that PDF no longer calls this directly since the 2026-09-12 cache-read redesign, `9dea24a`) | reusable |
 | FN-061 | `rmPerfPrimaryManagerFor` / `rmPerfRhFor(rmName, map)` `#L251/#L256` | RM name + map | manager / RH name | none | — | `rmPerformanceHierarchyCells` (FN-063) | reusable |
 | FN-062 | `repeatOffendersRegionKey(rec)` `#L270` | a record | region bucket — Loan iff `group_source` says Loan, else `mainRegionFor(rec.region)` | none | `normRegionKey` / `mainRegionFor` (`JS-014`) | FN-058 — **no longer `JS-013`** (that PDF no longer calls this directly since the 2026-09-12 cache-read redesign, `9dea24a`) | reusable — Loan detection via `group_source` ONLY (Movement_Log has no `project_region`) |
-| FN-063 | `rmPerformanceDrivenBy(r)` / `rmPerformanceHierarchyCells(r, map)` `#L1241/#L1269` | a result row | the "driven by" contributor list / hierarchy cells | none | FN-061 | table + PDF renderers | reusable |
+| FN-063 | `rmPerformanceHierarchyCells(r, map)` `#L1269` | a result row | hierarchy cells | none | FN-061 | table + PDF renderers | reusable |
+| FN-320 | `rmPerformanceDrivenBy(r)` `#L1241` (status corrected 2026-10-03 — see `## Version / change reference`) | a result row | the "driven by" contributor list | none | FN-061 | **none — zero real callers** (confirmed by the 2026-10-03 dead-code audit, `docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md`) | **not reusable — dead, deliberately kept.** The "Driven by" column was removed from all 4 live tables + the PDF on 2026-09-07 per explicit request (replaced by FN-063 + `totalInstances`); the function's own header comment says it's left defined "in case a future request brings a 'why' column back." Its `.gs` twin `rmPerformanceDrivenByGs_` (`GS-003` `DailyRmIssueLog.gs`) is a DIFFERENT runtime and IS actively used there (`reportRmPerformanceNow()`) — not a pair to delete symmetrically. This row previously was bundled with FN-063 and incorrectly claimed "Called by: table + PDF renderers" for both functions — wrong for this one; `JS-022`'s own FN-155 row already had the correct unused status, this file's FN-063/064 row just hadn't been updated to match. |
 | FN-064 | `sortRmPerformanceByPriority` / `ByScore` / `filterRmPerformanceWorst` / `filterRmPerformanceRankable(list)` `#L1297/#L839/#L1322/#L1338` | a result list | sorted / filtered list | none | — | `JS-022`, `JS-013` | reusable |
 
 ## Config constants — `CFG-XXX` sub-table
@@ -221,6 +222,18 @@ leadership exclusion, and `computeRmPerformanceByRegion`. `Called by`
 cells for `FN-052`/`FN-060`/`FN-062` corrected 2026-09-15 (weekly doc
 spot-check, cycle 2) for the `JS-013` dependency-edge change above; no
 other content re-verified against `HEAD` this pass.
+
+**2026-10-03** (doc-accuracy fix, no code change): the 2026-10-03
+dead-code audit (`docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md`) found
+the old `FN-063` row bundled `rmPerformanceDrivenBy` and
+`rmPerformanceHierarchyCells` under one `Called by: table + PDF
+renderers` claim — true for the second, false for the first
+(`rmPerformanceDrivenBy` has had zero real callers since 2026-09-07 per
+its own header comment, correctly reflected in `JS-022`'s FN-155 row
+already, just never carried back to this file). Split into `FN-063`
+(`rmPerformanceHierarchyCells` only, unchanged claim) and new `FN-320`
+(`rmPerformanceDrivenBy`, correctly marked zero-callers/deliberately-kept
+dead code). No source line moved; `#L1241`/`#L1269` unchanged.
 
 ## Revalidation trigger
 
