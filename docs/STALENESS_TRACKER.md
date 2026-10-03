@@ -99,7 +99,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `MovementTracker.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `OpsChecklistRunner.gs` | `4c99f7f` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
+| `OpsChecklistRunner.gs` | `a325f00` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `OvernightEmailer.gs` | `bed9dd2` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `RmHierarchy.gs` | `ca7802c` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
 | `SlaEngine.gs` | `20cfec4` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
