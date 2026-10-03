@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit `a325f00` |
+| **Last Verified** | 2026-10-03 against commit `ad481cf` |
 
 ## Purpose / reason to exist
 
@@ -180,16 +180,22 @@ The live `Feature_Usage` tab; schema defined by `FEATURE_USAGE_COLUMNS`
   count incremented and `first_seen_at` preserved, blank-`first_seen_at`
   fallback) and `recordComponentUsage`'s input-validation/throttle/
   no-sheet-no-op guards are covered by real assertions in
-  `tests/frontend-harness.html` (section 2j, 12 assertions, full suite
-  168/168) — confirmed to make zero real network calls in that harness
+  `tests/frontend-harness.html` (section 2j, 14 assertions incl. the
+  Part 6 restart/repeated-session boundary case, full suite 170/170) —
+  confirmed to make zero real network calls in that harness
   (verified directly: `read_network_requests` showed no `googleapis.com`
-  entries on a fresh page load exercising both call sites).
+  entries on a fresh page load exercising both call sites). Part 6 also
+  added `checkStaleComponents_` boundary coverage on the `.gs` side:
+  exactly-30-days-not-stale, 30-days-plus-1-minute-is-stale, a blank/
+  malformed `last_used_at` treated as never-used (not a parse crash),
+  and two independent calls against the same persistently-stale data
+  returning identical results (no hidden dedup/restart-sensitive state).
 - **Evidence:** source line citations above; `tests/frontend-harness.html`
-  section 2j; `python3 test/run-gs-tests-headless.py` (1247/1247,
-  `Tests_OpsChecklistRunner.gs`'s new `checkStaleComponents_` assertions);
-  `docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md`.
-- **Status:** Closed + Monitored 2026-10-03 — both the writer (Part 3)
-  and the reader (Part 4, `checkStaleComponents_`) now exist and are
+  section 2j; `python3 test/run-gs-tests-headless.py` (1254/1254,
+  `Tests_OpsChecklistRunner.gs`'s `checkStaleComponents_` +
+  Part 6 boundary assertions); `docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md`.
+- **Status:** Closed + Monitored 2026-10-03 — writer (Part 3), reader
+  (Part 4), and boundary-case test coverage (Part 6) all exist and are
   tested end-to-end (write → upsert → weekly read → email summary).
 
 ## Version / change reference
@@ -200,6 +206,13 @@ the dead-code-audit follow-up (`docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md`).
 **2026-10-03** (`a325f00`, Part 4, same day): `OpsChecklistRunner.gs`'s
 `checkStaleComponents_` added as this tab's first reader, closing the
 write-only gap this record originally flagged.
+
+**2026-10-03** (`ad481cf`, Part 6 — Testing and Validation):
+boundary-case test coverage added on both sides — see Validation above
+for the full list (exact-30-day boundary, malformed/missing data,
+repeated-run/restart consistency on the `.gs` side; restart/repeated-
+session throttle behavior on the browser side). No production code
+changed — test-only commit.
 
 ## Revalidation trigger
 

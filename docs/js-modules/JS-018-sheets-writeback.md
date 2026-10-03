@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit `aa6f71b` |
+| **Last Verified** | 2026-10-03 against commit `ad481cf` |
 
 ## Purpose / reason to exist
 
@@ -219,6 +219,15 @@ confirmed zero `googleapis.com` network calls on a fresh page load via
 direct `read_network_requests` inspection, both with and against
 unmodified `git stash`ed code (ruling out a pre-existing unrelated 401
 as a regression this change introduced).
+
+**2026-10-03** (`ad481cf`, Part 6 — Testing and Validation): 2 more
+assertions added to section 2j covering the "restart" / "repeated
+session" boundary case explicitly — a second `recordComponentUsage`
+call for an already-recorded component in the SAME session is a no-op
+(throttle `Set` stays at one entry), and after a simulated restart
+(fresh `Set`, matching a real hard page reload) the same component is
+recorded again rather than staying permanently throttled by state that
+no longer exists. Section 2j is now 14 assertions; full suite 170/170.
 
 ## Revalidation trigger
 

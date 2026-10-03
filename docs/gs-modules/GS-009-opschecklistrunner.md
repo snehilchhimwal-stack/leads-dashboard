@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit `a325f00` |
+| **Last Verified** | 2026-10-03 against commit `ad481cf` |
 
 ## Purpose / reason to exist
 
@@ -189,6 +189,24 @@ automates); `CLAUDE.md` (the three-registration rule, `CHECKLIST-006`);
   (`Tests_OpsChecklistRunner.gs`, last green run); the user's Apps
   Script test confirmation this session; `a325f00` +
   `python3 test/run-gs-tests-headless.py` (1247/1247) for Part 4.
+  **Revalidated again 2026-10-03** (Part 6 — Testing and Validation,
+  `ad481cf`): 7 new boundary-case assertions added to
+  `checkStaleComponents_`'s coverage — exactly-30-days is NOT stale
+  (`ageDays > STALE_COMPONENT_DAYS_GS_` is strict, so the boundary
+  itself reads as recent), 30 days + 1 minute IS stale, a blank/
+  malformed `last_used_at` on an existing row never throws and is
+  treated as never-used (not misparsed into a bogus `ageDays`), and two
+  independent calls against identical persistently-stale data return
+  byte-identical results — covering this function's "repeated alerts"
+  and "script restart" acceptance cases (it is a pure read with no
+  module-level mutable state, unlike the browser-side session throttle,
+  so there is no dedup/warm-up behavior to lose between runs). Boundary
+  timestamps are built via `opsTestLocalDateString_`
+  (`Tests_OpsChecklistRunner.gs`), which round-trips through the SAME
+  local-time `Date` field getters `parseFeatureUsageTimestampGs_` itself
+  uses — not a hardcoded IST-looking string literal — so the tight
+  (1-minute-margin) boundary assertion holds regardless of the test
+  runtime's actual local timezone. Full suite `1254/1254`.
 - **Status:** Validated 2026-10-03.
 
 ## Version / change reference
@@ -208,6 +226,11 @@ Reads `Feature_Usage` (`SHEET-018`, new 2026-10-03, written by Part 3's
 — `setupWeeklyOpsChecklistTrigger()` does not need re-running for this
 change (a new check, not a new schedule — see "Requires `setupXxx()`
 re-run when" above).
+
+**2026-10-03** (`ad481cf`, Part 6 — Testing and Validation): no
+production code changed — 7 new boundary-case assertions added to
+`Tests_OpsChecklistRunner.gs` for `checkStaleComponents_` (see
+Validation above for the full list). Test-only commit.
 
 ## Revalidation trigger
 
