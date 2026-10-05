@@ -114,10 +114,13 @@ function runOvernightEmailerTests_() {
     TestAssert_(!!normalDraft, 'sendOvernightMorningEmails: the normal per-A1 bucket email went to the A1\'s own address');
     TestAssert_(!!chDraft, 'sendOvernightMorningEmails: the CH-level report went to ops+CH addresses');
 
-    // Lead IDs only appear in the HTML body's per-lead table — the plain
-    // body is deliberately just a one-line count summary (by design, see
-    // sendOneOvernightEmail_'s own plainBody construction), never a
-    // per-lead listing.
+    // Lead IDs are in the HTML body's per-lead table AND (since the 2026-10-05 email audit P2) in the plain-text part too — it
+    // used to be a one-line count stub, so a text-only client or preview saw an email with no leads in it.
+    TestAssertContains_(normalDraft.body, 'L-A', 'sendOvernightMorningEmails: the PLAIN-text part lists lead A too (not a count-only stub)');
+    TestAssertContains_(normalDraft.body, 'L-B', 'sendOvernightMorningEmails: the PLAIN-text part lists lead B too');
+    TestAssertContains_(normalDraft.body, 'L-DUP-2', 'sendOvernightMorningEmails: the PLAIN-text part lists the surviving duplicate copy too');
+    TestAssert_(normalDraft.body.indexOf('L-DUP-1') === -1 && normalDraft.body.indexOf('L-CH') === -1, 'sendOvernightMorningEmails: the plain-text part, like the HTML, omits the discarded copy and the CH-held lead');
+    TestAssertContains_(chDraft.body, 'L-CH', 'sendOvernightMorningEmails: the CH-level report\'s plain-text part lists the CH-held lead');
     TestAssertContains_(normalDraft.htmlBody, 'L-A', 'sendOvernightMorningEmails: bucket email lists lead A');
     TestAssertContains_(normalDraft.htmlBody, 'L-B', 'sendOvernightMorningEmails: bucket email lists lead B (same A1, different RM)');
     TestAssertContains_(normalDraft.htmlBody, 'L-DUP-2', 'sendOvernightMorningEmails: dedup keeps the FURTHER-progressed duplicate copy (Suspect over Not Updated)');
@@ -893,6 +896,42 @@ function runOvernightEmailerTests_() {
       sendThreadedGmailReply_('thr-x', TEST_EMAIL_PRIMARY_, '', 'Subject\r\nBcc: evil@x.com', 'plain', '<p>html</p>');
       const sentRaw = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[repliesBefore].raw);
       TestAssert_(sentRaw.indexOf('\r\nBcc: evil@x.com') === -1 && /Subject: Subject Bcc: evil@x\.com/.test(sentRaw), 'sendThreadedGmailReply_: a line break in the subject is collapsed — it can never become a second header');
+    }
+
+    // ---- email audit P2: the plain-text part of the 10:00 and 13:00 emails lists their leads ----
+    {
+      // 10:00 combined email: Section 1 empty-state + a Checkpoint 1 lead.
+      const ssM = P1_newSs([P1_flaggedLead('L-P2-S2')]);
+      const aiLogM = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-p2m', P1_snapshot('L-P2-S2'), '', '', '', '']]);
+      const section2 = { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1', rowNumbers: [2], snapshotEntries: JSON.parse(P1_snapshot('L-P2-S2')) };
+      const before = TestGmailLog_.drafts.length;
+      sendCombinedMorningEmail_(ssM, ensureOvernightLogSheet_(ssM), aiLogM, 'Pune', null, section2, 'test date', istDayKeyGs_(now), now, win, {}, null);
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, '10:00 plain text: the Section-2-only email is sent');
+      const d = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+      TestAssertContains_(d.body, 'L-P2-S2', '10:00 plain text: lists the Checkpoint 1 lead (not a count-only stub)');
+      TestAssertContains_(d.body, 'Section 1 - Overnight Leads', '10:00 plain text: labels Section 1');
+      TestAssertContains_(d.body, 'No overnight leads for your team today.', '10:00 plain text: shows Section 1\'s empty state');
+      TestAssertContains_(d.body, 'Section 2 - Previous Day 17:00 All-Issues Follow-up', '10:00 plain text: labels Section 2');
+      TestAssertContains_(d.body, 'Still open — Follow-up Overdue', '10:00 plain text: carries the lead\'s current state');
+      TestAssertContains_(d.body, 'Combined morning digest for Pune', '10:00 plain text: still opens with the one-line summary');
+      TestAssertEqual_(d.body.split('Regards,').length - 1, 1, '10:00 plain text: one signature');
+
+      // 13:00 threaded reply.
+      const ssF = P1_newSs([P1_flaggedLead('L-P2-S2B')]);
+      const ovLogF = ensureOvernightLogSheet_(ssF);
+      ovLogF.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p2f', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test p2f']);
+      ssF._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-p2f', P1_snapshot('L-P2-S2B'), P1_checkpoint1('L-P2-S2B'), now, '', '']]);
+      const repliesBefore = TestGmailLog_.threadReplies.length;
+      P1_withSs(ssF, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore + 1, '13:00 plain text: the reply is sent');
+      const raw = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[repliesBefore].raw);
+      const plainPart = raw.split('Content-Type: text/html')[0];
+      TestAssertContains_(plainPart, 'L-P2-S2B', '13:00 plain text: the plain-text part lists the Checkpoint 2 lead');
+      TestAssertContains_(plainPart, '1pm follow-up for Pune', '13:00 plain text: still opens with the one-line summary');
+      TestAssertContains_(plainPart, 'Section 2 - Previous Day 17:00 All-Issues Follow-up', '13:00 plain text: labels Section 2');
+      TestAssertContains_(plainPart, 'Nothing still unresolved from this morning', '13:00 plain text: shows Section 1\'s empty state');
     }
 
     TestAssertOnlyTestEmails_();

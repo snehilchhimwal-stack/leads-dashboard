@@ -510,6 +510,14 @@ code*, one bullet per plan step as each lands.
   carry zero leads. If a BLOCKED alert fires, fix the named cause (a bad cell in `Manager_Directory`
   / `Region_Recipients`, or a content/count mismatch that is a code bug) and run the job's `…Now`
   function by hand — the 13:00 job can be re-run the same day because a blocked reply writes no state.
+- **P2 — the plain-text part is a real email, not a stub.** Every report email's plain-text body is
+  now rendered from the *same opts object* as its HTML (`plainTextFromReportOptsGs_` /
+  `plainTextReportGs_` / `plainTextTwoSectionGs_`, `EmailInfra.gs`): title, region, KPIs, action,
+  every section's heading + table rows, footer, one signature — so a text-only client or a phone
+  preview shows the leads, and the two parts cannot describe different content. Each email still
+  opens with its old one-line count summary. The gate (P1) now requires every counted lead id in
+  the plain text **and** the HTML. A missing table cell now renders blank in both parts (it used to
+  print the word "undefined" in the HTML).
 
 ### 4.4 GitHub repo access
 

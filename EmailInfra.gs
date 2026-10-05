@@ -420,9 +420,9 @@ function visibleTextOfHtmlGs_(html) {
 // Normalizes a message (CR/LF in the subject collapsed — a header can never carry a line break) and returns
 // { msg: <the exact payload that will be sent>, problems: [...] }. `msg` = { to, cc, subject, plainBody, htmlBody, leadIds }.
 // leadIds (optional) is the list of lead ids this report email CLAIMS to report: when given, it must be non-empty and every
-// id must appear in the visible text of the HTML body — a report that names no leads, or whose body does not contain the
-// leads it counts, is never sent. Omit leadIds for a non-report mail. (The plain-text part is a one-line stub today and is
-// only checked for being non-blank; the next plan step gives it the lead list and then requires the ids there too.)
+// id must appear in BOTH the visible text of the HTML body and the plain-text body (email audit P2 gave the plain part the
+// lead list too) — a report that names no leads, or whose body does not contain the leads it counts, is never sent. Omit
+// leadIds for a non-report mail.
 function prepareOutgoingEmailGs_(msg) {
   const m = msg || {};
   const to = Array.isArray(m.to) ? m.to.join(',') : String(m.to == null ? '' : m.to).trim();
@@ -445,8 +445,10 @@ function prepareOutgoingEmailGs_(msg) {
     const ids = (m.leadIds || []).map(function (id) { return String(id == null ? '' : id).trim(); }).filter(Boolean);
     if (!ids.length) {
       problems.push('the email reports no leads — nothing to send');
-    } else if (htmlBody !== undefined) {
-      const missingHtml = ids.filter(function (id) { return visible.indexOf(id) === -1; });
+    } else {
+      const missingPlain = ids.filter(function (id) { return plainBody.indexOf(id) === -1; });
+      const missingHtml = htmlBody === undefined ? [] : ids.filter(function (id) { return visible.indexOf(id) === -1; });
+      if (missingPlain.length) problems.push('lead(s) counted but missing from the plain-text body: ' + missingPlain.slice(0, 5).join(', '));
       if (missingHtml.length) problems.push('lead(s) counted but missing from the HTML body: ' + missingHtml.slice(0, 5).join(', '));
     }
   }
@@ -472,6 +474,46 @@ function sendGuardedEmailGs_(msg, label) {
   return withSendRetry_(function () {
     return GmailApp.createDraft(m.to, m.subject, m.plainBody, options).send();
   }, label);
+}
+
+// ---- Plain-text twin of a report email (email audit P2 / F13) ----
+// The plain-text part used to be a one-line stub ("... Open this email in Gmail for the full breakdown."), so a text-only
+// client or preview showed an email with no leads in it. This renders the SAME opts object the HTML is built from, so the two
+// parts can never describe different content.
+function plainTextFromReportOptsGs_(opts) {
+  const o = opts || {};
+  const lines = [];
+  lines.push(String(o.title || ''));
+  const regionLine = o.regionLabel || (o.region ? 'Region: ' + o.region : '');
+  if (regionLine) lines.push(String(regionLine));
+  if (o.subtitle) lines.push(String(o.subtitle));
+  const kpis = (o.kpis || []).map(function (k) { return k.value + ' ' + k.label; });
+  if (kpis.length) lines.push(kpis.join(' | '));
+  if (o.action) { lines.push(''); lines.push('Recommended action: ' + o.action); }
+  (o.sections || []).forEach(function (sec) {
+    lines.push('');
+    if (sec.regionBand) lines.push('== ' + sec.regionBand + ' ==');
+    lines.push(String(sec.heading || '') + (sec.subheading ? ' - ' + sec.subheading : ''));
+    lines.push('  ' + (sec.columns || []).join(' | '));
+    (sec.rows || []).forEach(function (row) {
+      lines.push('  ' + row.map(function (c) { return c == null ? '' : String(c); }).join(' | '));
+    });
+  });
+  if (o.footerNote) { lines.push(''); lines.push(String(o.footerNote)); }
+  return lines.join('\n');
+}
+
+// Single-section email: the section text plus the same signature the HTML carries.
+function plainTextReportGs_(opts) {
+  return plainTextFromReportOptsGs_(opts) + '\n\nRegards,\nHomesfy Lead Ops';
+}
+
+// Two-section email (10:00 digest, 13:00 reply): both sections, labelled, then one signature.
+function plainTextTwoSectionGs_(section1Opts, section2Opts) {
+  return 'Section 1 - ' + section1Opts.title + '\n' + plainTextFromReportOptsGs_(section1Opts) +
+    '\n\n----------------------------------------\n\n' +
+    'Section 2 - ' + section2Opts.title + '\n' + plainTextFromReportOptsGs_(section2Opts) +
+    '\n\nRegards,\nHomesfy Lead Ops';
 }
 
 // Split into small independently-retried steps, with a flush() right
@@ -750,7 +792,8 @@ function renderOvernightReportEmailHTML_(opts) {
     }).join('') + '</tr>';
     const bodyRows = sec.rows.map(function (row, i) {
       return '<tr style="' + (i > 0 ? 'border-top:1px solid #f0f0f0;' : '') + '">' +
-        row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(String(cell)) + '</td>'; }).join('') +
+        // esc_ already maps null/undefined to '' — String(cell) first turned a missing cell into the literal text "undefined".
+        row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(cell) + '</td>'; }).join('') +
         '</tr>';
     }).join('');
     const regionBandHtml = sec.regionBand

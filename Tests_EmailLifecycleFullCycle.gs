@@ -388,8 +388,13 @@ function runEmailLifecycleFullCycleTests_() {
       sendOvernightFollowupEmails();
       TestAssertEqual_(TestGmailLog_.threadReplies.length, rB + 1, 'Futwork legacy rows 13:00: ONE reply');
       const replyB = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[rB].raw);
-      TestAssertEqual_(countOf_(replyB, 'L-LEG-A'), 1, 'Futwork legacy rows 13:00: a lead is NOT repeated once per row (the merged lists are de-duplicated)');
-      TestAssertEqual_(countOf_(replyB, 'L-LEG-B'), 1, 'Futwork legacy rows 13:00: the other lead appears exactly once too');
+      // The reply is multipart/alternative: a plain-text part (which since the 2026-10-05 email audit P2 lists the leads too) and an
+      // HTML part. Count per part — each lead must appear exactly once in EACH, never once per old row.
+      const replyBHtmlPart = replyB.split('Content-Type: text/html')[1] || '';
+      const replyBPlainPart = replyB.split('Content-Type: text/html')[0] || '';
+      TestAssertEqual_(countOf_(replyBHtmlPart, 'L-LEG-A'), 1, 'Futwork legacy rows 13:00: a lead is NOT repeated once per row (the merged lists are de-duplicated)');
+      TestAssertEqual_(countOf_(replyBHtmlPart, 'L-LEG-B'), 1, 'Futwork legacy rows 13:00: the other lead appears exactly once too');
+      TestAssertEqual_(countOf_(replyBPlainPart, 'L-LEG-A'), 1, 'Futwork legacy rows 13:00: the plain-text part lists a lead exactly once too');
       const afterB13 = logB.getRange(2, 1, 2, 14).getValues();
       TestAssert_(afterB13[0][12].length < 2000 && afterB13[1][12].length < 2000, 'Futwork legacy rows 13:00: the Checkpoint 2 cell stays small (no multiplied copies)');
     }

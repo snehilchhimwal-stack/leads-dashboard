@@ -299,6 +299,25 @@ function runAllIssuesEmailerTests_() {
       TestAssertEqual_(logSheetB.getLastRow(), rowsBefore, 'sendOneAllIssuesEmail_: recipient "' + badTo + '" — no AllIssues_Log row for an email that never went out');
     });
 
+    // ---- email audit P2: the plain-text part lists the leads (it used to be a one-line count stub) ----
+    {
+      const logSheetP = ensureAllIssuesLogSheet_(ss);
+      const before = TestGmailLog_.drafts.length;
+      const resP = sendOneAllIssuesEmail_(ss, logSheetP, 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+        [{ lead_id: 'L-PLAIN-1', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'call them' },
+         { lead_id: 'L-PLAIN-2', RM: 'Test RM Two', TL: 'Test A1 One', status: 'Suspect', issueLabel: "Behind on Today's Calls", followup: undefined }], '17 Aug 2026', istDayKeyGs_(now), now, win);
+      TestAssertEqual_(resP, null, 'sendOneAllIssuesEmail_ (P2): a normal bucket sends successfully');
+      const dP = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, 'sendOneAllIssuesEmail_ (P2): exactly one email');
+      ['L-PLAIN-1', 'L-PLAIN-2'].forEach(function (id) {
+        TestAssert_(dP.htmlBody.indexOf(id) !== -1 && dP.body.indexOf(id) !== -1, 'sendOneAllIssuesEmail_ (P2): ' + id + ' is in BOTH the HTML and the plain-text part');
+      });
+      TestAssertContains_(dP.body, 'Not Updated', 'sendOneAllIssuesEmail_ (P2): the plain-text part carries the issue');
+      TestAssertContains_(dP.body, 'call them', 'sendOneAllIssuesEmail_ (P2): …and the suggested follow-up');
+      TestAssert_(dP.body.indexOf('undefined') === -1 && dP.htmlBody.indexOf('undefined') === -1, 'sendOneAllIssuesEmail_ (P2): a lead with no follow-up text renders blank, never "undefined", in either part');
+      TestAssertContains_(dP.body, 'Leads with issue for Pune', 'sendOneAllIssuesEmail_ (P2): the plain-text part still opens with the one-line summary');
+    }
+
     // ---- notifyChLevelIssuesGs_: no leads -> nothing sent, and no ops noise either ----
     {
       const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];

@@ -412,7 +412,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
       return;
     }
 
-    const html = noteBanner.html + renderOvernightReportEmailHTML_({
+    const reportOpts = {
       title: 'Leads With Issue',
       region: region,
       subtitle: 'CH-level — ' + chName + ' · Google, Non-UTM/Search · last 48h',
@@ -431,10 +431,10 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
         };
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).',
-    });
-    const plainBody = noteBanner.plain +
-      'Region: ' + region + '\n' + 'RM(s): ' + entry.rmNames.join(', ') + '\n' +
-      allLeads.length + ' flagged lead(s) across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
+    };
+    const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
+    // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
+    const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
 
     try {
       sendGuardedEmailGs_({
@@ -493,7 +493,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     })
     : rmKeys.map(function (rm) { return makeRmSection_(rm, byRM[rm].leads); });
 
-  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_({
+  const reportOpts = {
     title: 'Leads With Issue',
     region: headerOpts.region,
     regionLabel: headerOpts.regionLabel,
@@ -506,9 +506,11 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, Follow-up Overdue, Behind on Today\'s Calls, Stuck 48h+).',
     sections: sections,
     footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
-  });
+  };
+  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(reportOpts);
+  // Plain-text part = a one-line count summary + the full lead list, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
-    ' across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
+    ' across ' + rmKeys.length + ' RM(s).\n\n' + plainTextReportGs_(reportOpts);
 
   Logger.log('All-issues email recipients for ' + region + bucketNote + ': ' + rec.source);
   let sentMessage;

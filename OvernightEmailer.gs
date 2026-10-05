@@ -203,7 +203,7 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
       return;
     }
 
-    const html = noteBanner.html + renderOvernightReportEmailHTML_({
+    const reportOpts = {
       title: 'Overnight Leads',
       region: region,
       subtitle: 'CH-level — ' + chName,
@@ -222,11 +222,10 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
         };
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically.',
-    });
-    const plainBody = noteBanner.plain +
-      'Region: ' + region + '\n' +
-      'RM(s): ' + entry.rmNames.join(', ') + '\n' +
-      allLeads.length + ' lead(s) across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
+    };
+    const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
+    // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
+    const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
 
     // Wrapped in its own try/catch, same reasoning as notifyOpsAlertGs_ —
     // a failure to send THIS report must never take down the real
@@ -425,9 +424,11 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     plain: 'TEST MODE — real send suppressed. This would really have gone to: ' + rec.originalTo + (rec.originalCc ? ' (cc: ' + rec.originalCc + ')' : ' (no cc)') + '\n\n',
   } : null;
 
-  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(buildOvernightSectionOptsGs_(region, leads, dateLabel, win));
+  const sectionOpts = buildOvernightSectionOptsGs_(region, leads, dateLabel, win);
+  const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(sectionOpts);
+  // Plain-text part = a one-line count summary + the full lead list, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Overnight leads for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
-    ' still open across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
+    ' still open across ' + rmKeys.length + ' RM(s).\n\n' + plainTextReportGs_(sectionOpts);
 
   Logger.log('Morning email recipients for ' + region + bucketNote + ': ' + rec.source);
   let sentMessage;
@@ -767,9 +768,10 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   }
 
   const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
+  // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
   const plainBody = 'Combined morning digest for ' + regionDisplay + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
-    section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + activeCheckpoint1Count +
-    ' unresolved lead(s). Open this email in Gmail for the full breakdown.';
+    section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + activeCheckpoint1Count + ' unresolved lead(s).\n\n' +
+    plainTextTwoSectionGs_(section1Opts, section2Opts);
 
   // The leads this email counts: Section 1's overnight leads + Checkpoint 1's still-unresolved leads. The send gate checks
   // every one of them is actually in the body that goes out.
@@ -1578,9 +1580,10 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   }
 
   const html = (testModeBanner ? testModeBanner.html : '') + renderTwoSectionEmailHTML_(section1Opts, section2Opts);
+  // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + region + ': Section 1 (Overnight Follow-up) ' +
-    section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count +
-    ' unresolved lead(s). Open this email in Gmail for the full breakdown.';
+    section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count + ' unresolved lead(s).\n\n' +
+    plainTextTwoSectionGs_(section1Opts, section2Opts);
 
   // The send-safety gate runs ONCE here, on the exact payload both send paths below would use, with the leads this email
   // counts (Section 1's still-unresolved + Checkpoint 2's still-unresolved): an email that is empty, has a bad recipient,

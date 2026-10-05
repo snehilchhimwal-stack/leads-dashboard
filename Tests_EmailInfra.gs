@@ -390,7 +390,7 @@ function runEmailInfraTests_() {
     TestAssertEqual_(visibleTextOfHtmlGs_(null), '', 'visibleTextOfHtmlGs_: null is empty text');
 
     // ---- prepareOutgoingEmailGs_ ----
-    const goodMsg = { to: TEST_EMAIL_PRIMARY_, cc: TEST_EMAIL_CH_, subject: 'S', plainBody: 'plain', htmlBody: '<p>html L-1</p>', leadIds: ['L-1'] };
+    const goodMsg = { to: TEST_EMAIL_PRIMARY_, cc: TEST_EMAIL_CH_, subject: 'S', plainBody: 'plain L-1', htmlBody: '<p>html L-1</p>', leadIds: ['L-1'] };
     TestAssertEqual_(prepareOutgoingEmailGs_(goodMsg).problems.length, 0, 'prepareOutgoingEmailGs_: a complete, consistent report email passes');
     TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { to: '' })).problems.length > 0, 'prepareOutgoingEmailGs_: a missing recipient is a problem');
     TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { to: 'nope' })).problems.length > 0, 'prepareOutgoingEmailGs_: an invalid recipient is a problem');
@@ -403,6 +403,8 @@ function runEmailInfraTests_() {
     TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { htmlBody: '<div><table><tr><td></td></tr></table></div>' })).problems.length > 0, 'prepareOutgoingEmailGs_: an HTML body with no visible text is a problem');
     TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { leadIds: [] })).problems.length > 0, 'prepareOutgoingEmailGs_: a report that names no leads is a problem — nothing to send');
     TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { leadIds: ['L-1', 'L-MISSING'] })).problems.some(function (p) { return /L-MISSING/.test(p); }), 'prepareOutgoingEmailGs_: a lead the email counts but whose id is NOT in the HTML body is a problem (and is named)');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { plainBody: 'plain, no ids' })).problems.some(function (p) { return /plain-text body/.test(p); }), 'prepareOutgoingEmailGs_ (P2): a counted lead missing from the PLAIN part alone is caught');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { htmlBody: '<p>html, no ids</p>' })).problems.some(function (p) { return /HTML body/.test(p); }), 'prepareOutgoingEmailGs_ (P2): …and one missing from the HTML part alone is caught');
     TestAssertEqual_(prepareOutgoingEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'S', plainBody: 'p' }).problems.length, 0, 'prepareOutgoingEmailGs_: leadIds omitted = not a report email, no lead check (an ops note can still pass)');
     TestAssertEqual_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { subject: 'Line1\r\nBcc: evil@x.com' })).msg.subject, 'Line1 Bcc: evil@x.com', 'prepareOutgoingEmailGs_: CR/LF in the subject is collapsed so a header can never carry a line break');
 
@@ -414,7 +416,7 @@ function runEmailInfraTests_() {
     TestAssertEqual_(guardedDraft.to, TEST_EMAIL_PRIMARY_, 'sendGuardedEmailGs_: the exact validated recipient reaches the provider');
     TestAssertEqual_(guardedDraft.cc, TEST_EMAIL_CH_, 'sendGuardedEmailGs_: the exact validated Cc reaches the provider');
     TestAssertEqual_(guardedDraft.subject, 'S', 'sendGuardedEmailGs_: the exact validated subject reaches the provider');
-    TestAssertEqual_(guardedDraft.body, 'plain', 'sendGuardedEmailGs_: the exact validated plain body reaches the provider');
+    TestAssertEqual_(guardedDraft.body, 'plain L-1', 'sendGuardedEmailGs_: the exact validated plain body reaches the provider');
     TestAssertEqual_(guardedDraft.htmlBody, '<p>html L-1</p>', 'sendGuardedEmailGs_: the exact validated HTML body reaches the provider');
 
     draftsBefore = TestGmailLog_.drafts.length;
@@ -431,10 +433,46 @@ function runEmailInfraTests_() {
     // The retry rule is unchanged underneath the gate: a definitive "operation not allowed" is retried, then delivered once.
     GmailApp = TestMockGmailApp_({ failSendCountFor: (function () { const o = {}; o[TEST_EMAIL_PRIMARY_] = 1; return o; })() });
     draftsBefore = TestGmailLog_.drafts.length;
-    const retried = sendGuardedEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'R', plainBody: 'p', htmlBody: '<p>L-9</p>', leadIds: ['L-9'] }, 'test retry through gate');
+    const retried = sendGuardedEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'R', plainBody: 'p L-9', htmlBody: '<p>L-9</p>', leadIds: ['L-9'] }, 'test retry through gate');
     TestAssert_(!!retried && typeof retried.getThread === 'function', 'sendGuardedEmailGs_: still returns the sent message (so callers can read its thread)');
     TestAssertEqual_(TestGmailLog_.drafts.length - draftsBefore, 2, 'sendGuardedEmailGs_: one definitive refusal is retried (2 drafts: the refused one + the delivered one) — unchanged withSendRetry_ behavior');
     GmailApp = TestMockGmailApp_();
+
+    // ============ 2026-10-05 email audit P2: a real plain-text part, and no "undefined" cells ============
+    // A missing cell used to render as the literal word "undefined" (String(undefined) before esc_).
+    const htmlNullCell = renderOvernightReportEmailHTML_({
+      title: 'T', region: 'R', subtitle: 'S', kpis: [],
+      sections: [{ heading: 'H', columns: ['A', 'B', 'C'], rows: [['x', undefined, null], [0, 'z', '']] }],
+    });
+    TestAssert_(htmlNullCell.indexOf('undefined') === -1 && htmlNullCell.indexOf('null') === -1, 'renderOvernightReportEmailHTML_: a null/undefined cell renders blank, never the text "undefined"/"null"');
+    TestAssertContains_(htmlNullCell, '>0<', 'renderOvernightReportEmailHTML_: a numeric 0 cell still renders as "0"');
+
+    const plainOpts = {
+      title: 'Overnight Leads', region: 'Pune', subtitle: '1 Oct 5pm - 2 Oct 9am',
+      kpis: [{ value: 2, label: 'Leads Assigned', bg: '#fff', fg: '#000' }],
+      action: 'Call them.',
+      sections: [{ heading: 'Test RM One', subheading: 'Manager: Test A1 One', columns: ['Lead ID', 'Status'], rows: [['L-100', 'Suspect'], ['L-101', undefined]] }],
+      footerNote: 'Status is live.',
+    };
+    const plainText = plainTextFromReportOptsGs_(plainOpts);
+    ['Overnight Leads', 'Region: Pune', '1 Oct 5pm - 2 Oct 9am', '2 Leads Assigned', 'Call them.', 'Test RM One - Manager: Test A1 One', 'Lead ID | Status', 'L-100 | Suspect', 'L-101 |', 'Status is live.'].forEach(function (needle) {
+      TestAssertContains_(plainText, needle, 'plainTextFromReportOptsGs_: includes "' + needle + '"');
+    });
+    TestAssert_(plainText.indexOf('undefined') === -1, 'plainTextFromReportOptsGs_: a missing cell is blank, never "undefined"');
+    TestAssertContains_(plainTextFromReportOptsGs_({ title: 'F', regionLabel: 'Regions: Pune (1) · Thane (1)', sections: [{ regionBand: 'Pune — 1 lead', heading: 'H', columns: ['A'], rows: [['x']] }] }), 'Regions: Pune (1) · Thane (1)', 'plainTextFromReportOptsGs_: a region label replaces the "Region:" line (the Futwork email)');
+    TestAssertContains_(plainTextFromReportOptsGs_({ title: 'F', sections: [{ regionBand: 'Pune — 1 lead', heading: 'H', columns: ['A'], rows: [['x']] }] }), '== Pune — 1 lead ==', 'plainTextFromReportOptsGs_: a region band is kept');
+    TestAssertEqual_(plainTextFromReportOptsGs_({ title: 'Empty', region: 'Pune', subtitle: 'Nothing today', kpis: [], sections: [] }).indexOf('Lead ID'), -1, 'plainTextFromReportOptsGs_: an empty-state section prints no table header');
+    TestAssertContains_(plainTextReportGs_(plainOpts), 'Regards,\nHomesfy Lead Ops', 'plainTextReportGs_: carries the same signature the HTML does');
+    const twoPlain = plainTextTwoSectionGs_(plainOpts, { title: 'Checkpoint 1', region: 'Pune', subtitle: 'None', kpis: [], sections: [] });
+    TestAssertContains_(twoPlain, 'Section 1 - Overnight Leads', 'plainTextTwoSectionGs_: labels Section 1');
+    TestAssertContains_(twoPlain, 'Section 2 - Checkpoint 1', 'plainTextTwoSectionGs_: labels Section 2');
+    TestAssertContains_(twoPlain, 'L-100 | Suspect', 'plainTextTwoSectionGs_: lists Section 1\'s leads');
+    TestAssertEqual_(twoPlain.split('Regards,').length - 1, 1, 'plainTextTwoSectionGs_: ONE signature for the whole email, not one per section');
+    // The HTML and the plain text are rendered from the same opts, so every lead id in the HTML is in the plain text.
+    const htmlOfPlainOpts = renderOvernightReportEmailHTML_(plainOpts);
+    ['L-100', 'L-101'].forEach(function (id) {
+      TestAssert_(htmlOfPlainOpts.indexOf(id) !== -1 && plainText.indexOf(id) !== -1, 'HTML and plain text are built from the same opts: ' + id + ' is in both');
+    });
 
     TestAssertOnlyTestEmails_();
   } finally {
