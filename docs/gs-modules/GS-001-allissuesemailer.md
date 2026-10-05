@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `AllIssuesEmailer.gs` (678 lines) |
+| **Location** | `AllIssuesEmailer.gs` (695 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `6fc3f3c` — email audit P4: the 17:00 job runs under the overlap lock (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `6acea29` — email audit P7: the AllIssues_Log append is once-only (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -216,6 +216,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-05** (`dbeb7da`, email audit P2 — `docs/_planning/EMAIL_AUDIT.md` F13/F15): `sendOneAllIssuesEmail_` and `notifyChLevelIssuesGs_` build their plain-text body from the same opts as the HTML (`GS-004` `FN-325`) instead of a one-line count stub. `Tests_AllIssuesEmailer.gs` +9 assertions. **Not live until pasted.**
 
 **2026-10-05** (`6fc3f3c`, email audit P4 — `docs/_planning/EMAIL_AUDIT.md` F5): `sendAllIssuesEmails` (the trigger entry point) runs its crash-alert wrapper inside `withEmailJobLockGs_` (`GS-004` `FN-327`): an overlapping job is skipped with an ops alert (not retried); a broken lock service fails open. No `setupXxx()` re-run. `Tests_AllIssuesEmailer.gs` gained the contended / normal / fail-open lock tests. **Not live until pasted.**
+
+**2026-10-05** (`6acea29`, email audit P7 — `docs/_planning/EMAIL_AUDIT.md` F9/F10): `sendOneAllIssuesEmail_` (FN-176) appends its `AllIssues_Log` row through `appendRowOnceGs_` (`GS-004` FN-329, keyed on the thread id, column I), so a retry after a timeout that landed after the write cannot add a second snapshot row. Recipient buckets that share an address now arrive already merged from `resolveRecipientEmailsForRegion_` (`GS-004` FN-330), so one address no longer receives two separate emails from this job for the same region. No line-count change (the line count above is also corrected: it was stale). **Not live until pasted.**
 
 ## Revalidation trigger
 

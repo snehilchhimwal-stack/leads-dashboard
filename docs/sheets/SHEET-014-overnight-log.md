@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `d1caf9d` — email audit P6: `followup_sent_at` may now hold `unconfirmed <time>` (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `6acea29` — email audit P7: rows are appended once per thread id (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -203,6 +203,8 @@ Chain-B content specifically).
 **2026-10-05** (`f9728cc`, email audit P5): no change to this sheet's columns. Its description of `followup_sent_at` is corrected — the contrast with `AllIssues_Log`'s checkpoint columns ("written even on failure") no longer holds: they are now written only on delivery too (`GS-010` FN-275/FN-280).
 
 **2026-10-05** (`d1caf9d`, email audit P6): `followup_sent_at` can now hold the text `unconfirmed <yyyy-MM-dd HH:mm:ss>` instead of a bare datetime when the 13:00 send failed in a way that does not prove it was not delivered. Any reader that parses the cell as a date must tolerate that prefix. (`GS-010` FN-280; resolve per `HANDOVER.md` section 4.3.4.)
+
+**2026-10-05** (`6acea29`, email audit P7): no column changes. A row is now appended at most once per thread id (`GS-004` `appendRowOnceGs_`): a timeout that arrived after Sheets had already written the row used to make the retry append an identical second row, which the 13:00 job would then answer with a second reply. The 10:00 job also reads columns A-F (was A-B) of today's rows for its idempotency check, to know which recipients already have a row.
 
 ## Revalidation trigger
 

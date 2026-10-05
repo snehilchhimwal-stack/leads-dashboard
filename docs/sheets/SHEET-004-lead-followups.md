@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-05 against commit `6acea29` — email audit P7: one row per lead id within a single backend push (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -181,6 +181,8 @@ collated_comments, F suggested_followup, G updated_at`).
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-032`.
+
+**2026-10-05** (`6acea29`, email audit P7 — `docs/_planning/EMAIL_AUDIT.md` F17): the backend push (`GS-010` FN-235) no longer appends two rows when one `lead_id` appears twice in the same push; the later entry wins. Rows the sheet already holds twice (from before this change) are not cleaned up, and the upsert still keys on the LAST such row.
 
 ## Revalidation trigger
 

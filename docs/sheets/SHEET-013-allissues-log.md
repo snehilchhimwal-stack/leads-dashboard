@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `f9728cc` — email audit P5: `checkpoint1/2_sent_at` are written only when the email was delivered (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `6acea29` — email audit P7: rows are appended once per thread id (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -201,6 +201,8 @@ Step 2 are now written and read by a real caller — this sheet's role in
 the two-checkpoint redesign is fully wired end to end.
 
 **2026-10-05** (`f9728cc`, email audit P5 — `docs/_planning/EMAIL_AUDIT.md` F6): `checkpoint1_json`/`checkpoint1_sent_at` and `checkpoint2_json`/`checkpoint2_sent_at` are written only when the corresponding email was delivered (or deliberately not needed); they used to be written even after a failed send, which made the loaders skip the row and the same-day re-run lose that Section 2. No column changes (`GS-010` FN-275/FN-280).
+
+**2026-10-05** (`6acea29`, email audit P7): no column changes. A row is now appended at most once per thread id (`GS-004` `appendRowOnceGs_`, `GS-001` FN-176): a retry after a timeout that landed after the write no longer adds a duplicate snapshot row (which tomorrow's Checkpoint 1 would have merged and double-counted).
 
 ## Revalidation trigger
 
