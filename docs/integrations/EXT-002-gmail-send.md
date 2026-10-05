@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `fb17144` — the backend send path now goes through one safety gate (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `dbeb7da` — plain-text part now carries the lead list (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -163,6 +163,8 @@ note doesn't read as ignored.
 **Revalidated 2026-09-30** `a1a21b4`: flagged again after `EmailInfra.gs` advanced (`GS-004` `CFG-070`, same P&L head Cc mechanism extended to Thane and Navi Mumbai, no code change beyond the config map). Checked against this record's own "Revalidation trigger" list below: same conclusion as 2026-09-26 — only WHO is Cc'd changed, on two more regions; send mechanics untouched. No change to this record's content.
 
 **Revalidated 2026-10-05** `fb17144`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-323`..`FN-325`, email audit P1). The backend's `GmailApp.createDraft(...).send()` is now called from exactly one place, `sendGuardedEmailGs_`, which validates the recipient, subject, bodies and the leads an email counts BEFORE the draft is created; the Advanced Gmail Service threaded send (`sendThreadedGmailReply_`) validates and collapses CR/LF in its raw MIME headers. Ops alerts still use `GmailApp.sendEmail` by design. The browser's own `gmail.send` grant (`js/reports-gmail.js`) is unchanged — its body gate is plan step P11.
+
+**Revalidated 2026-10-05** `dbeb7da`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-325`, email audit P2). Every backend email is still a `multipart/alternative` message built from one opts object; its plain-text part now lists the leads instead of a one-line stub. No change to the send mechanism, scopes or recipients; the browser's `gmail.send` grant is unchanged.
 
 ## Revalidation trigger
 
