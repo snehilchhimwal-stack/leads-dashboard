@@ -161,15 +161,19 @@ function ensureAllIssuesLogSheet_(ss) {
  * this run as Failed — never silently swallowed.
  */
 function sendAllIssuesEmails() {
-  try {
-    sendAllIssuesEmails_();
-  } catch (e) {
-    notifyOpsAlertGs_('sendAllIssuesEmails crashed — NO All-Issues emails were sent this run', [
-      'sendAllIssuesEmails threw before completing, so nothing was sent for ANY region this run — not even the usual per-lead "not sent" report, which only runs if the function reaches its own end.',
-      'Error: ' + (e && e.stack ? e.stack : e),
-    ]);
-    throw e;
-  }
+  // Held for the whole run (withEmailJobLockGs_, EmailInfra.gs; email audit P4): this job's "already sent today" guard reads
+  // AllIssues_Log rows that are only written after each send, so an overlapping run would send every bucket twice.
+  withEmailJobLockGs_('sendAllIssuesEmails', function () {
+    try {
+      sendAllIssuesEmails_();
+    } catch (e) {
+      notifyOpsAlertGs_('sendAllIssuesEmails crashed — NO All-Issues emails were sent this run', [
+        'sendAllIssuesEmails threw before completing, so nothing was sent for ANY region this run — not even the usual per-lead "not sent" report, which only runs if the function reaches its own end.',
+        'Error: ' + (e && e.stack ? e.stack : e),
+      ]);
+      throw e;
+    }
+  });
 }
 
 /**

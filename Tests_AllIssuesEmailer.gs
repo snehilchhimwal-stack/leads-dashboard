@@ -318,6 +318,36 @@ function runAllIssuesEmailerTests_() {
       TestAssertContains_(dP.body, 'Leads with issue for Pune', 'sendOneAllIssuesEmail_ (P2): the plain-text part still opens with the one-line summary');
     }
 
+    // ---- email audit P4 (F5): the 17:00 job takes the script lock; an overlapping job is skipped, and a broken lock fails open ----
+    {
+      const realLock = LockService;
+      const denied = TestMockLockService_({ denyLock: true });
+      LockService = denied;
+      const before = TestGmailLog_.drafts.length, alertsBefore = TestGmailLog_.sent.length;
+      try { sendAllIssuesEmails(); } finally { LockService = realLock; }
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'sendAllIssuesEmails: while another email job holds the lock it sends nothing');
+      TestAssert_(TestGmailLog_.sent.slice(alertsBefore).some(function (e) { return /sendAllIssuesEmails SKIPPED/.test(e.subject); }), 'sendAllIssuesEmails: …and alerts ops that it was skipped');
+
+      const free = TestMockLockService_();
+      LockService = free;
+      try { sendAllIssuesEmails(); } finally { LockService = realLock; }
+      TestAssertEqual_(free._state.tryLockCalls, 1, 'sendAllIssuesEmails: a normal run takes the lock once');
+      TestAssertEqual_(free._state.releases, 1, 'sendAllIssuesEmails: …and releases it once');
+
+      // FAIL OPEN: with a broken lock service the job body still runs. A stubbed leads read that throws makes "the body ran"
+      // observable: the job's own crash alert fires (plus the "ran WITHOUT its lock" alert), and the error still propagates.
+      const realReadLeadsTab = readLeadsTab_;
+      readLeadsTab_ = function () { throw new Error('simulated: leads read failed'); };
+      LockService = TestMockLockService_({ throwOnTryLock: true });
+      const alertsBeforeOpen = TestGmailLog_.sent.length;
+      let propagated = false;
+      try { sendAllIssuesEmails(); } catch (e) { propagated = /leads read failed/.test(e.message); } finally { LockService = realLock; readLeadsTab_ = realReadLeadsTab; }
+      const openAlerts = TestGmailLog_.sent.slice(alertsBeforeOpen);
+      TestAssert_(propagated, 'sendAllIssuesEmails (fail open): the job body ran despite the broken lock — its own error propagated');
+      TestAssert_(openAlerts.some(function (e) { return /sendAllIssuesEmails crashed/.test(e.subject); }), 'sendAllIssuesEmails (fail open): the job\'s own crash alert fired (the body really ran)');
+      TestAssert_(openAlerts.some(function (e) { return /sendAllIssuesEmails ran WITHOUT its overlap lock/.test(e.subject); }), 'sendAllIssuesEmails (fail open): ops is told the job ran without its lock');
+    }
+
     // ---- notifyChLevelIssuesGs_: no leads -> nothing sent, and no ops noise either ----
     {
       const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];

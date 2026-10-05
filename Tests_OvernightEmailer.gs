@@ -898,6 +898,46 @@ function runOvernightEmailerTests_() {
       TestAssert_(sentRaw.indexOf('\r\nBcc: evil@x.com') === -1 && /Subject: Subject Bcc: evil@x\.com/.test(sentRaw), 'sendThreadedGmailReply_: a line break in the subject is collapsed — it can never become a second header');
     }
 
+    // ---- email audit P4 (F5): the lock wraps the 10:00 and 13:00 jobs, and FAILS OPEN ----
+    {
+      const realLock = LockService;
+      // While another email job holds the lock, neither job sends anything, and each tells ops.
+      const denied = TestMockLockService_({ denyLock: true });
+      LockService = denied;
+      const draftsBefore = TestGmailLog_.drafts.length, alertsBefore = TestGmailLog_.sent.length;
+      try {
+        sendOvernightMorningEmails();
+        sendOvernightFollowupEmails();
+      } finally { LockService = realLock; }
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'job lock: while another email job holds the lock, neither the 10:00 nor the 13:00 job sends anything');
+      const skipAlerts = TestGmailLog_.sent.slice(alertsBefore).filter(function (e) { return /SKIPPED/.test(e.subject); });
+      TestAssertEqual_(skipAlerts.length, 2, 'job lock: each skipped job alerts ops');
+      TestAssert_(skipAlerts.some(function (e) { return /sendOvernightMorningEmails SKIPPED/.test(e.subject); }) && skipAlerts.some(function (e) { return /sendOvernightFollowupEmails SKIPPED/.test(e.subject); }), 'job lock: …each naming its own job');
+
+      // A normal run takes the lock once and releases it once.
+      const free = TestMockLockService_();
+      LockService = free;
+      try { sendOvernightFollowupEmails(); } finally { LockService = realLock; }
+      TestAssertEqual_(free._state.tryLockCalls, 1, 'job lock: a normal 13:00 run takes the lock once');
+      TestAssertEqual_(free._state.releases, 1, 'job lock: …and releases it once');
+      const freeMorning = TestMockLockService_();
+      LockService = freeMorning;
+      try { sendOvernightMorningEmails(); } finally { LockService = realLock; }
+      TestAssertEqual_(freeMorning._state.releases, freeMorning._state.tryLockCalls, 'job lock: a normal 10:00 run releases every lock it took');
+
+      // FAIL OPEN: if the lock service itself errors, the jobs still run (and ops hear about it).
+      const ssOpen = P1_newSs([TestOE_leadRow_(header, { lead_id: 'L-LOCKOPEN', client_id: 'C-LOCKOPEN', RM: 'Test RM One', lead_assigned_at: midWindow })]);
+      LockService = TestMockLockService_({ throwOnGet: true });
+      const draftsBeforeOpen = TestGmailLog_.drafts.length, alertsBeforeOpen = TestGmailLog_.sent.length;
+      try {
+        const real = SpreadsheetApp;
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return ssOpen; }, flush: function () {} };
+        try { sendOvernightMorningEmails(); } finally { SpreadsheetApp = real; }
+      } finally { LockService = realLock; }
+      TestAssertEqual_(TestGmailLog_.drafts.length - draftsBeforeOpen, 1, 'job lock (fail open): a broken lock service does NOT stop the 10:00 job — its email still goes out');
+      TestAssert_(TestGmailLog_.sent.slice(alertsBeforeOpen).some(function (e) { return /sendOvernightMorningEmails ran WITHOUT its overlap lock/.test(e.subject); }), 'job lock (fail open): ops is told the job ran without its lock');
+    }
+
     // ---- email audit P3 (F1): a multi-region recipient's 13:00 replies each carry ONLY their own region's Checkpoint 2 ----
     // Production defect (1 Oct 2026): a recipient who covers Thane/SoBo/Central got three ~36 KB replies that each carried the
     // SAME merged Section 2 of all three regions (the Central thread's Checkpoint 1 listed 7 leads at 10:05, its 13:04 reply

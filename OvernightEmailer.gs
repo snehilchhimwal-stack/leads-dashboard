@@ -903,15 +903,20 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
  * this run as Failed, never silently swallowed.
  */
 function sendOvernightMorningEmails() {
-  try {
-    sendOvernightMorningEmails_();
-  } catch (e) {
-    notifyOpsAlertGs_('sendOvernightMorningEmails crashed — NO overnight morning emails were sent this run', [
-      'sendOvernightMorningEmails threw before completing, so nothing was sent for ANY region this run.',
-      'Error: ' + (e && e.stack ? e.stack : e),
-    ]);
-    throw e;
-  }
+  // Held for the whole run (withEmailJobLockGs_, EmailInfra.gs; email audit P4): this job's "already sent today" guard reads
+  // log rows that are only written after each send, so an overlapping run (manual + trigger, or a double-fired trigger)
+  // would send everything twice.
+  withEmailJobLockGs_('sendOvernightMorningEmails', function () {
+    try {
+      sendOvernightMorningEmails_();
+    } catch (e) {
+      notifyOpsAlertGs_('sendOvernightMorningEmails crashed — NO overnight morning emails were sent this run', [
+        'sendOvernightMorningEmails threw before completing, so nothing was sent for ANY region this run.',
+        'Error: ' + (e && e.stack ? e.stack : e),
+      ]);
+      throw e;
+    }
+  });
 }
 
 function sendOvernightMorningEmails_() {
@@ -1694,15 +1699,18 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
 }
 
 function sendOvernightFollowupEmails() {
-  try {
-    sendOvernightFollowupEmails_();
-  } catch (e) {
-    notifyOpsAlertGs_('sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were sent this run', [
-      'sendOvernightFollowupEmails threw before completing, so no follow-up thread was updated for ANY region this run.',
-      'Error: ' + (e && e.stack ? e.stack : e),
-    ]);
-    throw e;
-  }
+  // Held for the whole run, same reason as sendOvernightMorningEmails (see withEmailJobLockGs_, EmailInfra.gs; email audit P4).
+  withEmailJobLockGs_('sendOvernightFollowupEmails', function () {
+    try {
+      sendOvernightFollowupEmails_();
+    } catch (e) {
+      notifyOpsAlertGs_('sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were sent this run', [
+        'sendOvernightFollowupEmails threw before completing, so no follow-up thread was updated for ANY region this run.',
+        'Error: ' + (e && e.stack ? e.stack : e),
+      ]);
+      throw e;
+    }
+  });
 }
 
 function sendOvernightFollowupEmails_() {

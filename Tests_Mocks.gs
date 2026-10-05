@@ -423,6 +423,35 @@ function TestMockGmailAdvanced_(opts) {
   };
 }
 
+// Mock LockService (added 2026-10-05, email audit P4) — the real script lock is what stops two automated-email jobs from
+// overlapping. Options: `denyLock: true` makes tryLock() report "could not acquire" (another job holds it); `throwOnGet` /
+// `throwOnTryLock` make the lock service itself error (to prove the jobs fail OPEN). Every call is recorded on `_state` so a
+// test can assert the lock was taken and released exactly once.
+function TestMockLockService_(opts) {
+  const state = { getCalls: 0, tryLockCalls: 0, releases: 0, held: false };
+  const deny = !!(opts && opts.denyLock);
+  const throwOnGet = !!(opts && opts.throwOnGet);
+  const throwOnTryLock = !!(opts && opts.throwOnTryLock);
+  const lock = {
+    tryLock: function () {
+      state.tryLockCalls++;
+      if (throwOnTryLock) throw new Error('simulated: LockService.tryLock failed');
+      if (deny || state.held) return false;
+      state.held = true;
+      return true;
+    },
+    releaseLock: function () { state.releases++; state.held = false; },
+  };
+  return {
+    _state: state,
+    getScriptLock: function () {
+      state.getCalls++;
+      if (throwOnGet) throw new Error('simulated: LockService.getScriptLock failed');
+      return lock;
+    },
+  };
+}
+
 // ============================== Mock Utilities / ScriptApp ==============================
 
 // Wraps the REAL Utilities — formatDate/newBlob/base64EncodeWebSafe/
@@ -581,6 +610,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
   TestEnv_realGlobals_ = {
     SpreadsheetApp: SpreadsheetApp, GmailApp: GmailApp, Utilities: Utilities,
     ScriptApp: ScriptApp, Gmail: (typeof Gmail === 'undefined' ? undefined : Gmail),
+    LockService: (typeof LockService === 'undefined' ? undefined : LockService),
     TEST_MODE_OVERRIDE_EMAIL_: TEST_MODE_OVERRIDE_EMAIL_, OPS_ALERT_EMAIL_: OPS_ALERT_EMAIL_,
     CH_LEVEL_EMAIL_: CH_LEVEL_EMAIL_, ALWAYS_CC_EMAILS_: ALWAYS_CC_EMAILS_,
     LEADERSHIP_NAME_TO_EMAIL_: LEADERSHIP_NAME_TO_EMAIL_,
@@ -611,6 +641,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
   Utilities = TestMockUtilities_();
   ScriptApp = TestMockScriptApp_(scriptAppTriggers);
   Gmail = TestMockGmailAdvanced_(gmailAdvancedOpts);
+  LockService = TestMockLockService_(); // the real script lock is never touched by a test run
 
   // Confine every test's email surface to the two allowed addresses —
   // see this file's own header. Restored in TestEnv_tearDown_.
@@ -632,7 +663,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
 function TestEnv_tearDown_() {
   const g = TestEnv_realGlobals_;
   SpreadsheetApp = g.SpreadsheetApp; GmailApp = g.GmailApp; Utilities = g.Utilities;
-  ScriptApp = g.ScriptApp; Gmail = g.Gmail;
+  ScriptApp = g.ScriptApp; Gmail = g.Gmail; LockService = g.LockService;
   TEST_MODE_OVERRIDE_EMAIL_ = g.TEST_MODE_OVERRIDE_EMAIL_; OPS_ALERT_EMAIL_ = g.OPS_ALERT_EMAIL_;
   CH_LEVEL_EMAIL_ = g.CH_LEVEL_EMAIL_; ALWAYS_CC_EMAILS_ = g.ALWAYS_CC_EMAILS_;
   LEADERSHIP_NAME_TO_EMAIL_ = g.LEADERSHIP_NAME_TO_EMAIL_;

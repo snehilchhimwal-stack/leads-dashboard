@@ -525,6 +525,17 @@ code*, one bullet per plan step as each lands.
   regions got every region's Checkpoint 2 in *each* region's thread — confirmed in production on 1
   Oct 2026 (the Central thread listed 7 leads at 10:05 and 68 at 13:04; the Thane, SoBo and Central
   replies were all ~36 KB). Legacy per-region Futwork rows still join the single `Futwork` group.
+- **P4 — the three email jobs cannot overlap.** `sendOvernightMorningEmails`, `sendOvernightFollowupEmails`
+  and `sendAllIssuesEmails` each run inside `withEmailJobLockGs_` (`EmailInfra.gs`), one script-wide
+  `LockService` lock held for the whole run. Their "already sent today?" guards read log rows that
+  are written only *after* each send, so two overlapping runs (a manual `…Now` during the schedule,
+  a double-fired trigger, a slow run still going) would both send to everyone. A second job waits up
+  to 30 s, then **skips and alerts ops** ("`<job>` SKIPPED — another email job was still running"); a
+  skipped job is **not** retried — run its `…Now` function by hand once the other has finished.
+  **It fails open:** only a clear "someone else holds the lock" skips a job; if the lock service
+  itself errors, the job runs without the lock and ops get "`<job>` ran WITHOUT its overlap lock" —
+  a broken lock must never silently stop all three daily emails. If Apps Script asks to
+  re-authorize the first time you run a job after pasting this, approve it.
 
 ### 4.4 GitHub repo access
 

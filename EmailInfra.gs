@@ -476,6 +476,57 @@ function sendGuardedEmailGs_(msg, label) {
   }, label);
 }
 
+// ---- Overlapping-run lock (email audit P4 / F5) ----
+// Every "already sent today?" guard in this project reads a log row that is only WRITTEN after the send, so two runs that
+// overlap (a manual run alongside the trigger, a double-fired trigger, a slow run still going when the next one starts) both
+// see "nothing sent yet" and both send to everyone. One script-wide lock around each automated-email job makes overlap
+// impossible: a second job waits briefly, then SKIPS and tells ops (a skipped job is not retried — run it by hand once the
+// other has finished).
+//
+// FAILS OPEN: only a clear "someone else holds the lock" (tryLock returns false) skips a job. If the lock service itself
+// errors (cannot be reached, authorization problem), the job runs WITHOUT the lock and ops are alerted — a broken lock must
+// never silently stop all three daily emails, which would be a worse failure than the overlap it guards against.
+const EMAIL_JOB_LOCK_WAIT_MS_ = 30000;
+function withEmailJobLockGs_(jobName, fn) {
+  if (typeof LockService === 'undefined') {
+    Logger.log(jobName + ': LockService is unavailable here — running without the overlap lock.');
+    fn();
+    return true;
+  }
+  let lock = null;
+  let acquired = false;
+  let lockError = null;
+  try {
+    lock = LockService.getScriptLock();
+    acquired = lock.tryLock(EMAIL_JOB_LOCK_WAIT_MS_);
+  } catch (e) {
+    lockError = e;
+  }
+  if (lockError) {
+    Logger.log(jobName + ': the overlap lock could not be used (' + lockError + ') — running WITHOUT it.');
+    notifyOpsAlertGs_(jobName + ' ran WITHOUT its overlap lock', [
+      jobName + ' ran, but the script lock could not be used: ' + lockError,
+      'The job was NOT skipped. Until this is fixed an overlapping run (a manual run during the schedule, a double-fired trigger) is not prevented. Check the Apps Script project\'s authorization/quotas.',
+    ]);
+    fn();
+    return true;
+  }
+  if (!acquired) {
+    Logger.log(jobName + ' SKIPPED: another automated-email job still holds the script lock.');
+    notifyOpsAlertGs_(jobName + ' SKIPPED — another email job was still running', [
+      jobName + ' did not run: another automated-email job held the script lock for more than ' + (EMAIL_JOB_LOCK_WAIT_MS_ / 1000) + ' seconds.',
+      'Running both at once would send duplicate emails, so this run was skipped, not queued. Check the Apps Script Executions list for the other run; if this run is still needed, run it by hand once that one has finished.',
+    ]);
+    return false;
+  }
+  try {
+    fn();
+    return true;
+  } finally {
+    try { lock.releaseLock(); } catch (relErr) { Logger.log(jobName + ': releaseLock failed: ' + relErr); }
+  }
+}
+
 // ---- Plain-text twin of a report email (email audit P2 / F13) ----
 // The plain-text part used to be a one-line stub ("... Open this email in Gmail for the full breakdown."), so a text-only
 // client or preview showed an email with no leads in it. This renders the SAME opts object the HTML is built from, so the two

@@ -474,6 +474,54 @@ function runEmailInfraTests_() {
       TestAssert_(htmlOfPlainOpts.indexOf(id) !== -1 && plainText.indexOf(id) !== -1, 'HTML and plain text are built from the same opts: ' + id + ' is in both');
     });
 
+    // ============ 2026-10-05 email audit P4: the overlapping-run lock ============
+    const lockFree = TestMockLockService_();
+    LockService = lockFree;
+    let jobRuns = 0;
+    TestAssertEqual_(withEmailJobLockGs_('testJob', function () { jobRuns++; }), true, 'withEmailJobLockGs_: returns true when the job ran');
+    TestAssertEqual_(jobRuns, 1, 'withEmailJobLockGs_: runs the job exactly once when the lock is free');
+    TestAssertEqual_(lockFree._state.tryLockCalls, 1, 'withEmailJobLockGs_: tries the script lock once');
+    TestAssertEqual_(lockFree._state.releases, 1, 'withEmailJobLockGs_: releases the lock after a normal run');
+    TestAssertEqual_(lockFree._state.held, false, 'withEmailJobLockGs_: the lock is not held afterwards');
+
+    let jobThrew = false;
+    try { withEmailJobLockGs_('testJob', function () { throw new Error('job blew up'); }); } catch (e) { jobThrew = /job blew up/.test(e.message); }
+    TestAssert_(jobThrew, 'withEmailJobLockGs_: a job error is re-thrown (the Executions list must still show Failed)');
+    TestAssertEqual_(lockFree._state.held, false, 'withEmailJobLockGs_: the lock is released even when the job throws');
+
+    // Contention: another job holds the lock -> SKIP + alert, never run.
+    const lockDenied = TestMockLockService_({ denyLock: true });
+    LockService = lockDenied;
+    let ranWhileDenied = false;
+    const alertsBeforeDeny = TestGmailLog_.sent.length;
+    TestAssertEqual_(withEmailJobLockGs_('overlapJob', function () { ranWhileDenied = true; }), false, 'withEmailJobLockGs_: returns false when another job holds the lock');
+    TestAssertEqual_(ranWhileDenied, false, 'withEmailJobLockGs_: does NOT run the job when the lock cannot be acquired — no overlapping sends');
+    TestAssertEqual_(lockDenied._state.releases, 0, 'withEmailJobLockGs_: a lock it never acquired is never released');
+    TestAssert_(TestGmailLog_.sent.length === alertsBeforeDeny + 1 && /overlapJob SKIPPED/.test(TestGmailLog_.sent[TestGmailLog_.sent.length - 1].subject), 'withEmailJobLockGs_: a skipped job alerts ops, naming the job');
+
+    // FAIL OPEN: the lock SERVICE erroring must never stop the job.
+    [{ throwOnGet: true }, { throwOnTryLock: true }].forEach(function (failure) {
+      const label = failure.throwOnGet ? 'getScriptLock throws' : 'tryLock throws';
+      const lockBroken = TestMockLockService_(failure);
+      LockService = lockBroken;
+      let ranDespiteError = 0;
+      const alertsBeforeBroken = TestGmailLog_.sent.length;
+      TestAssertEqual_(withEmailJobLockGs_('brokenLockJob', function () { ranDespiteError++; }), true, 'withEmailJobLockGs_ (' + label + '): the job still runs — a broken lock must never stop the daily emails');
+      TestAssertEqual_(ranDespiteError, 1, 'withEmailJobLockGs_ (' + label + '): …exactly once');
+      TestAssert_(TestGmailLog_.sent.slice(alertsBeforeBroken).some(function (e) { return /brokenLockJob ran WITHOUT its overlap lock/.test(e.subject); }), 'withEmailJobLockGs_ (' + label + '): ops is alerted that the job ran without its lock');
+      TestAssertEqual_(lockBroken._state.releases, 0, 'withEmailJobLockGs_ (' + label + '): nothing was acquired, so nothing is released');
+      let brokenJobThrew = false;
+      try { withEmailJobLockGs_('brokenLockJob', function () { throw new Error('job blew up too'); }); } catch (e) { brokenJobThrew = /job blew up too/.test(e.message); }
+      TestAssert_(brokenJobThrew, 'withEmailJobLockGs_ (' + label + '): a job error is still re-thrown');
+    });
+
+    // No LockService at all (an older paste / another runtime): runs the job.
+    LockService = undefined;
+    jobRuns = 0;
+    TestAssertEqual_(withEmailJobLockGs_('noLockSvc', function () { jobRuns++; }), true, 'withEmailJobLockGs_: with no LockService available it still runs the job');
+    TestAssertEqual_(jobRuns, 1, 'withEmailJobLockGs_: …exactly once');
+    LockService = TestMockLockService_();
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();
