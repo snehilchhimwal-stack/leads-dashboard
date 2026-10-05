@@ -489,12 +489,12 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const threadId = sentMessage.getThread().getId();
   const issueLog = [];
   leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
-  withRetry_(function () {
-    logSheet.appendRow([
-      todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
-      rec.to, rec.cc || '', subject,
-    ]);
-  }, 'log Overnight_Log row (' + region + bucketNote + ')');
+  // appendRowOnceGs_ (EmailInfra.gs, email audit P7 / F10): a retry after a timeout that landed AFTER the row was written must
+  // not append a second row — a duplicate row here means a duplicate 13:00 reply into the same thread.
+  withRetry_(appendRowOnceGs_(logSheet, [
+    todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+    rec.to, rec.cc || '', subject,
+  ], 2), 'log Overnight_Log row (' + region + bucketNote + ')');
   return null;
 }
 
@@ -709,9 +709,15 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   // (design doc Part 2's empty-state rule) — 'already_sent' means real
   // overnight leads existed and already went out in an earlier, separate
   // run today (this bucket is here only because Section 2 has content);
+  // 'already_sent_not_to_you' means the region ran earlier today but no
+  // Overnight_Log row names THIS recipient (email audit P7 / F16);
   // anything else means there simply were none.
+  // 'already_sent_not_to_you' (email audit P7 / F16): the region DID run earlier today, but no Overnight_Log row names this
+  // recipient — so claiming "already sent separately" would be false for them. It says only what is known.
   const section1EmptyText = section1SkippedReason === 'already_sent'
     ? "Already sent separately earlier today — see this morning's earlier Overnight email for this team."
+    : section1SkippedReason === 'already_sent_not_to_you'
+    ? 'No Overnight email to you is recorded for today. This region already had an Overnight run earlier today, so its overnight leads were not re-sent in this run — if you did not receive that email, contact Lead Ops.'
     : 'No overnight leads for your team today.';
   const section1Opts = section1
     ? buildOvernightSectionOptsGs_(region, section1Leads, dateLabel, win)
@@ -837,12 +843,11 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     // successfully. Logging is best-effort on top of a real send, not the
     // other way around.
     try {
-      writeUnlessTestModeGs_(function () {
-        overnightLogSheet.appendRow([
-          todayKey, region, threadId, jsonForCellGs_(issueLog, 'Overnight_Log lead_ids_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
-          to, cc || '', subject,
-        ]);
-      }, 'log Overnight_Log row (' + region + bucketNote + ')');
+      // Once-only append (email audit P7 / F10) — see appendRowOnceGs_; thread id (col C) is the row's identity.
+      writeUnlessTestModeGs_(appendRowOnceGs_(overnightLogSheet, [
+        todayKey, region, threadId, jsonForCellGs_(issueLog, 'Overnight_Log lead_ids_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+        to, cc || '', subject,
+      ], 2), 'log Overnight_Log row (' + region + bucketNote + ')');
     } catch (logErr) {
       Logger.log('Overnight_Log write failed for ' + region + bucketNote + ' (email itself sent fine): ' + logErr);
     }
@@ -1050,13 +1055,21 @@ function sendOvernightMorningEmails_() {
   // manual decision to re-run, not an automatic silent retry of the whole
   // region.
   const alreadyLoggedRegionsToday = {};
+  // Region+recipient keys (checkpoint1PendingKeyGs_) that have a today-dated Overnight_Log row — email audit P7 / F16: the
+  // region-level guard above says "this region ran", NOT "this recipient got their email", and the label a Section-2-only
+  // bucket shows must not claim the second.
+  const loggedRecipientsToday = {};
   const priorLastRow = logSheet.getLastRow();
   if (priorLastRow >= 2) {
-    withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 2).getValues(); }, 'read Overnight_Log for idempotency check')
+    withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 6).getValues(); }, 'read Overnight_Log for idempotency check')
       .forEach(function (r) {
         const cell = r[0];
         const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
-        if (key === todayKey) alreadyLoggedRegionsToday[String(r[1] || '').trim()] = true;
+        if (key === todayKey) {
+          const loggedRegion = String(r[1] || '').trim();
+          alreadyLoggedRegionsToday[loggedRegion] = true;
+          loggedRecipientsToday[checkpoint1PendingKeyGs_(loggedRegion, r[5])] = true;
+        }
       });
   }
 
@@ -1160,8 +1173,12 @@ function sendOvernightMorningEmails_() {
       // One bucket throwing (a bad read/write, an oversize cell) must not stop every OTHER bucket — it is reported
       // like any failed send instead (the consolidated "leads not sent" alert below).
       let failure;
+      // The region ran earlier today, but did THIS recipient get an Overnight email? If no row names them, the "Already sent
+      // separately earlier today" label would be false for them (their own send failed or went to someone else).
+      const bucketSkippedReason = (section1SkippedReason === 'already_sent' && !loggedRecipientsToday[checkpoint1PendingKeyGs_(region, emailKey)])
+        ? 'already_sent_not_to_you' : section1SkippedReason;
       try {
-        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason);
+        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason);
       } catch (bucketErr) {
         Logger.log('Combined morning email threw for ' + region + ' (' + emailKey + '): ' + bucketErr);
         failure = { reason: 'Unexpected error: ' + bucketErr, section1Leads: s1 ? s1.leads : [], section2: s2 };
@@ -1228,9 +1245,17 @@ function pushUnresolvedToLeadFollowups_(ss, entries) {
 
     const updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
     const newRows = [];
+    // lead_id -> index into newRows. Changed 2026-10-05 (email audit P7 / F17): the same lead_id twice in `entries` (a lead in
+    // two Overnight_Log rows, e.g. a duplicate morning row) used to append TWO rows, because rowIndexByLeadId only knows rows
+    // that were already on the sheet. A repeat now updates the row this call is about to append (the later entry wins).
+    const newRowIndexByLeadId = {};
     let existingChanged = false;
     entries.forEach(function (e) {
       const idx = rowIndexByLeadId[e.lead_id];
+      if (idx === undefined && newRowIndexByLeadId[e.lead_id] !== undefined) {
+        newRows[newRowIndexByLeadId[e.lead_id]] = [e.lead_id, e.region, e.RM, e.issue, e.comments, '', updatedAt, e.comments];
+        return;
+      }
       if (idx !== undefined) {
         // Column F (index 5, "suggested_followup") is deliberately
         // preserved untouched — same as the original's column-skipping
@@ -1239,6 +1264,7 @@ function pushUnresolvedToLeadFollowups_(ss, entries) {
         existingValues[idx] = [e.lead_id, e.region, e.RM, e.issue, e.comments, existingValues[idx][5], updatedAt, e.comments];
         existingChanged = true;
       } else {
+        newRowIndexByLeadId[e.lead_id] = newRows.length;
         newRows.push([e.lead_id, e.region, e.RM, e.issue, e.comments, '', updatedAt, e.comments]);
       }
     });

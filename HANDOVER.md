@@ -557,6 +557,27 @@ code*, one bullet per plan step as each lands.
   alerts ops "1pm follow-up UNCONFIRMED for <region>". **To resolve an UNCONFIRMED alert:** look in
   Gmail Sent for a reply in that thread; if it is missing, clear that cell *and* the row(s)'
   `checkpoint2_sent_at` in `AllIssues_Log`, then run `sendOvernightFollowupEmailsNow`.
+- **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
+  duplicate `Lead_Followups` rows.** Four small defects, one change each:
+  (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
+  wrapper, and Sheets can write the row and *then* time out — the retry used to append a second
+  identical row (a duplicate `Overnight_Log` row = a duplicate 13:00 reply into the same thread).
+  `appendRowOnceGs_` (`EmailInfra.gs`) makes the write a closure: its first attempt just appends (no
+  extra read), a retry first looks for its own thread id in the last 100 rows and does nothing if it
+  is already there. (2) *Same-address buckets merge (F9).* Two resolved buckets on one address (e.g. a
+  `Region_Recipients` fallback equal to an A1's own address) used to overwrite each other in the 10:00
+  job — the first bucket's leads were never emailed and never reported as "not sent".
+  `mergeBucketsByAddressGs_` now merges them inside `resolveRecipientEmailsForRegion_` (union of RM
+  names and Cc, first bucket's label/role kept), so the 10:00 *and* 17:00 jobs both get one bucket.
+  The Futwork bucket is added after the merge and stays separate. (3) *Truthful label (F16).* The
+  10:00 region guard says "this region ran today", not "this recipient got their email"; a
+  Section-2-only recipient with no `Overnight_Log` row of their own used to be told "Already sent
+  separately earlier today". They now get "No Overnight email to you is recorded for today… contact
+  Lead Ops". (4) *No duplicate `Lead_Followups` rows (F17, duplicate half only).*
+  `pushUnresolvedToLeadFollowups_` appended one row per repeated lead id (e.g. a lead in two
+  `Overnight_Log` rows); a repeat now updates the pending row (later entry wins). Not changed: the
+  stale-read rewrite of column F (millisecond window, noted in the audit) and the 17:00 Section-1
+  region guard, which is still per-region by design.
 
 ### 4.4 GitHub repo access
 

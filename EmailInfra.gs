@@ -113,6 +113,34 @@ function writeUnlessTestModeGs_(fn, label) {
   return withRetry_(function () { const result = fn(); SpreadsheetApp.flush(); return result; }, label);
 }
 
+// Changed 2026-10-05 (email audit P7 / F10). Every log append runs inside a retry wrapper (withRetry_ / writeUnlessTestModeGs_),
+// and a timeout can arrive AFTER Sheets already wrote the row — the retry then appended a SECOND identical row, and a duplicate
+// Overnight_Log row becomes a duplicate 13:00 reply into the same thread. appendRowOnceGs_ returns the write as a closure to
+// hand to those wrappers: its first attempt just appends; any later attempt first looks for THIS row (by its key column —
+// the Gmail thread id, unique per sent email) in the last APPEND_ONCE_TAIL_ROWS_ rows and, if it is already there, does
+// nothing. No extra Sheets read on the normal, first-attempt path. A blank key cannot be matched, so it appends as before.
+const APPEND_ONCE_TAIL_ROWS_ = 100;
+function appendRowOnceGs_(sheet, row, keyIndex) {
+  const rawKey = row[keyIndex];
+  const key = (rawKey === undefined || rawKey === null) ? '' : String(rawKey).trim();
+  let attempted = false;
+  return function () {
+    if (attempted && key) {
+      const lastRow = sheet.getLastRow();
+      if (lastRow >= 2) {
+        const firstRow = Math.max(2, lastRow - APPEND_ONCE_TAIL_ROWS_ + 1);
+        const tail = sheet.getRange(firstRow, keyIndex + 1, lastRow - firstRow + 1, 1).getValues();
+        for (let i = 0; i < tail.length; i++) {
+          if (String(tail[i][0]).trim() === key) return false; // an earlier attempt already landed — do not append a second copy
+        }
+      }
+    }
+    attempted = true; // set BEFORE the write: an attempt that throws may still have written
+    sheet.appendRow(row);
+    return true;
+  };
+}
+
 // Sheets rejects a cell over 50,000 characters. Serializes entries for one cell, dropping trailing entries (and alerting
 // ops) rather than ever attempting an oversize write.
 const MAX_CELL_JSON_CHARS_ = 45000;
@@ -706,8 +734,15 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
     }
   }
 
+  // Changed 2026-10-05 (email audit P7 / F9): two buckets that resolve to the SAME address (e.g. a Region_Recipients fallback
+  // equal to an A1's own address) become ONE bucket here, before test mode redirects every address. The 10:00 job keyed its
+  // Section 1 buckets by address, so the second bucket REPLACED the first: those leads were never emailed and never
+  // reported as "not sent". The Futwork bucket is added AFTER the merge and stays its own bucket — Futwork RMs are keyed to
+  // their own pseudo-region (regionKeyForRmGs_), so they never share a call with the regular buckets in a real run.
+  const mergedResults = mergeBucketsByAddressGs_(results);
+
   if (futworkRmNames.length) {
-    results.push({ to: FUTWORK_ROUTE_EMAIL_, cc: undefined, rmNames: futworkRmNames, source: 'Futwork override (RM name contains "Futwork": ' + futworkRmNames.join(', ') + ')', bucketLabel: 'Futwork', primaryRole: '' });
+    mergedResults.push({ to: FUTWORK_ROUTE_EMAIL_, cc: undefined, rmNames: futworkRmNames, source: 'Futwork override (RM name contains "Futwork": ' + futworkRmNames.join(', ') + ')', bucketLabel: 'Futwork', primaryRole: '' });
   }
 
   // Single choke point every path above funnels through — see
@@ -721,13 +756,45 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   // to see what a real send would have targeted is digging through the
   // Executions log rather than just reading the email you got.
   if (TEST_MODE_OVERRIDE_EMAIL_) {
-    const testResults = results.map(function (r) {
+    const testResults = mergedResults.map(function (r) {
       return { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, rmNames: r.rmNames, source: r.source + ' [TEST MODE — real recipients suppressed, sent to ' + TEST_MODE_OVERRIDE_EMAIL_ + ' only]', bucketLabel: r.bucketLabel, primaryRole: r.primaryRole, originalTo: r.to, originalCc: r.cc };
     });
     return { results: testResults, trulyUnresolved: trulyUnresolved, chLevelRms: resolved.chLevelRms };
   }
 
-  return { results: results, trulyUnresolved: trulyUnresolved, chLevelRms: resolved.chLevelRms };
+  return { results: mergedResults, trulyUnresolved: trulyUnresolved, chLevelRms: resolved.chLevelRms };
+}
+
+// Merges resolved recipient buckets that share a To address (case-insensitive, trimmed) into one: the first bucket keeps its
+// label/role/address, takes the union of the RM names, and the union of the Cc addresses (never the To address itself, never
+// a repeat); `source` shows every origin. A bucket with no To address is left alone (the send gate reports it). Pure — the
+// input buckets are not modified. Used by resolveRecipientEmailsForRegion_ (email audit P7 / F9).
+function mergeBucketsByAddressGs_(buckets) {
+  const merged = [];
+  const byAddress = {};
+  const ccList = function (cc) { return String(cc || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
+  buckets.forEach(function (b) {
+    const key = String(b.to || '').trim().toLowerCase();
+    if (!key) { merged.push(b); return; }
+    const first = byAddress[key];
+    if (!first) {
+      const copy = Object.assign({}, b, { rmNames: (b.rmNames || []).slice() });
+      byAddress[key] = copy;
+      merged.push(copy);
+      return;
+    }
+    (b.rmNames || []).forEach(function (n) { if (first.rmNames.indexOf(n) === -1) first.rmNames.push(n); });
+    const seen = {};
+    seen[key] = true;
+    const ccs = [];
+    ccList(first.cc).concat(ccList(b.cc)).forEach(function (addr) {
+      const k = addr.toLowerCase();
+      if (!seen[k]) { seen[k] = true; ccs.push(addr); }
+    });
+    first.cc = ccs.join(',') || undefined;
+    first.source = first.source + ' + ' + b.source;
+  });
+  return merged;
 }
 
 function loadRegionRecipients_(ss) {

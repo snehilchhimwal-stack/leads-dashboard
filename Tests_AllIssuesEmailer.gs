@@ -318,6 +318,24 @@ function runAllIssuesEmailerTests_() {
       TestAssertContains_(dP.body, 'Leads with issue for Pune', 'sendOneAllIssuesEmail_ (P2): the plain-text part still opens with the one-line summary');
     }
 
+    // ---- email audit P7 (F10): a retried AllIssues_Log append never lands twice ----
+    // Sheets can write the row and THEN time out; the retry used to append a second identical row (a second snapshot of the
+    // same email for tomorrow's Checkpoint 1 to merge).
+    {
+      const logSheetD = ensureAllIssuesLogSheet_(ss);
+      const rowsBefore = logSheetD.getLastRow();
+      const realAppend = logSheetD.appendRow;
+      let appendCalls = 0;
+      logSheetD.appendRow = function (values) { appendCalls++; realAppend(values); if (appendCalls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); };
+      try {
+        const resD = sendOneAllIssuesEmail_(ss, logSheetD, 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+          [{ lead_id: 'L-P7-DUP', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
+        TestAssertEqual_(resD, null, 'sendOneAllIssuesEmail_ (append lands then times out): the send still reports success');
+        TestAssertEqual_(appendCalls, 1, 'sendOneAllIssuesEmail_ (append lands then times out): the retry does NOT append a second row');
+        TestAssertEqual_(logSheetD.getLastRow(), rowsBefore + 1, 'sendOneAllIssuesEmail_ (append lands then times out): exactly ONE new AllIssues_Log row');
+      } finally { logSheetD.appendRow = realAppend; }
+    }
+
     // ---- email audit P4 (F5): the 17:00 job takes the script lock; an overlapping job is skipped, and a broken lock fails open ----
     {
       const realLock = LockService;

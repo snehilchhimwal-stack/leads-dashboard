@@ -1143,6 +1143,106 @@ function runOvernightEmailerTests_() {
       TestAssertContains_(plainPart, 'Nothing still unresolved from this morning', '13:00 plain text: shows Section 1\'s empty state');
     }
 
+    // ---- email audit P7 (F10): a retried Overnight_Log append never lands twice ----
+    // A duplicate Overnight_Log row means a duplicate 13:00 reply into the same thread. Sheets can write the row and THEN time
+    // out; withRetry_ retries the append.
+    {
+      const writeThenTimeOut = function (sheet) {
+        const realAppend = sheet.appendRow;
+        const state = { calls: 0 };
+        sheet.appendRow = function (values) { state.calls++; realAppend(values); if (state.calls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); };
+        return state;
+      };
+      const ssA = P1_newSs([]);
+      const ovLogA = ensureOvernightLogSheet_(ssA);
+      const aiLogA = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader]);
+      const stateA = writeThenTimeOut(ovLogA);
+      const leadsA = [{ lead_id: 'L-P7-A', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', followup: 'call', issue: null }];
+      const resA = sendCombinedMorningEmail_(ssA, ovLogA, aiLogA, 'Pune', { rec: { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' }, leads: leadsA }, null, 'test date', istDayKeyGs_(now), now, win, {}, null);
+      TestAssertEqual_(resA, null, 'sendCombinedMorningEmail_ (append lands then times out): the send still reports success');
+      TestAssertEqual_(stateA.calls, 1, 'sendCombinedMorningEmail_ (append lands then times out): the retry does NOT append the Overnight_Log row a second time');
+      TestAssertEqual_(ovLogA.getLastRow(), 2, 'sendCombinedMorningEmail_ (append lands then times out): exactly ONE Overnight_Log row — one thread, one 13:00 reply');
+
+      const ssS = P1_newSs([]);
+      const ovLogS = ensureOvernightLogSheet_(ssS);
+      const stateS = writeThenTimeOut(ovLogS);
+      const resS = sendOneOvernightEmail_(ssS, ovLogS, 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' }, leadsA, 'test date', istDayKeyGs_(now), now, win);
+      TestAssertEqual_(resS, null, 'sendOneOvernightEmail_ (append lands then times out): the send still reports success');
+      TestAssertEqual_(stateS.calls, 1, 'sendOneOvernightEmail_ (append lands then times out): the retry does NOT append a second row');
+      TestAssertEqual_(ovLogS.getLastRow(), 2, 'sendOneOvernightEmail_ (append lands then times out): exactly ONE Overnight_Log row');
+    }
+
+    // ---- email audit P7 (F9): two buckets on the same address are ONE email, not an overwrite ----
+    // Test RM One reports to the A1 (Test A1 One) and Test RM Three to the TM (Test TM One); both resolve to the SAME address.
+    // The 10:00 job keyed Section 1 by address, so the second bucket REPLACED the first and one RM's leads were never emailed.
+    {
+      const ssM = P1_newSs([
+        TestOE_leadRow_(header, { lead_id: 'L-P7-ONE', client_id: 'C-P7-ONE', RM: 'Test RM One', lead_assigned_at: midWindow }),
+        TestOE_leadRow_(header, { lead_id: 'L-P7-THREE', client_id: 'C-P7-THREE', RM: 'Test RM Three', lead_assigned_at: midWindow }),
+      ]);
+      const before = TestGmailLog_.drafts.length;
+      P1_withSs(ssM, function () { sendOvernightMorningEmails(); });
+      const sent = TestGmailLog_.drafts.slice(before).filter(function (d) { return d.to === TEST_EMAIL_PRIMARY_; });
+      TestAssertEqual_(sent.length, 1, '10:00 same-address buckets: exactly ONE email goes to the shared address');
+      TestAssert_(sent.length === 1 && sent[0].htmlBody.indexOf('L-P7-ONE') !== -1 && sent[0].htmlBody.indexOf('L-P7-THREE') !== -1, '10:00 same-address buckets: that email lists BOTH RMs\' leads (neither bucket overwrote the other)');
+      TestAssert_(sent.length === 1 && sent[0].body.indexOf('L-P7-ONE') !== -1 && sent[0].body.indexOf('L-P7-THREE') !== -1, '10:00 same-address buckets: …and so does its plain-text part');
+      TestAssertEqual_(ensureOvernightLogSheet_(ssM).getLastRow(), 2, '10:00 same-address buckets: one Overnight_Log row for the one email');
+      const loggedIds = JSON.parse(ensureOvernightLogSheet_(ssM).getRange(2, 4, 1, 1).getValues()[0][0]).map(function (e) { return e.lead_id; }).sort().join(',');
+      TestAssertEqual_(loggedIds, 'L-P7-ONE,L-P7-THREE', '10:00 same-address buckets: the logged lead ids cover both RMs, so the 13:00 follow-up tracks both');
+    }
+
+    // ---- email audit P7 (F16): the "already sent" label only claims what is true for THAT recipient ----
+    // The region ran earlier today (so Section 1 is not re-sent), but if no Overnight_Log row names this recipient, telling
+    // them "Already sent separately earlier today" is false — their own send failed, or went to someone else.
+    {
+      const runWithLoggedRecipient = function (loggedTo, tag) {
+        const ssL = P1_newSs([
+          TestOE_leadRow_(header, { lead_id: 'L-' + tag + '-OVN', client_id: 'C-' + tag + '-OVN', RM: 'Test RM One', lead_assigned_at: midWindow }),
+          P1_flaggedLead('L-' + tag + '-S2'),
+        ]);
+        ensureOvernightLogSheet_(ssL).appendRow([istDayKeyGs_(now), 'Pune', 'thr-' + tag + '-earlier', '[]', P1_stamp, loggedTo, '', 'Pune Digest - earlier today']);
+        ssL._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+          [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-' + tag, P1_snapshot('L-' + tag + '-S2'), '', '', '', '']]);
+        const before = TestGmailLog_.drafts.length;
+        P1_withSs(ssL, function () { sendOvernightMorningEmails(); });
+        return TestGmailLog_.drafts.slice(before).filter(function (d) { return d.to === TEST_EMAIL_PRIMARY_; });
+      };
+      // Control: the earlier Pune row WAS to this recipient -> the original label is true.
+      const claimed = runWithLoggedRecipient(TEST_EMAIL_PRIMARY_, 'F16A');
+      TestAssertEqual_(claimed.length, 1, '10:00 label: a Section-2 email is sent to the recipient who already had today\'s Overnight email');
+      TestAssertContains_(claimed[0].htmlBody, 'Already sent separately earlier today', '10:00 label: …and says "Already sent separately" (a row names them)');
+      // The case under test: the earlier Pune row went to SOMEONE ELSE.
+      const unclaimed = runWithLoggedRecipient(TEST_EMAIL_SECONDARY_, 'F16B');
+      TestAssertEqual_(unclaimed.length, 1, '10:00 label: the recipient with no Overnight row today still gets their Section 2');
+      TestAssert_(unclaimed[0].htmlBody.indexOf('Already sent separately earlier today') === -1, '10:00 label: …and is NOT told "Already sent separately" (no Overnight email to them is on record)');
+      TestAssertContains_(unclaimed[0].htmlBody, 'No Overnight email to you is recorded for today', '10:00 label: …it says what is actually known');
+      TestAssertContains_(unclaimed[0].htmlBody, 'contact Lead Ops', '10:00 label: …and tells them what to do');
+      TestAssert_(unclaimed[0].body.indexOf('No Overnight email to you is recorded for today') !== -1, '10:00 label: the plain-text part carries the same truthful wording');
+    }
+
+    // ---- email audit P7 (F17): the Lead_Followups push never appends a lead twice ----
+    {
+      const lfHeader = ['lead_id', 'region', 'RM', 'issue', 'collated_comments', 'suggested_followup', 'updated_at', 'own_comments'];
+      const lfSheet = TestMockSheet_('Lead_Followups', [lfHeader,
+        ['L-LF-EXIST', 'Pune', 'Old RM', 'Old issue', 'old comments', 'typed by a human', '2026-10-01 09:00:00', 'old comments']]);
+      const ssLf = TestMockSpreadsheet_({ 'Lead_Followups': lfSheet });
+      const started = pushUnresolvedToLeadFollowups_(ssLf, [
+        { lead_id: 'L-LF-NEW', region: 'Pune', RM: 'RM A', issue: 'Not Updated', comments: 'first copy' },
+        { lead_id: 'L-LF-EXIST', region: 'Pune', RM: 'RM B', issue: 'Follow-up Overdue', comments: 'fresh' },
+        { lead_id: 'L-LF-NEW', region: 'Pune', RM: 'RM A', issue: 'Not Updated', comments: 'second copy (later entry wins)' },
+        { lead_id: 'L-LF-EXIST', region: 'Pune', RM: 'RM B', issue: 'Follow-up Overdue', comments: 'fresher' },
+      ]);
+      TestAssertEqual_(started, true, 'pushUnresolvedToLeadFollowups_: reports it wrote');
+      const lfRows = lfSheet.getRange(2, 1, lfSheet.getLastRow() - 1, 8).getValues();
+      TestAssertEqual_(lfRows.length, 2, 'pushUnresolvedToLeadFollowups_: a lead listed twice is ONE row — the existing lead stays one row and the new lead is added once (it used to append a duplicate)');
+      const newRow = lfRows.filter(function (r) { return r[0] === 'L-LF-NEW'; });
+      TestAssertEqual_(newRow.length, 1, 'pushUnresolvedToLeadFollowups_: the new lead appears exactly once');
+      TestAssertEqual_(newRow[0][4], 'second copy (later entry wins)', 'pushUnresolvedToLeadFollowups_: the later entry for the same lead wins');
+      const existRow = lfRows.filter(function (r) { return r[0] === 'L-LF-EXIST'; })[0];
+      TestAssertEqual_(existRow[4], 'fresher', 'pushUnresolvedToLeadFollowups_: the existing row takes the later entry too');
+      TestAssertEqual_(existRow[5], 'typed by a human', 'pushUnresolvedToLeadFollowups_: column F (the human-typed suggestion) is still preserved');
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either

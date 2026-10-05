@@ -72,7 +72,9 @@ from under the other mid-cycle.
 by `lead_id`, deliberately never clears** — Apps Script runs as a
 separate process with no way to see the dashboard's in-memory
 `_generateCycleOwner` lock, so clearing here could wipe rows a human is
-actively reviewing at that exact moment) → `waitForFollowupSuggestions_()`
+actively reviewing at that exact moment; a lead id repeated within one
+push collapses to ONE row, later entry wins — email audit P7, 2026-10-05)
+→ `waitForFollowupSuggestions_()`
 (**bounded**, ~2 minutes total: 6 attempts × 20s, then sends with
 whatever's there — no human to click Cancel on an unattended trigger).
 **Staleness tolerance: this is the real, precise mechanism behind the

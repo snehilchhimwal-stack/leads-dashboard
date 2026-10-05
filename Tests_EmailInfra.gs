@@ -536,6 +536,116 @@ function runEmailInfraTests_() {
     TestAssertEqual_(jobRuns, 1, 'withEmailJobLockGs_: …exactly once');
     LockService = TestMockLockService_();
 
+    // ============ 2026-10-05 email audit P7 (F10): a retried log append never lands twice ============
+    {
+      const logRow = function (thread) { return ['2026-10-05', 'Pune', thread, '[]', '10:00', TEST_EMAIL_PRIMARY_, '', 'subject']; };
+      const newLog = function () { return TestMockSheet_('Overnight_Log', [['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject']]); };
+      // Simulates "Sheets wrote the row, THEN the call timed out": the first appendRow call writes and throws a transient error.
+      const writeThenTimeOut = function (sheet) {
+        const realAppend = sheet.appendRow;
+        const state = { calls: 0 };
+        sheet.appendRow = function (values) { state.calls++; realAppend(values); if (state.calls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); };
+        return state;
+      };
+
+      // Normal path: one append, no extra read.
+      const plainLog = newLog();
+      const realGetRange = plainLog.getRange;
+      let reads = 0;
+      plainLog.getRange = function () { reads++; return realGetRange.apply(plainLog, arguments); };
+      TestAssertEqual_(appendRowOnceGs_(plainLog, logRow('thr-ok'), 2)(), true, 'appendRowOnceGs_: the first attempt appends and reports true');
+      TestAssertEqual_(plainLog.getLastRow(), 2, 'appendRowOnceGs_: exactly one row appended');
+      TestAssertEqual_(reads, 0, 'appendRowOnceGs_: the normal first-attempt path reads nothing extra from the sheet');
+
+      // The hazard: the append landed, the call still timed out, withRetry_ retries.
+      const dupLog = newLog();
+      const dupState = writeThenTimeOut(dupLog);
+      withRetry_(appendRowOnceGs_(dupLog, logRow('thr-dup'), 2), 'test once-only append');
+      TestAssertEqual_(dupState.calls, 1, 'appendRowOnceGs_: after a write that landed before the timeout, the retry does NOT append again');
+      TestAssertEqual_(dupLog.getLastRow(), 2, 'appendRowOnceGs_: …so the log holds ONE row, not a duplicate');
+      TestAssertEqual_(dupLog.getRange(2, 3, 1, 1).getValues()[0][0], 'thr-dup', 'appendRowOnceGs_: …and it is the right row');
+
+      // The opposite case: the first attempt failed BEFORE writing anything — the retry must still append.
+      const lostLog = newLog();
+      const realLostAppend = lostLog.appendRow;
+      let lostCalls = 0;
+      lostLog.appendRow = function (values) { lostCalls++; if (lostCalls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); realLostAppend(values); };
+      withRetry_(appendRowOnceGs_(lostLog, logRow('thr-lost'), 2), 'test once-only append (nothing written)');
+      TestAssertEqual_(lostCalls, 2, 'appendRowOnceGs_: when the first attempt wrote nothing, the retry appends');
+      TestAssertEqual_(lostLog.getLastRow(), 2, 'appendRowOnceGs_: …exactly one row');
+
+      // Other rows on the sheet are not mistaken for this one: with someone else's row already there, the retry still
+      // recognises ITS OWN landed row (and only that).
+      const mixedLog = newLog();
+      mixedLog.appendRow(logRow('thr-someone-else'));
+      const mixedState = writeThenTimeOut(mixedLog);
+      withRetry_(appendRowOnceGs_(mixedLog, logRow('thr-mine'), 2), 'test once-only append (other rows present)');
+      TestAssertEqual_(mixedState.calls, 1, 'appendRowOnceGs_: with another row on the sheet, the retry still finds its own landed row and does not append again');
+      TestAssertEqual_(mixedLog.getLastRow(), 3, 'appendRowOnceGs_: …leaving the other row and this one, nothing more');
+      // …and a row whose id is NOT yet on the sheet is appended by the retry even though other rows are present.
+      const otherLog = newLog();
+      otherLog.appendRow(logRow('thr-someone-else'));
+      const realOtherAppend = otherLog.appendRow;
+      let otherCalls = 0;
+      otherLog.appendRow = function (values) { otherCalls++; if (otherCalls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); realOtherAppend(values); };
+      withRetry_(appendRowOnceGs_(otherLog, logRow('thr-mine'), 2), 'test once-only append (other rows, nothing written)');
+      TestAssertEqual_(otherLog.getLastRow(), 3, 'appendRowOnceGs_: another row\'s thread id never stops THIS row being appended by the retry');
+
+      // The row is also written exactly once when the failure is the flush that follows it (writeUnlessTestModeGs_).
+      const flushLog = newLog();
+      const realFlush = SpreadsheetApp.flush;
+      let flushCalls = 0;
+      SpreadsheetApp.flush = function () { flushCalls++; if (flushCalls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); };
+      try {
+        writeUnlessTestModeGs_(appendRowOnceGs_(flushLog, logRow('thr-flush'), 2), 'test once-only append (flush fails)');
+      } finally { SpreadsheetApp.flush = realFlush; }
+      TestAssertEqual_(flushLog.getLastRow(), 2, 'appendRowOnceGs_ via writeUnlessTestModeGs_: a flush that fails after the append lands does not duplicate the row');
+      TestAssertEqual_(flushCalls, 2, 'appendRowOnceGs_ via writeUnlessTestModeGs_: the wrapper did retry (so the guard was really exercised)');
+
+      // A blank key cannot be matched, so it still appends (no crash, no silent drop).
+      const blankLog = newLog();
+      appendRowOnceGs_(blankLog, logRow(''), 2)();
+      TestAssertEqual_(blankLog.getLastRow(), 2, 'appendRowOnceGs_: a row with a blank key still appends');
+
+      // A first attempt never searches at all: even the same id far up the sheet does not block it (only a RETRY looks, and
+      // only in the recent tail).
+      const bigLog = newLog();
+      bigLog.appendRow(logRow('thr-ancient'));
+      for (let i = 0; i < APPEND_ONCE_TAIL_ROWS_ + 5; i++) bigLog.appendRow(logRow('thr-filler-' + i));
+      appendRowOnceGs_(bigLog, logRow('thr-ancient'), 2)();
+      TestAssertEqual_(bigLog.getLastRow(), APPEND_ONCE_TAIL_ROWS_ + 5 + 2 + 1, 'appendRowOnceGs_: a first attempt appends without searching the sheet');
+    }
+
+    // ============ 2026-10-05 email audit P7 (F9): buckets sharing an address become one ============
+    {
+      const A = { to: 'a@x.com', cc: 'b@x.com,Boss@x.com', rmNames: ['RM 1'], source: 'S-A', bucketLabel: 'Label A', primaryRole: 'A1' };
+      const B = { to: 'A@X.com ', cc: 'boss@x.com, c@x.com,a@x.com', rmNames: ['RM 2', 'RM 1'], source: 'S-B', bucketLabel: 'Unmatched RMs', primaryRole: '' };
+      const C = { to: 'other@x.com', cc: undefined, rmNames: ['RM 3'], source: 'S-C', bucketLabel: 'Label C', primaryRole: 'TM' };
+      const merged = mergeBucketsByAddressGs_([A, C, B]);
+      TestAssertEqual_(merged.length, 2, 'mergeBucketsByAddressGs_: two buckets on the same address (case/space-insensitive) become one; a different address stays separate');
+      TestAssertEqual_(merged[0].bucketLabel, 'Label A', 'mergeBucketsByAddressGs_: the first bucket keeps its label');
+      TestAssertEqual_(merged[0].primaryRole, 'A1', 'mergeBucketsByAddressGs_: …and its role');
+      TestAssertEqual_(merged[0].rmNames.join(','), 'RM 1,RM 2', 'mergeBucketsByAddressGs_: RM names are the union, with no repeat');
+      TestAssertEqual_(merged[0].cc, 'b@x.com,Boss@x.com,c@x.com', 'mergeBucketsByAddressGs_: Cc is the union, never repeats an address, never includes the To address');
+      TestAssertEqual_(merged[0].source, 'S-A + S-B', 'mergeBucketsByAddressGs_: source shows both origins');
+      TestAssertEqual_(merged[1].to, 'other@x.com', 'mergeBucketsByAddressGs_: order preserved — the separate bucket follows');
+      TestAssertEqual_(A.rmNames.join(','), 'RM 1', 'mergeBucketsByAddressGs_: the input buckets are not modified');
+      TestAssertEqual_(mergeBucketsByAddressGs_([{ to: 'a@x.com', cc: undefined, rmNames: ['R1'], source: 's1' }, { to: 'a@x.com', cc: '', rmNames: ['R2'], source: 's2' }])[0].cc, undefined, 'mergeBucketsByAddressGs_: no Cc anywhere stays undefined');
+      TestAssertEqual_(mergeBucketsByAddressGs_([{ to: '', rmNames: ['R1'], source: 'a' }, { to: '  ', rmNames: ['R2'], source: 'b' }]).length, 2, 'mergeBucketsByAddressGs_: buckets with NO address are never merged together (the send gate reports them)');
+
+      // Through the real resolver: Test RM One (A1 -> TEST_EMAIL_PRIMARY_) + Test RM Three (TM -> the SAME address).
+      const sameAddr = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Test RM One', 'Test RM Three'], {}, { fireAlerts: false });
+      TestAssertEqual_(sameAddr.results.length, 1, 'resolveRecipientEmailsForRegion_: an A1 bucket and a TM bucket on the same address come back as ONE bucket');
+      TestAssertEqual_(sameAddr.results[0].rmNames.slice().sort().join(','), 'Test RM One,Test RM Three', 'resolveRecipientEmailsForRegion_: the merged bucket carries BOTH RMs (the second used to overwrite the first)');
+      // A Region_Recipients fallback equal to an A1's address (the audit's own example), in a different case.
+      const withFallback = resolveRecipientEmailsForRegion_(ss, 'Pune', ['Test RM One', 'Some Totally Unknown RM'], { Pune: { to: TEST_EMAIL_PRIMARY_.toUpperCase(), cc: '' } }, { fireAlerts: false });
+      TestAssertEqual_(withFallback.results.length, 1, 'resolveRecipientEmailsForRegion_: a Region_Recipients fallback on an A1\'s own address merges into that A1\'s bucket');
+      TestAssertEqual_(withFallback.results[0].rmNames.slice().sort().join(','), 'Some Totally Unknown RM,Test RM One', 'resolveRecipientEmailsForRegion_: …carrying the unmatched RM too');
+      // Control: a different fallback address keeps two buckets.
+      const separate = resolveRecipientEmailsForRegion_(ss, 'Pune', ['Test RM One', 'Some Totally Unknown RM'], { Pune: { to: TEST_EMAIL_SECONDARY_, cc: '' } }, { fireAlerts: false });
+      TestAssertEqual_(separate.results.length, 2, 'resolveRecipientEmailsForRegion_: buckets on DIFFERENT addresses are still separate');
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();

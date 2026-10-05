@@ -582,9 +582,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // precedent rather than adding a new defensive check nothing else
     // here has. Columns K-N (checkpoint1/2) are left blank -- written
     // later by the 10:00/13:00 jobs (Steps 4-7).
-    writeUnlessTestModeGs_(function () {
-      logSheet.appendRow([now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, jsonForCellGs_(leads, 'issue_snapshot_json (' + region + bucketNote + ')')]);
-    }, 'append AllIssues_Log row (' + region + bucketNote + ')');
+    // Once-only append (email audit P7 / F10) — see appendRowOnceGs_; thread id (col I) is the row's identity.
+    writeUnlessTestModeGs_(appendRowOnceGs_(logSheet, [now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, jsonForCellGs_(leads, 'issue_snapshot_json (' + region + bucketNote + ')')], 8),
+      'append AllIssues_Log row (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('AllIssues_Log write failed for ' + region + bucketNote + ' (email itself sent fine): ' + e);
   }
