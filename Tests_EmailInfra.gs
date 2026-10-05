@@ -371,6 +371,71 @@ function runEmailInfraTests_() {
     });
     TestAssertContains_(htmlEscaped, '&lt;script&gt;evil&lt;/script&gt;', 'renderOvernightReportEmailHTML_: title content is escaped, not injected raw');
 
+    // ============ 2026-10-05 email audit P1: the outgoing-email safety gate ============
+    // ---- emailAddressListProblemsGs_ ----
+    TestAssertEqual_(emailAddressListProblemsGs_('a@homesfy.in', 'To', true).length, 0, 'emailAddressListProblemsGs_: a plain address is fine');
+    TestAssertEqual_(emailAddressListProblemsGs_('a@homesfy.in, b.c+d@x.co.in', 'To', true).length, 0, 'emailAddressListProblemsGs_: a comma list of valid addresses is fine');
+    TestAssertEqual_(emailAddressListProblemsGs_('', 'To', true).length, 1, 'emailAddressListProblemsGs_: an empty required list is a problem');
+    TestAssertEqual_(emailAddressListProblemsGs_('', 'Cc', false).length, 0, 'emailAddressListProblemsGs_: an empty OPTIONAL list is fine');
+    TestAssertEqual_(emailAddressListProblemsGs_(undefined, 'Cc', false).length, 0, 'emailAddressListProblemsGs_: undefined Cc is fine');
+    TestAssertEqual_(emailAddressListProblemsGs_('not-an-email', 'To', true).length, 1, 'emailAddressListProblemsGs_: an address with no @ is rejected');
+    TestAssertEqual_(emailAddressListProblemsGs_('a@b', 'To', true).length, 1, 'emailAddressListProblemsGs_: an address with no dot after the @ is rejected');
+    TestAssertEqual_(emailAddressListProblemsGs_('a@homesfy.in,bad', 'To', true).length, 1, 'emailAddressListProblemsGs_: one bad address in a list is reported (and only that one)');
+    TestAssertEqual_(emailAddressListProblemsGs_('a@homesfy.in\r\nBcc: evil@x.com', 'To', true).length > 0, true, 'emailAddressListProblemsGs_: an address carrying a CR/LF header-injection payload is rejected');
+    TestAssertEqual_(emailAddressListProblemsGs_(['a@homesfy.in', 'b@homesfy.in'], 'To', true).length, 0, 'emailAddressListProblemsGs_: accepts an array too');
+
+    // ---- visibleTextOfHtmlGs_ ----
+    TestAssertEqual_(visibleTextOfHtmlGs_('<div><table><tr><td> </td></tr></table></div>'), '', 'visibleTextOfHtmlGs_: markup with no text has no visible text');
+    TestAssertEqual_(visibleTextOfHtmlGs_('<style>.a{color:red}</style><p>Hello&nbsp;<b>world</b> &amp; co</p>'), 'Hello world & co', 'visibleTextOfHtmlGs_: strips style blocks and tags, decodes entities, collapses whitespace');
+    TestAssertEqual_(visibleTextOfHtmlGs_(null), '', 'visibleTextOfHtmlGs_: null is empty text');
+
+    // ---- prepareOutgoingEmailGs_ ----
+    const goodMsg = { to: TEST_EMAIL_PRIMARY_, cc: TEST_EMAIL_CH_, subject: 'S', plainBody: 'plain', htmlBody: '<p>html L-1</p>', leadIds: ['L-1'] };
+    TestAssertEqual_(prepareOutgoingEmailGs_(goodMsg).problems.length, 0, 'prepareOutgoingEmailGs_: a complete, consistent report email passes');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { to: '' })).problems.length > 0, 'prepareOutgoingEmailGs_: a missing recipient is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { to: 'nope' })).problems.length > 0, 'prepareOutgoingEmailGs_: an invalid recipient is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { cc: 'bad cc' })).problems.length > 0, 'prepareOutgoingEmailGs_: an invalid Cc is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { subject: '   ' })).problems.length > 0, 'prepareOutgoingEmailGs_: a whitespace-only subject is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { subject: undefined })).problems.length > 0, 'prepareOutgoingEmailGs_: an undefined subject is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { plainBody: '' })).problems.length > 0, 'prepareOutgoingEmailGs_: an empty plain-text body is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { plainBody: ' \n\t ' })).problems.length > 0, 'prepareOutgoingEmailGs_: a whitespace-only plain-text body is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { plainBody: null })).problems.length > 0, 'prepareOutgoingEmailGs_: a null plain-text body is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { htmlBody: '<div><table><tr><td></td></tr></table></div>' })).problems.length > 0, 'prepareOutgoingEmailGs_: an HTML body with no visible text is a problem');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { leadIds: [] })).problems.length > 0, 'prepareOutgoingEmailGs_: a report that names no leads is a problem — nothing to send');
+    TestAssert_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { leadIds: ['L-1', 'L-MISSING'] })).problems.some(function (p) { return /L-MISSING/.test(p); }), 'prepareOutgoingEmailGs_: a lead the email counts but whose id is NOT in the HTML body is a problem (and is named)');
+    TestAssertEqual_(prepareOutgoingEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'S', plainBody: 'p' }).problems.length, 0, 'prepareOutgoingEmailGs_: leadIds omitted = not a report email, no lead check (an ops note can still pass)');
+    TestAssertEqual_(prepareOutgoingEmailGs_(Object.assign({}, goodMsg, { subject: 'Line1\r\nBcc: evil@x.com' })).msg.subject, 'Line1 Bcc: evil@x.com', 'prepareOutgoingEmailGs_: CR/LF in the subject is collapsed so a header can never carry a line break');
+
+    // ---- sendGuardedEmailGs_ ----
+    let draftsBefore = TestGmailLog_.drafts.length;
+    sendGuardedEmailGs_(goodMsg, 'test guarded send');
+    TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'sendGuardedEmailGs_: a valid email is drafted and sent');
+    const guardedDraft = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+    TestAssertEqual_(guardedDraft.to, TEST_EMAIL_PRIMARY_, 'sendGuardedEmailGs_: the exact validated recipient reaches the provider');
+    TestAssertEqual_(guardedDraft.cc, TEST_EMAIL_CH_, 'sendGuardedEmailGs_: the exact validated Cc reaches the provider');
+    TestAssertEqual_(guardedDraft.subject, 'S', 'sendGuardedEmailGs_: the exact validated subject reaches the provider');
+    TestAssertEqual_(guardedDraft.body, 'plain', 'sendGuardedEmailGs_: the exact validated plain body reaches the provider');
+    TestAssertEqual_(guardedDraft.htmlBody, '<p>html L-1</p>', 'sendGuardedEmailGs_: the exact validated HTML body reaches the provider');
+
+    draftsBefore = TestGmailLog_.drafts.length;
+    let blockedErr = null;
+    try { sendGuardedEmailGs_(Object.assign({}, goodMsg, { plainBody: '  ' }), 'test blocked send'); } catch (e) { blockedErr = e; }
+    TestAssert_(!!blockedErr && blockedErr.blockedByGuard === true, 'sendGuardedEmailGs_: an empty-body email throws a blockedByGuard error');
+    TestAssert_(!!blockedErr && blockedErr.guardProblems.length > 0, 'sendGuardedEmailGs_: the blocked error carries the problem list');
+    TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'sendGuardedEmailGs_: a blocked email creates NO draft at all — nothing reaches the provider');
+    blockedErr = null;
+    try { sendGuardedEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'S', plainBody: 'p', htmlBody: '<p></p>', leadIds: ['L-1'] }, 'test blocked 2'); } catch (e) { blockedErr = e; }
+    TestAssert_(!!blockedErr && blockedErr.blockedByGuard === true, 'sendGuardedEmailGs_: an HTML body with no visible text is blocked even when the plain body is fine');
+    TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'sendGuardedEmailGs_: …and again creates no draft');
+
+    // The retry rule is unchanged underneath the gate: a definitive "operation not allowed" is retried, then delivered once.
+    GmailApp = TestMockGmailApp_({ failSendCountFor: (function () { const o = {}; o[TEST_EMAIL_PRIMARY_] = 1; return o; })() });
+    draftsBefore = TestGmailLog_.drafts.length;
+    const retried = sendGuardedEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'R', plainBody: 'p', htmlBody: '<p>L-9</p>', leadIds: ['L-9'] }, 'test retry through gate');
+    TestAssert_(!!retried && typeof retried.getThread === 'function', 'sendGuardedEmailGs_: still returns the sent message (so callers can read its thread)');
+    TestAssertEqual_(TestGmailLog_.drafts.length - draftsBefore, 2, 'sendGuardedEmailGs_: one definitive refusal is retried (2 drafts: the refused one + the delivered one) — unchanged withSendRetry_ behavior');
+    GmailApp = TestMockGmailApp_();
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();

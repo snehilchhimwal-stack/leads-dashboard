@@ -487,6 +487,30 @@ override, 7 for the loan-team override, both the same self-contained-mock
 the production code itself hardcodes them — 'Snehil Chhimwal', the loan
 team's shape). Full suite 1232/1232 via `run-gs-tests-headless.py`.
 
+### 4.3.4 Email audit (2026-10-05) — the outgoing-email safety gate and what follows it
+
+The full audit, plan (P1–P14) and re-audit live in **`docs/_planning/EMAIL_AUDIT.md`** — read that
+for the findings (F1–F25) and their evidence. This section records only what is now *true of the
+code*, one bullet per plan step as each lands.
+
+- **P1 — every report email goes through one gate.** `sendGuardedEmailGs_` (`EmailInfra.gs`) is now
+  the ONLY place a report email is drafted and sent (`GmailApp.createDraft` appears nowhere else in
+  the emailers; ops alerts keep using `GmailApp.sendEmail` on purpose so an alert can always go out).
+  It validates the exact payload first (`prepareOutgoingEmailGs_`): a syntactically valid To (and
+  Cc), a non-blank subject (CR/LF collapsed), a non-whitespace plain body, an HTML body with visible
+  text, and — for report emails — a non-empty list of claimed lead ids that **all appear in the HTML
+  body** (the plain-text part is a one-line stub until P2, so it is only checked for being non-blank).
+  A failure throws `blockedByGuard` *before any draft exists*; each caller's existing failure path
+  turns that into an ops alert ("…BLOCKED by the send-safety gate…" or "Email BLOCKED by the
+  send-safety gate — nothing was drafted or sent: <reasons>") and a "not sent" entry, and **nothing
+  is marked as sent**. The 13:00 follow-up runs the gate once on the payload both of its paths
+  (threaded reply, plain fallback) would send; the threaded sender also re-validates and collapses
+  CR/LF, since it builds a raw MIME message by hand. `sendCombinedMorningEmail_` now treats a
+  Section 1 with no leads as no Section 1, and both CH-level reports skip silently when they would
+  carry zero leads. If a BLOCKED alert fires, fix the named cause (a bad cell in `Manager_Directory`
+  / `Region_Recipients`, or a content/count mismatch that is a code bug) and run the job's `…Now`
+  function by hand — the 13:00 job can be re-run the same day because a blocked reply writes no state.
+
 ### 4.4 GitHub repo access
 
 Push access to `github.com/snehilchhimwal-stack/leads-dashboard` is needed to

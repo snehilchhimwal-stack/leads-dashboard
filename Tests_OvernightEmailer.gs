@@ -764,6 +764,139 @@ function runOvernightEmailerTests_() {
 
     TestAssertOnlyTestEmails_();
 
+    // ======================================================================================================
+    // 2026-10-05 email audit P1 (docs/_planning/EMAIL_AUDIT.md F3/F4/F14): the send-safety gate at every send site.
+    // ======================================================================================================
+    const P1_allIssuesHeader = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
+      'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
+    const P1_yesterday = TestFixture_daysAgo_(now, 1);
+    const P1_stamp = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+    // A connected, under-48h lead whose last comment is 10h old -> flagged "Follow-up Overdue" right now.
+    const P1_flaggedLead = function (id, rm) {
+      return TestOE_leadRow_(header, {
+        lead_id: id, client_id: 'C-' + id, RM: rm || 'Test RM One', current_stage: 'Suspect', lead_assigned_at: TestFixture_hoursAgo_(now, 20),
+        last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+        internal_status_comments: (rm || 'Test RM One') + ': Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+      });
+    };
+    const P1_snapshot = function (id) {
+      return JSON.stringify([{ lead_id: id, RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'x' }]);
+    };
+    const P1_checkpoint1 = function (id) {
+      return JSON.stringify([{ lead_id: id, state: 'still_open', currentIssueLabel: 'Follow-up Overdue', currentStatus: 'Suspect' }]);
+    };
+    const P1_newSs = function (leadRows) {
+      const s = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      s._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header].concat(leadRows));
+      return s;
+    };
+    const P1_withSs = function (s, fn) {
+      const real = SpreadsheetApp;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return s; }, flush: function () {} };
+      try { fn(); } finally { SpreadsheetApp = real; }
+    };
+
+    // ---- notifyChLevelLeadsGs_: no leads -> no email (it used to send an empty "0 Leads Assigned" report) ----
+    {
+      const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];
+      const before = TestGmailLog_.drafts.length, sentBefore = TestGmailLog_.sent.length;
+      notifyChLevelLeadsGs_('Pune', chRms, {}, 'test date');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'notifyChLevelLeadsGs_: a CH-level entry with NO leads sends nothing — never an empty "0 Leads Assigned" report');
+      TestAssertEqual_(TestGmailLog_.sent.length, sentBefore, 'notifyChLevelLeadsGs_: …and skips silently (the first-line empty check, not the safety gate\'s "blocked" alert)');
+      notifyChLevelLeadsGs_('Pune', chRms, { 'Test CH Self': [{ lead_id: 'L-CHX', RM: 'Test CH Self', TL: '', status: 'Suspect', followup: 'call now' }] }, 'test date');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, 'notifyChLevelLeadsGs_: with a lead, it sends exactly one report');
+      TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-CHX', 'notifyChLevelLeadsGs_: the lead is in the HTML body');
+    }
+
+    // ---- sendCombinedMorningEmail_: an empty-but-present Section 1 with no Checkpoint 1 sends nothing ----
+    // (The old rule tested `!section1`, so an empty Section 1 OBJECT counted as "has overnight content" and a header-only
+    // email would have gone out.)
+    {
+      const ssM = P1_newSs([]);
+      const ovLogM = ensureOvernightLogSheet_(ssM);
+      const aiLogM = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader]);
+      const emptySection1 = { rec: { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' }, leads: [] };
+      const before = TestGmailLog_.drafts.length;
+      const r = sendCombinedMorningEmail_(ssM, ovLogM, aiLogM, 'Pune', emptySection1, null, 'test date', istDayKeyGs_(now), now, win, {}, null);
+      TestAssertEqual_(r, null, 'sendCombinedMorningEmail_: an empty Section 1 and no Checkpoint 1 returns null (not a failure)');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'sendCombinedMorningEmail_: an EMPTY Section 1 object with no Checkpoint 1 sends NO email — no header-only digest');
+      TestAssertEqual_(ovLogM.getLastRow(), 1, 'sendCombinedMorningEmail_: …and writes no Overnight_Log row');
+    }
+
+    // ---- sendCombinedMorningEmail_: bad recipients never reach the provider ----
+    ['', 'not-an-email'].forEach(function (badTo) {
+      const ssB = P1_newSs([]);
+      const ovLogB = ensureOvernightLogSheet_(ssB);
+      const aiLogB = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader]);
+      const s1 = { rec: { to: badTo, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' }, leads: [{ lead_id: 'L-BADTO', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', followup: 'call', issue: null }] };
+      const before = TestGmailLog_.drafts.length;
+      const fail = sendCombinedMorningEmail_(ssB, ovLogB, aiLogB, 'Pune', s1, null, 'test date', istDayKeyGs_(now), now, win, {}, null);
+      TestAssert_(!!fail && /BLOCKED by the send-safety gate/.test(fail.reason), 'sendCombinedMorningEmail_: recipient "' + badTo + '" is BLOCKED by the safety gate and reported as not sent');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'sendCombinedMorningEmail_: recipient "' + badTo + '" — NOTHING reaches the provider (no draft)');
+      TestAssertEqual_(ovLogB.getLastRow(), 1, 'sendCombinedMorningEmail_: recipient "' + badTo + '" — no Overnight_Log row for an email that was never sent');
+    });
+
+    // ---- standalone sendOneOvernightEmail_: a bad recipient is blocked and reported ----
+    {
+      const ssS = P1_newSs([]);
+      const ovLogS = ensureOvernightLogSheet_(ssS);
+      const before = TestGmailLog_.drafts.length;
+      const resS = sendOneOvernightEmail_(ssS, ovLogS, 'Pune', { to: 'not-an-email', cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+        [{ lead_id: 'L-STANDALONE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', followup: 'call', issue: null }], 'test date', istDayKeyGs_(now), now, win);
+      TestAssert_(!!resS && /BLOCKED by the send-safety gate/.test(resS.reason), 'sendOneOvernightEmail_: a bad recipient is blocked and returned as a failure');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'sendOneOvernightEmail_: …with nothing reaching the provider');
+      TestAssertEqual_(ovLogS.getLastRow(), 1, 'sendOneOvernightEmail_: …and no Overnight_Log row');
+    }
+
+    // ---- 13:00 follow-up: a bad stored recipient is BLOCKED on BOTH paths (nothing sent, nothing marked done) ----
+    {
+      const ssG = P1_newSs([P1_flaggedLead('L-BADREC')]);
+      const ovLogG = ensureOvernightLogSheet_(ssG);
+      ovLogG.appendRow([istDayKeyGs_(now), 'Pune', 'thr-badrec', '[]', P1_stamp, 'not-an-email', '', 'Pune Digest - test badrec']);
+      const aiLogG = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', 'not-an-email', '', 1, P1_yesterday, 'thr-ai-badrec', P1_snapshot('L-BADREC'), P1_checkpoint1('L-BADREC'), now, '', '']]);
+      ssG._sheets['AllIssues_Log'] = aiLogG;
+      const repliesBefore = TestGmailLog_.threadReplies.length, draftsBefore = TestGmailLog_.drafts.length, alertsBefore = TestGmailLog_.sent.length;
+      P1_withSs(ssG, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore, 'bad recipient at 13:00: no threaded reply is attempted');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'bad recipient at 13:00: no fallback message either — the gate blocks BOTH paths');
+      TestAssert_(TestGmailLog_.sent.slice(alertsBefore).some(function (e) { return /BLOCKED by the send-safety gate/.test(e.subject); }), 'bad recipient at 13:00: ops is alerted that the reply was blocked');
+      TestAssertEqual_(String(ovLogG.getRange(2, 9, 1, 1).getValues()[0][0]), '', 'bad recipient at 13:00: followup_sent_at stays blank');
+      TestAssert_(!aiLogG.getRange(2, 14, 1, 1).getValues()[0][0], 'bad recipient at 13:00: checkpoint2_sent_at stays blank — nothing is marked done');
+    }
+
+    // ---- 13:00 follow-up: an email that COUNTS a lead its body does not contain is blocked ----
+    // Checkpoint 2 finds L-MISMATCH still unresolved, but the stored snapshot (which the table is built from) does not hold it,
+    // so the HTML would count 1 lead and list none — exactly the validated-count-vs-sent-body mismatch the gate exists for.
+    {
+      const ssX = P1_newSs([P1_flaggedLead('L-MISMATCH')]);
+      const ovLogX = ensureOvernightLogSheet_(ssX);
+      ovLogX.appendRow([istDayKeyGs_(now), 'Pune', 'thr-mismatch', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test mismatch']);
+      ssX._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-mismatch', P1_snapshot('L-OTHER'), P1_checkpoint1('L-MISMATCH'), now, '', '']]);
+      const repliesBefore = TestGmailLog_.threadReplies.length, draftsBefore = TestGmailLog_.drafts.length, alertsBefore = TestGmailLog_.sent.length;
+      P1_withSs(ssX, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore, 'count/body mismatch at 13:00: no reply is sent');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'count/body mismatch at 13:00: no fallback message either');
+      TestAssert_(TestGmailLog_.sent.slice(alertsBefore).some(function (e) { return /BLOCKED by the send-safety gate/.test(e.subject) && /L-MISMATCH/.test(e.body); }), 'count/body mismatch at 13:00: ops is alerted and the missing lead is named');
+    }
+
+    // ---- the threaded sender never builds a raw message from a header-injection address ----
+    {
+      let injected = null;
+      try { sendThreadedGmailReply_('thr-x', 'a@homesfy.in\r\nBcc: evil@x.com', '', 'S', 'plain', '<p>html</p>'); } catch (e) { injected = e; }
+      TestAssert_(!!injected && injected.blockedByGuard === true, 'sendThreadedGmailReply_: an address carrying CR/LF is rejected before any raw MIME is built');
+      const repliesBefore = TestGmailLog_.threadReplies.length;
+      sendThreadedGmailReply_('thr-x', TEST_EMAIL_PRIMARY_, '', 'Subject\r\nBcc: evil@x.com', 'plain', '<p>html</p>');
+      const sentRaw = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[repliesBefore].raw);
+      TestAssert_(sentRaw.indexOf('\r\nBcc: evil@x.com') === -1 && /Subject: Subject Bcc: evil@x\.com/.test(sentRaw), 'sendThreadedGmailReply_: a line break in the subject is collapsed — it can never become a second header');
+    }
+
+    TestAssertOnlyTestEmails_();
+
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either
     // real run must alert ops before it aborts, not fail silently — same
     // reasoning/pattern as sendAllIssuesEmails' own wrapper

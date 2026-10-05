@@ -286,6 +286,33 @@ function runAllIssuesEmailerTests_() {
 
     TestAssertOnlyTestEmails_();
 
+    // ============ 2026-10-05 email audit P1 (docs/_planning/EMAIL_AUDIT.md F3/F4): the send-safety gate ============
+    // ---- bad recipients are blocked: nothing sent, nothing logged as sent ----
+    ['', 'not-an-email'].forEach(function (badTo) {
+      const logSheetB = ensureAllIssuesLogSheet_(ss);
+      const rowsBefore = logSheetB.getLastRow();
+      const before = TestGmailLog_.drafts.length;
+      const resB = sendOneAllIssuesEmail_(ss, logSheetB, 'Pune', { to: badTo, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+        [{ lead_id: 'L-BADTO', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
+      TestAssert_(!!resB && /BLOCKED by the send-safety gate/.test(resB.reason), 'sendOneAllIssuesEmail_: recipient "' + badTo + '" is blocked and reported as not sent');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'sendOneAllIssuesEmail_: recipient "' + badTo + '" — nothing reaches the provider');
+      TestAssertEqual_(logSheetB.getLastRow(), rowsBefore, 'sendOneAllIssuesEmail_: recipient "' + badTo + '" — no AllIssues_Log row for an email that never went out');
+    });
+
+    // ---- notifyChLevelIssuesGs_: no leads -> nothing sent, and no ops noise either ----
+    {
+      const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];
+      const before = TestGmailLog_.drafts.length, sentBefore = TestGmailLog_.sent.length;
+      notifyChLevelIssuesGs_('Pune', chRms, {}, win);
+      TestAssertEqual_(TestGmailLog_.drafts.length, before, 'notifyChLevelIssuesGs_: a CH-level entry with NO flagged leads sends nothing — never an empty "0 Leads Flagged" report');
+      TestAssertEqual_(TestGmailLog_.sent.length, sentBefore, 'notifyChLevelIssuesGs_: …and skips silently (the first-line empty check, not the safety gate\'s "blocked" alert)');
+      notifyChLevelIssuesGs_('Pune', chRms, { 'Test CH Self': [{ lead_id: 'L-CHI', RM: 'Test CH Self', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'call' }] }, win);
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, 'notifyChLevelIssuesGs_: with a flagged lead, it sends one report');
+      TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-CHI', 'notifyChLevelIssuesGs_: the lead is in the HTML body');
+    }
+
+    TestAssertOnlyTestEmails_();
+
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in the
     // real run must alert ops before it aborts, not fail silently ----
     // readLeadsTab_ is called near the very top of sendAllIssuesEmails_,

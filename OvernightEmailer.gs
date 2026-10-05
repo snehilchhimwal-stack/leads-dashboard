@@ -196,6 +196,13 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
     const allLeads = grouped.allLeads;
     const statusTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.status; }))).length;
 
+    // 2026-10-05 email audit (P1/F4): nothing in this function stopped a report with ZERO leads (the CH-level RM names
+    // resolved, but rmToLeads — optional — held none of their leads) from going out as an empty "0 Leads Assigned" email.
+    if (!allLeads.length) {
+      Logger.log('notifyChLevelLeadsGs_: no leads found for the CH-level RM(s) ' + entry.rmNames.join(', ') + ' (' + region + ') — report not sent.');
+      return;
+    }
+
     const html = noteBanner.html + renderOvernightReportEmailHTML_({
       title: 'Overnight Leads',
       region: region,
@@ -225,14 +232,13 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
     // a failure to send THIS report must never take down the real
     // morning-send loop it's reporting alongside.
     try {
-      withSendRetry_(function () {
-        return GmailApp.createDraft(chLevelReportToGs_(), subject, plainBody, {
-          htmlBody: html,
-          name: 'Homesfy Lead Ops',
-        }).send();
+      sendGuardedEmailGs_({
+        to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
+        leadIds: allLeads.map(function (l) { return l.lead_id; }),
       }, 'send CH-level report (' + chName + ', ' + region + ')');
     } catch (e) {
       Logger.log('notifyChLevelLeadsGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
+      if (e && e.blockedByGuard) notifyOpsAlertGs_('CH-level overnight report BLOCKED - ' + region + ' / ' + chName, [String(e.message || e)]);
     }
   });
 }
@@ -433,12 +439,9 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // actually succeeded and only the confirmation was lost) is a single
     // attempt, surfacing as the "failed" alert below rather than risking
     // a silent duplicate to a real recipient.
-    sentMessage = withSendRetry_(function () {
-      return GmailApp.createDraft(rec.to, subject, plainBody, {
-        cc: rec.cc || undefined,
-        htmlBody: html,
-        name: 'Homesfy Lead Ops',
-      }).send();
+    sentMessage = sendGuardedEmailGs_({
+      to: rec.to, cc: rec.cc, subject: subject, plainBody: plainBody, htmlBody: html,
+      leadIds: leads.map(function (l) { return l.lead_id; }),
     }, 'send morning email (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('Overnight morning email failed for ' + region + bucketNote + ': ' + e);
@@ -451,8 +454,11 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // manual Send from the Gmail UI works fine since the block is on
     // script-driven sends specifically. Called out explicitly here so the
     // alert is immediately actionable instead of just reporting failure.
-    const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
-    const failureReason = isSendBlocked
+    const guardBlocked = !!(e && e.blockedByGuard);
+    const isSendBlocked = !guardBlocked && /operation not allowed/i.test(String((e && e.message) || e));
+    const failureReason = guardBlocked
+      ? 'Email BLOCKED by the send-safety gate — nothing was drafted or sent: ' + e.guardProblems.join('; ')
+      : isSendBlocked
       ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send'
       : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so the draft may already exist)';
     notifyOpsAlertGs_('Morning email failed for ' + region + bucketNote, [
@@ -461,7 +467,9 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
       '',
       'These leads got no automated email this run — the window is fixed to this morning\'s run only, so tomorrow\'s run will NOT retry them.',
-      isSendBlocked
+      guardBlocked
+        ? 'The send-safety gate refused this payload before any draft was created: ' + e.guardProblems.join('; ') + '. Fix the underlying data (recipient address / content) and run the job by hand.'
+        : isSendBlocked
         ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
         // Any OTHER error here (not the specific "operation not allowed"
         // phrase) still carries the same underlying risk: createDraft()
@@ -685,6 +693,10 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
 // send failure — same shape sendOneOvernightEmail_ returns, so the
 // caller's existing failedLeadEntries aggregation needs no changes.
 function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason) {
+  // 2026-10-05 email audit (P1/F4): the skip rule below tests `!section1`, so a Section 1 bucket that exists but holds ZERO
+  // leads used to count as "has overnight content" — with no active Checkpoint 1 either, a header-only email would go out.
+  // A Section 1 with no leads is no Section 1.
+  if (section1 && !(section1.leads && section1.leads.length)) section1 = null;
   // TEST MODE: a Section-2-only bucket's `to` is the STORED 17:00 recipient (a real manager) — never route it there.
   const to = TEST_MODE_OVERRIDE_EMAIL_ || (section1 && section1.rec.to) || (section2 && section2.to);
   const cc = TEST_MODE_OVERRIDE_EMAIL_ ? '' : ((section1 && section1.rec.cc) || (section2 && section2.cc) || '');
@@ -759,16 +771,22 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + activeCheckpoint1Count +
     ' unresolved lead(s). Open this email in Gmail for the full breakdown.';
 
+  // The leads this email counts: Section 1's overnight leads + Checkpoint 1's still-unresolved leads. The send gate checks
+  // every one of them is actually in the body that goes out.
+  const claimedLeadIds = section1Leads.map(function (l) { return l.lead_id; })
+    .concat((checkpoint1Results || []).filter(allIssuesCheckpointIsActiveGs_).map(function (r) { return r.lead_id; }));
+
   let sentMessage = null;
   let sendFailureReason = null;
   try {
-    sentMessage = withSendRetry_(function () {
-      return GmailApp.createDraft(to, subject, plainBody, { cc: cc || undefined, htmlBody: html, name: 'Homesfy Lead Ops' }).send();
-    }, 'send combined morning email (' + region + bucketNote + ')');
+    sentMessage = sendGuardedEmailGs_({ to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send combined morning email (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('Combined morning email failed for ' + region + bucketNote + ': ' + e);
-    const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
-    sendFailureReason = isSendBlocked
+    const guardBlocked = !!(e && e.blockedByGuard);
+    const isSendBlocked = !guardBlocked && /operation not allowed/i.test(String((e && e.message) || e));
+    sendFailureReason = guardBlocked
+      ? 'Email BLOCKED by the send-safety gate — nothing was drafted or sent: ' + e.guardProblems.join('; ')
+      : isSendBlocked
       ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + to + ' with subject "' + subject + '"'
       : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so the draft may already exist)';
     notifyOpsAlertGs_('Combined morning email FAILED - ' + region + bucketNote, [
@@ -1312,6 +1330,13 @@ function formatFollowupAgeGs_(updatedAt, now) {
  * withSendRetry_'s own comment for the real production case this covers.
  */
 function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody) {
+  // Same send-safety gate as every other report email (EmailInfra.gs). This path builds a RAW MIME message by hand, so it
+  // is also where an address or subject carrying a line break would become a header-injection / corrupt-header bug —
+  // prepareOutgoingEmailGs_ rejects such an address and collapses a line break in the subject before anything is built.
+  const prepared = prepareOutgoingEmailGs_({ to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody });
+  if (prepared.problems.length) throw sendBlockedErrorGs_('threaded reply (' + threadId + ')', prepared.problems);
+  to = prepared.msg.to; cc = prepared.msg.cc; subject = prepared.msg.subject;
+
   const thread = withRetry_(function () {
     return Gmail.Users.Threads.get('me', threadId, { format: 'metadata', metadataHeaders: ['Message-ID'] });
   }, 'read thread for threaded reply (' + threadId + ')');
@@ -1557,6 +1582,28 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count +
     ' unresolved lead(s). Open this email in Gmail for the full breakdown.';
 
+  // The send-safety gate runs ONCE here, on the exact payload both send paths below would use, with the leads this email
+  // counts (Section 1's still-unresolved + Checkpoint 2's still-unresolved): an email that is empty, has a bad recipient,
+  // or whose body is missing a lead it counts is not sent by EITHER path — and nothing is marked as sent, so fixing the
+  // cause and running sendOvernightFollowupEmailsNow again today retries this bucket.
+  const claimedLeadIds = section1UnresolvedRows.map(function (row) { return row.lead_id; })
+    .concat((checkpoint2Results || []).map(function (r) { return r.lead_id; }));
+  const gate = prepareOutgoingEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds });
+  if (gate.problems.length) {
+    Logger.log('1pm follow-up BLOCKED for ' + region + ' (thread ' + threadId + '): ' + gate.problems.join('; '));
+    notifyOpsAlertGs_('1pm follow-up BLOCKED by the send-safety gate for ' + region, [
+      'Region: ' + region,
+      'Thread: ' + threadId,
+      'Intended recipient: ' + sendTo + (sendCc ? (' (cc: ' + sendCc + ')') : ''),
+      'Section 1 still-unresolved leads (' + section1UnresolvedRows.length + '): ' + section1UnresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
+      'Section 2 Checkpoint 2 leads (' + (section2Input ? section2Input.checkpoint1Entries.length : 0) + '): ' + (section2Input ? section2Input.checkpoint1Entries.map(function (e) { return e.lead_id; }).join(', ') : '(none)'),
+      '',
+      'The reply was not drafted or sent: ' + gate.problems.join('; ') + '.',
+      'Nothing was marked as sent, so running sendOvernightFollowupEmailsNow again TODAY (after fixing the cause) will retry this bucket.',
+    ]);
+    return;
+  }
+
   // sendThreadedGmailReply_ retries its own send step internally
   // (withSendRetry_ — only a definitive rejection, never an ambiguous
   // timeout). The plain fallback below gets the same treatment
@@ -1572,9 +1619,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   } catch (threadErr) {
     Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
     try {
-      withSendRetry_(function () {
-        return GmailApp.createDraft(sendTo, subject, plainBody, { cc: sendCc, htmlBody: html, name: 'Homesfy Lead Ops' }).send();
-      }, 'send fallback follow-up (' + region + ')');
+      sendGuardedEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send fallback follow-up (' + region + ')');
       sendSucceeded = true;
     } catch (fallbackErr) {
       Logger.log('Overnight follow-up reply failed entirely for ' + region + ' (thread ' + threadId + ', to ' + sendTo + '): ' + fallbackErr);

@@ -377,6 +377,103 @@ function withSendRetry_(fn, label) {
   }
 }
 
+// ============================== OUTGOING EMAIL SAFETY GATE ==============================
+// Added 2026-10-05 (email audit P1, docs/_planning/EMAIL_AUDIT.md F3/F4/F14). Before this, every report email was built
+// inline at its own call site and handed straight to GmailApp — nothing between "the body was built" and "the provider
+// call" checked that the recipient was a real address, that the subject/body had any content, or that the leads the email
+// claims to report are actually in the body that goes out. The skip rules at each call site ("nothing unresolved -> don't
+// send") are the FIRST line of defence; this is the LAST one, and it works on the exact payload about to be sent, so
+// validation and send can never disagree.
+//
+// A blocked send throws an Error with .blockedByGuard = true BEFORE any draft exists; every caller already turns a thrown
+// send error into an ops alert + a "not sent" entry, so a blocked email is recorded, never silent, and nothing is marked
+// as sent (the state stays recoverable).
+
+// Deliberately simple: one address, no display name, no quotes/brackets/commas/whitespace anywhere. Whitespace and CR/LF are
+// excluded on purpose — an address with a line break inside it is a header-injection attempt or a corrupt cell, not mail.
+// (Checked 2026-10-05 against every address ever sent to or configured — 7,854 — none is rejected.)
+const EMAIL_ADDRESS_RE_ = /^[^\s@<>,;"()\[\]\\]+@[^\s@<>,;"()\[\]\\]+\.[^\s@<>,;"()\[\]\\]+$/;
+
+// Problems with a comma-separated address list ([] = fine). `required` = an empty list is itself a problem (the To field).
+function emailAddressListProblemsGs_(list, fieldName, required) {
+  const raw = Array.isArray(list) ? list.join(',') : String(list == null ? '' : list);
+  const parts = raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  if (!parts.length) return required ? [fieldName + ' is empty'] : [];
+  const problems = [];
+  parts.forEach(function (a) {
+    if (!EMAIL_ADDRESS_RE_.test(a)) problems.push(fieldName + ' has an invalid address "' + a.replace(/[\r\n]+/g, ' ') + '"');
+  });
+  return problems;
+}
+
+// The text a reader would actually see in an HTML body — style/script/head blocks and tags removed, entities decoded,
+// whitespace collapsed. An HTML body that is all markup (empty cells, empty table) has no visible text.
+function visibleTextOfHtmlGs_(html) {
+  return String(html == null ? '' : html)
+    .replace(/<(style|script|head)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Normalizes a message (CR/LF in the subject collapsed — a header can never carry a line break) and returns
+// { msg: <the exact payload that will be sent>, problems: [...] }. `msg` = { to, cc, subject, plainBody, htmlBody, leadIds }.
+// leadIds (optional) is the list of lead ids this report email CLAIMS to report: when given, it must be non-empty and every
+// id must appear in the visible text of the HTML body — a report that names no leads, or whose body does not contain the
+// leads it counts, is never sent. Omit leadIds for a non-report mail. (The plain-text part is a one-line stub today and is
+// only checked for being non-blank; the next plan step gives it the lead list and then requires the ids there too.)
+function prepareOutgoingEmailGs_(msg) {
+  const m = msg || {};
+  const to = Array.isArray(m.to) ? m.to.join(',') : String(m.to == null ? '' : m.to).trim();
+  const cc = Array.isArray(m.cc) ? m.cc.join(',') : String(m.cc == null ? '' : m.cc).trim();
+  const subject = String(m.subject == null ? '' : m.subject).replace(/[\r\n]+/g, ' ').trim();
+  const plainBody = m.plainBody == null ? '' : String(m.plainBody);
+  const htmlBody = m.htmlBody == null ? undefined : String(m.htmlBody);
+
+  const problems = [];
+  problems.push.apply(problems, emailAddressListProblemsGs_(to, 'To', true));
+  problems.push.apply(problems, emailAddressListProblemsGs_(cc, 'Cc', false));
+  if (!subject) problems.push('the subject is empty');
+  if (!plainBody.trim()) problems.push('the plain-text body is empty or whitespace-only');
+  let visible = '';
+  if (htmlBody !== undefined) {
+    visible = visibleTextOfHtmlGs_(htmlBody);
+    if (!visible) problems.push('the HTML body has no visible text');
+  }
+  if (m.leadIds !== undefined) {
+    const ids = (m.leadIds || []).map(function (id) { return String(id == null ? '' : id).trim(); }).filter(Boolean);
+    if (!ids.length) {
+      problems.push('the email reports no leads — nothing to send');
+    } else if (htmlBody !== undefined) {
+      const missingHtml = ids.filter(function (id) { return visible.indexOf(id) === -1; });
+      if (missingHtml.length) problems.push('lead(s) counted but missing from the HTML body: ' + missingHtml.slice(0, 5).join(', '));
+    }
+  }
+  return { msg: { to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody }, problems: problems };
+}
+
+function sendBlockedErrorGs_(label, problems) {
+  const err = new Error('Send blocked by the safety gate (' + (label || 'email') + '): ' + problems.join('; '));
+  err.blockedByGuard = true;
+  err.guardProblems = problems;
+  return err;
+}
+
+// THE single sender for every report email: validate the exact payload, then draft+send it with the retry rules in
+// withSendRetry_. Throws (never sends) when the payload fails validation.
+function sendGuardedEmailGs_(msg, label) {
+  const prepared = prepareOutgoingEmailGs_(msg);
+  if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems);
+  const m = prepared.msg;
+  const options = { name: 'Homesfy Lead Ops' };
+  if (m.cc) options.cc = m.cc;
+  if (m.htmlBody !== undefined) options.htmlBody = m.htmlBody;
+  return withSendRetry_(function () {
+    return GmailApp.createDraft(m.to, m.subject, m.plainBody, options).send();
+  }, label);
+}
+
 // Split into small independently-retried steps, with a flush() right
 // after insertSheet — same reasoning as RmHierarchy.gs's identical
 // functions (see ensureRmHierarchySheet_'s comment): one big withRetry_

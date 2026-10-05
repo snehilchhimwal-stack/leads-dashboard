@@ -405,6 +405,13 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
     const allLeads = grouped.allLeads;
     const issueTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.issueLabel; }))).length;
 
+    // 2026-10-05 email audit (P1/F4): same hole as notifyChLevelLeadsGs_ — nothing stopped a "0 Leads Flagged" report from
+    // going out when the CH-level RM names resolved but rmToLeads held none of their leads.
+    if (!allLeads.length) {
+      Logger.log('notifyChLevelIssuesGs_: no flagged leads found for the CH-level RM(s) ' + entry.rmNames.join(', ') + ' (' + region + ') — report not sent.');
+      return;
+    }
+
     const html = noteBanner.html + renderOvernightReportEmailHTML_({
       title: 'Leads With Issue',
       region: region,
@@ -430,13 +437,13 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
       allLeads.length + ' flagged lead(s) across ' + rmKeys.length + ' RM(s). Open this email in Gmail for the full breakdown.';
 
     try {
-      withSendRetry_(function () {
-        return GmailApp.createDraft(chLevelReportToGs_(), subject, plainBody, {
-          htmlBody: html, name: 'Homesfy Lead Ops',
-        }).send();
+      sendGuardedEmailGs_({
+        to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
+        leadIds: allLeads.map(function (l) { return l.lead_id; }),
       }, 'send CH-level issues report (' + chName + ', ' + region + ')');
     } catch (e) {
       Logger.log('notifyChLevelIssuesGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
+      if (e && e.blockedByGuard) notifyOpsAlertGs_('CH-level All-Issues report BLOCKED - ' + region + ' / ' + chName, [String(e.message || e)]);
     }
   });
 }
@@ -506,10 +513,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   Logger.log('All-issues email recipients for ' + region + bucketNote + ': ' + rec.source);
   let sentMessage;
   try {
-    sentMessage = withSendRetry_(function () {
-      return GmailApp.createDraft(rec.to, subject, plainBody, {
-        cc: rec.cc || undefined, htmlBody: html, name: 'Homesfy Lead Ops',
-      }).send();
+    sentMessage = sendGuardedEmailGs_({
+      to: rec.to, cc: rec.cc, subject: subject, plainBody: plainBody, htmlBody: html,
+      leadIds: leads.map(function (l) { return l.lead_id; }),
     }, 'send all-issues email (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('All-issues email failed for ' + region + bucketNote + ': ' + e);
@@ -522,8 +528,11 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // Send from the Gmail UI works fine since the block is on script-driven
     // sends specifically — called out explicitly so the alert is
     // immediately actionable instead of just reporting failure.
-    const isSendBlocked = /operation not allowed/i.test(String((e && e.message) || e));
-    const failureReason = isSendBlocked
+    const guardBlocked = !!(e && e.blockedByGuard);
+    const isSendBlocked = !guardBlocked && /operation not allowed/i.test(String((e && e.message) || e));
+    const failureReason = guardBlocked
+      ? 'Email BLOCKED by the send-safety gate — nothing was drafted or sent: ' + e.guardProblems.join('; ')
+      : isSendBlocked
       ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send'
       : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so the draft may already exist)';
     try {
@@ -533,7 +542,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
         'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
         '',
         'These leads got no automated email this run — this script only covers the trailing 48h window, so tomorrow\'s run will re-check them only if they\'re still inside that window then.',
-        isSendBlocked
+        guardBlocked
+          ? 'The send-safety gate refused this payload before any draft was created: ' + e.guardProblems.join('; ') + '. Fix the underlying data (recipient address / content) and run the job by hand.'
+          : isSendBlocked
           ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
           // Any OTHER error here still carries the same underlying risk —
           // createDraft() and send() are chained, so this could be a
