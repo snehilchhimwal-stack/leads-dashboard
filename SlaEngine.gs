@@ -232,10 +232,15 @@ function allIssuesCheckpointPriorLabel_(entry) {
 function allIssuesCheckpointPriorWasActive_(entry) {
   return entry.state !== 'resolved' && entry.state !== 'not_found';
 }
-function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap) {
+// `leadsData` (optional, the {colIndex, dataRows} object readLeadsTab_ returns) — email audit P8 / F8: a job that already read
+// the leads tab passes ITS snapshot here, so a 10:00 / 13:00 run does ONE whole-sheet read instead of one per bucket (~30; the
+// 3 Oct 13:00 run took 663 s), and every bucket — Section 1 and Section 2 of the same email — is judged against the SAME moment
+// of a sheet that is re-imported underneath the run. Omitted (or not a usable {colIndex, dataRows}), it reads the tab itself,
+// exactly as before.
+function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leadsData) {
   if (!priorEntries || !priorEntries.length) return [];
   const wantedIds = new Set(priorEntries.map(function (e) { return e.lead_id; }));
-  const { colIndex, dataRows } = readLeadsTab_(ss);
+  const { colIndex, dataRows } = (leadsData && leadsData.colIndex && leadsData.dataRows) ? leadsData : readLeadsTab_(ss);
   const byLeadId = {};
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();

@@ -282,6 +282,34 @@ function runSlaEngineTests_() {
     const ckSecondPass = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap);
     TestAssertEqual_(ckSecondPass[0].state, 'still_open', 'computeAllIssuesCheckpointGs_: reused verbatim on its own prior output (a checkpoint-shaped entry, not a raw snapshot entry) — proves the "reused for both checkpoints" design intent');
 
+    // ---- email audit P8 (F8): an optional `leadsData` snapshot replaces the per-call whole-sheet read ----
+    {
+      const realReadLeads = readLeadsTab_;
+      let readCount = 0;
+      readLeadsTab_ = function (s) { readCount++; return realReadLeads(s); };
+      try {
+        const snap = realReadLeads(ckSs);
+        const withSnap = computeAllIssuesCheckpointGs_(ckSs, ckPriorEntries, now, ckBaselineMap, snap);
+        TestAssertEqual_(readCount, 0, 'computeAllIssuesCheckpointGs_ (leadsData): a supplied snapshot means the leads tab is NOT read again');
+        TestAssertEqual_(JSON.stringify(withSnap), JSON.stringify(ckResults), 'computeAllIssuesCheckpointGs_ (leadsData): the same data gives the same seven results as a fresh read');
+
+        // The snapshot, not the live sheet, is what gets judged: close L-CK-STILLOPEN in the SNAPSHOT only.
+        const closedSnap = { colIndex: snap.colIndex, dataRows: snap.dataRows.map(function (r) { return r.slice(); }) };
+        closedSnap.dataRows.forEach(function (r) { if (r[closedSnap.colIndex.lead_id] === 'L-CK-STILLOPEN') r[closedSnap.colIndex.current_stage] = 'Won'; });
+        const fromClosedSnap = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap, closedSnap);
+        TestAssertEqual_(fromClosedSnap[0].state, 'resolved', 'computeAllIssuesCheckpointGs_ (leadsData): judged against the supplied snapshot (closed there) even though the live sheet still shows it open');
+        TestAssertEqual_(computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap)[0].state, 'still_open', 'computeAllIssuesCheckpointGs_ (leadsData): control — with no snapshot the live sheet says still_open');
+
+        // Not a usable snapshot -> falls back to reading the tab (never throws, never returns wrong data).
+        readCount = 0;
+        [null, undefined, {}, { colIndex: {}, dataRows: null }, { dataRows: [] }].forEach(function (bad, i) {
+          const r = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap, bad);
+          TestAssertEqual_(r[0].state, 'still_open', 'computeAllIssuesCheckpointGs_ (leadsData): an unusable snapshot (#' + i + ') falls back to a real read');
+        });
+        TestAssertEqual_(readCount, 5, 'computeAllIssuesCheckpointGs_ (leadsData): …and each of those five calls did read the tab');
+      } finally { readLeadsTab_ = realReadLeads; }
+    }
+
     // ---- allIssuesCheckpointIsActiveGs_ (2026-09-26, "no email for
     // resolved status") — the one rule both checkpoint emails share. ----
     TestAssertEqual_(allIssuesCheckpointIsActiveGs_({ state: 'resolved' }), false, 'allIssuesCheckpointIsActiveGs_: resolved is not active');

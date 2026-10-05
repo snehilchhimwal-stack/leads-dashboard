@@ -1243,6 +1243,67 @@ function runOvernightEmailerTests_() {
       TestAssertEqual_(existRow[5], 'typed by a human', 'pushUnresolvedToLeadFollowups_: column F (the human-typed suggestion) is still preserved');
     }
 
+    // ---- email audit P8 (F8): ONE leads-tab read per 10:00 / 13:00 job, shared by every bucket ----
+    // Each bucket's checkpoint used to re-read the whole tab (~30 reads; the 3 Oct 13:00 run took 663 s), so buckets — and
+    // Section 1 vs Section 2 of one email — could be judged against different moments of a sheet re-imported underneath the run.
+    {
+      // A lead 50h old: not in the overnight window (so it is never a Section-1 lead), flagged "Stuck 48h+" -> an active
+      // Checkpoint lead against a snapshot that says "Follow-up Overdue".
+      const P8_lead = function (id) {
+        return TestOE_leadRow_(header, { lead_id: id, client_id: 'C-' + id, RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: TestFixture_hoursAgo_(now, 50), call_attempts: 15 });
+      };
+      // Spy on the whole-sheet read; `afterFirstRead` runs right after the job's FIRST read (a re-import landing mid-run).
+      const spyOnLeadsReads = function (afterFirstRead) {
+        const realRead = readLeadsTab_;
+        const state = { reads: 0, restore: function () { readLeadsTab_ = realRead; } };
+        readLeadsTab_ = function (s) {
+          state.reads++;
+          const data = realRead(s);
+          if (state.reads === 1 && afterFirstRead) afterFirstRead();
+          return data;
+        };
+        return state;
+      };
+      const closeLeadInSheet = function (s, leadId) {
+        s._sheets[monthShort]._data.forEach(function (r) { if (r[header.indexOf('lead_id')] === leadId) r[header.indexOf('current_stage')] = 'Won'; });
+      };
+
+      // 10:00: three Checkpoint-1 buckets (Pune, Harbour, Thane) -> one read, not four.
+      const ssR = P1_newSs([P8_lead('L-P8-A'), P8_lead('L-P8-B'), P8_lead('L-P8-T')]);
+      ssR._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-p8-ai-a', P1_snapshot('L-P8-A'), '', '', '', ''],
+        [P1_yesterday, 'Harbour', 'Harbour Manager', 'A1', TEST_EMAIL_SECONDARY_, '', 1, P1_yesterday, 'thr-p8-ai-b', P1_snapshot('L-P8-B'), '', '', '', ''],
+        [P1_yesterday, 'Thane', 'Test CH Self', 'A1', TEST_EMAIL_CH_, '', 1, P1_yesterday, 'thr-p8-ai-t', P1_snapshot('L-P8-T'), '', '', '', '']]);
+      const draftsBeforeR = TestGmailLog_.drafts.length;
+      // The mid-run re-import: right after the job's read, L-P8-A is closed in the LIVE sheet.
+      const spyR = spyOnLeadsReads(function () { closeLeadInSheet(ssR, 'L-P8-A'); });
+      try { P1_withSs(ssR, function () { sendOvernightMorningEmails(); }); } finally { spyR.restore(); }
+      TestAssertEqual_(spyR.reads, 1, '10:00 snapshot: the leads tab is read exactly ONCE for the whole job (it was once per bucket)');
+      const sentR = TestGmailLog_.drafts.slice(draftsBeforeR);
+      TestAssertEqual_(sentR.filter(function (d) { return d.htmlBody.indexOf('L-P8-A') !== -1 || d.htmlBody.indexOf('L-P8-B') !== -1 || d.htmlBody.indexOf('L-P8-T') !== -1; }).length, 3, '10:00 snapshot: all three buckets still got their Checkpoint 1 email');
+      TestAssert_(sentR.some(function (d) { return d.to === TEST_EMAIL_PRIMARY_ && d.htmlBody.indexOf('L-P8-A') !== -1; }),
+        '10:00 snapshot: Pune\'s Checkpoint 1 is judged against the job\'s own snapshot — a lead closed in the sheet AFTER that read is still listed (a per-bucket re-read would have dropped it)');
+
+      // 13:00: two Checkpoint-2 buckets (Pune, Thane) -> one read, not three.
+      const ssQ = P1_newSs([P8_lead('L-P8-C'), P8_lead('L-P8-D')]);
+      const ovLogQ = ensureOvernightLogSheet_(ssQ);
+      ['Pune', 'Thane'].forEach(function (reg) {
+        ovLogQ.appendRow([istDayKeyGs_(now), reg, 'thr-p8-' + reg.toLowerCase(), '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', reg + ' Google Overnight + Follow-up Digest - test']);
+      });
+      ssQ._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-p8-ai-c', P1_snapshot('L-P8-C'), P1_checkpoint1('L-P8-C'), now, '', ''],
+        [P1_yesterday, 'Thane', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-p8-ai-d', P1_snapshot('L-P8-D'), P1_checkpoint1('L-P8-D'), now, '', '']]);
+      const repliesBeforeQ = TestGmailLog_.threadReplies.length;
+      const spyQ = spyOnLeadsReads(function () { closeLeadInSheet(ssQ, 'L-P8-C'); });
+      try { P1_withSs(ssQ, function () { sendOvernightFollowupEmails(); }); } finally { spyQ.restore(); }
+      TestAssertEqual_(spyQ.reads, 1, '13:00 snapshot: the leads tab is read exactly ONCE for the whole job (it was once per bucket)');
+      const repliesQ = TestGmailLog_.threadReplies.slice(repliesBeforeQ);
+      TestAssertEqual_(repliesQ.length, 2, '13:00 snapshot: both buckets still got their Checkpoint 2 reply');
+      const puneReplyQ = repliesQ.filter(function (r) { return r.threadId === 'thr-p8-pune'; })[0];
+      TestAssert_(!!puneReplyQ && TestOE_decodeRawMime_(puneReplyQ.raw).indexOf('L-P8-C') !== -1,
+        '13:00 snapshot: Pune\'s Checkpoint 2 is judged against the job\'s own snapshot — a lead closed in the sheet AFTER that read is still listed');
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either

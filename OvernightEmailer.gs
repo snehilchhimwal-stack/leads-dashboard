@@ -693,7 +693,9 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
 // Returns null on success, or { reason, section1Leads, section2 } on
 // send failure — same shape sendOneOvernightEmail_ returns, so the
 // caller's existing failedLeadEntries aggregation needs no changes.
-function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason) {
+// `leadsData` (optional): the {colIndex, dataRows} the 10:00 job already read — Checkpoint 1 is computed against it instead of
+// re-reading the whole leads tab for every bucket (email audit P8 / F8). Omitted, computeAllIssuesCheckpointGs_ reads the tab.
+function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason, leadsData) {
   // 2026-10-05 email audit (P1/F4): the skip rule below tests `!section1`, so a Section 1 bucket that exists but holds ZERO
   // leads used to count as "has overnight content" — with no active Checkpoint 1 either, a header-only email would go out.
   // A Section 1 with no leads is no Section 1.
@@ -728,7 +730,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   let activeCheckpoint1Count = 0; // leads STILL UNRESOLVED — the only Checkpoint 1 leads ever emailed (2026-09-26)
   let section2Opts;
   if (section2) {
-    checkpoint1Results = computeAllIssuesCheckpointGs_(ss, section2.snapshotEntries, now, baselineMap);
+    checkpoint1Results = computeAllIssuesCheckpointGs_(ss, section2.snapshotEntries, now, baselineMap, leadsData);
     activeCheckpoint1Count = checkpoint1Results.filter(allIssuesCheckpointIsActiveGs_).length;
     const originalDateLabel = Utilities.formatDate(new Date(now.getTime() - 24 * 3600 * 1000), 'Asia/Kolkata', 'd MMM yyyy');
     section2Opts = activeCheckpoint1Count
@@ -927,7 +929,10 @@ function sendOvernightMorningEmails_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const win = overnightWindowGs_(now);
-  const { colIndex, dataRows } = readLeadsTab_(ss);
+  // The ONE whole-sheet read of the run (email audit P8 / F8): Section 1's candidates AND every bucket's Checkpoint 1 are
+  // judged against this snapshot (passed to sendCombinedMorningEmail_ below).
+  const leadsData = readLeadsTab_(ss);
+  const { colIndex, dataRows } = leadsData;
   const recipients = loadRegionRecipients_(ss);
   // Loaded ONCE here and threaded through resolveRecipientEmailsForRegion_
   // below (via opts.hierarchyData) instead of letting each region's own
@@ -1178,7 +1183,7 @@ function sendOvernightMorningEmails_() {
       const bucketSkippedReason = (section1SkippedReason === 'already_sent' && !loggedRecipientsToday[checkpoint1PendingKeyGs_(region, emailKey)])
         ? 'already_sent_not_to_you' : section1SkippedReason;
       try {
-        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason);
+        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason, leadsData);
       } catch (bucketErr) {
         Logger.log('Combined morning email threw for ' + region + ' (' + emailKey + '): ' + bucketErr);
         failure = { reason: 'Unexpected error: ' + bucketErr, section1Leads: s1 ? s1.leads : [], section2: s2 };
@@ -1586,7 +1591,9 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
 // already frozen (Section 1 from Overnight_Log, Section 2 from
 // AllIssues_Log) -- routing was decided once, either this morning or
 // yesterday at 17:00, never re-derived here.
-function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap) {
+// `leadsData` (optional): the {colIndex, dataRows} the 13:00 job already read — Checkpoint 2 is computed against it instead of
+// re-reading the whole leads tab for every bucket (email audit P8 / F8), so it is judged against the same moment as Section 1.
+function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap, leadsData) {
   const section1Opts = section1UnresolvedRows.length
     ? buildOvernightFollowupSectionOptsGs_(region, section1UnresolvedRows)
     : buildOvernightFollowupSectionEmptyStateOptsGs_(region, 'Nothing still unresolved from this morning — all clear.');
@@ -1595,7 +1602,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   let checkpoint2Results = null;
   let section2Opts;
   if (section2Input) {
-    const rawCheckpoint2 = computeAllIssuesCheckpointGs_(ss, section2Input.checkpoint1Entries, now, baselineMap);
+    const rawCheckpoint2 = computeAllIssuesCheckpointGs_(ss, section2Input.checkpoint1Entries, now, baselineMap, leadsData);
     checkpoint2Results = filterAllIssuesCheckpoint2ForEmailGs_(section2Input.checkpoint1Entries, rawCheckpoint2);
     const originalDateLabel = Utilities.formatDate(new Date(now.getTime() - 24 * 3600 * 1000), 'Asia/Kolkata', 'd MMM yyyy');
     section2Opts = checkpoint2Results.length
@@ -1793,7 +1800,9 @@ function sendOvernightFollowupEmails_() {
     });
   if (!todaysRuns.length) return;
 
-  const { colIndex, dataRows } = readLeadsTab_(ss);
+  // The ONE whole-sheet read of the run (email audit P8 / F8) — Section 1's classification AND every bucket's Checkpoint 2 use it.
+  const leadsData = readLeadsTab_(ss);
+  const { colIndex, dataRows } = leadsData;
   // buildMovementLogMapsGs_ (MovementTracker.gs) reads Movement_Log ONCE
   // and derives both maps from that one read — see
   // sendOvernightMorningEmails' identical comment above. Detailed feeds
@@ -1961,7 +1970,7 @@ function sendOvernightFollowupEmails_() {
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
     // One bucket throwing (2026-09-25: an oversize checkpoint cell) must not stop every OTHER bucket's follow-up.
     try {
-      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap);
+      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap, leadsData);
     } catch (bucketErr) {
       Logger.log('Combined follow-up threw for ' + r.region + ' (thread ' + r.threadId + '): ' + bucketErr);
       followupBucketFailures.push(r.region + ' — ' + r.subject + ' — to ' + r.to + ': ' + bucketErr);

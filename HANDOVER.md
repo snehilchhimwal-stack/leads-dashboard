@@ -578,6 +578,19 @@ code*, one bullet per plan step as each lands.
   `Overnight_Log` rows); a repeat now updates the pending row (later entry wins). Not changed: the
   stale-read rewrite of column F (millisecond window, noted in the audit) and the 17:00 Section-1
   region guard, which is still per-region by design.
+- **P8 — one leads-tab read per job.** `computeAllIssuesCheckpointGs_` (`SlaEngine.gs`) used to call
+  `readLeadsTab_` itself, so the 10:00 and 13:00 jobs re-read the whole leads tab once **per bucket**
+  (~30 reads — the 3 Oct 13:00 run took 663 s) *and* judged each bucket, and Section 1 vs Section 2 of
+  one email, against a different moment of a sheet that is re-imported underneath a 4–11 minute run.
+  It now takes an optional fifth argument `leadsData` (the `{colIndex, dataRows}` `readLeadsTab_`
+  returns); `sendOvernightMorningEmails_` / `sendOvernightFollowupEmails_` pass the snapshot they
+  already read at the start (through `sendCombinedMorningEmail_` / `sendCombinedFollowupEmail_`'s new
+  optional last parameter). Omitted, or not a usable `{colIndex, dataRows}`, it reads the tab exactly
+  as before, so any other caller is unaffected. Behaviour change to know about: Section 2 is now
+  judged against the job's *start-of-run* sheet, not the sheet as it is minutes later — consistent
+  with Section 1, and the same moment for every bucket. The per-bucket scan of the in-memory rows to
+  find the wanted lead ids is unchanged (cheap next to a Sheets read). The 17:00 job already read
+  once and is unchanged.
 
 ### 4.4 GitHub repo access
 
