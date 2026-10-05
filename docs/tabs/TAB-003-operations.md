@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Last Verified** | 2026-10-03 against commit (`9efec5d`) — reviewed after `js/overview-distribution-people-ops.js` changed (Overview KPI-strip tile removal, `TAB-002`); this tab's own content untouched |
 
 ## Purpose / reason to exist
 
@@ -159,6 +159,10 @@ Generate blocked by the mutex (`JS-018`).
   `js/overview-distribution-people-ops.js` file this tab's own logic
   lives in advanced for an unrelated reason (`TAB-009` Opp Monitor's
   tab-switch/renderAll wiring) — nothing this record describes changed.
+  **Revalidated again 2026-10-03**: the same shared file advanced again,
+  this time for Overview's own KPI-strip tile removal (`TAB-002`) —
+  Operations' own issue lists/reports code are untouched, confirmed by
+  reading the diff directly.
 
 ## Version / change reference
 

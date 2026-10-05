@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit `aa6f71b` |
+| **Last Verified** | 2026-10-03 against commit (`9efec5d`) |
 
 ## Purpose / reason to exist
 
@@ -44,16 +44,16 @@ Loads near the end of the tab group, before `main.js`
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-077 | `renderAll()` `#L159` | `leads`, `issueLeads` | writes every tab's DOM | `_logLeadRegistry.clear()` `#L164`; calls ~21 `render*` fns incl. `renderTrackingTab` / `renderAudit` / `renderRMTimelineTab` / `renderMorningBrief` (gated) / `renderOppMonitorTab` (`JS-025`, added 2026-09-18) | every `render*` here + `JS-019` / `JS-023` / `JS-024` / `JS-020` / `JS-025` | `applyFiltersAndRender` (`JS-004`), `fetchAndRender` (`JS-003`) | specific — the master orchestrator |
-| FN-078 | `computeRMScoreRows()` `#L514` | `leads` | per-RM `{open, breached, score}` rows; score = `(open − breached) / open × 100` over **open leads only** | none | `medianOfSorted` / `percentileOfSorted` | `renderRMScoreTable` (FN-079), `tab-morning.js` (`JS-020`) | reusable |
-| FN-079 | `renderRMScoreTable` / `renderRMTable` `#L587/#L1018` | score rows | the RM tables; `renderRMTable` flags ±25% load vs peer average | DOM write | `computeRMScoreRows` (FN-078), `renderBreakdownCard` (FN-082) | `renderAll` (FN-077) | specific |
+| FN-078 | `computeRMScoreRows()` `#L489` | `leads` | per-RM `{open, breached, score}` rows; score = `(open − breached) / open × 100` over **open leads only** | none | `medianOfSorted` / `percentileOfSorted` | `renderRMScoreTable` (FN-079), `tab-morning.js` (`JS-020`) | reusable |
+| FN-079 | `renderRMScoreTable` / `renderRMTable` `#L562/#L993` | score rows | the RM tables; `renderRMTable` flags ±25% load vs peer average | DOM write | `computeRMScoreRows` (FN-078), `renderBreakdownCard` (FN-082) | `renderAll` (FN-077) | specific |
 | FN-080 | `renderStageBreakdown` / `renderFunnel` / `renderRegionTable` / `renderTLTable` / `renderProjectTable` / `renderSourceBreakdown` / `renderSourceMix` / `renderFanout` / `renderAllocationMatrix` `#L17`..`#L796` | `leads` | the Overview/Distribution tables | DOM writes | `topBreakdown` (FN-083), `renderBreakdownCard` (FN-082), `esc` (`JS-010`) | `renderAll` (FN-077) | specific |
 | FN-081 | Operations issue lists: `renderDueTodayList`, `renderApproachingDeadlineList`, `renderStuckList`, `renderInactiveRmList`, `renderNotUpdatedList`, `renderRecordingList`, `renderClosedNoCommentList`, `renderNotConnectedList`, `renderFollowupList` `#L1084`..`#L1353` | `issueLeads` | the Operations SLA cards | DOM writes; `logToggleMarkup` on each card | `renderAlertCard` (`JS-010`), `logToggleMarkup` (`JS-010`), `groupLeadsByCalendarDay` (`JS-005`) | `renderAll` (FN-077) | specific — all 9 confirmed to include `.log-toggle` (`LOGIC_AUDIT.md` Part 6 §6.1 row 4) |
-| FN-082 | `renderBreakdownCard(el, opts)` / `colorForIssue(issue, i)` `#L1458/#L1450` | element + options | a shared breakdown card / an issue colour | DOM write | `topBreakdown` (FN-083) | called back from nearly every tab file | reusable — shared helpers |
+| FN-082 | `renderBreakdownCard(el, opts)` / `colorForIssue(issue, i)` `#L1433/#L1425` | element + options | a shared breakdown card / an issue colour | DOM write | `topBreakdown` (FN-083) | called back from nearly every tab file | reusable — shared helpers |
 | FN-083 | `topBreakdown(arr, keyFn, opts)` `#L133` | list + key fn | top-N `{key, n, pct}` | none | — | breakdown cards across tabs, `tab-morning.js` | reusable |
-| FN-084 | `computeDailyLeadCounts()` / `renderDailyTrend()` `#L422/#L440` | `leads` | per-day counts / the trend chart | DOM write | `istDateKey` (`JS-005`) | `renderAll` (FN-077), `tab-morning.js` | reusable / specific |
-| FN-085 | `downloadIssuesCSV()` / `downloadFilteredLeadIdsCSV()` `#L1542/#L1513` | `issueLeads` / `leads` | a CSV download | triggers a browser download | `csvEscape` (FN-086) | `#downloadIssuesBtn` (`BTN-001`), `#downloadLeadIdsBtn` (`DASH-001`) | specific |
-| FN-086 | `csvEscape(v)` `#L1499` | any value | CSV-safe string | none | — | every CSV export in the app | reusable |
-| FN-087 | `updateTabBadges()` / `renderJumpNav()` `#L396/#L331` | counts | tab-bar badge counts / the in-page jump nav | DOM writes | `numFromCountEl` | `renderAll` (FN-077) | specific |
+| FN-084 | `computeDailyLeadCounts()` / `renderDailyTrend()` `#L397/#L415` | `leads` | per-day counts / the trend chart | DOM write | `istDateKey` (`JS-005`) | `renderAll` (FN-077), `tab-morning.js` | reusable / specific |
+| FN-085 | `downloadIssuesCSV()` / `downloadFilteredLeadIdsCSV()` `#L1517/#L1488` | `issueLeads` / `leads` | a CSV download | triggers a browser download | `csvEscape` (FN-086) | `#downloadIssuesBtn` (`BTN-001`), `#downloadLeadIdsBtn` (`DASH-001`) | specific |
+| FN-086 | `csvEscape(v)` `#L1474` | any value | CSV-safe string | none | — | every CSV export in the app | reusable |
+| FN-087 | `updateTabBadges()` / `renderJumpNav()` `#L371/#L306` | counts | tab-bar badge counts / the in-page jump nav | DOM writes | `numFromCountEl` | `renderAll` (FN-077) | specific |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -143,13 +143,28 @@ Part 5 §5.1 (KPI audit), Part 6 §6.1 rows 1/4.
   filter-bar toggle behaves correctly on both directions of the switch.
 - **Evidence:** `LOGIC_AUDIT.md` Part 5 §5.1, Part 6 §6.1;
   `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-18.
+- **Status:** Validated 2026-09-18. **Revalidated again 2026-10-03**:
+  `Opportunity+`/`Median 1st Contact` KPI tiles removed from `renderAll()`
+  (user request — no-data/not-useful against the real Sheet); confirmed
+  via grep that their backing variables
+  (`oppPlusLeads`/`oppPlusCounts`/`oppBreakdown`,
+  `sortedContactMinsAll`/`medianContactAll`/`p90ContactAll`) had no other
+  reference in the file before removal. `tests/frontend-harness.html`
+  170/170; `#kpiStrip .kpi-label` confirmed in the browser to read exactly
+  the 4 remaining tiles. See `TAB-002`'s own record for the full detail.
 
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-028. Revalidated 2026-09-18
 (`4bbb58c`) for the `TAB-009` `renderAll` call + filter-bar-hiding
 addition.
+
+**2026-10-03** (`9efec5d`): `Opportunity+`/`Median 1st Contact` KPI
+tiles removed from the `renderAll()` KPI-strip block (`#L227`-area) —
+4 tiles remain (`Total Leads`, `Behind on Today's Calls`, `Not Connected
+in 10 min`, `No Attempts Yet`). No change to any other `render*` helper,
+breakdown table, or the underlying `oppOrAbove`/`businessMinsToConnect`
+fields themselves (still used elsewhere — see `TAB-002`'s record).
 
 **2026-10-03** (`aa6f71b`, dead-code-audit Part 3): one line added
 to the `tabBar` click handler, right after a tab panel is activated —

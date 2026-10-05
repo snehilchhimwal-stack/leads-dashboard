@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-18 against commit `4bbb58c` |
+| **Last Verified** | 2026-10-03 against commit (`9efec5d`) |
 
 ## Purpose / reason to exist
 
@@ -19,9 +19,18 @@ without drilling into any single lead. It is the first of four tabs
 (`TAB-002`/`TAB-003`/`TAB-005` here, plus Distribution content) served by
 the one large `renderAll()` orchestrator module.
 
+**Since 2026-10-03**, the KPI strip is 4 tiles, not 6 — `Opportunity+`
+and `Median 1st Contact` were removed at the user's explicit request:
+both read as effectively no-data/not-useful against their real Sheet
+(an operational-data-availability problem, not a code bug — nothing
+about either tile's logic was wrong). See Responsibilities and Version /
+change reference below.
+
 ## Responsibilities
 
-- Render the KPI strip (Total Leads, Opportunities, etc.).
+- Render the KPI strip (`Total Leads`, `Behind on Today's Calls`, `Not
+  Connected in 10 min`, `No Attempts Yet` — 4 tiles as of 2026-10-03;
+  `Opportunity+` and `Median 1st Contact` removed, see Purpose above).
 - Render funnel-stage, region, TL, project and source breakdown tables.
 - Stay consistent with the active `filterState` (re-rendered by
   `applyFiltersAndRender`).
@@ -45,9 +54,12 @@ KPI tiles + breakdown tables into `#tab-overview`. Feeds the
 ## Data displayed
 
 KPI counts; per-stage / per-region / per-TL / per-project / per-source
-lead counts and shares; the source mix. The KPI strip mixes
-customer-level and issue-level counts (documented undocumented-in-UI
-`LOGIC_AUDIT.md` Part 7 §18 LOW #2).
+lead counts and shares; the source mix. The KPI strip still mixes
+customer-level (`Total Leads`, `No Attempts Yet`) and issue-level
+(`Behind on Today's Calls`, `Not Connected in 10 min`) counts after the
+2026-10-03 tile removal (documented undocumented-in-UI `LOGIC_AUDIT.md`
+Part 7 §18 LOW #2) — that finding is unaffected by which 2 of the
+original 6 tiles were removed.
 
 ## Data written / modified
 
@@ -129,10 +141,29 @@ audit), Part 7 §18 LOW #2.
   `js/overview-distribution-people-ops.js` file this tab's own logic
   lives in advanced for an unrelated reason (`TAB-009` Opp Monitor's
   tab-switch/renderAll wiring) — nothing this record describes changed.
+  **Revalidated again 2026-10-03**: `Opportunity+`/`Median 1st Contact`
+  tiles and their now-unused compute (`oppPlusLeads`/`oppPlusCounts`/
+  `oppBreakdown`, `sortedContactMinsAll`/`medianContactAll`/
+  `p90ContactAll`) removed from `renderAll()`; confirmed via grep that
+  none of those variables are referenced anywhere else in the file before
+  removing them. Verified in the browser: `tests/frontend-harness.html`
+  (`#kpiStrip .kpi-label` reads exactly `["Total Leads", "Behind on
+  Today's Calls", "Not Connected in 10 min", "No Attempts Yet"]`), full
+  suite 170/170.
 
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-026.
+
+**2026-10-03** (`9efec5d`): `Opportunity+` and `Median 1st Contact`
+KPI tiles removed at the user's explicit request (no-data/not-useful
+against their real Sheet). No change to the 4 remaining tiles, the
+breakdown tables below the strip, or `oppOrAbove`/`businessMinsToConnect`
+themselves (both still compute and are used elsewhere — region/TL/
+project/RM breakdown table "Opp+" columns, `tab-tracking.js`,
+`tab-morning.js`'s own first-contact cards, the People tab's RM score
+table — this removal only touched the Overview KPI-strip tile, not the
+underlying fields).
 
 ## Revalidation trigger
 

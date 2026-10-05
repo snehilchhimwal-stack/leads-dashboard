@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `c1f8bf9` (js/tab-morning.js) / `b21849e` (dashboard.html) — revalidated in this sweep; dashboard.html moved (Opp Monitor tab added) but touches zero lines inside the #tab-morning block itself, confirmed via git diff — no drift found |
+| **Last Verified** | 2026-10-03 against commit (`9efec5d`) |
 
 ## Purpose / reason to exist
 
@@ -20,6 +20,18 @@ shared function or predicate from other modules (`LOGIC_AUDIT.md` Part 1
 a real data refresh or a Generate-report checkpoint, so it reads as a
 stable "as of this morning" snapshot rather than shifting on every filter
 tweak.
+
+**Since 2026-10-03, this tab is hidden from the UI** (the user's own
+request — "not really useful to me"). Its `#tabBar` button
+(`dashboard.html`) was removed; the panel (`#tab-morning`), its render
+function, and its checkpoint re-calls from `TAB-003`/`TAB-007` are all
+**unchanged** — they still compute and render into `#morningBriefCards`
+exactly as before, just into a DOM node nothing can navigate to anymore
+(`.tab-panel{display:none}`, never gains `.active` with no button to set
+it). This is a UI-visibility change only, not a retirement of the
+feature — `Component Status` stays `Active` since the code is correct
+and complete, just unreachable; re-enabling it is a one-line revert
+(restore the button, `dashboard.html` `#L939` as of this change).
 
 ## Responsibilities
 
@@ -57,9 +69,12 @@ None.
 
 ## Navigation relationships
 
-Reached from `#tabBar`. Re-called by `renderReports()` (`JS-016`) and
-`tab-movement.js` (`JS-021`) at Generate checkpoints, gated by
-`_refreshMorningBriefOnNextRender`. Not part of `renderAll()`.
+**No longer reachable from `#tabBar`** — its button was removed
+2026-10-03 (see Purpose above). Still re-called by `renderReports()`
+(`JS-016`) and `tab-movement.js` (`JS-021`) at Generate checkpoints,
+gated by `_refreshMorningBriefOnNextRender` — those calls are harmless
+no-ops from the user's perspective now (they repaint a hidden panel).
+Not part of `renderAll()`.
 
 ## Buttons / actions — `BTN-XXX` sub-table
 
@@ -124,22 +139,32 @@ error path of its own.
   `renderMorningBrief` after a synthetic `fetchAndRender`.
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c; `js/tab-morning.js` header
   comment (states the "no new logic" rule).
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-09-10. **Revalidated 2026-10-03**: confirmed
+  directly in the browser (DOM inspection, both the real `dashboard.html`
+  and `tests/frontend-harness.html`) that the button no longer exists,
+  `#tab-morning` computes to `display:none`, and nothing else in the app
+  ever sets its `.active` class.
 
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-026.
 
+**2026-10-03** (`9efec5d`): the `#tabBar` button removed at the
+user's request — see Purpose above. No change to `js/tab-morning.js`
+or any of its borrowed helpers.
+
 ## Revalidation trigger
 
 Any commit touching `js/tab-morning.js`; a card is added/removed; a
 borrowed helper in `JS-012` changes signature; the checkpoint set that
-re-calls `renderMorningBrief` changes.
+re-calls `renderMorningBrief` changes; the tab button is restored or the
+panel is removed outright.
 
 ## Handover relationship
 
 `HANDOVER.md` §2 names the file; §3 covers the render/checkpoint model.
-Current as of 2026-09-09. A change to the card set or the "no new logic"
+§2's row updated 2026-10-03, same commit as this revalidation, to note
+the hidden tab button. A change to the card set or the "no new logic"
 rule should update `HANDOVER.md` §2's row.
 
 ## Lifecycle / retention

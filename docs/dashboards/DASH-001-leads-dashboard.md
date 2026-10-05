@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `b21849e` — reviewed after `dashboard.html` gained a description paragraph for `TAB-004`'s new Opp-conversion columns (see `TAB-004`, `JS-008` §9.7.3); no structural/DASH-001-level change |
+| **Last Verified** | 2026-10-03 against commit (`9efec5d`) — `TAB-001`'s `#tabBar` button removed; 8 of 9 tabs unaffected |
 
 ## Purpose / reason to exist
 
@@ -121,6 +121,10 @@ Audit, `TAB-007` Movement, `TAB-008` Tracking, `TAB-009` Opp Monitor
 (added 2026-09-18 — the one tab with no `BTN-XXX`/`UI-XXX` sub-tables at
 all, and the one tab that hides the shared filter bar). Tab-specific
 buttons live on each `TAB-XXX` record as `BTN-XXX` sub-tables.
+**Since 2026-10-03, `TAB-001`'s own `#tabBar` button is removed** (user
+request — see `TAB-001`'s own record) — its panel/module still exist and
+are documented, just unreachable from the tab bar; the other 8 tabs are
+unaffected.
 
 ## Architecture relationship
 
@@ -140,10 +144,12 @@ Sheet (`SHEET-*`) and never call each other (`HANDOVER.md` §1).
 
 ## Tabs it contains
 
-`TAB-001` Morning Brief · `TAB-002` Overview · `TAB-003` Operations ·
-`TAB-004` Repeat Offenders · `TAB-005` People (contains RM Timeline) ·
-`TAB-006` Audit · `TAB-007` Movement · `TAB-008` Tracking · `TAB-009`
-Opp Monitor. Tab-bar order matches `dashboard.html`'s own `#tabBar`.
+`TAB-001` Morning Brief (hidden from `#tabBar` since 2026-10-03 — record
+and panel both still exist, just not reachable) · `TAB-002` Overview ·
+`TAB-003` Operations · `TAB-004` Repeat Offenders · `TAB-005` People
+(contains RM Timeline) · `TAB-006` Audit · `TAB-007` Movement · `TAB-008`
+Tracking · `TAB-009` Opp Monitor. Tab-bar order matches `dashboard.html`'s
+own `#tabBar` for the 8 tabs that still have a button there.
 
 ## Top-level buttons / actions
 
@@ -279,6 +285,11 @@ the `leads` tab gained a real `opp_at` column and `TAB-009` gained a
 live-computation capability from it — the client file count (25) and
 tab list are unchanged, this is a behavior change inside an existing
 file/tab, not a new module.
+
+**2026-10-03** (`9efec5d`): `TAB-001` (Morning Brief)'s `#tabBar`
+button removed at the user's request — see UI relationships / Tabs it
+contains above and `TAB-001`'s own record. 9 tabs still exist (no module
+removed), but only 8 have a tab-bar button now.
 
 ## Revalidation trigger
 
