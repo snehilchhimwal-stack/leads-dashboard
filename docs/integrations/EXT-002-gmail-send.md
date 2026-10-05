@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `6fc3f3c` — the backend email jobs now run under an overlap lock (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `d1caf9d` — an ambiguous send failure is no longer followed by a second send (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -167,6 +167,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-05** `dbeb7da`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-325`, email audit P2). Every backend email is still a `multipart/alternative` message built from one opts object; its plain-text part now lists the leads instead of a one-line stub. No change to the send mechanism, scopes or recipients; the browser's `gmail.send` grant is unchanged.
 
 **Revalidated 2026-10-05** `6fc3f3c`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-327`, email audit P4). The three scheduled email jobs now hold one script-wide `LockService` lock for their whole run, so two runs can no longer overlap and double-send; a broken lock service fails open (the job runs, ops are alerted). No change to the Gmail send mechanism, scopes, recipients or the browser's `gmail.send` grant.
+
+**Revalidated 2026-10-05** `d1caf9d`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-328`, email audit P6). The 13:00 threaded reply (Advanced Gmail Service `Messages.send`) falls back to a plain `GmailApp` send only after a DEFINITE failure; a timeout / server error (the message may already be delivered) no longer triggers the fallback — it is recorded as `unconfirmed` and ops are alerted. No change to scopes, recipients or the browser grant.
 
 ## Revalidation trigger
 
