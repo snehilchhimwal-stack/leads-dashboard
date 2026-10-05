@@ -898,6 +898,49 @@ function runOvernightEmailerTests_() {
       TestAssert_(sentRaw.indexOf('\r\nBcc: evil@x.com') === -1 && /Subject: Subject Bcc: evil@x\.com/.test(sentRaw), 'sendThreadedGmailReply_: a line break in the subject is collapsed — it can never become a second header');
     }
 
+    // ---- email audit P3 (F1): a multi-region recipient's 13:00 replies each carry ONLY their own region's Checkpoint 2 ----
+    // Production defect (1 Oct 2026): a recipient who covers Thane/SoBo/Central got three ~36 KB replies that each carried the
+    // SAME merged Section 2 of all three regions (the Central thread's Checkpoint 1 listed 7 leads at 10:05, its 13:04 reply
+    // listed 68), because Checkpoint 2 was keyed by recipient email alone.
+    {
+      const P3_mimeParts = function (raw) {
+        const full = TestOE_decodeRawMime_(raw);
+        const i = full.indexOf('Content-Type: text/html');
+        return { plain: full.slice(0, i), html: full.slice(i) };
+      };
+      const ssX = P1_newSs([P1_flaggedLead('L-XR-PUNE'), P1_flaggedLead('L-XR-THANE', 'Test RM Two')]);
+      const ovLogX = ensureOvernightLogSheet_(ssX);
+      ['Pune', 'Thane', 'Central'].forEach(function (reg) {
+        ovLogX.appendRow([istDayKeyGs_(now), reg, 'thr-xr-' + reg.toLowerCase(), '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', reg + ' Google Overnight + Follow-up Digest - test']);
+      });
+      // A duplicate Overnight_Log row for the SAME region + recipient (e.g. a double-fired morning job).
+      ovLogX.appendRow([istDayKeyGs_(now), 'Pune', 'thr-xr-pune-dup', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Google Overnight + Follow-up Digest - test (dup)']);
+      // Same recipient, TWO regions with a Checkpoint 1 today — Central has none.
+      ssX._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-pune', P1_snapshot('L-XR-PUNE'), P1_checkpoint1('L-XR-PUNE'), now, '', ''],
+        [P1_yesterday, 'Thane', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-thane', P1_snapshot('L-XR-THANE'), P1_checkpoint1('L-XR-THANE'), now, '', '']]);
+      const repliesBefore = TestGmailLog_.threadReplies.length;
+      P1_withSs(ssX, function () { sendOvernightFollowupEmails(); });
+      const newReplies = TestGmailLog_.threadReplies.slice(repliesBefore);
+      TestAssertEqual_(newReplies.length, 2, '13:00 multi-region recipient: exactly two replies (Pune + Thane) — Central has nothing of its own, and the duplicate Pune row gets no second copy of Section 2');
+      const puneReply = newReplies.filter(function (r) { return r.threadId === 'thr-xr-pune'; })[0];
+      const thaneReply = newReplies.filter(function (r) { return r.threadId === 'thr-xr-thane'; })[0];
+      TestAssert_(!!puneReply && !!thaneReply, '13:00 multi-region recipient: each region replied in its OWN thread');
+      TestAssert_(!newReplies.some(function (r) { return r.threadId === 'thr-xr-central' || r.threadId === 'thr-xr-pune-dup'; }), '13:00 multi-region recipient: no reply into the Central thread or the duplicate Pune thread');
+      const puneParts = P3_mimeParts(puneReply.raw);
+      const thaneParts = P3_mimeParts(thaneReply.raw);
+      TestAssert_(puneParts.html.indexOf('L-XR-PUNE') !== -1 && puneParts.plain.indexOf('L-XR-PUNE') !== -1, '13:00 multi-region recipient: the Pune reply lists the Pune lead (HTML and plain)');
+      TestAssert_(puneParts.html.indexOf('L-XR-THANE') === -1 && puneParts.plain.indexOf('L-XR-THANE') === -1, '13:00 multi-region recipient: the Pune reply does NOT carry Thane\'s lead (no cross-region leak)');
+      TestAssert_(thaneParts.html.indexOf('L-XR-THANE') !== -1 && thaneParts.plain.indexOf('L-XR-THANE') !== -1, '13:00 multi-region recipient: the Thane reply lists the Thane lead');
+      TestAssert_(thaneParts.html.indexOf('L-XR-PUNE') === -1 && thaneParts.plain.indexOf('L-XR-PUNE') === -1, '13:00 multi-region recipient: the Thane reply does NOT carry Pune\'s lead');
+      TestAssertContains_(puneParts.html, '1</div>', '13:00 multi-region recipient: the Pune reply counts only its own 1 lead');
+      // Each region's Checkpoint 2 state is written onto its OWN AllIssues_Log row only.
+      const aiAfter = ssX._sheets['AllIssues_Log'].getRange(2, 1, 2, 14).getValues();
+      TestAssert_(!!aiAfter[0][13] && !!aiAfter[1][13], '13:00 multi-region recipient: both regions\' own AllIssues_Log rows get checkpoint2_sent_at');
+      TestAssertEqual_(JSON.parse(aiAfter[0][12]).map(function (e) { return e.lead_id; }).join(','), 'L-XR-PUNE', '13:00 multi-region recipient: the Pune row\'s checkpoint2_json holds only the Pune lead');
+      TestAssertEqual_(JSON.parse(aiAfter[1][12]).map(function (e) { return e.lead_id; }).join(','), 'L-XR-THANE', '13:00 multi-region recipient: the Thane row\'s checkpoint2_json holds only the Thane lead');
+    }
+
     // ---- email audit P2: the plain-text part of the 10:00 and 13:00 emails lists their leads ----
     {
       // 10:00 combined email: Section 1 empty-state + a Checkpoint 1 lead.

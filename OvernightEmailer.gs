@@ -1464,15 +1464,23 @@ function buildOvernightFollowupSectionEmptyStateOptsGs_(region, reasonText) {
   return { title: '1pm Follow-up', region: region, subtitle: reasonText, kpis: [], action: '', sections: [], footerNote: '' };
 }
 
+// The lookup key shared by loadTodaysCheckpoint1PendingGs_ (writer) and sendOvernightFollowupEmails_ (reader) — one place,
+// so the two can never build it differently. Region + recipient, both trimmed and lower-cased.
+function checkpoint1PendingKeyGs_(region, to) {
+  return String(region || '').trim().toLowerCase() + '|' + String(to || '').trim().toLowerCase();
+}
+
 // Reads AllIssues_Log for TODAY's (IST) rows that already have a
 // Checkpoint 1 (checkpoint1_sent_at dated today -- i.e. this morning's
 // 10am run) but no Checkpoint 2 yet (checkpoint2_sent_at blank -- the
 // idempotency guard for THIS function, same role checkpoint1_sent_at
-// plays for loadYesterdaysAllIssuesBucketsGs_). Keyed directly by
-// recipient email (not by region first) since the caller looks these up
-// per-bucket against `perRegion`'s own `to`, already known to be the SAME
-// address (see this block's own header comment). Returns
-// { lowercasedEmail -> {rowNumbers, to, cc, bucketLabel, primaryRole,
+// plays for loadYesterdaysAllIssuesBucketsGs_). Keyed by REGION + recipient
+// email (checkpoint1PendingKeyGs_) -- changed 2026-10-05 (email audit P3/F1):
+// it used to be keyed by email alone, so a recipient covering several
+// regions got every region's Checkpoint 2 in each region's reply. The caller
+// looks these up per-bucket against `perRegion`'s own region + `to` (see
+// this block's own header comment). Returns
+// { key -> {rowNumbers, to, cc, bucketLabel, primaryRole,
 // snapshotEntries (original 17:00), checkpoint1Entries (this morning's
 // Checkpoint 1 result -- the PRIOR checkpoint computeAllIssuesCheckpointGs_
 // needs as its own input, design doc Part 4: the function accepts its own
@@ -1508,7 +1516,13 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
     }
     const to = String(r[4] || '').trim();
     if (!to) return;
-    const key = to.toLowerCase();
+    // Confirmed in production, 1 Oct 2026: ashish.ivlekar@ received three 13:00 replies (Thane/SoBo/Central), each ~36 KB
+    // and within a few bytes of the others; the Central thread's Checkpoint 1 had listed 7 leads at 10:05 and its 13:04
+    // reply listed 68. A recipient who covers several regions has one AllIssues_Log row — and one Overnight_Log thread —
+    // PER region; each region's reply must carry only that region's own Checkpoint 2. Legacy per-region Futwork rows
+    // (bucket_label 'Futwork') join the one Futwork group, exactly as loadYesterdaysAllIssuesBucketsGs_ does for Checkpoint 1.
+    const rowRegionKey = String(r[2] || '') === FUTWORK_REGION_KEY_ ? FUTWORK_REGION_KEY_ : String(r[1] || '').trim();
+    const key = checkpoint1PendingKeyGs_(rowRegionKey, to);
     if (!byEmail[key]) {
       byEmail[key] = { to: to, cc: String(r[5] || ''), bucketLabel: String(r[2] || ''), primaryRole: String(r[3] || ''), rowNumbers: [], snapshotEntries: [], checkpoint1Entries: [] };
     }
@@ -1830,8 +1844,14 @@ function sendOvernightFollowupEmails_() {
   // dropping Opportunity+/closed leads entirely rather than showing them
   // as a separate "already handled" list.
   const followupBucketFailures = [];
+  // Region+recipient keys already handed to a reply this run (email audit P3). loadTodaysCheckpoint1PendingGs_ is read
+  // once, before this loop, so without this a second Overnight_Log row for the SAME region+recipient (a duplicate morning
+  // row) would carry the same Section 2 again in a second reply.
+  const section2Consumed = {};
   perRegion.forEach(function (r) {
-    const section2Input = r.to ? (checkpoint1PendingByEmail[r.to.trim().toLowerCase()] || null) : null;
+    const pendingKey = checkpoint1PendingKeyGs_(r.region, r.to);
+    const section2Input = (r.to && !section2Consumed[pendingKey]) ? (checkpoint1PendingByEmail[pendingKey] || null) : null;
+    if (section2Input) section2Consumed[pendingKey] = true;
     if (!r.unresolvedRows.length && !section2Input) return; // nothing in EITHER section — nothing to send
     if (!r.to) {
       // This row predates the recipient-storing fix (Overnight_Log only

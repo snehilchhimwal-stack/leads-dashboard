@@ -518,6 +518,13 @@ code*, one bullet per plan step as each lands.
   opens with its old one-line count summary. The gate (P1) now requires every counted lead id in
   the plain text **and** the HTML. A missing table cell now renders blank in both parts (it used to
   print the word "undefined" in the HTML).
+- **P3 — each region's 13:00 reply carries only its own Checkpoint 2.** `loadTodaysCheckpoint1PendingGs_`
+  (`OvernightEmailer.gs`) is now keyed by **region + recipient** (`checkpoint1PendingKeyGs_`), and
+  `sendOvernightFollowupEmails_` looks it up with the Overnight_Log row's own region and uses each
+  key once per run. Before, it was keyed by recipient email alone, so a manager who covers several
+  regions got every region's Checkpoint 2 in *each* region's thread — confirmed in production on 1
+  Oct 2026 (the Central thread listed 7 leads at 10:05 and 68 at 13:04; the Thane, SoBo and Central
+  replies were all ~36 KB). Legacy per-region Futwork rows still join the single `Futwork` group.
 
 ### 4.4 GitHub repo access
 
