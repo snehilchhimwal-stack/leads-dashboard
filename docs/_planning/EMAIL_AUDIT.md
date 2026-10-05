@@ -71,7 +71,7 @@ proven by reading the code; **Data** = measured on the production Sheet.
 | F9 | **Two buckets on one address overwrite each other.** `section1ByEmail[key] = {…}` replaces the first bucket's leads: never emailed, never reported as "not sent". | Med | **Code.** Needs two resolved buckets with the same address (e.g. a `Region_Recipients` fallback equal to an A1's address). |
 | F10 | **Log appends can duplicate.** Appends run inside `withRetry_`; a timeout that arrives *after* Sheets wrote the row triggers a retry that appends a second identical row (a duplicate `Overnight_Log` row = a duplicate 13:00 reply). | Med | **Code**, hazard reproduced in a control test. |
 | F11 | **CH-level reports are unlogged** → resent on every re-run for a region that has *only* CH-level leads (the region guard needs a log row, which such a region never gets). | Med | **Code.** Not addressed by the draft. |
-| F12 | **Logs don't show what happened.** `followup_sent_at`/`sent_at` are stamped with the job's start time, not the send time (3 Oct: stamped 13:01:49, reply sent 13:12; 26 Sep: 13:01:46 vs 13:04–13:06). A *skipped* bucket and a *never-ran* job both leave the cell blank: 2 Oct has 32 `Overnight_Log` rows, 0 stamps, no 1pm reply and no crash alert — cannot tell which. | Med | **Prod/Data.** Needs the Apps Script Executions list to resolve 2 Oct (not readable from here). |
+| F12 | **Logs don't show what happened.** `followup_sent_at`/`sent_at` are stamped with the job's start time, not the send time (3 Oct: stamped 13:01:49, reply sent 13:12; 26 Sep: 13:01:46 vs 13:04–13:06). A *skipped* bucket and a *failed/never-ran* job both leave the cell blank, and no log records why an email was skipped, what the provider answered, or how long a send took. | Med | **Prod/Data.** 2 Oct is the proof: 32 `Overnight_Log` rows, 0 stamps — the Executions list (now read) shows that run **Failed**, see F21. |
 | F13 | **Plain-text part is a one-line stub** on every digest ("…Open this email in Gmail for the full breakdown") — a text-only client or preview shows no leads. | Low-Med | **Prod** (message bodies read via Gmail). |
 | F14 | **No address validation; raw MIME headers from unsanitised cells.** `Manager_Directory`/`Region_Recipients` values are only trimmed; the threaded sender interpolates `to`/`cc`/`subject` straight into header lines (a line break in a cell = header injection / corrupt mail). | Low-Med | **Code.** All 7,854 real recipient/cc addresses in the production logs and directories pass a strict validator — a gate would have blocked none of them (Data). |
 | F15 | **"Missing" cells render as the word `undefined`** (`esc_(String(cell))`). | Low | **Code.** |
@@ -79,7 +79,11 @@ proven by reading the code; **Data** = measured on the production Sheet.
 | F17 | **`pushUnresolvedToLeadFollowups_`** appends a duplicate row per repeated lead and rewrites the whole range from a stale read (can overwrite a concurrent human edit in column F). | Low | **Code.** Duplicate part is simple; stale-write part is a millisecond window. |
 | F18 | **Call baseline keyed by `client_id`.** 305 of 601 in-scope clients have more than one lead, so the "calls today" delta can compare a lead to a *sibling's* snapshot. Impact is small: only 27 of those 305 differ in `call_attempts` (8 by ≥5). Same key in the dashboard JS. | Low | **Code + Data.** Paired JS/GS decision; out of scope here. |
 | F19 | **Browser Gmail send has no body gate** (`performGmailSend`). Manual + confirm, separate runtime. | Low | **Code.** |
-| F20 | **Business-rule ambiguities, not defects:** Follow-up Overdue counts raw clock hours (so every connected lead untouched since last evening is "overdue" at 10:00); Section 1 (1pm) drops a lead whose issue *category* changed while Section 2 lists it; "He said he will call back" is read as "client asked to be called back". | — | Needs an owner decision; nothing changed. |
+| F21 | **A whole job can fail silently, and nothing notices.** `sendOvernightFollowupEmails` on **2 Oct 13:01:45 ended `Failed` after 120 s** with the platform error *"We're sorry, a server error occurred. Please wait a bit and try again."* (logged 13:03:45). No 13:00 reply went to anyone that day, and **no ops alert email was ever received** — a search of the mailbox finds no `[Overnight Emailer]` email at all since 29 Sep. The job's own crash handler either never ran (uncatchable platform termination) or its single, un-retried alert send hit the same outage. There is no completion check anywhere (nothing verifies that today's 10:00/13:00/17:00 work happened), and the failed run left every row unstamped so nothing retries. The Triggers page shows exactly one trigger per email job (no duplicates) and a 14.29 % (1-in-7) error rate for this one. | **High** | **Prod** (Executions list + Gmail). The same day's 17:04 job completed normally. |
+| F22 | **Transient platform errors are not retried.** `withRetry_` retries only `timed out`, `service (spreadsheets|gmail|error)`, `internal error`. The platform's own wording for a transient failure — *"a server error occurred. Please wait a bit and try again."* — matches none of them, so the first such error from a Sheets call aborts the whole job (very likely the 2 Oct failure). | Med | **Code + Prod.** `EmailInfra.gs` `withRetry_`. |
+| F23 | **`snapshotPeriodic` hits the 30-minute execution wall.** Three `Timed Out` runs (1,802–1,803 s) in 5 days (1 Oct 00:18, 2 Oct 18:51, 4 Oct 06:08) and several other runs of 12–29 min. It feeds `Movement_Log`, whose snapshots are the "calls so far today" baseline behind the *Behind on Today's Calls* flag in every email. A timed-out snapshot leaves a partial/missing baseline. Not an email defect, but it silently feeds one. | Med | **Prod** (Executions list). Impact on specific emails unverified. |
+| F24 | **Real addresses are committed to a public repository.** The GitHub repo is public (confirmed). `EmailInfra.gs`/`RmHierarchy.gs` hold five corporate addresses in source (ops, the CH backstop, the CEO and another leader), even though the code comments say the employee-email table was deliberately kept out of the repo. | Low-Med | **Code + web.** Privacy/phishing-surface item; no functional impact. |
+| F25 | **Business-rule ambiguities, not defects:** Follow-up Overdue counts raw clock hours (so every connected lead untouched since last evening is "overdue" at 10:00); Section 1 (1pm) drops a lead whose issue *category* changed while Section 2 lists it; "He said he will call back" is read as "client asked to be called back". | — | Needs an owner decision; nothing changed. |
 
 ### Why "issue reported, email empty" happened (root-cause chain)
 
@@ -89,6 +93,93 @@ checks content**, so a header-only digest is sent; the log only records "sent at
 content indicator. Competing explanations rejected: empty body from a builder bug (all builders
 return non-empty HTML; the 4 KB size is exactly two empty-state shells), provider truncation (sizes
 identical across 5 buckets), stale state (the leads really were resolved).
+
+### 3b. State machine (as implemented)
+
+| Record | State | Entered by | Fields set | Failure behaviour today | Problem |
+|---|---|---|---|---|---|
+| `AllIssues_Log` row | *sent* | 17:00 job, **after** the bucket's send | row + `issue_snapshot_json` | send fails -> no row, bucket reported "not sent" | a retry that lands twice duplicates the row (F10) |
+| | *checkpoint 1 done* | 10:00 job | `checkpoint1_json`, `checkpoint1_sent_at` | **stamped even if the send failed** | premature success (F6); a "nothing to send" outcome is also stamped (correct, final) |
+| | *checkpoint 2 done* | 13:00 job | `checkpoint2_json`, `checkpoint2_sent_at` | **stamped even if both sends failed** | premature success (F6) |
+| `Overnight_Log` row | *sent* | 10:00 job, **after** the send | thread id, recipients, subject, flagged lead ids | send fails -> no row (so no 13:00 thread to reply in) | duplicate row after a retried append (F10) |
+| | *follow-up done* | 13:00 job, after a successful reply | `followup_sent_at` (job-start time) | blank on failure and on "skipped" | **stuck**: nothing retries it, and blank is ambiguous (F12/F21) |
+
+Impossible/contradictory states reachable today: *checkpoint 2 done but no email delivered* (F6); *two
+`Overnight_Log` rows for one thread/recipient* (F10); *a 13:00 reply carrying another region's leads* (F1);
+*job failed but no record anywhere* (F21). States that become stuck: any row left blank by a failed 13:00 run.
+
+### 3c. Concurrency and race audit
+
+There is **no lock, no transaction and no unique key** anywhere; the Sheet is the database. Every guard is
+check-then-act on a log row written after the side effect.
+
+| Race | Window | Observed | Verdict |
+|---|---|---|---|
+| Two 10:00 (or 13:00 / 17:00) runs overlap - manual run + trigger, double-fired trigger | the whole run (2-11 min) | 1 duplicate row pair in 787 (25 Aug) | possible, rare (F5) |
+| Send succeeds, process dies/times out before the log row | between `send()` and `appendRow` | none seen | a re-run would then re-send that bucket; low |
+| `snapshotPeriodic` (12:44 slot, up to 30 min) overlapping the 13:01:45 job | up to 30 min | slot runs took 289-761 s, finishing before 13:01 | possible if the snapshot runs long; effect = a half-written snapshot read as baseline (hint text only) |
+| Human edits `Lead_Followups` col F while the 13:00 job rewrites the range | milliseconds-seconds | none known | F17 |
+| `readLeadsTab_` snapshot vs a re-import mid-run | each per-bucket re-read (F8) | job runs 4-11 min while the sheet is re-imported | buckets/sections can disagree (F8) |
+
+Trigger inventory (live Triggers page): `snapshotPeriodic` x4 (00:18, 06:08, 12:44, 18:51 - the minute differs per
+slot), `sendOvernightMorningEmails` (10:03:41), `sendOvernightFollowupEmails` (13:01:45), `sendAllIssuesEmails`
+(17:04:10), `captureDailyRmIssues` (22:53), `runWeeklyOpsChecklistNow` (Mon 09:06). **One trigger per email job - no
+duplicate triggers.** Email-job run times (7-day window): 10:00 job 115-181 s; 17:00 job 67-156 s; **13:00 job 120 s
+(failed) / 261 / 276 / 419 / 663 s.**
+
+### 3d. Loop / retry / recursion audit
+
+No unbounded loop, no recursion, no queue consumer, no auto-reschedule. Every retry is bounded:
+`withRetry_` 4 attempts (<=12 s); `withSendRetry_` 3 attempts for two definitive errors only (leaves one orphan
+draft per failed attempt); `waitForFollowupSuggestions_` <=6 polls x 20 s (about 2 min, once per job); per-bucket
+`try/catch` keeps one failure from stopping the rest. The hard ceiling is Apps Script's **30-minute** limit (proved by
+`snapshotPeriodic` timing out at 1,802 s). The retry *gaps* are the findings: the platform "server error" is not
+retried (F22); an ambiguous send falls through to a second send (F7); failed 13:00 work is never retried by the
+schedule (F6/F21).
+
+### 3e. Observability - can each attempt be reconstructed?
+
+| Needed to reconstruct an attempt | Recorded? |
+|---|---|
+| lead ids, recipient/cc, subject, bucket | Yes (log rows + `issue_snapshot_json`) - only for sends that succeeded |
+| thread id | Yes, on success |
+| actual send time | **No** - job start time is stamped (F12) |
+| validation result / content checked | **No** (no gate existed) |
+| provider result | **No** - only "no exception"; ambiguous results are not recorded |
+| skipped, and why | **No** - blank cell (F12) |
+| failure reason | Only via an ops email, whose delivery is **not guaranteed and is not retried** (F21) |
+| job-level outcome | Executions list only; no completion check |
+
+The browser sender is better: it writes a `Send_Log` row per send (best-effort).
+
+### 3f. External dependencies
+
+| Dependency | Failure behaviour in the code | Gap |
+|---|---|---|
+| Gmail (`GmailApp.createDraft().send()`, advanced `Gmail.Users.Messages.send`) | timeouts are ambiguous; only "operation not allowed" / "Not found" are retried | duplicate-on-fallback (F7); orphan drafts on retries |
+| Gmail quota | about 90 mails/day, each 1 To + ~4 Cc, so roughly 450 recipient-deliveries/day (estimate from the logs) | headroom against a 2,000/day Workspace limit is about 4x but unmeasured; no quota alert |
+| Sheets service | `withRetry_` on timeouts/"service" errors | misses "server error occurred" (F22) |
+| Apps Script runtime | 30-min cap; one platform failure on 2 Oct | no completion watchdog, no alert retry (F21) |
+| Time triggers | pinned, firing 1-4 min after the hour in practice | fine |
+
+### 3g. Security and privacy
+
+- Dynamic text in HTML is escaped (`esc_`), including banners; plain-text parts are plain. Free-text RM comments are
+  rendered escaped - they can mislead but cannot inject markup.
+- Header injection in the hand-built MIME message is possible from a bad address/subject cell (F14).
+- Alert emails go only to the ops address and contain lead ids, RM names and recipient addresses (no lead PII).
+- The repo is public and contains five corporate addresses (F24); the OAuth client id in `reports-gmail.js` is
+  public by design; the browser grant is `gmail.send` only (least privilege).
+- `TEST_MODE_OVERRIDE_EMAIL_` is a mutable global: left set, every real email silently goes to one address.
+  Nothing alerts when a *scheduled* run executes in test mode.
+
+### 3h. Supporting actions audited
+
+Eligibility (`Core.gs` stage/closed/Opp+ helpers, `SlaEngine.gs`), comment parsing (`parseDatedCommentEntries_`: an entry
+needs `- YYYY-MM-DD HH:MM` or it carries no time - lead 2248179 fell back to time-since-connect), recipient routing
+(`RmHierarchy.gs`, 7,854 real addresses valid), call baselines (`MovementTracker.gs`; client-keyed, F18; fed by a job that
+times out, F23), `Lead_Followups` push/wait, region mapping, the ops-alert path, the weekly checklist email (always
+non-empty), the browser report builder/sender and `Send_Log`. `DailyRmIssueLog.gs` and the comment loggers send no mail.
 
 ## 4. Plan
 
@@ -105,13 +196,14 @@ Status column: **D** = already drafted in the working tree (uncommitted; headles
 | P6 | **No fallback after an ambiguous send**: record `unconfirmed <time>`, alert, don't resend. | F7 | `EmailInfra.gs`, `OvernightEmailer.gs` | timeout test | D |
 | P7 | **Append log rows once** per thread id; **merge** buckets sharing an address; truthful "not re-sent" label; dedupe `Lead_Followups` pushes; skip a CH-level report with zero leads. | F9 F10 F16 F17(dup) F4 | emailers | per-defect tests | D |
 | P8 | **One leads-tab snapshot per job**, passed to every checkpoint. | F8 | `SlaEngine.gs`, emailers | read-count test | D |
-| P9 | **Log what happened**: stamp actual send time, and write an explicit `skipped: nothing unresolved` marker so skipped ≠ never-ran. | F12 | emailers | log assertions | N — needs a column/format decision |
+| P9 | **Observability + watchdog**: stamp the actual send time; write an explicit `skipped: nothing unresolved` marker (skipped != failed); a small **completion check** (e.g. 10:30 / 13:30 / 17:30) that alerts if today's `Overnight_Log` / follow-up stamps / `AllIssues_Log` rows are missing; make the ops alert retry once and fall back to a second send path. | F12 F21 | emailers, `EmailInfra.gs`, one new trigger | log + watchdog tests | N - needs a column/format decision and one new trigger |
 | P10 | **CH-level report idempotency** (record once per day/region/CH). | F11 | emailers | rerun test | N — adds persistent state (ScriptProperties) |
 | P11 | Browser `performGmailSend` body/recipient gate. | F19 | `js/reports-gmail.js` + harness | harness | N |
+| P13 | Add the platform's "server error occurred" wording to `withRetry_`'s transient list (appends are already made safe to retry by P7). | F22 | `EmailInfra.gs` | retry test | N |
+| P14 | Move the five committed corporate addresses out of the public repo (Script Properties / the private file). | F24 | `EmailInfra.gs`, `RmHierarchy.gs`, docs | tests keep using test addresses | N - decision |
 | P12 | Docs, catalog, deploy register; **paste 9 changed `.gs` files** (4 production, 5 test) via the hash-verified procedure. No trigger re-setup needed (no trigger changed). | — | docs, tracker | check-catalog / check-staleness | N |
 
-Out of scope / owner decisions: F18, F20, the stale untracked folder, resolving 2 Oct via the Executions
-list.
+Out of scope / owner decisions: F18, F23, F24, F25 and the stale untracked folder.
 
 Post-deploy verification (next 3 scheduled runs): (1) no 13:00 reply in a multi-region recipient's
 threads carries another region's leads and sizes differ by region; (2) no `[Overnight Emailer] … BLOCKED`
@@ -153,9 +245,9 @@ Checks run against the draft, and what they found:
 ## 6. Decisions needed from you
 
 1. Approve P1–P8 (drafted) with Amendment A1, as one commit, then deploy to the live Apps Script project.
-2. P9 (log send time + explicit "skipped" marker): OK to add a column to `Overnight_Log`?
-3. P10 (CH-level idempotency) and P11 (browser gate): include now or later?
-4. The three business rules in F20 — leave as is, or decide each?
+2. P9 (log the real send time, an explicit "skipped" marker, and a completion watchdog that alerts when a job didn't finish): OK to add a column to `Overnight_Log` and one new trigger?
+3. P13 (retry the platform's "server error", tiny) — include now? P10 (CH-level idempotency), P11 (browser gate) and P14 (move the five addresses out of the public repo): now or later?
+4. The three business rules in F25 — leave as is, or decide each?
 
 ---
 
@@ -178,5 +270,5 @@ why the 17:04 report relabelled it "Behind on Today's Calls").
 
 Other measurements: `AllIssues_Log` 1,122 rows, 0 with `lead_count` = 0, 0 with blank `sent_at`; 25 Sep
 07:34Z the 13:00 job crashed on the 50,000-character cell limit (hardened in `b3a58f9`).
-Limits: size (<5 KB) only surfaces *small* empties; the Apps Script Executions list and Cloud logs were
-not readable from here.
+Limits: size (<5 KB) only surfaces *small* empties. The Apps Script Executions list (7 days) and Triggers page were
+read afterwards — see F21-F23 and sections 3c-3d; Cloud logs beyond the one expanded error line were not.
