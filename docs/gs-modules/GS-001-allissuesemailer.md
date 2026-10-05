@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `dbeb7da` — email audit P2: the plain-text part lists the leads (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `6fc3f3c` — email audit P4: the 17:00 job runs under the overlap lock (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -51,13 +51,13 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L163/#L183` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
+| FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L163/#L187` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
 | FN-175 | `allIssuesWindowGs_(asOf)` / `allIssuesDateRangeLabelGs_(win)` `#L85/#L95` | as-of date | `{start, end}` IST-midnight-anchored 3-calendar-day window + a label | none | `istDayKeyGs_` (`GS-002`) | FN-174 | specific — **not rolling-hours** (documented undercount fix) |
-| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L458` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
-| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L372` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
+| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L462` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
+| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L376` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
 | FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
-| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L591/#L618` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
-| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L649` / `removeTestModeAllIssuesRowsNow()` `#L645` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
+| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L595/#L622` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
+| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L653` / `removeTestModeAllIssuesRowsNow()` `#L649` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -214,6 +214,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-05** (`fb17144`, email audit P1 — `docs/_planning/EMAIL_AUDIT.md` F3/F4): `sendOneAllIssuesEmail_` and `notifyChLevelIssuesGs_` now send through `sendGuardedEmailGs_` (`GS-004` `FN-324`), claiming the lead ids they count; a blocked bucket is reported as "not sent" (no `AllIssues_Log` row), and `notifyChLevelIssuesGs_` skips silently when it would carry zero flagged leads. `Tests_AllIssuesEmailer.gs` gained assertions for the per-bucket plain part, a no-follow-up lead rendering blank, and the CH-level plain part. **Not live until pasted.**
 
 **2026-10-05** (`dbeb7da`, email audit P2 — `docs/_planning/EMAIL_AUDIT.md` F13/F15): `sendOneAllIssuesEmail_` and `notifyChLevelIssuesGs_` build their plain-text body from the same opts as the HTML (`GS-004` `FN-325`) instead of a one-line count stub. `Tests_AllIssuesEmailer.gs` +9 assertions. **Not live until pasted.**
+
+**2026-10-05** (`6fc3f3c`, email audit P4 — `docs/_planning/EMAIL_AUDIT.md` F5): `sendAllIssuesEmails` (the trigger entry point) runs its crash-alert wrapper inside `withEmailJobLockGs_` (`GS-004` `FN-327`): an overlapping job is skipped with an ops alert (not retried); a broken lock service fails open. No `setupXxx()` re-run. `Tests_AllIssuesEmailer.gs` gained the contended / normal / fail-open lock tests. **Not live until pasted.**
 
 ## Revalidation trigger
 
