@@ -536,6 +536,16 @@ code*, one bullet per plan step as each lands.
   itself errors, the job runs without the lock and ops get "`<job>` ran WITHOUT its overlap lock" —
   a broken lock must never silently stop all three daily emails. If Apps Script asks to
   re-authorize the first time you run a job after pasting this, approve it.
+- **P5 — a checkpoint is "done" only when its email was delivered.** `checkpoint1_json` /
+  `checkpoint1_sent_at` (10:00) and `checkpoint2_json` / `checkpoint2_sent_at` (13:00) used to be
+  written even when the send **failed**; the loaders skip any row whose stamp is set, so the same-day
+  re-run the failure alert asks for could never deliver that Section 2 (the 13:00 re-run replied
+  *without* it). Now a definite failure leaves **both** the checkpoint stamp and `followup_sent_at`
+  blank, so running `sendOvernightMorningEmailsNow` / `sendOvernightFollowupEmailsNow` again the same
+  day retries that bucket, Section 2 included. A deliberate "nothing to send" outcome is still
+  recorded (that is a final result, not a failure). The scheduled jobs still do **not** retry — the
+  13:00 job reads only today's rows — and the 13:00 failure alert now says exactly that (it used to
+  claim "retried on the next run").
 
 ### 4.4 GitHub repo access
 

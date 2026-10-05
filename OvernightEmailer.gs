@@ -852,17 +852,16 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   // onto EVERY AllIssues_Log row this bucket's snapshot came from
   // (design doc Part 5: the row IS the state; spans more than one row
   // only in the rare case AllIssuesEmailer.gs logged twice for the same
-  // recipient in one run). Deliberately written even when the SEND
-  // failed, unlike Section 1's own choice above -- the content was
-  // still correctly computed (only delivery failed, and the ops alert
-  // above already surfaced that), and unlike Section 1's region-level
-  // guard, an un-checkpointed row falls out of "yesterday" scope
-  // entirely once a full day passes (loadYesterdaysAllIssuesBucketsGs_
-  // only ever looks at ONE day back) -- leaving it un-checkpointed on a
-  // transient failure would silently lose that checkpoint forever, not
-  // just delay it. A more complete retry-until-success story is Step
-  // 8/11's job; this is the safer default until then.
-  writeCheckpoint1State_('email itself sent fine');
+  // recipient in one run).
+  //
+  // Changed 2026-10-05 (email audit P5 / F6): written ONLY when the email was delivered. It used to be written even when
+  // the send FAILED ("an un-checkpointed row falls out of yesterday's scope anyway"), which recorded Checkpoint 1 as DONE
+  // for an email nobody received — and, because loadYesterdaysAllIssuesBucketsGs_ skips any row whose checkpoint1_sent_at
+  // is set, a same-day manual re-run could then never deliver it either (a premature success state). Left blank on
+  // failure, a re-run the same morning still has this Section 2 to send; if nobody re-runs, the row falls out of
+  // "yesterday" scope exactly as it always did. The "no email was needed" path above still records state — that is a
+  // genuine, final outcome, not a failure.
+  if (!sendFailureReason) writeCheckpoint1State_('email itself sent fine');
 
   if (sendFailureReason) {
     return { reason: sendFailureReason, section1Leads: section1Leads, section2: section2 };
@@ -1652,33 +1651,24 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
         'Section 1 still-unresolved leads (' + section1UnresolvedRows.length + '): ' + section1UnresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
         'Section 2 Checkpoint 2 leads (' + (section2Input ? section2Input.checkpoint1Entries.length : 0) + '): ' + (section2Input ? section2Input.checkpoint1Entries.map(function (e) { return e.lead_id; }).join(', ') : '(none)'),
         '',
-        'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded. This bucket will be retried on the next run (followup_sent_at is only written on success).',
+        'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded. Nothing was marked as sent (followup_sent_at and checkpoint2_sent_at stay blank), so running sendOvernightFollowupEmailsNow again TODAY will retry this bucket, Section 2 included; the scheduled 13:00 job will not (it only reads today\'s rows, and tomorrow\'s run starts from tomorrow\'s).',
         'Error: ' + fallbackErr,
       ]);
     }
   }
 
-  // checkpoint2_json/checkpoint2_sent_at -- written back even on a total
-  // send failure, same reasoning as Checkpoint 1's own write in
-  // sendCombinedMorningEmail_ (an un-checkpointed row silently falls out
-  // of loadTodaysCheckpoint1PendingGs_'s own "today" scope once the
-  // calendar day rolls over, since it only ever looks at TODAY's
-  // checkpoint1_sent_at -- leaving it unwritten on failure wouldn't
-  // create a retry opportunity tomorrow, it would just lose the row
-  // forever with no record it was ever attempted). The ops alert above
-  // already surfaces the failure for manual follow-up.
-  writeCheckpoint2State_('reply itself sent fine');
+  // checkpoint2_json/checkpoint2_sent_at -- changed 2026-10-05 (email audit P5 / F6): written ONLY when the reply was
+  // delivered. It used to be written "even on a total send failure", recording Checkpoint 2 as DONE for an email nobody
+  // received; because loadTodaysCheckpoint1PendingGs_ skips any row whose checkpoint2_sent_at is set, the same-day re-run
+  // the failure alert asks for would then send a reply WITHOUT Section 2. (The "no reply was needed" path above still
+  // records state — a genuine, final outcome.) A definite failure now leaves BOTH this and followup_sent_at blank.
+  if (sendSucceeded) writeCheckpoint2State_('reply itself sent fine');
 
   // followup_sent_at (Overnight_Log col I) -- Step 8/11's idempotency
   // guard for the WHOLE combined reply (Section 1 + Section 2 together,
-  // since Step 7 made them ride in one email). Deliberately WRITTEN ONLY
-  // ON SUCCESS, unlike checkpoint2_json above -- a send failure here
-  // must stay retryable (the next run's Pass 1 skips a row only when
-  // this column is truthy), whereas Section 2's own checkpoint write is
-  // "write regardless" for a different reason (see that block's own
-  // comment: no future run ever re-looks at an un-checkpointed row once
-  // the day rolls over, so leaving it blank on failure would lose it
-  // forever rather than enabling a retry).
+  // since Step 7 made them ride in one email). Written only on success —
+  // a send failure here must stay retryable (a same-day re-run's Pass 1
+  // skips a row only when this column is truthy).
   if (sendSucceeded) {
     // Step 9/11: own try/catch, consistent with every other write in this
     // function — even though this value is a small fixed-width timestamp

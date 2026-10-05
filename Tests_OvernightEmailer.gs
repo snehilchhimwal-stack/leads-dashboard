@@ -898,6 +898,69 @@ function runOvernightEmailerTests_() {
       TestAssert_(sentRaw.indexOf('\r\nBcc: evil@x.com') === -1 && /Subject: Subject Bcc: evil@x\.com/.test(sentRaw), 'sendThreadedGmailReply_: a line break in the subject is collapsed — it can never become a second header');
     }
 
+    // ---- email audit P5 (F6): a checkpoint is marked done only when its email was DELIVERED ----
+    // 10:00. Before: checkpoint1_sent_at was written even when the send failed, so a same-day re-run skipped that Section 2.
+    {
+      const ssM = P1_newSs([P1_flaggedLead('L-P5-M')]);
+      const aiLogM = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-p5m', P1_snapshot('L-P5-M'), '', '', '', '']]);
+      const ovLogM = ensureOvernightLogSheet_(ssM);
+      const section2 = { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1', rowNumbers: [2], snapshotEntries: JSON.parse(P1_snapshot('L-P5-M')) };
+      const run = function () { return sendCombinedMorningEmail_(ssM, ovLogM, aiLogM, 'Pune', null, section2, 'test date', istDayKeyGs_(now), now, win, {}, null); };
+
+      const realGmailApp = GmailApp;
+      GmailApp = TestMockGmailApp_({});
+      GmailApp.createDraft = function () { return { send: function () { throw new Error('simulated total failure'); } }; };
+      let failure;
+      try { failure = run(); } finally { GmailApp = realGmailApp; }
+      TestAssert_(!!failure && /simulated total failure/.test(failure.reason), '10:00 failed send: returned as a failure with its reason');
+      const rowAfterFail = aiLogM.getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!rowAfterFail[10] && !rowAfterFail[11], '10:00 failed send: checkpoint1_json/checkpoint1_sent_at stay BLANK — Checkpoint 1 is not recorded as done for an email nobody received');
+      TestAssertEqual_(ovLogM.getLastRow(), 1, '10:00 failed send: no Overnight_Log row either');
+
+      const before = TestGmailLog_.drafts.length;
+      TestAssertEqual_(run(), null, '10:00 re-run: succeeds');
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, '10:00 re-run: the same-day re-run delivers the Section 2 the failed run could not');
+      TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-P5-M', '10:00 re-run: the delivered email lists the Checkpoint 1 lead');
+      const rowAfterRetry = aiLogM.getRange(2, 1, 1, 14).getValues()[0];
+      TestAssert_(!!rowAfterRetry[10] && !!rowAfterRetry[11], '10:00 re-run: after a SUCCESSFUL send, checkpoint1_json/checkpoint1_sent_at are written');
+      TestAssertEqual_(ovLogM.getLastRow(), 2, '10:00 re-run: …and the Overnight_Log row exists');
+    }
+    // 13:00. Before: checkpoint2_sent_at was written even after BOTH sends failed, so the re-run replied WITHOUT Section 2.
+    {
+      const ssF = P1_newSs([P1_flaggedLead('L-P5-F')]);
+      const ovLogF = ensureOvernightLogSheet_(ssF);
+      ovLogF.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p5f', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test p5f']);
+      const aiLogF = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+        [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-p5f', P1_snapshot('L-P5-F'), P1_checkpoint1('L-P5-F'), now, '', '']]);
+      ssF._sheets['AllIssues_Log'] = aiLogF;
+      const realGmail = Gmail, realGmailApp = GmailApp;
+      Gmail = TestMockGmailAdvanced_({ shouldFail: true });
+      GmailApp = TestMockGmailApp_({});
+      GmailApp.createDraft = function () { return { send: function () { throw new Error('simulated total failure — neither path can send'); } }; };
+      const alertsBefore = TestGmailLog_.sent.length;
+      try {
+        P1_withSs(ssF, function () { sendOvernightFollowupEmails(); });
+      } finally { Gmail = realGmail; GmailApp = realGmailApp; }
+      TestAssertEqual_(String(ovLogF.getRange(2, 9, 1, 1).getValues()[0][0]), '', '13:00 total failure: followup_sent_at stays blank');
+      const cp2AfterFail = aiLogF.getRange(2, 13, 1, 2).getValues()[0];
+      TestAssert_(!cp2AfterFail[0] && !cp2AfterFail[1], '13:00 total failure: checkpoint2_json/checkpoint2_sent_at stay BLANK — Section 2 is not recorded as done for a reply nobody received');
+      const failAlert = TestGmailLog_.sent.slice(alertsBefore).filter(function (e) { return /1pm follow-up failed/.test(e.subject); })[0];
+      TestAssert_(!!failAlert, '13:00 total failure: ops is alerted');
+      TestAssert_(!!failAlert && /sendOvernightFollowupEmailsNow again TODAY/.test(failAlert.body) && !/retried on the next run/.test(failAlert.body), '13:00 total failure: the alert tells the truth — a same-day re-run retries it, the scheduled job does not');
+
+      const repliesBefore = TestGmailLog_.threadReplies.length;
+      P1_withSs(ssF, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore + 1, '13:00 same-day re-run: delivers the reply');
+      const raw = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw);
+      TestAssert_(raw.indexOf('L-P5-F') !== -1, '13:00 same-day re-run: the reply STILL carries Section 2 (it used to be lost — the failed run had already marked Checkpoint 2 done)');
+      TestAssert_(!!aiLogF.getRange(2, 14, 1, 1).getValues()[0][0], '13:00 same-day re-run: after the successful reply, checkpoint2_sent_at is written');
+      TestAssert_(!!ovLogF.getRange(2, 9, 1, 1).getValues()[0][0], '13:00 same-day re-run: …and followup_sent_at');
+      const repliesAfter = TestGmailLog_.threadReplies.length;
+      P1_withSs(ssF, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesAfter, '13:00 third run: nothing is resent once delivered');
+    }
+
     // ---- email audit P4 (F5): the lock wraps the 10:00 and 13:00 jobs, and FAILS OPEN ----
     {
       const realLock = LockService;
