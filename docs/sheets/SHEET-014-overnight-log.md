@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `4df2dd7` — Step 8/11, gained `followup_sent_at` (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `f9728cc` — email audit P5: `followup_sent_at` semantics unchanged (success-only); the checkpoint columns it contrasted with are now success-only too (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -53,7 +53,7 @@ threaded follow-up.
 | `sent_at` | datetime | 10:00 send instant |
 | `to` / `cc` | text | the **actual resolved** recipients (so the 13:00 reply reaches the same people explicitly) |
 | `subject` | text | the 10:00 subject line |
-| `followup_sent_at` | datetime | added 2026-09-23 (Step 8/11) — idempotency guard for the 13:00 job's own combined reply (Section 1 unresolved-leads + Section 2 Checkpoint 2 together). Written ONLY on a confirmed successful send (threaded reply OR its plain fallback) — a failed send leaves it blank so the next run retries, unlike `AllIssues_Log`'s checkpoint columns which are written even on failure for a different reason (see `GS-010` FN-280's own comment). Chain-A-internal only — carries no Chain-B/checkpoint content (see `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's own note on why this doesn't violate "the two chains stay separate"). |
+| `followup_sent_at` | datetime | added 2026-09-23 (Step 8/11) — idempotency guard for the 13:00 job's own combined reply (Section 1 unresolved-leads + Section 2 Checkpoint 2 together). Written ONLY on a confirmed successful send (threaded reply OR its plain fallback) — a failed send leaves it blank so a same-day re-run retries (the scheduled 13:00 job reads only today's rows, so it does not); since 2026-10-05 (email audit P5) `AllIssues_Log`'s checkpoint columns follow the same success-only rule. Chain-A-internal only — carries no Chain-B/checkpoint content (see `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's own note on why this doesn't violate "the two chains stay separate"). |
 
 Exact list: `OvernightEmailer.gs` `#L274`
 (`['date','region','thread_id','lead_ids_json','sent_at','to','cc','subject','followup_sent_at']`).
@@ -199,6 +199,8 @@ entry for the full reasoning on why this deviates from
 `EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's original "gets no
 new columns" statement (refined, not violated — that statement was about
 Chain-B content specifically).
+
+**2026-10-05** (`f9728cc`, email audit P5): no change to this sheet's columns. Its description of `followup_sent_at` is corrected — the contrast with `AllIssues_Log`'s checkpoint columns ("written even on failure") no longer holds: they are now written only on delivery too (`GS-010` FN-275/FN-280).
 
 ## Revalidation trigger
 

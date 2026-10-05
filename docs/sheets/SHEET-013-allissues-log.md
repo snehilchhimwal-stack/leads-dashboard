@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-23 against commit `7aa9786` — Step 7, all 5 columns now fully wired end to end (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `f9728cc` — email audit P5: `checkpoint1/2_sent_at` are written only when the email was delivered (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -52,9 +52,9 @@ debug). No dashboard reader.
 | `thread_id` | text | the Gmail thread |
 | `issue_snapshot_json` | text (JSON) | added 2026-09-23, **written as of Step 3/11**: the exact per-lead population this bucket's 17:00 email reported: `[{lead_id, RM, TL, status, issueLabel, followup}, ...]`. Written at send time by `sendOneAllIssuesEmail_`; blank on any row from before Step 3. |
 | `checkpoint1_json` | text (JSON) | added 2026-09-23 — written by the next day's 10:00 job: `[{lead_id, state, currentIssueLabel, currentStatus}, ...]`. Wired as of Step 6/11: `sendCombinedMorningEmail_` (`GS-010` FN-275). |
-| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job. Wired as of Step 6/11 (same writer as above); a fuller retry story beyond this basic guard is Step 8/11. |
+| `checkpoint1_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 10:00 job. Wired as of Step 6/11 (same writer as above). Since 2026-10-05 (email audit P5) written ONLY when the 10:00 email was delivered (or when none was needed) — a failed send leaves it blank so a same-day re-run can still deliver that Section 2. |
 | `checkpoint2_json` | text (JSON) | added 2026-09-23 — written by that day's 13:00 job, same shape as `checkpoint1_json`, computed incrementally against it. Wired as of Step 7/11: `sendCombinedFollowupEmail_` (`GS-010` FN-280). |
-| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job. Wired as of Step 7/11 (same writer as above); a fuller retry story beyond this basic guard is Step 8/11. |
+| `checkpoint2_sent_at` | datetime | added 2026-09-23 — idempotency guard for the 13:00 job. Wired as of Step 7/11 (same writer as above). Since 2026-10-05 (email audit P5) written ONLY when the 13:00 reply was delivered (or none was needed) — a failed reply leaves it blank so a same-day re-run replies WITH Section 2. |
 
 Exact list: `AllIssuesEmailer.gs` `#L131`
 (`['date','region','bucket_label','primary_role','to','cc','lead_count','sent_at','thread_id','issue_snapshot_json','checkpoint1_json','checkpoint1_sent_at','checkpoint2_json','checkpoint2_sent_at']`).
@@ -199,6 +199,8 @@ columns are now live too. `GS-010`'s `loadTodaysCheckpoint1PendingGs_`
 `checkpoint2_sent_at` (cols M/N) back onto them. All 5 columns added in
 Step 2 are now written and read by a real caller — this sheet's role in
 the two-checkpoint redesign is fully wired end to end.
+
+**2026-10-05** (`f9728cc`, email audit P5 — `docs/_planning/EMAIL_AUDIT.md` F6): `checkpoint1_json`/`checkpoint1_sent_at` and `checkpoint2_json`/`checkpoint2_sent_at` are written only when the corresponding email was delivered (or deliberately not needed); they used to be written even after a failed send, which made the loaders skip the row and the same-day re-run lose that Section 2. No column changes (`GS-010` FN-275/FN-280).
 
 ## Revalidation trigger
 
