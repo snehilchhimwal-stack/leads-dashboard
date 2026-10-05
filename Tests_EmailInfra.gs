@@ -474,6 +474,20 @@ function runEmailInfraTests_() {
       TestAssert_(htmlOfPlainOpts.indexOf(id) !== -1 && plainText.indexOf(id) !== -1, 'HTML and plain text are built from the same opts: ' + id + ' is in both');
     });
 
+    // ============ 2026-10-05 email audit P6: ambiguous vs definite send errors ============
+    TestAssert_(isAmbiguousSendErrorGs_(new Error('Exception: Service Gmail timed out')), 'isAmbiguousSendErrorGs_: a timeout is ambiguous (the message may have been delivered)');
+    TestAssert_(isAmbiguousSendErrorGs_(new Error('Request timeout while sending')), 'isAmbiguousSendErrorGs_: "timeout" is ambiguous');
+    TestAssert_(isAmbiguousSendErrorGs_(new Error('Internal error encountered')), 'isAmbiguousSendErrorGs_: an internal error is ambiguous');
+    TestAssert_(isAmbiguousSendErrorGs_(new Error("We're sorry, a server error occurred. Please wait a bit and try again.")), 'isAmbiguousSendErrorGs_: the platform\'s own "server error occurred" wording is ambiguous');
+    TestAssert_(isAmbiguousSendErrorGs_(new Error('Backend Error')), 'isAmbiguousSendErrorGs_: a backend error is ambiguous');
+    TestAssert_(isAmbiguousSendErrorGs_(new Error('HTTP 503 Service Unavailable')), 'isAmbiguousSendErrorGs_: a 503 is ambiguous');
+    TestAssert_(isAmbiguousSendErrorGs_('Exception: Service Gmail failed while accessing document'), 'isAmbiguousSendErrorGs_: also reads a bare string error');
+    TestAssert_(!isAmbiguousSendErrorGs_(new Error('Gmail operation not allowed')), 'isAmbiguousSendErrorGs_: a definitive refusal is NOT ambiguous');
+    TestAssert_(!isAmbiguousSendErrorGs_(new Error('Invalid argument: raw')), 'isAmbiguousSendErrorGs_: a bad-argument error is NOT ambiguous');
+    TestAssert_(!isAmbiguousSendErrorGs_(new Error('Exception: Service invoked too many times for one day: gmail.')), 'isAmbiguousSendErrorGs_: a quota refusal is NOT ambiguous (nothing was sent)');
+    TestAssert_(!isAmbiguousSendErrorGs_(new Error('Exception: Not found')), 'isAmbiguousSendErrorGs_: "Not found" is NOT ambiguous (a lookup miss, nothing was sent)');
+    TestAssert_(!isAmbiguousSendErrorGs_(null) && !isAmbiguousSendErrorGs_(undefined), 'isAmbiguousSendErrorGs_: no error is not ambiguous');
+
     // ============ 2026-10-05 email audit P4: the overlapping-run lock ============
     const lockFree = TestMockLockService_();
     LockService = lockFree;

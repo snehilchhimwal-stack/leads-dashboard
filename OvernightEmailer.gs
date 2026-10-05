@@ -1374,9 +1374,16 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
     '--' + boundary + '--';
 
   const raw = Utilities.base64EncodeWebSafe(Utilities.newBlob(mime).getBytes());
-  return withSendRetry_(function () {
-    return Gmail.Users.Messages.send({ raw: raw, threadId: threadId }, 'me');
-  }, 'send threaded follow-up reply (' + threadId + ')');
+  try {
+    return withSendRetry_(function () {
+      return Gmail.Users.Messages.send({ raw: raw, threadId: threadId }, 'me');
+    }, 'send threaded follow-up reply (' + threadId + ')');
+  } catch (sendErr) {
+    // The send call itself failed. Tag an AMBIGUOUS failure (timeout / server error — the message may have gone out) so the
+    // caller does NOT follow it with a second, fallback send; see isAmbiguousSendErrorGs_ (email audit P6 / F7).
+    if (sendErr && typeof sendErr === 'object' && isAmbiguousSendErrorGs_(sendErr)) sendErr.sendOutcomeUnknown = true;
+    throw sendErr;
+  }
 }
 
 /**
@@ -1625,51 +1632,75 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     return;
   }
 
-  // sendThreadedGmailReply_ retries its own send step internally
-  // (withSendRetry_ — only a definitive rejection, never an ambiguous
-  // timeout). The plain fallback below gets the same treatment
-  // explicitly, for the same reason. Same try/catch shape as this
-  // function's pre-Step-7 inline predecessor. `sendSucceeded` tracks
-  // whether EITHER leg got the reply out — it gates the Step 8/11
-  // followup_sent_at write below, so a total failure stays retryable on
-  // the next run instead of being permanently marked done.
-  let sendSucceeded = false;
+  // The alert body shared by the failure and unconfirmed paths: who, which thread, which leads.
+  const alertLines = function (headline) {
+    return [
+      'Region: ' + region,
+      'Thread: ' + threadId,
+      'Intended recipient: ' + sendTo + (sendCc ? (' (cc: ' + sendCc + ')') : ''),
+      'Section 1 still-unresolved leads (' + section1UnresolvedRows.length + '): ' + section1UnresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
+      'Section 2 Checkpoint 2 leads (' + (section2Input ? section2Input.checkpoint1Entries.length : 0) + '): ' + (section2Input ? section2Input.checkpoint1Entries.map(function (e) { return e.lead_id; }).join(', ') : '(none)'),
+      '',
+    ].concat(headline);
+  };
+
+  // outcome (email audit P6 / F7): 'sent' (delivered), 'unconfirmed' (the send call failed AMBIGUOUSLY — a timeout / server
+  // error that does not prove the email was NOT delivered), or 'failed' (definitely not delivered). Only 'failed' leaves the
+  // bucket retryable; 'sent' and 'unconfirmed' both count as "this bucket's reply is done" below.
+  //
+  // sendThreadedGmailReply_ retries its own send step internally (withSendRetry_ — only a definitive rejection, never an
+  // ambiguous timeout). The plain fallback below used to follow ANY threaded error — including a timeout where the message
+  // may already have been delivered, so it could deliver a second copy. It now follows only a DEFINITE failure.
+  let outcome = 'failed';
   try {
     sendThreadedGmailReply_(threadId, sendTo, sendCc || '', subject, plainBody, html);
-    sendSucceeded = true;
+    outcome = 'sent';
   } catch (threadErr) {
-    Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
-    try {
-      sendGuardedEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send fallback follow-up (' + region + ')');
-      sendSucceeded = true;
-    } catch (fallbackErr) {
-      Logger.log('Overnight follow-up reply failed entirely for ' + region + ' (thread ' + threadId + ', to ' + sendTo + '): ' + fallbackErr);
-      notifyOpsAlertGs_('1pm follow-up failed for ' + region, [
-        'Region: ' + region,
-        'Thread: ' + threadId,
-        'Intended recipient: ' + sendTo + (sendCc ? (' (cc: ' + sendCc + ')') : ''),
-        'Section 1 still-unresolved leads (' + section1UnresolvedRows.length + '): ' + section1UnresolvedRows.map(function (row) { return row.lead_id; }).join(', '),
-        'Section 2 Checkpoint 2 leads (' + (section2Input ? section2Input.checkpoint1Entries.length : 0) + '): ' + (section2Input ? section2Input.checkpoint1Entries.map(function (e) { return e.lead_id; }).join(', ') : '(none)'),
-        '',
-        'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded. Nothing was marked as sent (followup_sent_at and checkpoint2_sent_at stay blank), so running sendOvernightFollowupEmailsNow again TODAY will retry this bucket, Section 2 included; the scheduled 13:00 job will not (it only reads today\'s rows, and tomorrow\'s run starts from tomorrow\'s).',
-        'Error: ' + fallbackErr,
-      ]);
+    if (threadErr && threadErr.sendOutcomeUnknown) {
+      outcome = 'unconfirmed';
+      Logger.log('Threaded send for ' + region + ' (thread ' + threadId + ') ended in an UNCONFIRMED state (' + threadErr + ') — not sending a fallback copy.');
+    } else if (threadErr && threadErr.blockedByGuard) {
+      Logger.log('Threaded send for ' + region + ' (thread ' + threadId + ') was blocked by the send-safety gate: ' + threadErr);
+      notifyOpsAlertGs_('1pm follow-up BLOCKED by the send-safety gate for ' + region, alertLines([String(threadErr.message || threadErr)]));
+    } else {
+      Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
+      try {
+        sendGuardedEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send fallback follow-up (' + region + ')');
+        outcome = 'sent';
+      } catch (fallbackErr) {
+        outcome = isAmbiguousSendErrorGs_(fallbackErr) ? 'unconfirmed' : 'failed';
+        Logger.log('Overnight follow-up reply ' + (outcome === 'unconfirmed' ? 'ended UNCONFIRMED' : 'failed entirely') + ' for ' + region + ' (thread ' + threadId + ', to ' + sendTo + '): ' + fallbackErr);
+        if (outcome === 'failed') {
+          notifyOpsAlertGs_('1pm follow-up failed for ' + region, alertLines([
+            'No follow-up email went out for this bucket this run — neither the threaded send nor the plain fallback succeeded. Nothing was marked as sent (followup_sent_at and checkpoint2_sent_at stay blank), so running sendOvernightFollowupEmailsNow again TODAY will retry this bucket, Section 2 included; the scheduled 13:00 job will not (it only reads today\'s rows, and tomorrow\'s run starts from tomorrow\'s).',
+            'Error: ' + fallbackErr,
+          ]));
+        }
+      }
+    }
+    if (outcome === 'unconfirmed') {
+      notifyOpsAlertGs_('1pm follow-up UNCONFIRMED for ' + region, alertLines([
+        'The send call failed in a way that does not prove the email was NOT delivered (a timeout / server error). NO second copy was sent. Check Gmail Sent for a reply in thread ' + threadId + ' to ' + sendTo + '.',
+        'This bucket is marked "unconfirmed" in Overnight_Log.followup_sent_at so it is not re-sent automatically; if the reply really is missing, clear that cell and AllIssues_Log\'s checkpoint2_sent_at for the row(s), then run sendOvernightFollowupEmailsNow.',
+      ]));
     }
   }
+  const replyDone = outcome !== 'failed';
 
   // checkpoint2_json/checkpoint2_sent_at -- changed 2026-10-05 (email audit P5 / F6): written ONLY when the reply was
-  // delivered. It used to be written "even on a total send failure", recording Checkpoint 2 as DONE for an email nobody
-  // received; because loadTodaysCheckpoint1PendingGs_ skips any row whose checkpoint2_sent_at is set, the same-day re-run
-  // the failure alert asks for would then send a reply WITHOUT Section 2. (The "no reply was needed" path above still
-  // records state — a genuine, final outcome.) A definite failure now leaves BOTH this and followup_sent_at blank.
-  if (sendSucceeded) writeCheckpoint2State_('reply itself sent fine');
+  // delivered (or is unconfirmed — attempted and possibly delivered, so it must not be re-sent without a human looking). It
+  // used to be written "even on a total send failure", recording Checkpoint 2 as DONE for an email nobody received; because
+  // loadTodaysCheckpoint1PendingGs_ skips any row whose checkpoint2_sent_at is set, the same-day re-run the failure alert
+  // asks for would then send a reply WITHOUT Section 2. (The "no reply was needed" path above still records state — a
+  // genuine, final outcome.) A definite failure leaves BOTH this and followup_sent_at blank.
+  if (replyDone) writeCheckpoint2State_('reply itself sent fine');
 
   // followup_sent_at (Overnight_Log col I) -- Step 8/11's idempotency
   // guard for the WHOLE combined reply (Section 1 + Section 2 together,
-  // since Step 7 made them ride in one email). Written only on success —
-  // a send failure here must stay retryable (a same-day re-run's Pass 1
-  // skips a row only when this column is truthy).
-  if (sendSucceeded) {
+  // since Step 7 made them ride in one email). Written on success — and as "unconfirmed <time>" when delivery is unknown
+  // (still truthy, so Pass 1 will not auto-resend it). A definite failure stays blank and retryable (a same-day re-run's
+  // Pass 1 skips a row only when this column is truthy).
+  if (replyDone) {
     // Step 9/11: own try/catch, consistent with every other write in this
     // function — even though this value is a small fixed-width timestamp
     // (never at real risk of the oversized-cell class of failure the
@@ -1680,7 +1711,8 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     // is (harmlessly) resent on the next run, not that anything breaks.
     try {
       writeUnlessTestModeGs_(function () {
-        overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+        const stamp = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+        overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[outcome === 'unconfirmed' ? 'unconfirmed ' + stamp : stamp]]);
       }, 'write followup_sent_at back to Overnight_Log (' + region + ')');
     } catch (logErr) {
       Logger.log('followup_sent_at write failed for ' + region + ' (reply itself sent fine — this bucket will be re-sent, harmlessly, on the next run): ' + logErr);

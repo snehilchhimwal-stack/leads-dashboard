@@ -546,6 +546,17 @@ code*, one bullet per plan step as each lands.
   recorded (that is a final result, not a failure). The scheduled jobs still do **not** retry — the
   13:00 job reads only today's rows — and the 13:00 failure alert now says exactly that (it used to
   claim "retried on the next run").
+- **P6 — no second copy after an ambiguous 13:00 send.** The 13:00 reply is sent by the Advanced Gmail
+  Service into the 10:00 thread, with a plain `GmailApp` send as a fallback. The fallback used to
+  follow *any* threaded error — including a timeout or "server error", where the message may already
+  have been delivered, so it could deliver a duplicate. Now `isAmbiguousSendErrorGs_` (`EmailInfra.gs`)
+  classifies the error: a **definite** refusal (bad argument, "operation not allowed", quota, "Not
+  found") still falls back; an **ambiguous** one (timeout, internal/server/backend error, 5xx,
+  network) sends **nothing more**, marks the bucket `unconfirmed <time>` in
+  `Overnight_Log.followup_sent_at` (so it is not re-sent automatically), records Checkpoint 2, and
+  alerts ops "1pm follow-up UNCONFIRMED for <region>". **To resolve an UNCONFIRMED alert:** look in
+  Gmail Sent for a reply in that thread; if it is missing, clear that cell *and* the row(s)'
+  `checkpoint2_sent_at` in `AllIssues_Log`, then run `sendOvernightFollowupEmailsNow`.
 
 ### 4.4 GitHub repo access
 

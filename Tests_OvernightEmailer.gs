@@ -961,6 +961,69 @@ function runOvernightEmailerTests_() {
       TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesAfter, '13:00 third run: nothing is resent once delivered');
     }
 
+    // ---- email audit P6 (F7): an AMBIGUOUS threaded-send failure is never followed by a second (fallback) send ----
+    {
+      // One 13:00 bucket with a Checkpoint 2 lead; `threadedError` is what Gmail.Users.Messages.send throws, `fallbackError`
+      // (optional) is what the plain GmailApp fallback throws. Returns what happened.
+      const P6_run = function (leadId, threadedError, fallbackError) {
+        const ss = P1_newSs([P1_flaggedLead(leadId)]);
+        const ovLog = ensureOvernightLogSheet_(ss);
+        ovLog.appendRow([istDayKeyGs_(now), 'Pune', 'thr-' + leadId, '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test ' + leadId]);
+        const aiLog = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+          [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-' + leadId, P1_snapshot(leadId), P1_checkpoint1(leadId), now, '', '']]);
+        ss._sheets['AllIssues_Log'] = aiLog;
+        const realGmail = Gmail, realGmailApp = GmailApp;
+        Gmail = { Users: { Threads: realGmail.Users.Threads, Messages: { send: function () { throw new Error(threadedError); } } } };
+        if (fallbackError) {
+          GmailApp = TestMockGmailApp_({});
+          GmailApp.createDraft = function () { return { send: function () { throw new Error(fallbackError); } }; };
+        }
+        const draftsBefore = TestGmailLog_.drafts.length, alertsBefore = TestGmailLog_.sent.length;
+        try {
+          P1_withSs(ss, function () { sendOvernightFollowupEmails(); });
+        } finally { Gmail = realGmail; GmailApp = realGmailApp; }
+        return {
+          ss: ss, ovLog: ovLog, aiLog: aiLog,
+          fallbackDrafts: TestGmailLog_.drafts.length - draftsBefore,
+          alerts: TestGmailLog_.sent.slice(alertsBefore),
+          stamp: String(ovLog.getRange(2, 9, 1, 1).getValues()[0][0]),
+          cp2Sent: !!aiLog.getRange(2, 14, 1, 1).getValues()[0][0],
+        };
+      };
+
+      // (a) threaded send times out -> the message may be delivered: NO fallback, marked "unconfirmed", ops alerted.
+      const a = P6_run('L-P6-A', 'Exception: Service Gmail timed out');
+      TestAssertEqual_(a.fallbackDrafts, 0, 'ambiguous threaded send (timeout): NO fallback message is sent — a second copy would be a duplicate if the first was delivered');
+      TestAssertEqual_(a.stamp.indexOf('unconfirmed '), 0, 'ambiguous threaded send: followup_sent_at is "unconfirmed <time>" — not blank (no auto-resend) and not a plain "sent" stamp');
+      TestAssert_(a.alerts.some(function (e) { return /1pm follow-up UNCONFIRMED/.test(e.subject); }), 'ambiguous threaded send: ops is alerted that the outcome is unconfirmed');
+      TestAssert_(!a.alerts.some(function (e) { return /1pm follow-up failed/.test(e.subject); }), 'ambiguous threaded send: …and it is NOT reported as a definite failure');
+      TestAssert_(a.cp2Sent, 'ambiguous threaded send: checkpoint2 state is recorded (the reply was attempted and may be delivered)');
+      const unconfirmedAlert = a.alerts.filter(function (e) { return /UNCONFIRMED/.test(e.subject); })[0];
+      TestAssert_(!!unconfirmedAlert && /thr-L-P6-A/.test(unconfirmedAlert.body) && /Gmail Sent/.test(unconfirmedAlert.body), 'ambiguous threaded send: the alert names the thread and tells a human where to check');
+      const repliesBefore = TestGmailLog_.threadReplies.length, draftsBefore = TestGmailLog_.drafts.length;
+      P1_withSs(a.ss, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore, 'ambiguous threaded send: a same-day re-run does not auto-resend an unconfirmed reply');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'ambiguous threaded send: …nor create a fallback message');
+
+      // (b) threaded send is refused DEFINITELY (bad argument) -> nothing was sent -> the plain fallback is correct.
+      const b = P6_run('L-P6-B', 'Invalid argument: raw');
+      TestAssertEqual_(b.fallbackDrafts, 1, 'definite threaded failure: the plain fallback IS used (nothing was delivered, so it cannot duplicate)');
+      TestAssert_(b.stamp !== '' && b.stamp.indexOf('unconfirmed') === -1, 'definite threaded failure: followup_sent_at is a normal sent stamp');
+      TestAssert_(!b.alerts.some(function (e) { return /UNCONFIRMED/.test(e.subject); }), 'definite threaded failure: no "unconfirmed" alert');
+
+      // (c) threaded failed definitively, then the fallback itself times out -> unconfirmed, not "failed".
+      const c = P6_run('L-P6-C', 'Invalid argument: raw', 'Exception: Service Gmail timed out');
+      TestAssertEqual_(c.stamp.indexOf('unconfirmed '), 0, 'fallback times out: followup_sent_at is "unconfirmed <time>"');
+      TestAssert_(c.alerts.some(function (e) { return /1pm follow-up UNCONFIRMED/.test(e.subject); }) && !c.alerts.some(function (e) { return /1pm follow-up failed/.test(e.subject); }), 'fallback times out: reported as unconfirmed, not as a definite failure');
+      TestAssert_(c.cp2Sent, 'fallback times out: checkpoint2 state is recorded');
+
+      // (d) both paths refuse DEFINITELY -> a true failure: retryable same day, alert says failed.
+      const d = P6_run('L-P6-D', 'Invalid argument: raw', 'Gmail operation not allowed for this user');
+      TestAssertEqual_(d.stamp, '', 'both paths refused: followup_sent_at stays blank (retryable)');
+      TestAssert_(!d.cp2Sent, 'both paths refused: checkpoint2_sent_at stays blank');
+      TestAssert_(d.alerts.some(function (e) { return /1pm follow-up failed/.test(e.subject); }) && !d.alerts.some(function (e) { return /UNCONFIRMED/.test(e.subject); }), 'both paths refused: reported as a definite failure');
+    }
+
     // ---- email audit P4 (F5): the lock wraps the 10:00 and 13:00 jobs, and FAILS OPEN ----
     {
       const realLock = LockService;

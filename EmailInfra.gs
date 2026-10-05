@@ -455,6 +455,16 @@ function prepareOutgoingEmailGs_(msg) {
   return { msg: { to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody }, problems: problems };
 }
 
+// A send error after which the message MAY still have been delivered (the request reached Gmail, the answer was lost or Gmail
+// failed mid-way) — as opposed to a definitive refusal ("operation not allowed", a bad id, bad arguments, a quota refusal),
+// after which nothing was sent. The 13:00 threaded send falls back to a second, plain send when the first one fails (email
+// audit P6 / F7); for an ambiguous error that fallback would deliver a DUPLICATE if the first send had in fact gone through.
+// Deliberately a short allow-list of "may have happened" wordings; anything else is treated as a definite failure.
+function isAmbiguousSendErrorGs_(err) {
+  const msg = String((err && err.message) || err || '');
+  return /timed out|timeout|deadline|internal error|server error|backend error|service error|service (gmail )?failed|unavailable|empty response|socket|network|temporar|\b50[0234]\b/i.test(msg);
+}
+
 function sendBlockedErrorGs_(label, problems) {
   const err = new Error('Send blocked by the safety gate (' + (label || 'email') + '): ' + problems.join('; '));
   err.blockedByGuard = true;
