@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `a1a21b4` — checked, unaffected by the region P&L head Cc extension to Thane/Navi Mumbai (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `fb17144` — the backend send path now goes through one safety gate (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -161,6 +161,8 @@ note doesn't read as ignored.
 **Revalidated 2026-09-26** `5aafbd4`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-298`/`CFG-070`, region P&L head Cc for Hyderabad and Bangalore). Checked against this record's own "Revalidation trigger" list below: only WHO is Cc'd changed (one more address on those regions' emails); the send mechanics (`GmailApp`/Advanced Gmail Service, `withSendRetry_`, threaded replies, TEST MODE redirection) are untouched, and TEST MODE still sends with no Cc. No change to this record's content.
 
 **Revalidated 2026-09-30** `a1a21b4`: flagged again after `EmailInfra.gs` advanced (`GS-004` `CFG-070`, same P&L head Cc mechanism extended to Thane and Navi Mumbai, no code change beyond the config map). Checked against this record's own "Revalidation trigger" list below: same conclusion as 2026-09-26 — only WHO is Cc'd changed, on two more regions; send mechanics untouched. No change to this record's content.
+
+**Revalidated 2026-10-05** `fb17144`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-323`..`FN-325`, email audit P1). The backend's `GmailApp.createDraft(...).send()` is now called from exactly one place, `sendGuardedEmailGs_`, which validates the recipient, subject, bodies and the leads an email counts BEFORE the draft is created; the Advanced Gmail Service threaded send (`sendThreadedGmailReply_`) validates and collapses CR/LF in its raw MIME headers. Ops alerts still use `GmailApp.sendEmail` by design. The browser's own `gmail.send` grant (`js/reports-gmail.js`) is unchanged — its body gate is plan step P11.
 
 ## Revalidation trigger
 
