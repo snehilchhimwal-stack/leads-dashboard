@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `71162ff` — revalidated in this sweep (all 8 FN anchors, CFG-024, the _allReports cross-file let claim, EXC-029/030/031 re-checked against source), no drift found |
+| **Last Verified** | 2026-10-07 against commit `c416a01` — revalidated after email audit P13 (a code comment's example address is now a placeholder; no logic change) |
 
 ## Purpose / reason to exist
 
@@ -148,6 +148,8 @@ Part 1 §4c, Part 3 §3.8/§3.9, Part 7 §18 MEDIUM #3.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-028.
+
+**Revalidated 2026-10-07** `c416a01` (email audit P13 / F24): the comment above `TEST_MODE_OVERRIDE_EMAIL` used a corporate address as its console example; it is now a placeholder. No logic change.
 
 ## Revalidation trigger
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-03 against commit `5802f35` — source unchanged since this sha (doc-accuracy fix only: `FN-063` split into `FN-063`/`FN-320` to correct a false "Called by" claim, see `## Version / change reference`); prior note: posterior-confidence flagging added (HANDOVER.md §9.7.5, FN-056/FN-314/FN-317/FN-318, CFG-077/078, RULE-037) |
+| **Last Verified** | 2026-10-07 against commit `c416a01` — revalidated after email audit P13 (a code comment no longer quotes two corporate addresses; no logic change) |
 
 ## Purpose / reason to exist
 
@@ -234,6 +234,8 @@ already, just never carried back to this file). Split into `FN-063`
 (`rmPerformanceHierarchyCells` only, unchanged claim) and new `FN-320`
 (`rmPerformanceDrivenBy`, correctly marked zero-callers/deliberately-kept
 dead code). No source line moved; `#L1241`/`#L1269` unchanged.
+
+**Revalidated 2026-10-07** `c416a01` (email audit P13 / F24): two code COMMENTS in the leadership-exclusion block no longer quote the leaders' corporate email addresses (this repository is public). No logic change.
 
 ## Revalidation trigger
 

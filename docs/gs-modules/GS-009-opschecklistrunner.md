@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `OpsChecklistRunner.gs` (153 lines) |
+| **Location** | `OpsChecklistRunner.gs` (312 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit `ad481cf` |
+| **Last Verified** | 2026-10-07 against commit `c416a01` — email audit P13: the weekly summary is addressed through `opsAlertEmailGs_()` (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -231,6 +231,8 @@ re-run when" above).
 production code changed — 7 new boundary-case assertions added to
 `Tests_OpsChecklistRunner.gs` for `checkStaleComponents_` (see
 Validation above for the full list). Test-only commit.
+
+**2026-10-07** (`c416a01`, email audit P13): `runWeeklyOpsChecklist_` addresses its weekly summary through `opsAlertEmailGs_()` (`GS-004` FN-338) instead of reading the `OPS_ALERT_EMAIL_` variable (now a blank test override). Same recipient in production. (The line count above was also stale: 153 -> 312.) **Not live until pasted.**
 
 ## Revalidation trigger
 

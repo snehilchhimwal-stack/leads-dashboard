@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `15d74d4` — email audit P10: the CH-level overnight report is sent once per day per region + CH (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-07 against commit `c416a01` — email audit P13: comment-only change (revalidated; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -509,6 +509,8 @@ ending the session.
 **2026-10-05** (`fe9b37f`, email audit P9 — `docs/_planning/EMAIL_AUDIT.md` F12/F21): (1) new `Overnight_Log` column `followup_result` (col J, appended to `OVERNIGHT_LOG_HEADERS_`; the sheet heals itself on the next run) — `sendCombinedFollowupEmail_` (FN-280) and the Pass 2 loop of `sendOvernightFollowupEmails_` (FN-232) write what they did with the row via `writeFollowupResultGs_` (FN-335): sent (threaded / fallback), skipped (nothing unresolved / no stored recipient), blocked, unconfirmed, failed. `followup_sent_at` keeps its meaning (the "already sent" guard) and stays blank for a skip; a BLANK result on today's row after 13:30 means the job never reached it. (2) every log stamp (`Overnight_Log.sent_at`, `followup_sent_at`, `AllIssues_Log.checkpoint1_sent_at`/`checkpoint2_sent_at`) is taken at the write via `istStampGs_` (`GS-004` FN-331), not from the job's start time (3 Oct: a reply sent 13:12 was stamped 13:01:49). (3) the job entry points are unchanged — their run records come from `withEmailJobLockGs_` (`GS-004` FN-327/FN-332). +31 lines (anchors re-mapped). `Tests_OvernightEmailer.gs` gained result-note, sentinel-stamp and run-record tests; **Not live until pasted** (the new column is added automatically on the first run after the paste).
 
 **2026-10-05** (`15d74d4`, email audit P10 — `docs/_planning/EMAIL_AUDIT.md` F11): `notifyChLevelLeadsGs_` (FN-238) checks `wasChReportSentTodayGs_` (`GS-004` FN-336) after its zero-leads guard and records `markChReportSentGs_` only after a successful send, so a same-day re-run of the 10:00 job no longer re-sends the CH-level report for a region whose only leads are CH-held (such a region never gets an `Overnight_Log` row, so the region guard never protected it). +6 lines (anchors re-mapped). `Tests_OvernightEmailer.gs` gained once-a-day, failed-send-retried, next-day, TEST-MODE and end-to-end CH-only-region tests. **Not live until pasted.**
+
+**Revalidated 2026-10-07** `c416a01` (email audit P13): `OvernightEmailer.gs` changed by ONE COMMENT (a production-evidence note no longer quotes a colleague's address). No behaviour change. The CH-level report it sends is addressed by `GS-004`'s `chLevelReportToGs_`, which now resolves the ops and CH addresses from the private employee table.
 
 ## Revalidation trigger
 

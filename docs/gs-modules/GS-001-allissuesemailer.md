@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `AllIssuesEmailer.gs` (701 lines) |
+| **Location** | `AllIssuesEmailer.gs` (702 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `15d74d4` — email audit P10: the CH-level issues report is sent once per day per region + CH (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-07 against commit `c416a01` — email audit P13: the one-off test-rows cleanup resolves its recipient by name (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -57,7 +57,8 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 | FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L376` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
 | FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
 | FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L601/#L628` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
-| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L659` / `removeTestModeAllIssuesRowsNow()` `#L655` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
+| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L660` / `removeTestModeAllIssuesRowsNow()` `#L656` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
+| FN-341 | `testModeRowsRecipientGs_()` `#L654` | none | the tester address whose test-mode `AllIssues_Log` rows `removeTestModeAllIssuesRowsNow` (FN-299) deletes — the ops address | none | `opsAlertEmailGs_` (`GS-004` FN-338) | `removeTestModeAllIssuesRowsNow` | specific — **added 2026-10-07 (email audit P13)**; replaces the old test-rows recipient string constant (a corporate address in a public repo) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -220,6 +221,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-05** (`6acea29`, email audit P7 — `docs/_planning/EMAIL_AUDIT.md` F9/F10): `sendOneAllIssuesEmail_` (FN-176) appends its `AllIssues_Log` row through `appendRowOnceGs_` (`GS-004` FN-329, keyed on the thread id, column I), so a retry after a timeout that landed after the write cannot add a second snapshot row. Recipient buckets that share an address now arrive already merged from `resolveRecipientEmailsForRegion_` (`GS-004` FN-330), so one address no longer receives two separate emails from this job for the same region. No line-count change (the line count above is also corrected: it was stale). **Not live until pasted.**
 
 **2026-10-05** (`15d74d4`, email audit P10 — `docs/_planning/EMAIL_AUDIT.md` F11): `notifyChLevelIssuesGs_` (FN-177) checks `wasChReportSentTodayGs_` (`GS-004` FN-336) after its zero-leads guard and records `markChReportSentGs_` only after a successful send, so a same-day re-run of the 17:00 job no longer re-sends the CH-level issues report for a region whose only flagged leads are CH-held (no `AllIssues_Log` row, so the region guard never protected it). The 10:00 overnight report and this one are tracked separately. +6 lines (anchors re-mapped). `Tests_AllIssuesEmailer.gs` gained once-a-day, separate-kind, failed-send and end-to-end CH-only-region tests. **Not live until pasted.**
+
+**2026-10-07** (`c416a01`, email audit P13 — `docs/_planning/EMAIL_AUDIT.md` F24): `TEST_MODE_ROWS_RECIPIENT_` (a corporate address literal used only by the one-off `removeTestModeAllIssuesRowsNow`) is replaced by `testModeRowsRecipientGs_()` (`FN-341`), which returns the ops address resolved from the private employee table. No change to the job itself. +7 lines (695L -> 702L; anchors re-mapped). **Not live until pasted.**
 
 ## Revalidation trigger
 
