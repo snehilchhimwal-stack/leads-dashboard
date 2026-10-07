@@ -264,11 +264,41 @@ Still open:
 | Item | Why | Who / when |
 |---|---|---|
 | Run `setupEmailJobWatchdogTrigger()` once | installs the ONE hourly watchdog trigger. Deliberately not run on 2026-10-07: the 10:00 and 13:00 jobs ran before run records existed, so the first hourly check would have flagged them "did not run" | Snehil — any time after midnight and before ~10:00 IST |
-| Paste the 5 changed `Tests_*.gs` + create `Tests_EmailLifecycleFullCycle.gs` live | optional; lets `runAllTests()` run in the editor (it fails today with a ReferenceError — the full-cycle file was never in the live project). Expected 1758/1758 | Snehil, optional |
+| Paste the changed `Tests_*.gs` + create `Tests_EmailLifecycleFullCycle.gs` live | optional; lets `runAllTests()` run in the editor (it fails today with a ReferenceError — the full-cycle file was never in the live project). Expected 1914/1914 on the repo after P15/P16 and the e2e | Snehil, optional |
 | Watch the first real runs | 17:04 today (All-Issues), 10:03 and 13:01 tomorrow: Executions `Completed`; `Overnight_Log.followup_result` filled for each 13:00 row; no WATCHDOG email once the trigger exists | Claude can read the Executions list on request |
 | P15 + P16 live | F18 (per-lead call baseline) and F23 (`snapshotPeriodic` vs the 30-minute limit) are committed (`7799e44`) but NOT yet in the live Apps Script project: paste `MovementTracker.gs`, `SlaEngine.gs`, `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `EmailInfra.gs`. The dashboard half of F18 is live when GitHub Pages deploys | Claude can stage them in the editor; Snehil saves |
 | Measure P16 | after the first scheduled `snapshotPeriodic` runs (00:18, 06:08, 12:44, 18:51 IST): read the `[timing]` lines in the Executions log and `Movement_Log_Runs.total_s`; expect minutes (was 209-1,803 s) and an empty `skipped_phases`. If a run still skips phases, the `[timing]` lines say which phase is the slow one | Claude can read the Executions list on request |
 | F24-in-history, F25 | owner decisions / out of scope: the corporate addresses remain in git history (not rewritten), F25 business rules (left as is) | — |
+
+## 8. End-to-end verification of P15 + P16 (2026-10-07)
+
+What was run, and what it can and cannot tell you.
+
+**Apps Script chain** (`Tests_EmailLifecycleFullCycle.gs`, `TestEFC_runSnapshotChain_`, 53 assertions): the real
+`snapshotPeriodic()` writes `Movement_Log` / `Movement_Log_Runs` / `SLA_History` and its run record; the real 17:00 and 10:00
+jobs read what it wrote; a second capture, the prune and four watchdog situations follow. Two sibling leads of one customer
+(counters 13 and 4 -> 9) are the F18 trap; controls cover no-calls, many-calls and created-today leads. Result: the
+sibling's email row is "Stuck 48h+" with "5 more call attempts" (its own baseline), the no-calls lead is "Behind on Today's
+Calls", the many-calls lead says "6 more call attempts"; `SLA_History` after the second capture counts 2 under-called (it
+would read 3 if it used the run's own rows as a baseline); the prune removes the 4 expired rows with one `deleteRows` after
+archiving them.
+
+**Browser chain** (`tests/frontend-harness.html` section 7, 8 assertions): a second real `fetchAndRender()` over a
+`Movement_Log` in the Sheets-API shape; asserts the baselines, the rendered "Behind on Today's Calls" list and the shared
+per-lead table (the same one the Apps Script e2e asserts).
+
+**Robustness:** the whole `.gs` suite (1914) passed at 13 simulated clock times (IST midnight +-, 01:30, 03:00, 08:59:50,
+10:03, 13:01, 17:04, 18:51, a Saturday, a Sunday after midnight) and in 4 time zones (IST, UTC, Los Angeles, Auckland) and
+combinations around IST midnight; the browser harness (267) in the same 4 zones. The sweep found one old fixture that was
+only clean at some hours (`Tests_OvernightEmailer.gs`'s `midWindow`, fixed). **Regressions:** 14 chain mutations on the
+Apps Script side and 7 on the browser side each fail an `E2E` assertion on their own.
+
+**Not covered - only the live system can show it:** the real speed-up of `snapshotPeriodic` (the platform's 30-minute limit,
+real Sheets read/write cost - the run is expected to take minutes, not measured); real `LockService`, Gmail and Drive
+behaviour; real `deleteRows` on a ~48K-row sheet; whether the live editor's pasted files equal the repo (checked by hash after
+saving, then `runAllTests()` live). After the paste, the live checks are read-only: reload and re-hash all files, run
+`runAllTests`, run `showEmailJobRunsNow` / `showEmailConfigNow`, and read the first scheduled `snapshotPeriodic` run's `[timing]`
+lines and `Movement_Log_Runs.total_s`.
 
 ---
 

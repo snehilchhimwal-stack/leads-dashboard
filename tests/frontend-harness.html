@@ -1809,8 +1809,8 @@
     // fetchAndRender() kicks off applyFiltersAndRender(), which defers the
     // actual render through two chained setTimeout(...,0) passes (see
     // core.js) rather than awaiting it — wait that out before asserting.
-    const start = Date.now();
-    while (typeof _isApplyingFilters !== 'undefined' && _isApplyingFilters && Date.now() - start < 3000) {
+    // Iteration cap, not Date.now() - the clock is frozen above, so a time-based cap never expires (150 x 20 ms = 3 s).
+    for (let i = 0; i < 150 && typeof _isApplyingFilters !== 'undefined' && _isApplyingFilters; i++) {
       await new Promise(r => setTimeout(r, 20));
     }
     await new Promise(r => setTimeout(r, 30));
@@ -2011,6 +2011,103 @@
       assert('Clicking Opp Monitor hides the shared filter bar', filterBarEl && filterBarEl.style.display === 'none');
       if (overviewTabBtn) overviewTabBtn.click();
       assert('Switching back to Overview restores the shared filter bar', filterBarEl && filterBarEl.style.display === 'flex');
+    }
+  }
+
+  // ---- 7. Snapshot -> baseline -> render, end to end (email audit F18, 2026-10-07) ----
+  // A SECOND real fetchAndRender() pass, run last so nothing after it depends on its state. The Movement_Log it reads is
+  // built in the exact shape the Apps Script writer produces and the Sheets API returns (header = MOVEMENT_LOG_COLUMNS +
+  // content_hash; date cells as serial numbers, which is what valueRenderOption=UNFORMATTED_VALUE / SERIAL_NUMBER gives), and
+  // goes through the REAL fetchMovementLog -> buildTodayCallBaseline -> enrichLead -> renderAll chain. The same lead ids and
+  // the same expected table are asserted by Tests_EmailLifecycleFullCycle.gs's TestEFC_runSnapshotChain_ against the real
+  // snapshotPeriodic() output, so the two runtimes are checked against ONE table:
+  //   E101  customer C-E1, counter 13, no calls today        -> behind
+  //   E102  customer C-E1 (sibling), counter 4 -> 9          -> NOT behind (own baseline 4: 5 calls)  <- the F18 trap
+  //   E201  own customer, counter 2 -> 2                     -> behind
+  //   E301  own customer, counter 1 -> 7                     -> NOT behind (6 calls)
+  //   E401  created today, 6 attempts                        -> NOT behind (a lead created today is judged on its raw count)
+  //   E402  created today, 2 attempts                        -> behind
+  // Waits on explicit conditions (the baseline is built / filtering finished), never a fixed sleep. Frozen clock: 2026-09-09
+  // 14:00 IST, so "today" starts at 00:00 IST and every snapshot below is 24h+ old unless it is deliberately today's.
+  {
+    const SHEET_EPOCH_OFFSET = 25569; // days from 1899-12-30 to 1970-01-01
+    const serialAgo = h => (Date.now() - h * H + 330 * 60000) / 86400000 + SHEET_EPOCH_OFFSET; // IST wall clock as a sheet serial
+    const e2eLead = (id, client, stage, createdH, attempts) => row({
+      lead_id: id, RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client ' + id, lead_assigned_at: ago(createdH), group_source: 'Google', source_bucket: 'Organic', current_stage: stage,
+      client_id: client, last_connect_time: ago(0.5), call_attempts: attempts,
+    });
+    const e2eLeadValues = [headers.slice(),
+      e2eLead('E101', 'C-E1', 'Not Updated', 60, 13),
+      e2eLead('E102', 'C-E1', 'Suspect', 60, 9),
+      e2eLead('E201', 'C-E2', 'Suspect', 60, 2),
+      e2eLead('E301', 'C-E3', 'Suspect', 60, 7),
+      e2eLead('E401', 'C-E4', 'Suspect', 5, 6),
+      e2eLead('E402', 'C-E5', 'Suspect', 5, 2),
+    ];
+    const mlHeader = MOVEMENT_LOG_COLUMNS.concat(['content_hash']);
+    const mlRow = (atH, leadId, client, attempts) => mlHeader.map(key => {
+      if (key === 'snapshot_at') return serialAgo(atH);
+      if (key === 'snapshot_label') return 'e2e';
+      if (key === 'lead_id') return leadId;
+      if (key === 'client_id') return client;
+      if (key === 'RM') return 'Ravi Kumar';
+      if (key === 'call_attempts') return attempts;
+      if (key === 'content_hash') return 'h-' + leadId + '-' + attempts;
+      return '';
+    });
+    const e2eMovementValues = [mlHeader,
+      mlRow(25, 'E102', 'C-E1', 4),   // the sibling's snapshot is the EARLIER one; E101's (below) is the later - the F18 trap
+      mlRow(24, 'E101', 'C-E1', 13),
+      mlRow(24, 'E201', 'C-E2', 2),
+      mlRow(24, 'E301', 'C-E3', 1),
+      mlRow(8, 'E102', 'C-E1', 9),    // today's own early capture (06:00 IST): the latest snapshot, but never a baseline
+      mlRow(24, '', 'C-E1', 77),      // no lead id: ignored
+    ];
+    sheetsApiValuesGet = async function (sheetId, range) {
+      if (/!A2:AZ$/.test(range)) return e2eLeadValues;
+      if (range.indexOf('Movement_Log') === 0) return e2eMovementValues;
+      return [];
+    };
+
+    let e2eThrew = null;
+    try {
+      await fetchAndRender();
+      // An ITERATION cap, not Date.now(): this harness freezes the clock (FakeDate.now is constant), so a time-based cap can
+      // never expire - a failing e2e would hang the whole harness instead of failing. 250 x 20 ms = at most 5 s of real time.
+      for (let i = 0; i < 250 && !(_todayCallBaselineByKey && _todayCallBaselineByKey.has('E101') && !(typeof _isApplyingFilters !== 'undefined' && _isApplyingFilters)); i++) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+      await new Promise(r => setTimeout(r, 30));
+    } catch (e) { e2eThrew = e; }
+    assert('E2E snapshot->render: the second fetchAndRender pass completes with no uncaught exception', !e2eThrew, e2eThrew && (e2eThrew.message + '\n' + e2eThrew.stack));
+
+    if (!e2eThrew) {
+      assert('E2E snapshot->render: Movement_Log was read through the real fetch (state ok, 5 usable rows of 6 - the lead-id-less one is dropped)',
+        movementFetchState === 'ok' && movementSnapshots.length === 5, 'state=' + movementFetchState + ' rows=' + movementSnapshots.length);
+      assert('E2E snapshot->render: the baselines are per LEAD id and ignore today\'s own snapshot (E101 13, E102 4 - not 9, E201 2, E301 1)',
+        _todayCallBaselineByKey.get('E101') === 13 && _todayCallBaselineByKey.get('E102') === 4 && _todayCallBaselineByKey.get('E201') === 2 && _todayCallBaselineByKey.get('E301') === 1 &&
+        !_todayCallBaselineByKey.has('C-E1') && _todayCallBaselineByKey.size === 4,
+        JSON.stringify(Array.from(_todayCallBaselineByKey.entries())));
+      assert('E2E snapshot->render: the latest-snapshot map holds today\'s early capture for E102 (9)', _lastSnapshotByKey.get('E102') && _lastSnapshotByKey.get('E102').call_attempts === 9, JSON.stringify(_lastSnapshotByKey.get('E102')));
+
+      const byId = {};
+      issueLeads.forEach(l => { byId[String(l.lead_id)] = l; });
+      const table = {};
+      ['E101', 'E102', 'E201', 'E301', 'E401', 'E402'].forEach(id => { table[id] = byId[id] ? byId[id].underCalledToday : 'MISSING'; });
+      assert('E2E snapshot->render: the shared per-lead "behind on today\'s calls" table (same one the Apps Script e2e asserts)',
+        JSON.stringify(table) === JSON.stringify({ E101: true, E102: false, E201: true, E301: false, E401: false, E402: true }), JSON.stringify(table));
+
+      const dueText = document.getElementById('dueTodayList') ? document.getElementById('dueTodayList').textContent : '';
+      assert('E2E snapshot->render: the rendered "Behind on Today\'s Calls" list names E101, E201 and E402',
+        ['E101', 'E201', 'E402'].every(id => dueText.indexOf(id) !== -1), dueText.slice(0, 200));
+      assert('E2E snapshot->render: …and does NOT name E102 (the sibling), E301 or E401',
+        ['E102', 'E301', 'E401'].every(id => dueText.indexOf(id) === -1), dueText.slice(0, 200));
+
+      const merged = leads.find(l => l.client_id === 'C-E1');
+      assert('E2E snapshot->render: the merged customer record for C-E1 carries both leads\' counters and is NOT behind (its best lead made 5 calls)',
+        !!merged && merged.callAttemptsByLeadId && merged.callAttemptsByLeadId.E101 === 13 && merged.callAttemptsByLeadId.E102 === 9 && merged.underCalledToday === false,
+        merged ? JSON.stringify({ c: merged.callAttemptsByLeadId, u: merged.underCalledToday }) : 'no merged record');
     }
   }
 

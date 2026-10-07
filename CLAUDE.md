@@ -153,6 +153,12 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
     same approach turned into a reusable, headless (no visible tab, no
     render/paint overhead), one-command tool. Use it to catch a real
     failure BEFORE pushing, not as a replacement for a green CI run.
+  - **Run it at awkward clock times and zones too** (added 2026-10-07):
+    `--at 2026-10-08T00:00:20+05:30` starts its clock at that moment and `--tz UTC` sets
+    its local zone (CI is UTC, this machine is IST). Most of the suite uses the REAL
+    clock, so a fixture can be clean at 10:00 and wrong at 00:30 — the first sweep found
+    exactly one (`Tests_OvernightEmailer.gs`'s `midWindow`). Do this after adding any
+    test that uses `new Date()`; `HANDOVER.md` §7.1 has the list of times used.
   - This still doesn't change the general point: `python3` is useful for
     local dry-runs/validation Node would otherwise cover and for building
     `.docx`/`.pptx` output, but GitHub Actions remains the authoritative

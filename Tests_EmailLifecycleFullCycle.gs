@@ -478,12 +478,283 @@ function runEmailLifecycleFullCycleTests_() {
       }
     }
 
+    // ==== 2026-10-07 email audit F18 + F23: the real snapshot -> baseline -> email -> watchdog chain (see TestEFC_runSnapshotChain_) ====
+    TestEFC_runSnapshotChain_(now, header, banner, monthShort);
+
     TestAssertOnlyTestEmails_();
   } finally {
     TEST_MODE_OVERRIDE_EMAIL_ = '';
     TestEnv_tearDown_();
   }
   return TestResults_;
+}
+
+// ======================================================================================================================
+// 2026-10-07 email audit F18 + F23 - the SNAPSHOT -> BASELINE -> EMAIL chain, end to end.
+//
+// The unit tests prove each piece with hand-built inputs; this proves the pieces agree with EACH OTHER: the REAL
+// snapshotPeriodic() writes Movement_Log / Movement_Log_Runs / SLA_History and its run record; the REAL 17:00 and 10:00 jobs
+// then read the Movement_Log it produced; the REAL watchdog reads the run record. Nothing here hand-builds a Movement_Log row
+// that the real writer would have produced (the one thing done by hand is moving a captured row's snapshot_at back by a day -
+// the same single-cell technique this file's other scenarios use, because the clock is the real one and cannot be advanced).
+//
+// Written to be safe at ANY hour of the day (the project's earlier e2e/time failures: a fixture that was only "clean" outside
+// the first hours after IST midnight): every offset is >= 24 h, so a "yesterday" snapshot is always before today's IST start;
+// the leads are > 48 h old at any time of day (created one millisecond after the 17:00 window opens); no assertion reads the
+// current IST hour; watchdog assertions look ONLY at snapshotPeriodic alerts (the email-job checks depend on the hour).
+// Every scenario builds its own spreadsheet + Script Properties, restores every global it swaps in a finally, and counts
+// against the shared Gmail log RELATIVELY. No real Drive / Gmail / Sheet / property is touched (all mocks).
+//
+// The same lead ids and the same expected flags are asserted in the browser by tests/frontend-harness.html section 7
+// ("snapshot -> baseline -> render"), so the two runtimes are checked against ONE table:
+//   E101  customer C-E1, counter 13, no calls today        -> behind
+//   E102  customer C-E1 (sibling), counter 4 -> 9          -> NOT behind (own baseline 4: 5 calls)  <- the F18 trap
+//   E201  own customer, counter 2 -> 2                     -> behind
+//   E301  own customer, counter 1 -> 7                     -> NOT behind (6 calls)
+// ======================================================================================================================
+function TestEFC_e2eRows_(header, banner, created, now, state) {
+  const base = function (id, client, stage, attempts) {
+    return TestEFC_leadRow_(header, {
+      lead_id: id, client_id: client, RM: 'Test RM One', region: 'Pune', current_stage: stage, lead_assigned_at: created,
+      call_attempts: attempts, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5),
+    });
+  };
+  return [banner, header,
+    base('E101', 'C-E1', 'Not Updated', state.A),
+    base('E102', 'C-E1', 'Suspect', state.B),
+    base('E201', 'C-E2', 'Suspect', state.SOLO),
+    base('E301', 'C-E3', 'Suspect', state.BUSY),
+  ];
+}
+
+function TestEFC_e2eSpreadsheet_(rows, monthShort) {
+  const s = TestMockSpreadsheet_({
+    'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+    'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+  });
+  s._sheets[monthShort] = TestMockSheet_(monthShort, rows);
+  return s;
+}
+
+// Moves the snapshot_at of every Movement_Log row captured so far back to `atByLead[lead_id]` (a Date) - "a day passed".
+function TestEFC_ageMovementLog_(ss, atByLead) {
+  const sheet = ss.getSheetByName('Movement_Log');
+  const leadCol = 1 + 2 + SNAPSHOT_COLUMNS_.indexOf('lead_id'); // 1-based: snapshot_at, snapshot_label, then the fields
+  const n = sheet.getLastRow() - 1;
+  const ids = sheet.getRange(2, leadCol, n, 1).getValues();
+  for (let i = 0; i < n; i++) {
+    const at = atByLead[String(ids[i][0])];
+    if (at) sheet.getRange(2 + i, 1, 1, 1).setValues([[at]]);
+  }
+}
+
+function TestEFC_movementRows_(ss) {
+  const sheet = ss.getSheetByName('Movement_Log');
+  const w = sheet.getLastColumn();
+  const header = sheet.getRange(1, 1, 1, w).getValues()[0];
+  const data = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, w).getValues() : [];
+  return data.map(function (r) {
+    const o = {};
+    header.forEach(function (h, i) { o[h] = r[i]; });
+    return o;
+  });
+}
+
+function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
+  const win = allIssuesWindowGs_(now);
+  const created = new Date(win.from.getTime() + 1);                  // inside the window, > 48 h old at any time of day
+  const dayAgo = TestFixture_hoursAgo_(now, 24);
+  const dayAndHourAgo = TestFixture_hoursAgo_(now, 25);
+  const realSpreadsheetApp = SpreadsheetApp;
+  const realProps = PropertiesService;
+  const realDrive = DriveApp;
+  const realSnapshotOpenLeads = snapshotOpenLeads_;
+  const useSs = function (s) { SpreadsheetApp = { getActiveSpreadsheet: function () { return s; }, flush: function () {} }; };
+  const snapAlerts = function (fromIndex) {
+    return TestGmailLog_.sent.slice(fromIndex).filter(function (e) { return /snapshotPeriodic/.test(e.subject); });
+  };
+  const D1 = { A: 13, B: 4, SOLO: 2, BUSY: 1 };   // yesterday's counters
+  const D2 = { A: 13, B: 9, SOLO: 2, BUSY: 7 };   // today's: B +5 calls, BUSY +6, A and SOLO none
+  try {
+    // ===== SCENARIO 1: yesterday's capture -> today's 17:00 all-issues email =====
+    PropertiesService = TestMockPropertiesService_();
+    const ss1 = TestEFC_e2eSpreadsheet_(TestEFC_e2eRows_(header, banner, created, now, D1), monthShort);
+    useSs(ss1);
+
+    snapshotPeriodic();                                                  // REAL capture #1 ("yesterday")
+    let mlRows = TestEFC_movementRows_(ss1);
+    TestAssertEqual_(mlRows.map(function (r) { return r.lead_id; }).sort().join(','), 'E101,E102,E201,E301', 'E2E capture #1: Movement_Log holds exactly the four leads, written by the real snapshot');
+    TestAssertEqual_(mlRows.filter(function (r) { return r.lead_id === 'E102'; })[0].call_attempts, 4, 'E2E capture #1: E102\'s counter (4) is what was captured');
+    TestAssert_(mlRows.every(function (r) { return /^[0-9a-f]{64}$/.test(String(r.content_hash)); }), 'E2E capture #1: every row carries a real 64-char content hash');
+    const runs1 = ss1.getSheetByName('Movement_Log_Runs');
+    const runRow1 = runs1.getRange(2, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssert_(runRow1[2] === 4 && runRow1[3] === 4 && typeof runRow1[4] === 'number' && runRow1[5] === '', 'E2E capture #1: Movement_Log_Runs says 4 seen / 4 changed, a numeric total_s, nothing skipped');
+    const record1 = readEmailJobRunGs_('snapshotPeriodic');
+    TestAssert_(record1 && record1.status === 'completed' && typeof record1.totalSeconds === 'number' && record1.skipped.length === 0, 'E2E capture #1: the run record says completed, with a run time and no skipped phases');
+    TestAssertEqual_(snapshotRunProblemsGs_(new Date()).length, 0, 'E2E capture #1: the watchdog sees nothing wrong with a clean run');
+    const sla1 = ss1.getSheetByName('SLA_History').getRange(2, 1, 1, SLA_HISTORY_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(sla1[SLA_HISTORY_COLUMNS_.indexOf('underCalledToday')], 4, 'E2E capture #1: with no earlier snapshot there is no baseline, so all four read as under-called (comment-count fallback)');
+
+    // A day passes: yesterday's capture. The sibling's snapshot is the LATER one on purpose (the F18 trap).
+    TestEFC_ageMovementLog_(ss1, { E102: dayAndHourAgo, E101: dayAgo, E201: dayAgo, E301: dayAgo });
+    runs1.getRange(2, 1, 1, 1).setValues([[dayAgo]]);
+
+    // TODAY: the leads tab changes (E102 +5 calls, E301 +6), then the REAL 17:00 job reads the Movement_Log the snapshot wrote.
+    ss1._sheets[monthShort] = TestMockSheet_(monthShort, TestEFC_e2eRows_(header, banner, created, now, D2));
+    const drafts1 = TestGmailLog_.drafts.length;
+    sendAllIssuesEmails();
+    const sent1 = TestGmailLog_.drafts.slice(drafts1);
+    TestAssertEqual_(sent1.length, 1, 'E2E 17:00: one bucket email goes out');
+    const html1 = sent1[0].htmlBody;
+    const rowOf = function (html, id) { const at = html.indexOf(id); return at === -1 ? '' : html.slice(at, html.indexOf('</tr>', at)); };
+    TestAssertEqual_(html1.indexOf('E101'), -1, 'E2E 17:00: the sibling that lost the per-customer collapse (E101) is not listed');
+    const rowB = rowOf(html1, 'E102');
+    TestAssertContains_(rowB, 'Stuck 48h+', 'E2E 17:00: E102 is measured against ITS OWN baseline from the real Movement_Log (9 - 4 = 5 calls): Stuck 48h+, not behind');
+    TestAssertEqual_(rowB.indexOf("Behind on Today's Calls"), -1, 'E2E 17:00: …so the sibling\'s later 13 does not make it look behind');
+    TestAssertContains_(rowB, '5 more call attempts', 'E2E 17:00: E102\'s follow-up compares with its own last snapshot (4 -> 9)');
+    const rowSolo = rowOf(html1, 'E201');
+    TestAssertContains_(rowSolo, "Behind on Today's Calls", 'E2E 17:00: control - a lead with no calls today (2 -> 2) is still flagged behind');
+    TestAssertContains_(rowSolo, 'no new call attempts', 'E2E 17:00: control - …with the "no new call attempts" follow-up');
+    const rowBusy = rowOf(html1, 'E301');
+    TestAssertContains_(rowBusy, 'Stuck 48h+', 'E2E 17:00: control - a lead with 6 calls today (1 -> 7) is not behind');
+    TestAssertContains_(rowBusy, '6 more call attempts', 'E2E 17:00: control - …and its follow-up says 6 more attempts');
+    const snapshotJson = JSON.parse(ss1.getSheetByName('AllIssues_Log').getRange(2, 10, 1, 1).getValues()[0][0]);
+    TestAssertEqual_(snapshotJson.map(function (l) { return l.lead_id + ':' + l.issueLabel; }).sort().join('|'),
+      "E102:Stuck 48h+|E201:Behind on Today's Calls|E301:Stuck 48h+", 'E2E 17:00: the logged issue snapshot names exactly the same issue per lead as the email');
+
+    // TODAY'S capture (#2), real, after the email. Only the two leads that changed get a new row.
+    snapshotPeriodic();
+    mlRows = TestEFC_movementRows_(ss1);
+    TestAssertEqual_(mlRows.length, 6, 'E2E capture #2: Movement_Log gained exactly two rows (E102 and E301 changed; E101 and E201 were deduplicated)');
+    const runRow2 = runs1.getRange(3, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssert_(runRow2[2] === 4 && runRow2[3] === 2, 'E2E capture #2: Movement_Log_Runs says 4 seen / 2 changed');
+    // 5 ms past "now": the capture stamped its rows with its own `new Date()` a moment ago, and the mock runs fast enough for the two
+    // to land in the same millisecond - the maps take snapshots STRICTLY BEFORE their cutoff, so an equal stamp would be left out.
+    const mapsNow = new Date(Date.now() + 5);
+    const maps = buildMovementLogMapsGs_(ss1, mapsNow);
+    TestAssert_(maps.baselineMap.E102 === 4 && maps.baselineMap.E101 === 13 && maps.baselineMap.E201 === 2 && maps.baselineMap.E301 === 1,
+      'E2E capture #2: the baselines are still yesterday\'s per-lead counters - today\'s own capture rows are never a baseline');
+    TestAssert_(maps.lastSnapshotMap.E102.call_attempts === 9 && maps.lastSnapshotMap.E301.call_attempts === 7, 'E2E capture #2: …while the latest-snapshot map now holds today\'s capture');
+    TestAssertEqual_(Object.keys(maps.baselineMap).sort().join(','), 'E101,E102,E201,E301', 'E2E capture #2: the maps are keyed by lead id only (no client-id or l: keys)');
+    const todayRows = ss1._sheets[monthShort].getRange(3, 1, 4, header.length).getValues();
+    const colIndexE2e = buildColIndex_(header);
+    const behind = {};
+    todayRows.forEach(function (r) { behind[String(getVal_(r, colIndexE2e, 'lead_id'))] = computeSlaFlags_(r, colIndexE2e, mapsNow, maps.baselineMap).underCalledToday; });
+    TestAssertEqual_(JSON.stringify(behind), JSON.stringify({ E101: true, E102: false, E201: true, E301: false }), 'E2E shared table: per-lead "behind on today\'s calls" from the real Movement_Log (the browser test asserts the same table)');
+    const sla2 = ss1.getSheetByName('SLA_History').getRange(3, 1, 1, SLA_HISTORY_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(sla2[SLA_HISTORY_COLUMNS_.indexOf('underCalledToday')], 2, 'E2E capture #2: SLA_History (written AFTER the capture now) counts 2 under-called - it did not read the run\'s own fresh rows as a baseline (that would give 3)');
+    TestAssertEqual_(sla2[SLA_HISTORY_COLUMNS_.indexOf('openTotal')], 4, 'E2E capture #2: …over the 4 open leads');
+
+    // ===== SCENARIO 2: the 10:00 overnight email reads the same real Movement_Log =====
+    PropertiesService = TestMockPropertiesService_();
+    const overnightWin = overnightWindowGs_(now);
+    // Never younger than 3.5 h (see Tests_OvernightEmailer.gs's midWindow): the window's end can be in the future between midnight and ~04:30 IST.
+    const midWindow = new Date(Math.min((overnightWin.from.getTime() + overnightWin.to.getTime()) / 2, now.getTime() - 3.5 * 3600 * 1000));
+    const ss2 = TestEFC_e2eSpreadsheet_(TestEFC_e2eRows_(header, banner, midWindow, now, D1), monthShort);
+    useSs(ss2);
+    snapshotPeriodic();                                                  // real capture of yesterday's counters
+    TestEFC_ageMovementLog_(ss2, { E102: dayAndHourAgo, E101: dayAgo, E201: dayAgo, E301: dayAgo });
+    ss2._sheets[monthShort] = TestMockSheet_(monthShort, TestEFC_e2eRows_(header, banner, midWindow, now, D2));
+    const drafts2 = TestGmailLog_.drafts.length;
+    sendOvernightMorningEmails();
+    const sent2 = TestGmailLog_.drafts.slice(drafts2).filter(function (d) { return d.htmlBody.indexOf('E102') !== -1; });
+    TestAssertEqual_(sent2.length, 1, 'E2E 10:00: the overnight email carrying the surviving sibling goes out once');
+    const html2 = sent2[0] ? sent2[0].htmlBody : '';
+    TestAssertEqual_(html2.indexOf('E101'), -1, 'E2E 10:00: the collapsed sibling is not listed');
+    TestAssertContains_(rowOf(html2, 'E102'), '5 more call attempts', 'E2E 10:00: E102\'s follow-up uses its OWN snapshot from the real Movement_Log (4 -> 9)');
+    TestAssertContains_(rowOf(html2, 'E301'), '6 more call attempts', 'E2E 10:00: control - E301 (1 -> 7)');
+    TestAssertContains_(rowOf(html2, 'E201'), 'no new call attempts', 'E2E 10:00: control - E201 (2 -> 2)');
+
+    // ===== SCENARIO 3: the prune (F23) against rows the real snapshot wrote =====
+    PropertiesService = TestMockPropertiesService_();
+    const driveMock = TestMockDriveApp_();
+    DriveApp = driveMock;
+    const old = TestFixture_daysAgo_(now, 10);
+    const ss3 = TestEFC_e2eSpreadsheet_(TestEFC_e2eRows_(header, banner, created, now, D1), monthShort);
+    useSs(ss3);
+    snapshotPeriodic();
+    TestEFC_ageMovementLog_(ss3, { E101: old, E102: old, E201: old, E301: old });  // the whole first capture is 10 days old
+    ss3.getSheetByName('Movement_Log_Runs').getRange(2, 1, 1, 1).setValues([[old]]);
+    const mlSheet3 = ss3.getSheetByName('Movement_Log');
+    mlSheet3._maxRows = 20000;
+    const deletes3 = [];
+    const origDelete3 = mlSheet3.deleteRows;
+    mlSheet3.deleteRows = function (a, b) { deletes3.push([a, b]); return origDelete3.apply(mlSheet3, arguments); };
+    ss3._sheets[monthShort] = TestMockSheet_(monthShort, TestEFC_e2eRows_(header, banner, created, now, D2));
+    snapshotPeriodic();                                                  // today: B and BUSY changed; the prune removes the 10-day-old prefix
+    mlRows = TestEFC_movementRows_(ss3);
+    TestAssertEqual_(mlRows.map(function (r) { return r.lead_id; }).sort().join(','), 'E102,E301', 'E2E prune: after today\'s capture only the two changed leads have a row - the 10-day-old prefix is gone');
+    TestAssert_(mlRows.every(function (r) { return r.snapshot_at instanceof Date && r.snapshot_at.getTime() > now.getTime() - 3600000; }), 'E2E prune: every surviving row is today\'s capture');
+    TestAssertEqual_(deletes3[0].join(','), '2,4', 'E2E prune: the 4 expired rows (sheet rows 2-5) were removed by ONE deleteRows call, not a rewrite');
+    const archiveFolder3 = driveMock._folders[ARCHIVE_ROOT_FOLDER_] && driveMock._folders[ARCHIVE_ROOT_FOLDER_]._folders['Movement_Log'];
+    TestAssert_(!!archiveFolder3 && ['E101', 'E102', 'E201', 'E301'].every(function (id) { return archiveFolder3._filesList[0]._content.indexOf(id) !== -1; }), 'E2E prune: the removed rows were archived to Drive first - all four leads');
+    TestAssertEqual_(ss3.getSheetByName('Movement_Log').getRange(1, 1, 1, 2).getValues()[0].join(','), 'snapshot_at,snapshot_label', 'E2E prune: the header row is intact');
+    const runRow3 = ss3.getSheetByName('Movement_Log_Runs').getRange(3, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssert_(runRow3[2] === 4 && runRow3[3] === 2 && typeof runRow3[4] === 'number' && runRow3[5] === '', 'E2E prune: the run record is complete (4 seen, 2 changed, total_s, nothing skipped)');
+    snapshotPeriodic();                                                  // the unchanged leads lost their only row to the prune; the next capture restores them
+    TestAssertEqual_(TestEFC_movementRows_(ss3).map(function (r) { return r.lead_id; }).sort().join(','), 'E101,E102,E201,E301', 'E2E prune: the next capture writes the two leads whose only row was pruned (existing behaviour: a lead unchanged for 7+ days is re-captured one run later)');
+    DriveApp = realDrive;
+
+    // ===== SCENARIO 4: the watchdog reads the run record (F23) =====
+    PropertiesService = TestMockPropertiesService_();
+    const ss4 = TestEFC_e2eSpreadsheet_(TestEFC_e2eRows_(header, banner, created, now, D2), monthShort);
+    useSs(ss4);
+    // 4a. a clean scheduled run is silent
+    let alertsAt = TestGmailLog_.sent.length;
+    snapshotPeriodic();
+    checkEmailJobsCompletedGs_(new Date());
+    TestAssertEqual_(snapAlerts(alertsAt).length, 0, 'E2E watchdog: a clean run produces no snapshotPeriodic alert');
+    // 4b. a run the platform killed leaves its record "running"; it is alerted ONCE, then a good run clears it
+    PropertiesService.getScriptProperties().setProperty('EMAIL_JOB_RUN_snapshotPeriodic', JSON.stringify({ day: istDayKeyGs_(now), startedAt: new Date(now.getTime() - 40 * 60000).toISOString(), status: 'running' }));
+    alertsAt = TestGmailLog_.sent.length;
+    checkEmailJobsCompletedGs_(new Date());
+    let a4b = snapAlerts(alertsAt);
+    TestAssertEqual_(a4b.length, 1, 'E2E watchdog: a snapshot still "running" after 40 minutes (killed at the limit) is alerted');
+    TestAssertContains_(a4b[0].subject, 'WATCHDOG: snapshotPeriodic did not finish', 'E2E watchdog: …naming the job and the problem');
+    TestAssertContains_(a4b[0].body, 'snapshotNow', 'E2E watchdog: …and how to capture right now');
+    checkEmailJobsCompletedGs_(new Date());
+    TestAssertEqual_(snapAlerts(alertsAt).length, 1, 'E2E watchdog: an hourly re-check does not repeat the alert for the same run');
+    snapshotPeriodic();
+    alertsAt = TestGmailLog_.sent.length;
+    checkEmailJobsCompletedGs_(new Date());
+    TestAssertEqual_(snapAlerts(alertsAt).length, 0, 'E2E watchdog: the next good run clears the problem - silent again');
+    // 4c. a run too slow for its budget: the core capture is kept, the optional phases are skipped, ops are told once
+    // a REAL change first (E101's counter moves), so the kept core capture is observable as exactly one new row
+    ss4._sheets[monthShort] = TestMockSheet_(monthShort, TestEFC_e2eRows_(header, banner, created, now, { A: 14, B: 9, SOLO: 2, BUSY: 7 }));
+    snapshotOpenLeads_ = function (label) { return realSnapshotOpenLeads(label, { deadlineSeconds: -1 }); };
+    const mlBefore4 = TestEFC_movementRows_(ss4).length;
+    const slaBefore4 = ss4.getSheetByName('SLA_History').getLastRow();
+    try { snapshotPeriodic(); } finally { snapshotOpenLeads_ = realSnapshotOpenLeads; }
+    const record4c = readEmailJobRunGs_('snapshotPeriodic');
+    TestAssert_(record4c.status === 'completed' && record4c.skipped.length === 7, 'E2E watchdog: a budget-starved run still completes and records the 7 skipped phases');
+    TestAssertEqual_(ss4.getSheetByName('SLA_History').getLastRow(), slaBefore4, 'E2E watchdog: …the optional SLA_History write was the first thing skipped');
+    TestAssertEqual_(TestEFC_movementRows_(ss4).length, mlBefore4 + 1, 'E2E watchdog: …but the core Movement_Log capture was kept (the one changed lead got its row)');
+    const runsLast4 = ss4.getSheetByName('Movement_Log_Runs');
+    const runRow4c = runsLast4.getRange(runsLast4.getLastRow(), 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssert_(typeof runRow4c[4] === 'number' && /Movement_Log prune/.test(String(runRow4c[5])), 'E2E watchdog: …and Movement_Log_Runs records the skipped phases');
+    alertsAt = TestGmailLog_.sent.length;
+    checkEmailJobsCompletedGs_(new Date());
+    checkEmailJobsCompletedGs_(new Date());
+    const a4c = snapAlerts(alertsAt);
+    TestAssertEqual_(a4c.length, 1, 'E2E watchdog: skipped phases are alerted exactly once for that run');
+    TestAssertContains_(a4c[0].subject, 'skipped work', 'E2E watchdog: …as "skipped work to stay inside its time limit"');
+    // 4d. a failing run: recorded as failed, re-thrown, alerted once
+    snapshotOpenLeads_ = function () { throw new Error('simulated: the leads tab could not be read'); };
+    let threw4d = false;
+    try { snapshotPeriodic(); } catch (e) { threw4d = /could not be read/.test(e.message); } finally { snapshotOpenLeads_ = realSnapshotOpenLeads; }
+    TestAssert_(threw4d, 'E2E watchdog: a failing snapshot still fails the execution (re-thrown)');
+    alertsAt = TestGmailLog_.sent.length;
+    checkEmailJobsCompletedGs_(new Date());
+    const a4d = snapAlerts(alertsAt);
+    TestAssertEqual_(a4d.length, 1, 'E2E watchdog: the failed run is alerted once');
+    TestAssertContains_(a4d[0].subject, 'WATCHDOG: snapshotPeriodic failed', 'E2E watchdog: …as a failure');
+    TestAssertContains_(a4d[0].body, 'could not be read', 'E2E watchdog: …with the error text');
+  } finally {
+    SpreadsheetApp = realSpreadsheetApp;
+    PropertiesService = realProps;
+    DriveApp = realDrive;
+    snapshotOpenLeads_ = realSnapshotOpenLeads;
+  }
 }
 
 function runEmailLifecycleFullCycleTestsNow() { runEmailLifecycleFullCycleTests_(); }

@@ -859,6 +859,38 @@ a new module's own suite. It has no matching production `.gs` file by
 design; `test/check-gs-registration.py` prints one expected false positive
 for it, documented in the file's own header comment.
 
+**The snapshot -> baseline -> email -> watchdog chain, end to end (2026-10-07, email audit F18/F23).**
+`Tests_EmailLifecycleFullCycle.gs`'s `TestEFC_runSnapshotChain_` runs the REAL `snapshotPeriodic()` against a mock
+spreadsheet and lets the real writers feed the real readers - nothing a writer produces is hand-built: capture #1
+("yesterday": its rows' `snapshot_at` are moved back a day, the one cell the comparison depends on) -> the REAL 17:00
+all-issues job and the REAL 10:00 overnight job read the `Movement_Log` it wrote (two sibling leads of one customer with
+different counters, plus controls) -> capture #2 (only changed leads get a row; the baselines stay yesterday's;
+`SLA_History`, written after the capture, does not read the run's own fresh rows) -> the prune against rows the snapshot
+wrote (one `deleteRows`, archive first) -> the watchdog (clean run / run killed at the limit / budget-starved run / failed
+run, each alerted once). The same lead ids (`E101`/`E102`/`E201`/`E301`, plus `E401`/`E402` created today) and the same
+expected "behind on today's calls" table are asserted by `tests/frontend-harness.html` section 7, a second real
+`fetchAndRender()` fed a `Movement_Log` in the Sheets-API shape (header = `MOVEMENT_LOG_COLUMNS` + `content_hash`, dates as
+serial numbers), so the two runtimes are checked against ONE table. 14 + 7 deliberate chain regressions (reader keyed by
+the wrong column, today's own capture used as a baseline, dedup removed, prune fast path off, run record never completed,
+watchdog not wired, ...) each fail an `E2E` assertion by themselves.
+
+**Run the suite at awkward clock times and zones before trusting a test that uses the real clock.**
+`python3 test/run-gs-tests-headless.py --at 2026-10-08T00:00:20+05:30` starts the browser's clock at that moment (it keeps
+ticking) and `--tz UTC` sets its local zone (CI runs in UTC; this machine is in IST; the two combine). The first sweep -
+13 clock times (just after and just before IST midnight, 01:30, 03:00, 08:59:50, 10:03, 13:01, 17:04, 18:51, a Saturday, a
+Sunday just after midnight) and 4 zones - found ONE fixture that was only clean at some hours:
+`Tests_OvernightEmailer.gs`'s `midWindow` is 01:00 IST, the overnight window's end (09:00 today) is in the future between
+midnight and ~04:30, and a lead younger than the 3 h grace is not flagged, so a P7 assertion failed only in those hours (the
+job itself runs at 10:00, so production was never affected). It is now `min(middle of the window, now - 3.5 h)`. After the
+fix all 13 times and all 4 zones pass, and no assertion of the e2e reads the IST hour (every offset is >= 24 h, the leads are
+> 48 h old at any hour, and the watchdog assertions look only at `snapshotPeriodic` alerts).
+
+**Two traps found while building the e2e (keep them in mind for the next one):** (1) `tests/frontend-harness.html` freezes
+`Date.now()`, so a wait loop capped with `Date.now() - start < N` can never expire - a FAILING check hangs the whole harness
+instead of failing (use an iteration cap; the two wait loops there now do); (2) the baseline maps take snapshots STRICTLY
+BEFORE their cutoff and the mock runs fast enough for a capture and a following `new Date()` to land in the same millisecond,
+so the e2e takes its map cutoff 5 ms after "now".
+
 **Real gotcha (2026-09-24): the Node CI harness (`test/run-gs-tests.js`)
 does not inherit Node's own globals.** `vm.createContext()` builds a
 genuinely isolated sandbox — `atob`/`TextDecoder`/`TextEncoder`, used

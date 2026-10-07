@@ -42,7 +42,11 @@ function TestOE_leadRow_(header, overrides) {
 function runOvernightEmailerTests_() {
   const now = new Date();
   const win = overnightWindowGs_(now);
-  const midWindow = new Date((win.from.getTime() + win.to.getTime()) / 2);
+  // The middle of the overnight window (01:00 IST), but never younger than 3.5 h: the window's end (09:00 today) can be in the
+  // FUTURE when this runs between midnight and ~04:30 IST, and a lead younger than LEAD_GRACE_HOURS_ (3 h) is not flagged, so
+  // fixtures that need a flagged lead failed only in those hours (found 2026-10-07 by running the suite at simulated clock times:
+  // python3 test/run-gs-tests-headless.py --at <time>). The jobs themselves run at 10:00, long after the window has closed.
+  const midWindow = new Date(Math.min((win.from.getTime() + win.to.getTime()) / 2, now.getTime() - 3.5 * 3600 * 1000));
   const outsideWindow = TestFixture_daysAgo_(now, 4);
   const monthShort = 'leads'; // fixed tab name (no longer month-based) — see Core.gs's resolveTabName_
   const header = TestFixture_leadsHeader_();

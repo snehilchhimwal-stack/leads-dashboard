@@ -41,6 +41,20 @@ run-gs-tests.js's shims change, port the change here too.
 
 USAGE:
     python3 test/run-gs-tests-headless.py
+    python3 test/run-gs-tests-headless.py --at 2026-10-08T00:00:20+05:30
+    python3 test/run-gs-tests-headless.py --tz UTC
+
+`--at <ISO-8601 time WITH an offset>` (added 2026-10-07) runs the whole suite as if the real wall clock
+started at that moment (Playwright's page.clock; time then keeps ticking). Most of the suite uses the REAL
+clock (`new Date()`), so a fixture that is only clean at some hours of the day passes or fails depending on
+when it happens to run - real incident: a fixture failed at 00:01 IST (2026-09-12) and nowhere else. Run it at
+the awkward moments (just after IST midnight, just before it, around the 10:00/13:00/17:00 job hours) to flush
+those out before they surface in CI or a live run.
+
+`--tz <IANA zone>` (e.g. UTC, America/Los_Angeles) runs the suite with the browser's LOCAL time zone set to that zone.
+CI (GitHub Actions) runs in UTC and the live Apps Script project in the script's own zone, while this machine is in IST, so
+a test that quietly relies on the local zone passes here and fails there (CLAUDE.md: everything date-sensitive is pinned
+to IST explicitly). `--at` and `--tz` combine.
 
 Exit code 0 = every assertion passed. Exit code 1 = at least one failure,
 a load/syntax error, or no browser channel could be launched (falls back
@@ -211,7 +225,35 @@ def extract_file_list(js_source: str, const_name: str) -> list[str]:
     return re.findall(r"'([^']+)'", m.group(1))
 
 
+def parse_at(argv: list[str]):
+    """Returns the --at value (a string) or None. Exits with an error on a malformed use."""
+    if "--at" not in argv:
+        return None
+    i = argv.index("--at")
+    if i + 1 >= len(argv):
+        print("ERROR: --at needs a value, e.g. --at 2026-10-08T00:00:20+05:30", file=sys.stderr)
+        sys.exit(1)
+    value = argv[i + 1]
+    if not re.search(r"(Z|[+-]\d{2}:\d{2})$", value):
+        print("ERROR: --at must carry an explicit offset (e.g. +05:30 or Z) - a bare time would be read in this machine's zone.", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def parse_tz(argv: list[str]):
+    """Returns the --tz value (an IANA zone name) or None."""
+    if "--tz" not in argv:
+        return None
+    i = argv.index("--tz")
+    if i + 1 >= len(argv):
+        print("ERROR: --tz needs a value, e.g. --tz UTC", file=sys.stderr)
+        sys.exit(1)
+    return argv[i + 1]
+
+
 def main() -> int:
+    at_time = parse_at(sys.argv[1:])
+    tz_id = parse_tz(sys.argv[1:])
     if not RUN_GS_TESTS_JS.exists():
         print(f"ERROR: {RUN_GS_TESTS_JS} not found — run this from the repo root.", file=sys.stderr)
         return 1
@@ -253,7 +295,16 @@ def main() -> int:
                 print("  " + line, file=sys.stderr)
             return 1
 
-        page = browser.new_page()
+        if tz_id:
+            page = browser.new_context(timezone_id=tz_id).new_page()
+            print(f"(browser local time zone: {tz_id})")
+        else:
+            page = browser.new_page()
+        if at_time:
+            # Fake only the clock's starting point; it keeps running, so durations (e.g. the snapshot's total_s) stay real.
+            from datetime import datetime
+            page.clock.install(time=datetime.fromisoformat(at_time.replace("Z", "+00:00")))
+            print(f"(wall clock starts at {at_time})")
         try:
             # Deliberately NOT page.evaluate(combined_js) directly --
             # Playwright's string-evaluate tries to parse its argument as a
