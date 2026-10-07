@@ -44,6 +44,7 @@ disagree about the same lead. `HANDOVER.md` §6, `LOGIC_AUDIT.md` Part 4.
 | RM-performance tuning | `RM_PERF_*` (`JS-008` CFG-013..018) | `RM_PERF_*_GS_` (`GS-003` CFG-031..036) | Part 1 §4b ("must stay numerically identical") |
 | IST day boundary | `istDateKey` (`JS-005`) | `istDayKeyGs_` (`GS-002`) | Part 4 §4.6 (verified equivalent) |
 | `TEST_MODE_OVERRIDE_EMAIL` | `js/reports-ui.js` (`JS-016` CFG-024) | `EmailInfra.gs` (`GS-004` CFG-039) | Part 6 findings (both unset, both footguns) |
+| Outgoing-email send-safety gate (added 2026-10-07, email audit P11) | `GMAIL_ADDRESS_RE` / `prepareGmailSend` (`js/reports-gmail.js`, `JS-015` FN-337) | `EMAIL_ADDRESS_RE_` / `prepareOutgoingEmailGs_` (`EmailInfra.gs`, `GS-004` FN-323) | regex literals diffed by `check-runtime-parity.py`; functions by hand + shared test vectors |
 
 ## 3. The "if I change this file, what could break" high-risk records
 

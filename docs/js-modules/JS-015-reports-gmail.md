@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/reports-gmail.js` (411 lines) |
+| **Location** | `js/reports-gmail.js` (499 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `71162ff` — revalidated in this sweep (all 8 FN line anchors, GMAIL_SENT_WINDOW_MS, EXC-027/028 re-checked against source), no drift found |
+| **Last Verified** | 2026-10-07 against commit `b9e6c7b` — email audit P11: `performGmailSend` runs a send-safety gate first (`FN-337`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -42,14 +42,15 @@ Second of the 3 reports files (`reports-build` → **reports-gmail** →
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-103 | `performGmailSend(pending)` `#L270` | a `pending` send descriptor (`kind: 'single' | 'bulk'`, report(s), recipients) | resolves on a 200 from Gmail | **the one real `fetch(POST .../messages/send)`**; may re-request the token; on OAuth resume branches on `pending.kind==='bulk'` and calls `_runBulkGmailSend` | `buildRawEmail` (FN-104), `gmailTokenValid` (FN-106), `logEmailSend` (`JS-018`, fire-and-forget) | `sendReportViaGmail` (FN-107), `_runBulkGmailSend` (FN-108) | specific — the send boundary |
-| FN-104 | `buildRawEmail(to, cc, subject, body, htmlBody)` `#L244` | recipients + content | a base64url raw MIME string | none | `utf8ToBase64` / `encodeHeaderUtf8` / `toBase64Url` (`#L216`–`#L236`) | FN-103 | reusable |
-| FN-105 | `connectGmail()` / `initGmailTokenClient(clientId)` / `saveGmailClientId()` `#L188/#L155/#L204` | — / Client ID | triggers the `gmail.send` grant; persists a Client-ID override | GIS token client for the Gmail scope; `localStorage` write | `getGmailClientId` (FN-106), GIS (`EXT-002`) | `#gmailConnectBtn` (`BTN-006`), `#gmailSaveClientIdBtn` (`BTN-007`) | specific |
+| FN-103 | `performGmailSend(pending)` `#L339` | a `pending` send descriptor (`kind: 'single' | 'bulk'`, report(s), recipients) | resolves on a 200 from Gmail | **the one real `fetch(POST .../messages/send)`**; may re-request the token; on OAuth resume branches on `pending.kind==='bulk'` and calls `_runBulkGmailSend` | `buildRawEmail` (FN-104), `gmailTokenValid` (FN-106), `logEmailSend` (`JS-018`, fire-and-forget) | `sendReportViaGmail` (FN-107), `_runBulkGmailSend` (FN-108) | specific — the send boundary |
+| FN-104 | `buildRawEmail(to, cc, subject, body, htmlBody)` `#L250` | recipients + content | a base64url raw MIME string | none | `utf8ToBase64` / `encodeHeaderUtf8` / `toBase64Url` (`#L216`–`#L236`) | FN-103 | reusable |
+| FN-105 | `connectGmail()` / `initGmailTokenClient(clientId)` / `saveGmailClientId()` `#L194/#L155/#L210` | — / Client ID | triggers the `gmail.send` grant; persists a Client-ID override | GIS token client for the Gmail scope; `localStorage` write | `getGmailClientId` (FN-106), GIS (`EXT-002`) | `#gmailConnectBtn` (`BTN-006`), `#gmailSaveClientIdBtn` (`BTN-007`) | specific |
 | FN-106 | `getGmailClientId` / `setGmailClientId` / `gmailTokenValid` / `updateGmailStatusUI` / `fetchGmailUserEmail` `#L114`–`#L142` | — | Client ID / bool / status UI / user email | `localStorage` read/write; DOM status | — | FN-103, FN-105, `core-auth.js` (`JS-001`) fallback | reusable |
-| FN-107 | `sendReportViaGmail(report, btnId)` / `sendRegionReportGmail(idx)` / `sendAllReportGmail(i)` `#L313/#L334/#L338` | a report + button id / an index | initiates a single send | button state changes | `performGmailSend` (FN-103), `recipientsForReport` (`JS-016`) | onclick handlers in generated report HTML | specific |
-| FN-108 | `_runBulkGmailSend(reports, btnIdFn, statusElId, confirmText)` / `sendAllReportsGmail(...)` `#L349/#L378` | a report list + UI ids | sends every report **sequentially** (not `Promise.all`) | per-report button + status updates | `performGmailSend` (FN-103) | `#generateAllReportsBtn`-driven bulk send | specific — sequential to reduce Gmail rate-limit risk |
+| FN-107 | `sendReportViaGmail(report, btnId)` / `sendRegionReportGmail(idx)` / `sendAllReportGmail(i)` `#L399/#L420/#L424` | a report + button id / an index | initiates a single send | button state changes | `performGmailSend` (FN-103), `recipientsForReport` (`JS-016`) | onclick handlers in generated report HTML | specific |
+| FN-108 | `_runBulkGmailSend(reports, btnIdFn, statusElId, confirmText)` / `sendAllReportsGmail(...)` `#L435/#L466` | a report list + UI ids | sends every report **sequentially** (not `Promise.all`) | per-report button + status updates | `performGmailSend` (FN-103) | `#generateAllReportsBtn`-driven bulk send | specific — sequential to reduce Gmail rate-limit risk |
 | FN-109 | `loadGmailSentLog` / `markReportSent(subject)` / `gmailSentAt(subject)` / `applyGmailButtonState(btn, subject)` / `applyGmailButtonStatesFor(...)` `#L59`–`#L107` | a subject / a button | reads/writes the 1-hour sent-log; sets button cosmetics | `localStorage` read/write | — | render paths after a send | reusable — **cosmetic only**, not a send guard |
-| FN-110 | `initGmailUI()` `#L394` | — | wires the Gmail connect/setup buttons | DOM listeners | FN-105, FN-106 | `reports-ui.js` `initGmailUI` call | specific |
+| FN-110 | `initGmailUI()` `#L482` | — | wires the Gmail connect/setup buttons | DOM listeners | FN-105, FN-106 | `reports-ui.js` `initGmailUI` call | specific |
+| FN-337 | `prepareGmailSend(report, to, cc)` `#L315` (+ `gmailAddressListProblems` `#L290`, `gmailVisibleText` `#L303`, `GMAIL_ADDRESS_RE` `#L286`, `_alertIfGmailSendBlocked` `#L190`) | a report `{subject, body, html}` + the To and Cc lists | `{msg: {to, cc, subject, body, html}, problems: [...]}` — the exact normalised payload, and why it must not be sent | none (pure) — the CALLER (`performGmailSend`) blocks on a non-empty `problems`: no Gmail API call, no `markReportSent`, no `Send_Log` row, `pending.blockedReason` set, button shows "Blocked ✗" with the reason as its tooltip | — | `performGmailSend` (FN-103) | specific — **added 2026-10-07 (email audit P11 / F19)**; browser twin of `GS-004`'s `prepareOutgoingEmailGs_` (`FN-323`): no/invalid recipient, empty subject/body, all-markup HTML body -> blocked; a CR/LF in the subject is collapsed. Does NOT check lead ids (a browser report carries a count, and a combined report can count zero in its numbered sections) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -85,6 +86,8 @@ state, EXC-027). Bulk sends are sequential so one failure doesn't abort
 the rest. OAuth resume covers both single and bulk (EXC-028). The
 `Send_Log` append is fire-and-forget — a failure there is not surfaced.
 
+**Send-safety gate (2026-10-07, email audit P11).** `performGmailSend` first runs `prepareGmailSend` (FN-337). A send it refuses (no/invalid recipient, empty subject or body, an HTML body with no visible text) never reaches the Gmail API, is not marked "Sent", and writes no `Send_Log` row; the function returns `false` and records `pending.blockedReason`. A single send shows "Blocked ✗" (tooltip = the reason) and an alert; a bulk send finishes the rest and reports "n blocked by the safety check" separately from "failed" (a Gmail/HTTP error).
+
 ## Cross-runtime duplication
 
 The unattended email path (`OvernightEmailer.gs` / `AllIssuesEmailer.gs`,
@@ -93,6 +96,8 @@ Advanced Gmail Service for threaded replies) — a parallel implementation,
 not shared code. `TEST_MODE_OVERRIDE_EMAIL_` (`EmailInfra.gs` `#L43`) is
 the backend's twin of the `reports-ui.js` `TEST_MODE_OVERRIDE_EMAIL`
 footgun (`LOGIC_AUDIT.md` Part 1 §4d / §6).
+
+Since 2026-10-07 the send-safety gate is a second cross-runtime pair: `GMAIL_ADDRESS_RE` / `gmailAddressListProblems` / `gmailVisibleText` / `prepareGmailSend` here vs `EMAIL_ADDRESS_RE_` / `emailAddressListProblemsGs_` / `visibleTextOfHtmlGs_` / `prepareOutgoingEmailGs_` in `EmailInfra.gs` (`GS-004` FN-323). `test/check-runtime-parity.py` diffs the two address regex literals; the functions are kept in parity by hand, backed by the same address and visible-text vectors in `tests/frontend-harness.html` section 2k and `Tests_EmailInfra.gs`.
 
 ## UI relationships
 
@@ -137,6 +142,8 @@ Gmail" buttons in generated report HTML.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-028.
+
+**2026-10-07** (`b9e6c7b`, email audit P11 — `docs/_planning/EMAIL_AUDIT.md` F19): `performGmailSend` (FN-103) runs `prepareGmailSend` (FN-337) before anything else and refuses an unsafe send (see `## Failure / error behaviour`); the bulk loop (FN-108) counts a refused report as "blocked", not "failed", and the single-send paths (FN-107) alert the user. +88 lines (411L -> 499L; anchors re-mapped). `tests/frontend-harness.html` section 2k: 68 assertions (shared address/visible-text vectors; end-to-end with `fetch` stubbed, incl. a bulk run of 2 good + 1 blocked); 15 deliberate regressions each fail a named test. **Live as soon as GitHub Pages deploys the push** (no Apps Script paste).
 
 ## Revalidation trigger
 

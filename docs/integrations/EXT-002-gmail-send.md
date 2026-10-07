@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `15d74d4` — revalidated after email audit P10 (no change to the Gmail send paths; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-07 against commit `b9e6c7b` — the dashboard's Gmail send gains a send-safety gate (email audit P11; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -175,6 +175,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-05** `fe9b37f`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-331`..`FN-334`, email audit P9). One change touches Gmail sending: `notifyOpsAlertGs_` now retries GmailApp and then sends the ops alert through the Advanced Gmail Service (`Gmail.Users.Messages.send`, already authorized for the threaded replies — no new scope). Report emails and their recipients are unchanged.
 
 **Revalidated 2026-10-05** `15d74d4`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-336`, email audit P10). The change decides WHETHER a CH-level report is sent a second time the same day; it does not touch how any email is sent, who receives it, or the scopes.
+
+**Revalidated 2026-10-07** `b9e6c7b`: flagged after `js/reports-gmail.js` advanced (`JS-015` `FN-337`, email audit P11). `performGmailSend` now refuses a send with no/invalid recipient, an empty subject/body or an all-markup HTML body before the Gmail API call, and collapses a line break in the subject. Scope (`gmail.send` + `userinfo.email`), the Client ID handling and the recipients are unchanged.
 
 ## Revalidation trigger
 
