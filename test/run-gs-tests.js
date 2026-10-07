@@ -131,6 +131,11 @@ function buildSandbox() {
         const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
         return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
       },
+      // Standard (non-web-safe) base64 -- added 2026-10-05 for notifyOpsAlertGs_'s second send path (RFC 2047 encoded subject).
+      base64Encode: function (bytes) {
+        const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+        return buf.toString('base64');
+      },
       getUuid: function () { return crypto.randomUUID(); },
       sleep: function () {},
       // Content-hash dedup (Lead History & Versioning Review, Phase 6)

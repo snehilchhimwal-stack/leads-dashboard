@@ -98,12 +98,21 @@ function runOvernightEmailerTests_() {
     const legacySheet = legacySs.insertSheet(OVERNIGHT_LOG_SHEET_);
     legacySheet.getRange(1, 1, 1, 8).setValues([['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject']]);
     const healedSheet = ensureOvernightLogSheet_(legacySs);
-    TestAssertEqual_(healedSheet.getLastColumn(), 9, 'ensureOvernightLogSheet_: heals an existing 8-column sheet up to 9 columns');
-    TestAssertContains_(healedSheet.getRange(1, 1, 1, 9).getValues()[0].join(','), 'followup_sent_at', 'ensureOvernightLogSheet_: the healed header includes followup_sent_at, appended at the end');
+    TestAssertEqual_(healedSheet.getLastColumn(), 10, 'ensureOvernightLogSheet_: heals an existing 8-column sheet up to 10 columns (followup_sent_at, then followup_result)');
+    TestAssertContains_(healedSheet.getRange(1, 1, 1, 10).getValues()[0].join(','), 'followup_sent_at', 'ensureOvernightLogSheet_: the healed header includes followup_sent_at, appended at the end');
+    TestAssertEqual_(healedSheet.getRange(1, 10, 1, 1).getValues()[0][0], 'followup_result', 'ensureOvernightLogSheet_: followup_result (email audit P9) is the LAST column — appended, never inserted, so existing rows stay aligned');
     // Idempotent: healing an already-healed sheet is a no-op, not a
     // second append that would duplicate the column.
     ensureOvernightLogSheet_(legacySs);
-    TestAssertEqual_(legacySs.getSheetByName(OVERNIGHT_LOG_SHEET_).getLastColumn(), 9, 'ensureOvernightLogSheet_: healing an already-9-column sheet does not append a duplicate column');
+    TestAssertEqual_(legacySs.getSheetByName(OVERNIGHT_LOG_SHEET_).getLastColumn(), 10, 'ensureOvernightLogSheet_: healing an already-10-column sheet does not append a duplicate column');
+    // The live sheet today has 9 columns (it predates followup_result): one column is appended, existing data stays put.
+    const nineColSs = TestMockSpreadsheet_({});
+    const nineColSheet = nineColSs.insertSheet(OVERNIGHT_LOG_SHEET_);
+    nineColSheet.getRange(1, 1, 1, 9).setValues([['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject', 'followup_sent_at']]);
+    nineColSheet.appendRow(['2026-10-04', 'Pune', 'thr-old', '[]', '2026-10-04 10:05:00', TEST_EMAIL_PRIMARY_, '', 'old subject', '2026-10-04 13:05:00']);
+    ensureOvernightLogSheet_(nineColSs);
+    TestAssertEqual_(nineColSheet.getLastColumn(), 10, 'ensureOvernightLogSheet_: the live 9-column sheet gains exactly one column (followup_result)');
+    TestAssertEqual_(nineColSheet.getRange(2, 9, 1, 1).getValues()[0][0], '2026-10-04 13:05:00', 'ensureOvernightLogSheet_: an existing row\'s followup_sent_at stays in column I after the heal');
 
     // ---- sendOvernightMorningEmails: end to end ----
     sendOvernightMorningEmails();
@@ -998,6 +1007,7 @@ function runOvernightEmailerTests_() {
       TestAssert_(a.alerts.some(function (e) { return /1pm follow-up UNCONFIRMED/.test(e.subject); }), 'ambiguous threaded send: ops is alerted that the outcome is unconfirmed');
       TestAssert_(!a.alerts.some(function (e) { return /1pm follow-up failed/.test(e.subject); }), 'ambiguous threaded send: …and it is NOT reported as a definite failure');
       TestAssert_(a.cp2Sent, 'ambiguous threaded send: checkpoint2 state is recorded (the reply was attempted and may be delivered)');
+      TestAssertEqual_(String(a.ovLog.getRange(2, 10, 1, 1).getValues()[0][0]).indexOf('unconfirmed: the threaded send ended ambiguously'), 0, 'ambiguous threaded send: followup_result says "unconfirmed" and why (email audit P9)');
       const unconfirmedAlert = a.alerts.filter(function (e) { return /UNCONFIRMED/.test(e.subject); })[0];
       TestAssert_(!!unconfirmedAlert && /thr-L-P6-A/.test(unconfirmedAlert.body) && /Gmail Sent/.test(unconfirmedAlert.body), 'ambiguous threaded send: the alert names the thread and tells a human where to check');
       const repliesBefore = TestGmailLog_.threadReplies.length, draftsBefore = TestGmailLog_.drafts.length;
@@ -1010,17 +1020,20 @@ function runOvernightEmailerTests_() {
       TestAssertEqual_(b.fallbackDrafts, 1, 'definite threaded failure: the plain fallback IS used (nothing was delivered, so it cannot duplicate)');
       TestAssert_(b.stamp !== '' && b.stamp.indexOf('unconfirmed') === -1, 'definite threaded failure: followup_sent_at is a normal sent stamp');
       TestAssert_(!b.alerts.some(function (e) { return /UNCONFIRMED/.test(e.subject); }), 'definite threaded failure: no "unconfirmed" alert');
+      TestAssertEqual_(String(b.ovLog.getRange(2, 10, 1, 1).getValues()[0][0]).indexOf('sent (fallback: a new message, not threaded'), 0, 'definite threaded failure: followup_result says it went by the NON-threaded fallback (email audit P9)');
 
       // (c) threaded failed definitively, then the fallback itself times out -> unconfirmed, not "failed".
       const c = P6_run('L-P6-C', 'Invalid argument: raw', 'Exception: Service Gmail timed out');
       TestAssertEqual_(c.stamp.indexOf('unconfirmed '), 0, 'fallback times out: followup_sent_at is "unconfirmed <time>"');
       TestAssert_(c.alerts.some(function (e) { return /1pm follow-up UNCONFIRMED/.test(e.subject); }) && !c.alerts.some(function (e) { return /1pm follow-up failed/.test(e.subject); }), 'fallback times out: reported as unconfirmed, not as a definite failure');
       TestAssert_(c.cp2Sent, 'fallback times out: checkpoint2 state is recorded');
+      TestAssertEqual_(String(c.ovLog.getRange(2, 10, 1, 1).getValues()[0][0]).indexOf('unconfirmed: the fallback send ended ambiguously'), 0, 'fallback times out: followup_result says "unconfirmed" (email audit P9)');
 
       // (d) both paths refuse DEFINITELY -> a true failure: retryable same day, alert says failed.
       const d = P6_run('L-P6-D', 'Invalid argument: raw', 'Gmail operation not allowed for this user');
       TestAssertEqual_(d.stamp, '', 'both paths refused: followup_sent_at stays blank (retryable)');
       TestAssert_(!d.cp2Sent, 'both paths refused: checkpoint2_sent_at stays blank');
+      TestAssertEqual_(String(d.ovLog.getRange(2, 10, 1, 1).getValues()[0][0]).indexOf('failed: neither send worked'), 0, 'both paths refused: followup_result says "failed" — a blank followup_sent_at is no longer the only trace (email audit P9)');
       TestAssert_(d.alerts.some(function (e) { return /1pm follow-up failed/.test(e.subject); }) && !d.alerts.some(function (e) { return /UNCONFIRMED/.test(e.subject); }), 'both paths refused: reported as a definite failure');
     }
 
@@ -1302,6 +1315,140 @@ function runOvernightEmailerTests_() {
       const puneReplyQ = repliesQ.filter(function (r) { return r.threadId === 'thr-p8-pune'; })[0];
       TestAssert_(!!puneReplyQ && TestOE_decodeRawMime_(puneReplyQ.raw).indexOf('L-P8-C') !== -1,
         '13:00 snapshot: Pune\'s Checkpoint 2 is judged against the job\'s own snapshot — a lead closed in the sheet AFTER that read is still listed');
+    }
+
+    // ---- email audit P9 (F12): the log says what the 13:00 job did with each row, and stamps are taken at the write ----
+    {
+      const resultOf = function (sheet, row) { return String(sheet.getRange(row, 10, 1, 1).getValues()[0][0]); };
+      const run13 = function (s) { P1_withSs(s, function () { sendOvernightFollowupEmails(); }); };
+      const aiRow = function (leadId, thread, to) {
+        return [P1_yesterday, 'Pune', 'Test A1 One', 'A1', to || TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, thread, P1_snapshot(leadId), P1_checkpoint1(leadId), now, '', ''];
+      };
+
+      // (1) a delivered threaded reply -> "sent (threaded reply)"
+      const ssS = P1_newSs([P1_flaggedLead('L-P9-S')]);
+      const ovS = ensureOvernightLogSheet_(ssS);
+      ovS.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-s', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test p9s']);
+      ssS._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader, aiRow('L-P9-S', 'thr-ai-p9s')]);
+      run13(ssS);
+      TestAssertEqual_(resultOf(ovS, 2), 'sent (threaded reply)', '13:00 followup_result: a delivered threaded reply is recorded as "sent (threaded reply)"');
+      TestAssert_(String(ovS.getRange(2, 9, 1, 1).getValues()[0][0]) !== '', '13:00 followup_result: …and followup_sent_at is stamped as before');
+
+      // (2) nothing unresolved in either section -> "skipped: nothing unresolved", followup_sent_at STILL blank
+      const ssK = P1_newSs([]);
+      const ovK = ensureOvernightLogSheet_(ssK);
+      ovK.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-k', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test p9k']);
+      const repliesBeforeK = TestGmailLog_.threadReplies.length;
+      run13(ssK);
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeK, '13:00 followup_result: a bucket with nothing unresolved still sends no reply');
+      TestAssertEqual_(resultOf(ovK, 2), 'skipped: nothing unresolved', '13:00 followup_result: a skipped bucket is recorded as "skipped: nothing unresolved" — not a blank');
+      TestAssertEqual_(String(ovK.getRange(2, 9, 1, 1).getValues()[0][0]), '', '13:00 followup_result: …and followup_sent_at stays blank (nothing was sent)');
+
+      // (3) Section 2 present but every Checkpoint-2 lead already resolved (the skip INSIDE sendCombinedFollowupEmail_)
+      const ssR = P1_newSs([TestOE_leadRow_(header, { lead_id: 'L-P9-R', client_id: 'C-P9-R', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) })]);
+      const ovR = ensureOvernightLogSheet_(ssR);
+      ovR.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-r', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test p9r']);
+      ssR._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader, aiRow('L-P9-R', 'thr-ai-p9r')]);
+      run13(ssR);
+      TestAssertEqual_(resultOf(ovR, 2), 'skipped: nothing unresolved', '13:00 followup_result: a bucket whose Checkpoint-2 leads all resolved is also "skipped: nothing unresolved"');
+
+      // (4) the safety gate blocks it -> "blocked: ..."
+      const ssB = P1_newSs([P1_flaggedLead('L-P9-B')]);
+      const ovB = ensureOvernightLogSheet_(ssB);
+      ovB.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-b', '[]', P1_stamp, 'not-an-email', '', 'Pune Digest - test p9b']);
+      ssB._sheets['AllIssues_Log'] = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader, aiRow('L-P9-B', 'thr-ai-p9b', 'not-an-email')]);
+      run13(ssB);
+      TestAssertEqual_(resultOf(ovB, 2).indexOf('blocked: '), 0, '13:00 followup_result: a reply the safety gate refused is recorded as "blocked: <why>"');
+      TestAssertEqual_(String(ovB.getRange(2, 9, 1, 1).getValues()[0][0]), '', '13:00 followup_result: …and followup_sent_at stays blank');
+
+      // (5) a row with no stored recipient -> "skipped: no stored recipient"
+      const ssN = P1_newSs([P1_flaggedLead('L-P9-N')]);
+      const ovN = ensureOvernightLogSheet_(ssN);
+      ovN.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-n', JSON.stringify([{ lead_id: 'L-P9-N', issueKey: 'followupOverdue', issueLabel: 'Follow-up Overdue' }]), P1_stamp, '', '', '']);
+      run13(ssN);
+      TestAssertEqual_(resultOf(ovN, 2).indexOf('skipped: no stored recipient'), 0, '13:00 followup_result: a row that predates the recipient fix is recorded as skipped, with the reason');
+
+      // (6) a row the 13:00 job has not processed -> followup_result stays blank (so blank means "not processed")
+      const ssU = P1_newSs([]);
+      const ovU = ensureOvernightLogSheet_(ssU);
+      ovU.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-u', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test p9u']);
+      TestAssertEqual_(resultOf(ovU, 2), '', '13:00 followup_result: a row the job has not processed has a blank result');
+    }
+
+    // ---- email audit P9 (F12): log stamps are taken when the row is written, not at the start of the job ----
+    // The 3 Oct reply went out at 13:12 but was stamped 13:01:49 (the job's start). The fix: every stamp comes from istStampGs_().
+    // A sentinel proves each stamp site calls it (a stamp built from the job's `now` would not carry the sentinel).
+    {
+      const SENTINEL = '2099-01-01 00:00:00';
+      const realStamp = istStampGs_;
+      istStampGs_ = function () { return SENTINEL; };
+      try {
+        // 10:00 standalone: Overnight_Log.sent_at
+        const ssO = P1_newSs([]);
+        const ovO = ensureOvernightLogSheet_(ssO);
+        sendOneOvernightEmail_(ssO, ovO, 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+          [{ lead_id: 'L-P9-ST1', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', followup: 'call', issue: null }], 'test date', istDayKeyGs_(now), now, win);
+        TestAssertEqual_(String(ovO.getRange(2, 5, 1, 1).getValues()[0][0]), SENTINEL, 'stamp: the standalone 10:00 email sent_at is taken at the write (istStampGs_), not from the start of the job');
+
+        // 10:00 combined: Overnight_Log.sent_at AND AllIssues_Log.checkpoint1_sent_at
+        const ssC = P1_newSs([P1_flaggedLead('L-P9-ST2')]);
+        const ovC = ensureOvernightLogSheet_(ssC);
+        const aiC = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+          [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-st2', P1_snapshot('L-P9-ST2'), '', '', '', '']]);
+        const section2C = { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1', rowNumbers: [2], snapshotEntries: JSON.parse(P1_snapshot('L-P9-ST2')) };
+        const resC = sendCombinedMorningEmail_(ssC, ovC, aiC, 'Pune', null, section2C, 'test date', istDayKeyGs_(now), now, win, {}, null);
+        TestAssertEqual_(resC, null, 'stamp: the combined 10:00 email sends');
+        TestAssertEqual_(String(ovC.getRange(2, 5, 1, 1).getValues()[0][0]), SENTINEL, 'stamp: the combined 10:00 email sent_at is taken at the write');
+        TestAssertEqual_(String(aiC.getRange(2, 12, 1, 1).getValues()[0][0]), SENTINEL, 'stamp: checkpoint1_sent_at is taken at the write');
+
+        // 13:00: followup_sent_at AND checkpoint2_sent_at
+        const ssF = P1_newSs([P1_flaggedLead('L-P9-ST3')]);
+        const ovF = ensureOvernightLogSheet_(ssF);
+        ovF.appendRow([istDayKeyGs_(now), 'Pune', 'thr-p9-st3', '[]', P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - test st3']);
+        const aiF = TestMockSheet_('AllIssues_Log', [P1_allIssuesHeader,
+          [P1_yesterday, 'Pune', 'Test A1 One', 'A1', TEST_EMAIL_PRIMARY_, '', 1, P1_yesterday, 'thr-ai-st3', P1_snapshot('L-P9-ST3'), P1_checkpoint1('L-P9-ST3'), now, '', '']]);
+        ssF._sheets['AllIssues_Log'] = aiF;
+        P1_withSs(ssF, function () { sendOvernightFollowupEmails(); });
+        TestAssertEqual_(String(ovF.getRange(2, 9, 1, 1).getValues()[0][0]), SENTINEL, 'stamp: followup_sent_at is taken when the reply was sent, not at the start of the job');
+        TestAssertEqual_(String(aiF.getRange(2, 14, 1, 1).getValues()[0][0]), SENTINEL, 'stamp: checkpoint2_sent_at is taken at the write');
+      } finally { istStampGs_ = realStamp; }
+    }
+
+    // ---- email audit P9 (F21/F20): every job leaves a run record; a crash is recorded; test mode alerts and records nothing ----
+    {
+      const jobName = 'sendOvernightMorningEmails';
+      // A quiet day (nothing to send at all) is still a COMPLETED run — the watchdog must not read it as "never ran".
+      PropertiesService = TestMockPropertiesService_();
+      P1_withSs(P1_newSs([]), function () { sendOvernightMorningEmails(); });
+      const quiet = readEmailJobRunGs_(jobName);
+      TestAssert_(!!quiet && quiet.status === 'completed' && quiet.day === istDayKeyGs_(now), 'run record: a 10:00 run with nothing to send is recorded as completed for today');
+      TestAssert_(!!quiet && !!quiet.startedAt && !!quiet.finishedAt, 'run record: …with its start and finish times');
+
+      // A crash: the run is recorded as failed (with the error), the error still propagates, and ops still get the job's own alert.
+      PropertiesService = TestMockPropertiesService_();
+      const realReadLeads = readLeadsTab_;
+      readLeadsTab_ = function () { throw new Error('simulated platform failure: a server error occurred'); };
+      const alertsBeforeCrash = TestGmailLog_.sent.length;
+      let crashThrew = false;
+      try { P1_withSs(P1_newSs([]), function () { sendOvernightMorningEmails(); }); } catch (e) { crashThrew = /server error occurred/.test(e.message); } finally { readLeadsTab_ = realReadLeads; }
+      TestAssert_(crashThrew, 'run record: a crashing job still throws (the Executions list must show Failed)');
+      const crashed = readEmailJobRunGs_(jobName);
+      TestAssert_(!!crashed && crashed.status === 'failed' && /server error occurred/.test(crashed.error || ''), 'run record: a crashing run is recorded as failed, with the error text');
+      TestAssert_(TestGmailLog_.sent.slice(alertsBeforeCrash).some(function (e) { return /sendOvernightMorningEmails crashed/.test(e.subject); }), 'run record: …and the job\'s own crash alert is unchanged');
+
+      // The 13:00 job records a run too (nothing logged today -> it returns early, and that is still a completed run).
+      PropertiesService = TestMockPropertiesService_();
+      P1_withSs(P1_newSs([]), function () { sendOvernightFollowupEmails(); });
+      const fup = readEmailJobRunGs_('sendOvernightFollowupEmails');
+      TestAssert_(!!fup && fup.status === 'completed', 'run record: the 13:00 job records a completed run even when there was nothing to follow up');
+
+      // TEST MODE: ops are told, and NO run record is written (test runs must not write production state).
+      PropertiesService = TestMockPropertiesService_();
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_SECONDARY_;
+      const alertsBeforeTm = TestGmailLog_.sent.length;
+      try { P1_withSs(P1_newSs([]), function () { sendOvernightMorningEmails(); }); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+      TestAssert_(TestGmailLog_.sent.slice(alertsBeforeTm).some(function (e) { return /sendOvernightMorningEmails ran in TEST MODE/.test(e.subject); }), 'test mode: a job that starts with test mode on alerts ops');
+      TestAssertEqual_(readEmailJobRunGs_(jobName), null, 'test mode: …and writes no run record (the watchdog would otherwise think the real job ran)');
     }
 
     TestAssertOnlyTestEmails_();

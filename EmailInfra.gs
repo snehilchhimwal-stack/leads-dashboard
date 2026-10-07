@@ -209,12 +209,49 @@ function dedupeByLeadIdGs_(entries) {
 // never take down the real run it's reporting on. Kept deliberately
 // plain-text/no-frills — this is an ops ping, not a report. Always to
 // OPS_ALERT_EMAIL_ only, no Cc.
+//
+// Changed 2026-10-05 (email audit P9 / F21): the alert used to be ONE un-retried GmailApp call, so an alert about a platform
+// outage was lost to that same outage (the 2 Oct 13:00 failure left no alert at all). It now tries GmailApp twice (3 s apart),
+// then a second path — the Advanced Gmail Service, already authorized for the threaded replies — and only then gives up (logged).
+// A retry after an ambiguous timeout can deliver the alert twice; a duplicate alert is harmless, a lost one is not. Returns true
+// when some path sent it.
 function notifyOpsAlertGs_(subject, bodyLines) {
-  try {
-    GmailApp.sendEmail(OPS_ALERT_EMAIL_, '[Overnight Emailer] ' + subject, bodyLines.join('\n'));
-  } catch (e) {
-    Logger.log('notifyOpsAlertGs_ failed to send its own alert ("' + subject + '"): ' + e);
+  const fullSubject = '[Overnight Emailer] ' + subject;
+  const body = bodyLines.join('\n');
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      GmailApp.sendEmail(OPS_ALERT_EMAIL_, fullSubject, body);
+      return true;
+    } catch (e) {
+      Logger.log('notifyOpsAlertGs_: GmailApp send failed (attempt ' + attempt + '/2) for alert "' + subject + '": ' + e);
+      if (attempt === 1) Utilities.sleep(3000);
+    }
   }
+  try {
+    sendOpsAlertViaGmailApiGs_(fullSubject, body);
+    return true;
+  } catch (e2) {
+    Logger.log('notifyOpsAlertGs_ failed to send its own alert ("' + subject + '") by every path: ' + e2);
+    return false;
+  }
+}
+
+// Second send path for an ops alert: a plain-text raw MIME message through the Advanced Gmail Service. Non-ASCII subjects
+// (the alerts use an em dash) are sent as an RFC 2047 encoded word; a line break can never reach a header.
+function sendOpsAlertViaGmailApiGs_(subject, body) {
+  if (typeof Gmail === 'undefined' || !Gmail || !Gmail.Users || !Gmail.Users.Messages) throw new Error('the Advanced Gmail Service is not available');
+  const cleanSubject = String(subject).replace(/[\r\n]+/g, ' ');
+  const encodedSubject = /^[\x20-\x7e]*$/.test(cleanSubject)
+    ? cleanSubject
+    : '=?UTF-8?B?' + Utilities.base64Encode(Utilities.newBlob(cleanSubject).getBytes()) + '?=';
+  const mime = ['To: ' + OPS_ALERT_EMAIL_, 'Subject: ' + encodedSubject, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n');
+  return Gmail.Users.Messages.send({ raw: Utilities.base64EncodeWebSafe(Utilities.newBlob(mime).getBytes()) }, 'me');
+}
+
+// "yyyy-MM-dd HH:mm:ss" in IST for NOW (or the given date) — the stamp every log cell uses. Log stamps are taken at the moment of
+// the write, not the job's start time (email audit P9 / F12: the 3 Oct reply went out at 13:12 but was stamped 13:01:49).
+function istStampGs_(date) {
+  return Utilities.formatDate(date || new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
 }
 
 // ONE consolidated report, across every region in a run, naming every
@@ -528,7 +565,7 @@ const EMAIL_JOB_LOCK_WAIT_MS_ = 30000;
 function withEmailJobLockGs_(jobName, fn) {
   if (typeof LockService === 'undefined') {
     Logger.log(jobName + ': LockService is unavailable here — running without the overlap lock.');
-    fn();
+    runEmailJobTrackedGs_(jobName, fn);
     return true;
   }
   let lock = null;
@@ -546,7 +583,7 @@ function withEmailJobLockGs_(jobName, fn) {
       jobName + ' ran, but the script lock could not be used: ' + lockError,
       'The job was NOT skipped. Until this is fixed an overlapping run (a manual run during the schedule, a double-fired trigger) is not prevented. Check the Apps Script project\'s authorization/quotas.',
     ]);
-    fn();
+    runEmailJobTrackedGs_(jobName, fn);
     return true;
   }
   if (!acquired) {
@@ -558,11 +595,172 @@ function withEmailJobLockGs_(jobName, fn) {
     return false;
   }
   try {
-    fn();
+    runEmailJobTrackedGs_(jobName, fn);
     return true;
   } finally {
     try { lock.releaseLock(); } catch (relErr) { Logger.log(jobName + ': releaseLock failed: ' + relErr); }
   }
+}
+
+// ---- Job run records ("heartbeat") + completion watchdog (email audit P9 / F20 / F21) ----
+// 2 Oct 2026: the 13:00 job ended `Failed` with a platform "server error occurred" and NOTHING told anyone — its own crash
+// alert never arrived, and no check anywhere asked "did today's jobs run?". Each automated-email job now leaves a run record in
+// Script Properties (written by withEmailJobLockGs_ above): `running` when it starts, `completed` or `failed` when it ends. A
+// job killed by the platform (timeout, server error) never gets to write the ending, so its record stays `running` — which is
+// exactly how the watchdog tells "died mid-run" from "still running" (a run older than the 30-minute execution cap) and from
+// "never started" (no record for today). A quiet day — jobs that completed having nothing to send — is a `completed` record, so
+// it never raises a false alarm the way "no log rows today" would.
+//
+// The record is machine state, not a report: it holds only the latest run per job. A broken Properties service never stops a
+// job (every call here is wrapped), and a TEST MODE run writes nothing (test runs must not write production state — see
+// writeUnlessTestModeGs_).
+const EMAIL_JOB_DEADLINE_MINUTES_ = 30; // a job should have STARTED by its scheduled hour + this many minutes
+const EMAIL_JOB_MAX_RUN_MINUTES_ = 35;  // a run still `running` this long after it started died (Apps Script's cap is 30)
+function emailJobScheduleGs_() {
+  return {
+    sendOvernightMorningEmails: { hour: 10, label: '10:00 Overnight + Checkpoint 1 emails' },
+    sendOvernightFollowupEmails: { hour: 13, label: '13:00 follow-up replies' },
+    sendAllIssuesEmails: { hour: ALL_ISSUES_RUN_HOUR_, label: '17:00 All-Issues emails' },
+  };
+}
+function emailJobRunKeyGs_(jobName) { return 'EMAIL_JOB_RUN_' + jobName; }
+function emailJobAlertedKeyGs_(jobName) { return 'EMAIL_JOB_ALERTED_' + jobName; }
+
+// The latest run record for a job: the parsed object, null when there is none, or { unreadable: '<reason>' } when the Properties
+// service itself failed (the watchdog treats that as a problem; it must not read as "never ran").
+function readEmailJobRunGs_(jobName) {
+  try {
+    if (typeof PropertiesService === 'undefined') return { unreadable: 'PropertiesService is unavailable' };
+    const raw = PropertiesService.getScriptProperties().getProperty(emailJobRunKeyGs_(jobName));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return { unreadable: String((e && e.message) || e) };
+  }
+}
+function writeEmailJobRunGs_(jobName, record) {
+  try {
+    if (typeof PropertiesService === 'undefined') return false;
+    PropertiesService.getScriptProperties().setProperty(emailJobRunKeyGs_(jobName), JSON.stringify(record));
+    return true;
+  } catch (e) {
+    Logger.log(jobName + ': could not write its run record (' + e + ') — the job is not affected.');
+    return false;
+  }
+}
+
+// Runs the job body and records `running` -> `completed` / `failed`. A failure is re-thrown unchanged (the Executions list must
+// still show Failed). In TEST MODE nothing is recorded and ops are told the run was a test run (F20: a left-on test mode silently
+// redirects every real email to one address and skips every production log write).
+function runEmailJobTrackedGs_(jobName, fn) {
+  if (TEST_MODE_OVERRIDE_EMAIL_) {
+    notifyOpsAlertGs_(jobName + ' ran in TEST MODE — real recipients suppressed', [
+      jobName + ' started with TEST_MODE_OVERRIDE_EMAIL_ set (' + TEST_MODE_OVERRIDE_EMAIL_ + '): every email goes to that address only, and no log rows or run records are written.',
+      'If this was a scheduled run, the real recipients got NOTHING and the "already sent today" guards saw nothing — clear TEST_MODE_OVERRIDE_EMAIL_ in EmailInfra.gs and run the job by hand.',
+    ]);
+    fn();
+    return;
+  }
+  const started = new Date();
+  const day = istDayKeyGs_(started);
+  writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), status: 'running' });
+  try {
+    fn();
+  } catch (e) {
+    writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), finishedAt: new Date().toISOString(), status: 'failed', error: String((e && e.message) || e).slice(0, 300) });
+    throw e;
+  }
+  writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), finishedAt: new Date().toISOString(), status: 'completed' });
+}
+
+// What is wrong with today's runs as of `now`? Returns [{ job, kind, detail }] — kind is 'never_started' (no record for today
+// and the job's deadline has passed), 'stuck' (still `running` more than EMAIL_JOB_MAX_RUN_MINUTES_ after it started — it died),
+// 'failed' (the run ended in an error), or 'unreadable' (the Properties service failed). A job whose deadline has not passed yet
+// is never a problem. Pure apart from reading the records.
+function emailJobProblemsGs_(now) {
+  const day = istDayKeyGs_(now);
+  const minutesIntoDay = Number(Utilities.formatDate(now, 'Asia/Kolkata', 'HH')) * 60 + Number(Utilities.formatDate(now, 'Asia/Kolkata', 'mm'));
+  const schedule = emailJobScheduleGs_();
+  const problems = [];
+  Object.keys(schedule).forEach(function (job) {
+    const spec = schedule[job];
+    if (minutesIntoDay < spec.hour * 60 + EMAIL_JOB_DEADLINE_MINUTES_) return; // not due yet
+    const rec = readEmailJobRunGs_(job);
+    if (rec && rec.unreadable) { problems.push({ job: job, kind: 'unreadable', detail: 'the run record could not be read: ' + rec.unreadable }); return; }
+    if (!rec || rec.day !== day) {
+      problems.push({ job: job, kind: 'never_started', detail: 'No run of ' + spec.label + ' is recorded for today (' + day + '), and it should have started by ' + spec.hour + ':' + EMAIL_JOB_DEADLINE_MINUTES_ + ' IST.' });
+      return;
+    }
+    if (rec.status === 'failed') {
+      problems.push({ job: job, kind: 'failed', detail: spec.label + ' ended in an error: ' + (rec.error || '(no message recorded)') });
+    } else if (rec.status === 'running') {
+      const ageMin = (now.getTime() - new Date(rec.startedAt).getTime()) / 60000;
+      if (ageMin > EMAIL_JOB_MAX_RUN_MINUTES_) {
+        problems.push({ job: job, kind: 'stuck', detail: spec.label + ' started at ' + Utilities.formatDate(new Date(rec.startedAt), 'Asia/Kolkata', 'HH:mm:ss') + ' IST and never finished (' + Math.round(ageMin) + ' minutes ago) — the platform probably killed it (timeout or "server error occurred").' });
+      }
+    }
+  });
+  return problems;
+}
+
+// The watchdog body: alerts ops ONCE per job per day per kind of problem (an hourly trigger would otherwise repeat it) and
+// returns the problems it found. 'unreadable' is not de-duplicated — a broken Properties service is exactly when the dedupe
+// record cannot be trusted, and being told hourly is the right amount of noise.
+function checkEmailJobsCompletedGs_(now) {
+  const problems = emailJobProblemsGs_(now);
+  const day = istDayKeyGs_(now);
+  problems.forEach(function (p) {
+    const alertedKey = emailJobAlertedKeyGs_(p.job);
+    const marker = day + '|' + p.kind;
+    if (p.kind !== 'unreadable') {
+      let already = null;
+      try { already = PropertiesService.getScriptProperties().getProperty(alertedKey); } catch (e) { already = null; }
+      if (already === marker) return;
+    }
+    const what = p.kind === 'never_started' ? 'did not run' : p.kind === 'stuck' ? 'did not finish' : p.kind === 'failed' ? 'failed' : 'cannot be checked';
+    notifyOpsAlertGs_('WATCHDOG: ' + p.job + ' ' + what, [
+      p.detail,
+      '',
+      p.kind === 'never_started' || p.kind === 'stuck'
+        ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + p.job + 'Now by hand (it is safe to re-run: its "already sent today" guards stop it re-sending what already went out).'
+        : 'See the Executions list for the full error. This watchdog alerts once per day per job and problem.',
+    ]);
+    if (p.kind !== 'unreadable') {
+      try { PropertiesService.getScriptProperties().setProperty(alertedKey, marker); } catch (e2) { Logger.log('watchdog: could not record its alert for ' + p.job + ': ' + e2); }
+    }
+  });
+  return problems;
+}
+
+// The trigger entry point (installed by setupEmailJobWatchdogTrigger). Never throws into the platform — a watchdog that itself
+// fails silently would be the same hole one level up.
+function emailJobWatchdog() {
+  try {
+    checkEmailJobsCompletedGs_(new Date());
+  } catch (e) {
+    Logger.log('emailJobWatchdog failed: ' + e);
+    notifyOpsAlertGs_('WATCHDOG itself failed', ['emailJobWatchdog threw: ' + (e && e.stack ? e.stack : e)]);
+  }
+}
+function emailJobWatchdogNow() { emailJobWatchdog(); }
+
+// One-time setup — ONE hourly trigger for emailJobWatchdog (safe to re-run: deletes its own earlier trigger first). Hourly,
+// not pinned to a minute: the watchdog only compares the clock with each job's deadline, so loose firing is harmless — it alerts
+// at the first run after a job's hh:30 deadline (about an hour of latency at worst). Run this ONCE after pasting this file
+// (function dropdown -> setupEmailJobWatchdogTrigger -> Run).
+function setupEmailJobWatchdogTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'emailJobWatchdog') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('emailJobWatchdog').timeBased().everyHours(1).create();
+  Logger.log('Installed one hourly trigger for emailJobWatchdog. It alerts ' + OPS_ALERT_EMAIL_ + ' when an automated email job did not run, did not finish, or failed.');
+}
+
+// Logs each job's latest run record — for a human checking what the watchdog sees (Executions log).
+function showEmailJobRunsNow() {
+  const schedule = emailJobScheduleGs_();
+  Object.keys(schedule).forEach(function (job) {
+    Logger.log(job + ': ' + JSON.stringify(readEmailJobRunGs_(job)));
+  });
 }
 
 // ---- Plain-text twin of a report email (email audit P2 / F13) ----

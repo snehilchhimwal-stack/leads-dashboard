@@ -452,6 +452,28 @@ function TestMockLockService_(opts) {
   };
 }
 
+// Mock PropertiesService (added 2026-10-05, email audit P9) — only getScriptProperties() is used: each email job's run record
+// ("heartbeat") lives there so the watchdog can tell "never ran" from "ran and had nothing to send". An in-memory map, fresh per
+// test file; `failReads` / `failWrites` make the service itself error (the heartbeat must never break a job).
+function TestMockPropertiesService_(opts) {
+  const store = {};
+  const failReads = !!(opts && opts.failReads);
+  const failWrites = !!(opts && opts.failWrites);
+  const props = {
+    getProperty: function (k) {
+      if (failReads) throw new Error('simulated: PropertiesService.getProperty failed');
+      return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null;
+    },
+    setProperty: function (k, v) {
+      if (failWrites) throw new Error('simulated: PropertiesService.setProperty failed');
+      store[k] = String(v);
+      return props;
+    },
+    deleteProperty: function (k) { delete store[k]; return props; },
+  };
+  return { _store: store, getScriptProperties: function () { return props; } };
+}
+
 // ============================== Mock Utilities / ScriptApp ==============================
 
 // Wraps the REAL Utilities — formatDate/newBlob/base64EncodeWebSafe/
@@ -467,6 +489,7 @@ function TestMockUtilities_() {
     formatDate: function () { return real.formatDate.apply(real, arguments); },
     newBlob: function () { return real.newBlob.apply(real, arguments); },
     base64EncodeWebSafe: function () { return real.base64EncodeWebSafe.apply(real, arguments); },
+    base64Encode: function () { return real.base64Encode.apply(real, arguments); },
     getUuid: function () { return real.getUuid.apply(real, arguments); },
     sleep: function () { /* no-op — see file header */ },
     // Lead History & Versioning Review, Phase 6/7 — MovementTracker.gs's
@@ -510,6 +533,7 @@ function TestMockScriptApp_(existingTriggers) {
       const builder = {
         timeBased: function () { spec.type = 'timeBased'; return builder; },
         atHour: function (h) { spec.hour = h; return builder; },
+        everyHours: function (n) { spec.everyHours = n; return builder; },
         nearMinute: function (m) { spec.minute = m; return builder; },
         everyDays: function (d) { spec.days = d; return builder; },
         onWeekDay: function (d) { spec.weekDay = d; return builder; },
@@ -611,6 +635,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
     SpreadsheetApp: SpreadsheetApp, GmailApp: GmailApp, Utilities: Utilities,
     ScriptApp: ScriptApp, Gmail: (typeof Gmail === 'undefined' ? undefined : Gmail),
     LockService: (typeof LockService === 'undefined' ? undefined : LockService),
+    PropertiesService: (typeof PropertiesService === 'undefined' ? undefined : PropertiesService),
     TEST_MODE_OVERRIDE_EMAIL_: TEST_MODE_OVERRIDE_EMAIL_, OPS_ALERT_EMAIL_: OPS_ALERT_EMAIL_,
     CH_LEVEL_EMAIL_: CH_LEVEL_EMAIL_, ALWAYS_CC_EMAILS_: ALWAYS_CC_EMAILS_,
     LEADERSHIP_NAME_TO_EMAIL_: LEADERSHIP_NAME_TO_EMAIL_,
@@ -642,6 +667,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
   ScriptApp = TestMockScriptApp_(scriptAppTriggers);
   Gmail = TestMockGmailAdvanced_(gmailAdvancedOpts);
   LockService = TestMockLockService_(); // the real script lock is never touched by a test run
+  PropertiesService = TestMockPropertiesService_(); // …and neither are the real script properties (the email jobs' run records)
 
   // Confine every test's email surface to the two allowed addresses —
   // see this file's own header. Restored in TestEnv_tearDown_.
@@ -663,7 +689,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
 function TestEnv_tearDown_() {
   const g = TestEnv_realGlobals_;
   SpreadsheetApp = g.SpreadsheetApp; GmailApp = g.GmailApp; Utilities = g.Utilities;
-  ScriptApp = g.ScriptApp; Gmail = g.Gmail; LockService = g.LockService;
+  ScriptApp = g.ScriptApp; Gmail = g.Gmail; LockService = g.LockService; PropertiesService = g.PropertiesService;
   TEST_MODE_OVERRIDE_EMAIL_ = g.TEST_MODE_OVERRIDE_EMAIL_; OPS_ALERT_EMAIL_ = g.OPS_ALERT_EMAIL_;
   CH_LEVEL_EMAIL_ = g.CH_LEVEL_EMAIL_; ALWAYS_CC_EMAILS_ = g.ALWAYS_CC_EMAILS_;
   LEADERSHIP_NAME_TO_EMAIL_ = g.LEADERSHIP_NAME_TO_EMAIL_;

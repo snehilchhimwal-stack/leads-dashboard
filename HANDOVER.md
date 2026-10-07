@@ -291,6 +291,7 @@ re-running after an edit never leaves a duplicate):
 | `setupMovementTracking()` | `MovementTracker.gs` | 4 daily triggers at 00:00, 06:00, 12:00, 18:00 IST (`SNAPSHOT_HOURS_`) → `snapshotPeriodic` → snapshot + SLA_History row. Also removes any stale legacy `snapshotEvening` trigger. |
 | `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). **Since 2026-09-24:** each of these is now a combined send — Section 1 (unchanged) + Section 2 (a Checkpoint on yesterday's 17:00 `AllIssuesEmailer.gs` report — see §2's own row for the full picture). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
+| `setupEmailJobWatchdogTrigger()` | `EmailInfra.gs` | **Added 2026-10-05 (email audit P9).** ONE hourly trigger → `emailJobWatchdog`, which alerts `OPS_ALERT_EMAIL_` when a 10:00 / 13:00 / 17:00 email job did not run, did not finish, or failed (§4.3.4, P9). Run it once after pasting `EmailInfra.gs`. |
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
 | `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 5 automatable checks (added 2026-10-03: a 30-day stale-dashboard-tab check against `Feature_Usage`). Sends every week regardless of outcome — see §8. |
 | `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). **Since 2026-10-01:** `rebuildRmHierarchy()` (the function this calls under the hood when re-run) now automatically runs `auditUnresolvedRms_`/`auditManagerDirectoryEmailGaps_` at the end of every rebuild and logs the result — see §4.3.2. |
@@ -557,6 +558,31 @@ code*, one bullet per plan step as each lands.
   alerts ops "1pm follow-up UNCONFIRMED for <region>". **To resolve an UNCONFIRMED alert:** look in
   Gmail Sent for a reply in that thread; if it is missing, clear that cell *and* the row(s)'
   `checkpoint2_sent_at` in `AllIssues_Log`, then run `sendOvernightFollowupEmailsNow`.
+- **P9 — the logs say what happened and when, and a dead job gets noticed.** On 2 Oct the 13:00 job
+  ended `Failed` with a platform "server error occurred" and nothing told anyone (its own alert never
+  arrived; no check asked "did today's jobs run?"). Five changes:
+  (1) *Run records.* Each of the three jobs writes `running` → `completed` / `failed` into Script
+  Properties (`EMAIL_JOB_RUN_<job>`, latest run only) from inside `withEmailJobLockGs_`. A job the
+  platform kills never writes its ending, so its record stays `running`. A quiet day is a `completed`
+  run, so it never false-alarms the way "no log rows today" would. `showEmailJobRunsNow()` logs them.
+  (2) *Watchdog.* ONE new hourly trigger runs `emailJobWatchdog`; for each job whose deadline (scheduled
+  hour + 30 min) has passed it reports **never started** (no record for today), **stuck** (still
+  `running` 35+ min after it started — it died) or **failed** (with the error). One alert per job per day
+  per problem; the first alert arrives within about an hour of the deadline. **Install it once:** paste
+  `EmailInfra.gs`, then run `setupEmailJobWatchdogTrigger()` (safe to re-run). After fixing a problem, run
+  the job by hand (`…Now`) — a completed record silences the watchdog.
+  (3) *Real send times.* `Overnight_Log.sent_at` / `followup_sent_at` and `AllIssues_Log.checkpoint1_sent_at`
+  / `checkpoint2_sent_at` are stamped when the row is written (`istStampGs_`), not with the job's start
+  time (3 Oct: a reply sent 13:12 was stamped 13:01:49).
+  (4) *`Overnight_Log.followup_result` (new column J, appended — the sheet heals itself on the next run).*
+  What the 13:00 job did with the row: `sent (threaded reply)`, `sent (fallback: a new message, not
+  threaded …)`, `skipped: nothing unresolved`, `skipped: no stored recipient …`, `blocked: …`,
+  `unconfirmed: …`, `failed: …`. A **blank** result on today's row after 13:30 means the job never got to
+  it. `followup_sent_at` keeps its meaning (the "already sent" guard) and is still blank for a skip.
+  (5) *Ops alerts retry.* `notifyOpsAlertGs_` tries GmailApp twice (3 s apart), then the Advanced Gmail
+  Service (already authorized), and only then gives up (logged). A job that starts with
+  `TEST_MODE_OVERRIDE_EMAIL_` set now alerts ops ("ran in TEST MODE") and writes no run record.
+  No new OAuth scope is needed (Script Properties and the Advanced Gmail Service are already covered).
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry

@@ -646,6 +646,236 @@ function runEmailInfraTests_() {
       TestAssertEqual_(separate.results.length, 2, 'resolveRecipientEmailsForRegion_: buckets on DIFFERENT addresses are still separate');
     }
 
+    // ============ 2026-10-05 email audit P9 (F21): the ops alert retries, then falls back to a second send path ============
+    {
+      const realGmailApp = GmailApp, realGmail = Gmail;
+      const sleeps = [];
+      const realSleep = Utilities.sleep;
+      Utilities.sleep = function (ms) { sleeps.push(ms); };
+      const decodeRaw = function (raw) { return TestOE_decodeRawMime_(raw); };
+      try {
+        // Normal: one GmailApp send, nothing else.
+        const sentBefore = TestGmailLog_.sent.length, repliesBefore = TestGmailLog_.threadReplies.length;
+        TestAssertEqual_(notifyOpsAlertGs_('plain subject', ['line one', 'line two']), true, 'notifyOpsAlertGs_: reports true when GmailApp sent it');
+        TestAssertEqual_(TestGmailLog_.sent.length, sentBefore + 1, 'notifyOpsAlertGs_: exactly one alert on the normal path');
+        TestAssertEqual_(TestGmailLog_.sent[TestGmailLog_.sent.length - 1].subject, '[Overnight Emailer] plain subject', 'notifyOpsAlertGs_: subject keeps its prefix');
+        TestAssertEqual_(TestGmailLog_.sent[TestGmailLog_.sent.length - 1].body, 'line one\nline two', 'notifyOpsAlertGs_: body is the joined lines');
+        TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore, 'notifyOpsAlertGs_: the second path is not touched when the first works');
+
+        // One transient failure: the retry delivers it (after a pause), once.
+        let sendCalls = 0;
+        GmailApp = { sendEmail: function (to, subject, body) { sendCalls++; if (sendCalls === 1) throw new Error('Service error: Gmail'); TestGmailLog_.sent.push({ to: to, subject: subject, body: body, cc: '' }); } };
+        sleeps.length = 0;
+        const sentBeforeRetry = TestGmailLog_.sent.length;
+        TestAssertEqual_(notifyOpsAlertGs_('retry me', ['x']), true, 'notifyOpsAlertGs_: a single transient failure is retried and succeeds');
+        TestAssertEqual_(sendCalls, 2, 'notifyOpsAlertGs_: GmailApp was tried exactly twice');
+        TestAssertEqual_(TestGmailLog_.sent.length, sentBeforeRetry + 1, 'notifyOpsAlertGs_: the alert went out once');
+        TestAssertEqual_(sleeps[0], 3000, 'notifyOpsAlertGs_: it paused 3 seconds between attempts');
+
+        // GmailApp keeps failing: the Advanced Gmail Service carries the alert. The em dash is sent as an encoded word.
+        GmailApp = { sendEmail: function () { throw new Error('Service error: Gmail'); } };
+        const repliesBeforeFallback = TestGmailLog_.threadReplies.length;
+        TestAssertEqual_(notifyOpsAlertGs_('sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were sent this run', ['the body']), true, 'notifyOpsAlertGs_: falls back to the Advanced Gmail Service when GmailApp keeps failing');
+        TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBeforeFallback + 1, 'notifyOpsAlertGs_: exactly one message went by the second path');
+        const fallbackMime = decodeRaw(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw);
+        TestAssertContains_(fallbackMime, 'To: ' + OPS_ALERT_EMAIL_, 'notifyOpsAlertGs_ (second path): addressed to the ops address');
+        TestAssertContains_(fallbackMime, 'Subject: =?UTF-8?B?', 'notifyOpsAlertGs_ (second path): a non-ASCII subject (the em dash) is sent as an RFC 2047 encoded word');
+        TestAssertContains_(fallbackMime, 'the body', 'notifyOpsAlertGs_ (second path): carries the body');
+        TestAssert_(!/\r\n\r\n.*\r\nSubject:/.test(fallbackMime), 'notifyOpsAlertGs_ (second path): no header ends up in the body');
+
+        // A plain-ASCII subject stays readable (no encoding).
+        notifyOpsAlertGs_('ascii only', ['b']);
+        TestAssertContains_(decodeRaw(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw), 'Subject: [Overnight Emailer] ascii only', 'notifyOpsAlertGs_ (second path): an ASCII subject is sent as-is');
+
+        // A line break smuggled into a subject cannot start a new header.
+        notifyOpsAlertGs_('bad\r\nBcc: attacker@example.com', ['b']);
+        const injectedMime = decodeRaw(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw);
+        TestAssert_(!/\r\nBcc:/.test(injectedMime), 'notifyOpsAlertGs_ (second path): a line break in the subject never becomes a header');
+        TestAssertContains_(injectedMime, 'Subject: [Overnight Emailer] bad Bcc: attacker@example.com\r\n', 'notifyOpsAlertGs_ (second path): …the line break is collapsed to a space, so the subject stays ONE plain line (not merely hidden inside an encoded word)');
+
+        // Everything fails: no throw (an alert must never take down the job it reports on), and the caller is told.
+        Gmail = { Users: { Messages: { send: function () { throw new Error('Gmail API down'); } } } };
+        let alertThrew = false, bothFailed = null;
+        try { bothFailed = notifyOpsAlertGs_('nothing works', ['b']); } catch (e) { alertThrew = true; }
+        TestAssert_(!alertThrew, 'notifyOpsAlertGs_: when every path fails it still does not throw');
+        TestAssertEqual_(bothFailed, false, 'notifyOpsAlertGs_: …and returns false');
+
+        // No Advanced Service at all.
+        Gmail = undefined;
+        let noGmailThrew = false;
+        try { TestAssertEqual_(notifyOpsAlertGs_('no advanced service', ['b']), false, 'notifyOpsAlertGs_: with GmailApp failing and no Advanced Service it returns false'); } catch (e) { noGmailThrew = true; }
+        TestAssert_(!noGmailThrew, 'notifyOpsAlertGs_: …without throwing');
+      } finally { GmailApp = realGmailApp; Gmail = realGmail; Utilities.sleep = realSleep; }
+
+      // istStampGs_: the log-stamp format, in IST.
+      TestAssertEqual_(istStampGs_(new Date('2026-10-05T07:30:00Z')), '2026-10-05 13:00:00', 'istStampGs_: formats a given moment in IST');
+      TestAssert_(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(istStampGs_()), 'istStampGs_: with no argument it stamps the current moment in the same format');
+    }
+
+    // ============ 2026-10-05 email audit P9 (F21/F20): job run records, the completion watchdog, test-mode alert ============
+    {
+      const realProps = PropertiesService;
+      const realLock = LockService;
+      const todayDay = '2026-10-05';
+      const at = function (hhmm) { return new Date('2026-10-05T' + hhmm + ':00+05:30'); };
+      const iso = function (hhmm) { return at(hhmm).toISOString(); };
+      const rec = function (job, r) { writeEmailJobRunGs_(job, Object.assign({ day: todayDay }, r)); };
+      const M = 'sendOvernightMorningEmails', F = 'sendOvernightFollowupEmails', A = 'sendAllIssuesEmails';
+      const kinds = function (ps) { return ps.map(function (p) { return p.job + ':' + p.kind; }).sort().join(','); };
+      try {
+        // ---- the run record itself (through withEmailJobLockGs_) ----
+        PropertiesService = TestMockPropertiesService_();
+        LockService = TestMockLockService_();
+        let sawRunning = null;
+        withEmailJobLockGs_(M, function () { sawRunning = readEmailJobRunGs_(M); });
+        TestAssertEqual_(sawRunning && sawRunning.status, 'running', 'run record: while the job body runs, its record says running');
+        const done = readEmailJobRunGs_(M);
+        TestAssert_(done.status === 'completed' && done.day === istDayKeyGs_(new Date()) && !!done.finishedAt, 'run record: after the body returns, the record says completed, with the IST day and a finish time');
+        TestAssertEqual_(readEmailJobRunGs_(F), null, 'run record: a job that has not run has no record (null)');
+
+        let failedThrew = false;
+        try { withEmailJobLockGs_(F, function () { throw new Error('body blew up'); }); } catch (e) { failedThrew = /body blew up/.test(e.message); }
+        TestAssert_(failedThrew, 'run record: a failing body is re-thrown unchanged');
+        const failedRec = readEmailJobRunGs_(F);
+        TestAssert_(failedRec.status === 'failed' && /body blew up/.test(failedRec.error), 'run record: …and recorded as failed with its error');
+
+        // Skipped because another job holds the lock: no record is written (the job did not run).
+        PropertiesService = TestMockPropertiesService_();
+        LockService = TestMockLockService_({ denyLock: true });
+        withEmailJobLockGs_(A, function () { throw new Error('must not run'); });
+        TestAssertEqual_(readEmailJobRunGs_(A), null, 'run record: a job skipped for the lock writes no record');
+
+        // Fail-open paths still record.
+        [{ throwOnGet: true }, { throwOnTryLock: true }].forEach(function (failure) {
+          PropertiesService = TestMockPropertiesService_();
+          LockService = TestMockLockService_(failure);
+          withEmailJobLockGs_(M, function () {});
+          TestAssertEqual_(readEmailJobRunGs_(M).status, 'completed', 'run record: a job that runs because the lock service is broken is still recorded');
+        });
+        PropertiesService = TestMockPropertiesService_();
+        LockService = undefined;
+        withEmailJobLockGs_(M, function () {});
+        TestAssertEqual_(readEmailJobRunGs_(M).status, 'completed', 'run record: with no LockService the job is still recorded');
+        LockService = realLock;
+
+        // A broken Properties service never stops a job.
+        [{ failWrites: true }, { failReads: true }].forEach(function (opts) {
+          PropertiesService = TestMockPropertiesService_(opts);
+          let ran = 0;
+          let threw = false;
+          try { withEmailJobLockGs_(M, function () { ran++; }); } catch (e) { threw = true; }
+          TestAssert_(ran === 1 && !threw, 'run record: a broken Properties service (' + Object.keys(opts)[0] + ') neither stops nor changes the job');
+        });
+        PropertiesService = undefined;
+        let ranNoProps = 0;
+        withEmailJobLockGs_(M, function () { ranNoProps++; });
+        TestAssertEqual_(ranNoProps, 1, 'run record: with no PropertiesService at all the job still runs');
+
+        // ---- emailJobProblemsGs_: what is wrong at a given moment ----
+        PropertiesService = TestMockPropertiesService_();
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('09:00'))), '', 'watchdog: before any job is due, nothing is wrong (even with no records at all)');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:29'))), '', 'watchdog: one minute before the 10:00 job\'s 10:30 deadline, nothing is wrong');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:30'))), M + ':never_started', 'watchdog: at the deadline, a job with no record for today never started');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('13:29'))), M + ':never_started', 'watchdog: the 13:00 job is not due until 13:30');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('18:00'))), A + ':never_started,' + F + ':never_started,' + M + ':never_started', 'watchdog: after 17:30 all three missing jobs are reported');
+        const nev = emailJobProblemsGs_(at('10:31'))[0];
+        TestAssert_(/10:30 IST/.test(nev.detail) && /10:00 Overnight/.test(nev.detail), 'watchdog: the message names the job and its deadline');
+
+        rec(M, { startedAt: iso('10:03'), finishedAt: iso('10:07'), status: 'completed' });
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:31'))), '', 'watchdog: a completed run is fine — even when it had nothing to send');
+        writeEmailJobRunGs_(M, { day: '2026-10-04', startedAt: '2026-10-04T04:33:00.000Z', finishedAt: '2026-10-04T04:37:00.000Z', status: 'completed' });
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:31'))), M + ':never_started', 'watchdog: yesterday\'s completed run does not count for today');
+
+        rec(M, { startedAt: iso('10:03'), status: 'running' });
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:31'))), '', 'watchdog: a run that started 28 minutes ago is still running, not stuck');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:38'))), '', 'watchdog: …still fine at 35 minutes');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:39'))), M + ':stuck', 'watchdog: a run still "running" past the 30-minute execution cap died (timeout / platform error)');
+        TestAssert_(/10:03:00 IST/.test(emailJobProblemsGs_(at('10:50'))[0].detail), 'watchdog: the stuck message says when the run started');
+
+        rec(F, { startedAt: iso('13:01'), finishedAt: iso('13:03'), status: 'failed', error: 'We\'re sorry, a server error occurred.' });
+        const fl = emailJobProblemsGs_(at('13:31')).filter(function (p) { return p.job === F; })[0];
+        TestAssert_(!!fl && fl.kind === 'failed' && /server error occurred/.test(fl.detail), 'watchdog: a run that ended in an error is reported with its error text');
+
+        // An unreadable record is its own problem — not "never ran".
+        PropertiesService = TestMockPropertiesService_({ failReads: true });
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:31'))), M + ':unreadable', 'watchdog: a failing Properties service reports "unreadable", not "never started"');
+        PropertiesService = undefined;
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:31'))), M + ':unreadable', 'watchdog: no PropertiesService at all is "unreadable" too');
+
+        // ---- checkEmailJobsCompletedGs_: alerts once per job/day/kind ----
+        PropertiesService = TestMockPropertiesService_();
+        const alertsOf = function (fn) { const before = TestGmailLog_.sent.length; const r = fn(); return { result: r, alerts: TestGmailLog_.sent.slice(before) }; };
+        const first = alertsOf(function () { return checkEmailJobsCompletedGs_(at('10:35')); });
+        TestAssertEqual_(first.alerts.length, 1, 'watchdog: a job that never started produces exactly one alert');
+        TestAssertContains_(first.alerts[0].subject, 'WATCHDOG: sendOvernightMorningEmails did not run', 'watchdog: the alert subject names the job and the problem');
+        TestAssertContains_(first.alerts[0].body, 'sendOvernightMorningEmailsNow', 'watchdog: the alert says what to run by hand');
+        TestAssertEqual_(first.result.length, 1, 'watchdog: it returns the problems it found');
+        const second = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:35')); });
+        TestAssertEqual_(second.alerts.length, 0, 'watchdog: an hourly re-check does NOT repeat the same alert the same day');
+        TestAssertEqual_(second.result.length, 1, 'watchdog: …though it still reports the problem');
+        // The kind changes (the job started but never finished) -> a new alert.
+        rec(M, { startedAt: iso('11:00'), status: 'running' });
+        const third = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:50')); });
+        TestAssertEqual_(third.alerts.length, 1, 'watchdog: a DIFFERENT problem for the same job (now stuck) alerts again');
+        TestAssertContains_(third.alerts[0].subject, 'did not finish', 'watchdog: …naming it as a job that did not finish');
+        // A manual re-run fixes it -> silence.
+        rec(M, { startedAt: iso('12:00'), finishedAt: iso('12:04'), status: 'completed' });
+        TestAssertEqual_(alertsOf(function () { return checkEmailJobsCompletedGs_(at('12:35')); }).alerts.length, 0, 'watchdog: once the job has been re-run and completed, the watchdog is silent');
+        // A new day re-arms the alert.
+        PropertiesService = TestMockPropertiesService_();
+        checkEmailJobsCompletedGs_(at('10:35'));
+        const nextDay = alertsOf(function () { return checkEmailJobsCompletedGs_(new Date('2026-10-06T10:35:00+05:30')); });
+        TestAssertEqual_(nextDay.alerts.length, 1, 'watchdog: the next day\'s missing run alerts again (the dedupe is per day)');
+        // A failed run is reported once even though the job sent its own alert (that alert may not have arrived).
+        PropertiesService = TestMockPropertiesService_();
+        rec(F, { startedAt: iso('13:01'), finishedAt: iso('13:03'), status: 'failed', error: 'boom' });
+        rec(M, { startedAt: iso('10:03'), finishedAt: iso('10:07'), status: 'completed' });
+        const failAlerts = alertsOf(function () { return checkEmailJobsCompletedGs_(at('13:40')); });
+        TestAssertEqual_(failAlerts.alerts.length, 1, 'watchdog: a failed run is alerted once');
+        TestAssertContains_(failAlerts.alerts[0].subject, 'sendOvernightFollowupEmails failed', 'watchdog: …as a failure');
+        // Unreadable alerts every time (the dedupe record cannot be trusted).
+        PropertiesService = TestMockPropertiesService_({ failReads: true });
+        const u1 = alertsOf(function () { return checkEmailJobsCompletedGs_(at('10:35')); });
+        const u2 = alertsOf(function () { return checkEmailJobsCompletedGs_(at('10:36')); });
+        TestAssert_(u1.alerts.length === 1 && u2.alerts.length === 1, 'watchdog: an unreadable record alerts on every check');
+        TestAssertContains_(u1.alerts[0].subject, 'cannot be checked', 'watchdog: …saying it cannot be checked');
+
+        // ---- the trigger entry point never throws ----
+        PropertiesService = TestMockPropertiesService_();
+        const realProblems = emailJobProblemsGs_;
+        emailJobProblemsGs_ = function () { throw new Error('watchdog bug'); };
+        const wdBefore = TestGmailLog_.sent.length;
+        let wdThrew = false;
+        try { emailJobWatchdog(); } catch (e) { wdThrew = true; } finally { emailJobProblemsGs_ = realProblems; }
+        TestAssert_(!wdThrew, 'emailJobWatchdog: never throws into the platform');
+        TestAssert_(TestGmailLog_.sent.slice(wdBefore).some(function (e) { return /WATCHDOG itself failed/.test(e.subject); }), 'emailJobWatchdog: if the check itself breaks, ops are told');
+        emailJobWatchdogNow();
+        showEmailJobRunsNow();
+        TestAssert_(true, 'emailJobWatchdogNow / showEmailJobRunsNow run without error');
+      } finally {
+        PropertiesService = realProps;
+        LockService = TestMockLockService_();
+        PropertiesService = TestMockPropertiesService_();
+      }
+
+      // ---- setupEmailJobWatchdogTrigger: ONE hourly trigger; re-running replaces only its own ----
+      const realScriptApp = ScriptApp;
+      ScriptApp = TestMockScriptApp_(['emailJobWatchdog', 'sendAllIssuesEmails']);
+      try {
+        setupEmailJobWatchdogTrigger();
+        const st = ScriptApp._state;
+        TestAssertEqual_(st.created.length, 1, 'setupEmailJobWatchdogTrigger: installs exactly ONE trigger');
+        TestAssertEqual_(st.created[0].fnName, 'emailJobWatchdog', 'setupEmailJobWatchdogTrigger: for emailJobWatchdog');
+        TestAssertEqual_(st.created[0].type, 'timeBased', 'setupEmailJobWatchdogTrigger: a time-based trigger');
+        TestAssertEqual_(st.created[0].everyHours, 1, 'setupEmailJobWatchdogTrigger: every hour');
+        TestAssertEqual_(st.deleted.join(','), 'emailJobWatchdog', 'setupEmailJobWatchdogTrigger: deletes its OWN earlier trigger (so a re-run never leaves two) and nothing else');
+      } finally { ScriptApp = realScriptApp; }
+
+      // ---- the job schedule the watchdog checks ----
+      const sch = emailJobScheduleGs_();
+      TestAssertEqual_(sch.sendOvernightMorningEmails.hour + ',' + sch.sendOvernightFollowupEmails.hour + ',' + sch.sendAllIssuesEmails.hour, '10,13,17', 'emailJobScheduleGs_: the three jobs are watched at 10, 13 and 17 (the 17:00 hour follows ALL_ISSUES_RUN_HOUR_)');
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();

@@ -276,7 +276,23 @@ function overnightWindowGs_(asOf) {
 // "Overnight_Log is untouched" — true only through Step 7; this is the
 // one column Step 8 needs to add to actually deliver "a trigger retry
 // must reconcile the existing cycle, not create a duplicate email."
-const OVERNIGHT_LOG_HEADERS_ = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject', 'followup_sent_at'];
+// followup_result: added 2026-10-05 (email audit P9 / F12) — what the 13:00 job DID with this row, in words: "sent (threaded
+// reply)", "skipped: nothing unresolved", "blocked: ...", "unconfirmed: ...", "failed: ...". Before this, a bucket that was
+// skipped because nothing was unresolved and a bucket the job never reached (crash, timeout) both left followup_sent_at blank.
+// A blank followup_result on today's row at the end of the day means the 13:00 job never got to this row.
+const OVERNIGHT_LOG_HEADERS_ = ['date', 'region', 'thread_id', 'lead_ids_json', 'sent_at', 'to', 'cc', 'subject', 'followup_sent_at', 'followup_result'];
+
+// Writes the 13:00 job's one-line outcome for a row into followup_result. Best-effort (never throws): a lost note must not
+// abort the caller's per-bucket loop. In TEST MODE it writes nothing (writeUnlessTestModeGs_).
+function writeFollowupResultGs_(logSheet, rowNumber, text, region) {
+  try {
+    writeUnlessTestModeGs_(function () {
+      logSheet.getRange(rowNumber, OVERNIGHT_LOG_HEADERS_.indexOf('followup_result') + 1, 1, 1).setValues([[String(text).slice(0, 500)]]);
+    }, 'write followup_result back to Overnight_Log (' + region + ')');
+  } catch (logErr) {
+    Logger.log('followup_result write failed for ' + region + ' (row ' + rowNumber + '): ' + logErr);
+  }
+}
 
 // Self-healing header, same pattern as ensureAllIssuesLogSheet_
 // (AllIssuesEmailer.gs) — appends any column missing from an EXISTING
@@ -492,7 +508,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   // appendRowOnceGs_ (EmailInfra.gs, email audit P7 / F10): a retry after a timeout that landed AFTER the row was written must
   // not append a second row — a duplicate row here means a duplicate 13:00 reply into the same thread.
   withRetry_(appendRowOnceGs_(logSheet, [
-    todayKey, region, threadId, JSON.stringify(issueLog), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+    todayKey, region, threadId, JSON.stringify(issueLog), istStampGs_(), // sent_at = when the send finished, not the job's start
     rec.to, rec.cc || '', subject,
   ], 2), 'log Overnight_Log row (' + region + bucketNote + ')');
   return null;
@@ -759,7 +775,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     try {
       writeUnlessTestModeGs_(function () {
         section2.rowNumbers.forEach(function (rowNumber) {
-          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[jsonForCellGs_(checkpoint1Results, 'checkpoint1_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+          allIssuesLogSheet.getRange(rowNumber, 11, 1, 2).setValues([[jsonForCellGs_(checkpoint1Results, 'checkpoint1_json (' + region + bucketNote + ')'), istStampGs_()]]);
         });
       }, 'write checkpoint1_json back to AllIssues_Log (' + region + bucketNote + ')');
     } catch (logErr) {
@@ -847,7 +863,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     try {
       // Once-only append (email audit P7 / F10) — see appendRowOnceGs_; thread id (col C) is the row's identity.
       writeUnlessTestModeGs_(appendRowOnceGs_(overnightLogSheet, [
-        todayKey, region, threadId, jsonForCellGs_(issueLog, 'Overnight_Log lead_ids_json (' + region + bucketNote + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+        todayKey, region, threadId, jsonForCellGs_(issueLog, 'Overnight_Log lead_ids_json (' + region + bucketNote + ')'), istStampGs_(), // sent_at = send time (email audit P9 / F12)
         to, cc || '', subject,
       ], 2), 'log Overnight_Log row (' + region + bucketNote + ')');
     } catch (logErr) {
@@ -1620,7 +1636,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     try {
       writeUnlessTestModeGs_(function () {
         section2Input.rowNumbers.forEach(function (rowNumber) {
-          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[jsonForCellGs_(checkpoint2Results, 'checkpoint2_json (' + region + ')'), Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss')]]);
+          allIssuesLogSheet.getRange(rowNumber, 13, 1, 2).setValues([[jsonForCellGs_(checkpoint2Results, 'checkpoint2_json (' + region + ')'), istStampGs_()]]);
         });
       }, 'write checkpoint2_json back to AllIssues_Log (' + region + ')');
     } catch (logErr) {
@@ -1633,6 +1649,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   const activeCheckpoint2Count = checkpoint2Results ? checkpoint2Results.length : 0;
   if (!section1UnresolvedRows.length && !activeCheckpoint2Count) {
     writeCheckpoint2State_('no reply was needed');
+    writeFollowupResultGs_(overnightLogSheet, overnightLogRowNumber, 'skipped: nothing unresolved', region);
     Logger.log('1pm follow-up skipped for ' + region + ' (thread ' + threadId + '): nothing is still unresolved.');
     return;
   }
@@ -1662,6 +1679,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
       'The reply was not drafted or sent: ' + gate.problems.join('; ') + '.',
       'Nothing was marked as sent, so running sendOvernightFollowupEmailsNow again TODAY (after fixing the cause) will retry this bucket.',
     ]);
+    writeFollowupResultGs_(overnightLogSheet, overnightLogRowNumber, 'blocked: ' + gate.problems.join('; '), region);
     return;
   }
 
@@ -1685,23 +1703,29 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   // ambiguous timeout). The plain fallback below used to follow ANY threaded error — including a timeout where the message
   // may already have been delivered, so it could deliver a second copy. It now follows only a DEFINITE failure.
   let outcome = 'failed';
+  let resultNote = 'failed'; // the one-line outcome written to Overnight_Log.followup_result (email audit P9 / F12)
   try {
     sendThreadedGmailReply_(threadId, sendTo, sendCc || '', subject, plainBody, html);
     outcome = 'sent';
+    resultNote = 'sent (threaded reply)';
   } catch (threadErr) {
     if (threadErr && threadErr.sendOutcomeUnknown) {
       outcome = 'unconfirmed';
+      resultNote = 'unconfirmed: the threaded send ended ambiguously (' + threadErr + ') — no second copy sent';
       Logger.log('Threaded send for ' + region + ' (thread ' + threadId + ') ended in an UNCONFIRMED state (' + threadErr + ') — not sending a fallback copy.');
     } else if (threadErr && threadErr.blockedByGuard) {
       Logger.log('Threaded send for ' + region + ' (thread ' + threadId + ') was blocked by the send-safety gate: ' + threadErr);
+      resultNote = 'blocked: ' + String((threadErr && threadErr.message) || threadErr);
       notifyOpsAlertGs_('1pm follow-up BLOCKED by the send-safety gate for ' + region, alertLines([String(threadErr.message || threadErr)]));
     } else {
       Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
       try {
         sendGuardedEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send fallback follow-up (' + region + ')');
         outcome = 'sent';
+        resultNote = 'sent (fallback: a new message, not threaded — the threaded send failed: ' + threadErr + ')';
       } catch (fallbackErr) {
         outcome = isAmbiguousSendErrorGs_(fallbackErr) ? 'unconfirmed' : 'failed';
+        resultNote = (outcome === 'unconfirmed' ? 'unconfirmed: the fallback send ended ambiguously (' : 'failed: neither send worked (') + fallbackErr + ')';
         Logger.log('Overnight follow-up reply ' + (outcome === 'unconfirmed' ? 'ended UNCONFIRMED' : 'failed entirely') + ' for ' + region + ' (thread ' + threadId + ', to ' + sendTo + '): ' + fallbackErr);
         if (outcome === 'failed') {
           notifyOpsAlertGs_('1pm follow-up failed for ' + region, alertLines([
@@ -1719,6 +1743,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     }
   }
   const replyDone = outcome !== 'failed';
+  writeFollowupResultGs_(overnightLogSheet, overnightLogRowNumber, resultNote, region);
 
   // checkpoint2_json/checkpoint2_sent_at -- changed 2026-10-05 (email audit P5 / F6): written ONLY when the reply was
   // delivered (or is unconfirmed — attempted and possibly delivered, so it must not be re-sent without a human looking). It
@@ -1744,7 +1769,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     // is (harmlessly) resent on the next run, not that anything breaks.
     try {
       writeUnlessTestModeGs_(function () {
-        const stamp = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+        const stamp = istStampGs_(); // the real send time, not the job's start time (email audit P9 / F12)
         overnightLogSheet.getRange(overnightLogRowNumber, 9, 1, 1).setValues([[outcome === 'unconfirmed' ? 'unconfirmed ' + stamp : stamp]]);
       }, 'write followup_sent_at back to Overnight_Log (' + region + ')');
     } catch (logErr) {
@@ -1917,7 +1942,11 @@ function sendOvernightFollowupEmails_() {
     const pendingKey = checkpoint1PendingKeyGs_(r.region, r.to);
     const section2Input = (r.to && !section2Consumed[pendingKey]) ? (checkpoint1PendingByEmail[pendingKey] || null) : null;
     if (section2Input) section2Consumed[pendingKey] = true;
-    if (!r.unresolvedRows.length && !section2Input) return; // nothing in EITHER section — nothing to send
+    if (!r.unresolvedRows.length && !section2Input) {
+      // nothing in EITHER section — nothing to send. Recorded (email audit P9 / F12): "skipped" is a result, not a blank.
+      writeFollowupResultGs_(logSheet, r.rowNumber, 'skipped: nothing unresolved', r.region);
+      return;
+    }
     if (!r.to) {
       // This row predates the recipient-storing fix (Overnight_Log only
       // had 5 columns, no to/cc/subject) — GmailThread.reply() on
@@ -1926,6 +1955,7 @@ function sendOvernightFollowupEmails_() {
       // it. Resolves itself the next time sendOvernightMorningEmails runs
       // and logs a row with the new columns filled in.
       Logger.log('Skipping follow-up for ' + r.region + ' (thread ' + r.threadId + '): no stored recipient — this row predates the recipient-storing fix.');
+      writeFollowupResultGs_(logSheet, r.rowNumber, 'skipped: no stored recipient (this row predates the recipient-storing fix)', r.region);
       return;
     }
     // Prefer the dashboard's own richer, sibling-pooled suggestion
@@ -1973,6 +2003,7 @@ function sendOvernightFollowupEmails_() {
       sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap, leadsData);
     } catch (bucketErr) {
       Logger.log('Combined follow-up threw for ' + r.region + ' (thread ' + r.threadId + '): ' + bucketErr);
+      writeFollowupResultGs_(logSheet, r.rowNumber, 'failed: unexpected error: ' + bucketErr, r.region);
       followupBucketFailures.push(r.region + ' — ' + r.subject + ' — to ' + r.to + ': ' + bucketErr);
     }
   });

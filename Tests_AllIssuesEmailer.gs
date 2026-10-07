@@ -336,6 +336,24 @@ function runAllIssuesEmailerTests_() {
       } finally { logSheetD.appendRow = realAppend; }
     }
 
+    // ---- email audit P9 (F21): the 17:00 job leaves a run record, and a crash is recorded ----
+    {
+      PropertiesService = TestMockPropertiesService_();
+      sendAllIssuesEmails();
+      const done = readEmailJobRunGs_('sendAllIssuesEmails');
+      TestAssert_(!!done && done.status === 'completed' && done.day === istDayKeyGs_(now), 'run record: the 17:00 job is recorded as completed for today');
+
+      PropertiesService = TestMockPropertiesService_();
+      const realReadLeads = readLeadsTab_;
+      readLeadsTab_ = function () { throw new Error('simulated platform failure: a server error occurred'); };
+      let threw = false;
+      try { sendAllIssuesEmails(); } catch (e) { threw = /server error occurred/.test(e.message); } finally { readLeadsTab_ = realReadLeads; }
+      TestAssert_(threw, 'run record: a crashing 17:00 job still throws');
+      const failed = readEmailJobRunGs_('sendAllIssuesEmails');
+      TestAssert_(!!failed && failed.status === 'failed' && /server error occurred/.test(failed.error || ''), 'run record: …and is recorded as failed, with the error');
+      PropertiesService = TestMockPropertiesService_();
+    }
+
     // ---- email audit P4 (F5): the 17:00 job takes the script lock; an overlapping job is skipped, and a broken lock fails open ----
     {
       const realLock = LockService;

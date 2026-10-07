@@ -98,6 +98,12 @@ SANDBOX_SHIM_JS = r"""
       for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
       return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_');
     },
+    // Standard (non-web-safe) base64 -- added 2026-10-05 for notifyOpsAlertGs_'s second send path (RFC 2047 encoded subject).
+    base64Encode: function (bytes) {
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    },
     // crypto.randomUUID() requires a "secure context" (HTTPS/localhost) --
     // a page with no navigation (default about:blank) or a data: URL is
     // NEITHER, so it's undefined there (confirmed by hand; real incident:
