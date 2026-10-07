@@ -44,9 +44,13 @@ let movementFetchStartedAt = null;
 let _lastOvernightCohort = null;        // last computeOvernightCohort() result — the "Generate Region Emails" button under Overnight Leads builds from this
 
 const MOVEMENT_LOG_TAB_NAME = 'Movement_Log';
-// Mirrors MovementTracker.gs's MOVEMENT_LOG_RUNS_SHEET_/
-// MOVEMENT_LOG_RUNS_COLUMNS_ exactly — see that constant's own comment
-// for why this exists as a tab separate from Movement_Log itself.
+// Mirrors the first four columns of MovementTracker.gs's
+// MOVEMENT_LOG_RUNS_SHEET_/MOVEMENT_LOG_RUNS_COLUMNS_ — see that constant's
+// own comment for why this exists as a tab separate from Movement_Log
+// itself. The Apps Script writer has two more columns since 2026-10-07
+// (total_s, skipped_phases: how long the scheduled run took and which
+// optional phases its time budget skipped, email audit F23); a browser
+// "Snapshot now" row leaves them blank - it has no time budget.
 const MOVEMENT_LOG_RUNS_TAB_NAME = 'Movement_Log_Runs';
 const MOVEMENT_LOG_RUNS_COLUMNS = ['run_at', 'run_label', 'lead_count_seen', 'leads_changed'];
 // Comment-history export written on every "Generate" click for the
@@ -99,12 +103,15 @@ let _currentSheetId = ''; // set once a fetch succeeds — needed by the Sheets-
 
 const MOVEMENT_LOG_DATE_KEYS = new Set(['snapshot_at', 'lead_assigned_at', 'last_connect_time', 'opp_at']);
 
-// customer-key -> call_attempts as of the LATEST Movement_Log snapshot
+// lead-id -> call_attempts as of the LATEST Movement_Log snapshot
 // captured before the IST calendar day `asOf` falls in — the baseline
 // enrichLead subtracts a lead's current call_attempts against to get a
 // real count of today's calls (see attemptsToday there). Returns an empty
 // map when there's no snapshot history yet (fresh setup) — callers treat
 // a missing key as "no baseline available" and fall back accordingly.
+// Keyed by LEAD id, not client_id (email audit F18, 2026-10-07) — mirrors
+// MovementTracker.gs's _readMovementLogRowsGs_; call_attempts is a per-lead
+// counter and a customer's several leads each carry their own.
 function buildTodayCallBaseline(asOf){
   const map = new Map();
   if (!movementSnapshots.length) return map;
@@ -114,7 +121,8 @@ function buildTodayCallBaseline(asOf){
   movementSnapshots.forEach(rec => {
     const atMs = rec.snapshot_at.getTime();
     if (atMs >= todayStart) return; // only snapshots strictly before today count as a baseline
-    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    const key = String(rec.lead_id).trim();
+    if (!key) return; // no lead id — nothing a live lead could look this row up by
     const cur = latest.get(key);
     if (!cur || atMs > cur.atMs) latest.set(key, { atMs, call_attempts: Number(rec.call_attempts) || 0 });
   });
@@ -124,9 +132,9 @@ function buildTodayCallBaseline(asOf){
 
 // Same scan as buildTodayCallBaseline above, but keeps each entry's own
 // snapshot timestamp instead of discarding it, and applies NO "before
-// today" gate — returns every customer's LATEST snapshot strictly
+// today" gate — returns every LEAD's LATEST snapshot strictly
 // before `asOf`, whatever calendar day it falls on, as
-// key -> {atMs, call_attempts}. buildTodayCallBaseline's day-boundary
+// lead-id -> {atMs, call_attempts}. buildTodayCallBaseline's day-boundary
 // gate exists for a different purpose (today's-calls delta against a
 // fixed start-of-day baseline) and would incorrectly exclude an
 // overnight lead's most recent snapshot from earlier today — see
@@ -139,7 +147,8 @@ function lastSnapshotBefore(asOf){
   movementSnapshots.forEach(rec => {
     const atMs = rec.snapshot_at.getTime();
     if (atMs >= cutoffMs) return;
-    const key = String(rec.client_id || '').trim() || 'l:' + String(rec.lead_id).trim();
+    const key = String(rec.lead_id).trim();
+    if (!key) return;
     const cur = map.get(key);
     if (!cur || atMs > cur.atMs) map.set(key, { atMs, call_attempts: Number(rec.call_attempts) || 0 });
   });
@@ -659,9 +668,12 @@ function computeStalledLeads(){
       // latest retained snapshot at or before that cutoff; a lead too
       // new for Movement_Log to have a snapshot that old yet (or with no
       // history at all) can't be judged this way — skipped, not flagged.
+      // `histories` is per customer (it also feeds customer-level history views), but call_attempts is a per-LEAD counter —
+      // compare only against THIS lead's own snapshots, not a sibling lead's (email audit F18, 2026-10-07).
       const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
-      const history = histories.get(key);
-      if (!history || !history.length) return;
+      const leadIdStr = String(l.lead_id).trim();
+      const history = (histories.get(key) || []).filter(h => String(h.lead_id).trim() === leadIdStr);
+      if (!history.length) return;
       const cutoffMs = now.getTime() - SIX_HOURS_MS;
       let baseline = null;
       for (let i = history.length - 1; i >= 0; i--) {

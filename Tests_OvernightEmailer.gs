@@ -1513,6 +1513,64 @@ function runOvernightEmailerTests_() {
       TestAssertEqual_(reports(beforeJob).filter(function (d) { return d.htmlBody.indexOf('L-P10-CHONLY') !== -1; }).length, 1, '10:00 CH-only region: a same-day RE-RUN does not send the CH-level report a second time');
     }
 
+    // ======================================================================================================
+    // Email audit F18 (2026-10-07): the call baseline is per LEAD, not per customer - on BOTH the 10:00 and 13:00 paths.
+    // Two leads of ONE customer (same client_id) with different call_attempts counters; the sibling's snapshot is the LATER
+    // one, which is the one a client-keyed lookup returned. Own snapshots: L-SIB-B 4 -> now 9 (5 more attempts);
+    // the sibling's 13 would have read "no new call attempts".
+    // ======================================================================================================
+    {
+      const f18Header = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+      const f18Snap = function (at, leadId, attempts) {
+        return f18Header.map(function (k) {
+          if (k === 'snapshot_at') return at;
+          if (k === 'snapshot_label') return 'f18';
+          if (k === 'lead_id') return leadId;
+          if (k === 'client_id') return 'C-SIB';
+          if (k === 'call_attempts') return attempts;
+          return '';
+        });
+      };
+      const f18Log = function () {
+        return TestMockSheet_('Movement_Log', [f18Header, f18Snap(TestFixture_hoursAgo_(now, 25), 'L-SIB-B', 4), f18Snap(TestFixture_hoursAgo_(now, 24), 'L-SIB-A', 13)]);
+      };
+
+      // ---- 10:00 morning email ----
+      // 'Not Updated' (rank 0) vs 'Suspect' (rank 1): L-SIB-B is the copy that survives the per-customer collapse.
+      PropertiesService = TestMockPropertiesService_();
+      const ssF18m = P1_newSs([
+        TestOE_leadRow_(header, { lead_id: 'L-SIB-A', client_id: 'C-SIB', RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: midWindow, call_attempts: 13 }),
+        TestOE_leadRow_(header, { lead_id: 'L-SIB-B', client_id: 'C-SIB', RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: midWindow, call_attempts: 9 }),
+      ]);
+      ssF18m._sheets['Movement_Log'] = f18Log();
+      const f18mBefore = TestGmailLog_.drafts.length;
+      P1_withSs(ssF18m, function () { sendOvernightMorningEmails(); });
+      const f18mDrafts = TestGmailLog_.drafts.slice(f18mBefore).filter(function (d) { return d.htmlBody.indexOf('L-SIB-B') !== -1; });
+      TestAssertEqual_(f18mDrafts.length, 1, 'F18 10:00 email: exactly one email carries the surviving sibling lead');
+      const f18mHtml = f18mDrafts[0] ? f18mDrafts[0].htmlBody : '';
+      TestAssert_(f18mHtml.indexOf('L-SIB-A') === -1, 'F18 10:00 email: the other sibling collapsed away (one row per customer)');
+      const f18mRow = f18mHtml.slice(f18mHtml.indexOf('L-SIB-B'), f18mHtml.indexOf('</tr>', f18mHtml.indexOf('L-SIB-B')));
+      TestAssertContains_(f18mRow, '5 more call attempts', 'F18 10:00 email: the follow-up compares with the lead\'s OWN last snapshot (4 -> 9 = 5 more attempts), not the sibling\'s (13)');
+
+      // ---- 13:00 follow-up: an unresolved lead's follow-up text ----
+      PropertiesService = TestMockPropertiesService_();
+      const ssF18f = P1_newSs([
+        TestOE_leadRow_(header, { lead_id: 'L-SIB-A', client_id: 'C-SIB', RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: TestFixture_hoursAgo_(now, 70), call_attempts: 13 }),
+        TestOE_leadRow_(header, { lead_id: 'L-SIB-B', client_id: 'C-SIB', RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: TestFixture_hoursAgo_(now, 60), call_attempts: 9 }),
+      ]);
+      ssF18f._sheets['Movement_Log'] = f18Log();
+      const f18fLog = ensureOvernightLogSheet_(ssF18f);
+      f18fLog.appendRow([istDayKeyGs_(now), 'Pune', 'thr-f18', JSON.stringify([{ lead_id: 'L-SIB-B', issueKey: 'stageStuck48h', issueLabel: 'Stuck 48h+' }]),
+        P1_stamp, TEST_EMAIL_PRIMARY_, '', 'Pune Digest - f18']);
+      const f18fRepliesBefore = TestGmailLog_.threadReplies.length;
+      P1_withSs(ssF18f, function () { sendOvernightFollowupEmails(); });
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, f18fRepliesBefore + 1, 'F18 13:00 reply: one threaded reply is sent for the still-unresolved lead');
+      const f18fReply = TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1];
+      const f18fHtml = TestOE_decodeRawMime_(f18fReply && f18fReply.raw);
+      TestAssertContains_(f18fHtml, 'L-SIB-B', 'F18 13:00 reply: the unresolved lead is listed');
+      TestAssertContains_(f18fHtml, '5 more call attempts', 'F18 13:00 reply: its follow-up compares with the lead\'s OWN last snapshot (4 -> 9), not the sibling\'s (13)');
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either

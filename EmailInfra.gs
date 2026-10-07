@@ -850,23 +850,28 @@ function emailJobProblemsGs_(now) {
 // returns the problems it found. 'unreadable' is not de-duplicated — a broken Properties service is exactly when the dedupe
 // record cannot be trusted, and being told hourly is the right amount of noise.
 function checkEmailJobsCompletedGs_(now) {
-  const problems = emailJobProblemsGs_(now);
+  // The Movement_Log snapshot job (MovementTracker.gs, email audit F23) shares this watchdog: its baselines feed the "Behind on
+  // Today's Calls" flag in every email, and it is the job that hit the 30-minute limit. Its problems carry their own `marker`
+  // (reported once per RUN, not once per day - it runs four times a day) and `hint`.
+  const problems = emailJobProblemsGs_(now).concat(typeof snapshotRunProblemsGs_ === 'function' ? snapshotRunProblemsGs_(now) : []);
   const day = istDayKeyGs_(now);
   problems.forEach(function (p) {
     const alertedKey = emailJobAlertedKeyGs_(p.job);
-    const marker = day + '|' + p.kind;
+    const marker = p.marker || (day + '|' + p.kind);
     if (p.kind !== 'unreadable') {
       let already = null;
       try { already = PropertiesService.getScriptProperties().getProperty(alertedKey); } catch (e) { already = null; }
       if (already === marker) return;
     }
-    const what = p.kind === 'never_started' ? 'did not run' : p.kind === 'stuck' ? 'did not finish' : p.kind === 'failed' ? 'failed' : 'cannot be checked';
+    const whatByKind = { never_started: 'did not run', stuck: 'did not finish', failed: 'failed', overdue: 'is overdue', degraded: 'skipped work to stay inside its time limit' };
+    const what = whatByKind[p.kind] || 'cannot be checked';
     notifyOpsAlertGs_('WATCHDOG: ' + p.job + ' ' + what, [
       p.detail,
       '',
-      p.kind === 'never_started' || p.kind === 'stuck'
-        ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + p.job + 'Now by hand (it is safe to re-run: its "already sent today" guards stop it re-sending what already went out).'
-        : 'See the Executions list for the full error. This watchdog alerts once per day per job and problem.',
+      p.hint ? p.hint
+        : p.kind === 'never_started' || p.kind === 'stuck'
+          ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + p.job + 'Now by hand (it is safe to re-run: its "already sent today" guards stop it re-sending what already went out).'
+          : 'See the Executions list for the full error. This watchdog alerts once per day per job and problem.',
     ]);
     if (p.kind !== 'unreadable') {
       try { PropertiesService.getScriptProperties().setProperty(alertedKey, marker); } catch (e2) { Logger.log('watchdog: could not record its alert for ' + p.job + ': ' + e2); }
@@ -922,6 +927,7 @@ function showEmailJobRunsNow() {
   Object.keys(schedule).forEach(function (job) {
     Logger.log(job + ': ' + JSON.stringify(readEmailJobRunGs_(job)));
   });
+  Logger.log('snapshotPeriodic: ' + JSON.stringify(readEmailJobRunGs_('snapshotPeriodic')));
 }
 
 // ---- Plain-text twin of a report email (email audit P2 / F13) ----

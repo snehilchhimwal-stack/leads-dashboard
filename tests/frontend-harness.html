@@ -1280,7 +1280,7 @@
     const savedRenderNow = _renderNow;
     _renderNow = new Date(); // resolves to the frozen clock (top of file)
     try {
-      _todayCallBaselineByKey = new Map([['C-UCT-1', 10]]);
+      _todayCallBaselineByKey = new Map([['L-UCT-1', 10]]); // keyed by LEAD id (email audit F18)
       const baseLead = {
         lead_id: 'L-UCT-1', client_id: 'C-UCT-1', current_stage: 'Suspect',
         lead_assigned_at: new Date(_renderNow.getTime() - 48 * 3600000),
@@ -1312,6 +1312,133 @@
         l.underCalledToday === false, 'expected cleared via delta alone; got ' + l.underCalledToday);
     } finally {
       _todayCallBaselineByKey = savedBaseline;
+      _renderNow = savedRenderNow;
+    }
+  })();
+
+  // ---- 2i-b. Call baselines are per LEAD, not per customer (email audit F18, 2026-10-07) ----
+  // call_attempts is a per-lead counter: every RM copy of ONE lead id carries the identical value, but a customer's several
+  // leads (one client_id, different lead_ids) each carry their own. Keyed by client_id, a lead's "calls today" was measured
+  // against whichever sibling's snapshot came first (real data: 37 of 764 open Google Non-UTM leads had a different baseline,
+  // 3 were wrongly NOT flagged "Behind on Today's Calls"). Mirrors MovementTracker.gs's _readMovementLogRowsGs_ and
+  // SlaEngine.gs's computeSlaFlags_ (Tests_SlaEngine.gs / Tests_MovementTracker.gs carry the same scenarios).
+  (function () {
+    const savedBaseline = _todayCallBaselineByKey;
+    const savedSnapshots = _lastSnapshotByKey;
+    const savedMovement = movementSnapshots;
+    const savedIssueLeads = issueLeads;
+    const savedRenderNow = _renderNow;
+    _renderNow = new Date(); // the frozen clock: 2026-09-09 14:00 IST
+    const ist = (iso) => new Date(iso + '+05:30');
+    const yday = ist('2026-09-08T20:00:00'), twoDays = ist('2026-09-07T20:00:00'), earlyToday = ist('2026-09-09T06:00:00');
+    try {
+      // -- the two baseline builders --
+      movementSnapshots = [
+        { snapshot_at: twoDays, lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 13 },
+        { snapshot_at: twoDays, lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 4 },
+        { snapshot_at: yday, lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 6 },
+        { snapshot_at: yday, lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 13, RM: 'Test RM Two' }, // a second RM copy of ONE lead
+        { snapshot_at: earlyToday, lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 9 },
+        { snapshot_at: yday, lead_id: '', client_id: 'C-ORPHAN', call_attempts: 77 },
+        { snapshot_at: yday, lead_id: 2245786, client_id: '', call_attempts: 5 },
+      ];
+      const base = buildTodayCallBaseline(_renderNow);
+      assert('F18 buildTodayCallBaseline: sibling leads of one client each keep their OWN pre-today counter (L-A 13, L-B 6)',
+        base.get('L-A') === 13 && base.get('L-B') === 6, 'got L-A=' + base.get('L-A') + ' L-B=' + base.get('L-B'));
+      assert('F18 buildTodayCallBaseline: nothing is stored under the client id',
+        !base.has('C-SAME') && !base.has('l:L-A'), 'keys: ' + Array.from(base.keys()).join(','));
+      assert('F18 buildTodayCallBaseline: a numeric lead id is keyed by its string form, and a row with no lead id is dropped',
+        base.get('2245786') === 5 && base.size === 3, 'size ' + base.size + ' keys: ' + Array.from(base.keys()).join(','));
+      const last = lastSnapshotBefore(_renderNow);
+      assert('F18 lastSnapshotBefore: per lead - L-B\'s latest snapshot before now is today\'s early one (9), L-A\'s is yesterday\'s (13)',
+        last.get('L-B') && last.get('L-B').call_attempts === 9 && last.get('L-A') && last.get('L-A').call_attempts === 13 && !last.has('C-SAME'),
+        'L-B=' + JSON.stringify(last.get('L-B')) + ' L-A=' + JSON.stringify(last.get('L-A')));
+
+      // -- a single-copy lead is measured against ITS OWN baseline --
+      const sib = (over) => Object.assign({
+        lead_id: 'L-B', client_id: 'C-SAME', current_stage: 'Suspect',
+        lead_assigned_at: new Date(_renderNow.getTime() - 48 * 3600000), call_attempts: 9, rm_is_active: true,
+      }, over || {});
+      _todayCallBaselineByKey = new Map([['L-A', 13], ['L-B', 4], ['C-SAME', 13]]);
+      let l = enrichLead(sib());
+      assert('F18 enrichLead: a lead is measured against its OWN baseline (9 - 4 = 5 calls today), not a sibling\'s (13 would read 0)',
+        l.underCalledToday === false, 'expected cleared; got ' + l.underCalledToday);
+      _todayCallBaselineByKey = new Map([['L-A', 2], ['L-B', 9], ['C-SAME', 2]]);
+      l = enrichLead(sib());
+      assert('F18 enrichLead: a lead with NO calls today is flagged even when a sibling has a low baseline (own 9 - 9 = 0; the sibling\'s 2 would read 7 and hide it)',
+        l.underCalledToday === true, 'expected flagged; got ' + l.underCalledToday);
+      _todayCallBaselineByKey = new Map([['C-SAME', 0]]);
+      l = enrichLead(sib());
+      assert('F18 enrichLead: a baseline stored under the client id is NOT used - no own baseline falls back to the comment count (0 here)',
+        l.underCalledToday === true, 'expected flagged; got ' + l.underCalledToday);
+
+      // -- a MERGED customer record takes the best per-lead delta (its call_attempts is the max over its leads) --
+      const merged = (over) => Object.assign({
+        lead_id: 'L-A', client_id: 'C-SAME', current_stage: 'Suspect',
+        lead_assigned_at: new Date(_renderNow.getTime() - 48 * 3600000), rm_is_active: true,
+        call_attempts: 13, callAttemptsByLeadId: { 'L-A': 13, 'L-B': 9 }, collatedLeadIds: ['L-A', 'L-B'], collatedFrom: 2,
+      }, over || {});
+      _todayCallBaselineByKey = new Map([['L-A', 13], ['L-B', 4]]);
+      l = enrichLead(merged());
+      assert('F18 merged record: the sibling that actually made 5 calls today clears it (L-B 9 - 4) even though the primary lead made none (13 - 13)',
+        l.underCalledToday === false, 'expected cleared; got ' + l.underCalledToday);
+      _todayCallBaselineByKey = new Map([['L-A', 13], ['L-B', 9]]);
+      l = enrichLead(merged());
+      assert('F18 merged record: no lead of the customer made any calls today -> flagged',
+        l.underCalledToday === true, 'expected flagged; got ' + l.underCalledToday);
+      _todayCallBaselineByKey = new Map([['L-B', 4]]);
+      l = enrichLead(merged());
+      assert('F18 merged record: a lead without a baseline contributes nothing - the one with a baseline still counts (L-B 9 - 4 = 5)',
+        l.underCalledToday === false, 'expected cleared; got ' + l.underCalledToday);
+      _todayCallBaselineByKey = new Map();
+      l = enrichLead(merged());
+      assert('F18 merged record: no baseline for any of its leads -> comment-count fallback (0 comments -> flagged)',
+        l.underCalledToday === true, 'expected flagged; got ' + l.underCalledToday);
+
+      // -- the "no comment" follow-up text compares against the right lead's snapshot --
+      const fiveHoursAgo = new Date(_renderNow.getTime() - 5 * 3600000);
+      _lastSnapshotByKey = new Map([['L-A', { atMs: fiveHoursAgo.getTime(), call_attempts: 13 }], ['L-B', { atMs: fiveHoursAgo.getTime(), call_attempts: 4 }]]);
+      let txt = noCommentFollowUp({ lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 9 });
+      assert('F18 noCommentFollowUp: compares against the lead\'s OWN snapshot (9 - 4 = 5 more attempts), not a sibling\'s',
+        /5 more call attempts/.test(txt), txt);
+      txt = noCommentFollowUp({ lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 4 });
+      assert('F18 noCommentFollowUp: unchanged since its own snapshot -> "no new call attempts" (the sibling\'s higher counter must not change that)',
+        /no new call attempts/.test(txt), txt);
+      txt = noCommentFollowUp({ lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 13, collatedLeadIds: ['L-A', 'L-B'] });
+      assert('F18 noCommentFollowUp: a merged record compares against the snapshot of the lead with the highest counter (L-A 13)',
+        /no new call attempts/.test(txt), txt);
+      // …even when the record's primary lead is NOT the one with the highest counter (primary L-B 4; the merged call_attempts is L-A's 13).
+      txt = noCommentFollowUp({ lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 13, collatedLeadIds: ['L-B', 'L-A'] });
+      assert('F18 noCommentFollowUp: …regardless of which of its leads is the record\'s primary (primary L-B has 4, but the record carries L-A\'s 13)',
+        /no new call attempts/.test(txt), txt);
+
+      // -- Stalled Leads: attempts are compared with THIS lead's own snapshot history --
+      const stallBase = (over) => enrichLead(Object.assign({
+        lead_id: 'L-B', client_id: 'C-SAME', current_stage: 'Suspect', RM: 'Test RM One',
+        lead_assigned_at: new Date(_renderNow.getTime() - 72 * 3600000), call_attempts: 9, rm_is_active: true, internal_status_comments: '',
+      }, over || {}));
+      const hoursAgo = (h) => new Date(_renderNow.getTime() - h * 3600000);
+      issueLeads = [stallBase()];
+      movementSnapshots = [
+        { snapshot_at: hoursAgo(8), lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 4 },   // its own: attempts have risen since
+        { snapshot_at: hoursAgo(7), lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 13 },  // a sibling's, LATER: higher counter
+      ];
+      assert('F18 computeStalledLeads: a sibling lead\'s later, higher snapshot does not make a lead whose own attempts rose (4 -> 9) look stalled',
+        !computeStalledLeads().some(r => r.lead_id === 'L-B'), 'L-B was reported stalled');
+      movementSnapshots = [
+        { snapshot_at: hoursAgo(8), lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 9 },   // its own: unchanged
+        { snapshot_at: hoursAgo(7), lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 3 },   // a sibling's, LATER: lower counter
+      ];
+      assert('F18 computeStalledLeads: a sibling lead\'s later, lower snapshot does not hide a lead whose own attempts are unchanged (9 -> 9)',
+        computeStalledLeads().some(r => r.lead_id === 'L-B' && r.issue === 'Attempts Unchanged (6h+)'), 'L-B was not reported stalled');
+      movementSnapshots = [{ snapshot_at: hoursAgo(7), lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 3 }];
+      assert('F18 computeStalledLeads: a lead with no snapshot of its own is skipped (not judged from a sibling\'s history)',
+        !computeStalledLeads().some(r => r.lead_id === 'L-B'), 'L-B was judged from the sibling\'s snapshot');
+    } finally {
+      _todayCallBaselineByKey = savedBaseline;
+      _lastSnapshotByKey = savedSnapshots;
+      movementSnapshots = savedMovement;
+      issueLeads = savedIssueLeads;
       _renderNow = savedRenderNow;
     }
   })();
@@ -1718,6 +1845,16 @@
 
     assert('Stuck does NOT list L009 (already Opportunity)', textOf('stuckList').indexOf('L009') === -1);
     assert('Stuck does NOT list L010 (Booking, closed)', textOf('stuckList').indexOf('L010') === -1);
+
+    // Email audit F18: a merged customer record keeps each of its leads' OWN call_attempts (callsTodayFromBaseline needs them —
+    // the merged call_attempts is only the max over the leads). L013/L014 are one customer (C013) with counters 0 and 3.
+    const f18Merged = allParsedLeads.find(l => l.client_id === 'C013');
+    assert('F18 merge: the C013 customer record carries callAttemptsByLeadId {L013: 0, L014: 3} (per-lead counters kept apart)',
+      !!f18Merged && !!f18Merged.callAttemptsByLeadId && f18Merged.callAttemptsByLeadId.L013 === 0 && f18Merged.callAttemptsByLeadId.L014 === 3 &&
+      Object.keys(f18Merged.callAttemptsByLeadId).length === 2, JSON.stringify(f18Merged && f18Merged.callAttemptsByLeadId));
+    assert('F18 merge: …while its own call_attempts is still the max over its leads (3)', !!f18Merged && f18Merged.call_attempts === 3, 'got ' + (f18Merged && f18Merged.call_attempts));
+    const f18Single = allParsedLeads.find(l => l.lead_id === 'L002');
+    assert('F18 merge: a single-lead customer has no callAttemptsByLeadId (the helper falls back to its own lead id)', !!f18Single && f18Single.callAttemptsByLeadId === undefined, 'got ' + (f18Single && JSON.stringify(f18Single.callAttemptsByLeadId)));
 
     const rmTableText = textOf('rmTable');
     ['Ravi Kumar', 'Sonal Mehta', 'Kunal Joshi', 'Neha Singh'].forEach(rm =>

@@ -892,6 +892,45 @@ function runEmailInfraTests_() {
         TestAssert_(u1.alerts.length === 1 && u2.alerts.length === 1, 'watchdog: an unreadable record alerts on every check');
         TestAssertContains_(u1.alerts[0].subject, 'cannot be checked', 'watchdog: …saying it cannot be checked');
 
+        // ---- the Movement_Log snapshot job shares the watchdog (email audit F23) ----
+        // snapshotPeriodic runs 4x a day, its snapshots are the "calls so far today" baseline behind every email, and it hit the
+        // 30-minute wall three times in five days with nothing noticing. snapshotRunProblemsGs_ (MovementTracker.gs) reads its run
+        // record; checkEmailJobsCompletedGs_ alerts once per RUN (not once per day).
+        const S = 'snapshotPeriodic';
+        PropertiesService = TestMockPropertiesService_();
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('12:00'))), '', 'snapshot watchdog: no run record at all (not deployed yet) is not a problem');
+        rec(S, { startedAt: iso('06:08'), status: 'running' });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('06:40'))), '', 'snapshot watchdog: a run 32 minutes in is still running');
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('06:43'))), '', 'snapshot watchdog: …and at 35 minutes');
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('06:44'))), S + ':stuck', 'snapshot watchdog: still "running" past 35 minutes means the platform killed it (the 30-minute wall)');
+        TestAssert_(/06:08 IST/.test(snapshotRunProblemsGs_(at('06:50'))[0].detail), 'snapshot watchdog: the stuck message says when that run started');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:09'), status: 'failed', error: 'Exception: boom' });
+        const sFailed = snapshotRunProblemsGs_(at('06:30'))[0];
+        TestAssert_(sFailed.kind === 'failed' && /Exception: boom/.test(sFailed.detail), 'snapshot watchdog: a failed run is reported with its error text');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:20'), status: 'completed', totalSeconds: 700, skipped: [] });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), '', 'snapshot watchdog: a clean completed run is fine');
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('14:08'))), '', 'snapshot watchdog: …and 8 hours later, still inside the 8-hour grace window');
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('14:09'))), S + ':overdue', 'snapshot watchdog: no new run for more than 8 hours means a scheduled run did not happen');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune', 'Daily_Cohort_History persist'] });
+        const sSkipped = snapshotRunProblemsGs_(at('07:00'));
+        TestAssertEqual_(kinds(sSkipped), S + ':degraded', 'snapshot watchdog: a run that skipped phases to stay inside its time budget is reported');
+        TestAssert_(/Movement_Log prune, Daily_Cohort_History persist/.test(sSkipped[0].detail) && /850s/.test(sSkipped[0].detail), 'snapshot watchdog: …naming the skipped phases and the run time');
+        rec(S, { startedAt: iso('06:08'), status: 'running' });
+        TestAssertEqual_(snapshotRunProblemsGs_(at('16:00')).length, 1, 'snapshot watchdog: a record that is BOTH stuck and overdue is one problem, not two (two would re-alert each other every hour)');
+        TestAssertEqual_(snapshotRunProblemsGs_(at('16:00'))[0].kind, 'stuck', 'snapshot watchdog: …and stuck is the one reported');
+        PropertiesService = TestMockPropertiesService_({ failReads: true });
+        TestAssertEqual_(snapshotRunProblemsGs_(at('12:00')).length, 0, 'snapshot watchdog: an unreadable Properties service is left to the email-job check (no duplicate alert)');
+
+        PropertiesService = TestMockPropertiesService_();
+        rec(S, { startedAt: iso('00:18'), status: 'running' });
+        const snap1 = alertsOf(function () { return checkEmailJobsCompletedGs_(at('01:00')); });
+        TestAssertEqual_(snap1.alerts.length, 1, 'snapshot watchdog: a stuck snapshot produces exactly one alert');
+        TestAssertContains_(snap1.alerts[0].subject, 'WATCHDOG: snapshotPeriodic did not finish', 'snapshot watchdog: the alert subject names the job and the problem');
+        TestAssertContains_(snap1.alerts[0].body, 'snapshotNow', 'snapshot watchdog: the alert says how to capture right now (its own hint, not the email jobs\' "run <job>Now")');
+        TestAssertEqual_(alertsOf(function () { return checkEmailJobsCompletedGs_(at('02:00')); }).alerts.length, 0, 'snapshot watchdog: the hourly re-check does not repeat the alert for the SAME run');
+        rec(S, { startedAt: iso('06:08'), status: 'running' });
+        TestAssertEqual_(alertsOf(function () { return checkEmailJobsCompletedGs_(at('06:50')); }).alerts.length, 1, 'snapshot watchdog: the NEXT run getting stuck alerts again the same day (marker is per run, not per day)');
+
         // ---- the trigger entry point never throws ----
         PropertiesService = TestMockPropertiesService_();
         const realProblems = emailJobProblemsGs_;

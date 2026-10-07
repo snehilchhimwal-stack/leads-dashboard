@@ -398,14 +398,17 @@ async function fetchAndRender(){
         .filter(Boolean)
         .sort((a, b) => b - a)[0] || null;
 
-      // call_attempts/call_count/duration are tracked per CLIENT ID by the
-      // phone system, not accumulated per RM copy — every copy of the same
-      // customer reports the SAME cumulative client-level figure, not a
-      // partial contribution. Summing across copies multiplied it by the
-      // copy count instead (3 copies each reporting 36 attempts read as
-      // 108). Max takes it "as a whole" for the customer, matching
-      // whichever copy's snapshot happens to be most complete, without
-      // the multiplication.
+      // call_attempts/call_count/duration are cumulative figures the phone
+      // system keeps per LEAD, not accumulated per RM copy — every RM copy
+      // of the same lead id reports the SAME figure, not a partial
+      // contribution (0 of 1,852 multi-row leads differed; email audit F18).
+      // Summing across copies multiplied it by the copy count instead (3
+      // copies each reporting 36 attempts read as 108). Max takes it "as a
+      // whole" for the customer, matching whichever copy's snapshot happens
+      // to be most complete, without the multiplication. NOTE a customer's
+      // DIFFERENT leads (distinct lead ids under one client_id) carry
+      // different counters — callAttemptsByLeadId below keeps them apart for
+      // the per-lead call baseline.
       // collatedFrom counts DISTINCT lead_ids, not raw rows.length — two
       // rows unioned together (by shared client_id or lead_id) aren't
       // necessarily two different RM copies. A literal duplicate row (the
@@ -417,9 +420,18 @@ async function fetchAndRender(){
       // distinct copies (see e.g. collationBadge, countCollatedAmong), so
       // it has to actually measure that, not just row multiplicity.
       const distinctLeadIds = Array.from(new Set(rows.map(r => String(r.lead_id).trim())));
+      // Each lead's OWN call_attempts (max over that lead's rows - every RM copy of one lead id carries the identical value).
+      // The merged call_attempts below is the max over ALL the customer's leads; callsTodayFromBaseline (core-lead-model.js)
+      // needs the per-lead figures to subtract each lead's own pre-today baseline (email audit F18).
+      const callAttemptsByLeadId = {};
+      rows.forEach(r => {
+        const id = String(r.lead_id).trim();
+        callAttemptsByLeadId[id] = Math.max(callAttemptsByLeadId[id] || 0, Number(r.call_attempts) || 0);
+      });
       return Object.assign({}, primary, {
         internal_status_comments: mergedComments,
         stage_comments: mergedStageComments,
+        callAttemptsByLeadId: callAttemptsByLeadId,
         call_attempts: Math.max(0, ...rows.map(r => Number(r.call_attempts) || 0)),
         call_count:    Math.max(0, ...rows.map(r => Number(r.call_count) || 0)),
         duration:      Math.max(0, ...rows.map(r => Number(r.duration) || 0)),

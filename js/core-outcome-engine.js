@@ -851,8 +851,7 @@ function suggestedFollowUp(l){
 // specific than any fixed wording could be, so every caller now gets the
 // same real signal instead of a guess.
 function noCommentFollowUp(l){
-  const key = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
-  const baseline = _lastSnapshotByKey.get(key);
+  const baseline = lastSnapshotForLead(l); // per LEAD (email audit F18) - see core-lead-model.js
   if (!baseline || (_renderNow.getTime() - baseline.atMs) < 4 * 3600000) {
     return 'No comment added — connect and log the outcome.';
   }

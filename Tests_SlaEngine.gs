@@ -122,10 +122,10 @@ function runSlaEngineTests_() {
     // Lead NOT created today: attemptsToday is computed against a
     // baseline (yesterday's known call_attempts), not the raw total.
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // 12 - 10 = 2 today, under 5
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // 12 - 10 = 2 today, under 5
     TestAssert_(flags.underCalledToday === true, 'underCalledToday: for an older lead, uses (current - baseline) attempts, not the raw lifetime total');
 
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 5 }); // 12 - 5 = 7 today, not under 5
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 5 }); // 12 - 5 = 7 today, not under 5
     TestAssert_(flags.underCalledToday === false, 'underCalledToday: correctly NOT flagged once (current - baseline) clears the daily minimum');
 
     // 2026-10-01 fix: the delta-vs-baseline can UNDERCOUNT when a real
@@ -143,7 +143,7 @@ function runSlaEngineTests_() {
       lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
       internal_status_comments: underCalledComments5,
     });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // delta = 10-10 = 0, but 5 dated comments logged today
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 10-10 = 0, but 5 dated comments logged today
     TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix: 5 today-dated comment entries clear the daily minimum even though call_attempts never moved off its own baseline (the real Riya Yadav incident shape)');
 
     const underCalledComments4 = [0, 1, 2, 3].map(function (h) {
@@ -153,15 +153,32 @@ function runSlaEngineTests_() {
       lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
       internal_status_comments: underCalledComments4,
     });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // delta = 0, only 4 comments today -- still under the daily minimum
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 0, only 4 comments today -- still under the daily minimum
     TestAssert_(flags.underCalledToday === true, 'underCalledToday 2026-10-01 fix: still correctly fires when even the comment count alone has not cleared the daily minimum (MAX, not an automatic pass)');
 
     // The fix must not weaken the ORIGINAL case the delta already
     // handled correctly: a real logged call that pushed call_attempts
     // up, with zero comments today, still clears via the delta alone.
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 15 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 10 }); // delta = 5, no comments at all today
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 5, no comments at all today
     TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix sanity: a real call-attempts delta with zero same-day comments still clears the minimum via the delta alone, unaffected by the fix');
+
+    // Email audit F18 (2026-10-07): the baseline is looked up by LEAD id, not client_id. call_attempts is a per-lead counter, and
+    // a customer's several leads (one client_id, different lead_ids) each carry their own - under the old client key a lead was
+    // compared with whichever sibling's snapshot came first. Real data: 37 of 764 open Google Non-UTM leads had a different
+    // baseline; 3 were wrongly NOT flagged "Behind on Today's Calls" (e.g. lead 2246693: 17 attempts, own baseline 19 -> 0 today,
+    // but the shared client key held 7 -> read as 10 calls today).
+    f = TestSla_buildRow_({ lead_id: 'L-SIB-B', client_id: 'C-SHARED', lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 9 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-SIB-A': 13, 'L-SIB-B': 4, 'C-SHARED': 13 }); // own baseline 4 -> 5 calls today
+    TestAssert_(flags.underCalledToday === false, 'underCalledToday F18: a lead is measured against ITS OWN baseline, not a sibling lead of the same customer (sibling baseline 13 would have read 0 calls today and wrongly flagged it)');
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-SIB-A': 2, 'L-SIB-B': 9, 'C-SHARED': 2 }); // own baseline 9 -> 0 calls today
+    TestAssert_(flags.underCalledToday === true, 'underCalledToday F18: a lead with no calls today is flagged even when a sibling lead of the same customer has a low baseline (sibling baseline 2 would have read 7 calls today and hidden it)');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 0 }); // a map keyed by client id only: this lead has no baseline of its own
+    TestAssert_(flags.underCalledToday === true, 'underCalledToday F18: a baseline stored under the client id is NOT used for the lead (no own baseline -> falls back to the comment count, 0 here)');
+    f = TestSla_buildRow_({ lead_id: '', lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { '': 0, 'undefined': 0 });
+    TestAssert_(flags.underCalledToday === true, 'underCalledToday F18: a row with no lead id never matches a baseline entry');
 
     // ---- stageStuck48h ----
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 50) });
@@ -259,7 +276,7 @@ function runSlaEngineTests_() {
       { lead_id: 'L-CK-REOPEN', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
       { lead_id: 'L-CK-GONE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'f' },
     ];
-    const ckBaselineMap = { 'C-CK-CATCHANGE': 10 }; // 15 - 10 = 5 today, clears MIN_CALLS_PER_DAY_ so underCalledToday can't also fire on L-CK-CATCHANGE
+    const ckBaselineMap = { 'L-CK-CATCHANGE': 10 }; // 15 - 10 = 5 today, clears MIN_CALLS_PER_DAY_ so underCalledToday can't also fire on L-CK-CATCHANGE
     const ckResults = computeAllIssuesCheckpointGs_(ckSs, ckPriorEntries, now, ckBaselineMap);
     const ckByLeadId = {};
     ckResults.forEach(function (r) { ckByLeadId[r.lead_id] = r; });

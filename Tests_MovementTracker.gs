@@ -346,17 +346,17 @@ function runMovementTrackerTests_() {
       ]),
     });
     const baseline = buildTodayCallBaselineGs_(priorSs, now);
-    TestAssertEqual_(baseline['C-3'], 4, 'buildTodayCallBaselineGs_: reads back yesterday\'s call_attempts as today\'s baseline');
+    TestAssertEqual_(baseline['L-3'], 4, 'buildTodayCallBaselineGs_: reads back yesterday\'s call_attempts as today\'s baseline');
     const lastSnap = lastSnapshotBeforeGs_(priorSs, now);
-    TestAssert_(!!lastSnap['C-3'] && lastSnap['C-3'].call_attempts === 4, 'lastSnapshotBeforeGs_: returns the full {atMs, call_attempts} entry, not just the count');
+    TestAssert_(!!lastSnap['L-3'] && lastSnap['L-3'].call_attempts === 4, 'lastSnapshotBeforeGs_: returns the full {atMs, call_attempts} entry, not just the count');
 
     // ---- buildMovementLogMapsGs_ (perf pass, 2026-08-28) — reads
     // Movement_Log ONCE and must produce results IDENTICAL to calling
     // buildTodayCallBaselineGs_ and lastSnapshotBeforeGs_ separately. ----
     const combined = buildMovementLogMapsGs_(priorSs, now);
-    TestAssertEqual_(combined.baselineMap['C-3'], baseline['C-3'], 'buildMovementLogMapsGs_: baselineMap matches buildTodayCallBaselineGs_\'s own separate result exactly');
-    TestAssertEqual_(combined.lastSnapshotMap['C-3'].call_attempts, lastSnap['C-3'].call_attempts, 'buildMovementLogMapsGs_: lastSnapshotMap matches lastSnapshotBeforeGs_\'s own separate result exactly');
-    TestAssertEqual_(combined.lastSnapshotMap['C-3'].atMs, lastSnap['C-3'].atMs, 'buildMovementLogMapsGs_: lastSnapshotMap\'s atMs matches too, not just call_attempts');
+    TestAssertEqual_(combined.baselineMap['L-3'], baseline['L-3'], 'buildMovementLogMapsGs_: baselineMap matches buildTodayCallBaselineGs_\'s own separate result exactly');
+    TestAssertEqual_(combined.lastSnapshotMap['L-3'].call_attempts, lastSnap['L-3'].call_attempts, 'buildMovementLogMapsGs_: lastSnapshotMap matches lastSnapshotBeforeGs_\'s own separate result exactly');
+    TestAssertEqual_(combined.lastSnapshotMap['L-3'].atMs, lastSnap['L-3'].atMs, 'buildMovementLogMapsGs_: lastSnapshotMap\'s atMs matches too, not just call_attempts');
 
     // ---- pruneMovementLog_: retention cutoff + row-headroom shrink ----
     // pruneMovementLog_ computes its cutoff from the REAL wall clock
@@ -829,10 +829,10 @@ function runMovementTrackerTests_() {
       p7Tick_();
 
       const p7Recon = lastSnapshotBeforeGs_(phase7Ss, p7TBefore3);
-      TestAssertEqual_(p7Recon['C-REPEATCHANGE'].call_attempts, 3, 'Phase 7 reconstruction (before capture 3): L-REPEATCHANGE.call_attempts correctly resolves to its capture-2 value (3), not the stale capture-1 value (1) — proves lastSnapshotBeforeGs_ walks past the dedup gaps correctly');
-      TestAssertEqual_(p7Recon['C-STABLE'].call_attempts, 2, 'Phase 7 reconstruction (before capture 3): L-STABLE resolves to its ONLY row (capture 1) even though 2 captures have happened since — dedup did not lose or corrupt it');
-      TestAssertEqual_(p7Recon['C-NEW'].call_attempts, 5, 'Phase 7 reconstruction (before capture 3): L-NEW (created at capture 2) is already reconstructable, one capture after it first appeared');
-      TestAssertEqual_(p7Recon['C-VANISH'].call_attempts, 1, 'Phase 7 reconstruction (before capture 3): L-VANISH resolves to its capture-1 row (its only row so far, still 2 captures before it disappears)');
+      TestAssertEqual_(p7Recon['L-REPEATCHANGE'].call_attempts, 3, 'Phase 7 reconstruction (before capture 3): L-REPEATCHANGE.call_attempts correctly resolves to its capture-2 value (3), not the stale capture-1 value (1) — proves lastSnapshotBeforeGs_ walks past the dedup gaps correctly');
+      TestAssertEqual_(p7Recon['L-STABLE'].call_attempts, 2, 'Phase 7 reconstruction (before capture 3): L-STABLE resolves to its ONLY row (capture 1) even though 2 captures have happened since — dedup did not lose or corrupt it');
+      TestAssertEqual_(p7Recon['L-NEW'].call_attempts, 5, 'Phase 7 reconstruction (before capture 3): L-NEW (created at capture 2) is already reconstructable, one capture after it first appeared');
+      TestAssertEqual_(p7Recon['L-VANISH'].call_attempts, 1, 'Phase 7 reconstruction (before capture 3): L-VANISH resolves to its capture-1 row (its only row so far, still 2 captures before it disappears)');
 
       const p7StageBefore3Repeat = p7StageAsOfGs_(phase7Ss, 'C-REPEATCHANGE', p7TBefore3.getTime());
       TestAssertEqual_(p7StageBefore3Repeat, 'Suspect', 'Phase 7 reconstruction (before capture 3, raw current_stage): L-REPEATCHANGE was still "Suspect" at this point — its call_attempts had changed (capture 2) but current_stage had not yet (that happens at capture 3)');
@@ -915,8 +915,8 @@ function runMovementTrackerTests_() {
       // history is never deleted, only no longer added to. ----
       const p7FarFuture = new Date(p7Now.getTime() + 365 * 86400000);
       const p7VanishFinal = lastSnapshotBeforeGs_(phase7Ss, p7FarFuture);
-      TestAssert_(!!p7VanishFinal['C-VANISH'], 'Phase 7 (vanished lead): L-VANISH is STILL reconstructable after captures 3 and 4, even though it no longer appears in the live leads tab at all');
-      TestAssertEqual_(p7VanishFinal['C-VANISH'].call_attempts, 1, 'Phase 7 (vanished lead): its last known call_attempts (from capture 1/2, its only real data) is preserved correctly, unchanged by later captures it was never part of');
+      TestAssert_(!!p7VanishFinal['L-VANISH'], 'Phase 7 (vanished lead): L-VANISH is STILL reconstructable after captures 3 and 4, even though it no longer appears in the live leads tab at all');
+      TestAssertEqual_(p7VanishFinal['L-VANISH'].call_attempts, 1, 'Phase 7 (vanished lead): its last known call_attempts (from capture 1/2, its only real data) is preserved correctly, unchanged by later captures it was never part of');
       const p7VanishStage = p7StageAsOfGs_(phase7Ss, 'C-VANISH', p7FarFuture.getTime());
       TestAssertEqual_(p7VanishStage, 'Suspect', 'Phase 7 (vanished lead): its last known current_stage is also still correctly reconstructable from the raw Movement_Log rows');
 
@@ -951,6 +951,259 @@ function runMovementTrackerTests_() {
     } finally {
       SpreadsheetApp = p7RealSpreadsheetApp;
     }
+
+    // ============ 2026-10-07 email audit F18 (per-lead call baseline) + F23 (snapshotPeriodic vs the 30-minute wall) ============
+    (function () {
+      const f18Now = new Date('2026-10-07T14:00:00+05:30');
+      const yday = new Date('2026-10-06T20:00:00+05:30');
+      const twoDays = new Date('2026-10-05T20:00:00+05:30');
+      const earlyToday = new Date('2026-10-07T06:00:00+05:30');
+      const mlHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_).concat(['content_hash']);
+      function mlRow(at, leadId, clientId, attempts, rm, hash, label) {
+        return [at, label || 'x'].concat(SNAPSHOT_COLUMNS_.map(function (c) {
+          if (c === 'lead_id') return leadId;
+          if (c === 'client_id') return clientId;
+          if (c === 'RM') return rm || 'Test RM One';
+          if (c === 'call_attempts') return attempts;
+          return '';
+        })).concat([hash || '']);
+      }
+      // Wraps a mock sheet so a test can see every read's shape, every write, and every deleteRows - the proof that a path reads
+      // narrow columns / does not rewrite the sheet, rather than just ending in the right data.
+      function spySheet(sheet) {
+        const rec = { reads: [], writes: 0, clears: 0, deletes: [] };
+        const origGetRange = sheet.getRange;
+        const origDelete = sheet.deleteRows;
+        sheet.getRange = function () {
+          const range = origGetRange.apply(sheet, arguments);
+          rec.reads.push({ nr: arguments[2] || 1, nc: arguments[3] || 1 });
+          const os = range.setValues;
+          const oc = range.clearContent;
+          range.setValues = function () { rec.writes++; return os.apply(range, arguments); };
+          range.clearContent = function () { rec.clears++; return oc.apply(range, arguments); };
+          return range;
+        };
+        sheet.deleteRows = function (a, b) { rec.deletes.push([a, b]); return origDelete.apply(sheet, arguments); };
+        rec.dataCellsRead = function () { return rec.reads.filter(function (r) { return r.nr > 1; }).reduce(function (sum, r) { return sum + r.nr * r.nc; }, 0); };
+        return rec;
+      }
+
+      // ---- F18: the baseline is keyed by LEAD id ----
+      const f18Sheet = TestMockSheet_('Movement_Log', [mlHeader,
+        mlRow(twoDays, 'L-A', 'C-SAME', 13),
+        mlRow(twoDays, 'L-B', 'C-SAME', 4),
+        mlRow(yday, 'L-B', 'C-SAME', 6),                      // a later pre-today snapshot of L-B
+        mlRow(yday, 'L-A', 'C-SAME', 13, 'Test RM One'),      // two RM copies of ONE lead, identical counter
+        mlRow(yday, 'L-A', 'C-SAME', 13, 'Test RM Two'),
+        mlRow(earlyToday, 'L-B', 'C-SAME', 9),                // today's own snapshot: not a baseline, but it IS the latest known
+        mlRow(yday, '', 'C-ORPHAN', 77),                      // no lead id: nothing could ever look it up
+        mlRow(yday, 2245786, '', 5),                          // a numeric lead id with no client id
+      ]);
+      const f18Ss = TestMockSpreadsheet_({ 'Movement_Log': f18Sheet });
+      const f18Maps = buildMovementLogMapsGs_(f18Ss, f18Now);
+      TestAssertEqual_(f18Maps.baselineMap['L-A'], 13, 'F18 baseline: lead L-A keeps its OWN counter (13)');
+      TestAssertEqual_(f18Maps.baselineMap['L-B'], 6, 'F18 baseline: sibling lead L-B (same client_id) gets its own latest PRE-today value (6) - not the sibling\'s 13, not its own older 4, not today\'s 9');
+      TestAssertEqual_(f18Maps.baselineMap['C-SAME'], undefined, 'F18 baseline: nothing is stored under the client id any more');
+      TestAssertEqual_(f18Maps.baselineMap['2245786'], 5, 'F18 baseline: a numeric lead id in the sheet is keyed by its string form');
+      TestAssertEqual_(Object.keys(f18Maps.baselineMap).sort().join(','), '2245786,L-A,L-B', 'F18 baseline: exactly the three lead ids - the row with no lead id is dropped, not filed under its client id or an "l:" key');
+      TestAssertEqual_(f18Maps.lastSnapshotMap['L-B'].call_attempts, 9, 'F18 lastSnapshotMap: the latest snapshot BEFORE now includes today\'s earlier capture (9) - the "N hours ago" reference noCommentFollowUp needs');
+      TestAssertEqual_(f18Maps.lastSnapshotMap['L-A'].atMs, yday.getTime(), 'F18 lastSnapshotMap: two RM copies of one lead collapse to one entry at the later snapshot time');
+
+      // ---- F23: narrow column reads ----
+      const rdr = _readMovementLogColumnsGs_(f18Sheet, ['snapshot_at', 'call_attempts', 'no_such_column']);
+      TestAssertEqual_(Object.keys(rdr.cols).sort().join(','), 'call_attempts,snapshot_at', 'F23 column reader: returns only the columns asked for');
+      TestAssertEqual_(rdr.idx.no_such_column, -1, 'F23 column reader: a column the sheet does not have is idx -1 with no data entry');
+      TestAssertEqual_(rdr.rowCount, 8, 'F23 column reader: rowCount is the number of data rows (header excluded)');
+      TestAssertEqual_(rdr.cols.call_attempts[0][0], 13, 'F23 column reader: cols[name][i][0] is data row i of that column');
+      TestAssertEqual_(_readMovementLogColumnsGs_(TestMockSheet_('Movement_Log', [mlHeader]), ['snapshot_at']).rowCount, 0, 'F23 column reader: a header-only sheet has no rows');
+
+      const spyBaseline = spySheet(f18Sheet);
+      _readMovementLogRowsGs_(f18Ss);
+      const fullCells = f18Sheet.getLastRow() * mlHeader.length;
+      TestAssert_(spyBaseline.reads.every(function (r) { return r.nr === 1 || r.nc === 1; }), 'F23: the baseline reader never reads a multi-column data range - every data read is ONE column');
+      TestAssert_(spyBaseline.dataCellsRead() < 0.2 * fullCells, 'F23: the baseline reader reads under 20% of the cells a full-width read would (3 of ' + mlHeader.length + ' columns)');
+
+      const hashSheet = TestMockSheet_('Movement_Log', [mlHeader,
+        mlRow(twoDays, 'L-1', 'C-1', 1, 'Test RM One', 'H1'),
+        mlRow(yday, 'L-1', 'C-1', 1, 'Test RM One', 'H2'),    // the later hash for the same lead + RM wins
+        mlRow(yday, 'L-1', 'C-1', 1, 'Test RM Two', 'H3'),
+        mlRow(yday, 'L-9', 'C-9', 1, 'Test RM One', ''),      // a pre-upgrade row: no hash to compare against
+      ]);
+      const hashSs = TestMockSpreadsheet_({ 'Movement_Log': hashSheet });
+      const hashSpy = spySheet(hashSheet);
+      const hashes = _latestContentHashByKeyGs_(hashSs);
+      TestAssertEqual_(hashes['L-1|Test RM One'], 'H2', 'F23 hash lookup: the latest hash per lead + RM wins');
+      TestAssertEqual_(hashes['L-1|Test RM Two'], 'H3', 'F23 hash lookup: a second RM copy of the same lead keeps its own hash');
+      TestAssertEqual_(hashes['L-9|Test RM One'], undefined, 'F23 hash lookup: a row with no hash is skipped');
+      TestAssert_(hashSpy.reads.every(function (r) { return r.nr === 1 || r.nc === 1; }), 'F23 hash lookup: every data read is ONE column (4 columns in 4 reads, not 27 at once)');
+      TestAssertEqual_(Object.keys(_latestContentHashByKeyGs_(TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [mlHeader.slice(0, -1), mlRow(yday, 'L-1', 'C-1', 1).slice(0, -1)]) }))).length, 0, 'F23 hash lookup: …and it is empty, so the capture writes everything (the safe direction)');
+
+      const histSheet = TestMockSheet_('Movement_Log', [mlHeader,
+        mlRow(yday, 'L-H1', 'C-H', 3), mlRow(yday, 'L-H2', '', 4), mlRow(yday, '', 'C-X', 5)]);
+      const histSpy = spySheet(histSheet);
+      const histRows = _readMovementLogHistoryRowsGs_(TestMockSpreadsheet_({ 'Movement_Log': histSheet }));
+      TestAssertEqual_(histRows.map(function (r) { return r.key; }).join(','), 'C-H,l:L-H2', 'F23 history reader: customer identity (client_id, else l:<lead>) is kept ON PURPOSE for the daily cohort; a row with no lead id is skipped');
+      TestAssert_(histSpy.reads.every(function (r) { return r.nr === 1 || r.nc === 1; }), 'F23 history reader: every data read is ONE column');
+
+      // ---- F23: pruneMovementLog_ - prefix delete instead of a full rewrite ----
+      const pNow = new Date();
+      function prRow(daysAgo, leadId) { return mlRow(TestFixture_daysAgo_(pNow, daysAgo), leadId, 'C-P', 1, 'Test RM One', 'h', 'lbl-' + leadId); }
+      const realDriveF23 = DriveApp;
+      try {
+        // (1) expired rows are a clean prefix
+        let drv = TestMockDriveApp_();
+        DriveApp = drv;
+        const prefixSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(10, 'L-O10'), prRow(9, 'L-O9'), prRow(5, 'L-R5'), prRow(3, 'L-R3'), prRow(1, 'L-R1'), prRow(0.1, 'L-R0')]);
+        prefixSheet._maxRows = 20000;
+        const prefixSpy = spySheet(prefixSheet);
+        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': prefixSheet }));
+        const leadIdCol0 = 2 + SNAPSHOT_COLUMNS_.indexOf('lead_id');
+        const prefixKept = prefixSheet.getRange(2, 1, prefixSheet.getLastRow() - 1, mlHeader.length).getValues();
+        TestAssertEqual_(prefixKept.map(function (r) { return r[leadIdCol0]; }).join(','), 'L-R5,L-R3,L-R1,L-R0', 'F23 prune fast path: the 4 in-retention rows survive, in their original order');
+        TestAssertEqual_(prefixSheet.getRange(1, 1, 1, mlHeader.length).getValues()[0].join(','), mlHeader.join(','), 'F23 prune fast path: the header row is untouched');
+        TestAssertEqual_(prefixSpy.deletes[0].join(','), '2,3', 'F23 prune fast path: exactly the 3 expired rows (sheet rows 2-4) are deleted in ONE deleteRows call');
+        TestAssertEqual_(prefixSpy.writes + prefixSpy.clears, 0, 'F23 prune fast path: NOTHING is rewritten or cleared - the kept rows are never touched, so no window can erase in-retention data');
+        TestAssert_(!prefixSpy.reads.some(function (r) { return r.nr === 7 && r.nc > 1; }), 'F23 prune fast path: the whole data range is never read at full width (only the snapshot_at column, then the 3 expired rows)');
+        const prefixFolder = drv._folders[ARCHIVE_ROOT_FOLDER_]._folders['Movement_Log'];
+        const prefixCsv = prefixFolder._filesList[0]._content;
+        TestAssert_(['L-O12', 'L-O10', 'L-O9'].every(function (id) { return prefixCsv.indexOf(id) >= 0; }), 'F23 prune fast path: the archive holds all 3 expired rows');
+        TestAssert_(['L-R5', 'L-R3', 'L-R1', 'L-R0'].every(function (id) { return prefixCsv.indexOf(id) === -1; }), 'F23 prune fast path: …and none of the kept rows');
+        TestAssert_(prefixSheet.getMaxRows() < 20000 && prefixSheet.getMaxRows() >= 1 + 4 + MOVEMENT_LOG_ROW_HEADROOM_, 'F23 prune fast path: the allocation shrink still runs (down toward kept rows + headroom, never below)');
+
+        // (2) nothing expired: one narrow read, then out
+        drv = TestMockDriveApp_();
+        DriveApp = drv;
+        const freshSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(5, 'L-R5'), prRow(1, 'L-R1')]);
+        const freshSpy = spySheet(freshSheet);
+        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': freshSheet }));
+        TestAssertEqual_(freshSpy.writes + freshSpy.clears + freshSpy.deletes.length, 0, 'F23 prune: nothing expired -> nothing written, cleared or deleted');
+        TestAssert_(freshSpy.reads.every(function (r) { return r.nr === 1 || r.nc === 1; }), 'F23 prune: nothing expired -> only the snapshot_at column was read, no full-width read at all');
+        TestAssertEqual_(Object.keys(drv._folders).length, 0, 'F23 prune: nothing expired -> nothing archived');
+
+        // (3) an expired row AFTER a kept row is not a prefix -> the full rewrite still handles it correctly
+        drv = TestMockDriveApp_();
+        DriveApp = drv;
+        const gapSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(10, 'L-O10'), prRow(2, 'L-R2'), prRow(11, 'L-O11'), prRow(1, 'L-R1')]);
+        const gapSpy = spySheet(gapSheet);
+        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': gapSheet }));
+        const gapKept = gapSheet.getRange(2, 1, gapSheet.getLastRow() - 1, mlHeader.length).getValues();
+        TestAssertEqual_(gapKept.map(function (r) { return r[leadIdCol0]; }).join(','), 'L-R2,L-R1', 'F23 prune fallback: a non-prefix expiry falls back to the full rewrite and keeps exactly the in-retention rows, in order');
+        TestAssert_(gapSpy.writes >= 1, 'F23 prune fallback: the rewrite really happened (the kept rows were written back)');
+        const gapCsv = drv._folders[ARCHIVE_ROOT_FOLDER_]._folders['Movement_Log']._filesList[0]._content;
+        TestAssert_(gapCsv.indexOf('L-O10') >= 0 && gapCsv.indexOf('L-O11') >= 0 && gapCsv.indexOf('L-R2') === -1, 'F23 prune fallback: both expired rows (one of them after a kept row) are archived, no kept row is');
+
+        // (4) EVERY row expired: Sheets refuses to delete all non-frozen rows -> the rewrite path empties it
+        drv = TestMockDriveApp_();
+        DriveApp = drv;
+        const allOldSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(10, 'L-O10')]);
+        const allOldSpy = spySheet(allOldSheet);
+        let allOldThrew = false;
+        try { pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': allOldSheet })); } catch (e) { allOldThrew = true; }
+        TestAssert_(!allOldThrew && allOldSheet.getLastRow() === 1, 'F23 prune: every row expired -> no error and only the header is left');
+        TestAssert_(!allOldSpy.deletes.some(function (d) { return d[0] === 2 && d[1] === 2; }), 'F23 prune: every row expired -> it does NOT try to deleteRows every non-frozen row (which Sheets would refuse)');
+
+        // (5) the archive fails -> nothing is deleted
+        DriveApp = { getFoldersByName: function () { throw new Error('Drive is down'); }, createFolder: function () { throw new Error('Drive is down'); } };
+        const keepSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(3, 'L-R3')]);
+        const keepSpy = spySheet(keepSheet);
+        let keepErr = '';
+        try { pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': keepSheet })); } catch (e) { keepErr = String(e); }
+        TestAssertContains_(keepErr, 'Drive is down', 'F23 prune: a failed archive throws (the run record then says failed)');
+        TestAssertEqual_(keepSheet.getLastRow(), 3, 'F23 prune: …and NOTHING was deleted - the expired row is still in the sheet');
+        TestAssertEqual_(keepSpy.deletes.length + keepSpy.writes + keepSpy.clears, 0, 'F23 prune: …no delete, write or clear was even attempted before the archive succeeded');
+      } finally {
+        DriveApp = realDriveF23;
+      }
+
+      // ---- F23: the phase runner and the time budget ----
+      let clockMs = 0;
+      const mkCtx = function () { return { nowMs: function () { return clockMs; }, startedMs: 0, deadlineS: 100, skipped: [], errors: [] }; };
+      const c1 = mkCtx();
+      let ran1 = 0;
+      clockMs = 100000;
+      runSnapshotPhaseGs_(c1, 'at the deadline', function () { ran1++; });
+      TestAssertEqual_(ran1, 1, 'F23 phase runner: a phase that starts exactly at the deadline still runs (the cut-off is "past" the deadline)');
+      clockMs = 100001;
+      runSnapshotPhaseGs_(c1, 'late phase', function () { ran1++; });
+      TestAssertEqual_(ran1, 1, 'F23 phase runner: a phase that would start past the deadline is skipped, not run');
+      TestAssertEqual_(c1.skipped.join(','), 'late phase', 'F23 phase runner: …and recorded as skipped by name');
+      const c2 = mkCtx();
+      clockMs = 0;
+      let threwOut = false;
+      try { runSnapshotPhaseGs_(c2, 'swallowed', function () { throw new Error('phase blew up'); }); } catch (e) { threwOut = true; }
+      TestAssert_(!threwOut && c2.errors.length === 0, 'F23 phase runner: an ordinary phase that throws is logged and swallowed - the run continues');
+      runSnapshotPhaseGs_(c2, 'kept', function () { throw new Error('prune blew up'); }, true);
+      TestAssertEqual_(c2.errors.length, 1, 'F23 phase runner: a phase flagged rethrow keeps its error for the end of the run');
+      TestAssertContains_(String(c2.errors[0]), 'prune blew up', 'F23 phase runner: …the original error');
+
+      // ---- F23: a slow run still captures first, records it, skips the rest ----
+      const runsBefore = ss.getSheetByName('Movement_Log_Runs').getLastRow();
+      const slaBefore = ss.getSheetByName('SLA_History').getLastRow();
+      leadsSheet.getRange(3, 1, 1, leadsHeader.length).setValues([leadRow({ current_stage: 'Opportunity' })]); // a real change, so the core capture appends a row
+      const mlBefore = ss.getSheetByName('Movement_Log').getLastRow();
+      // The clock reads 0 until the run record exists, then jumps ~83 minutes: i.e. the core capture was slow and everything after it is over budget.
+      const slowSummary = snapshotOpenLeads_('slow run', { nowMs: function () { return ss.getSheetByName('Movement_Log_Runs').getLastRow() > runsBefore ? 5000000 : 0; } });
+      TestAssert_(ss.getSheetByName('Movement_Log').getLastRow() > mlBefore, 'F23 slow run: the CORE capture still wrote its Movement_Log rows');
+      TestAssertEqual_(ss.getSheetByName('SLA_History').getLastRow(), slaBefore, 'F23 slow run: the SLA_History write (an optional phase) was skipped');
+      TestAssertEqual_(slowSummary.skipped.join(' | '), 'SLA_History write | Unmatched_Comments_Log scan | Comment_History log | Movement_Log prune | Comment_History prune | Unmatched_Comments_Log prune | Daily_Cohort_History persist', 'F23 slow run: every optional phase is skipped, in order, by name');
+      TestAssertEqual_(slowSummary.totalSeconds, 5000, 'F23 slow run: the summary carries the total run time');
+      const slowRunRow = ss.getSheetByName('Movement_Log_Runs').getRange(runsBefore + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssertEqual_(slowRunRow[3], 1, 'F23 slow run: the Movement_Log_Runs row (written right after the core capture) records the changed lead');
+      TestAssertEqual_(slowRunRow[4], 5000, 'F23 slow run: …and total_s is filled in at the end');
+      TestAssertContains_(String(slowRunRow[5]), 'Movement_Log prune', 'F23 slow run: …and skipped_phases names what was skipped');
+
+      const slaBeforeNormal = ss.getSheetByName('SLA_History').getLastRow();
+      const normalRunsBefore = ss.getSheetByName('Movement_Log_Runs').getLastRow();
+      const normalSummary = snapshotOpenLeads_('normal run');
+      TestAssertEqual_(normalSummary.skipped.length, 0, 'F23 normal run: nothing is skipped inside the budget');
+      TestAssertEqual_(ss.getSheetByName('SLA_History').getLastRow(), slaBeforeNormal + 1, 'F23 normal run: the SLA_History row is written (it runs AFTER the capture now, with an identical result - its baseline only looks at snapshots before today)');
+      const normalRunRow = ss.getSheetByName('Movement_Log_Runs').getRange(normalRunsBefore + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssert_(typeof normalRunRow[4] === 'number' && normalRunRow[4] >= 0 && normalRunRow[5] === '', 'F23 normal run: total_s is a number and skipped_phases is empty');
+      TestAssertEqual_(normalSummary.leadCountSeen, 4, 'F23 normal run: the summary reports the leads seen (blank lead_id excluded)');
+
+      // A prune that throws still fails the run - but only AFTER the run record is complete and the later phases have run.
+      const realPrune = pruneMovementLog_;
+      const pruneFailRunsBefore = ss.getSheetByName('Movement_Log_Runs').getLastRow();
+      const pruneFailSlaBefore = ss.getSheetByName('SLA_History').getLastRow();
+      pruneMovementLog_ = function () { throw new Error('prune broke'); };
+      let pruneFailMsg = '';
+      try { snapshotOpenLeads_('prune fails'); } catch (e) { pruneFailMsg = String(e); } finally { pruneMovementLog_ = realPrune; }
+      TestAssertContains_(pruneFailMsg, 'prune broke', 'F23: a failing prune still makes the run FAIL (Executions shows Failed, as before) - re-thrown at the end');
+      const pruneFailRow = ss.getSheetByName('Movement_Log_Runs').getRange(pruneFailRunsBefore + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssert_(typeof pruneFailRow[4] === 'number', 'F23: …but only after the run record is complete (total_s filled in)');
+      TestAssertEqual_(ss.getSheetByName('SLA_History').getLastRow(), pruneFailSlaBefore + 1, 'F23: …and the phases before the failing one ran');
+
+      // ---- F23: Movement_Log_Runs gains its two columns on an existing sheet ----
+      const oldRunsSheet = TestMockSheet_('Movement_Log_Runs', [['run_at', 'run_label', 'lead_count_seen', 'leads_changed'], [yday, 'old run', 10, 2]]);
+      const healedRuns = ensureMovementLogRunsSheet_(TestMockSpreadsheet_({ 'Movement_Log_Runs': oldRunsSheet }));
+      TestAssertEqual_(healedRuns.getRange(1, 1, 1, 6).getValues()[0].join(','), 'run_at,run_label,lead_count_seen,leads_changed,total_s,skipped_phases', 'F23 runs sheet: an existing 4-column sheet gets total_s and skipped_phases appended');
+      TestAssertEqual_(healedRuns.getRange(2, 1, 1, 4).getValues()[0][1], 'old run', 'F23 runs sheet: its existing rows are untouched');
+      TestAssertEqual_(ensureMovementLogRunsSheet_(TestMockSpreadsheet_({})).getLastColumn(), 6, 'F23 runs sheet: a brand-new sheet is created with all 6 columns');
+
+      // ---- F23: snapshotPeriodic leaves a run record for the watchdog ----
+      PropertiesService = TestMockPropertiesService_();
+      let sawRunningRecord = null;
+      const realSnapshotOpenLeads = snapshotOpenLeads_;
+      snapshotOpenLeads_ = function () { sawRunningRecord = readEmailJobRunGs_('snapshotPeriodic'); return { leadCountSeen: 3, leadsChanged: 1, totalSeconds: 42, skipped: ['Movement_Log prune'] }; };
+      try { snapshotPeriodic(); } finally { snapshotOpenLeads_ = realSnapshotOpenLeads; }
+      TestAssertEqual_(sawRunningRecord && sawRunningRecord.status, 'running', 'F23 run record: while snapshotPeriodic runs, its record says running');
+      const doneSnap = readEmailJobRunGs_('snapshotPeriodic');
+      TestAssert_(doneSnap.status === 'completed' && doneSnap.totalSeconds === 42 && doneSnap.skipped.join() === 'Movement_Log prune' && !!doneSnap.finishedAt, 'F23 run record: afterwards it says completed, with the run time and the skipped phases');
+      snapshotOpenLeads_ = function () { throw new Error('sheet exploded'); };
+      let periodicThrew = false;
+      try { snapshotPeriodic(); } catch (e) { periodicThrew = /sheet exploded/.test(e.message); } finally { snapshotOpenLeads_ = realSnapshotOpenLeads; }
+      TestAssert_(periodicThrew, 'F23 run record: a failing snapshot is re-thrown unchanged');
+      const failedSnap = readEmailJobRunGs_('snapshotPeriodic');
+      TestAssert_(failedSnap.status === 'failed' && /sheet exploded/.test(failedSnap.error), 'F23 run record: …and recorded as failed with its error');
+      PropertiesService = TestMockPropertiesService_();
+      snapshotNow();
+      TestAssertEqual_(readEmailJobRunGs_('snapshotPeriodic'), null, 'F23 run record: a manual snapshotNow leaves NO record (only the scheduled run is watched)');
+      PropertiesService = TestMockPropertiesService_({ failWrites: true });
+      let periodicBroken = false;
+      try { snapshotPeriodic(); } catch (e) { periodicBroken = true; }
+      TestAssert_(!periodicBroken, 'F23 run record: a broken Properties service never stops the snapshot');
+      PropertiesService = TestMockPropertiesService_();
+    })();
   } finally {
     TestEnv_tearDown_();
   }

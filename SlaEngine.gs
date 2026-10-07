@@ -149,10 +149,11 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   if (isCreatedToday) {
     attemptsToday = callAttempts;
   } else {
-    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    // Keyed by LEAD id, not client_id (email audit F18): call_attempts is a per-lead lifetime counter, and a customer's several
+    // leads carry different counters - under the old client key a lead was compared with whichever sibling's snapshot came first.
+    // (Every RM copy of ONE lead id carries the identical counter, so copies agree.) Mirrors js/core-lead-model.js enrichLead.
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    const baselineKey = clientId || ('l:' + leadId);
-    const baseline = baselineMap[baselineKey];
+    const baseline = leadId ? baselineMap[leadId] : undefined;
     attemptsToday = baseline !== undefined
       ? Math.max(0, callAttempts - baseline, commentCountToday)
       : commentCountToday; // no pre-today baseline yet — same fallback as enrichLead's loggedToday

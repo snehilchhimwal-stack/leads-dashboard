@@ -1017,7 +1017,7 @@ function sendOvernightMorningEmails_() {
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // kept on the lead for Overnight_Log — not shown in the email itself
-    const baselineEntry = lastSnapshotMap[clientId || ('l:' + leadId)];
+    const baselineEntry = lastSnapshotMap[leadId]; // per LEAD, not per customer (email audit F18) - call_attempts is a per-lead counter
 
     candidateLeads.push({
       identityKey: clientId || ('l:' + leadId), // same customer-identity rule buildMovementHistories (dashboard) and RmHierarchy.gs's CC lookups already use
@@ -1896,8 +1896,7 @@ function sendOvernightFollowupEmails_() {
       if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
       const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
       if (flags[entry.issueKey]) {
-        const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
-        const baselineEntry = lastSnapshotMap[clientId || ('l:' + entry.lead_id)];
+        const baselineEntry = lastSnapshotMap[String(entry.lead_id === null || entry.lead_id === undefined ? '' : entry.lead_id).trim()]; // per LEAD (email audit F18)
         // Real region of THIS lead (the log row's region can be the 'Futwork' pseudo-region) — used for the region bands
         // and the Lead_Followups push.
         const leadRegion = region === FUTWORK_REGION_KEY_ ? (mainRegionForGs_(getVal_(row, colIndex, 'region')) || region) : region;
@@ -2183,8 +2182,7 @@ function downloadNoIssueLeadsNow() {
     if (isOppOrAbove_(stage, closingReason, leadClosingReason)) return;
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
 
-    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
-    const baselineEntry = lastSnapshotMap[clientId || ('l:' + leadId)];
+    const baselineEntry = lastSnapshotMap[leadId]; // per LEAD (email audit F18)
     const hint = overnightFollowupHintGs_(row, colIndex, now, baselineEntry);
     if (hint.indexOf('No comment added') !== 0) return; // only the leads landing on the no-usable-comment branch
 

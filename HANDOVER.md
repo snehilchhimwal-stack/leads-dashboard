@@ -288,7 +288,7 @@ re-running after an edit never leaves a duplicate):
 
 | Run this function... | ...from this file | Installs |
 |---|---|---|
-| `setupMovementTracking()` | `MovementTracker.gs` | 4 daily triggers at 00:00, 06:00, 12:00, 18:00 IST (`SNAPSHOT_HOURS_`) → `snapshotPeriodic` → snapshot + SLA_History row. Also removes any stale legacy `snapshotEvening` trigger. |
+| `setupMovementTracking()` | `MovementTracker.gs` | 4 daily triggers at 00:00, 06:00, 12:00, 18:00 IST (`SNAPSHOT_HOURS_`) → `snapshotPeriodic` → snapshot + SLA_History row (core capture first, optional phases inside an 840 s budget, run record watched by `emailJobWatchdog` - §4.3.4 P16). Also removes any stale legacy `snapshotEvening` trigger. |
 | `setupOvernightEmailer()` | `OvernightEmailer.gs` | Daily triggers at 10:00 IST (`sendOvernightMorningEmails`) and 13:00 IST (`sendOvernightFollowupEmails`, same Gmail thread). **Since 2026-09-24:** each of these is now a combined send — Section 1 (unchanged) + Section 2 (a Checkpoint on yesterday's 17:00 `AllIssuesEmailer.gs` report — see §2's own row for the full picture). Also calls `setupRmHierarchy()` — one run of this sets up `RM_Hierarchy`/`Manager_Directory` sheet tabs too. |
 | `setupAllIssuesEmailTrigger()` | `AllIssuesEmailer.gs` | One daily trigger at 17:00 IST (`ALL_ISSUES_RUN_HOUR_`) → `sendAllIssuesEmails`. |
 | `setupEmailJobWatchdogTrigger()` | `EmailInfra.gs` | **Added 2026-10-05 (email audit P9).** ONE hourly trigger → `emailJobWatchdog`, which alerts `OPS_ALERT_EMAIL_` when a 10:00 / 13:00 / 17:00 email job did not run, did not finish, or failed (§4.3.4, P9). Run it once after pasting `EmailInfra.gs`. |
@@ -654,6 +654,48 @@ code*, one bullet per plan step as each lands.
   `runAllTests()` fails there with a ReferenceError (true before this work) — optional to fix.
   Rollback: paste the previous version of any of the six files back (`git show <old-sha>:<file>`; the old
   shas are in the tracker's sweep log). The new `Overnight_Log` column and the Script Properties may stay.
+- **P15 — "calls so far today" is measured per LEAD, not per customer (F18).** `call_attempts` is a per-*lead*
+  lifetime counter: every RM copy of one lead id carries the identical value (0 of 1,852 multi-row leads
+  differed), but a customer's several leads (one `client_id`, different `lead_id`s) each carry their own. The
+  baseline maps (`_readMovementLogRowsGs_` -> `buildTodayCallBaselineGs_` / `lastSnapshotBeforeGs_` /
+  `buildMovementLogMapsGs_`, `MovementTracker.gs`) were keyed by `client_id`, so a lead was compared with
+  whichever sibling's snapshot came first. On the live data (open Google Non-UTM leads, 7 Oct): 37 of 764 had a
+  different baseline and 3 were wrongly NOT flagged "Behind on Today's Calls" (lead 2246693: 17 attempts, own
+  baseline 19 = 0 calls today; the shared key held 7 = "10 calls today"); none was wrongly flagged. Everything
+  now keys by **lead id**, in both runtimes (§6): `computeSlaFlags_`, the three emailer lookups behind the
+  no-comment follow-up text (`OvernightEmailer.gs` x3 - morning, 13:00 reply, the debug download -
+  `AllIssuesEmailer.gs`), and in the dashboard `buildTodayCallBaseline` / `lastSnapshotBefore`
+  (`js/tab-movement.js`), `enrichLead` (via `callsTodayFromBaseline`, `js/core-lead-model.js`),
+  `noCommentFollowUp` (via `lastSnapshotForLead`, `js/core-outcome-engine.js`) and Stalled-Leads detection
+  (a lead is compared only with its own snapshots). A *merged* customer record (several leads) carries each
+  lead's own counter (`callAttemptsByLeadId`, built in `fetchAndRender`'s merge) and takes the best per-lead
+  delta, because its `call_attempts` is the max over its leads. Deliberately unchanged: everything that is
+  about the *customer* (cohort history, `buildMovementHistories`, the one-row-per-customer `identityKey`
+  collapse in the emails). No data is migrated - every `Movement_Log` row already carries its `lead_id`. Takes
+  effect for the emails when `MovementTracker.gs`, `SlaEngine.gs`, `OvernightEmailer.gs` and
+  `AllIssuesEmailer.gs` are pasted; the dashboard side is live when GitHub Pages deploys the push.
+- **P16 — `snapshotPeriodic` stays inside the 30-minute limit (F23).** It hit the limit three times in five days
+  (1,802-1,803 s on 1 Oct 00:18, 2 Oct 18:51, 4 Oct 06:08) and several other runs took 12-29 minutes. Its
+  snapshots are the "calls so far today" baseline behind every email, so a killed run left the history
+  without that capture and nothing said so. The cost was `Movement_Log` (~48K rows x 26 columns): four
+  full-width reads per run (SLA baseline, hash lookup, prune, cohort history) and - with a 7-day window and
+  ~1.7K rows appended per run - a prune that **rewrote the whole sheet on nearly every run**. Now: (1) the
+  readers read only the columns they use (`_readMovementLogColumnsGs_`; 3-4 of 27 columns); (2) `pruneMovementLog_`
+  reads just the `snapshot_at` column and, when the expired rows are a contiguous prefix (the normal case),
+  archives those rows to Drive and removes them with ONE `deleteRows` - nothing is rewritten or cleared; any
+  other shape (an out-of-order row, a blank cell, every row expired) falls back to the old full rewrite;
+  (3) the **core capture** (hash lookup + append) runs first and its `Movement_Log_Runs` row is written right
+  after it, then the optional phases (SLA_History, the two loggers, prune, the two prunes, cohort history) each
+  start only while the run is inside `SNAPSHOT_OPTIONAL_PHASE_DEADLINE_SECONDS_` (840 s) - a skipped phase is
+  idempotent, the next run does it; a failing prune still fails the run, but only after the run record is
+  complete; (4) the log carries `[timing]` lines (where the time went); `Movement_Log_Runs` gained `total_s`
+  and `skipped_phases` (a row with `total_s` blank is a run killed after its capture); (5) `snapshotPeriodic`
+  leaves a run record in Script Properties (`EMAIL_JOB_RUN_snapshotPeriodic`) and the hourly watchdog
+  (`snapshotRunProblemsGs_`) alerts once per run when it is stuck past 35 minutes, failed, overdue (no run for
+  more than 8 hours) or finished having skipped phases. **Not measured live** - the speed-up is expected from
+  the reads/writes removed, not yet observed: after the first scheduled runs read the `[timing]` lines and
+  `Movement_Log_Runs.total_s` (expect minutes, not tens of minutes, and an empty `skipped_phases`). The
+  watchdog trigger (`setupEmailJobWatchdogTrigger`, see P14) must be installed for the alerts to fire.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
@@ -750,6 +792,7 @@ one-line fix in one file is complete:
 | **Loan-region override** | `effectiveRegion` (`js/reports-build.js`) | **NO working twin** — a real HIGH finding (`LOGIC_AUDIT.md` Part 4 §4.4 / Part 7 §18; `docs/data-flows/DATA-005`). Loan leads can be mis-attributed on the `.gs` side. |
 | RM-performance tuning constants | `RM_PERF_*` (`js/core-rm-performance.js`) | `RM_PERF_*_GS_` (`DailyRmIssueLog.gs`) — must stay numerically identical |
 | IST day boundary | `istDateKey` (`js/core-foundation.js`) | `istDayKeyGs_` (`Core.gs`) |
+| "Calls so far today" baseline key (added 2026-10-07, email audit F18): per **lead id**, never `client_id` - `call_attempts` is a per-lead counter | `buildTodayCallBaseline` / `lastSnapshotBefore` (`js/tab-movement.js`), `callsTodayFromBaseline` / `lastSnapshotForLead` (`js/core-lead-model.js`), `noCommentFollowUp` (`js/core-outcome-engine.js`) | `_readMovementLogRowsGs_` (`MovementTracker.gs`), `computeSlaFlags_` (`SlaEngine.gs`), the three `lastSnapshotMap[leadId]` lookups in `OvernightEmailer.gs` and the one in `AllIssuesEmailer.gs` - the same scenarios (a sibling lead with a different counter) are asserted in `Tests_SlaEngine.gs` / `Tests_MovementTracker.gs` / the emailer tests and `tests/frontend-harness.html` 2i-b |
 | Outgoing-email send-safety gate (added 2026-10-07, email audit P11): address shape, visible-text check, CR/LF-in-subject collapse | `GMAIL_ADDRESS_RE` / `gmailAddressListProblems` / `gmailVisibleText` / `prepareGmailSend` (`js/reports-gmail.js`) | `EMAIL_ADDRESS_RE_` / `emailAddressListProblemsGs_` / `visibleTextOfHtmlGs_` / `prepareOutgoingEmailGs_` (`EmailInfra.gs`) — the two address regex literals are diffed by `check-runtime-parity.py`'s regex-pair check; the functions are kept in parity by hand, backed by the SAME address/visible-text vectors in `tests/frontend-harness.html` 2k and `Tests_EmailInfra.gs`. The browser gate does not check lead ids (the backend one does). |
 | Test-mode email override (must be `''` in prod) | `TEST_MODE_OVERRIDE_EMAIL` (`js/reports-ui.js`) | `TEST_MODE_OVERRIDE_EMAIL_` (`EmailInfra.gs`) |
 | Tracked dashboard tab roster (added 2026-10-03) | `TRACKED_COMPONENT_IDS` (`js/sheets-writeback.js`) | `TRACKED_COMPONENT_IDS_GS_` (`OpsChecklistRunner.gs`) — the browser side writes `Feature_Usage` rows for exactly these 9 tabs, the Apps Script side judges 30-day staleness against the same list |

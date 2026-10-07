@@ -249,6 +249,53 @@ function runAllIssuesEmailerTests_() {
       SpreadsheetApp = realSsFw;
     }
 
+    // ---- Email audit F18 (2026-10-07): the call baseline is per LEAD, not per customer ----
+    // Two leads of ONE customer (same client_id, different lead_id) with different call_attempts counters. Only the
+    // further-progressed lead survives the per-customer collapse (L-SIB-B, Suspect > Not Updated), so the email must show
+    // L-SIB-B measured against ITS OWN snapshots: yesterday's 4 -> today's 9 = 5 calls (not behind), and "5 more call attempts
+    // since the last check". Keyed by client_id the later sibling snapshot (13) won the lookup, which read as 0 calls today:
+    // the lead was labelled "Behind on Today's Calls" and its follow-up said "no new call attempts".
+    {
+      const f18Header = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
+      const f18Snap = function (at, leadId, attempts) {
+        return f18Header.map(function (k) {
+          if (k === 'snapshot_at') return at;
+          if (k === 'snapshot_label') return 'f18';
+          if (k === 'lead_id') return leadId;
+          if (k === 'client_id') return 'C-SIB';
+          if (k === 'call_attempts') return attempts;
+          return '';
+        });
+      };
+      const f18Ss = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        // The sibling's snapshot is the LATER one on purpose - under the old client key it is the one that was found.
+        'Movement_Log': TestMockSheet_('Movement_Log', [f18Header, f18Snap(TestFixture_hoursAgo_(now, 25), 'L-SIB-B', 4), f18Snap(TestFixture_hoursAgo_(now, 24), 'L-SIB-A', 13)]),
+      });
+      const f18Created = new Date(win.from.getTime() + 1); // inside the window and >48h old at any time of day
+      f18Ss._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        TestAIE_leadRow_(header, { lead_id: 'L-SIB-A', client_id: 'C-SIB', RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: f18Created, call_attempts: 13, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5) }),
+        TestAIE_leadRow_(header, { lead_id: 'L-SIB-B', client_id: 'C-SIB', RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: f18Created, call_attempts: 9, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5) }),
+      ]);
+      const realSsF18 = SpreadsheetApp;
+      const f18DraftsBefore = TestGmailLog_.drafts.length;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return f18Ss; }, flush: function () {} };
+      try {
+        sendAllIssuesEmails();
+      } finally {
+        SpreadsheetApp = realSsF18;
+      }
+      const f18Drafts = TestGmailLog_.drafts.slice(f18DraftsBefore).filter(function (d) { return d.htmlBody.indexOf('L-SIB-B') !== -1; });
+      TestAssertEqual_(f18Drafts.length, 1, 'F18 all-issues email: exactly one email carries the surviving sibling lead');
+      const f18Html = f18Drafts[0] ? f18Drafts[0].htmlBody : '';
+      TestAssert_(f18Html.indexOf('L-SIB-A') === -1, 'F18 all-issues email: the other sibling lead collapsed away (one row per customer)');
+      const f18Row = f18Html.slice(f18Html.indexOf('L-SIB-B'), f18Html.indexOf('</tr>', f18Html.indexOf('L-SIB-B')));
+      TestAssertContains_(f18Row, 'Stuck 48h+', 'F18 all-issues email: the lead is measured against its OWN baseline (9 - 4 = 5 calls today), so it is not "Behind on Today\'s Calls" - its issue is Stuck 48h+');
+      TestAssert_(f18Row.indexOf("Behind on Today's Calls") === -1, 'F18 all-issues email: …and the sibling\'s higher counter (13) does not make it look behind');
+      TestAssertContains_(f18Row, '5 more call attempts', 'F18 all-issues email: the follow-up compares with the lead\'s OWN last snapshot (4 -> 9 = 5 more attempts), not the sibling\'s (13)');
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- sendOneAllIssuesEmail_: Gmail-blocked failure path (direct call) ----

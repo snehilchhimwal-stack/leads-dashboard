@@ -181,19 +181,58 @@ function isLeadClosed(l){
 // check inconsistently within the same view. Set once per render pass.
 let _renderNow = new Date();
 
-// customer-key -> call_attempts as of the most recent Movement_Log
+// LEAD-id -> call_attempts as of the most recent Movement_Log
 // snapshot captured before today (IST) started — the baseline
 // attemptsToday subtracts from a lead's current call_attempts to get a
 // REAL count of today's calls, instead of guessing from CRM comments.
+// Keyed by LEAD id, not client_id (email audit F18, 2026-10-07): call_attempts
+// is a per-lead counter, so a customer's several leads each need their own
+// baseline (see MovementTracker.gs's _readMovementLogRowsGs_ for the numbers).
 // Rebuilt once per applyFiltersAndRender() pass (see buildTodayCallBaseline
 // there); enrichLead only ever reads it, never rebuilds it, so enriching
 // many leads/copySplits in one pass stays cheap.
 let _todayCallBaselineByKey = new Map();
 // Same idea, but for noCommentFollowUp below (see lastSnapshotBefore,
 // tab-movement.js) — rebuilt alongside _todayCallBaselineByKey so a
-// customer's no-comment fallback text doesn't re-scan the whole
+// lead's no-comment fallback text doesn't re-scan the whole
 // Movement_Log dataset on every single lead card.
 let _lastSnapshotByKey = new Map();
+
+// Today's call count for `l` measured against the per-lead baseline, or null
+// when no lead it covers has a pre-today baseline (the caller then falls back
+// to its comment-log proxy). A single-copy record is one lead: its own
+// call_attempts less its own baseline. A MERGED customer record (several
+// leads, `callAttemptsByLeadId` filled in by fetchAndRender's merge) takes the
+// best per-lead delta — its call_attempts is the MAX over the leads, so
+// subtracting one lead's baseline from it would credit a sibling's counter.
+// Mirrors SlaEngine.gs computeSlaFlags_, which sees one row (one lead) at a time.
+function callsTodayFromBaseline(l){
+  const byId = l.callAttemptsByLeadId;
+  const ids = byId ? Object.keys(byId) : [String(l.lead_id).trim()];
+  let best = null;
+  ids.forEach(id => {
+    const baseline = _todayCallBaselineByKey.get(id);
+    if (baseline === undefined) return;
+    const delta = Math.max(0, (Number(byId ? byId[id] : l.call_attempts) || 0) - baseline);
+    if (best === null || delta > best) best = delta;
+  });
+  return best;
+}
+
+// The latest pre-now Movement_Log snapshot to compare `l`'s call_attempts
+// against, or undefined. One lead -> that lead's own entry. A merged customer
+// record -> the entry of whichever of its leads has the highest call_attempts
+// (ties: the later snapshot), matching the record's own max call_attempts.
+function lastSnapshotForLead(l){
+  const ids = (l.collatedLeadIds && l.collatedLeadIds.length > 1) ? l.collatedLeadIds : [String(l.lead_id).trim()];
+  let best;
+  ids.forEach(id => {
+    const e = _lastSnapshotByKey.get(id);
+    if (!e) return;
+    if (!best || e.call_attempts > best.call_attempts || (e.call_attempts === best.call_attempts && e.atMs > best.atMs)) best = e;
+  });
+  return best;
+}
 // True only while enrichLeadAsOf is enriching a PAST Movement_Log snapshot
 // (RM stall leaderboard, time-to-remediate) — attemptsToday falls back to
 // the CRM-comment proxy in that case; see enrichLeadAsOf for why.
@@ -353,9 +392,8 @@ function enrichLead(l){
   if (isCreatedToday) {
     attemptsToday = l.call_attempts;
   } else if (!_enrichingHistorical) {
-    const baselineKey = String(l.client_id || '').trim() || 'l:' + String(l.lead_id).trim();
-    const baseline = _todayCallBaselineByKey.get(baselineKey);
-    attemptsToday = baseline !== undefined ? Math.max(0, (Number(l.call_attempts) || 0) - baseline, loggedToday) : loggedToday;
+    const callsToday = callsTodayFromBaseline(l);
+    attemptsToday = callsToday !== null ? Math.max(callsToday, loggedToday) : loggedToday;
   } else {
     attemptsToday = loggedToday;
   }

@@ -253,7 +253,7 @@ function sendAllIssuesEmails_() {
     const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
     const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
     const stageRank = FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || '');
-    const baselineEntry = lastSnapshotMap[clientId || ('l:' + leadId)];
+    const baselineEntry = lastSnapshotMap[leadId]; // per LEAD, not per customer (email audit F18) - call_attempts is a per-lead counter
 
     candidateLeads.push({
       identityKey: clientId || ('l:' + leadId),
