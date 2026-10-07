@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `6acea29` — revalidated after email audit P7 (no change to the Gmail send paths; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `fe9b37f` — revalidated after email audit P9 (ops alerts gain a second send path; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -171,6 +171,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-05** `d1caf9d`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-328`, email audit P6). The 13:00 threaded reply (Advanced Gmail Service `Messages.send`) falls back to a plain `GmailApp` send only after a DEFINITE failure; a timeout / server error (the message may already be delivered) no longer triggers the fallback — it is recorded as `unconfirmed` and ops are alerted. No change to scopes, recipients or the browser grant.
 
 **Revalidated 2026-10-05** `6acea29`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-329`/`FN-330`, email audit P7). Neither change touches the Gmail send itself: one makes the LOG append that follows a send once-only, the other merges recipient buckets that share an address before any send. No change to scopes, recipients or the browser grant.
+
+**Revalidated 2026-10-05** `fe9b37f`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-331`..`FN-334`, email audit P9). One change touches Gmail sending: `notifyOpsAlertGs_` now retries GmailApp and then sends the ops alert through the Advanced Gmail Service (`Gmail.Users.Messages.send`, already authorized for the threaded replies — no new scope). Report emails and their recipients are unchanged.
 
 ## Revalidation trigger
 

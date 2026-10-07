@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `6acea29` — email audit P7: rows are appended once per thread id (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `fe9b37f` — email audit P9: new column `followup_result` (J); stamps are taken at the write (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -54,9 +54,10 @@ threaded follow-up.
 | `to` / `cc` | text | the **actual resolved** recipients (so the 13:00 reply reaches the same people explicitly) |
 | `subject` | text | the 10:00 subject line |
 | `followup_sent_at` | datetime | added 2026-09-23 (Step 8/11) — idempotency guard for the 13:00 job's own combined reply (Section 1 unresolved-leads + Section 2 Checkpoint 2 together). Written on a confirmed successful send (threaded reply OR its plain fallback), or as `unconfirmed <datetime>` when the send failed AMBIGUOUSLY (timeout/server error — the email may have been delivered; since 2026-10-05, email audit P6) — still truthy, so the 13:00 job will not auto-resend it — a failed send leaves it blank so a same-day re-run retries (the scheduled 13:00 job reads only today's rows, so it does not); since 2026-10-05 (email audit P5) `AllIssues_Log`'s checkpoint columns follow the same success-only rule. Chain-A-internal only — carries no Chain-B/checkpoint content (see `docs/_planning/EMAIL_LIFECYCLE_TWO_CHECKPOINT_REDESIGN.md` Part 5's own note on why this doesn't violate "the two chains stay separate"). |
+| `followup_result` | text | added 2026-10-05 (email audit P9 / F12) — what the 13:00 job DID with this row: `sent (threaded reply)`, `sent (fallback: a new message, not threaded ...)`, `skipped: nothing unresolved`, `skipped: no stored recipient ...`, `blocked: ...`, `unconfirmed: ...`, `failed: ...`. **Blank on today's row after 13:30 = the job never processed it** (crash/timeout). Appended as the LAST column; the sheet heals itself. |
 
 Exact list: `OvernightEmailer.gs` `#L274`
-(`['date','region','thread_id','lead_ids_json','sent_at','to','cc','subject','followup_sent_at']`).
+(`['date','region','thread_id','lead_ids_json','sent_at','to','cc','subject','followup_sent_at','followup_result']`).
 Self-healing header as of Step 8/11 (`ensureOvernightLogSheet_`, `#L282`)
 — same append-missing-columns pattern `AllIssuesEmailer.gs`'s
 `ensureAllIssuesLogSheet_` already used; before Step 8 this sheet had NO
@@ -72,6 +73,7 @@ columns it already had).
 | `GS-010` | `ensureOvernightLogSheet_` (FN-234) | header, on first use; self-heals missing columns on an existing sheet (Step 8/11) |
 | `GS-010` | `backfillTodaysOvernightLogRecipientsNow` | in-place `to`/`cc` repair (manual) |
 | `GS-010` | `sendCombinedFollowupEmail_` (FN-280) | added 2026-09-23 (Step 8/11) — writes `followup_sent_at` (col I) back onto the exact row its reply came from, success only |
+| `GS-010` | `writeFollowupResultGs_` (FN-335) | added 2026-10-05 (email audit P9) — writes `followup_result` (col J) for every row the 13:00 job processes, including skips and failures |
 
 ## Readers
 
@@ -205,6 +207,8 @@ Chain-B content specifically).
 **2026-10-05** (`d1caf9d`, email audit P6): `followup_sent_at` can now hold the text `unconfirmed <yyyy-MM-dd HH:mm:ss>` instead of a bare datetime when the 13:00 send failed in a way that does not prove it was not delivered. Any reader that parses the cell as a date must tolerate that prefix. (`GS-010` FN-280; resolve per `HANDOVER.md` section 4.3.4.)
 
 **2026-10-05** (`6acea29`, email audit P7): no column changes. A row is now appended at most once per thread id (`GS-004` `appendRowOnceGs_`): a timeout that arrived after Sheets had already written the row used to make the retry append an identical second row, which the 13:00 job would then answer with a second reply. The 10:00 job also reads columns A-F (was A-B) of today's rows for its idempotency check, to know which recipients already have a row.
+
+**2026-10-05** (`fe9b37f`, email audit P9 — `docs/_planning/EMAIL_AUDIT.md` F12): new column `followup_result` (J), appended; `sent_at` and `followup_sent_at` are now the time the row was written / the reply was sent, not the job's start time. A reader that parsed `sent_at`/`followup_sent_at` as "job start" now gets the true send time (minutes later on a long run).
 
 ## Revalidation trigger
 

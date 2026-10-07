@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `6acea29` — email audit P7: rows are appended once per thread id (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `fe9b37f` — email audit P9: `checkpoint1/2_sent_at` are stamped at the write (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -203,6 +203,8 @@ the two-checkpoint redesign is fully wired end to end.
 **2026-10-05** (`f9728cc`, email audit P5 — `docs/_planning/EMAIL_AUDIT.md` F6): `checkpoint1_json`/`checkpoint1_sent_at` and `checkpoint2_json`/`checkpoint2_sent_at` are written only when the corresponding email was delivered (or deliberately not needed); they used to be written even after a failed send, which made the loaders skip the row and the same-day re-run lose that Section 2. No column changes (`GS-010` FN-275/FN-280).
 
 **2026-10-05** (`6acea29`, email audit P7): no column changes. A row is now appended at most once per thread id (`GS-004` `appendRowOnceGs_`, `GS-001` FN-176): a retry after a timeout that landed after the write no longer adds a duplicate snapshot row (which tomorrow's Checkpoint 1 would have merged and double-counted).
+
+**2026-10-05** (`fe9b37f`, email audit P9 — F12): no column changes. `checkpoint1_sent_at` and `checkpoint2_sent_at` are now the time the cell was written (`GS-004` `istStampGs_`), not the 10:00 / 13:00 job's start time.
 
 ## Revalidation trigger
 

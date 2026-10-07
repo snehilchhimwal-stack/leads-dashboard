@@ -13,7 +13,7 @@ section. Forensic-audit P2 item 10 (`t-tf-5ad22d8e4c2e`).
 
 ## The triggers
 
-Verified against source at `HEAD`, 2026-09-10.
+Verified against source at `HEAD`, 2026-09-10; row 10 added 2026-10-05 (email audit P9).
 
 | # | Schedule (IST) | Handler function | File (`GS-`) | Installed by | `.inTimezone('Asia/Kolkata')`? |
 |---|---|---|---|---|---|
@@ -23,9 +23,10 @@ Verified against source at `HEAD`, 2026-09-10.
 | 7 | `atHour(13).nearMinute(0).everyDays(1)` | `sendOvernightFollowupEmails` (same-thread "what got resolved") | `OvernightEmailer.gs` (`GS-010`) | `setupOvernightEmailer()` | **NO** |
 | 8 | `atHour(ALL_ISSUES_RUN_HOUR_ = 17).nearMinute(0).everyDays(1)` | `sendAllIssuesEmails` | `AllIssuesEmailer.gs` (`GS-001`) | `setupAllIssuesEmailTrigger()` | **yes** |
 | 9 | `onWeekDay(MONDAY).atHour(9).nearMinute(0)` | `runWeeklyOpsChecklistNow` | `OpsChecklistRunner.gs` (`GS-009`) | `setupWeeklyOpsChecklistTrigger()` | **yes** |
+| 10 | `everyHours(1)` — **not** pinned to a minute (the watchdog only compares the clock with each job's deadline, so loose firing is harmless; it alerts at the first run after a job's hh:30 deadline) | `emailJobWatchdog` (alerts when a 10:00 / 13:00 / 17:00 email job did not run, did not finish, or failed) | `EmailInfra.gs` (`GS-004`) | `setupEmailJobWatchdogTrigger()` | no (it does not use an hour of day) |
 
 **No trigger of their own** (called only from other `.gs` or a one-time
-setup): `Core.gs` (`GS-002`), `EmailInfra.gs` (`GS-004`),
+setup): `Core.gs` (`GS-002`), `EmailInfra.gs` (`GS-004`) — apart from trigger 10,
 `FollowupEngine.gs` (`GS-005`), `RmHierarchy.gs` (`GS-011`) —
 `setupRmHierarchy()` creates sheets only, `SlaEngine.gs` (`GS-012`),
 `LeadFollowupsStaleness.gs` (`GS-007`) — `setupLeadFollowupsStalenessFormatting()`
