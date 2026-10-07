@@ -91,18 +91,18 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `AllIssuesEmailer.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `Core.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `DailyRmIssueLog.gs` | `5802f35` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `EmailInfra.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `EmailInfra.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `MovementTracker.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `MovementTracker.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `OpsChecklistRunner.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `OvernightEmailer.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `OvernightEmailer.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `RmHierarchy.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `SlaEngine.gs` | `83be0fe` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `SlaEngine.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 
 ### Known live-vs-repo differences
@@ -215,6 +215,18 @@ One line per sweep: date — what was found — what was fixed / left open.
   never been in it (so `runAllTests()` fails there with a ReferenceError — true since
   before this work); both optional, files staged in `Downloads\email-audit-P14\`.
   Deploy register refreshed with `match-live-gs.py --apply`.
+
+- 2026-10-07 — **email audit P15 + P16 deployed** (`7799e44` code; the test files at `0f7dadb`). Five production files
+  (`OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `EmailInfra.gs`, `MovementTracker.gs`, `SlaEngine.gs`) and seven test files
+  (`Tests_Mocks`, `Tests_SlaEngine`, `Tests_OvernightEmailer`, `Tests_MovementTracker`, `Tests_EmailInfra`,
+  `Tests_AllIssuesEmailer`, and the never-before-live `Tests_EmailLifecycleFullCycle`) were attached to a file input injected into
+  the editor tab (`file_upload`), dry-run checked (each live model still its expected old hash AND each upload equal to HEAD),
+  replaced with `pushEditOperations`, saved by Snehil, the page RELOADED, and all 30 files re-read: 29 at HEAD, the private
+  employee table unchanged. Two things learned: (1) if the editor tab reports `document.visibilityState` hidden, `find` /
+  `read_page` / screenshots time out while `javascript_tool` still works - open a FRESH tab, navigate it to the project and
+  close the old one; (2) the first live `runAllTests()` showed 3 suites cut short by `atob is not defined` (a test helper;
+  see `HANDOVER.md` §7.1) - fixed and guarded by `test/check-gs-runtime-globals.py`. **Left open:** paste the corrected
+  `Tests_OvernightEmailer.gs`; run `setupEmailJobWatchdogTrigger()` after midnight and before ~10:00 IST.
 
 ## Current status
 

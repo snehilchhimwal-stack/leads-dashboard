@@ -885,6 +885,17 @@ job itself runs at 10:00, so production was never affected). It is now `min(midd
 fix all 13 times and all 4 zones pass, and no assertion of the e2e reads the IST hour (every offset is >= 24 h, the leads are
 > 48 h old at any hour, and the watchdog assertions look only at `snapshotPeriodic` alerts).
 
+**The first live `runAllTests()` (2026-10-07, 17:54 IST, after the P15/P16 paste) - what it showed.** 14 suites ran
+clean on the real platform, including every new F18/F23 test (`Tests_MovementTracker.gs` 224/224, `Tests_SlaEngine.gs`,
+`Tests_AllIssuesEmailer.gs`, `Tests_DailyRmIssueLog.gs`, ...), but THREE suites (`EmailInfra`, `OvernightEmailer`,
+`EmailLifecycleFullCycle`) threw `ReferenceError: atob is not defined` partway through: `TestOE_decodeRawMime_`
+(`Tests_OvernightEmailer.gs`) used `atob()` and `TextDecoder`, which exist in a browser and in the Node CI sandbox (after the
+2026-09-24 shim) but NOT in Apps Script. Every local and CI run was green because both runners provide them. Test-only (no
+production code touched); fixed with a pure-JavaScript base64 + UTF-8 decoder. **Guard:** `python3 test/check-gs-runtime-globals.py`
+flags browser/Node-only globals in any `.gs` file (comments and strings ignored) - it flags the old helper and passes the fixed
+tree. A green headless/CI run is therefore not proof the suite runs in the editor; run `runAllTests()` live after a paste and read
+the per-suite lines, not only the total.
+
 **Two traps found while building the e2e (keep them in mind for the next one):** (1) `tests/frontend-harness.html` freezes
 `Date.now()`, so a wait loop capped with `Date.now() - start < N` can never expire - a FAILING check hangs the whole harness
 instead of failing (use an iteration cap; the two wait loops there now do); (2) the baseline maps take snapshots STRICTLY

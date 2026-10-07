@@ -159,6 +159,10 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
     clock, so a fixture can be clean at 10:00 and wrong at 00:30 — the first sweep found
     exactly one (`Tests_OvernightEmailer.gs`'s `midWindow`). Do this after adding any
     test that uses `new Date()`; `HANDOVER.md` §7.1 has the list of times used.
+  - **A green local/CI run does not prove the suite runs in Apps Script itself.** Run
+    `python3 test/check-gs-runtime-globals.py` (added 2026-10-07) after touching a `.gs` file: it flags
+    browser/Node-only globals (`atob`, `TextDecoder`, `Promise`, ...) that the test runners provide but the real
+    editor does not. Real incident: `runAllTests()` threw `atob is not defined` in 3 suites the first time it ran live.
   - This still doesn't change the general point: `python3` is useful for
     local dry-runs/validation Node would otherwise cover and for building
     `.docx`/`.pptx` output, but GitHub Actions remains the authoritative

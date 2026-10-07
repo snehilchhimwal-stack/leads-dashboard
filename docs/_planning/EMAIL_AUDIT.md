@@ -293,6 +293,13 @@ combinations around IST midnight; the browser harness (267) in the same 4 zones.
 only clean at some hours (`Tests_OvernightEmailer.gs`'s `midWindow`, fixed). **Regressions:** 14 chain mutations on the
 Apps Script side and 7 on the browser side each fail an `E2E` assertion on their own.
 
+**First live `runAllTests()` (2026-10-07 17:54 IST, after the paste):** 14 suites clean, including every new F18/F23 test run
+on the real platform (`Tests_MovementTracker.gs` 224/224). Three suites (`EmailInfra`, `OvernightEmailer`,
+`EmailLifecycleFullCycle`) threw `atob is not defined` - a TEST helper used a browser/Node-only function that Apps Script does
+not have, invisible to every local and CI run. Fixed (pure-JS decoder) and a permanent guard added
+(`test/check-gs-runtime-globals.py`). The live total was therefore 1020 passed with 3 suites cut short, not the 1914 the repo
+reports; the corrected `Tests_OvernightEmailer.gs` has to be pasted for the live number to match.
+
 **Not covered - only the live system can show it:** the real speed-up of `snapshotPeriodic` (the platform's 30-minute limit,
 real Sheets read/write cost - the run is expected to take minutes, not measured); real `LockService`, Gmail and Drive
 behaviour; real `deleteRows` on a ~48K-row sheet; whether the live editor's pasted files equal the repo (checked by hash after

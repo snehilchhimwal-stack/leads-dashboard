@@ -20,13 +20,42 @@
 // TestGmailLog_.drafts/sent do. Decode it back to plain text here so
 // Step 7's threaded-reply tests can assert on its content the same way
 // the draft-based tests already assert on draft.htmlBody.
+//
+// PURE JAVASCRIPT ON PURPOSE (2026-10-07): this used atob() + TextDecoder, which exist in a browser and (since the 2026-09-24 fix)
+// in the Node CI sandbox but NOT in the Apps Script runtime - so every test that decoded a threaded reply threw "ReferenceError:
+// atob is not defined" the moment runAllTests() ran in the real editor (found when runAllTests() was first run live, 2026-10-07; it
+// had never got that far before because Tests_EmailLifecycleFullCycle.gs was missing there). Decodes web-safe base64 -> bytes ->
+// UTF-8 by hand, so it behaves identically in all three places.
 function TestOE_decodeRawMime_(raw) {
-  const b64 = String(raw || '').replace(/-/g, '+').replace(/_/g, '/');
-  const padded = b64 + '==='.slice((b64.length + 3) % 4);
-  const bin = atob(padded);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean = String(raw || '').replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/]/g, ''); // also drops '=' padding / whitespace
+  const bytes = [];
+  let buffer = 0;
+  let bits = 0;
+  for (let i = 0; i < clean.length; i++) {
+    buffer = (buffer << 6) | alphabet.indexOf(clean.charAt(i));
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((buffer >> bits) & 0xff);
+      buffer &= (1 << bits) - 1;
+    }
+  }
+  let out = '';
+  for (let i = 0; i < bytes.length;) {
+    const b = bytes[i++];
+    if (b < 0x80) {
+      out += String.fromCharCode(b);
+    } else if (b < 0xe0) {
+      out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i++] & 0x3f));
+    } else if (b < 0xf0) {
+      out += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+    } else {
+      const cp = (((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f)) - 0x10000;
+      out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
+    }
+  }
+  return out;
 }
 
 function TestOE_leadRow_(header, overrides) {
