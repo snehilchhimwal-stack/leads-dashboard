@@ -267,3 +267,87 @@ re-run for this change. Pushed as `4a06803` (fixes) +
 `31f3217` (placeholder-sha swap); GitHub Actions run 227 triggered on
 `31f3217` — status at time of this log entry pending, see the Actions
 tab / run 227 for the final result.
+
+---
+
+## Cycle 5 — 2026-10-07 (run by Claude, scheduled cloud routine)
+
+Checked `SHEET-006` (`RM_Hierarchy`), `GS-005` (`FollowupEngine.gs`),
+`JS-005` (`core-foundation.js`), `DATA-002` (the SLA-flag pipeline) — none
+checked in cycles 1-4, and none touched by the large, separate
+in-progress email-pipeline audit (P1-P16, `EMAIL_AUDIT.md`) that landed
+immediately before this cycle ran. Note: this cycle's own local clone
+started out shallow (50-commit `clone_depth` default) and also started
+8 commits behind `origin/master` (the email audit's P13-P16 batch had
+landed since this routine's prompt was stored) — unshallowed and
+fast-forwarded before doing anything else, since both the catalog check
+and an honest "what changed since Last Verified" comparison need full,
+current history. 2/4 records had real, fixed drift; 2/4 were fully
+clean.
+
+**`SHEET-006`** — real drift, fixed. Two independent issues, both from
+`RmHierarchy.gs` roster churn between 2026-09-10 (this record's prior
+`Last Verified`) and 2026-10-01 (new-joiner batches, departures, the
+Pre Sales team addition, the loan-team BDM alias) that was never
+propagated into this record even though `GS-011`'s own record was kept
+current through that same period: (1) the header-array line-anchor
+citation had drifted `#L443`/`#L475` → real `#L554`/`#L586`
+(`ensureRmHierarchySheet_` / `rebuildRmHierarchy`); (2) the stated row
+count/role mix ("~270 rows: S1 163, A1 23, Executive 8, BDM 8, Cluster
+Head 6, TM 6, S3 5, RH 4, City Lead 3, Manager 1, Commercial Head 1") no
+longer matched `RM_HIERARCHY_RAW_`'s real current contents — recomputed
+directly from source: 231 rows (S1 162, A1 22, BDM 9, Executive 8,
+Cluster Head 7, TM 7, S3 5, City Lead 4, RH 4, Manager 1, Commercial Head
+1, and a `Leadership` role not previously listed at all — Shitij Kaushal,
+added 2026-09-17, deliberately outside `TOP_OF_ORG_ROLES_`). Fixed both,
+`Last Verified`/`Version / change reference`/`docs/INDEX.md` row bumped
+to `2026-10-07 (c416a01)`.
+
+**`GS-005`** — fully clean. File length (739 lines, matching the header)
+and all 17 `#Lnn` citations across `FN-205`..`FN-211` checked directly
+against `FollowupEngine.gs` and every one pointed at the exact right
+function; `OUTCOME_RULES_GS_` (`CFG-041`, `#L147`-`#L401`) recounted at
+exactly 31 rule objects as claimed. No drift — matches the record's own
+note that this file's source hasn't changed since `c82ec67`.
+
+**`JS-005`** — fully clean. File length (246 lines, matching the header)
+and all 9 `#Lnn` citations across `FN-026`..`FN-033` checked directly
+against `js/core-foundation.js`, plus every `CFG-003`..`CFG-012` literal
+value (`5`, `48`, `10`, `3`, `4`, `9`/`19`, the 9-stage `FUNNEL_ORDER`
+list, `CLOSED_STAGE_EXACT`/`_STEMS`, `330 * 60000`) — all matched exactly.
+No drift.
+
+**`DATA-002`** — real drift, fixed. Its own `## Source of truth` /
+`## Validation` sections cite 3 line anchors across 3 different files;
+2 of the 3 had drifted: `js/core-lead-model.js` `enrichLead` moved
+`#L202` → real `#L241` (the file grew from the 2026-10-07 email-audit
+F18 per-lead-call-baseline change, `7799e44`), and
+`DailyRmIssueLog.gs` `computeRmPerformanceGs_` moved `#L1071` → real
+`#L1289` (unrelated `GS-003` growth, already fixed on `GS-003`'s *own*
+record back in spot-check cycle 3). In both cases the owning component's
+own record (`JS-006`, `GS-003`) already cited the correct current line —
+this was purely a duplicate citation inside `DATA-002` that never got
+the same propagation, the exact failure shape `HOW_TO_UPDATE_A_
+COMPONENT.md`'s "Recording a new dependency edge" section warns about
+for relationship edits, just for a line-anchor instead. The third anchor,
+`SlaEngine.gs` `computeSlaFlags_` `#L46`, was already correct — unchanged
+since `c82ec67`. Fixed both stale anchors, `Last Verified`/`Version /
+change reference`/`docs/INDEX.md` row bumped to `2026-10-07 (7799e44)`.
+
+**Not fixed, flagged for human review:** `SHEET-006`'s own `## Handover
+relationship` field states `HANDOVER.md` §2/§4.3 are "current as of
+2026-09-09" — `HANDOVER.md` itself has in fact been edited since then
+(`check-docs-coverage.js` reports its last edit as 2026-09-29, and the
+unshallow fetch pulled in further `HANDOVER.md` changes from the P15/P16
+email-audit batch), so that staleness date is itself now wrong. Whether
+§2/§4.3's *content* is still accurate for `RM_Hierarchy` is a separate,
+larger question this cycle's scope (one record's cited literals/anchors)
+didn't attempt — left on `SHEET-006` as a note rather than guessed at.
+
+Verified before push: `python3 test/check-catalog.py` clean (all blocking
+checks A-C, plus F-P; the only prints were the pre-existing advisory
+notes, unrelated to this cycle's edits); `node test/check-docs-coverage.js`
+full coverage (25/25 `js/`, 13/13 `.gs`). No `.gs`/`js/` source touched,
+so `node test/run-gs-tests.js` was not re-run for this change. GitHub
+Actions confirmed green on the pushed commit(s) before this entry was
+finalized.

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-07 against commit `c416a01` (weekly spot-check cycle 5) |
 
 ## Purpose / reason to exist
 
@@ -27,8 +27,11 @@ who is in scope.
 
 ## Data stored
 
-~270 rows (role mix: S1 163, A1 23, Executive 8, BDM 8, Cluster Head 6,
-TM 6, S3 5, RH 4, City Lead 3, Manager 1, Commercial Head 1).
+231 rows (role mix: S1 162, A1 22, BDM 9, Executive 8, Cluster Head 7,
+TM 7, S3 5, City Lead 4, RH 4, Manager 1, Commercial Head 1, Leadership 1 —
+the last is Shitij Kaushal, added 2026-09-17 with role literally
+`'Leadership'`, deliberately not in `TOP_OF_ORG_ROLES_` (`RmHierarchy.gs`
+`#L401`'s comment)).
 
 ## Source of the data
 
@@ -56,7 +59,8 @@ can be toggled in-sheet.
 | `note` | text | free-text |
 | `email` | text | populated from `RmHierarchy.private.gs` if present, else `''` |
 
-Exact list: `RmHierarchy.gs` `#L443` / `#L475`
+Exact list: `RmHierarchy.gs` `#L554` (`ensureRmHierarchySheet_`) / `#L586`
+(`rebuildRmHierarchy`)
 (`['team','role','name','tl','tm','rh','ch','excluded','note','email']`).
 
 ## Writers
@@ -159,17 +163,22 @@ The live `RM_Hierarchy` tab; its content is authored by
 
 ## Validation
 
-- **Method:** header read from `RmHierarchy.gs` `#L443`/`#L475` at
-  `c82ec67`; role distribution from `LOGIC_AUDIT.md` Part 1 §4d / the
-  summary in this session's context; `Tests_RmHierarchy.gs` in CI.
+- **Method:** header read from `RmHierarchy.gs` `#L554`/`#L586` at
+  `c416a01`; role distribution recomputed directly from the live
+  `RM_HIERARCHY_RAW_` array at the same commit (weekly spot-check cycle 5,
+  2026-10-07); `Tests_RmHierarchy.gs` in CI.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_RmHierarchy.gs`,
   last green run); `LOGIC_AUDIT.md` Part 3 §3.7.
-- **Status:** Validated 2026-09-10 (non-lifecycle); lifecycle framing
+- **Status:** Validated 2026-10-07 (non-lifecycle); lifecycle framing
   `TBD` (`DOC-036`).
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-032`.
+Verified at `c82ec67`; record created by `DOC-032`. Re-verified at
+`c416a01` (2026-10-07, weekly spot-check cycle 5) — the row count/role mix
+and the header-array line anchors had drifted from the roster churn
+between 2026-09-10 and 2026-10-01 (new-joiner batches, the Pre Sales team
+addition, departures); fixed both, no other field affected.
 
 ## Revalidation trigger
 

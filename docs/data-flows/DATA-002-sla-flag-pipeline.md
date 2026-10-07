@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-07 against commit `7799e44` (weekly spot-check cycle 5) |
 
 ## Purpose / reason to exist
 
@@ -116,23 +116,32 @@ Part 1 §1 layers 6, 7, 17.
 
 ## Source of truth
 
-`js/core-lead-model.js` `enrichLead` `#L202`; `SlaEngine.gs`
+`js/core-lead-model.js` `enrichLead` `#L241`; `SlaEngine.gs`
 `computeSlaFlags_` `#L46`; `DailyRmIssueLog.gs` `computeRmPerformanceGs_`
-`#L1071`.
+`#L1289`.
 
 ## Validation
 
 - **Method:** traced against `LOGIC_AUDIT.md` Part 3 §3.1/§3.6 + Part 4
-  §4.2 (the field-by-field `enrichLead` ↔ `computeSlaFlags_` diff) at
-  `c82ec67`. `tests/frontend-harness.html` runs known SLA states;
+  §4.2 (the field-by-field `enrichLead` ↔ `computeSlaFlags_` diff)
+  originally at `c82ec67`; the 3 cross-file line anchors re-grepped
+  directly against current source at `7799e44` (weekly spot-check cycle
+  5, 2026-10-07). `tests/frontend-harness.html` runs known SLA states;
   `Tests_SlaEngine.gs` / `Tests_DailyRmIssueLog.gs` cover the backend.
 - **Evidence:** `LOGIC_AUDIT.md` Part 4 §4.2; `.github/workflows/test.yml`;
   `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-10-07.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-034`.
+Verified at `c82ec67`; record created by `DOC-034`. Re-verified at
+`7799e44` (2026-10-07, weekly spot-check cycle 5) — `enrichLead` had moved
+`#L202` → `#L241` (`js/core-lead-model.js` growth, email audit F18's
+per-lead call baseline) and `computeRmPerformanceGs_` had moved `#L1071`
+→ `#L1289` (`DailyRmIssueLog.gs` growth from unrelated `GS-003` changes);
+both anchors were already corrected on their OWN records (`JS-006`,
+`GS-003`) but this record's duplicate citation of the same two functions
+was never propagated. Fixed both anchors here; no other field affected.
 
 ## Revalidation trigger
 
