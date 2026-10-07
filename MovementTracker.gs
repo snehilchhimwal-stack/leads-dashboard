@@ -191,7 +191,10 @@ const MOVEMENT_LOG_RUNS_SHEET_ = 'Movement_Log_Runs';
 // total_s / skipped_phases (email audit F23, 2026-10-07): the run row is now written as soon as the CORE capture is down, and
 // these two cells are filled in when the run ends. A row whose total_s is still blank is a run that never reached its end (the
 // platform killed it) - the same signal the snapshotPeriodic run record gives the watchdog, readable by eye in the sheet.
-const MOVEMENT_LOG_RUNS_COLUMNS_ = ['run_at', 'run_label', 'lead_count_seen', 'leads_changed', 'total_s', 'skipped_phases'];
+// failed_phases (2026-10-07): the optional steps that THREW in this run (they are also emailed to ops - alertSnapshotPhaseFailuresGs_).
+// phase_s (2026-10-07): where the run's time went - "core capture 95s | SLA_History write 14s | ..." - so a slow run can be diagnosed
+// from the sheet without opening the Executions log (a skipped step is absent; a failed one is marked FAILED).
+const MOVEMENT_LOG_RUNS_COLUMNS_ = ['run_at', 'run_label', 'lead_count_seen', 'leads_changed', 'total_s', 'skipped_phases', 'failed_phases', 'phase_s'];
 
 function ensureMovementLogRunsSheet_(ss) {
   let sheet = ss.getSheetByName(MOVEMENT_LOG_RUNS_SHEET_);
@@ -558,7 +561,8 @@ function writeSlaHistorySnapshot_(ss, dataRows, colIndex, now) {
 const SNAPSHOT_OPTIONAL_PHASE_DEADLINE_SECONDS_ = 840;
 
 // Runs one optional phase if the run is still inside its time budget. ctx = { nowMs: () => ms, startedMs, deadlineS, skipped: [],
-// errors: [] } (a plain object so a test can drive the clock). A phase that throws is logged and the run carries on - UNLESS
+// errors: [], failed: [{phase, message}] } (a plain object so a test can drive the clock). A phase that throws is logged, recorded in
+// ctx.failed (so it is emailed and shown in Movement_Log_Runs) and the run carries on - UNLESS
 // `rethrow` is set, in which case the error is kept in ctx.errors and re-thrown by the caller at the very end, after the run
 // record is written (so a failing prune still shows the execution as Failed, as it always did, without costing the later phases).
 function runSnapshotPhaseGs_(ctx, name, fn, rethrow) {
@@ -571,9 +575,13 @@ function runSnapshotPhaseGs_(ctx, name, fn, rethrow) {
   const phaseStartMs = ctx.nowMs();
   try {
     fn();
-    Logger.log('[timing] ' + name + ' took ' + Math.round((ctx.nowMs() - phaseStartMs) / 1000) + 's (run at ' + Math.round((ctx.nowMs() - ctx.startedMs) / 1000) + 's)');
+    const phaseSeconds = Math.round((ctx.nowMs() - phaseStartMs) / 1000);
+    if (ctx.timings) ctx.timings.push(name + ' ' + phaseSeconds + 's');
+    Logger.log('[timing] ' + name + ' took ' + phaseSeconds + 's (run at ' + Math.round((ctx.nowMs() - ctx.startedMs) / 1000) + 's)');
   } catch (e) {
+    if (ctx.timings) ctx.timings.push(name + ' FAILED after ' + Math.round((ctx.nowMs() - phaseStartMs) / 1000) + 's');
     Logger.log(name + ' failed (Movement_Log capture continues): ' + e);
+    ctx.failed.push({ phase: name, message: String((e && e.message) || e).slice(0, 400) });
     if (rethrow) ctx.errors.push(e);
   }
 }
@@ -587,7 +595,7 @@ function runSnapshotPhaseGs_(ctx, name, fn, rethrow) {
  *
  * `opts` is a test hook only: { nowMs: () => ms, deadlineSeconds } replaces the
  * wall clock / the optional-phase budget so a test can simulate a slow run.
- * Returns { leadCountSeen, leadsChanged, totalSeconds, skipped: [phase names] },
+ * Returns { leadCountSeen, leadsChanged, totalSeconds, skipped: [phase names], failed: [phase names that threw], timings: ["step 12s", ...] },
  * or null when the tab has nothing to snapshot.
  */
 function snapshotOpenLeads_(label, opts) {
@@ -598,6 +606,8 @@ function snapshotOpenLeads_(label, opts) {
     deadlineS: options.deadlineSeconds !== undefined ? options.deadlineSeconds : SNAPSHOT_OPTIONAL_PHASE_DEADLINE_SECONDS_,
     skipped: [],
     errors: [],
+    failed: [],
+    timings: [],
   };
   ctx.startedMs = ctx.nowMs();
   const sinceStartS = function () { return Math.round((ctx.nowMs() - ctx.startedMs) / 1000); };
@@ -656,6 +666,7 @@ function snapshotOpenLeads_(label, opts) {
     logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
   }
   Logger.log('[timing] core capture: ' + out.length + ' changed of ' + leadCountSeen + ' leads, appended by ' + sinceStartS() + 's');
+  ctx.timings.push('core capture (read, hash, append) ' + sinceStartS() + 's');
 
   // The run record, written as soon as the core capture is down and ALWAYS (even when out.length is 0 — a run happened whether
   // or not any lead's content changed; keeping those two concepts independent is what Phase 6 of the Lead History &
@@ -667,7 +678,7 @@ function snapshotOpenLeads_(label, opts) {
     runsSheet = ensureMovementLogRunsSheet_(ss);
     runRow = runsSheet.getLastRow() + 1;
     runsSheet.getRange(runRow, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length)
-      .setValues([[now, snapshotLabel, leadCountSeen, out.length, '', '']]);
+      .setValues([[now, snapshotLabel, leadCountSeen, out.length, '', '', '', '']]);
   } catch (e) {
     Logger.log('Movement_Log_Runs write failed (Movement_Log capture continues): ' + e);
     runsSheet = null;
@@ -709,14 +720,55 @@ function snapshotOpenLeads_(label, opts) {
   if (runsSheet && runRow) {
     try {
       const totalCol = MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('total_s') + 1;
-      runsSheet.getRange(runRow, totalCol, 1, 2).setValues([[totalSeconds, ctx.skipped.join(', ')]]);
+      runsSheet.getRange(runRow, totalCol, 1, 4).setValues([[totalSeconds, ctx.skipped.join(', '), ctx.failed.map(function (f) { return f.phase; }).join(', '), ctx.timings.join(' | ')]]);
     } catch (e) {
       Logger.log('Movement_Log_Runs total_s update failed (the capture itself is complete): ' + e);
     }
   }
+  // Tell ops about every step that threw (once per day per step) - BEFORE re-throwing a prune failure below, so that case is emailed too.
+  try {
+    alertSnapshotPhaseFailuresGs_(ctx.failed, snapshotLabel, now);
+  } catch (e) {
+    Logger.log('Snapshot phase-failure alert failed (the capture itself is complete): ' + e);
+  }
   if (ctx.errors.length) throw ctx.errors[0];
-  return { leadCountSeen: leadCountSeen, leadsChanged: out.length, totalSeconds: totalSeconds, skipped: ctx.skipped.slice() };
+  return { leadCountSeen: leadCountSeen, leadsChanged: out.length, totalSeconds: totalSeconds, skipped: ctx.skipped.slice(), failed: ctx.failed.map(function (f) { return f.phase; }), timings: ctx.timings.slice() };
 }
+
+// A phase that FAILED (threw) used to be only logged: nobody was told, so the Comment_History / Unmatched_Comments_Log prunes
+// failed for days on a mis-counting archive check without a single email (2026-10-07). Now every failed phase is (1) kept in the
+// run's result and in Movement_Log_Runs.failed_phases and (2) emailed to ops - at most ONCE PER DAY PER PHASE (the run is every 6
+// hours and a phase that fails will fail again; a different phase failing the same day still alerts). The capture itself is never
+// affected by any of this: a failing alert is logged and swallowed. State is one Script Property:
+// SNAPSHOT_PHASE_ALERTED = {day, phases: [names already alerted today]}; an unreadable property means "alert anyway".
+const SNAPSHOT_PHASE_ALERT_PROPERTY_ = 'SNAPSHOT_PHASE_ALERTED';
+function alertSnapshotPhaseFailuresGs_(failed, label, now) {
+  if (!failed || !failed.length) return 0;
+  const day = istDayKeyGs_(now || new Date());
+  let already = [];
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(SNAPSHOT_PHASE_ALERT_PROPERTY_);
+    const rec = raw ? JSON.parse(raw) : null;
+    if (rec && rec.day === day && Array.isArray(rec.phases)) already = rec.phases;
+  } catch (e) {
+    already = [];
+  }
+  const fresh = failed.filter(function (f) { return already.indexOf(f.phase) === -1; });
+  if (!fresh.length) return 0;
+  const lines = ['The Movement_Log snapshot run "' + (label || '') + '" finished its capture but these steps FAILED:', ''];
+  fresh.forEach(function (f) { lines.push('- ' + f.phase + ': ' + f.message); });
+  lines.push('');
+  lines.push('The capture itself (Movement_Log rows, the call baselines every email uses) is NOT affected. A failed prune means that tab keeps growing past its retention window until it succeeds; a failed log or scan means that run\'s rows are missing from it. Each step is retried on the next run (every 6 hours).');
+  lines.push('This email is sent once per day per step. Full error text: the Apps Script Executions list, this run, log lines starting with the step name.');
+  notifyOpsAlertGs_('Movement snapshot: ' + fresh.map(function (f) { return f.phase; }).join(', ') + ' FAILED', lines);
+  try {
+    PropertiesService.getScriptProperties().setProperty(SNAPSHOT_PHASE_ALERT_PROPERTY_, JSON.stringify({ day: day, phases: already.concat(fresh.map(function (f) { return f.phase; })) }));
+  } catch (e2) {
+    Logger.log('alertSnapshotPhaseFailuresGs_: could not record the alert (a repeat alert may follow): ' + e2);
+  }
+  return fresh.length;
+}
+
 
 // Rewrites the whole data range with only rows newer than the retention
 // window — simpler and safer than deleting individual rows out from under
@@ -1291,6 +1343,7 @@ function snapshotPeriodic() {
     status: 'completed',
     totalSeconds: summary ? summary.totalSeconds : 0,
     skipped: summary ? summary.skipped : [],
+    failed: summary ? summary.failed : [],
   }));
 }
 

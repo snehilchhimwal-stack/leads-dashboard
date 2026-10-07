@@ -366,7 +366,8 @@ function pruneUnmatchedCommentsLog_(ss) {
     files.push(file);
   }
   let archivedLines = 0;
-  files.forEach(function (file) { archivedLines += file.getBlob().getDataAsString().split('\n').length; });
+  // Counts CSV RECORDS, not physical lines - a comment with a line break is one record (countCsvRecordsGs_, Core.gs).
+  files.forEach(function (file) { archivedLines += countCsvRecordsGs_(file.getBlob().getDataAsString()); });
   const archivedRows = archivedLines - files.length;
   if (archivedRows !== dropped.length) {
     throw new Error('Drive archive holds ' + archivedRows + ' row(s) across ' + files.length + ' file(s) but ' + dropped.length +

@@ -307,6 +307,25 @@ function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel) {
   return file;
 }
 
+// Number of CSV RECORDS in `text` as archiveRowsToDriveCsv_ writes it: records are joined with a line feed (no trailing one), and a
+// cell that holds a line break is quoted, so a line feed INSIDE quotes belongs to the same record. The prunes use this to prove an
+// archive holds every row they are about to delete. They used to count `text.split('\n').length`, which counts PHYSICAL lines:
+// every multi-line comment added a phantom row, the count never matched, and the Comment_History / Unmatched_Comments_Log prunes
+// refused to run for days without anyone being told (2026-10-07: 6,369 expired rows, 102 multi-line -> "holds 6518 ... but 6369
+// were expected"). An escaped quote ("") toggles the quote state twice, so it never ends a quoted cell early.
+function countCsvRecordsGs_(text) {
+  const s = String(text === null || text === undefined ? '' : text);
+  if (!s) return 0;
+  let records = 1;
+  let inQuotes = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charAt(i);
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (ch === '\n' && !inQuotes) records++;
+  }
+  return records;
+}
+
 // Appends one line to ARCHIVE_MANIFEST_FILE_ in rootFolder, creating it
 // (with a header row) on first use. Drive has no native "append to file"
 // call — this reads the whole current content back, adds one line, and

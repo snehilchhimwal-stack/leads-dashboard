@@ -749,6 +749,51 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     TestAssertEqual_(a4d.length, 1, 'E2E watchdog: the failed run is alerted once');
     TestAssertContains_(a4d[0].subject, 'WATCHDOG: snapshotPeriodic failed', 'E2E watchdog: …as a failure');
     TestAssertContains_(a4d[0].body, 'could not be read', 'E2E watchdog: …with the error text');
+    // ===== SCENARIO 5: the comment prunes (the real production failure) and the failure email =====
+    // Comment_History / Unmatched_Comments_Log hold multi-line comments. They failed for days in production ("Drive archive holds
+    // 6518 row(s) ... refusing to prune") and nobody was emailed. Here the REAL snapshotPeriodic prunes them, then a failing prune
+    // is emailed once and shown in Movement_Log_Runs.
+    PropertiesService = TestMockPropertiesService_();
+    const drive5 = TestMockDriveApp_();
+    DriveApp = drive5;
+    const ss5 = TestEFC_e2eSpreadsheet_(TestEFC_e2eRows_(header, banner, created, now, D2), monthShort);
+    const old5 = Utilities.formatDate(TestFixture_daysAgo_(now, 45), 'Asia/Kolkata', 'yyyy-MM-dd');
+    const new5 = Utilities.formatDate(TestFixture_daysAgo_(now, 2), 'Asia/Kolkata', 'yyyy-MM-dd');
+    const chRow5 = function (d, id, comment) { return [d, id, 'C-' + id, 'Test RM One', 'Pune', 'P', comment, '', '2026-01-01 00:00:00']; };
+    ss5._sheets[COMMENT_HISTORY_SHEET_] = TestMockSheet_(COMMENT_HISTORY_SHEET_, [COMMENT_HISTORY_COLUMNS_,
+      chRow5(old5, 'E-OLD1', 'line one\nline two'), chRow5(old5, 'E-OLD2', 'single line'), chRow5(new5, 'E-NEW1', 'recent\nmulti-line')]);
+    ss5._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = TestMockSheet_(UNMATCHED_COMMENTS_LOG_SHEET_, [UNMATCHED_COMMENTS_LOG_COLUMNS_,
+      [old5, 'E-OLD3', 'Test RM One', 'Pune', 'P', 'x\ny', '', '2026-01-01 00:00:00', false, ''],
+      [new5, 'E-NEW2', 'Test RM One', 'Pune', 'P', 'recent', '', '2026-01-01 00:00:00', false, '']]);
+    useSs(ss5);
+    let alerts5 = TestGmailLog_.sent.length;
+    snapshotPeriodic();
+    TestAssertEqual_(ss5.getSheetByName(COMMENT_HISTORY_SHEET_).getLastRow(), 2, 'E2E comment prunes: the expired Comment_History rows (one multi-line) are removed - header + the recent row remain');
+    TestAssertEqual_(ss5.getSheetByName(COMMENT_HISTORY_SHEET_).getRange(2, 2, 1, 1).getValues()[0][0], 'E-NEW1', 'E2E comment prunes: …the survivor is the recent multi-line row, intact');
+    TestAssertEqual_(ss5.getSheetByName(UNMATCHED_COMMENTS_LOG_SHEET_).getLastRow(), 2, 'E2E comment prunes: the expired Unmatched_Comments_Log row (multi-line) is removed too');
+    const archived5 = JSON.stringify(Object.keys(drive5._folders[ARCHIVE_ROOT_FOLDER_]._folders));
+    TestAssert_(archived5.indexOf(COMMENT_HISTORY_SHEET_) !== -1 && archived5.indexOf(UNMATCHED_COMMENTS_LOG_SHEET_) !== -1, 'E2E comment prunes: both were archived to Drive first');
+    const runs5 = ss5.getSheetByName('Movement_Log_Runs');
+    const runRow5 = runs5.getRange(runs5.getLastRow(), 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(runRow5[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('failed_phases')], '', 'E2E comment prunes: nothing failed in this run (failed_phases is blank)');
+    TestAssertEqual_(TestGmailLog_.sent.slice(alerts5).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 0, 'E2E comment prunes: …so no failure email');
+    // Now the failure path, end to end: the real run, a prune that throws.
+    ss5._sheets[COMMENT_HISTORY_SHEET_].appendRow(chRow5(old5, 'E-OLD4', 'expired again'));
+    const realPruneCh5 = pruneCommentHistory_;
+    pruneCommentHistory_ = function () { throw new Error('Drive archive holds 9 row(s) across 1 file(s) but 4 were expected - refusing to prune Comment_History.'); };
+    alerts5 = TestGmailLog_.sent.length;
+    try { snapshotPeriodic(); } finally { pruneCommentHistory_ = realPruneCh5; }
+    const fail5 = TestGmailLog_.sent.slice(alerts5).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); });
+    TestAssertEqual_(fail5.length, 1, 'E2E comment prunes: a failing prune emails ops exactly once');
+    TestAssertContains_(fail5[0].body, 'refusing to prune Comment_History', 'E2E comment prunes: …with the real error text');
+    const runRow5b = runs5.getRange(runs5.getLastRow(), 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+    TestAssertEqual_(runRow5b[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('failed_phases')], 'Comment_History prune', 'E2E comment prunes: …and Movement_Log_Runs.failed_phases says which step');
+    TestAssertEqual_(readEmailJobRunGs_('snapshotPeriodic').status, 'completed', 'E2E comment prunes: …while the run itself still completes (the capture is unaffected)');
+    TestAssertEqual_(readEmailJobRunGs_('snapshotPeriodic').failed.join(','), 'Comment_History prune', 'E2E comment prunes: …and the run record carries the failed step');
+    snapshotPeriodic();
+    TestAssertEqual_(TestGmailLog_.sent.slice(alerts5).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 1, 'E2E comment prunes: once fixed, the next run prunes the row and sends nothing more');
+    TestAssertEqual_(ss5.getSheetByName(COMMENT_HISTORY_SHEET_).getLastRow(), 2, 'E2E comment prunes: …the row that failed to prune is now gone');
+    DriveApp = realDrive;
   } finally {
     SpreadsheetApp = realSpreadsheetApp;
     PropertiesService = realProps;

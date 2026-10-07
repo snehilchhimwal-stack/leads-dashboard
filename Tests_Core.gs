@@ -204,6 +204,29 @@ function runCoreTests_() {
     } finally {
       SpreadsheetApp = realSpreadsheetAppForOppConv_;
     }
+
+    // ---- countCsvRecordsGs_ (2026-10-07): counts CSV RECORDS, not physical lines ----
+    // Real incident: the comment prunes counted split('\n') lines of their own archive CSV, so every multi-line comment added a
+    // phantom row and the prunes refused to run for days ("holds 6518 ... but 6369 were expected").
+    TestAssertEqual_(countCsvRecordsGs_(''), 0, 'countCsvRecordsGs_: empty text has no records');
+    TestAssertEqual_(countCsvRecordsGs_('a,b,c'), 1, 'countCsvRecordsGs_: a header alone is one record');
+    TestAssertEqual_(countCsvRecordsGs_('h1,h2\nr1a,r1b\nr2a,r2b'), 3, 'countCsvRecordsGs_: plain lines are one record each (the same answer split(newline) gave)');
+    TestAssertEqual_(countCsvRecordsGs_('h\n"line one\nline two"\nplain'), 3, 'countCsvRecordsGs_: a line break INSIDE quotes belongs to the same record (the production failure)');
+    TestAssertEqual_(countCsvRecordsGs_('h\n"a\nb\nc\nd"\n"e\nf"'), 3, 'countCsvRecordsGs_: several multi-line records');
+    TestAssertEqual_(countCsvRecordsGs_('h\n"he said ""call\nme"" later",x\nnext'), 3, 'countCsvRecordsGs_: an escaped quote ("") does not end the quoted cell early');
+    TestAssertEqual_(countCsvRecordsGs_('h\n"comma, inside",x\nnext'), 3, 'countCsvRecordsGs_: commas inside quotes are irrelevant');
+    TestAssertEqual_(countCsvRecordsGs_('h\r\n"a\r\nb"\r\nz'), 3, 'countCsvRecordsGs_: CRLF line ends count the same');
+    TestAssertEqual_(countCsvRecordsGs_(null), 0, 'countCsvRecordsGs_: null is empty');
+    // Round trip with the real writer: whatever archiveRowsToDriveCsv_ writes, the counter reads back as header + rows.
+    const csvRealDrive = DriveApp;
+    DriveApp = TestMockDriveApp_();
+    try {
+      const csvRows = [['2026-08-01', 'x', 'multi\nline\ncomment, with "quotes"'], ['2026-08-02', 'y', 'single'], ['2026-08-03', 'z', '\nleading and trailing\n']];
+      const csvFile = archiveRowsToDriveCsv_('Round_Trip', ['date', 'id', 'comment'], csvRows, 'test');
+      TestAssertEqual_(countCsvRecordsGs_(csvFile.getBlob().getDataAsString()), 1 + csvRows.length, 'countCsvRecordsGs_: reads back exactly header + N records from what archiveRowsToDriveCsv_ really writes');
+    } finally {
+      DriveApp = csvRealDrive;
+    }
   } finally {
     TestEnv_tearDown_();
   }

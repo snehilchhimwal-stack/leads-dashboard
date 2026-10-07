@@ -1117,7 +1117,7 @@ function runMovementTrackerTests_() {
 
       // ---- F23: the phase runner and the time budget ----
       let clockMs = 0;
-      const mkCtx = function () { return { nowMs: function () { return clockMs; }, startedMs: 0, deadlineS: 100, skipped: [], errors: [] }; };
+      const mkCtx = function () { return { nowMs: function () { return clockMs; }, startedMs: 0, deadlineS: 100, skipped: [], errors: [], failed: [], timings: [] }; };
       const c1 = mkCtx();
       let ran1 = 0;
       clockMs = 100000;
@@ -1151,6 +1151,7 @@ function runMovementTrackerTests_() {
       TestAssertEqual_(slowRunRow[3], 1, 'F23 slow run: the Movement_Log_Runs row (written right after the core capture) records the changed lead');
       TestAssertEqual_(slowRunRow[4], 5000, 'F23 slow run: …and total_s is filled in at the end');
       TestAssertContains_(String(slowRunRow[5]), 'Movement_Log prune', 'F23 slow run: …and skipped_phases names what was skipped');
+      TestAssertEqual_(String(slowRunRow[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('phase_s')]).indexOf('SLA_History write'), -1, 'F23 slow run: …and a skipped step has no timing (it did not run)');
 
       const slaBeforeNormal = ss.getSheetByName('SLA_History').getLastRow();
       const normalRunsBefore = ss.getSheetByName('Movement_Log_Runs').getLastRow();
@@ -1160,6 +1161,9 @@ function runMovementTrackerTests_() {
       const normalRunRow = ss.getSheetByName('Movement_Log_Runs').getRange(normalRunsBefore + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
       TestAssert_(typeof normalRunRow[4] === 'number' && normalRunRow[4] >= 0 && normalRunRow[5] === '', 'F23 normal run: total_s is a number and skipped_phases is empty');
       TestAssertEqual_(normalSummary.leadCountSeen, 4, 'F23 normal run: the summary reports the leads seen (blank lead_id excluded)');
+      const phaseS = String(normalRunRow[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('phase_s')]);
+      TestAssert_(/^core capture \(read, hash, append\) \d+s \| SLA_History write \d+s \| Unmatched_Comments_Log scan \d+s \| Comment_History log \d+s \| Movement_Log prune \d+s \| Comment_History prune \d+s \| Unmatched_Comments_Log prune \d+s \| Daily_Cohort_History persist \d+s$/.test(phaseS), 'F23 normal run: Movement_Log_Runs.phase_s shows where the time went - the core capture, then each step in order (' + phaseS + ')');
+      TestAssertEqual_(normalSummary.timings.length, 8, 'F23 normal run: the summary carries the same 8 timings');
 
       // A prune that throws still fails the run - but only AFTER the run record is complete and the later phases have run.
       const realPrune = pruneMovementLog_;
@@ -1173,12 +1177,70 @@ function runMovementTrackerTests_() {
       TestAssert_(typeof pruneFailRow[4] === 'number', 'F23: …but only after the run record is complete (total_s filled in)');
       TestAssertEqual_(ss.getSheetByName('SLA_History').getLastRow(), pruneFailSlaBefore + 1, 'F23: …and the phases before the failing one ran');
 
+
+      // ---- 2026-10-07: a phase that THROWS is reported, not just logged ----
+      // Real incident: the Comment_History / Unmatched_Comments_Log prunes failed for days on a mis-counting archive check
+      // ("Drive archive holds 6518 row(s) ... refusing to prune") and nobody was told - the phases were try/catch-logged only.
+      PropertiesService = TestMockPropertiesService_();
+      const failSs = ss;
+      const realPruneCh = pruneCommentHistory_;
+      const realPruneUcl = pruneUnmatchedCommentsLog_;
+      const runsBeforeFail = failSs.getSheetByName('Movement_Log_Runs').getLastRow();
+      const alertsBeforeFail = TestGmailLog_.sent.length;
+      pruneCommentHistory_ = function () { throw new Error('Drive archive holds 6518 row(s) across 2 file(s) but 6369 were expected - refusing to prune Comment_History.'); };
+      let failedRun;
+      try { failedRun = snapshotOpenLeads_('phase failure run'); } finally { pruneCommentHistory_ = realPruneCh; }
+      TestAssertEqual_(failedRun.failed.join(','), 'Comment_History prune', 'phase failure: the run result names the step that threw');
+      TestAssertEqual_(failedRun.skipped.length, 0, 'phase failure: …and nothing was skipped');
+      const failRunRow = failSs.getSheetByName('Movement_Log_Runs').getRange(runsBeforeFail + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
+      TestAssertEqual_(failRunRow[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('failed_phases')], 'Comment_History prune', 'phase failure: Movement_Log_Runs.failed_phases names it');
+      TestAssertContains_(String(failRunRow[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('phase_s')]), 'Comment_History prune FAILED after', 'phase failure: …and phase_s marks that step FAILED');
+      TestAssert_(typeof failRunRow[4] === 'number', 'phase failure: …and the run record is still completed (total_s filled in) - a failing step never stops the run');
+      const failAlerts = TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); });
+      TestAssertEqual_(failAlerts.length, 1, 'phase failure: ops get exactly one email');
+      TestAssertContains_(failAlerts[0].subject, 'Comment_History prune', 'phase failure: …its subject names the step');
+      TestAssertContains_(failAlerts[0].body, 'refusing to prune Comment_History', 'phase failure: …its body carries the actual error text');
+      TestAssertContains_(failAlerts[0].body, 'NOT affected', 'phase failure: …and says the capture itself was not affected');
+      // The same step failing again the same day is NOT re-emailed (the run is every 6 hours); a different step failing is.
+      pruneCommentHistory_ = function () { throw new Error('again'); };
+      try { snapshotOpenLeads_('phase failure repeat'); } finally { pruneCommentHistory_ = realPruneCh; }
+      TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 1, 'phase failure: the same step failing again the same day is not emailed a second time');
+      pruneUnmatchedCommentsLog_ = function () { throw new Error('different step broke'); };
+      try { snapshotOpenLeads_('phase failure other step'); } finally { pruneUnmatchedCommentsLog_ = realPruneUcl; }
+      const failAlerts2 = TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); });
+      TestAssertEqual_(failAlerts2.length, 2, 'phase failure: a DIFFERENT step failing the same day is emailed');
+      TestAssertContains_(failAlerts2[1].subject, 'Unmatched_Comments_Log prune', 'phase failure: …naming that step');
+      TestAssert_(failAlerts2[1].subject.indexOf('Comment_History') === -1, 'phase failure: …and not the one already reported');
+      // Next day the same step is reported again.
+      PropertiesService.getScriptProperties().setProperty(SNAPSHOT_PHASE_ALERT_PROPERTY_, JSON.stringify({ day: '2026-01-01', phases: ['Comment_History prune'] }));
+      pruneCommentHistory_ = function () { throw new Error('new day'); };
+      try { snapshotOpenLeads_('phase failure next day'); } finally { pruneCommentHistory_ = realPruneCh; }
+      TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 3, 'phase failure: yesterday\'s alert does not suppress today\'s');
+      // A Movement_Log prune failure is emailed AND still fails the execution.
+      PropertiesService = TestMockPropertiesService_();
+      const alertsBeforeMlPrune = TestGmailLog_.sent.length;
+      const realPruneMl = pruneMovementLog_;
+      pruneMovementLog_ = function () { throw new Error('movement prune broke'); };
+      let mlPruneThrew = '';
+      try { snapshotOpenLeads_('movement prune failure'); } catch (e) { mlPruneThrew = String(e.message); } finally { pruneMovementLog_ = realPruneMl; }
+      TestAssertContains_(mlPruneThrew, 'movement prune broke', 'phase failure: a Movement_Log prune failure still fails the execution');
+      TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeMlPrune).filter(function (e) { return /Movement snapshot: Movement_Log prune FAILED/.test(e.subject); }).length, 1, 'phase failure: …and ops are emailed about it too (before the re-throw)');
+      // An alert that cannot be sent never breaks the run; an unreadable Properties service still alerts.
+      PropertiesService = TestMockPropertiesService_({ failReads: true, failWrites: true });
+      pruneUnmatchedCommentsLog_ = function () { throw new Error('props broken'); };
+      const alertsBeforeProps = TestGmailLog_.sent.length;
+      let propsRun;
+      try { propsRun = snapshotOpenLeads_('props broken'); } finally { pruneUnmatchedCommentsLog_ = realPruneUcl; }
+      TestAssertEqual_(propsRun.failed.join(','), 'Unmatched_Comments_Log prune', 'phase failure: with a broken Properties service the run still completes and reports the failure');
+      TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeProps).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 1, 'phase failure: …and fails OPEN - ops are still emailed (the once-a-day record is unreadable, so it alerts)');
+      PropertiesService = TestMockPropertiesService_();
+
       // ---- F23: Movement_Log_Runs gains its two columns on an existing sheet ----
       const oldRunsSheet = TestMockSheet_('Movement_Log_Runs', [['run_at', 'run_label', 'lead_count_seen', 'leads_changed'], [yday, 'old run', 10, 2]]);
       const healedRuns = ensureMovementLogRunsSheet_(TestMockSpreadsheet_({ 'Movement_Log_Runs': oldRunsSheet }));
-      TestAssertEqual_(healedRuns.getRange(1, 1, 1, 6).getValues()[0].join(','), 'run_at,run_label,lead_count_seen,leads_changed,total_s,skipped_phases', 'F23 runs sheet: an existing 4-column sheet gets total_s and skipped_phases appended');
+      TestAssertEqual_(healedRuns.getRange(1, 1, 1, 8).getValues()[0].join(','), 'run_at,run_label,lead_count_seen,leads_changed,total_s,skipped_phases,failed_phases,phase_s', 'F23 runs sheet: an existing 4-column sheet gets total_s, skipped_phases, failed_phases and phase_s appended');
       TestAssertEqual_(healedRuns.getRange(2, 1, 1, 4).getValues()[0][1], 'old run', 'F23 runs sheet: its existing rows are untouched');
-      TestAssertEqual_(ensureMovementLogRunsSheet_(TestMockSpreadsheet_({})).getLastColumn(), 6, 'F23 runs sheet: a brand-new sheet is created with all 6 columns');
+      TestAssertEqual_(ensureMovementLogRunsSheet_(TestMockSpreadsheet_({})).getLastColumn(), 8, 'F23 runs sheet: a brand-new sheet is created with all 8 columns');
 
       // ---- F23: snapshotPeriodic leaves a run record for the watchdog ----
       PropertiesService = TestMockPropertiesService_();

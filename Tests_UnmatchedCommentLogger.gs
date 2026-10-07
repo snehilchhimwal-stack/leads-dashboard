@@ -248,6 +248,34 @@ function runUnmatchedCommentLoggerTests_() {
     } finally {
       DriveApp = realDriveForPrune2_;
     }
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (c) 2026-10-07 REGRESSION - multi-line comments (same real incident as Tests_InteractionHistoryLogger.gs (e)): this
+      // prune refused to run in production because its archive check counted physical CSV lines, and a comment with a line break is
+      // one record on several lines (2,134 expired rows, 7 of them multi-line: "2148 row(s) ... but 2134 were expected").
+      const mlSs = TestMockSpreadsheet_({});
+      const mlRow = function (dateStr, leadId, comment) {
+        const r = unmatchedRow_(dateStr, leadId, false);
+        r[5] = comment;
+        return r;
+      };
+      const mlSheet = TestMockSheet_(UNMATCHED_COMMENTS_LOG_SHEET_, [UNMATCHED_COMMENTS_LOG_COLUMNS_,
+        mlRow('2026-08-01', 'L-ML1', 'first line\nsecond line'),
+        mlRow('2026-08-02', 'L-ML2', 'he said "no, thanks"\nand left'),
+        mlRow('2026-08-03', 'L-ML3', 'one line'),
+        mlRow('2026-09-25', 'L-MLKEEP', 'recent\nmulti-line'),
+      ]);
+      mlSs._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = mlSheet;
+      const realNowMl = Date.now;
+      Date.now = function () { return new Date('2026-09-29T12:00:00+05:30').getTime(); };
+      let mlThrew = '';
+      try { pruneUnmatchedCommentsLog_(mlSs); } catch (e) { mlThrew = String(e && e.message || e); } finally { Date.now = realNowMl; }
+      TestAssertEqual_(mlThrew, '', 'pruneUnmatchedCommentsLog_ (multi-line comments): the prune does NOT refuse - 3 archived records are 3 records, however many lines they span');
+      TestAssertEqual_(mlSheet.getLastRow(), 2, 'pruneUnmatchedCommentsLog_ (multi-line comments): the 3 expired rows are removed (header + the recent row remain)');
+      TestAssertEqual_(mlSheet.getRange(2, 2, 1, 1).getValues()[0][0], 'L-MLKEEP', 'pruneUnmatchedCommentsLog_ (multi-line comments): the surviving row is the recent one');
+    } finally {
+      DriveApp = realDriveForPrune2_;
+    }
   } finally {
     TestEnv_tearDown_();
   }

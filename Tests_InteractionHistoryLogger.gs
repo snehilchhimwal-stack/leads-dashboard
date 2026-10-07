@@ -213,6 +213,41 @@ function runInteractionHistoryLoggerTests_() {
     } finally {
       DriveApp = realDriveForPrune_;
     }
+    DriveApp = TestMockDriveApp_();
+    try {
+      // (e) 2026-10-07 REGRESSION - multi-line comments. Real incident: this prune had been failing silently for days in
+      // production ("Drive archive holds 6518 row(s) across 2 file(s) but 6369 were expected - refusing to prune"): the archive
+      // check counted physical lines in the CSV, but a comment containing a line break is ONE record spread over several lines
+      // (the CSV writer quotes it). 102 of the 6,369 expired rows had one. Every fixture above has single-line comments, which is
+      // why nothing caught it. Comma, quote and CRLF cases are here too.
+      const mlNow = new Date('2026-09-29T12:00:00+05:30');
+      const mlSs = TestMockSpreadsheet_({});
+      const multiLine = function (dateStr, leadId, comment) {
+        const r = commentHistoryRow_(dateStr, leadId);
+        r[6] = comment;
+        return r;
+      };
+      const mlSheet = TestMockSheet_(COMMENT_HISTORY_SHEET_, [COMMENT_HISTORY_COLUMNS_,
+        multiLine('2026-08-01', 'L-ML1', 'first line\nsecond line\nthird line'),
+        multiLine('2026-08-02', 'L-ML2', 'He said "call me, later"\nthen hung up'),
+        multiLine('2026-08-03', 'L-ML3', 'plain single line'),
+        multiLine('2026-08-04', 'L-ML4', 'windows\r\nline break'),
+        multiLine('2026-09-25', 'L-MLKEEP', 'recent\nmulti-line row stays'),
+      ]);
+      mlSs._sheets[COMMENT_HISTORY_SHEET_] = mlSheet;
+      const realNowMl = Date.now;
+      Date.now = function () { return mlNow.getTime(); };
+      let mlThrew = '';
+      try { pruneCommentHistory_(mlSs); } catch (e) { mlThrew = String(e && e.message || e); } finally { Date.now = realNowMl; }
+      TestAssertEqual_(mlThrew, '', 'pruneCommentHistory_ (multi-line comments): the prune does NOT refuse - 4 records archived are 4 records, however many lines they span');
+      TestAssertEqual_(mlSheet.getLastRow(), 2, 'pruneCommentHistory_ (multi-line comments): the 4 expired rows are removed (header + the 1 recent row remain)');
+      TestAssertEqual_(mlSheet.getRange(2, 2, 1, 1).getValues()[0][0], 'L-MLKEEP', 'pruneCommentHistory_ (multi-line comments): the surviving row is the recent one, intact');
+      const mlFolder = DriveApp._folders[ARCHIVE_ROOT_FOLDER_] && DriveApp._folders[ARCHIVE_ROOT_FOLDER_]._folders[COMMENT_HISTORY_SHEET_];
+      const mlCsv = mlFolder && mlFolder._filesList[0] ? mlFolder._filesList[0].getBlob().getDataAsString() : '';
+      TestAssert_(mlCsv.indexOf('first line\nsecond line\nthird line') !== -1 && mlCsv.indexOf('call me, later') !== -1, 'pruneCommentHistory_ (multi-line comments): the archive keeps each comment whole, line breaks and all');
+    } finally {
+      DriveApp = realDriveForPrune_;
+    }
   } finally {
     TestEnv_tearDown_();
   }
