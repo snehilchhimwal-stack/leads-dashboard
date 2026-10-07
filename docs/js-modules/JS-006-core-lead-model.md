@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-01 against commit `20cfec4` — `underCalledToday` (FN-034) fixed to take `MAX(delta, loggedToday)` instead of delta alone (real incident, lead 2245665/Riya Yadav); see `## Version / change reference` |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): the call baselines are per lead id; `callsTodayFromBaseline` / `lastSnapshotForLead` added (`FN-346`/`FN-347`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -39,7 +39,9 @@ core-collation → core-outcome-engine → …`). Forward-references
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-034 | `enrichLead(l)` `#L202` | a raw parsed lead + module state (`_renderNow`, `_todayCallBaselineByKey`, `_lastSnapshotByKey`) | the lead with `firstContactBreach`, `neverConnectedPastWindow`, `isNotUpdated`, `underCalledToday`, `stageStuck48h`, `followupOverdue`, `recordingNotWorking`, `closedWithNoComment`, `inactiveRmNewLead`, `isMultiAgent`, funnel position | reads module baseline `Map`s | `businessMinutesBetween` (FN-035), `parseDate` (FN-036), `canonicalStage` (FN-037), `combinedCommentsText` / `parseActionLog` (`JS-007`) | `applyFiltersAndRender` (`JS-004`), `fetchAndRender` (`JS-003`), `tab-movement.js`, `reports-build.js`, `overview-…`, and more | specific — the core enrichment |
+| FN-034 | `enrichLead(l)` `#L241` | a raw parsed lead + module state (`_renderNow`, `_todayCallBaselineByKey`, `_lastSnapshotByKey`) | the lead with `firstContactBreach`, `neverConnectedPastWindow`, `isNotUpdated`, `underCalledToday`, `stageStuck48h`, `followupOverdue`, `recordingNotWorking`, `closedWithNoComment`, `inactiveRmNewLead`, `isMultiAgent`, funnel position | reads module baseline `Map`s | `businessMinutesBetween` (FN-035), `parseDate` (FN-036), `canonicalStage` (FN-037), `combinedCommentsText` / `parseActionLog` (`JS-007`) | `applyFiltersAndRender` (`JS-004`), `fetchAndRender` (`JS-003`), `tab-movement.js`, `reports-build.js`, `overview-…`, and more | specific — the core enrichment |
+| FN-346 | `callsTodayFromBaseline(l)` `#L209` | an unenriched lead (single-copy, or merged with `callAttemptsByLeadId`) + module state `_todayCallBaselineByKey` | today's call count: the best per-lead `max(0, call_attempts - that lead's own baseline)`, or `null` when none of the leads it covers has a pre-today baseline (the caller then falls back to its comment-log proxy) | none (pure) | — | `enrichLead` (FN-034) | specific — **added 2026-10-07 (email audit F18)**. A merged customer record's `call_attempts` is the MAX over its leads, so subtracting one lead's baseline would credit a sibling's counter; the single-lead case equals `SlaEngine.gs`'s `computeSlaFlags_` exactly |
+| FN-347 | `lastSnapshotForLead(l)` `#L226` | a lead (single-copy or merged with `collatedLeadIds`) + `_lastSnapshotByKey` | the latest pre-now `{atMs, call_attempts}` snapshot of the lead — for a merged record, of whichever of its leads has the highest `call_attempts` (ties: the later snapshot), matching the record's own max | none (pure) | — | `noCommentFollowUp` (`JS-007` FN-049) | specific — **added 2026-10-07 (email audit F18)** |
 | FN-035 | `businessMinutesBetween(start, end)` `#L14` | two dates | minutes within `WORK_START_HOUR`..`WORK_END_HOUR` | none | `CONFIG` (`JS-005`) | `enrichLead` (FN-034), SLA timing | reusable |
 | FN-036 | `parseDate(v)` `#L52` | a string / Date / serial | a `Date` or `null` (cached in `_parseDateCache`) | populates the cache Map | — | virtually every module that reads a timestamp | reusable |
 | FN-037 | `canonicalStage(stage)` `#L83` | a raw stage string | a `CONFIG.FUNNEL_ORDER` entry or `null` | none | `CONFIG` (`JS-005`) | `isOppOrAbove` (FN-038), `enrichLead`, renderers | reusable |
@@ -53,7 +55,7 @@ core-collation → core-outcome-engine → …`). Forward-references
 | ID | Rule | Where | Duplicated in (`GS-XXX`)? | Notes |
 |---|---|---|---|---|
 | RULE-005 | The 5 Operations SLA checks (`firstContactBreach`, not-connected-in-window, `isNotUpdated`, `stageStuck48h`, `followupOverdue`) + the recording / closed-no-comment / inactive-RM signals | FN-034 | **Yes — `SlaEngine.gs` `computeSlaFlags_`** (`GS-012`). Full diff: `LOGIC_AUDIT.md` Part 4 §4.2 | manual-sync risk — edit both sides |
-| RULE-006 | `underCalledToday` = day-over-day call-count delta vs a `Movement_Log` baseline (`_todayCallBaselineByKey`), not an absolute count | FN-034 | Yes — backend derives its own baseline from `Movement_Log` | `MIN_CALLS_AFTER_48H` (`CONFIG`) is display-only, disagrees with the real threshold — `LOGIC_AUDIT.md` Part 4 §4.9 / Part 7 §18 MEDIUM #2 |
+| RULE-006 | `underCalledToday` = day-over-day call-count delta vs a `Movement_Log` baseline (`_todayCallBaselineByKey`, keyed by LEAD id since 2026-10-07 — email audit F18), not an absolute count | FN-034 | Yes — backend derives its own baseline from `Movement_Log` | `MIN_CALLS_AFTER_48H` (`CONFIG`) is display-only, disagrees with the real threshold — `LOGIC_AUDIT.md` Part 4 §4.9 / Part 7 §18 MEDIUM #2 |
 | RULE-007 | `isNotUpdated` deliberately does **not** gate on `isUnder48h` (changed 2026-09-03) — a neglected lead must not silently reclassify as "Stuck 48h+" once past 48h | FN-034 | Yes — `SlaEngine.gs` got the same change 2026-09-03 (`LOGIC_AUDIT.md` Part 1 §4d) | keep the two changes in lockstep |
 | RULE-008 | A lead reads closed only via `isClosedStage` OR a closing-reason field; `isLeadClosed` is the client twin of `isOpenLead_` | FN-041 | Yes — `Core.gs` `isOpenLead_` | `LOGIC_AUDIT.md` Part 1 §4b |
 
@@ -161,6 +163,8 @@ preserved. `tests/frontend-harness.html` section 2i: 3 new assertions
 delta-alone sanity case is unaffected) — full suite 156/156. Not tracked
 by `test/check-runtime-parity.py` (full function logic, not a parseable
 constant). See `HANDOVER.md` §9.8 for the full incident writeup.
+
+**2026-10-07** (`7799e44`, email audit P15 / F18): `_todayCallBaselineByKey` / `_lastSnapshotByKey` are keyed by LEAD id (they were `client_id || 'l:' + lead_id`, which compared a lead with a sibling lead's snapshot — `call_attempts` is a per-lead counter). `enrichLead`'s `attemptsToday` now goes through `callsTodayFromBaseline` (`FN-346`) and keeps the `MAX(delta, loggedToday)` rule of the 2026-10-01 fix; `lastSnapshotForLead` (`FN-347`) serves `noCommentFollowUp`. The maps are built by `JS-021` (`buildTodayCallBaseline` / `lastSnapshotBefore`). `tests/frontend-harness.html` 2i-b carries the scenarios (single sibling leads both ways, merged records, stalled leads). The 2i fixture's baseline key is now the lead id. Live as soon as GitHub Pages deploys.
 
 ## Revalidation trigger
 

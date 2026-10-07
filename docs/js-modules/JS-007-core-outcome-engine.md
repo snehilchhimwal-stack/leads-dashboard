@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `c82ec67` — source unchanged since creation; corrected a real content error found in this sweep alongside its twin `GS-005`: the "~110-vs-~30 rule-count gap, unresolved" framing was stale — `LOGIC_AUDIT.md` §4.1 already resolved it (31/31 exact match) 3 days before this record was even created, never corrected here since |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): `noCommentFollowUp` reads the lead's own snapshot via `lastSnapshotForLead` (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -153,6 +153,8 @@ Part 4 §4.1; `CLAUDE.md` (duplication gotcha); `GS-013`
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-027.
+
+**2026-10-07** (`7799e44`, email audit P15 / F18): `noCommentFollowUp` (`FN-049`) looks its snapshot up through `lastSnapshotForLead` (`JS-006` `FN-347`) — the lead's OWN last snapshot (a merged record: the lead with the highest counter) instead of the customer-keyed entry, so a sibling lead's counter no longer decides "no new call attempts" vs "N more". Twin: `OvernightEmailer.gs` / `AllIssuesEmailer.gs`'s `lastSnapshotMap[leadId]`. Live as soon as GitHub Pages deploys.
 
 ## Revalidation trigger
 

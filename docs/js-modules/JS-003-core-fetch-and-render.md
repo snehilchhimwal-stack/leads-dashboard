@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit `aa6f71b` |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): a merged customer record carries each lead's own `call_attempts` (`callAttemptsByLeadId`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -165,6 +165,8 @@ FN-321) on every successful `fetchAndRender()`, so the tab a user lands
 on by default, or is already viewing when they hit Refresh, counts as
 used too, not just an explicit tab-switch click. Fire-and-forget,
 never throws, no change to this function's own pipeline/error handling.
+
+**2026-10-07** (`7799e44`, email audit P15 / F18): `mergeRowsIntoOneLead` adds `callAttemptsByLeadId` (`{lead_id: that lead's call_attempts}`, the max over the lead's own rows) to a merged multi-lead record, next to the unchanged `call_attempts` (the max over all its leads). `callsTodayFromBaseline` (`JS-006` `FN-346`) needs the per-lead figures to subtract each lead's own pre-today baseline. A single-lead record does not carry the field. The comment above `call_attempts` was also corrected: the counter is per LEAD (every RM copy of one lead id is identical), not per client. `tests/frontend-harness.html` asserts the field on the pipeline's C013 customer (L013/L014). Live as soon as GitHub Pages deploys.
 
 ## Revalidation trigger
 

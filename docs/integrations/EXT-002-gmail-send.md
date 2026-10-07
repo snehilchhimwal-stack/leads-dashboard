@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `c416a01` — revalidated after email audit P13 (recipient addresses are now looked up by name; no change to the Gmail send paths) |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — revalidated after email audit P16 (the watchdog also checks the snapshot job; no change to any Gmail send path) |
 
 ## Purpose / reason to exist
 
@@ -181,6 +181,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-07** `415be48`: flagged after `EmailInfra.gs` advanced again (`GS-004` `CFG-091`, email audit P12). The change widens which errors `withRetry_` (Sheets calls and the Gmail thread READ) retries; `withSendRetry_` — the one wrapper around the actual Gmail send, deliberately never retrying an ambiguous error — is untouched, so no send is ever repeated by it.
 
 **Revalidated 2026-10-07** `c416a01`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-338`/`FN-339`, email audit P13). The ops, CH-level and Futwork addresses the backend sends to are now resolved from the private employee table by name instead of read from literals; how any message is sent, the scopes and the browser grant are unchanged.
+
+**Revalidated 2026-10-07** `7799e44`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-333`, email audit P16 / F23 — the hourly watchdog also reports the Movement_Log snapshot job through the existing ops-alert send path). How any message is sent, the scopes and the browser grant are unchanged.
 
 ## Revalidation trigger
 

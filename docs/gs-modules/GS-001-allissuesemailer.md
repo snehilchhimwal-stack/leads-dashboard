@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `c416a01` — email audit P13: the one-off test-rows cleanup resolves its recipient by name (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): the follow-up text looks up its snapshot by lead id (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -90,7 +90,7 @@ maps (`SHEET-002`, via `buildMovementLogMapsGs_`, `GS-008`) →
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
 | `SHEET-001` `leads` | Read | FN-174 (via `readLeadsTab_`) | the source data |
-| `SHEET-002` `Movement_Log` | Read | FN-174 (via `buildMovementLogMapsGs_`) | for `underCalledToday` baselines |
+| `SHEET-002` `Movement_Log` | Read | FN-174 (via `buildMovementLogMapsGs_`) | for `underCalledToday` baselines and the follow-up text's last snapshot — both looked up by LEAD id since 2026-10-07 (email audit F18) |
 | `SHEET-012` `Region_Recipients` | Read | FN-174 (via `resolveRecipientEmailsForRegion_`) | recipient fallback |
 | `SHEET-006` `RM_Hierarchy` / `SHEET-007` `Manager_Directory` | Read | FN-174 (via `GS-011`) | routing |
 | `AllIssues_Log` | Write (append) | FN-176 / FN-178 | send bookkeeping — not yet a `SHEET-XXX` (count TBD, DOC-010/032) |
@@ -223,6 +223,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-05** (`15d74d4`, email audit P10 — `docs/_planning/EMAIL_AUDIT.md` F11): `notifyChLevelIssuesGs_` (FN-177) checks `wasChReportSentTodayGs_` (`GS-004` FN-336) after its zero-leads guard and records `markChReportSentGs_` only after a successful send, so a same-day re-run of the 17:00 job no longer re-sends the CH-level issues report for a region whose only flagged leads are CH-held (no `AllIssues_Log` row, so the region guard never protected it). The 10:00 overnight report and this one are tracked separately. +6 lines (anchors re-mapped). `Tests_AllIssuesEmailer.gs` gained once-a-day, separate-kind, failed-send and end-to-end CH-only-region tests. **Not live until pasted.**
 
 **2026-10-07** (`c416a01`, email audit P13 — `docs/_planning/EMAIL_AUDIT.md` F24): `TEST_MODE_ROWS_RECIPIENT_` (a corporate address literal used only by the one-off `removeTestModeAllIssuesRowsNow`) is replaced by `testModeRowsRecipientGs_()` (`FN-341`), which returns the ops address resolved from the private employee table. No change to the job itself. +7 lines (695L -> 702L; anchors re-mapped). **Not live until pasted.**
+
+**2026-10-07** (`7799e44`, email audit P15 / F18): the 17:00 email's follow-up text fetches the lead's last Movement_Log snapshot by `lead_id` instead of `client_id || 'l:' + lead_id` (`GS-008`'s maps are lead-keyed now). The per-customer `identityKey` collapse is unchanged. `Tests_AllIssuesEmailer.gs` gained an end-to-end scenario with two sibling leads (the surviving lead's issue label and "5 more call attempts" text come from its OWN baseline). **Not live until pasted.**
 
 ## Revalidation trigger
 

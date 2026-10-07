@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-26 against commit `29b7146` |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P16 (F23): the 7-day prune is now a prefix delete (`GS-008` FN-220); readers read single columns |
 
 ## Purpose / reason to exist
 
@@ -179,6 +179,8 @@ The live `Movement_Log` tab; schema defined by `SNAPSHOT_COLUMNS_`
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-032`.
+
+**2026-10-07** (`7799e44`, email audit P16 / F23): `pruneMovementLog_` no longer rewrites the whole tab on every run — it reads only `snapshot_at` and, when the expired rows are a contiguous prefix, archives them to Drive and deletes just them (`GS-008` FN-220); the full rewrite remains as the fallback for any other shape. The tab's readers (`_readMovementLogRowsGs_`, `_latestContentHashByKeyGs_`, `_readMovementLogHistoryRowsGs_`) read only the columns they use. The call baselines built from this tab are keyed by lead id (email audit F18). No column or retention changed.
 
 ## Revalidation trigger
 

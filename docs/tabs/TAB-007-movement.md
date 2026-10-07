@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `b21849e` — reviewed after `js/tab-movement.js` gained `evidenceAtDeadline` (moved verbatim from `js/tab-tracking.js`, see `JS-021`, `HANDOVER.md` §9.7.3); a global function addition with no callers/side-effects touching the Movement tab's own UI or behavior — no content change here |
+| **Last Verified** | 2026-10-07 against commit `7799e44` — revalidated after email audit P15 (F18): `js/tab-movement.js` call baselines are per lead id; Stalled Leads compares a lead with its own snapshots |
 
 ## Purpose / reason to exist
 
@@ -181,6 +181,8 @@ Overnight cycle.
 
 Verified at `641398e`; record created by DOC-026, revalidated 2026-09-17
 for the content-hash dedup + `Movement_Log_Runs` write (`SHEET-015`).
+
+**Revalidated 2026-10-07** `7799e44` (email audit P15 / F18): `js/tab-movement.js` changed in three places that this tab reads — the call baselines are keyed by lead id (`JS-021` `FN-148`), Stalled Leads' "Attempts Unchanged (6h+)" reason compares a lead only with its own Movement_Log snapshots (a sibling lead of the same customer used to supply the comparison), and a comment about `Movement_Log_Runs`. No control, button or layout changed.
 
 ## Revalidation trigger
 
