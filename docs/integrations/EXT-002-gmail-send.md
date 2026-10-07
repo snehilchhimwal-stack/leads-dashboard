@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-05 against commit `fe9b37f` — revalidated after email audit P9 (ops alerts gain a second send path; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-05 against commit `15d74d4` — revalidated after email audit P10 (no change to the Gmail send paths; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -173,6 +173,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-05** `6acea29`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-329`/`FN-330`, email audit P7). Neither change touches the Gmail send itself: one makes the LOG append that follows a send once-only, the other merges recipient buckets that share an address before any send. No change to scopes, recipients or the browser grant.
 
 **Revalidated 2026-10-05** `fe9b37f`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-331`..`FN-334`, email audit P9). One change touches Gmail sending: `notifyOpsAlertGs_` now retries GmailApp and then sends the ops alert through the Advanced Gmail Service (`Gmail.Users.Messages.send`, already authorized for the threaded replies — no new scope). Report emails and their recipients are unchanged.
+
+**Revalidated 2026-10-05** `15d74d4`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-336`, email audit P10). The change decides WHETHER a CH-level report is sent a second time the same day; it does not touch how any email is sent, who receives it, or the scopes.
 
 ## Revalidation trigger
 
