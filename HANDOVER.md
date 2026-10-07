@@ -644,6 +644,16 @@ code*, one bullet per plan step as each lands.
   force-pushing, which was deliberately NOT done (it breaks every clone and open PR, and the addresses are
   ordinary corporate mailboxes). The test suite's third address is now a plus-address of the maintainer's own
   gmail instead of a colleague's corporate address.
+- **P14 — deployed 2026-10-07.** Steps P1–P13 are live: the six production files (`EmailInfra.gs`,
+  `OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `RmHierarchy.gs`, `SlaEngine.gs`, `OpsChecklistRunner.gs`)
+  were verified equal to the repo by hash after a server reload (`docs/STALENESS_TRACKER.md` sweep log has
+  the method). **Still to do by hand: run `setupEmailJobWatchdogTrigger()` once, after midnight and before
+  ~10:00 IST** (run earlier in the day it flags the jobs that ran before run records existed as "did not run"),
+  then `showEmailConfigNow()` should still say `Every configured address resolves.` The five changed
+  `Tests_*.gs` files and the never-pasted `Tests_EmailLifecycleFullCycle.gs` are not in the live project, so
+  `runAllTests()` fails there with a ReferenceError (true before this work) — optional to fix.
+  Rollback: paste the previous version of any of the six files back (`git show <old-sha>:<file>`; the old
+  shas are in the tracker's sweep log). The new `Overnight_Log` column and the Script Properties may stay.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry

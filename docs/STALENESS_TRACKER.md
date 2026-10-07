@@ -91,19 +91,19 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `5aafbd4` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `Core.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `DailyRmIssueLog.gs` | `5802f35` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `EmailInfra.gs` | `a1a21b4` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `MovementTracker.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `OpsChecklistRunner.gs` | `a325f00` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `OvernightEmailer.gs` | `bed9dd2` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `RmHierarchy.gs` | `ca7802c` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `SlaEngine.gs` | `20cfec4` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
-| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-10-03 | read directly from the live editor by hash-match (2026-10-03) |
+| `AllIssuesEmailer.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `Core.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `DailyRmIssueLog.gs` | `5802f35` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `EmailInfra.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `MovementTracker.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `OvernightEmailer.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `RmHierarchy.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `SlaEngine.gs` | `83be0fe` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 
 ### Known live-vs-repo differences
 
@@ -188,6 +188,33 @@ One line per sweep: date — what was found — what was fixed / left open.
   `LeadFollowupsStaleness.gs`/`OpsChecklistRunner.gs`/`UnmatchedCommentLogger.gs`,
   all still at their prior sha) that had drifted from a concurrent
   session's own deploy work this same day.
+
+- 2026-10-07 — **email audit P1–P13 deployed (P14).** The six production files
+  behind HEAD — `EmailInfra.gs` (`a1a21b4` -> `c416a01`), `OvernightEmailer.gs`
+  (`bed9dd2` -> `c416a01`), `AllIssuesEmailer.gs` (`5aafbd4` -> `c416a01`),
+  `RmHierarchy.gs` (`ca7802c` -> `c416a01`), `SlaEngine.gs` (`20cfec4` -> `83be0fe`),
+  `OpsChecklistRunner.gs` (`a325f00` -> `c416a01`) — are now live. Method, for the
+  next session: reading the editor's hashes (the snippet above) worked as ever; the
+  `--push` payload (192 KB) was too large to type through a tool call, and routing
+  it through a throwaway localhost server was **refused by the permission checker**
+  (a Google-origin page reaching localhost). What worked: the repo files were attached
+  to a file input injected into the editor tab with the Chrome extension's
+  `file_upload` tool, **dry-run** first (each live model still equal to its expected
+  old hash AND each uploaded file equal to HEAD's hash), then each model replaced
+  with `pushEditOperations` over the full range and re-hashed in the page (all six
+  `match:true`). **Saving was refused for the agent as well**, so Snehil pressed
+  Ctrl+S on the six tabs; the page was then RELOADED (so the hashes come from the
+  server, not the open tab) and all 29 files re-read: the six at HEAD, the other 23
+  unchanged. `showEmailConfigNow` and `showEmailJobRunsNow` then ran live — no
+  authorization prompt, every configured address resolved from `RmHierarchy.private.gs`,
+  Script Properties readable. **Left open on purpose:** (1) `setupEmailJobWatchdogTrigger()`
+  is NOT yet run — installed today it would flag the 10:00 and 13:00 jobs as "did not
+  run" (they ran before the run records existed); run it between midnight and ~10:00 IST
+  so its first checks follow a job that wrote a record; (2) the five changed `Tests_*.gs`
+  files are still behind in the live project and `Tests_EmailLifecycleFullCycle.gs` has
+  never been in it (so `runAllTests()` fails there with a ReferenceError — true since
+  before this work); both optional, files staged in `Downloads\email-audit-P14\`.
+  Deploy register refreshed with `match-live-gs.py --apply`.
 
 ## Current status
 

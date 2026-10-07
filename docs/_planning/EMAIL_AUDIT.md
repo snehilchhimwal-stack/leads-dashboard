@@ -250,6 +250,22 @@ Checks run against the draft, and what they found:
 3. P12 (retry the platform's "server error", tiny) — include now? P10 (CH-level idempotency), P11 (browser gate) and P13 (move the five addresses out of the public repo): now or later?
 4. The three business rules in F25 — leave as is, or decide each?
 
+## 7. Status — deployed 2026-10-07
+
+Steps P1–P13 are implemented, committed (`docs/_planning/EMAIL_AUDIT.md` plan table) and **live in the Apps Script
+project** as of 2026-10-07 ~14:35 IST: the six production files match repo `c416a01` (`83be0fe` for `SlaEngine.gs`),
+verified by hash after a server reload. Verified live afterwards: `showEmailConfigNow()` — every address resolves from the
+private employee table; `showEmailJobRunsNow()` — Script Properties readable, no authorization prompt.
+
+Still open:
+
+| Item | Why | Who / when |
+|---|---|---|
+| Run `setupEmailJobWatchdogTrigger()` once | installs the ONE hourly watchdog trigger. Deliberately not run on 2026-10-07: the 10:00 and 13:00 jobs ran before run records existed, so the first hourly check would have flagged them "did not run" | Snehil — any time after midnight and before ~10:00 IST |
+| Paste the 5 changed `Tests_*.gs` + create `Tests_EmailLifecycleFullCycle.gs` live | optional; lets `runAllTests()` run in the editor (it fails today with a ReferenceError — the full-cycle file was never in the live project). Expected 1758/1758 | Snehil, optional |
+| Watch the first real runs | 17:04 today (All-Issues), 10:03 and 13:01 tomorrow: Executions `Completed`; `Overnight_Log.followup_result` filled for each 13:00 row; no WATCHDOG email once the trigger exists | Claude can read the Executions list on request |
+| F18, F23, F24-in-history, F25 | owner decisions / out of scope: F18 (call baseline keyed by `client_id`), F23 (`snapshotPeriodic` hits the 30-minute limit), the corporate addresses remain in git history (not rewritten), F25 business rules (left as is) | — |
+
 ---
 
 ## Appendix A — A0: the reported symptom in real sent mail (2026-10-05)
