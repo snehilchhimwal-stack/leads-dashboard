@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P16 (F23): `total_s` and `skipped_phases` columns; the row is written right after the core capture |
+| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: `failed_phases` and `phase_s` columns |
 
 ## Purpose / reason to exist
 
@@ -64,8 +64,10 @@ exists yet — `JS-018`/`JS-021` only write.
 | `leads_changed` | number | how many got a new `Movement_Log` row this run | 0 on a fully-idempotent run — expected, not an error |
 | `total_s` | number | how long the scheduled run took, in seconds | **added 2026-10-07 (email audit F23)**; written when the run ENDS — the row itself is written right after the core capture, so a row with `total_s` BLANK is a run the platform killed after its capture. A browser "Snapshot now" row leaves it blank (no time budget) |
 | `skipped_phases` | text | the optional phases the run skipped to stay inside `SNAPSHOT_OPTIONAL_PHASE_DEADLINE_SECONDS_` (comma-separated), blank when none | **added 2026-10-07 (email audit F23)**; a skipped phase is picked up by the next run |
+| `failed_phases` | text | the optional steps that THREW in this run (comma-separated), blank when none | **added 2026-10-07 (email audit P17)**; each is also emailed to ops once a day (`GS-008` FN-349) |
+| `phase_s` | text | where the run's time went: `core capture (read, hash, append) 95s \| SLA_History write 14s \| ...` in run order | **added 2026-10-07 (email audit P17)**; a skipped step is absent, a failed one reads `FAILED after Ns` |
 
-Exact list: `MovementTracker.gs` `MOVEMENT_LOG_RUNS_COLUMNS_` `#L194` (6 columns; `ensureMovementLogRunsSheet_` appends the two new headers to an existing 4-column sheet, never reordering). `js/tab-movement.js`'s `MOVEMENT_LOG_RUNS_COLUMNS` mirrors only the first four.
+Exact list: `MovementTracker.gs` `MOVEMENT_LOG_RUNS_COLUMNS_` `#L194` (8 columns; `ensureMovementLogRunsSheet_` appends the two new headers to an existing 4-column sheet, never reordering). `js/tab-movement.js`'s `MOVEMENT_LOG_RUNS_COLUMNS` mirrors only the first four.
 
 ## Writers
 

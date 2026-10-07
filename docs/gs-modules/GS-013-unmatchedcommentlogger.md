@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `c9c0b66` |
+| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: `pruneUnmatchedCommentsLog_` counts CSV records, not lines (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -65,7 +65,7 @@ Movement hub fire.
 | FN-253 | `clearReviewedUnmatchedCommentsNow()` `#L241` | — | removes rows flagged reviewed | Sheets delete | — | Apps Script editor (manual, after a review pass) | specific |
 | FN-254 | `dedupeUnmatchedCommentsNow()` `#L276` | — | removes duplicate rows caused by the 2026-09-03 Date-coercion bug | Sheets delete | — | Apps Script editor (incident recovery) | specific — **a documented incident-recovery function** |
 | FN-309 | `pruneUnmatchedCommentsLog_(ss)` `#L336` (added 2026-09-29) | a spreadsheet | none | archives (chunked) then removes rows older than `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_` (30) — REGARDLESS of `reviewed`; no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneUnmatchedCommentsLogNow` | specific — re-inserts checkboxes on the `reviewed` column after rewriting, same discipline as FN-253 |
-| FN-310 | `pruneUnmatchedCommentsLogNow()` `#L407` (added 2026-09-29) | — | runs FN-309 once by hand | as FN-309 | FN-309 | Apps Script editor (manual) | specific |
+| FN-310 | `pruneUnmatchedCommentsLogNow()` `#L408` (added 2026-09-29) | — | runs FN-309 once by hand | as FN-309 | FN-309 | Apps Script editor (manual) | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -170,6 +170,8 @@ Movement hub) in `LOGIC_AUDIT.md` Part 1 §1.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-029.
+
+**2026-10-07** (`58ab8e1`, email audit P17): `pruneUnmatchedCommentsLog_`'s archive check now counts records with `countCsvRecordsGs_` (`GS-002` FN-348). Root cause (found 2026-10-07 on the live data - `Comment_History` held 6,369 rows and `Unmatched_Comments_Log` 2,134 rows past their 30-day retention): the prune proved its Drive archive by counting `split('\n')` lines of the CSV, but a comment containing a line break is ONE record on several lines (the writer quotes it). With 102 multi-line comments the count read 6,518 against 6,369 and the prune threw "Drive archive holds ... but ... were expected - refusing to prune"; the throw was only logged, so nobody was told. The fixtures had only single-line comments. Fixed with `countCsvRecordsGs_` (`GS-002` FN-348). `docs/_planning/EMAIL_AUDIT.md` P17. (This tab: 2,134 expired rows, 7 multi-line, "2148 ... but 2134".) **Not live until pasted.**
 
 ## Revalidation trigger
 

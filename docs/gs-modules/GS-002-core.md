@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `c9c0b66` |
+| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: `countCsvRecordsGs_` added (`FN-348`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -62,10 +62,11 @@ Never — it has no `setupXxx()` and no schedule.
 | FN-186 | `esc_(s)` `#L236` | any value | HTML-escaped string | none | — | `renderOvernightReportEmailHTML_` (`GS-004`), all email builders | reusable — the backend `esc` |
 | FN-265 | `archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel)` (added 2026-09-21) | table name + header/rows arrays + a date-range label | the created Drive `File`, or `null` if `rows` is empty | creates/reuses `ARCHIVE_ROOT_FOLDER_`/a per-table subfolder, writes a dated CSV, appends a manifest row | `archiveAppendManifestRow_` (FN-266) | `pruneMovementLog_` (`GS-008`), `pruneDailyRmIssueLog_` (`GS-003`) | reusable — the shared archive mechanism both prune functions call |
 | FN-266 | `archiveAppendManifestRow_(rootFolder, rowValues)` (added 2026-09-21) | the root folder + a row's values | none | reads + rewrites `ARCHIVE_MANIFEST_FILE_`'s whole content (no native Drive append) | — | FN-265 | reusable |
-| FN-301 | `computeWorkbookCellUsageGs_(ss)` `#L350` (added 2026-09-28) | a spreadsheet | `{sheets, totalCells, ceiling, pctUsed}` — every tab's `getMaxRows()*getMaxColumns()` (the DECLARED grid, not data-bearing cells; see `pruneMovementLog_`'s own comment, `GS-008`), largest first | none (reads `ss.getSheets()`) | — | `reportWorkbookCellUsageNow` (FN-303), `buildWeeklyOpsChecklistSummary_` (`GS-009` FN-228) | reusable — the shared computation so the console report and the Monday alert can never disagree |
-| FN-302 | `fmtCellsGs_(n)` `#L363` (added 2026-09-28) | a number | `'1,234,567'`-style comma-grouped string | none (pure) | — | FN-301's callers | reusable — no locale dependency, unlike `toLocaleString()` |
-| FN-303 | `reportWorkbookCellUsageNow()` `#L370` (added 2026-09-28) | — | none | `Logger.log`s the full per-tab breakdown, largest first | FN-301, FN-302 | Apps Script editor (manual) | specific — the console-callable diagnostic |
-| FN-305 | `removeOppConversionTrackingTabNow()` `#L394` (added 2026-09-29) | — | none | refuses (throws) if `Opp_Conversion_Tracking` has any data row below its header; deletes the tab outright otherwise (no Drive archive — an empty tab has nothing to archive) | — | Apps Script editor (manual) | specific — one-off cleanup of a dead scratch tab the cell-budget diagnostic (FN-301/303) surfaced 2026-09-28, confirmed zero code references anywhere, authorized for deletion by Snehil 2026-09-29 |
+| FN-301 | `computeWorkbookCellUsageGs_(ss)` `#L369` (added 2026-09-28) | a spreadsheet | `{sheets, totalCells, ceiling, pctUsed}` — every tab's `getMaxRows()*getMaxColumns()` (the DECLARED grid, not data-bearing cells; see `pruneMovementLog_`'s own comment, `GS-008`), largest first | none (reads `ss.getSheets()`) | — | `reportWorkbookCellUsageNow` (FN-303), `buildWeeklyOpsChecklistSummary_` (`GS-009` FN-228) | reusable — the shared computation so the console report and the Monday alert can never disagree |
+| FN-302 | `fmtCellsGs_(n)` `#L382` (added 2026-09-28) | a number | `'1,234,567'`-style comma-grouped string | none (pure) | — | FN-301's callers | reusable — no locale dependency, unlike `toLocaleString()` |
+| FN-303 | `reportWorkbookCellUsageNow()` `#L389` (added 2026-09-28) | — | none | `Logger.log`s the full per-tab breakdown, largest first | FN-301, FN-302 | Apps Script editor (manual) | specific — the console-callable diagnostic |
+| FN-305 | `removeOppConversionTrackingTabNow()` `#L413` (added 2026-09-29) | — | none | refuses (throws) if `Opp_Conversion_Tracking` has any data row below its header; deletes the tab outright otherwise (no Drive archive — an empty tab has nothing to archive) | — | Apps Script editor (manual) | specific — one-off cleanup of a dead scratch tab the cell-budget diagnostic (FN-301/303) surfaced 2026-09-28, confirmed zero code references anywhere, authorized for deletion by Snehil 2026-09-29 |
+| FN-348 | `countCsvRecordsGs_(text)` `#L316` | the text of a CSV written by `archiveRowsToDriveCsv_` | the number of CSV RECORDS (header included): line feeds inside quotes do not start a record; an escaped quote ("") never ends a quoted cell; empty text is 0 | none (pure) | - | `pruneCommentHistory_` (`GS-006`), `pruneUnmatchedCommentsLog_` (`GS-013`) - to prove an archive holds every row before deleting | reusable - **added 2026-10-07 (email audit P17)**; replaces `split('\n').length`, which counted physical lines and made both comment prunes refuse to run |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -171,6 +172,8 @@ Verified at `c82ec67`; record created by DOC-029. Revalidated 2026-09-21
 addition (this record's own catalog-drift note went unresolved for 2
 commits before this pass — see `CLAUDE.md`'s drift-discipline rule, added
 the same day).
+
+**2026-10-07** (`58ab8e1`, email audit P17): `countCsvRecordsGs_` (`FN-348`) added next to `archiveRowsToDriveCsv_`. Root cause (found 2026-10-07 on the live data - `Comment_History` held 6,369 rows and `Unmatched_Comments_Log` 2,134 rows past their 30-day retention): the prune proved its Drive archive by counting `split('\n')` lines of the CSV, but a comment containing a line break is ONE record on several lines (the writer quotes it). With 102 multi-line comments the count read 6,518 against 6,369 and the prune threw "Drive archive holds ... but ... were expected - refusing to prune"; the throw was only logged, so nobody was told. The fixtures had only single-line comments. Fixed with `countCsvRecordsGs_` (`GS-002` FN-348). `docs/_planning/EMAIL_AUDIT.md` P17. **Not live until pasted.**
 
 ## Revalidation trigger
 

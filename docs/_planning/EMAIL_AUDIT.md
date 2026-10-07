@@ -205,6 +205,7 @@ Status column: **D** = already drafted in the working tree (uncommitted; headles
 | P14 | Docs, catalog, deploy register; **paste 9 changed `.gs` files** (4 production, 5 test) via the hash-verified procedure. If P9 is approved, run its one-time setup function so the watchdog trigger is installed; otherwise no trigger changes. | — | docs, tracker | check-catalog / check-staleness | N |
 | P15 | **Per-lead call baseline.** `call_attempts` is a per-lead counter (0 of 1,852 multi-row leads differ across their RM copies); key `_readMovementLogRowsGs_` / `computeSlaFlags_` / the four emailer snapshot lookups and, in the dashboard, `buildTodayCallBaseline` / `lastSnapshotBefore` / `enrichLead` / `noCommentFollowUp` / Stalled Leads by lead id. A merged customer record carries each lead's counter and takes the best per-lead delta. Customer-level uses stay as they are. | F18 | `MovementTracker.gs`, `SlaEngine.gs`, 2 emailers, 4 `js/` files + harness | sibling-lead scenarios in every layer; 8 (`.gs`) + 13 (browser) deliberate regressions caught | `7799e44` |
 | P16 | **`snapshotPeriodic` inside the 30-minute limit.** Single-column `Movement_Log` reads; prefix-delete prune (archive first, full rewrite as the fallback); core capture first and its `Movement_Log_Runs` row right after it; optional phases inside an 840 s budget (a failing prune still fails the run, at the end); `[timing]` lines; `Movement_Log_Runs` +`total_s`/`skipped_phases`; a run record + a watchdog check (stuck / failed / overdue / skipped phases, alerted once per run). | F23 | `MovementTracker.gs`, `EmailInfra.gs` | spy tests on read width / writes / deletes, slow-run and prune-failure end to end; 25 deliberate regressions caught | `7799e44` |
+| P17 | **Comment prunes + failure alerting.** `countCsvRecordsGs_` (quote-aware) replaces the line count in both comment prunes (multi-line comments made them refuse to run for days); every failed snapshot step is emailed once a day, recorded in `Movement_Log_Runs.failed_phases`, and timed in `phase_s`. | found 2026-10-07 on the live data (follow-up to F23) | `Core.gs`, `InteractionHistoryLogger.gs`, `UnmatchedCommentLogger.gs`, `MovementTracker.gs` | multi-line fixtures fail on the old code with the production error text; 10 deliberate regressions caught; e2e scenario 5 | `58ab8e1` |
 
 Out of scope / owner decisions: F24 (history), F25 and the stale untracked folder. F18 and F23 were first left out and then done as P15 and P16 (2026-10-07).
 
@@ -299,6 +300,12 @@ on the real platform (`Tests_MovementTracker.gs` 224/224). Three suites (`EmailI
 not have, invisible to every local and CI run. Fixed (pure-JS decoder) and a permanent guard added
 (`test/check-gs-runtime-globals.py`). The live total was therefore 1020 passed with 3 suites cut short, not the 1914 the repo
 reports; the corrected `Tests_OvernightEmailer.gs` has to be pasted for the live number to match.
+
+**P17 (2026-10-07), found while checking the first live `snapshotNow`:** `Comment_History` (6,369 rows) and
+`Unmatched_Comments_Log` (2,134 rows) were past their 30-day retention because their prunes refused to run - the archive row
+count counted CSV lines and a multi-line comment is one record. The failure was only logged. Fixed and the e2e now runs the real
+snapshot over multi-line comment tabs (scenario 5) and over a failing prune (one email, `failed_phases`, run still completes).
+**Why the tests missed it:** every prune fixture had single-line comments.
 
 **Not covered - only the live system can show it:** the real speed-up of `snapshotPeriodic` (the platform's 30-minute limit,
 real Sheets read/write cost - the run is expected to take minutes, not measured); real `LockService`, Gmail and Drive

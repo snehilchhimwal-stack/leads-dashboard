@@ -696,6 +696,18 @@ code*, one bullet per plan step as each lands.
   the reads/writes removed, not yet observed: after the first scheduled runs read the `[timing]` lines and
   `Movement_Log_Runs.total_s` (expect minutes, not tens of minutes, and an empty `skipped_phases`). The
   watchdog trigger (`setupEmailJobWatchdogTrigger`, see P14) must be installed for the alerts to fire.
+- **P17 — the comment prunes had been failing silently; a failed snapshot step is now emailed (2026-10-07).**
+  `Comment_History` held 6,369 rows (oldest 32.8 days) and `Unmatched_Comments_Log` 2,134 (oldest 34.8) past their 30-day
+  retention. Both prunes prove their Drive archive before deleting by counting the CSV's lines - but a comment with a line
+  break is ONE record on several lines (the writer quotes it), so 102 multi-line comments made the count 6,518 against 6,369
+  and the prune threw `Drive archive holds ... refusing to prune`. That throw was only written to the log, so nobody knew.
+  Fixed: `countCsvRecordsGs_` (`Core.gs`) counts RECORDS (quote-aware); both prunes use it. **Alerting:** every optional step of
+  `snapshotOpenLeads_` that throws is now emailed to ops (`alertSnapshotPhaseFailuresGs_`), at most once per day per step,
+  listed in `Movement_Log_Runs.failed_phases` and in the run record; a `Movement_Log` prune failure is emailed AND still
+  fails the execution. New column `Movement_Log_Runs.phase_s` shows where each run's time went. Not changed: the
+  `Movement_Log` prune itself was not failing - with a 7-day window it simply had nothing expired when last run. The first run
+  after the paste archives and removes the ~8,500 expired comment rows. Earlier failed attempts probably left duplicate archive
+  CSVs in the Drive archive folders (harmless).
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry

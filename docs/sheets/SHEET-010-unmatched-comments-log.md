@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: the 30-day prune had been failing silently; fixed (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -86,13 +86,16 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
 ## Data Lifecycle (DOC-019 — confirmed; DOC-036 signed off 2026-09-10)
 
 - **Data Type:** operational (a review queue)
-- **Retention Period:** **manually curated, not time-limited** —
-  `clearReviewedUnmatchedCommentsNow()` removes rows *after a human marks
-  them reviewed*. Rows persist until reviewed.
-- **Enforced By:** a human, via `clearReviewedUnmatchedCommentsNow()` —
-  there is no time-based prune
-- **Archive / Delete Behavior:** reviewed rows deleted on the manual
-  clear; unreviewed rows kept indefinitely
+- **Retention Period:** **30 days since 2026-09-29**
+  (`UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_`), regardless of `reviewed`. It was
+  manually curated until then; `clearReviewedUnmatchedCommentsNow()` still
+  removes rows a human marked reviewed, ahead of the window.
+- **Enforced By:** `pruneUnmatchedCommentsLog_` (`GS-013`), on every scheduled
+  snapshot (4×/day), plus the manual clear above
+- **Archive / Delete Behavior:** rows past the window are first written to a
+  Drive CSV, then removed; the prune refuses to delete when the archive's
+  record count does not match. A failure is emailed to ops since 2026-10-07
+  (`GS-008` FN-349)
 - **Sensitivity:** contains RM comment text — `DOC-036` to classify
 
 ## Sensitivity & operational importance (DOC-038)
@@ -160,6 +163,8 @@ The live `Unmatched_Comments_Log` tab; schema
 
 Verified at `c82ec67`; record created by `DOC-032`.
 
+**2026-10-07** (`58ab8e1`, email audit P17): found 2,134 rows (oldest 34.8 days) past the 30-day retention because `pruneUnmatchedCommentsLog_` refused to run - its archive check counted CSV lines and a multi-line comment is one record on several lines (`GS-013`; fixed with `countCsvRecordsGs_`, `GS-002` FN-348). The first run after the paste archives and removes them.
+
 ## Revalidation trigger
 
 `UNMATCHED_COMMENTS_LOG_COLUMNS_` changes; the dedup-key logic changes;
@@ -173,9 +178,10 @@ as of 2026-09-09. A schema or dedup change must update `HANDOVER.md`
 
 ## Lifecycle / retention
 
-**Manually curated** — rows persist until a human marks them `reviewed`
-and runs `clearReviewedUnmatchedCommentsNow()`. No time-based prune.
-Confirmed. Sensitivity `TBD` (`DOC-036`).
+**30 days since 2026-09-29**, enforced by `pruneUnmatchedCommentsLog_`
+(`GS-013`), archive-to-Drive first; a human can still clear reviewed rows
+sooner with `clearReviewedUnmatchedCommentsNow()`. It was manually curated
+before that. Sensitivity `TBD` (`DOC-036`).
 
 ## Next action
 

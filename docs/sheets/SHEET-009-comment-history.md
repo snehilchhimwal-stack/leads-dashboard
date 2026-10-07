@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: the 30-day prune had been failing silently; fixed (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -84,13 +84,19 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
 ## Data Lifecycle (DOC-019 — confirmed; DOC-036 signed off 2026-09-10)
 
 - **Data Type:** historical
-- **Retention Period:** **no limit — append-only by design.** Writes are
-  comment-triggered, an order of magnitude rarer than `Movement_Log`'s
-  unconditional 4×/day, so unbounded growth is acceptable (`LOGIC_AUDIT.md`
-  Part 1 §4d — measured ~33,229 `Movement_Log` rows/day vs this file's
-  comment-triggered rate).
-- **Enforced By:** `None` — deliberately no prune
-- **Archive / Delete Behavior:** rows are never removed automatically
+- **Retention Period:** **30 days since 2026-09-29** (`COMMENT_HISTORY_RETENTION_DAYS_`).
+  It shipped 2026-09-05 with no limit (append-only by design - comment-triggered
+  writes are an order of magnitude rarer than `Movement_Log`'s unconditional
+  4×/day, `LOGIC_AUDIT.md` Part 1 §4d, which is a dated snapshot and still
+  describes that original state), then a 30-day window was confirmed because
+  the tab counts against the workbook's shared cell ceiling.
+- **Enforced By:** `pruneCommentHistory_` (`GS-006` FN-307), on every
+  scheduled snapshot (`snapshotOpenLeads_`, 4×/day) and by hand via
+  `pruneCommentHistoryNow()`
+- **Archive / Delete Behavior:** rows past the window are first written to a
+  Drive CSV (chunks of 5,000), then removed; the prune refuses to delete when
+  the archive's record count does not match (`GS-006` EXC-104). A failure is
+  emailed to ops since 2026-10-07 (`GS-008` FN-349)
 - **Sensitivity:** contains RM comment text + customer context —
   `DOC-036` to confirm the classification, but the retention answer is
   **known**.
@@ -159,6 +165,8 @@ The live `Comment_History` tab; schema `COMMENT_HISTORY_COLUMNS_`
 Verified at `c82ec67`; record created by `DOC-032` (tab renamed in
 `DOC-029`).
 
+**2026-10-07** (`58ab8e1`, email audit P17): found 6,369 rows (oldest 32.8 days) past the 30-day retention because `pruneCommentHistory_` refused to run - its archive check counted CSV lines and a multi-line comment is one record on several lines (`GS-006`; fixed with `countCsvRecordsGs_`, `GS-002` FN-348). The first run after the paste archives and removes them (chunks of 5,000 rows). Earlier failed attempts probably left duplicate archive CSVs in the Drive archive folder (harmless; not touched).
+
 ## Revalidation trigger
 
 `COMMENT_HISTORY_COLUMNS_` changes; a pruning policy is added; a consumer
@@ -171,9 +179,10 @@ consumer or a pruning policy must update `HANDOVER.md` §2/§9.
 
 ## Lifecycle / retention
 
-**No automatic retention limit — append-only by design.** Confirmed
-(`LOGIC_AUDIT.md` Part 1 §4d). Sensitivity classification `TBD`
-(`DOC-036`).
+**30 days since 2026-09-29**, enforced by `pruneCommentHistory_`
+(`GS-006`), archive-to-Drive first. Before that it was append-only by design
+(`LOGIC_AUDIT.md` Part 1 §4d, a dated snapshot). Sensitivity classification
+`TBD` (`DOC-036`).
 
 ## Next action
 

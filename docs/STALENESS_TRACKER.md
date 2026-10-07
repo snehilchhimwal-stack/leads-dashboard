@@ -92,18 +92,18 @@ snippet text itself is the same every time — only the embedded payload changes
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
 | `AllIssuesEmailer.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `Core.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `Core.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `DailyRmIssueLog.gs` | `5802f35` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `EmailInfra.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `InteractionHistoryLogger.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `InteractionHistoryLogger.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `MovementTracker.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `MovementTracker.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `OpsChecklistRunner.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `OvernightEmailer.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `RmHierarchy.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 | `SlaEngine.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `UnmatchedCommentLogger.gs` | `c9c0b66` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `UnmatchedCommentLogger.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
 
 ### Known live-vs-repo differences
 
@@ -227,6 +227,13 @@ One line per sweep: date — what was found — what was fixed / left open.
   close the old one; (2) the first live `runAllTests()` showed 3 suites cut short by `atob is not defined` (a test helper;
   see `HANDOVER.md` §7.1) - fixed and guarded by `test/check-gs-runtime-globals.py`. **Left open:** paste the corrected
   `Tests_OvernightEmailer.gs`; run `setupEmailJobWatchdogTrigger()` after midnight and before ~10:00 IST.
+- 2026-10-07 — **email audit P17 deployed** (`58ab8e1`: the comment-prune fix, failure alerting, `phase_s`). Nine files
+  (`Core.gs`, `InteractionHistoryLogger.gs`, `UnmatchedCommentLogger.gs`, `MovementTracker.gs` and their `Tests_*.gs`, plus
+  `Tests_EmailLifecycleFullCycle.gs`) were staged with `file_upload` + dry run + `pushEditOperations`, saved by Snehil, the
+  page reloaded, and all 30 files re-read: 29 at HEAD (the private employee table is the 30th). Live `runAllTests()`:
+  1965 passed, 0 failed across 14 files (this also closes the `Tests_OvernightEmailer.gs` item above). **Verify after the
+  18:51 IST scheduled `snapshotPeriodic`:** `Movement_Log_Runs` last row (`failed_phases` blank, `phase_s` filled), the
+  `Comment_History` / `Unmatched_Comments_Log` backlog gone, no "Movement snapshot ... FAILED" email.
 
 ## Current status
 

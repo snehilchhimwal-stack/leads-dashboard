@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: the step list names the comment prunes, failure alerting and `phase_s` |
 
 ## Purpose / reason to exist
 
@@ -30,7 +30,12 @@ has moved on.
    §4.7): `snapshotOpenLeads_` (`GS-008` FN-218, 4×/day) and
    `browserSnapshotOpenLeads` (`JS-018` FN-121, on-demand `BTN-014`).
 4. Prune to 7 days + shrink allocation: `pruneMovementLog_` (`GS-008`
-   FN-220).
+   FN-220). The same scheduled run then prunes `Comment_History` and
+   `Unmatched_Comments_Log` to 30 days (`GS-006` / `GS-013`; archive-to-Drive
+   first, proved by `countCsvRecordsGs_`, `GS-002` FN-348). Any optional step
+   that throws is recorded in `Movement_Log_Runs.failed_phases` and emailed to
+   ops once a day (`GS-008` FN-349); `phase_s` shows where the run's time went
+   (email audit P17, 2026-10-07).
 5. Browser read + history build: `fetchMovementLog` → `movementSnapshots`
    → `buildMovementHistories` / `enrichSnapshotCached` (`JS-021` FN-140/141).
 

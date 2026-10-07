@@ -150,8 +150,8 @@ one place:
 |---|---|---|
 | `Movement_Log` | **7 days**, `pruneMovementLog_` | `MOVEMENT_LOG_RETENTION_DAYS`, `MovementTracker.gs` |
 | `Daily_RM_Issues` | **7 days**, `pruneDailyRmIssueLog_` (prune-before-write) | `DAILY_RM_ISSUE_LOG_RETENTION_DAYS_`, `DailyRmIssueLog.gs` (2026-09-07 incident fix) |
-| `Comment_History` | **unbounded — by explicit design** (comment-triggered writes, ~order of magnitude slower than `Movement_Log`) | `InteractionHistoryLogger.gs` header, `LOGIC_AUDIT.md` Part 1 §4d — **owner may want to sanity-check this against the shared 2M-cell headroom** |
-| `Unmatched_Comments_Log` | **manually curated** — rows removed by `clearReviewedUnmatchedCommentsNow` after a human marks them `reviewed`; no time-based prune | `GS-013`, `SHEET-010` |
+| `Comment_History` | **30 days since 2026-09-29**, `pruneCommentHistory_` (archive-to-Drive first). Was unbounded by explicit design before that (`LOGIC_AUDIT.md` Part 1 §4d, a dated snapshot) | `COMMENT_HISTORY_RETENTION_DAYS_`, `InteractionHistoryLogger.gs`, `GS-006` |
+| `Unmatched_Comments_Log` | **30 days since 2026-09-29**, `pruneUnmatchedCommentsLog_` (archive-to-Drive first, regardless of `reviewed`); a human can still clear reviewed rows sooner with `clearReviewedUnmatchedCommentsNow` | `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_`, `GS-013`, `SHEET-010` |
 | `RM_Hierarchy` / `Manager_Directory` / `Region_Recipients` | **N/A — configuration**, rebuilt on demand, no history | `SHEET-006` / `007` / `012` (`RM_Hierarchy` + `Manager_Directory` also FLAGGED for employee-data sensitivity → `DOC-038`) |
 
 ---
