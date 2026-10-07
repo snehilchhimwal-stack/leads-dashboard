@@ -1408,6 +1408,147 @@
     }
   })();
 
+  // ---- 2k. Browser send-safety gate (email audit P11 / F19, 2026-10-07) ----
+  // js/reports-gmail.js: prepareGmailSend + performGmailSend. performGmailSend used to pass whatever it was handed straight to
+  // the Gmail API. The address and visible-text vectors below are the SAME ones Tests_EmailInfra.gs asserts against its
+  // Apps Script twins (emailAddressListProblemsGs_ / visibleTextOfHtmlGs_) — the two gates are kept in parity by hand.
+  await (async function () {
+    const decodeRaw = (raw) => {
+      const bin = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    };
+    const addr = (list, required) => gmailAddressListProblems(list, 'To', required).length;
+
+    // -- shared address vectors (mirror Tests_EmailInfra.gs) --
+    assert('gmailAddressListProblems: a plain address is fine', addr('a@homesfy.in', true) === 0);
+    assert('gmailAddressListProblems: a comma list of valid addresses is fine', addr('a@homesfy.in, b.c+d@x.co.in', true) === 0);
+    assert('gmailAddressListProblems: a semicolon list (how the recipients table may store it) is fine too', addr('a@homesfy.in; b@homesfy.in', true) === 0);
+    assert('gmailAddressListProblems: an empty required list is a problem', addr('', true) === 1);
+    assert('gmailAddressListProblems: an empty OPTIONAL list is fine', addr('', false) === 0);
+    assert('gmailAddressListProblems: undefined is fine when optional', addr(undefined, false) === 0);
+    assert('gmailAddressListProblems: an address with no @ is rejected', addr('not-an-email', true) === 1);
+    assert('gmailAddressListProblems: an address with no dot after the @ is rejected', addr('a@b', true) === 1);
+    assert('gmailAddressListProblems: one bad address in a list is reported (and only that one)', addr('a@homesfy.in,bad', true) === 1);
+    assert('gmailAddressListProblems: an address carrying a CR/LF header-injection payload is rejected', addr('a@homesfy.in\r\nBcc: evil@x.com', true) > 0);
+    assert('gmailAddressListProblems: accepts an array too', addr(['a@homesfy.in', 'b@homesfy.in'], true) === 0);
+    assert('gmailVisibleText: markup with no text has no visible text', gmailVisibleText('<div><table><tr><td> </td></tr></table></div>') === '');
+    assert('gmailVisibleText: strips style blocks and tags, decodes entities, collapses whitespace',
+      gmailVisibleText('<style>.a{color:red}</style><p>Hello&nbsp;<b>world</b> &amp; co</p>') === 'Hello world & co', gmailVisibleText('<style>.a{color:red}</style><p>Hello&nbsp;<b>world</b> &amp; co</p>'));
+    assert('gmailVisibleText: null is empty text', gmailVisibleText(null) === '');
+
+    // -- prepareGmailSend: the pure decision --
+    const good = { subject: 'P11 report', body: 'Lead L-1', html: '<p>Lead L-1</p>', count: 1, region: 'Pune' };
+    assert('prepareGmailSend: a normal report to a normal recipient has no problems', prepareGmailSend(good, 'a@homesfy.in', 'b@homesfy.in').problems.length === 0);
+    assert('prepareGmailSend: a Cc-only send (a recipients row with no To) is allowed', prepareGmailSend(good, '', 'b@homesfy.in').problems.length === 0);
+    assert('prepareGmailSend: no To and no Cc is a problem', prepareGmailSend(good, '', '').problems.some(x => /no recipient/.test(x)));
+    assert('prepareGmailSend: a bad Cc address is a problem', prepareGmailSend(good, 'a@homesfy.in', 'oops').problems.some(x => /Cc has an invalid address/.test(x)));
+    assert('prepareGmailSend: a missing report is a problem', prepareGmailSend(null, 'a@homesfy.in', '').problems.some(x => /no report/.test(x)));
+    assert('prepareGmailSend: an empty subject is a problem', prepareGmailSend({ ...good, subject: '  ' }, 'a@homesfy.in', '').problems.some(x => /subject is empty/.test(x)));
+    assert('prepareGmailSend: an empty plain-text body is a problem', prepareGmailSend({ ...good, body: '   ' }, 'a@homesfy.in', '').problems.some(x => /plain-text body is empty/.test(x)));
+    assert('prepareGmailSend: an HTML body with no visible text is a problem', prepareGmailSend({ ...good, html: '<table><tr><td></td></tr></table>' }, 'a@homesfy.in', '').problems.some(x => /no visible text/.test(x)));
+    assert('prepareGmailSend: a plain-text-only report (no html) is fine', prepareGmailSend({ ...good, html: undefined }, 'a@homesfy.in', '').problems.length === 0);
+    assert('prepareGmailSend: a line break in the subject is collapsed to a space, not rejected',
+      prepareGmailSend({ ...good, subject: 'Hi\r\nBcc: evil@x.com' }, 'a@homesfy.in', '').msg.subject === 'Hi Bcc: evil@x.com');
+
+    // -- performGmailSend end to end, with the network boundary stubbed --
+    const realFetch = window.fetch, realLog = window.logEmailSend, realToken = gmailAccessToken, realExpiry = gmailTokenExpiresAt;
+    const realAlert = window.alert, realConfirm = window.confirm, realRecipients = window.recipientsForReport;
+    // performGmailSend's markReportSent writes the "Sent ✓" state into localStorage; this block must neither be affected by a
+    // previous run's leftovers nor leave its own test subjects behind in the developer's browser.
+    let savedSentLog = null;
+    try { savedSentLog = localStorage.getItem(GMAIL_SENT_LOG_KEY); localStorage.removeItem(GMAIL_SENT_LOG_KEY); } catch (e) {}
+    const requests = [];
+    let logged = 0;
+    let nextResponse = { ok: true, status: 200 };
+    window.fetch = async function (url, opts) { requests.push({ url: String(url), opts }); return Object.assign({ json: async () => ({}) }, nextResponse); };
+    window.logEmailSend = function () { logged++; };
+    gmailAccessToken = 'test-token';
+    gmailTokenExpiresAt = Date.now() + 3600 * 1000;
+    const btn = document.createElement('button');
+    btn.id = 'p11TestBtn';
+    document.body.appendChild(btn);
+    const send = async (report, to, cc) => {
+      const job = { report, to, cc, btnId: 'p11TestBtn' };
+      const ok = await performGmailSend(job);
+      return { ok, job };
+    };
+    try {
+      let r = await send({ ...good, subject: 'P11 send ok' }, 'a@homesfy.in', 'b@homesfy.in');
+      assert('performGmailSend: a good report is sent (returns true)', r.ok === true);
+      assert('performGmailSend: …through ONE Gmail API call', requests.length === 1 && /gmail\.googleapis\.com\/gmail\/v1\/users\/me\/messages\/send$/.test(requests[0].url), JSON.stringify(requests.map(x => x.url)));
+      const mime = requests.length ? decodeRaw(JSON.parse(requests[0].opts.body).raw) : '';
+      assert('performGmailSend: the MIME carries the To, Cc and Subject headers', /To: a@homesfy\.in\r\nCc: b@homesfy\.in\r\nSubject: P11 send ok\r\n/.test(mime), mime.slice(0, 160));
+      assert('performGmailSend: the Send_Log write still happens for a real send', logged === 1);
+      assert('performGmailSend: …and the button shows the Sent state', /^Sent/.test(btn.textContent), btn.textContent);
+      assert('performGmailSend: a send is not marked blocked', r.job.blockedReason === undefined);
+
+      // Blocked sends never reach the Gmail API, the Sent state, or the Send_Log.
+      const blockedCase = async (label, report, to, cc, reasonRe) => {
+        const before = requests.length, loggedBefore = logged;
+        const x = await send(report, to, cc);
+        assert('performGmailSend BLOCKS ' + label + ': returns false', x.ok === false);
+        assert('performGmailSend BLOCKS ' + label + ': nothing reaches the Gmail API', requests.length === before);
+        assert('performGmailSend BLOCKS ' + label + ': the reason is recorded', reasonRe.test(x.job.blockedReason || ''), x.job.blockedReason);
+        assert('performGmailSend BLOCKS ' + label + ': no Send_Log row and no "Sent" state', logged === loggedBefore && gmailSentAt(report && report.subject) === null);
+        assert('performGmailSend BLOCKS ' + label + ': the button says so, with the reason as its tooltip', btn.textContent === 'Blocked ✗' && /^Not sent: /.test(btn.title) && !btn.disabled, btn.textContent + ' / ' + btn.title);
+      };
+      await blockedCase('a malformed recipient', { ...good, subject: 'P11 blocked to' }, 'not-an-email', '', /invalid address/);
+      await blockedCase('a header-injection recipient', { ...good, subject: 'P11 blocked inject' }, 'a@homesfy.in\r\nBcc: evil@x.com', '', /invalid address/);
+      await blockedCase('a send with no recipient at all', { ...good, subject: 'P11 blocked none' }, '', '', /no recipient/);
+      await blockedCase('an empty subject', { ...good, subject: '' }, 'a@homesfy.in', '', /subject is empty/);
+      await blockedCase('an empty body', { ...good, subject: 'P11 blocked body', body: '' }, 'a@homesfy.in', '', /plain-text body is empty/);
+      await blockedCase('an all-markup HTML body', { ...good, subject: 'P11 blocked html', html: '<div><table></table></div>' }, 'a@homesfy.in', '', /no visible text/);
+
+      // A line break in the subject is neutralised, and the send still goes.
+      const reqsBefore = requests.length;
+      r = await send({ ...good, subject: 'P11 inj\r\nBcc: evil@x.com' }, 'a@homesfy.in', '');
+      const injMime = requests.length > reqsBefore ? decodeRaw(JSON.parse(requests[requests.length - 1].opts.body).raw) : '';
+      assert('performGmailSend: a line break in the subject is collapsed and the report still sends', r.ok === true && /\r\nSubject: P11 inj Bcc: evil@x\.com\r\n/.test(injMime) && !/\r\nBcc:/.test(injMime), injMime.slice(0, 200));
+
+      // A real Gmail failure is a failure, NOT a block.
+      nextResponse = { ok: false, status: 500 };
+      r = await send({ ...good, subject: 'P11 http 500' }, 'a@homesfy.in', '');
+      assert('performGmailSend: an HTTP error returns false but is NOT reported as blocked', r.ok === false && r.job.blockedReason === undefined);
+      assert('performGmailSend: …and the button shows the ordinary failure face', btn.textContent === 'Failed ✗', btn.textContent);
+      nextResponse = { ok: true, status: 200 };
+
+      // Single-send alert helper.
+      const alerts = [];
+      window.alert = (m) => alerts.push(m);
+      _alertIfGmailSendBlocked({ blockedReason: 'To has an invalid address "x"' });
+      _alertIfGmailSendBlocked({});
+      _alertIfGmailSendBlocked(null);
+      assert('_alertIfGmailSendBlocked: a blocked single send tells the user why (once); anything else says nothing', alerts.length === 1 && /invalid address "x"/.test(alerts[0]), JSON.stringify(alerts));
+
+      // Bulk: 2 good + 1 blocked -> counted separately, status line says so.
+      const statusEl = document.createElement('div');
+      statusEl.id = 'p11BulkStatus';
+      document.body.appendChild(statusEl);
+      const bulkBtns = [0, 1, 2].map(i => { const b = document.createElement('button'); b.id = 'p11Bulk' + i; document.body.appendChild(b); return b; });
+      window.confirm = () => true;
+      window.recipientsForReport = async (rep) => ({ to: rep.__to, cc: '', missing: [] });
+      const reqsBeforeBulk = requests.length;
+      await _runBulkGmailSend([
+        { ...good, subject: 'P11 bulk 0', __to: 'a@homesfy.in' },
+        { ...good, subject: 'P11 bulk 1', __to: 'not-an-email' },
+        { ...good, subject: 'P11 bulk 2', __to: 'c@homesfy.in' },
+      ], (i) => 'p11Bulk' + i, 'p11BulkStatus', 'send?');
+      assert('bulk send: only the two sendable reports reach the Gmail API', requests.length - reqsBeforeBulk === 2, String(requests.length - reqsBeforeBulk));
+      assert('bulk send: the status line counts 2 sent and 1 blocked (not "failed")', /2 sent/.test(statusEl.textContent) && /1 blocked by the safety check/.test(statusEl.textContent) && !/failed/.test(statusEl.textContent), statusEl.textContent);
+      assert('bulk send: …and is shown in the amber (needs-a-look) colour', statusEl.style.color === 'var(--amber)', statusEl.style.color);
+      assert('bulk send: the blocked report\'s own button is the one marked Blocked', bulkBtns[1].textContent === 'Blocked ✗' && bulkBtns[0].textContent !== 'Blocked ✗' && bulkBtns[2].textContent !== 'Blocked ✗');
+      statusEl.remove();
+      bulkBtns.forEach(b => b.remove());
+    } finally {
+      window.fetch = realFetch; window.logEmailSend = realLog; window.alert = realAlert; window.confirm = realConfirm; window.recipientsForReport = realRecipients;
+      gmailAccessToken = realToken; gmailTokenExpiresAt = realExpiry;
+      try { if (savedSentLog === null) localStorage.removeItem(GMAIL_SENT_LOG_KEY); else localStorage.setItem(GMAIL_SENT_LOG_KEY, savedSentLog); } catch (e) {}
+      btn.remove();
+    }
+  })();
+
   // ---- 3. Synthetic dataset ----
   // IST wall-clock string ("YYYY-MM-DD HH:MM:SS") N hours before "now" —
   // matches parseDate's own IST-fixed-offset reading of the sheet (core.js),

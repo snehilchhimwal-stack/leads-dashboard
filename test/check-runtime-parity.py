@@ -382,6 +382,36 @@ def report_plain_pair(label, js_file, js_name, gs_file, gs_name, findings):
         findings.append("MISMATCH %s: js (%s) = %r, gs (%s) = %r" % (label, js_file, js_val, gs_file, gs_val))
 
 
+# Regex-literal pairs (added 2026-10-07, email audit P11): a regex literal is not one of this file's plain-data shapes, so
+# the plain-pair parser above can't compare it -- but the SOURCE TEXT of the two literals can simply be diffed, which is all
+# "the two runtimes accept the same addresses" needs. (The functions around them stay in parity by hand, backed by the same
+# test vectors on both sides: tests/frontend-harness.html 2k / Tests_EmailInfra.gs.)
+REGEX_PAIRS = [
+    # (label, js_file, js_name, gs_file, gs_name)
+    ("EMAIL_ADDRESS_RE (send-safety gate address shape)", "js/reports-gmail.js", "GMAIL_ADDRESS_RE", "EmailInfra.gs", "EMAIL_ADDRESS_RE_"),
+]
+_REGEX_LITERAL = r"/(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\n\[])+/[a-z]*"
+
+
+def extract_regex_literal(file_text, name):
+    m = re.search(r"\b(?:const|let|var)\s+" + re.escape(name) + r"\s*=\s*(" + _REGEX_LITERAL + r")\s*;", file_text)
+    return m.group(1) if m else None
+
+
+def report_regex_pair(label, js_file, js_name, gs_file, gs_name, findings):
+    js_text, gs_text = load(js_file), load(gs_file)
+    if js_text is None or gs_text is None:
+        findings.append("SKIP %s -- file missing" % label)
+        return
+    js_re = extract_regex_literal(js_text, js_name)
+    gs_re = extract_regex_literal(gs_text, gs_name)
+    if js_re is None or gs_re is None:
+        findings.append("SKIP %s -- regex literal not found on one side (js=%s gs=%s)" % (label, js_re is not None, gs_re is not None))
+        return
+    if js_re != gs_re:
+        findings.append("MISMATCH %s: js %s=%s  gs %s=%s" % (label, js_name, js_re, gs_name, gs_re))
+
+
 def report_ruleset_pair(spec, findings):
     label = spec["label"]
     key_field = spec["key_field"]
@@ -439,6 +469,9 @@ def main():
     for label, js_file, js_name, gs_file, gs_name in PLAIN_PAIRS:
         report_plain_pair(label, js_file, js_name, gs_file, gs_name, findings)
 
+    for label, js_file, js_name, gs_file, gs_name in REGEX_PAIRS:
+        report_regex_pair(label, js_file, js_name, gs_file, gs_name, findings)
+
     label, js_file, js_name, gs_file, gs_name = TEST_MODE_PAIR
     js_text, gs_text = load(js_file), load(gs_file)
     if js_text is not None and gs_text is not None:
@@ -461,7 +494,7 @@ def main():
     print("check-runtime-parity.py -- browser vs Apps Script duplicated-logic pairs")
     print("(HANDOVER.md section 6)")
     print("=" * 60)
-    print("Checked %d plain pairs, 1 prod-safety pair, %d ruleset pairs." % (len(PLAIN_PAIRS), len(RULESET_PAIRS)))
+    print("Checked %d plain pairs, %d regex-literal pairs, 1 prod-safety pair, %d ruleset pairs." % (len(PLAIN_PAIRS), len(REGEX_PAIRS), len(RULESET_PAIRS)))
     print()
 
     mismatches = [f for f in findings if f.startswith("MISMATCH") or f.startswith("PROD SAFETY")]

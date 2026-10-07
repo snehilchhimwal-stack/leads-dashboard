@@ -595,6 +595,20 @@ code*, one bullet per plan step as each lands.
   failure, it does not pick up leads that arrived later. It **fails open** (an unreadable/unwritable record
   means the report may be re-sent, never withheld) and TEST MODE neither reads nor writes it. To force a
   re-send the same day, delete that property in Project Settings → Script properties.
+- **P11 — the dashboard's own Gmail send has the same last-line gate (browser, `js/reports-gmail.js`).**
+  `performGmailSend` — the one place every dashboard send funnels through (the single "Send via Gmail"
+  button and both bulk flows) — used to hand whatever it was given straight to the Gmail API: nothing
+  checked that a recipient was a real address, that the subject/body had any content, or that a line break
+  hidden in a Region-recipients cell or a subject could not become an extra header (`buildRawEmail` pastes
+  `to`/`cc`/subject into the MIME header block). `prepareGmailSend` now runs first and **blocks** the send
+  — nothing reaches the Gmail API, no "Sent ✓" state, no `Send_Log` row — when: neither To nor Cc holds an
+  address; any To/Cc address is malformed (the same shape the Apps Script gate uses); the subject is empty;
+  the plain-text body is empty; or the HTML body has no visible text. A line break in the subject is
+  *collapsed to a space* (the send still goes). A single send shows a red **"Blocked ✗"** button (tooltip =
+  why) and an alert; a bulk send finishes the rest and reports "n blocked by the safety check". It does
+  **not** check lead ids the way the backend gate does: a browser report carries a lead *count*, and a
+  combined report can legitimately count zero in its numbered sections. Live as soon as GitHub Pages
+  deploys this push (no Apps Script paste). Kept in parity with `EmailInfra.gs` — see §6.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
@@ -691,6 +705,7 @@ one-line fix in one file is complete:
 | **Loan-region override** | `effectiveRegion` (`js/reports-build.js`) | **NO working twin** — a real HIGH finding (`LOGIC_AUDIT.md` Part 4 §4.4 / Part 7 §18; `docs/data-flows/DATA-005`). Loan leads can be mis-attributed on the `.gs` side. |
 | RM-performance tuning constants | `RM_PERF_*` (`js/core-rm-performance.js`) | `RM_PERF_*_GS_` (`DailyRmIssueLog.gs`) — must stay numerically identical |
 | IST day boundary | `istDateKey` (`js/core-foundation.js`) | `istDayKeyGs_` (`Core.gs`) |
+| Outgoing-email send-safety gate (added 2026-10-07, email audit P11): address shape, visible-text check, CR/LF-in-subject collapse | `GMAIL_ADDRESS_RE` / `gmailAddressListProblems` / `gmailVisibleText` / `prepareGmailSend` (`js/reports-gmail.js`) | `EMAIL_ADDRESS_RE_` / `emailAddressListProblemsGs_` / `visibleTextOfHtmlGs_` / `prepareOutgoingEmailGs_` (`EmailInfra.gs`) — the two address regex literals are diffed by `check-runtime-parity.py`'s regex-pair check; the functions are kept in parity by hand, backed by the SAME address/visible-text vectors in `tests/frontend-harness.html` 2k and `Tests_EmailInfra.gs`. The browser gate does not check lead ids (the backend one does). |
 | Test-mode email override (must be `''` in prod) | `TEST_MODE_OVERRIDE_EMAIL` (`js/reports-ui.js`) | `TEST_MODE_OVERRIDE_EMAIL_` (`EmailInfra.gs`) |
 | Tracked dashboard tab roster (added 2026-10-03) | `TRACKED_COMPONENT_IDS` (`js/sheets-writeback.js`) | `TRACKED_COMPONENT_IDS_GS_` (`OpsChecklistRunner.gs`) — the browser side writes `Feature_Usage` rows for exactly these 9 tabs, the Apps Script side judges 30-day staleness against the same list |
 

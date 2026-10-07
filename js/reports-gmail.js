@@ -178,11 +178,17 @@ function initGmailTokenClient(clientId){
         if (pending.kind === 'bulk') {
           _runBulkGmailSend(pending.reports, pending.btnIdFn, pending.statusElId, pending.confirmText);
         } else {
-          performGmailSend(pending);
+          performGmailSend(pending).then(() => _alertIfGmailSendBlocked(pending));
         }
       }
     },
   });
+}
+
+// A single report's Send button gives the user only the button face to read, so a send the safety gate refused also says
+// so plainly (the bulk flow reports blocked sends in its own status line instead).
+function _alertIfGmailSendBlocked(pending){
+  if (pending && pending.blockedReason) alert('Not sent — the safety check refused this email:\n\n' + pending.blockedReason);
 }
 
 function connectGmail(){
@@ -263,16 +269,96 @@ function buildRawEmail(to, cc, subject, body, htmlBody){
   return toBase64Url(`${headers.filter(Boolean).join('\r\n')}\r\n\r\n${parts}`);
 }
 
+/* ============ SEND-SAFETY GATE (email audit P11 / F19) ============
+ * performGmailSend used to hand whatever it was given straight to the Gmail API: nothing checked that a recipient was a
+ * real address, that the subject/body had any content, or that a line break hidden in a recipient cell or subject could not
+ * become an extra header (buildRawEmail pastes `to`/`cc`/subject into the MIME header block). The Apps Script emailers have
+ * had this gate since P1 (EmailInfra.gs prepareOutgoingEmailGs_) — this is its browser twin, applied at the one place every
+ * browser send funnels through. A blocked send NEVER reaches the Gmail API.
+ *
+ * Kept in parity BY HAND with EmailInfra.gs (a regex literal and functions are invisible to test/check-runtime-parity.py —
+ * HANDOVER.md section 6 lists the pair): GMAIL_ADDRESS_RE = EMAIL_ADDRESS_RE_, gmailAddressListProblems =
+ * emailAddressListProblemsGs_, gmailVisibleText = visibleTextOfHtmlGs_. The same address vectors are asserted on both sides
+ * (tests/frontend-harness.html 2k / Tests_EmailInfra.gs). Unlike the backend gate this one does not check lead ids: a
+ * browser report carries a lead COUNT, not the list, and a combined report can legitimately count zero in its numbered
+ * sections.
+ */
+const GMAIL_ADDRESS_RE = /^[^\s@<>,;"()\[\]\\]+@[^\s@<>,;"()\[\]\\]+\.[^\s@<>,;"()\[\]\\]+$/;
+
+// Problems with an address list ([] = fine). The list may be comma/semicolon separated (how the Region recipients table
+// stores it). `required`: an empty list is itself a problem.
+function gmailAddressListProblems(list, fieldName, required){
+  const raw = Array.isArray(list) ? list.join(',') : String(list == null ? '' : list);
+  const parts = raw.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return required ? [`${fieldName} is empty`] : [];
+  const problems = [];
+  parts.forEach(a => {
+    if (!GMAIL_ADDRESS_RE.test(a)) problems.push(`${fieldName} has an invalid address "${a.replace(/[\r\n]+/g, ' ')}"`);
+  });
+  return problems;
+}
+
+// The text a reader would actually see in an HTML body — style/script/head blocks and tags removed, entities decoded,
+// whitespace collapsed. An HTML body that is all markup (empty cells, an empty table) has no visible text.
+function gmailVisibleText(html){
+  return String(html == null ? '' : html)
+    .replace(/<(style|script|head)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Normalises one browser send and returns { msg: <the exact payload that will be sent>, problems: [...] }. CR/LF in the
+// subject are collapsed (a header can never carry a line break). At least one of To/Cc must hold an address (the Region
+// recipients table can legitimately be Cc-only), and every address in either must be well formed.
+function prepareGmailSend(report, to, cc){
+  const r = report || {};
+  const toList = Array.isArray(to) ? to.join(',') : String(to == null ? '' : to).trim();
+  const ccList = Array.isArray(cc) ? cc.join(',') : String(cc == null ? '' : cc).trim();
+  const subject = String(r.subject == null ? '' : r.subject).replace(/[\r\n]+/g, ' ').trim();
+  const body = r.body == null ? '' : String(r.body);
+  const html = r.html == null || r.html === '' ? undefined : String(r.html);
+
+  const problems = [];
+  if (!report) problems.push('there is no report to send');
+  const hasAddress = (toList + ',' + ccList).split(/[,;]+/).some(s => s.trim());
+  if (!hasAddress) problems.push('there is no recipient (To and Cc are both empty)');
+  problems.push(...gmailAddressListProblems(toList, 'To', false));
+  problems.push(...gmailAddressListProblems(ccList, 'Cc', false));
+  if (!subject) problems.push('the subject is empty');
+  if (!body.trim()) problems.push('the plain-text body is empty or whitespace-only');
+  if (html !== undefined && !gmailVisibleText(html)) problems.push('the HTML body has no visible text');
+  return { msg: { to: toList, cc: ccList, subject, body, html }, problems };
+}
+
 // Returns true/false so a bulk caller (sendAllReportsGmail below) can track
-// how many of a batch actually went through — every existing call site
-// still ignores the return value, so this is additive, not a behavior
-// change for the single-report Send button.
+// how many of a batch actually went through. A send the safety gate (prepareGmailSend, above) REFUSES also returns false, but
+// first records why on `pending.blockedReason` — that is how a caller tells "blocked, nothing sent" from "the Gmail call
+// failed" without a new return shape.
 async function performGmailSend(pending){
   const { report, to, cc, btnId } = pending;
   const btn = btnId ? document.getElementById(btnId) : null;
+  const prepared = prepareGmailSend(report, to, cc);
+  if (prepared.problems.length) {
+    const reason = prepared.problems.join('; ');
+    pending.blockedReason = reason;
+    console.error('Gmail send BLOCKED by the send-safety gate (nothing was sent):', reason, report && report.subject);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Blocked ✗';
+      btn.title = 'Not sent: ' + reason;
+      btn.style.borderColor = 'var(--red)';
+      // Longer than a plain failure's 3s so the tooltip can actually be read.
+      setTimeout(() => { btn.style.borderColor = ''; applyGmailButtonState(btn, report && report.subject); }, 6000);
+    }
+    return false;
+  }
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
-    const raw = buildRawEmail(to, cc, report.subject, report.body, report.html);
+    // The normalised payload (CR/LF collapsed, addresses trimmed) is what is sent; the Sent-state key and the Send_Log row
+    // below keep using the report's own subject so a resend within the hour is still recognised.
+    const raw = buildRawEmail(prepared.msg.to, prepared.msg.cc, prepared.msg.subject, prepared.msg.body, prepared.msg.html);
     const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       headers: { Authorization: `Bearer ${gmailAccessToken}`, 'Content-Type': 'application/json' },
@@ -324,7 +410,7 @@ async function sendReportViaGmail(report, btnId){
   }
   const pending = { kind: 'single', report, to, cc, btnId };
   if (gmailTokenValid()) {
-    performGmailSend(pending);
+    performGmailSend(pending).then(() => _alertIfGmailSendBlocked(pending));
   } else {
     _pendingGmailSend = pending;
     connectGmail(); // performGmailSend fires from the token callback once granted
@@ -350,7 +436,7 @@ async function _runBulkGmailSend(reports, btnIdFn, statusElId, confirmText){
   if (!confirm(confirmText || `Send all ${reports.length} emails now?`)) return;
 
   const missingRegions = new Set();
-  let sent = 0, failed = 0;
+  let sent = 0, failed = 0, blocked = 0;
   for (let i = 0; i < reports.length; i++) {
     const report = reports[i];
     const { to, cc, missing } = await recipientsForReport(report);
@@ -359,15 +445,17 @@ async function _runBulkGmailSend(reports, btnIdFn, statusElId, confirmText){
       continue;
     }
     setFollowupsPushStatus(`Sending ${i + 1} of ${reports.length}…`, 'var(--text-faint)', statusElId);
-    const ok = await performGmailSend({ report, to, cc, btnId: btnIdFn(i) });
-    if (ok) sent++; else failed++;
+    const job = { report, to, cc, btnId: btnIdFn(i) };
+    const ok = await performGmailSend(job);
+    if (ok) sent++; else if (job.blockedReason) blocked++; else failed++;
   }
 
   if (missingRegions.size) flagMissingRegionRecipients(Array.from(missingRegions));
   const parts = [`${sent} sent`];
   if (failed) parts.push(`${failed} failed`);
+  if (blocked) parts.push(`${blocked} blocked by the safety check (not sent — hover the red button)`);
   if (missingRegions.size) parts.push(`${missingRegions.size} skipped (no recipients)`);
-  setFollowupsPushStatus(parts.join(', ') + '.', failed || missingRegions.size ? 'var(--amber)' : 'var(--green)', statusElId);
+  setFollowupsPushStatus(parts.join(', ') + '.', failed || blocked || missingRegions.size ? 'var(--amber)' : 'var(--green)', statusElId);
 }
 
 // Sends every report in `reports` via Gmail. Mirrors the single-report
