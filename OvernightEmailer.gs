@@ -202,6 +202,11 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
       Logger.log('notifyChLevelLeadsGs_: no leads found for the CH-level RM(s) ' + entry.rmNames.join(', ') + ' (' + region + ') — report not sent.');
       return;
     }
+    // Once per day per region + CH (email audit P10 / F11) — see wasChReportSentTodayGs_ (EmailInfra.gs).
+    if (wasChReportSentTodayGs_(CH_REPORT_KINDS_.overnight, region, chName)) {
+      Logger.log('notifyChLevelLeadsGs_: the CH-level overnight report for ' + chName + ' (' + region + ') was already sent today — not re-sending.');
+      return;
+    }
 
     const reportOpts = {
       title: 'Overnight Leads',
@@ -235,6 +240,7 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
         to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
         leadIds: allLeads.map(function (l) { return l.lead_id; }),
       }, 'send CH-level report (' + chName + ', ' + region + ')');
+      markChReportSentGs_(CH_REPORT_KINDS_.overnight, region, chName);
     } catch (e) {
       Logger.log('notifyChLevelLeadsGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
       if (e && e.blockedByGuard) notifyOpsAlertGs_('CH-level overnight report BLOCKED - ' + region + ' / ' + chName, [String(e.message || e)]);

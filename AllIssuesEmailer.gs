@@ -415,6 +415,11 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
       Logger.log('notifyChLevelIssuesGs_: no flagged leads found for the CH-level RM(s) ' + entry.rmNames.join(', ') + ' (' + region + ') — report not sent.');
       return;
     }
+    // Once per day per region + CH (email audit P10 / F11) — see wasChReportSentTodayGs_ (EmailInfra.gs).
+    if (wasChReportSentTodayGs_(CH_REPORT_KINDS_.allIssues, region, chName)) {
+      Logger.log('notifyChLevelIssuesGs_: the CH-level issues report for ' + chName + ' (' + region + ') was already sent today — not re-sending.');
+      return;
+    }
 
     const reportOpts = {
       title: 'Leads With Issue',
@@ -445,6 +450,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
         to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
         leadIds: allLeads.map(function (l) { return l.lead_id; }),
       }, 'send CH-level issues report (' + chName + ', ' + region + ')');
+      markChReportSentGs_(CH_REPORT_KINDS_.allIssues, region, chName);
     } catch (e) {
       Logger.log('notifyChLevelIssuesGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
       if (e && e.blockedByGuard) notifyOpsAlertGs_('CH-level All-Issues report BLOCKED - ' + region + ' / ' + chName, [String(e.message || e)]);

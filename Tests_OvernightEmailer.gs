@@ -818,6 +818,9 @@ function runOvernightEmailerTests_() {
       notifyChLevelLeadsGs_('Pune', chRms, {}, 'test date');
       TestAssertEqual_(TestGmailLog_.drafts.length, before, 'notifyChLevelLeadsGs_: a CH-level entry with NO leads sends nothing — never an empty "0 Leads Assigned" report');
       TestAssertEqual_(TestGmailLog_.sent.length, sentBefore, 'notifyChLevelLeadsGs_: …and skips silently (the first-line empty check, not the safety gate\'s "blocked" alert)');
+      // The 10:00 run earlier in this file already sent today's Pune / Test CH Self report (email audit P10 records that), so this
+      // call needs a fresh record to be the "first report of the day".
+      PropertiesService = TestMockPropertiesService_();
       notifyChLevelLeadsGs_('Pune', chRms, { 'Test CH Self': [{ lead_id: 'L-CHX', RM: 'Test CH Self', TL: '', status: 'Suspect', followup: 'call now' }] }, 'test date');
       TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, 'notifyChLevelLeadsGs_: with a lead, it sends exactly one report');
       TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-CHX', 'notifyChLevelLeadsGs_: the lead is in the HTML body');
@@ -1449,6 +1452,65 @@ function runOvernightEmailerTests_() {
       try { P1_withSs(P1_newSs([]), function () { sendOvernightMorningEmails(); }); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
       TestAssert_(TestGmailLog_.sent.slice(alertsBeforeTm).some(function (e) { return /sendOvernightMorningEmails ran in TEST MODE/.test(e.subject); }), 'test mode: a job that starts with test mode on alerts ops');
       TestAssertEqual_(readEmailJobRunGs_(jobName), null, 'test mode: …and writes no run record (the watchdog would otherwise think the real job ran)');
+    }
+
+    // ---- email audit P10 (F11): the CH-level overnight report goes once a day per region + CH ----
+    // A region with ONLY CH-level leads never gets an Overnight_Log row, so the 10:00 region guard never protected it: every re-run
+    // of the job re-sent the same report.
+    {
+      const chRms = function (chName) { return [{ rmName: chName, chName: chName, chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }]; };
+      const chLeads = function (chName, id) { const m = {}; m[chName] = [{ lead_id: id, RM: chName, TL: '', status: 'Suspect', followup: 'call now' }]; return m; };
+      const reports = function (since) { return TestGmailLog_.drafts.slice(since); };
+
+      PropertiesService = TestMockPropertiesService_();
+      const before = TestGmailLog_.drafts.length;
+      notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-A'), 'test date');
+      TestAssertEqual_(reports(before).length, 1, 'CH report once a day: the first report goes out');
+      notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-A'), 'test date');
+      TestAssertEqual_(reports(before).length, 1, 'CH report once a day: the same report for the same region + CH is NOT sent again the same day');
+      notifyChLevelLeadsGs_('Thane', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-B'), 'test date');
+      TestAssertEqual_(reports(before).length, 2, 'CH report once a day: a different region still gets its report');
+      notifyChLevelLeadsGs_('Pune', chRms('Other CH'), chLeads('Other CH', 'L-P10-C'), 'test date');
+      TestAssertEqual_(reports(before).length, 3, 'CH report once a day: a different CH in the same region still gets its report');
+
+      // A failed send is NOT recorded, so a retry the same day delivers it.
+      PropertiesService = TestMockPropertiesService_();
+      const realGmailApp = GmailApp;
+      GmailApp = TestMockGmailApp_({});
+      GmailApp.createDraft = function () { return { send: function () { throw new Error('Gmail operation not allowed for this user'); } }; };
+      try { notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-F'), 'test date'); } finally { GmailApp = realGmailApp; }
+      TestAssertEqual_(wasChReportSentTodayGs_(CH_REPORT_KINDS_.overnight, 'Pune', 'Test CH Self'), false, 'CH report once a day: a send that FAILED is not recorded as sent');
+      const beforeRetry = TestGmailLog_.drafts.length;
+      notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-F'), 'test date');
+      TestAssertEqual_(reports(beforeRetry).length, 1, 'CH report once a day: …so the retry the same day delivers it');
+
+      // Tomorrow is a new day.
+      PropertiesService.getScriptProperties().setProperty('EMAIL_CH_REPORTS_overnight', JSON.stringify({ day: '2026-01-01', keys: ['pune|test ch self'] }));
+      const beforeNextDay = TestGmailLog_.drafts.length;
+      notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-D'), 'test date');
+      TestAssertEqual_(reports(beforeNextDay).length, 1, 'CH report once a day: a report recorded on an earlier day does not suppress today\'s');
+
+      // TEST MODE ignores the record, like the region guards, and writes none.
+      PropertiesService = TestMockPropertiesService_();
+      notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-E'), 'test date');
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_SECONDARY_;
+      const beforeTm = TestGmailLog_.drafts.length;
+      try {
+        notifyChLevelLeadsGs_('Pune', chRms('Test CH Self'), chLeads('Test CH Self', 'L-P10-E'), 'test date');
+        TestAssertEqual_(reports(beforeTm).length, 1, 'CH report once a day (TEST MODE): a real report earlier today does not stop a test run sending');
+      } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+
+      // End to end: a region whose ONLY lead is CH-held. Two runs of the 10:00 job -> ONE report (and no Overnight_Log row at all,
+      // which is exactly why the region guard never protected it).
+      PropertiesService = TestMockPropertiesService_();
+      const ssCh = P1_newSs([TestOE_leadRow_(header, { lead_id: 'L-P10-CHONLY', client_id: 'C-P10-CHONLY', RM: 'Test CH Self', lead_assigned_at: midWindow })]);
+      const beforeJob = TestGmailLog_.drafts.length;
+      P1_withSs(ssCh, function () { sendOvernightMorningEmails(); });
+      const firstRun = reports(beforeJob).filter(function (d) { return d.htmlBody.indexOf('L-P10-CHONLY') !== -1; });
+      TestAssertEqual_(firstRun.length, 1, '10:00 CH-only region: the first run sends the CH-level report');
+      TestAssertEqual_(ensureOvernightLogSheet_(ssCh).getLastRow(), 1, '10:00 CH-only region: …and writes no Overnight_Log row (so the region guard cannot see it)');
+      P1_withSs(ssCh, function () { sendOvernightMorningEmails(); });
+      TestAssertEqual_(reports(beforeJob).filter(function (d) { return d.htmlBody.indexOf('L-P10-CHONLY') !== -1; }).length, 1, '10:00 CH-only region: a same-day RE-RUN does not send the CH-level report a second time');
     }
 
     TestAssertOnlyTestEmails_();

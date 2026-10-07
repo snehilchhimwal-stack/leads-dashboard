@@ -583,6 +583,18 @@ code*, one bullet per plan step as each lands.
   Service (already authorized), and only then gives up (logged). A job that starts with
   `TEST_MODE_OVERRIDE_EMAIL_` set now alerts ops ("ran in TEST MODE") and writes no run record.
   No new OAuth scope is needed (Script Properties and the Advanced Gmail Service are already covered).
+- **P10 — CH-level reports go once a day.** A CH-level report (a Cluster/Commercial Head or leader personally
+  holding leads, or an RM whose chain resolves all the way up to one) goes to OPS + the CH-level address, but
+  it was never logged — and the 10:00 / 17:00 region guards only read log rows. A region with **only**
+  CH-level leads never gets a row, so **every re-run of the job re-sent the same report** (a region with a
+  normal bucket as well was protected by that bucket's row). `wasChReportSentTodayGs_` / `markChReportSentGs_`
+  (`EmailInfra.gs`) now keep one Script Property per report type (`EMAIL_CH_REPORTS_overnight` for the 10:00
+  report, `EMAIL_CH_REPORTS_allissues` for the 17:00 one) holding today's `region|CH` keys; it is replaced
+  when the IST day changes, so it never grows. The key is recorded only after a **successful** send (a failed
+  send is retried by a same-day re-run). It is same-day only, like the region guards: a re-run recovers a
+  failure, it does not pick up leads that arrived later. It **fails open** (an unreadable/unwritable record
+  means the report may be re-sent, never withheld) and TEST MODE neither reads nor writes it. To force a
+  re-send the same day, delete that property in Project Settings → Script properties.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry

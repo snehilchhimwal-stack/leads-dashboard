@@ -876,6 +876,62 @@ function runEmailInfraTests_() {
       TestAssertEqual_(sch.sendOvernightMorningEmails.hour + ',' + sch.sendOvernightFollowupEmails.hour + ',' + sch.sendAllIssuesEmails.hour, '10,13,17', 'emailJobScheduleGs_: the three jobs are watched at 10, 13 and 17 (the 17:00 hour follows ALL_ISSUES_RUN_HOUR_)');
     }
 
+    // ============ 2026-10-05 email audit P10 (F11): a CH-level report is sent once per day per region + CH ============
+    {
+      const realProps = PropertiesService;
+      try {
+        PropertiesService = TestMockPropertiesService_();
+        const O = CH_REPORT_KINDS_.overnight, A = CH_REPORT_KINDS_.allIssues;
+        const storedKeys = function (kind) { const raw = PropertiesService.getScriptProperties().getProperty('EMAIL_CH_REPORTS_' + kind); return raw ? JSON.parse(raw) : null; };
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), false, 'CH report record: nothing has been sent yet today');
+        TestAssertEqual_(markChReportSentGs_(O, 'Pune', 'Test CH Self'), true, 'CH report record: marking a sent report reports success');
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), true, 'CH report record: …and it is then remembered');
+        TestAssertEqual_(wasChReportSentTodayGs_(O, '  pune ', 'TEST CH SELF'), true, 'CH report record: matching ignores case and surrounding spaces');
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Thane', 'Test CH Self'), false, 'CH report record: a different region is not covered');
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Another CH'), false, 'CH report record: a different CH is not covered');
+        TestAssertEqual_(wasChReportSentTodayGs_(A, 'Pune', 'Test CH Self'), false, 'CH report record: the 17:00 issues report is tracked separately from the 10:00 overnight one');
+        markChReportSentGs_(O, 'Pune', 'Test CH Self');
+        TestAssertEqual_(storedKeys(O).keys.length, 1, 'CH report record: marking the same report twice stores one key, not two');
+        TestAssertEqual_(storedKeys(O).day, istDayKeyGs_(new Date()), 'CH report record: the record carries today\'s IST day');
+        markChReportSentGs_(O, 'Thane', 'Test CH Self');
+        TestAssertEqual_(storedKeys(O).keys.length, 2, 'CH report record: a second region adds a second key');
+
+        // A new day starts clean, and the old day's keys are dropped (the record never grows).
+        PropertiesService.getScriptProperties().setProperty('EMAIL_CH_REPORTS_' + O, JSON.stringify({ day: '2026-01-01', keys: ['pune|test ch self', 'thane|test ch self'] }));
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), false, 'CH report record: yesterday\'s report does not suppress today\'s');
+        markChReportSentGs_(O, 'Pune', 'Test CH Self');
+        const rolled = storedKeys(O);
+        TestAssert_(rolled.day === istDayKeyGs_(new Date()) && rolled.keys.length === 1, 'CH report record: the first mark of a new day REPLACES the old day\'s keys');
+
+        // Fails OPEN: a damaged or unavailable record never withholds a report.
+        PropertiesService.getScriptProperties().setProperty('EMAIL_CH_REPORTS_' + O, '{not json');
+        let threwOnJunk = false, junkSeen = null;
+        try { junkSeen = wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'); } catch (e) { threwOnJunk = true; }
+        TestAssert_(!threwOnJunk && junkSeen === false, 'CH report record: an unreadable record reads as "not sent yet" (the report goes out) and never throws');
+        TestAssertEqual_(markChReportSentGs_(O, 'Pune', 'Test CH Self'), true, 'CH report record: …and the next mark repairs it');
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), true, 'CH report record: …so it is remembered again');
+        PropertiesService = TestMockPropertiesService_({ failWrites: true });
+        let threwOnWrite = false, wrote = null;
+        try { wrote = markChReportSentGs_(O, 'Pune', 'Test CH Self'); } catch (e) { threwOnWrite = true; }
+        TestAssert_(!threwOnWrite && wrote === false, 'CH report record: a failing Properties write returns false and never throws');
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), false, 'CH report record: …and the report is simply not remembered');
+        PropertiesService = TestMockPropertiesService_({ failReads: true });
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), false, 'CH report record: a failing Properties read means "not sent yet"');
+        PropertiesService = undefined;
+        TestAssert_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self') === false && markChReportSentGs_(O, 'Pune', 'Test CH Self') === false, 'CH report record: with no PropertiesService at all it is inert (never throws)');
+
+        // TEST MODE neither reads nor writes the record.
+        PropertiesService = TestMockPropertiesService_();
+        markChReportSentGs_(O, 'Pune', 'Test CH Self');
+        TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_SECONDARY_;
+        try {
+          TestAssertEqual_(wasChReportSentTodayGs_(O, 'Pune', 'Test CH Self'), false, 'CH report record (TEST MODE): a production record never suppresses a test send');
+          TestAssertEqual_(markChReportSentGs_(O, 'Thane', 'Test CH Self'), false, 'CH report record (TEST MODE): a test send is never recorded');
+        } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+        TestAssertEqual_(wasChReportSentTodayGs_(O, 'Thane', 'Test CH Self'), false, 'CH report record (TEST MODE): …so nothing from the test run is in the record afterwards');
+      } finally { PropertiesService = realProps; PropertiesService = TestMockPropertiesService_(); }
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();

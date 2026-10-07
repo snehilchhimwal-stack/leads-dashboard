@@ -163,6 +163,53 @@ function jsonForCellGs_(entries, label) {
 // CH-level reports go to OPS + CH, or only the tester in TEST MODE (both sends used to ignore TEST MODE).
 function chLevelReportToGs_() { return TEST_MODE_OVERRIDE_EMAIL_ || (OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_); }
 
+// CH-level reports once per day (email audit P10 / F11). A CH-level report (a CH personally holding leads, or an RM whose chain
+// resolves up to a CH) is sent to OPS + the CH-level address, but it was never LOGGED: the region guards of the 10:00 and 17:00
+// jobs key off a log row, which a region with ONLY CH-level leads never gets — so every re-run of the job re-sent the same
+// report. (A region that also had a normal bucket was protected by that bucket's row.) The record below is one Script
+// Property per report type, `EMAIL_CH_REPORTS_<kind>` = `{day, keys: ['<region>|<ch>', ...]}`; it holds only TODAY's keys and
+// is replaced when the IST day changes, so it never grows. Same-day only, like the region guards: a re-run is a recovery action,
+// not a way to pick up leads that arrived later. Fails OPEN — an unreadable or unwritable record means the report may be sent
+// again (annoying), never that it is withheld (harmful). TEST MODE neither reads nor writes it (a test run must not be
+// suppressed by, or write into, production state — same rule as the region guards).
+const CH_REPORT_KINDS_ = { overnight: 'overnight', allIssues: 'allissues' };
+function chReportKeyGs_(region, chName) {
+  return String(region || '').trim().toLowerCase() + '|' + String(chName || '').trim().toLowerCase();
+}
+function chReportPropertyGs_(kind) { return 'EMAIL_CH_REPORTS_' + kind; }
+function readChReportsTodayGs_(kind) {
+  try {
+    if (typeof PropertiesService === 'undefined') return null;
+    const raw = PropertiesService.getScriptProperties().getProperty(chReportPropertyGs_(kind));
+    const rec = raw ? JSON.parse(raw) : null;
+    return (rec && rec.day === istDayKeyGs_(new Date()) && Array.isArray(rec.keys)) ? rec.keys : [];
+  } catch (e) {
+    Logger.log('CH-level report record (' + kind + ') could not be read — treating it as "not sent yet": ' + e);
+    return null;
+  }
+}
+// true when this report type was already sent today for this region + CH.
+function wasChReportSentTodayGs_(kind, region, chName) {
+  if (TEST_MODE_OVERRIDE_EMAIL_) return false;
+  const keys = readChReportsTodayGs_(kind);
+  return !!keys && keys.indexOf(chReportKeyGs_(region, chName)) !== -1;
+}
+// Records a SUCCESSFUL send. Never throws.
+function markChReportSentGs_(kind, region, chName) {
+  if (TEST_MODE_OVERRIDE_EMAIL_) return false;
+  try {
+    if (typeof PropertiesService === 'undefined') return false;
+    const keys = readChReportsTodayGs_(kind) || [];
+    const key = chReportKeyGs_(region, chName);
+    if (keys.indexOf(key) === -1) keys.push(key);
+    PropertiesService.getScriptProperties().setProperty(chReportPropertyGs_(kind), JSON.stringify({ day: istDayKeyGs_(new Date()), keys: keys }));
+    return true;
+  } catch (e) {
+    Logger.log('CH-level report record (' + kind + ') could not be written — this report may be re-sent by a same-day re-run: ' + e);
+    return false;
+  }
+}
+
 // Futwork leads from EVERY region are grouped under this one pseudo-region, so each job (17:00 / 10:00 / 13:00)
 // sends ONE Futwork email; each lead keeps its real region (.region) and the email shows them as separate bands.
 const FUTWORK_REGION_KEY_ = 'Futwork';

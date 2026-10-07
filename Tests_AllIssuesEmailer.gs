@@ -396,6 +396,56 @@ function runAllIssuesEmailerTests_() {
       TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-CHI', 'notifyChLevelIssuesGs_: the lead is in the HTML body');
     }
 
+    // ---- email audit P10 (F11): the CH-level issues report goes once a day per region + CH ----
+    {
+      const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];
+      const flagged = function (id) { return { 'Test CH Self': [{ lead_id: id, RM: 'Test CH Self', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'call' }] }; };
+      PropertiesService = TestMockPropertiesService_();
+      const before = TestGmailLog_.drafts.length;
+      notifyChLevelIssuesGs_('Pune', chRms, flagged('L-P10-I1'), win);
+      notifyChLevelIssuesGs_('Pune', chRms, flagged('L-P10-I1'), win);
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 1, 'CH issues report once a day: the same region + CH is reported once, not on every call');
+      notifyChLevelIssuesGs_('Thane', chRms, flagged('L-P10-I2'), win);
+      TestAssertEqual_(TestGmailLog_.drafts.length, before + 2, 'CH issues report once a day: a different region still gets its report');
+      // Tracked separately from the 10:00 overnight report: having sent that one does not suppress this one.
+      PropertiesService = TestMockPropertiesService_();
+      markChReportSentGs_(CH_REPORT_KINDS_.overnight, 'Pune', 'Test CH Self');
+      const beforeSep = TestGmailLog_.drafts.length;
+      notifyChLevelIssuesGs_('Pune', chRms, flagged('L-P10-I3'), win);
+      TestAssertEqual_(TestGmailLog_.drafts.length, beforeSep + 1, 'CH issues report once a day: the 10:00 overnight report having gone out does not suppress the 17:00 issues report');
+
+      // A failed send is not recorded.
+      PropertiesService = TestMockPropertiesService_();
+      const realGmailApp = GmailApp;
+      GmailApp = TestMockGmailApp_({});
+      GmailApp.createDraft = function () { return { send: function () { throw new Error('Gmail operation not allowed for this user'); } }; };
+      try { notifyChLevelIssuesGs_('Pune', chRms, flagged('L-P10-I4'), win); } finally { GmailApp = realGmailApp; }
+      const beforeRetry = TestGmailLog_.drafts.length;
+      notifyChLevelIssuesGs_('Pune', chRms, flagged('L-P10-I4'), win);
+      TestAssertEqual_(TestGmailLog_.drafts.length, beforeRetry + 1, 'CH issues report once a day: a send that failed is retried by the next call');
+
+      // End to end: a region whose ONLY flagged lead is CH-held, two runs of the 17:00 job -> ONE report.
+      PropertiesService = TestMockPropertiesService_();
+      const ssCh = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ssCh._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        TestAIE_leadRow_(header, { lead_id: 'L-P10-CHONLY', client_id: 'C-P10-CHONLY', RM: 'Test CH Self', lead_assigned_at: now, rm_is_active: false })]);
+      const realSsCh = SpreadsheetApp;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ssCh; }, flush: function () {} };
+      try {
+        const beforeJob = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        const mine = function () { return TestGmailLog_.drafts.slice(beforeJob).filter(function (d) { return d.htmlBody.indexOf('L-P10-CHONLY') !== -1; }); };
+        TestAssertEqual_(mine().length, 1, '17:00 CH-only region: the first run sends the CH-level report');
+        TestAssertEqual_(ssCh.getSheetByName('AllIssues_Log').getLastRow(), 1, '17:00 CH-only region: …and writes no AllIssues_Log row (so the region guard cannot see it)');
+        sendAllIssuesEmails();
+        TestAssertEqual_(mine().length, 1, '17:00 CH-only region: a same-day RE-RUN does not send the CH-level report a second time');
+      } finally { SpreadsheetApp = realSsCh; }
+      PropertiesService = TestMockPropertiesService_();
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in the
