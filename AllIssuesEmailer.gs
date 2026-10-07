@@ -650,10 +650,11 @@ function setupAllIssuesEmailTrigger() {
 // re-run (a second run finds nothing and does nothing). Precedent: removeDedupIncidentRowsNow (MovementTracker.gs).
 const TEST_MODE_ROWS_FROM_ = new Date('2026-09-24T10:00:00+05:30');
 const TEST_MODE_ROWS_TO_ = new Date('2026-09-24T10:30:00+05:30');
-const TEST_MODE_ROWS_RECIPIENT_ = 'snehil.chhimwal@homesfy.in';
+// The tester whose test-mode rows are removed: the ops address (looked up from the private employee table at run time — email audit P13).
+function testModeRowsRecipientGs_() { return opsAlertEmailGs_(); }
 const TEST_MODE_ROWS_EXPECTED_ = 28;
 function removeTestModeAllIssuesRowsNow() {
-  removeAllIssuesLogRowsInWindowGs_(SpreadsheetApp.getActiveSpreadsheet(), TEST_MODE_ROWS_FROM_, TEST_MODE_ROWS_TO_, TEST_MODE_ROWS_RECIPIENT_, TEST_MODE_ROWS_EXPECTED_);
+  removeAllIssuesLogRowsInWindowGs_(SpreadsheetApp.getActiveSpreadsheet(), TEST_MODE_ROWS_FROM_, TEST_MODE_ROWS_TO_, testModeRowsRecipientGs_(), TEST_MODE_ROWS_EXPECTED_);
 }
 
 function removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount) {

@@ -274,7 +274,7 @@ function runWeeklyOpsChecklist_(ss, now) {
     ' — ' + Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
   try {
     withSendRetry_(function () {
-      GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, summary.lines.join('\n'));
+      GmailApp.sendEmail(opsAlertEmailGs_(), subject, summary.lines.join('\n'));
     }, 'runWeeklyOpsChecklistNow: send weekly summary');
   } catch (e) {
     Logger.log('runWeeklyOpsChecklistNow failed to send its summary email: ' + e);

@@ -282,8 +282,8 @@ function repeatOffendersRegionKey(rec){
 // live against real snapshot data, not guessed) -- a name added here
 // that doesn't exactly match production's spelling silently does
 // nothing, so re-verify the real string before changing this list.
-//   'Ashish Kukreja'       -- ashish.kukreja@homesfy.in; no RM_Hierarchy row at all
-//   'saurabh Mishra'       -- saurabh.mishra@homesfy.in; no RM_Hierarchy row at all
+//   'Ashish Kukreja'       -- the CEO; no RM_Hierarchy row at all
+//   'saurabh Mishra'       -- senior leadership; no RM_Hierarchy row at all
 //   'Mukesh Mishra Admin'  -- an admin-login alias of the real Cluster
 //                             Head "Mukesh Mishra" (who IS excluded via
 //                             the role-based path below, since THAT name

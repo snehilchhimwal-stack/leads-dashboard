@@ -255,7 +255,7 @@ This is what keeps Checkpoint 2 from "recreating the 17:00 table"
 CH safety valve (`notifyChLevelLeadsGs_`/`notifyChLevelIssuesGs_`) is
 untouched — a chain that resolves all the way to a real CH with no
 intermediate tier, or a CH personally holding a lead, still diverts to
-`OPS_ALERT_EMAIL_` + `ashish.ivlekar@homesfy.in` with no CC, never the
+`OPS_ALERT_EMAIL_` + the CH-level address (`CH_LEVEL_EMAIL_`) with no CC, never the
 normal bucket flow. Normal buckets still CC `ALWAYS_CC_EMAILS_` (Ashish
 Kukreja + Saurabh Mishra).
 

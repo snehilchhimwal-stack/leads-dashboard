@@ -1580,7 +1580,7 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
     }
     const to = String(r[4] || '').trim();
     if (!to) return;
-    // Confirmed in production, 1 Oct 2026: ashish.ivlekar@ received three 13:00 replies (Thane/SoBo/Central), each ~36 KB
+    // Confirmed in production, 1 Oct 2026: one CH-level recipient received three 13:00 replies (Thane/SoBo/Central), each ~36 KB
     // and within a few bytes of the others; the Central thread's Checkpoint 1 had listed 7 leads at 10:05 and its 13:04
     // reply listed 68. A recipient who covers several regions has one AllIssues_Log row — and one Overnight_Log thread —
     // PER region; each region's reply must carry only that region's own Checkpoint 2. Legacy per-region Futwork rows

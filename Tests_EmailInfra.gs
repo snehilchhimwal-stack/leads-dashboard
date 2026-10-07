@@ -984,6 +984,144 @@ function runEmailInfraTests_() {
       } finally { PropertiesService = realProps; PropertiesService = TestMockPropertiesService_(); }
     }
 
+    // ============ 2026-10-07 email audit P13 (F24): corporate addresses come from the PRIVATE employee table, not this public repo ============
+    {
+      // The committed defaults are blank/null — TestEnv_setUp_ saved the REAL values before overriding them, so this asserts the
+      // source itself no longer carries an address.
+      const real = TestEnv_realGlobals_;
+      TestAssertEqual_(real.OPS_ALERT_EMAIL_, '', 'public repo: the committed OPS_ALERT_EMAIL_ is blank (looked up by name at run time)');
+      TestAssertEqual_(real.CH_LEVEL_EMAIL_, '', 'public repo: the committed CH_LEVEL_EMAIL_ is blank');
+      TestAssertEqual_(real.FUTWORK_ROUTE_EMAIL_, '', 'public repo: the committed FUTWORK_ROUTE_EMAIL_ is blank');
+      TestAssertEqual_(real.ALWAYS_CC_EMAILS_, null, 'public repo: the committed ALWAYS_CC_EMAILS_ is null (names only, resolved at run time)');
+      TestAssertEqual_(real.LEADERSHIP_NAME_TO_EMAIL_, null, 'public repo: the committed LEADERSHIP_NAME_TO_EMAIL_ is null');
+
+      const saved = {
+        ops: OPS_ALERT_EMAIL_, ch: CH_LEVEL_EMAIL_, fw: FUTWORK_ROUTE_EMAIL_, cc: ALWAYS_CC_EMAILS_, lead: LEADERSHIP_NAME_TO_EMAIL_,
+        lookup: lookupEmployeeEmail_, ss: SpreadsheetApp,
+      };
+      // A stand-in for the private employee table: name -> address (the real lookup normalises names the same way, case-insensitively).
+      let table = {};
+      const setTable = function (t) { table = {}; Object.keys(t).forEach(function (k) { table[k.toLowerCase()] = t[k]; }); };
+      const blankOverrides = function () { OPS_ALERT_EMAIL_ = ''; CH_LEVEL_EMAIL_ = ''; FUTWORK_ROUTE_EMAIL_ = ''; ALWAYS_CC_EMAILS_ = null; LEADERSHIP_NAME_TO_EMAIL_ = null; };
+      const resetWarned = function () { Object.keys(_emailConfigWarned_).forEach(function (k) { delete _emailConfigWarned_[k]; }); };
+      const fullTable = function () {
+        const t = {};
+        t[OPS_ALERT_NAME_] = TEST_EMAIL_PRIMARY_;
+        t[CH_LEVEL_NAME_] = TEST_EMAIL_CH_.toUpperCase();   // mixed case on purpose: resolved addresses are lower-cased
+        t[FUTWORK_ROUTE_NAME_] = TEST_EMAIL_PRIMARY_;
+        t[LEADERSHIP_NAMES_[0]] = TEST_EMAIL_SECONDARY_;
+        t[LEADERSHIP_NAMES_[1]] = TEST_EMAIL_CH_;
+        return t;
+      };
+      lookupEmployeeEmail_ = function (name) { return table[String(name || '').trim().toLowerCase()] || ''; };
+      try {
+        blankOverrides();
+        resetWarned();
+        setTable(fullTable());
+
+        // ---- resolution from the private table ----
+        TestAssertEqual_(opsAlertEmailGs_(), TEST_EMAIL_PRIMARY_, 'opsAlertEmailGs_: resolved from the private table by name');
+        TestAssertEqual_(chLevelEmailGs_(), TEST_EMAIL_CH_, 'chLevelEmailGs_: resolved by name and LOWER-CASED (the table may hold mixed case)');
+        TestAssertEqual_(futworkRouteEmailGs_(), TEST_EMAIL_PRIMARY_, 'futworkRouteEmailGs_: resolved by name');
+        TestAssertEqual_(alwaysCcEmailsGs_().join(','), TEST_EMAIL_SECONDARY_ + ',' + TEST_EMAIL_CH_, 'alwaysCcEmailsGs_: the two leadership names resolved, in order');
+        TestAssertEqual_(leadershipEmailByNameGs_('ashish kukreja'), TEST_EMAIL_SECONDARY_, 'leadershipEmailByNameGs_: a lowercase name resolves');
+        TestAssertEqual_(leadershipEmailByNameGs_('Saurabh Mishra'), TEST_EMAIL_CH_, 'leadershipEmailByNameGs_: a display-case name resolves too');
+        TestAssertEqual_(leadershipEmailByNameGs_('Someone Else'), '', 'leadershipEmailByNameGs_: a name that is not leadership gets nothing');
+        TestAssertEqual_(chLevelReportToGs_(), TEST_EMAIL_PRIMARY_ + ',' + TEST_EMAIL_CH_, 'chLevelReportToGs_: ops + CH, both resolved');
+        TestAssertEqual_(emailConfigProblemsGs_().length, 0, 'emailConfigProblemsGs_: nothing to report when every name resolves');
+
+        // The private lookup being absent or failing never throws.
+        lookupEmployeeEmail_ = undefined;
+        TestAssertEqual_(resolvedEmailForNameGs_('Anyone'), '', 'resolvedEmailForNameGs_: no lookup function at all (the private file/RmHierarchy.gs is absent) -> blank, no throw');
+        lookupEmployeeEmail_ = function () { throw new Error('boom'); };
+        TestAssertEqual_(resolvedEmailForNameGs_('Anyone'), '', 'resolvedEmailForNameGs_: a failing lookup -> blank, no throw');
+        lookupEmployeeEmail_ = function (name) { return table[String(name || '').trim().toLowerCase()] || ''; };
+
+        // ---- an override always wins (this is how tests, and TEST MODE-style runs, stay off the real addresses) ----
+        OPS_ALERT_EMAIL_ = TEST_EMAIL_SECONDARY_; CH_LEVEL_EMAIL_ = TEST_EMAIL_SECONDARY_; FUTWORK_ROUTE_EMAIL_ = TEST_EMAIL_SECONDARY_; ALWAYS_CC_EMAILS_ = []; LEADERSHIP_NAME_TO_EMAIL_ = { 'x y': TEST_EMAIL_CH_ };
+        TestAssert_(opsAlertEmailGs_() === TEST_EMAIL_SECONDARY_ && chLevelEmailGs_() === TEST_EMAIL_SECONDARY_ && futworkRouteEmailGs_() === TEST_EMAIL_SECONDARY_, 'overrides: a non-blank override beats the private table for ops, CH and Futwork');
+        TestAssertEqual_(alwaysCcEmailsGs_().length, 0, 'overrides: an ALWAYS_CC_EMAILS_ array (even empty) is used as is');
+        TestAssertEqual_(leadershipEmailByNameGs_('x y') + '|' + leadershipEmailByNameGs_('ashish kukreja'), TEST_EMAIL_CH_ + '|', 'overrides: a LEADERSHIP_NAME_TO_EMAIL_ object is used as is (and the table is NOT consulted)');
+        TestAssertEqual_(emailConfigProblemsGs_().length, 0, 'overrides: count as resolved, so a test run raises no config problem');
+        // A PARTIAL override: only ops is overridden — Futwork and CH still come from the table (they do not borrow the override).
+        blankOverrides();
+        OPS_ALERT_EMAIL_ = TEST_EMAIL_SECONDARY_;
+        TestAssertEqual_(opsAlertEmailGs_() + '|' + futworkRouteEmailGs_() + '|' + chLevelEmailGs_(), TEST_EMAIL_SECONDARY_ + '|' + TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_CH_, 'overrides: overriding ONE role leaves the others resolved from the private table');
+        blankOverrides();
+
+        // ---- missing people: safe, loud fallbacks ----
+        resetWarned();
+        setTable({});
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return { getOwner: function () { return { getEmail: function () { return TEST_EMAIL_SECONDARY_.toUpperCase(); } }; } }; }, flush: function () {} };
+        TestAssertEqual_(opsAlertEmailGs_(), TEST_EMAIL_SECONDARY_, 'ops fallback: with no row for the ops person, alerts go to the workbook owner (lower-cased)');
+        TestAssertEqual_(chLevelEmailGs_(), TEST_EMAIL_SECONDARY_, 'CH fallback: with no row for the CH person, CH-level mail goes to the ops address');
+        TestAssertEqual_(futworkRouteEmailGs_(), TEST_EMAIL_SECONDARY_, 'Futwork fallback: with no row, the Futwork email goes to the ops address');
+        TestAssertEqual_(chLevelReportToGs_(), TEST_EMAIL_SECONDARY_, 'chLevelReportToGs_: when CH falls back to ops the report goes to ONE address, never "a,a"');
+        TestAssertEqual_(alwaysCcEmailsGs_().length, 0, 'leadership fallback: names with no row are skipped (no Cc), never a blank address');
+        TestAssertEqual_(emailConfigProblemsGs_().map(function (p) { return p.key; }).join(','), 'ops,ch,futwork,leadership:ashish kukreja,leadership:saurabh mishra', 'emailConfigProblemsGs_: every unresolved name is reported by key');
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return {}; }, flush: function () {} };
+        TestAssertEqual_(opsAlertEmailGs_(), '', 'ops fallback: no row AND no workbook owner -> blank (the alert cannot be delivered; logged, not thrown)');
+        SpreadsheetApp = saved.ss;
+
+        // ---- the sends use the resolved addresses ----
+        resetWarned();
+        setTable(fullTable());
+        const sentBefore = TestGmailLog_.sent.length;
+        notifyOpsAlertGs_('p13 subject', ['body']);
+        TestAssertEqual_(TestGmailLog_.sent[TestGmailLog_.sent.length - 1].to + '|' + (TestGmailLog_.sent.length - sentBefore), TEST_EMAIL_PRIMARY_ + '|1', 'notifyOpsAlertGs_: sends to the address resolved from the private table');
+        // The weekly Ops Checklist email (OpsChecklistRunner.gs) goes to the same resolved ops address.
+        const realChecklist = buildWeeklyOpsChecklistSummary_;
+        buildWeeklyOpsChecklistSummary_ = function () { return { issueCount: 0, lines: ['all clear'] }; };
+        const weeklyBefore = TestGmailLog_.sent.length;
+        try { runWeeklyOpsChecklist_({}, new Date()); } finally { buildWeeklyOpsChecklistSummary_ = realChecklist; }
+        TestAssertEqual_(TestGmailLog_.sent.length - weeklyBefore === 1 && TestGmailLog_.sent[TestGmailLog_.sent.length - 1].to === TEST_EMAIL_PRIMARY_, true, 'weekly Ops Checklist email: addressed to the ops address resolved from the private table');
+        const backstop = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Some Totally Unknown RM'], {}, { fireAlerts: false });
+        TestAssertEqual_(backstop.results[0].to, TEST_EMAIL_CH_, 'CH backstop bucket: addressed to the CH person resolved from the private table');
+        const fwRes = resolveRecipientEmailsForRegion_(ss, 'Test Region', ['Kajal Futwork'], {}, { fireAlerts: false });
+        TestAssertEqual_(fwRes.results[0].to, TEST_EMAIL_PRIMARY_, 'Futwork bucket: addressed to the Futwork person resolved from the private table');
+        const legacyRes = resolveRecipientEmailsForRegion_(ss, 'Pune', ['Some Totally Unknown RM'], { Pune: { to: TEST_EMAIL_SECONDARY_, cc: '' } }, { fireAlerts: false });
+        const legacyCc = (legacyRes.results[0].cc || '').split(',');
+        TestAssert_(legacyCc.indexOf(TEST_EMAIL_SECONDARY_) !== -1 && legacyCc.indexOf(TEST_EMAIL_CH_) !== -1, 'legacy Region_Recipients fallback: the leadership Cc (resolved by name from the private table) is on the email');
+
+        // A leadership person personally holding a lead is recognised by NAME and routed to their resolved address.
+        const leaderRes = resolveRecipientBucketsForRms_(ss, ['Ashish Kukreja'], undefined);
+        TestAssertEqual_(leaderRes.chLevelRms.length === 1 && leaderRes.chLevelRms[0].chEmail === TEST_EMAIL_SECONDARY_ && leaderRes.chLevelRms[0].chRole === 'Leadership', true, 'leadership self-holding: recognised by name, chEmail resolved from the private table');
+        setTable({});
+        const leaderGone = resolveRecipientBucketsForRms_(ss, ['Ashish Kukreja'], undefined);
+        TestAssertEqual_(leaderGone.chLevelRms.length === 0 && leaderGone.unresolved.length === 1, true, 'leadership self-holding: with no row in the private table the name is simply unresolved (the normal fallback), not an error');
+        setTable(fullTable());
+
+        // ---- the hourly watchdog reports a missing address once a day, for as long as the same set persists ----
+        const realProps = PropertiesService;
+        PropertiesService = TestMockPropertiesService_();
+        try {
+          const at = function (iso) { return new Date(iso); };
+          const alertsAfter = function (fn) { const b = TestGmailLog_.sent.length; fn(); return TestGmailLog_.sent.slice(b).filter(function (e) { return /an email address cannot be resolved/.test(e.subject); }); };
+          const early = '2026-10-07T09:00:00+05:30'; // before any job deadline: only the config check can speak
+          TestAssertEqual_(alertsAfter(function () { checkEmailJobsCompletedGs_(at(early)); }).length, 0, 'watchdog config check: silent while every address resolves');
+          setTable(Object.assign(fullTable(), (function () { const m = {}; m[CH_LEVEL_NAME_] = ''; return m; })()));
+          const first = alertsAfter(function () { checkEmailJobsCompletedGs_(at(early)); });
+          TestAssertEqual_(first.length, 1, 'watchdog config check: an unresolvable address produces ONE alert');
+          TestAssert_(/Ashish Ivlekar/.test(first[0].body) && /RmHierarchy\.private\.gs/.test(first[0].body) && /showEmailConfigNow/.test(first[0].body), 'watchdog config check: …naming the person, the private file and how to check it');
+          TestAssertEqual_(alertsAfter(function () { checkEmailJobsCompletedGs_(at('2026-10-07T10:00:00+05:30')); }).length, 0, 'watchdog config check: the next hourly run the same day does NOT repeat it');
+          setTable(Object.assign(fullTable(), (function () { const m = {}; m[CH_LEVEL_NAME_] = ''; m[LEADERSHIP_NAMES_[1]] = ''; return m; })()));
+          TestAssertEqual_(alertsAfter(function () { checkEmailJobsCompletedGs_(at('2026-10-07T11:00:00+05:30')); }).length, 1, 'watchdog config check: a DIFFERENT set of problems alerts again');
+          TestAssertEqual_(alertsAfter(function () { checkEmailJobsCompletedGs_(at('2026-10-08T09:00:00+05:30')); }).length, 1, 'watchdog config check: the next day alerts again while the problem persists');
+          setTable(fullTable());
+          TestAssertEqual_(alertsAfter(function () { checkEmailJobsCompletedGs_(at('2026-10-09T09:00:00+05:30')); }).length, 0, 'watchdog config check: silent again once it is fixed');
+        } finally { PropertiesService = realProps; PropertiesService = TestMockPropertiesService_(); }
+
+        // The human-readable check runs (it only logs).
+        blankOverrides();
+        setTable(fullTable());
+        showEmailConfigNow();
+        TestAssert_(true, 'showEmailConfigNow runs without error');
+      } finally {
+        OPS_ALERT_EMAIL_ = saved.ops; CH_LEVEL_EMAIL_ = saved.ch; FUTWORK_ROUTE_EMAIL_ = saved.fw; ALWAYS_CC_EMAILS_ = saved.cc; LEADERSHIP_NAME_TO_EMAIL_ = saved.lead;
+        lookupEmployeeEmail_ = saved.lookup; SpreadsheetApp = saved.ss;
+      }
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();

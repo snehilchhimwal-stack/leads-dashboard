@@ -304,15 +304,22 @@ None of these have a menu/`onOpen()` — they only run from the Apps Script
 editor's function dropdown (select the function name, click Run), by a human
 with Editor access.
 
-**Config constants a new maintainer will likely need to update** (all are
-real people/addresses, hardcoded — update on personnel change):
+**Config constants a new maintainer will likely need to update** (these are
+real people — update on personnel change). **Since 2026-10-07 (email audit P13)
+the repository holds only each role's NAME; the address is looked up from the
+git-ignored `RmHierarchy.private.gs` employee table at run time** (the repo is
+public). A personnel change is therefore two edits: the name constant here (or
+`LEADERSHIP_NAMES_` in `RmHierarchy.gs`), and a row for that person in
+`RmHierarchy.private.gs`. After any paste, run **`showEmailConfigNow()`** — it
+logs where each address comes from and lists anything unresolved (the hourly
+watchdog alerts about the same thing once a day):
 
 | Constant | File | Current value | Purpose |
 |---|---|---|---|
-| `OPS_ALERT_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | Where ops/failure alerts (e.g. a send failure) go. |
-| `CH_LEVEL_EMAIL_` | `EmailInfra.gs` | `ashish.ivlekar@homesfy.in` | Fallback CH-level routing address — used both for a real top-of-org person personally holding a lead, and (since 2026-09-01) as the last-resort backstop when an RM name doesn't resolve anywhere (departed employee, unaliased spelling variant) AND that region has no `Region_Recipients` fallback configured either, so a broken chain still reaches someone instead of the lead being silently dropped. See `resolveRecipientEmailsForRegion_`'s own comment (`EmailInfra.gs`). |
-| `ALWAYS_CC_EMAILS_` | `RmHierarchy.gs` | `ashish.kukreja@homesfy.in`, `saurabh.mishra@homesfy.in` | CC'd on every region issue email, regardless of region — **except** the `CH_LEVEL_EMAIL_` backstop above when NEITHER `RM_Hierarchy` nor `Region_Recipients` resolves an RM at all (fixed 2026-09-24, real production case — see `EmailInfra.gs`'s own comment on `resolveRecipientEmailsForRegion_`): that specific "couldn't route this at all" email deliberately excludes leadership, matching the sibling CH-level-personally-holds-a-lead backstop's own long-standing rule. |
-| `FUTWORK_ROUTE_EMAIL_` | `EmailInfra.gs` | `snehil.chhimwal@homesfy.in` | The ONLY recipient for any RM whose name contains "Futwork" (tele-calling vendor agents, added 2026-09-25) — ONE `Futwork` email per job across ALL regions (each region a separate band, every region spelled out at the top and in the subject), no Cc, bypassing `RM_Hierarchy`, `Region_Recipients`, the `CH_LEVEL_EMAIL_` backstop and `ALWAYS_CC_EMAILS_`. Applied inside `resolveRecipientEmailsForRegion_`, so both the 17:00 and 10:00 emails inherit it. |
+| `OPS_ALERT_EMAIL_` (blank) / `OPS_ALERT_NAME_` | `EmailInfra.gs` | name `Snehil Chhimwal` — address from the private table; the variable is blank in the repo and only a test/override | Where ops/failure alerts (e.g. a send failure) go. Read via `opsAlertEmailGs_()`. If the private table has no row for that name, alerts fall back to the workbook owner (and the watchdog says so). |
+| `CH_LEVEL_EMAIL_` (blank) / `CH_LEVEL_NAME_` | `EmailInfra.gs` | name `Ashish Ivlekar` — address from the private table (read via `chLevelEmailGs_()`; falls back to the ops address if absent) | Fallback CH-level routing address — used both for a real top-of-org person personally holding a lead, and (since 2026-09-01) as the last-resort backstop when an RM name doesn't resolve anywhere (departed employee, unaliased spelling variant) AND that region has no `Region_Recipients` fallback configured either, so a broken chain still reaches someone instead of the lead being silently dropped. See `resolveRecipientEmailsForRegion_`'s own comment (`EmailInfra.gs`). |
+| `ALWAYS_CC_EMAILS_` (null) / `LEADERSHIP_NAMES_` | `RmHierarchy.gs` | names `Ashish Kukreja`, `Saurabh Mishra` — addresses from the private table (read via `alwaysCcEmailsGs_()`; a name with no row is skipped, not blanked) | CC'd on every region issue email, regardless of region — **except** the `CH_LEVEL_EMAIL_` backstop above when NEITHER `RM_Hierarchy` nor `Region_Recipients` resolves an RM at all (fixed 2026-09-24, real production case — see `EmailInfra.gs`'s own comment on `resolveRecipientEmailsForRegion_`): that specific "couldn't route this at all" email deliberately excludes leadership, matching the sibling CH-level-personally-holds-a-lead backstop's own long-standing rule. |
+| `FUTWORK_ROUTE_EMAIL_` (blank) / `FUTWORK_ROUTE_NAME_` | `EmailInfra.gs` | name `Snehil Chhimwal` — address from the private table (read via `futworkRouteEmailGs_()`; falls back to the ops address if absent) | The ONLY recipient for any RM whose name contains "Futwork" (tele-calling vendor agents, added 2026-09-25) — ONE `Futwork` email per job across ALL regions (each region a separate band, every region spelled out at the top and in the subject), no Cc, bypassing `RM_Hierarchy`, `Region_Recipients`, the `CH_LEVEL_EMAIL_` backstop and `ALWAYS_CC_EMAILS_`. Applied inside `resolveRecipientEmailsForRegion_`, so both the 17:00 and 10:00 emails inherit it. |
 | `REGION_PNL_HEAD_CC_` | `EmailInfra.gs` | `{ Hyderabad, Bangalore } -> 'Mukesh Mishra'; { Thane, 'Navi Mumbai' } -> 'Shitij Kaushal'` (NAMES, not addresses) | The P&L head Cc'd on every automatic email for that region (added 2026-09-26 for Hyderabad/Bangalore, extended 2026-09-30 to Thane/Navi Mumbai, from the HR export's P&L column). The address is looked up by name in Manager_Directory at send time (this repo is public, so no address is committed) - if Manager_Directory has no address for the name, no Cc is added and a line is logged. Applied where `resolveRecipientEmailsForRegion_` builds each bucket's Cc, so the 17:00, 10:00 and 13:00 emails all carry it; the 10:00 Section-2-only and 13:00 sends reuse the Cc STORED at 17:00 / 10:00, so a NEW region reaches them from the next 17:00 run. Not applied to the CH-level backstop or the Futwork email. |
 | `TEST_MODE_OVERRIDE_EMAIL_` | `EmailInfra.gs` | `''` (empty) | Safety valve: if set to a real address, **every** real send (not just tests) redirects there instead of real recipients. Leave empty in production; useful for a live smoke-test without running the mock suite. |
 
@@ -619,6 +626,24 @@ code*, one bullet per plan step as each lands.
   (P7) and the other writes are idempotent. Deliberately narrow — only `server error occurred`, not the
   generic "please wait a bit" — so a permanent refusal (quota, permission) is still thrown on the first
   attempt. A blip longer than ~12 s still fails the job; that is what P9's watchdog is for.
+- **P13 — the corporate addresses are no longer in the public repository.** `EmailInfra.gs` / `RmHierarchy.gs`
+  held five corporate addresses as string literals (the ops address, the CH-level address, the Futwork route,
+  and the two leadership Cc addresses) in a **public** GitHub repo. The code now keeps each role's **name**
+  (`OPS_ALERT_NAME_`, `CH_LEVEL_NAME_`, `FUTWORK_ROUTE_NAME_`, `LEADERSHIP_NAMES_`) and looks the address up
+  from `RmHierarchy.private.gs` — the git-ignored employee table you already paste beside `RmHierarchy.gs`,
+  which already holds all of these people — at the moment it is needed (never at load time, per the load-order
+  rule in `lookupEmployeeEmail_`). Read an address only through `opsAlertEmailGs_()` / `chLevelEmailGs_()` /
+  `futworkRouteEmailGs_()` / `alwaysCcEmailsGs_()` / `leadershipEmailByNameGs_()`; the old variables
+  (`OPS_ALERT_EMAIL_` …) are now blank/null **overrides** that only the tests assign. **No new file to paste, no
+  new Script Property** — but `RmHierarchy.private.gs` is now needed for ops alerts and leadership Cc as well as
+  routing. If it is absent or a person has no row, nothing is dropped silently: ops alerts fall back to the
+  workbook owner, CH-level and Futwork mail to the ops address, a leadership Cc is skipped, and the hourly
+  watchdog alerts once a day naming exactly what is unresolved (`emailConfigProblemsGs_`). **After pasting:
+  run `showEmailConfigNow()` and read the Executions log.** Not changed: the addresses still exist in
+  this repository's earlier commits (git history) — removing them from history means rewriting it and
+  force-pushing, which was deliberately NOT done (it breaks every clone and open PR, and the addresses are
+  ordinary corporate mailboxes). The test suite's third address is now a plus-address of the maintainer's own
+  gmail instead of a colleague's corporate address.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
@@ -753,8 +778,9 @@ global `SpreadsheetApp`/`GmailApp`/`Utilities`/`ScriptApp` to in-memory fakes
 in a `finally` block, same pattern real-world Apps Script testing uses since
 there's no official mocking API. See `Tests_Mocks.gs`'s own header for the
 full explanation of why this is safe. The only two email addresses that ever
-appear anywhere in the suite are `snehil.chhimwal@gmail.com` and
-`ashish.ivlekar@homesfy.in` (`TEST_EMAIL_PRIMARY_`/`TEST_EMAIL_CH_`).
+appear anywhere in the suite are `snehil.chhimwal@gmail.com` and its `+test2` /
+`+testch` plus-addresses (`TEST_EMAIL_PRIMARY_`/`TEST_EMAIL_SECONDARY_`/`TEST_EMAIL_CH_`) —
+no corporate address (the tests override the ops/CH/Futwork/leadership settings with these).
 
 **To run it**: open the Sheet's Apps Script editor, make sure all the
 `Tests_*.gs` files are pasted in alongside the production files, select
@@ -956,8 +982,8 @@ test) Sheet, and use the browser console directly.
   matching NEITHER `RM_Hierarchy` NOR `Region_Recipients` at all): this
   was a real, confirmed bug through 2026-09-24 — reported by a maintainer
   off a real "(Unmatched RMs (backstop)) Navi Mumbai Google Overnight
-  Leads" email that CC'd `ashish.kukreja@homesfy.in` /
-  `saurabh.mishra@homesfy.in` (`ALWAYS_CC_EMAILS_`). Fixed in
+  Leads" email that CC'd the two leadership addresses
+  (`ALWAYS_CC_EMAILS_` — Ashish Kukreja / Saurabh Mishra). Fixed in
   `EmailInfra.gs`'s `resolveRecipientEmailsForRegion_` — this ONE branch
   no longer adds that CC, matching the sibling CH-level backstop
   (`notifyChLevelLeadsGs_`/`notifyChLevelIssuesGs_`, used when someone

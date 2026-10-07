@@ -202,7 +202,7 @@ function initRegionRecipientsPanel(){
 }
 
 // TEMPORARY TEST OVERRIDE — leave '' for real sends. Set from the browser
-// console (e.g. `TEST_MODE_OVERRIDE_EMAIL = 'snehil.chhimwal@homesfy.in'`)
+// console (e.g. `TEST_MODE_OVERRIDE_EMAIL = 'you@your-company.com'`)
 // to redirect EVERY resolved To/Cc for any report — the per-region panel,
 // every issue/report type — to just that one address, so a manual "Send
 // via Gmail" click can never reach a real recipient by accident. Applied

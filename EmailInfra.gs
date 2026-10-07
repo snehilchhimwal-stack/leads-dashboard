@@ -28,7 +28,7 @@
  */
 
 // TEMPORARY TEST OVERRIDE — leave '' for real sends. Set to a single email
-// address (e.g. 'snehil.chhimwal@homesfy.in') to redirect EVERY resolved
+// address (e.g. your own) to redirect EVERY resolved
 // To/Cc on EVERY email this project sends — real recipients, RM_Hierarchy
 // or Region_Recipients fallback alike, and even the always-cc leadership
 // addresses — to just that one address, so a manual test run can never
@@ -44,29 +44,114 @@ let TEST_MODE_OVERRIDE_EMAIL_ = '';
 
 const REGION_RECIPIENTS_SHEET_ = 'Region_Recipients';
 
-// Where to alert when a script could NOT get an automated email out at
-// all for some region/RM — no resolvable recipient, the send itself
-// failed after retries, or a chain resolved all the way to a CH. These
-// failures are otherwise invisible outside the Apps Script Executions
-// log, which nobody watches proactively. `let`, not `const` — same
-// test-overridability reason as TEST_MODE_OVERRIDE_EMAIL_ above;
-// Tests_Mocks.gs reassigns this for the duration of a test run and
-// restores it afterward. Never reassigned by real production code.
-let OPS_ALERT_EMAIL_ = 'snehil.chhimwal@homesfy.in';
+// ---- Corporate addresses are NOT in this public file (email audit P13 / F24) ----
+// This repository is public. The ops, CH-level and Futwork-route addresses used to be string literals here (and the two
+// leadership Cc addresses in RmHierarchy.gs). They now live ONLY in RmHierarchy.private.gs (git-ignored, pasted into the Apps
+// Script project beside RmHierarchy.gs — the same file that already holds every employee's address): this file keeps the NAME
+// of the person each role belongs to, and the address is looked up from that private table (lookupEmployeeEmail_,
+// RmHierarchy.gs) when it is needed, never at load time (Apps Script does not guarantee file load order — see that function).
+//
+// The `let` address variables below are OVERRIDES: blank (the real setting) means "look it up by name"; Tests_Mocks.gs assigns
+// them test addresses for the duration of a test run and restores them. Nothing in real production code assigns them. Read the
+// address through the accessors (opsAlertEmailGs_ / chLevelEmailGs_ / futworkRouteEmailGs_), never the variable.
+//
+// If the private table is missing or a person has no row, the accessor falls back SAFELY and LOUDLY instead of dropping mail:
+// ops -> the Spreadsheet's owner; CH-level and Futwork -> the ops address; leadership Cc -> skipped. The hourly watchdog
+// (emailConfigProblemsGs_) alerts ops once a day while any of that is true.
+const OPS_ALERT_NAME_ = 'Snehil Chhimwal';
+const CH_LEVEL_NAME_ = 'Ashish Ivlekar';
+const FUTWORK_ROUTE_NAME_ = 'Snehil Chhimwal';
 
-// Second recipient specifically for CH-level reports (OvernightEmailer.gs's
-// notifyChLevelLeadsGs_, AllIssuesEmailer.gs's notifyChLevelIssuesGs_) —
-// leads held directly by the CEO or a Cluster Head/City Lead, with nobody
-// below them to route through automatically, go to OPS_ALERT_EMAIL_ AND
-// this address. Deliberately separate from ALWAYS_CC_EMAILS_
-// (RmHierarchy.gs) — that Cc applies to every normal per-RM email; this
-// is scoped to CH-level reports only. `let`, same test-overridability
-// reason as OPS_ALERT_EMAIL_ above.
-let CH_LEVEL_EMAIL_ = 'ashish.ivlekar@homesfy.in';
+// The address from the private employee table for a person's name — lower-cased, or '' when the table or the person is absent.
+function resolvedEmailForNameGs_(name) {
+  try {
+    if (typeof lookupEmployeeEmail_ !== 'function') return '';
+    return String(lookupEmployeeEmail_(name) || '').trim().toLowerCase();
+  } catch (e) {
+    Logger.log('resolvedEmailForNameGs_(' + name + ') failed: ' + e);
+    return '';
+  }
+}
+const _emailConfigWarned_ = {};
+function warnEmailConfigOnceGs_(key, text) {
+  if (_emailConfigWarned_[key]) return;
+  _emailConfigWarned_[key] = true;
+  Logger.log('EMAIL CONFIG WARNING: ' + text);
+}
 
-// Any RM whose name contains "Futwork" (tele-calling vendor agents) is emailed ONLY here — never their
-// manager chain, Region_Recipients, the CH backstop, or ALWAYS_CC_EMAILS_. `let` for test-overridability.
-let FUTWORK_ROUTE_EMAIL_ = 'snehil.chhimwal@homesfy.in';
+// Where a script alert goes when a script could NOT get an automated email out at all for some region/RM — no resolvable
+// recipient, the send itself failed after retries, or a chain resolved all the way to a CH. These failures are otherwise
+// invisible outside the Apps Script Executions log, which nobody watches proactively. `let`: test override, see above.
+let OPS_ALERT_EMAIL_ = '';
+function opsAlertEmailGs_() {
+  if (OPS_ALERT_EMAIL_) return OPS_ALERT_EMAIL_;
+  const resolved = resolvedEmailForNameGs_(OPS_ALERT_NAME_);
+  if (resolved) return resolved;
+  // Last resort: the workbook's owner (needs no extra OAuth scope). Better a possibly-wrong inbox than a silently lost alert.
+  try {
+    const owner = SpreadsheetApp.getActiveSpreadsheet().getOwner();
+    const ownerEmail = owner && owner.getEmail ? String(owner.getEmail() || '').trim().toLowerCase() : '';
+    if (ownerEmail) {
+      warnEmailConfigOnceGs_('ops', 'no address for "' + OPS_ALERT_NAME_ + '" in the private employee table — ops alerts are going to the workbook owner (' + ownerEmail + ') instead.');
+      return ownerEmail;
+    }
+  } catch (e) { /* no owner available */ }
+  warnEmailConfigOnceGs_('ops', 'no address for "' + OPS_ALERT_NAME_ + '" in the private employee table and no workbook owner — ops alerts CANNOT be delivered.');
+  return '';
+}
+
+// Second recipient specifically for CH-level reports (OvernightEmailer.gs's notifyChLevelLeadsGs_, AllIssuesEmailer.gs's
+// notifyChLevelIssuesGs_) — leads held directly by the CEO or a Cluster Head/City Lead, with nobody below them to route through
+// automatically, go to the ops address AND this one. Also the last-resort recipient of the "no RM_Hierarchy match" backstop
+// bucket. Deliberately separate from the leadership Cc (RmHierarchy.gs alwaysCcEmailsGs_) — that applies to every normal
+// per-RM email; this is scoped to CH-level reports only. `let`: test override, see above.
+let CH_LEVEL_EMAIL_ = '';
+function chLevelEmailGs_() {
+  if (CH_LEVEL_EMAIL_) return CH_LEVEL_EMAIL_;
+  const resolved = resolvedEmailForNameGs_(CH_LEVEL_NAME_);
+  if (resolved) return resolved;
+  warnEmailConfigOnceGs_('ch', 'no address for "' + CH_LEVEL_NAME_ + '" in the private employee table — CH-level mail is going to the ops address only.');
+  return opsAlertEmailGs_();
+}
+
+// Any RM whose name contains "Futwork" (tele-calling vendor agents) is emailed ONLY here — never their manager chain,
+// Region_Recipients, the CH backstop, or the leadership Cc. `let`: test override, see above.
+let FUTWORK_ROUTE_EMAIL_ = '';
+function futworkRouteEmailGs_() {
+  if (FUTWORK_ROUTE_EMAIL_) return FUTWORK_ROUTE_EMAIL_;
+  const resolved = resolvedEmailForNameGs_(FUTWORK_ROUTE_NAME_);
+  if (resolved) return resolved;
+  warnEmailConfigOnceGs_('futwork', 'no address for "' + FUTWORK_ROUTE_NAME_ + '" in the private employee table — the Futwork email is going to the ops address instead.');
+  return opsAlertEmailGs_();
+}
+
+// What is NOT resolvable right now: [{ key, detail }]. Empty = every configured address comes from a real source. Used by the
+// hourly watchdog (checkEmailJobsCompletedGs_) and showEmailConfigNow. Overrides count as resolved (a test run is not a problem).
+function emailConfigProblemsGs_() {
+  const problems = [];
+  const need = function (key, override, name, effect) {
+    if (!override && !resolvedEmailForNameGs_(name)) problems.push({ key: key, detail: 'no address for "' + name + '" in the private employee table (RmHierarchy.private.gs) — ' + effect });
+  };
+  need('ops', OPS_ALERT_EMAIL_, OPS_ALERT_NAME_, 'ops alerts fall back to the workbook owner.');
+  need('ch', CH_LEVEL_EMAIL_, CH_LEVEL_NAME_, 'CH-level reports and the "no RM_Hierarchy match" backstop go to the ops address only.');
+  need('futwork', FUTWORK_ROUTE_EMAIL_, FUTWORK_ROUTE_NAME_, 'the Futwork email goes to the ops address.');
+  if (!Array.isArray(ALWAYS_CC_EMAILS_)) {
+    LEADERSHIP_NAMES_.forEach(function (name) {
+      if (!resolvedEmailForNameGs_(name)) problems.push({ key: 'leadership:' + name.toLowerCase(), detail: 'no address for "' + name + '" in the private employee table — the leadership Cc is being SKIPPED for them on every email.' });
+    });
+  }
+  return problems;
+}
+
+// Logs where each configured address comes from (the Executions log) — for a human checking a deploy.
+function showEmailConfigNow() {
+  Logger.log('ops alert      : ' + (OPS_ALERT_EMAIL_ ? 'OVERRIDE ' : '') + (opsAlertEmailGs_() || '(none)'));
+  Logger.log('CH-level       : ' + (CH_LEVEL_EMAIL_ ? 'OVERRIDE ' : '') + (chLevelEmailGs_() || '(none)'));
+  Logger.log('Futwork route  : ' + (FUTWORK_ROUTE_EMAIL_ ? 'OVERRIDE ' : '') + (futworkRouteEmailGs_() || '(none)'));
+  Logger.log('leadership Cc  : ' + (Array.isArray(ALWAYS_CC_EMAILS_) ? 'OVERRIDE ' : '') + (alwaysCcEmailsGs_().join(', ') || '(none)'));
+  const problems = emailConfigProblemsGs_();
+  Logger.log(problems.length ? 'PROBLEMS:\n  ' + problems.map(function (p) { return p.detail; }).join('\n  ') : 'Every configured address resolves.');
+}
 function isFutworkRmNameGs_(name) { return /futwork/i.test(String(name || '')); }
 
 // P&L head Cc'd on every automatic email for a region (2026-09-26, "add pnl head of Hyderabad and Bangalore in cc";
@@ -161,7 +246,11 @@ function jsonForCellGs_(entries, label) {
 }
 
 // CH-level reports go to OPS + CH, or only the tester in TEST MODE (both sends used to ignore TEST MODE).
-function chLevelReportToGs_() { return TEST_MODE_OVERRIDE_EMAIL_ || (OPS_ALERT_EMAIL_ + ',' + CH_LEVEL_EMAIL_); }
+function chLevelReportToGs_() {
+  if (TEST_MODE_OVERRIDE_EMAIL_) return TEST_MODE_OVERRIDE_EMAIL_;
+  const ops = opsAlertEmailGs_(), ch = chLevelEmailGs_();
+  return (ch && ch !== ops) ? ops + ',' + ch : ops; // chLevelEmailGs_ falls back to the ops address: never "a,a"
+}
 
 // CH-level reports once per day (email audit P10 / F11). A CH-level report (a CH personally holding leads, or an RM whose chain
 // resolves up to a CH) is sent to OPS + the CH-level address, but it was never LOGGED: the region guards of the 10:00 and 17:00
@@ -267,7 +356,7 @@ function notifyOpsAlertGs_(subject, bodyLines) {
   const body = bodyLines.join('\n');
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      GmailApp.sendEmail(OPS_ALERT_EMAIL_, fullSubject, body);
+      GmailApp.sendEmail(opsAlertEmailGs_(), fullSubject, body);
       return true;
     } catch (e) {
       Logger.log('notifyOpsAlertGs_: GmailApp send failed (attempt ' + attempt + '/2) for alert "' + subject + '": ' + e);
@@ -291,7 +380,7 @@ function sendOpsAlertViaGmailApiGs_(subject, body) {
   const encodedSubject = /^[\x20-\x7e]*$/.test(cleanSubject)
     ? cleanSubject
     : '=?UTF-8?B?' + Utilities.base64Encode(Utilities.newBlob(cleanSubject).getBytes()) + '?=';
-  const mime = ['To: ' + OPS_ALERT_EMAIL_, 'Subject: ' + encodedSubject, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n');
+  const mime = ['To: ' + opsAlertEmailGs_(), 'Subject: ' + encodedSubject, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n');
   return Gmail.Users.Messages.send({ raw: Utilities.base64EncodeWebSafe(Utilities.newBlob(mime).getBytes()) }, 'me');
 }
 
@@ -338,7 +427,7 @@ function notifyLeadSendFailuresGs_(entries) {
     return 'Lead ' + e.lead_id + ' (RM: ' + e.RM + ') — To: ' + (e.to || '(none)') + ', Cc: ' + (e.cc || '(none)') + ' — ' + e.reason;
   }).join('\n');
   try {
-    GmailApp.sendEmail(OPS_ALERT_EMAIL_, subject, plainBody, { htmlBody: html });
+    GmailApp.sendEmail(opsAlertEmailGs_(), subject, plainBody, { htmlBody: html });
   } catch (e) {
     Logger.log('notifyLeadSendFailuresGs_ failed to send its own report: ' + e);
   }
@@ -783,6 +872,23 @@ function checkEmailJobsCompletedGs_(now) {
       try { PropertiesService.getScriptProperties().setProperty(alertedKey, marker); } catch (e2) { Logger.log('watchdog: could not record its alert for ' + p.job + ': ' + e2); }
     }
   });
+
+  // Address configuration (email audit P13): the corporate addresses are looked up from the private employee table, so a missing
+  // table / a person with no row must not go unnoticed. One alert per day for as long as the SAME set of problems persists.
+  const configProblems = emailConfigProblemsGs_();
+  if (configProblems.length) {
+    const configKey = emailJobAlertedKeyGs_('__config');
+    const configMarker = day + '|config|' + configProblems.map(function (p) { return p.key; }).join(',');
+    let alreadyAlerted = null;
+    try { alreadyAlerted = PropertiesService.getScriptProperties().getProperty(configKey); } catch (e) { alreadyAlerted = null; }
+    if (alreadyAlerted !== configMarker) {
+      notifyOpsAlertGs_('WATCHDOG: an email address cannot be resolved', configProblems.map(function (p) { return p.detail; }).concat([
+        '',
+        'The corporate addresses are no longer in the public repository: they come from RmHierarchy.private.gs (the git-ignored employee table pasted beside RmHierarchy.gs). Check that file is present in the Apps Script project and that each person above has a row; run showEmailConfigNow() to see exactly what resolves.',
+      ]));
+      try { PropertiesService.getScriptProperties().setProperty(configKey, configMarker); } catch (e2) { Logger.log('watchdog: could not record its config alert: ' + e2); }
+    }
+  }
   return problems;
 }
 
@@ -807,7 +913,7 @@ function setupEmailJobWatchdogTrigger() {
     if (t.getHandlerFunction() === 'emailJobWatchdog') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('emailJobWatchdog').timeBased().everyHours(1).create();
-  Logger.log('Installed one hourly trigger for emailJobWatchdog. It alerts ' + OPS_ALERT_EMAIL_ + ' when an automated email job did not run, did not finish, or failed.');
+  Logger.log('Installed one hourly trigger for emailJobWatchdog. It alerts ' + opsAlertEmailGs_() + ' when an automated email job did not run, did not finish, or failed.');
 }
 
 // Logs each job's latest run record — for a human checking what the watchdog sees (Executions log).
@@ -949,7 +1055,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       // fallback path — it's an unconditional business requirement on every
       // overnight email, not something specific to RM_Hierarchy resolution.
       const ccSet = new Set((legacy.cc || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean));
-      ALWAYS_CC_EMAILS_.forEach(function (e) { ccSet.add(e); });
+      alwaysCcEmailsGs_().forEach(function (e) { ccSet.add(e); });
       const unresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
       results.push({ to: legacy.to, cc: withRegionPnlHeadCcGs_(pnlHeadEmail, legacy.to, Array.from(ccSet).join(',')), rmNames: unresolvedNames, source: 'Region_Recipients (fallback — RM_Hierarchy could not resolve: ' + unresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs', primaryRole: '' });
     } else {
@@ -983,7 +1089,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
       // request, this goes only to OPS_ALERT_EMAIL_ + CH_LEVEL_EMAIL_, not
       // leadership". This branch now matches that same rule.
       const chUnresolvedNames = resolved.unresolved.map(function (u) { return u.rmName; });
-      results.push({ to: CH_LEVEL_EMAIL_, cc: undefined, rmNames: chUnresolvedNames, source: 'CH-level backstop (no RM_Hierarchy match and no Region_Recipients fallback for ' + region + ': ' + chUnresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs (backstop)', primaryRole: '' });
+      results.push({ to: chLevelEmailGs_(), cc: undefined, rmNames: chUnresolvedNames, source: 'CH-level backstop (no RM_Hierarchy match and no Region_Recipients fallback for ' + region + ': ' + chUnresolvedNames.join(', ') + ')', bucketLabel: 'Unmatched RMs (backstop)', primaryRole: '' });
     }
   }
 
@@ -995,7 +1101,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   const mergedResults = mergeBucketsByAddressGs_(results);
 
   if (futworkRmNames.length) {
-    mergedResults.push({ to: FUTWORK_ROUTE_EMAIL_, cc: undefined, rmNames: futworkRmNames, source: 'Futwork override (RM name contains "Futwork": ' + futworkRmNames.join(', ') + ')', bucketLabel: 'Futwork', primaryRole: '' });
+    mergedResults.push({ to: futworkRouteEmailGs_(), cc: undefined, rmNames: futworkRmNames, source: 'Futwork override (RM name contains "Futwork": ' + futworkRmNames.join(', ') + ')', bucketLabel: 'Futwork', primaryRole: '' });
   }
 
   // Single choke point every path above funnels through — see

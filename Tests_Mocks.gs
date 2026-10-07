@@ -48,7 +48,7 @@
  */
 
 const TEST_EMAIL_PRIMARY_ = 'snehil.chhimwal@gmail.com';
-const TEST_EMAIL_CH_ = 'ashish.ivlekar@homesfy.in';
+const TEST_EMAIL_CH_ = 'snehil.chhimwal+testch@gmail.com';
 // A third, distinct test address — added for TM_STILL_CC_'s own test
 // (Tests_RmHierarchy.gs), which needs the TM's email to be provably
 // DIFFERENT from the A1/TL primary's email (TEST_EMAIL_PRIMARY_), since

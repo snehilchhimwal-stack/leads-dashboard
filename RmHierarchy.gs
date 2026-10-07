@@ -888,7 +888,7 @@ function auditUnresolvedRms_(ss) {
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed leads don't need routing
     const rmName = String(getVal_(row, colIndex, 'RM') || '').trim();
     if (!rmName) return;
-    if (LEADERSHIP_NAME_TO_EMAIL_[rmName.toLowerCase()]) return; // self-CH fallback works fine without a row
+    if (leadershipEmailByNameGs_(rmName)) return; // self-CH fallback works fine without a row
     const chain = lookupRmChain_(data.byRmNameLower, rmName);
     if (chain && !chain.excluded) return; // resolves fine — not a gap
     if (!byName[rmName]) byName[rmName] = { count: 0, leadIds: [] };
@@ -1043,7 +1043,18 @@ function loadRmHierarchyAndEmails_(ss) {
 // `const` — Tests_Mocks.gs reassigns this (and restores it) for the
 // duration of a test run so tests never send a real leadership address;
 // nothing in real production code ever reassigns it.
-let ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in'];
+//
+// Changed 2026-10-07 (email audit P13 / F24): this repository is public, so the two addresses are no longer literals here — the
+// NAMES are, and each address is looked up from the git-ignored private employee table (RmHierarchy.private.gs, lookupEmployeeEmail_)
+// when it is needed (never at load time). `null` (the real setting) means "look them up"; a test assigns an array (e.g. [])
+// and restores it. Read through alwaysCcEmailsGs_() / leadershipEmailByNameGs_(), never the variables. A name with no row in
+// the private table is SKIPPED (no Cc for them) and reported by EmailInfra.gs's emailConfigProblemsGs_ / the hourly watchdog.
+const LEADERSHIP_NAMES_ = ['Ashish Kukreja', 'Saurabh Mishra'];
+let ALWAYS_CC_EMAILS_ = null;
+function alwaysCcEmailsGs_() {
+  if (Array.isArray(ALWAYS_CC_EMAILS_)) return ALWAYS_CC_EMAILS_;
+  return LEADERSHIP_NAMES_.map(resolvedEmailForNameGs_).filter(Boolean);
+}
 // Name -> email for that same senior leadership, keyed lowercase — needed
 // separately from ALWAYS_CC_EMAILS_ (which only has the emails) because
 // resolveRecipientBucketsForRms_ below needs to recognize one of THEM
@@ -1055,10 +1066,15 @@ let ALWAYS_CC_EMAILS_ = ['ashish.kukreja@homesfy.in', 'saurabh.mishra@homesfy.in
 // CH tier), Ashish Kukreja can never get an entry there no matter how
 // the sheet is rebuilt. Kept in sync with ALWAYS_CC_EMAILS_. `let`, same
 // test-overridability reason as ALWAYS_CC_EMAILS_ above.
-let LEADERSHIP_NAME_TO_EMAIL_ = {
-  'ashish kukreja': 'ashish.kukreja@homesfy.in',
-  'saurabh mishra': 'saurabh.mishra@homesfy.in',
-};
+// `null` = look each LEADERSHIP_NAMES_ entry up in the private employee table (see ALWAYS_CC_EMAILS_ above); a test assigns an
+// object keyed lowercase. Read through leadershipEmailByNameGs_().
+let LEADERSHIP_NAME_TO_EMAIL_ = null;
+function leadershipEmailByNameGs_(nameLower) {
+  const key = String(nameLower || '').trim().toLowerCase();
+  if (LEADERSHIP_NAME_TO_EMAIL_ && typeof LEADERSHIP_NAME_TO_EMAIL_ === 'object') return LEADERSHIP_NAME_TO_EMAIL_[key] || '';
+  const match = LEADERSHIP_NAMES_.filter(function (n) { return n.toLowerCase() === key; })[0];
+  return match ? resolvedEmailForNameGs_(match) : '';
+}
 
 // Rajesh Muni and Manisha rathod (Pre Sales team leads) — confirmed by the
 // user directly 2026-10-01: their issue emails must go ONLY to them, cc'd
@@ -1229,7 +1245,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
       // an overnight lead. Checked via LEADERSHIP_NAME_TO_EMAIL_, not
       // Manager_Directory — see that constant's own comment for why a
       // Manager_Directory lookup can never work for the CEO specifically.
-      const leadershipEmail = LEADERSHIP_NAME_TO_EMAIL_[String(rmName).trim().toLowerCase()];
+      const leadershipEmail = leadershipEmailByNameGs_(rmName);
       if (leadershipEmail) {
         // No RM_Hierarchy row to read a real title from (that's the whole
         // reason this branch exists — see the comment above) — 'Leadership'
@@ -1315,7 +1331,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
       const snehilEmail = data.emailByManagerNameLower['snehil chhimwal'];
       if (snehilEmail) b.ccSet.add(snehilEmail);
     } else {
-      ALWAYS_CC_EMAILS_.forEach(function (e) { b.ccSet.add(e); });
+      alwaysCcEmailsGs_().forEach(function (e) { b.ccSet.add(e); });
     }
     b.ccSet.delete(b.primaryEmail); // don't cc someone already in To
     return { primaryName: b.primaryName, primaryEmail: b.primaryEmail, primaryRole: b.primaryRole, cc: Array.from(b.ccSet), rmNames: b.rmNames };
