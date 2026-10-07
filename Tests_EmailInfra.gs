@@ -27,6 +27,58 @@ function runEmailInfraTests_() {
     }, 'withRetry_: a non-transient error propagates');
     TestAssertEqual_(calls, 1, 'withRetry_: a non-transient error is NOT retried — only 1 attempt made');
 
+    // ---- 2026-10-07 email audit P12 (F22): the platform's own "server error occurred" wording is transient too ----
+    // The 2 Oct 13:00 run ended Failed with exactly this message; it matched none of the old patterns, so the first such error
+    // from a Sheets call aborted the whole job.
+    const platformMsg = "We're sorry, a server error occurred. Please wait a bit and try again.";
+    calls = 0;
+    const platformOk = withRetry_(function () {
+      calls++;
+      if (calls < 3) throw new Error(platformMsg);
+      return 'ok';
+    }, 'test platform server error');
+    TestAssertEqual_(platformOk, 'ok', 'withRetry_: the platform\'s "server error occurred" error is retried and the call eventually succeeds');
+    TestAssertEqual_(calls, 3, 'withRetry_: …after exactly two retries');
+    calls = 0;
+    const platformSleeps = [];
+    const realSleepP12 = Utilities.sleep;
+    Utilities.sleep = function (ms) { platformSleeps.push(ms); };
+    try {
+      TestAssertThrows_(function () { withRetry_(function () { calls++; throw new Error(platformMsg); }, 'test persistent platform error'); }, 'withRetry_: a platform error that never clears is finally re-thrown (not swallowed)');
+    } finally { Utilities.sleep = realSleepP12; }
+    TestAssertEqual_(calls, 4, 'withRetry_: a persistent platform error is attempted 4 times in total, like every other transient error');
+    TestAssertEqual_(platformSleeps.join(','), '2000,4000,6000', 'withRetry_: …with the usual 2s/4s/6s backoff');
+    calls = 0;
+    const thrownString = withRetry_(function () { calls++; if (calls < 2) throw platformMsg; return 'ok'; }, 'test platform error thrown as a bare string');
+    TestAssert_(thrownString === 'ok' && calls === 2, 'withRetry_: the wording is recognised even when thrown as a bare string rather than an Error');
+    [
+      'Service Spreadsheets timed out while accessing document with id abc',
+      'Exception: Service error: Spreadsheets',
+      'Exception: Service Gmail failed while accessing document',
+      'Internal error encountered.',
+    ].forEach(function (m) {
+      calls = 0;
+      withRetry_(function () { calls++; if (calls < 2) throw new Error(m); return 'ok'; }, 'test existing transient');
+      TestAssertEqual_(calls, 2, 'withRetry_: the pre-existing transient wording is still retried: ' + m.slice(0, 40));
+    });
+    [
+      'Exception: Service invoked too many times for one day: gmail.',
+      'You do not have permission to call SpreadsheetApp.openById',
+      'Exception: The number of rows in the range must be at least 1.',
+      'Please wait a bit and try again later.',
+    ].forEach(function (m) {
+      calls = 0;
+      try { withRetry_(function () { calls++; throw new Error(m); }, 'test permanent'); } catch (e) { /* expected */ }
+      TestAssertEqual_(calls, 1, 'withRetry_: a permanent refusal is NOT retried: ' + m.slice(0, 40));
+    });
+    // A once-only log append whose write landed before the platform error is retried WITHOUT adding a second row (P7 + P12 together).
+    const p12Log = TestMockSheet_('Overnight_Log', [['date', 'region', 'thread_id']]);
+    const realP12Append = p12Log.appendRow;
+    let p12AppendCalls = 0;
+    p12Log.appendRow = function (values) { p12AppendCalls++; realP12Append(values); if (p12AppendCalls === 1) throw new Error(platformMsg); };
+    withRetry_(appendRowOnceGs_(p12Log, ['2026-10-07', 'Pune', 'thr-p12'], 2), 'log row (platform error after the write)');
+    TestAssertEqual_(p12Log.getLastRow(), 2, 'withRetry_ + appendRowOnceGs_: an append that landed before a platform "server error occurred" is retried without a duplicate row');
+
     // ---- withSendRetry_ ----
     calls = 0;
     const sendResult = withSendRetry_(function () {

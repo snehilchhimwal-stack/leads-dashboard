@@ -609,6 +609,16 @@ code*, one bullet per plan step as each lands.
   **not** check lead ids the way the backend gate does: a browser report carries a lead *count*, and a
   combined report can legitimately count zero in its numbered sections. Live as soon as GitHub Pages
   deploys this push (no Apps Script paste). Kept in parity with `EmailInfra.gs` — see §6.
+- **P12 — `withRetry_` retries the platform's own "server error occurred".** `withRetry_` (`EmailInfra.gs`)
+  wraps every Sheets read/write the email jobs make and retries only errors that are Google's own transient
+  hiccups (`timed out`, `service (spreadsheets|gmail|error)`, `internal error`). The platform's wording for a
+  transient failure — *"We're sorry, a server error occurred. Please wait a bit and try again."* — matched
+  none of them, so the first such error from a Sheets call aborted the whole job; that is very likely what
+  ended the 2 Oct 13:00 run `Failed`. It is now in the shared list (`TRANSIENT_ERROR_RE_`): the same 4
+  attempts / 2 s + 4 s + 6 s backoff. Safe to retry because the log appends inside the wrapper are once-only
+  (P7) and the other writes are idempotent. Deliberately narrow — only `server error occurred`, not the
+  generic "please wait a bit" — so a permanent refusal (quota, permission) is still thrown on the first
+  attempt. A blip longer than ~12 s still fails the job; that is what P9's watchdog is for.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
@@ -843,6 +853,15 @@ test) Sheet, and use the browser console directly.
   in-session `Logger.log` output. `notifyOpsAlertGs_`/`OPS_ALERT_EMAIL_`
   (§4.3) should also have already emailed a failure notice for anything that
   threw inside a guarded path.
+- **An automatic email job never ran, died part-way, or ended `Failed` with no alert** (real incident,
+  2026-10-02: `sendOvernightFollowupEmails` ended `Failed` after 2 minutes with the platform error "a server
+  error occurred", no 13:00 reply went out and no alert arrived). Since the 2026-10-05 email audit: (1) a
+  **WATCHDOG** alert from `emailJobWatchdog` (hourly) says which job did not run / did not finish / failed —
+  run `showEmailJobRunsNow()` to see the three run records it reads, and `Overnight_Log.followup_result`
+  says what the 13:00 job did with each row (blank after 13:30 = never reached); (2) `withRetry_` now
+  retries that platform error (§4.3.4 P12); (3) ops alerts retry and fall back to a second send path (P9).
+  After fixing the cause, run the job's `…Now` function by hand — its "already sent today" guards stop it
+  re-sending what already went out — and the watchdog goes quiet once the run completes.
 - **Recipient routing looks wrong** (an issue email went to the wrong
   manager, or fell back to a generic address): check `RM_Hierarchy` /
   `Manager_Directory` sheet tabs for a blank/stale email against that RM's

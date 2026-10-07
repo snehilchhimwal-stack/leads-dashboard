@@ -414,6 +414,14 @@ function passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw) {
 // generic "large sheet" assumption accounted for. Still comfortably
 // inside Apps Script's own execution-time ceiling even if several
 // withRetry_ calls in one run each hit the full budget.
+//
+// Changed 2026-10-07 (email audit P12 / F22): the platform's OWN wording for a transient failure — "We're sorry, a server
+// error occurred. Please wait a bit and try again." — matched none of the patterns, so the first such error from a Sheets call
+// aborted the whole job (very likely the 2 Oct 13:00 failure, which ended Failed with exactly that message). It is now in the
+// list. Safe to retry: the log appends that run inside this wrapper are once-only (appendRowOnceGs_, P7) and every other
+// write here (setValues, header heals) is idempotent. Deliberately NOT the generic "please wait a bit" part of that message:
+// a permanent refusal (quota, permission) never says "server error occurred".
+const TRANSIENT_ERROR_RE_ = /timed out|service (spreadsheets|gmail|error)|internal error|server error occurred/i;
 function withRetry_(fn, label) {
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -421,7 +429,7 @@ function withRetry_(fn, label) {
       return fn();
     } catch (e) {
       const msg = String((e && e.message) || e);
-      const isTransient = /timed out|service (spreadsheets|gmail|error)|internal error/i.test(msg);
+      const isTransient = TRANSIENT_ERROR_RE_.test(msg);
       if (!isTransient || attempt === maxAttempts) throw e;
       Logger.log((label || 'Sheets operation') + ' failed transiently (attempt ' + attempt + '/' + maxAttempts + '): ' + msg + ' — retrying in ' + attempt * 2 + 's');
       Utilities.sleep(attempt * 2000);
