@@ -94,14 +94,14 @@ snippet text itself is the same every time — only the embedded payload changes
 | `AllIssuesEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `Core.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `EmailInfra.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `EmailInfra.gs` | `d897529` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `MovementTracker.gs` | `58ab8e1` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `OpsChecklistRunner.gs` | `c416a01` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `OvernightEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `RmHierarchy.gs` | `c416a01` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `RmHierarchy.gs` | `d897529` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `SlaEngine.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 
@@ -254,6 +254,15 @@ One line per sweep: date — what was found — what was fixed / left open.
   capture instead (log: "Captured 3512 flagged lead(s) across 206 RM(s) for 2026-10-08", no `capture-write` entry, i.e. the text write-back
   found nothing blank). So `Daily_RM_Issues` already holds a midday 3,512-row set dated 2026-10-08, and the capture's idempotency guard will
   make the 22:53 run skip ("already has rows dated today") unless those rows are removed first - decision with Snehil.
+- 2026-10-08 — **nightly RM hierarchy sync deployed** (`d897529`, `70f21c4`; `GS-014`). `RmHierarchySync.gs` + `Tests_RmHierarchySync.gs` are new files in the live project;
+  `RmHierarchy.gs` (rebuild guard), `EmailInfra.gs` (watchdog schedule) and `Tests_RunAll.gs` were re-pasted. Staged with `file_upload` + dry run + `pushEditOperations`
+  (two new files created through the editor's Add a file menu), saved by Snehil in two rounds, page reloaded, all 32 files re-read and matched with
+  `match-live-gs.py --apply`. Live `runAllTests()`: 2240 passed, 0 failed across 15 files (`Tests_RmHierarchySync` 144). `setupRmHierarchySync()` run 17:14 IST (trigger near
+  23:15), first report-only `syncRmHierarchyNightlyNow()` 17:15 IST: HR sheet 322 people read, 13 new people, 0 manager changes, 46 items for a person (27 manager fields,
+  19 possible leavers incl. Sonam Dubey) - the report email reached Snehil, Sushil and Ashish. **Verify after the first scheduled 23:15 run:** the run record
+  (`showRmHierarchySyncStatusNow`), no "syncRmHierarchyNightly never started" watchdog alert after 23:30, report only if something new. **Editor quirk found while deploying:** after
+  changing the function dropdown, the FIRST Run click runs the previously selected function - always read the log to see which function actually ran (press Run again if it was
+  the old one); the new file therefore lists its read-only helpers first. Apply is OFF: review 2-3 reports, then `enableRmHierarchySyncApplyNow()`.
 
 ## Current status
 
