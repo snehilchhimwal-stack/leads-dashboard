@@ -358,21 +358,9 @@ function pruneUnmatchedCommentsLog_(ss) {
       + '_to_' + Utilities.formatDate(new Date(Math.max.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
     : 'unknown-dates';
 
-  const files = [];
-  for (let i = 0; i < dropped.length; i += UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_) {
-    const chunkRows = dropped.slice(i, i + UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_);
-    const file = archiveRowsToDriveCsv_(UNMATCHED_COMMENTS_LOG_SHEET_, UNMATCHED_COMMENTS_LOG_COLUMNS_, chunkRows, rowDateRangeLabel + '_part' + (files.length + 1));
-    if (!file) throw new Error('Drive archive chunk ' + (files.length + 1) + ' was not created - refusing to prune ' + UNMATCHED_COMMENTS_LOG_SHEET_ + '.');
-    files.push(file);
-  }
-  let archivedLines = 0;
-  // Counts CSV RECORDS, not physical lines - a comment with a line break is one record (countCsvRecordsGs_, Core.gs).
-  files.forEach(function (file) { archivedLines += countCsvRecordsGs_(file.getBlob().getDataAsString()); });
-  const archivedRows = archivedLines - files.length;
-  if (archivedRows !== dropped.length) {
-    throw new Error('Drive archive holds ' + archivedRows + ' row(s) across ' + files.length + ' file(s) but ' + dropped.length +
-      ' were expected - refusing to prune ' + UNMATCHED_COMMENTS_LOG_SHEET_ + '.');
-  }
+  // Archive-first, proved, and rolled back if the proof fails (archiveChunksVerifiedGs_, Core.gs) - so a failed prune leaves no
+  // surplus file behind, and a retry after a later failure reuses the identical archive instead of writing another copy.
+  const archive = archiveChunksVerifiedGs_(UNMATCHED_COMMENTS_LOG_SHEET_, UNMATCHED_COMMENTS_LOG_COLUMNS_, dropped, rowDateRangeLabel, UNMATCHED_COMMENTS_LOG_ARCHIVE_CHUNK_, true);
 
   // Write kept rows to their final position FIRST, THEN clear only the
   // leftover tail beyond them — never clear-then-write. An interruption
@@ -399,8 +387,9 @@ function pruneUnmatchedCommentsLog_(ss) {
     sheet.deleteRows(neededRows + 1, maxRows - neededRows);
   }
 
+  commitArchiveManifestGs_(UNMATCHED_COMMENTS_LOG_SHEET_, archive); // the ledger lists the archive only now that its rows are gone from the sheet
   Logger.log('Pruned ' + dropped.length + ' ' + UNMATCHED_COMMENTS_LOG_SHEET_ + ' row(s) older than ' + UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ +
-    ' days (reviewed or not), archived to ' + files.length + ' Drive CSV file(s) starting with ' + files[0].getUrl() + '. ' + kept.length + ' row(s) kept.');
+    ' days (reviewed or not), archived to ' + archive.length + ' Drive CSV file(s) starting with ' + archive[0].file.getUrl() + '. ' + kept.length + ' row(s) kept.');
 }
 
 // Run manually (function dropdown) to prune right now without waiting

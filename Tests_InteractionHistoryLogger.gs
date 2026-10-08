@@ -248,6 +248,70 @@ function runInteractionHistoryLoggerTests_() {
     } finally {
       DriveApp = realDriveForPrune_;
     }
+    // (f)/(g) 2026-10-08 (email audit P18): a prune whose archive cannot be proved leaves no surplus file behind, and a retry after a
+    // failed sheet write reuses the archive instead of writing another copy (32 duplicate files in Drive, 2026-10-03..07).
+    DriveApp = TestMockDriveApp_();
+    try {
+      const rbNow = new Date('2026-09-29T12:00:00+05:30');
+      const rbSeed = function () {
+        return TestMockSheet_(COMMENT_HISTORY_SHEET_, [COMMENT_HISTORY_COLUMNS_,
+          commentHistoryRow_('2026-08-01', 'L-RB1'), commentHistoryRow_('2026-08-20', 'L-RB2'), commentHistoryRow_('2026-09-25', 'L-RBKEEP')]);
+      };
+      const withRbNow = function (fn) {
+        const realN = Date.now;
+        Date.now = function () { return rbNow.getTime(); };
+        try { return fn(); } finally { Date.now = realN; }
+      };
+      // (f) the archive cannot be proved
+      const rbRoot = DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+      const rbFolder = rbRoot.createFolder(COMMENT_HISTORY_SHEET_);
+      const rbRealCreate = rbFolder.createFile;
+      rbFolder.createFile = function (n, content, mime) { return rbRealCreate.call(rbFolder, n, content.split('\n').slice(0, -1).join('\n'), mime); };
+      const rbSheet = rbSeed();
+      const rbSs = TestMockSpreadsheet_({});
+      rbSs._sheets[COMMENT_HISTORY_SHEET_] = rbSheet;
+      let rbThrew = '';
+      withRbNow(function () { try { pruneCommentHistory_(rbSs); } catch (e) { rbThrew = String(e && e.message || e); } });
+      TestAssertContains_(rbThrew, 'refusing to prune', 'pruneCommentHistory_ (unprovable archive): the prune refuses');
+      TestAssertEqual_(rbSheet.getLastRow(), 4, 'pruneCommentHistory_ (unprovable archive): nothing is deleted from the sheet');
+      TestAssert_(rbFolder._filesList.length >= 1 && rbFolder._filesList.every(function (f) { return f.isTrashed(); }), 'pruneCommentHistory_ (unprovable archive): the archive file it wrote is trashed, not left behind');
+      TestAssert_(!rbRoot._files[ARCHIVE_MANIFEST_FILE_], 'pruneCommentHistory_ (unprovable archive): no archive_log.csv row for a discarded file');
+      rbFolder.createFile = rbRealCreate;
+      withRbNow(function () { pruneCommentHistory_(rbSs); });
+      TestAssertEqual_(rbSheet.getLastRow(), 2, 'pruneCommentHistory_ (unprovable archive): the next run, with Drive healthy again, prunes normally');
+      TestAssertEqual_(rbFolder._filesList.filter(function (f) { return !f.isTrashed(); }).length, 1, 'pruneCommentHistory_ (unprovable archive): exactly one live archive file results');
+
+      // (g) the sheet write fails AFTER a good archive: the retry reuses that archive
+      DriveApp = TestMockDriveApp_();
+      const rtSheet = rbSeed();
+      const rtRealGetRange = rtSheet.getRange;
+      let rtFailNext = true;
+      rtSheet.getRange = function (r, c, nr, nc) {
+        const rng = rtRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        rng.setValues = function (v) {
+          if (rtFailNext) { rtFailNext = false; throw new Error('simulated sheet write failure'); }
+          return realSet.call(rng, v);
+        };
+        return rng;
+      };
+      const rtSs = TestMockSpreadsheet_({});
+      rtSs._sheets[COMMENT_HISTORY_SHEET_] = rtSheet;
+      let rtThrew = '';
+      withRbNow(function () { try { pruneCommentHistory_(rtSs); } catch (e) { rtThrew = String(e && e.message || e); } });
+      TestAssertContains_(rtThrew, 'simulated sheet write failure', 'pruneCommentHistory_ (failed write): the prune fails');
+      const rtRoot = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+      const rtFolder = rtRoot._folders[COMMENT_HISTORY_SHEET_];
+      TestAssertEqual_(rtFolder._filesList.filter(function (f) { return !f.isTrashed(); }).length, 1, 'pruneCommentHistory_ (failed write): the good archive is kept (the rows may be the only copy)');
+      TestAssert_(!rtRoot._files[ARCHIVE_MANIFEST_FILE_], 'pruneCommentHistory_ (failed write): the ledger is not written for rows that are still in the sheet');
+      withRbNow(function () { pruneCommentHistory_(rtSs); });
+      TestAssertEqual_(rtSheet.getLastRow(), 2, 'pruneCommentHistory_ (failed write): the retry prunes the sheet');
+      TestAssertEqual_(rtFolder._filesList.length, 1, 'pruneCommentHistory_ (failed write): the retry REUSES the archive - still one file in Drive, not a second copy');
+      const rtLedger = rtRoot._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n');
+      TestAssertEqual_(rtLedger.length, 2, 'pruneCommentHistory_ (failed write): archive_log.csv lists the archive exactly once (header + 1)');
+    } finally {
+      DriveApp = realDriveForPrune_;
+    }
   } finally {
     TestEnv_tearDown_();
   }

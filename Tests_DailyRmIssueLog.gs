@@ -373,6 +373,229 @@ function runDailyRmIssueLogTests_() {
       pruneMovementLog_ = realPruneMovementLogUp;
     }
 
+    // ---- Date integrity (email audit P18, 2026-10-08). From 2026-10-02 the nightly prune archived ~600 KB of rows whose date,
+    // captured_at and lead_assigned_at cells read back blank, filed as "unknown-dates", because a blank date compared as "older than
+    // the window". The fix: (1) the date columns are read back after every write and re-written if blank, (2) the prune never drops a
+    // row for lack of a date - it gives the row one first, (3) what happened is recorded, not emailed. ----
+    const diKey = dailyRmIssueDateKeyGs_;
+    TestAssertEqual_(diKey(new Date('2026-10-04T18:30:00.000Z')), '2026-10-05', 'dailyRmIssueDateKeyGs_: a Date stored as midnight IST (18:30 UTC the day before) reads as its IST day');
+    TestAssertEqual_(diKey('2026-10-04'), '2026-10-04', 'dailyRmIssueDateKeyGs_: a yyyy-MM-dd string reads as itself');
+    TestAssertEqual_(diKey('2026-10-04 22:53:11'), '2026-10-04', 'dailyRmIssueDateKeyGs_: a captured_at string reads as its day');
+    TestAssertEqual_(diKey(''), '', 'dailyRmIssueDateKeyGs_: blank reads as unreadable');
+    TestAssertEqual_(diKey(null), '', 'dailyRmIssueDateKeyGs_: null reads as unreadable');
+    TestAssertEqual_(diKey(new Date('nonsense')), '', 'dailyRmIssueDateKeyGs_: an invalid Date reads as unreadable');
+    TestAssertEqual_(diKey('not a date'), '', 'dailyRmIssueDateKeyGs_: free text reads as unreadable');
+
+    function diRow_(dateCell, tag, capCell) {
+      return prLogHeader.map(function (col) {
+        if (col === 'date') return dateCell;
+        if (col === 'RM') return tag;
+        if (col === 'lead_id') return 'L-' + tag;
+        if (col === 'captured_at') return capCell === undefined ? '' : capCell;
+        return '';
+      });
+    }
+    const diValues = [
+      diRow_('2026-10-03', 'a'),
+      diRow_('', 'b'),
+      diRow_('', 'c'),
+      diRow_('2026-10-05', 'd'),
+      diRow_('', 'e', '2026-10-04 22:53:11'),
+      diRow_('2026-10-06', 'f'),
+      diRow_('', 'g'),
+    ];
+    const diRepair = repairDailyRmIssueDatesGs_(diValues, '2026-10-08');
+    TestAssertEqual_(diRepair.blank, 4, 'repairDailyRmIssueDatesGs_: counts the 4 undated rows');
+    TestAssertEqual_(diRepair.fromCapturedAt, 1, 'repairDailyRmIssueDatesGs_: a row with a readable captured_at takes its date from there');
+    TestAssertEqual_(diRepair.fromNeighbour, 3, 'repairDailyRmIssueDatesGs_: the other undated rows take a neighbour\'s date');
+    TestAssertEqual_(diRepair.fromToday, 0, 'repairDailyRmIssueDatesGs_: nothing fell back to today when neighbours exist');
+    TestAssertEqual_(diValues[4][0], '2026-10-04', 'repairDailyRmIssueDatesGs_: captured_at 22:53 on 4 Oct dates the row 2026-10-04');
+    TestAssertEqual_(diValues[1][0] + ' ' + diValues[2][0], '2026-10-05 2026-10-05', 'repairDailyRmIssueDatesGs_: a block of undated rows takes the date of the row that FOLLOWS it (a later date only keeps a row longer)');
+    TestAssertEqual_(diValues[6][0], '2026-10-06', 'repairDailyRmIssueDatesGs_: undated rows after the last dated row take the preceding row\'s date');
+    TestAssertEqual_(diValues[0][0] + ' ' + diValues[3][0] + ' ' + diValues[5][0], '2026-10-03 2026-10-05 2026-10-06', 'repairDailyRmIssueDatesGs_: rows that already had a date are untouched');
+    TestAssertEqual_(JSON.stringify(diRepair.blocks), JSON.stringify([{ row: 3, len: 2 }, { row: 6, len: 1 }, { row: 8, len: 1 }]), 'repairDailyRmIssueDatesGs_: reports where the undated runs were (sheet rows)');
+    TestAssertEqual_(diRepair.sampleLeadIds.join(','), 'L-b,L-c,L-e', 'repairDailyRmIssueDatesGs_: reports up to 3 sample lead ids');
+    const diAllBlank = [diRow_('', 'x'), diRow_('', 'y')];
+    const diAllRepair = repairDailyRmIssueDatesGs_(diAllBlank, '2026-10-08');
+    TestAssertEqual_(diAllRepair.fromToday + ':' + diAllBlank[0][0] + ':' + diAllBlank[1][0], '2:2026-10-08:2026-10-08', 'repairDailyRmIssueDatesGs_: with no date anywhere, rows are dated today (they age out in a week) instead of being dropped');
+    const diNone = [diRow_('2026-10-05', 'p'), diRow_(new Date('2026-10-05T18:30:00.000Z'), 'q')];
+    TestAssertEqual_(repairDailyRmIssueDatesGs_(diNone, '2026-10-08').blank, 0, 'repairDailyRmIssueDatesGs_: nothing to repair when every row has a readable date (string or Date)');
+
+    // A sheet that blanks chosen columns when a range is written - the failure being guarded against. mode 'once': the first write of
+    // those columns reads back blank, later writes stick; mode 'until-text': writes read back blank unless the range was first
+    // formatted as plain text.
+    function diBlankingSheet_(seedRows, blankCols, mode) {
+      const s = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, seedRows);
+      const realGetRange = s.getRange;
+      s._blankedWrites = 0;
+      s.getRange = function (r, c, nr, nc) {
+        const rng = realGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        const realFmt = rng.setNumberFormat;
+        let textFormat = false;
+        rng.setNumberFormat = function (f) { if (f === '@') textFormat = true; return realFmt.call(rng, f); };
+        rng.setValues = function (vals) {
+          let touched = false;
+          const out = vals.map(function (row) {
+            return row.map(function (v, j) {
+              if (blankCols.indexOf(c - 1 + j) === -1) return v;
+              if (mode === 'once' && s._blankedWrites >= 1) return v;
+              if (mode === 'until-text' && textFormat) return v;
+              touched = true;
+              return '';
+            });
+          });
+          if (touched) s._blankedWrites++;
+          return realSet.call(rng, out);
+        };
+        return rng;
+      };
+      return s;
+    }
+    const diProps = function () { return JSON.parse(PropertiesService.getScriptProperties().getProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_) || '[]'); };
+
+    const realSsDi = SpreadsheetApp;
+    const realDriveDi = DriveApp;
+    try {
+      // (a) prune: undated rows are repaired and KEPT - never archived as "unknown-dates"; an undated row whose captured_at is old is
+      // dated by it and dropped like any other old row.
+      const diDrive = TestMockDriveApp_();
+      DriveApp = diDrive;
+      const diOldStamp = Utilities.formatDate(TestFixture_daysAgo_(realNowForPrune, 40), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+      const diSs = TestMockSpreadsheet_({});
+      const diSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [
+        prLogHeader,
+        diRow_(istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 40)), 'old-dated'),
+        diRow_('', 'blank-old-captured-at', diOldStamp),
+        diRow_('', 'blank-between'),
+        diRow_(prRecentStringCell, 'recent-dated'),
+        diRow_('', 'blank-trailing'),
+      ]);
+      diSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diSheet;
+      pruneDailyRmIssueLog_(diSs);
+      const diKept = diSheet.getRange(2, 1, diSheet.getLastRow() - 1, prLogHeader.length).getValues();
+      TestAssertEqual_(diKept.map(function (r) { return r[1]; }).join(','), 'blank-between,recent-dated,blank-trailing', 'pruneDailyRmIssueLog_: undated rows are kept (not dropped as "old"), only the two genuinely old rows go');
+      TestAssert_(diKept.every(function (r) { return !!diKey(r[0]); }), 'pruneDailyRmIssueLog_: every kept row has a readable date afterwards - the repair is written back to the sheet');
+      const diFolder = diDrive._folders[ARCHIVE_ROOT_FOLDER_]._folders['Daily_RM_Issues'];
+      TestAssertEqual_(diFolder._filesList.length, 1, 'pruneDailyRmIssueLog_: one archive file for the run');
+      TestAssert_(diFolder._filesList[0]._name.indexOf('unknown-dates') === -1, 'pruneDailyRmIssueLog_: the archive is filed under a real date range, never "unknown-dates"');
+      TestAssert_(diFolder._filesList[0]._content.indexOf('old-dated') >= 0 && diFolder._filesList[0]._content.indexOf('blank-old-captured-at') >= 0 && diFolder._filesList[0]._content.indexOf('blank-between') === -1, 'pruneDailyRmIssueLog_: the archive holds the two old rows and none of the kept undated ones');
+      TestAssert_(diDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_]._content.indexOf(diFolder._filesList[0]._name) >= 0, 'pruneDailyRmIssueLog_: the archive_log.csv row is written once the rows are gone');
+      const diRec = diProps();
+      TestAssert_(diRec.length === 1 && diRec[0].phase === 'prune' && diRec[0].blank === 3 && diRec[0].fromCapturedAt === 1, 'pruneDailyRmIssueLog_: what it found is recorded in DAILY_RM_ISSUE_DIAG (3 undated rows, 1 dated from captured_at)');
+      TestAssertEqual_(TestGmailLog_.sent.length, 0, 'pruneDailyRmIssueLog_: nothing is emailed for undated rows - they are repaired');
+
+      // (b) nothing old enough to drop, but an undated row: it is dated in the sheet and no archive is written.
+      PropertiesService.getScriptProperties().deleteProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_);
+      const diDrive2 = TestMockDriveApp_();
+      DriveApp = diDrive2;
+      const diSheet2 = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader, diRow_(prRecentStringCell, 'r1'), diRow_('', 'blank-only'), diRow_(prRecentStringCell, 'r2')]);
+      const diSs2 = TestMockSpreadsheet_({});
+      diSs2._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diSheet2;
+      pruneDailyRmIssueLog_(diSs2);
+      TestAssertEqual_(diKey(diSheet2.getRange(3, 1, 1, 1).getValues()[0][0]), prRecentStringCell, 'pruneDailyRmIssueLog_: with nothing to drop, an undated row is still given a date in the sheet');
+      TestAssert_(!diDrive2._folders[ARCHIVE_ROOT_FOLDER_], 'pruneDailyRmIssueLog_: no archive is written when nothing is dropped');
+
+      // (c) prune rewrite: if the kept rows' date cells come back blank after the rewrite, they are re-written.
+      const diDrive3 = TestMockDriveApp_();
+      DriveApp = diDrive3;
+      const diSheet3 = diBlankingSheet_([prLogHeader, diRow_(istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 40)), 'gone'), diRow_(prRecentStringCell, 'k1'), diRow_(prRecentStringCell, 'k2')], [0], 'once');
+      const diSs3 = TestMockSpreadsheet_({});
+      diSs3._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diSheet3;
+      pruneDailyRmIssueLog_(diSs3);
+      TestAssertEqual_(diSheet3._blankedWrites, 1, 'fixture check: the rewrite of the kept rows did lose their dates once');
+      TestAssert_(diSheet3.getRange(2, 1, 2, 1).getValues().every(function (r) { return diKey(r[0]) === prRecentStringCell; }), 'pruneDailyRmIssueLog_: dates that read back blank after the rewrite are written again');
+
+      // (d) capture: dates blanked by the write are restored, and the repair is recorded.
+      const diNowBefore = istDayKeyGs_(new Date());
+      PropertiesService.getScriptProperties().deleteProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_);
+      const diCapSs = TestMockSpreadsheet_({});
+      diCapSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      const diCapSheet = diBlankingSheet_([prLogHeader], [0, 8], 'once');
+      diCapSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diCapSheet;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return diCapSs; }, flush: function () {} };
+      DriveApp = TestMockDriveApp_();
+      captureDailyRmIssues_();
+      const diCapRows = diCapSheet.getRange(2, 1, diCapSheet.getLastRow() - 1, prLogHeader.length).getValues();
+      TestAssert_(diCapRows.length >= 1, 'fixture check: the capture wrote the flagged lead');
+      const diNowAfter = istDayKeyGs_(new Date());
+      TestAssert_(diCapRows.every(function (r) { const k = diKey(r[0]); return k === diNowBefore || k === diNowAfter; }), 'captureDailyRmIssues_: the date column holds tonight\'s date even though the write blanked it');
+      TestAssert_(diCapRows.every(function (r) { return !!diKey(r[8]); }), 'captureDailyRmIssues_: captured_at is restored too');
+      const diCapRec = diProps();
+      TestAssert_(diCapRec.length === 1 && diCapRec[0].phase === 'capture-write' && diCapRec[0].blankFound >= 2 && diCapRec[0].rewrittenCols.indexOf(0) >= 0, 'captureDailyRmIssues_: the blank write-back is recorded in DAILY_RM_ISSUE_DIAG');
+      TestAssertEqual_(TestGmailLog_.sent.length, 0, 'captureDailyRmIssues_: nothing is emailed about it');
+
+      // (e) capture: a column that stays blank after a plain re-write is stored as text instead.
+      PropertiesService.getScriptProperties().deleteProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_);
+      const diTxtSs = TestMockSpreadsheet_({});
+      diTxtSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      const diTxtSheet = diBlankingSheet_([prLogHeader], [0], 'until-text');
+      diTxtSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diTxtSheet;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return diTxtSs; }, flush: function () {} };
+      DriveApp = TestMockDriveApp_();
+      captureDailyRmIssues_();
+      const diTxtRows = diTxtSheet.getRange(2, 1, diTxtSheet.getLastRow() - 1, prLogHeader.length).getValues();
+      TestAssert_(diTxtRows.length >= 1 && diTxtRows.every(function (r) { return !!diKey(r[0]); }), 'captureDailyRmIssues_: when a plain re-write still reads back blank, the date is stored as text and sticks');
+      const diTxtRec = diProps();
+      TestAssert_(diTxtRec.length === 1 && diTxtRec[0].escalatedCols.indexOf(0) >= 0, 'captureDailyRmIssues_: the text fallback is recorded');
+
+      // (f) a clean write records nothing.
+      PropertiesService.getScriptProperties().deleteProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_);
+      const diOkSs = TestMockSpreadsheet_({});
+      diOkSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return diOkSs; }, flush: function () {} };
+      DriveApp = TestMockDriveApp_();
+      captureDailyRmIssues_();
+      TestAssertEqual_(diProps().length, 0, 'captureDailyRmIssues_: a clean write leaves no date-integrity record');
+
+      // (g) the sheet write fails after a good archive: the retry reuses the archive and the ledger lists it once
+      const rtDrive = TestMockDriveApp_();
+      DriveApp = rtDrive;
+      const rtSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader, diRow_(istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 40)), 'old-one'), diRow_(prRecentStringCell, 'recent-one')]);
+      const rtRealGetRange = rtSheet.getRange;
+      let rtFailNext = true;
+      rtSheet.getRange = function (r, c, nr, nc) {
+        const rng = rtRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        rng.setValues = function (v) {
+          if (rtFailNext) { rtFailNext = false; throw new Error('simulated sheet write failure'); }
+          return realSet.call(rng, v);
+        };
+        return rng;
+      };
+      const rtSs = TestMockSpreadsheet_({});
+      rtSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = rtSheet;
+      let rtThrew = '';
+      try { pruneDailyRmIssueLog_(rtSs); } catch (e) { rtThrew = String(e && e.message || e); }
+      TestAssertContains_(rtThrew, 'simulated sheet write failure', 'pruneDailyRmIssueLog_ (failed write): the prune fails');
+      const rtFolder = rtDrive._folders[ARCHIVE_ROOT_FOLDER_]._folders['Daily_RM_Issues'];
+      TestAssertEqual_(rtFolder._filesList.length, 1, 'pruneDailyRmIssueLog_ (failed write): the good archive is kept');
+      TestAssert_(!rtDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_], 'pruneDailyRmIssueLog_ (failed write): no ledger row while the rows are still in the sheet');
+      pruneDailyRmIssueLog_(rtSs);
+      TestAssertEqual_(rtSheet.getLastRow(), 2, 'pruneDailyRmIssueLog_ (failed write): the retry prunes the sheet');
+      TestAssertEqual_(rtFolder._filesList.length, 1, 'pruneDailyRmIssueLog_ (failed write): the retry REUSES the archive - one file in Drive, not a second copy');
+      TestAssertEqual_(rtDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n').length, 2, 'pruneDailyRmIssueLog_ (failed write): archive_log.csv lists it once');
+
+      // (h) an archive that cannot be proved stops the prune, nothing is deleted and the file is trashed
+      const udRbDrive = TestMockDriveApp_();
+      DriveApp = udRbDrive;
+      const udRbRoot = udRbDrive.createFolder(ARCHIVE_ROOT_FOLDER_);
+      const udRbFolder = udRbRoot.createFolder('Daily_RM_Issues');
+      const udRbReal = udRbFolder.createFile;
+      udRbFolder.createFile = function (n, content, mime) { return udRbReal.call(udRbFolder, n, content.split('\n').slice(0, -1).join('\n'), mime); };
+      const udRbSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader, diRow_(istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 40)), 'old-one'), diRow_(prRecentStringCell, 'recent-one')]);
+      const udRbSs = TestMockSpreadsheet_({});
+      udRbSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = udRbSheet;
+      let udRbThrew = '';
+      try { pruneDailyRmIssueLog_(udRbSs); } catch (e) { udRbThrew = String(e && e.message || e); }
+      TestAssertContains_(udRbThrew, 'refusing to prune Daily_RM_Issues', 'pruneDailyRmIssueLog_ (unprovable archive): the prune refuses - it used to delete without proving anything');
+      TestAssertEqual_(udRbSheet.getLastRow(), 3, 'pruneDailyRmIssueLog_ (unprovable archive): both rows are still in the sheet');
+      TestAssert_(udRbFolder._filesList.length === 1 && udRbFolder._filesList[0].isTrashed(), 'pruneDailyRmIssueLog_ (unprovable archive): the unproven archive is trashed');
+    } finally {
+      SpreadsheetApp = realSsDi;
+      DriveApp = realDriveDi;
+    }
+
     // ---- RM Performance (Phase 4): reconstructRmPerformanceObservationsGs_
     // / aggregateRmPerformanceGs_ / classifyRmPerformanceGs_ against a
     // hand-seeded Movement_Log ----

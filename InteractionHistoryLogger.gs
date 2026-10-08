@@ -237,25 +237,9 @@ function pruneCommentHistory_(ss) {
       + '_to_' + Utilities.formatDate(new Date(Math.max.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
     : 'unknown-dates';
 
-  const files = [];
-  for (let i = 0; i < dropped.length; i += COMMENT_HISTORY_ARCHIVE_CHUNK_) {
-    const chunkRows = dropped.slice(i, i + COMMENT_HISTORY_ARCHIVE_CHUNK_);
-    const file = archiveRowsToDriveCsv_(COMMENT_HISTORY_SHEET_, header, chunkRows, rowDateRangeLabel + '_part' + (files.length + 1));
-    if (!file) throw new Error('Drive archive chunk ' + (files.length + 1) + ' was not created - refusing to prune ' + COMMENT_HISTORY_SHEET_ + '.');
-    files.push(file);
-  }
-  // Total lines across every chunk file, minus one header line PER chunk
-  // (archiveRowsToDriveCsv_ writes [header].concat(rows) into every file
-  // it creates) — a general row-count proof that works regardless of
-  // what shape column 0 happens to be, unlike a format-specific regex.
-  let archivedLines = 0;
-  // Counts CSV RECORDS, not physical lines - a comment with a line break is one record (countCsvRecordsGs_, Core.gs).
-  files.forEach(function (file) { archivedLines += countCsvRecordsGs_(file.getBlob().getDataAsString()); });
-  const archivedRows = archivedLines - files.length;
-  if (archivedRows !== dropped.length) {
-    throw new Error('Drive archive holds ' + archivedRows + ' row(s) across ' + files.length + ' file(s) but ' + dropped.length +
-      ' were expected - refusing to prune ' + COMMENT_HISTORY_SHEET_ + '.');
-  }
+  // Archive-first, proved, and rolled back if the proof fails (archiveChunksVerifiedGs_, Core.gs) - so a failed prune leaves no
+  // surplus file behind, and a retry after a later failure reuses the identical archive instead of writing another copy.
+  const archive = archiveChunksVerifiedGs_(COMMENT_HISTORY_SHEET_, header, dropped, rowDateRangeLabel, COMMENT_HISTORY_ARCHIVE_CHUNK_, true);
 
   if (kept.length) {
     sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
@@ -274,8 +258,9 @@ function pruneCommentHistory_(ss) {
     sheet.deleteRows(neededRows + 1, maxRows - neededRows);
   }
 
+  commitArchiveManifestGs_(COMMENT_HISTORY_SHEET_, archive); // the ledger lists the archive only now that its rows are gone from the sheet
   Logger.log('Pruned ' + dropped.length + ' ' + COMMENT_HISTORY_SHEET_ + ' row(s) older than ' + COMMENT_HISTORY_RETENTION_DAYS_ +
-    ' days, archived to ' + files.length + ' Drive CSV file(s) starting with ' + files[0].getUrl() + '. ' + kept.length + ' row(s) kept.');
+    ' days, archived to ' + archive.length + ' Drive CSV file(s) starting with ' + archive[0].file.getUrl() + '. ' + kept.length + ' row(s) kept.');
 }
 
 // Run manually (function dropdown) to prune right now without waiting

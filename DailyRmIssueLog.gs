@@ -230,16 +230,161 @@ function captureDailyRmIssues_() {
   // night's capture — and each chunk still gets withRetry_'s own
   // transient-error retry on top.
   let startRow = logSheet.getLastRow() + 1;
+  const firstWriteRow = startRow;
   for (let i = 0; i < rows.length; i += BACKFILL_CHUNK_SIZE_) {
     const chunk = rows.slice(i, i + BACKFILL_CHUNK_SIZE_);
     withRetry_(function () { logSheet.getRange(startRow, 1, chunk.length, chunk[0].length).setValues(chunk); }, 'write Daily_RM_Issues chunk (rows ' + i + '-' + (i + chunk.length) + ')');
     startRow += chunk.length;
   }
+  // Read the date columns back and re-write any cell that came back blank (email audit P18, 2026-10-08): the nightly rows must keep
+  // the date they were written with. Nothing is emailed; a repair is recorded in DAILY_RM_ISSUE_DIAG.
+  reassertDateColumnsGs_(logSheet, firstWriteRow, rows, DAILY_RM_ISSUE_DATE_COLS_, 'capture-write');
   const rmCount = new Set(rows.map(function (r) { return r[1]; })).size;
   Logger.log('Captured ' + rows.length + ' flagged lead(s) across ' + rmCount + ' RM(s) for ' + todayKey + '.');
 }
 
 function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
+
+// ==================== Date integrity (email audit P18, 2026-10-08) ====================
+// From 2026-10-02 the nightly prune archived ~600 KB of undated rows every night, filed as "unknown-dates": the `date`,
+// `captured_at` and `lead_assigned_at` cells of those rows (the three Date-typed columns) read back blank, and the prune treated a
+// blank date as "older than the window". Cause not yet identified (the tab holds no undated row during the day), so this is
+// defence in depth: (1) after every write the date columns are read back and re-written if a cell came back blank,
+// (2) the prune never drops a row for lack of a date - it gives the row one first, and (3) what was seen is recorded in the
+// DAILY_RM_ISSUE_DIAG Script Property. showDailyRmIssueDiagNow() prints it.
+const DAILY_RM_ISSUE_DATE_COLS_ = [0, 8, 12]; // date, captured_at, lead_assigned_at
+const DAILY_RM_ISSUE_DIAG_PROPERTY_ = 'DAILY_RM_ISSUE_DIAG';
+
+// 'yyyy-MM-dd' (IST) for a date cell - a real Date, or a string that starts with that shape - or '' when it cannot be read.
+function dailyRmIssueDateKeyGs_(cell) {
+  if (cell instanceof Date) return isNaN(cell.getTime()) ? '' : istDayKeyGs_(cell);
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(cell === null || cell === undefined ? '' : cell).trim());
+  return m ? m[1] : '';
+}
+
+// Gives every row of `values` whose date cell cannot be read a date, in place (row[0] becomes the 'yyyy-MM-dd' string). Order: the
+// row's own captured_at; else the nearest FOLLOWING row that has a date (a block of undated rows sits just before the next night's
+// rows, and a later date can only keep a row longer, never drop it early); else the nearest PRECEDING one; else todayKey. Returns
+// { rows, blank, fromCapturedAt, fromNeighbour, fromToday, blocks: [{row, len}] (first 5), sampleLeadIds, indexes }.
+function repairDailyRmIssueDatesGs_(values, todayKey) {
+  const capIdx = DAILY_RM_ISSUE_LOG_COLUMNS_.indexOf('captured_at');
+  const leadIdx = DAILY_RM_ISSUE_LOG_COLUMNS_.indexOf('lead_id');
+  const keys = values.map(function (row) { return dailyRmIssueDateKeyGs_(row[0]); });
+  const indexes = [];
+  keys.forEach(function (k, i) { if (!k) indexes.push(i); });
+  const out = { rows: values.length, blank: indexes.length, fromCapturedAt: 0, fromNeighbour: 0, fromToday: 0, blocks: [], sampleLeadIds: [], indexes: indexes };
+  if (!indexes.length) return out;
+
+  indexes.forEach(function (i) {
+    const k = dailyRmIssueDateKeyGs_(values[i][capIdx]);
+    if (k) { keys[i] = k; out.fromCapturedAt++; }
+  });
+  const following = new Array(values.length);
+  let next = '';
+  for (let i = values.length - 1; i >= 0; i--) { if (keys[i]) next = keys[i]; following[i] = next; }
+  const preceding = new Array(values.length);
+  let prev = '';
+  for (let i = 0; i < values.length; i++) { if (keys[i]) prev = keys[i]; preceding[i] = prev; }
+  const resolved = keys.slice();
+  indexes.forEach(function (i) {
+    if (keys[i]) return;
+    const k = following[i] || preceding[i];
+    if (k) { resolved[i] = k; out.fromNeighbour++; } else { resolved[i] = todayKey; out.fromToday++; }
+  });
+  indexes.forEach(function (i) { values[i][0] = resolved[i]; });
+
+  let runStart = 0;
+  while (runStart < indexes.length && out.blocks.length < 5) {
+    let runEnd = runStart;
+    while (runEnd + 1 < indexes.length && indexes[runEnd + 1] === indexes[runEnd] + 1) runEnd++;
+    out.blocks.push({ row: indexes[runStart] + 2, len: runEnd - runStart + 1 });
+    runStart = runEnd + 1;
+  }
+  indexes.slice(0, 3).forEach(function (i) { out.sampleLeadIds.push(String(values[i][leadIdx])); });
+  return out;
+}
+
+// Writes the repaired date cells (column A only) back to the sheet, one contiguous run at a time, and re-asserts them.
+function persistRepairedDailyRmIssueDatesGs_(logSheet, values, indexes) {
+  let i = 0;
+  while (i < indexes.length) {
+    let j = i;
+    while (j + 1 < indexes.length && indexes[j + 1] === indexes[j] + 1) j++;
+    const first = indexes[i];
+    const slice = values.slice(first, indexes[j] + 1);
+    withRetry_(function () { logSheet.getRange(2 + first, 1, slice.length, 1).setValues(slice.map(function (r) { return [r[0]]; })); }, 'write repaired Daily_RM_Issues dates');
+    reassertDateColumnsGs_(logSheet, 2 + first, slice, [0], 'prune-repair');
+    i = j + 1;
+  }
+}
+
+// Reads the given columns of the rows just written (startRow..) back and re-writes any column that came back blank where `rows` had
+// a value. If a plain re-write still reads back blank, that column's cells are stored as TEXT (setNumberFormat('@') with an IST
+// string), which Sheets cannot mistake for a date. Returns { checked, blankFound, rewrittenCols, escalatedCols }; anything found
+// is recorded (recordDailyRmIssueDiagGs_) and nothing is emailed.
+function reassertDateColumnsGs_(sheet, startRow, rows, colIdxs, phase) {
+  const result = { checked: rows.length, blankFound: 0, rewrittenCols: [], escalatedCols: [] };
+  if (!rows.length) return result;
+  const isBlank = function (c) { return c === '' || c === null || c === undefined || (c instanceof Date && isNaN(c.getTime())); };
+  colIdxs.forEach(function (ci) {
+    if (!rows.some(function (r) { return !isBlank(r[ci]); })) return;
+    const readBack = function () {
+      return withRetry_(function () { return sheet.getRange(startRow, ci + 1, rows.length, 1).getValues(); }, 'read back Daily_RM_Issues column ' + (ci + 1));
+    };
+    const lostIn = function (actual) {
+      let n = 0;
+      rows.forEach(function (r, i) { if (!isBlank(r[ci]) && isBlank(actual[i][0])) n++; });
+      return n;
+    };
+    let lost = lostIn(readBack());
+    if (!lost) return;
+    result.blankFound += lost;
+    withRetry_(function () { sheet.getRange(startRow, ci + 1, rows.length, 1).setValues(rows.map(function (r) { return [r[ci]]; })); }, 'rewrite Daily_RM_Issues column ' + (ci + 1));
+    result.rewrittenCols.push(ci);
+    lost = lostIn(readBack());
+    if (!lost) return;
+    const range = sheet.getRange(startRow, ci + 1, rows.length, 1);
+    if (typeof range.setNumberFormat !== 'function') return;
+    range.setNumberFormat('@');
+    const asText = function (v) {
+      if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Kolkata', ci === 0 ? 'yyyy-MM-dd' : 'yyyy-MM-dd HH:mm:ss');
+      return String(v === null || v === undefined ? '' : v);
+    };
+    withRetry_(function () { range.setValues(rows.map(function (r) { return [asText(r[ci])]; })); }, 'rewrite Daily_RM_Issues column ' + (ci + 1) + ' as text');
+    result.escalatedCols.push(ci);
+  });
+  if (result.blankFound) {
+    result.phase = phase || 'write-verify';
+    result.startRow = startRow;
+    recordDailyRmIssueDiagGs_(result);
+  }
+  return result;
+}
+
+// Keeps the last 4 observations in the DAILY_RM_ISSUE_DIAG Script Property and logs the latest. Fail-open, never emails.
+function recordDailyRmIssueDiagGs_(diag) {
+  const rec = {};
+  Object.keys(diag).forEach(function (k) { if (k !== 'indexes') rec[k] = diag[k]; });
+  rec.at = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') + ' IST';
+  Logger.log('[Daily_RM_Issues date integrity] ' + JSON.stringify(rec));
+  try {
+    if (typeof PropertiesService === 'undefined') return;
+    const props = PropertiesService.getScriptProperties();
+    let history = [];
+    try { history = JSON.parse(props.getProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_) || '[]'); } catch (parseErr) { history = []; }
+    if (!Array.isArray(history)) history = [];
+    history.push(rec);
+    props.setProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_, JSON.stringify(history.slice(-4)));
+  } catch (e) {
+    Logger.log('Could not store the Daily_RM_Issues date-integrity record: ' + e);
+  }
+}
+
+// Prints what the date-integrity checks last saw (Run from the editor; log-only).
+function showDailyRmIssueDiagNow() {
+  const raw = PropertiesService.getScriptProperties().getProperty(DAILY_RM_ISSUE_DIAG_PROPERTY_);
+  Logger.log(raw || '(nothing recorded - no undated row and no blank write-back has been seen since this was deployed)');
+}
 
 // Rewrites the whole data range with only rows newer than the retention
 // window — same "rewrite, don't delete individual rows out from under a
@@ -274,38 +419,49 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount) {
   const lastCol = logSheet.getLastColumn();
   const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for pruning');
   const cutoffKey = istDayKeyGs_(new Date(Date.now() - DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ * 24 * 60 * 60 * 1000));
+  // A row whose date cell could not be read used to compare as '' < cutoffKey, so it was archived and deleted as "old" - on
+  // 2026-10-02..07 that threw away the audit trail every night and filed the archive under "unknown-dates". Such a row is now GIVEN a
+  // date first (its own captured_at, else a neighbouring row's, else today's) and the repair is written back to the sheet, so
+  // nothing is dropped for lack of a date. Nothing is emailed either: the problem is fixed where it is found, and the detail is kept in
+  // the DAILY_RM_ISSUE_DIAG Script Property (showDailyRmIssueDiagNow) to find out what blanks them. Email audit P18, 2026-10-08.
+  const repair = repairDailyRmIssueDatesGs_(values, istDayKeyGs_(new Date()));
+  if (repair.blank) {
+    repair.phase = 'prune';
+    recordDailyRmIssueDiagGs_(repair);
+  }
   const isKeptRow_ = function (row) {
-    const cell = row[0];
-    const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell || '');
-    return key >= cutoffKey; // 'yyyy-MM-dd' strings compare correctly lexicographically
+    return dailyRmIssueDateKeyGs_(row[0]) >= cutoffKey; // 'yyyy-MM-dd' strings compare correctly lexicographically
   };
   const kept = values.filter(isKeptRow_);
   if (kept.length === values.length) {
-    // Nothing to prune — still fall through to the row-shrink check below,
+    // Nothing to prune - still fall through to the row-shrink check below,
     // since a prior run could have written more rows than this one needs
     // (e.g. after DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ was lowered).
+    if (repair.blank) persistRepairedDailyRmIssueDatesGs_(logSheet, values, repair.indexes);
   } else {
-    // Archive what's about to be dropped, before it's gone for good — same
+    // Archive what's about to be dropped, before it's gone for good - same
     // zero-cell-cost Drive CSV pattern as pruneMovementLog_ (MovementTracker.gs);
-    // see archiveRowsToDriveCsv_'s own comment (Core.gs).
+    // see archiveRowsToDriveCsv_'s own comment (Core.gs). The archive is proved
+    // and rolled back on failure (archiveChunksVerifiedGs_), and the ledger row
+    // is written only after the rows are really gone.
     const dropped = values.filter(function (row) { return !isKeptRow_(row); });
     const header = withRetry_(function () { return logSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Daily_RM_Issues header for archiving');
-    // date (column 0) can be a real Date OR a 'yyyy-MM-dd' string (see this
-    // function's own header comment) — normalize the same way isKeptRow_
-    // already does, then sort lexicographically (valid for 'yyyy-MM-dd').
-    const droppedDateKeys = dropped.map(function (row) {
-      const cell = row[0];
-      return cell instanceof Date ? istDayKeyGs_(cell) : String(cell || '');
-    }).filter(function (k) { return k; }).sort();
-    const rowDateRangeLabel = droppedDateKeys.length
-      ? droppedDateKeys[0] + '_to_' + droppedDateKeys[droppedDateKeys.length - 1]
-      : 'unknown-dates';
-    archiveRowsToDriveCsv_('Daily_RM_Issues', header, dropped, rowDateRangeLabel);
+    // Every row has a readable date now (repairDailyRmIssueDatesGs_), so the label is always a real date range.
+    const droppedDateKeys = dropped.map(function (row) { return dailyRmIssueDateKeyGs_(row[0]); }).sort();
+    const rowDateRangeLabel = droppedDateKeys[0] + '_to_' + droppedDateKeys[droppedDateKeys.length - 1];
+    const archive = archiveChunksVerifiedGs_('Daily_RM_Issues', header, dropped, rowDateRangeLabel, dropped.length, false);
 
-    withRetry_(function () { logSheet.getRange(2, 1, lastRow - 1, lastCol).clearContent(); }, 'clear Daily_RM_Issues before pruned rewrite');
+    // Write the kept rows to their final position FIRST, then clear only the leftover tail - never clear-then-write, so an
+    // interruption cannot land on a sheet whose still-in-retention rows are erased and not yet written back (the same ordering
+    // pruneMovementLog_ and the comment prunes already use).
     if (kept.length) {
       withRetry_(function () { logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept); }, 'rewrite pruned Daily_RM_Issues rows');
+      reassertDateColumnsGs_(logSheet, 2, kept, DAILY_RM_ISSUE_DATE_COLS_, 'prune-rewrite');
     }
+    if (lastRow - 1 > kept.length) {
+      withRetry_(function () { logSheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent(); }, 'clear Daily_RM_Issues tail after pruned rewrite');
+    }
+    commitArchiveManifestGs_('Daily_RM_Issues', archive);
   }
 
   // incomingRowCount is the caller's own about-to-be-written row count —

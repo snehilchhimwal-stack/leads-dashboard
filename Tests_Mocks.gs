@@ -296,6 +296,11 @@ function TestMockDriveFile_(fileName, content, mimeType) {
     getUrl: function () { return 'https://drive.google.com/mock/' + encodeURIComponent(fileName); },
     getBlob: function () { return { getDataAsString: function () { return file._content; } }; },
     setContent: function (newContent) { file._content = newContent; return file; },
+    // Trash support (archiveChunksVerifiedGs_ moves an unverified archive to the trash): a trashed file stays in the folder's
+    // _filesList (so a test can assert on it) but is no longer returned by getFiles(), exactly like real Drive.
+    _trashed: false,
+    setTrashed: function (flag) { file._trashed = !!flag; return file; },
+    isTrashed: function () { return file._trashed; },
   };
   return file;
 }
@@ -334,6 +339,15 @@ function TestMockDriveFolder_(name) {
       return {
         hasNext: function () { return !!existing && !handed; },
         next: function () { handed = true; return existing; },
+      };
+    },
+    // Iterator over the folder's files that are not trashed (findIdenticalArchiveFileGs_, Core.gs).
+    getFiles: function () {
+      const live = folder._filesList.filter(function (f) { return !f._trashed; });
+      let i = 0;
+      return {
+        hasNext: function () { return i < live.length; },
+        next: function () { return live[i++]; },
       };
     },
     createFile: function (fileName, content, mimeType) {

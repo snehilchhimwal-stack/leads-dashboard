@@ -278,10 +278,20 @@ const ARCHIVE_MANIFEST_FILE_ = 'archive_log.csv';
 // No-ops (returns null, writes nothing, no manifest row) when rows is
 // empty, so a prune run that drops nothing never leaves a pointless empty
 // file behind. Returns the created File otherwise.
-function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel) {
+//
+// opts (optional, added 2026-10-08 / email audit P18):
+//   skipManifest - do NOT append the archive_log.csv row; the caller appends it with commitArchiveManifestGs_ once the rows are
+//                  really gone from the sheet (archiveChunksVerifiedGs_ does this), so the ledger never lists a file that was
+//                  discarded.
+//   info         - an object the function fills with { reused: true|false }.
+// An archive is IDEMPOTENT: when the folder already holds a file for the same table and the same label whose content is
+// byte-for-byte what would be written now, that file is returned and nothing new is created. This is what stops a retried prune
+// (the first attempt archived, then failed before the rows were removed) from leaving one more copy in Drive on every run -
+// 2026-10-03..07 left 32 copies of the same few archives behind.
+function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel, opts) {
   if (!rows || !rows.length) return null;
-  const rootFolders = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_);
-  const root = rootFolders.hasNext() ? rootFolders.next() : DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+  const options = opts || {};
+  const root = archiveRootFolderGs_();
   const subFolders = root.getFoldersByName(tableName);
   const folder = subFolders.hasNext() ? subFolders.next() : root.createFolder(tableName);
 
@@ -294,17 +304,100 @@ function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel) {
     return row.map(csvEscape).join(',');
   }).join('\n');
   const label = rowDateRangeLabel || 'unknown-dates';
+  const namePrefix = tableName + '_rows_' + label + '_archived_';
+  const identical = findIdenticalArchiveFileGs_(folder, namePrefix, csv);
+  if (identical) {
+    if (options.info) options.info.reused = true;
+    Logger.log('Archive already in Drive with identical content - reusing it instead of writing another copy: ' + identical.getUrl());
+    return identical;
+  }
   const archivedAtStamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd_HHmmss');
-  const fileName = tableName + '_rows_' + label + '_archived_' + archivedAtStamp + '.csv';
+  const fileName = namePrefix + archivedAtStamp + '.csv';
   const file = folder.createFile(fileName, csv, MimeType.CSV);
+  if (options.info) options.info.reused = false;
 
-  archiveAppendManifestRow_(root, [
-    Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
-    tableName, fileName, label, String(rows.length),
-  ]);
+  if (!options.skipManifest) {
+    archiveAppendManifestRow_(root, [
+      Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'),
+      tableName, fileName, label, String(rows.length),
+    ]);
+  }
 
   Logger.log('Archived ' + rows.length + ' ' + tableName + ' row(s) (dates ' + label + ') to Drive: ' + file.getUrl());
   return file;
+}
+
+// The shared "Leads Dashboard Archive" folder (created on first use).
+function archiveRootFolderGs_() {
+  const rootFolders = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_);
+  return rootFolders.hasNext() ? rootFolders.next() : DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+}
+
+// A file in `folder` (not trashed) whose name starts with `namePrefix` and whose text is exactly `csv`, or null. Only files that
+// share the prefix are read, so this costs one name check per file in the folder plus a read of the (rare) same-label ones.
+function findIdenticalArchiveFileGs_(folder, namePrefix, csv) {
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const f = files.next();
+    if (String(f.getName()).indexOf(namePrefix) !== 0) continue;
+    if (f.getBlob().getDataAsString() === csv) return f;
+  }
+  return null;
+}
+
+// Archive-first step of every row prune, as one unit (email audit P18, 2026-10-08): writes `rows` to Drive in chunks, PROVES the
+// files hold exactly those rows (header record per file, counted by countCsvRecordsGs_), and returns the entries. If the proof
+// fails - or a chunk cannot be created - the files THIS call created are moved to the Drive trash before the error is re-thrown,
+// because nothing has been deleted from the sheet yet and a leftover file would only be copied again by the next run (a reused
+// file is never trashed: it may be the only copy of rows an earlier attempt already removed). The caller then changes the sheet and
+// calls commitArchiveManifestGs_ so archive_log.csv only ever lists archives whose rows are really gone.
+// labelBase: the date-range label; with usePartSuffix each chunk's label gets "_part<N>" (the comment prunes' naming).
+function archiveChunksVerifiedGs_(tableName, header, rows, labelBase, chunkSize, usePartSuffix) {
+  const entries = [];
+  try {
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const label = usePartSuffix ? labelBase + '_part' + (entries.length + 1) : labelBase;
+      const info = {};
+      const file = archiveRowsToDriveCsv_(tableName, header, chunk, label, { skipManifest: true, info: info });
+      if (!file) throw new Error('Drive archive chunk ' + (entries.length + 1) + ' was not created - refusing to prune ' + tableName + '.');
+      entries.push({ file: file, label: label, rowCount: chunk.length, reused: !!info.reused });
+    }
+    let archivedRecords = 0;
+    entries.forEach(function (en) { archivedRecords += countCsvRecordsGs_(en.file.getBlob().getDataAsString()); });
+    const archivedRows = archivedRecords - entries.length; // every file starts with one header record
+    if (archivedRows !== rows.length) {
+      throw new Error('Drive archive holds ' + archivedRows + ' row(s) across ' + entries.length + ' file(s) but ' + rows.length +
+        ' were expected - refusing to prune ' + tableName + '.');
+    }
+  } catch (e) {
+    entries.forEach(function (en) {
+      if (en.reused) return;
+      try { en.file.setTrashed(true); } catch (trashErr) { Logger.log('Could not trash the unverified archive ' + en.file.getName() + ': ' + trashErr); }
+    });
+    throw e;
+  }
+  return entries;
+}
+
+// Appends the archive_log.csv rows for entries returned by archiveChunksVerifiedGs_, once the pruned rows are really gone from the
+// sheet. Idempotent (a file already listed is skipped, so a reused archive is not listed twice) and fail-open: the ledger is a
+// convenience, so a failure to update it is logged and never undoes a prune.
+function commitArchiveManifestGs_(tableName, entries) {
+  if (!entries || !entries.length) return;
+  try {
+    const root = archiveRootFolderGs_();
+    const existing = root.getFilesByName(ARCHIVE_MANIFEST_FILE_);
+    const known = existing.hasNext() ? existing.next().getBlob().getDataAsString() : '';
+    const stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+    entries.forEach(function (en) {
+      const name = en.file.getName();
+      if (known.indexOf(',' + name + ',') !== -1) return;
+      archiveAppendManifestRow_(root, [stamp, tableName, name, en.label, String(en.rowCount)]);
+    });
+  } catch (e) {
+    Logger.log('archive_log.csv could not be updated (the archive files themselves are fine): ' + e);
+  }
 }
 
 // Number of CSV RECORDS in `text` as archiveRowsToDriveCsv_ writes it: records are joined with a line feed (no trailing one), and a

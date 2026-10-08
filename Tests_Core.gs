@@ -227,6 +227,70 @@ function runCoreTests_() {
     } finally {
       DriveApp = csvRealDrive;
     }
+    // ---- archive idempotence, proof and rollback (email audit P18, 2026-10-08) ----
+    // Real incident: a prune that archived and then failed before removing its rows wrote ANOTHER identical file on every retry (4 a
+    // day) - 32 copies of the same few archives sat in Drive from 2026-10-03.
+    const idRealDrive = DriveApp;
+    try {
+      const idHeader = ['date', 'id'];
+      const idRows = [['2026-08-01', 'a'], ['2026-08-02', 'b']];
+      const idLabel = '2026-08-01_to_2026-08-02';
+      const idDrive = TestMockDriveApp_();
+      DriveApp = idDrive;
+      const idInfo1 = {};
+      const idInfo2 = {};
+      const idFile1 = archiveRowsToDriveCsv_('Id_Table', idHeader, idRows, idLabel, { info: idInfo1 });
+      const idFile2 = archiveRowsToDriveCsv_('Id_Table', idHeader, idRows, idLabel, { info: idInfo2 });
+      const idFolder = idDrive._folders[ARCHIVE_ROOT_FOLDER_]._folders['Id_Table'];
+      TestAssertEqual_(idFolder._filesList.length, 1, 'archiveRowsToDriveCsv_: archiving the same rows under the same label twice leaves ONE file in Drive');
+      TestAssert_(idFile1 === idFile2 && idInfo1.reused === false && idInfo2.reused === true, 'archiveRowsToDriveCsv_: the second call returns the first file and says it was reused');
+      TestAssertEqual_(idDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n').length, 2, 'archiveRowsToDriveCsv_: a reused archive adds no second archive_log.csv row (header + 1)');
+      archiveRowsToDriveCsv_('Id_Table', idHeader, [['2026-08-01', 'a'], ['2026-08-02', 'DIFFERENT']], idLabel);
+      TestAssertEqual_(idFolder._filesList.length, 2, 'archiveRowsToDriveCsv_: same label but different content is a new file (nothing is ever overwritten or merged)');
+      archiveRowsToDriveCsv_('Id_Table', idHeader, idRows, '2026-08-01_to_2026-08-03');
+      TestAssertEqual_(idFolder._filesList.length, 3, 'archiveRowsToDriveCsv_: same content under a different label is a new file');
+      idFile1.setTrashed(true);
+      const idFile3 = archiveRowsToDriveCsv_('Id_Table', idHeader, idRows, idLabel);
+      TestAssert_(idFile3 !== idFile1 && idFolder._filesList.length === 4, 'archiveRowsToDriveCsv_: a trashed copy is not reused - a fresh file is written');
+
+      // archiveChunksVerifiedGs_: chunking, part labels, the ledger written only on commit (and only once)
+      const skDrive = TestMockDriveApp_();
+      DriveApp = skDrive;
+      const skEntries = archiveChunksVerifiedGs_('Sk_Table', ['d', 'v'], [['x', '1'], ['y', '2'], ['z', '3']], 'lbl', 2, true);
+      TestAssertEqual_(skEntries.map(function (e) { return e.label + ':' + e.rowCount; }).join(','), 'lbl_part1:2,lbl_part2:1', 'archiveChunksVerifiedGs_: 3 rows in chunks of 2 are archived as part1 (2 rows) and part2 (1 row)');
+      TestAssert_(skEntries.every(function (e) { return !e.reused && !e.file.isTrashed(); }), 'archiveChunksVerifiedGs_: a proved archive keeps all its files');
+      TestAssert_(!skDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_], 'archiveChunksVerifiedGs_: nothing is written to archive_log.csv until the caller commits');
+      commitArchiveManifestGs_('Sk_Table', skEntries);
+      TestAssertEqual_(skDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n').length, 3, 'commitArchiveManifestGs_: one ledger row per archive file (header + 2)');
+      commitArchiveManifestGs_('Sk_Table', skEntries);
+      TestAssertEqual_(skDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n').length, 3, 'commitArchiveManifestGs_: committing again adds nothing - a file already listed is skipped');
+
+      // a proof that fails: thrown, this call's files trashed, no ledger row
+      const rbDrive = TestMockDriveApp_();
+      DriveApp = rbDrive;
+      const rbRoot = rbDrive.createFolder(ARCHIVE_ROOT_FOLDER_);
+      const rbFolder = rbRoot.createFolder('Rb_Table');
+      const rbRealCreate = rbFolder.createFile;
+      rbFolder.createFile = function (n, content, mime) { return rbRealCreate.call(rbFolder, n, content.split('\n').slice(0, -1).join('\n'), mime); }; // loses the last record
+      let rbThrew = '';
+      try { archiveChunksVerifiedGs_('Rb_Table', ['d', 'v'], [['x', '1'], ['y', '2'], ['z', '3']], 'lbl', 2, true); } catch (e) { rbThrew = String(e && e.message || e); }
+      TestAssertContains_(rbThrew, 'were expected - refusing to prune Rb_Table', 'archiveChunksVerifiedGs_: an archive that does not hold every row throws');
+      TestAssert_(rbFolder._filesList.length === 2 && rbFolder._filesList.every(function (f) { return f.isTrashed(); }), 'archiveChunksVerifiedGs_: …and the files it had just created are moved to the trash, not left to be copied again by the next run');
+      TestAssert_(!rbRoot._files[ARCHIVE_MANIFEST_FILE_], 'archiveChunksVerifiedGs_: …and no ledger row was written');
+
+      // a reused file is never trashed, even when a later chunk fails (it may be the only copy of rows an earlier attempt removed)
+      const ruDrive = TestMockDriveApp_();
+      DriveApp = ruDrive;
+      const ruFirst = archiveChunksVerifiedGs_('Ru_Table', ['d', 'v'], [['x', '1'], ['y', '2']], 'L', 2, true);
+      const ruFolder = ruDrive._folders[ARCHIVE_ROOT_FOLDER_]._folders['Ru_Table'];
+      ruFolder.createFile = function () { throw new Error('simulated Drive failure'); };
+      let ruThrew = '';
+      try { archiveChunksVerifiedGs_('Ru_Table', ['d', 'v'], [['x', '1'], ['y', '2'], ['z', '3']], 'L', 2, true); } catch (e) { ruThrew = String(e && e.message || e); }
+      TestAssertContains_(ruThrew, 'simulated Drive failure', 'archiveChunksVerifiedGs_: a chunk that cannot be created throws');
+      TestAssertEqual_(ruFirst[0].file.isTrashed(), false, 'archiveChunksVerifiedGs_: an archive reused from an earlier attempt is NOT trashed by the rollback');
+    } finally {
+      DriveApp = idRealDrive;
+    }
   } finally {
     TestEnv_tearDown_();
   }

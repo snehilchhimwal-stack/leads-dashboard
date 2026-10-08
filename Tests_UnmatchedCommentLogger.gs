@@ -276,6 +276,61 @@ function runUnmatchedCommentLoggerTests_() {
     } finally {
       DriveApp = realDriveForPrune2_;
     }
+    // 2026-10-08 (email audit P18): the same two guarantees for this prune - an unprovable archive is trashed and nothing is deleted;
+    // a retry after a failed sheet write reuses the archive instead of writing a copy.
+    DriveApp = TestMockDriveApp_();
+    try {
+      const rbNow = new Date('2026-09-29T12:00:00+05:30');
+      const rbSeed = function () {
+        return TestMockSheet_(UNMATCHED_COMMENTS_LOG_SHEET_, [UNMATCHED_COMMENTS_LOG_COLUMNS_,
+          unmatchedRow_('2026-08-01', 'L-RB1', false), unmatchedRow_('2026-08-20', 'L-RB2', true), unmatchedRow_('2026-09-25', 'L-RBKEEP', false)]);
+      };
+      const withRbNow = function (fn) {
+        const realN = Date.now;
+        Date.now = function () { return rbNow.getTime(); };
+        try { return fn(); } finally { Date.now = realN; }
+      };
+      const rbRoot = DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+      const rbFolder = rbRoot.createFolder(UNMATCHED_COMMENTS_LOG_SHEET_);
+      const rbRealCreate = rbFolder.createFile;
+      rbFolder.createFile = function (n, content, mime) { return rbRealCreate.call(rbFolder, n, content.split('\n').slice(0, -1).join('\n'), mime); };
+      const rbSheet = rbSeed();
+      const rbSs = TestMockSpreadsheet_({});
+      rbSs._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = rbSheet;
+      let rbThrew = '';
+      withRbNow(function () { try { pruneUnmatchedCommentsLog_(rbSs); } catch (e) { rbThrew = String(e && e.message || e); } });
+      TestAssertContains_(rbThrew, 'refusing to prune', 'pruneUnmatchedCommentsLog_ (unprovable archive): the prune refuses');
+      TestAssertEqual_(rbSheet.getLastRow(), 4, 'pruneUnmatchedCommentsLog_ (unprovable archive): nothing is deleted from the sheet');
+      TestAssert_(rbFolder._filesList.length >= 1 && rbFolder._filesList.every(function (f) { return f.isTrashed(); }), 'pruneUnmatchedCommentsLog_ (unprovable archive): the archive file it wrote is trashed, not left behind');
+      TestAssert_(!rbRoot._files[ARCHIVE_MANIFEST_FILE_], 'pruneUnmatchedCommentsLog_ (unprovable archive): no archive_log.csv row for a discarded file');
+
+      DriveApp = TestMockDriveApp_();
+      const rtSheet = rbSeed();
+      const rtRealGetRange = rtSheet.getRange;
+      let rtFailNext = true;
+      rtSheet.getRange = function (r, c, nr, nc) {
+        const rng = rtRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        rng.setValues = function (v) {
+          if (rtFailNext) { rtFailNext = false; throw new Error('simulated sheet write failure'); }
+          return realSet.call(rng, v);
+        };
+        return rng;
+      };
+      const rtSs = TestMockSpreadsheet_({});
+      rtSs._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = rtSheet;
+      let rtThrew = '';
+      withRbNow(function () { try { pruneUnmatchedCommentsLog_(rtSs); } catch (e) { rtThrew = String(e && e.message || e); } });
+      TestAssertContains_(rtThrew, 'simulated sheet write failure', 'pruneUnmatchedCommentsLog_ (failed write): the prune fails');
+      const rtRoot = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+      const rtFolder = rtRoot._folders[UNMATCHED_COMMENTS_LOG_SHEET_];
+      withRbNow(function () { pruneUnmatchedCommentsLog_(rtSs); });
+      TestAssertEqual_(rtSheet.getLastRow(), 2, 'pruneUnmatchedCommentsLog_ (failed write): the retry prunes the sheet');
+      TestAssertEqual_(rtFolder._filesList.length, 1, 'pruneUnmatchedCommentsLog_ (failed write): the retry REUSES the archive - still one file in Drive, not a second copy');
+      TestAssertEqual_(rtRoot._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n').length, 2, 'pruneUnmatchedCommentsLog_ (failed write): archive_log.csv lists the archive exactly once (header + 1)');
+    } finally {
+      DriveApp = realDriveForPrune2_;
+    }
   } finally {
     TestEnv_tearDown_();
   }
