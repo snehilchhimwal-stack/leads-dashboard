@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `(pending commit)` - `emailJobScheduleGs_` also watches `syncRmHierarchyNightly` (`GS-014`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `d897529` - `emailJobScheduleGs_` also watches `syncRmHierarchyNightly` (`GS-014`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -257,7 +257,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-07** (`7799e44`, email audit P16 / F23): `checkEmailJobsCompletedGs_` (`FN-333`) now also reports the Movement_Log snapshot job — its snapshots are the "calls so far today" baseline behind every email and it hit the 30-minute wall 3 times in 5 days with nothing noticing. `GS-008`'s `snapshotRunProblemsGs_` (`FN-344`) reads the run record `snapshotPeriodic` now leaves (`EMAIL_JOB_RUN_snapshotPeriodic`) and returns at most one problem; a problem may carry its own `marker` (alerted once per run) and `hint` (what to run). `showEmailJobRunsNow` also logs the snapshot record. The hourly watchdog trigger (`setupEmailJobWatchdogTrigger`) must be installed for any of this to alert. +6 lines (1308L -> 1314L). `Tests_EmailInfra.gs` gained the snapshot-watchdog cases. **Not live until pasted.**
 
-**2026-10-08** (`(pending commit)`): `emailJobScheduleGs_` also lists `syncRmHierarchyNightly` (the nightly HR-roster sync, `GS-014`; hour 23, so the hourly watchdog alerts when it has not run by 23:30). Only added when `RMSYNC_RUN_HOUR_` exists, so pasting this file without `RmHierarchySync.gs` does not break the watchdog. **Not live until pasted.**
+**2026-10-08** (`d897529`): `emailJobScheduleGs_` also lists `syncRmHierarchyNightly` (the nightly HR-roster sync, `GS-014`; hour 23, so the hourly watchdog alerts when it has not run by 23:30). Only added when `RMSYNC_RUN_HOUR_` exists, so pasting this file without `RmHierarchySync.gs` does not break the watchdog. **Not live until pasted.**
 
 ## Revalidation trigger
 

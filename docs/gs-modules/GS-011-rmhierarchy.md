@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `(pending commit)` - `rebuildRmHierarchy` refuses to run once the nightly HR sync is applying (`GS-014`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `d897529` - `rebuildRmHierarchy` refuses to run once the nightly HR sync is applying (`GS-014`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -343,7 +343,7 @@ Apps Script editor.
 
 **2026-10-07** (`c416a01`, email audit P13 — `docs/_planning/EMAIL_AUDIT.md` F24): `ALWAYS_CC_EMAILS_` and `LEADERSHIP_NAME_TO_EMAIL_` were literal corporate addresses in this PUBLIC repository. They are now `null`-by-default overrides; the code keeps the leadership NAMES (`LEADERSHIP_NAMES_`, `CFG-093`) and reads the addresses through `alwaysCcEmailsGs_` / `leadershipEmailByNameGs_` (`FN-340`), which look them up from the git-ignored `RmHierarchy.private.gs` (the table this file already depends on). The three direct reads (`resolveRecipientBucketsForRms_` x2, the unresolved-RM audit) now use the accessors. A leader with no row in the private table is skipped, not blanked, and `GS-004`'s watchdog check reports it. +16 lines (1339L -> 1355L; anchors re-mapped). **Not live until pasted.**
 
-**2026-10-08** (`(pending commit)`): `rebuildRmHierarchy(force)` refuses to run (logs why, changes nothing) once the nightly HR-roster sync (`GS-014`) is applying changes - the LIVE tab is then the source of truth and rebuilding from `RM_HIERARCHY_RAW_` would silently undo the synced changes. `rebuildRmHierarchyForce()` overrides it on purpose. `RM_HIERARCHY_RAW_` is now only the seed. **Not live until pasted.**
+**2026-10-08** (`d897529`): `rebuildRmHierarchy(force)` refuses to run (logs why, changes nothing) once the nightly HR-roster sync (`GS-014`) is applying changes - the LIVE tab is then the source of truth and rebuilding from `RM_HIERARCHY_RAW_` would silently undo the synced changes. `rebuildRmHierarchyForce()` overrides it on purpose. `RM_HIERARCHY_RAW_` is now only the seed. **Not live until pasted.**
 
 ## Revalidation trigger
 
