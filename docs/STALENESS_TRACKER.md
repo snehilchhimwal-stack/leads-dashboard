@@ -91,19 +91,19 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `Core.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `DailyRmIssueLog.gs` | `5802f35` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `EmailInfra.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `InteractionHistoryLogger.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `MovementTracker.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `OvernightEmailer.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `RmHierarchy.gs` | `c416a01` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `SlaEngine.gs` | `7799e44` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
-| `UnmatchedCommentLogger.gs` | `58ab8e1` | 2026-10-07 | read directly from the live editor by hash-match (2026-10-07) |
+| `AllIssuesEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `Core.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `DailyRmIssueLog.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `EmailInfra.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `MovementTracker.gs` | `58ab8e1` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `OvernightEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `RmHierarchy.gs` | `c416a01` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `SlaEngine.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 
 ### Known live-vs-repo differences
 
@@ -234,6 +234,13 @@ One line per sweep: date — what was found — what was fixed / left open.
   1965 passed, 0 failed across 14 files (this also closes the `Tests_OvernightEmailer.gs` item above). **Verify after the
   18:51 IST scheduled `snapshotPeriodic`:** `Movement_Log_Runs` last row (`failed_phases` blank, `phase_s` filled), the
   `Comment_History` / `Unmatched_Comments_Log` backlog gone, no "Movement snapshot ... FAILED" email.
+- 2026-10-08 — **email audit P18 deployed** (`78e47f5`: idempotent / verified prune archives; `Daily_RM_Issues` date integrity). Nine files
+  (`Core.gs`, `DailyRmIssueLog.gs`, `InteractionHistoryLogger.gs`, `UnmatchedCommentLogger.gs`, `Tests_Core.gs`, `Tests_DailyRmIssueLog.gs`,
+  `Tests_InteractionHistoryLogger.gs`, `Tests_Mocks.gs`, `Tests_UnmatchedCommentLogger.gs`) were dry-run checked against both their expected old
+  and new hashes, staged with `pushEditOperations`, saved by Snehil, the page reloaded, and all 30 files re-read: 29 at HEAD (the private
+  employee table is the 30th). Live `runAllTests()`: 2049 passed, 0 failed across 14 files. **Verify after the 22:53 IST `captureDailyRmIssues`:**
+  no `unknown-dates` file in the Drive `Daily_RM_Issues` archive folder, `showDailyRmIssueDiagNow()`, and whether the 7 Oct rows kept their
+  `lead_assigned_at` (505 of 505 on 8 Oct morning).
 
 ## Current status
 
