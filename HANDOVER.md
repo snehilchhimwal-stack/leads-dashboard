@@ -725,6 +725,10 @@ code*, one bullet per plan step as each lands.
   tail, and proves its archive before deleting. Nothing is emailed - what was seen goes to the `DAILY_RM_ISSUE_DIAG` Script Property
   (`showDailyRmIssueDiagNow()`). The 6 existing `unknown-dates` archives cannot be re-dated from the files; nights still in
   `Movement_Log` (1 Oct onward) can be rebuilt with `backfillOneDayFromMovementLog_`, which skips a day that already has a dated row.
+  *`lead_assigned_at` refill (P18b, same day):* On 2026-10-08 the newest night kept `lead_assigned_at` on 505 of 505 rows, the night before on 75 of 674, 5 Oct on 5 of 41 and 4 Oct on 0 of 2, while the Leads tab (6,680 of 6,680) and every `Movement_Log` snapshot of 1-7 Oct have it for every lead - so the cell is lost after the row is written, not at the source. After every prune, any remaining row with a lead id and no value is filled from the
+  lead's own record - that day's `Movement_Log` snapshot, else the Leads tab today, else the lead's latest snapshot. Fill only (a populated
+  cell is never touched), nothing is emailed, the observation goes to `DAILY_RM_ISSUE_DIAG`. The capture hands the prune its own Leads read
+  (the tab is read once a night) and the column is re-asserted after the rewrite. `refillDailyRmIssueAssignedAtNow()` does it on demand.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
