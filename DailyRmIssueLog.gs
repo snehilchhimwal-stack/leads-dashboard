@@ -215,7 +215,7 @@ function captureDailyRmIssues_() {
   // WORKBOOK over its ceiling. Passing rows.length lets
   // pruneDailyRmIssueLog_ size the sheet to fit kept + tonight's rows
   // exactly, so the write below never needs to grow the grid at all.
-  pruneDailyRmIssueLog_(ss, rows.length);
+  pruneDailyRmIssueLog_(ss, rows.length, { colIndex: colIndex, dataRows: dataRows });
 
   // Chunked writes — same BACKFILL_CHUNK_SIZE_ pattern
   // backfillOneDayFromMovementLog_ already uses, applied here to the main
@@ -304,18 +304,24 @@ function repairDailyRmIssueDatesGs_(values, todayKey) {
   return out;
 }
 
-// Writes the repaired date cells (column A only) back to the sheet, one contiguous run at a time, and re-asserts them.
-function persistRepairedDailyRmIssueDatesGs_(logSheet, values, indexes) {
+// Writes one column of the given rows (by their 0-based indexes in `values`) back to the sheet, one contiguous run at a time, and
+// re-asserts the cells. Used for the repaired date cells (column A) and the refilled lead_assigned_at cells.
+function persistDailyRmIssueColumnGs_(logSheet, values, indexes, colIdx, phase) {
   let i = 0;
   while (i < indexes.length) {
     let j = i;
     while (j + 1 < indexes.length && indexes[j + 1] === indexes[j] + 1) j++;
     const first = indexes[i];
     const slice = values.slice(first, indexes[j] + 1);
-    withRetry_(function () { logSheet.getRange(2 + first, 1, slice.length, 1).setValues(slice.map(function (r) { return [r[0]]; })); }, 'write repaired Daily_RM_Issues dates');
-    reassertDateColumnsGs_(logSheet, 2 + first, slice, [0], 'prune-repair');
+    withRetry_(function () { logSheet.getRange(2 + first, colIdx + 1, slice.length, 1).setValues(slice.map(function (r) { return [r[colIdx]]; })); }, 'write repaired Daily_RM_Issues column ' + (colIdx + 1));
+    reassertDateColumnsGs_(logSheet, 2 + first, slice, [colIdx], phase);
     i = j + 1;
   }
+}
+
+// Writes the repaired date cells (column A only) back to the sheet.
+function persistRepairedDailyRmIssueDatesGs_(logSheet, values, indexes) {
+  persistDailyRmIssueColumnGs_(logSheet, values, indexes, 0, 'prune-repair');
 }
 
 // Reads the given columns of the rows just written (startRow..) back and re-writes any column that came back blank where `rows` had
@@ -386,6 +392,112 @@ function showDailyRmIssueDiagNow() {
   Logger.log(raw || '(nothing recorded - no undated row and no blank write-back has been seen since this was deployed)');
 }
 
+// ==================== lead_assigned_at refill (email audit P18, 2026-10-08) ====================
+// On 2026-10-08 only 505 of the 505 rows of the newest night kept their `lead_assigned_at`, against 75 of 674 the night before, 5 of 41
+// the night before that and 0 of 2 four nights back - the cell is lost AFTER the row is written (the Leads tab and Movement_Log have it
+// for every lead). So after every prune, any row still without it is filled from the lead's own record: the Movement_Log snapshot of
+// the row's day (what the lead looked like that night), else the Leads tab today, else the lead's latest Movement_Log snapshot. Fill
+// only: a cell that already has a value is never touched, and a lead with no source stays blank.
+const DAILY_RM_ISSUE_ASSIGNED_COL_ = 12; // lead_assigned_at (0-based) - one of DAILY_RM_ISSUE_DATE_COLS_
+
+function dailyRmIssueBlankCellGs_(c) {
+  return c === '' || c === null || c === undefined || (c instanceof Date && isNaN(c.getTime()));
+}
+
+// The sources a refill can use: { leads: {leadId: value}, movementByDay: {'leadId|yyyy-MM-dd': value}, movementLatest: {leadId: value} }.
+// `leadsRead` ({colIndex, dataRows}) is the caller's own read of the Leads tab when it has one (the nightly capture does), so it is not
+// read twice. Each source is optional: one that cannot be read is logged and skipped.
+function buildAssignedAtLookupsGs_(ss, leadsRead) {
+  const out = { leads: {}, movementByDay: {}, movementLatest: {}, leadsOk: false, movementOk: false };
+  try {
+    const lr = leadsRead || readLeadsTab_(ss);
+    lr.dataRows.forEach(function (row) {
+      const id = String(getVal_(row, lr.colIndex, 'lead_id') || '').trim();
+      const v = getVal_(row, lr.colIndex, 'lead_assigned_at');
+      if (id && !dailyRmIssueBlankCellGs_(v)) out.leads[id] = v;
+    });
+    out.leadsOk = true;
+  } catch (e) {
+    Logger.log('lead_assigned_at refill: the Leads tab could not be read (' + e + ') - using Movement_Log only.');
+  }
+  try {
+    const mlSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+    if (mlSheet) {
+      const d = _readMovementLogColumnsGs_(mlSheet, ['snapshot_at', 'lead_id', 'lead_assigned_at']);
+      if (d.rowCount && d.idx.snapshot_at !== -1 && d.idx.lead_id !== -1 && d.idx.lead_assigned_at !== -1) {
+        const dayAtMs = {};
+        const latestAtMs = {};
+        const dayKeyByMs = {}; // snapshots share a handful of timestamps - format each once, not per row
+        for (let i = 0; i < d.rowCount; i++) {
+          const ts = d.cols.snapshot_at[i][0];
+          if (!(ts instanceof Date)) continue;
+          const id = String(d.cols.lead_id[i][0] || '').trim();
+          const v = d.cols.lead_assigned_at[i][0];
+          if (!id || dailyRmIssueBlankCellGs_(v)) continue;
+          const ms = ts.getTime();
+          if (dayKeyByMs[ms] === undefined) dayKeyByMs[ms] = istDayKeyGs_(ts);
+          const dayKey = id + '|' + dayKeyByMs[ms];
+          if (dayAtMs[dayKey] === undefined || ms > dayAtMs[dayKey]) { dayAtMs[dayKey] = ms; out.movementByDay[dayKey] = v; }
+          if (latestAtMs[id] === undefined || ms > latestAtMs[id]) { latestAtMs[id] = ms; out.movementLatest[id] = v; }
+        }
+        out.movementOk = true;
+      }
+    }
+  } catch (e) {
+    Logger.log('lead_assigned_at refill: Movement_Log could not be read (' + e + ') - using the Leads tab only.');
+  }
+  return out;
+}
+
+// Fills the blank lead_assigned_at of `values` in place from `lookups` (buildAssignedAtLookupsGs_). Returns
+// { rows, blank, filled, fromMovementDay, fromLeads, fromMovementLatest, noSource, indexes } - `blank` counts rows with a lead id and no value.
+function refillDailyRmIssueAssignedAtGs_(values, lookups) {
+  const leadIdx = DAILY_RM_ISSUE_LOG_COLUMNS_.indexOf('lead_id');
+  const asIdx = DAILY_RM_ISSUE_ASSIGNED_COL_;
+  const out = { rows: values.length, blank: 0, filled: 0, fromMovementDay: 0, fromLeads: 0, fromMovementLatest: 0, noSource: 0, indexes: [] };
+  values.forEach(function (row, i) {
+    if (row.length <= asIdx || !dailyRmIssueBlankCellGs_(row[asIdx])) return;
+    const id = String(row[leadIdx] === null || row[leadIdx] === undefined ? '' : row[leadIdx]).trim();
+    if (!id) return;
+    out.blank++;
+    let v = lookups.movementByDay[id + '|' + dailyRmIssueDateKeyGs_(row[0])];
+    let src = 'day';
+    if (dailyRmIssueBlankCellGs_(v)) { v = lookups.leads[id]; src = 'leads'; }
+    if (dailyRmIssueBlankCellGs_(v)) { v = lookups.movementLatest[id]; src = 'latest'; }
+    if (dailyRmIssueBlankCellGs_(v)) { out.noSource++; return; }
+    row[asIdx] = v;
+    out.filled++;
+    out.indexes.push(i);
+    if (src === 'day') out.fromMovementDay++; else if (src === 'leads') out.fromLeads++; else out.fromMovementLatest++;
+  });
+  return out;
+}
+
+// True when at least one row has a lead id and no lead_assigned_at - the cheap in-memory test that decides whether the lookups are built.
+function dailyRmIssueNeedsAssignedAtGs_(values) {
+  const leadIdx = DAILY_RM_ISSUE_LOG_COLUMNS_.indexOf('lead_id');
+  const asIdx = DAILY_RM_ISSUE_ASSIGNED_COL_;
+  return values.some(function (row) {
+    return row.length > asIdx && dailyRmIssueBlankCellGs_(row[asIdx]) && String(row[leadIdx] === null || row[leadIdx] === undefined ? '' : row[leadIdx]).trim() !== '';
+  });
+}
+
+// Console-callable (function dropdown -> Run): fills every blank lead_assigned_at in Daily_RM_Issues right now instead of waiting for the
+// next prune. Additive - only blank cells are written. Logs the counts and returns them.
+function refillDailyRmIssueAssignedAtNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
+  if (!logSheet || logSheet.getLastRow() < 2) { Logger.log('Daily_RM_Issues is empty - nothing to refill.'); return null; }
+  const lastCol = logSheet.getLastColumn();
+  const values = withRetry_(function () { return logSheet.getRange(2, 1, logSheet.getLastRow() - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for refill');
+  if (!dailyRmIssueNeedsAssignedAtGs_(values)) { Logger.log('Every Daily_RM_Issues row already has a lead_assigned_at - nothing to refill.'); return null; }
+  const refill = refillDailyRmIssueAssignedAtGs_(values, buildAssignedAtLookupsGs_(ss, null));
+  if (refill.filled) persistDailyRmIssueColumnGs_(logSheet, values, refill.indexes, DAILY_RM_ISSUE_ASSIGNED_COL_, 'refill-now');
+  Logger.log('lead_assigned_at refill: ' + refill.blank + ' blank, ' + refill.filled + ' filled (' + refill.fromMovementDay + ' from that day\'s Movement_Log snapshot, ' +
+    refill.fromLeads + ' from the Leads tab, ' + refill.fromMovementLatest + ' from the latest Movement_Log snapshot), ' + refill.noSource + ' with no source.');
+  return refill;
+}
+
 // Rewrites the whole data range with only rows newer than the retention
 // window — same "rewrite, don't delete individual rows out from under a
 // shifting range" approach as MovementTracker.gs's pruneMovementLog_, and
@@ -410,7 +522,7 @@ function showDailyRmIssueDiagNow() {
 // type depending on how it happened to be written. The cutoff comparison
 // below normalizes both shapes the same way captureDailyRmIssues_'s own
 // idempotency check already does (line ~144), rather than assuming one.
-function pruneDailyRmIssueLog_(ss, incomingRowCount) {
+function pruneDailyRmIssueLog_(ss, incomingRowCount, leadsRead) {
   incomingRowCount = incomingRowCount || 0;
   const logSheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
   if (!logSheet) return;
@@ -429,6 +541,21 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount) {
     repair.phase = 'prune';
     recordDailyRmIssueDiagGs_(repair);
   }
+  // After every prune, whatever rows remain are checked for a missing lead_assigned_at and filled from the lead's own record (see
+  // refillDailyRmIssueAssignedAtGs_). `leadsRead` is the capture's own read of the Leads tab, so it is not read twice. Fail-open: a refill
+  // problem is logged and never stops the prune.
+  let refill = null;
+  try {
+    if (dailyRmIssueNeedsAssignedAtGs_(values)) {
+      refill = refillDailyRmIssueAssignedAtGs_(values, buildAssignedAtLookupsGs_(ss, leadsRead));
+      const refillRec = Object.assign({}, refill);
+      refillRec.phase = 'prune-refill';
+      recordDailyRmIssueDiagGs_(refillRec);
+    }
+  } catch (refillErr) {
+    Logger.log('lead_assigned_at refill skipped: ' + refillErr);
+    refill = null;
+  }
   const isKeptRow_ = function (row) {
     return dailyRmIssueDateKeyGs_(row[0]) >= cutoffKey; // 'yyyy-MM-dd' strings compare correctly lexicographically
   };
@@ -438,6 +565,7 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount) {
     // since a prior run could have written more rows than this one needs
     // (e.g. after DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ was lowered).
     if (repair.blank) persistRepairedDailyRmIssueDatesGs_(logSheet, values, repair.indexes);
+    if (refill && refill.filled) persistDailyRmIssueColumnGs_(logSheet, values, refill.indexes, DAILY_RM_ISSUE_ASSIGNED_COL_, 'prune-refill');
   } else {
     // Archive what's about to be dropped, before it's gone for good - same
     // zero-cell-cost Drive CSV pattern as pruneMovementLog_ (MovementTracker.gs);
