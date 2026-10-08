@@ -57,6 +57,32 @@ const RMSYNC_OUT_OF_SCOPE_TEAMS_ = ['magnet (mumbai)', 'magnet pune'];
 const RMSYNC_ROLE_TO_FIELD_ = { 'a1': 'tl', 'tl': 'tl', 'tm': 'tm', 'rh': 'rh', 'cluster head': 'ch', 'city lead': 'ch', 'commercial head': 'ch', 'leadership': 'ch' };
 const RMSYNC_FIELD_LABEL_ = { tl: 'TL', tm: 'TM', rh: 'RH', ch: 'CH' };
 
+// The read-only helpers come FIRST in this file on purpose: the editor's function dropdown lists functions in source order, and a Run
+// that does not pick up the selected function runs the first one (seen on 2026-10-08 with DailyRmIssueLog.gs) - here that is harmless.
+// Read-only: logs the full plan (no email, no writes) so a person can see everything the report truncates.
+function showRmHierarchySyncPlanNow() {
+  const hr = parseHrRosterGs_(readHrRosterValuesGs_());
+  if (hr.problems.length) { Logger.log('The HR sheet is not laid out as expected: ' + hr.problems.join('; ')); return; }
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  const directorySheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
+  const plan = computeRmHierarchySyncPlanGs_(hr, readRmHierarchyRowsGs_(sheet), directorySheet ? readManagerDirectoryRowsGs_(directorySheet) : null);
+  const lines = rmSyncChangeLinesGs_(plan);
+  Logger.log('Mode: ' + (rmHierarchySyncApplyEnabledGs_() ? 'APPLY' : 'report-only') + '. HR people: ' + hr.count + '.');
+  [['New people', lines.joiners], ['Manager changes', lines.fixes], ['Manager_Directory', lines.directory]].forEach(function (s) {
+    Logger.log(s[0] + ' (' + s[1].length + '):'); s[1].forEach(function (l) { Logger.log(l); });
+  });
+  const attention = rmSyncAttentionItemsGs_(plan);
+  Logger.log('For a person (' + attention.length + '):');
+  attention.forEach(function (i) { Logger.log(i.line); });
+}
+
+function showRmHierarchySyncStatusNow() {
+  const state = readRmSyncStateGs_();
+  Logger.log('RM hierarchy sync: apply ' + (rmHierarchySyncApplyEnabledGs_() ? 'ON' : 'OFF') + '; has ever applied: ' + state.appliedEver + '; open items remembered: ' + Object.keys(state.items).length + '; last Monday reminder: ' + (state.lastReminderDay || 'never') + '.');
+  Logger.log('Last run record: ' + JSON.stringify(readEmailJobRunGs_(RMSYNC_JOB_NAME_)));
+}
+
 function rmSyncStr_(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function rmSyncUnique_(list) { return list.filter(function (v, i) { return list.indexOf(v) === i; }); }
 
@@ -607,28 +633,4 @@ function enableRmHierarchySyncApplyNow() {
 function disableRmHierarchySyncApplyNow() {
   PropertiesService.getScriptProperties().setProperty(RMSYNC_APPLY_PROPERTY_, 'false');
   Logger.log('RM hierarchy sync: APPLY is OFF - it only reports.');
-}
-
-// Read-only: logs the full plan (no email, no writes) so a person can see everything the report truncates.
-function showRmHierarchySyncPlanNow() {
-  const hr = parseHrRosterGs_(readHrRosterValuesGs_());
-  if (hr.problems.length) { Logger.log('The HR sheet is not laid out as expected: ' + hr.problems.join('; ')); return; }
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
-  const directorySheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
-  const plan = computeRmHierarchySyncPlanGs_(hr, readRmHierarchyRowsGs_(sheet), directorySheet ? readManagerDirectoryRowsGs_(directorySheet) : null);
-  const lines = rmSyncChangeLinesGs_(plan);
-  Logger.log('Mode: ' + (rmHierarchySyncApplyEnabledGs_() ? 'APPLY' : 'report-only') + '. HR people: ' + hr.count + '.');
-  [['New people', lines.joiners], ['Manager changes', lines.fixes], ['Manager_Directory', lines.directory]].forEach(function (s) {
-    Logger.log(s[0] + ' (' + s[1].length + '):'); s[1].forEach(function (l) { Logger.log(l); });
-  });
-  const attention = rmSyncAttentionItemsGs_(plan);
-  Logger.log('For a person (' + attention.length + '):');
-  attention.forEach(function (i) { Logger.log(i.line); });
-}
-
-function showRmHierarchySyncStatusNow() {
-  const state = readRmSyncStateGs_();
-  Logger.log('RM hierarchy sync: apply ' + (rmHierarchySyncApplyEnabledGs_() ? 'ON' : 'OFF') + '; has ever applied: ' + state.appliedEver + '; open items remembered: ' + Object.keys(state.items).length + '; last Monday reminder: ' + (state.lastReminderDay || 'never') + '.');
-  Logger.log('Last run record: ' + JSON.stringify(readEmailJobRunGs_(RMSYNC_JOB_NAME_)));
 }
