@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `80a1768` - email audit P18b: lead_assigned_at refill |
+| **Last Verified** | 2026-10-08 against commit `1cd1cfa` - email audit P18c: the real size of the tab; date columns written as text |
 
 ## Purpose / reason to exist
 
@@ -160,9 +160,11 @@ The live `Daily_RM_Issues` tab; schema `DAILY_RM_ISSUE_LOG_COLUMNS_`
 
 Verified at `c82ec67`; record created by `DOC-032`.
 
-**2026-10-08** (`78e47f5`, email audit P18): from 2026-10-02 the nightly prune archived ~600 KB of rows whose `date`, `captured_at` and `lead_assigned_at` read back blank, filed as `unknown-dates` (6 files in the Drive `Daily_RM_Issues` archive folder, 2-7 Oct), and deleted them from the tab. The live tab held 1,222 dated rows for 4 nights (4 Oct 2 rows, 5 Oct 41, 6 Oct 674, 7 Oct 505) on 2026-10-08 and no undated row. `GS-003` now repairs undated rows, re-asserts the date columns after every write, and records what it saw in the `DAILY_RM_ISSUE_DIAG` Script Property (`showDailyRmIssueDiagNow()`). Cause not yet identified. Nothing reads this tab.
+**2026-10-08** (`78e47f5`, email audit P18): from 2026-10-02 the nightly prune archived ~600 KB of rows whose `date`, `captured_at` and `lead_assigned_at` read back blank, filed as `unknown-dates` (6 files in the Drive `Daily_RM_Issues` archive folder, 2-7 Oct), and deleted them from the tab. (Corrected the same day, P18c: the Sheets query endpoint sees only the first ~1,200 rows, 4 Oct 2 / 5 Oct 41 / 6 Oct 674 / 7 Oct 505 dated survivors - the tab itself is ~13,900 rows, mostly the blank-dated rows.) `GS-003` now repairs undated rows, re-asserts the date columns after every write, and records what it saw in the `DAILY_RM_ISSUE_DIAG` Script Property (`showDailyRmIssueDiagNow()`). Nothing reads this tab.
 
 **2026-10-08** (`80a1768`, email audit P18b): `lead_assigned_at` is now refilled after every prune (`GS-003` FN-361). On 2026-10-08 the newest night kept `lead_assigned_at` on 505 of 505 rows, the night before on 75 of 674, 5 Oct on 5 of 41 and 4 Oct on 0 of 2, while the Leads tab (6,680 of 6,680) and every `Movement_Log` snapshot of 1-7 Oct have it for every lead - so the cell is lost after the row is written, not at the source.
+
+**2026-10-08** (`1cd1cfa`, email audit P18c): Found by running the refill live on 2026-10-08: the Sheets query endpoint (gviz) only sees the first ~1,200 rows of this tab, which is why earlier counts ("1,222 rows", "no undated row in the morning") were wrong. `reportWorkbookCellUsageNow()` shows the tab at 13,877 rows: the nightly capture writes ~10,000 rows (in 5,000-row chunks) and kept the date, `captured_at` and `lead_assigned_at` of only its last, small chunk (505 rows for 7 Oct); the rest read back blank - and a single `lead_assigned_at` written as a Date read back blank too - while the same values written as text in a plain-text column stuck every time. The `unknown-dates` archives are those ~5,000-row chunks, dropped the next night because a blank date compared as older than the window. Dates are now written to columns A, I and M as text in a plain-text column. The tab will hold about 7 nights x ~10,000 rows instead of being emptied of its blank-dated rows every night.
 
 ## Revalidation trigger
 

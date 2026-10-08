@@ -718,8 +718,7 @@ code*, one bullet per plan step as each lands.
   *`unknown-dates`:* from 2026-10-02 every nightly `Daily_RM_Issues` archive (~600 KB) was filed `unknown-dates` - the `date`,
   `captured_at` and `lead_assigned_at` cells of those rows read back blank and the prune compared a blank date as older than the
   window, so it archived and deleted them. Nothing reads this tab (the dashboard moved to `Movement_Log` on 2026-09-05), so there
-  was no user-visible effect, only a thin, undated audit trail. **The cause of the blanking is not identified** (the tab holds no
-  undated row in the morning). Fix: an undated row is given a date (its `captured_at`, else the next dated row's, else the previous
+  was no user-visible effect, only a thin, undated audit trail. **The cause was found later the same day (P18c, below).** Fix: an undated row is given a date (its `captured_at`, else the next dated row's, else the previous
   one's, else today's) and written back instead of being dropped; the date columns are read back after the capture write and the
   prune rewrite and re-written (as text if a plain re-write still reads blank); the prune writes kept rows first, clears only the
   tail, and proves its archive before deleting. Nothing is emailed - what was seen goes to the `DAILY_RM_ISSUE_DIAG` Script Property
@@ -729,6 +728,12 @@ code*, one bullet per plan step as each lands.
   lead's own record - that day's `Movement_Log` snapshot, else the Leads tab today, else the lead's latest snapshot. Fill only (a populated
   cell is never touched), nothing is emailed, the observation goes to `DAILY_RM_ISSUE_DIAG`. The capture hands the prune its own Leads read
   (the tab is read once a night) and the column is re-asserted after the rewrite. `refillDailyRmIssueAssignedAtNow()` does it on demand.
+  *The cause, and the real size of the tab (P18c, same day):* Found by running the refill live on 2026-10-08: the Sheets query endpoint (gviz) only sees the first ~1,200 rows of this tab, which is why earlier counts ("1,222 rows", "no undated row in the morning") were wrong. `reportWorkbookCellUsageNow()` shows the tab at 13,877 rows: the nightly capture writes ~10,000 rows (in 5,000-row chunks) and kept the date, `captured_at` and `lead_assigned_at` of only its last, small chunk (505 rows for 7 Oct); the rest read back blank - and a single `lead_assigned_at` written as a Date read back blank too - while the same values written as text in a plain-text column stuck every time. The `unknown-dates` archives are those ~5,000-row chunks, dropped the next night because a blank date compared as older than the window. Fix: the capture and the prune rewrite convert Date cells of columns
+  A, I and M to IST text and format the range as plain text before writing, and the persist step writes one span per column. **Consequence:**
+  the old behaviour deleted the ~10,000 blank-dated rows every night; now they keep their date and age out after 7 days, so the tab holds about
+  7 nights x ~10,000 rows (+~1.5M cells; the workbook was at 5.37M of 10M on 2026-10-08). The live refill (stopped from the Executions page
+  after ~7 minutes - the per-run persist was too slow, since fixed) filled `lead_assigned_at` on 585 -> 1,187 of the 1,222 rows the query endpoint
+  could see; 35 have no source. **Do not count rows with a Sheets query (`gviz`) on this tab** - use `reportWorkbookCellUsageNow()` or an Apps Script read.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
