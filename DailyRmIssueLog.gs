@@ -231,6 +231,9 @@ function captureDailyRmIssues_() {
   // transient-error retry on top.
   let startRow = logSheet.getLastRow() + 1;
   const firstWriteRow = startRow;
+  // Date cells go in as text (see dailyRmIssueTextCellGs_): written as dates they were lost for all but the last chunk.
+  dailyRmIssueTextRowsGs_(rows);
+  setDailyRmIssueTextFormatGs_(logSheet, firstWriteRow, rows.length);
   for (let i = 0; i < rows.length; i += BACKFILL_CHUNK_SIZE_) {
     const chunk = rows.slice(i, i + BACKFILL_CHUNK_SIZE_);
     withRetry_(function () { logSheet.getRange(startRow, 1, chunk.length, chunk[0].length).setValues(chunk); }, 'write Daily_RM_Issues chunk (rows ' + i + '-' + (i + chunk.length) + ')');
@@ -304,24 +307,58 @@ function repairDailyRmIssueDatesGs_(values, todayKey) {
   return out;
 }
 
-// Writes one column of the given rows (by their 0-based indexes in `values`) back to the sheet, one contiguous run at a time, and
-// re-asserts the cells. Used for the repaired date cells (column A) and the refilled lead_assigned_at cells.
+// Writes one column of the given rows back to the sheet as TEXT, in ONE write spanning the first to the last changed row (the rows in
+// between are re-written with their own current value), then re-asserts it. `indexes` are the 0-based indexes in `values` of the
+// changed rows, ascending. One write, not one per contiguous run: the first version wrote run by run and a scattered ~10,000-row refill
+// took over six minutes (2026-10-08) - the nightly prune would have spent its time there before the capture's own write.
+// Used for the repaired date cells (column A) and the refilled lead_assigned_at cells.
 function persistDailyRmIssueColumnGs_(logSheet, values, indexes, colIdx, phase) {
-  let i = 0;
-  while (i < indexes.length) {
-    let j = i;
-    while (j + 1 < indexes.length && indexes[j + 1] === indexes[j] + 1) j++;
-    const first = indexes[i];
-    const slice = values.slice(first, indexes[j] + 1);
-    withRetry_(function () { logSheet.getRange(2 + first, colIdx + 1, slice.length, 1).setValues(slice.map(function (r) { return [r[colIdx]]; })); }, 'write repaired Daily_RM_Issues column ' + (colIdx + 1));
-    reassertDateColumnsGs_(logSheet, 2 + first, slice, [colIdx], phase);
-    i = j + 1;
-  }
+  if (!indexes.length) return;
+  const first = indexes[0];
+  const last = indexes[indexes.length - 1];
+  const span = values.slice(first, last + 1);
+  span.forEach(function (r) { r[colIdx] = dailyRmIssueTextCellGs_(r[colIdx], colIdx); });
+  const range = logSheet.getRange(2 + first, colIdx + 1, span.length, 1);
+  if (typeof range.setNumberFormat === 'function') range.setNumberFormat('@');
+  withRetry_(function () { range.setValues(span.map(function (r) { return [r[colIdx]]; })); }, 'write repaired Daily_RM_Issues column ' + (colIdx + 1));
+  reassertDateColumnsGs_(logSheet, 2 + first, span, [colIdx], phase);
 }
 
 // Writes the repaired date cells (column A only) back to the sheet.
 function persistRepairedDailyRmIssueDatesGs_(logSheet, values, indexes) {
   persistDailyRmIssueColumnGs_(logSheet, values, indexes, 0, 'prune-repair');
+}
+
+// The three Date-typed columns are WRITTEN AS TEXT (email audit P18c, 2026-10-08). Writing them as dates lost them: on 2026-10-08 the
+// nightly capture (~10,000 rows, in 5,000-row chunks) kept the date, captured_at and lead_assigned_at of only its last, small chunk (505
+// rows) and the rest read back blank, and a single refilled lead_assigned_at written as a Date read back blank too, while the same
+// value written as text in a plain-text column stuck every time. So Date cells are converted to IST text before every write
+// (dailyRmIssueTextCellGs_) and the target range is formatted as plain text first (setDailyRmIssueTextFormatGs_). Every reader of this
+// tab already accepts either shape (dailyRmIssueDateKeyGs_, the capture's idempotency check).
+function dailyRmIssueTextCellGs_(v, colIdx) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, 'Asia/Kolkata', colIdx === 0 ? 'yyyy-MM-dd' : 'yyyy-MM-dd HH:mm:ss');
+  return v;
+}
+
+// Converts the Date cells of columns A, I and M of every row to IST text, in place. Returns the rows.
+function dailyRmIssueTextRowsGs_(rows) {
+  rows.forEach(function (r) {
+    DAILY_RM_ISSUE_DATE_COLS_.forEach(function (ci) { if (r.length > ci) r[ci] = dailyRmIssueTextCellGs_(r[ci], ci); });
+  });
+  return rows;
+}
+
+// Formats columns A, I and M of `numRows` rows from `startRow` as plain text, so a value written there stays the literal text. Fail-open.
+function setDailyRmIssueTextFormatGs_(sheet, startRow, numRows) {
+  if (!numRows) return;
+  try {
+    DAILY_RM_ISSUE_DATE_COLS_.forEach(function (ci) {
+      const range = sheet.getRange(startRow, ci + 1, numRows, 1);
+      if (typeof range.setNumberFormat === 'function') range.setNumberFormat('@');
+    });
+  } catch (e) {
+    Logger.log('Could not format the Daily_RM_Issues date columns as text (' + e + ') - the write-back check still applies.');
+  }
 }
 
 // Reads the given columns of the rows just written (startRow..) back and re-writes any column that came back blank where `rows` had
@@ -583,6 +620,8 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount, leadsRead) {
     // interruption cannot land on a sheet whose still-in-retention rows are erased and not yet written back (the same ordering
     // pruneMovementLog_ and the comment prunes already use).
     if (kept.length) {
+      dailyRmIssueTextRowsGs_(kept); // after the archive, which keeps the original cell values
+      setDailyRmIssueTextFormatGs_(logSheet, 2, kept.length);
       withRetry_(function () { logSheet.getRange(2, 1, kept.length, lastCol).setValues(kept); }, 'rewrite pruned Daily_RM_Issues rows');
       reassertDateColumnsGs_(logSheet, 2, kept, DAILY_RM_ISSUE_DATE_COLS_, 'prune-rewrite');
     }

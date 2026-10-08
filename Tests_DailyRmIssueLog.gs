@@ -597,6 +597,7 @@ function runDailyRmIssueLogTests_() {
       TestAssertEqual_(dailyRmIssueBlankCellGs_(new Date('nonsense')), true, 'dailyRmIssueBlankCellGs_: an invalid Date is blank');
       TestAssertEqual_(dailyRmIssueBlankCellGs_(new Date('2026-10-03T08:03:06Z')), false, 'dailyRmIssueBlankCellGs_: a real Date is not blank');
       const asIdx = DAILY_RM_ISSUE_ASSIGNED_COL_;
+      const raText = function (d) { return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'); };
       TestAssertEqual_(DAILY_RM_ISSUE_LOG_COLUMNS_[asIdx], 'lead_assigned_at', 'DAILY_RM_ISSUE_ASSIGNED_COL_ points at the lead_assigned_at column');
       function raRow_(dateKey, leadId, assigned) {
         const r = prLogHeader.map(function () { return ''; });
@@ -688,8 +689,8 @@ function runDailyRmIssueLogTests_() {
       TestAssertEqual_(raReadCalls, 0, 'pruneDailyRmIssueLog_: uses the Leads read the caller passes - the Leads tab is not read a second time');
       const raAfter = raSheet.getRange(2, 1, raSheet.getLastRow() - 1, prLogHeader.length).getValues();
       TestAssertEqual_(raAfter.length, 3, 'pruneDailyRmIssueLog_: the old row is dropped, the three recent ones stay');
-      TestAssertEqual_(raAfter[0][asIdx].getTime(), raDate3.getTime(), 'pruneDailyRmIssueLog_: a remaining row with no lead_assigned_at is filled from the Leads tab');
-      TestAssertEqual_(raAfter[1][asIdx].getTime(), raDate2.getTime(), 'pruneDailyRmIssueLog_: …a lead that is not in the Leads tab any more is filled from Movement_Log');
+      TestAssertEqual_(raAfter[0][asIdx], raText(raDate3), 'pruneDailyRmIssueLog_: a remaining row with no lead_assigned_at is filled from the Leads tab (written as text)');
+      TestAssertEqual_(raAfter[1][asIdx], raText(raDate2), 'pruneDailyRmIssueLog_: …a lead that is not in the Leads tab any more is filled from Movement_Log');
       TestAssertEqual_(raAfter[2][asIdx], 'KEEP-ME', 'pruneDailyRmIssueLog_: a value already there is left alone');
       const raDiag = diProps().filter(function (r) { return r.phase === 'prune-refill'; });
       TestAssert_(raDiag.length === 1 && raDiag[0].blank === 3 && raDiag[0].filled === 3 && raDiag[0].fromLeads === 2 && raDiag[0].fromMovementDay === 1, 'pruneDailyRmIssueLog_: the refill is recorded in DAILY_RM_ISSUE_DIAG (3 blank incl. the row about to be archived, 3 filled: 2 from the Leads tab, 1 from the same-day Movement_Log snapshot)');
@@ -701,7 +702,7 @@ function runDailyRmIssueLogTests_() {
       const raKeepSs = TestMockSpreadsheet_({});
       raKeepSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = raKeepSheet;
       pruneDailyRmIssueLog_(raKeepSs, 0, raLeadsRead);
-      TestAssertEqual_(raKeepSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0].getTime(), raDate3.getTime(), 'pruneDailyRmIssueLog_: with nothing to drop, a missing lead_assigned_at is still filled in the sheet');
+      TestAssertEqual_(raKeepSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0], raText(raDate3), 'pruneDailyRmIssueLog_: with nothing to drop, a missing lead_assigned_at is still filled in the sheet');
 
       // (R5) a source that cannot be read never stops the prune
       DriveApp = TestMockDriveApp_();
@@ -720,7 +721,7 @@ function runDailyRmIssueLogTests_() {
       raBlankSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = raBlankSheet;
       pruneDailyRmIssueLog_(raBlankSs, 0, raLeadsRead);
       TestAssertEqual_(raBlankSheet._blankedWrites, 1, 'fixture check: the rewrite did blank lead_assigned_at once');
-      TestAssertEqual_(raBlankSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0].getTime(), raDate3.getTime(), 'pruneDailyRmIssueLog_: a lead_assigned_at that reads back blank after the rewrite is written again');
+      TestAssertEqual_(raBlankSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0], raText(raDate3), 'pruneDailyRmIssueLog_: a lead_assigned_at that reads back blank after the rewrite is written again');
 
       // (R7) the console function fills everything now, and a second run has nothing left to do
       const raNowSs = TestMockSpreadsheet_({});
@@ -730,7 +731,7 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = { getActiveSpreadsheet: function () { return raNowSs; }, flush: function () {} };
       const raNowOut = refillDailyRmIssueAssignedAtNow();
       TestAssertEqual_(raNowOut.blank + ':' + raNowOut.filled + ':' + raNowOut.noSource, '3:2:1', 'refillDailyRmIssueAssignedAtNow: fills what has a source and reports what has none');
-      TestAssertEqual_(raNowSheet.getRange(2, asIdx + 1, 2, 1).getValues().map(function (r) { return r[0].getTime(); }).join(','), raDate3.getTime() + ',' + raDate3.getTime(), 'refillDailyRmIssueAssignedAtNow: the cells are written to the sheet');
+      TestAssertEqual_(raNowSheet.getRange(2, asIdx + 1, 2, 1).getValues().map(function (r) { return r[0]; }).join(','), raText(raDate3) + ',' + raText(raDate3), 'refillDailyRmIssueAssignedAtNow: the cells are written to the sheet');
       TestAssertEqual_(raNowSheet.getRange(4, asIdx + 1, 1, 1).getValues()[0][0], '', 'refillDailyRmIssueAssignedAtNow: a lead with no source stays blank');
 
       // (R8) the nightly capture hands the prune its own Leads read: the Leads tab is read ONCE per night, and an older row is refilled from it
@@ -745,7 +746,74 @@ function runDailyRmIssueLogTests_() {
       readLeadsTab_ = function (s2) { raCapReads++; return raRealReadLeads(s2); };
       try { captureDailyRmIssues_(); } finally { readLeadsTab_ = raRealReadLeads; }
       TestAssertEqual_(raCapReads, 1, 'captureDailyRmIssues_: the Leads tab is read once per night - the refill inside the prune reuses the capture read');
-      TestAssert_(raCapSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0] instanceof Date, 'captureDailyRmIssues_: an older row that had lost its lead_assigned_at is refilled in the same run');
+      TestAssert_(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(raCapSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0])), 'captureDailyRmIssues_: an older row that had lost its lead_assigned_at is refilled in the same run');
+
+      // ---- the date columns are written as TEXT (email audit P18c, 2026-10-08) ----
+      TestAssertEqual_(dailyRmIssueTextCellGs_(new Date('2026-10-03T08:03:06Z'), asIdx), '2026-10-03 13:33:06', 'dailyRmIssueTextCellGs_: a Date becomes its IST date-time text');
+      TestAssertEqual_(dailyRmIssueTextCellGs_(new Date('2026-10-04T18:30:00Z'), 0), '2026-10-05', 'dailyRmIssueTextCellGs_: column A becomes the IST day');
+      TestAssertEqual_(dailyRmIssueTextCellGs_(new Date('nonsense'), asIdx) + '|' + dailyRmIssueTextCellGs_('2026-10-03 13:33:06', asIdx) + '|' + dailyRmIssueTextCellGs_('', asIdx), '|2026-10-03 13:33:06|', 'dailyRmIssueTextCellGs_: an invalid Date is blank, text and blanks are left alone');
+      const txRows = [[new Date('2026-10-04T18:30:00Z'), 'x', 'y', 'z', 'L', 'C', 'k', 'l', new Date('2026-10-04T17:23:11Z'), 'tl', 'g', 's', new Date('2026-09-18T05:40:00Z')]];
+      dailyRmIssueTextRowsGs_(txRows);
+      TestAssertEqual_(txRows[0][0] + '|' + txRows[0][8] + '|' + txRows[0][12], '2026-10-05|2026-10-04 22:53:11|2026-09-18 11:10:00', 'dailyRmIssueTextRowsGs_: converts columns A, I and M in place');
+      TestAssertEqual_(txRows[0][1] + txRows[0][4], 'xL', 'dailyRmIssueTextRowsGs_: leaves every other column alone');
+
+      // the capture writes them as text and formats the range as plain text first
+      function txFormatSpy_(sheet) {
+        const calls = [];
+        const realGetRange = sheet.getRange;
+        sheet.getRange = function (r, c, nr, nc) {
+          const rng = realGetRange(r, c, nr, nc);
+          const realFmt = rng.setNumberFormat;
+          rng.setNumberFormat = function (f) { calls.push(c + ':' + (nc || 1) + ':' + f); return realFmt.call(rng, f); };
+          return rng;
+        };
+        sheet._fmtCalls = calls;
+        return sheet;
+      }
+      const txCapSs = TestMockSpreadsheet_({});
+      txCapSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      const txCapSheet = txFormatSpy_(TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader]));
+      txCapSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = txCapSheet;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return txCapSs; }, flush: function () {} };
+      DriveApp = TestMockDriveApp_();
+      captureDailyRmIssues_();
+      const txCapRow = txCapSheet.getRange(2, 1, 1, prLogHeader.length).getValues()[0];
+      TestAssert_(typeof txCapRow[0] === 'string' && typeof txCapRow[8] === 'string' && typeof txCapRow[12] === 'string', 'captureDailyRmIssues_: date, captured_at and lead_assigned_at are written as text, not as Date objects');
+      TestAssert_(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(txCapRow[12]), 'captureDailyRmIssues_: lead_assigned_at is the IST date-time text');
+      TestAssert_(txCapSheet._fmtCalls.indexOf('1:1:@') !== -1 && txCapSheet._fmtCalls.indexOf('9:1:@') !== -1 && txCapSheet._fmtCalls.indexOf('13:1:@') !== -1, 'captureDailyRmIssues_: columns A, I and M are formatted as plain text before the write (' + txCapSheet._fmtCalls.join(',') + ')');
+
+      // the prune rewrite does the same for the rows it keeps
+      DriveApp = TestMockDriveApp_();
+      const txPrSheet = txFormatSpy_(TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [prLogHeader,
+        raRow_(raOldKey, 'L-A'),
+        raRow_(new Date(TestFixture_daysAgo_(realNowForPrune, 2).getTime()), 'L-A', new Date('2026-10-03T08:03:06Z'))]));
+      const txPrSs = TestMockSpreadsheet_({});
+      txPrSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = txPrSheet;
+      pruneDailyRmIssueLog_(txPrSs);
+      const txPrRow = txPrSheet.getRange(2, 1, 1, prLogHeader.length).getValues()[0];
+      TestAssert_(typeof txPrRow[0] === 'string' && typeof txPrRow[asIdx] === 'string', 'pruneDailyRmIssueLog_: the rows it keeps are rewritten with their date cells as text');
+      TestAssertEqual_(txPrRow[asIdx], '2026-10-03 13:33:06', 'pruneDailyRmIssueLog_: a Date lead_assigned_at is rewritten as its IST text');
+      TestAssert_(txPrSheet._fmtCalls.indexOf('1:1:@') !== -1 && txPrSheet._fmtCalls.indexOf('13:1:@') !== -1, 'pruneDailyRmIssueLog_: the rewritten range is formatted as plain text first');
+
+      // ONE write per column, however scattered the changed rows are (the per-run version took over six minutes on ~10,000 rows)
+      DriveApp = TestMockDriveApp_();
+      const scSeed = [prLogHeader];
+      for (let k = 0; k < 40; k++) scSeed.push(raRow_(raRecentKey, 'L-A', k % 2 === 0 ? '' : 'KEEP-' + k)); // alternating blank / filled
+      const scSheet = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, scSeed);
+      let scAsWrites = 0;
+      const scRealGetRange = scSheet.getRange;
+      scSheet.getRange = function (r, c, nr, nc) {
+        const rng = scRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        rng.setValues = function (v) { if (c === asIdx + 1 && (nc || 1) === 1) scAsWrites++; return realSet.call(rng, v); };
+        return rng;
+      };
+      const scSs = TestMockSpreadsheet_({});
+      scSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = scSheet;
+      pruneDailyRmIssueLog_(scSs, 0, raLeadsRead);
+      TestAssertEqual_(scAsWrites, 1, 'pruneDailyRmIssueLog_: 20 scattered refilled cells are written in ONE write, not one per run');
+      const scAfter = scSheet.getRange(2, asIdx + 1, 40, 1).getValues().map(function (r) { return r[0]; });
+      TestAssertEqual_(scAfter[0] + '|' + scAfter[1] + '|' + scAfter[38], raText(raDate3) + '|KEEP-1|' + raText(raDate3), 'pruneDailyRmIssueLog_: the filled rows are filled and the rows in between keep their own value');
     } finally {
       SpreadsheetApp = realSsDi;
       DriveApp = realDriveDi;

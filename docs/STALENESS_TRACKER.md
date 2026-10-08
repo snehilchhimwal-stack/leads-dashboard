@@ -93,7 +93,7 @@ snippet text itself is the same every time — only the embedded payload changes
 |---|---|---|---|
 | `AllIssuesEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `Core.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `DailyRmIssueLog.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `DailyRmIssueLog.gs` | `80a1768` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `EmailInfra.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
