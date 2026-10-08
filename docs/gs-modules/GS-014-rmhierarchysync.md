@@ -53,7 +53,7 @@ paste the file, run `setupRmHierarchySync()` once, then `syncRmHierarchyNightlyN
 | FN-372 | `buildRmHierarchySyncReportGs_(info)` / `rmSyncRecipientsGs_(hr)` `#L372/#L422` | run facts / the HR sheet | `{subject, body}` / the recipient addresses | none (recipients read the private table by name, then the HR row) | `resolvedEmailForNameGs_`, `opsAlertEmailGs_` (`GS-004`) | FN-373 | specific |
 | FN-373 | `runRmHierarchySyncGs_(opts)` `#L526` | `{now}` | the run summary | reads the HR sheet and both tabs; may write them (apply on); emails the report; saves state | all of the above | FN-374 | specific |
 | FN-374 | `syncRmHierarchyNightly()` / `syncRmHierarchyNightlyNow()` `#L597/#L612` | — | — | the lock + run record; alerts ops and re-throws on a crash | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
-| FN-375 | `setupRmHierarchySync()`, `enable/disableRmHierarchySyncApplyNow()`, `showRmHierarchySyncPlanNow()`, `showRmHierarchySyncStatusNow()` `#L589/#L603/#L607/#L613/#L630` | — | — | trigger install; Script Property switch; read-only logs | FN-367, FN-369 | Apps Script editor (manual) | specific |
+| FN-375 | `setupRmHierarchySync()`, `enable/disableRmHierarchySyncApplyNow()`, `showRmHierarchySyncPlanNow()`, `showRmHierarchySyncStatusNow()` `#L615/#L629/#L633/#L63/#L80` | — | — | trigger install; Script Property switch; read-only logs | FN-367, FN-369 | Apps Script editor (manual) | specific |
 | FN-376 | `rmHierarchySyncIsActiveGs_()` `#L326` | — | `true` when apply is on or the sync has ever applied | none | — | `rebuildRmHierarchy` (`GS-011`) | specific |
 
 ## Business rules implemented — `RULE-XXX` sub-table
