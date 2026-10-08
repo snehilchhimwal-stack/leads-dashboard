@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (report-only until `enableRmHierarchySyncApplyNow` is run) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `(pending commit)` - old spellings of current staff are recognised instead of listed as leavers (`FN-377`, `RULE-042`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `3dc9852` - old spellings of current staff are recognised instead of listed as leavers (`FN-377`, `RULE-042`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -153,7 +153,7 @@ Apps Script backend; a time-driven job (23:15 IST) sharing the email jobs' lock,
 `emailJobScheduleGs_` watches it; `RmHierarchy.gs` `rebuildRmHierarchy` refuses to run once the sync is applying (use
 `rebuildRmHierarchyForce`). **Not live until pasted.**
 
-**2026-10-08** (`(pending commit)`): the first report listed 19 possible leavers, 9 of them old spellings of people still in the HR sheet (Peddapally Shivaji, Atharva P Belose, Akash Ugale, Kavya Gowda, Sourabh Sareen Pnl, Jay Renavikar, Mamtaben S 1 Account and two Mohmmad Azaz spellings). `computeRmHierarchySyncPlanGs_` now recognises such a row (FN-377, RULE-042) and the report lists it once under "OLD SPELLINGS OF CURRENT STAFF" with the matched person and employee code; it is not counted as work in the subject. Report lines also carry the HR employee code (column A) for new people and manager-field items. **Not live until pasted.**
+**2026-10-08** (`3dc9852`): the first report listed 19 possible leavers, 9 of them old spellings of people still in the HR sheet (Peddapally Shivaji, Atharva P Belose, Akash Ugale, Kavya Gowda, Sourabh Sareen Pnl, Jay Renavikar, Mamtaben S 1 Account and two Mohmmad Azaz spellings). `computeRmHierarchySyncPlanGs_` now recognises such a row (FN-377, RULE-042) and the report lists it once under "OLD SPELLINGS OF CURRENT STAFF" with the matched person and employee code; it is not counted as work in the subject. Report lines also carry the HR employee code (column A) for new people and manager-field items. **Not live until pasted.**
 
 ## Revalidation trigger
 
