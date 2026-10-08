@@ -788,6 +788,8 @@ people it could not place, and **possible leavers — never removed** (someone a
 first sight and again each Monday until a person says remove). More than 25 changes in a night are held. Both tabs are backed up to Drive
 (`RM_Hierarchy_sync_backup`, `Manager_Directory_sync_backup`) before any write.
 
+**Old spellings (added the same day):** the leads sheet and `RM_Hierarchy` still carry old spellings and labels of people who ARE in the HR sheet ("Atharva P Belose" for "Atharva Belose", "Sourabh Sareen Pnl", "Mamtaben S 1 Account"); 9 of the first report's 19 "possible leavers" were these. A row missing from the HR sheet by exact name is now recognised as an old spelling when exactly one current HR person is a near match (`GS-014` RULE-042) and is listed once under "OLD SPELLINGS OF CURRENT STAFF" (with the matched person's employee code) instead of as a leaver; ambiguous or exited-only matches stay leavers, with the similar names shown. Nothing is changed or removed either way. Removing a row while leads are still assigned to that name sends those leads' emails to the region fallback, so reassign the leads first.
+
 **Report:** emailed to Snehil Chhimwal, Sushil Kannojiya and Ashish Ivlekar (addresses resolved by name from the private employee table,
 else from the person's HR row) on nights with something to say.
 

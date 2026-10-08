@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (report-only until `enableRmHierarchySyncApplyNow` is run) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `70f21c4` - created with the nightly HR-roster sync (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `(pending commit)` - old spellings of current staff are recognised instead of listed as leavers (`FN-377`, `RULE-042`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -28,6 +28,7 @@ itself and emails a report of the rest. Design and decisions: `docs/_planning/RM
   backup (`applyRmHierarchySyncPlanGs_`); read every change back.
 - Email the report (`buildRmHierarchySyncReportGs_`) to Snehil Chhimwal, Sushil Kannojiya and Ashish Ivlekar - new items once, the
   open ones again on Mondays.
+- Recognise an RM_Hierarchy name that is not in the HR sheet but is an old spelling of exactly ONE current person (a dropped middle name, an initial, a label like "Pnl" or "S 1 Account", a spelling slip) and list it once, in its own section, instead of as a possible leaver.
 - **Never** removes a person, never overwrites a hand-written email, never writes a field it is not sure of.
 
 ## Trigger schedule
@@ -45,16 +46,17 @@ paste the file, run `setupRmHierarchySync()` once, then `syncRmHierarchyNightlyN
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-367 | `parseHrRosterGs_(values)` `#L94` | the HR sheet's rows | `{problems, people, count}`; people keyed by normalised name with role, team, email (`@` only), current chain names, exited flag | none (pure) | `normPersonName_` (`GS-011`) | FN-373, FN-375 | specific |
-| FN-368 | `classifyRmSyncJoinerGs_(person, roleByKey)` `#L164` | a person, name -> role | `{confidence, fields, notes}`; HIGH only when every chain name resolves, by that name's own role, to a distinct tier | none (pure) | — | FN-369 | specific - the rule `test/refresh-rm-hierarchy.py` `classify_new_joiner` uses |
-| FN-369 | `computeRmHierarchySyncPlanGs_(hr, rows, directory)` `#L182` | parsed HR sheet, tab rows, directory rows | `{newJoiners, newJoinersLow, fixes, needsHuman, leavers, emailFills, emailChanges, directoryAdds}` | none (pure) | FN-368 | FN-373, FN-375 | specific - RULE-038..RULE-041 |
-| FN-370 | `applyRmHierarchySyncPlanGs_(ss, sheet, rows, directorySheet, directory, plan, day)` `#L441` | the plan and the live tabs | `{problems, backupUrls}` | Drive backup CSVs of both tabs; cell writes (re-checked just before each), appended rows + checkboxes, directory emails/rows; read-back | `archiveRowsToDriveCsv_` (`GS-002`), `withRetry_` (`GS-004`) | FN-373 | specific |
-| FN-371 | `rmSyncAttentionItemsGs_(plan)` / `rmSyncChangeLinesGs_(plan)` `#L340/#L357` | the plan | report lines; attention items with a stable id | none | — | FN-373, FN-374 | specific |
-| FN-372 | `buildRmHierarchySyncReportGs_(info)` / `rmSyncRecipientsGs_(hr)` `#L372/#L422` | run facts / the HR sheet | `{subject, body}` / the recipient addresses | none (recipients read the private table by name, then the HR row) | `resolvedEmailForNameGs_`, `opsAlertEmailGs_` (`GS-004`) | FN-373 | specific |
-| FN-373 | `runRmHierarchySyncGs_(opts)` `#L526` | `{now}` | the run summary | reads the HR sheet and both tabs; may write them (apply on); emails the report; saves state | all of the above | FN-374 | specific |
-| FN-374 | `syncRmHierarchyNightly()` / `syncRmHierarchyNightlyNow()` `#L597/#L612` | — | — | the lock + run record; alerts ops and re-throws on a crash | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
-| FN-375 | `setupRmHierarchySync()`, `enable/disableRmHierarchySyncApplyNow()`, `showRmHierarchySyncPlanNow()`, `showRmHierarchySyncStatusNow()` `#L615/#L629/#L633/#L63/#L80` | — | — | trigger install; Script Property switch; read-only logs | FN-367, FN-369 | Apps Script editor (manual) | specific |
-| FN-376 | `rmHierarchySyncIsActiveGs_()` `#L326` | — | `true` when apply is on or the sync has ever applied | none | — | `rebuildRmHierarchy` (`GS-011`) | specific |
+| FN-367 | `parseHrRosterGs_(values)` `#L146` | the HR sheet's rows | `{problems, people, count}`; people keyed by normalised name with role, team, email (`@` only), current chain names, exited flag | none (pure) | `normPersonName_` (`GS-011`) | FN-373, FN-375 | specific |
+| FN-368 | `classifyRmSyncJoinerGs_(person, roleByKey)` `#L218` | a person, name -> role | `{confidence, fields, notes}`; HIGH only when every chain name resolves, by that name's own role, to a distinct tier | none (pure) | — | FN-369 | specific - the rule `test/refresh-rm-hierarchy.py` `classify_new_joiner` uses |
+| FN-369 | `computeRmHierarchySyncPlanGs_(hr, rows, directory)` `#L236` | parsed HR sheet, tab rows, directory rows | `{newJoiners, newJoinersLow, fixes, needsHuman, leavers, emailFills, emailChanges, directoryAdds}` | none (pure) | FN-368 | FN-373, FN-375 | specific - RULE-038..RULE-041 |
+| FN-370 | `applyRmHierarchySyncPlanGs_(ss, sheet, rows, directorySheet, directory, plan, day)` `#L507` | the plan and the live tabs | `{problems, backupUrls}` | Drive backup CSVs of both tabs; cell writes (re-checked just before each), appended rows + checkboxes, directory emails/rows; read-back | `archiveRowsToDriveCsv_` (`GS-002`), `withRetry_` (`GS-004`) | FN-373 | specific |
+| FN-371 | `rmSyncAttentionItemsGs_(plan)` / `rmSyncChangeLinesGs_(plan)` `#L402/#L422` | the plan | report lines; attention items with a stable id | none | — | FN-373, FN-374 | specific |
+| FN-372 | `buildRmHierarchySyncReportGs_(info)` / `rmSyncRecipientsGs_(hr)` `#L437/#L488` | run facts / the HR sheet | `{subject, body}` / the recipient addresses | none (recipients read the private table by name, then the HR row) | `resolvedEmailForNameGs_`, `opsAlertEmailGs_` (`GS-004`) | FN-373 | specific |
+| FN-373 | `runRmHierarchySyncGs_(opts)` `#L592` | `{now}` | the run summary | reads the HR sheet and both tabs; may write them (apply on); emails the report; saves state | all of the above | FN-374 | specific |
+| FN-374 | `syncRmHierarchyNightly()` / `syncRmHierarchyNightlyNow()` `#L663/#L678` | — | — | the lock + run record; alerts ops and re-throws on a crash | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
+| FN-375 | `setupRmHierarchySync()`, `enable/disableRmHierarchySyncApplyNow()`, `showRmHierarchySyncPlanNow()`, `showRmHierarchySyncStatusNow()` `#L681/#L695/#L699/#L64/#L81` | — | — | trigger install; Script Property switch; read-only logs | FN-367, FN-369 | Apps Script editor (manual) | specific |
+| FN-377 | `rmSyncNameTokensGs_`, `rmSyncEditDistanceGs_`, `rmSyncTokenCloseGs_`, `rmSyncNearNameGs_(rowName, person)` `#L97/#L128` | a name; an HR person | `true` when the name is an old spelling of that person | none (pure) | — | FN-369 | specific - RULE-042 |
+| FN-376 | `rmHierarchySyncIsActiveGs_()` `#L388` | — | `true` when apply is on or the sync has ever applied | none | — | `rebuildRmHierarchy` (`GS-011`) | specific |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
@@ -64,6 +66,7 @@ paste the file, run `setupRmHierarchySync()` once, then `syncRmHierarchyNightlyN
 | RULE-039 | A new person is added only when every current-chain name resolves to a distinct tier (HIGH); sales-track roles only; Magnet teams and exited people never | FN-368, FN-369 | `test/refresh-rm-hierarchy.py` `classify_new_joiner`, `SALES_TRACK_ROLES`, `OUT_OF_SCOPE_TEAMS`, `ROLE_TO_FIELD` |
 | RULE-040 | A person missing from the HR sheet or with an Exit date is only reported, never removed; reported on first sight, then every Monday while open | FN-369, FN-373 | — |
 | RULE-041 | A `Manager_Directory` email is filled only when blank; a different HR email is reported; a row is added only for a manager who is in the HR sheet | FN-369 | — |
+| RULE-042 | A row not in the HR sheet by exact name is an OLD SPELLING (not a leaver) only when exactly one current (not exited) HR person is a near match: same words ignoring initials, numbers and "Pnl"/"Account"; or one name's words are all in the other's (a dropped middle name, at least two shared words, at most two extra); or the same number of words each within a small edit distance (1 for 5-6 letters, 2 for 7+; a swap of neighbours counts once); or a label ending "Account" whose single remaining word is another person's first name. Zero, several or only-exited matches stay possible leavers, with the similar HR names listed | FN-377, FN-369 | — |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -149,6 +152,8 @@ Apps Script backend; a time-driven job (23:15 IST) sharing the email jobs' lock,
 **2026-10-08** (`d897529`, reordered `70f21c4`): file created - nightly HR-roster sync, report-only by default; `EmailInfra.gs`
 `emailJobScheduleGs_` watches it; `RmHierarchy.gs` `rebuildRmHierarchy` refuses to run once the sync is applying (use
 `rebuildRmHierarchyForce`). **Not live until pasted.**
+
+**2026-10-08** (`(pending commit)`): the first report listed 19 possible leavers, 9 of them old spellings of people still in the HR sheet (Peddapally Shivaji, Atharva P Belose, Akash Ugale, Kavya Gowda, Sourabh Sareen Pnl, Jay Renavikar, Mamtaben S 1 Account and two Mohmmad Azaz spellings). `computeRmHierarchySyncPlanGs_` now recognises such a row (FN-377, RULE-042) and the report lists it once under "OLD SPELLINGS OF CURRENT STAFF" with the matched person and employee code; it is not counted as work in the subject. Report lines also carry the HR employee code (column A) for new people and manager-field items. **Not live until pasted.**
 
 ## Revalidation trigger
 

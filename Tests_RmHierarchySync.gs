@@ -456,6 +456,63 @@ function runRmHierarchySyncTests_() {
       TestAssertEqual_([rmSyncIsMondayIstGs_(RMSYNC_TEST_MON_), rmSyncIsMondayIstGs_(RMSYNC_TEST_THU_), rmSyncIsMondayIstGs_(new Date('2026-10-11T17:00:00Z')), rmSyncIsMondayIstGs_(new Date('2026-10-11T19:00:00Z')), rmSyncIsMondayIstGs_(new Date('2026-10-12T19:00:00Z'))],
         [true, false, false, true, false], 'monday: judged in IST (Sun 22:30 IST is not Monday; Sun 19:00 UTC is already Monday 00:30 IST; Mon 19:00 UTC is Tuesday in IST)');
     }
+
+    // ================= near-name matching: old spellings are not leavers =================
+    {
+      TestAssertEqual_(rmSyncNameTokensGs_('Mamtaben S 1 Account'), ['mamtaben'], 'tokens: initials, numbers and the word "Account" are dropped');
+      TestAssertEqual_(rmSyncNameTokensGs_('Atharva P. Belose'), ['atharva', 'belose'], 'tokens: a one-letter initial and punctuation are dropped');
+      TestAssertEqual_(rmSyncNameTokensGs_('Sourabh Sareen Pnl'), ['sourabh', 'sareen'], 'tokens: the label word "Pnl" is dropped');
+      TestAssertEqual_([rmSyncEditDistanceGs_('abc', 'abc'), rmSyncEditDistanceGs_('mohmmad', 'mohammad'), rmSyncEditDistanceGs_('anasair', 'ansari'), rmSyncEditDistanceGs_('ab', 'ba')], [0, 1, 2, 1],
+        'edit distance: equal 0, one missing letter 1, a missing letter plus a swap 2, a swap of neighbours 1');
+      TestAssertEqual_([rmSyncTokenCloseGs_('renavikar', 'renaviker'), rmSyncTokenCloseGs_('anasair', 'ansari'), rmSyncTokenCloseGs_('khan', 'khat'), rmSyncTokenCloseGs_('rahul', 'rohit'), rmSyncTokenCloseGs_('rahul', 'rahull')], [true, true, false, false, true],
+        'token match: long words may differ by an edit or two, short words must match exactly, different words never match');
+      const near = function (row, hr) { return rmSyncNearNameGs_(row, { rawName: hr }); };
+      TestAssertEqual_([
+        near('Peddapally Shivaji', 'Peddapally Veera Shivaji'), near('Atharva P Belose', 'Atharva Belose'), near('Akash Ugale', 'Akash A Ugale'), near('Sourabh Sareen Pnl', 'Sourabh Sareen'),
+        near('Jay Renavikar', 'Jay Renaviker'), near('Mohmmad Azaz Izhar Anasair', 'Mohammad Azaz Izhar Ansari'), near('Mamtaben S 1 Account', 'Mamtaben Sosa'), near('Wasim Shaikh', 'Shaikh Wasim'),
+      ], [true, true, true, true, true, true, true, true], 'near name: every kind of old spelling seen in the real data is recognised (middle name, initial, label word, spelling slip, "Account" label, word order)');
+      TestAssertEqual_([
+        near('G Kumar', 'Avinash Kumar'), near('Pratapkumar Yadav', 'Angad Yadav'), near('Sonam Dubey', 'Deepali Dubey'), near('Adil Shaikh', 'Firoj Shaikh'), near('Mohd Ali Abdul Gaffar', 'Mohd Ali Khan'),
+        near('Mohammed Khan', 'Fahim Khan'), near('Mamtaben S 1 Account', 'Mohd Sosa'), near('Rahul Singh', 'Rohit Singh'),
+      ], [false, false, false, false, false, false, false, false], 'near name: different people who share a first name, a surname or a title never match');
+
+      const aliasPeople = [
+        { name: 'Orlan Veera Zhivaji', role: 'S1', team: 'Pune' }, { name: 'Brisa Kellow', role: 'S1', team: 'Pune' }, { name: 'Tavi A Ostrel', role: 'S1', team: 'Pune' },
+        { name: 'Pelor Wanes', role: 'S1', team: 'Pune' }, { name: 'Jorv Renaviker', role: 'S1', team: 'Pune' }, { name: 'Mohammad Quill Ansari', role: 'S1', team: 'Pune' },
+        { name: 'Zorbit Sosa', role: 'S1', team: 'Pune' }, { name: 'Avi Kumar', role: 'S1', team: 'Pune' }, { name: 'Dev Amit Sharma', role: 'S1', team: 'Pune' },
+        { name: 'Dev Amit Verma', role: 'S1', team: 'Pune' }, { name: 'Mohd Ali Khan', role: 'S1', team: 'Pune' }, { name: 'Rina Exitt Two', role: 'S1', team: 'Pune', exit: '2026-10-01' },
+      ];
+      const aliasRows = [['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email']];
+      ['Orlan Veera Zhivaji', 'Brisa Kellow', 'Tavi A Ostrel', 'Pelor Wanes', 'Jorv Renaviker', 'Mohammad Quill Ansari', 'Zorbit Sosa', 'Avi Kumar', 'Dev Amit Sharma', 'Dev Amit Verma', 'Mohd Ali Khan']
+        .concat(['Orlan Zhivaji', 'Brisa P Kellow', 'Tavi Ostrel', 'Pelor Wanes Pnl', 'Jorv Renavikar', 'Mohmmad Quill Anasair', 'Zorbit S 1 Account', 'G Kumar', 'Dev Amit', 'Rina Exitt', 'Nobody Atall', 'Mohd Ali Abdul Gaffar'])
+        .forEach(function (n) { aliasRows.push(['Pune', 'S1', n, '', '', '', '', false, '', '']); });
+      const aliasWorld = rmSyncTestWorld_({ people: aliasPeople, tabRows: aliasRows });
+      const aliasHr = parseHrRosterGs_(readHrRosterValuesGs_());
+      const aliasPlan = computeRmHierarchySyncPlanGs_(aliasHr, readRmHierarchyRowsGs_(aliasWorld.tab), readManagerDirectoryRowsGs_(aliasWorld.dir));
+      TestAssertEqual_(aliasPlan.aliases.map(function (a) { return a.name + ' -> ' + a.matchedName; }).sort(), [
+        'Brisa P Kellow -> Brisa Kellow', 'Jorv Renavikar -> Jorv Renaviker', 'Mohmmad Quill Anasair -> Mohammad Quill Ansari', 'Orlan Zhivaji -> Orlan Veera Zhivaji',
+        'Pelor Wanes Pnl -> Pelor Wanes', 'Tavi Ostrel -> Tavi A Ostrel', 'Zorbit S 1 Account -> Zorbit Sosa',
+      ], 'plan: seven kinds of old spelling are recognised as the one current person they match');
+      TestAssertEqual_(aliasPlan.aliases.filter(function (a) { return a.name === 'Orlan Zhivaji'; })[0].matchedCode, aliasHr.people['orlan veera zhivaji'].code, 'plan: an old spelling carries the employee code of the person it matches');
+      TestAssertEqual_(rmSyncTestNames_(aliasPlan.leavers).sort(), ['Dev Amit', 'G Kumar', 'Mohd Ali Abdul Gaffar', 'Nobody Atall', 'Rina Exitt'],
+        'plan: a name that matches nobody, matches two people, matches only an exited person or only shares a first name stays a possible leaver');
+      TestAssertEqual_(aliasPlan.leavers.filter(function (l) { return l.name === 'Dev Amit'; })[0].similar, ['Dev Amit Sharma', 'Dev Amit Verma'], 'plan: an ambiguous name lists the similar names so a person can decide');
+      TestAssertEqual_([aliasPlan.fixes.length, aliasPlan.needsHuman.length, aliasPlan.newJoiners.length], [0, 0, 0], 'plan: recognising old spellings changes nothing else');
+
+      const before = TestGmailLog_.sent.length;
+      runRmHierarchySyncGs_({ now: RMSYNC_TEST_THU_ });
+      const aliasMail = TestGmailLog_.sent[before];
+      TestAssertContains_(aliasMail.body, 'OLD SPELLINGS OF CURRENT STAFF', 'report: old spellings have their own section');
+      TestAssertContains_(aliasMail.body, 'Orlan Zhivaji (Pune, S1): old spelling of Orlan Veera Zhivaji (H', 'report: the line names the person it matches and their code');
+      const leaverPart = aliasMail.body.slice(aliasMail.body.indexOf('POSSIBLE LEAVERS'), aliasMail.body.indexOf('OLD SPELLINGS OF CURRENT STAFF'));
+      TestAssert_(leaverPart.indexOf('Brisa P Kellow') === -1 && leaverPart.indexOf('Zorbit S 1 Account') === -1 && leaverPart.indexOf('Nobody Atall') !== -1, 'report: an old spelling is not under possible leavers, a real leaver is');
+      TestAssertContains_(leaverPart, 'similar name in the HR sheet: Dev Amit Sharma, Dev Amit Verma', 'report: an ambiguous leaver shows the similar names');
+      TestAssertContains_(aliasMail.subject, '5 for a person to look at', 'report: only the 5 leavers count as work; the 7 old spellings are information');
+      TestAssertEqual_(Object.keys(rmSyncTestState_().items).length, 12, 'report: the 12 listed items are remembered');
+      runRmHierarchySyncGs_({ now: RMSYNC_TEST_FRI_ });
+      TestAssertEqual_(TestGmailLog_.sent.length, before + 1, 'report: the next night nothing is new, so nothing is sent');
+      TestAssertOnlyTestEmails_();
+    }
     TestAssertOnlyTestEmails_();
   } finally {
     lookupEmployeeEmail_ = realLookup;

@@ -3,7 +3,7 @@
 Status: plan written and approved 2026-10-08; built the same day as `RmHierarchySync.gs` + `Tests_RmHierarchySync.gs` (`GS-014`),
 report-only by default, not live until pasted. Decisions taken with Snehil: leavers kept until told (the sheet drops a leaver within ~48h);
 report to Snehil, Sushil Kannojiya, Ashish Ivlekar; first tab only; HR sheet link opened to "Anyone in Homesfy"; `rebuildRmHierarchy()`
-refuses to run once the sync is applying (`rebuildRmHierarchyForce()` overrides). One refinement over the plan below: a flagged stale
+refuses to run once the sync is applying (`rebuildRmHierarchyForce()` overrides). Refinements after the first report: a flagged stale field also shows a suggested value when the whole HR chain resolves cleanly (never written), and a row that is only an old spelling of one current person is listed under "old spellings" instead of as a possible leaver (`GS-014` RULE-042). Original refinement: a flagged stale
 field also shows a suggested value when the whole HR chain resolves cleanly (never written).
 
 ## Goal

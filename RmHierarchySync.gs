@@ -41,6 +41,7 @@ const RMSYNC_MAX_CHANGES_ = 25;     // more writes than this in one night are he
 const RMSYNC_LIST_LIMIT_ = 60;      // lines per report section; the rest is "and N more"
 const RMSYNC_STATE_MAX_CHARS_ = 8000; // a Script Property value is limited to ~9 KB
 
+const RMSYNC_HR_COL_CODE_ = 0; // "New E Code"
 const RMSYNC_HR_COL_NAME_ = 1;
 const RMSYNC_HR_COL_ROLE_ = 2;
 const RMSYNC_HR_COL_TEAM_ = 15;
@@ -86,6 +87,57 @@ function showRmHierarchySyncStatusNow() {
 function rmSyncStr_(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function rmSyncUnique_(list) { return list.filter(function (v, i) { return list.indexOf(v) === i; }); }
 
+// ==================== Near-name matching (old spellings of current staff) ====================
+// The leads sheet and RM_Hierarchy still carry old spellings and labels of people who ARE in the HR sheet ("Atharva P Belose" for
+// "Atharva Belose", "Sourabh Sareen Pnl", "Mamtaben S 1 Account"). Listed as "possible leavers" they drowned the real ones (9 of the first 19).
+// A row that is not in the HR sheet by exact name is recognised as an old spelling when EXACTLY ONE current (not exited) HR person is a near match.
+const RMSYNC_NOISE_TOKENS_ = ['pnl', 'account', 'acct'];
+
+// Comparable tokens of a name: lower case, letters and digits only, no one-letter initials, no numbers, no label words.
+function rmSyncNameTokensGs_(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(function (t) {
+    return t.length > 1 && !/^\d+$/.test(t) && RMSYNC_NOISE_TOKENS_.indexOf(t) === -1;
+  });
+}
+
+// Optimal-string-alignment distance: an insertion, deletion, substitution or swap of two neighbouring letters is one edit.
+function rmSyncEditDistanceGs_(a, b) {
+  const d = [];
+  for (let i = 0; i <= a.length; i++) {
+    d.push([]);
+    for (let j = 0; j <= b.length; j++) d[i].push(i === 0 ? j : (j === 0 ? i : 0));
+  }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+// Two name tokens are the same word spelled differently: short words must match exactly, longer ones may differ by 1 (5-6 letters) or 2 (7+).
+function rmSyncTokenCloseGs_(a, b) {
+  if (a === b) return true;
+  const longest = Math.max(a.length, b.length);
+  const allowed = longest < 5 ? 0 : (longest < 7 ? 1 : 2);
+  return allowed > 0 && rmSyncEditDistanceGs_(a, b) <= allowed;
+}
+
+// Is `rowName` (a name in RM_Hierarchy that the HR sheet does not have) an old spelling of HR person `person`?
+function rmSyncNearNameGs_(rowName, person) {
+  const a = rmSyncNameTokensGs_(rowName);
+  const b = rmSyncNameTokensGs_(person.rawName);
+  if (!a.length || !b.length) return false;
+  if (a.join(' ') === b.join(' ')) return true; // same name apart from initials, numbers and label words
+  const small = a.length <= b.length ? a : b;
+  const big = a.length <= b.length ? b : a;
+  if (small.length >= 2 && big.length <= small.length + 2 && small.every(function (t) { return big.indexOf(t) !== -1; })) return true; // a dropped middle name
+  if (a.length === b.length && a.length >= 2) return a.every(function (t, i) { return rmSyncTokenCloseGs_(t, b[i]); }); // spelling slips
+  // "<First name> S 1 Account": a first name alone, accepted only for a label ending "account" (the caller requires it to be the one match).
+  return /\baccount\s*$/i.test(String(rowName)) && a.length === 1 && b.length >= 2 && b[0] === a[0];
+}
+
 // ==================== Parsing ====================
 
 // values: the HR sheet's rows (row 0 = header). Returns { problems, people, count }. `people` is keyed by normalised name; a person
@@ -108,6 +160,7 @@ function parseHrRosterGs_(values) {
     const emailCell = rmSyncStr_(row[RMSYNC_HR_COL_EMAIL_]);
     const entry = {
       rawName: rawName,
+      code: rmSyncStr_(row[RMSYNC_HR_COL_CODE_]),
       role: rmSyncStr_(row[RMSYNC_HR_COL_ROLE_]),
       team: rmSyncStr_(row[RMSYNC_HR_COL_TEAM_]),
       email: emailCell.indexOf('@') !== -1 ? emailCell : '', // the sheet writes "-" or "NA" for no address
@@ -120,6 +173,7 @@ function parseHrRosterGs_(values) {
       prior.chainNames = rmSyncUnique_(prior.chainNames.concat(entry.chainNames));
       prior.exited = prior.exited || entry.exited;
       if (!prior.email) prior.email = entry.email;
+      if (!prior.code) prior.code = entry.code;
     } else {
       out.people[key] = entry;
     }
@@ -180,8 +234,9 @@ function classifyRmSyncJoinerGs_(person, roleByKey) {
 // hr: parseHrRosterGs_'s result; rows: readRmHierarchyRowsGs_; directory: readManagerDirectoryRowsGs_ (or null when the tab is absent).
 // Returns what the sync would do and what it only reports. Pure: reads and writes nothing.
 function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
-  const plan = { newJoiners: [], newJoinersLow: [], fixes: [], needsHuman: [], leavers: [], emailFills: [], emailChanges: [], directoryAdds: [] };
+  const plan = { newJoiners: [], newJoinersLow: [], fixes: [], needsHuman: [], leavers: [], aliases: [], emailFills: [], emailChanges: [], directoryAdds: [] };
   const people = hr.people;
+  const hrList = Object.keys(people).map(function (k) { return people[k]; });
   const roleByKey = {};
   const nameByKey = {};
   rows.forEach(function (r) { const k = normPersonName_(r.name); roleByKey[k] = r.role.toLowerCase(); nameByKey[k] = r.name; });
@@ -191,7 +246,14 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
   rows.forEach(function (row) {
     if (row.excluded) return; // a person hand-flagged Excluded is left entirely alone
     const person = people[normPersonName_(row.name)];
-    if (!person) { plan.leavers.push({ name: row.name, role: row.role, team: row.team, reason: 'not in the HR sheet' }); return; }
+    if (!person) {
+      // Not in the HR sheet by exact name: an old spelling of ONE current person is not a leaver; zero, several or only-exited matches stay leavers.
+      const near = hrList.filter(function (p) { return rmSyncNearNameGs_(row.name, p); });
+      const current = near.filter(function (p) { return !p.exited; });
+      if (current.length === 1) { plan.aliases.push({ name: row.name, role: row.role, team: row.team, matchedName: current[0].rawName, matchedCode: current[0].code }); return; }
+      plan.leavers.push({ name: row.name, role: row.role, team: row.team, reason: 'not in the HR sheet', similar: near.slice(0, 3).map(function (p) { return p.rawName; }) });
+      return;
+    }
     if (person.exited) { plan.leavers.push({ name: row.name, role: row.role, team: row.team, reason: 'has an Exit date in the HR sheet' }); return; }
     const chainKeys = person.chainNames.map(normPersonName_);
     RMSYNC_FIELDS_.forEach(function (field) {
@@ -208,12 +270,12 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
         else why = 'their one current manager is a ' + (candidateRole || 'person not in RM_Hierarchy') + ', which is not the ' + RMSYNC_FIELD_LABEL_[field] + ' tier';
       }
       if (newValue) {
-        plan.fixes.push({ rowNumber: row.rowNumber, name: row.name, team: row.team, role: row.role, field: field, oldValue: value, newValue: newValue });
+        plan.fixes.push({ rowNumber: row.rowNumber, name: row.name, code: person.code, team: row.team, role: row.role, field: field, oldValue: value, newValue: newValue });
       } else {
         // Not safe to write on its own, but when the WHOLE chain resolves cleanly (every name has a known tier) the report suggests the value.
         const whole = classifyRmSyncJoinerGs_(person, roleByKey);
         const suggestion = whole.confidence === 'HIGH' && whole.fields[field] && normPersonName_(whole.fields[field]) !== normPersonName_(value) ? canon(whole.fields[field]) : '';
-        plan.needsHuman.push({ name: row.name, team: row.team, role: row.role, field: field, oldValue: value, currentChain: person.chainNames.slice(), reason: why, suggestion: suggestion });
+        plan.needsHuman.push({ name: row.name, code: person.code, team: row.team, role: row.role, field: field, oldValue: value, currentChain: person.chainNames.slice(), reason: why, suggestion: suggestion });
       }
     });
   });
@@ -231,7 +293,7 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
       const c = classifyRmSyncJoinerGs_(p.person, roleByKey);
       if (c.confidence !== 'HIGH') return true;
       plan.newJoiners.push({
-        team: p.person.team, role: p.person.role, name: p.person.rawName,
+        team: p.person.team, role: p.person.role, name: p.person.rawName, code: p.person.code,
         tl: c.fields.tl ? canon(c.fields.tl) : '', tm: c.fields.tm ? canon(c.fields.tm) : '',
         rh: c.fields.rh ? canon(c.fields.rh) : '', ch: c.fields.ch ? canon(c.fields.ch) : '',
         email: p.person.email.indexOf('@') !== -1 ? p.person.email : '',
@@ -244,7 +306,7 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
     if (!progressed) break;
   }
   pending.forEach(function (p) {
-    plan.newJoinersLow.push({ name: p.person.rawName, team: p.person.team, role: p.person.role, notes: classifyRmSyncJoinerGs_(p.person, roleByKey).notes });
+    plan.newJoinersLow.push({ name: p.person.rawName, code: p.person.code, team: p.person.team, role: p.person.role, notes: classifyRmSyncJoinerGs_(p.person, roleByKey).notes });
   });
 
   // Manager_Directory: emails for managers, and a row for any manager the directory has never heard of.
@@ -334,7 +396,7 @@ function rmSyncLinesGs_(lines) {
   if (lines.length <= RMSYNC_LIST_LIMIT_) return lines;
   return lines.slice(0, RMSYNC_LIST_LIMIT_).concat(['  ... and ' + (lines.length - RMSYNC_LIST_LIMIT_) + ' more (run showRmHierarchySyncPlanNow in the editor for the full list)']);
 }
-function rmSyncWhoGs_(p) { return p.name + ' (' + [p.team, p.role].filter(Boolean).join(', ') + ')'; }
+function rmSyncWhoGs_(p) { return p.name + ' (' + [p.team, p.role, p.code].filter(Boolean).join(', ') + ')'; }
 
 // The attention items — each has a stable id so a night only reports the NEW ones (the rest come back as a Monday reminder).
 function rmSyncAttentionItemsGs_(plan) {
@@ -346,7 +408,10 @@ function rmSyncAttentionItemsGs_(plan) {
     items.push({ kind: 'joiner', id: 'J|' + normPersonName_(j.name), line: '  * ' + rmSyncWhoGs_(j) + ': new in the HR sheet, not added - ' + j.notes });
   });
   plan.leavers.forEach(function (l) {
-    items.push({ kind: 'leaver', id: 'L|' + normPersonName_(l.name), line: '  * ' + rmSyncWhoGs_(l) + ': ' + l.reason + ' - kept in RM_Hierarchy until you say remove' });
+    items.push({ kind: 'leaver', id: 'L|' + normPersonName_(l.name), line: '  * ' + rmSyncWhoGs_(l) + ': ' + l.reason + ' - kept in RM_Hierarchy until you say remove' + (l.similar && l.similar.length ? ' (similar name in the HR sheet: ' + l.similar.join(', ') + ')' : '') });
+  });
+  plan.aliases.forEach(function (a) {
+    items.push({ kind: 'alias', id: 'A|' + normPersonName_(a.name) + '|' + normPersonName_(a.matchedName), line: '  * ' + rmSyncWhoGs_(a) + ': old spelling of ' + a.matchedName + (a.matchedCode ? ' (' + a.matchedCode + ')' : '') + ' - kept, not a leaver' });
   });
   plan.emailChanges.forEach(function (c) {
     items.push({ kind: 'email', id: 'E|' + normPersonName_(c.name) + '|' + c.hr.toLowerCase(), line: '  * ' + c.name + ': Manager_Directory has ' + c.existing + ', the HR sheet has ' + c.hr + ' - left as it is' });
@@ -398,6 +463,7 @@ function buildRmHierarchySyncReportGs_(info) {
   section('NEEDS A PERSON - a manager field that no longer matches the HR sheet and could not be fixed safely', 'human');
   section('NEEDS A PERSON - new people the sync could not place safely', 'joiner');
   section('POSSIBLE LEAVERS - kept in RM_Hierarchy; tell Claude which to remove', 'leaver');
+  section('OLD SPELLINGS OF CURRENT STAFF - recognised automatically, kept in RM_Hierarchy, nothing to do (check the match is right)', 'alias');
   section('MANAGER EMAIL DIFFERENCES', 'email');
   if (info.reminders.length) {
     body.push('MONDAY REMINDER - still open from earlier nights (' + info.reminders.length + '):');
@@ -414,7 +480,7 @@ function buildRmHierarchySyncReportGs_(info) {
     body.push('');
   }
   if (info.backupUrls.length) body.push('Backup of both tabs before this run: ' + info.backupUrls.join(' , '));
-  const attention = info.newAttention.length;
+  const attention = info.newAttention.filter(function (i) { return i.kind !== 'alias'; }).length; // the old-spelling lines are information, not work
   const subject = 'RM hierarchy sync ' + info.day + ' - ' + info.mode + ': ' + changeCount + ' change(s)' + (attention ? ', ' + attention + ' for a person to look at' : '');
   return { subject: subject, body: body.join('\n') };
 }
@@ -586,7 +652,7 @@ function runRmHierarchySyncGs_(opts) {
     const nextState = { items: nextItems, lastReminderDay: dueReminder ? day : state.lastReminderDay, appliedEver: state.appliedEver || (mode === 'APPLIED' && changeCount + plan.emailFills.length + plan.directoryAdds.length > 0) };
     writeRmSyncStateGs_(nextState);
   }
-  Logger.log('RM hierarchy sync ' + day + ' [' + mode + ']: ' + plan.newJoiners.length + ' new, ' + plan.fixes.length + ' manager change(s), ' + plan.emailFills.length + ' email fill(s), ' + plan.directoryAdds.length + ' directory add(s); ' + newAttention.length + ' new item(s) for a person, ' + outstanding.length + ' still open.');
+  Logger.log('RM hierarchy sync ' + day + ' [' + mode + ']: ' + plan.newJoiners.length + ' new, ' + plan.fixes.length + ' manager change(s), ' + plan.emailFills.length + ' email fill(s), ' + plan.directoryAdds.length + ' directory add(s); ' + plan.aliases.length + ' old spelling(s) recognised; ' + newAttention.length + ' new item(s) listed, ' + outstanding.length + ' still open.');
   return { mode: mode, plan: plan, held: held, newAttention: newAttention, outstanding: outstanding, reminders: reminders, applyProblems: applyResult.problems, recipients: recipients.to };
 }
 
