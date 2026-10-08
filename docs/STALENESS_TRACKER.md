@@ -102,6 +102,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `OpsChecklistRunner.gs` | `c416a01` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `OvernightEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `RmHierarchy.gs` | `d897529` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `RmHierarchySync.gs` | `70f21c4` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `SlaEngine.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 

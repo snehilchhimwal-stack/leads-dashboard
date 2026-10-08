@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (report-only until `enableRmHierarchySyncApplyNow` is run) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `d897529` - created with the nightly HR-roster sync (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `70f21c4` - created with the nightly HR-roster sync (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -146,7 +146,7 @@ Apps Script backend; a time-driven job (23:15 IST) sharing the email jobs' lock,
 
 ## Version / change reference
 
-**2026-10-08** (`d897529`): file created - nightly HR-roster sync, report-only by default; `EmailInfra.gs`
+**2026-10-08** (`d897529`, reordered `70f21c4`): file created - nightly HR-roster sync, report-only by default; `EmailInfra.gs`
 `emailJobScheduleGs_` watches it; `RmHierarchy.gs` `rebuildRmHierarchy` refuses to run once the sync is applying (use
 `rebuildRmHierarchyForce`). **Not live until pasted.**
 
