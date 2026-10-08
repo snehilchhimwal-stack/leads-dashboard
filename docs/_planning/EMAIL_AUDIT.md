@@ -206,6 +206,7 @@ Status column: **D** = already drafted in the working tree (uncommitted; headles
 | P15 | **Per-lead call baseline.** `call_attempts` is a per-lead counter (0 of 1,852 multi-row leads differ across their RM copies); key `_readMovementLogRowsGs_` / `computeSlaFlags_` / the four emailer snapshot lookups and, in the dashboard, `buildTodayCallBaseline` / `lastSnapshotBefore` / `enrichLead` / `noCommentFollowUp` / Stalled Leads by lead id. A merged customer record carries each lead's counter and takes the best per-lead delta. Customer-level uses stay as they are. | F18 | `MovementTracker.gs`, `SlaEngine.gs`, 2 emailers, 4 `js/` files + harness | sibling-lead scenarios in every layer; 8 (`.gs`) + 13 (browser) deliberate regressions caught | `7799e44` |
 | P16 | **`snapshotPeriodic` inside the 30-minute limit.** Single-column `Movement_Log` reads; prefix-delete prune (archive first, full rewrite as the fallback); core capture first and its `Movement_Log_Runs` row right after it; optional phases inside an 840 s budget (a failing prune still fails the run, at the end); `[timing]` lines; `Movement_Log_Runs` +`total_s`/`skipped_phases`; a run record + a watchdog check (stuck / failed / overdue / skipped phases, alerted once per run). | F23 | `MovementTracker.gs`, `EmailInfra.gs` | spy tests on read width / writes / deletes, slow-run and prune-failure end to end; 25 deliberate regressions caught | `7799e44` |
 | P17 | **Comment prunes + failure alerting.** `countCsvRecordsGs_` (quote-aware) replaces the line count in both comment prunes (multi-line comments made them refuse to run for days); every failed snapshot step is emailed once a day, recorded in `Movement_Log_Runs.failed_phases`, and timed in `phase_s`. | found 2026-10-07 on the live data (follow-up to F23) | `Core.gs`, `InteractionHistoryLogger.gs`, `UnmatchedCommentLogger.gs`, `MovementTracker.gs` | multi-line fixtures fail on the old code with the production error text; 10 deliberate regressions caught; e2e scenario 5 | `58ab8e1` |
+| P18 | **Idempotent, verified prune archives; Daily_RM_Issues date integrity.** An identical archive is reused, a failed proof trashes the files it wrote, the ledger row is written after the rows are gone; an undated `Daily_RM_Issues` row is repaired and kept (never archived as `unknown-dates` and deleted); the date columns are re-asserted after every write; observations go to `DAILY_RM_ISSUE_DIAG`, nothing is emailed. | found 2026-10-08 checking the Drive archives (follow-up to P17) | `Core.gs`, `DailyRmIssueLog.gs`, `InteractionHistoryLogger.gs`, `UnmatchedCommentLogger.gs` | +85 assertions; 11 of 12 deliberate regressions caught (the 12th is an equivalent mutation); clean at 00:00:20 IST, 23:59:50 IST and UTC | `78e47f5` |
 
 Out of scope / owner decisions: F24 (history), F25 and the stale untracked folder. F18 and F23 were first left out and then done as P15 and P16 (2026-10-07).
 
@@ -306,6 +307,12 @@ reports; the corrected `Tests_OvernightEmailer.gs` has to be pasted for the live
 count counted CSV lines and a multi-line comment is one record. The failure was only logged. Fixed and the e2e now runs the real
 snapshot over multi-line comment tabs (scenario 5) and over a failing prune (one email, `failed_phases`, run still completes).
 **Why the tests missed it:** every prune fixture had single-line comments.
+
+**P18 (2026-10-08), found while checking the Drive archives after P17:** the failed prunes had left 32 duplicate archives
+(14 + 18) and `Daily_RM_Issues` had been archiving ~600 KB of undated rows a night as `unknown-dates` since 2026-10-02. Fixed as
+above. **Not found:** what blanks the `date` / `captured_at` / `lead_assigned_at` cells (the live tab holds no undated row in the
+morning). The date-integrity checks record what they see in `DAILY_RM_ISSUE_DIAG`; read it with `showDailyRmIssueDiagNow()`
+after the next 22:53 run.
 
 **Not covered - only the live system can show it:** the real speed-up of `snapshotPeriodic` (the platform's 30-minute limit,
 real Sheets read/write cost - the run is expected to take minutes, not measured); real `LockService`, Gmail and Drive

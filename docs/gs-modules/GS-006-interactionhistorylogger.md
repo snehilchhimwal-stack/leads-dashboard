@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: `pruneCommentHistory_` counts CSV records, not lines (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `78e47f5` - email audit P18: `pruneCommentHistory_` archives through `archiveChunksVerifiedGs_` (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -61,7 +61,7 @@ Movement hub fire.
 | FN-214 | `ensureCommentHistorySheet_(ss)` `#L87` | spreadsheet | ensures `Comment_History` exists with the right header | may create/repair the tab | — | FN-212 | specific |
 | FN-215 | `logInteractionHistoryNow()` `#L179` | — | runs FN-212 once by hand | Sheets append | FN-212 | Apps Script editor (manual) | specific |
 | FN-307 | `pruneCommentHistory_(ss)` `#L213` (added 2026-09-29) | a spreadsheet | none | archives (chunked, `COMMENT_HISTORY_ARCHIVE_CHUNK_`) then removes rows older than `COMMENT_HISTORY_RETENTION_DAYS_` (30); no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneCommentHistoryNow` | specific — follows `pruneMovementLog_`'s crash-safety ordering (`GS-008`) exactly |
-| FN-308 | `pruneCommentHistoryNow()` `#L283` (added 2026-09-29) | — | runs FN-307 once by hand | as FN-307 | FN-307 | Apps Script editor (manual) | specific |
+| FN-308 | `pruneCommentHistoryNow()` `#L268` (added 2026-09-29) | — | runs FN-307 once by hand | as FN-307 | FN-307 | Apps Script editor (manual) | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -162,6 +162,8 @@ Verified at `c82ec67`; record created by DOC-029. Added 2026-09-05 — the
 newest scheduled subsystem at the time of the 2026-09-07 audit.
 
 **2026-10-07** (`58ab8e1`, email audit P17): `pruneCommentHistory_`'s archive check now counts records with `countCsvRecordsGs_` (`GS-002` FN-348) instead of `split('\n')` lines. Root cause (found 2026-10-07 on the live data - `Comment_History` held 6,369 rows and `Unmatched_Comments_Log` 2,134 rows past their 30-day retention): the prune proved its Drive archive by counting `split('\n')` lines of the CSV, but a comment containing a line break is ONE record on several lines (the writer quotes it). With 102 multi-line comments the count read 6,518 against 6,369 and the prune threw "Drive archive holds ... but ... were expected - refusing to prune"; the throw was only logged, so nobody was told. The fixtures had only single-line comments. Fixed with `countCsvRecordsGs_` (`GS-002` FN-348). `docs/_planning/EMAIL_AUDIT.md` P17. Its failure is now also emailed to ops by `GS-008`'s `alertSnapshotPhaseFailuresGs_` (FN-349). **Not live until pasted.**
+
+**2026-10-08** (`78e47f5`, email audit P18): `pruneCommentHistory_` archives through `archiveChunksVerifiedGs_` (`GS-002` FN-352): a failed proof trashes the files it wrote, a retry reuses the identical archive, and the `archive_log.csv` row is written only after the rows are gone. A prune archives first, proves the archive, then deletes. When the proof (or a later sheet write) failed, the files it had written stayed in Drive and the next run - 4 a day - wrote another identical copy: 14 extra `Comment_History` and 18 extra `Unmatched_Comments_Log` archives sat in Drive from 2026-10-03. Fixed in `Core.gs` (`FN-350`..`FN-353`): an identical archive is reused, a failed proof trashes the files that call created, and the `archive_log.csv` row is written only after the rows are gone. `docs/_planning/EMAIL_AUDIT.md` P18. **Not live until pasted.**
 
 ## Revalidation trigger
 

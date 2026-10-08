@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-08 against commit `78e47f5` - email audit P18: date integrity (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -159,6 +159,8 @@ The live `Daily_RM_Issues` tab; schema `DAILY_RM_ISSUE_LOG_COLUMNS_`
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-032`.
+
+**2026-10-08** (`78e47f5`, email audit P18): from 2026-10-02 the nightly prune archived ~600 KB of rows whose `date`, `captured_at` and `lead_assigned_at` read back blank, filed as `unknown-dates` (6 files in the Drive `Daily_RM_Issues` archive folder, 2-7 Oct), and deleted them from the tab. The live tab held 1,222 dated rows for 4 nights (4 Oct 2 rows, 5 Oct 41, 6 Oct 674, 7 Oct 505) on 2026-10-08 and no undated row. `GS-003` now repairs undated rows, re-asserts the date columns after every write, and records what it saw in the `DAILY_RM_ISSUE_DIAG` Script Property (`showDailyRmIssueDiagNow()`). Cause not yet identified. Nothing reads this tab.
 
 ## Revalidation trigger
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: `pruneUnmatchedCommentsLog_` counts CSV records, not lines (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `78e47f5` - email audit P18: `pruneUnmatchedCommentsLog_` archives through `archiveChunksVerifiedGs_` (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -65,7 +65,7 @@ Movement hub fire.
 | FN-253 | `clearReviewedUnmatchedCommentsNow()` `#L241` | — | removes rows flagged reviewed | Sheets delete | — | Apps Script editor (manual, after a review pass) | specific |
 | FN-254 | `dedupeUnmatchedCommentsNow()` `#L276` | — | removes duplicate rows caused by the 2026-09-03 Date-coercion bug | Sheets delete | — | Apps Script editor (incident recovery) | specific — **a documented incident-recovery function** |
 | FN-309 | `pruneUnmatchedCommentsLog_(ss)` `#L336` (added 2026-09-29) | a spreadsheet | none | archives (chunked) then removes rows older than `UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_` (30) — REGARDLESS of `reviewed`; no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneUnmatchedCommentsLogNow` | specific — re-inserts checkboxes on the `reviewed` column after rewriting, same discipline as FN-253 |
-| FN-310 | `pruneUnmatchedCommentsLogNow()` `#L408` (added 2026-09-29) | — | runs FN-309 once by hand | as FN-309 | FN-309 | Apps Script editor (manual) | specific |
+| FN-310 | `pruneUnmatchedCommentsLogNow()` `#L397` (added 2026-09-29) | — | runs FN-309 once by hand | as FN-309 | FN-309 | Apps Script editor (manual) | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -172,6 +172,8 @@ Movement hub) in `LOGIC_AUDIT.md` Part 1 §1.
 Verified at `c82ec67`; record created by DOC-029.
 
 **2026-10-07** (`58ab8e1`, email audit P17): `pruneUnmatchedCommentsLog_`'s archive check now counts records with `countCsvRecordsGs_` (`GS-002` FN-348). Root cause (found 2026-10-07 on the live data - `Comment_History` held 6,369 rows and `Unmatched_Comments_Log` 2,134 rows past their 30-day retention): the prune proved its Drive archive by counting `split('\n')` lines of the CSV, but a comment containing a line break is ONE record on several lines (the writer quotes it). With 102 multi-line comments the count read 6,518 against 6,369 and the prune threw "Drive archive holds ... but ... were expected - refusing to prune"; the throw was only logged, so nobody was told. The fixtures had only single-line comments. Fixed with `countCsvRecordsGs_` (`GS-002` FN-348). `docs/_planning/EMAIL_AUDIT.md` P17. (This tab: 2,134 expired rows, 7 multi-line, "2148 ... but 2134".) **Not live until pasted.**
+
+**2026-10-08** (`78e47f5`, email audit P18): `pruneUnmatchedCommentsLog_` archives through `archiveChunksVerifiedGs_` (`GS-002` FN-352): a failed proof trashes the files it wrote, a retry reuses the identical archive, and the `archive_log.csv` row is written only after the rows are gone. A prune archives first, proves the archive, then deletes. When the proof (or a later sheet write) failed, the files it had written stayed in Drive and the next run - 4 a day - wrote another identical copy: 14 extra `Comment_History` and 18 extra `Unmatched_Comments_Log` archives sat in Drive from 2026-10-03. Fixed in `Core.gs` (`FN-350`..`FN-353`): an identical archive is reused, a failed proof trashes the files that call created, and the `archive_log.csv` row is written only after the rows are gone. `docs/_planning/EMAIL_AUDIT.md` P18. **Not live until pasted.**
 
 ## Revalidation trigger
 

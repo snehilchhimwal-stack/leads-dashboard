@@ -708,6 +708,23 @@ code*, one bullet per plan step as each lands.
   `Movement_Log` prune itself was not failing - with a 7-day window it simply had nothing expired when last run. The first run
   after the paste archives and removes the ~8,500 expired comment rows. Earlier failed attempts probably left duplicate archive
   CSVs in the Drive archive folders (harmless).
+- **P18 — duplicate prune archives stopped; `Daily_RM_Issues` never drops a row for lack of a date (2026-10-08).**
+  *Duplicates:* a prune archives, proves the archive, then deletes. When the proof or a later sheet write failed, the files stayed in
+  Drive and the next run (4 a day) wrote another identical copy - 32 extra archives sat in Drive from 2026-10-03 (14 in
+  `Comment_History`, 18 in `Unmatched_Comments_Log`; moved to the Drive trash 2026-10-08). Now `archiveRowsToDriveCsv_` reuses an
+  identical existing file, `archiveChunksVerifiedGs_` (`Core.gs`) proves the archive and trashes the files it just made if the proof
+  fails, and the `archive_log.csv` row is written only after the rows are gone. Used by the `Comment_History`,
+  `Unmatched_Comments_Log` and `Daily_RM_Issues` prunes; `Movement_Log` gets the reuse through the shared writer.
+  *`unknown-dates`:* from 2026-10-02 every nightly `Daily_RM_Issues` archive (~600 KB) was filed `unknown-dates` - the `date`,
+  `captured_at` and `lead_assigned_at` cells of those rows read back blank and the prune compared a blank date as older than the
+  window, so it archived and deleted them. Nothing reads this tab (the dashboard moved to `Movement_Log` on 2026-09-05), so there
+  was no user-visible effect, only a thin, undated audit trail. **The cause of the blanking is not identified** (the tab holds no
+  undated row in the morning). Fix: an undated row is given a date (its `captured_at`, else the next dated row's, else the previous
+  one's, else today's) and written back instead of being dropped; the date columns are read back after the capture write and the
+  prune rewrite and re-written (as text if a plain re-write still reads blank); the prune writes kept rows first, clears only the
+  tail, and proves its archive before deleting. Nothing is emailed - what was seen goes to the `DAILY_RM_ISSUE_DIAG` Script Property
+  (`showDailyRmIssueDiagNow()`). The 6 existing `unknown-dates` archives cannot be re-dated from the files; nights still in
+  `Movement_Log` (1 Oct onward) can be rebuilt with `backfillOneDayFromMovementLog_`, which skips a day that already has a dated row.
 - **P7 — log rows written once, same-address buckets merged, a truthful "already sent" label, no
   duplicate `Lead_Followups` rows.** Four small defects, one change each:
   (1) *Once-only log appends (F10).* Every `Overnight_Log` / `AllIssues_Log` append runs inside a retry
