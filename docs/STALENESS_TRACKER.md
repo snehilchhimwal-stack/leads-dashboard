@@ -93,7 +93,7 @@ snippet text itself is the same every time — only the embedded payload changes
 |---|---|---|---|
 | `AllIssuesEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `Core.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `DailyRmIssueLog.gs` | `80a1768` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `EmailInfra.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
 | `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
@@ -241,6 +241,19 @@ One line per sweep: date — what was found — what was fixed / left open.
   employee table is the 30th). Live `runAllTests()`: 2049 passed, 0 failed across 14 files. **Verify after the 22:53 IST `captureDailyRmIssues`:**
   no `unknown-dates` file in the Drive `Daily_RM_Issues` archive folder, `showDailyRmIssueDiagNow()`, and whether the 7 Oct rows kept their
   `lead_assigned_at` (505 of 505 on 8 Oct morning).
+- 2026-10-08 — **email audit P18b + P18c deployed** (`1cd1cfa`: `lead_assigned_at` refill after every prune; the three date columns written
+  as text, one write per column). `DailyRmIssueLog.gs` and `Tests_DailyRmIssueLog.gs` re-pasted, saved by Snehil, hash-matched live
+  (`df38b3d0ebe993da` / `32d1324393ff4442`), all 30 files re-read (29 at HEAD). Live `runAllTests()`: 2096 passed, 0 failed across 14 files.
+  Live runs the same day: `refillDailyRmIssueAssignedAtNow()` was stopped from the Executions page after ~7 minutes (the per-run persist,
+  since reworked to one span write); `pruneDailyRmIssueLogNow()` took ~38 s - it gave 4,248 undated rows a date from their neighbours
+  (rows 8,876 in all), found 332 rows with no `lead_assigned_at` source anywhere, and logged no `prune-rewrite` entry (the read-back found
+  nothing blank). **Verify after the 22:53 IST `captureDailyRmIssues` (the first run on the text writes):** its run time (was 177-1,270 s;
+  limit 30 min), `showDailyRmIssueDiagNow()` (a `capture-write` entry means the loss still happens), no `unknown-dates` file in the Drive
+  archive folder, and the workbook cell total (5.37M of 10M before; the `Daily_RM_Issues` grid is 13,877 rows x 26 cols).
+  **Unintended live run, same day:** at 12:09-12:11 IST an attempt to run `showDailyRmIssueDiagNow()` from the editor executed the
+  capture instead (log: "Captured 3512 flagged lead(s) across 206 RM(s) for 2026-10-08", no `capture-write` entry, i.e. the text write-back
+  found nothing blank). So `Daily_RM_Issues` already holds a midday 3,512-row set dated 2026-10-08, and the capture's idempotency guard will
+  make the 22:53 run skip ("already has rows dated today") unless those rows are removed first - decision with Snehil.
 
 ## Current status
 
