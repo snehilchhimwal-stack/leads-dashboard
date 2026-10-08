@@ -242,18 +242,19 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013 | DATA-005, GS-010, SHEET-013 | 2026-10-07 (`7799e44`) |
-| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013 | 2026-10-08 (`78e47f5`) |
+| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014 | 2026-10-08 (`78e47f5`) |
 | GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-004, GS-008, GS-012, SHEET-001, SHEET-002, SHEET-003 | DATA-002, SHEET-003 | 2026-10-08 (`1cd1cfa`) |
-| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, SHEET-012 | 2026-10-07 (`7799e44`) |
+| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, GS-014, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, SHEET-012 | 2026-10-08 (`(pending commit)`) |
 | GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | DATA-003, GS-001, GS-006, GS-010, GS-012, GS-013, SHEET-010 | 2026-09-30 (`c82ec67`) |
 | GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-009 | DATA-003, GS-008, SHEET-009 | 2026-10-08 (`78e47f5`) |
 | GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none | 2026-09-30 (`6e4c904`) |
 | GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-10-07 (`58ab8e1`) |
 | GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Closed + Monitored | EXT-002, GS-002, GS-004, GS-008, GS-011, SHEET-002, SHEET-006, SHEET-007, SHEET-018 | none | 2026-10-07 (`c416a01`) |
 | GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | DATA-002, EXT-002, GS-001, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, SHEET-001, SHEET-002, SHEET-004, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-014 | DATA-003, SHEET-004, SHEET-013, SHEET-014 | 2026-10-07 (`7799e44`) |
-| GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, SHEET-006, SHEET-007 | 2026-10-07 (`c416a01`) |
+| GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, GS-014, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, GS-014, SHEET-006, SHEET-007 | 2026-10-08 (`(pending commit)`) |
 | GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Closed + Monitored | GS-002, GS-004, GS-005 | DATA-002, DATA-004, GS-001, GS-003, GS-008, GS-010 | 2026-10-07 (`7799e44`) |
 | GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-010 | DATA-003, GS-008, SHEET-010 | 2026-10-08 (`78e47f5`) |
+| GS-014 | GS- | RmHierarchySync | `RmHierarchySync.gs` | Closed + Monitored | GS-002, GS-004, GS-011, SHEET-006, SHEET-007 | GS-004, GS-011 | 2026-10-08 (`(pending commit)`) |
 
 `RmHierarchy.private.gs` is **not** cataloged — gitignored, real employee
 emails, never in this repo (`DOC-007`).
@@ -267,8 +268,8 @@ emails, never in this repo (`DOC-007`).
 | SHEET-003 | SHEET- | Daily_RM_Issues | Google Sheet | Closed + Monitored (lifecycle 7d confirmed; DOC-038: IMPORTANT / operational) | DATA-002, EXT-001, GS-003, SHEET-001, SHEET-002 | GS-003, JS-022, TAB-004 | 2026-10-08 (`1cd1cfa`) |
 | SHEET-004 | SHEET- | Lead_Followups | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: CRITICAL / comment-text) | EXT-001, GS-010, JS-018, SHEET-001 | DATA-003, DATA-005, GS-007, GS-010, JS-016, JS-018, JS-021, TAB-003, TAB-007 | 2026-10-05 (`6acea29`) |
 | SHEET-005 | SHEET- | SLA_History | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / operational) | DATA-002, DATA-004, EXT-001, GS-008, JS-018, SHEET-002 | GS-008, JS-004, JS-018, JS-024, TAB-008 | 2026-09-10 (`c82ec67`) |
-| SHEET-006 | SHEET- | RM_Hierarchy | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: CRITICAL / EMPLOYEE-DATA) | EXT-001, GS-011, RM_HIERARCHY_RAW_ (GS-011), RmHierarchy.private.gs (opt) | GS-001, GS-004, GS-009, GS-010, GS-011, JS-008, JS-013, JS-022, SHEET-007, TAB-004 | 2026-10-07 (`c416a01`) |
-| SHEET-007 | SHEET- | Manager_Directory | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: CRITICAL / EMPLOYEE-DATA) | EXT-001, GS-011, SHEET-006 | GS-001, GS-004, GS-009, GS-010, GS-011 | 2026-09-10 (`c82ec67`) |
+| SHEET-006 | SHEET- | RM_Hierarchy | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: CRITICAL / EMPLOYEE-DATA) | EXT-001, GS-011, RM_HIERARCHY_RAW_ (GS-011), RmHierarchy.private.gs (opt) | GS-001, GS-004, GS-009, GS-010, GS-011, GS-014, JS-008, JS-013, JS-022, SHEET-007, TAB-004 | 2026-10-07 (`c416a01`) |
+| SHEET-007 | SHEET- | Manager_Directory | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: CRITICAL / EMPLOYEE-DATA) | EXT-001, GS-011, SHEET-006 | GS-001, GS-004, GS-009, GS-010, GS-011, GS-014 | 2026-09-10 (`c82ec67`) |
 | SHEET-008 | SHEET- | Daily_Cohort_History | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / operational) | DATA-004, EXT-001, GS-008, JS-018, SHEET-002 | GS-008, JS-018, JS-024, TAB-008 | 2026-09-10 (`c82ec67`) |
 | SHEET-009 | SHEET- | Comment_History | Google Sheet | Closed + Monitored (retention 30 days since 2026-09-29; DOC-038: LOW / COMMENT-TEXT) | DATA-003, EXT-001, GS-006, GS-008, SHEET-001 | GS-006, GS-008 | 2026-10-07 (`58ab8e1`) |
 | SHEET-010 | SHEET- | Unmatched_Comments_Log | Google Sheet | Closed + Monitored (retention 30 days since 2026-09-29, plus manual clear of reviewed rows; DOC-038: LOW / COMMENT-TEXT) | DATA-003, EXT-001, GS-005, GS-008, GS-013, SHEET-001 | GS-008, GS-013 | 2026-10-07 (`58ab8e1`) |
@@ -332,7 +333,7 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 ## Coverage snapshot (auto-checkable target)
 
 - `JS-` records: 25 / 25 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-025` DOC-028)
-- `GS-` records: 13 / 13 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each)
+- `GS-` records: 14 / 14 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each; `GS-014` RmHierarchySync added 2026-10-08)
 - `TAB-` records: 9 / 9 (DOC-026). `TAB-009` (Opp Monitor) added 2026-09-18 — `Record Status: Validated` (backfilled with real live data same day), not yet `Closed + Monitored` (see its own `## Next action`).
 - `SHEET-` records: 18 / 18 (base DOC-032; `## Data Lifecycle` DOC-036; sensitivity + operational-importance DOC-038, all with a stated reason). **Operational importance:** CRITICAL x5 (`leads`, `Movement_Log`, `Lead_Followups`, `RM_Hierarchy`, `Manager_Directory`), IMPORTANT x4 (`Daily_RM_Issues`, `Region_Recipients`, `Overnight_Log`; `Movement_Log` degradations), MEDIUM x2 (`Movement_Log_Runs`, `Feature_Usage` — promoted from LOW 2026-10-03 once `OpsChecklistRunner.gs`'s weekly report started depending on it), LOW x8 (`SLA_History`, `Daily_Cohort_History`, `Comment_History`, `Unmatched_Comments_Log`, `Send_Log`, `AllIssues_Log`, `Opp_Monitor_Period`, `Opp_Monitor_Month`). **Employee data:** `RM_Hierarchy` + `Manager_Directory` (names/emails). **Comment text:** `leads`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`. Retention: 2 confirmed 7d (`Movement_Log`, `Daily_RM_Issues`), 1 append-only-by-design (`Comment_History`), 1 manually-curated (`Unmatched_Comments_Log`), 3 N/A-configuration (`RM_Hierarchy`, `Manager_Directory`, `Region_Recipients`), 1 none-needed-bounded-by-construction (`Feature_Usage` — upsert by key, one row per fixed tracked-component list, never an append-only log), **10 `TBD` — no pruning function found** (`leads`, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, `Send_Log`, `AllIssues_Log`, `Overnight_Log`, `Movement_Log_Runs`, `Opp_Monitor_Period`, `Opp_Monitor_Month`) → `DOC-037`. `SHEET-015` (`Movement_Log_Runs`) added 2026-09-17, closing a `check-catalog.py` check-L gap. `SHEET-016`/`SHEET-017` (`Opp_Monitor_Period`/`Opp_Monitor_Month`) added 2026-09-18, net-new — both `Validated` (backfilled with real July/August 2026 data same day), and **unlike every other `SHEET-` record, have no writer anywhere in this codebase** (populated out-of-band by an external analytics session) — see Seed correction note above the `SHEET-` table. `SHEET-018` (`Feature_Usage`) added 2026-10-03, net-new, `Closed + Monitored` — the dead-code-audit follow-up's client-side runtime-usage-tracking write path (Part 3) plus its reader, `OpsChecklistRunner.gs`'s 30-day stale-component checker (Part 4), both landed the same day.
 - `EXT-` records: 4 / 4 (DOC-033)
@@ -340,7 +341,7 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 - `DATA-` records: 5 / 5 (DOC-034)
 - `FLOW-` records: 2 / 2 (`t-tf-5ad22d8e4c2e`; overlays in `architecture/`)
 - **Component-record set is complete** — 1 `DASH-`, 9 `TAB-`
-  (+ `BTN-001`..`023`), 25 `JS-`, 13 `GS-` (+ `FN-001`..`263`),
+  (+ `BTN-001`..`023`), 25 `JS-`, 14 `GS-` (+ `FN-001`..`263`),
   17 `SHEET-`, 4 `EXT-`, 5 `DATA-`. `test/check-docs-coverage.js`'s
   file-coverage check reports `js/*.js` and `*.gs` as **100% covered**
   (verified in CI).

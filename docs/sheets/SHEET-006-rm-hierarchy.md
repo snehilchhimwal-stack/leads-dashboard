@@ -152,7 +152,7 @@ a confirmed soft-degrade.
 
 - **Depends On:** `GS-011`, `EXT-001`
 - **Used By:** `TAB-004`, `JS-008`, `JS-013`, `JS-022`, `GS-001`,
-  `GS-004`, `GS-009`, `GS-010`, `GS-011`, `SHEET-007`
+  `GS-004`, `GS-009`, `GS-010`, `GS-011`, `GS-014`, `SHEET-007`
 - **Related:** `SHEET-007` (`Manager_Directory`), `SHEET-012`
   (`Region_Recipients`)
 

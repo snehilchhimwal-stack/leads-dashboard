@@ -136,7 +136,7 @@ Part 3 §3.7.
 
 - **Depends On:** `SHEET-006` (`RM_Hierarchy` — the chain it addresses),
   `GS-011`, `EXT-001`
-- **Used By:** `GS-004`, `GS-011`, `GS-001`, `GS-010`, `GS-009`
+- **Used By:** `GS-004`, `GS-011`, `GS-001`, `GS-010`, `GS-009`, `GS-014`
 - **Related:** `SHEET-012` (`Region_Recipients` — the next fallback),
   `RmHierarchy.private.gs` (the file this tab substitutes for)
 

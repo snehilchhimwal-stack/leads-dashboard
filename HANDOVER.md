@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-09-29 (§9.7.3, RM Opp-Conversion join).
+Written 2026-08-31, updated 2026-10-08 (§4.3.4, the nightly RM-hierarchy sync from the HR roster sheet).
 This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
@@ -114,6 +114,7 @@ branch-deploy signature) runs green on `master`;
 | `AllIssuesEmailer.gs` | 17:00 IST daily email covering all 5 Operations SLA checks for Google Non-UTM/Search leads assigned in the last 3 calendar days. **Since 2026-09-24:** also persists a JSON snapshot of what it sent (`issue_snapshot_json`, `AllIssues_Log`) — the state `OvernightEmailer.gs`'s two checkpoints above compare against. |
 | `RmHierarchy.gs` | Resolves each RM's manager chain (A1/TM/RH/CH) from the HR export, so issue emails route to the right specific managers. |
 | `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
+| `RmHierarchySync.gs` | **Added 2026-10-08.** Nightly (~23:15 IST) sync of `RM_Hierarchy` / `Manager_Directory` from the company HR roster sheet — applies the unambiguous changes (once switched on), emails a report of the rest. Report-only until `enableRmHierarchySyncApplyNow()`. See §4.3.4 (`GS-014`). |
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. Since 2026-09-29 also age-prunes (30 days, regardless of review status) alongside the pre-existing manual `clearReviewedUnmatchedCommentsNow()`. |
 | `InteractionHistoryLogger.gs` | Logs every open lead's genuinely NEW owner-logged comment (any outcome) into `Comment_History` — a forward-capture interaction-history dataset, no dashboard reader. Since 2026-09-29 age-prunes at 30 days (was unbounded-by-design before that). |
 | `DailyRmIssueLog.gs` | Nightly (22:50 IST) full-company SLA-issue census — feeds `js/tab-repeat-offenders.js`. Added 2026-09-01. See §9 — this one has real operational quirks (unbounded nightly row growth, a real incident where a run took ~8min and wrote nothing) worth knowing before you're debugging it live. |
@@ -295,6 +296,7 @@ re-running after an edit never leaves a duplicate):
 | `setupDailyRmIssueLog()` | `DailyRmIssueLog.gs` | One daily trigger at 22:50 IST → `captureDailyRmIssues`, plus creates the `Daily_RM_Issues` sheet tab. See §9 for what this actually does and its known quirks. |
 | `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 5 automatable checks (added 2026-10-03: a 30-day stale-dashboard-tab check against `Feature_Usage`). Sends every week regardless of outcome — see §8. |
 | `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). **Since 2026-10-01:** `rebuildRmHierarchy()` (the function this calls under the hood when re-run) now automatically runs `auditUnresolvedRms_`/`auditManagerDirectoryEmailGaps_` at the end of every rebuild and logs the result — see §4.3.2. |
+| `setupRmHierarchySync()` | `RmHierarchySync.gs` | **Added 2026-10-08.** One daily trigger near 23:15 IST → `syncRmHierarchyNightly` (shares the email jobs' lock, run record and the hourly watchdog). Report-only until `enableRmHierarchySyncApplyNow()` is run. See §4.3.4. |
 | `setupLeadFollowupsStalenessFormatting()` | `LeadFollowupsStaleness.gs` | **No trigger** — applies the amber/red conditional formatting to `Lead_Followups` (a row 12h/24h stale on its `updated_at` column). Runs immediately; re-run only if the rule changes (`GS-007`, `LEAD_FOLLOWUPS_STALENESS.md`). |
 
 The **full, source-verified trigger set** (schedules, handlers, timezone
@@ -768,6 +770,37 @@ code*, one bullet per plan step as each lands.
   with Section 1, and the same moment for every bucket. The per-bucket scan of the in-memory rows to
   find the wanted lead ids is unchanged (cheap next to a Sheets read). The 17:00 job already read
   once and is unchanged.
+
+### 4.3.4 Nightly RM-hierarchy sync from the HR roster sheet (2026-10-08)
+
+**Why:** the hierarchy used to be refreshed by hand (export "HR Live", `test/refresh-rm-hierarchy.py`, paste `RmHierarchy.gs`, run
+`rebuildRmHierarchy()`), and that lapsed twice — a new Cluster Head missing for ~13 days, three RMs routed to a manager who had left three
+months earlier. `RmHierarchySync.gs` (`GS-014`) does the unambiguous part of that routine every night and reports the rest.
+Plan and decisions: `docs/_planning/RM_HIERARCHY_NIGHTLY_SYNC.md`.
+
+**What it does:** at ~23:15 IST it opens the HR roster sheet (`RMSYNC_HR_SHEET_ID_`, first tab; the script owner's account needs link
+access — set to "Anyone in Homesfy"), checks the header cells at the fixed positions the Python scripts use (name 1, role 2, team 15,
+exit 17, current chain 6/8/10/12, mail 35 — it stops if they moved or fewer than 250 people are listed), and compares it with the live
+`RM_Hierarchy` / `Manager_Directory` tabs. Auto-applied (when apply is on): new sales-track joiners whose whole chain resolves to known
+tiers; a stale TL/TM/RH/CH when the person's current chain has exactly one name whose role maps to that field; blank manager emails;
+missing managers in `Manager_Directory`. Only reported: everything ambiguous (with a suggested value when the whole chain resolves),
+people it could not place, and **possible leavers — never removed** (someone absent from the HR sheet, or with an Exit date; reported on
+first sight and again each Monday until a person says remove). More than 25 changes in a night are held. Both tabs are backed up to Drive
+(`RM_Hierarchy_sync_backup`, `Manager_Directory_sync_backup`) before any write.
+
+**Report:** emailed to Snehil Chhimwal, Sushil Kannojiya and Ashish Ivlekar (addresses resolved by name from the private employee table,
+else from the person's HR row) on nights with something to say.
+
+**Switching on:** report-only by default — the report says "would be applied". After a few reports look right, run
+`enableRmHierarchySyncApplyNow()`; `disableRmHierarchySyncApplyNow()` turns it off; `showRmHierarchySyncPlanNow()` logs the full plan
+(the email truncates long lists); `showRmHierarchySyncStatusNow()` shows the mode and last run.
+
+**IMPORTANT — `rebuildRmHierarchy()` now refuses to run once the sync is applying** (or has ever applied): the live tab is then the source
+of truth and `RM_HIERARCHY_RAW_` is only the seed, so rebuilding from it would silently undo every synced change. Use
+`rebuildRmHierarchyForce()` to override on purpose. `test/refresh-rm-hierarchy.py` remains for the by-hand path.
+
+**Failure:** a structural problem (no access to the HR sheet, changed layout, tiny roster, missing tab) throws — ops is alerted, Executions
+shows Failed, nothing is written, and the hourly watchdog also flags a night it did not run (`emailJobScheduleGs_`).
 
 ### 4.4 GitHub repo access
 

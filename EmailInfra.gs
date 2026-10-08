@@ -761,11 +761,15 @@ function withEmailJobLockGs_(jobName, fn) {
 const EMAIL_JOB_DEADLINE_MINUTES_ = 30; // a job should have STARTED by its scheduled hour + this many minutes
 const EMAIL_JOB_MAX_RUN_MINUTES_ = 35;  // a run still `running` this long after it started died (Apps Script's cap is 30)
 function emailJobScheduleGs_() {
-  return {
+  const schedule = {
     sendOvernightMorningEmails: { hour: 10, label: '10:00 Overnight + Checkpoint 1 emails' },
     sendOvernightFollowupEmails: { hour: 13, label: '13:00 follow-up replies' },
     sendAllIssuesEmails: { hour: ALL_ISSUES_RUN_HOUR_, label: '17:00 All-Issues emails' },
   };
+  // RmHierarchySync.gs (2026-10-08): the nightly HR-roster sync. Not an email job, but it shares the lock + run record, and a night
+  // it silently does not run is a night the hierarchy keeps drifting. Only watched once that file is part of the project.
+  if (typeof RMSYNC_RUN_HOUR_ !== 'undefined') schedule.syncRmHierarchyNightly = { hour: RMSYNC_RUN_HOUR_, label: '23:15 RM hierarchy sync' };
+  return schedule;
 }
 function emailJobRunKeyGs_(jobName) { return 'EMAIL_JOB_RUN_' + jobName; }
 function emailJobAlertedKeyGs_(jobName) { return 'EMAIL_JOB_ALERTED_' + jobName; }

@@ -52,6 +52,7 @@ const PRODUCTION_FILES = [
   'DailyRmIssueLog.gs',
   'OpsChecklistRunner.gs',
   'LeadFollowupsStaleness.gs',
+  'RmHierarchySync.gs',
 ];
 
 const TEST_FILES = [
@@ -69,6 +70,7 @@ const TEST_FILES = [
   'Tests_DailyRmIssueLog.gs',
   'Tests_OpsChecklistRunner.gs',
   'Tests_LeadFollowupsStaleness.gs',
+  'Tests_RmHierarchySync.gs',
   'Tests_EmailLifecycleFullCycle.gs',
   'Tests_RunAll.gs',
 ];

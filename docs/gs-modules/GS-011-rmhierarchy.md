@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `c416a01` — email audit P13: the leadership Cc addresses are looked up by name from the private employee table (`FN-340`, `CFG-093`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-08 against commit `(pending commit)` - `rebuildRmHierarchy` refuses to run once the nightly HR sync is applying (`GS-014`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -55,15 +55,15 @@ data-rebuild.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L529/#L1005` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
-| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1229` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
-| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L509/#L486/#L1201` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
-| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1210` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
-| FN-244 | `isTopOfOrgRole_(role)` `#L1125` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
-| FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L584/#L549/#L931/#L994` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | `logPostRebuildCoverageAudit_` (FN-246, since 2026-10-01 — see that row) | `setupRmHierarchy` (FN-247), manual | specific |
-| FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` / `logPostRebuildCoverageAudit_(ss)` `#L857/#L909/#L782/#L804/#L712/#L740/#L673` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs, `rebuildRmHierarchy()` (FN-245, automatically, since 2026-10-01) | reusable — **`logPostRebuildCoverageAudit_` (2026-10-01) calls the first two audits above unconditionally at the end of every rebuild, each wrapped in its own try/catch so a read failure logs a note instead of making the rebuild itself look like it failed (`HANDOVER.md` §4.3.2)** |
-| FN-247 | `setupRmHierarchy()` `#L1345` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
-| FN-340 | `alwaysCcEmailsGs_()` `#L1054` / `leadershipEmailByNameGs_(nameLower)` `#L1072` | none / a (lowercase) name | the leadership Cc list — addresses resolved from the private employee table by `LEADERSHIP_NAMES_`, a name with no row SKIPPED (never a blank address) / one leader's address, or `''` | none (pure); an `ALWAYS_CC_EMAILS_` array / `LEADERSHIP_NAME_TO_EMAIL_` object override (tests) is used as is | `resolvedEmailForNameGs_` (`GS-004` FN-338) | `resolveRecipientBucketsForRms_` (the per-bucket leadership Cc + the leadership self-holding path), `resolveRecipientEmailsForRegion_` (`GS-004`, the legacy fallback's Cc), the unresolved-RM audit | reusable — **added 2026-10-07 (email audit P13 / F24)**; replaces direct reads of the two variables |
+| FN-240 | `resolveRmHierarchy_()` / `loadRmHierarchyAndEmails_(ss)` `#L529/#L1017` | — | the name→chain map (+ emails if the private file is present) | reads `RM_Hierarchy` / `Manager_Directory` | `RmHierarchy.private.gs` (optional, `typeof`-guarded), `lookupEmployeeEmail_` (FN-242) | `resolveRecipientBucketsForRms_` (FN-241), the emailers | reusable |
+| FN-241 | `resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData)` `#L1241` | flagged RM names + the chain data | `[{primary, cc, rms}]` — one bucket per manager | reads `Region_Recipients` for a fallback | `lookupRmChain_` (FN-243), `isTopOfOrgRole_` (FN-244), `groupChLevelRmsByCh_` (`GS-004`) | `GS-001`, `GS-010` (via `GS-004`) | reusable — **the routing algorithm**: primary = nearest existing tier in `tl → tm → rh → ch`; a top-of-org person with a fully blank chain diverts to a CH-level backstop, not a normal bucket primary |
+| FN-242 | `lookupEmployeeEmail_(name)` / `normPersonName_(name)` / `stripRoleSuffix_(name)` `#L509/#L486/#L1213` | a name | the email (`''` if the private file is absent) / a normalised name | none | `EMPLOYEE_EMAIL_BY_NAME_RAW_` (from the private file) | FN-240, FN-241 | reusable |
+| FN-243 | `lookupRmChain_(byRmNameLower, rmName)` `#L1222` | the map + an RM name | that RM's `{tl, tm, rh, ch}` chain | none | `stripRoleSuffix_` (FN-242) | FN-241 | reusable |
+| FN-244 | `isTopOfOrgRole_(role)` `#L1137` | a role string | bool — true for `TOP_OF_ORG_ROLES_` = `['cluster head', 'city lead', 'commercial head']` | none | — | FN-241 | reusable — **mirrors `RM_PERF_NON_RM_ROLES`'s top-3 (`JS-008` CFG-020)** |
+| FN-245 | `rebuildRmHierarchy()` / `ensureRmHierarchySheet_(ss)` / `ensureManagerDirectorySheetInternal_(ss, forceRefresh)` / `ensureManagerDirectorySheet_(ss)` `#L588/#L549/#L943/#L1006` | — | rebuilds the sheets from `RM_HIERARCHY_RAW_` | Sheets writes | `logPostRebuildCoverageAudit_` (FN-246, since 2026-10-01 — see that row) | `setupRmHierarchy` (FN-247), manual | specific |
+| FN-246 | `auditUnresolvedRms_(ss)` / `auditUnresolvedRmsNow()` / `auditManagerDirectoryEmailGaps_(ss)` / `auditManagerDirectoryEmailGapsNow()` / `listExcludedRmsNow()` / `clearAllRmHierarchyExclusionsNow()` / `logPostRebuildCoverageAudit_(ss)` `#L869/#L921/#L794/#L816/#L724/#L752/#L685` | spreadsheet | resolution-gap / email-gap reports (console + return value) | none (audits) / clears exclusions (the two `...Now` mutating ones) | FN-240 | `OpsChecklistRunner.gs` (`GS-009`), `OPS_CHECKLIST.md` manual runs, `rebuildRmHierarchy()` (FN-245, automatically, since 2026-10-01) | reusable — **`logPostRebuildCoverageAudit_` (2026-10-01) calls the first two audits above unconditionally at the end of every rebuild, each wrapped in its own try/catch so a read failure logs a note instead of making the rebuild itself look like it failed (`HANDOVER.md` §4.3.2)** |
+| FN-247 | `setupRmHierarchy()` `#L1357` | — | creates `RM_Hierarchy` + `Manager_Directory` (no trigger) | Sheets writes | FN-245 | Apps Script editor; **called by `setupOvernightEmailer()`** | specific |
+| FN-340 | `alwaysCcEmailsGs_()` `#L1066` / `leadershipEmailByNameGs_(nameLower)` `#L1084` | none / a (lowercase) name | the leadership Cc list — addresses resolved from the private employee table by `LEADERSHIP_NAMES_`, a name with no row SKIPPED (never a blank address) / one leader's address, or `''` | none (pure); an `ALWAYS_CC_EMAILS_` array / `LEADERSHIP_NAME_TO_EMAIL_` object override (tests) is used as is | `resolvedEmailForNameGs_` (`GS-004` FN-338) | `resolveRecipientBucketsForRms_` (the per-bucket leadership Cc + the leadership self-holding path), `resolveRecipientEmailsForRegion_` (`GS-004`, the legacy fallback's Cc), the unresolved-RM audit | reusable — **added 2026-10-07 (email audit P13 / F24)**; replaces direct reads of the two variables |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -148,13 +148,13 @@ bug `auditUnresolvedRmsNow()` can't see).
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs` —
+- **Depends On:** `GS-002` (`Core.gs`), `GS-014` (`RmHierarchySync.gs` — `rmHierarchySyncIsActiveGs_`, read by the rebuild guard), `GS-004` (`EmailInfra.gs` —
   `withRetry_`, `passesGoogleNonUtmSearchGs_`; a file-level circular
   reference, harmless in Apps Script's single namespace), `SHEET-006`,
   `SHEET-007`, `SHEET-012`
 - **Used By:** `GS-001`, `GS-004` (`EmailInfra.gs`), `GS-009`
   (`OpsChecklistRunner.gs` — the audit functions), `GS-010`,
-  `SHEET-006`, `SHEET-007`
+  `GS-014` (`RmHierarchySync.gs` — reads `normPersonName_` and the tab constants), `SHEET-006`, `SHEET-007`
 - **Related:** `JS-022` (`tab-repeat-offenders.js` — the separate
   browser read of `RM_Hierarchy`), `JS-008` (`RM_PERF_NON_RM_ROLES`
   overlap)
@@ -342,6 +342,8 @@ bypassed one. Full suite 1232/1232 via `run-gs-tests-headless.py`. Not live unti
 Apps Script editor.
 
 **2026-10-07** (`c416a01`, email audit P13 — `docs/_planning/EMAIL_AUDIT.md` F24): `ALWAYS_CC_EMAILS_` and `LEADERSHIP_NAME_TO_EMAIL_` were literal corporate addresses in this PUBLIC repository. They are now `null`-by-default overrides; the code keeps the leadership NAMES (`LEADERSHIP_NAMES_`, `CFG-093`) and reads the addresses through `alwaysCcEmailsGs_` / `leadershipEmailByNameGs_` (`FN-340`), which look them up from the git-ignored `RmHierarchy.private.gs` (the table this file already depends on). The three direct reads (`resolveRecipientBucketsForRms_` x2, the unresolved-RM audit) now use the accessors. A leader with no row in the private table is skipped, not blanked, and `GS-004`'s watchdog check reports it. +16 lines (1339L -> 1355L; anchors re-mapped). **Not live until pasted.**
+
+**2026-10-08** (`(pending commit)`): `rebuildRmHierarchy(force)` refuses to run (logs why, changes nothing) once the nightly HR-roster sync (`GS-014`) is applying changes - the LIVE tab is then the source of truth and rebuilding from `RM_HIERARCHY_RAW_` would silently undo the synced changes. `rebuildRmHierarchyForce()` overrides it on purpose. `RM_HIERARCHY_RAW_` is now only the seed. **Not live until pasted.**
 
 ## Revalidation trigger
 

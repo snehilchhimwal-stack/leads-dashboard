@@ -170,6 +170,13 @@ nobody separately ran either check after they started appearing in the
       *preserves* emails already on file, it never fills a new manager's
       email in on its own.
 
+
+- [ ] **Nightly RM hierarchy sync report** (`RmHierarchySync.gs`, added 2026-10-08) — the ~23:15 IST report to Snehil, Sushil and
+      Ashish. Check it arrives on nights something changed; read the "NEEDS A PERSON" and "POSSIBLE LEAVERS" lists and tell Claude which
+      leavers to remove (the sync never removes anyone). A subject starting "HELD" means more than 25 changes were pending and nothing was
+      written. An ops alert "syncRmHierarchyNightly failed" means no access to the HR sheet, a changed layout or a missing tab. While it
+      is still report-only (`showRmHierarchySyncStatusNow()`), review 2-3 reports, then run `enableRmHierarchySyncApplyNow()`. Remember
+      `rebuildRmHierarchy()` refuses to run once the sync is applying (`rebuildRmHierarchyForce()` overrides).
 ### Worst-performing-RM identification
 
 - [ ] **`reportRmPerformanceNow()`** (`DailyRmIssueLog.gs`, pre-existing,

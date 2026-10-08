@@ -580,8 +580,17 @@ function ensureRmHierarchySheet_(ss) {
  * human made in the existing sheet — Excluded checkbox and Note, matched
  * by person name (case-insensitive). People no longer in the source table
  * are dropped.
+ *
+ * REFUSES TO RUN once the nightly HR sync (RmHierarchySync.gs) is applying changes (2026-10-08): from then on the LIVE tab, not
+ * RM_HIERARCHY_RAW_, is the source of truth, and rebuilding from the embedded table would silently undo every synced change
+ * (new joiners, manager moves). Run rebuildRmHierarchyForce() to override on purpose.
  */
-function rebuildRmHierarchy() {
+function rebuildRmHierarchy(force) {
+  if (force !== true && typeof rmHierarchySyncIsActiveGs_ === 'function' && rmHierarchySyncIsActiveGs_()) {
+    Logger.log('rebuildRmHierarchy REFUSED: the nightly HR sync is applying changes to the live RM_Hierarchy tab, so rebuilding it from the embedded RM_HIERARCHY_RAW_ would undo them. ' +
+      'Nothing was changed. If you really mean to rebuild from RM_HIERARCHY_RAW_, run rebuildRmHierarchyForce().');
+    return;
+  }
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const headers = ['team', 'role', 'name', 'tl', 'tm', 'rh', 'ch', 'excluded', 'note', 'email'];
 
@@ -645,6 +654,9 @@ function rebuildRmHierarchy() {
   Logger.log('RM_Hierarchy rebuilt: ' + rows.length + ' people. Manager_Directory refreshed (emails preserved).');
   logPostRebuildCoverageAudit_(ss);
 }
+
+// Deliberate override of the refusal above — run from the editor when RM_HIERARCHY_RAW_ really should replace the live tab.
+function rebuildRmHierarchyForce() { rebuildRmHierarchy(true); }
 
 // Runs automatically at the end of every rebuildRmHierarchy() call. Folds
 // the two OPS_CHECKLIST.md "RM hierarchy routing" items that say to run
