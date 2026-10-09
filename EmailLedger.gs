@@ -30,12 +30,14 @@
 // Read-only helper FIRST in the file (the editor's Run button has run the previously selected function before - see HANDOVER).
 // Logs how many bucket emails today's ledger holds per status. Writes nothing.
 // ---- Recovery of failed emails (Email Ops EO-9 / EO-9b; plan decisions D3 and D5; spec rules 4 and 6) ----
-// Today's recoverable emails of ONE job, read from the ledger: [{ emailId, region, bucket, status }]. Only FAILED and BLOCKED - never UNCONFIRMED (it may have
-// been delivered; a second copy is a duplicate) and never an ACCEPTED one. Shared by the 17:00, 10:00 and 13:00 recoveries.
+// Today's recoverable emails of ONE job, read from the ledger: [{ emailId, region, bucket, status }]. FAILED and BLOCKED (the send was refused) and PLANNED (the run
+// died before it reached the bucket: nothing was attempted, so nothing can be duplicated - the recovery runs under the job lock, so a live job's own PLANNED rows are
+// never mistaken for abandoned ones). Never UNCONFIRMED or ATTEMPTING (the send may have gone out; a second copy is a duplicate) and never an ACCEPTED one.
+// Shared by the 17:00, 10:00 and 13:00 recoveries.
 function emailLedgerRecoveryTargetsGs_(ss, now, job) {
   const day = istDayKeyGs_(now);
   return emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, day)
-    .filter(function (r) { return r.job === job && emailLedgerDayKeyOfGs_(r.cycle_day) === day && (r.status === 'FAILED' || r.status === 'BLOCKED'); })
+    .filter(function (r) { return r.job === job && emailLedgerDayKeyOfGs_(r.cycle_day) === day && (r.status === 'FAILED' || r.status === 'BLOCKED' || r.status === 'PLANNED'); })
     .map(function (r) { return { emailId: r.email_id, region: r.region, bucket: r.bucket_label, status: r.status }; });
 }
 
@@ -52,7 +54,7 @@ function emailRecoverBucketsGs_(spec, opts) {
   const now = o.now || new Date();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const targets = emailLedgerRecoveryTargetsGs_(ss, now, spec.job);
-  if (!targets.length) { Logger.log('Recovery: no FAILED or BLOCKED ' + spec.label + ' bucket in today\'s ledger - nothing to re-send.'); return { targets: [], cutoff: false, ran: false }; }
+  if (!targets.length) { Logger.log('Recovery: no FAILED, BLOCKED or never-attempted (PLANNED) ' + spec.label + ' bucket in today\'s ledger - nothing to re-send.'); return { targets: [], cutoff: false, ran: false }; }
   if (!o.force && emailLateCutoffPassedGs_(now, spec.cutoffHour, spec.cutoffMinute)) {
     Logger.log('Recovery: ' + targets.length + ' failed bucket(s) but it is past the late-send cutoff (' + spec.cutoffHour + ':' + pad2Gs_(spec.cutoffMinute) + ' IST) - NOT sent late (decision D5). Use ' + spec.forceName + ' to send them on purpose.');
     return { targets: targets, cutoff: true, ran: false };

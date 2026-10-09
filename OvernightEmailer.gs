@@ -1090,7 +1090,6 @@ function sendOvernightMorningEmails_(opts) {
   // every ledger call below is a no-op and the emails go out exactly as before.
   const ledger = emailLedgerOpenGs_(ss);
   const ledgerJob = EMAIL_LEDGER_JOB_MORNING_;
-  const exLedger = recoverIds ? null : ledger; // a recovery run does not repeat the original run's exclusion rows
 
   // Two-checkpoint email lifecycle redesign (Step 6/11) — yesterday's
   // 17:00 AllIssues_Log rows still awaiting Checkpoint 1, grouped by
@@ -1194,7 +1193,7 @@ function sendOvernightMorningEmails_(opts) {
             unresolvedExclusions.push({ job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: l.lead_id, rm: u.rmName, reason: 'no recipient could be resolved: ' + u.reason });
           });
         });
-        emailLedgerExcludeGs_(exLedger, unresolvedExclusions);
+        emailLedgerExcludeGs_(ledger, unresolvedExclusions);
 
         resolution.results.forEach(function (rec) {
           const rmSet = new Set(rec.rmNames);
