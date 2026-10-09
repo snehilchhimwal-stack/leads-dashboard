@@ -212,18 +212,26 @@ function runEmailSweepTests_() {
       TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /sweepEmailBouncesAndReplies crashed/.test(e.subject); }).length, 1, 'trigger: a crash raises one alert');
       TestAssertEqual_(readEmailJobRunGs_(EMAIL_SWEEP_JOB_).status, 'failed', 'trigger: …and the run record says failed');
 
+      // the sweep never takes the script-wide job lock either
+      TestSW_bind_(TestMockSpreadsheet_({}));
+      TestSW_gmail_([], {});
+      LockService = TestMockLockService_({ denyLock: true });
+      sweepEmailBouncesAndReplies();
+      TestAssertEqual_(LockService._state.tryLockCalls + ',' + LockService._state.getCalls + ',' + readEmailJobRunGs_(EMAIL_SWEEP_JOB_).status, '0,0,completed', 'no lock: the sweep runs and is recorded without ever asking for the script lock');
+      LockService = TestMockLockService_();
+
       ScriptApp = TestMockScriptApp_(['sweepEmailBouncesAndReplies', 'other']);
       setupEmailSweepTrigger();
       const spec = ScriptApp._state.created[0];
-      TestAssertEqual_(ScriptApp._state.created.length + ',' + spec.fnName + ',' + spec.hour + ',' + spec.minute + ',' + spec.tz, '1,sweepEmailBouncesAndReplies,16,10,Asia/Kolkata', 'setup: one daily trigger near 16:10 IST');
+      TestAssertEqual_(ScriptApp._state.created.length + ',' + spec.fnName + ',' + spec.hour + ',' + spec.minute + ',' + spec.tz, '1,sweepEmailBouncesAndReplies,15,45,Asia/Kolkata', 'setup: one daily trigger near 15:45 IST');
       TestAssertEqual_(ScriptApp._state.deleted.join(','), 'sweepEmailBouncesAndReplies', 'setup: only its own earlier trigger is deleted');
 
       PropertiesService = TestMockPropertiesService_(); // no run records: the watchdog sees a sweep that never started
       const sched = emailJobScheduleGs_().sweepEmailBouncesAndReplies;
-      TestAssertEqual_(sched ? sched.hour + ':' + sched.minute + ' ' + sched.label : 'missing', '16:10 16:10 bounce/reply sweep', 'watchdog: the sweep is on the schedule');
-      const late = emailJobProblemsGs_(new Date('2026-10-09T16:45:00+05:30')).filter(function (p) { return p.job === 'sweepEmailBouncesAndReplies'; });
-      TestAssertEqual_(late.length + ',' + (late[0] ? late[0].kind : ''), '1,never_started', 'watchdog: at 16:45 a sweep that did not run is flagged');
-      TestAssertContains_(late[0] ? late[0].detail : '', 'should have started by 16:40 IST', 'watchdog: …with its 16:40 deadline');
+      TestAssertEqual_(sched ? sched.hour + ':' + sched.minute + ' ' + sched.label : 'missing', '15:45 15:45 bounce/reply sweep', 'watchdog: the sweep is on the schedule');
+      const late = emailJobProblemsGs_(new Date('2026-10-09T16:20:00+05:30')).filter(function (p) { return p.job === 'sweepEmailBouncesAndReplies'; });
+      TestAssertEqual_(late.length + ',' + (late[0] ? late[0].kind : ''), '1,never_started', 'watchdog: at 16:20 a sweep that did not run is flagged');
+      TestAssertContains_(late[0] ? late[0].detail : '', 'should have started by 16:15 IST', 'watchdog: …with its 16:15 deadline');
     }
 
     TestAssertOnlyTestEmails_();

@@ -56,9 +56,9 @@ Status: **B** built, **P** partial, **X** outside this system (the Homesfy CRM),
 | 11 | **Immediate post-13:00 audit** | held alert (D2) + the 16:30 report | right after the run | the alert's confirmation line; Incident_Log | any failure in the 13:00 run is emailed once the rest is confirmed sent | yes | B (as the held alert; a separate silent audit pass is Plan) |
 | 12 | 17:00 preparation | `sendAllIssuesEmails_` | 17:00 | ledger rows PLANNED per region in one write | a crash before planning -> CRITICAL, sent at once | n/a | B |
 | 13 | 17:00 validation + send | the send gate, per-lead isolation | 17:00 (watchdog 17:30) | per-bucket status | see phases 4, 5, 9 | yes (per bucket / per lead) | B |
-| 14 | Post-send verification + reconciliation | the ledger, the sweep, the 16:30 report | 16:10 sweep, 16:30 report | `bounce_status`, `reply_status`, `swept_at`; Daily_Report row | bounce -> HIGH alert; PLANNED/ATTEMPTING left over = outcome unknown -> attention | yes | B |
+| 14 | Post-send verification + reconciliation | the ledger, the sweep, the 16:30 report | 15:45 sweep, 16:30 report | `bounce_status`, `reply_status`, `swept_at`; Daily_Report row | bounce -> HIGH alert; PLANNED/ATTEMPTING left over = outcome unknown -> attention | yes | B |
 | 15 | Follow-up scheduling / execution | Checkpoint 1 (10:00) and 2 (13:00) | next day | `AllIssues_Log` checkpoint columns, `Lead_Followups` | a skipped checkpoint -> MEDIUM | yes (per bucket) | P (a follow-up tracker view is Plan) |
-| 16 | Reply / bounce / engagement monitoring | `EmailSweep.gs` | 16:10 daily | the three sweep columns | search fails -> `UNKNOWN`, never "no bounce" | yes | B (opens: not available) |
+| 16 | Reply / bounce / engagement monitoring | `EmailSweep.gs` | 15:45 daily | the three sweep columns | search fails -> `UNKNOWN`, never "no bounce" | yes | B (opens: not available) |
 | 17 | Lead status updates / next action | CRM | - | - | n/a here | - | X |
 | 18 | Exception resolution + recovery | `recoverFailedAllIssuesBucketsNow` | until 18:30 | ledger attempts, SKIPPED reason | still failing -> alert again; past 18:30 -> not sent late | yes | B (17:00 only; 10:00/13:00 Plan) |
 | 19 | End-of-day reconciliation + report | `CycleReport.gs` | 16:30 daily (watchdog 17:00) | the email; `Daily_Report` row | not sent by 17:00 -> CRITICAL watchdog alert | yes | B |
@@ -100,7 +100,7 @@ Missing evidence is never reported as a confirmed failure: it is AMBER/`UNKNOWN`
 | G Immediate post-13:00 audit | a failure is emailed after the run (D2) | automatic | held alert + Incident_Log |
 | H 17:00 preparation | as E | automatic | as E |
 | I 17:00 send + verification | send, per-bucket isolation, ACCEPTED/FAILED; recovery until 18:30 | automatic; **you** run `recoverFailedAllIssuesBucketsNow()` after fixing a cause | ledger, AllIssues_Log |
-| J Follow-up monitoring | bounces and replies (16:10 sweep) | automatic | sweep columns, the report |
+| J Follow-up monitoring | bounces and replies (15:45 sweep) | automatic | sweep columns, the report |
 | K End-of-day reconciliation | **the 16:30 report** | automatic; **you read it** | the email, `Daily_Report` |
 
 Never mark an action complete because it was planned or attempted: a ledger row stays `PLANNED`/`ATTEMPTING` until a result is recorded, and the report counts such rows as unfinished.
@@ -129,7 +129,7 @@ For each issue the alert gives: the lead/email, expected vs actual, severity (In
 
 Before 17:00 (the 16:30 report's "Ready for 17:00?" table): recipient addresses resolve; no held alerts waiting; Leads tab fresh (GREEN) or its AMBER/RED noted.
 At 17:00 (automatic): the Leads tab is read once; flagged leads become buckets per region; each bucket is PLANNED, then ATTEMPTING, then ACCEPTED/FAILED/UNCONFIRMED/BLOCKED; defective leads are dropped individually and recorded; the same-day re-run guard stops a region being sent twice.
-After 17:00: failures arrive as one held alert; fix the cause and run `recoverFailedAllIssuesBucketsNow()` before 18:30; next day 16:10 the sweep records bounces and replies; 16:30 the report reconciles planned vs accepted vs failed vs left out.
+After 17:00: failures arrive as one held alert; fix the cause and run `recoverFailedAllIssuesBucketsNow()` before 18:30; next day 15:45 the sweep records bounces and replies; 16:30 the report reconciles planned vs accepted vs failed vs left out.
 
 The reconciliation numbers (all in the report, each with numerator and denominator): planned, accepted by Gmail, skipped, failed, unconfirmed, blocked, unfinished, leads sent, leads left out (with reasons), bounced, replies, incidents.
 There is no "delivered" number and no "opened" number, by design.
@@ -197,8 +197,8 @@ Duplicates are prevented by deterministic email ids (a re-run finds its own row)
 |---|---|---|---|---|---|
 | 10:00 / 13:00 / 17:00 emails | `atHour(10/13/17).nearMinute(0)` | Leads tab, hierarchy | managers | gate; `withSendRetry_` only for a definite refusal; never an ambiguous one | yes, per bucket |
 | Held alerts | inside those jobs | Incident_Log | Snehil, after the run | released by the watchdog after 45 min if the run died | yes |
-| Bounce / reply sweep | 16:10 daily | ledger + Gmail search/threads | Snehil on a new bounce | a failed search -> `UNKNOWN`, retried next day | yes |
-| Cycle report | 16:30 daily | the three evidence tabs, Leads tab | Snehil (every day) | a crash alerts at once and re-throws; the watchdog flags a missing report from 17:00 | yes |
+| Bounce / reply sweep | 15:45 daily (no job lock) | ledger + Gmail search/threads | Snehil on a new bounce | a failed search -> `UNKNOWN`, retried next day | yes |
+| Cycle report | 16:30 daily (no job lock) | the three evidence tabs, Leads tab | Snehil (every day) | a crash alerts at once and re-throws; the watchdog flags a missing report from 17:00 | yes |
 | Recovery | manual `recoverFailedAllIssuesBucketsNow()` | ledger FAILED/BLOCKED | Snehil if still failing | until 18:30; `...ForceNow` overrides on purpose | yes |
 | Watchdog | hourly | run records | Snehil | one alert per job per day per problem | - |
 

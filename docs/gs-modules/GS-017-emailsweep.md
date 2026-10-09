@@ -29,7 +29,7 @@ reported as delivered, and a bounce Gmail does not file as a mailer-daemon messa
 ## Trigger schedule
 
 `setupEmailSweepTrigger()` installs ONE trigger for `sweepEmailBouncesAndReplies`: `atHour(16).nearMinute(10).everyDays(1)` in `Asia/Kolkata`, run
-through `withEmailJobLockGs_` and watched by the hourly watchdog (`emailJobScheduleGs_`, deadline 16:40).
+with a run record (`runEmailJobTrackedGs_`) - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip) - and watched by the hourly watchdog (`emailJobScheduleGs_`, deadline 16:15).
 
 ## Requires `setupXxx()` re-run when
 
@@ -43,7 +43,7 @@ First install (run `setupEmailSweepTrigger()` once after pasting) and whenever `
 | FN-400 | `emailSweepMatchBounceGs_(row, bounces)` | a ledger row, `[{at, subject, body}]` | the bounce that belongs to it, or null | none (pure) | `emailSweepAddressesGs_` | FN-402 | specific - RULE-052 |
 | FN-401 | `emailSweepRepliesGs_(row, messages, ownAddress)` / `emailSweepIsOwnGs_` / `emailSweepIsBounceSenderGs_` | a ledger row, `[{from, date}]` | `{count, latest}` | none (pure) | - | FN-402 | specific |
 | FN-402 | `sweepEmailBouncesAndReplies_(opts)` / `emailSweepFetchBouncesGs_` / `emailSweepFetchThreadGs_` / `emailSweepReadRowsGs_` | `{now, maxRunMs}` | `{checked, bounced, replied, newBounces, unswept, errors}` | reads Gmail; one write to `Email_Ledger`; one ops alert for new bounces | `emailLedgerReadRowsGs_` (`GS-015`), `notifyOpsAlertGs_`, `writeUnlessTestModeGs_` (`GS-004`) | FN-403 | specific - RULE-053 |
-| FN-403 | `sweepEmailBouncesAndReplies()` / `sweepEmailBouncesAndRepliesNow()` / `setupEmailSweepTrigger()` / `showEmailSweepPlanNow()` | - | - | the lock + run record; a crash alerts ops at once and re-throws; trigger install; a read-only count in the log | `withEmailJobLockGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
+| FN-403 | `sweepEmailBouncesAndReplies()` / `sweepEmailBouncesAndRepliesNow()` / `setupEmailSweepTrigger()` / `showEmailSweepPlanNow()` | - | - | the run record (no job lock); a crash alerts ops at once and re-throws; trigger install; a read-only count in the log | `withEmailJobLockGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
@@ -57,7 +57,7 @@ First install (run `setupEmailSweepTrigger()` once after pasting) and whenever `
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-113 | `EMAIL_SWEEP_HOUR_`, `EMAIL_SWEEP_MINUTE_`, `EMAIL_SWEEP_LOOKBACK_DAYS_`, `EMAIL_SWEEP_MIN_AGE_MINUTES_`, `EMAIL_SWEEP_MAX_RUN_MS_`, `EMAIL_SWEEP_QUICK_BOUNCE_MS_`, `EMAIL_SWEEP_BOUNCE_QUERY_`, `EMAIL_SWEEP_OWN_NAME_` | `16`, `10`, `3`, `30`, `270000`, 15 minutes, `from:(mailer-daemon OR postmaster) newer_than:3d`, `homesfy lead ops` | when it runs and what it looks at; how our own messages are told apart (the display name every send uses) | the trigger (re-run `setupEmailSweepTrigger`), the watchdog deadline, what counts as a bounce or a reply |
+| CFG-113 | `EMAIL_SWEEP_HOUR_`, `EMAIL_SWEEP_MINUTE_`, `EMAIL_SWEEP_LOOKBACK_DAYS_`, `EMAIL_SWEEP_MIN_AGE_MINUTES_`, `EMAIL_SWEEP_MAX_RUN_MS_`, `EMAIL_SWEEP_QUICK_BOUNCE_MS_`, `EMAIL_SWEEP_BOUNCE_QUERY_`, `EMAIL_SWEEP_OWN_NAME_` | `15`, `45`, `3`, `30`, `270000`, 15 minutes, `from:(mailer-daemon OR postmaster) newer_than:3d`, `homesfy lead ops` | when it runs and what it looks at; how our own messages are told apart (the display name every send uses) | the trigger (re-run `setupEmailSweepTrigger`), the watchdog deadline, what counts as a bounce or a reply |
 
 ## Exceptions - `EXC-XXX` sub-table
 
@@ -97,7 +97,7 @@ N/A - backend.
 
 ## Architecture relationship
 
-Apps Script backend; a time-driven job (16:10 IST) sharing the email jobs' lock, run record and watchdog.
+Apps Script backend; a time-driven job (15:45 IST) with a run record watched by the hourly watchdog, and no job lock.
 
 ## Related documentation
 
@@ -122,6 +122,8 @@ Apps Script backend; a time-driven job (16:10 IST) sharing the email jobs' lock,
 ## Version / change reference
 
 **2026-10-09** (`c18d89f`): file created - Email Ops EO-5. `EmailLedger.gs` gained `emailLedgerReadRowsGs_` / `EMAIL_LEDGER_JOB_LABELS_` (moved from `CycleReport.gs`); `CycleReport.gs` shows a "Bounces and replies" section and lists bounced emails under "Needs attention"; `emailJobScheduleGs_` lists the sweep. **Not live until pasted.**
+
+**2026-10-09** (`(pending commit)`, Email Ops review): moved from 16:10 to 15:45 so it reliably finishes before the 16:30 report, and the entry point uses `runEmailJobTrackedGs_` instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
 ## Revalidation trigger
 

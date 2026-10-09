@@ -23,7 +23,7 @@ cannot see (delivery and opens cannot be seen from Apps Script; bounces and repl
 - Compute the cycle window: 16:30 of the previous IST day up to now (`cycleReportWindowGs_`).
 - Turn ledger / exclusion / incident rows into counts and lists (`cycleReportDataGs_`, pure) and then into the email (`cycleReportRenderGs_`, pure).
 - Send ONE email to `opsAlertEmailGs_()` only, once per IST day (`sendEmailCycleReport_`); `sendEmailCycleReportNow()` sends again on purpose.
-- Run through the email jobs' lock and run record so the hourly watchdog alerts when it did not run by 17:00 (`emailJobScheduleGs_`, `GS-004`).
+- Keep a run record so the hourly watchdog alerts when it did not run by 17:00 (`emailJobScheduleGs_`, `GS-004`) - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip).
 
 ## Trigger schedule
 
@@ -42,7 +42,7 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 | FN-394 | `cycleReportInWindowGs_` / `cycleRateGs_` | a value and the window / two counts | a window test; "n of d (p%)" | none (pure) | — | FN-395, FN-396 | specific (the row reader and the job labels now live in `GS-015`, FN-398) |
 | FN-395 | `cycleReportDataGs_(input)` / `cycleReportRenderGs_(data, now)` | ledger / exclusion / incident rows + config problems | the counts and lists; `{subject, html, plainBody}` | none (pure) | `renderOvernightReportEmailHTML_`, `plainTextReportGs_` (`GS-004`) | FN-396 | specific - RULE-049 |
 | FN-396 | `buildEmailCycleReportGs_(ss, now)` / `sendEmailCycleReport_(opts)` | the workbook, the time | the built report; sends it | reads the three evidence tabs; one email; records the sent day in a Script Property | `sendGuardedEmailGs_`, `opsAlertEmailGs_`, `emailConfigProblemsGs_` (`GS-004`) | FN-397 | specific - RULE-050 |
-| FN-397 | `sendEmailCycleReport()` / `sendEmailCycleReportNow()` / `setupEmailCycleReportTrigger()` / `showEmailCycleReportNow()` | - | - | the lock + run record; a crash alerts ops at once and re-throws; trigger install; a read-only preview in the log | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
+| FN-397 | `sendEmailCycleReport()` / `sendEmailCycleReportNow()` / `setupEmailCycleReportTrigger()` / `showEmailCycleReportNow()` | - | - | the run record (no job lock); a crash alerts ops at once and re-throws; trigger install; a read-only preview in the log | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
 | FN-404 | `cycleFreshnessLevelGs_(ageHours)` / `cycleLeadsFreshnessGs_(ss, now)` | the age in hours / the workbook, the time | GREEN / AMBER / RED; `{level, ageHours, newest, text}` (UNKNOWN when the Leads tab cannot be read or has no assignment times) | reads the Leads tab (`readLeadsTab_`, `GS-004`) | `getVal_` (`GS-002`) | FN-396 | specific - RULE-054 |
 | FN-405 | `cycleReportRecordDailyGs_(ss, data, now)` | the workbook, the report data, the time | none | upserts today's row in `Daily_Report`; fail-open; TEST MODE writes nothing | `emailLedgerEnsureSheetGs_`, `emailLedgerAppendBlockGs_` (`GS-015`) | FN-396 | specific - RULE-055 |
 
@@ -105,7 +105,7 @@ N/A - backend.
 
 ## Architecture relationship
 
-Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock, run record and watchdog.
+Apps Script backend; a time-driven job (16:30 IST) with a run record watched by the hourly watchdog, and no job lock.
 
 ## Related documentation
 
@@ -136,6 +136,8 @@ Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock,
 **2026-10-09** (`c18d89f`, Email Ops EO-5): the report shows a "Bounces and replies" section from the sweep's columns (`GS-017`), lists a bounced email under "Needs attention" (it counts as accepted by Gmail but is not all clear), and lists replies; the row reader and job labels moved to `GS-015` (FN-398). **Not live until pasted.**
 
 **2026-10-09** (`bc39815`, Email Ops EO-10 / EO-8b): the report also judges the Leads tab's freshness (FN-404, RULE-054, thresholds from decision D4) and stores a `Daily_Report` row per day (FN-405, RULE-055). A stale tab is a warning in the report; nothing is held or blocked. **Not live until pasted.**
+
+**2026-10-09** (`(pending commit)`, Email Ops review): the report entry points use `runEmailJobTrackedGs_` (run record) instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
 ## Revalidation trigger
 

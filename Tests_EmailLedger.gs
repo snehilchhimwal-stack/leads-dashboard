@@ -999,6 +999,57 @@ function runEmailLedgerTests_() {
       }
     }
 
+    // ================= EO-11: the spec's acceptance scenarios that are not covered above =================
+    // ---- (40) a sending-platform outage: every send fails, ONE consolidated alert, nothing is lost, and the whole day is recovered once the platform is back ----
+    {
+      const noon = new Date(istDayKeyGs_(new Date()) + 'T12:00:00+05:30');
+      const w = twoRegionWorld();
+      TestEL_bind_(w);
+      failingGmailFor(null); // every send is refused
+      sendAllIssuesEmails();
+      const led = TestEL_objects_(w.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(led.map(function (r) { return r.status; }).sort().join(','), 'FAILED,FAILED', 'outage: both buckets are on record as FAILED (nothing is lost, nothing claimed sent)');
+      TestAssertEqual_(w.getSheetByName('AllIssues_Log').getLastRow(), 1, 'outage: nothing is logged as sent');
+      const consolidated = TestGmailLog_.sent.filter(function (e) { return /alerts from this run/.test(e.subject); });
+      TestAssertEqual_(consolidated.length, 1, 'outage: the failures reach Snehil as ONE message, not one per bucket');
+      TestAssertContains_(consolidated[0].body.split('\n')[0], '2 failed', 'outage: …whose confirmation says nothing went out');
+      // the platform is back
+      GmailApp = TestMockGmailApp_({});
+      TestGmailLog_.sent.length = 0;
+      const draftsBefore = TestGmailLog_.drafts.length;
+      const res = recoverFailedAllIssuesBuckets_({ now: noon });
+      TestAssertEqual_(res.ran + ',' + res.targets.length, 'true,2', 'outage recovery: both failed buckets are targeted');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 2, 'outage recovery: both emails go out');
+      TestAssertEqual_(TestEL_objects_(w.getSheetByName(EMAIL_LEDGER_SHEET_), L).map(function (r) { return r.status + ':' + r.attempts; }).sort().join(','), 'ACCEPTED:2,ACCEPTED:2', 'outage recovery: both ACCEPTED on their second attempt, no duplicates');
+      TestAssertEqual_(w.getSheetByName('AllIssues_Log').getLastRow(), 3, 'outage recovery: AllIssues_Log now records both');
+      TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /FAILED|BLOCKED/.test(e.subject); }).length, 0, 'outage recovery: no further alert');
+    }
+
+    // ---- (41) an excluded RM (the closest thing to a suppression list here): the lead is never emailed to that RM's chain ----
+    {
+      const w = TestEL_world_(function (header, now) {
+        return [
+          TestEL_leadRow_(header, { lead_id: 'L-EXCL', client_id: 'C-EXCL', RM: 'Test RM Excl', lead_assigned_at: now, rm_is_active: false }),
+          TestEL_leadRow_(header, { lead_id: 'L-OK', client_id: 'C-OK', RM: 'Test RM One', lead_assigned_at: now, rm_is_active: false }),
+        ];
+      });
+      TestEL_bind_(w);
+      sendAllIssuesEmails();
+      const toChain = TestGmailLog_.drafts.filter(function (d) { return d.to === TEST_EMAIL_PRIMARY_ && d.htmlBody.indexOf('L-EXCL') !== -1; });
+      TestAssertEqual_(toChain.length, 0, 'excluded RM: their lead is NOT in any email to the manager chain');
+      const okMail = TestGmailLog_.drafts.filter(function (d) { return d.htmlBody.indexOf('L-OK') !== -1; });
+      TestAssertEqual_(okMail.length, 1, 'excluded RM: the other RM\'s lead is emailed normally (one bad recipient does not stop the rest)');
+      const exclMail = TestGmailLog_.drafts.filter(function (d) { return d.htmlBody.indexOf('L-EXCL') !== -1; });
+      TestAssertEqual_(exclMail.length + ',' + (exclMail[0] ? exclMail[0].to.indexOf(TEST_EMAIL_CH_) !== -1 : ''), '1,true', 'excluded RM: the lead goes only to the CH-level backstop address, in its own email');
+      TestAssert_(exclMail[0] && exclMail[0].htmlBody.indexOf('L-OK') === -1, 'excluded RM: …which does not carry the other RM\'s lead');
+      const led = TestEL_objects_(w.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      const all17 = led.filter(function (r) { return r.job === 'allIssues17'; });
+      const chainRow = all17.filter(function (r) { return JSON.parse(r.lead_ids_json).indexOf('L-OK') !== -1; })[0];
+      const backstopRow = all17.filter(function (r) { return JSON.parse(r.lead_ids_json).indexOf('L-EXCL') !== -1; })[0];
+      TestAssertEqual_(all17.length + ',' + (chainRow ? chainRow.status : '') + ',' + (backstopRow ? backstopRow.status : ''), '2,ACCEPTED,ACCEPTED', 'excluded RM: the ledger has two emails - the chain\'s and the backstop\'s - each ACCEPTED');
+      TestAssert_(chainRow && JSON.parse(chainRow.lead_ids_json).indexOf('L-EXCL') === -1, 'excluded RM: the chain\'s email does not carry the excluded RM\'s lead');
+    }
+
     // ---- (11) the 10:00 / 13:00 jobs are untouched by the gate change (they ignore missingLeadIds) ----
     TestAssertOnlyTestEmails_();
   } finally {

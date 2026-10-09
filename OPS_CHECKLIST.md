@@ -219,7 +219,7 @@ nobody separately ran either check after they started appearing in the
       email reached a final result and no incident above LOW happened in the cycle; `need attention` lists what to look at; `no emails recorded`
       on a working day means the jobs or the ledger did not run (`showEmailJobRunsNow()`, `showEmailLedgerTodayNow()`). If it did not arrive by
       17:00 the watchdog alerts. "Accepted by Gmail" is not "delivered"; "No bounce found" is not proof of delivery either. A `Email BOUNCED` alert (from the
-      16:10 sweep) means a manager did not get an email: fix the address and send it by hand. A `LEADS AMBER/RED` line means the newest lead is over 3 / 5 hours old (the Leads tab refresh is late): check the refresh before 17:00.
+      15:45 sweep) means a manager did not get an email: fix the address and send it by hand. A `LEADS AMBER/RED` line means the newest lead is over 3 / 5 hours old (the Leads tab refresh is late): check the refresh before 17:00.
 
 Since 2026-09-24 this is a **two-checkpoint lifecycle**, not three
 independent sends: 17:00 `AllIssuesEmailer.gs` opens one Gmail thread per

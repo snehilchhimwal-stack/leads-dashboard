@@ -28,8 +28,8 @@ function showEmailSweepPlanNow() {
 }
 
 const EMAIL_SWEEP_JOB_ = 'sweepEmailBouncesAndReplies';
-const EMAIL_SWEEP_HOUR_ = 16;   // IST - before the 16:30 cycle report
-const EMAIL_SWEEP_MINUTE_ = 10; // IST
+const EMAIL_SWEEP_HOUR_ = 15;   // IST - well before the 16:30 cycle report (a nearMinute trigger fires up to 15 minutes either side of its minute)
+const EMAIL_SWEEP_MINUTE_ = 45; // IST
 const EMAIL_SWEEP_LOOKBACK_DAYS_ = 3;
 const EMAIL_SWEEP_MIN_AGE_MINUTES_ = 30; // a bounce arrives within minutes; before this a clean result would prove nothing
 const EMAIL_SWEEP_MAX_RUN_MS_ = 270000;  // stop after 4.5 minutes; what is left is swept next time
@@ -204,9 +204,11 @@ function sweepEmailBouncesAndReplies_(opts) {
   return summary;
 }
 
-// Trigger entry point: the job lock + run record (so the watchdog sees it); a crash alerts ops at once and re-throws.
+// Trigger entry point: the run record (so the watchdog sees it) but deliberately NOT the script-wide job lock - a nearMinute trigger can fire up to 15 minutes either
+// side of its minute, and holding the lock near 17:00 could make the 17:00 job skip its own send. The sweep only reads Gmail and writes the ledger's three sweep
+// columns, which no send ever touches. A crash alerts ops at once and re-throws.
 function sweepEmailBouncesAndReplies() {
-  withEmailJobLockGs_(EMAIL_SWEEP_JOB_, function () {
+  runEmailJobTrackedGs_(EMAIL_SWEEP_JOB_, function () {
     try {
       sweepEmailBouncesAndReplies_();
     } catch (e) {
@@ -218,7 +220,7 @@ function sweepEmailBouncesAndReplies() {
 
 function sweepEmailBouncesAndRepliesNow() { sweepEmailBouncesAndReplies(); }
 
-// One-time setup - ONE daily trigger near 16:10 IST. Safe to re-run: deletes its own earlier trigger first.
+// One-time setup - ONE daily trigger near 15:45 IST. Safe to re-run: deletes its own earlier trigger first.
 function setupEmailSweepTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'sweepEmailBouncesAndReplies') ScriptApp.deleteTrigger(t);

@@ -97,7 +97,7 @@ function runCycleReportTests_() {
     TestAssertContains_(bad.plainBody, 'Left out of emails', 'render: the exclusions table is present');
     TestAssertContains_(bad.plainBody, 'ops address missing', 'render: a recipient-address problem is shown under "Ready for 17:00?"');
     TestAssertContains_(bad.plainBody, '1 held alert(s)', 'render: held alerts are shown');
-    TestAssertContains_(bad.plainBody, 'bounces and replies (the 16:10 sweep has not run yet); delivery and opens cannot be seen from Apps Script', 'render: what is NOT tracked yet is stated, not hidden');
+    TestAssertContains_(bad.plainBody, 'bounces and replies (the 15:45 sweep has not run yet); delivery and opens cannot be seen from Apps Script', 'render: what is NOT tracked yet is stated, not hidden');
     TestAssertEqual_(data.sweep.notSwept + ',' + data.sweep.bounced + ',' + data.sweep.replied, '4,0,0', 'data: with no sweep evidence the four accepted/unconfirmed emails are "not checked yet"');
     TestAssertContains_(bad.plainBody, 'The bounce/reply sweep has not run for these emails yet.', 'render: the bounces section says the sweep has not run');
 
@@ -121,7 +121,7 @@ function runCycleReportTests_() {
       TestAssertContains_(sr.plainBody, 'Replies received (1)', 'sweep render: replies are listed');
       TestAssertContains_(sr.plainBody, 'Chatty', 'sweep render: …by bucket');
       TestAssertContains_(sr.plainBody, 'BOUNCED', 'sweep render: the bounce is in the attention table');
-      TestAssert_(sr.plainBody.indexOf('the 16:10 sweep has not run yet') === -1, 'sweep render: once swept, the "not run yet" note is gone');
+      TestAssert_(sr.plainBody.indexOf('the 15:45 sweep has not run yet') === -1, 'sweep render: once swept, the "not run yet" note is gone');
       TestAssertContains_(sr.plainBody, 'delivery and opens cannot be seen from Apps Script', 'sweep render: …but what Apps Script can never see is still stated');
       TestAssertContains_(sr.plainBody, 'Leads tab freshness | not checked', 'sweep render: with no freshness check supplied the row says not checked');
     }
@@ -293,6 +293,21 @@ function runCycleReportTests_() {
       sendEmailCycleReport();
       sendEmailCycleReportNow();
       TestAssertEqual_(TestGmailLog_.drafts.length, 2, 'trigger: sendEmailCycleReportNow sends again even though today\'s report went out');
+    }
+    {
+      // The report must never take the script-wide job lock: a nearMinute(30) trigger can still be running when the 17:00 job fires (from 16:45), and a lock held
+      // then would make the PRIMARY send skip. It also must not be skipped itself because an email job holds the lock.
+      const ss = TestCR_world_(TestCR_standardLeads_);
+      TestCR_bind_(ss);
+      LockService = TestMockLockService_({ denyLock: true }); // pretend another job holds the lock
+      sendEmailCycleReport();
+      TestAssertEqual_(TestGmailLog_.drafts.length, 1, 'no lock: the report is sent even while another job holds the script lock');
+      TestAssertEqual_(LockService._state.tryLockCalls + ',' + LockService._state.getCalls, '0,0', 'no lock: it never even asks for the script lock, so it can never make the 17:00 job skip');
+      TestAssert_(!TestGmailLog_.sent.some(function (e) { return /SKIPPED/.test(e.subject); }), 'no lock: nothing is raised as skipped');
+      TestAssertEqual_(readEmailJobRunGs_(CYCLE_REPORT_JOB_).status, 'completed', 'no lock: the run is still recorded for the watchdog');
+      sendEmailCycleReportNow();
+      TestAssertEqual_(TestGmailLog_.drafts.length + ',' + LockService._state.tryLockCalls, '2,0', 'no lock: the deliberate re-send does not take the script lock either');
+      LockService = TestMockLockService_();
     }
     {
       // setup installs ONE trigger near 16:30 IST and replaces its own earlier one

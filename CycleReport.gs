@@ -11,7 +11,7 @@
  * THE CYCLE. 16:30 of the previous IST day up to the moment of the report - so a 16:30 run covers yesterday's 17:00 send, today's 10:00 and
  * 13:00 emails and the CH-level reports. A manual run at another time shows the last full cycle plus what has happened since.
  *
- * It runs through the same job lock and run record as the email jobs, and the hourly watchdog alerts when it did not run (emailJobScheduleGs_).
+ * It keeps a run record like the email jobs (the hourly watchdog alerts when it did not run, emailJobScheduleGs_) but does NOT take the script-wide job lock, so it can never make the 17:00 job skip.
  * It sends ONE email to the ops address only (opsAlertEmailGs_), once per day (a re-fire the same day is skipped; sendEmailCycleReportNow()
  * sends again on purpose).
  */
@@ -188,7 +188,7 @@ function cycleReportRenderGs_(data, now) {
       ['Recipient addresses resolve', data.configProblems.length ? data.configProblems.length + ' problem(s): ' + data.configProblems.map(function (p) { return p.detail; }).join(' | ') : 'OK'],
       ['Alerts waiting to be sent', data.heldNow ? data.heldNow + ' held alert(s) - a job may have been killed; the watchdog releases them' : 'none'],
       ['Leads tab freshness', data.freshness ? data.freshness.text : 'not checked'],
-      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 16:10 sweep has not run yet); ') + 'delivery and opens cannot be seen from Apps Script'],
+      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 15:45 sweep has not run yet); ') + 'delivery and opens cannot be seen from Apps Script'],
     ],
   });
 
@@ -299,9 +299,11 @@ function sendEmailCycleReport_(opts) {
   return built;
 }
 
-// Trigger entry point: the job lock + run record (so the watchdog sees it), and a crash alerts ops before re-throwing - same shape as the email jobs.
+// Trigger entry point: the run record (so the watchdog sees it) but deliberately NOT the script-wide job lock - a nearMinute(30) trigger can fire from 16:15 to 16:45,
+// and holding the lock while the 17:00 job (which can fire from 16:45) starts would make the primary send skip. The report only reads, plus its own Daily_Report row.
+// A crash alerts ops before re-throwing - same shape as the email jobs.
 function sendEmailCycleReport() {
-  withEmailJobLockGs_(CYCLE_REPORT_JOB_, function () {
+  runEmailJobTrackedGs_(CYCLE_REPORT_JOB_, function () {
     try {
       sendEmailCycleReport_();
     } catch (e) {
@@ -313,7 +315,7 @@ function sendEmailCycleReport() {
 
 // Sends the report again on purpose (ignores the once-a-day guard).
 function sendEmailCycleReportNow() {
-  withEmailJobLockGs_(CYCLE_REPORT_JOB_, function () { sendEmailCycleReport_({ force: true }); });
+  runEmailJobTrackedGs_(CYCLE_REPORT_JOB_, function () { sendEmailCycleReport_({ force: true }); });
 }
 
 // One-time setup - ONE daily trigger near 16:30 IST. Safe to re-run: deletes its own earlier trigger first.

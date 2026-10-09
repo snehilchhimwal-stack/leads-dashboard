@@ -835,8 +835,8 @@ function emailJobScheduleGs_() {
   if (typeof RMSYNC_RUN_HOUR_ !== 'undefined') schedule.syncRmHierarchyNightly = { hour: RMSYNC_RUN_HOUR_, label: '23:15 RM hierarchy sync' };
   // CycleReport.gs (Email Ops EO-8): the daily 16:30 report to Snehil. A job with a `minute` is due at hour:minute, so its deadline is that plus
   // EMAIL_JOB_DEADLINE_MINUTES_ (17:00 for this one). Only watched once that file is part of the project.
-  // EmailSweep.gs (Email Ops EO-5): the daily 16:10 bounce/reply sweep that feeds the 16:30 report.
-  if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: '16:10 bounce/reply sweep' };
+  // EmailSweep.gs (Email Ops EO-5): the daily 15:45 bounce/reply sweep that feeds the 16:30 report.
+  if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: '15:45 bounce/reply sweep' };
   if (typeof CYCLE_REPORT_HOUR_ !== 'undefined') schedule.sendEmailCycleReport = { hour: CYCLE_REPORT_HOUR_, minute: CYCLE_REPORT_MINUTE_, label: '16:30 cycle report' };
   return schedule;
 }
