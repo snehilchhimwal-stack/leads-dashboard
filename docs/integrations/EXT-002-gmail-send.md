@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `93a120a` — revalidated after Email Ops EO-1a (the send gate names the leads it objects to; no change to the Gmail send itself) |
+| **Last Verified** | 2026-10-09 against commit `0811d3a` - revalidated after the bottom data-freshness notice (email content only; no change to the Gmail send itself) |
 
 ## Purpose / reason to exist
 
@@ -185,6 +185,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-07** `7799e44`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-333`, email audit P16 / F23 — the hourly watchdog also reports the Movement_Log snapshot job through the existing ops-alert send path). How any message is sent, the scopes and the browser grant are unchanged.
 
 **Revalidated 2026-10-09** `b1dbc3a`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-323`/`FN-324`, Email Ops EO-1a). The send gate now also reports WHICH counted leads were absent from a body (`missingLeadIds`), so the 17:00 emailer can drop just those leads and resend the rest; the Gmail send itself, its scopes, recipients and the browser grant are unchanged. The 17:00 job also records each send in a new ledger (`GS-015`), using the `GmailMessage` ids `send()` already returns.
+
+**2026-10-09** (`0811d3a`, Email Ops, decision D6): email CONTENT only - a RED Leads tab adds a bottom "Data freshness notice" section (`GS-004` FN-408). The notice carries no lead ids, so the send-safety gate's lead check is unaffected; the Gmail send path itself is unchanged.
 
 ## Revalidation trigger
 

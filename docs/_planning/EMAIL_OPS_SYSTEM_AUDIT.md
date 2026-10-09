@@ -25,7 +25,7 @@ All twelve files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.
 5. Update the deploy register (`python3 test/match-live-gs.py ... --apply`).
 Rollback: paste the previous versions from git (`git show <sha>:EmailInfra.gs` etc.); the three new tabs can simply be left or hidden.
 
-Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER over 3 h / RED over 5 h; nothing is blocked) and the `Daily_Report` row per day (EO-8b).
+Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER over 3 h / RED over 5 h; nothing is blocked) and the `Daily_Report` row per day (EO-8b). **D6 (2026-10-09): a RED tab never holds an email; every email carries a separate bottom "Data freshness notice" section instead.**
 
 **Not built yet:** EO-3/EO-4 (the silent 13:00 audit pass and the 17:00 pre-send / post-send reconciliation), EO-6 (daily checklist A-K with GREEN/AMBER/RED/GREY), EO-7 (follow-up tracker), EO-9b recovery for the 10:00/13:00 emails (the 17:00 recovery is built: `recoverFailedAllIssuesBucketsNow`).
 
@@ -40,6 +40,7 @@ Also built: EO-11 as acceptance scenarios inside the existing suites (invalid le
 | D3 | Lead-level isolation | **Yes - drop only the defective lead.** The rest of that bucket's email still goes out. A bucket with no valid lead left is recorded as excluded. Every dropped lead is recorded with its reason |
 | D4 | Leads-tab freshness | The tab refreshes about **every other hour, at varying times**; no "last imported" cell exists. Default gate: newest lead evidence older than 3 h on a working day = AMBER, older than 5 h = RED. If the refresh process can write one timestamp cell, the gate becomes exact (a one-cell change on your side; not required) |
 | D5 | Late sends | Default: a blocked 17:00 bucket recovered up to **18:30** is sent late; after that it is recorded "rescheduled" and not sent |
+| D6 | Stale Leads tab | **Decided 2026-10-09:** a RED Leads tab (over 5 h) does NOT hold or block any email. Every email carries a separate "Data freshness notice" section as its last section, and the 16:30 report still lists the tab as AMBER/RED |
 
 Consequences already folded into the parts below: the separate 13:35 / 17:35 / 19:00 emails are gone (their checks still run,
 silently, and feed the 16:30 report); `Email_Ledger_Leads` is now exclusion-only (see section 6); EO-2 also owns the held-alert
@@ -220,7 +221,7 @@ user a manual paste + Ctrl+S; parts inside a wave are built and tested together 
 | **EO-8** | **16:30 cycle report** (previous 17:00 -> today 16:30), always sent to Snehil: the spec's 25 counts and 9 rates with numerator, denominator and period; `Daily_Report` row; readiness section for the coming 17:00 (freshness, config problems, open incidents). Needs a minute field in the watchdog schedule | new `DailyReport.gs` + tests; `EmailInfra.gs` | L | EO-1..7 |
 | **EO-9** | Recovery: `recoverBlockedEmailsNow()` (revalidate -> window check -> send / reschedule -> documented outcome) + ledger-checked retries (consult ledger, classify temporary vs permanent) | `EmailLedger.gs`, emailers | M | EO-1, EO-2 |
 | *Deploy wave 3* | | | | |
-| **EO-10** | Leads-tab freshness gate before 17:00 (D4: AMBER > 3 h, RED > 5 h of newest-lead age on a working day; row-count sanity; duplicate-id check); holds only what depends on the data | `OpsAudit.gs` | M | - |
+| **EO-10** | Leads-tab freshness (D4: AMBER > 3 h, RED > 5 h of newest-lead age). **Not a gate (D6): a RED tab adds a bottom notice to every email; nothing is held** - built; row-count sanity and a duplicate-id check are not built | `OpsAudit.gs` | M | - |
 | **EO-11** | Fault-injection E2E: invalid lead, failed email, duplicate-send risk, data-source outage, platform outage, excluded recipient, delayed follow-up, mixed batch - each mutation-proved, run at awkward clock times/zones | `Tests_EmailOps_E2E.gs` | M | EO-1..9 |
 | **EO-12** | Operating manual (the spec's 14-part output) + `HANDOVER`/`OPS_CHECKLIST`/`docs/` records + deploy register | docs only | M | everything |
 | *Deploy wave 4* | | | | |

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `93a120a` - created (Email Ops EO-8) |
+| **Last Verified** | 2026-10-09 against commit `0811d3a` - the freshness rules moved to `GS-004` (FN-404 is now wrappers; RULE-057 added) |
 
 ## Purpose / reason to exist
 
@@ -43,7 +43,7 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 | FN-395 | `cycleReportDataGs_(input)` / `cycleReportRenderGs_(data, now)` | ledger / exclusion / incident rows + config problems | the counts and lists; `{subject, html, plainBody}` | none (pure) | `renderOvernightReportEmailHTML_`, `plainTextReportGs_` (`GS-004`) | FN-396 | specific - RULE-049 |
 | FN-396 | `buildEmailCycleReportGs_(ss, now)` / `sendEmailCycleReport_(opts)` | the workbook, the time | the built report; sends it | reads the three evidence tabs; one email; records the sent day in a Script Property | `sendGuardedEmailGs_`, `opsAlertEmailGs_`, `emailConfigProblemsGs_` (`GS-004`) | FN-397 | specific - RULE-050 |
 | FN-397 | `sendEmailCycleReport()` / `sendEmailCycleReportNow()` / `setupEmailCycleReportTrigger()` / `showEmailCycleReportNow()` | - | - | the run record (no job lock); a crash alerts ops at once and re-throws; trigger install; a read-only preview in the log | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
-| FN-404 | `cycleFreshnessLevelGs_(ageHours)` / `cycleLeadsFreshnessGs_(ss, now)` | the age in hours / the workbook, the time | GREEN / AMBER / RED; `{level, ageHours, newest, text}` (UNKNOWN when the Leads tab cannot be read or has no assignment times) | reads the Leads tab (`readLeadsTab_`, `GS-004`) | `getVal_` (`GS-002`) | FN-396 | specific - RULE-054 |
+| FN-404 | `cycleFreshnessLevelGs_(ageHours)` / `cycleLeadsFreshnessGs_(ss, now)` | the age in hours / the workbook, the time | GREEN / AMBER / RED; `{level, ageHours, newest, text}` (UNKNOWN when the Leads tab cannot be read or has no assignment times) - thin wrappers since 2026-10-09; the rules are `leadsFreshnessLevelGs_` / `leadsFreshnessFromRowsGs_` (`GS-004` FN-408) | reads the Leads tab (`readLeadsTab_`, `GS-004`) | `leadsFreshnessLevelGs_`, `leadsFreshnessFromRowsGs_` (`GS-004` FN-408) | FN-396 | specific - RULE-054 |
 | FN-405 | `cycleReportRecordDailyGs_(ss, data, now)` | the workbook, the report data, the time | none | upserts today's row in `Daily_Report`; fail-open; TEST MODE writes nothing | `emailLedgerEnsureSheetGs_`, `emailLedgerAppendBlockGs_` (`GS-015`) | FN-396 | specific - RULE-055 |
 
 ## Business rules implemented - `RULE-XXX` sub-table
@@ -53,6 +53,7 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 | RULE-049 | "All clear" needs at least one planned email, none left unfinished/failed/unconfirmed/blocked, and no incident above LOW in the cycle; an empty cycle is "no emails recorded", never all clear. The execution rate is accepted / (planned minus skipped), shown with numerator and denominator. The report lists what it cannot see instead of implying it | FN-395 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` sections 0 and 6 |
 | RULE-050 | One report per IST day (a re-fire is skipped; the sent day is recorded only after a real send; TEST MODE neither honours nor consumes the guard); it goes to the ops address only, with no Cc | FN-396 | - |
 | RULE-054 | The Leads tab is judged from the newest lead assignment time (decision D4: the tab refreshes about every other hour and has no last-imported cell): up to 3 h GREEN, over 3 h AMBER, over 5 h RED. AMBER/RED are attention items (so not all clear) and say the 17:00 emails would describe stale data; a tab that cannot be read or has no times is UNKNOWN and is shown but never raised; times in the future are ignored. It is a warning only - nothing is held or blocked | FN-404 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` D4 |
+| RULE-057 | A RED Leads tab (over 5 h) never holds an email; every email that is sent instead ends with a separate "Data freshness notice" section (the lead tables above it stay complete). AMBER and UNKNOWN add nothing to the emails (the report still shows them). It is judged at the moment of each send (a re-send after the tab refreshed has none), is not part of the send-safety gate's lead check, and is fail-open | `GS-004` FN-408 (built), `GS-001`, `GS-010` (attached) | the emailers pass the same section object through every email builder - no second copy of the rule |
 | RULE-055 | One `Daily_Report` row per IST day: written after the report email was sent, updated (not duplicated) by a re-send the same day; the email never depends on it | FN-405 | - |
 
 ## Config constants - `CFG-XXX` sub-table
@@ -61,7 +62,6 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 |---|---|---|---|---|
 | CFG-110 | `CYCLE_REPORT_HOUR_`, `CYCLE_REPORT_MINUTE_` | `16`, `30` | the report time (IST); also the cycle boundary | the trigger (re-run `setupEmailCycleReportTrigger`), the watchdog deadline, the window |
 | CFG-111 | `CYCLE_REPORT_SENT_PROPERTY_`, `CYCLE_REPORT_MAX_ROWS_` | `EMAIL_CYCLE_REPORT_SENT_DAY`, `30` | the once-a-day record; the per-table row cap | duplicate protection; report length |
-| CFG-114 | `LEADS_FRESH_AMBER_HOURS_`, `LEADS_FRESH_RED_HOURS_` | `3`, `5` | the freshness thresholds in hours | when the report calls the Leads tab AMBER or RED |
 | CFG-115 | `CYCLE_REPORT_DAILY_SHEET_`, `CYCLE_REPORT_DAILY_HEADERS_` | `Daily_Report`, 21 columns | the daily-row tab and its column order | where the daily numbers go; never reorder by hand |
 
 ## Exceptions - `EXC-XXX` sub-table
@@ -138,6 +138,8 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 **2026-10-09** (`bc39815`, Email Ops EO-10 / EO-8b): the report also judges the Leads tab's freshness (FN-404, RULE-054, thresholds from decision D4) and stores a `Daily_Report` row per day (FN-405, RULE-055). A stale tab is a warning in the report; nothing is held or blocked. **Not live until pasted.**
 
 **2026-10-09** (`93a120a`, Email Ops review): the report entry points use `runEmailJobTrackedGs_` (run record) instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
+
+**2026-10-09** (`0811d3a`, Email Ops, decision D6): the freshness rules and thresholds (CFG-114) moved to `EmailInfra.gs` (`GS-004` FN-408); FN-404 is now two thin wrappers over them, behaviour unchanged. The emailers use the same rules to add RULE-057's bottom notice. **Not live until pasted.**
 
 ## Revalidation trigger
 

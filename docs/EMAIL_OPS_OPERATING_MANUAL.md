@@ -31,8 +31,9 @@ proof of delivery, and no report says so.
 | D1 | One report to **Snehil only** at 16:30 every day, covering the cycle since the previous day's 17:00 - sent when everything is fine **and** when it is not |
 | D2 | An error is emailed **after the rest of that job's emails are confirmed sent**, as one message that opens with "N bucket emails handled: A accepted, F failed...". A whole-job failure is sent at once |
 | D3 | Per-lead isolation: **only the defective lead** is dropped; the rest of its bucket still goes |
-| D4 | The Leads tab refreshes about every other hour, at varying times, with no "last imported" cell: judged from the newest lead assignment - over 3 h AMBER, over 5 h RED. A **warning** only |
+| D4 | The Leads tab refreshes about every other hour, at varying times, with no "last imported" cell: judged from the newest lead assignment - over 3 h AMBER, over 5 h RED. A **warning** in the report; a RED tab also adds a bottom notice to every email (D6) |
 | D5 | A failed 17:00 bucket can be re-sent until **18:30 IST**; after that it is not sent late |
+| D6 | A RED Leads tab **never holds an email**; every email ends with a separate red "Data freshness notice" section instead |
 
 Adapted from the specification (it was written for outbound email to leads): the "recipient" is a manager/RM bucket; "suppression" is the `excluded` flag in `RM_Hierarchy`; "follow-up" is
 the Checkpoint 1/2 re-check of yesterday's flagged leads; there is no unsubscribe, no tracking pixel and no email to clients.
@@ -43,7 +44,7 @@ Status: **B** built, **P** partial, **X** outside this system (the Homesfy CRM),
 
 | # | Phase | Owner | Checkpoint | Evidence kept | Failure condition -> severity -> corrective action | Independent? | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | Lead sourcing | CRM / import process | Leads tab refresh ~every 2 h | newest lead assignment time | Leads tab older than 3 h / 5 h -> AMBER/RED warning in the 16:30 report -> check the refresh before 17:00 | yes (warning only) | P (X for the import itself) |
+| 1 | Lead sourcing | CRM / import process | Leads tab refresh ~every 2 h | newest lead assignment time | Leads tab older than 3 h / 5 h -> AMBER/RED warning in the 16:30 report; RED also puts a bottom "Data freshness notice" on every email (nothing is held) -> check the refresh before 17:00 | yes (warning only) | P (X for the import itself) |
 | 2 | Qualification / relevance | `SlaEngine.gs` | each job | the flagged lead and its issue type in the email and the ledger's lead list | a lead flagged wrongly is a rule bug -> MEDIUM -> fix the rule | yes | B |
 | 3 | Entry into CRM / tracking | CRM + Leads tab | continuous | the Leads tab | n/a here | - | X |
 | 4 | Validation / duplicates | `emailLedgerSplitLeadsGs_` | before each 17:00 bucket | `Email_Ledger_Exclusions` row with reason | blank id / over-long id / blank reason for contact / duplicate id -> MEDIUM -> that lead is dropped, the rest goes | yes (per lead) | B (17:00) |
@@ -202,12 +203,14 @@ Duplicates are prevented by deterministic email ids (a re-run finds its own row)
 | Recovery | manual `recoverFailedAllIssuesBucketsNow()` | ledger FAILED/BLOCKED | Snehil if still failing | until 18:30; `...ForceNow` overrides on purpose | yes |
 | Watchdog | hourly | run records | Snehil | one alert per job per day per problem | - |
 
-Human judgement stays with a person: fixing an address or hierarchy row, deciding to re-send an `UNCONFIRMED` email, deciding whether a stale Leads tab should hold the day's emails (open question), and reading the report.
+**Stale Leads tab (D6).** When the newest lead on the Leads tab was assigned more than 5 h ago (RED), the 17:00, 10:00 and 13:00 emails and the CH-level reports are sent as normal, and each ends with a red "Data freshness notice" section (how old the newest lead is; a listed lead may already be handled; check the CRM before acting). AMBER (over 3 h) and UNKNOWN add nothing to the emails; both still show in the 16:30 report. The notice is judged at the moment of each send (a re-send after the tab refreshed has none) and is fail-open: if the check errors, the email goes without it.
+
+Human judgement stays with a person: fixing an address or hierarchy row, deciding to re-send an `UNCONFIRMED` email, and reading the report.
 No notification is claimed sent unless the send path confirmed it: an incident is `HELD`, then `SENT`/`SEND-FAILED`/`RELEASED`.
 
 ## 13. Roadmap
 
-Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-10 freshness warning, EO-11 acceptance scenarios (as tests).
+Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
 Planned: EO-3/EO-4 a separate silent audit pass at 13:35 / 17:35 (the held alert and the report already cover most of it), EO-6 a per-check daily checklist sheet with GREEN/AMBER/RED/GREY cells, EO-7 follow-up tracker view and the stop-after-reply rule, EO-9b recovery for the 10:00/13:00 emails.
 
 ## 14. First five actions
@@ -216,7 +219,7 @@ Planned: EO-3/EO-4 a separate silent audit pass at 13:35 / 17:35 (the held alert
 2. Run `setupEmailCycleReportTrigger()` and `setupEmailSweepTrigger()` once each.
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`.
 4. After the next 17:00 run, run `showEmailLedgerTodayNow()`; next day expect the 16:30 report.
-5. Record the deploy (`python3 test/match-live-gs.py ... --apply`), then answer the open decision: should a RED Leads tab hold the 17:00 emails?
+5. Record the deploy (`python3 test/match-live-gs.py ... --apply`).
 
 ## Appendix - the specification's acceptance scenarios and the tests that prove them
 

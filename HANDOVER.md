@@ -853,8 +853,10 @@ so; delivery and opens cannot be seen from Apps Script at all. After pasting, ru
 
 **Leads-tab freshness and the daily row (EO-10 / EO-8b).** The "Ready for 17:00?" table now shows the Leads tab's freshness, judged from the newest lead assignment time (the tab refreshes about
 every other hour and has no last-imported cell): up to 3 h GREEN, over 3 h AMBER, over 5 h RED (`LEADS_FRESH_AMBER_HOURS_` / `LEADS_FRESH_RED_HOURS_` in `CycleReport.gs`). AMBER or RED is listed
-under "Needs attention" and means the report is not all clear; it is a **warning only** - the 17:00 emails are not held (that would be a decision about every email of the day, not made here).
+under "Needs attention" and means the report is not all clear. The thresholds and the rules now live in `EmailInfra.gs` (`GS-004` FN-408) so every emailer shares them.
 A tab that cannot be read, or has no assignment times, is shown as UNKNOWN. The report also stores one `Daily_Report` row per day (counts, all-clear, freshness) for tracking over time.
+
+**Stale-data notice (decision D6, 2026-10-09).** A RED Leads tab never holds an email. Instead every email that is sent ends with a separate "Data freshness notice" section: the 17:00 bucket and CH-level emails, the 10:00 combined email and CH-level report, and the 13:00 reply. It says how old the newest lead is, that a listed lead may already have been handled, and to check the CRM first. AMBER and UNKNOWN add nothing to the emails (the 16:30 report still shows them). It is judged at the moment of each send (a recovery re-send after the tab refreshed has none), carries no lead ids (the send-safety gate is unaffected) and is fail-open - an error in the check means the email goes without it (`GS-004` EXC-132, `GS-016` RULE-057).
 
 **Bounces and replies (EO-5, `EmailSweep.gs`, `GS-017`).** A daily sweep near 15:45 IST (before the cycle report) looks at the emails Gmail accepted in the last
 3 days (at least 30 minutes old) and fills the ledger's `bounce_status`, `reply_status` and `swept_at`. A **bounce** is matched to an email only when the
