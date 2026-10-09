@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — revalidated after email audit P16 (the watchdog also checks the snapshot job; no change to any Gmail send path) |
+| **Last Verified** | 2026-10-09 against commit `(pending commit)` — revalidated after Email Ops EO-1a (the send gate names the leads it objects to; no change to the Gmail send itself) |
 
 ## Purpose / reason to exist
 
@@ -183,6 +183,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-07** `c416a01`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-338`/`FN-339`, email audit P13). The ops, CH-level and Futwork addresses the backend sends to are now resolved from the private employee table by name instead of read from literals; how any message is sent, the scopes and the browser grant are unchanged.
 
 **Revalidated 2026-10-07** `7799e44`: flagged after `EmailInfra.gs` advanced again (`GS-004` `FN-333`, email audit P16 / F23 — the hourly watchdog also reports the Movement_Log snapshot job through the existing ops-alert send path). How any message is sent, the scopes and the browser grant are unchanged.
+
+**Revalidated 2026-10-09** `(pending commit)`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-323`/`FN-324`, Email Ops EO-1a). The send gate now also reports WHICH counted leads were absent from a body (`missingLeadIds`), so the 17:00 emailer can drop just those leads and resend the rest; the Gmail send itself, its scopes, recipients and the browser grant are unchanged. The 17:00 job also records each send in a new ledger (`GS-015`), using the `GmailMessage` ids `send()` already returns.
 
 ## Revalidation trigger
 

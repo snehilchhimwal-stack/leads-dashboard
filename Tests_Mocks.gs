@@ -399,7 +399,8 @@ function TestMockGmailApp_(opts) {
           const threadId = 'thread_' + (TestGmailLog_.nextThreadId++);
           draft._sent = true;
           draft._threadId = threadId;
-          return { getThread: function () { return { getId: function () { return threadId; } }; } };
+          // getId: a real GmailMessage has one (EmailLedger.gs records it as the evidence that Gmail accepted the message).
+          return { getId: function () { return 'msg_' + threadId; }, getThread: function () { return { getId: function () { return threadId; } }; } };
         },
       };
     },

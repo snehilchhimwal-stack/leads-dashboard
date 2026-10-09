@@ -290,6 +290,10 @@ function sendAllIssuesEmails_() {
   const logSheet = ensureAllIssuesLogSheet_(ss);
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
   const todayKey = istDayKeyGs_(now);
+  // Evidence trail (Email Ops EO-1a, EmailLedger.gs): null in TEST MODE, DISABLED when the sheets cannot be opened - either way
+  // every ledger call below is a no-op and the emails go out exactly as before.
+  const ledger = emailLedgerOpenGs_(ss);
+  const ledgerJob = EMAIL_LEDGER_JOB_ALL_ISSUES_;
 
   // Idempotency guard — same per-region-per-day pattern
   // sendOvernightMorningEmails uses against Overnight_Log, applied here
@@ -309,13 +313,25 @@ function sendAllIssuesEmails_() {
   let bucketSendCount = 0; // [timing] how many individual Gmail sends this run actually made — the send loop's own duration only means something alongside this count
 
   Object.keys(byRegion).sort().forEach(function (region) {
-    const flaggedLeads = byRegion[region];
-    if (!flaggedLeads.length) return;
+    const regionLeads = byRegion[region];
+    if (!regionLeads.length) return;
     if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_) {
       Logger.log('Skipping ' + region + ' — already has an AllIssues_Log row dated today (' + todayKey + '); not re-sending.');
+      emailLedgerExcludeGs_(ledger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', reason: 'already sent today - the re-run guard skipped ' + regionLeads.length + ' lead(s)' }]);
       return;
     }
     const regionStart_ = Date.now();
+
+    // Per-lead isolation (plan decision D3): a lead that cannot be shown reliably is left out and recorded; the rest still goes.
+    const split = emailLedgerSplitLeadsGs_(regionLeads);
+    split.defective.filter(function (d) { return !d.covered; }).forEach(function (d) { // a duplicate's first copy WAS sent - not "unsent"
+      failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: '', cc: '', reason: 'Left out of the email: ' + d.reason });
+    });
+    emailLedgerExcludeGs_(ledger, split.defective.map(function (d) {
+      return { job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: d.lead.lead_id, rm: d.lead.RM, reason: d.reason };
+    }));
+    const flaggedLeads = split.valid;
+    if (!flaggedLeads.length) return;
 
     const rmNames = Array.from(new Set(flaggedLeads.map(function (l) { return l.RM; })));
     const rmToLeads = {};
@@ -335,20 +351,45 @@ function sendAllIssuesEmails_() {
     // of the per-region RM_Hierarchy/Manager_Directory reload cost.
     notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win);
 
+    const unresolvedExclusions = [];
     resolution.trulyUnresolved.forEach(function (u) {
       (rmToLeads[u.rmName] || []).forEach(function (l) {
         failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
+        unresolvedExclusions.push({ job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: l.lead_id, rm: u.rmName, reason: 'no recipient could be resolved: ' + u.reason });
       });
     });
+    emailLedgerExcludeGs_(ledger, unresolvedExclusions);
 
-    resolution.results.forEach(function (rec) {
+    // Every bucket email of this region is recorded as PLANNED in ONE write before the first send, so an email that never goes
+    // out (a crash, a timeout kill) still leaves a row that says it should have.
+    const buckets = resolution.results.map(function (rec) {
       const rmSet = new Set(rec.rmNames);
       const bucketLeads = flaggedLeads.filter(function (l) { return rmSet.has(l.RM); });
-      const failure = sendOneAllIssuesEmail_(ss, logSheet, region, rec, bucketLeads, dateLabel, todayKey, now, win);
+      return { rec: rec, leads: bucketLeads, emailId: emailLedgerIdGs_(ledgerJob, todayKey, region, rec.primaryRole, rec.bucketLabel) };
+    });
+    emailLedgerPlanGs_(ledger, buckets.filter(function (b) { return b.leads.length; }).map(function (b) {
+      return {
+        emailId: b.emailId, job: ledgerJob, dayKey: todayKey, region: region, bucketLabel: b.rec.bucketLabel, primaryRole: b.rec.primaryRole,
+        to: b.rec.to, cc: b.rec.cc, leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
+      };
+    }));
+
+    buckets.forEach(function (b) {
+      const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false };
+      const failure = sendOneAllIssuesEmail_(ss, logSheet, region, b.rec, b.leads, dateLabel, todayKey, now, win, ledgerCtx);
       bucketSendCount++;
+      // Leads the send-safety gate objected to individually were dropped from this bucket and the rest was resent (decision D3).
+      ledgerCtx.dropped.forEach(function (d) {
+        failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: b.rec.to, cc: b.rec.cc || '', reason: 'Left out of the email: ' + d.reason });
+      });
+      emailLedgerExcludeGs_(ledger, ledgerCtx.dropped.map(function (d) {
+        return { job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: d.lead.lead_id, rm: d.lead.RM, emailId: b.emailId, reason: d.reason };
+      }));
       if (failure) {
-        bucketLeads.forEach(function (l) {
-          failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: rec.to, cc: rec.cc || '', reason: failure.reason });
+        const droppedIds = {};
+        ledgerCtx.dropped.forEach(function (d) { droppedIds[String(d.lead.lead_id)] = true; }); // already listed above - not twice
+        b.leads.filter(function (l) { return !droppedIds[String(l.lead_id)]; }).forEach(function (l) {
+          failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: b.rec.to, cc: b.rec.cc || '', reason: failure.reason });
         });
       }
     });
@@ -361,6 +402,8 @@ function sendAllIssuesEmails_() {
   // the same OPS_ALERT_EMAIL_. No need for a separate copy of this
   // function just because the run that produced the entries is different.
   notifyLeadSendFailuresGs_(failedLeadEntries);
+  pruneEmailLedgerGs_(ledger, now);
+  emailLedgerFinishGs_(ledger, 'the 17:00 All-Issues run');
   Logger.log('[timing] sendAllIssuesEmails_ finished — total ' + elapsed_() + ', ' + bucketSendCount + ' bucket email(s), ' + failedLeadEntries.length + ' failed lead entrie(s)');
 }
 
@@ -465,8 +508,13 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
 // Aug 2026". Returns null on success, or {reason} on failure — same
 // contract as sendOneOvernightEmail_, so the caller can fold a failure
 // into the shared notifyLeadSendFailuresGs_ report.
-function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win) {
+//
+// ledgerCtx (optional, Email Ops EO-1a): { ledger, emailId, dropped: [], isRetry } - where this bucket's ledger row is recorded, and
+// the out-list for leads the send-safety gate objected to INDIVIDUALLY (plan decision D3): those are left out and the rest of the
+// bucket is sent once more, instead of the whole bucket being blocked for one bad lead. Absent for direct callers (tests).
+function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win, ledgerCtx) {
   if (!leads.length) return null;
+  const ctx = ledgerCtx || {};
 
   const byRM = {};
   leads.forEach(function (l) {
@@ -523,6 +571,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     ' across ' + rmKeys.length + ' RM(s).\n\n' + plainTextReportGs_(reportOpts);
 
   Logger.log('All-issues email recipients for ' + region + bucketNote + ': ' + rec.source);
+  emailLedgerAttemptGs_(ctx.ledger, ctx.emailId); // a row left ATTEMPTING = the run died mid-send; the outcome is unknown
   let sentMessage;
   try {
     sentMessage = sendGuardedEmailGs_({
@@ -531,6 +580,21 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     }, 'send all-issues email (' + region + bucketNote + ')');
   } catch (e) {
     Logger.log('All-issues email failed for ' + region + bucketNote + ': ' + e);
+    // Per-lead isolation (plan decision D3): when the gate objects to SPECIFIC leads (counted but absent from a body), drop only
+    // those and send the rest once more; the dropped leads are reported through ctx.dropped. One retry at most - a second refusal
+    // is a bucket-level failure like any other. Never when every lead is objected to (that is a bucket-level problem).
+    if (e && e.blockedByGuard && !ctx.isRetry && e.missingLeadIds && e.missingLeadIds.length) {
+      const objected = {};
+      e.missingLeadIds.forEach(function (id) { objected[String(id).trim()] = true; });
+      const remaining = leads.filter(function (l) { return !objected[String(l.lead_id).trim()]; });
+      if (remaining.length && remaining.length < leads.length) {
+        leads.filter(function (l) { return objected[String(l.lead_id).trim()]; }).forEach(function (l) {
+          ctx.dropped.push({ lead: l, reason: 'could not be shown in the email body (the send-safety gate objected to this lead only); the rest of the bucket was sent' });
+        });
+        return sendOneAllIssuesEmail_(ss, logSheet, region, rec, remaining, dateLabel, todayKey, now, win,
+          { ledger: ctx.ledger, emailId: ctx.emailId, dropped: ctx.dropped, isRetry: true });
+      }
+    }
     // Same "operation not allowed" detection sendOneOvernightEmail_ uses —
     // createDraft(...).send() is two steps chained together, and a real
     // production case showed the DRAFT succeeds while the immediately-
@@ -570,8 +634,16 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     } catch (alertErr) {
       Logger.log('notifyOpsAlertGs_ itself failed: ' + alertErr);
     }
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: emailLedgerStatusForErrorGs_(e), reason: failureReason, leadIds: [] });
     return { reason: failureReason };
   }
+
+  // ACCEPTED = Gmail took the message. Recorded BEFORE the AllIssues_Log write below so a failure there cannot lose the evidence.
+  const sentIds = emailLedgerSentIdsGs_(sentMessage);
+  emailLedgerResultGs_(ctx.ledger, ctx.emailId, {
+    status: EMAIL_LEDGER_STATUS_.ACCEPTED, messageId: sentIds.messageId, threadId: sentIds.threadId,
+    leadIds: leads.map(function (l) { return String(l.lead_id); }),
+  });
 
   try {
     const threadId = sentMessage ? sentMessage.getThread().getId() : '';

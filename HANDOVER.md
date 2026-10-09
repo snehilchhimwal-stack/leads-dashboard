@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-10-08 (§4.3.4, the nightly RM-hierarchy sync from the HR roster sheet).
+Written 2026-08-31, updated 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger).
 This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
@@ -115,6 +115,7 @@ branch-deploy signature) runs green on `master`;
 | `RmHierarchy.gs` | Resolves each RM's manager chain (A1/TM/RH/CH) from the HR export, so issue emails route to the right specific managers. |
 | `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
 | `RmHierarchySync.gs` | **Added 2026-10-08.** Nightly (~23:15 IST) sync of `RM_Hierarchy` / `Manager_Directory` from the company HR roster sheet — applies the unambiguous changes (once switched on), emails a report of the rest. Report-only until `enableRmHierarchySyncApplyNow()`. See §4.3.4 (`GS-014`). |
+| `EmailLedger.gs` | **Added 2026-10-09.** The per-email evidence trail (Email Ops EO-1a): `Email_Ledger` (one row per bucket email, PLANNED -> ACCEPTED/FAILED/UNCONFIRMED/BLOCKED, with the Gmail message + thread ids) and `Email_Ledger_Exclusions` (every lead/region left out, with the reason). Wired into the 17:00 job; fail-open. See §4.3.5 (`GS-015`). |
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. Since 2026-09-29 also age-prunes (30 days, regardless of review status) alongside the pre-existing manual `clearReviewedUnmatchedCommentsNow()`. |
 | `InteractionHistoryLogger.gs` | Logs every open lead's genuinely NEW owner-logged comment (any outcome) into `Comment_History` — a forward-capture interaction-history dataset, no dashboard reader. Since 2026-09-29 age-prunes at 30 days (was unbounded-by-design before that). |
 | `DailyRmIssueLog.gs` | Nightly (22:50 IST) full-company SLA-issue census — feeds `js/tab-repeat-offenders.js`. Added 2026-09-01. See §9 — this one has real operational quirks (unbounded nightly row growth, a real incident where a run took ~8min and wrote nothing) worth knowing before you're debugging it live. |
@@ -803,6 +804,35 @@ of truth and `RM_HIERARCHY_RAW_` is only the seed, so rebuilding from it would s
 
 **Failure:** a structural problem (no access to the HR sheet, changed layout, tiny roster, missing tab) throws — ops is alerted, Executions
 shows Failed, nothing is written, and the hourly watchdog also flags a night it did not run (`emailJobScheduleGs_`).
+
+### 4.3.5 Email Operations System - the per-email ledger (2026-10-09, part EO-1a)
+
+Plan, audit and decisions: `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` (goal `g-tf-d895943847` in the To-Do Dashboard; decisions D1-D5 in its
+section 0: one 16:30 cycle report to Snehil only, errors emailed only after the rest of the job is confirmed sent, drop only the defective lead,
+Leads tab refreshes ~every 2 h, late-send cutoff 18:30). What exists so far is **EO-1a**: the ledger and the 17:00 job wired to it.
+
+**Why.** Every older log is written only after a successful send, so the system knew what went out and could not know what should have gone out
+and did not. `EmailLedger.gs` (`GS-015`) records each 17:00 bucket email from the moment it is planned: `PLANNED` for a whole region in one write,
+`ATTEMPTING` just before the send, then `ACCEPTED` (Gmail's `send()` returned a message - **not** "delivered" or "opened", Apps Script cannot see
+either), `FAILED` (definite error), `UNCONFIRMED` (a timeout-class error - the message may have gone) or `BLOCKED` (the send gate refused). A row
+stuck in `PLANNED`/`ATTEMPTING` means the run died before/during the send. Leads or regions that did not go out are in `Email_Ledger_Exclusions`
+with the reason (unroutable RM, defective lead, duplicate id, the same-day re-run guard).
+
+**Per-lead isolation.** A lead with no id, a control character or over-long id, or no reason for contact is left out and recorded; a second copy of
+a lead id is left out but is NOT reported as unsent (its first copy was). When the send gate objects to specific leads (counted but missing from a
+body - `prepareOutgoingEmailGs_` now returns `missingLeadIds`, the refusal carries `err.missingLeadIds`), only those are dropped and the rest of the
+bucket is resent once; they appear in the "Leads NOT sent" report and in the exclusions sheet. If the gate objects to every lead, the bucket is
+`BLOCKED` as before.
+
+**The ledger is evidence, not a gate.** Every call is fail-open: a ledger error is counted and reported by ONE ops note at the end of the job, and the
+email proceeds. A sheet whose columns are not recognised is never written into (the ledger disables itself). TEST MODE never writes. Retention
+90 days (archived to Drive first, `pruneEmailLedgerGs_`).
+
+**Check it live:** run `showEmailLedgerTodayNow()` (read-only) after a 17:00 run. Both tabs create themselves on the first run after the paste.
+
+**Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
+`Tests_RunAll.gs`; no `setupXxx()` (no trigger). Still to come: EO-1b (10:00/13:00 jobs), EO-2 (incident log + held alerts), EO-3/EO-4 (the
+13:00 audit and the 17:00 reconciliation), EO-5 (bounce/reply sweep), EO-8 (the 16:30 cycle report).
 
 ### 4.4 GitHub repo access
 

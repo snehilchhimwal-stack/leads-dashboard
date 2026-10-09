@@ -1,0 +1,162 @@
+# GS-015 — EmailLedger.gs
+
+| | |
+|---|---|
+| **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
+| **Location** | `EmailLedger.gs` |
+| **Owner** | Snehil |
+| **Component Status** | Active (wired into the 17:00 job only; the 10:00 and 13:00 jobs follow in EO-1b) |
+| **Record Status** | Closed + Monitored |
+| **Last Verified** | 2026-10-09 against commit `(pending commit)` - created (Email Ops EO-1a) |
+
+## Purpose / reason to exist
+
+The per-email evidence trail of the Email Operations System (`docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md`, part EO-1a). Every other
+log in this project (`AllIssues_Log`, `Overnight_Log`) is written only AFTER a send succeeded, so the system knew what went out and
+could never know what *should* have gone out and did not, what was blocked, or why. The ledger records each bucket email from the
+moment it is planned to its final status, with the Gmail message and thread ids as evidence, and records every lead or region that
+was left out with the reason. The later parts (13:00 audit, 17:00 reconciliation, bounce/reply sweep, 16:30 cycle report) read it.
+
+## Responsibilities
+
+- Create and open the two sheets (`SHEET-019` `Email_Ledger`, `SHEET-020` `Email_Ledger_Exclusions`) and refuse to write into one whose
+  columns it does not recognise (`emailLedgerOpenGs_`, `emailLedgerEnsureSheetGs_`).
+- Record a region's buckets as PLANNED in one write, then ATTEMPTING / ACCEPTED / FAILED / UNCONFIRMED / BLOCKED per bucket
+  (`emailLedgerPlanGs_`, `emailLedgerAttemptGs_`, `emailLedgerResultGs_`).
+- Record leads and regions that did not go out, with the reason (`emailLedgerExcludeGs_`).
+- Per-lead isolation (plan decision D3): decide which individual leads cannot be shown reliably (`emailLedgerSplitLeadsGs_`) so the
+  rest of their bucket still goes.
+- Archive to Drive and remove rows older than 90 days (`pruneEmailLedgerGs_`).
+- Stay out of the way: every function is fail-open and a null/disabled handle makes each call a no-op.
+
+## Trigger schedule
+
+None of its own. It runs inside `sendAllIssuesEmails` (`GS-001`, 17:00 IST, `atHour(17).nearMinute(0)`).
+
+## Requires `setupXxx()` re-run when
+
+Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_Mocks.gs`,
+`Tests_RunAll.gs`) and the two sheets create themselves on the next 17:00 run. `showEmailLedgerTodayNow()` is a read-only check.
+
+## Significant functions — `FN-XXX` sub-table
+
+| ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
+|---|---|---|---|---|---|---|---|
+| FN-378 | `emailLedgerOpenGs_(ss)` / `emailLedgerEnsureSheetGs_` `#L162/#L141` | the spreadsheet | a handle (`null` in test mode; DISABLED when the sheets cannot be opened) | creates the two sheets with their header row; indexes existing email ids | `istDayKeyGs_` (`GS-002`) | FN-387 | specific |
+| FN-379 | `emailLedgerPlanGs_(h, plans)` / `emailLedgerAppendBlockGs_` `#L207/#L186` | the buckets of one region | — | ONE write of PLANNED rows; a re-run keeps the existing row; a retry never writes the batch twice | `writeUnlessTestModeGs_`, `jsonForCellGs_` (`GS-004`) | FN-387 | specific |
+| FN-380 | `emailLedgerAttemptGs_` / `emailLedgerResultGs_` / `emailLedgerPatchGs_` `#L242/#L253/#L228` | an email id; a result `{status, reason, messageId, threadId, leadIds}` | — | rewrites the nine outcome columns of one row | `writeUnlessTestModeGs_` (`GS-004`) | FN-387 | specific |
+| FN-381 | `emailLedgerExcludeGs_(h, items)` `#L267` | leads/regions left out, each with a reason | — | one write to `Email_Ledger_Exclusions` | `writeUnlessTestModeGs_` (`GS-004`) | FN-387 | specific |
+| FN-382 | `emailLedgerSplitLeadsGs_(leads)` / `emailLedgerLeadDefectGs_` `#L100/#L87` | flagged leads | `{valid, defective:[{lead, reason, covered}]}` | none (pure) | — | FN-387 | specific - RULE-045 |
+| FN-383 | `emailLedgerIdGs_`, `emailLedgerDayKeyOfGs_`, `emailLedgerSentIdsGs_`, `emailLedgerStatusForErrorGs_` `#L78/#L71/#L114/#L122` | job/day/region/role/bucket; a cell; a sent message; an error | the deterministic email id; a day key; `{messageId, threadId}`; a status | none (pure) | `isAmbiguousSendErrorGs_` (`GS-004`) | FN-387 | specific |
+| FN-384 | `pruneEmailLedgerGs_(h, now)` `#L280` | the handle, now | — | archives leading rows older than 90 days to Drive, then deletes them | `archiveRowsToDriveCsv_` (`GS-002`) | FN-387 | specific - RULE-046 |
+| FN-385 | `emailLedgerGuardGs_` / `emailLedgerFinishGs_` `#L130/#L305` | the handle | — | counts a ledger failure; one ops note at the end of the job | `notifyOpsAlertGs_` (`GS-004`) | FN-378..FN-384, FN-387 | specific - RULE-044 |
+| FN-386 | `showEmailLedgerTodayNow()` `#L31` | — | — | read-only: logs today's counts per status | — | Apps Script editor (manual) | specific |
+| FN-387 | `sendAllIssuesEmails_` / `sendOneAllIssuesEmail_` ledger calls (`GS-001`) | — | — | the wiring: open, split, plan, attempt, result, exclude, prune, finish | FN-378..FN-385 | the 17:00 trigger | specific |
+
+## Business rules implemented — `RULE-XXX` sub-table
+
+| ID | Rule | Where | Duplicated elsewhere? |
+|---|---|---|---|
+| RULE-043 | The statuses never imply one another: ACCEPTED means Gmail's `send()` returned a message - not delivered, not opened (Apps Script cannot see either); UNCONFIRMED (a timeout-class error) is NOT FAILED because the message may have gone; a row left PLANNED/ATTEMPTING means the run died before/during the send | FN-380, FN-383 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` section 6 |
+| RULE-044 | The ledger is evidence, not a gate: a ledger error is counted, logged and reported once at the end; the email always proceeds. A sheet with unrecognised columns disables the ledger rather than being overwritten. TEST MODE never writes | FN-378, FN-385 | the same fail-open stance as `withEmailJobLockGs_` (`GS-004`) |
+| RULE-045 | Per-lead isolation (decision D3): a lead with no id, an id with control characters or over 100 characters, or no reason for contact is left out and recorded; a second copy of a lead id is left out but NOT reported as unsent (its first copy was sent); anything subtler is caught by the send gate, which now names the leads it objected to, and only those are dropped and the rest resent once | FN-382, FN-387 | — |
+| RULE-046 | Retention is 90 days; only LEADING rows older than the window are removed, and only after they were archived to Drive (a failed archive deletes nothing) | FN-384 | the other pruned logs (`archiveRowsToDriveCsv_`) |
+
+## Config constants — `CFG-XXX` sub-table
+
+| ID | Constant | Value | Meaning | Changing it affects |
+|---|---|---|---|---|
+| CFG-105 | `EMAIL_LEDGER_SHEET_`, `EMAIL_LEDGER_EXCLUSIONS_SHEET_` | `Email_Ledger`, `Email_Ledger_Exclusions` | the two tab names | where the evidence is written; existing tabs are not renamed for you |
+| CFG-106 | `EMAIL_LEDGER_HEADERS_`, `EMAIL_LEDGER_EXCLUSION_HEADERS_` | 23 and 9 columns | the column order; the outcome block `attempted_at..lead_ids_json` must stay contiguous | any reorder breaks the one-write row update and the header check |
+| CFG-107 | `EMAIL_LEDGER_RETENTION_DAYS_` | `90` | rows older than this are archived and removed | how long the evidence stays in the workbook |
+| CFG-108 | `EMAIL_LEDGER_JOB_ALL_ISSUES_` | `allIssues17` | the job id in every email id | email ids (a change makes today's re-run plan new rows) |
+
+## Exceptions — `EXC-XXX` sub-table
+
+| ID | Condition | Handling | User-visible result |
+|---|---|---|---|
+| EXC-119 | a ledger sheet has unrecognised columns, or cannot be opened | the handle is DISABLED; every ledger call is a no-op | one ops note at the end of the job; the emails are unaffected |
+| EXC-120 | a ledger write throws mid-run | counted on the handle, logged; the send path never sees it | the same single ops note |
+| EXC-121 | the run dies mid-send | the row stays ATTEMPTING (or PLANNED if it never started) | the later audit (EO-3/EO-4) reads that as "outcome unknown" |
+
+## Data lineage
+
+`sendAllIssuesEmails_` (`GS-001`) -> plan (per region, one write) -> attempt -> `sendGuardedEmailGs_` (`GS-004`) -> result with the
+Gmail ids -> `Email_Ledger`; skipped leads/regions -> `Email_Ledger_Exclusions`. Nothing reads them yet except `showEmailLedgerTodayNow()`.
+
+## Sheets touched
+
+| `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
+|---|---|---|---|
+| `SHEET-019` `Email_Ledger` | Read + write | FN-378..FN-380, FN-384 | one row per bucket email |
+| `SHEET-020` `Email_Ledger_Exclusions` | Read + write | FN-378, FN-381, FN-384 | one row per lead/region left out |
+
+## Failure / error behaviour
+
+Fail-open (RULE-044). Nothing in this file can stop, delay beyond a few sheet writes, or change the content of an email.
+
+## Cross-runtime duplication
+
+None - backend only.
+
+## Not live until pasted
+
+Paste `EmailLedger.gs` as a NEW file, then `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
+`Tests_RunAll.gs`. Registrations: `Tests_RunAll.gs` `suites`, `test/run-gs-tests.js` lists, the live editor.
+
+## UI relationships
+
+N/A - backend.
+
+## Architecture relationship
+
+Apps Script backend; a library called from the 17:00 emailer. Part of the Email Operations System (`goal g-tf-d895943847`).
+
+## Related documentation
+
+`docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md`; `docs/_planning/EMAIL_AUDIT.md`; `HANDOVER.md` (the Email Operations section).
+
+## Relationships
+
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`), `SHEET-019`, `SHEET-020`
+- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `SHEET-019`, `SHEET-020`
+- **Related:** `SHEET-013` (`AllIssues_Log`) - the success-only log this complements
+
+## Source of truth
+
+`EmailLedger.gs` at `HEAD`.
+
+## Validation
+
+- **Method:** `Tests_EmailLedger.gs` (in-memory sheets, Gmail, Drive) in CI and the headless runner, including end-to-end runs of the
+  real 17:00 job (normal, re-run, test mode, Gmail refusal, timeout, one bad lead, every lead refused, duplicate id, unroutable RM,
+  broken ledger sheet); 24 deliberate regressions (ML1..ML24, scratchpad `mutate_ledger.py`), 23 caught and 1 equivalent mutant;
+  clock/zone sweeps (`--at`, `--tz`).
+- **Evidence:** `.github/workflows/test.yml`; the first live 17:00 run after the paste (`showEmailLedgerTodayNow()`).
+- **Status:** Validated 2026-10-09 (locally); live behaviour proven by the first 17:00 run.
+
+## Version / change reference
+
+**2026-10-09** (`(pending commit)`): file created - Email Ops EO-1a. `EmailInfra.gs` `prepareOutgoingEmailGs_` also returns
+`missingLeadIds` and the gate's refusal carries it. **Not live until pasted.**
+
+## Revalidation trigger
+
+Any commit touching `EmailLedger.gs` or `Tests_EmailLedger.gs`; the `AllIssues_Log`/ledger column lists; the send gate
+(`prepareOutgoingEmailGs_`, `sendGuardedEmailGs_`); the 17:00 flow (`sendAllIssuesEmails_`, `sendOneAllIssuesEmail_`).
+
+## Handover relationship
+
+`HANDOVER.md` updated in the same commit (the Email Operations System section).
+
+## Lifecycle / retention
+
+90 days in the workbook, then archived to Drive (`Email_Ledger`, `Email_Ledger_Exclusions` folders under the archive root).
+
+## Next action
+
+EO-1b wires the 10:00/13:00 jobs; EO-2 adds the incident log and held alerts; EO-3/EO-4 read the ledger.
+
+## Closure evidence
+
+Record created with the feature; `docs/INDEX.md` `GS-015`.

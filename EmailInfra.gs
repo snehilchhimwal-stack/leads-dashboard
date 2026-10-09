@@ -641,6 +641,7 @@ function prepareOutgoingEmailGs_(msg) {
   const htmlBody = m.htmlBody == null ? undefined : String(m.htmlBody);
 
   const problems = [];
+  let missingLeadIds = []; // the counted leads that are absent from a body (Email Ops EO-1a: lets a caller drop just those leads and resend)
   problems.push.apply(problems, emailAddressListProblemsGs_(to, 'To', true));
   problems.push.apply(problems, emailAddressListProblemsGs_(cc, 'Cc', false));
   if (!subject) problems.push('the subject is empty');
@@ -659,9 +660,10 @@ function prepareOutgoingEmailGs_(msg) {
       const missingHtml = htmlBody === undefined ? [] : ids.filter(function (id) { return visible.indexOf(id) === -1; });
       if (missingPlain.length) problems.push('lead(s) counted but missing from the plain-text body: ' + missingPlain.slice(0, 5).join(', '));
       if (missingHtml.length) problems.push('lead(s) counted but missing from the HTML body: ' + missingHtml.slice(0, 5).join(', '));
+      missingLeadIds = ids.filter(function (id) { return missingPlain.indexOf(id) !== -1 || missingHtml.indexOf(id) !== -1; });
     }
   }
-  return { msg: { to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody }, problems: problems };
+  return { msg: { to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody }, problems: problems, missingLeadIds: missingLeadIds };
 }
 
 // A send error after which the message MAY still have been delivered (the request reached Gmail, the answer was lost or Gmail
@@ -674,10 +676,11 @@ function isAmbiguousSendErrorGs_(err) {
   return /timed out|timeout|deadline|internal error|server error|backend error|service error|service (gmail )?failed|unavailable|empty response|socket|network|temporar|\b50[0234]\b/i.test(msg);
 }
 
-function sendBlockedErrorGs_(label, problems) {
+function sendBlockedErrorGs_(label, problems, missingLeadIds) {
   const err = new Error('Send blocked by the safety gate (' + (label || 'email') + '): ' + problems.join('; '));
   err.blockedByGuard = true;
   err.guardProblems = problems;
+  err.missingLeadIds = missingLeadIds || []; // leads the gate could not find in a body (empty for any other kind of refusal)
   return err;
 }
 
@@ -685,7 +688,7 @@ function sendBlockedErrorGs_(label, problems) {
 // withSendRetry_. Throws (never sends) when the payload fails validation.
 function sendGuardedEmailGs_(msg, label) {
   const prepared = prepareOutgoingEmailGs_(msg);
-  if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems);
+  if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems, prepared.missingLeadIds);
   const m = prepared.msg;
   const options = { name: 'Homesfy Lead Ops' };
   if (m.cc) options.cc = m.cc;

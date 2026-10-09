@@ -53,6 +53,7 @@ const PRODUCTION_FILES = [
   'OpsChecklistRunner.gs',
   'LeadFollowupsStaleness.gs',
   'RmHierarchySync.gs',
+  'EmailLedger.gs',
 ];
 
 const TEST_FILES = [
@@ -71,6 +72,7 @@ const TEST_FILES = [
   'Tests_OpsChecklistRunner.gs',
   'Tests_LeadFollowupsStaleness.gs',
   'Tests_RmHierarchySync.gs',
+  'Tests_EmailLedger.gs',
   'Tests_EmailLifecycleFullCycle.gs',
   'Tests_RunAll.gs',
 ];
