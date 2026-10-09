@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `(pending commit)` - created (Email Ops EO-5) |
+| **Last Verified** | 2026-10-09 against commit `c18d89f` - created (Email Ops EO-5) |
 
 ## Purpose / reason to exist
 
@@ -121,7 +121,7 @@ Apps Script backend; a time-driven job (16:10 IST) sharing the email jobs' lock,
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`): file created - Email Ops EO-5. `EmailLedger.gs` gained `emailLedgerReadRowsGs_` / `EMAIL_LEDGER_JOB_LABELS_` (moved from `CycleReport.gs`); `CycleReport.gs` shows a "Bounces and replies" section and lists bounced emails under "Needs attention"; `emailJobScheduleGs_` lists the sweep. **Not live until pasted.**
+**2026-10-09** (`c18d89f`): file created - Email Ops EO-5. `EmailLedger.gs` gained `emailLedgerReadRowsGs_` / `EMAIL_LEDGER_JOB_LABELS_` (moved from `CycleReport.gs`); `CycleReport.gs` shows a "Bounces and replies" section and lists bounced emails under "Needs attention"; `emailJobScheduleGs_` lists the sweep. **Not live until pasted.**
 
 ## Revalidation trigger
 

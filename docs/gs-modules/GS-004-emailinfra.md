@@ -266,7 +266,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-09** (`d79aae5`, Email Ops EO-8): `emailJobScheduleGs_` (FN-332) lists `sendEmailCycleReport` (hour 16, minute 30) once `CycleReport.gs` is part of the project, and `emailJobProblemsGs_` (FN-333) computes a job's deadline from hour:minute plus the 30-minute grace (17:00 for the report; every other job's deadline text is unchanged). **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-5): `emailJobScheduleGs_` (FN-332) also lists `sweepEmailBouncesAndReplies` (hour 16, minute 10) once `EmailSweep.gs` is part of the project. **Not live until pasted.**
+**2026-10-09** (`c18d89f`, Email Ops EO-5): `emailJobScheduleGs_` (FN-332) also lists `sweepEmailBouncesAndReplies` (hour 16, minute 10) once `EmailSweep.gs` is part of the project. **Not live until pasted.**
 
 ## Revalidation trigger
 

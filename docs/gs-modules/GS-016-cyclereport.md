@@ -125,7 +125,7 @@ Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock,
 **2026-10-09** (`d79aae5`): file created - Email Ops EO-8. `EmailInfra.gs` `emailJobScheduleGs_` lists the job (with a `minute`) and
 `emailJobProblemsGs_` computes its deadline from hour:minute. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-5): the report shows a "Bounces and replies" section from the sweep's columns (`GS-017`), lists a bounced email under "Needs attention" (it counts as accepted by Gmail but is not all clear), and lists replies; the row reader and job labels moved to `GS-015` (FN-398). **Not live until pasted.**
+**2026-10-09** (`c18d89f`, Email Ops EO-5): the report shows a "Bounces and replies" section from the sweep's columns (`GS-017`), lists a bounced email under "Needs attention" (it counts as accepted by Gmail but is not all clear), and lists replies; the row reader and job labels moved to `GS-015` (FN-398). **Not live until pasted.**
 
 ## Revalidation trigger
 
