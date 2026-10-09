@@ -833,6 +833,9 @@ function emailJobScheduleGs_() {
   // RmHierarchySync.gs (2026-10-08): the nightly HR-roster sync. Not an email job, but it shares the lock + run record, and a night
   // it silently does not run is a night the hierarchy keeps drifting. Only watched once that file is part of the project.
   if (typeof RMSYNC_RUN_HOUR_ !== 'undefined') schedule.syncRmHierarchyNightly = { hour: RMSYNC_RUN_HOUR_, label: '23:15 RM hierarchy sync' };
+  // CycleReport.gs (Email Ops EO-8): the daily 16:30 report to Snehil. A job with a `minute` is due at hour:minute, so its deadline is that plus
+  // EMAIL_JOB_DEADLINE_MINUTES_ (17:00 for this one). Only watched once that file is part of the project.
+  if (typeof CYCLE_REPORT_HOUR_ !== 'undefined') schedule.sendEmailCycleReport = { hour: CYCLE_REPORT_HOUR_, minute: CYCLE_REPORT_MINUTE_, label: '16:30 cycle report' };
   return schedule;
 }
 function emailJobRunKeyGs_(jobName) { return 'EMAIL_JOB_RUN_' + jobName; }
@@ -903,11 +906,12 @@ function emailJobProblemsGs_(now) {
   const problems = [];
   Object.keys(schedule).forEach(function (job) {
     const spec = schedule[job];
-    if (minutesIntoDay < spec.hour * 60 + EMAIL_JOB_DEADLINE_MINUTES_) return; // not due yet
+    const dueAtMinutes = spec.hour * 60 + (spec.minute || 0) + EMAIL_JOB_DEADLINE_MINUTES_; // hour:minute + the grace period
+    if (minutesIntoDay < dueAtMinutes) return; // not due yet
     const rec = readEmailJobRunGs_(job);
     if (rec && rec.unreadable) { problems.push({ job: job, kind: 'unreadable', detail: 'the run record could not be read: ' + rec.unreadable }); return; }
     if (!rec || rec.day !== day) {
-      problems.push({ job: job, kind: 'never_started', detail: 'No run of ' + spec.label + ' is recorded for today (' + day + '), and it should have started by ' + spec.hour + ':' + EMAIL_JOB_DEADLINE_MINUTES_ + ' IST.' });
+      problems.push({ job: job, kind: 'never_started', detail: 'No run of ' + spec.label + ' is recorded for today (' + day + '), and it should have started by ' + Math.floor(dueAtMinutes / 60) + ':' + pad2Gs_(dueAtMinutes % 60) + ' IST.' });
       return;
     }
     if (rec.status === 'failed') {

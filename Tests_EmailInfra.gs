@@ -829,7 +829,8 @@ function runEmailInfraTests_() {
         TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:29'))), '', 'watchdog: one minute before the 10:00 job\'s 10:30 deadline, nothing is wrong');
         TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:30'))), M + ':never_started', 'watchdog: at the deadline, a job with no record for today never started');
         TestAssertEqual_(kinds(emailJobProblemsGs_(at('13:29'))), M + ':never_started', 'watchdog: the 13:00 job is not due until 13:30');
-        TestAssertEqual_(kinds(emailJobProblemsGs_(at('18:00'))), A + ':never_started,' + F + ':never_started,' + M + ':never_started', 'watchdog: after 17:30 all three missing jobs are reported');
+        // The 16:30 cycle report (CycleReport.gs) is a fourth scheduled job once that file is part of the project; its own deadline (17:00) is tested in Tests_CycleReport.gs.
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('18:00'))), A + ':never_started,sendEmailCycleReport:never_started,' + F + ':never_started,' + M + ':never_started', 'watchdog: after 17:30 all three missing email jobs and the 16:30 cycle report are reported');
         const nev = emailJobProblemsGs_(at('10:31'))[0];
         TestAssert_(/10:30 IST/.test(nev.detail) && /10:00 Overnight/.test(nev.detail), 'watchdog: the message names the job and its deadline');
 
