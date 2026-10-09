@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `bc39815` - created (Email Ops EO-8) |
+| **Last Verified** | 2026-10-09 against commit `93a120a` - created (Email Ops EO-8) |
 
 ## Purpose / reason to exist
 
@@ -137,7 +137,7 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 
 **2026-10-09** (`bc39815`, Email Ops EO-10 / EO-8b): the report also judges the Leads tab's freshness (FN-404, RULE-054, thresholds from decision D4) and stores a `Daily_Report` row per day (FN-405, RULE-055). A stale tab is a warning in the report; nothing is held or blocked. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops review): the report entry points use `runEmailJobTrackedGs_` (run record) instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
+**2026-10-09** (`93a120a`, Email Ops review): the report entry points use `runEmailJobTrackedGs_` (run record) instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
 ## Revalidation trigger
 

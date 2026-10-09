@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `c18d89f` - created (Email Ops EO-5) |
+| **Last Verified** | 2026-10-09 against commit `93a120a` - created (Email Ops EO-5) |
 
 ## Purpose / reason to exist
 
@@ -123,7 +123,7 @@ Apps Script backend; a time-driven job (15:45 IST) with a run record watched by 
 
 **2026-10-09** (`c18d89f`): file created - Email Ops EO-5. `EmailLedger.gs` gained `emailLedgerReadRowsGs_` / `EMAIL_LEDGER_JOB_LABELS_` (moved from `CycleReport.gs`); `CycleReport.gs` shows a "Bounces and replies" section and lists bounced emails under "Needs attention"; `emailJobScheduleGs_` lists the sweep. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops review): moved from 16:10 to 15:45 so it reliably finishes before the 16:30 report, and the entry point uses `runEmailJobTrackedGs_` instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
+**2026-10-09** (`93a120a`, Email Ops review): moved from 16:10 to 15:45 so it reliably finishes before the 16:30 report, and the entry point uses `runEmailJobTrackedGs_` instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
 ## Revalidation trigger
 
