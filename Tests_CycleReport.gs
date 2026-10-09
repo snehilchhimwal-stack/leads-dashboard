@@ -97,7 +97,7 @@ function runCycleReportTests_() {
     TestAssertContains_(bad.plainBody, 'Left out of emails', 'render: the exclusions table is present');
     TestAssertContains_(bad.plainBody, 'ops address missing', 'render: a recipient-address problem is shown under "Ready for 17:00?"');
     TestAssertContains_(bad.plainBody, '1 held alert(s)', 'render: held alerts are shown');
-    TestAssertContains_(bad.plainBody, 'bounces and replies (the 16:10 sweep has not run yet); the age of the Leads tab (planned)', 'render: what is NOT tracked yet is stated, not hidden');
+    TestAssertContains_(bad.plainBody, 'bounces and replies (the 16:10 sweep has not run yet); delivery and opens cannot be seen from Apps Script', 'render: what is NOT tracked yet is stated, not hidden');
     TestAssertEqual_(data.sweep.notSwept + ',' + data.sweep.bounced + ',' + data.sweep.replied, '4,0,0', 'data: with no sweep evidence the four accepted/unconfirmed emails are "not checked yet"');
     TestAssertContains_(bad.plainBody, 'The bounce/reply sweep has not run for these emails yet.', 'render: the bounces section says the sweep has not run');
 
@@ -122,7 +122,8 @@ function runCycleReportTests_() {
       TestAssertContains_(sr.plainBody, 'Chatty', 'sweep render: …by bucket');
       TestAssertContains_(sr.plainBody, 'BOUNCED', 'sweep render: the bounce is in the attention table');
       TestAssert_(sr.plainBody.indexOf('the 16:10 sweep has not run yet') === -1, 'sweep render: once swept, the "not run yet" note is gone');
-      TestAssertContains_(sr.plainBody, 'the age of the Leads tab (planned)', 'sweep render: …but the Leads-age gap is still stated');
+      TestAssertContains_(sr.plainBody, 'delivery and opens cannot be seen from Apps Script', 'sweep render: …but what Apps Script can never see is still stated');
+      TestAssertContains_(sr.plainBody, 'Leads tab freshness | not checked', 'sweep render: with no freshness check supplied the row says not checked');
     }
     TestAssertContains_(bad.plainBody, '3 of 7 (43%) accepted by Gmail', 'render: the execution rate shows numerator and denominator');
     TestAssertContains_(bad.html, 'Daily Cycle Report', 'render: the HTML carries the title');
@@ -195,6 +196,77 @@ function runCycleReportTests_() {
       TestAssertEqual_(TestGmailLog_.drafts.length, 2, 'report (test mode): the once-a-day guard is not consumed or honoured');
       TestAssertContains_(TestGmailLog_.drafts[0].subject, '[TEST MODE]', 'report (test mode): the subject says so');
       TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(CYCLE_REPORT_SENT_PROPERTY_), null, 'report (test mode): nothing is recorded as sent');
+    }
+
+    // ================= Leads-tab freshness (decision D4) =================
+    TestAssertEqual_([0, 3, 3.01, 5, 5.01, 30].map(cycleFreshnessLevelGs_).join(','), 'GREEN,GREEN,AMBER,AMBER,RED,RED', 'freshness level: up to 3 h is GREEN, over 3 h AMBER, over 5 h RED');
+    {
+      const fresh = function (level, text) { return { level: level, ageHours: level === 'UNKNOWN' ? null : 4, newest: null, text: text || level + ': text' }; };
+      const mk = function (fr) { return cycleReportDataGs_({ window: win, ledgerRows: [L('allIssues17', 'ACCEPTED', { leads_sent: 2 })], exclusionRows: [], incidentRows: [], configProblems: [], freshness: fr }); };
+      TestAssertEqual_(mk(fresh('GREEN')).allClear, true, 'freshness data: GREEN does not change anything');
+      const amber = mk(fresh('AMBER', 'AMBER: the newest lead was assigned 4 h ago'));
+      TestAssertEqual_(amber.allClear + ',' + amber.attention.length + ',' + amber.attention[0].status, 'false,1,LEADS AMBER', 'freshness data: AMBER is an attention item and means not all clear');
+      TestAssertEqual_(mk(fresh('RED')).attention[0].status, 'LEADS RED', 'freshness data: RED too');
+      TestAssertEqual_(mk(fresh('UNKNOWN')).allClear, true, 'freshness data: UNKNOWN (cannot be judged) is shown but never raised as a problem it cannot prove');
+      TestAssertContains_(cycleReportRenderGs_(amber, now).plainBody, 'Leads tab freshness | AMBER: the newest lead was assigned 4 h ago', 'freshness render: the readiness table shows the text');
+      TestAssertContains_(cycleReportRenderGs_(amber, now).plainBody, 'LEADS AMBER', 'freshness render: and the attention table lists it');
+    }
+    {
+      const freshOf = function (rowsFn) { return cycleLeadsFreshnessGs_(TestCR_world_(rowsFn), new Date()); };
+      const hoursAgo = function (h) { return new Date(Date.now() - h * 3600000); };
+      const withLead = function (when) { return function (header) { return [TestCR_leadRow_(header, { lead_id: 'L-F', client_id: 'C-F', lead_assigned_at: when })]; }; };
+      const g = freshOf(withLead(hoursAgo(1)));
+      TestAssertEqual_(g.level + ',' + Math.round(g.ageHours), 'GREEN,1', 'freshness: a lead assigned an hour ago is GREEN');
+      TestAssertEqual_(freshOf(withLead(hoursAgo(4))).level, 'AMBER', 'freshness: 4 hours is AMBER');
+      TestAssertEqual_(freshOf(withLead(hoursAgo(6))).level, 'RED', 'freshness: 6 hours is RED');
+      TestAssertContains_(freshOf(withLead(hoursAgo(6))).text, 'would describe stale data', 'freshness: RED says why it matters');
+      const mixed = freshOf(function (header) {
+        return [TestCR_leadRow_(header, { lead_id: 'L-1', client_id: 'C-1', lead_assigned_at: hoursAgo(6) }), TestCR_leadRow_(header, { lead_id: 'L-2', client_id: 'C-2', lead_assigned_at: new Date(Date.now() + 5 * 3600000) })];
+      });
+      TestAssertEqual_(mixed.level, 'RED', 'freshness: an assignment time in the future is ignored (bad data cannot make a stale tab look fresh)');
+      TestAssertEqual_(freshOf(null).level, 'UNKNOWN', 'freshness: a Leads tab with no leads is UNKNOWN');
+      TestAssertEqual_(cycleLeadsFreshnessGs_(TestMockSpreadsheet_({}), new Date()).level, 'UNKNOWN', 'freshness: an unreadable Leads tab is UNKNOWN, not a crash');
+      // end to end: a stale tab shows in the report that goes to Snehil
+      const ssS = TestCR_world_(function (header) { return [TestCR_leadRow_(header, { lead_id: 'L-STALE', client_id: 'C-STALE', lead_assigned_at: hoursAgo(6) })]; });
+      TestCR_bind_(ssS);
+      sendAllIssuesEmails();
+      const built = sendEmailCycleReport_({ now: new Date(Date.now() + 60000) });
+      TestAssert_(built.data.freshness.level === 'RED' && built.data.allClear === false, 'freshness report: a RED Leads tab means the report is not all clear');
+      TestAssertContains_(built.plainBody, 'LEADS RED', 'freshness report: and says so');
+    }
+
+    // ================= the Daily_Report row =================
+    {
+      const ssD = TestCR_world_(TestCR_standardLeads_);
+      TestCR_bind_(ssD);
+      sendAllIssuesEmails();
+      const day = istDayKeyGs_(new Date());
+      sendEmailCycleReport_({ now: new Date(Date.now() + 60000) });
+      const daily = function () { return TestEL_objects_(ssD.getSheetByName(CYCLE_REPORT_DAILY_SHEET_), CYCLE_REPORT_DAILY_HEADERS_); };
+      TestAssertEqual_(daily().length, 1, 'daily row: one row is written');
+      const d = daily()[0];
+      TestAssertEqual_([d.report_day, d.planned, d.accepted, d.failed, d.leads_sent, d.all_clear, d.leads_freshness].join(','), day + ',1,1,0,2,yes,GREEN', 'daily row: the day, the counts, all-clear and the freshness level');
+      TestAssert_(d.sent_at instanceof Date && d.window_start instanceof Date && d.window_end instanceof Date, 'daily row: the send time and the cycle window are stored');
+      sendEmailCycleReport_({ now: new Date(Date.now() + 120000), force: true });
+      TestAssertEqual_(daily().length, 1, 'daily row: a forced re-send the same day UPDATES the row instead of adding a second');
+      const other = cycleReportDataGs_({ window: win, ledgerRows: [], exclusionRows: [], incidentRows: [] });
+      cycleReportRecordDailyGs_(ssD, other, new Date(Date.now() + 30 * 3600000));
+      TestAssertEqual_(daily().length + ',' + daily()[1].planned, '2,0', 'daily row: a different day gets its own row');
+      // a broken Daily_Report sheet never stops the report
+      const ssB = TestCR_world_(TestCR_standardLeads_);
+      ssB._sheets['Daily_Report'] = TestMockSheet_('Daily_Report', [['wrong', 'header']]);
+      TestCR_bind_(ssB);
+      sendAllIssuesEmails();
+      const draftsBefore = TestGmailLog_.drafts.length;
+      sendEmailCycleReport_({ now: new Date(Date.now() + 60000) });
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'daily row: a broken Daily_Report sheet does not stop the report email');
+      TestAssertEqual_(ssB.getSheetByName('Daily_Report').getLastRow(), 1, 'daily row: and nothing is written into the unrecognised sheet');
+      // test mode
+      const ssT = TestCR_world_(TestCR_standardLeads_);
+      TestCR_bind_(ssT);
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+      try { sendEmailCycleReport_({ now: new Date(Date.now() + 60000) }); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+      TestAssert_(!ssT.getSheetByName(CYCLE_REPORT_DAILY_SHEET_), 'daily row: test mode writes nothing');
     }
 
     // ================= the trigger entry points =================

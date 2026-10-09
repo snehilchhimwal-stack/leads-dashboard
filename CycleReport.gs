@@ -29,6 +29,14 @@ const CYCLE_REPORT_HOUR_ = 16;   // IST
 const CYCLE_REPORT_MINUTE_ = 30; // IST
 const CYCLE_REPORT_SENT_PROPERTY_ = 'EMAIL_CYCLE_REPORT_SENT_DAY';
 const CYCLE_REPORT_MAX_ROWS_ = 30; // per table, so a bad day cannot make the report unreadable
+// Plan decision D4: the Leads tab is refreshed about every other hour, at varying times, and carries no "last imported" cell, so its freshness is judged
+// from the newest lead assignment time: more than 3 h old = AMBER, more than 5 h = RED. If the refresh process ever writes a timestamp cell, use that instead.
+const LEADS_FRESH_AMBER_HOURS_ = 3;
+const LEADS_FRESH_RED_HOURS_ = 5;
+// One row per IST day, upserted by the report: the day's numbers (numerators; the report email carries the rates) for tracking over time.
+const CYCLE_REPORT_DAILY_SHEET_ = 'Daily_Report';
+const CYCLE_REPORT_DAILY_HEADERS_ = ['report_day', 'sent_at', 'window_start', 'window_end', 'planned', 'accepted', 'skipped', 'failed', 'unconfirmed', 'blocked',
+  'unfinished', 'leads_sent', 'bounced', 'replied', 'leads_left_out', 'regions_skipped', 'incidents', 'serious_incidents', 'all_clear', 'leads_freshness', 'leads_age_hours'];
 const CYCLE_REPORT_JOB_ORDER_ = ['allIssues17', 'chLevel17', 'morning10', 'chLevel10', 'followup13'];
 
 // 16:30 of the previous IST day -> now. Before today's 16:30 the cycle that just ended is the one before, so the window reaches one day further back.
@@ -102,12 +110,16 @@ function cycleReportDataGs_(input) {
   const serious = incidents.filter(function (r) { return r.severity !== 'LOW'; });
   const heldNow = (input.incidentRows || []).filter(function (r) { return r.notification === 'HELD'; }).length;
 
+  const fr = input.freshness || null;
+  if (fr && (fr.level === 'AMBER' || fr.level === 'RED')) {
+    attention.push({ job: '-', region: '-', bucket: 'Leads tab', status: 'LEADS ' + fr.level, reason: fr.text });
+  }
   const attemptable = totals.planned - totals.skipped;
   const allClear = totals.planned > 0 && attention.length === 0 && serious.length === 0;
   return {
     cycle: win, totals: totals, byJob: byJob, attention: attention, exclusions: { leads: leadsLeftOut, regions: regionsSkipped, reasons: reasons },
     incidents: incidents, bySeverity: bySeverity, seriousIncidents: serious.length, heldNow: heldNow, configProblems: input.configProblems || [],
-    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep,
+    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep, freshness: fr,
   };
 }
 
@@ -175,7 +187,8 @@ function cycleReportRenderGs_(data, now) {
     rows: [
       ['Recipient addresses resolve', data.configProblems.length ? data.configProblems.length + ' problem(s): ' + data.configProblems.map(function (p) { return p.detail; }).join(' | ') : 'OK'],
       ['Alerts waiting to be sent', data.heldNow ? data.heldNow + ' held alert(s) - a job may have been killed; the watchdog releases them' : 'none'],
-      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 16:10 sweep has not run yet); ') + 'the age of the Leads tab (planned); delivery and opens cannot be seen from Apps Script'],
+      ['Leads tab freshness', data.freshness ? data.freshness.text : 'not checked'],
+      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 16:10 sweep has not run yet); ') + 'delivery and opens cannot be seen from Apps Script'],
     ],
   });
 
@@ -197,6 +210,56 @@ function cycleReportRenderGs_(data, now) {
   return { subject: subject, html: renderOvernightReportEmailHTML_(opts), plainBody: plainTextReportGs_(opts) };
 }
 
+// GREEN / AMBER / RED from the age (hours) of the newest lead assignment (decision D4).
+function cycleFreshnessLevelGs_(ageHours) {
+  if (ageHours > LEADS_FRESH_RED_HOURS_) return 'RED';
+  if (ageHours > LEADS_FRESH_AMBER_HOURS_) return 'AMBER';
+  return 'GREEN';
+}
+
+// How fresh the Leads tab looks: { level: GREEN|AMBER|RED|UNKNOWN, ageHours, newest, text }. UNKNOWN (never a guess) when the tab cannot be read or holds
+// no assignment times. Assignment times in the future (bad data) are ignored.
+function cycleLeadsFreshnessGs_(ss, now) {
+  try {
+    const leads = readLeadsTab_(ss);
+    let newest = null;
+    leads.dataRows.forEach(function (row) {
+      const v = getVal_(row, leads.colIndex, 'lead_assigned_at');
+      if (v instanceof Date && v.getTime() <= now.getTime() + 3600000 && (!newest || v.getTime() > newest.getTime())) newest = v;
+    });
+    if (!newest) return { level: 'UNKNOWN', ageHours: null, newest: null, text: 'UNKNOWN: the Leads tab has no lead assignment times to judge by' };
+    const ageHours = Math.max(0, (now.getTime() - newest.getTime()) / 3600000);
+    const level = cycleFreshnessLevelGs_(ageHours);
+    const when = Utilities.formatDate(newest, 'Asia/Kolkata', 'd MMM HH:mm');
+    const text = level + ': the newest lead was assigned ' + (Math.round(ageHours * 10) / 10) + ' h ago (' + when + ' IST)' +
+      (level === 'GREEN' ? '' : ' - older than ' + (level === 'RED' ? LEADS_FRESH_RED_HOURS_ : LEADS_FRESH_AMBER_HOURS_) + ' h; the Leads tab refresh (about every 2 h) may be late, so the 17:00 emails would describe stale data');
+    return { level: level, ageHours: ageHours, newest: newest, text: text };
+  } catch (e) {
+    return { level: 'UNKNOWN', ageHours: null, newest: null, text: 'UNKNOWN: the Leads tab could not be read (' + String((e && e.message) || e) + ')' };
+  }
+}
+
+// Upserts the day's row in Daily_Report (fail-open: the report email never depends on it). TEST MODE writes nothing.
+function cycleReportRecordDailyGs_(ss, data, now) {
+  if (TEST_MODE_OVERRIDE_EMAIL_) return;
+  try {
+    const sheet = emailLedgerEnsureSheetGs_(ss, CYCLE_REPORT_DAILY_SHEET_, CYCLE_REPORT_DAILY_HEADERS_, [1]);
+    const t = data.totals, fr = data.freshness;
+    const day = istDayKeyGs_(now);
+    const row = [day, now, data.cycle.start, data.cycle.end, t.planned, t.accepted, t.skipped, t.failed, t.unconfirmed, t.blocked, t.unfinished, t.leadsSent,
+      data.sweep.bounced, data.sweep.replied, data.exclusions.leads, data.exclusions.regions, data.incidents.length, data.seriousIncidents, data.allClear ? 'yes' : 'no',
+      fr ? fr.level : 'not checked', fr && fr.ageHours !== null ? Math.round(fr.ageHours * 10) / 10 : ''];
+    const last = sheet.getLastRow();
+    if (last >= 2 && emailLedgerDayKeyOfGs_(sheet.getRange(last, 1, 1, 1).getValue()) === day) {
+      writeUnlessTestModeGs_(function () { sheet.getRange(last, 1, 1, row.length).setValues([row]); }, 'update the Daily_Report row');
+    } else {
+      emailLedgerAppendBlockGs_(sheet, [row], function (probe) { return emailLedgerDayKeyOfGs_(probe) === day; }, 'append the Daily_Report row');
+    }
+  } catch (e) {
+    Logger.log('Daily_Report row not written - the report email is NOT affected: ' + e);
+  }
+}
+
 // Reads the three evidence tabs and builds the report for `now`. Pure apart from reading the spreadsheet.
 function buildEmailCycleReportGs_(ss, now) {
   const win = cycleReportWindowGs_(now);
@@ -207,6 +270,7 @@ function buildEmailCycleReportGs_(ss, now) {
     exclusionRows: emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), EMAIL_LEDGER_EXCLUSION_HEADERS_, startKey),
     incidentRows: emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_), EMAIL_INCIDENT_HEADERS_, startKey),
     configProblems: typeof emailConfigProblemsGs_ === 'function' ? emailConfigProblemsGs_() : [],
+    freshness: cycleLeadsFreshnessGs_(ss, now),
   });
   const rendered = cycleReportRenderGs_(data, now);
   rendered.data = data;
@@ -230,6 +294,7 @@ function sendEmailCycleReport_(opts) {
   if (!TEST_MODE_OVERRIDE_EMAIL_) {
     try { PropertiesService.getScriptProperties().setProperty(CYCLE_REPORT_SENT_PROPERTY_, day); } catch (e2) { Logger.log('Could not record the cycle report as sent (it may be sent twice today): ' + e2); }
   }
+  cycleReportRecordDailyGs_(ss, built.data, now);
   Logger.log('Cycle report sent: ' + built.subject);
   return built;
 }
