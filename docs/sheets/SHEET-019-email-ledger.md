@@ -11,7 +11,7 @@
 
 ## Purpose / reason to exist
 
-The per-email evidence trail (`GS-015`): one row per bucket email of the 17:00 job, from PLANNED to its final status, with the Gmail message and thread ids. It exists because every older log is written only after a successful send, so the system could not know what should have gone out and did not.
+The per-email evidence trail (`GS-015`): one row per bucket email of the 17:00, 10:00 and 13:00 jobs and the CH-level reports, from PLANNED to its final status, with the Gmail message and thread ids. It exists because every older log is written only after a successful send, so the system could not know what should have gone out and did not.
 
 ## Data stored
 
@@ -33,12 +33,12 @@ None yet except `showEmailLedgerTodayNow()` (read-only). The 13:00 audit, the 17
 |---|---|---|
 | `email_id` | text | deterministic `yyyymmdd / job / region / role / bucket` joined with a pipe - the same bucket on the same day has the same id |
 | `cycle_day` | text | the run's IST day (`yyyy-MM-dd`, text format so Sheets never turns it into a date) |
-| `job` / `region` / `bucket_label` / `primary_role` | text | which email: job id (`allIssues17`), region, recipient bucket, its role |
+| `job` / `region` / `bucket_label` / `primary_role` | text | which email: job id (`allIssues17`, `morning10`, `followup13`, `chLevel10`, `chLevel17`), region, recipient bucket, its role |
 | `to` / `cc` / `subject` | text | the planned recipients and subject |
 | `leads_planned` | number | leads the bucket was planned with |
 | `planned_at` | datetime | when the region's buckets were planned |
 | `attempted_at` / `finished_at` | datetime | the last attempt's start and end; `finished_at` is empty while ATTEMPTING |
-| `status` | text | `PLANNED`, `ATTEMPTING`, `ACCEPTED`, `FAILED`, `UNCONFIRMED`, `BLOCKED` (see `GS-015` RULE-043) |
+| `status` | text | `PLANNED`, `ATTEMPTING`, `ACCEPTED`, `FAILED`, `UNCONFIRMED`, `BLOCKED`, `SKIPPED` (planned, then not sent because there was nothing to say) - see `GS-015` RULE-043 |
 | `status_reason` | text | the failure/block reason (500 characters at most) |
 | `attempts` | number | send attempts (a quarantine-and-resend counts as a second) |
 | `message_id` / `thread_id` | text | the Gmail ids - the evidence that Gmail accepted the message |

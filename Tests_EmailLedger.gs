@@ -60,6 +60,7 @@ function TestEL_bind_(ss) {
   SpreadsheetApp.getActiveSpreadsheet = function () { return ss; };
   TestGmailLog_reset_();
   GmailApp = TestMockGmailApp_({});
+  Gmail = TestMockGmailAdvanced_({}); // a scenario may have swapped in a failing Advanced Gmail Service
   PropertiesService = TestMockPropertiesService_();
 }
 
@@ -588,6 +589,38 @@ function runEmailLedgerTests_() {
       TestAssertEqual_(ledgerRows(wO).length, 2, '10:00 overnight re-run: no new ledger rows');
       const exO = TestEL_objects_(ssO.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X);
       TestAssertEqual_(exO.length + ',' + (exO[0] ? exO[0].kind : ''), '1,region', '10:00 overnight re-run: the skipped Section 1 is recorded as a region exclusion');
+    }
+
+    // ---- (20) a 10:00 bucket that throws unexpectedly: its row is closed as FAILED, never left PLANNED/ATTEMPTING ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      const realCombined = sendCombinedMorningEmail_;
+      sendCombinedMorningEmail_ = function () { throw new Error('simulated bucket crash'); };
+      try { sendOvernightMorningEmails(); } finally { sendCombinedMorningEmail_ = realCombined; }
+      const r10 = ledgerRows(w, 'morning10')[0];
+      TestAssertEqual_(r10 ? r10.status : 'no row', 'FAILED', 'bucket crash at 10:00: the ledger row is closed as FAILED');
+      TestAssertContains_(r10 ? r10.status_reason : '', 'simulated bucket crash', 'bucket crash at 10:00: …with the error');
+    }
+
+    // ---- (21) a broken ledger at 10:00 and at 13:00: the emails still go and ONE ops note names the job ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      w.ss.getSheetByName(EMAIL_LEDGER_SHEET_).getRange(1, 1, 1, 1).setValues([['broken']]);
+      const draftsBefore = TestGmailLog_.drafts.length;
+      sendOvernightMorningEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'broken ledger at 10:00: the 10:00 email is still sent');
+      const note10 = TestGmailLog_.sent.filter(function (e) { return /Email ledger:.*the 10:00 morning run/.test(e.subject); });
+      TestAssertEqual_(note10.length, 1, 'broken ledger at 10:00: exactly one ops note, naming the 10:00 run');
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, 1, 'broken ledger at 13:00: the 13:00 reply is still sent');
+      const note13 = TestGmailLog_.sent.filter(function (e) { return /Email ledger:.*the 13:00 follow-up run/.test(e.subject); });
+      TestAssertEqual_(note13.length, 1, 'broken ledger at 13:00: exactly one ops note, naming the 13:00 run');
     }
 
     // ---- (11) the 10:00 / 13:00 jobs are untouched by the gate change (they ignore missingLeadIds) ----

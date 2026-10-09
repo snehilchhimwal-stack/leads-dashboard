@@ -809,7 +809,7 @@ shows Failed, nothing is written, and the hourly watchdog also flags a night it 
 
 Plan, audit and decisions: `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` (goal `g-tf-d895943847` in the To-Do Dashboard; decisions D1-D5 in its
 section 0: one 16:30 cycle report to Snehil only, errors emailed only after the rest of the job is confirmed sent, drop only the defective lead,
-Leads tab refreshes ~every 2 h, late-send cutoff 18:30). What exists so far is **EO-1a**: the ledger and the 17:00 job wired to it.
+Leads tab refreshes ~every 2 h, late-send cutoff 18:30). What exists so far is **EO-1a** (the ledger and the 17:00 job) and **EO-1b** (the 10:00 and 13:00 jobs and both CH-level reports, wired the same way: PLANNED per region/bucket in one write, ATTEMPTING, then the outcome with the Gmail ids; a bucket with nothing to say ends `SKIPPED`; the 10:00/13:00 ids carry the recipient).
 
 **Why.** Every older log is written only after a successful send, so the system knew what went out and could not know what should have gone out
 and did not. `EmailLedger.gs` (`GS-015`) records each 17:00 bucket email from the moment it is planned: `PLANNED` for a whole region in one write,
@@ -831,7 +831,7 @@ email proceeds. A sheet whose columns are not recognised is never written into (
 **Check it live:** run `showEmailLedgerTodayNow()` (read-only) after a 17:00 run. Both tabs create themselves on the first run after the paste.
 
 **Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
-`Tests_RunAll.gs`; no `setupXxx()` (no trigger). Still to come: EO-1b (10:00/13:00 jobs), EO-2 (incident log + held alerts), EO-3/EO-4 (the
+`Tests_RunAll.gs`, and for EO-1b `OvernightEmailer.gs`; no `setupXxx()` (no trigger). Still to come: EO-2 (incident log + held alerts), EO-3/EO-4 (the
 13:00 audit and the 17:00 reconciliation), EO-5 (bounce/reply sweep), EO-8 (the 16:30 cycle report).
 
 ### 4.4 GitHub repo access
