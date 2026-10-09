@@ -132,7 +132,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 ## Relationships
 
 - **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`), `SHEET-019`, `SHEET-020`, `SHEET-021`
-- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-004` (`EmailInfra.gs` - the alert hold and the watchdog release call it), `GS-010` (`OvernightEmailer.gs`), `SHEET-019`, `SHEET-020`
+- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-004` (`EmailInfra.gs` - the alert hold and the watchdog release call it), `GS-010` (`OvernightEmailer.gs`), `GS-016` (`CycleReport.gs` - reads the three tabs), `SHEET-019`, `SHEET-020`
 - **Related:** `SHEET-013` (`AllIssues_Log`) - the success-only log this complements
 
 ## Source of truth

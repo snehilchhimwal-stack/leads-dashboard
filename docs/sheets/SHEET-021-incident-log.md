@@ -113,7 +113,7 @@ Complements `SHEET-019` (`Email_Ledger`): the ledger says what happened to each 
 ## Relationships
 
 - **Depends On:** `GS-015`, `EXT-001`
-- **Used By:** `GS-015`
+- **Used By:** `GS-015`, `GS-016`
 - **Related:** `SHEET-019`
 
 ## Source of truth

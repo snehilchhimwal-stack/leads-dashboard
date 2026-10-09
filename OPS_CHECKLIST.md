@@ -214,6 +214,11 @@ nobody separately ran either check after they started appearing in the
 
 ### Automatic email
 
+- [ ] **Daily: read the 16:30 cycle report** (`CycleReport.gs`, added 2026-10-09) — one email to Snehil near 16:30 IST. `all clear` means every planned
+      email reached a final result and no incident above LOW happened in the cycle; `need attention` lists what to look at; `no emails recorded`
+      on a working day means the jobs or the ledger did not run (`showEmailJobRunsNow()`, `showEmailLedgerTodayNow()`). If it did not arrive by
+      17:00 the watchdog alerts. "Accepted by Gmail" is not "delivered"; the report cannot yet show bounces, replies or the age of the Leads tab.
+
 Since 2026-09-24 this is a **two-checkpoint lifecycle**, not three
 independent sends: 17:00 `AllIssuesEmailer.gs` opens one Gmail thread per
 region bucket for the day; 10:00 and 13:00 `OvernightEmailer.gs` (the

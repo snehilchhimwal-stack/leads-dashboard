@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger).
+Written 2026-08-31, updated 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts and the 16:30 cycle report).
 This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
@@ -116,6 +116,7 @@ branch-deploy signature) runs green on `master`;
 | `RmHierarchy.private.gs` | **Not in git** (see §4.3) — the raw `[name, email]` table `RmHierarchy.gs` looks employees up in. |
 | `RmHierarchySync.gs` | **Added 2026-10-08.** Nightly (~23:15 IST) sync of `RM_Hierarchy` / `Manager_Directory` from the company HR roster sheet — applies the unambiguous changes (once switched on), emails a report of the rest. Report-only until `enableRmHierarchySyncApplyNow()`. See §4.3.4 (`GS-014`). |
 | `EmailLedger.gs` | **Added 2026-10-09.** The per-email evidence trail (Email Ops EO-1a): `Email_Ledger` (one row per bucket email, PLANNED -> ACCEPTED/FAILED/UNCONFIRMED/BLOCKED, with the Gmail message + thread ids) and `Email_Ledger_Exclusions` (every lead/region left out, with the reason). Wired into the 17:00 job; fail-open. See §4.3.5 (`GS-015`). |
+| `CycleReport.gs` | **Added 2026-10-09.** The daily 16:30 report (Email Ops EO-8): one email to Snehil covering the whole cycle since the previous day's 17:00 - emails by final status, what was left out, incidents, what needs attention, readiness for 17:00. Built only from the evidence tabs. See §4.3.5 (`GS-016`). |
 | `UnmatchedCommentLogger.gs` | Logs every RM comment the classification keywords fail to match, into `Unmatched_Comments_Log`, for periodic human review. Since 2026-09-29 also age-prunes (30 days, regardless of review status) alongside the pre-existing manual `clearReviewedUnmatchedCommentsNow()`. |
 | `InteractionHistoryLogger.gs` | Logs every open lead's genuinely NEW owner-logged comment (any outcome) into `Comment_History` — a forward-capture interaction-history dataset, no dashboard reader. Since 2026-09-29 age-prunes at 30 days (was unbounded-by-design before that). |
 | `DailyRmIssueLog.gs` | Nightly (22:50 IST) full-company SLA-issue census — feeds `js/tab-repeat-offenders.js`. Added 2026-09-01. See §9 — this one has real operational quirks (unbounded nightly row growth, a real incident where a run took ~8min and wrote nothing) worth knowing before you're debugging it live. |
@@ -298,6 +299,7 @@ re-running after an edit never leaves a duplicate):
 | `setupWeeklyOpsChecklistTrigger()` | `OpsChecklistRunner.gs` | One weekly trigger, Monday ~9:00 IST → `runWeeklyOpsChecklistNow`, emailing `OPS_ALERT_EMAIL_` a summary of `OPS_CHECKLIST.md`'s 5 automatable checks (added 2026-10-03: a 30-day stale-dashboard-tab check against `Feature_Usage`). Sends every week regardless of outcome — see §8. |
 | `setupRmHierarchy()` | `RmHierarchy.gs` | **No trigger** — creates the `RM_Hierarchy` / `Manager_Directory` sheet tabs and seeds them from `RM_HIERARCHY_RAW_` / `RmHierarchy.private.gs`. Called as a side-effect of `setupOvernightEmailer()`, but also separately runnable to (re)build just those two tabs (`GS-011`). **Since 2026-10-01:** `rebuildRmHierarchy()` (the function this calls under the hood when re-run) now automatically runs `auditUnresolvedRms_`/`auditManagerDirectoryEmailGaps_` at the end of every rebuild and logs the result — see §4.3.2. |
 | `setupRmHierarchySync()` | `RmHierarchySync.gs` | **Added 2026-10-08.** One daily trigger near 23:15 IST → `syncRmHierarchyNightly` (shares the email jobs' lock, run record and the hourly watchdog). Report-only until `enableRmHierarchySyncApplyNow()` is run. See §4.3.4. |
+| `setupEmailCycleReportTrigger()` | `CycleReport.gs` | **Added 2026-10-09.** One daily trigger near 16:30 IST → `sendEmailCycleReport` (shares the email jobs' lock, run record and the hourly watchdog, deadline 17:00). Run it once after pasting `CycleReport.gs`; `showEmailCycleReportNow()` previews the report in the log without sending. See §4.3.5. |
 | `setupLeadFollowupsStalenessFormatting()` | `LeadFollowupsStaleness.gs` | **No trigger** — applies the amber/red conditional formatting to `Lead_Followups` (a row 12h/24h stale on its `updated_at` column). Runs immediately; re-run only if the rule changes (`GS-007`, `LEAD_FOLLOWUPS_STALENESS.md`). |
 
 The **full, source-verified trigger set** (schedules, handlers, timezone
@@ -838,11 +840,20 @@ confirm. If a job is killed before it can send what it holds, the hourly watchdo
 once as before, and are also recorded in `Incident_Log`. Severity is a guess from the subject (CRITICAL = a whole job crashed / did not run).
 `Incident_Log` is created on the first alert after the paste; read it directly.
 
+**The 16:30 cycle report (EO-8, `CycleReport.gs`, `GS-016`).** One email a day to the ops address (Snehil only) near 16:30 IST, covering the
+cycle that began at the previous day's 16:30 (so yesterday's 17:00 send, today's 10:00 and 13:00 emails and the CH-level reports): a table of
+emails by job and final status (planned / accepted / skipped / failed / unconfirmed / blocked / unfinished / leads sent), a "Needs attention"
+table, what was left out and why, the incidents of the cycle, and "Ready for 17:00?" (recipient-address problems, held alerts). The subject
+says `all clear (N of M emails accepted by Gmail)`, `K need attention (...)` or `no emails recorded in this cycle`. It is sent when
+everything is fine as well as when it is not, once per IST day (`sendEmailCycleReportNow()` sends again on purpose). Errors still arrive on their
+own, earlier, after their run (above); the report is the daily summary. It cannot yet show bounces, replies or the age of the Leads tab, and says
+so; delivery and opens cannot be seen from Apps Script at all. After pasting, run `setupEmailCycleReportTrigger()` once.
+
 **Check it live:** run `showEmailLedgerTodayNow()` (read-only) after a 17:00 run. Both tabs create themselves on the first run after the paste.
 
 **Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
-`Tests_RunAll.gs`, `OvernightEmailer.gs`; no `setupXxx()` (no trigger). EO-2 adds nothing new to paste beyond these files (`Incident_Log` creates itself). Still to come: EO-3/EO-4 (the
-13:00 audit and the 17:00 reconciliation), EO-5 (bounce/reply sweep), EO-8 (the 16:30 cycle report).
+`Tests_RunAll.gs`, `OvernightEmailer.gs`, plus `CycleReport.gs` and `Tests_CycleReport.gs` (new) and `Tests_EmailInfra.gs`; the ledger and held alerts need no `setupXxx()`, the cycle report needs `setupEmailCycleReportTrigger()` once. EO-2 adds nothing new to paste beyond these files (`Incident_Log` creates itself). Still to come: EO-3/EO-4 (the
+13:00 audit and the 17:00 reconciliation), EO-5 (bounce/reply sweep), then the daily checklist, follow-up tracker and recovery (EO-6/7/9).
 
 ### 4.4 GitHub repo access
 

@@ -108,7 +108,7 @@ Complements `SHEET-013` (`AllIssues_Log`, written only after a successful send) 
 ## Relationships
 
 - **Depends On:** `GS-015`, `EXT-001`
-- **Used By:** `GS-015`, `GS-001`
+- **Used By:** `GS-015`, `GS-001`, `GS-010`, `GS-016`
 - **Related:** `SHEET-013`, `SHEET-014`, `SHEET-020`
 
 ## Source of truth

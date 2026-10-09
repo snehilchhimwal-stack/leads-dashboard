@@ -242,9 +242,9 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-019, SHEET-020 | DATA-005, GS-010, SHEET-013 | 2026-10-07 (`7799e44`) |
-| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015 | 2026-10-08 (`78e47f5`) |
+| GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016 | 2026-10-08 (`78e47f5`) |
 | GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-004, GS-008, GS-012, SHEET-001, SHEET-002, SHEET-003 | DATA-002, SHEET-003 | 2026-10-08 (`1cd1cfa`) |
-| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, GS-014, GS-015, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, SHEET-012 | 2026-10-08 (`d897529`) |
+| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, GS-014, GS-015, GS-016, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016, SHEET-012 | 2026-10-08 (`d897529`) |
 | GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | DATA-003, GS-001, GS-006, GS-010, GS-012, GS-013, SHEET-010 | 2026-09-30 (`c82ec67`) |
 | GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-009 | DATA-003, GS-008, SHEET-009 | 2026-10-08 (`78e47f5`) |
 | GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none | 2026-09-30 (`6e4c904`) |
@@ -255,7 +255,8 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Closed + Monitored | GS-002, GS-004, GS-005 | DATA-002, DATA-004, GS-001, GS-003, GS-008, GS-010 | 2026-10-07 (`7799e44`) |
 | GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-010 | DATA-003, GS-008, SHEET-010 | 2026-10-08 (`78e47f5`) |
 | GS-014 | GS- | RmHierarchySync | `RmHierarchySync.gs` | Closed + Monitored | GS-002, GS-004, GS-011, SHEET-006, SHEET-007 | GS-004, GS-011 | 2026-10-08 (`3dc9852`) |
-| GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020, SHEET-021 | GS-001, GS-004, GS-010, SHEET-019, SHEET-020, SHEET-021 | 2026-10-09 (`b1dbc3a`) |
+| GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020, SHEET-021 | GS-001, GS-004, GS-010, GS-016, SHEET-019, SHEET-020, SHEET-021 | 2026-10-09 (`b1dbc3a`) |
+| GS-016 | GS- | CycleReport | `CycleReport.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-019, SHEET-020, SHEET-021 | GS-004 | 2026-10-09 (`(pending commit)`) |
 
 `RmHierarchy.private.gs` is **not** cataloged — gitignored, real employee
 emails, never in this repo (`DOC-007`).
@@ -282,9 +283,9 @@ emails, never in this repo (`DOC-007`).
 | SHEET-016 | SHEET- | Opp_Monitor_Period | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`f853a1c`) |
 | SHEET-017 | SHEET- | Opp_Monitor_Month | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`f853a1c`) |
 | SHEET-018 | SHEET- | Feature_Usage | Google Sheet | Closed + Monitored (lifecycle none needed, bounded by construction; DOC-038: MEDIUM / operational) | EXT-001, JS-018 | JS-018, GS-009 | 2026-10-03 (`a325f00`) |
-| SHEET-019 | SHEET- | Email_Ledger | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-010, GS-015 | 2026-10-09 (`b1dbc3a`) |
-| SHEET-020 | SHEET- | Email_Ledger_Exclusions | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-010, GS-015 | 2026-10-09 (`b1dbc3a`) |
-| SHEET-021 | SHEET- | Incident_Log | Google Sheet | Closed + Monitored (retention: none yet, a few rows a day; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-015 | 2026-10-09 (`f46ebc7`) |
+| SHEET-019 | SHEET- | Email_Ledger | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-010, GS-015, GS-016 | 2026-10-09 (`b1dbc3a`) |
+| SHEET-020 | SHEET- | Email_Ledger_Exclusions | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-010, GS-015, GS-016 | 2026-10-09 (`b1dbc3a`) |
+| SHEET-021 | SHEET- | Incident_Log | Google Sheet | Closed + Monitored (retention: none yet, a few rows a day; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-015, GS-016 | 2026-10-09 (`f46ebc7`) |
 
 **Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
 `Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and
@@ -337,7 +338,7 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 ## Coverage snapshot (auto-checkable target)
 
 - `JS-` records: 25 / 25 (core `JS-001`..`JS-011` DOC-027; feature `JS-012`..`JS-025` DOC-028)
-- `GS-` records: 15 / 15 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each; `GS-014` RmHierarchySync added 2026-10-08; `GS-015` EmailLedger added 2026-10-09)
+- `GS-` records: 16 / 16 (DOC-029 — trigger schedules + `setupXxx()` re-run conditions on each; `GS-014` RmHierarchySync added 2026-10-08; `GS-015` EmailLedger and `GS-016` CycleReport added 2026-10-09)
 - `TAB-` records: 9 / 9 (DOC-026). `TAB-009` (Opp Monitor) added 2026-09-18 — `Record Status: Validated` (backfilled with real live data same day), not yet `Closed + Monitored` (see its own `## Next action`).
 - `SHEET-` records: 21 / 21 (base DOC-032; `## Data Lifecycle` DOC-036; sensitivity + operational-importance DOC-038, all with a stated reason). **Operational importance:** CRITICAL x5 (`leads`, `Movement_Log`, `Lead_Followups`, `RM_Hierarchy`, `Manager_Directory`), IMPORTANT x4 (`Daily_RM_Issues`, `Region_Recipients`, `Overnight_Log`; `Movement_Log` degradations), MEDIUM x2 (`Movement_Log_Runs`, `Feature_Usage` — promoted from LOW 2026-10-03 once `OpsChecklistRunner.gs`'s weekly report started depending on it), LOW x8 (`SLA_History`, `Daily_Cohort_History`, `Comment_History`, `Unmatched_Comments_Log`, `Send_Log`, `AllIssues_Log`, `Opp_Monitor_Period`, `Opp_Monitor_Month`). **Employee data:** `RM_Hierarchy` + `Manager_Directory` (names/emails). **Comment text:** `leads`, `Lead_Followups`, `Comment_History`, `Unmatched_Comments_Log`. Retention: 2 confirmed 7d (`Movement_Log`, `Daily_RM_Issues`), 1 append-only-by-design (`Comment_History`), 1 manually-curated (`Unmatched_Comments_Log`), 3 N/A-configuration (`RM_Hierarchy`, `Manager_Directory`, `Region_Recipients`), 1 none-needed-bounded-by-construction (`Feature_Usage` — upsert by key, one row per fixed tracked-component list, never an append-only log), **10 `TBD` — no pruning function found** (`leads`, `Lead_Followups`, `SLA_History`, `Daily_Cohort_History`, `Send_Log`, `AllIssues_Log`, `Overnight_Log`, `Movement_Log_Runs`, `Opp_Monitor_Period`, `Opp_Monitor_Month`) → `DOC-037`. `SHEET-015` (`Movement_Log_Runs`) added 2026-09-17, closing a `check-catalog.py` check-L gap. `SHEET-016`/`SHEET-017` (`Opp_Monitor_Period`/`Opp_Monitor_Month`) added 2026-09-18, net-new — both `Validated` (backfilled with real July/August 2026 data same day), and **unlike every other `SHEET-` record, have no writer anywhere in this codebase** (populated out-of-band by an external analytics session) — see Seed correction note above the `SHEET-` table. `SHEET-018` (`Feature_Usage`) added 2026-10-03, net-new, `Closed + Monitored` — the dead-code-audit follow-up's client-side runtime-usage-tracking write path (Part 3) plus its reader, `OpsChecklistRunner.gs`'s 30-day stale-component checker (Part 4), both landed the same day.
 - `EXT-` records: 4 / 4 (DOC-033)
