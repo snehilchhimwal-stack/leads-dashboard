@@ -720,7 +720,7 @@ function sendGuardedEmailGs_(msg, label) {
 // While one of the three email jobs runs, notifyOpsAlertGs_ holds its alerts (they are already recorded in Incident_Log, status HELD).
 // emailAlertHoldFlushGs_ sends them once the job has ended, as ONE message that starts with the ledger's count of how many emails Gmail
 // accepted. If the job is killed before it can flush, the hourly watchdog releases them (releaseHeldIncidentsGs_, EmailLedger.gs).
-const EMAIL_ALERT_HOLD_JOBS_ = ['sendOvernightMorningEmails', 'sendOvernightFollowupEmails', 'sendAllIssuesEmails'];
+const EMAIL_ALERT_HOLD_JOBS_ = ['sendOvernightMorningEmails', 'sendOvernightFollowupEmails', 'sendAllIssuesEmails', 'recoverAllIssuesBuckets'];
 let EMAIL_ALERT_HOLD_ = null; // { job, items: [{ subject, bodyLines, incidentId }] } while a hold-job runs
 
 function emailAlertHoldStartGs_(jobName) {

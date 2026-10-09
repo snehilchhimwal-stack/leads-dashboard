@@ -72,6 +72,10 @@ const ALL_ISSUES_LOG_SHEET_ = 'AllIssues_Log';
 // partway through that calendar day rather than at its midnight.
 const ALL_ISSUES_WINDOW_DAYS_BACK_ = 2;
 const ALL_ISSUES_RUN_HOUR_ = 17; // IST (5pm) — one run a day, see setupAllIssuesEmailTrigger below
+// Email Ops EO-9 / plan decision D5: a failed or blocked 17:00 bucket may be re-sent (recoverFailedAllIssuesBucketsNow) until 18:30 IST; after that it
+// stays failed and is NOT sent late (it is reported, and the next 17:00 run covers any lead that is still flagged).
+const ALL_ISSUES_LATE_CUTOFF_HOUR_ = 18;
+const ALL_ISSUES_LATE_CUTOFF_MINUTE_ = 30;
 
 // TODAY (IST) plus the ALL_ISSUES_WINDOW_DAYS_BACK_ full calendar days
 // before it — e.g. run on the 28th, covers the 26th, 27th, and 28th (up
@@ -184,7 +188,11 @@ function sendAllIssuesEmails() {
  * one email per bucket, and finish with one consolidated "not sent"
  * report for anything that couldn't be routed or failed to send.
  */
-function sendAllIssuesEmails_() {
+function sendAllIssuesEmails_(opts) {
+  // opts.onlyEmailIds (Email Ops EO-9, recovery only): { ledgerEmailId: true } - re-send just those failed buckets. The region "already sent today" guard is
+  // skipped for them, everything else is recomputed from the CURRENT data (so a lead that is resolved by now is simply not in the email), and the exclusions
+  // and CH-level reports of the original run are not repeated.
+  const recoverIds = (opts && opts.onlyEmailIds) || null;
   // Timing breadcrumbs (added 2026-09-02, after a real run took ~50min end
   // to end with no way to tell from Executions alone whether the time went
   // into the preliminary reads or the per-bucket send loop). Purely
@@ -294,6 +302,7 @@ function sendAllIssuesEmails_() {
   // every ledger call below is a no-op and the emails go out exactly as before.
   const ledger = emailLedgerOpenGs_(ss);
   const ledgerJob = EMAIL_LEDGER_JOB_ALL_ISSUES_;
+  const exLedger = recoverIds ? null : ledger; // a recovery run does not repeat the original run's exclusion rows
 
   // Idempotency guard — same per-region-per-day pattern
   // sendOvernightMorningEmails uses against Overnight_Log, applied here
@@ -310,14 +319,15 @@ function sendAllIssuesEmails_() {
   }
 
   const failedLeadEntries = [];
+  const recoveredSeen = {}; // recovery only: the targeted email ids that this run produced a bucket for
   let bucketSendCount = 0; // [timing] how many individual Gmail sends this run actually made — the send loop's own duration only means something alongside this count
 
   Object.keys(byRegion).sort().forEach(function (region) {
     const regionLeads = byRegion[region];
     if (!regionLeads.length) return;
-    if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_) {
+    if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
       Logger.log('Skipping ' + region + ' — already has an AllIssues_Log row dated today (' + todayKey + '); not re-sending.');
-      emailLedgerExcludeGs_(ledger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', reason: 'already sent today - the re-run guard skipped ' + regionLeads.length + ' lead(s)' }]);
+      emailLedgerExcludeGs_(exLedger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', reason: 'already sent today - the re-run guard skipped ' + regionLeads.length + ' lead(s)' }]);
       return;
     }
     const regionStart_ = Date.now();
@@ -327,7 +337,7 @@ function sendAllIssuesEmails_() {
     split.defective.filter(function (d) { return !d.covered; }).forEach(function (d) { // a duplicate's first copy WAS sent - not "unsent"
       failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: '', cc: '', reason: 'Left out of the email: ' + d.reason });
     });
-    emailLedgerExcludeGs_(ledger, split.defective.map(function (d) {
+    emailLedgerExcludeGs_(exLedger, split.defective.map(function (d) {
       return { job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: d.lead.lead_id, rm: d.lead.RM, reason: d.reason };
     }));
     const flaggedLeads = split.valid;
@@ -349,7 +359,7 @@ function sendAllIssuesEmails_() {
     // resolveRecipientBucketsForRms_ a second time with identical
     // arguments — that second call used to double this file's own share
     // of the per-region RM_Hierarchy/Manager_Directory reload cost.
-    notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win, ledger);
+    if (!recoverIds) notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win, ledger);
 
     const unresolvedExclusions = [];
     resolution.trulyUnresolved.forEach(function (u) {
@@ -358,7 +368,7 @@ function sendAllIssuesEmails_() {
         unresolvedExclusions.push({ job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: l.lead_id, rm: u.rmName, reason: 'no recipient could be resolved: ' + u.reason });
       });
     });
-    emailLedgerExcludeGs_(ledger, unresolvedExclusions);
+    emailLedgerExcludeGs_(exLedger, unresolvedExclusions);
 
     // Every bucket email of this region is recorded as PLANNED in ONE write before the first send, so an email that never goes
     // out (a crash, a timeout kill) still leaves a row that says it should have.
@@ -367,14 +377,19 @@ function sendAllIssuesEmails_() {
       const bucketLeads = flaggedLeads.filter(function (l) { return rmSet.has(l.RM); });
       return { rec: rec, leads: bucketLeads, emailId: emailLedgerIdGs_(ledgerJob, todayKey, region, rec.primaryRole, rec.bucketLabel) };
     });
-    emailLedgerPlanGs_(ledger, buckets.filter(function (b) { return b.leads.length; }).map(function (b) {
+    let bucketsToSend = buckets;
+    if (recoverIds) {
+      bucketsToSend = buckets.filter(function (b) { return recoverIds[b.emailId]; });
+      bucketsToSend.forEach(function (b) { recoveredSeen[b.emailId] = true; });
+    }
+    emailLedgerPlanGs_(ledger, bucketsToSend.filter(function (b) { return b.leads.length; }).map(function (b) {
       return {
         emailId: b.emailId, job: ledgerJob, dayKey: todayKey, region: region, bucketLabel: b.rec.bucketLabel, primaryRole: b.rec.primaryRole,
         to: b.rec.to, cc: b.rec.cc, leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
       };
     }));
 
-    buckets.forEach(function (b) {
+    bucketsToSend.forEach(function (b) {
       const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false };
       const failure = sendOneAllIssuesEmail_(ss, logSheet, region, b.rec, b.leads, dateLabel, todayKey, now, win, ledgerCtx);
       bucketSendCount++;
@@ -395,6 +410,12 @@ function sendAllIssuesEmails_() {
     });
     Logger.log('[timing] ' + region + ' done at ' + elapsed_() + ' (' + resolution.results.length + ' bucket(s) this region, ' + ((Date.now() - regionStart_) / 1000).toFixed(1) + 's for this region)');
   });
+  if (recoverIds) {
+    // A targeted bucket that this run did not produce (its leads were resolved meanwhile, or the routing changed): it is closed with the reason, never left failed without one.
+    Object.keys(recoverIds).forEach(function (id) {
+      if (!recoveredSeen[id]) emailLedgerResultGs_(ledger, id, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'recovery: no bucket with this id was produced - the flagged leads were resolved or the routing changed since the failure, so nothing was re-sent', leadIds: [] });
+    });
+  }
   Logger.log('[timing] send loop finished at ' + elapsed_() + ' — ' + bucketSendCount + ' total bucket email(s) sent this run');
 
   // Reused directly from EmailInfra.gs — same shape entries
@@ -678,6 +699,52 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
 }
 
 function sendAllIssuesEmailsNow() { sendAllIssuesEmails(); }
+
+// ---- Recovery of failed 17:00 buckets (Email Ops EO-9, plan decisions D3/D5, spec rules 4 and 6) ----
+// Why this exists: when ONE bucket of a region fails and its siblings succeed, a plain re-run of the job skips the whole region (the "already sent today"
+// guard), so the failed bucket could never be re-sent the same day. This re-sends exactly the buckets the ledger shows as FAILED or BLOCKED today - never
+// UNCONFIRMED (it may have been delivered; a second copy is a duplicate), never an ACCEPTED one - after re-checking everything from the current data, and
+// only until the late-send cutoff (18:30 IST); after that nothing is sent late. A bucket whose leads were resolved meanwhile is closed as SKIPPED with the reason.
+const EMAIL_RECOVERY_JOB_ = 'recoverAllIssuesBuckets';
+
+// Today's recoverable 17:00 buckets from the ledger: [{ emailId, region, bucket, status }].
+function allIssuesRecoveryTargetsGs_(ss, now) {
+  const day = istDayKeyGs_(now);
+  return emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, day)
+    .filter(function (r) { return r.job === EMAIL_LEDGER_JOB_ALL_ISSUES_ && emailLedgerDayKeyOfGs_(r.cycle_day) === day && (r.status === 'FAILED' || r.status === 'BLOCKED'); })
+    .map(function (r) { return { emailId: r.email_id, region: r.region, bucket: r.bucket_label, status: r.status }; });
+}
+
+function allIssuesLateCutoffPassedGs_(now) {
+  const cutoff = new Date(istDayKeyGs_(now) + 'T' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_HOUR_) + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ':00+05:30');
+  return now.getTime() > cutoff.getTime();
+}
+
+// opts.now (tests), opts.force (past the cutoff on purpose). Returns { targets, cutoff, ran }.
+function recoverFailedAllIssuesBuckets_(opts) {
+  const o = opts || {};
+  const now = o.now || new Date();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targets = allIssuesRecoveryTargetsGs_(ss, now);
+  if (!targets.length) { Logger.log('Recovery: no FAILED or BLOCKED 17:00 bucket in today\'s ledger - nothing to re-send.'); return { targets: [], cutoff: false, ran: false }; }
+  if (!o.force && allIssuesLateCutoffPassedGs_(now)) {
+    Logger.log('Recovery: ' + targets.length + ' failed bucket(s) but it is past the late-send cutoff (' + ALL_ISSUES_LATE_CUTOFF_HOUR_ + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ' IST) - NOT sent late (decision D5). Use recoverFailedAllIssuesBucketsForceNow to send them on purpose.');
+    return { targets: targets, cutoff: true, ran: false };
+  }
+  const ids = {};
+  targets.forEach(function (t) { ids[t.emailId] = true; });
+  Logger.log('Recovery: re-sending ' + targets.length + ' failed bucket(s): ' + targets.map(function (t) { return t.region + ' / ' + t.bucket + ' (' + t.status + ')'; }).join('; '));
+  sendAllIssuesEmails_({ onlyEmailIds: ids });
+  return { targets: targets, cutoff: false, ran: true };
+}
+
+function recoverFailedAllIssuesBucketsNow() {
+  withEmailJobLockGs_(EMAIL_RECOVERY_JOB_, function () { recoverFailedAllIssuesBuckets_({}); });
+}
+
+function recoverFailedAllIssuesBucketsForceNow() {
+  withEmailJobLockGs_(EMAIL_RECOVERY_JOB_, function () { recoverFailedAllIssuesBuckets_({ force: true }); });
+}
 
 // One-time setup — installs a single daily trigger at ALL_ISSUES_RUN_HOUR_
 // IST. Safe to re-run: clears any trigger this function previously
