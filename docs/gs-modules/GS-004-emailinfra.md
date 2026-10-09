@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0811d3a` - the shared Leads-tab freshness helpers and the stale-data notice section (FN-408; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `15bec89` - the watchdog schedule lists the three audits; the new recovery jobs hold their alerts (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -274,6 +274,8 @@ local `.gs` tests pass (+1 new).
 **2026-10-09** (`ec0948e`, Email Ops EO-9): `EMAIL_ALERT_HOLD_JOBS_` also lists `recoverAllIssuesBuckets` (the 17:00 recovery job, `GS-001` FN-407). **Not live until pasted.**
 
 **2026-10-09** (`0811d3a`, Email Ops, decision D6): the Leads-tab freshness rules move here from `CycleReport.gs` (`LEADS_FRESH_*_HOURS_` = CFG-114; FN-408) so every emailer shares them, and a RED Leads tab (newest lead assigned at least 24 h ago (changed from 5 h by user decision D7 the same day)) now adds a separate **"Data freshness notice"** section at the very bottom of every email (17:00 bucket and CH-level, 10:00 combined and CH-level, 13:00 reply) - the lead tables above stay complete and **no email is ever held** for it (user decision D6, 2026-10-09). `staleLeadsNoticeSectionGs_` builds the section (a red accent, three plain sentences: how old the newest lead is, that a listed lead may already be handled, check the CRM first); `staleLeadsNoticeFromRowsGs_` is fail-open (EXC-132). `CycleReport.gs` keeps thin wrappers (`GS-016` FN-404). **Not live until pasted.**
+
+**2026-10-09** (`15bec89`, Email Ops EO-9b / EO-3 / EO-4): `EMAIL_ALERT_HOLD_JOBS_` also lists `recoverMorningBuckets` and `recoverFollowupBuckets` (`GS-010` FN-410); `emailJobScheduleGs_` (FN-332) lists the three silent audits of `OpsAudit.gs` (`GS-018`: 11:15, 14:00, 18:00) once that file is part of the project. **Not live until pasted.**
 
 ## Revalidation trigger
 

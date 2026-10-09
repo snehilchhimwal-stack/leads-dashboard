@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0811d3a` - the 10:00 / 13:00 / CH-level emails carry the bottom data-freshness notice when the Leads tab is RED (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `0213c9f` - the 10:00 / 13:00 recoveries (FN-410; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -149,6 +149,7 @@ their own.
 | FN-326 | `checkpoint1PendingKeyGs_(region, to)` `#L1596` | a region key + a recipient address | the lookup key `region|email`, both trimmed and lower-cased | none (pure) | — | `loadTodaysCheckpoint1PendingGs_` (writer, FN-279), `sendOvernightFollowupEmails_` (reader, FN-232; also uses it for its one-use-per-key set) | specific — **added 2026-10-05 (email audit P3)**; one place builds the key so the writer and reader cannot disagree. The Futwork pseudo-region key is `FUTWORK_REGION_KEY_` for both the consolidated row and legacy per-region rows |
 | FN-280 | `sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap)` `#L1681` | one bucket's Section 1/2 inputs + its `Overnight_Log` row number | the combined 13:00 reply | threaded Gmail reply (with plain-fallback); `Overnight_Log` `followup_sent_at` write-back (**success ONLY** — Step 8/11, so a total failure stays retryable on the next run); `AllIssues_Log` `checkpoint2_json`/`checkpoint2_sent_at` write-back (even on total send failure — same reasoning `GS-012`'s comment on `computeAllIssuesCheckpointGs_` gives, and FN-275's own Checkpoint 1 write, since an un-checkpointed row silently falls out of FN-279's own "today" scope once the day rolls over — a DIFFERENT tradeoff from `followup_sent_at`'s, see this function's own comment on why) | `buildOvernightFollowupSectionOptsGs_`/`buildOvernightFollowupSectionEmptyStateOptsGs_`/`buildAllIssuesCheckpointSectionOptsGs_`/`buildAllIssuesCheckpointEmptyStateOptsGs_`/`renderTwoSectionEmailHTML_` (all same file), `computeAllIssuesCheckpointGs_` (`GS-012` FN-270), `filterAllIssuesCheckpoint2ForEmailGs_` (`GS-012` FN-271), `sendThreadedGmailReply_` (FN-236), `withSendRetry_`/`notifyOpsAlertGs_` (`GS-004`) | FN-232 | specific — **unlike FN-275, no separate "resolve recipient" step — both sections' routing is already frozen (Section 1 from `Overnight_Log`, Section 2 from `AllIssues_Log`), never re-derived here** |
 | FN-335 | `writeFollowupResultGs_(logSheet, rowNumber, text, region)` `#L301` | the Overnight_Log sheet, a row number, a one-line outcome, the region | none | writes `Overnight_Log.followup_result` (col J, via `writeUnlessTestModeGs_`; best-effort — never throws; truncated to 500 characters) | `writeUnlessTestModeGs_` (`GS-004` FN-283) | `sendCombinedFollowupEmail_` (FN-280) and `sendOvernightFollowupEmails_` (FN-232) | specific — **added 2026-10-05 (email audit P9 / F12)**; outcomes: `sent (threaded reply)`, `sent (fallback: ...)`, `skipped: nothing unresolved`, `skipped: no stored recipient ...`, `blocked: ...`, `unconfirmed: ...`, `failed: ...` |
+| FN-410 | `recoverFailedMorningBuckets_(opts)` / `recoverFailedMorningBucketsNow()` / `recoverFailedMorningBucketsForceNow()`, `recoverFailedFollowupBuckets_(opts)` / `recoverFailedFollowupBucketsNow()` / `recoverFailedFollowupBucketsForceNow()`, `sendOvernightMorningEmails_({ onlyEmailIds, onlyRegions })`, `sendOvernightFollowupEmails_({ onlyEmailIds })` | `{now, force}` | `{targets, cutoff, ran}` | re-runs the 10:00 / 13:00 pipeline for ONLY the targeted emails (see `GS-015` RULE-059); the entry points go through the job lock (jobs `recoverMorningBuckets` / `recoverFollowupBuckets`, alerts held); cutoffs 12:45 and 16:00 IST | `emailRecoverBucketsGs_` (`GS-015` FN-409), `withEmailJobLockGs_` (`GS-004`) | the Apps Script editor (manual) | specific - `GS-015` RULE-058 / RULE-059 |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -157,6 +158,7 @@ their own.
 | CFG-051 | morning / follow-up hours | `10` / `13` | the two send hours | the trigger schedule — **requires `setupOvernightEmailer()` re-run** |
 | CFG-052 | follow-up-suggestion poll budget | ~2 minutes | how long `waitForFollowupSuggestions_` waits for a human/dashboard suggestion before the keyword-engine fallback | overlap window with the client Generate cycle (`LOGIC_AUDIT.md` Part 7 §18 MEDIUM #3) |
 | CFG-053 | *(no `.inTimezone()`)* | — | these triggers inherit the Apps Script project timezone | **the sole project outlier** — every other trigger pins `Asia/Kolkata` explicitly (`LOGIC_AUDIT.md` Part 1 §5) |
+| CFG-117 | `MORNING_LATE_CUTOFF_HOUR_` / `_MINUTE_`, `FOLLOWUP_LATE_CUTOFF_HOUR_` / `_MINUTE_`, `EMAIL_RECOVERY_MORNING_JOB_`, `EMAIL_RECOVERY_FOLLOWUP_JOB_` | `12`:`45`, `16`:`0`, `recoverMorningBuckets`, `recoverFollowupBuckets` | the latest time a failed 10:00 email (so the 13:00 reply can still thread into it) / 13:00 reply is re-sent; the recovery jobs' names (their alerts are held like the three email jobs') | how late a recovery may send |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -519,6 +521,8 @@ ending the session.
 **2026-10-09** (`f46ebc7`, Email Ops EO-2): the whole-job crash alerts of `sendOvernightMorningEmails` and `sendOvernightFollowupEmails` are sent with `{ immediate: true }` - every other alert raised during a run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
 
 **2026-10-09** (`0811d3a`, Email Ops, decision D6): `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` judge the Leads tab's freshness once per run (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when it is RED, the notice is appended as the last section of Section 2 of the combined 10:00 email and of the 13:00 reply, and as the last section of the CH-level overnight report. It is passed through each bucket's ledger context; nothing is held. `sendOneOvernightEmail_` (the standalone, untriggered path) is deliberately unchanged. **Not live until pasted.**
+
+**2026-10-09** (`0213c9f`, Email Ops EO-9b): `recoverFailedMorningBucketsNow()` (until 12:45 IST) and `recoverFailedFollowupBucketsNow()` (until 16:00 IST) re-send just the failed, blocked or never-attempted 10:00 emails / 13:00 replies of the day; `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` take an optional `{ onlyEmailIds }` (recovery only). With no argument they behave exactly as before. **Not live until pasted.**
 
 ## Revalidation trigger
 

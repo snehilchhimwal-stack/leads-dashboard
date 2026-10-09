@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0811d3a` - the 17:00 emails carry the bottom data-freshness notice when the Leads tab is RED (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `0213c9f` - the 17:00 recovery runs on the shared driver and also re-sends PLANNED buckets (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -59,14 +59,14 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 | FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L706/#L765` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
 | FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L797` / `removeTestModeAllIssuesRowsNow()` `#L793` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
 | FN-341 | `testModeRowsRecipientGs_()` `#L791` | none | the tester address whose test-mode `AllIssues_Log` rows `removeTestModeAllIssuesRowsNow` (FN-299) deletes — the ops address | none | `opsAlertEmailGs_` (`GS-004` FN-338) | `removeTestModeAllIssuesRowsNow` | specific — **added 2026-10-07 (email audit P13)**; replaces the old test-rows recipient string constant (a corporate address in a public repo) |
-| FN-406 | `allIssuesRecoveryTargetsGs_(ss, now)` / `allIssuesLateCutoffPassedGs_(now)` | the workbook, the time | today's FAILED or BLOCKED 17:00 bucket rows `[{emailId, region, bucket, status}]`; whether it is past 18:30 IST | reads `Email_Ledger` | `emailLedgerReadRowsGs_` (`GS-015`) | FN-407 | specific - RULE-056 |
+| FN-406 | `allIssuesRecoveryTargetsGs_(ss, now)` / `allIssuesLateCutoffPassedGs_(now)` (thin wrappers over `GS-015` FN-409) | the workbook, the time | today's FAILED, BLOCKED or PLANNED 17:00 bucket rows `[{emailId, region, bucket, status}]`; whether it is past 18:30 IST | reads `Email_Ledger` | `emailLedgerReadRowsGs_` (`GS-015`) | FN-407 | specific - RULE-056 |
 | FN-407 | `recoverFailedAllIssuesBuckets_(opts)` / `recoverFailedAllIssuesBucketsNow()` / `recoverFailedAllIssuesBucketsForceNow()` / `sendAllIssuesEmails_({ onlyEmailIds })` | `{now, force}` | `{targets, cutoff, ran}` | re-runs the 17:00 pipeline for ONLY the targeted buckets (region guard skipped, exclusions and CH-level reports not repeated), closes untargeted-but-missing buckets as SKIPPED; the entry points go through the job lock (job `recoverAllIssuesBuckets`, alerts held) | `sendAllIssuesEmails_`, `withEmailJobLockGs_` (`GS-004`) | the Apps Script editor (manual) | specific - RULE-056 |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
-| RULE-056 | A failed 17:00 bucket can be re-sent the same IST day, until 18:30 IST (decision D5), by `recoverFailedAllIssuesBucketsNow()`: only buckets the ledger shows FAILED or BLOCKED (never UNCONFIRMED - it may have been delivered; never ACCEPTED), everything re-checked from the CURRENT data, siblings in the region untouched; a bucket whose leads are resolved or whose routing changed is closed as SKIPPED with the reason; after 18:30 nothing is sent late (`...ForceNow` overrides on purpose) | FN-406, FN-407 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` D3, D5 |
+| RULE-056 | A failed 17:00 bucket can be re-sent the same IST day, until 18:30 IST (decision D5), by `recoverFailedAllIssuesBucketsNow()`: only buckets the ledger shows FAILED, BLOCKED or still PLANNED (the run died before reaching them) (never ATTEMPTING or UNCONFIRMED - it may have been delivered; never ACCEPTED), everything re-checked from the CURRENT data, siblings in the region untouched; a bucket whose leads are resolved or whose routing changed is closed as SKIPPED with the reason; after 18:30 nothing is sent late (`...ForceNow` overrides on purpose) | FN-406, FN-407 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` D3, D5 |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -245,6 +245,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-09** (`ec0948e`, Email Ops EO-9): `recoverFailedAllIssuesBucketsNow()` re-sends just the failed or blocked 17:00 buckets of the day (until 18:30 IST) - a plain re-run could not, because the "region already sent today" guard skips the whole region when a sibling bucket succeeded. `sendAllIssuesEmails_` takes an optional `{ onlyEmailIds }` for it. **Not live until pasted.**
 
 **2026-10-09** (`0811d3a`, Email Ops, decision D6): `sendAllIssuesEmails_` judges the Leads tab's freshness once per run from the rows it already read (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when the tab is RED, a RED Leads tab (newest lead assigned at least 24 h ago) now adds a separate **"Data freshness notice"** section at the very bottom of every email (17:00 bucket and CH-level, 10:00 combined and CH-level, 13:00 reply) - the lead tables above stay complete and **no email is ever held** for it (user decision D6, 2026-10-09). The section is carried in the per-bucket context (so the quarantine-and-resend keeps it) and passed to `notifyChLevelIssuesGs_`; the recovery job re-judges the tab at its own send time. Nothing is held. **Not live until pasted.**
+
+**2026-10-09** (`0213c9f`, Email Ops EO-9b): the recovery's target reader, cutoff test and driver are now the shared `GS-015` FN-409 (this file keeps its wrappers and its own cutoff constants, CFG-116); buckets left PLANNED by a run that died are targets too (`GS-015` RULE-058). **Not live until pasted.**
 
 ## Revalidation trigger
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00, 10:00 and 13:00 jobs and both CH-level reports) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `c18d89f` - created (Email Ops EO-1a) |
+| **Last Verified** | 2026-10-09 against commit `0213c9f` - the shared recovery driver (FN-409; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -60,6 +60,7 @@ Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmail
 | FN-392 | `releaseHeldIncidentsGs_(now)` | the time | how many held incidents were released | sends ONE "released" message and marks the rows RELEASED | FN-390 | `checkEmailJobsCompletedGs_` (`GS-004`, the hourly watchdog) | specific - RULE-048 |
 | FN-398 | `emailLedgerReadRowsGs_(sheet, headers, startDayKey)` + `EMAIL_LEDGER_JOB_LABELS_` | an evidence tab, its headers, a day key | the rows from the first row of that day as objects keyed by header, each with its `rowNo`; human names of the jobs | reads the tab | `emailLedgerDayKeyOfGs_` | `GS-016`, `GS-017` | specific - moved here from `CycleReport.gs` (EO-5) |
 | FN-387 | `sendAllIssuesEmails_` / `sendOneAllIssuesEmail_` ledger calls (`GS-001`) | — | — | the wiring: open, split, plan, attempt, result, exclude, prune, finish | FN-378..FN-385 | the 17:00 trigger | specific |
+| FN-409 | `emailLedgerRecoveryTargetsGs_(ss, now, job)` / `emailLateCutoffPassedGs_(now, hour, minute)` / `emailRecoverBucketsGs_(spec, opts)` | the workbook, the time, a job id / a recovery spec `{job, label, cutoffHour, cutoffMinute, forceName, run}` | today's recoverable emails `[{emailId, region, bucket, status}]` / whether the cutoff has passed / `{targets, cutoff, ran}` | reads `Email_Ledger`; `run(ids, regions)` re-sends exactly the targets | `emailLedgerReadRowsGs_`, `istDayKeyGs_` | `GS-001` FN-406/407, `GS-010` FN-410 | reusable - RULE-058 |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
@@ -71,6 +72,8 @@ Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmail
 | RULE-046 | Retention is 90 days; only LEADING rows older than the window are removed, and only after they were archived to Drive (a failed archive deletes nothing) | FN-384 | the other pruned logs (`archiveRowsToDriveCsv_`) |
 | RULE-047 | An alert raised while one of the three email jobs runs is recorded in `Incident_Log` as HELD at once and emailed only after the job ended, as ONE message that opens with the count of emails Gmail accepted (decision D2). A whole-job failure (crash) is sent immediately - nothing is left to confirm. A single held alert keeps its own subject; several are consolidated. Outside a job an alert is sent at once | FN-390, FN-391, `notifyOpsAlertGs_` / `emailAlertHoldFlushGs_` (`GS-004`) | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` section 0 |
 | RULE-048 | A HELD incident older than 45 minutes belongs to a job that was killed before it could send it: the hourly watchdog sends ONE release message listing them and marks them RELEASED; a fresh HELD incident is left alone (its job may still be running) | FN-392 | — |
+| RULE-058 | A failed email can be recovered the same IST day: FAILED and BLOCKED (the send was refused) and PLANNED (the run died before reaching it - nothing was attempted, so nothing can be duplicated; the recovery runs under the job lock) are targets; ATTEMPTING and UNCONFIRMED (the send may have gone out) and ACCEPTED never are. Everything is re-checked from the CURRENT data; a target the run no longer produces is closed as SKIPPED with the reason; after the job's cutoff (17:00 emails 18:30, 10:00 emails 12:45, 13:00 replies 16:00) nothing is sent late unless forced | FN-409 | `GS-001` RULE-056 |
+| RULE-059 | The 10:00 recovery bypasses the region "already sent today" guard for the targeted bucket only, re-sends no sibling, no CH-level report, no exclusion row and no unroutable-RM report of the original run; the 13:00 recovery retries a reply only while its Overnight_Log `followup_sent_at` is still blank and the ledger says it failed (a stamped or unconfirmed one is never sent twice), and re-evaluates only the targeted rows - a SKIPPED sibling is not sent late | `GS-010` FN-410 | - |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -158,6 +161,8 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 **2026-10-09** (`b1dbc3a`): file created - Email Ops EO-1a. `EmailInfra.gs` `prepareOutgoingEmailGs_` also returns
 `missingLeadIds` and the gate's refusal carries it. **Not live until pasted.**
+
+**2026-10-09** (`0213c9f`, Email Ops EO-9b): the 17:00 recovery's reader, cutoff test and driver moved here as the shared FN-409 so the 10:00 and 13:00 recoveries (`GS-010` FN-410) reuse them; PLANNED rows (never attempted) became recovery targets (RULE-058). **Not live until pasted.**
 
 ## Revalidation trigger
 

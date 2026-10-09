@@ -284,6 +284,13 @@ function runOpsAuditTests_() {
       const clean = audit('followup');
       TestAssertEqual_(clean.status + ',' + clean.findings.length + ',' + TestOA_alerts_().length, 'clean,0,0', '13:00 audit, clean afternoon: silent');
 
+      // the 13:00 audit watches the 13:00 job's own run record (not the 10:00 job's): while the 13:00 job is still running it is deferred
+      const followupRecordKey = 'EMAIL_JOB_RUN_sendOvernightFollowupEmails';
+      const finishedRecord = PropertiesService.getScriptProperties().getProperty(followupRecordKey);
+      PropertiesService.getScriptProperties().setProperty(followupRecordKey, JSON.stringify({ day: day(), startedAt: new Date(Date.now() - 5 * 60000).toISOString(), status: 'running' }));
+      TestAssertEqual_(audit('followup').status, 'deferred', '13:00 audit: deferred while the 13:00 job itself is running, even though the 10:00 job finished');
+      PropertiesService.getScriptProperties().setProperty(followupRecordKey, finishedRecord);
+
       // the 13:00 job never reached the bucket: no reply, no stamp, no ledger row for the reply
       const r13 = TestOA_ledgerRow_(w.ss, 'followup13');
       w.ss.getSheetByName(EMAIL_LEDGER_SHEET_).deleteRows(r13.rowNo, 1);
