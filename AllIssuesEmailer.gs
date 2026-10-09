@@ -646,6 +646,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
         'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
         '',
         'These leads got no automated email this run — this script only covers the trailing 48h window, so tomorrow\'s run will re-check them only if they\'re still inside that window then.',
+        'Once the cause is fixed, run recoverFailedAllIssuesBucketsNow() before ' + ALL_ISSUES_LATE_CUTOFF_HOUR_ + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ' IST: it re-sends ONLY this bucket (its siblings are not repeated) and re-checks the leads first. After that time nothing is sent late.',
         guardBlocked
           ? 'The send-safety gate refused this payload before any draft was created: ' + e.guardProblems.join('; ') + '. Fix the underlying data (recipient address / content) and run the job by hand.'
           : isSendBlocked

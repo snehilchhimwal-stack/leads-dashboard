@@ -847,6 +847,52 @@ function runEmailLedgerTests_() {
         TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'recovery: …and a second call sends nothing');
       }
 
+      // ---- (32b) the region already has a logged sibling bucket: the "already sent today" guard must not stop the recovery ----
+      {
+        const w = mkFailedPune();
+        ensureAllIssuesLogSheet_(w).appendRow([new Date(), 'Pune', 'Sibling Bucket', 'A1', 'sibling@example.test', '', 1, new Date(), 'thread-sibling', '[]']);
+        const draftsBefore = TestGmailLog_.drafts.length;
+        recoverFailedAllIssuesBuckets_({ now: noonToday });
+        TestAssertEqual_(TestGmailLog_.drafts.length + ',' + byRegion(w, 'Pune').status, (draftsBefore + 1) + ',ACCEPTED', 'region guard: a sibling already logged for the region does not stop the failed bucket being re-sent');
+      }
+
+      // ---- (32c) an exclusion recorded by the original run is not recorded a second time by the recovery ----
+      {
+        const w = TestEL_world_(function (header, now) {
+          const row = function (id, client) { return TestEL_leadRow_(header, { lead_id: id, client_id: client, RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false }); };
+          return [row('L-PUNE', 'C-1'), row('L-PUNE', 'C-2')]; // a duplicate lead id: the second copy is left out
+        });
+        TestEL_bind_(w);
+        failingGmailFor('L-PUNE');
+        sendAllIssuesEmails();
+        GmailApp = TestMockGmailApp_({});
+        const exBefore = TestEL_objects_(w.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).length;
+        TestAssertEqual_(exBefore, 1, 'exclusions: set up - the original run recorded the duplicate once');
+        recoverFailedAllIssuesBuckets_({ now: noonToday });
+        TestAssertEqual_(TestEL_objects_(w.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).length, exBefore, 'exclusions: the recovery does not record the same duplicate again');
+        TestAssertEqual_(byRegion(w, 'Pune').status, 'ACCEPTED', 'exclusions: …and the bucket was recovered');
+      }
+
+      // ---- (32d) the CH-level report of the original run is not repeated by the recovery (even if its once-a-day record were lost) ----
+      {
+        const w = TestEL_world_(function (header, now) {
+          return [
+            TestEL_leadRow_(header, { lead_id: 'L-PUNE', client_id: 'C-PUNE', RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+            TestEL_leadRow_(header, { lead_id: 'L-CHX', client_id: 'C-CHX', RM: 'Test CH Self', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+          ];
+        });
+        TestEL_bind_(w);
+        failingGmailFor('L-PUNE');
+        sendAllIssuesEmails();
+        GmailApp = TestMockGmailApp_({});
+        TestAssertEqual_(ledgerOf(w).filter(function (r) { return r.job === 'chLevel17'; }).length, 1, 'CH-level: set up - the original run sent the CH-level report');
+        PropertiesService = TestMockPropertiesService_(); // the once-a-day record of that report is gone
+        const draftsBefore = TestGmailLog_.drafts.length;
+        recoverFailedAllIssuesBuckets_({ now: noonToday });
+        TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'CH-level: the recovery sends only the failed bucket - not the CH-level report again');
+        TestAssertEqual_(ledgerOf(w).filter(function (r) { return r.job === 'chLevel17'; }).length, 1, 'CH-level: …and the ledger still has one CH-level row');
+      }
+
       // ---- (33) nothing failed at all ----
       {
         const w = TestEL_world_(TestEL_standardLeads_);
@@ -907,6 +953,8 @@ function runEmailLedgerTests_() {
         const pune = byRegion(w, 'Pune');
         TestAssertEqual_(pune.status + ',' + pune.attempts, 'FAILED,2', 'still failing: FAILED after a second attempt');
         TestAssert_(TestGmailLog_.sent.some(function (e) { return /All-issues email FAILED/.test(e.subject); }), 'still failing: the failure alert fires again');
+        const failAlert = TestGmailLog_.sent.filter(function (e) { return /All-issues email FAILED/.test(e.subject); })[0];
+        TestAssertContains_(failAlert.body, 'recoverFailedAllIssuesBucketsNow() before 18:30 IST', 'still failing: the alert tells you how to re-send just this bucket, and until when');
       }
 
       // ---- (36b) through the entry point: the recovery job holds its alerts and states what went out ----

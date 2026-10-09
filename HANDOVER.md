@@ -864,11 +864,18 @@ email's thread from someone other than the sending account. `NO_BOUNCE_SEEN` mea
 search or an unreadable thread is recorded as `UNKNOWN`, not as clean. The 16:30 report shows a "Bounces and replies" section and lists bounced emails
 under "Needs attention". After pasting, run `setupEmailSweepTrigger()` once.
 
+**Recovering a failed 17:00 bucket (EO-9).** A plain re-run of the 17:00 job cannot re-send one failed bucket when its sibling buckets in the same region went out (the "region already sent
+today" guard skips the whole region). `recoverFailedAllIssuesBucketsNow()` (`AllIssuesEmailer.gs`) re-sends exactly the buckets today's ledger shows as `FAILED` or `BLOCKED` - never
+`UNCONFIRMED` (it may have been delivered; check Gmail Sent first), never `ACCEPTED` - after re-checking everything from the current data: a lead that is resolved by now is not
+in the email, and a bucket with nothing left is closed as `SKIPPED` with the reason. It works until **18:30 IST** (decision D5); after that it sends nothing, and
+`recoverFailedAllIssuesBucketsForceNow()` sends on purpose. The siblings, the exclusions and the CH-level reports of the original run are not repeated. The 10:00 and 13:00 emails have no
+such recovery yet. Its alerts are held until the run ends like the three email jobs'.
+
 **Check it live:** run `showEmailLedgerTodayNow()` (read-only) after a 17:00 run. Both tabs create themselves on the first run after the paste.
 
 **Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
 `Tests_RunAll.gs`, `OvernightEmailer.gs`, plus `CycleReport.gs`, `Tests_CycleReport.gs`, `EmailSweep.gs` and `Tests_EmailSweep.gs` (new) and `Tests_EmailInfra.gs`; the ledger and held alerts need no `setupXxx()`, the cycle report needs `setupEmailCycleReportTrigger()` once and the sweep `setupEmailSweepTrigger()` once. EO-2 adds nothing new to paste beyond these files (`Incident_Log` creates itself). Still to come: EO-3/EO-4 (the
-13:00 audit and the 17:00 reconciliation), then the daily checklist, follow-up tracker and recovery (EO-6/7/9).
+13:00 audit and the 17:00 reconciliation), then the daily checklist and follow-up tracker (EO-6/7) and the 10:00/13:00 recovery.
 
 ### 4.4 GitHub repo access
 

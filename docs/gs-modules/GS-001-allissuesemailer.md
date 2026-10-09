@@ -51,14 +51,22 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L163/#L187` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
-| FN-175 | `allIssuesWindowGs_(asOf)` / `allIssuesDateRangeLabelGs_(win)` `#L85/#L95` | as-of date | `{start, end}` IST-midnight-anchored 3-calendar-day window + a label | none | `istDayKeyGs_` (`GS-002`) | FN-174 | specific — **not rolling-hours** (documented undercount fix) |
-| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L522` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
-| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L419` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
-| FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L129` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
-| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L680/#L707` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
-| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L739` / `removeTestModeAllIssuesRowsNow()` `#L735` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
-| FN-341 | `testModeRowsRecipientGs_()` `#L733` | none | the tester address whose test-mode `AllIssues_Log` rows `removeTestModeAllIssuesRowsNow` (FN-299) deletes — the ops address | none | `opsAlertEmailGs_` (`GS-004` FN-338) | `removeTestModeAllIssuesRowsNow` | specific — **added 2026-10-07 (email audit P13)**; replaces the old test-rows recipient string constant (a corporate address in a public repo) |
+| FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L167/#L191` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
+| FN-175 | `allIssuesWindowGs_(asOf)` / `allIssuesDateRangeLabelGs_(win)` `#L89/#L99` | as-of date | `{start, end}` IST-midnight-anchored 3-calendar-day window + a label | none | `istDayKeyGs_` (`GS-002`) | FN-174 | specific — **not rolling-hours** (documented undercount fix) |
+| FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win)` `#L543` | one region's data | that region's email | Gmail send; log row | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
+| FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win)` `#L440` | CH-level RMs + their leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
+| FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L133` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
+| FN-179 | `sendAllIssuesEmailsNow()` / `setupAllIssuesEmailTrigger()` `#L702/#L775` | — | manual run / installs the trigger | Gmail sends / creates a trigger | FN-174 / `ScriptApp` | Apps Script editor, manual | specific |
+| FN-299 | `removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCount)` `#L807` / `removeTestModeAllIssuesRowsNow()` `#L803` | a spreadsheet, a time window, a recipient, an expected row count | deletes those `AllIssues_Log` rows | archives them to a Drive CSV first (`archiveRowsToDriveCsv_`, `GS-002`) and checks the archive, then `deleteRows`; touches NOTHING unless the header is as expected, the matching rows are one contiguous block, and their count equals `expectedCount` | `archiveRowsToDriveCsv_` (`GS-002`) | run once by hand from the Apps Script editor (`removeTestModeAllIssuesRowsNow`, window 2026-09-24 10:00-10:30 IST, recipient the tester, expected 28) — not wired to any trigger | specific — **one-off remediation, 2026-09-26** for the rows a TEST MODE run wrote before `writeUnlessTestModeGs_` existed; safe to re-run (a second run finds nothing). Same pattern as `removeDedupIncidentRowsNow` (`GS-008`) |
+| FN-341 | `testModeRowsRecipientGs_()` `#L801` | none | the tester address whose test-mode `AllIssues_Log` rows `removeTestModeAllIssuesRowsNow` (FN-299) deletes — the ops address | none | `opsAlertEmailGs_` (`GS-004` FN-338) | `removeTestModeAllIssuesRowsNow` | specific — **added 2026-10-07 (email audit P13)**; replaces the old test-rows recipient string constant (a corporate address in a public repo) |
+| FN-406 | `allIssuesRecoveryTargetsGs_(ss, now)` / `allIssuesLateCutoffPassedGs_(now)` | the workbook, the time | today's FAILED or BLOCKED 17:00 bucket rows `[{emailId, region, bucket, status}]`; whether it is past 18:30 IST | reads `Email_Ledger` | `emailLedgerReadRowsGs_` (`GS-015`) | FN-407 | specific - RULE-056 |
+| FN-407 | `recoverFailedAllIssuesBuckets_(opts)` / `recoverFailedAllIssuesBucketsNow()` / `recoverFailedAllIssuesBucketsForceNow()` / `sendAllIssuesEmails_({ onlyEmailIds })` | `{now, force}` | `{targets, cutoff, ran}` | re-runs the 17:00 pipeline for ONLY the targeted buckets (region guard skipped, exclusions and CH-level reports not repeated), closes untargeted-but-missing buckets as SKIPPED; the entry points go through the job lock (job `recoverAllIssuesBuckets`, alerts held) | `sendAllIssuesEmails_`, `withEmailJobLockGs_` (`GS-004`) | the Apps Script editor (manual) | specific - RULE-056 |
+
+## Business rules implemented - `RULE-XXX` sub-table
+
+| ID | Rule | Where | Duplicated elsewhere? |
+|---|---|---|---|
+| RULE-056 | A failed 17:00 bucket can be re-sent the same IST day, until 18:30 IST (decision D5), by `recoverFailedAllIssuesBucketsNow()`: only buckets the ledger shows FAILED or BLOCKED (never UNCONFIRMED - it may have been delivered; never ACCEPTED), everything re-checked from the CURRENT data, siblings in the region untouched; a bucket whose leads are resolved or whose routing changed is closed as SKIPPED with the reason; after 18:30 nothing is sent late (`...ForceNow` overrides on purpose) | FN-406, FN-407 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` D3, D5 |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -66,6 +74,7 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 |---|---|---|---|---|
 | CFG-025 | `ALL_ISSUES_RUN_HOUR_` | `17` | the send hour | the trigger schedule — **requires `setupAllIssuesEmailTrigger()` re-run to take effect** |
 | CFG-026 | the 3-calendar-day window | 3 days, IST-midnight-anchored | which leads are in scope | `allIssuesWindowGs_` (FN-175) |
+| CFG-116 | `ALL_ISSUES_LATE_CUTOFF_HOUR_`, `ALL_ISSUES_LATE_CUTOFF_MINUTE_`, `EMAIL_RECOVERY_JOB_` | `18`, `30`, `recoverAllIssuesBuckets` | the latest time a failed bucket is re-sent; the recovery job's name (its alerts are held like the three email jobs') | how late a recovery may send |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -74,6 +83,8 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 | EXC-055 | a send fails transiently | `withSendRetry_` (`GS-004`) retries with backoff; persistent failure → `notifyLeadSendFailuresGs_` ops alert | the run continues for other regions; ops gets an alert |
 | EXC-056 | `RmHierarchy.private.gs` absent → all resolved emails `''` | routing degrades to `Region_Recipients` / `CH_LEVEL_EMAIL_` fallback | email still sends, to the fallback address (`GS-011`) |
 | EXC-057 | trigger fires late without `.nearMinute(0)` | mitigated by `.nearMinute(0)` in the installer | (historical) a 54-minute-late fire |
+| EXC-130 | recovery is called after 18:30 IST | nothing is sent; the log says so; the ledger keeps FAILED/BLOCKED | none (use `...ForceNow` to send on purpose) |
+| EXC-131 | a targeted bucket is not produced by the recovery run (leads resolved, routing changed) | its ledger row is closed as SKIPPED with the reason | the 16:30 report shows it as skipped |
 
 ## Data lineage
 
@@ -230,6 +241,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-09** (`b1dbc3a`, Email Ops EO-1a): `sendAllIssuesEmails_` now records every bucket email in the ledger (`GS-015`): PLANNED per region in one write, ATTEMPTING before the send, then ACCEPTED / FAILED / UNCONFIRMED / BLOCKED with the Gmail ids; leads left out go to `Email_Ledger_Exclusions`. Per-lead isolation (plan decision D3): a defective lead is dropped and the rest of its bucket still goes; when the send gate objects to specific leads only those are dropped and the bucket is resent once (`sendOneAllIssuesEmail_` takes an optional `ledgerCtx`). A duplicate lead id is left out but not reported as unsent. The ledger is fail-open: it can never stop or change an email. **Not live until pasted.**
 
 **2026-10-09** (`f46ebc7`, Email Ops EO-2): the whole-job crash alert of `sendAllIssuesEmails` is sent with `{ immediate: true }` - every other alert raised during the run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
+
+**2026-10-09** (`(pending commit)`, Email Ops EO-9): `recoverFailedAllIssuesBucketsNow()` re-sends just the failed or blocked 17:00 buckets of the day (until 18:30 IST) - a plain re-run could not, because the "region already sent today" guard skips the whole region when a sibling bucket succeeded. `sendAllIssuesEmails_` takes an optional `{ onlyEmailIds }` for it. **Not live until pasted.**
 
 ## Revalidation trigger
 

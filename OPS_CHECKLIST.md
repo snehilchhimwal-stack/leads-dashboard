@@ -214,6 +214,7 @@ nobody separately ran either check after they started appearing in the
 
 ### Automatic email
 
+- [ ] **A 17:00 `All-issues email FAILED` / `BLOCKED` alert** — fix the cause (the address, the Gmail restriction) and run `recoverFailedAllIssuesBucketsNow()` before 18:30 IST: it re-sends only the failed bucket, not its siblings. An `UNCONFIRMED` bucket is not re-sent (check Gmail Sent first).
 - [ ] **Daily: read the 16:30 cycle report** (`CycleReport.gs`, added 2026-10-09) — one email to Snehil near 16:30 IST. `all clear` means every planned
       email reached a final result and no incident above LOW happened in the cycle; `need attention` lists what to look at; `no emails recorded`
       on a working day means the jobs or the ledger did not run (`showEmailJobRunsNow()`, `showEmailLedgerTodayNow()`). If it did not arrive by
