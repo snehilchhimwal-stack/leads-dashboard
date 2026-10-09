@@ -91,20 +91,20 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `Core.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `EmailInfra.gs` | `d897529` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `MovementTracker.gs` | `58ab8e1` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `OvernightEmailer.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `RmHierarchy.gs` | `d897529` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `RmHierarchySync.gs` | `70f21c4` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `SlaEngine.gs` | `7799e44` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
-| `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-08 | read directly from the live editor by hash-match (2026-10-08) |
+| `AllIssuesEmailer.gs` | `7799e44` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `Core.gs` | `78e47f5` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `EmailInfra.gs` | `d897529` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `MovementTracker.gs` | `58ab8e1` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `OvernightEmailer.gs` | `7799e44` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `RmHierarchy.gs` | `d897529` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `RmHierarchySync.gs` | `3dc9852` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `SlaEngine.gs` | `7799e44` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
 
 ### Known live-vs-repo differences
 
@@ -264,6 +264,12 @@ One line per sweep: date — what was found — what was fixed / left open.
   (`showRmHierarchySyncStatusNow`), no "syncRmHierarchyNightly never started" watchdog alert after 23:30, report only if something new. **Editor quirk found while deploying:** after
   changing the function dropdown, the FIRST Run click runs the previously selected function - always read the log to see which function actually ran (press Run again if it was
   the old one); the new file therefore lists its read-only helpers first. Apply is OFF: review 2-3 reports, then `enableRmHierarchySyncApplyNow()`.
+- 2026-10-09 — **RM hierarchy sync: old-spelling matching deployed** (`3dc9852`). `RmHierarchySync.gs` + `Tests_RmHierarchySync.gs` re-pasted and saved by Snehil, page reloaded, all 32 files
+  re-read and matched (`match-live-gs.py --apply`). Live `runAllTests()`: 2260 passed, 0 failed (`Tests_RmHierarchySync` 164). The first scheduled run fired 23:12 IST on 8 Oct
+  (report-only, 13 pending changes, no repeated items) and no watchdog alert followed. Live read-only plan after the deploy: 11 old spellings recognised (Atharva P Belose, Akash Ugale,
+  Peddapally Shivaji, Sourabh Sareen Pnl, Jay Renavikar, Mamtaben S 1 Account, two Mohmmad Azaz spellings, and by dropped-middle-name Mohammed Khan, Mohd Shaikh,
+  Shaikh Wasim Shaikh Harun), 8 leavers left, 27 manager-field items, 13 new people. **Verify:** tonight's report lists the 11 once under "OLD SPELLINGS OF CURRENT STAFF"; the three
+  middle-name matches are worth a human glance (could be a different person with the same first and last name).
 
 ## Current status
 
