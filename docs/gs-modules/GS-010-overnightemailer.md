@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0213c9f` - the 10:00 / 13:00 recoveries (FN-410; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `15bec89` - the 10:00 / 13:00 recoveries (FN-410; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0213c9f` - the 17:00 recovery runs on the shared driver and also re-sends PLANNED buckets (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `15bec89` - the 17:00 recovery runs on the shared driver and also re-sends PLANNED buckets (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

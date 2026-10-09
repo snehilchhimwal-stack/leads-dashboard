@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0811d3a` - revalidated after the bottom data-freshness notice (email content only; no change to the Gmail send itself) |
+| **Last Verified** | 2026-10-09 against commit `15bec89` - revalidated after the bottom data-freshness notice (email content only; no change to the Gmail send itself) |
 
 ## Purpose / reason to exist
 
