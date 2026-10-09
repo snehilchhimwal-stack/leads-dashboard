@@ -712,35 +712,21 @@ function sendAllIssuesEmailsNow() { sendAllIssuesEmails(); }
 // only until the late-send cutoff (18:30 IST); after that nothing is sent late. A bucket whose leads were resolved meanwhile is closed as SKIPPED with the reason.
 const EMAIL_RECOVERY_JOB_ = 'recoverAllIssuesBuckets';
 
-// Today's recoverable 17:00 buckets from the ledger: [{ emailId, region, bucket, status }].
+// Today's recoverable 17:00 buckets from the ledger: [{ emailId, region, bucket, status }] (the shared reader is EmailLedger.gs's).
 function allIssuesRecoveryTargetsGs_(ss, now) {
-  const day = istDayKeyGs_(now);
-  return emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, day)
-    .filter(function (r) { return r.job === EMAIL_LEDGER_JOB_ALL_ISSUES_ && emailLedgerDayKeyOfGs_(r.cycle_day) === day && (r.status === 'FAILED' || r.status === 'BLOCKED'); })
-    .map(function (r) { return { emailId: r.email_id, region: r.region, bucket: r.bucket_label, status: r.status }; });
+  return emailLedgerRecoveryTargetsGs_(ss, now, EMAIL_LEDGER_JOB_ALL_ISSUES_);
 }
 
 function allIssuesLateCutoffPassedGs_(now) {
-  const cutoff = new Date(istDayKeyGs_(now) + 'T' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_HOUR_) + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ':00+05:30');
-  return now.getTime() > cutoff.getTime();
+  return emailLateCutoffPassedGs_(now, ALL_ISSUES_LATE_CUTOFF_HOUR_, ALL_ISSUES_LATE_CUTOFF_MINUTE_);
 }
 
 // opts.now (tests), opts.force (past the cutoff on purpose). Returns { targets, cutoff, ran }.
 function recoverFailedAllIssuesBuckets_(opts) {
-  const o = opts || {};
-  const now = o.now || new Date();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const targets = allIssuesRecoveryTargetsGs_(ss, now);
-  if (!targets.length) { Logger.log('Recovery: no FAILED or BLOCKED 17:00 bucket in today\'s ledger - nothing to re-send.'); return { targets: [], cutoff: false, ran: false }; }
-  if (!o.force && allIssuesLateCutoffPassedGs_(now)) {
-    Logger.log('Recovery: ' + targets.length + ' failed bucket(s) but it is past the late-send cutoff (' + ALL_ISSUES_LATE_CUTOFF_HOUR_ + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ' IST) - NOT sent late (decision D5). Use recoverFailedAllIssuesBucketsForceNow to send them on purpose.');
-    return { targets: targets, cutoff: true, ran: false };
-  }
-  const ids = {};
-  targets.forEach(function (t) { ids[t.emailId] = true; });
-  Logger.log('Recovery: re-sending ' + targets.length + ' failed bucket(s): ' + targets.map(function (t) { return t.region + ' / ' + t.bucket + ' (' + t.status + ')'; }).join('; '));
-  sendAllIssuesEmails_({ onlyEmailIds: ids });
-  return { targets: targets, cutoff: false, ran: true };
+  return emailRecoverBucketsGs_({
+    job: EMAIL_LEDGER_JOB_ALL_ISSUES_, label: '17:00', cutoffHour: ALL_ISSUES_LATE_CUTOFF_HOUR_, cutoffMinute: ALL_ISSUES_LATE_CUTOFF_MINUTE_,
+    forceName: 'recoverFailedAllIssuesBucketsForceNow', run: function (ids) { sendAllIssuesEmails_({ onlyEmailIds: ids }); },
+  }, opts);
 }
 
 function recoverFailedAllIssuesBucketsNow() {

@@ -1050,6 +1050,227 @@ function runEmailLedgerTests_() {
       TestAssert_(chainRow && JSON.parse(chainRow.lead_ids_json).indexOf('L-EXCL') === -1, 'excluded RM: the chain\'s email does not carry the excluded RM\'s lead');
     }
 
+    // ================= EO-9b: recovering failed 10:00 and 13:00 emails =================
+    {
+      const dayToday = istDayKeyGs_(new Date());
+      const noonToday = new Date(dayToday + 'T12:00:00+05:30');
+      const ledgerOf = function (ssX, job) { return TestEL_objects_(ssX.getSheetByName(EMAIL_LEDGER_SHEET_), L).filter(function (r) { return !job || r.job === job; }); };
+      const byRegion = function (ssX, job, region) { return ledgerOf(ssX, job).filter(function (r) { return r.region === region; })[0]; };
+      const overnightRows = function (ssX) { return ssX.getSheetByName('Overnight_Log').getLastRow() - 1; };
+
+      // A Pune lead and a Thane lead assigned yesterday evening (inside the overnight window), flagged by a rule that does not depend on the clock.
+      const morningWorld = function (extra) {
+        const header = TestFixture_leadsHeader_();
+        const banner = header.map(function () { return ''; });
+        const eve = new Date(istDayKeyGs_(new Date(Date.now() - 24 * 3600 * 1000)) + 'T18:00:00+05:30');
+        const ss = TestMockSpreadsheet_({
+          'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+          'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        });
+        const row = function (o) { return TestEL_leadRow_(header, Object.assign({ RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: eve }, o)); };
+        ss._sheets['leads'] = TestMockSheet_('leads', [banner, header, row({ lead_id: 'L-PUNE', client_id: 'C-PUNE', region: 'Pune' }), row({ lead_id: 'L-THANE', client_id: 'C-THANE', region: 'Thane' })]
+          .concat((extra || []).map(row)));
+        return ss;
+      };
+      const failedPuneMorning = function (extra) {
+        const ss = morningWorld(extra);
+        TestEL_bind_(ss);
+        failingGmailFor('L-PUNE');
+        sendOvernightMorningEmails();
+        GmailApp = TestMockGmailApp_({}); // Gmail works again
+        TestGmailLog_.sent.length = 0;
+        return ss;
+      };
+
+      // ---- the shared helpers ----
+      {
+        const ssC = TestMockSpreadsheet_({});
+        TestEL_bind_(ssC);
+        const hC = emailLedgerOpenGs_(ssC);
+        const mk = function (job, label, status) {
+          const idC = emailLedgerIdGs_(job, dayToday, 'Pune', 'A1', label);
+          emailLedgerPlanGs_(hC, [{ emailId: idC, job: job, dayKey: dayToday, region: 'Pune', bucketLabel: label, primaryRole: 'A1', to: TEST_EMAIL_PRIMARY_, leadIds: ['1'] }]);
+          emailLedgerAttemptGs_(hC, idC);
+          emailLedgerResultGs_(hC, idC, { status: status, reason: 'x', leadIds: status === 'ACCEPTED' ? ['1'] : [] });
+        };
+        mk('morning10', 'M failed', 'FAILED'); mk('morning10', 'M blocked', 'BLOCKED'); mk('morning10', 'M unconfirmed', 'UNCONFIRMED'); mk('morning10', 'M accepted', 'ACCEPTED');
+        mk('followup13', 'F failed', 'FAILED'); mk('allIssues17', 'A failed', 'FAILED'); mk('chLevel10', 'C failed', 'FAILED');
+        const names = function (job) { return emailLedgerRecoveryTargetsGs_(ssC, new Date(), job).map(function (t) { return t.bucket; }).sort().join('|'); };
+        TestAssertEqual_(names('morning10'), 'M blocked|M failed', 'recovery targets: only the 10:00 emails that are FAILED or BLOCKED - not UNCONFIRMED (may have been delivered), not ACCEPTED, not another job\'s');
+        TestAssertEqual_(names('followup13') + ',' + names('allIssues17') + ',' + names('chLevel10'), 'F failed,A failed,C failed', 'recovery targets: each job sees only its own failed emails');
+        const cut = function (h, m, fh, fm) { return emailLateCutoffPassedGs_(new Date(dayToday + 'T' + pad2Gs_(h) + ':' + pad2Gs_(m) + ':00+05:30'), fh, fm); };
+        TestAssertEqual_([cut(12, 45, 12, 45), cut(12, 46, 12, 45), cut(16, 0, 16, 0), cut(16, 1, 16, 0)].join(','), 'false,true,false,true', 'cutoff helper: the cutoff minute itself is still allowed, the next minute is not');
+        TestAssertEqual_(MORNING_LATE_CUTOFF_HOUR_ + ':' + MORNING_LATE_CUTOFF_MINUTE_ + ',' + FOLLOWUP_LATE_CUTOFF_HOUR_ + ':' + FOLLOWUP_LATE_CUTOFF_MINUTE_, '12:45,16:0', 'cutoffs: 10:00 emails until 12:45 (so the 13:00 reply can thread), 13:00 replies until 16:00');
+      }
+
+      // ---- 10:00: one bucket failed, its sibling went out: only the failed one is re-sent ----
+      {
+        const ss = failedPuneMorning();
+        TestAssertEqual_(byRegion(ss, 'morning10', 'Pune').status + ',' + byRegion(ss, 'morning10', 'Thane').status, 'FAILED,ACCEPTED', '10:00 recovery: set up - Pune failed, Thane went out');
+        const draftsBefore = TestGmailLog_.drafts.length, exBefore = TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).length, logBefore = overnightRows(ss);
+        const res = recoverFailedMorningBuckets_({ now: noonToday });
+        TestAssertEqual_(res.ran + ',' + res.targets.length + ',' + res.targets[0].region + ',' + res.targets[0].status, 'true,1,Pune,FAILED', '10:00 recovery: one FAILED bucket found and re-run');
+        TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, '10:00 recovery: exactly one email is sent - the failed bucket');
+        TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-PUNE', '10:00 recovery: …and it is the Pune bucket');
+        const pune = byRegion(ss, 'morning10', 'Pune'), thane = byRegion(ss, 'morning10', 'Thane');
+        TestAssertEqual_([pune.status, pune.attempts, pune.leads_sent].join(','), 'ACCEPTED,2,1', '10:00 recovery: the Pune row is now ACCEPTED after a second attempt');
+        TestAssertEqual_([thane.status, thane.attempts].join(','), 'ACCEPTED,1', '10:00 recovery: the Thane row is untouched (not sent a second time)');
+        TestAssertEqual_(ledgerOf(ss, 'morning10').length, 2, '10:00 recovery: no extra ledger rows');
+        TestAssertEqual_(overnightRows(ss), logBefore + 1, '10:00 recovery: the recovered email is logged in Overnight_Log, so the 13:00 reply can thread into it');
+        TestAssertEqual_(TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).length, exBefore, '10:00 recovery: the original run\'s exclusion rows are not repeated');
+        TestAssert_(!TestGmailLog_.sent.some(function (e) { return /FAILED|BLOCKED|failed/.test(e.subject); }), '10:00 recovery: no failure alert when the re-send worked');
+        const again = recoverFailedMorningBuckets_({ now: noonToday });
+        TestAssertEqual_(again.ran + ',' + again.targets.length + ',' + TestGmailLog_.drafts.length, 'false,0,' + (draftsBefore + 1), '10:00 recovery: once recovered there is nothing left to recover, and a second call sends nothing');
+        recoverFailedMorningBucketsNow(); // the entry point (through the job lock) is also a quiet no-op
+        TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, '10:00 recovery: the entry point sends nothing either');
+      }
+
+      // ---- 10:00: the region already has a logged sibling email - the "already sent today" guard must not stop the recovery ----
+      {
+        const ss = failedPuneMorning();
+        ensureOvernightLogSheet_(ss).appendRow([dayToday, 'Pune', 'thread-sibling', '[]', new Date(), 'sibling@example.test', '', 'Sibling', '']);
+        const draftsBefore = TestGmailLog_.drafts.length, exBefore = TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).length;
+        recoverFailedMorningBuckets_({ now: noonToday });
+        TestAssertEqual_(TestGmailLog_.drafts.length + ',' + byRegion(ss, 'morning10', 'Pune').status, (draftsBefore + 1) + ',ACCEPTED', '10:00 region guard: a sibling already logged for the region does not stop the failed bucket being re-sent');
+        TestAssertEqual_(TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).length, exBefore, '10:00 region guard: …and the guard skip is not recorded as an exclusion');
+      }
+
+      // ---- 10:00: a CH-level report of the original run is not repeated by the recovery ----
+      {
+        const ss = failedPuneMorning([{ lead_id: 'L-CHX', client_id: 'C-CHX', RM: 'Test CH Self', region: 'Pune' }]);
+        TestAssertEqual_(ledgerOf(ss, 'chLevel10').length, 1, '10:00 CH-level: set up - the original run sent the CH-level report');
+        const draftsBefore = TestGmailLog_.drafts.length;
+        recoverFailedMorningBuckets_({ now: noonToday });
+        TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, '10:00 CH-level: the recovery sends only the failed bucket - not the CH-level report again');
+        TestAssertEqual_(ledgerOf(ss, 'chLevel10').length, 1, '10:00 CH-level: …and the ledger still has one CH-level row');
+      }
+
+      // ---- 10:00: past the cutoff nothing is sent late, unless forced ----
+      {
+        const ss = failedPuneMorning();
+        const draftsBefore = TestGmailLog_.drafts.length;
+        const late = new Date(dayToday + 'T12:46:00+05:30');
+        const res = recoverFailedMorningBuckets_({ now: late });
+        TestAssertEqual_(res.ran + ',' + res.cutoff + ',' + res.targets.length + ',' + TestGmailLog_.drafts.length + ',' + byRegion(ss, 'morning10', 'Pune').status, 'false,true,1,' + draftsBefore + ',FAILED', '10:00 cutoff: after 12:45 the failed bucket is found but not sent, and the ledger still says FAILED');
+        const forced = recoverFailedMorningBuckets_({ now: late, force: true });
+        TestAssertEqual_(forced.ran + ',' + TestGmailLog_.drafts.length + ',' + byRegion(ss, 'morning10', 'Pune').status, 'true,' + (draftsBefore + 1) + ',ACCEPTED', '10:00 cutoff: force sends it on purpose');
+      }
+
+      // ---- 10:00: the leads were resolved meanwhile - re-checked from current data, nothing is sent, the row says why ----
+      {
+        const ss = failedPuneMorning();
+        const draftsBefore = TestGmailLog_.drafts.length;
+        ss._sheets['leads'].getRange(3, TestFixture_leadsHeader_().indexOf('current_stage') + 1, 1, 1).setValues([['Won']]); // L-PUNE is the first lead row
+        recoverFailedMorningBuckets_({ now: noonToday });
+        TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, '10:00 revalidation: a resolved lead is not emailed');
+        const pune = byRegion(ss, 'morning10', 'Pune');
+        TestAssertEqual_(pune.status, 'SKIPPED', '10:00 revalidation: the row is closed as SKIPPED, not left FAILED without a reason');
+        TestAssertContains_(pune.status_reason, 'recovery', '10:00 revalidation: …with the recovery reason');
+      }
+
+      // ---- 10:00: the recovery run's own failure is reported (and the ledger says FAILED again, with two attempts) ----
+      {
+        const ss = failedPuneMorning();
+        failingGmailFor('L-PUNE'); // Gmail still refuses this bucket
+        recoverFailedMorningBuckets_({ now: noonToday });
+        const pune = byRegion(ss, 'morning10', 'Pune');
+        TestAssertEqual_(pune.status + ',' + pune.attempts, 'FAILED,2', '10:00 recovery that fails again: FAILED, two attempts - the evidence stays truthful');
+        TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /Morning email failed|Leads Not Sent|leads not sent/i.test(e.subject); }).length >= 1, true, '10:00 recovery that fails again: ops are told');
+      }
+
+      // ---- 13:00: the reply failed entirely - the recovery re-sends just that reply, threaded ----
+      const failedFollowup = function () {
+        const w = cycleWorld();
+        TestEL_bind_(w.ss);
+        sendAllIssuesEmails();
+        ageAllIssues(w);
+        sendOvernightMorningEmails();
+        w.tenThread = TestGmailLog_.drafts[1]._threadId;
+        Gmail = TestMockGmailAdvanced_({ shouldFail: true }); // the threaded send is refused...
+        failingGmailFor(null); // ...and so is the plain fallback
+        sendOvernightFollowupEmails();
+        GmailApp = TestMockGmailApp_({});
+        Gmail = TestMockGmailAdvanced_({}); // Gmail works again
+        TestGmailLog_.sent.length = 0;
+        return w;
+      };
+      {
+        const w = failedFollowup();
+        const r13 = function () { return ledgerRows(w, 'followup13')[0]; };
+        TestAssertEqual_(r13().status + ',' + w.ss.getSheetByName('Overnight_Log').getRange(2, 9, 1, 1).getValue(), 'FAILED,', '13:00 recovery: set up - the reply failed and followup_sent_at is still blank');
+        const draftsBefore = TestGmailLog_.drafts.length;
+        const res = recoverFailedFollowupBuckets_({ now: noonToday });
+        TestAssertEqual_(res.ran + ',' + res.targets.length + ',' + res.targets[0].status, 'true,1,FAILED', '13:00 recovery: one FAILED reply found and re-run');
+        TestAssertEqual_(TestGmailLog_.threadReplies.length, 1, '13:00 recovery: exactly one reply is sent, threaded');
+        TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, '13:00 recovery: no plain copy');
+        TestAssertEqual_([r13().status, r13().attempts, r13().thread_id].join(','), 'ACCEPTED,2,' + w.tenThread, '13:00 recovery: the row is ACCEPTED after a second attempt, in the 10:00 thread');
+        TestAssert_(!!w.ss.getSheetByName('Overnight_Log').getRange(2, 9, 1, 1).getValue(), '13:00 recovery: followup_sent_at is now stamped');
+        const again = recoverFailedFollowupBuckets_({ now: noonToday });
+        TestAssertEqual_(again.ran + ',' + again.targets.length + ',' + TestGmailLog_.threadReplies.length, 'false,0,1', '13:00 recovery: once recovered there is nothing left to recover');
+        recoverFailedFollowupBucketsNow();
+        TestAssertEqual_(TestGmailLog_.threadReplies.length, 1, '13:00 recovery: the entry point sends nothing more either');
+      }
+
+      // ---- 13:00: past the cutoff, and force ----
+      {
+        const w = failedFollowup();
+        const late = new Date(dayToday + 'T16:01:00+05:30');
+        const res = recoverFailedFollowupBuckets_({ now: late });
+        TestAssertEqual_(res.ran + ',' + res.cutoff + ',' + TestGmailLog_.threadReplies.length + ',' + ledgerRows(w, 'followup13')[0].status, 'false,true,0,FAILED', '13:00 cutoff: after 16:00 the failed reply is found but not sent');
+        const forced = recoverFailedFollowupBuckets_({ now: late, force: true });
+        TestAssertEqual_(forced.ran + ',' + TestGmailLog_.threadReplies.length + ',' + ledgerRows(w, 'followup13')[0].status, 'true,1,ACCEPTED', '13:00 cutoff: force sends it on purpose');
+      }
+
+      // ---- 13:00: an UNCONFIRMED reply is never re-sent ----
+      {
+        const w = cycleWorld();
+        TestEL_bind_(w.ss);
+        sendAllIssuesEmails();
+        ageAllIssues(w);
+        sendOvernightMorningEmails();
+        Gmail = TestMockGmailAdvanced_({});
+        Gmail.Users.Messages.send = function () { throw new Error('Service timed out: Gmail'); };
+        sendOvernightFollowupEmails();
+        Gmail = TestMockGmailAdvanced_({});
+        const draftsBefore = TestGmailLog_.drafts.length;
+        const res = recoverFailedFollowupBuckets_({ now: noonToday });
+        TestAssertEqual_(ledgerRows(w, 'followup13')[0].status + ',' + res.targets.length + ',' + TestGmailLog_.threadReplies.length + ',' + TestGmailLog_.drafts.length, 'UNCONFIRMED,0,0,' + draftsBefore, '13:00 recovery: an UNCONFIRMED reply (it may have been delivered) is not a target and nothing is re-sent');
+      }
+
+      // ---- 13:00: everything was resolved meanwhile - nothing is sent, the row says why ----
+      {
+        const w = failedFollowup();
+        closeLead(w);
+        recoverFailedFollowupBuckets_({ now: noonToday });
+        const r13 = ledgerRows(w, 'followup13')[0];
+        TestAssertEqual_(TestGmailLog_.threadReplies.length + ',' + r13.status, '0,SKIPPED', '13:00 revalidation: a resolved lead is not emailed and the row is closed as SKIPPED');
+        TestAssertContains_(r13.status_reason, 'nothing is still unresolved', '13:00 revalidation: …with the reason');
+      }
+
+      // ---- 13:00: two replies, only the failed one is re-sent ----
+      {
+        const ss = morningWorld();
+        TestEL_bind_(ss);
+        sendOvernightMorningEmails(); // both regions' 10:00 emails go out
+        // The Pune reply is refused (the threaded send AND the plain fallback); the Thane reply is fine.
+        const logVals = ss.getSheetByName('Overnight_Log').getRange(2, 1, 2, 3).getValues();
+        const puneThread = String(logVals.filter(function (r) { return r[1] === 'Pune'; })[0][2]);
+        const realSend = Gmail.Users.Messages.send;
+        Gmail.Users.Messages.send = function (payload) { if (payload.threadId === puneThread) throw new Error('Gmail operation not allowed for this user'); return realSend.apply(this, arguments); };
+        failingGmailFor('L-PUNE');
+        sendOvernightFollowupEmails();
+        Gmail.Users.Messages.send = realSend;
+        GmailApp = TestMockGmailApp_({});
+        const rows13 = ledgerOf(ss, 'followup13');
+        TestAssertEqual_(rows13.map(function (r) { return r.status; }).sort().join(','), 'ACCEPTED,FAILED', '13:00 two replies: set up - one went out, one failed');
+        const repliesBefore = TestGmailLog_.threadReplies.length, draftsBefore = TestGmailLog_.drafts.length;
+        const res = recoverFailedFollowupBuckets_({ now: noonToday });
+        TestAssertEqual_(res.targets.length + ',' + res.ran, '1,true', '13:00 two replies: only the failed one is a recovery target');
+        TestAssertEqual_((TestGmailLog_.threadReplies.length - repliesBefore) + ',' + (TestGmailLog_.drafts.length - draftsBefore), '1,0', '13:00 two replies: exactly one more reply is sent - the sibling is not sent a second time');
+        TestAssertEqual_(ledgerOf(ss, 'followup13').map(function (r) { return r.status; }).join(','), 'ACCEPTED,ACCEPTED', '13:00 two replies: both are ACCEPTED now');
+      }
+    }
+
     // ================= EO-10b: a RED Leads tab puts a separate notice at the bottom of every email - and never holds one =================
     {
       const STALE_HEAD = 'Data freshness notice';

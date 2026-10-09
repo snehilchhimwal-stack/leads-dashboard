@@ -29,6 +29,41 @@
 
 // Read-only helper FIRST in the file (the editor's Run button has run the previously selected function before - see HANDOVER).
 // Logs how many bucket emails today's ledger holds per status. Writes nothing.
+// ---- Recovery of failed emails (Email Ops EO-9 / EO-9b; plan decisions D3 and D5; spec rules 4 and 6) ----
+// Today's recoverable emails of ONE job, read from the ledger: [{ emailId, region, bucket, status }]. Only FAILED and BLOCKED - never UNCONFIRMED (it may have
+// been delivered; a second copy is a duplicate) and never an ACCEPTED one. Shared by the 17:00, 10:00 and 13:00 recoveries.
+function emailLedgerRecoveryTargetsGs_(ss, now, job) {
+  const day = istDayKeyGs_(now);
+  return emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, day)
+    .filter(function (r) { return r.job === job && emailLedgerDayKeyOfGs_(r.cycle_day) === day && (r.status === 'FAILED' || r.status === 'BLOCKED'); })
+    .map(function (r) { return { emailId: r.email_id, region: r.region, bucket: r.bucket_label, status: r.status }; });
+}
+
+// True once now is past hour:minute IST on its own IST day - the latest a failed email is still re-sent (decision D5).
+function emailLateCutoffPassedGs_(now, hour, minute) {
+  const cutoff = new Date(istDayKeyGs_(now) + 'T' + pad2Gs_(hour) + ':' + pad2Gs_(minute) + ':00+05:30');
+  return now.getTime() > cutoff.getTime();
+}
+
+// The one recovery driver. spec: { job, label ('17:00'), cutoffHour, cutoffMinute, forceName, run: function (ids, regions) } - run re-sends exactly the targeted
+// emails (ids: { emailId: true }, regions: { region: true }). opts: { now, force }. Returns { targets, cutoff, ran }.
+function emailRecoverBucketsGs_(spec, opts) {
+  const o = opts || {};
+  const now = o.now || new Date();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targets = emailLedgerRecoveryTargetsGs_(ss, now, spec.job);
+  if (!targets.length) { Logger.log('Recovery: no FAILED or BLOCKED ' + spec.label + ' bucket in today\'s ledger - nothing to re-send.'); return { targets: [], cutoff: false, ran: false }; }
+  if (!o.force && emailLateCutoffPassedGs_(now, spec.cutoffHour, spec.cutoffMinute)) {
+    Logger.log('Recovery: ' + targets.length + ' failed bucket(s) but it is past the late-send cutoff (' + spec.cutoffHour + ':' + pad2Gs_(spec.cutoffMinute) + ' IST) - NOT sent late (decision D5). Use ' + spec.forceName + ' to send them on purpose.');
+    return { targets: targets, cutoff: true, ran: false };
+  }
+  const ids = {}, regions = {};
+  targets.forEach(function (t) { ids[t.emailId] = true; regions[t.region] = true; });
+  Logger.log('Recovery: re-sending ' + targets.length + ' failed bucket(s): ' + targets.map(function (t) { return t.region + (t.bucket ? ' / ' + t.bucket : '') + ' (' + t.status + ')'; }).join('; '));
+  spec.run(ids, regions);
+  return { targets: targets, cutoff: false, ran: true };
+}
+
 function showEmailLedgerTodayNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(EMAIL_LEDGER_SHEET_);

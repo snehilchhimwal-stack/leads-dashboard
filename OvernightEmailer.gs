@@ -965,7 +965,13 @@ function sendOvernightMorningEmails() {
   });
 }
 
-function sendOvernightMorningEmails_() {
+function sendOvernightMorningEmails_(opts) {
+  // opts.onlyEmailIds / opts.onlyRegions (Email Ops EO-9b, recovery only): { ledgerEmailId: true } / { region: true } - re-send just those failed buckets. The
+  // region "already sent today" guard is skipped for them, everything is recomputed from the CURRENT data (a lead resolved by now is simply not in the email),
+  // and the original run's exclusion rows, CH-level reports and unresolved-recipient reports are not repeated.
+  const recoverIds = (opts && opts.onlyEmailIds) || null;
+  const recoverRegions = (opts && opts.onlyRegions) || null;
+  const recoveredSeen = {}; // recovery only: the targeted email ids that this run produced a bucket for
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const win = overnightWindowGs_(now);
@@ -1084,6 +1090,7 @@ function sendOvernightMorningEmails_() {
   // every ledger call below is a no-op and the emails go out exactly as before.
   const ledger = emailLedgerOpenGs_(ss);
   const ledgerJob = EMAIL_LEDGER_JOB_MORNING_;
+  const exLedger = recoverIds ? null : ledger; // a recovery run does not repeat the original run's exclusion rows
 
   // Two-checkpoint email lifecycle redesign (Step 6/11) — yesterday's
   // 17:00 AllIssues_Log rows still awaiting Checkpoint 1, grouped by
@@ -1135,7 +1142,8 @@ function sendOvernightMorningEmails_() {
   // have Checkpoint 1 content pending with zero overnight leads today,
   // or vice versa. Both need to reach the loop below.
   const allRegionsForThisRun = Object.keys(byRegion).concat(Object.keys(yesterdaysAllIssuesByRegion))
-    .filter(function (v, i, a) { return a.indexOf(v) === i; }).sort();
+    .filter(function (v, i, a) { return a.indexOf(v) === i; }).sort()
+    .filter(function (rg) { return !recoverRegions || recoverRegions[rg]; });
 
   allRegionsForThisRun.forEach(function (region) {
     const openLeads = byRegion[region] || [];
@@ -1157,7 +1165,7 @@ function sendOvernightMorningEmails_() {
     // own empty-state text uses this).
     let section1SkippedReason = null;
     if (openLeads.length) {
-      if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_) {
+      if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
         section1SkippedReason = 'already_sent';
         Logger.log('Section 1 (Overnight) skipped for ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '). Section 2 (Checkpoint 1), if any, still proceeds separately below.');
         emailLedgerExcludeGs_(ledger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', reason: 'Section 1 (overnight) already sent today - the re-run guard skipped ' + openLeads.length + ' lead(s)' }]);
@@ -1173,20 +1181,20 @@ function sendOvernightMorningEmails_() {
           if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
           rmToLeads[l.RM].push(l);
         });
-        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData, ledger: ledger, staleNotice: staleNotice });
+        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: !recoverIds, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData, ledger: ledger, staleNotice: staleNotice });
 
         // RMs with no resolvable recipient anywhere AND no
         // Region_Recipients fallback either — their leads got no
         // automated email at all this run. To/Cc are genuinely blank
         // here (there was none to compute).
         const unresolvedExclusions = [];
-        resolution.trulyUnresolved.forEach(function (u) {
+        (recoverIds ? [] : resolution.trulyUnresolved).forEach(function (u) { // a recovery run does not report the original run's unroutable RMs again
           (rmToLeads[u.rmName] || []).forEach(function (l) {
             failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
             unresolvedExclusions.push({ job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: l.lead_id, rm: u.rmName, reason: 'no recipient could be resolved: ' + u.reason });
           });
         });
-        emailLedgerExcludeGs_(ledger, unresolvedExclusions);
+        emailLedgerExcludeGs_(exLedger, unresolvedExclusions);
 
         resolution.results.forEach(function (rec) {
           const rmSet = new Set(rec.rmNames);
@@ -1237,9 +1245,12 @@ function sendOvernightMorningEmails_() {
         bucketLabel: mLabel, primaryRole: mRole, to: mTo, cc: (m1 && m1.rec.cc) || (m2 && m2.cc) || '', leadIds: mLeadIds,
       };
     });
-    emailLedgerPlanGs_(ledger, unionEmails.map(function (k) { return ledgerMeta[k]; }));
+    // Recovery: only the buckets the ledger shows as failed are planned and sent; the rest of the region was handled by the original run.
+    const unionToSend = recoverIds ? unionEmails.filter(function (k) { return recoverIds[ledgerMeta[k].emailId]; }) : unionEmails;
+    if (recoverIds) unionToSend.forEach(function (k) { recoveredSeen[ledgerMeta[k].emailId] = true; });
+    emailLedgerPlanGs_(ledger, unionToSend.map(function (k) { return ledgerMeta[k]; }));
 
-    unionEmails.forEach(function (emailKey) {
+    unionToSend.forEach(function (emailKey) {
       const s1 = section1ByEmail[emailKey] || null;
       const s2 = section2ByEmail[emailKey] || null;
       // One bucket throwing (a bad read/write, an oversize cell) must not stop every OTHER bucket — it is reported
@@ -1270,8 +1281,14 @@ function sendOvernightMorningEmails_() {
     });
   });
 
+  if (recoverIds) {
+    // A targeted bucket that this run did not produce (its leads were resolved meanwhile, or the routing changed): it is closed with the reason, never left failed without one.
+    Object.keys(recoverIds).forEach(function (id) {
+      if (!recoveredSeen[id]) emailLedgerResultGs_(ledger, id, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'recovery: no bucket with this id was produced - the flagged leads were resolved or the routing changed since the failure, so nothing was re-sent', leadIds: [] });
+    });
+  }
   notifyLeadSendFailuresGs_(failedLeadEntries);
-  emailLedgerFinishGs_(ledger, 'the 10:00 morning run');
+  emailLedgerFinishGs_(ledger, recoverIds ? 'the 10:00 recovery run' : 'the 10:00 morning run');
 }
 
 const LEAD_FOLLOWUPS_SHEET_ = 'Lead_Followups';
@@ -1861,7 +1878,11 @@ function sendOvernightFollowupEmails() {
   });
 }
 
-function sendOvernightFollowupEmails_() {
+function sendOvernightFollowupEmails_(opts) {
+  // opts.onlyEmailIds (Email Ops EO-9b, recovery only): { ledgerEmailId: true } - re-send just those failed replies. Everything is recomputed from the CURRENT data;
+  // a reply is only retried while its Overnight_Log followup_sent_at is still blank (a delivered or unconfirmed one is never sent twice).
+  const recoverIds = (opts && opts.onlyEmailIds) || null;
+  const recoveredSeen = {}; // recovery only: the targeted email ids that this run found a pending reply for
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const now = new Date();
   const todayKey = istDayKeyGs_(now);
@@ -1928,6 +1949,11 @@ function sendOvernightFollowupEmails_() {
     // AllIssues_Log's checkpoint columns which are written even on
     // failure for a different reason (see that function's own comment).
     if (run[8] && !TEST_MODE_OVERRIDE_EMAIL_) return;
+    if (recoverIds) {
+      const recId = emailLedgerIdGs_(EMAIL_LEDGER_JOB_FOLLOWUP_, todayKey, run[1], '', '', String(run[5] || '').trim());
+      if (!recoverIds[recId]) return; // recovery: only the replies the ledger shows as failed
+      recoveredSeen[recId] = true;
+    }
     const region = run[1];
     const threadId = run[2];
     const to = String(run[5] || '').trim();
@@ -2038,6 +2064,7 @@ function sendOvernightFollowupEmails_() {
     if (!r.unresolvedRows.length && !section2Input) {
       // nothing in EITHER section — nothing to send. Recorded (email audit P9 / F12): "skipped" is a result, not a blank.
       writeFollowupResultGs_(logSheet, r.rowNumber, 'skipped: nothing unresolved', r.region);
+      if (recoverIds) emailLedgerResultGs_(ledger, r.ledgerId, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'recovery: nothing is still unresolved in either section - nothing was re-sent', leadIds: [] });
       return;
     }
     if (!r.to) {
@@ -2104,7 +2131,56 @@ function sendOvernightFollowupEmails_() {
   if (followupBucketFailures.length) {
     notifyOpsAlertGs_('1pm follow-up: ' + followupBucketFailures.length + ' bucket(s) failed — every other bucket was still sent', followupBucketFailures);
   }
-  emailLedgerFinishGs_(ledger, 'the 13:00 follow-up run');
+  if (recoverIds) {
+    // A targeted reply that this run found nothing pending for (its row was already sent, or is gone): closed with the reason, never left failed without one.
+    Object.keys(recoverIds).forEach(function (id) {
+      if (!recoveredSeen[id]) emailLedgerResultGs_(ledger, id, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'recovery: no pending 13:00 reply with this id was found (it was already sent or its Overnight_Log row is gone), so nothing was re-sent', leadIds: [] });
+    });
+  }
+  emailLedgerFinishGs_(ledger, recoverIds ? 'the 13:00 recovery run' : 'the 13:00 follow-up run');
+}
+
+// ---- Recovery of failed 10:00 and 13:00 emails (Email Ops EO-9b; plan decisions D3/D5; spec rules 4 and 6) ----
+// Same idea as the 17:00 recovery (AllIssuesEmailer.gs, EO-9): re-send exactly the emails the ledger shows as FAILED or BLOCKED today - never UNCONFIRMED (it may
+// have been delivered), never an ACCEPTED one - after re-checking everything from the current data, and only until a late-send cutoff; after that nothing is sent late.
+// The 10:00 cutoff (12:45 IST) leaves the 13:00 job able to thread its reply into a recovered morning email; the 13:00 cutoff (16:00 IST) leaves the 16:30 report and the
+// 17:00 job a clean slate. A bucket whose leads were resolved meanwhile is closed as SKIPPED with the reason. Manual entry points only - no trigger.
+const MORNING_LATE_CUTOFF_HOUR_ = 12;
+const MORNING_LATE_CUTOFF_MINUTE_ = 45;
+const FOLLOWUP_LATE_CUTOFF_HOUR_ = 16;
+const FOLLOWUP_LATE_CUTOFF_MINUTE_ = 0;
+const EMAIL_RECOVERY_MORNING_JOB_ = 'recoverMorningBuckets';
+const EMAIL_RECOVERY_FOLLOWUP_JOB_ = 'recoverFollowupBuckets';
+
+// opts.now (tests), opts.force (past the cutoff on purpose). Return { targets, cutoff, ran }.
+function recoverFailedMorningBuckets_(opts) {
+  return emailRecoverBucketsGs_({
+    job: EMAIL_LEDGER_JOB_MORNING_, label: '10:00', cutoffHour: MORNING_LATE_CUTOFF_HOUR_, cutoffMinute: MORNING_LATE_CUTOFF_MINUTE_,
+    forceName: 'recoverFailedMorningBucketsForceNow', run: function (ids, regions) { sendOvernightMorningEmails_({ onlyEmailIds: ids, onlyRegions: regions }); },
+  }, opts);
+}
+
+function recoverFailedFollowupBuckets_(opts) {
+  return emailRecoverBucketsGs_({
+    job: EMAIL_LEDGER_JOB_FOLLOWUP_, label: '13:00', cutoffHour: FOLLOWUP_LATE_CUTOFF_HOUR_, cutoffMinute: FOLLOWUP_LATE_CUTOFF_MINUTE_,
+    forceName: 'recoverFailedFollowupBucketsForceNow', run: function (ids) { sendOvernightFollowupEmails_({ onlyEmailIds: ids }); },
+  }, opts);
+}
+
+function recoverFailedMorningBucketsNow() {
+  withEmailJobLockGs_(EMAIL_RECOVERY_MORNING_JOB_, function () { recoverFailedMorningBuckets_({}); });
+}
+
+function recoverFailedMorningBucketsForceNow() {
+  withEmailJobLockGs_(EMAIL_RECOVERY_MORNING_JOB_, function () { recoverFailedMorningBuckets_({ force: true }); });
+}
+
+function recoverFailedFollowupBucketsNow() {
+  withEmailJobLockGs_(EMAIL_RECOVERY_FOLLOWUP_JOB_, function () { recoverFailedFollowupBuckets_({}); });
+}
+
+function recoverFailedFollowupBucketsForceNow() {
+  withEmailJobLockGs_(EMAIL_RECOVERY_FOLLOWUP_JOB_, function () { recoverFailedFollowupBuckets_({ force: true }); });
 }
 
 // ONE-OFF: backfills to/cc/subject into TODAY's Overnight_Log rows that
