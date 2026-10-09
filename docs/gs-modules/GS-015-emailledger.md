@@ -19,6 +19,7 @@ was left out with the reason. The later parts (13:00 audit, 17:00 reconciliation
 
 ## Responsibilities
 
+- Record every ops alert as an incident and hold the alerts of an email job until the job has ended (EO-2); release held alerts of a killed job (`incidentRecordGs_`, `releaseHeldIncidentsGs_`).
 - Be the single evidence trail for the 17:00, 10:00 and 13:00 emails and the two CH-level reports (jobs `allIssues17`, `morning10`, `followup13`, `chLevel10`, `chLevel17`).
 - Create and open the two sheets (`SHEET-019` `Email_Ledger`, `SHEET-020` `Email_Ledger_Exclusions`) and refuse to write into one whose
   columns it does not recognise (`emailLedgerOpenGs_`, `emailLedgerEnsureSheetGs_`).
@@ -44,16 +45,19 @@ Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmail
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-378 | `emailLedgerOpenGs_(ss)` / `emailLedgerEnsureSheetGs_` `#L171/#L150` | the spreadsheet | a handle (`null` in test mode; DISABLED when the sheets cannot be opened) | creates the two sheets with their header row; indexes existing email ids | `istDayKeyGs_` (`GS-002`) | FN-387 | specific |
-| FN-379 | `emailLedgerPlanGs_(h, plans)` / `emailLedgerAppendBlockGs_` `#L216/#L195` | the buckets of one region | — | ONE write of PLANNED rows; a re-run keeps the existing row; a retry never writes the batch twice | `writeUnlessTestModeGs_`, `jsonForCellGs_` (`GS-004`) | FN-387 | specific |
-| FN-380 | `emailLedgerAttemptGs_` / `emailLedgerResultGs_` / `emailLedgerPatchGs_` `#L254/#L265/#L240` | an email id; a result `{status, reason, messageId, threadId, leadIds}` | — | rewrites the nine outcome columns of one row | `writeUnlessTestModeGs_` (`GS-004`) | FN-387 | specific |
-| FN-381 | `emailLedgerExcludeGs_(h, items)` `#L279` | leads/regions left out, each with a reason | — | one write to `Email_Ledger_Exclusions` | `writeUnlessTestModeGs_` (`GS-004`) | FN-387 | specific |
+| FN-379 | `emailLedgerPlanGs_(h, plans)` / `emailLedgerAppendBlockGs_` `#L217/#L196` | the buckets of one region | — | ONE write of PLANNED rows; a re-run keeps the existing row; a retry never writes the batch twice | `writeUnlessTestModeGs_`, `jsonForCellGs_` (`GS-004`) | FN-387 | specific |
+| FN-380 | `emailLedgerAttemptGs_` / `emailLedgerResultGs_` / `emailLedgerPatchGs_` `#L255/#L266/#L241` | an email id; a result `{status, reason, messageId, threadId, leadIds}` | — | rewrites the nine outcome columns of one row | `writeUnlessTestModeGs_` (`GS-004`) | FN-387 | specific |
+| FN-381 | `emailLedgerExcludeGs_(h, items)` `#L280` | leads/regions left out, each with a reason | — | one write to `Email_Ledger_Exclusions` | `writeUnlessTestModeGs_` (`GS-004`) | FN-387 | specific |
 | FN-382 | `emailLedgerSplitLeadsGs_(leads)` / `emailLedgerLeadDefectGs_` `#L109/#L96` | flagged leads | `{valid, defective:[{lead, reason, covered}]}` | none (pure) | — | FN-387 | specific - RULE-045 |
 | FN-383 | `emailLedgerIdGs_`, `emailLedgerDayKeyOfGs_`, `emailLedgerSentIdsGs_`, `emailLedgerStatusForErrorGs_` `#L85/#L77/#L123/#L131` | job/day/region/role/bucket; a cell; a sent message; an error | the deterministic email id; a day key; `{messageId, threadId}`; a status | none (pure) | `isAmbiguousSendErrorGs_` (`GS-004`) | FN-387 | specific |
-| FN-384 | `pruneEmailLedgerGs_(h, now)` `#L335` | the handle, now | — | archives leading rows older than 90 days to Drive, then deletes them | `archiveRowsToDriveCsv_` (`GS-002`) | FN-387 | specific - RULE-046 |
-| FN-385 | `emailLedgerGuardGs_` / `emailLedgerFinishGs_` `#L139/#L360` | the handle | — | counts a ledger failure; one ops note at the end of the job | `notifyOpsAlertGs_` (`GS-004`) | FN-378..FN-384, FN-387 | specific - RULE-044 |
+| FN-384 | `pruneEmailLedgerGs_(h, now)` `#L336` | the handle, now | — | archives leading rows older than 90 days to Drive, then deletes them | `archiveRowsToDriveCsv_` (`GS-002`) | FN-387 | specific - RULE-046 |
+| FN-385 | `emailLedgerGuardGs_` / `emailLedgerFinishGs_` `#L139/#L361` | the handle | — | counts a ledger failure; one ops note at the end of the job | `notifyOpsAlertGs_` (`GS-004`) | FN-378..FN-384, FN-387 | specific - RULE-044 |
 | FN-386 | `showEmailLedgerTodayNow()` `#L32` | — | — | read-only: logs today's counts per status | — | Apps Script editor (manual) | specific |
 | FN-388 | `emailLedgerTrackSendGs_(h, meta, sendFn)` / `emailLedgerSkipGs_` / `emailLedgerFailIfOpenGs_` / `emailLedgerStatusOfGs_` | a plan-shaped `meta`, a send function | the send's result (the error is re-thrown unchanged) | plan + attempt + outcome in the ledger; SKIPPED rows; closes a still-open row as FAILED but never overwrites a final one | FN-379, FN-380 | the CH-level reports (`GS-001`, `GS-010`), the 10:00/13:00 wiring | specific - RULE-043 |
 | FN-389 | the 10:00 / 13:00 ledger calls in `sendOvernightMorningEmails_`, `sendCombinedMorningEmail_`, `sendOvernightFollowupEmails_`, `sendCombinedFollowupEmail_` (`GS-010`) | — | — | the same wiring for the two other jobs; a bucket exception closes its row | FN-378..FN-385, FN-388 | the 10:00 and 13:00 triggers | specific |
+| FN-390 | `incidentRecordGs_(info)` / `incidentNotifiedGs_(ids, status, continuity)` / `incidentSeverityGs_(subject)` / `emailIncidentSheetGs_` | an alert (subject, text, job, held) / incident ids | the incident id; none | appends an `Incident_Log` row (HELD when the alert is held); marks incidents SENT / SEND-FAILED / RELEASED with the time; never throws | FN-378 | `notifyOpsAlertGs_` (`GS-004`) | specific - RULE-047 |
+| FN-391 | `emailLedgerConfirmationLineGs_()` / `emailLedgerSetActiveGs_` / `emailLedgerResetActiveGs_` | none | the line a held alert opens with: how many of THIS run's emails Gmail accepted / failed / skipped / left unfinished, or "confirmation unavailable" | none | FN-378 | `emailAlertHoldFlushGs_` (`GS-004`) | specific - RULE-047 |
+| FN-392 | `releaseHeldIncidentsGs_(now)` | the time | how many held incidents were released | sends ONE "released" message and marks the rows RELEASED | FN-390 | `checkEmailJobsCompletedGs_` (`GS-004`, the hourly watchdog) | specific - RULE-048 |
 | FN-387 | `sendAllIssuesEmails_` / `sendOneAllIssuesEmail_` ledger calls (`GS-001`) | — | — | the wiring: open, split, plan, attempt, result, exclude, prune, finish | FN-378..FN-385 | the 17:00 trigger | specific |
 
 ## Business rules implemented — `RULE-XXX` sub-table
@@ -64,6 +68,8 @@ Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmail
 | RULE-044 | The ledger is evidence, not a gate: a ledger error is counted, logged and reported once at the end; the email always proceeds. A sheet with unrecognised columns disables the ledger rather than being overwritten. TEST MODE never writes | FN-378, FN-385 | the same fail-open stance as `withEmailJobLockGs_` (`GS-004`) |
 | RULE-045 | Per-lead isolation (decision D3): a lead with no id, an id with control characters or over 100 characters, or no reason for contact is left out and recorded; a second copy of a lead id is left out but NOT reported as unsent (its first copy was sent); anything subtler is caught by the send gate, which now names the leads it objected to, and only those are dropped and the rest resent once | FN-382, FN-387 | — |
 | RULE-046 | Retention is 90 days; only LEADING rows older than the window are removed, and only after they were archived to Drive (a failed archive deletes nothing) | FN-384 | the other pruned logs (`archiveRowsToDriveCsv_`) |
+| RULE-047 | An alert raised while one of the three email jobs runs is recorded in `Incident_Log` as HELD at once and emailed only after the job ended, as ONE message that opens with the count of emails Gmail accepted (decision D2). A whole-job failure (crash) is sent immediately - nothing is left to confirm. A single held alert keeps its own subject; several are consolidated. Outside a job an alert is sent at once | FN-390, FN-391, `notifyOpsAlertGs_` / `emailAlertHoldFlushGs_` (`GS-004`) | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` section 0 |
+| RULE-048 | A HELD incident older than 45 minutes belongs to a job that was killed before it could send it: the hourly watchdog sends ONE release message listing them and marks them RELEASED; a fresh HELD incident is left alone (its job may still be running) | FN-392 | — |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -73,6 +79,7 @@ Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmail
 | CFG-106 | `EMAIL_LEDGER_HEADERS_`, `EMAIL_LEDGER_EXCLUSION_HEADERS_` | 23 and 9 columns | the column order; the outcome block `attempted_at..lead_ids_json` must stay contiguous | any reorder breaks the one-write row update and the header check |
 | CFG-107 | `EMAIL_LEDGER_RETENTION_DAYS_` | `90` | rows older than this are archived and removed | how long the evidence stays in the workbook |
 | CFG-108 | `EMAIL_LEDGER_JOB_ALL_ISSUES_`, `_MORNING_`, `_FOLLOWUP_`, `_CH_OVERNIGHT_`, `_CH_ISSUES_` | `allIssues17`, `morning10`, `followup13`, `chLevel10`, `chLevel17` | the job id in every email id (the 10:00/13:00 ids also carry the recipient) | email ids (a change makes today's re-run plan new rows) |
+| CFG-109 | `EMAIL_INCIDENT_LOG_SHEET_`, `EMAIL_INCIDENT_HEADERS_`, `EMAIL_INCIDENT_RELEASE_AFTER_MINUTES_` | `Incident_Log`, 15 columns, `45` | the incident tab, its column order, and how old a HELD incident must be before the watchdog releases it | where incidents are recorded; the release window must stay above the 35-minute run cap (`EMAIL_JOB_MAX_RUN_MINUTES_`) |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -81,6 +88,8 @@ Never - no trigger. Paste the file (with `Tests_EmailLedger.gs`, `AllIssuesEmail
 | EXC-119 | a ledger sheet has unrecognised columns, or cannot be opened | the handle is DISABLED; every ledger call is a no-op | one ops note at the end of the job; the emails are unaffected |
 | EXC-120 | a ledger write throws mid-run | counted on the handle, logged; the send path never sees it | the same single ops note |
 | EXC-121 | the run dies mid-send | the row stays ATTEMPTING (or PLANNED if it never started) | the later audit (EO-3/EO-4) reads that as "outcome unknown" |
+| EXC-122 | the job is killed while it holds alerts | the incidents stay HELD; the hourly watchdog releases them after 45 minutes | one "held alert(s) released" message |
+| EXC-123 | `Incident_Log` has unrecognised columns, or a write to it fails | the alert is sent anyway (held or not); nothing is written into the unrecognised sheet | a log line only; the alert text is complete |
 
 ## Data lineage
 
@@ -93,6 +102,7 @@ Gmail ids -> `Email_Ledger`; skipped leads/regions -> `Email_Ledger_Exclusions`.
 |---|---|---|---|
 | `SHEET-019` `Email_Ledger` | Read + write | FN-378..FN-380, FN-384 | one row per bucket email |
 | `SHEET-020` `Email_Ledger_Exclusions` | Read + write | FN-378, FN-381, FN-384 | one row per lead/region left out |
+| `SHEET-021` `Incident_Log` | Read + write | FN-390, FN-392 | one row per ops alert |
 
 ## Failure / error behaviour
 
@@ -121,8 +131,8 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`), `SHEET-019`, `SHEET-020`
-- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-010` (`OvernightEmailer.gs`), `SHEET-019`, `SHEET-020`
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`), `SHEET-019`, `SHEET-020`, `SHEET-021`
+- **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-004` (`EmailInfra.gs` - the alert hold and the watchdog release call it), `GS-010` (`OvernightEmailer.gs`), `SHEET-019`, `SHEET-020`
 - **Related:** `SHEET-013` (`AllIssues_Log`) - the success-only log this complements
 
 ## Source of truth
@@ -139,6 +149,8 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 - **Status:** Validated 2026-10-09 (locally); live behaviour proven by the first 17:00 run.
 
 ## Version / change reference
+
+**2026-10-09** (`(pending commit)`, EO-2): `Incident_Log` (`SHEET-021`) and the held-alert mechanism - FN-390..FN-392, RULE-047, RULE-048, CFG-109, EXC-122, EXC-123. `notifyOpsAlertGs_` (`GS-004`) now records every alert and, inside one of the three email jobs, holds it until the job has ended.
 
 **2026-10-09** (`eaffb47`, EO-1b): wired into the 10:00 and 13:00 jobs and both CH-level reports; new `SKIPPED` status; ids of the 10:00/13:00 emails carry the recipient; plans can be written directly in a final state (`initialStatus`); tracked-send helpers (FN-388).
 

@@ -229,6 +229,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-10-09** (`b1dbc3a`, Email Ops EO-1a): `sendAllIssuesEmails_` now records every bucket email in the ledger (`GS-015`): PLANNED per region in one write, ATTEMPTING before the send, then ACCEPTED / FAILED / UNCONFIRMED / BLOCKED with the Gmail ids; leads left out go to `Email_Ledger_Exclusions`. Per-lead isolation (plan decision D3): a defective lead is dropped and the rest of its bucket still goes; when the send gate objects to specific leads only those are dropped and the bucket is resent once (`sendOneAllIssuesEmail_` takes an optional `ledgerCtx`). A duplicate lead id is left out but not reported as unsent. The ledger is fail-open: it can never stop or change an email. **Not live until pasted.**
 
+**2026-10-09** (`(pending commit)`, Email Ops EO-2): the whole-job crash alert of `sendAllIssuesEmails` is sent with `{ immediate: true }` - every other alert raised during the run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
+
 ## Revalidation trigger
 
 Any commit touching `AllIssuesEmailer.gs` or `Tests_AllIssuesEmailer.gs`;

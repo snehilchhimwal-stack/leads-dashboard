@@ -828,10 +828,20 @@ bucket is resent once; they appear in the "Leads NOT sent" report and in the exc
 email proceeds. A sheet whose columns are not recognised is never written into (the ledger disables itself). TEST MODE never writes. Retention
 90 days (archived to Drive first, `pruneEmailLedgerGs_`).
 
+**Alerts are now held until the rest of the job is confirmed sent (EO-2, decision D2).** Inside `sendAllIssuesEmails`, `sendOvernightMorningEmails` and
+`sendOvernightFollowupEmails`, `notifyOpsAlertGs_` (`EmailInfra.gs`) writes every alert to the new `Incident_Log` tab at once (status `HELD`) and
+sends it only after the job has ended, as ONE message that opens with `CONFIRMATION: N bucket email(s) were handled in this run - A accepted by
+Gmail, ...` (taken from the ledger; "accepted" is not "delivered"). A single held alert keeps its own subject; several become one
+`<job>: N alerts from this run` message. A whole-job crash (the three `... crashed` alerts) is sent immediately, because there is nothing left to
+confirm. If a job is killed before it can send what it holds, the hourly watchdog finds `HELD` incidents older than 45 minutes and sends them as
+"Held alert(s) released" (`releaseHeldIncidentsGs_`). Alerts outside an email job (the watchdog, the nightly sync, the snapshot jobs) are sent at
+once as before, and are also recorded in `Incident_Log`. Severity is a guess from the subject (CRITICAL = a whole job crashed / did not run).
+`Incident_Log` is created on the first alert after the paste; read it directly.
+
 **Check it live:** run `showEmailLedgerTodayNow()` (read-only) after a 17:00 run. Both tabs create themselves on the first run after the paste.
 
 **Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
-`Tests_RunAll.gs`, and for EO-1b `OvernightEmailer.gs`; no `setupXxx()` (no trigger). Still to come: EO-2 (incident log + held alerts), EO-3/EO-4 (the
+`Tests_RunAll.gs`, `OvernightEmailer.gs`; no `setupXxx()` (no trigger). EO-2 adds nothing new to paste beyond these files (`Incident_Log` creates itself). Still to come: EO-3/EO-4 (the
 13:00 audit and the 17:00 reconciliation), EO-5 (bounce/reply sweep), EO-8 (the 16:30 cycle report).
 
 ### 4.4 GitHub repo access
