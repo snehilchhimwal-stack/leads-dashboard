@@ -1145,6 +1145,31 @@ function runEmailLedgerTests_() {
         TestAssertEqual_(ledgerOf(ss, 'chLevel10').length, 1, '10:00 CH-level: …and the ledger still has one CH-level row');
       }
 
+      // ---- 10:00: an RM the original run could not route is not recorded or reported a second time by the recovery ----
+      {
+        const ss = morningWorld([{ lead_id: 'L-TWO', client_id: 'C-TWO', RM: 'Test RM Three', region: 'Pune' }]);
+        TestEL_bind_(ss);
+        const realResolve = resolveRecipientEmailsForRegion_;
+        resolveRecipientEmailsForRegion_ = function (ssArg, region, rmNames, recipients, opts) {
+          const res = realResolve(ssArg, region, rmNames, recipients, opts);
+          res.results = res.results.map(function (rec) { return Object.assign({}, rec, { rmNames: rec.rmNames.filter(function (n) { return n !== 'Test RM Three'; }) }); }).filter(function (rec) { return rec.rmNames.length; });
+          res.trulyUnresolved = rmNames.indexOf('Test RM Three') !== -1 ? [{ rmName: 'Test RM Three', reason: 'simulated: no manager email on file' }] : []; // pretend this RM could not be routed anywhere
+          return res;
+        };
+        try {
+          failingGmailFor('L-PUNE');
+          sendOvernightMorningEmails();
+          GmailApp = TestMockGmailApp_({});
+          TestGmailLog_.sent.length = 0;
+          const exBefore = TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).filter(function (e) { return e.lead_id === 'L-TWO'; }).length;
+          TestAssertEqual_(exBefore, 1, '10:00 unroutable RM: set up - the original run recorded the lead once');
+          recoverFailedMorningBuckets_({ now: noonToday });
+          TestAssertEqual_(TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X).filter(function (e) { return e.lead_id === 'L-TWO'; }).length, 1, '10:00 unroutable RM: the recovery does not record the same lead again');
+          TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /Leads NOT sent/.test(e.subject); }).length, 0, '10:00 unroutable RM: …and does not send the "Leads NOT sent" report again');
+          TestAssertEqual_(byRegion(ss, 'morning10', 'Pune').status, 'ACCEPTED', '10:00 unroutable RM: …while the failed bucket itself was recovered');
+        } finally { resolveRecipientEmailsForRegion_ = realResolve; }
+      }
+
       // ---- 10:00: past the cutoff nothing is sent late, unless forced ----
       {
         const ss = failedPuneMorning();
