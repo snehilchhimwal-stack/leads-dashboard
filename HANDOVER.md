@@ -851,6 +851,11 @@ everything is fine as well as when it is not, once per IST day (`sendEmailCycleR
 own, earlier, after their run (above); the report is the daily summary. It cannot yet show bounces, replies or the age of the Leads tab, and says
 so; delivery and opens cannot be seen from Apps Script at all. After pasting, run `setupEmailCycleReportTrigger()` once.
 
+**Leads-tab freshness and the daily row (EO-10 / EO-8b).** The "Ready for 17:00?" table now shows the Leads tab's freshness, judged from the newest lead assignment time (the tab refreshes about
+every other hour and has no last-imported cell): up to 3 h GREEN, over 3 h AMBER, over 5 h RED (`LEADS_FRESH_AMBER_HOURS_` / `LEADS_FRESH_RED_HOURS_` in `CycleReport.gs`). AMBER or RED is listed
+under "Needs attention" and means the report is not all clear; it is a **warning only** - the 17:00 emails are not held (that would be a decision about every email of the day, not made here).
+A tab that cannot be read, or has no assignment times, is shown as UNKNOWN. The report also stores one `Daily_Report` row per day (counts, all-clear, freshness) for tracking over time.
+
 **Bounces and replies (EO-5, `EmailSweep.gs`, `GS-017`).** A daily sweep near 16:10 IST (before the cycle report) looks at the emails Gmail accepted in the last
 3 days (at least 30 minutes old) and fills the ledger's `bounce_status`, `reply_status` and `swept_at`. A **bounce** is matched to an email only when the
 delivery-failure message names one of its recipients and either quotes its subject or arrived within 15 minutes of the send; each NEW bounce raises

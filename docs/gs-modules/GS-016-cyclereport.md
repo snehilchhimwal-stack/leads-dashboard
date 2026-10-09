@@ -16,7 +16,7 @@ address covering the whole cycle that started at the previous day's 17:00 - ever
 reports by final status, what was left out and why, the incidents raised, what needs attention, and whether the coming 17:00 send is ready. It is
 sent when everything is fine AND when it is not; errors are emailed separately and earlier, after the rest of their run is confirmed sent
 (`GS-015` RULE-047). It is built only from the evidence tabs (`SHEET-019`, `SHEET-020`, `SHEET-021`) - nothing is guessed, and it states what it
-cannot see (delivery and opens cannot be seen from Apps Script; bounces and replies come from the daily sweep, `GS-017`; the age of the Leads tab is not tracked yet).
+cannot see (delivery and opens cannot be seen from Apps Script; bounces and replies come from the daily sweep, `GS-017`; the age of the Leads tab is judged from the newest lead assignment time, RULE-054).
 
 ## Responsibilities
 
@@ -43,6 +43,8 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 | FN-395 | `cycleReportDataGs_(input)` / `cycleReportRenderGs_(data, now)` | ledger / exclusion / incident rows + config problems | the counts and lists; `{subject, html, plainBody}` | none (pure) | `renderOvernightReportEmailHTML_`, `plainTextReportGs_` (`GS-004`) | FN-396 | specific - RULE-049 |
 | FN-396 | `buildEmailCycleReportGs_(ss, now)` / `sendEmailCycleReport_(opts)` | the workbook, the time | the built report; sends it | reads the three evidence tabs; one email; records the sent day in a Script Property | `sendGuardedEmailGs_`, `opsAlertEmailGs_`, `emailConfigProblemsGs_` (`GS-004`) | FN-397 | specific - RULE-050 |
 | FN-397 | `sendEmailCycleReport()` / `sendEmailCycleReportNow()` / `setupEmailCycleReportTrigger()` / `showEmailCycleReportNow()` | - | - | the lock + run record; a crash alerts ops at once and re-throws; trigger install; a read-only preview in the log | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
+| FN-404 | `cycleFreshnessLevelGs_(ageHours)` / `cycleLeadsFreshnessGs_(ss, now)` | the age in hours / the workbook, the time | GREEN / AMBER / RED; `{level, ageHours, newest, text}` (UNKNOWN when the Leads tab cannot be read or has no assignment times) | reads the Leads tab (`readLeadsTab_`, `GS-004`) | `getVal_` (`GS-002`) | FN-396 | specific - RULE-054 |
+| FN-405 | `cycleReportRecordDailyGs_(ss, data, now)` | the workbook, the report data, the time | none | upserts today's row in `Daily_Report`; fail-open; TEST MODE writes nothing | `emailLedgerEnsureSheetGs_`, `emailLedgerAppendBlockGs_` (`GS-015`) | FN-396 | specific - RULE-055 |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
@@ -50,6 +52,8 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 |---|---|---|---|
 | RULE-049 | "All clear" needs at least one planned email, none left unfinished/failed/unconfirmed/blocked, and no incident above LOW in the cycle; an empty cycle is "no emails recorded", never all clear. The execution rate is accepted / (planned minus skipped), shown with numerator and denominator. The report lists what it cannot see instead of implying it | FN-395 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` sections 0 and 6 |
 | RULE-050 | One report per IST day (a re-fire is skipped; the sent day is recorded only after a real send; TEST MODE neither honours nor consumes the guard); it goes to the ops address only, with no Cc | FN-396 | - |
+| RULE-054 | The Leads tab is judged from the newest lead assignment time (decision D4: the tab refreshes about every other hour and has no last-imported cell): up to 3 h GREEN, over 3 h AMBER, over 5 h RED. AMBER/RED are attention items (so not all clear) and say the 17:00 emails would describe stale data; a tab that cannot be read or has no times is UNKNOWN and is shown but never raised; times in the future are ignored. It is a warning only - nothing is held or blocked | FN-404 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` D4 |
+| RULE-055 | One `Daily_Report` row per IST day: written after the report email was sent, updated (not duplicated) by a re-send the same day; the email never depends on it | FN-405 | - |
 
 ## Config constants - `CFG-XXX` sub-table
 
@@ -57,6 +61,8 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 |---|---|---|---|---|
 | CFG-110 | `CYCLE_REPORT_HOUR_`, `CYCLE_REPORT_MINUTE_` | `16`, `30` | the report time (IST); also the cycle boundary | the trigger (re-run `setupEmailCycleReportTrigger`), the watchdog deadline, the window |
 | CFG-111 | `CYCLE_REPORT_SENT_PROPERTY_`, `CYCLE_REPORT_MAX_ROWS_` | `EMAIL_CYCLE_REPORT_SENT_DAY`, `30` | the once-a-day record; the per-table row cap | duplicate protection; report length |
+| CFG-114 | `LEADS_FRESH_AMBER_HOURS_`, `LEADS_FRESH_RED_HOURS_` | `3`, `5` | the freshness thresholds in hours | when the report calls the Leads tab AMBER or RED |
+| CFG-115 | `CYCLE_REPORT_DAILY_SHEET_`, `CYCLE_REPORT_DAILY_HEADERS_` | `Daily_Report`, 21 columns | the daily-row tab and its column order | where the daily numbers go; never reorder by hand |
 
 ## Exceptions - `EXC-XXX` sub-table
 
@@ -64,6 +70,7 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 |---|---|---|---|
 | EXC-124 | the report cannot be built or sent | the wrapper alerts ops at once and re-throws; the run record says failed; the watchdog also flags a day it did not run | an ops alert; Executions shows Failed |
 | EXC-125 | an evidence tab is missing or empty | its section is simply empty; if all three are, the report says "no emails recorded in this cycle" | the report still arrives |
+| EXC-129 | the `Daily_Report` row cannot be written (unrecognised columns, a Sheets error) | logged only; the report email is already sent | none |
 
 ## Data lineage
 
@@ -76,6 +83,7 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 | `SHEET-019` | Read | FN-396 | the cycle's bucket emails |
 | `SHEET-020` | Read | FN-396 | what was left out |
 | `SHEET-021` | Read | FN-396 | incidents and held alerts |
+| `SHEET-022` `Daily_Report` | Write | FN-405 | one row per day |
 
 ## Failure / error behaviour
 
@@ -105,8 +113,8 @@ Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock,
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`), `GS-015` (`EmailLedger.gs`), `SHEET-019`, `SHEET-020`, `SHEET-021`
-- **Used By:** `GS-004` (the watchdog schedule reads `CYCLE_REPORT_HOUR_` / `CYCLE_REPORT_MINUTE_`)
+- **Depends On:** `GS-002` (`Core.gs`), `GS-004` (`EmailInfra.gs`), `GS-015` (`EmailLedger.gs`), `SHEET-019`, `SHEET-020`, `SHEET-021`, `SHEET-022`
+- **Used By:** `GS-004` (the watchdog schedule reads `CYCLE_REPORT_HOUR_` / `CYCLE_REPORT_MINUTE_`), `SHEET-022`
 - **Related:** `GS-001`, `GS-010` (the jobs whose emails it reports)
 
 ## Source of truth
@@ -126,6 +134,8 @@ Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock,
 `emailJobProblemsGs_` computes its deadline from hour:minute. **Not live until pasted.**
 
 **2026-10-09** (`c18d89f`, Email Ops EO-5): the report shows a "Bounces and replies" section from the sweep's columns (`GS-017`), lists a bounced email under "Needs attention" (it counts as accepted by Gmail but is not all clear), and lists replies; the row reader and job labels moved to `GS-015` (FN-398). **Not live until pasted.**
+
+**2026-10-09** (`(pending commit)`, Email Ops EO-10 / EO-8b): the report also judges the Leads tab's freshness (FN-404, RULE-054, thresholds from decision D4) and stores a `Daily_Report` row per day (FN-405, RULE-055). A stale tab is a warning in the report; nothing is held or blocked. **Not live until pasted.**
 
 ## Revalidation trigger
 

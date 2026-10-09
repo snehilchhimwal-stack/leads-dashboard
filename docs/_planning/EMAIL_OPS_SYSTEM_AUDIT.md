@@ -25,7 +25,9 @@ All twelve files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.
 5. Update the deploy register (`python3 test/match-live-gs.py ... --apply`).
 Rollback: paste the previous versions from git (`git show <sha>:EmailInfra.gs` etc.); the three new tabs can simply be left or hidden.
 
-**Not built yet:** EO-3/EO-4 (the silent 13:00 audit pass and the 17:00 pre-send / post-send reconciliation), EO-6 (daily checklist A-K with GREEN/AMBER/RED/GREY), EO-7 (follow-up tracker), EO-9 (recovery of blocked emails), EO-10 (Leads-tab freshness), EO-11 (the spec's eight fault-injection scenarios as one suite), EO-12 (operating manual).
+Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER over 3 h / RED over 5 h; nothing is blocked) and the `Daily_Report` row per day (EO-8b).
+
+**Not built yet:** EO-3/EO-4 (the silent 13:00 audit pass and the 17:00 pre-send / post-send reconciliation), EO-6 (daily checklist A-K with GREEN/AMBER/RED/GREY), EO-7 (follow-up tracker), EO-9 (recovery of blocked emails), EO-11 (the spec's eight fault-injection scenarios as one suite), EO-12 (operating manual).
 
 ## 0. Decisions recorded 2026-10-09 (these override anything below that disagrees)
 

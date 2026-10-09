@@ -252,6 +252,9 @@ function runCycleReportTests_() {
       const other = cycleReportDataGs_({ window: win, ledgerRows: [], exclusionRows: [], incidentRows: [] });
       cycleReportRecordDailyGs_(ssD, other, new Date(Date.now() + 30 * 3600000));
       TestAssertEqual_(daily().length + ',' + daily()[1].planned, '2,0', 'daily row: a different day gets its own row');
+      const failing = cycleReportDataGs_({ window: win, ledgerRows: [L('allIssues17', 'FAILED')], exclusionRows: [], incidentRows: [] });
+      cycleReportRecordDailyGs_(ssD, failing, new Date(Date.now() + 54 * 3600000));
+      TestAssertEqual_(daily().length + ',' + daily()[2].failed + ',' + daily()[2].all_clear, '3,1,no', 'daily row: a day with a failed email is recorded as NOT all clear');
       // a broken Daily_Report sheet never stops the report
       const ssB = TestCR_world_(TestCR_standardLeads_);
       ssB._sheets['Daily_Report'] = TestMockSheet_('Daily_Report', [['wrong', 'header']]);
