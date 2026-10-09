@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `15bec89` - created (Email Ops EO-3 / EO-4) |
+| **Last Verified** | 2026-10-09 against commit `8ebf41a` - created (Email Ops EO-3 / EO-4) |
 
 ## Purpose / reason to exist
 
@@ -123,7 +123,7 @@ Apps Script backend; three time-driven jobs with run records watched by the hour
 
 ## Version / change reference
 
-**2026-10-09** (`15bec89`): file created - Email Ops EO-3 / EO-4. `emailJobScheduleGs_` (`GS-004` FN-332) lists the three audits once this file is part of the project. **Not live until pasted.**
+**2026-10-09** (`8ebf41a`): file created - Email Ops EO-3 / EO-4. `emailJobScheduleGs_` (`GS-004` FN-332) lists the three audits once this file is part of the project. **Not live until pasted.**
 
 ## Revalidation trigger
 

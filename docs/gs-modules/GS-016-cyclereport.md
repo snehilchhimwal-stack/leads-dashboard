@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0811d3a` - the freshness rules moved to `GS-004` (FN-404 is now wrappers; RULE-057 added) |
+| **Last Verified** | 2026-10-09 against commit `ea5fdc5` - the freshness rules moved to `GS-004` (FN-404 is now wrappers; RULE-057 added) |
 
 ## Purpose / reason to exist
 
@@ -139,7 +139,7 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 
 **2026-10-09** (`93a120a`, Email Ops review): the report entry points use `runEmailJobTrackedGs_` (run record) instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
-**2026-10-09** (`0811d3a`, Email Ops, decision D6): the freshness rules and thresholds (CFG-114) moved to `EmailInfra.gs` (`GS-004` FN-408); FN-404 is now two thin wrappers over them, behaviour unchanged. The emailers use the same rules to add RULE-057's bottom notice. **Not live until pasted.**
+**2026-10-09** (`ea5fdc5`, Email Ops, decision D6): the freshness rules and thresholds (CFG-114) moved to `EmailInfra.gs` (`GS-004` FN-408); FN-404 is now two thin wrappers over them, behaviour unchanged. The emailers use the same rules to add RULE-057's bottom notice. **Not live until pasted.**
 
 ## Revalidation trigger
 

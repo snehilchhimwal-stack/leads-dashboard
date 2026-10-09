@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `15bec89` - the 17:00 recovery runs on the shared driver and also re-sends PLANNED buckets (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `8ebf41a` - the 17:00 recovery runs on the shared driver and also re-sends PLANNED buckets (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -244,9 +244,9 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-10-09** (`ec0948e`, Email Ops EO-9): `recoverFailedAllIssuesBucketsNow()` re-sends just the failed or blocked 17:00 buckets of the day (until 18:30 IST) - a plain re-run could not, because the "region already sent today" guard skips the whole region when a sibling bucket succeeded. `sendAllIssuesEmails_` takes an optional `{ onlyEmailIds }` for it. **Not live until pasted.**
 
-**2026-10-09** (`0811d3a`, Email Ops, decision D6): `sendAllIssuesEmails_` judges the Leads tab's freshness once per run from the rows it already read (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when the tab is RED, a RED Leads tab (newest lead assigned at least 24 h ago) now adds a separate **"Data freshness notice"** section at the very bottom of every email (17:00 bucket and CH-level, 10:00 combined and CH-level, 13:00 reply) - the lead tables above stay complete and **no email is ever held** for it (user decision D6, 2026-10-09). The section is carried in the per-bucket context (so the quarantine-and-resend keeps it) and passed to `notifyChLevelIssuesGs_`; the recovery job re-judges the tab at its own send time. Nothing is held. **Not live until pasted.**
+**2026-10-09** (`ea5fdc5`, Email Ops, decision D6): `sendAllIssuesEmails_` judges the Leads tab's freshness once per run from the rows it already read (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when the tab is RED, a RED Leads tab (newest lead assigned at least 24 h ago) now adds a separate **"Data freshness notice"** section at the very bottom of every email (17:00 bucket and CH-level, 10:00 combined and CH-level, 13:00 reply) - the lead tables above stay complete and **no email is ever held** for it (user decision D6, 2026-10-09). The section is carried in the per-bucket context (so the quarantine-and-resend keeps it) and passed to `notifyChLevelIssuesGs_`; the recovery job re-judges the tab at its own send time. Nothing is held. **Not live until pasted.**
 
-**2026-10-09** (`0213c9f`, Email Ops EO-9b): the recovery's target reader, cutoff test and driver are now the shared `GS-015` FN-409 (this file keeps its wrappers and its own cutoff constants, CFG-116); buckets left PLANNED by a run that died are targets too (`GS-015` RULE-058). **Not live until pasted.**
+**2026-10-09** (`f774462`, Email Ops EO-9b): the recovery's target reader, cutoff test and driver are now the shared `GS-015` FN-409 (this file keeps its wrappers and its own cutoff constants, CFG-116); buckets left PLANNED by a run that died are targets too (`GS-015` RULE-058). **Not live until pasted.**
 
 ## Revalidation trigger
 

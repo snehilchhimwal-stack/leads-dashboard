@@ -258,7 +258,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020, SHEET-021 | GS-001, GS-004, GS-010, GS-016, GS-017, GS-018, SHEET-019, SHEET-020, SHEET-021 | 2026-10-09 (`c18d89f`) |
 | GS-016 | GS- | CycleReport | `CycleReport.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-019, SHEET-020, SHEET-021, SHEET-022 | GS-004, SHEET-022 | 2026-10-09 (`93a120a`) |
 | GS-017 | GS- | EmailSweep | `EmailSweep.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-019 | GS-004 | 2026-10-09 (`93a120a`) |
-| GS-018 | GS- | OpsAudit | `OpsAudit.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-013, SHEET-014, SHEET-019, SHEET-021 | GS-004 | 2026-10-09 (`15bec89`) |
+| GS-018 | GS- | OpsAudit | `OpsAudit.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-013, SHEET-014, SHEET-019, SHEET-021 | GS-004 | 2026-10-09 (`8ebf41a`) |
 
 `RmHierarchy.private.gs` is **not** cataloged — gitignored, real employee
 emails, never in this repo (`DOC-007`).

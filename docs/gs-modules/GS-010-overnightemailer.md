@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `15bec89` - the 10:00 / 13:00 recoveries (FN-410; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `8ebf41a` - the 10:00 / 13:00 recoveries (FN-410; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -520,9 +520,9 @@ ending the session.
 
 **2026-10-09** (`f46ebc7`, Email Ops EO-2): the whole-job crash alerts of `sendOvernightMorningEmails` and `sendOvernightFollowupEmails` are sent with `{ immediate: true }` - every other alert raised during a run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
 
-**2026-10-09** (`0811d3a`, Email Ops, decision D6): `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` judge the Leads tab's freshness once per run (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when it is RED, the notice is appended as the last section of Section 2 of the combined 10:00 email and of the 13:00 reply, and as the last section of the CH-level overnight report. It is passed through each bucket's ledger context; nothing is held. `sendOneOvernightEmail_` (the standalone, untriggered path) is deliberately unchanged. **Not live until pasted.**
+**2026-10-09** (`ea5fdc5`, Email Ops, decision D6): `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` judge the Leads tab's freshness once per run (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when it is RED, the notice is appended as the last section of Section 2 of the combined 10:00 email and of the 13:00 reply, and as the last section of the CH-level overnight report. It is passed through each bucket's ledger context; nothing is held. `sendOneOvernightEmail_` (the standalone, untriggered path) is deliberately unchanged. **Not live until pasted.**
 
-**2026-10-09** (`0213c9f`, Email Ops EO-9b): `recoverFailedMorningBucketsNow()` (until 12:45 IST) and `recoverFailedFollowupBucketsNow()` (until 16:00 IST) re-send just the failed, blocked or never-attempted 10:00 emails / 13:00 replies of the day; `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` take an optional `{ onlyEmailIds }` (recovery only). With no argument they behave exactly as before. **Not live until pasted.**
+**2026-10-09** (`f774462`, Email Ops EO-9b): `recoverFailedMorningBucketsNow()` (until 12:45 IST) and `recoverFailedFollowupBucketsNow()` (until 16:00 IST) re-send just the failed, blocked or never-attempted 10:00 emails / 13:00 replies of the day; `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` take an optional `{ onlyEmailIds }` (recovery only). With no argument they behave exactly as before. **Not live until pasted.**
 
 ## Revalidation trigger
 

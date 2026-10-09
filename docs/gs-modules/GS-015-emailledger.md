@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00, 10:00 and 13:00 jobs and both CH-level reports) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `0213c9f` - the shared recovery driver (FN-409; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `f774462` - the shared recovery driver (FN-409; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -162,7 +162,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 **2026-10-09** (`b1dbc3a`): file created - Email Ops EO-1a. `EmailInfra.gs` `prepareOutgoingEmailGs_` also returns
 `missingLeadIds` and the gate's refusal carries it. **Not live until pasted.**
 
-**2026-10-09** (`0213c9f`, Email Ops EO-9b): the 17:00 recovery's reader, cutoff test and driver moved here as the shared FN-409 so the 10:00 and 13:00 recoveries (`GS-010` FN-410) reuse them; PLANNED rows (never attempted) became recovery targets (RULE-058). **Not live until pasted.**
+**2026-10-09** (`f774462`, Email Ops EO-9b): the 17:00 recovery's reader, cutoff test and driver moved here as the shared FN-409 so the 10:00 and 13:00 recoveries (`GS-010` FN-410) reuse them; PLANNED rows (never attempted) became recovery targets (RULE-058). **Not live until pasted.**
 
 ## Revalidation trigger
 
