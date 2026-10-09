@@ -29,10 +29,6 @@ const CYCLE_REPORT_HOUR_ = 16;   // IST
 const CYCLE_REPORT_MINUTE_ = 30; // IST
 const CYCLE_REPORT_SENT_PROPERTY_ = 'EMAIL_CYCLE_REPORT_SENT_DAY';
 const CYCLE_REPORT_MAX_ROWS_ = 30; // per table, so a bad day cannot make the report unreadable
-// Plan decision D4: the Leads tab is refreshed about every other hour, at varying times, and carries no "last imported" cell, so its freshness is judged
-// from the newest lead assignment time: more than 3 h old = AMBER, more than 5 h = RED. If the refresh process ever writes a timestamp cell, use that instead.
-const LEADS_FRESH_AMBER_HOURS_ = 3;
-const LEADS_FRESH_RED_HOURS_ = 5;
 // One row per IST day, upserted by the report: the day's numbers (numerators; the report email carries the rates) for tracking over time.
 const CYCLE_REPORT_DAILY_SHEET_ = 'Daily_Report';
 const CYCLE_REPORT_DAILY_HEADERS_ = ['report_day', 'sent_at', 'window_start', 'window_end', 'planned', 'accepted', 'skipped', 'failed', 'unconfirmed', 'blocked',
@@ -210,30 +206,14 @@ function cycleReportRenderGs_(data, now) {
   return { subject: subject, html: renderOvernightReportEmailHTML_(opts), plainBody: plainTextReportGs_(opts) };
 }
 
-// GREEN / AMBER / RED from the age (hours) of the newest lead assignment (decision D4).
-function cycleFreshnessLevelGs_(ageHours) {
-  if (ageHours > LEADS_FRESH_RED_HOURS_) return 'RED';
-  if (ageHours > LEADS_FRESH_AMBER_HOURS_) return 'AMBER';
-  return 'GREEN';
-}
+// GREEN / AMBER / RED from the age (hours) of the newest lead assignment (decision D4); the rules live in EmailInfra.gs so every emailer shares them.
+function cycleFreshnessLevelGs_(ageHours) { return leadsFreshnessLevelGs_(ageHours); }
 
-// How fresh the Leads tab looks: { level: GREEN|AMBER|RED|UNKNOWN, ageHours, newest, text }. UNKNOWN (never a guess) when the tab cannot be read or holds
-// no assignment times. Assignment times in the future (bad data) are ignored.
+// How fresh the Leads tab looks now: { level: GREEN|AMBER|RED|UNKNOWN, ageHours, newest, text }. UNKNOWN (never a guess) when the tab cannot be read.
 function cycleLeadsFreshnessGs_(ss, now) {
   try {
     const leads = readLeadsTab_(ss);
-    let newest = null;
-    leads.dataRows.forEach(function (row) {
-      const v = getVal_(row, leads.colIndex, 'lead_assigned_at');
-      if (v instanceof Date && v.getTime() <= now.getTime() + 3600000 && (!newest || v.getTime() > newest.getTime())) newest = v;
-    });
-    if (!newest) return { level: 'UNKNOWN', ageHours: null, newest: null, text: 'UNKNOWN: the Leads tab has no lead assignment times to judge by' };
-    const ageHours = Math.max(0, (now.getTime() - newest.getTime()) / 3600000);
-    const level = cycleFreshnessLevelGs_(ageHours);
-    const when = Utilities.formatDate(newest, 'Asia/Kolkata', 'd MMM HH:mm');
-    const text = level + ': the newest lead was assigned ' + (Math.round(ageHours * 10) / 10) + ' h ago (' + when + ' IST)' +
-      (level === 'GREEN' ? '' : ' - older than ' + (level === 'RED' ? LEADS_FRESH_RED_HOURS_ : LEADS_FRESH_AMBER_HOURS_) + ' h; the Leads tab refresh (about every 2 h) may be late, so the 17:00 emails would describe stale data');
-    return { level: level, ageHours: ageHours, newest: newest, text: text };
+    return leadsFreshnessFromRowsGs_(leads.colIndex, leads.dataRows, now);
   } catch (e) {
     return { level: 'UNKNOWN', ageHours: null, newest: null, text: 'UNKNOWN: the Leads tab could not be read (' + String((e && e.message) || e) + ')' };
   }

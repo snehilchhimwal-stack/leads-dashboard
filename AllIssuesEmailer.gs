@@ -204,6 +204,8 @@ function sendAllIssuesEmails_(opts) {
   const now = new Date();
   const win = allIssuesWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss); // EmailInfra.gs
+  // Leads tab RED (> 5 h old): every email of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
+  const staleNotice = staleLeadsNoticeFromRowsGs_(colIndex, dataRows, now);
   Logger.log('[timing] readLeadsTab_ done at ' + elapsed_() + ' (' + dataRows.length + ' rows)');
   const recipients = loadRegionRecipients_(ss); // EmailInfra.gs — legacy fallback, same as overnight
   // Loaded ONCE and threaded through resolveRecipientEmailsForRegion_ below
@@ -359,7 +361,7 @@ function sendAllIssuesEmails_(opts) {
     // resolveRecipientBucketsForRms_ a second time with identical
     // arguments — that second call used to double this file's own share
     // of the per-region RM_Hierarchy/Manager_Directory reload cost.
-    if (!recoverIds) notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win, ledger);
+    if (!recoverIds) notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win, ledger, staleNotice);
 
     const unresolvedExclusions = [];
     resolution.trulyUnresolved.forEach(function (u) {
@@ -390,7 +392,7 @@ function sendAllIssuesEmails_(opts) {
     }));
 
     bucketsToSend.forEach(function (b) {
-      const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false };
+      const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false, staleNotice: staleNotice };
       const failure = sendOneAllIssuesEmail_(ss, logSheet, region, b.rec, b.leads, dateLabel, todayKey, now, win, ledgerCtx);
       bucketSendCount++;
       // Leads the send-safety gate objected to individually were dropped from this bucket and the rest was resent (decision D3).
@@ -437,7 +439,7 @@ function sendAllIssuesEmails_(opts) {
 // fireAlerts:false above specifically so ITS OWN overnight-flavored
 // CH alert doesn't ALSO fire; this is the one that actually sends for
 // this script).
-function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
+function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger, staleNotice) {
   if (!chLevelRms.length) return;
   const byCh = groupChLevelRmsByCh_(chLevelRms);
   const dateRangeLabel = allIssuesDateRangeLabelGs_(win);
@@ -505,6 +507,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).',
     };
+    if (staleNotice) reportOpts.sections = reportOpts.sections.concat([staleNotice]); // the separate bottom notice when the Leads tab is RED
     const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
     // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
     const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
@@ -593,6 +596,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     sections: sections,
     footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
   };
+  if (ctx.staleNotice) reportOpts.sections = reportOpts.sections.concat([ctx.staleNotice]); // the separate bottom notice when the Leads tab is RED
   const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(reportOpts);
   // Plain-text part = a one-line count summary + the full lead list, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
@@ -620,7 +624,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
           ctx.dropped.push({ lead: l, reason: 'could not be shown in the email body (the send-safety gate objected to this lead only); the rest of the bucket was sent' });
         });
         return sendOneAllIssuesEmail_(ss, logSheet, region, rec, remaining, dateLabel, todayKey, now, win,
-          { ledger: ctx.ledger, emailId: ctx.emailId, dropped: ctx.dropped, isRetry: true });
+          { ledger: ctx.ledger, emailId: ctx.emailId, dropped: ctx.dropped, isRetry: true, staleNotice: ctx.staleNotice });
       }
     }
     // Same "operation not allowed" detection sendOneOvernightEmail_ uses —
