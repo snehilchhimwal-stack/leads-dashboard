@@ -262,7 +262,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-09** (`b1dbc3a`, Email Ops EO-1a): `prepareOutgoingEmailGs_` (FN-323) also returns `missingLeadIds` - the counted leads absent from a body - and the gate's refusal (`sendBlockedErrorGs_`, FN-324) carries it as `err.missingLeadIds` (empty for any other kind of refusal), so the 17:00 emailer can drop just those leads and resend the rest (`GS-015` RULE-045). Additive: callers that ignore the field behave exactly as before. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-2): `notifyOpsAlertGs_` takes an optional `opts` and, inside the three email jobs, holds the alert until the job has ended (`emailAlertHoldStartGs_` / `emailAlertHoldFlushGs_`, FN-391; the former body is `sendOpsAlertNowGs_`); `runEmailJobTrackedGs_` (FN-332) starts and flushes the hold and writes the run record before the flush; `checkEmailJobsCompletedGs_` (FN-333) releases held incidents of a killed job (`GS-015` RULE-048). **Not live until pasted.**
+**2026-10-09** (`f46ebc7`, Email Ops EO-2): `notifyOpsAlertGs_` takes an optional `opts` and, inside the three email jobs, holds the alert until the job has ended (`emailAlertHoldStartGs_` / `emailAlertHoldFlushGs_`, FN-391; the former body is `sendOpsAlertNowGs_`); `runEmailJobTrackedGs_` (FN-332) starts and flushes the hold and writes the run record before the flush; `checkEmailJobsCompletedGs_` (FN-333) releases held incidents of a killed job (`GS-015` RULE-048). **Not live until pasted.**
 
 ## Revalidation trigger
 

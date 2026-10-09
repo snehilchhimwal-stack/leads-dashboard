@@ -150,7 +150,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`, EO-2): `Incident_Log` (`SHEET-021`) and the held-alert mechanism - FN-390..FN-392, RULE-047, RULE-048, CFG-109, EXC-122, EXC-123. `notifyOpsAlertGs_` (`GS-004`) now records every alert and, inside one of the three email jobs, holds it until the job has ended.
+**2026-10-09** (`f46ebc7`, EO-2): `Incident_Log` (`SHEET-021`) and the held-alert mechanism - FN-390..FN-392, RULE-047, RULE-048, CFG-109, EXC-122, EXC-123. `notifyOpsAlertGs_` (`GS-004`) now records every alert and, inside one of the three email jobs, holds it until the job has ended.
 
 **2026-10-09** (`eaffb47`, EO-1b): wired into the 10:00 and 13:00 jobs and both CH-level reports; new `SKIPPED` status; ids of the 10:00/13:00 emails carry the recipient; plans can be written directly in a final state (`initialStatus`); tracked-send helpers (FN-388).
 

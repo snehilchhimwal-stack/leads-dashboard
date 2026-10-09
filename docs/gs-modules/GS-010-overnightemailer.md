@@ -516,7 +516,7 @@ ending the session.
 
 **2026-10-09** (`eaffb47`, Email Ops EO-1b): the 10:00 and 13:00 jobs and the CH-level overnight report now record every email in the ledger (`GS-015`). 10:00: the region's buckets are PLANNED in one write (id keyed by recipient), `sendCombinedMorningEmail_` takes an optional `ledgerCtx` and records ATTEMPTING, then ACCEPTED (with the Gmail ids) / FAILED / UNCONFIRMED / BLOCKED, or SKIPPED when there is nothing to say; unroutable RMs and the same-day re-run guard go to `Email_Ledger_Exclusions`. 13:00: a pre-pass plans every reply (a bucket with nothing to send is planned directly as SKIPPED), `sendCombinedFollowupEmail_` records the threaded reply's Gmail API message id, or the plain fallback's own ids, or UNCONFIRMED / BLOCKED / FAILED. `notifyChLevelLeadsGs_` takes an optional `ledger` (passed through `resolveRecipientEmailsForRegion_`'s `opts.ledger`). No behaviour of any email changes; the ledger is fail-open. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-2): the whole-job crash alerts of `sendOvernightMorningEmails` and `sendOvernightFollowupEmails` are sent with `{ immediate: true }` - every other alert raised during a run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
+**2026-10-09** (`f46ebc7`, Email Ops EO-2): the whole-job crash alerts of `sendOvernightMorningEmails` and `sendOvernightFollowupEmails` are sent with `{ immediate: true }` - every other alert raised during a run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
 
 ## Revalidation trigger
 

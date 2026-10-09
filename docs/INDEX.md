@@ -284,7 +284,7 @@ emails, never in this repo (`DOC-007`).
 | SHEET-018 | SHEET- | Feature_Usage | Google Sheet | Closed + Monitored (lifecycle none needed, bounded by construction; DOC-038: MEDIUM / operational) | EXT-001, JS-018 | JS-018, GS-009 | 2026-10-03 (`a325f00`) |
 | SHEET-019 | SHEET- | Email_Ledger | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-010, GS-015 | 2026-10-09 (`b1dbc3a`) |
 | SHEET-020 | SHEET- | Email_Ledger_Exclusions | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-010, GS-015 | 2026-10-09 (`b1dbc3a`) |
-| SHEET-021 | SHEET- | Incident_Log | Google Sheet | Closed + Monitored (retention: none yet, a few rows a day; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-015 | 2026-10-09 (`(pending commit)`) |
+| SHEET-021 | SHEET- | Incident_Log | Google Sheet | Closed + Monitored (retention: none yet, a few rows a day; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-015 | 2026-10-09 (`f46ebc7`) |
 
 **Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
 `Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and
