@@ -240,14 +240,15 @@ function runCycleReportTests_() {
       const ssD = TestCR_world_(TestCR_standardLeads_);
       TestCR_bind_(ssD);
       sendAllIssuesEmails();
-      const day = istDayKeyGs_(new Date());
-      sendEmailCycleReport_({ now: new Date(Date.now() + 60000) });
+      const dailyNow = new Date(Date.now() + 60000); // the report time; its IST day is the row's day (a run just before midnight crosses into the next day)
+      const day = istDayKeyGs_(dailyNow);
+      sendEmailCycleReport_({ now: dailyNow });
       const daily = function () { return TestEL_objects_(ssD.getSheetByName(CYCLE_REPORT_DAILY_SHEET_), CYCLE_REPORT_DAILY_HEADERS_); };
       TestAssertEqual_(daily().length, 1, 'daily row: one row is written');
       const d = daily()[0];
       TestAssertEqual_([d.report_day, d.planned, d.accepted, d.failed, d.leads_sent, d.all_clear, d.leads_freshness].join(','), day + ',1,1,0,2,yes,GREEN', 'daily row: the day, the counts, all-clear and the freshness level');
       TestAssert_(d.sent_at instanceof Date && d.window_start instanceof Date && d.window_end instanceof Date, 'daily row: the send time and the cycle window are stored');
-      sendEmailCycleReport_({ now: new Date(Date.now() + 120000), force: true });
+      sendEmailCycleReport_({ now: dailyNow, force: true });
       TestAssertEqual_(daily().length, 1, 'daily row: a forced re-send the same day UPDATES the row instead of adding a second');
       const other = cycleReportDataGs_({ window: win, ledgerRows: [], exclusionRows: [], incidentRows: [] });
       cycleReportRecordDailyGs_(ssD, other, new Date(Date.now() + 30 * 3600000));
