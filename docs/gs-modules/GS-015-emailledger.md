@@ -140,7 +140,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`, EO-1b): wired into the 10:00 and 13:00 jobs and both CH-level reports; new `SKIPPED` status; ids of the 10:00/13:00 emails carry the recipient; plans can be written directly in a final state (`initialStatus`); tracked-send helpers (FN-388).
+**2026-10-09** (`eaffb47`, EO-1b): wired into the 10:00 and 13:00 jobs and both CH-level reports; new `SKIPPED` status; ids of the 10:00/13:00 emails carry the recipient; plans can be written directly in a final state (`initialStatus`); tracked-send helpers (FN-388).
 
 **2026-10-09** (`b1dbc3a`): file created - Email Ops EO-1a. `EmailInfra.gs` `prepareOutgoingEmailGs_` also returns
 `missingLeadIds` and the gate's refusal carries it. **Not live until pasted.**
