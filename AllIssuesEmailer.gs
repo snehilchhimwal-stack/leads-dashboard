@@ -170,7 +170,7 @@ function sendAllIssuesEmails() {
       notifyOpsAlertGs_('sendAllIssuesEmails crashed — NO All-Issues emails were sent this run', [
         'sendAllIssuesEmails threw before completing, so nothing was sent for ANY region this run — not even the usual per-lead "not sent" report, which only runs if the function reaches its own end.',
         'Error: ' + (e && e.stack ? e.stack : e),
-      ]);
+      ], { immediate: true }); // a whole-job failure: nothing left to confirm (EO-2)
       throw e;
     }
   });

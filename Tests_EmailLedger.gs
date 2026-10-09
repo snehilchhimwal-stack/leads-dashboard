@@ -623,6 +623,192 @@ function runEmailLedgerTests_() {
       TestAssertEqual_(note13.length, 1, 'broken ledger at 13:00: exactly one ops note, naming the 13:00 run');
     }
 
+    // ================= EO-2: the incident log and held alerts =================
+    const I = EMAIL_INCIDENT_HEADERS_;
+    const incidentRows = function (ss) { const sh = ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_); return sh ? TestEL_objects_(sh, I) : []; };
+    const failingGmailFor = function (leadId) {
+      const realCD = GmailApp.createDraft;
+      GmailApp.createDraft = function (to, subject, body, options) {
+        if (!leadId || String((options && options.htmlBody) || '').indexOf(leadId) !== -1) return { send: function () { throw new Error('Gmail operation not allowed for this user'); } };
+        return realCD.apply(GmailApp, arguments);
+      };
+    };
+    const twoRegionWorld = function () {
+      return TestEL_world_(function (header, now) {
+        return [
+          TestEL_leadRow_(header, { lead_id: 'L-PUNE', client_id: 'C-PUNE', RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+          TestEL_leadRow_(header, { lead_id: 'L-THANE', client_id: 'C-THANE', RM: 'Test RM One', region: 'Thane', lead_assigned_at: now, rm_is_active: false }),
+        ];
+      });
+    };
+
+    // ---- severity guesses (spec section 3) ----
+    TestAssertEqual_(['sendAllIssuesEmails crashed \u2014 NO All-Issues emails were sent this run', 'sendOvernightFollowupEmails SKIPPED \u2014 another email job was still running', 'WATCHDOG: sendAllIssuesEmails did not run'].map(incidentSeverityGs_).join(','), 'CRITICAL,CRITICAL,CRITICAL', 'severity: a whole job crashing, being skipped or not running is CRITICAL');
+    TestAssertEqual_(['sendAllIssuesEmails ran in TEST MODE \u2014 real recipients suppressed', 'x ran WITHOUT its overlap lock'].map(incidentSeverityGs_).join(','), 'HIGH,HIGH', 'severity: a suppressed-recipients test run and a missing lock are HIGH');
+    TestAssertEqual_(['All-issues email FAILED - Pune', 'Morning email failed for Pune'].map(incidentSeverityGs_).join(','), 'MEDIUM,MEDIUM', 'severity: one bucket failing is MEDIUM (an isolated item)');
+    TestAssertEqual_(incidentSeverityGs_('Email ledger: 2 write(s) failed during the 17:00 run - the emails were NOT affected'), 'LOW', 'severity: bookkeeping notes are LOW');
+
+    // ---- (22) an alert raised OUTSIDE an email job is sent at once and recorded ----
+    {
+      const ssI = TestMockSpreadsheet_({});
+      TestEL_bind_(ssI);
+      const ok = notifyOpsAlertGs_('Something FAILED', ['line one', 'line two']);
+      TestAssertEqual_(ok, true, 'alert outside a job: reported as sent');
+      TestAssertEqual_(TestGmailLog_.sent.length + ',' + TestGmailLog_.sent[0].subject, '1,[Overnight Emailer] Something FAILED', 'alert outside a job: sent at once with its original subject');
+      const inc = incidentRows(ssI);
+      TestAssertEqual_(inc.length + ',' + inc[0].severity + ',' + inc[0].scope + ',' + inc[0].notification + ',' + inc[0].attention_required + ',' + inc[0].owner, '1,MEDIUM,item,SENT,yes,Snehil', 'alert outside a job: one incident row, SENT, attention required, owned by Snehil');
+      TestAssert_(/^INC-\d{8}-\d{6}-\d+$/.test(inc[0].incident_id), 'alert outside a job: the incident id is INC-yyyymmdd-hhmmss-n');
+      TestAssertEqual_(inc[0].detail, 'line one\nline two', 'alert outside a job: the incident keeps the alert text');
+      TestAssert_(inc[0].notified_at instanceof Date && inc[0].detected_at instanceof Date, 'alert outside a job: detection and notification times are stamped');
+      TestAssertContains_(inc[0].continuity, 'Sent immediately', 'alert outside a job: the continuity note says it was sent immediately');
+    }
+
+    // ---- (23) one bucket fails, the other is fine: ONE alert, sent AFTER the job, saying 1 of 2 went out ----
+    {
+      const w23 = { ss: twoRegionWorld() };
+      TestEL_bind_(w23.ss);
+      failingGmailFor('L-PUNE');
+      sendAllIssuesEmails();
+      const alerts = TestGmailLog_.sent.filter(function (e) { return /All-issues email FAILED/.test(e.subject); });
+      TestAssertEqual_(alerts.length, 1, 'held alert: exactly one failure alert is sent');
+      TestAssertEqual_(alerts[0].subject, '[Overnight Emailer] All-issues email FAILED - Pune (A1/Test A1 One)', 'held alert: a single alert keeps its own subject');
+      const firstLine = alerts[0].body.split('\n')[0];
+      TestAssertContains_(firstLine, 'CONFIRMATION: 2 bucket email(s) were handled in this run', 'held alert: it opens with the count of emails handled');
+      TestAssertContains_(firstLine, '1 accepted by Gmail', 'held alert: …saying one was accepted by Gmail (the Thane email)');
+      TestAssertContains_(firstLine, '1 failed', 'held alert: …and one failed');
+      TestAssertContains_(alerts[0].body, 'Intended recipient:', 'held alert: the original alert text follows the confirmation');
+      const led = TestEL_objects_(w23.ss.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(led.map(function (r) { return r.region + ':' + r.status; }).sort().join(','), 'Pune:FAILED,Thane:ACCEPTED', 'held alert: the other region\'s email went out normally');
+      const inc = incidentRows(w23.ss);
+      TestAssertEqual_(inc.length + ',' + inc[0].notification + ',' + inc[0].severity + ',' + inc[0].job, '1,SENT,MEDIUM,sendAllIssuesEmails', 'held alert: one incident, SENT after the job, tied to the job');
+      TestAssertContains_(inc[0].continuity, '1 accepted by Gmail', 'held alert: the incident\'s continuity note records the confirmation');
+      TestAssert_(EMAIL_ALERT_HOLD_ === null, 'held alert: nothing is held after the job ended');
+    }
+
+    // ---- (24) several alerts in one run: ONE message ----
+    {
+      const w24 = { ss: twoRegionWorld() };
+      TestEL_bind_(w24.ss);
+      failingGmailFor(null);
+      sendAllIssuesEmails();
+      const combined = TestGmailLog_.sent.filter(function (e) { return /alerts from this run/.test(e.subject); });
+      TestAssertEqual_(combined.length, 1, 'several alerts: one consolidated message');
+      TestAssertContains_(combined[0].subject, '17:00 All-Issues emails: 2 alerts from this run', 'several alerts: the subject names the job and the count');
+      TestAssertContains_(combined[0].body, '--- Alert 1 of 2:', 'several alerts: each alert is a section of the message');
+      TestAssertContains_(combined[0].body, '--- Alert 2 of 2:', 'several alerts: …both of them');
+      TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /All-issues email FAILED/.test(e.subject); }).length, 0, 'several alerts: no separate message per alert');
+      TestAssertEqual_(incidentRows(w24.ss).map(function (r) { return r.notification; }).join(','), 'SENT,SENT', 'several alerts: both incidents are SENT');
+      TestAssertContains_(combined[0].body.split('\n')[0], '2 failed', 'several alerts: the confirmation says nothing went out');
+    }
+
+    // ---- (25) a whole-job crash is sent AT ONCE (nothing left to confirm), and recorded CRITICAL ----
+    {
+      const w25 = { ss: TestEL_world_(TestEL_standardLeads_) };
+      TestEL_bind_(w25.ss);
+      const realRead = readLeadsTab_;
+      readLeadsTab_ = function () { throw new Error('simulated total failure'); };
+      try { TestAssertThrows_(function () { sendAllIssuesEmails(); }, 'crash: the error is still re-thrown (Executions shows Failed)'); } finally { readLeadsTab_ = realRead; }
+      const crash = TestGmailLog_.sent.filter(function (e) { return /sendAllIssuesEmails crashed/.test(e.subject); });
+      TestAssertEqual_(crash.length, 1, 'crash: one alert');
+      TestAssert_(crash[0].body.indexOf('CONFIRMATION') === -1, 'crash: it is sent immediately, with no held-alert confirmation');
+      const inc = incidentRows(w25.ss);
+      TestAssertEqual_(inc.length + ',' + inc[0].severity + ',' + inc[0].scope + ',' + inc[0].notification, '1,CRITICAL,system,SENT', 'crash: recorded as a CRITICAL, system-wide incident, SENT');
+      TestAssertContains_(inc[0].continuity, 'Sent immediately', 'crash: …"sent immediately"');
+      TestAssert_(EMAIL_ALERT_HOLD_ === null, 'crash: the hold is cleared even though the job threw');
+      TestAssertEqual_(readEmailJobRunGs_('sendAllIssuesEmails').status, 'failed', 'crash: the run record still says failed');
+    }
+
+    // ---- (26) a job killed before it could send its held alerts: the watchdog releases them ----
+    {
+      const ssK = TestMockSpreadsheet_({});
+      TestEL_bind_(ssK);
+      emailAlertHoldStartGs_('sendAllIssuesEmails');
+      notifyOpsAlertGs_('All-issues email FAILED - Pune (A1/Bucket)', ['the failure text']);
+      TestAssertEqual_(TestGmailLog_.sent.length, 0, 'killed job: the alert is held, not sent');
+      EMAIL_ALERT_HOLD_ = null; // the platform killed the run here: no flush ever happens
+      TestAssertEqual_(incidentRows(ssK)[0].notification, 'HELD', 'killed job: the incident is on record as HELD');
+      TestAssertEqual_(releaseHeldIncidentsGs_(new Date()), 0, 'killed job: a fresh HELD incident is NOT released (its job may still be running)');
+      TestAssertEqual_(TestGmailLog_.sent.length, 0, 'killed job: nothing sent yet');
+      ssK.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_).getRange(2, I.indexOf('detected_at') + 1, 1, 1).setValues([[new Date(Date.now() - 60 * 60000)]]);
+      checkEmailJobsCompletedGs_(new Date()); // the hourly watchdog
+      const released = TestGmailLog_.sent.filter(function (e) { return /Held alert\(s\) released/.test(e.subject); });
+      TestAssertEqual_(released.length, 1, 'killed job: an hour later the watchdog sends ONE release message');
+      TestAssertContains_(released[0].body, 'All-issues email FAILED - Pune (A1/Bucket)', 'killed job: …listing the alert that was held');
+      TestAssertContains_(released[0].body, 'the failure text', 'killed job: …with its text');
+      TestAssertEqual_(incidentRows(ssK)[0].notification, 'RELEASED', 'killed job: the incident is marked RELEASED');
+      const before = TestGmailLog_.sent.length;
+      checkEmailJobsCompletedGs_(new Date());
+      TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /Held alert\(s\) released/.test(e.subject); }).length, 1, 'killed job: the next watchdog run does not release it a second time');
+    }
+
+    // ---- (27) test mode: alerts go at once, nothing is recorded ----
+    {
+      const ssT = TestMockSpreadsheet_({});
+      TestEL_bind_(ssT);
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+      try { notifyOpsAlertGs_('Test mode alert', ['x']); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+      TestAssertEqual_(TestGmailLog_.sent.length, 1, 'test mode: the alert is sent');
+      TestAssert_(!ssT.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_), 'test mode: no Incident_Log is created or written');
+    }
+
+    // ---- (28) a broken Incident_Log never stops an alert ----
+    {
+      const ssB = TestMockSpreadsheet_({ 'Incident_Log': TestMockSheet_('Incident_Log', [['not', 'the', 'header']]) });
+      TestEL_bind_(ssB);
+      const ok = notifyOpsAlertGs_('Another FAILED', ['x']);
+      TestAssertEqual_(ok + ',' + TestGmailLog_.sent.length, 'true,1', 'broken incident sheet: the alert is still sent');
+      TestAssertEqual_(ssB.getSheetByName('Incident_Log').getLastRow(), 1, 'broken incident sheet: nothing is written into the unrecognised sheet');
+    }
+
+    // ---- (29) no ledger in the run: the held alert says so instead of inventing a count ----
+    {
+      const ssN = TestEL_world_(TestEL_standardLeads_);
+      ssN._sheets['Email_Ledger'] = TestMockSheet_('Email_Ledger', [['wrong', 'header']]);
+      TestEL_bind_(ssN);
+      sendAllIssuesEmails();
+      const note = TestGmailLog_.sent.filter(function (e) { return /Email ledger:/.test(e.subject); });
+      TestAssertEqual_(note.length, 1, 'no ledger: the ledger note is still sent once');
+      TestAssertContains_(note[0].body.split('\n')[0], 'CONFIRMATION UNAVAILABLE', 'no ledger: the confirmation line says the count cannot be stated');
+      TestAssertEqual_(incidentRows(ssN).map(function (r) { return r.severity; }).join(','), 'LOW', 'no ledger: recorded as a LOW incident');
+    }
+
+    // ---- (30) a job that never opened a ledger must not borrow the PREVIOUS run's counts ----
+    {
+      const w30 = { ss: TestEL_world_(TestEL_standardLeads_) };
+      TestEL_bind_(w30.ss);
+      sendAllIssuesEmails(); // leaves a live ledger handle with real counts behind
+      TestGmailLog_.sent.length = 0;
+      withEmailJobLockGs_('sendOvernightFollowupEmails', function () { notifyOpsAlertGs_('Something FAILED early', ['it stopped before opening the ledger']); });
+      const early = TestGmailLog_.sent.filter(function (e) { return /Something FAILED early/.test(e.subject); });
+      TestAssertEqual_(early.length, 1, 'stale counts: the early alert is sent after the job');
+      TestAssertContains_(early[0].body.split('\n')[0], 'CONFIRMATION UNAVAILABLE', 'stale counts: it does NOT state the previous run counts as its own');
+    }
+
+    // ---- (31) the 10:00 and 13:00 whole-job crashes are sent AT ONCE too ----
+    {
+      const w31 = cycleWorld();
+      TestEL_bind_(w31.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w31);
+      const realRead = readLeadsTab_;
+      readLeadsTab_ = function () { throw new Error('simulated total failure'); };
+      try {
+        TestAssertThrows_(function () { sendOvernightMorningEmails(); }, '10:00 crash: re-thrown');
+        const crash10 = TestGmailLog_.sent.filter(function (e) { return /sendOvernightMorningEmails crashed/.test(e.subject); });
+        TestAssertEqual_(crash10.length, 1, '10:00 crash: one alert');
+        TestAssert_(crash10[0].body.indexOf('CONFIRMATION') === -1, '10:00 crash: sent immediately, no held-alert confirmation');
+      } finally { readLeadsTab_ = realRead; }
+      sendOvernightMorningEmails();
+      readLeadsTab_ = function () { throw new Error('simulated total failure'); };
+      try {
+        TestAssertThrows_(function () { sendOvernightFollowupEmails(); }, '13:00 crash: re-thrown');
+        const crash13 = TestGmailLog_.sent.filter(function (e) { return /sendOvernightFollowupEmails crashed/.test(e.subject); });
+        TestAssertEqual_(crash13.length, 1, '13:00 crash: one alert');
+        TestAssert_(crash13[0].body.indexOf('CONFIRMATION') === -1, '13:00 crash: sent immediately, no held-alert confirmation');
+      } finally { readLeadsTab_ = realRead; }
+      TestAssert_(EMAIL_ALERT_HOLD_ === null, '10:00/13:00 crash: nothing is left held');
+    }
+
     // ---- (11) the 10:00 / 13:00 jobs are untouched by the gate change (they ignore missingLeadIds) ----
     TestAssertOnlyTestEmails_();
   } finally {

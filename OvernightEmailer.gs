@@ -957,7 +957,7 @@ function sendOvernightMorningEmails() {
       notifyOpsAlertGs_('sendOvernightMorningEmails crashed — NO overnight morning emails were sent this run', [
         'sendOvernightMorningEmails threw before completing, so nothing was sent for ANY region this run.',
         'Error: ' + (e && e.stack ? e.stack : e),
-      ]);
+      ], { immediate: true }); // a whole-job failure: nothing left to confirm (EO-2)
       throw e;
     }
   });
@@ -1850,7 +1850,7 @@ function sendOvernightFollowupEmails() {
       notifyOpsAlertGs_('sendOvernightFollowupEmails crashed — NO 1pm follow-up emails were sent this run', [
         'sendOvernightFollowupEmails threw before completing, so no follow-up thread was updated for ANY region this run.',
         'Error: ' + (e && e.stack ? e.stack : e),
-      ]);
+      ], { immediate: true }); // a whole-job failure: nothing left to confirm (EO-2)
       throw e;
     }
   });

@@ -171,6 +171,7 @@ function emailLedgerEnsureSheetGs_(ss, name, headers, textColumns) {
 function emailLedgerOpenGs_(ss) {
   if (TEST_MODE_OVERRIDE_EMAIL_) return null;
   const h = { ledger: null, exclusions: null, rowById: {}, rows: {}, failures: 0, lastError: '', disabled: false };
+  emailLedgerSetActiveGs_(h); // a held alert (EO-2) states how many of THIS run's emails went out
   try {
     h.ledger = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_, [1, 2]);
     h.exclusions = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_, [2, 6]);
@@ -364,4 +365,129 @@ function emailLedgerFinishGs_(h, jobLabel) {
     'Last error: ' + (h.lastError || '(none recorded)'),
     'Check that both sheets exist with their original header row, then run showEmailLedgerTodayNow() to see what was recorded.',
   ]);
+}
+
+// ==================== Incident log + held alerts (Email Ops EO-2) ====================
+// Plan decision D2 (docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md section 0): an error is emailed only AFTER the rest of the job's emails are
+// confirmed sent, so it never delays or interrupts the safe work. While one of the three email jobs runs, notifyOpsAlertGs_
+// (EmailInfra.gs) records each alert as an incident here at once - status HELD - and sends it once, after the job, as ONE message that
+// starts with a count of how many emails Gmail accepted. A whole-job failure (nothing left to confirm) is sent immediately. If a job
+// is killed before it can send its held alerts, the hourly watchdog releases them (releaseHeldIncidentsGs_). Like the ledger, every
+// function here is fail-open: it can never stop an alert or an email.
+
+const EMAIL_INCIDENT_LOG_SHEET_ = 'Incident_Log';
+const EMAIL_INCIDENT_HEADERS_ = ['incident_id', 'day', 'detected_at', 'job', 'severity', 'scope', 'subject', 'detail', 'attention_required',
+  'owner', 'notification', 'notified_at', 'continuity', 'resolved_at', 'resolution'];
+const EMAIL_INCIDENT_RELEASE_AFTER_MINUTES_ = 45; // a HELD incident older than this belongs to a job that never finished
+let EMAIL_LEDGER_ACTIVE_ = null; // the ledger handle of the job running now (so a held alert can state how many emails went out)
+let EMAIL_INCIDENT_SEQ_ = 0;
+
+function emailLedgerSetActiveGs_(h) { EMAIL_LEDGER_ACTIVE_ = h || null; }
+function emailLedgerResetActiveGs_() { EMAIL_LEDGER_ACTIVE_ = null; }
+
+// How many of this run's bucket emails went out - the line a held alert starts with. Counts the rows this run planned or loaded.
+function emailLedgerConfirmationLineGs_() {
+  const h = EMAIL_LEDGER_ACTIVE_;
+  if (!emailLedgerLiveGs_(h)) return 'CONFIRMATION UNAVAILABLE: the email ledger was not active in this run, so the number of emails that went out cannot be stated.';
+  const counts = {};
+  let total = 0;
+  Object.keys(h.rows).forEach(function (rowNo) {
+    const status = String(h.rows[rowNo][emailLedgerCol_('status') - 1] || '');
+    counts[status] = (counts[status] || 0) + 1;
+    total++;
+  });
+  const open = (counts.PLANNED || 0) + (counts.ATTEMPTING || 0);
+  const parts = [(counts.ACCEPTED || 0) + ' accepted by Gmail'];
+  if (counts.SKIPPED) parts.push(counts.SKIPPED + ' skipped (nothing to send)');
+  if (counts.FAILED) parts.push(counts.FAILED + ' failed');
+  if (counts.UNCONFIRMED) parts.push(counts.UNCONFIRMED + ' unconfirmed (may have been delivered)');
+  if (counts.BLOCKED) parts.push(counts.BLOCKED + ' blocked by the send-safety gate');
+  if (open) parts.push(open + ' left unfinished');
+  return 'CONFIRMATION: ' + total + ' bucket email(s) were handled in this run - ' + parts.join(', ') + '. ("Accepted" means Gmail took the message; delivery and opens cannot be seen from here.) The alert(s) below were held until the rest of the run finished.';
+}
+
+// Severity (spec section 3) from the alert's subject: CRITICAL = a whole job did not run/finish, LOW = bookkeeping notes, else MEDIUM.
+function incidentSeverityGs_(subject) {
+  const s = String(subject || '');
+  if (/crashed|did not run|did not finish|is overdue|SKIPPED\s*[-—–]\s*another/i.test(s)) return 'CRITICAL';
+  if (/TEST MODE|WITHOUT its overlap lock|cannot be checked|cannot be resolved/i.test(s)) return 'HIGH';
+  if (/Email ledger:|truncated|log cell/i.test(s)) return 'LOW';
+  return 'MEDIUM';
+}
+
+function emailIncidentSheetGs_(create) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!create && !ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_)) return null;
+  return emailLedgerEnsureSheetGs_(ss, EMAIL_INCIDENT_LOG_SHEET_, EMAIL_INCIDENT_HEADERS_, [1, 2]);
+}
+
+// Records an alert as an incident and returns its id ('' when it could not be recorded - never throws).
+// info = { subject, bodyLines, job, held, severity, scope }. A held incident is HELD until the job's flush sends it.
+function incidentRecordGs_(info) {
+  if (TEST_MODE_OVERRIDE_EMAIL_) return '';
+  try {
+    const sheet = emailIncidentSheetGs_(true);
+    const now = new Date();
+    const severity = info.severity || incidentSeverityGs_(info.subject);
+    const id = 'INC-' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyyMMdd-HHmmss') + '-' + (++EMAIL_INCIDENT_SEQ_);
+    const row = [id, istDayKeyGs_(now), now, info.job || '', severity, info.scope || (severity === 'CRITICAL' ? 'system' : 'item'),
+      String(info.subject || '').slice(0, 300), (info.bodyLines || []).join('\n').slice(0, 1500), severity === 'LOW' ? 'no' : 'yes', 'Snehil',
+      info.held ? 'HELD' : 'PENDING', '', info.held ? 'Held until the rest of the run is confirmed sent (decision D2).' : 'Sent immediately: nothing else to confirm.', '', ''];
+    emailLedgerAppendBlockGs_(sheet, [row], function (probe) { return String(probe).trim() === id; }, 'append Incident_Log row');
+    return id;
+  } catch (e) {
+    Logger.log('Incident_Log write failed - the alert itself is NOT affected: ' + e);
+    return '';
+  }
+}
+
+// Marks incidents as notified (status 'SENT', 'SEND-FAILED' or 'RELEASED') with the time and a continuity note. Never throws.
+function incidentNotifiedGs_(ids, status, continuity) {
+  const wanted = {};
+  (ids || []).filter(Boolean).forEach(function (id) { wanted[id] = true; });
+  if (!Object.keys(wanted).length || TEST_MODE_OVERRIDE_EMAIL_) return;
+  try {
+    const sheet = emailIncidentSheetGs_(false);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    const last = sheet.getLastRow();
+    const ids2 = sheet.getRange(2, 1, last - 1, 1).getValues();
+    const first = EMAIL_INCIDENT_HEADERS_.indexOf('notification') + 1, count = 3; // notification, notified_at, continuity
+    ids2.forEach(function (r, i) {
+      const id = String(r[0]).trim();
+      if (!wanted[id]) return;
+      const cur = sheet.getRange(i + 2, first, 1, count).getValues()[0];
+      writeUnlessTestModeGs_(function () { sheet.getRange(i + 2, first, 1, count).setValues([[status, new Date(), continuity || cur[2]]]); }, 'update Incident_Log ' + id);
+    });
+  } catch (e) {
+    Logger.log('Incident_Log update failed - the alert itself is NOT affected: ' + e);
+  }
+}
+
+// The watchdog's safety net: HELD incidents older than the release window belong to a job that was killed before it could send them.
+// Sends ONE message listing them and marks them RELEASED. Never throws.
+function releaseHeldIncidentsGs_(now) {
+  try {
+    if (TEST_MODE_OVERRIDE_EMAIL_) return 0;
+    const sheet = emailIncidentSheetGs_(false);
+    if (!sheet || sheet.getLastRow() < 2) return 0;
+    const col = function (n) { return EMAIL_INCIDENT_HEADERS_.indexOf(n); };
+    const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, EMAIL_INCIDENT_HEADERS_.length).getValues();
+    const stale = rows.filter(function (r) {
+      const at = r[col('detected_at')];
+      return r[col('notification')] === 'HELD' && at instanceof Date && (now.getTime() - at.getTime()) / 60000 > EMAIL_INCIDENT_RELEASE_AFTER_MINUTES_;
+    });
+    if (!stale.length) return 0;
+    const lines = ['The run that raised ' + (stale.length === 1 ? 'this alert' : 'these ' + stale.length + ' alerts') + ' never finished (it was probably killed by the platform), so the alert' + (stale.length === 1 ? ' was' : 's were') + ' never sent. Released now by the watchdog.', ''];
+    stale.forEach(function (r) {
+      lines.push('[' + r[col('severity')] + '] ' + r[col('subject')] + '  (' + r[col('incident_id')] + ', job ' + (r[col('job')] || '?') + ', ' + Utilities.formatDate(r[col('detected_at')], 'Asia/Kolkata', 'd MMM HH:mm') + ' IST)');
+      lines.push(String(r[col('detail')] || ''));
+      lines.push('');
+    });
+    const sent = sendOpsAlertNowGs_('Held alert(s) released: their job never finished (' + stale.length + ')', lines);
+    incidentNotifiedGs_(stale.map(function (r) { return r[col('incident_id')]; }), sent ? 'RELEASED' : 'SEND-FAILED', 'Released by the watchdog: the job that held it never finished.');
+    return stale.length;
+  } catch (e) {
+    Logger.log('releaseHeldIncidentsGs_ failed: ' + e);
+    return 0;
+  }
 }

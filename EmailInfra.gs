@@ -351,7 +351,25 @@ function dedupeByLeadIdGs_(entries) {
 // then a second path — the Advanced Gmail Service, already authorized for the threaded replies — and only then gives up (logged).
 // A retry after an ambiguous timeout can deliver the alert twice; a duplicate alert is harmless, a lost one is not. Returns true
 // when some path sent it.
-function notifyOpsAlertGs_(subject, bodyLines) {
+function notifyOpsAlertGs_(subject, bodyLines, opts) {
+  // Email Ops EO-2 (plan decision D2): while one of the three email jobs runs, an alert is recorded as an incident at once but SENT only
+  // after the job, as one message behind a count of how many emails went out - an error never delays or interrupts the safe work.
+  // opts.immediate (a whole-job failure: nothing left to confirm) sends at once; opts.severity / opts.scope override the guess.
+  const immediate = !!(opts && opts.immediate);
+  const hold = EMAIL_ALERT_HOLD_;
+  const held = !!(hold && !immediate);
+  let incidentId = '';
+  if (typeof incidentRecordGs_ === 'function') {
+    try { incidentId = incidentRecordGs_({ subject: subject, bodyLines: bodyLines, job: hold ? hold.job : '', held: held, severity: opts && opts.severity, scope: opts && opts.scope }); } catch (incidentErr) { incidentId = ''; }
+  }
+  if (held) { hold.items.push({ subject: subject, bodyLines: bodyLines, incidentId: incidentId }); return true; }
+  const sent = sendOpsAlertNowGs_(subject, bodyLines);
+  if (incidentId && typeof incidentNotifiedGs_ === 'function') incidentNotifiedGs_([incidentId], sent ? 'SENT' : 'SEND-FAILED');
+  return sent;
+}
+
+// The actual send of an ops alert (the retries and the second path described above). Returns true when some path sent it.
+function sendOpsAlertNowGs_(subject, bodyLines) {
   const fullSubject = '[Overnight Emailer] ' + subject;
   const body = bodyLines.join('\n');
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -698,6 +716,49 @@ function sendGuardedEmailGs_(msg, label) {
   }, label);
 }
 
+// ---- Held alerts (Email Ops EO-2, plan decision D2) ----
+// While one of the three email jobs runs, notifyOpsAlertGs_ holds its alerts (they are already recorded in Incident_Log, status HELD).
+// emailAlertHoldFlushGs_ sends them once the job has ended, as ONE message that starts with the ledger's count of how many emails Gmail
+// accepted. If the job is killed before it can flush, the hourly watchdog releases them (releaseHeldIncidentsGs_, EmailLedger.gs).
+const EMAIL_ALERT_HOLD_JOBS_ = ['sendOvernightMorningEmails', 'sendOvernightFollowupEmails', 'sendAllIssuesEmails'];
+let EMAIL_ALERT_HOLD_ = null; // { job, items: [{ subject, bodyLines, incidentId }] } while a hold-job runs
+
+function emailAlertHoldStartGs_(jobName) {
+  EMAIL_ALERT_HOLD_ = { job: jobName, items: [] };
+  if (typeof emailLedgerResetActiveGs_ === 'function') emailLedgerResetActiveGs_(); // the count must describe THIS run
+}
+
+function emailAlertHoldFlushGs_() {
+  const hold = EMAIL_ALERT_HOLD_;
+  EMAIL_ALERT_HOLD_ = null;
+  if (!hold || !hold.items.length) return;
+  try {
+    const confirmation = typeof emailLedgerConfirmationLineGs_ === 'function'
+      ? emailLedgerConfirmationLineGs_()
+      : 'CONFIRMATION UNAVAILABLE: the email ledger is not installed, so the number of emails that went out cannot be stated.';
+    const label = (emailJobScheduleGs_()[hold.job] || {}).label || hold.job;
+    let subject, lines;
+    if (hold.items.length === 1) {
+      subject = hold.items[0].subject;
+      lines = [confirmation, ''].concat(hold.items[0].bodyLines);
+    } else {
+      subject = label + ': ' + hold.items.length + ' alerts from this run';
+      lines = [confirmation, ''];
+      hold.items.forEach(function (it, i) {
+        lines.push('--- Alert ' + (i + 1) + ' of ' + hold.items.length + ': ' + it.subject + ' ---');
+        Array.prototype.push.apply(lines, it.bodyLines);
+        lines.push('');
+      });
+    }
+    const sent = sendOpsAlertNowGs_(subject, lines);
+    if (typeof incidentNotifiedGs_ === 'function') {
+      incidentNotifiedGs_(hold.items.map(function (it) { return it.incidentId; }), sent ? 'SENT' : 'SEND-FAILED', confirmation);
+    }
+  } catch (e) {
+    Logger.log('emailAlertHoldFlushGs_ failed (' + (hold.items.length) + ' held alert(s)): ' + e);
+  }
+}
+
 // ---- Overlapping-run lock (email audit P4 / F5) ----
 // Every "already sent today?" guard in this project reads a log row that is only WRITTEN after the send, so two runs that
 // overlap (a manual run alongside the trigger, a double-fired trigger, a slow run still going when the next one starts) both
@@ -814,13 +875,21 @@ function runEmailJobTrackedGs_(jobName, fn) {
   const started = new Date();
   const day = istDayKeyGs_(started);
   writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), status: 'running' });
+  const holding = EMAIL_ALERT_HOLD_JOBS_.indexOf(jobName) !== -1; // EO-2: the three email jobs hold their alerts until they have ended
+  if (holding) emailAlertHoldStartGs_(jobName);
+  let failure = null;
+  let failed = false;
   try {
     fn();
   } catch (e) {
-    writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), finishedAt: new Date().toISOString(), status: 'failed', error: String((e && e.message) || e).slice(0, 300) });
-    throw e;
+    failure = e;
+    failed = true;
   }
-  writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), finishedAt: new Date().toISOString(), status: 'completed' });
+  writeEmailJobRunGs_(jobName, failed
+    ? { day: day, startedAt: started.toISOString(), finishedAt: new Date().toISOString(), status: 'failed', error: String((failure && failure.message) || failure).slice(0, 300) }
+    : { day: day, startedAt: started.toISOString(), finishedAt: new Date().toISOString(), status: 'completed' });
+  if (holding) emailAlertHoldFlushGs_(); // never throws; sends the held alerts as one message behind the delivery count
+  if (failed) throw failure; // re-thrown unchanged: the Executions list must still show Failed
 }
 
 // What is wrong with today's runs as of `now`? Returns [{ job, kind, detail }] — kind is 'never_started' (no record for today
@@ -901,6 +970,8 @@ function checkEmailJobsCompletedGs_(now) {
       try { PropertiesService.getScriptProperties().setProperty(configKey, configMarker); } catch (e2) { Logger.log('watchdog: could not record its config alert: ' + e2); }
     }
   }
+  // Email Ops EO-2: alerts held by a job that was killed before it could send them are released here (EmailLedger.gs).
+  if (typeof releaseHeldIncidentsGs_ === 'function') releaseHeldIncidentsGs_(now);
   return problems;
 }
 
