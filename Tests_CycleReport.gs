@@ -97,7 +97,33 @@ function runCycleReportTests_() {
     TestAssertContains_(bad.plainBody, 'Left out of emails', 'render: the exclusions table is present');
     TestAssertContains_(bad.plainBody, 'ops address missing', 'render: a recipient-address problem is shown under "Ready for 17:00?"');
     TestAssertContains_(bad.plainBody, '1 held alert(s)', 'render: held alerts are shown');
-    TestAssertContains_(bad.plainBody, 'bounces, replies, the age of the Leads tab (planned)', 'render: what is NOT tracked yet is stated, not hidden');
+    TestAssertContains_(bad.plainBody, 'bounces and replies (the 16:10 sweep has not run yet); the age of the Leads tab (planned)', 'render: what is NOT tracked yet is stated, not hidden');
+    TestAssertEqual_(data.sweep.notSwept + ',' + data.sweep.bounced + ',' + data.sweep.replied, '4,0,0', 'data: with no sweep evidence the four accepted/unconfirmed emails are "not checked yet"');
+    TestAssertContains_(bad.plainBody, 'The bounce/reply sweep has not run for these emails yet.', 'render: the bounces section says the sweep has not run');
+
+    // ---- bounce / reply evidence from the daily sweep ----
+    {
+      const swept = new Date(win.start.getTime() + 20 * 3600000);
+      const S = function (extra) { return L('allIssues17', 'ACCEPTED', Object.assign({ leads_sent: 2, swept_at: swept, bounce_status: 'NO_BOUNCE_SEEN', reply_status: 'NO_REPLY_SEEN' }, extra || {})); };
+      const sd = cycleReportDataGs_({ window: win, ledgerRows: [
+        S(), S({ bounce_status: 'BOUNCED 2026-10-08 17:03', bucket_label: 'Bouncy' }), S({ reply_status: 'REPLIED 2 (latest 2026-10-08 18:30)', bucket_label: 'Chatty' }),
+        L('allIssues17', 'FAILED', { bounce_status: 'BOUNCED x' }), // a failed email's bounce text is not counted: it never went out
+      ], exclusionRows: [], incidentRows: [], configProblems: [] });
+      TestAssertEqual_(sd.sweep.bounced + ',' + sd.sweep.replied + ',' + sd.sweep.noBounce + ',' + sd.sweep.notSwept, '1,1,2,0', 'sweep data: bounced / replied / no-bounce-found / not-checked counts (a FAILED email is not counted)');
+      TestAssertEqual_(sd.sweep.lastSweep.getTime(), swept.getTime(), 'sweep data: the time of the latest sweep is kept');
+      TestAssertEqual_(sd.attention.filter(function (a) { return a.status === 'BOUNCED'; }).length, 1, 'sweep data: a bounced email needs attention even though Gmail accepted it');
+      TestAssertEqual_(sd.allClear, false, 'sweep data: a bounce means not all clear');
+      TestAssertEqual_(sd.totals.accepted, 3, 'sweep data: the bounced email still counts as accepted by Gmail (it was) - the bounce is reported separately');
+      const sr = cycleReportRenderGs_(sd, now);
+      TestAssertContains_(sr.plainBody, 'Bounces and replies', 'sweep render: the section is present');
+      TestAssertContains_(sr.plainBody, 'Checked by the sweep at', 'sweep render: it states when the sweep ran');
+      TestAssertContains_(sr.plainBody, '"No bounce found" is NOT proof of delivery.', 'sweep render: it never implies delivery');
+      TestAssertContains_(sr.plainBody, 'Replies received (1)', 'sweep render: replies are listed');
+      TestAssertContains_(sr.plainBody, 'Chatty', 'sweep render: …by bucket');
+      TestAssertContains_(sr.plainBody, 'BOUNCED', 'sweep render: the bounce is in the attention table');
+      TestAssert_(sr.plainBody.indexOf('the 16:10 sweep has not run yet') === -1, 'sweep render: once swept, the "not run yet" note is gone');
+      TestAssertContains_(sr.plainBody, 'the age of the Leads tab (planned)', 'sweep render: …but the Leads-age gap is still stated');
+    }
     TestAssertContains_(bad.plainBody, '3 of 7 (43%) accepted by Gmail', 'render: the execution rate shows numerator and denominator');
     TestAssertContains_(bad.html, 'Daily Cycle Report', 'render: the HTML carries the title');
     const good = cycleReportRenderGs_(clean, now);

@@ -55,6 +55,7 @@ const PRODUCTION_FILES = [
   'RmHierarchySync.gs',
   'EmailLedger.gs',
   'CycleReport.gs',
+  'EmailSweep.gs',
 ];
 
 const TEST_FILES = [
@@ -75,6 +76,7 @@ const TEST_FILES = [
   'Tests_RmHierarchySync.gs',
   'Tests_EmailLedger.gs',
   'Tests_CycleReport.gs',
+  'Tests_EmailSweep.gs',
   'Tests_EmailLifecycleFullCycle.gs',
   'Tests_RunAll.gs',
 ];

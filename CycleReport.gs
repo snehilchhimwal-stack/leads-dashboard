@@ -30,10 +30,6 @@ const CYCLE_REPORT_MINUTE_ = 30; // IST
 const CYCLE_REPORT_SENT_PROPERTY_ = 'EMAIL_CYCLE_REPORT_SENT_DAY';
 const CYCLE_REPORT_MAX_ROWS_ = 30; // per table, so a bad day cannot make the report unreadable
 const CYCLE_REPORT_JOB_ORDER_ = ['allIssues17', 'chLevel17', 'morning10', 'chLevel10', 'followup13'];
-const CYCLE_REPORT_JOB_LABELS_ = {
-  allIssues17: '17:00 All-Issues', chLevel17: 'CH-level (17:00)', morning10: '10:00 Overnight + Checkpoint 1',
-  chLevel10: 'CH-level (10:00)', followup13: '13:00 follow-up',
-};
 
 // 16:30 of the previous IST day -> now. Before today's 16:30 the cycle that just ended is the one before, so the window reaches one day further back.
 function cycleReportWindowGs_(now) {
@@ -41,23 +37,6 @@ function cycleReportWindowGs_(now) {
   const todayAt = new Date(istDayKeyGs_(now) + 'T' + pad2Gs_(CYCLE_REPORT_HOUR_) + ':' + pad2Gs_(CYCLE_REPORT_MINUTE_) + ':00+05:30');
   const lastBoundary = now.getTime() >= todayAt.getTime() ? todayAt : new Date(todayAt.getTime() - dayMs);
   return { start: new Date(lastBoundary.getTime() - dayMs), end: now };
-}
-
-// Rows of a tab whose day column (column B in all three evidence tabs) is on/after startDayKey, as objects keyed by header name.
-function cycleReadRowsGs_(sheet, headers, startDayKey) {
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  const last = sheet.getLastRow();
-  const days = sheet.getRange(2, 2, last - 1, 1).getValues();
-  let first = -1;
-  for (let i = 0; i < days.length; i++) {
-    if (emailLedgerDayKeyOfGs_(days[i][0]) >= startDayKey) { first = i; break; }
-  }
-  if (first === -1) return [];
-  return sheet.getRange(first + 2, 1, last - first - 1, headers.length).getValues().map(function (r) {
-    const o = {};
-    headers.forEach(function (h, i) { o[h] = r[i]; });
-    return o;
-  });
 }
 
 function cycleReportInWindowGs_(value, win) {
@@ -78,6 +57,8 @@ function cycleReportDataGs_(input) {
   const byJob = {};
   const totals = newCounts();
   const attention = [];
+  // Bounce/reply evidence from the daily sweep (EmailSweep.gs): only for emails Gmail accepted (or may have accepted).
+  const sweep = { bounced: 0, replied: 0, noBounce: 0, notSwept: 0, lastSweep: null, replies: [] };
   ledger.forEach(function (r) {
     const job = String(r.job || '');
     const c = byJob[job] = byJob[job] || newCounts();
@@ -91,6 +72,16 @@ function cycleReportDataGs_(input) {
       else if (status === 'BLOCKED') t.blocked++;
       else t.unfinished++; // PLANNED / ATTEMPTING / anything unexpected: the run ended without a final status
     });
+    if (status === 'ACCEPTED' || status === 'UNCONFIRMED') {
+      const bs = String(r.bounce_status || ''), rs = String(r.reply_status || '');
+      if (/^BOUNCED/.test(bs)) {
+        sweep.bounced++;
+        attention.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: 'BOUNCED', reason: 'Gmail accepted it but a delivery-failure message came back (' + bs + ') - the recipient did not get it' });
+      } else if (bs === 'NO_BOUNCE_SEEN') sweep.noBounce++;
+      else sweep.notSwept++;
+      if (/^REPLIED/.test(rs)) { sweep.replied++; sweep.replies.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: rs }); }
+      if (r.swept_at instanceof Date && (!sweep.lastSweep || r.swept_at.getTime() > sweep.lastSweep.getTime())) sweep.lastSweep = r.swept_at;
+    }
     if (status !== 'ACCEPTED' && status !== 'SKIPPED') {
       attention.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: status || '(blank)', reason: String(r.status_reason || (status === 'PLANNED' || status === 'ATTEMPTING' ? 'the run ended without a final result - the outcome is unknown' : '')) });
     }
@@ -116,7 +107,7 @@ function cycleReportDataGs_(input) {
   return {
     cycle: win, totals: totals, byJob: byJob, attention: attention, exclusions: { leads: leadsLeftOut, regions: regionsSkipped, reasons: reasons },
     incidents: incidents, bySeverity: bySeverity, seriousIncidents: serious.length, heldNow: heldNow, configProblems: input.configProblems || [],
-    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0,
+    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep,
   };
 }
 
@@ -135,7 +126,7 @@ function cycleReportRenderGs_(data, now) {
     .filter(function (j) { return data.byJob[j]; })
     .map(function (j) {
       const c = data.byJob[j];
-      return [CYCLE_REPORT_JOB_LABELS_[j] || j, c.planned, c.accepted, c.skipped, c.failed, c.unconfirmed, c.blocked, c.unfinished, c.leadsSent];
+      return [EMAIL_LEDGER_JOB_LABELS_[j] || j, c.planned, c.accepted, c.skipped, c.failed, c.unconfirmed, c.blocked, c.unfinished, c.leadsSent];
     });
   if (jobRows.length) {
     jobRows.push(['All emails', t.planned, t.accepted, t.skipped, t.failed, t.unconfirmed, t.blocked, t.unfinished, t.leadsSent]);
@@ -144,11 +135,25 @@ function cycleReportRenderGs_(data, now) {
       columns: ['Email', 'Planned', 'Accepted', 'Skipped', 'Failed', 'Unconfirmed', 'Blocked', 'Unfinished', 'Leads sent'], rows: jobRows,
     });
   }
+  if (jobRows.length) {
+    const sw = data.sweep;
+    sections.push({
+      heading: 'Bounces and replies', subheading: sw.lastSweep ? 'Checked by the sweep at ' + fmt(sw.lastSweep) + ' IST. "No bounce found" is NOT proof of delivery.' : 'The bounce/reply sweep has not run for these emails yet.',
+      columns: ['What', 'Emails'],
+      rows: [['Bounced (accepted by Gmail, then a delivery-failure message came back)', sw.bounced], ['Replies received', sw.replied], ['No bounce found', sw.noBounce], ['Not checked yet', sw.notSwept]],
+    });
+    if (sw.replies.length) {
+      sections.push({
+        heading: 'Replies received (' + sw.replied + ')', columns: ['Email', 'Region', 'Bucket / recipient', 'Replies'],
+        rows: sw.replies.slice(0, CYCLE_REPORT_MAX_ROWS_).map(function (x) { return [EMAIL_LEDGER_JOB_LABELS_[x.job] || x.job, x.region, x.bucket, x.status]; }),
+      });
+    }
+  }
   if (data.attention.length) {
     sections.push({
       heading: 'Needs attention (' + data.attention.length + ')', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       columns: ['Email', 'Region', 'Bucket / recipient', 'Status', 'Why'],
-      rows: data.attention.slice(0, CYCLE_REPORT_MAX_ROWS_).map(function (a) { return [CYCLE_REPORT_JOB_LABELS_[a.job] || a.job, a.region, a.bucket, a.status, a.reason]; }),
+      rows: data.attention.slice(0, CYCLE_REPORT_MAX_ROWS_).map(function (a) { return [EMAIL_LEDGER_JOB_LABELS_[a.job] || a.job, a.region, a.bucket, a.status, a.reason]; }),
       subheading: data.attention.length > CYCLE_REPORT_MAX_ROWS_ ? 'First ' + CYCLE_REPORT_MAX_ROWS_ + ' of ' + data.attention.length + ' - see Email_Ledger for the rest.' : '',
     });
   }
@@ -170,7 +175,7 @@ function cycleReportRenderGs_(data, now) {
     rows: [
       ['Recipient addresses resolve', data.configProblems.length ? data.configProblems.length + ' problem(s): ' + data.configProblems.map(function (p) { return p.detail; }).join(' | ') : 'OK'],
       ['Alerts waiting to be sent', data.heldNow ? data.heldNow + ' held alert(s) - a job may have been killed; the watchdog releases them' : 'none'],
-      ['Not tracked yet', 'bounces, replies, the age of the Leads tab (planned); delivery and opens cannot be seen from Apps Script'],
+      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 16:10 sweep has not run yet); ') + 'the age of the Leads tab (planned); delivery and opens cannot be seen from Apps Script'],
     ],
   });
 
@@ -198,9 +203,9 @@ function buildEmailCycleReportGs_(ss, now) {
   const startKey = istDayKeyGs_(win.start);
   const data = cycleReportDataGs_({
     window: win,
-    ledgerRows: cycleReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, startKey),
-    exclusionRows: cycleReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), EMAIL_LEDGER_EXCLUSION_HEADERS_, startKey),
-    incidentRows: cycleReadRowsGs_(ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_), EMAIL_INCIDENT_HEADERS_, startKey),
+    ledgerRows: emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, startKey),
+    exclusionRows: emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), EMAIL_LEDGER_EXCLUSION_HEADERS_, startKey),
+    incidentRows: emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_), EMAIL_INCIDENT_HEADERS_, startKey),
     configProblems: typeof emailConfigProblemsGs_ === 'function' ? emailConfigProblemsGs_() : [],
   });
   const rendered = cycleReportRenderGs_(data, now);

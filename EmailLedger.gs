@@ -71,6 +71,30 @@ const EMAIL_LEDGER_STATUS_ = {
   SKIPPED: 'SKIPPED', // planned, then deliberately not sent: there was nothing to say (a genuine final outcome, not a failure)
 };
 
+// Human names of the jobs, for every report that lists them (the 16:30 cycle report, the bounce alert).
+const EMAIL_LEDGER_JOB_LABELS_ = {
+  allIssues17: '17:00 All-Issues', chLevel17: 'CH-level (17:00)', morning10: '10:00 Overnight + Checkpoint 1',
+  chLevel10: 'CH-level (10:00)', followup13: '13:00 follow-up',
+};
+
+// Rows of an evidence tab whose day column (column B in all three tabs) is on/after startDayKey, as objects keyed by header name, each with its
+// sheet row number as `rowNo`. Rows are appended in time order, so these are the tail of the sheet (contiguous).
+function emailLedgerReadRowsGs_(sheet, headers, startDayKey) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const last = sheet.getLastRow();
+  const days = sheet.getRange(2, 2, last - 1, 1).getValues();
+  let first = -1;
+  for (let i = 0; i < days.length; i++) {
+    if (emailLedgerDayKeyOfGs_(days[i][0]) >= startDayKey) { first = i; break; }
+  }
+  if (first === -1) return [];
+  return sheet.getRange(first + 2, 1, last - first - 1, headers.length).getValues().map(function (r, i) {
+    const o = { rowNo: first + 2 + i };
+    headers.forEach(function (h, j) { o[h] = r[j]; });
+    return o;
+  });
+}
+
 function emailLedgerCol_(name) { return EMAIL_LEDGER_HEADERS_.indexOf(name) + 1; } // 1-based sheet column
 
 // The day a ledger/exclusion cell belongs to: a real Date (Sheets turned the text into one) or the 'yyyy-MM-dd' text we wrote.
