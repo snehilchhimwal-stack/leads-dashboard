@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created by the first 16:30 report after `GS-016` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `(pending commit)` - created (Email Ops EO-10 / EO-8b) |
+| **Last Verified** | 2026-10-09 against commit `bc39815` - created (Email Ops EO-10 / EO-8b) |
 
 ## Purpose / reason to exist
 
@@ -105,7 +105,7 @@ The live tab; header authored in `CycleReport.gs` (`CYCLE_REPORT_DAILY_HEADERS_`
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`): tab created. **Not live until pasted.**
+**2026-10-09** (`bc39815`): tab created. **Not live until pasted.**
 
 ## Revalidation trigger
 
