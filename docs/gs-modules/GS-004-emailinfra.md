@@ -264,7 +264,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-09** (`f46ebc7`, Email Ops EO-2): `notifyOpsAlertGs_` takes an optional `opts` and, inside the three email jobs, holds the alert until the job has ended (`emailAlertHoldStartGs_` / `emailAlertHoldFlushGs_`, FN-391; the former body is `sendOpsAlertNowGs_`); `runEmailJobTrackedGs_` (FN-332) starts and flushes the hold and writes the run record before the flush; `checkEmailJobsCompletedGs_` (FN-333) releases held incidents of a killed job (`GS-015` RULE-048). **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-8): `emailJobScheduleGs_` (FN-332) lists `sendEmailCycleReport` (hour 16, minute 30) once `CycleReport.gs` is part of the project, and `emailJobProblemsGs_` (FN-333) computes a job's deadline from hour:minute plus the 30-minute grace (17:00 for the report; every other job's deadline text is unchanged). **Not live until pasted.**
+**2026-10-09** (`d79aae5`, Email Ops EO-8): `emailJobScheduleGs_` (FN-332) lists `sendEmailCycleReport` (hour 16, minute 30) once `CycleReport.gs` is part of the project, and `emailJobProblemsGs_` (FN-333) computes a job's deadline from hour:minute plus the 30-minute grace (17:00 for the report; every other job's deadline text is unchanged). **Not live until pasted.**
 
 ## Revalidation trigger
 

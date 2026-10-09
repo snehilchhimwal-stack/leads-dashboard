@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `(pending commit)` - created (Email Ops EO-8) |
+| **Last Verified** | 2026-10-09 against commit `d79aae5` - created (Email Ops EO-8) |
 
 ## Purpose / reason to exist
 
@@ -122,7 +122,7 @@ Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock,
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`): file created - Email Ops EO-8. `EmailInfra.gs` `emailJobScheduleGs_` lists the job (with a `minute`) and
+**2026-10-09** (`d79aae5`): file created - Email Ops EO-8. `EmailInfra.gs` `emailJobScheduleGs_` lists the job (with a `minute`) and
 `emailJobProblemsGs_` computes its deadline from hour:minute. **Not live until pasted.**
 
 ## Revalidation trigger
