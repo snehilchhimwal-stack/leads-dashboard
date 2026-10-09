@@ -268,7 +268,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-09** (`c18d89f`, Email Ops EO-5): `emailJobScheduleGs_` (FN-332) also lists `sweepEmailBouncesAndReplies` (hour 16, minute 10) once `EmailSweep.gs` is part of the project. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-9): `EMAIL_ALERT_HOLD_JOBS_` also lists `recoverAllIssuesBuckets` (the 17:00 recovery job, `GS-001` FN-407). **Not live until pasted.**
+**2026-10-09** (`ec0948e`, Email Ops EO-9): `EMAIL_ALERT_HOLD_JOBS_` also lists `recoverAllIssuesBuckets` (the 17:00 recovery job, `GS-001` FN-407). **Not live until pasted.**
 
 ## Revalidation trigger
 

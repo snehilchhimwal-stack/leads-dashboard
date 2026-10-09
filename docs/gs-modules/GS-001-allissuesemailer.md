@@ -242,7 +242,7 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-10-09** (`f46ebc7`, Email Ops EO-2): the whole-job crash alert of `sendAllIssuesEmails` is sent with `{ immediate: true }` - every other alert raised during the run is held until the run has ended (`GS-015` RULE-047). **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-9): `recoverFailedAllIssuesBucketsNow()` re-sends just the failed or blocked 17:00 buckets of the day (until 18:30 IST) - a plain re-run could not, because the "region already sent today" guard skips the whole region when a sibling bucket succeeded. `sendAllIssuesEmails_` takes an optional `{ onlyEmailIds }` for it. **Not live until pasted.**
+**2026-10-09** (`ec0948e`, Email Ops EO-9): `recoverFailedAllIssuesBucketsNow()` re-sends just the failed or blocked 17:00 buckets of the day (until 18:30 IST) - a plain re-run could not, because the "region already sent today" guard skips the whole region when a sibling bucket succeeded. `sendAllIssuesEmails_` takes an optional `{ onlyEmailIds }` for it. **Not live until pasted.**
 
 ## Revalidation trigger
 
