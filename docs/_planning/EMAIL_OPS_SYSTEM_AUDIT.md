@@ -27,7 +27,9 @@ Rollback: paste the previous versions from git (`git show <sha>:EmailInfra.gs` e
 
 Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER over 3 h / RED over 5 h; nothing is blocked) and the `Daily_Report` row per day (EO-8b).
 
-**Not built yet:** EO-3/EO-4 (the silent 13:00 audit pass and the 17:00 pre-send / post-send reconciliation), EO-6 (daily checklist A-K with GREEN/AMBER/RED/GREY), EO-7 (follow-up tracker), EO-9 for the 10:00/13:00 emails (the 17:00 recovery is built: `recoverFailedAllIssuesBucketsNow`), EO-11 (the spec's eight fault-injection scenarios as one suite), EO-12 (operating manual).
+**Not built yet:** EO-3/EO-4 (the silent 13:00 audit pass and the 17:00 pre-send / post-send reconciliation), EO-6 (daily checklist A-K with GREEN/AMBER/RED/GREY), EO-7 (follow-up tracker), EO-9b recovery for the 10:00/13:00 emails (the 17:00 recovery is built: `recoverFailedAllIssuesBucketsNow`).
+
+Also built: EO-11 as acceptance scenarios inside the existing suites (invalid lead, failed email, duplicate-send risk, data-source outage, platform outage + recovery, excluded RM, mixed batch - table at the end of the manual) and EO-12, the operating manual: `docs/EMAIL_OPS_OPERATING_MANUAL.md`.
 
 ## 0. Decisions recorded 2026-10-09 (these override anything below that disagrees)
 

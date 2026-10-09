@@ -241,22 +241,22 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-019, SHEET-020 | DATA-005, GS-010, SHEET-013 | 2026-10-07 (`7799e44`) |
+| GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-019, SHEET-020 | DATA-005, GS-010, SHEET-013 | 2026-10-09 (`65f33c7`) |
 | GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016, GS-017 | 2026-10-08 (`78e47f5`) |
 | GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-004, GS-008, GS-012, SHEET-001, SHEET-002, SHEET-003 | DATA-002, SHEET-003 | 2026-10-08 (`1cd1cfa`) |
-| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, GS-014, GS-015, GS-016, GS-017, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016, GS-017, SHEET-012 | 2026-10-08 (`d897529`) |
+| GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, GS-014, GS-015, GS-016, GS-017, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016, GS-017, SHEET-012 | 2026-10-09 (`ec0948e`) |
 | GS-005 | GS- | FollowupEngine | `FollowupEngine.gs` | Closed + Monitored | GS-002 | DATA-003, GS-001, GS-006, GS-010, GS-012, GS-013, SHEET-010 | 2026-09-30 (`c82ec67`) |
 | GS-006 | GS- | InteractionHistoryLogger | `InteractionHistoryLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-009 | DATA-003, GS-008, SHEET-009 | 2026-10-08 (`78e47f5`) |
 | GS-007 | GS- | LeadFollowupsStaleness | `LeadFollowupsStaleness.gs` | Closed + Monitored | SHEET-004 | none | 2026-09-30 (`6e4c904`) |
 | GS-008 | GS- | MovementTracker | `MovementTracker.gs` | Closed + Monitored | GS-002, GS-004, GS-006, GS-012, GS-013, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | DATA-002, DATA-004, GS-001, GS-003, GS-009, GS-010, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | 2026-10-07 (`58ab8e1`) |
 | GS-009 | GS- | OpsChecklistRunner | `OpsChecklistRunner.gs` | Closed + Monitored | EXT-002, GS-002, GS-004, GS-008, GS-011, SHEET-002, SHEET-006, SHEET-007, SHEET-018 | none | 2026-10-07 (`c416a01`) |
-| GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | DATA-002, EXT-002, GS-001, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, SHEET-001, SHEET-002, SHEET-004, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-014, SHEET-019, SHEET-020 | DATA-003, SHEET-004, SHEET-013, SHEET-014 | 2026-10-07 (`7799e44`) |
+| GS-010 | GS- | OvernightEmailer | `OvernightEmailer.gs` | Closed + Monitored | DATA-002, EXT-002, GS-001, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, SHEET-001, SHEET-002, SHEET-004, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-014, SHEET-019, SHEET-020 | DATA-003, SHEET-004, SHEET-013, SHEET-014 | 2026-10-09 (`f46ebc7`) |
 | GS-011 | GS- | RmHierarchy | `RmHierarchy.gs` | Closed + Monitored | GS-002, GS-004, GS-014, SHEET-006, SHEET-007, SHEET-012 | GS-001, GS-004, GS-009, GS-010, GS-014, SHEET-006, SHEET-007 | 2026-10-08 (`d897529`) |
 | GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Closed + Monitored | GS-002, GS-004, GS-005 | DATA-002, DATA-004, GS-001, GS-003, GS-008, GS-010 | 2026-10-07 (`7799e44`) |
 | GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-010 | DATA-003, GS-008, SHEET-010 | 2026-10-08 (`78e47f5`) |
 | GS-014 | GS- | RmHierarchySync | `RmHierarchySync.gs` | Closed + Monitored | GS-002, GS-004, GS-011, SHEET-006, SHEET-007 | GS-004, GS-011 | 2026-10-08 (`3dc9852`) |
-| GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020, SHEET-021 | GS-001, GS-004, GS-010, GS-016, GS-017, SHEET-019, SHEET-020, SHEET-021 | 2026-10-09 (`b1dbc3a`) |
-| GS-016 | GS- | CycleReport | `CycleReport.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-019, SHEET-020, SHEET-021, SHEET-022 | GS-004, SHEET-022 | 2026-10-09 (`d79aae5`) |
+| GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020, SHEET-021 | GS-001, GS-004, GS-010, GS-016, GS-017, SHEET-019, SHEET-020, SHEET-021 | 2026-10-09 (`c18d89f`) |
+| GS-016 | GS- | CycleReport | `CycleReport.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-019, SHEET-020, SHEET-021, SHEET-022 | GS-004, SHEET-022 | 2026-10-09 (`bc39815`) |
 | GS-017 | GS- | EmailSweep | `EmailSweep.gs` | Closed + Monitored | GS-002, GS-004, GS-015, SHEET-019 | GS-004 | 2026-10-09 (`c18d89f`) |
 
 `RmHierarchy.private.gs` is **not** cataloged — gitignored, real employee
@@ -308,7 +308,7 @@ has with no writer in this codebase at all.
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | EXT-001 | EXT- | Google Sheets API (v4) | via `js/core-sheets-fetch.js` / `SpreadsheetApp` | Closed + Monitored | EXT-003 | DASH-001, DATA-001, DATA-004, GS-002, JS-003, JS-004, JS-009, JS-018, JS-021, JS-022, JS-025, SHEET-001, SHEET-002, SHEET-003, SHEET-004, SHEET-005, SHEET-006, SHEET-007, SHEET-008, SHEET-009, SHEET-010, SHEET-011, SHEET-012, SHEET-013, SHEET-014, SHEET-015, SHEET-016, SHEET-017, SHEET-018, SHEET-019, SHEET-020, SHEET-021, SHEET-022, TAB-007, TAB-008, TAB-009 | 2026-10-03 (`aa6f71b`) |
-| EXT-002 | EXT- | Gmail (send) — dashboard OAuth grant + `GmailApp` + Advanced Gmail Service | `js/reports-gmail.js` / `EmailInfra.gs` | Closed + Monitored | EXT-003, GS-004, JS-014, JS-016 | DATA-005, GS-001, GS-004, GS-009, GS-010, JS-015, JS-018, JS-021, SHEET-011, SHEET-013, SHEET-014, TAB-003, TAB-007 | 2026-10-07 (`7799e44`) |
+| EXT-002 | EXT- | Gmail (send) — dashboard OAuth grant + `GmailApp` + Advanced Gmail Service | `js/reports-gmail.js` / `EmailInfra.gs` | Closed + Monitored | EXT-003, GS-004, JS-014, JS-016 | DATA-005, GS-001, GS-004, GS-009, GS-010, JS-015, JS-018, JS-021, SHEET-011, SHEET-013, SHEET-014, TAB-003, TAB-007 | 2026-10-09 (`ec0948e`) |
 | EXT-003 | EXT- | Google Identity / OAuth (sign-in gate) | `js/core-auth.js` | Closed + Monitored | none | EXT-001, EXT-002, JS-001, JS-004, JS-009, JS-018, JS-021, JS-022 | 2026-09-30 (`c82ec67`) |
 | EXT-004 | EXT- | jsPDF 2.5.1 + jspdf-autotable 3.8.2 (PDF export) | `js/repeat-offenders-pdf.js` | Closed + Monitored | none | JS-013, TAB-004 | 2026-09-30 (`5802f35`) |
 

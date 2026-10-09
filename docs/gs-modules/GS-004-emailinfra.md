@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `d897529` - `emailJobScheduleGs_` also watches `syncRmHierarchyNightly` (`GS-014`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `ec0948e` - `emailJobScheduleGs_` also watches `syncRmHierarchyNightly` (`GS-014`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

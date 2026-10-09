@@ -873,6 +873,8 @@ such recovery yet. Its alerts are held until the run ends like the three email j
 
 **Check it live:** run `showEmailLedgerTodayNow()` (read-only) after a 17:00 run. Both tabs create themselves on the first run after the paste.
 
+**Operating manual** (daily routine, the 16:30 report, flags and severities, the fault-isolation matrix, sample records): `docs/EMAIL_OPS_OPERATING_MANUAL.md`.
+
 **Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
 `Tests_RunAll.gs`, `OvernightEmailer.gs`, plus `CycleReport.gs`, `Tests_CycleReport.gs`, `EmailSweep.gs` and `Tests_EmailSweep.gs` (new) and `Tests_EmailInfra.gs`; the ledger and held alerts need no `setupXxx()`, the cycle report needs `setupEmailCycleReportTrigger()` once and the sweep `setupEmailSweepTrigger()` once. EO-2 adds nothing new to paste beyond these files (`Incident_Log` creates itself). Still to come: EO-3/EO-4 (the
 13:00 audit and the 17:00 reconciliation), then the daily checklist and follow-up tracker (EO-6/7) and the 10:00/13:00 recovery.

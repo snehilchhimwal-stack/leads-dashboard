@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `b1dbc3a` — revalidated after Email Ops EO-1a (the send gate names the leads it objects to; no change to the Gmail send itself) |
+| **Last Verified** | 2026-10-09 against commit `ec0948e` — revalidated after Email Ops EO-1a (the send gate names the leads it objects to; no change to the Gmail send itself) |
 
 ## Purpose / reason to exist
 

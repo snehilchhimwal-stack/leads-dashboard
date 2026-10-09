@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): the no-comment follow-up looks up its snapshot by lead id (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `f46ebc7` — email audit P15 (F18): the no-comment follow-up looks up its snapshot by lead id (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 

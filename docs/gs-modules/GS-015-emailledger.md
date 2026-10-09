@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00, 10:00 and 13:00 jobs and both CH-level reports) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `b1dbc3a` - created (Email Ops EO-1a) |
+| **Last Verified** | 2026-10-09 against commit `c18d89f` - created (Email Ops EO-1a) |
 
 ## Purpose / reason to exist
 

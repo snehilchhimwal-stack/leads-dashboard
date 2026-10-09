@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `d79aae5` - created (Email Ops EO-8) |
+| **Last Verified** | 2026-10-09 against commit `bc39815` - created (Email Ops EO-8) |
 
 ## Purpose / reason to exist
 
