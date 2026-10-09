@@ -259,7 +259,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-08** (`d897529`): `emailJobScheduleGs_` also lists `syncRmHierarchyNightly` (the nightly HR-roster sync, `GS-014`; hour 23, so the hourly watchdog alerts when it has not run by 23:30). Only added when `RMSYNC_RUN_HOUR_` exists, so pasting this file without `RmHierarchySync.gs` does not break the watchdog. **Not live until pasted.**
 
-**2026-10-09** (`(pending commit)`, Email Ops EO-1a): `prepareOutgoingEmailGs_` (FN-323) also returns `missingLeadIds` - the counted leads absent from a body - and the gate's refusal (`sendBlockedErrorGs_`, FN-324) carries it as `err.missingLeadIds` (empty for any other kind of refusal), so the 17:00 emailer can drop just those leads and resend the rest (`GS-015` RULE-045). Additive: callers that ignore the field behave exactly as before. **Not live until pasted.**
+**2026-10-09** (`b1dbc3a`, Email Ops EO-1a): `prepareOutgoingEmailGs_` (FN-323) also returns `missingLeadIds` - the counted leads absent from a body - and the gate's refusal (`sendBlockedErrorGs_`, FN-324) carries it as `err.missingLeadIds` (empty for any other kind of refusal), so the 17:00 emailer can drop just those leads and resend the rest (`GS-015` RULE-045). Additive: callers that ignore the field behave exactly as before. **Not live until pasted.**
 
 ## Revalidation trigger
 

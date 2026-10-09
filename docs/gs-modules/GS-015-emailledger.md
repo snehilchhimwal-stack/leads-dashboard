@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00 job only; the 10:00 and 13:00 jobs follow in EO-1b) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `(pending commit)` - created (Email Ops EO-1a) |
+| **Last Verified** | 2026-10-09 against commit `b1dbc3a` - created (Email Ops EO-1a) |
 
 ## Purpose / reason to exist
 
@@ -137,7 +137,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`): file created - Email Ops EO-1a. `EmailInfra.gs` `prepareOutgoingEmailGs_` also returns
+**2026-10-09** (`b1dbc3a`): file created - Email Ops EO-1a. `EmailInfra.gs` `prepareOutgoingEmailGs_` also returns
 `missingLeadIds` and the gate's refusal carries it. **Not live until pasted.**
 
 ## Revalidation trigger

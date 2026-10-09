@@ -255,7 +255,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | GS-012 | GS- | SlaEngine | `SlaEngine.gs` | Closed + Monitored | GS-002, GS-004, GS-005 | DATA-002, DATA-004, GS-001, GS-003, GS-008, GS-010 | 2026-10-07 (`7799e44`) |
 | GS-013 | GS- | UnmatchedCommentLogger | `UnmatchedCommentLogger.gs` | Closed + Monitored | GS-002, GS-004, GS-005, SHEET-001, SHEET-010 | DATA-003, GS-008, SHEET-010 | 2026-10-08 (`78e47f5`) |
 | GS-014 | GS- | RmHierarchySync | `RmHierarchySync.gs` | Closed + Monitored | GS-002, GS-004, GS-011, SHEET-006, SHEET-007 | GS-004, GS-011 | 2026-10-08 (`3dc9852`) |
-| GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020 | GS-001, SHEET-019, SHEET-020 | 2026-10-09 (`(pending commit)`) |
+| GS-015 | GS- | EmailLedger | `EmailLedger.gs` | Closed + Monitored | GS-002, GS-004, SHEET-019, SHEET-020 | GS-001, SHEET-019, SHEET-020 | 2026-10-09 (`b1dbc3a`) |
 
 `RmHierarchy.private.gs` is **not** cataloged — gitignored, real employee
 emails, never in this repo (`DOC-007`).
@@ -282,8 +282,8 @@ emails, never in this repo (`DOC-007`).
 | SHEET-016 | SHEET- | Opp_Monitor_Period | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`f853a1c`) |
 | SHEET-017 | SHEET- | Opp_Monitor_Month | Google Sheet | Validated (lifecycle TBD; DOC-038: LOW / operational) | EXT-001 | JS-025, TAB-009 | 2026-09-18 (`f853a1c`) |
 | SHEET-018 | SHEET- | Feature_Usage | Google Sheet | Closed + Monitored (lifecycle none needed, bounded by construction; DOC-038: MEDIUM / operational) | EXT-001, JS-018 | JS-018, GS-009 | 2026-10-03 (`a325f00`) |
-| SHEET-019 | SHEET- | Email_Ledger | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-015 | 2026-10-09 (`(pending commit)`) |
-| SHEET-020 | SHEET- | Email_Ledger_Exclusions | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-015 | 2026-10-09 (`(pending commit)`) |
+| SHEET-019 | SHEET- | Email_Ledger | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-015 | 2026-10-09 (`b1dbc3a`) |
+| SHEET-020 | SHEET- | Email_Ledger_Exclusions | Google Sheet | Closed + Monitored (retention 90 days, archived to Drive; DOC-038: MEDIUM / operational) | EXT-001, GS-015 | GS-001, GS-015 | 2026-10-09 (`b1dbc3a`) |
 
 **Seed correction (DOC-029):** `SHEET-009` renamed `Interaction_History` →
 `Comment_History` (the real tab name, per `LOGIC_AUDIT.md` Part 1 §1 and

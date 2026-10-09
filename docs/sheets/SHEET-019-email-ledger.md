@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created on the first 17:00 run after `GS-015` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `(pending commit)` - created (Email Ops EO-1a) |
+| **Last Verified** | 2026-10-09 against commit `b1dbc3a` - created (Email Ops EO-1a) |
 
 ## Purpose / reason to exist
 
@@ -123,7 +123,7 @@ The live tab; header authored in `EmailLedger.gs` (`EMAIL_LEDGER_HEADERS_`).
 
 ## Version / change reference
 
-**2026-10-09** (`(pending commit)`): tab created by Email Ops EO-1a. **Not live until pasted.**
+**2026-10-09** (`b1dbc3a`): tab created by Email Ops EO-1a. **Not live until pasted.**
 
 ## Revalidation trigger
 
