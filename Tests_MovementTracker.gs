@@ -23,6 +23,27 @@ function runMovementTrackerTests_() {
   const ss = TestMockSpreadsheet_({});
   ss._sheets[monthShort] = leadsSheet;
 
+  // Every capture stamps the rows it appends with the REAL clock (`const now = new Date()` in snapshotOpenLeads_), and the dedup
+  // lookup (_latestContentHashByKeyGs_, and its browser twin latestMovementLogHashByKey) keeps the FIRST of two rows of one lead
+  // that carry an identical snapshot_at (strict >). Production captures are hours apart so that tie cannot happen there, but this
+  // in-memory mock runs a whole capture in well under a millisecond: two captures of one lead could tie, the next capture then
+  // compared its live hash with the OLDER row's, read that lead as changed, and appended a second row (the F23 slow run saw
+  // "2 changed leads, not 1" in ~5% of runs - Movement_Log rows for L-M / Test RM Two, Prospect then Opportunity, both stamped
+  // the same millisecond). capture_ spins until the clock has passed the END of the previous capture, so every capture's `now`
+  // is strictly later than the one before it. Nothing is faked and no assertion is relaxed. A frozen clock cannot hang it: the
+  // spin is capped and a stuck clock is reported by name instead of as a confusing count mismatch.
+  let lastCaptureEndMs_ = 0;
+  function capture_(label, opts) {
+    const floorMs = lastCaptureEndMs_;
+    for (let spins = 0; spins < 5000000 && Date.now() <= floorMs; spins++) { /* busy-wait for the real clock to advance by >=1ms */ }
+    if (Date.now() <= floorMs) TestAssert_(false, 'capture_ (test helper): the real clock did not advance, so two captures could share a snapshot_at');
+    try {
+      return snapshotOpenLeads_(label, opts);
+    } finally {
+      lastCaptureEndMs_ = Date.now();
+    }
+  }
+
   TestEnv_setUp_('Tests_MovementTracker', ss);
   try {
     // ---- ensureMovementLogSheet_: fresh creation + header self-heal ----
@@ -92,7 +113,7 @@ function runMovementTrackerTests_() {
     TestAssertEqual_(sha256AbcHex, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'Utilities.computeDigest (test shim): SHA-256 of "abc" matches the standard NIST test vector');
 
     // ---- snapshotOpenLeads_: writes rows, skips blank lead_id, triggers SLA_History ----
-    snapshotOpenLeads_('test snapshot label');
+    capture_('test snapshot label');
     const afterSnap = ss.getSheetByName('Movement_Log');
     TestAssertEqual_(afterSnap.getLastRow(), 3, 'snapshotOpenLeads_: writes exactly 2 data rows (3 total incl. header) — the blank-lead_id row is correctly skipped, and the FIRST capture of a lead always writes (no prior hash to compare against)');
     const slaHistory = ss.getSheetByName('SLA_History');
@@ -105,7 +126,7 @@ function runMovementTrackerTests_() {
     // ---- Content-hash dedup (Lead History & Versioning Review, Phase 6)
     // — the exact gap Phase 1 of that review found: NO existing test
     // covered "capture the same lead twice with no changes". ----
-    snapshotOpenLeads_('test snapshot label — repeat, unchanged');
+    capture_('test snapshot label — repeat, unchanged');
     TestAssertEqual_(afterSnap.getLastRow(), 3, 'snapshotOpenLeads_ (dedup): an immediate repeat capture with NO field changes writes ZERO new Movement_Log rows — still header + 2, not header + 4');
     const runsAfterUnchanged = ss.getSheetByName('Movement_Log_Runs');
     TestAssert_(!!runsAfterUnchanged, 'snapshotOpenLeads_ (dedup): Movement_Log_Runs is created automatically on first use');
@@ -117,7 +138,7 @@ function runMovementTrackerTests_() {
     // Now change ONE field on L-1 (current_stage) and capture again —
     // exactly one new Movement_Log row for L-1, L-2 still not duplicated.
     leadsSheet.getRange(3, 1, 1, leadsHeader.length).setValues([leadRow({ current_stage: 'Prospect' })]);
-    snapshotOpenLeads_('test snapshot label — one field changed');
+    capture_('test snapshot label — one field changed');
     TestAssertEqual_(afterSnap.getLastRow(), 4, 'snapshotOpenLeads_ (dedup): a real field change on one lead (L-1: Suspect -> Prospect) writes exactly ONE new row — L-2 (unchanged) still does not get a duplicate');
     const newestRow = afterSnap.getRange(4, 1, 1, afterSnap.getLastColumn()).getValues()[0];
     const stageColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('current_stage'); // +2 for snapshot_at/snapshot_label, 1-indexed
@@ -137,7 +158,7 @@ function runMovementTrackerTests_() {
     // land in Movement_Log at all.
     const oppAtNow = new Date('2026-08-17T15:00:00+05:30');
     leadsSheet.getRange(5, 1, 1, leadsHeader.length).setValues([leadRow({ lead_id: 'L-2', client_id: 'C-2', RM: 'Test RM Two', current_stage: 'Opportunity', opp_at: oppAtNow })]);
-    snapshotOpenLeads_('test snapshot label — opp_at set');
+    capture_('test snapshot label — opp_at set');
     TestAssertEqual_(afterSnap.getLastRow(), 5, 'snapshotOpenLeads_ (dedup): L-2 reaching Opportunity (opp_at blank -> set) is NOT deduped away -- writes a real new row');
     const oppAtColIdx = 2 + SNAPSHOT_COLUMNS_.indexOf('opp_at');
     const oppAtRow = afterSnap.getRange(5, 1, 1, afterSnap.getLastColumn()).getValues()[0];
@@ -157,11 +178,11 @@ function runMovementTrackerTests_() {
     misalignedLog.getRange(1, 1, 1, badHeaderRow.length).setValues([badHeaderRow]);
     const rowsBeforeMisaligned = misalignedLog.getLastRow();
     let misalignedRunMsg = '';
-    try { snapshotOpenLeads_('test snapshot label — misaligned header'); } catch (e) { misalignedRunMsg = String(e); }
+    try { capture_('test snapshot label — misaligned header'); } catch (e) { misalignedRunMsg = String(e); }
     TestAssertContains_(misalignedRunMsg, 'refusing to append', 'snapshotOpenLeads_ (2026-09-25 regression): with content_hash/opp_at in the wrong header order the capture FAILS LOUDLY instead of silently re-appending every lead');
     TestAssertEqual_(misalignedLog.getLastRow(), rowsBeforeMisaligned, 'snapshotOpenLeads_ (2026-09-25 regression): the refused capture appended nothing');
     misalignedLog.getRange(1, 1, 1, goodHeaderRow.length).setValues([goodHeaderRow]);
-    snapshotOpenLeads_('test snapshot label — header restored, unchanged');
+    capture_('test snapshot label — header restored, unchanged');
     TestAssertEqual_(misalignedLog.getLastRow(), rowsBeforeMisaligned, 'snapshotOpenLeads_ (2026-09-25 regression): once the header is restored an unchanged repeat capture writes ZERO rows again (dedup reads the real hash column)');
 
     // ---- removeDedupIncidentRowsNow (one-off remediation, 2026-09-25) ----
@@ -324,12 +345,12 @@ function runMovementTrackerTests_() {
       leadRow({ lead_id: 'L-M', client_id: 'C-M', RM: 'Test RM One', current_stage: 'Suspect' }),
       leadRow({ lead_id: 'L-M', client_id: 'C-M', RM: 'Test RM Two', current_stage: 'Prospect' }),
     ]);
-    snapshotOpenLeads_('test snapshot label — two rows share client_id and lead_id, first capture');
+    capture_('test snapshot label — two rows share client_id and lead_id, first capture');
     TestAssertEqual_(afterSnap.getLastRow(), rowsBeforeMulti + 2, 'snapshotOpenLeads_ (2026-09-26): two leads-tab rows sharing client_id AND lead_id (different RM, different content) are BOTH captured the first time');
-    snapshotOpenLeads_('test snapshot label — two rows share client_id and lead_id, unchanged repeat');
+    capture_('test snapshot label — two rows share client_id and lead_id, unchanged repeat');
     TestAssertEqual_(afterSnap.getLastRow(), rowsBeforeMulti + 2, 'snapshotOpenLeads_ (2026-09-26): an unchanged repeat capture writes ZERO rows for them — keyed by client_id the second row re-appended on every run');
     leadsSheet.getRange(multiStart + 1, 1, 1, leadsHeader.length).setValues([leadRow({ lead_id: 'L-M', client_id: 'C-M', RM: 'Test RM Two', current_stage: 'Opportunity' })]);
-    snapshotOpenLeads_('test snapshot label — only the second row changed');
+    capture_('test snapshot label — only the second row changed');
     TestAssertEqual_(afterSnap.getLastRow(), rowsBeforeMulti + 3, 'snapshotOpenLeads_ (2026-09-26): a real change to ONE of the shared-client rows writes exactly one new row, not two');
 
     // ---- buildTodayCallBaselineGs_ / lastSnapshotBeforeGs_ ----
@@ -650,7 +671,7 @@ function runMovementTrackerTests_() {
     const realPersistDailyCohortHistoryGs_ = persistDailyCohortHistoryGs_;
     persistDailyCohortHistoryGs_ = function () { throw new Error('simulated Daily_Cohort_History failure'); };
     try {
-      snapshotOpenLeads_('containment test');
+      capture_('containment test');
       const containmentMovementLog = containmentSs.getSheetByName('Movement_Log');
       TestAssert_(!!containmentMovementLog && containmentMovementLog.getLastRow() === 2, 'snapshotOpenLeads_: a persistDailyCohortHistoryGs_ throw still lets Movement_Log capture complete (header + 1 data row)');
     } finally {
@@ -789,7 +810,7 @@ function runMovementTrackerTests_() {
       ];
       phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture1Rows);
       p7Tick_();
-      snapshotOpenLeads_('phase7 capture 1 of 4 — initial');
+      capture_('phase7 capture 1 of 4 — initial');
       const p7Log = phase7Ss.getSheetByName('Movement_Log');
       const p7Runs = phase7Ss.getSheetByName('Movement_Log_Runs');
       TestAssertEqual_(p7Log.getLastRow(), 1 + 5, 'Phase 7 capture 1: 5 leads, all first-seen -> 5 new Movement_Log rows (header + 5)');
@@ -811,7 +832,7 @@ function runMovementTrackerTests_() {
         p7LeadRow({ lead_id: 'L-NEW', client_id: 'C-NEW', call_attempts: 5, current_stage: 'Suspect' }),
       ];
       phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture2Rows);
-      snapshotOpenLeads_('phase7 capture 2 of 4 — L-NEW appears, L-REPEATCHANGE.call_attempts changes');
+      capture_('phase7 capture 2 of 4 — L-NEW appears, L-REPEATCHANGE.call_attempts changes');
       TestAssertEqual_(p7Log.getLastRow(), 1 + 7, 'Phase 7 capture 2: only L-NEW (new) and L-REPEATCHANGE (real change) write -> 2 new rows (header + 7 total)');
       TestAssertEqual_(p7Runs.getLastRow(), 1 + 2, 'Phase 7 capture 2: Movement_Log_Runs gets a 2nd row');
       p7RunRow = p7Runs.getRange(3, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
@@ -857,7 +878,7 @@ function runMovementTrackerTests_() {
         p7LeadRow({ lead_id: 'L-REPEATCHANGE', client_id: 'C-REPEATCHANGE', call_attempts: 3, current_stage: 'Prospect' }),
       ];
       phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture3Rows);
-      snapshotOpenLeads_('phase7 capture 3 of 4 — L-ONECHANGE/L-MULTICHANGE/L-REPEATCHANGE change, L-VANISH disappears');
+      capture_('phase7 capture 3 of 4 — L-ONECHANGE/L-MULTICHANGE/L-REPEATCHANGE change, L-VANISH disappears');
       TestAssertEqual_(p7Log.getLastRow(), 1 + 10, 'Phase 7 capture 3: L-ONECHANGE, L-MULTICHANGE, L-REPEATCHANGE each write exactly ONE new row -> 3 new rows (header + 10 total); L-VANISH\'s absence writes nothing (it simply is not in dataRows)');
       TestAssertEqual_(p7Runs.getLastRow(), 1 + 3, 'Phase 7 capture 3: Movement_Log_Runs gets a 3rd row');
       p7RunRow = p7Runs.getRange(4, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
@@ -888,7 +909,7 @@ function runMovementTrackerTests_() {
         p7LeadRow({ lead_id: 'L-REPEATCHANGE', client_id: 'C-REPEATCHANGE', call_attempts: 3, current_stage: 'Prospect' }),
       ];
       phase7Ss._sheets['leads'] = TestMockSheet_('leads', p7Capture4Rows);
-      snapshotOpenLeads_('phase7 capture 4 of 4 — exact retry / idempotency');
+      capture_('phase7 capture 4 of 4 — exact retry / idempotency');
       TestAssertEqual_(p7Log.getLastRow(), 1 + 10, 'Phase 7 capture 4 (retry): Movement_Log is UNCHANGED — still header + 10, zero duplicate rows from the identical retry');
       TestAssertEqual_(p7Runs.getLastRow(), 1 + 4, 'Phase 7 capture 4 (retry): Movement_Log_Runs still gets a 4th row — "a run happened" is recorded even though it was a no-op retry. NOTE (real, acknowledged gap vs. the Phase 3 target schema): this Sheets implementation does NOT deduplicate the run record itself via an idempotency_key the way lead_ingestion_runs.idempotency_key would — a genuinely duplicate trigger fire records 2 run rows here, not 1. Left as-is for this pass; not a regression from Phase 6, just an honest limit of what Sheets/Apps Script can enforce without a real unique constraint.');
       p7RunRow = p7Runs.getRange(5, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
@@ -1142,7 +1163,7 @@ function runMovementTrackerTests_() {
       leadsSheet.getRange(3, 1, 1, leadsHeader.length).setValues([leadRow({ current_stage: 'Opportunity' })]); // a real change, so the core capture appends a row
       const mlBefore = ss.getSheetByName('Movement_Log').getLastRow();
       // The clock reads 0 until the run record exists, then jumps ~83 minutes: i.e. the core capture was slow and everything after it is over budget.
-      const slowSummary = snapshotOpenLeads_('slow run', { nowMs: function () { return ss.getSheetByName('Movement_Log_Runs').getLastRow() > runsBefore ? 5000000 : 0; } });
+      const slowSummary = capture_('slow run', { nowMs: function () { return ss.getSheetByName('Movement_Log_Runs').getLastRow() > runsBefore ? 5000000 : 0; } });
       TestAssert_(ss.getSheetByName('Movement_Log').getLastRow() > mlBefore, 'F23 slow run: the CORE capture still wrote its Movement_Log rows');
       TestAssertEqual_(ss.getSheetByName('SLA_History').getLastRow(), slaBefore, 'F23 slow run: the SLA_History write (an optional phase) was skipped');
       TestAssertEqual_(slowSummary.skipped.join(' | '), 'SLA_History write | Unmatched_Comments_Log scan | Comment_History log | Movement_Log prune | Comment_History prune | Unmatched_Comments_Log prune | Daily_Cohort_History persist', 'F23 slow run: every optional phase is skipped, in order, by name');
@@ -1155,7 +1176,7 @@ function runMovementTrackerTests_() {
 
       const slaBeforeNormal = ss.getSheetByName('SLA_History').getLastRow();
       const normalRunsBefore = ss.getSheetByName('Movement_Log_Runs').getLastRow();
-      const normalSummary = snapshotOpenLeads_('normal run');
+      const normalSummary = capture_('normal run');
       TestAssertEqual_(normalSummary.skipped.length, 0, 'F23 normal run: nothing is skipped inside the budget');
       TestAssertEqual_(ss.getSheetByName('SLA_History').getLastRow(), slaBeforeNormal + 1, 'F23 normal run: the SLA_History row is written (it runs AFTER the capture now, with an identical result - its baseline only looks at snapshots before today)');
       const normalRunRow = ss.getSheetByName('Movement_Log_Runs').getRange(normalRunsBefore + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
@@ -1171,7 +1192,7 @@ function runMovementTrackerTests_() {
       const pruneFailSlaBefore = ss.getSheetByName('SLA_History').getLastRow();
       pruneMovementLog_ = function () { throw new Error('prune broke'); };
       let pruneFailMsg = '';
-      try { snapshotOpenLeads_('prune fails'); } catch (e) { pruneFailMsg = String(e); } finally { pruneMovementLog_ = realPrune; }
+      try { capture_('prune fails'); } catch (e) { pruneFailMsg = String(e); } finally { pruneMovementLog_ = realPrune; }
       TestAssertContains_(pruneFailMsg, 'prune broke', 'F23: a failing prune still makes the run FAIL (Executions shows Failed, as before) - re-thrown at the end');
       const pruneFailRow = ss.getSheetByName('Movement_Log_Runs').getRange(pruneFailRunsBefore + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
       TestAssert_(typeof pruneFailRow[4] === 'number', 'F23: …but only after the run record is complete (total_s filled in)');
@@ -1189,7 +1210,7 @@ function runMovementTrackerTests_() {
       const alertsBeforeFail = TestGmailLog_.sent.length;
       pruneCommentHistory_ = function () { throw new Error('Drive archive holds 6518 row(s) across 2 file(s) but 6369 were expected - refusing to prune Comment_History.'); };
       let failedRun;
-      try { failedRun = snapshotOpenLeads_('phase failure run'); } finally { pruneCommentHistory_ = realPruneCh; }
+      try { failedRun = capture_('phase failure run'); } finally { pruneCommentHistory_ = realPruneCh; }
       TestAssertEqual_(failedRun.failed.join(','), 'Comment_History prune', 'phase failure: the run result names the step that threw');
       TestAssertEqual_(failedRun.skipped.length, 0, 'phase failure: …and nothing was skipped');
       const failRunRow = failSs.getSheetByName('Movement_Log_Runs').getRange(runsBeforeFail + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
@@ -1203,10 +1224,10 @@ function runMovementTrackerTests_() {
       TestAssertContains_(failAlerts[0].body, 'NOT affected', 'phase failure: …and says the capture itself was not affected');
       // The same step failing again the same day is NOT re-emailed (the run is every 6 hours); a different step failing is.
       pruneCommentHistory_ = function () { throw new Error('again'); };
-      try { snapshotOpenLeads_('phase failure repeat'); } finally { pruneCommentHistory_ = realPruneCh; }
+      try { capture_('phase failure repeat'); } finally { pruneCommentHistory_ = realPruneCh; }
       TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 1, 'phase failure: the same step failing again the same day is not emailed a second time');
       pruneUnmatchedCommentsLog_ = function () { throw new Error('different step broke'); };
-      try { snapshotOpenLeads_('phase failure other step'); } finally { pruneUnmatchedCommentsLog_ = realPruneUcl; }
+      try { capture_('phase failure other step'); } finally { pruneUnmatchedCommentsLog_ = realPruneUcl; }
       const failAlerts2 = TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); });
       TestAssertEqual_(failAlerts2.length, 2, 'phase failure: a DIFFERENT step failing the same day is emailed');
       TestAssertContains_(failAlerts2[1].subject, 'Unmatched_Comments_Log prune', 'phase failure: …naming that step');
@@ -1214,7 +1235,7 @@ function runMovementTrackerTests_() {
       // Next day the same step is reported again.
       PropertiesService.getScriptProperties().setProperty(SNAPSHOT_PHASE_ALERT_PROPERTY_, JSON.stringify({ day: '2026-01-01', phases: ['Comment_History prune'] }));
       pruneCommentHistory_ = function () { throw new Error('new day'); };
-      try { snapshotOpenLeads_('phase failure next day'); } finally { pruneCommentHistory_ = realPruneCh; }
+      try { capture_('phase failure next day'); } finally { pruneCommentHistory_ = realPruneCh; }
       TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeFail).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 3, 'phase failure: yesterday\'s alert does not suppress today\'s');
       // A Movement_Log prune failure is emailed AND still fails the execution.
       PropertiesService = TestMockPropertiesService_();
@@ -1222,7 +1243,7 @@ function runMovementTrackerTests_() {
       const realPruneMl = pruneMovementLog_;
       pruneMovementLog_ = function () { throw new Error('movement prune broke'); };
       let mlPruneThrew = '';
-      try { snapshotOpenLeads_('movement prune failure'); } catch (e) { mlPruneThrew = String(e.message); } finally { pruneMovementLog_ = realPruneMl; }
+      try { capture_('movement prune failure'); } catch (e) { mlPruneThrew = String(e.message); } finally { pruneMovementLog_ = realPruneMl; }
       TestAssertContains_(mlPruneThrew, 'movement prune broke', 'phase failure: a Movement_Log prune failure still fails the execution');
       TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeMlPrune).filter(function (e) { return /Movement snapshot: Movement_Log prune FAILED/.test(e.subject); }).length, 1, 'phase failure: …and ops are emailed about it too (before the re-throw)');
       // An alert that cannot be sent never breaks the run; an unreadable Properties service still alerts.
@@ -1230,7 +1251,7 @@ function runMovementTrackerTests_() {
       pruneUnmatchedCommentsLog_ = function () { throw new Error('props broken'); };
       const alertsBeforeProps = TestGmailLog_.sent.length;
       let propsRun;
-      try { propsRun = snapshotOpenLeads_('props broken'); } finally { pruneUnmatchedCommentsLog_ = realPruneUcl; }
+      try { propsRun = capture_('props broken'); } finally { pruneUnmatchedCommentsLog_ = realPruneUcl; }
       TestAssertEqual_(propsRun.failed.join(','), 'Unmatched_Comments_Log prune', 'phase failure: with a broken Properties service the run still completes and reports the failure');
       TestAssertEqual_(TestGmailLog_.sent.slice(alertsBeforeProps).filter(function (e) { return /Movement snapshot: .*FAILED/.test(e.subject); }).length, 1, 'phase failure: …and fails OPEN - ops are still emailed (the once-a-day record is unreadable, so it alerts)');
       PropertiesService = TestMockPropertiesService_();

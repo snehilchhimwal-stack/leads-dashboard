@@ -1048,7 +1048,13 @@ the per-suite lines, not only the total.
 `Date.now()`, so a wait loop capped with `Date.now() - start < N` can never expire - a FAILING check hangs the whole harness
 instead of failing (use an iteration cap; the two wait loops there now do); (2) the baseline maps take snapshots STRICTLY
 BEFORE their cutoff and the mock runs fast enough for a capture and a following `new Date()` to land in the same millisecond,
-so the e2e takes its map cutoff 5 ms after "now".
+so the e2e takes its map cutoff 5 ms after "now". The same millisecond tie also hit `Tests_MovementTracker.gs` (2026-10-09, F23 slow
+run "expected 1, got 2", ~1-5% of runs): `_latestContentHashByKeyGs_` keeps the FIRST of two rows with an identical `snapshot_at`
+(strict `>`, same in the browser twin), so two captures of one lead inside a millisecond left a stale "latest hash" and the next
+capture re-appended that lead. Production captures are hours apart, so it was a fixture artifact and the production rule was left
+alone. Every capture in that file now goes through `capture_`, which waits for the clock to pass the previous capture's end - **a new
+test there must call `capture_(...)`, not `snapshotOpenLeads_(...)` directly.** How it was proven (a throwaway wrapper, not in the
+repo): the suite run with `Date` quantized to 20 ms makes the tie the norm - without the wait 7 assertions fail, with it none.
 
 **Real gotcha (2026-09-24): the Node CI harness (`test/run-gs-tests.js`)
 does not inherit Node's own globals.** `vm.createContext()` builds a
