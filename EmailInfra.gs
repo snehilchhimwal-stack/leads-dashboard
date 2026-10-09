@@ -1050,6 +1050,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   const rmToLeads = (opts && opts.rmToLeads) || {};
   const dateLabel = (opts && opts.dateLabel) || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   const hierarchyData = opts && opts.hierarchyData;
+  const ledger = opts && opts.ledger; // Email Ops EO-1b: the evidence trail, passed on to the CH-level report
   const futworkRmNames = rmNames.filter(isFutworkRmNameGs_);
   const regularRmNames = rmNames.filter(function (n) { return !isFutworkRmNameGs_(n); });
   const pnlHeadEmail = regionPnlHeadEmailGs_(ss, region, hierarchyData);
@@ -1058,7 +1059,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
     return { to: b.primaryEmail, cc: withRegionPnlHeadCcGs_(pnlHeadEmail, b.primaryEmail, b.cc.join(',')), rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
 
-  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel);
+  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel, ledger);
 
   let trulyUnresolved = [];
   if (resolved.unresolved.length) {

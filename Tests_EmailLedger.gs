@@ -217,6 +217,46 @@ function runEmailLedgerTests_() {
       TestAssert_(true, 'a null handle makes every ledger call a no-op');
     }
 
+    // ================= EO-1b helpers =================
+    {
+      TestAssertEqual_(emailLedgerIdGs_('followup13', '2026-10-09', 'Pune', '', '', 'Boss@Example.TEST'), '20261009|followup13|Pune|||boss@example.test', 'email id: a recipient is appended in lower case for the jobs keyed by recipient');
+      TestAssertEqual_(emailLedgerIdGs_('allIssues17', '2026-10-09', 'Pune', 'A1', 'B'), '20261009|allIssues17|Pune|A1|B', 'email id: without a recipient the 17:00 id is unchanged');
+
+      const ssU = TestMockSpreadsheet_({});
+      const hu = emailLedgerOpenGs_(ssU);
+      const planU = function (id, extra) { return Object.assign({ emailId: id, job: 'followup13', dayKey: dayKey, region: 'Pune', bucketLabel: '', primaryRole: '', to: TEST_EMAIL_PRIMARY_, cc: '', leadIds: ['1'] }, extra || {}); };
+      emailLedgerPlanGs_(hu, [planU('U1'), planU('U2', { initialStatus: 'SKIPPED', initialReason: 'nothing unresolved in either section' })]);
+      let urows = TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(urows[0].status + ',' + urows[0].finished_at, 'PLANNED,', 'plan: a normal plan starts PLANNED with no finish time');
+      TestAssertEqual_(urows[1].status + ',' + urows[1].status_reason + ',' + urows[1].attempts, 'SKIPPED,nothing unresolved in either section,0', 'plan: a bucket known to need no email is planned directly as SKIPPED, with its reason, in the same write');
+      TestAssert_(urows[1].finished_at instanceof Date, 'plan: …and stamped as finished');
+
+      emailLedgerSkipGs_(hu, planU('U3'), 'no stored recipient');
+      urows = TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(urows[2].status + ',' + urows[2].status_reason, 'SKIPPED,no stored recipient', 'skip: an email that was never planned is planned and marked SKIPPED');
+
+      TestAssertEqual_(emailLedgerStatusOfGs_(hu, 'U1'), 'PLANNED', 'status of: read from the cached row');
+      emailLedgerFailIfOpenGs_(hu, 'U1', 'unexpected error: boom');
+      TestAssertEqual_(TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L)[0].status, 'FAILED', 'fail-if-open: a still-open email is marked FAILED');
+      emailLedgerAttemptGs_(hu, 'U1');
+      emailLedgerResultGs_(hu, 'U1', { status: 'ACCEPTED', messageId: 'm', threadId: 't', leadIds: ['1'] });
+      emailLedgerFailIfOpenGs_(hu, 'U1', 'a later exception');
+      TestAssertEqual_(TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L)[0].status, 'ACCEPTED', 'fail-if-open: an email that already ended ACCEPTED is NEVER overwritten by a later exception');
+      emailLedgerFailIfOpenGs_(hu, 'U2', 'x');
+      TestAssertEqual_(TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L)[1].status, 'SKIPPED', 'fail-if-open: a SKIPPED email is left alone');
+
+      // tracked send: plan + attempt + outcome, the error re-thrown unchanged
+      const sentMsg = emailLedgerTrackSendGs_(hu, planU('U4'), function () { return { getId: function () { return 'mid'; }, getThread: function () { return { getId: function () { return 'tid'; } }; } }; });
+      TestAssertEqual_(typeof sentMsg.getId, 'function', 'tracked send: the send result is returned to the caller');
+      let u4 = TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L)[3];
+      TestAssertEqual_([u4.status, u4.message_id, u4.thread_id, u4.leads_sent, u4.attempts].join(','), 'ACCEPTED,mid,tid,1,1', 'tracked send: ACCEPTED with the Gmail ids and one attempt');
+      let thrown = null;
+      try { emailLedgerTrackSendGs_(hu, planU('U5'), function () { throw new Error('Service timed out'); }); } catch (e) { thrown = e; }
+      TestAssert_(thrown && /timed out/.test(thrown.message), 'tracked send: the original error is re-thrown unchanged');
+      TestAssertEqual_(TestEL_objects_(ssU.getSheetByName(EMAIL_LEDGER_SHEET_), L)[4].status, 'UNCONFIRMED', 'tracked send: …and the ledger says UNCONFIRMED');
+      TestAssertEqual_(emailLedgerTrackSendGs_(null, planU('U6'), function () { return 'sent'; }), 'sent', 'tracked send: with no ledger the send still runs and its result is returned');
+    }
+
     // ================= end to end: the real 17:00 job =================
     const a1Id = emailLedgerIdGs_(EMAIL_LEDGER_JOB_ALL_ISSUES_, dayKey, 'Pune', 'A1', 'Test A1 One');
 
@@ -383,6 +423,171 @@ function runEmailLedgerTests_() {
       TestAssertEqual_(ss10.getSheetByName('AllIssues_Log').getLastRow(), 2, 'broken ledger: AllIssues_Log is still written');
       TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /^\[Overnight Emailer\] Email ledger:/.test(e.subject); }).length, 1, 'broken ledger: exactly one ops note');
       TestAssertEqual_(ss10.getSheetByName('Email_Ledger').getLastRow(), 1, 'broken ledger: nothing was written into the unrecognised sheet');
+    }
+
+
+    // ================= end to end: the 10:00 and 13:00 jobs (EO-1b) =================
+    const cycleWorld = function (overrides) {
+      const header = TestFixture_leadsHeader_();
+      const banner = header.map(function () { return ''; });
+      const now = new Date();
+      const ss = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ss._sheets['leads'] = TestMockSheet_('leads', [banner, header, TestEL_leadRow_(header, Object.assign({
+        lead_id: 'L-CYCLE', client_id: 'C-CYCLE', RM: 'Test RM One', current_stage: 'Suspect',
+        lead_assigned_at: TestFixture_hoursAgo_(now, 40), last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+        internal_status_comments: 'Test RM One: Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+      }, overrides || {}))]);
+      return { ss: ss, header: header, now: now };
+    };
+    const ageAllIssues = function (w) { w.ss.getSheetByName('AllIssues_Log').getRange(2, 1, 1, 1).setValues([[TestFixture_daysAgo_(w.now, 1)]]); };
+    const closeLead = function (w) { w.ss._sheets['leads'].getRange(3, w.header.indexOf('current_stage') + 1, 1, 1).setValues([['Won']]); };
+    const ledgerRows = function (w, job) { return TestEL_objects_(w.ss.getSheetByName(EMAIL_LEDGER_SHEET_), L).filter(function (r) { return !job || r.job === job; }); };
+
+    // ---- (12) a whole cycle: 17:00 -> 10:00 -> 13:00, every email in the ledger with its Gmail ids ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      sendOvernightMorningEmails();
+      const tenThread = TestGmailLog_.drafts[1]._threadId;
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(ledgerRows(w).length, 3, 'full cycle: three emails, three ledger rows (17:00, 10:00, 13:00)');
+      const r17 = ledgerRows(w, 'allIssues17')[0], r10 = ledgerRows(w, 'morning10')[0], r13 = ledgerRows(w, 'followup13')[0];
+      TestAssertEqual_([r17.status, r17.leads_sent].join(','), 'ACCEPTED,1', 'full cycle 17:00: ACCEPTED, 1 lead');
+      TestAssertEqual_([r10.status, r10.leads_planned, r10.leads_sent, r10.attempts, r10.region, r10.primary_role, r10.bucket_label].join(','), 'ACCEPTED,1,1,1,Pune,A1,Test A1 One', 'full cycle 10:00: ACCEPTED, the checkpoint-1 lead carried, keyed to the same bucket as 17:00');
+      TestAssertEqual_(r10.thread_id + ',' + r10.message_id, tenThread + ',msg_' + tenThread, 'full cycle 10:00: the ledger holds the real Gmail thread and message ids of the 10:00 email');
+      TestAssertEqual_([r13.status, r13.leads_sent, r13.attempts].join(','), 'ACCEPTED,1,1', 'full cycle 13:00: ACCEPTED, 1 lead');
+      TestAssertEqual_(r13.thread_id, tenThread, 'full cycle 13:00: the threaded reply is recorded against the 10:00 thread');
+      TestAssert_(/^msg_/.test(r13.message_id), 'full cycle 13:00: the Gmail API message id of the reply is recorded');
+      TestAssertEqual_(r13.to, TEST_EMAIL_PRIMARY_, 'full cycle 13:00: the reply\'s recipient is the one stored at 10:00');
+      TestAssertEqual_(new Set([r17.email_id, r10.email_id, r13.email_id]).size, 3, 'full cycle: the three email ids are distinct');
+
+      // a second pass of both jobs the same day adds nothing
+      const before = ledgerRows(w).length;
+      sendOvernightMorningEmails();
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(ledgerRows(w).length, before, 'full cycle re-run: no new ledger rows and no new emails');
+      TestAssertEqual_(TestEL_objects_(w.ss.getSheetByName(EMAIL_LEDGER_SHEET_), L).filter(function (r) { return r.status === 'ATTEMPTING' || r.status === 'PLANNED'; }).length, 0, 'full cycle: no email is left PLANNED or ATTEMPTING - every one has a final status');
+    }
+
+    // ---- (13) the lead is resolved before 10:00: no email is needed, and the ledger says SKIPPED (not "nothing") ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      closeLead(w);
+      sendOvernightMorningEmails();
+      TestAssertEqual_(TestGmailLog_.drafts.length, 1, 'resolved before 10:00: no 10:00 email is sent');
+      const r10 = ledgerRows(w, 'morning10')[0];
+      TestAssertEqual_(r10 ? r10.status + ',' + r10.leads_sent + ',' + r10.attempts : 'no row', 'SKIPPED,0,0', 'resolved before 10:00: the planned 10:00 email ends SKIPPED, with no attempt');
+      TestAssertContains_(r10 ? r10.status_reason : '', 'no Checkpoint 1 lead is still unresolved', 'resolved before 10:00: …with the reason');
+    }
+
+    // ---- (14) resolved between 10:00 and 13:00: the reply is SKIPPED by the send function itself ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      sendOvernightMorningEmails();
+      closeLead(w);
+      sendOvernightFollowupEmails();
+      TestAssertEqual_(TestGmailLog_.threadReplies.length, 0, 'resolved before 13:00: no reply is sent');
+      const r13 = ledgerRows(w, 'followup13')[0];
+      TestAssertEqual_(r13 ? r13.status + ',' + r13.attempts : 'no row', 'SKIPPED,0', 'resolved before 13:00: the 13:00 reply ends SKIPPED, with no attempt');
+      TestAssertContains_(r13 ? r13.status_reason : '', 'nothing is still unresolved', 'resolved before 13:00: …with the reason');
+    }
+
+    // ---- (15) nothing for 13:00 to send at all: planned directly as SKIPPED in the same write ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      sendOvernightMorningEmails();
+      w.ss.getSheetByName('AllIssues_Log').getRange(2, 14, 1, 1).setValues([['2026-01-01 00:00:00']]); // checkpoint2 already recorded -> nothing pending
+      sendOvernightFollowupEmails();
+      const r13 = ledgerRows(w, 'followup13')[0];
+      TestAssertEqual_(r13 ? r13.status + ',' + r13.status_reason : 'no row', 'SKIPPED,nothing unresolved in either section', 'nothing for 13:00: the bucket is recorded SKIPPED up front');
+    }
+
+    // ---- (16) the threaded reply fails definitely and the plain fallback goes out: ACCEPTED, with the fallback's own ids ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      sendOvernightMorningEmails();
+      const tenThread = TestGmailLog_.drafts[1]._threadId;
+      Gmail = TestMockGmailAdvanced_({ shouldFail: true });
+      sendOvernightFollowupEmails();
+      const r13 = ledgerRows(w, 'followup13')[0];
+      const fallbackDraft = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+      TestAssertEqual_(r13.status, 'ACCEPTED', 'fallback reply: ACCEPTED');
+      TestAssertEqual_(r13.thread_id + ',' + r13.message_id, fallbackDraft._threadId + ',msg_' + fallbackDraft._threadId, 'fallback reply: the ids are the fallback message\'s own, not the 10:00 thread');
+      TestAssert_(r13.thread_id !== tenThread, 'fallback reply: it is recorded as a new thread (it did not thread into the 10:00 email)');
+    }
+
+    // ---- (17) a threaded reply that ends ambiguously: UNCONFIRMED, and no second copy is sent ----
+    {
+      const w = cycleWorld();
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      ageAllIssues(w);
+      sendOvernightMorningEmails();
+      const draftsBefore = TestGmailLog_.drafts.length;
+      Gmail = TestMockGmailAdvanced_({});
+      Gmail.Users.Messages.send = function () { throw new Error('Service timed out: Gmail'); };
+      sendOvernightFollowupEmails();
+      const r13 = ledgerRows(w, 'followup13')[0];
+      TestAssertEqual_(r13.status + ',' + r13.leads_sent, 'UNCONFIRMED,0', 'ambiguous reply: UNCONFIRMED - it may have been delivered');
+      TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'ambiguous reply: no fallback copy was sent');
+    }
+
+    // ---- (18) the CH-level report (a CH personally holding a flagged lead) is in the ledger too ----
+    {
+      const w = cycleWorld({ lead_id: 'L-CH', client_id: 'C-CH', RM: 'Test CH Self', lead_assigned_at: new Date(), rm_is_active: false, last_connect: '', last_connect_time: '', internal_status_comments: '' });
+      TestEL_bind_(w.ss);
+      sendAllIssuesEmails();
+      const ch = ledgerRows(w, 'chLevel17');
+      TestAssertEqual_(ch.length, 1, 'CH-level report: one ledger row');
+      TestAssertEqual_([ch[0].status, ch[0].bucket_label, ch[0].leads_sent, ch[0].region].join(','), 'ACCEPTED,Test CH Self,1,Pune', 'CH-level report: ACCEPTED, named for the CH, carrying the lead');
+      TestAssert_(/^msg_/.test(ch[0].message_id), 'CH-level report: the Gmail message id is recorded');
+      TestAssertEqual_(ledgerRows(w, 'allIssues17').length, 0, 'CH-level report: it is not mistaken for an ordinary 17:00 bucket');
+    }
+
+    // ---- (19) the 10:00 job with a real overnight lead AND a CH-held one: both are in the ledger, each as its own email ----
+    {
+      const header = TestFixture_leadsHeader_();
+      const banner = header.map(function () { return ''; });
+      const nowO = new Date();
+      const owin = overnightWindowGs_(nowO);
+      const omid = new Date(Math.min((owin.from.getTime() + owin.to.getTime()) / 2, nowO.getTime() - 3.5 * 3600 * 1000));
+      const ssO = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ssO._sheets['leads'] = TestMockSheet_('leads', [banner, header,
+        TestEL_leadRow_(header, { lead_id: 'L-A', client_id: 'C-A', RM: 'Test RM One', lead_assigned_at: omid }),
+        TestEL_leadRow_(header, { lead_id: 'L-CH', client_id: 'C-CH', RM: 'Test CH Self', lead_assigned_at: omid }),
+      ]);
+      TestEL_bind_(ssO);
+      sendOvernightMorningEmails();
+      const wO = { ss: ssO };
+      const m10 = ledgerRows(wO, 'morning10'), c10 = ledgerRows(wO, 'chLevel10');
+      TestAssertEqual_(m10.length + ',' + (m10[0] ? [m10[0].status, m10[0].leads_sent, m10[0].bucket_label].join('/') : ''), '1,ACCEPTED/1/Test A1 One', '10:00 overnight: the ordinary bucket is ACCEPTED with its one lead');
+      TestAssertEqual_(JSON.parse(m10[0].lead_ids_json).join(','), 'L-A', '10:00 overnight: the ledger lists the lead the email carried');
+      TestAssertEqual_(c10.length + ',' + (c10[0] ? [c10[0].status, c10[0].leads_sent, c10[0].bucket_label].join('/') : ''), '1,ACCEPTED/1/Test CH Self', '10:00 overnight: the CH-level report is its own ledger row');
+      TestAssert_(c10[0] && /^msg_/.test(c10[0].message_id), '10:00 overnight: the CH-level report records its Gmail message id');
+      sendOvernightMorningEmails();
+      TestAssertEqual_(ledgerRows(wO).length, 2, '10:00 overnight re-run: no new ledger rows');
+      const exO = TestEL_objects_(ssO.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), X);
+      TestAssertEqual_(exO.length + ',' + (exO[0] ? exO[0].kind : ''), '1,region', '10:00 overnight re-run: the skipped Section 1 is recorded as a region exclusion');
     }
 
     // ---- (11) the 10:00 / 13:00 jobs are untouched by the gate change (they ignore missingLeadIds) ----

@@ -349,7 +349,7 @@ function sendAllIssuesEmails_() {
     // resolveRecipientBucketsForRms_ a second time with identical
     // arguments — that second call used to double this file's own share
     // of the per-region RM_Hierarchy/Manager_Directory reload cost.
-    notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win);
+    notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win, ledger);
 
     const unresolvedExclusions = [];
     resolution.trulyUnresolved.forEach(function (u) {
@@ -416,7 +416,7 @@ function sendAllIssuesEmails_() {
 // fireAlerts:false above specifically so ITS OWN overnight-flavored
 // CH alert doesn't ALSO fire; this is the one that actually sends for
 // this script).
-function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
+function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
   if (!chLevelRms.length) return;
   const byCh = groupChLevelRmsByCh_(chLevelRms);
   const dateRangeLabel = allIssuesDateRangeLabelGs_(win);
@@ -489,10 +489,17 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win) {
     const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
 
     try {
-      sendGuardedEmailGs_({
-        to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
-        leadIds: allLeads.map(function (l) { return l.lead_id; }),
-      }, 'send CH-level issues report (' + chName + ', ' + region + ')');
+      const chLeadIds = allLeads.map(function (l) { return l.lead_id; });
+      const chDay = istDayKeyGs_(new Date());
+      emailLedgerTrackSendGs_(ledger, {
+        emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_CH_ISSUES_, chDay, region, entry.chRole || 'CH', chName), job: EMAIL_LEDGER_JOB_CH_ISSUES_, dayKey: chDay,
+        region: region, bucketLabel: chName, primaryRole: entry.chRole || 'CH', to: chLevelReportToGs_(), cc: '', subject: subject, leadIds: chLeadIds.map(String),
+      }, function () {
+        return sendGuardedEmailGs_({
+          to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
+          leadIds: chLeadIds,
+        }, 'send CH-level issues report (' + chName + ', ' + region + ')');
+      });
       markChReportSentGs_(CH_REPORT_KINDS_.allIssues, region, chName);
     } catch (e) {
       Logger.log('notifyChLevelIssuesGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);

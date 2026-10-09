@@ -19,6 +19,7 @@
  *   FAILED       the send raised a definite error; nothing was delivered.
  *   UNCONFIRMED  the send raised an error after which the message MAY still have gone out (timeouts etc.) - needs a look.
  *   BLOCKED      the send-safety gate refused the payload; nothing was drafted or sent.
+ *   SKIPPED      planned, then deliberately not sent because there was nothing to say (e.g. every follow-up lead is already resolved).
  *   EXCLUDED     (exclusions sheet only) a lead or region left out on purpose, with the reason.
  *
  * THE LEDGER IS EVIDENCE, NOT A GATE. Every function here is fail-open: a ledger error is caught, counted, logged and reported
@@ -55,6 +56,10 @@ const EMAIL_LEDGER_SHEET_ = 'Email_Ledger';
 const EMAIL_LEDGER_EXCLUSIONS_SHEET_ = 'Email_Ledger_Exclusions';
 const EMAIL_LEDGER_RETENTION_DAYS_ = 90; // older rows are archived to Drive (archiveRowsToDriveCsv_) and then removed
 const EMAIL_LEDGER_JOB_ALL_ISSUES_ = 'allIssues17';
+const EMAIL_LEDGER_JOB_MORNING_ = 'morning10'; // the combined 10:00 email (overnight + checkpoint 1)
+const EMAIL_LEDGER_JOB_FOLLOWUP_ = 'followup13'; // the combined 13:00 threaded reply (overnight follow-up + checkpoint 2)
+const EMAIL_LEDGER_JOB_CH_OVERNIGHT_ = 'chLevel10'; // the CH-level overnight report (sent to ops, not to the CH)
+const EMAIL_LEDGER_JOB_CH_ISSUES_ = 'chLevel17'; // the CH-level all-issues report
 
 // Column order matters: the outcome columns (attempted_at .. lead_ids_json) must stay contiguous - one setValues rewrites them.
 const EMAIL_LEDGER_HEADERS_ = ['email_id', 'cycle_day', 'job', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'subject',
@@ -63,6 +68,7 @@ const EMAIL_LEDGER_HEADERS_ = ['email_id', 'cycle_day', 'job', 'region', 'bucket
 const EMAIL_LEDGER_EXCLUSION_HEADERS_ = ['recorded_at', 'cycle_day', 'job', 'region', 'kind', 'lead_id', 'rm', 'email_id', 'reason'];
 const EMAIL_LEDGER_STATUS_ = {
   PLANNED: 'PLANNED', ATTEMPTING: 'ATTEMPTING', ACCEPTED: 'ACCEPTED', FAILED: 'FAILED', UNCONFIRMED: 'UNCONFIRMED', BLOCKED: 'BLOCKED',
+  SKIPPED: 'SKIPPED', // planned, then deliberately not sent: there was nothing to say (a genuine final outcome, not a failure)
 };
 
 function emailLedgerCol_(name) { return EMAIL_LEDGER_HEADERS_.indexOf(name) + 1; } // 1-based sheet column
@@ -74,9 +80,12 @@ function emailLedgerDayKeyOfGs_(cell) {
 }
 
 // Deterministic id for one bucket email: the same bucket on the same day and job always gets the same id, so a re-run finds
-// its own row instead of adding a second one.
-function emailLedgerIdGs_(job, dayKey, region, primaryRole, bucketLabel) {
-  return [String(dayKey || '').replace(/-/g, ''), job, region, primaryRole, bucketLabel].map(function (part) {
+// its own row instead of adding a second one. `to` (optional) is added for the jobs whose bucket is identified by its recipient
+// (the 10:00 and 13:00 emails are keyed by recipient address, not by bucket label).
+function emailLedgerIdGs_(job, dayKey, region, primaryRole, bucketLabel, to) {
+  const parts = [String(dayKey || '').replace(/-/g, ''), job, region, primaryRole, bucketLabel];
+  if (to) parts.push(String(to).toLowerCase());
+  return parts.map(function (part) {
     return String(part == null ? '' : part).replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
   }).join('|');
 }
@@ -203,7 +212,7 @@ function emailLedgerLoadRowGs_(h, emailId) {
 }
 
 // Records the buckets a region is about to send, in ONE write: plans = [{ emailId, job, dayKey, region, bucketLabel, primaryRole,
-// to, cc, subject, leadIds }]. A bucket whose id already has a row (a re-run) keeps that row and its attempt count.
+// to, cc, subject, leadIds, initialStatus?, initialReason? }]. A bucket whose id already has a row (a re-run) keeps that row and its attempt count.
 function emailLedgerPlanGs_(h, plans) {
   if (!emailLedgerLiveGs_(h) || !plans || !plans.length) return;
   emailLedgerGuardGs_(h, 'plan', function () {
@@ -215,8 +224,11 @@ function emailLedgerPlanGs_(h, plans) {
     if (!fresh.length) return;
     const plannedAt = new Date();
     const rows = fresh.map(function (p) {
+      // initialStatus/initialReason: an email already known not to be sent (nothing to say, no recipient) is planned directly
+      // in its final state - one write instead of two.
+      const done = p.initialStatus ? plannedAt : '';
       return [p.emailId, p.dayKey, p.job, p.region, p.bucketLabel, p.primaryRole, p.to, p.cc || '', p.subject || '',
-        p.leadIds.length, plannedAt, '', '', EMAIL_LEDGER_STATUS_.PLANNED, '', 0, '', '', 0,
+        p.leadIds.length, plannedAt, '', done, p.initialStatus || EMAIL_LEDGER_STATUS_.PLANNED, String(p.initialReason || '').slice(0, 500), 0, '', '', 0,
         jsonForCellGs_(p.leadIds, 'Email_Ledger lead_ids_json (' + p.emailId + ')'), '', '', ''];
     });
     const startRow = emailLedgerAppendBlockGs_(h.ledger, rows, function (probe) { return String(probe).trim() === rows[0][0]; }, 'append Email_Ledger rows');
@@ -273,6 +285,49 @@ function emailLedgerExcludeGs_(h, items) {
     });
     emailLedgerAppendBlockGs_(h.exclusions, rows, function (probe) { return probe instanceof Date && probe.getTime() === at.getTime(); }, 'append Email_Ledger_Exclusions rows');
   });
+}
+
+// The current ledger status of a planned email as held in memory ('' when unknown).
+function emailLedgerStatusOfGs_(h, emailId) {
+  if (!emailLedgerLiveGs_(h) || !emailId) return '';
+  const rowNo = h.rowById[emailId];
+  const row = rowNo ? h.rows[rowNo] : null;
+  return row ? String(row[emailLedgerCol_('status') - 1] || '') : '';
+}
+
+// Marks an email FAILED only when it is still open (PLANNED/ATTEMPTING): a bucket that already ended ACCEPTED must never be
+// overwritten by a later, unrelated exception in the same bucket's bookkeeping.
+function emailLedgerFailIfOpenGs_(h, emailId, reason) {
+  const status = emailLedgerStatusOfGs_(h, emailId);
+  if (status === EMAIL_LEDGER_STATUS_.PLANNED || status === EMAIL_LEDGER_STATUS_.ATTEMPTING) {
+    emailLedgerResultGs_(h, emailId, { status: EMAIL_LEDGER_STATUS_.FAILED, reason: reason, leadIds: [] });
+  }
+}
+
+// A planned email that was deliberately not sent (nothing to say). Plans it first if the caller had not.
+function emailLedgerSkipGs_(h, meta, reason) {
+  if (!emailLedgerLiveGs_(h)) return;
+  if (!h.rowById[meta.emailId]) emailLedgerPlanGs_(h, [meta]);
+  emailLedgerResultGs_(h, meta.emailId, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: reason, leadIds: [] });
+}
+
+// Runs `sendFn` (which sends ONE email and returns what the send returned) through the ledger: plan (if not yet planned), attempt,
+// then the outcome. The error, if any, is re-thrown unchanged so the caller's own handling is untouched. meta = { emailId, job,
+// dayKey, region, bucketLabel, primaryRole, to, cc, subject, leadIds }. Used by the CH-level reports.
+function emailLedgerTrackSendGs_(h, meta, sendFn) {
+  if (!emailLedgerLiveGs_(h)) return sendFn();
+  if (!h.rowById[meta.emailId]) emailLedgerPlanGs_(h, [meta]);
+  emailLedgerAttemptGs_(h, meta.emailId);
+  let sent;
+  try {
+    sent = sendFn();
+  } catch (e) {
+    emailLedgerResultGs_(h, meta.emailId, { status: emailLedgerStatusForErrorGs_(e), reason: String((e && e.message) || e), leadIds: [] });
+    throw e;
+  }
+  const ids = emailLedgerSentIdsGs_(sent);
+  emailLedgerResultGs_(h, meta.emailId, { status: EMAIL_LEDGER_STATUS_.ACCEPTED, messageId: ids.messageId, threadId: ids.threadId, leadIds: meta.leadIds || [] });
+  return sent;
 }
 
 // Archives (to Drive, same as the other pruned logs) and then removes rows older than the retention window. Rows are appended in

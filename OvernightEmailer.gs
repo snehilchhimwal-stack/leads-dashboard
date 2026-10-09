@@ -131,7 +131,7 @@ const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 // shared with the real per-RM emails this run) — see
 // resolveRecipientEmailsForRegion_'s own comment on both; either can be
 // omitted (empty leads, or a freshly-computed dateLabel).
-function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
+function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger) {
   if (!chLevelRms.length) return;
   const byCh = groupChLevelRmsByCh_(chLevelRms); // chName -> { chEmail, chRole, rmNames: [] }
   const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
@@ -236,10 +236,17 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel) {
     // a failure to send THIS report must never take down the real
     // morning-send loop it's reporting alongside.
     try {
-      sendGuardedEmailGs_({
-        to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
-        leadIds: allLeads.map(function (l) { return l.lead_id; }),
-      }, 'send CH-level report (' + chName + ', ' + region + ')');
+      const chLeadIds = allLeads.map(function (l) { return l.lead_id; });
+      const chDay = istDayKeyGs_(new Date());
+      emailLedgerTrackSendGs_(ledger, {
+        emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_CH_OVERNIGHT_, chDay, region, entry.chRole || 'CH', chName), job: EMAIL_LEDGER_JOB_CH_OVERNIGHT_, dayKey: chDay,
+        region: region, bucketLabel: chName, primaryRole: entry.chRole || 'CH', to: chLevelReportToGs_(), cc: '', subject: subject, leadIds: chLeadIds.map(String),
+      }, function () {
+        return sendGuardedEmailGs_({
+          to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
+          leadIds: chLeadIds,
+        }, 'send CH-level report (' + chName + ', ' + region + ')');
+      });
       markChReportSentGs_(CH_REPORT_KINDS_.overnight, region, chName);
     } catch (e) {
       Logger.log('notifyChLevelLeadsGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
@@ -717,7 +724,8 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
 // caller's existing failedLeadEntries aggregation needs no changes.
 // `leadsData` (optional): the {colIndex, dataRows} the 10:00 job already read — Checkpoint 1 is computed against it instead of
 // re-reading the whole leads tab for every bucket (email audit P8 / F8). Omitted, computeAllIssuesCheckpointGs_ reads the tab.
-function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason, leadsData) {
+function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, region, section1, section2, dateLabel, todayKey, now, win, baselineMap, section1SkippedReason, leadsData, ledgerCtx) {
+  const ctx = ledgerCtx || {}; // Email Ops EO-1b: { ledger, emailId } - where this bucket's ledger row is recorded (absent for direct callers)
   // 2026-10-05 email audit (P1/F4): the skip rule below tests `!section1`, so a Section 1 bucket that exists but holds ZERO
   // leads used to count as "has overnight content" — with no active Checkpoint 1 either, a header-only email would go out.
   // A Section 1 with no leads is no Section 1.
@@ -794,6 +802,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   if (!section1 && !activeCheckpoint1Count) {
     writeCheckpoint1State_('no email was needed');
     Logger.log('Combined morning email skipped for ' + region + bucketNote + ': no overnight leads and no Checkpoint 1 lead is still unresolved.');
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'no overnight leads and no Checkpoint 1 lead is still unresolved', leadIds: [] });
     return null;
   }
 
@@ -810,6 +819,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
 
   let sentMessage = null;
   let sendFailureReason = null;
+  emailLedgerAttemptGs_(ctx.ledger, ctx.emailId); // a row left ATTEMPTING = the run died mid-send; the outcome is unknown
   try {
     sentMessage = sendGuardedEmailGs_({ to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send combined morning email (' + region + bucketNote + ')');
   } catch (e) {
@@ -829,6 +839,12 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
       '',
       sendFailureReason,
     ]);
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: emailLedgerStatusForErrorGs_(e), reason: sendFailureReason, leadIds: [] });
+  }
+  if (!sendFailureReason) {
+    // ACCEPTED = Gmail took the message; recorded BEFORE the Overnight_Log write below so a failure there cannot lose the evidence.
+    const sentIds = emailLedgerSentIdsGs_(sentMessage);
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: EMAIL_LEDGER_STATUS_.ACCEPTED, messageId: sentIds.messageId, threadId: sentIds.threadId, leadIds: claimedLeadIds.map(String) });
   }
 
   // Overnight_Log row -- SAME columns sendOneOvernightEmail_ always
@@ -1060,6 +1076,10 @@ function sendOvernightMorningEmails_() {
   const logSheet = ensureOvernightLogSheet_(ss);
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
   const todayKey = istDayKeyGs_(now);
+  // Evidence trail (Email Ops EO-1b, EmailLedger.gs): null in TEST MODE, DISABLED when the sheets cannot be opened - either way
+  // every ledger call below is a no-op and the emails go out exactly as before.
+  const ledger = emailLedgerOpenGs_(ss);
+  const ledgerJob = EMAIL_LEDGER_JOB_MORNING_;
 
   // Two-checkpoint email lifecycle redesign (Step 6/11) — yesterday's
   // 17:00 AllIssues_Log rows still awaiting Checkpoint 1, grouped by
@@ -1136,6 +1156,7 @@ function sendOvernightMorningEmails_() {
       if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_) {
         section1SkippedReason = 'already_sent';
         Logger.log('Section 1 (Overnight) skipped for ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '). Section 2 (Checkpoint 1), if any, still proceeds separately below.');
+        emailLedgerExcludeGs_(ledger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', reason: 'Section 1 (overnight) already sent today - the re-run guard skipped ' + openLeads.length + ' lead(s)' }]);
       } else {
         const rmNames = Array.from(new Set(openLeads.map(function (l) { return l.RM; })));
         // RM -> its own full lead objects this region/run (same shape
@@ -1148,17 +1169,20 @@ function sendOvernightMorningEmails_() {
           if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
           rmToLeads[l.RM].push(l);
         });
-        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData });
+        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: true, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData, ledger: ledger });
 
         // RMs with no resolvable recipient anywhere AND no
         // Region_Recipients fallback either — their leads got no
         // automated email at all this run. To/Cc are genuinely blank
         // here (there was none to compute).
+        const unresolvedExclusions = [];
         resolution.trulyUnresolved.forEach(function (u) {
           (rmToLeads[u.rmName] || []).forEach(function (l) {
             failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
+            unresolvedExclusions.push({ job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: l.lead_id, rm: u.rmName, reason: 'no recipient could be resolved: ' + u.reason });
           });
         });
+        emailLedgerExcludeGs_(ledger, unresolvedExclusions);
 
         resolution.results.forEach(function (rec) {
           const rmSet = new Set(rec.rmNames);
@@ -1194,6 +1218,23 @@ function sendOvernightMorningEmails_() {
     const unionEmails = Object.keys(section1ByEmail).concat(Object.keys(section2ByEmail))
       .filter(function (v, i, a) { return a.indexOf(v) === i; });
 
+    // Every bucket email of this region is recorded as PLANNED in ONE write before the first send (its id is keyed by recipient).
+    const ledgerMeta = {};
+    unionEmails.forEach(function (emailKey) {
+      const m1 = section1ByEmail[emailKey] || null;
+      const m2 = section2ByEmail[emailKey] || null;
+      const mTo = (m1 && m1.rec.to) || (m2 && m2.to) || '';
+      const mLabel = (m1 && m1.rec.bucketLabel) || (m2 && m2.bucketLabel) || '';
+      const mRole = (m1 && m1.rec.primaryRole) || (m2 && m2.primaryRole) || '';
+      const mLeadIds = (m1 ? m1.leads.map(function (l) { return String(l.lead_id); }) : []).concat(m2 ? m2.snapshotEntries.map(function (l) { return String(l.lead_id); }) : [])
+        .filter(function (v, i, a) { return a.indexOf(v) === i; });
+      ledgerMeta[emailKey] = {
+        emailId: emailLedgerIdGs_(ledgerJob, todayKey, region, mRole, mLabel, mTo), job: ledgerJob, dayKey: todayKey, region: region,
+        bucketLabel: mLabel, primaryRole: mRole, to: mTo, cc: (m1 && m1.rec.cc) || (m2 && m2.cc) || '', leadIds: mLeadIds,
+      };
+    });
+    emailLedgerPlanGs_(ledger, unionEmails.map(function (k) { return ledgerMeta[k]; }));
+
     unionEmails.forEach(function (emailKey) {
       const s1 = section1ByEmail[emailKey] || null;
       const s2 = section2ByEmail[emailKey] || null;
@@ -1205,9 +1246,10 @@ function sendOvernightMorningEmails_() {
       const bucketSkippedReason = (section1SkippedReason === 'already_sent' && !loggedRecipientsToday[checkpoint1PendingKeyGs_(region, emailKey)])
         ? 'already_sent_not_to_you' : section1SkippedReason;
       try {
-        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason, leadsData);
+        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason, leadsData, { ledger: ledger, emailId: ledgerMeta[emailKey].emailId });
       } catch (bucketErr) {
         Logger.log('Combined morning email threw for ' + region + ' (' + emailKey + '): ' + bucketErr);
+        emailLedgerFailIfOpenGs_(ledger, ledgerMeta[emailKey].emailId, 'Unexpected error: ' + bucketErr);
         failure = { reason: 'Unexpected error: ' + bucketErr, section1Leads: s1 ? s1.leads : [], section2: s2 };
       }
       if (!failure) return;
@@ -1225,6 +1267,7 @@ function sendOvernightMorningEmails_() {
   });
 
   notifyLeadSendFailuresGs_(failedLeadEntries);
+  emailLedgerFinishGs_(ledger, 'the 10:00 morning run');
 }
 
 const LEAD_FOLLOWUPS_SHEET_ = 'Lead_Followups';
@@ -1615,7 +1658,8 @@ function loadTodaysCheckpoint1PendingGs_(ss, now) {
 // yesterday at 17:00, never re-derived here.
 // `leadsData` (optional): the {colIndex, dataRows} the 13:00 job already read — Checkpoint 2 is computed against it instead of
 // re-reading the whole leads tab for every bucket (email audit P8 / F8), so it is judged against the same moment as Section 1.
-function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap, leadsData) {
+function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber, allIssuesLogSheet, region, threadId, sendTo, sendCc, subject, testModeBanner, section1UnresolvedRows, section2Input, now, baselineMap, leadsData, ledgerCtx) {
+  const ctx = ledgerCtx || {}; // Email Ops EO-1b: { ledger, emailId } - where this reply's ledger row is recorded (absent for direct callers)
   const section1Opts = section1UnresolvedRows.length
     ? buildOvernightFollowupSectionOptsGs_(region, section1UnresolvedRows)
     : buildOvernightFollowupSectionEmptyStateOptsGs_(region, 'Nothing still unresolved from this morning — all clear.');
@@ -1657,6 +1701,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     writeCheckpoint2State_('no reply was needed');
     writeFollowupResultGs_(overnightLogSheet, overnightLogRowNumber, 'skipped: nothing unresolved', region);
     Logger.log('1pm follow-up skipped for ' + region + ' (thread ' + threadId + '): nothing is still unresolved.');
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'nothing is still unresolved in either section', leadIds: [] });
     return;
   }
 
@@ -1686,6 +1731,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
       'Nothing was marked as sent, so running sendOvernightFollowupEmailsNow again TODAY (after fixing the cause) will retry this bucket.',
     ]);
     writeFollowupResultGs_(overnightLogSheet, overnightLogRowNumber, 'blocked: ' + gate.problems.join('; '), region);
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: EMAIL_LEDGER_STATUS_.BLOCKED, reason: 'blocked by the send-safety gate: ' + gate.problems.join('; '), leadIds: [] });
     return;
   }
 
@@ -1710,8 +1756,12 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   // may already have been delivered, so it could deliver a second copy. It now follows only a DEFINITE failure.
   let outcome = 'failed';
   let resultNote = 'failed'; // the one-line outcome written to Overnight_Log.followup_result (email audit P9 / F12)
+  let sentIds = { messageId: '', threadId: threadId }; // the evidence the ledger keeps of an accepted reply
+  let ledgerStatus = EMAIL_LEDGER_STATUS_.FAILED;
+  emailLedgerAttemptGs_(ctx.ledger, ctx.emailId); // a row left ATTEMPTING = the run died mid-send; the outcome is unknown
   try {
-    sendThreadedGmailReply_(threadId, sendTo, sendCc || '', subject, plainBody, html);
+    const threadedResp = sendThreadedGmailReply_(threadId, sendTo, sendCc || '', subject, plainBody, html);
+    if (threadedResp && threadedResp.id) sentIds = { messageId: String(threadedResp.id), threadId: String(threadedResp.threadId || threadId) };
     outcome = 'sent';
     resultNote = 'sent (threaded reply)';
   } catch (threadErr) {
@@ -1721,12 +1771,14 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
       Logger.log('Threaded send for ' + region + ' (thread ' + threadId + ') ended in an UNCONFIRMED state (' + threadErr + ') — not sending a fallback copy.');
     } else if (threadErr && threadErr.blockedByGuard) {
       Logger.log('Threaded send for ' + region + ' (thread ' + threadId + ') was blocked by the send-safety gate: ' + threadErr);
+      ledgerStatus = EMAIL_LEDGER_STATUS_.BLOCKED;
       resultNote = 'blocked: ' + String((threadErr && threadErr.message) || threadErr);
       notifyOpsAlertGs_('1pm follow-up BLOCKED by the send-safety gate for ' + region, alertLines([String(threadErr.message || threadErr)]));
     } else {
       Logger.log('Threaded send failed for ' + region + ' (thread ' + threadId + ') — falling back to a new message that will NOT auto-thread into the 10am email. Likely cause: the "Gmail API" Advanced Service isn\'t enabled yet (Apps Script editor -> Services (+)). Error: ' + threadErr);
       try {
-        sendGuardedEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send fallback follow-up (' + region + ')');
+        const fallbackMsg = sendGuardedEmailGs_({ to: sendTo, cc: sendCc, subject: subject, plainBody: plainBody, htmlBody: html, leadIds: claimedLeadIds }, 'send fallback follow-up (' + region + ')');
+        sentIds = emailLedgerSentIdsGs_(fallbackMsg);
         outcome = 'sent';
         resultNote = 'sent (fallback: a new message, not threaded — the threaded send failed: ' + threadErr + ')';
       } catch (fallbackErr) {
@@ -1750,6 +1802,11 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   }
   const replyDone = outcome !== 'failed';
   writeFollowupResultGs_(overnightLogSheet, overnightLogRowNumber, resultNote, region);
+  // The ledger keeps the delivery evidence separately from the Overnight_Log note: ACCEPTED (with the Gmail ids), UNCONFIRMED (the
+  // send ended ambiguously - may have gone), BLOCKED (the gate refused) or FAILED.
+  emailLedgerResultGs_(ctx.ledger, ctx.emailId, outcome === 'sent'
+    ? { status: EMAIL_LEDGER_STATUS_.ACCEPTED, messageId: sentIds.messageId, threadId: sentIds.threadId, leadIds: claimedLeadIds.map(String) }
+    : { status: outcome === 'unconfirmed' ? EMAIL_LEDGER_STATUS_.UNCONFIRMED : ledgerStatus, reason: resultNote, leadIds: [] });
 
   // checkpoint2_json/checkpoint2_sent_at -- changed 2026-10-05 (email audit P5 / F6): written ONLY when the reply was
   // delivered (or is unconfirmed — attempted and possibly delivered, so it must not be re-sent without a human looking). It
@@ -1929,6 +1986,30 @@ function sendOvernightFollowupEmails_() {
   const allIssuesLogSheet = ensureAllIssuesLogSheet_(ss);
   const checkpoint1PendingByEmail = loadTodaysCheckpoint1PendingGs_(ss, now);
 
+  // Evidence trail (Email Ops EO-1b, EmailLedger.gs): null in TEST MODE, DISABLED when the sheets cannot be opened - either way
+  // every ledger call below is a no-op and the replies go out exactly as before. Every bucket reply is recorded as PLANNED in ONE
+  // write before the first send; a bucket already known to have nothing to send (nothing unresolved, no stored recipient) is
+  // recorded directly as SKIPPED. The pre-pass mirrors the Section 2 hand-out of the loop below without changing any state of it.
+  const ledger = emailLedgerOpenGs_(ss);
+  {
+    const consumedForLedger = {};
+    emailLedgerPlanGs_(ledger, perRegion.map(function (r) {
+      const pendingKey = checkpoint1PendingKeyGs_(r.region, r.to);
+      const s2ForLedger = (r.to && !consumedForLedger[pendingKey]) ? (checkpoint1PendingByEmail[pendingKey] || null) : null;
+      if (s2ForLedger) consumedForLedger[pendingKey] = true;
+      r.ledgerId = emailLedgerIdGs_(EMAIL_LEDGER_JOB_FOLLOWUP_, todayKey, r.region, '', '', r.to);
+      const nothingToSend = !r.unresolvedRows.length && !s2ForLedger;
+      return {
+        emailId: r.ledgerId, job: EMAIL_LEDGER_JOB_FOLLOWUP_, dayKey: todayKey, region: r.region, bucketLabel: '', primaryRole: '',
+        to: r.to, cc: r.cc, subject: r.subject,
+        leadIds: r.unresolvedRows.map(function (u) { return String(u.lead_id); }).concat(s2ForLedger ? s2ForLedger.checkpoint1Entries.map(function (e) { return String(e.lead_id); }) : [])
+          .filter(function (v, i, a) { return a.indexOf(v) === i; }),
+        initialStatus: nothingToSend ? EMAIL_LEDGER_STATUS_.SKIPPED : (!r.to ? EMAIL_LEDGER_STATUS_.SKIPPED : ''),
+        initialReason: nothingToSend ? 'nothing unresolved in either section' : (!r.to ? 'no stored recipient (the row predates the recipient-storing fix)' : ''),
+      };
+    }));
+  }
+
   // Pass 2: send, now that suggestions (if any came back in time) are known.
   // Same renderOvernightReportEmailHTML_ shell the 10am email uses (see its
   // own comment). Red "Still Unresolved" only — same scoping as the
@@ -2005,9 +2086,10 @@ function sendOvernightFollowupEmails_() {
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
     // One bucket throwing (2026-09-25: an oversize checkpoint cell) must not stop every OTHER bucket's follow-up.
     try {
-      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap, leadsData);
+      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap, leadsData, { ledger: ledger, emailId: r.ledgerId });
     } catch (bucketErr) {
       Logger.log('Combined follow-up threw for ' + r.region + ' (thread ' + r.threadId + '): ' + bucketErr);
+      emailLedgerFailIfOpenGs_(ledger, r.ledgerId, 'unexpected error: ' + bucketErr);
       writeFollowupResultGs_(logSheet, r.rowNumber, 'failed: unexpected error: ' + bucketErr, r.region);
       followupBucketFailures.push(r.region + ' — ' + r.subject + ' — to ' + r.to + ': ' + bucketErr);
     }
@@ -2015,6 +2097,7 @@ function sendOvernightFollowupEmails_() {
   if (followupBucketFailures.length) {
     notifyOpsAlertGs_('1pm follow-up: ' + followupBucketFailures.length + ' bucket(s) failed — every other bucket was still sent', followupBucketFailures);
   }
+  emailLedgerFinishGs_(ledger, 'the 13:00 follow-up run');
 }
 
 // ONE-OFF: backfills to/cc/subject into TODAY's Overnight_Log rows that
