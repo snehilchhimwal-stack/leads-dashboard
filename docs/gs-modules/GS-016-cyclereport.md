@@ -16,7 +16,7 @@ address covering the whole cycle that started at the previous day's 17:00 - ever
 reports by final status, what was left out and why, the incidents raised, what needs attention, and whether the coming 17:00 send is ready. It is
 sent when everything is fine AND when it is not; errors are emailed separately and earlier, after the rest of their run is confirmed sent
 (`GS-015` RULE-047). It is built only from the evidence tabs (`SHEET-019`, `SHEET-020`, `SHEET-021`) - nothing is guessed, and it states what it
-cannot see (delivery and opens cannot be seen from Apps Script; bounces, replies and the age of the Leads tab are not tracked yet).
+cannot see (delivery and opens cannot be seen from Apps Script; bounces and replies come from the daily sweep, `GS-017`; the age of the Leads tab is not tracked yet).
 
 ## Responsibilities
 
@@ -39,7 +39,7 @@ First install (run `setupEmailCycleReportTrigger()` once after pasting) and when
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-393 | `cycleReportWindowGs_(now)` | the time | `{start, end}` - 16:30 IST of the previous day to now | none (pure) | `istDayKeyGs_`, `pad2Gs_` (`GS-002`) | FN-396 | specific |
-| FN-394 | `cycleReadRowsGs_(sheet, headers, startDayKey)` / `cycleReportInWindowGs_` / `cycleRateGs_` | a tab and its headers | rows as objects from the first row of the start day; a window test; "n of d (p%)" | reads the tab | `emailLedgerDayKeyOfGs_` (`GS-015`) | FN-396 | specific |
+| FN-394 | `cycleReportInWindowGs_` / `cycleRateGs_` | a value and the window / two counts | a window test; "n of d (p%)" | none (pure) | — | FN-395, FN-396 | specific (the row reader and the job labels now live in `GS-015`, FN-398) |
 | FN-395 | `cycleReportDataGs_(input)` / `cycleReportRenderGs_(data, now)` | ledger / exclusion / incident rows + config problems | the counts and lists; `{subject, html, plainBody}` | none (pure) | `renderOvernightReportEmailHTML_`, `plainTextReportGs_` (`GS-004`) | FN-396 | specific - RULE-049 |
 | FN-396 | `buildEmailCycleReportGs_(ss, now)` / `sendEmailCycleReport_(opts)` | the workbook, the time | the built report; sends it | reads the three evidence tabs; one email; records the sent day in a Script Property | `sendGuardedEmailGs_`, `opsAlertEmailGs_`, `emailConfigProblemsGs_` (`GS-004`) | FN-397 | specific - RULE-050 |
 | FN-397 | `sendEmailCycleReport()` / `sendEmailCycleReportNow()` / `setupEmailCycleReportTrigger()` / `showEmailCycleReportNow()` | - | - | the lock + run record; a crash alerts ops at once and re-throws; trigger install; a read-only preview in the log | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
@@ -124,6 +124,8 @@ Apps Script backend; a time-driven job (16:30 IST) sharing the email jobs' lock,
 
 **2026-10-09** (`d79aae5`): file created - Email Ops EO-8. `EmailInfra.gs` `emailJobScheduleGs_` lists the job (with a `minute`) and
 `emailJobProblemsGs_` computes its deadline from hour:minute. **Not live until pasted.**
+
+**2026-10-09** (`(pending commit)`, Email Ops EO-5): the report shows a "Bounces and replies" section from the sweep's columns (`GS-017`), lists a bounced email under "Needs attention" (it counts as accepted by Gmail but is not all clear), and lists replies; the row reader and job labels moved to `GS-015` (FN-398). **Not live until pasted.**
 
 ## Revalidation trigger
 

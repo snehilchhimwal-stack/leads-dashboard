@@ -44,7 +44,7 @@ None yet except `showEmailLedgerTodayNow()` (read-only). The 13:00 audit, the 17
 | `message_id` / `thread_id` | text | the Gmail ids - the evidence that Gmail accepted the message |
 | `leads_sent` | number | leads the accepted email really carried (0 unless ACCEPTED) |
 | `lead_ids_json` | text (JSON) | the lead ids (planned, then the ones really sent) |
-| `bounce_status` / `reply_status` / `swept_at` | text | reserved for the bounce/reply sweep (Email Ops EO-5); blank until then |
+| `bounce_status` / `reply_status` / `swept_at` | text / text / datetime | written by the daily bounce/reply sweep (`GS-017`, EO-5): `BOUNCED <time>`, `NO_BOUNCE_SEEN` (not proof of delivery), `UNKNOWN (...)`; `REPLIED n (latest <time>)`, `NO_REPLY_SEEN`, `UNKNOWN (...)`; the sweep time. Blank until swept |
 
 Exact list: `EmailLedger.gs` `EMAIL_LEDGER_HEADERS_`.
 
@@ -108,7 +108,7 @@ Complements `SHEET-013` (`AllIssues_Log`, written only after a successful send) 
 ## Relationships
 
 - **Depends On:** `GS-015`, `EXT-001`
-- **Used By:** `GS-015`, `GS-001`, `GS-010`, `GS-016`
+- **Used By:** `GS-015`, `GS-001`, `GS-010`, `GS-016`, `GS-017`
 - **Related:** `SHEET-013`, `SHEET-014`, `SHEET-020`
 
 ## Source of truth
