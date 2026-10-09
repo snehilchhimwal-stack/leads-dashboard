@@ -56,6 +56,7 @@ const PRODUCTION_FILES = [
   'EmailLedger.gs',
   'CycleReport.gs',
   'EmailSweep.gs',
+  'OpsAudit.gs',
 ];
 
 const TEST_FILES = [
@@ -77,6 +78,7 @@ const TEST_FILES = [
   'Tests_EmailLedger.gs',
   'Tests_CycleReport.gs',
   'Tests_EmailSweep.gs',
+  'Tests_OpsAudit.gs',
   'Tests_EmailLifecycleFullCycle.gs',
   'Tests_RunAll.gs',
 ];

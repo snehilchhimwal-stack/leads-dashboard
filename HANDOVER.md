@@ -852,7 +852,7 @@ own, earlier, after their run (above); the report is the daily summary. It canno
 so; delivery and opens cannot be seen from Apps Script at all. After pasting, run `setupEmailCycleReportTrigger()` once.
 
 **Leads-tab freshness and the daily row (EO-10 / EO-8b).** The "Ready for 17:00?" table now shows the Leads tab's freshness, judged from the newest lead assignment time (the tab refreshes about
-every other hour and has no last-imported cell): up to 3 h GREEN, over 3 h AMBER, over 5 h RED (`LEADS_FRESH_AMBER_HOURS_` / `LEADS_FRESH_RED_HOURS_` in `CycleReport.gs`). AMBER or RED is listed
+every other hour and has no last-imported cell): under 12 h GREEN, 12 h up to 24 h AMBER, at least 24 h RED (a stale lead is at least a day old - user decision D7, 2026-10-09: leads arrive irregularly, so a few hours without a new one is only a quiet spell) (`LEADS_FRESH_AMBER_HOURS_` = 12 / `LEADS_FRESH_RED_HOURS_` = 24). AMBER or RED is listed
 under "Needs attention" and means the report is not all clear. The thresholds and the rules now live in `EmailInfra.gs` (`GS-004` FN-408) so every emailer shares them.
 A tab that cannot be read, or has no assignment times, is shown as UNKNOWN. The report also stores one `Daily_Report` row per day (counts, all-clear, freshness) for tracking over time.
 

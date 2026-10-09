@@ -199,16 +199,16 @@ function runCycleReportTests_() {
     }
 
     // ================= Leads-tab freshness (decision D4) =================
-    TestAssertEqual_([0, 3, 3.01, 5, 5.01, 30].map(cycleFreshnessLevelGs_).join(','), 'GREEN,GREEN,AMBER,AMBER,RED,RED', 'freshness level: up to 3 h is GREEN, over 3 h AMBER, over 5 h RED');
+    TestAssertEqual_([0, 11.99, 12, 23.99, 24, 30].map(cycleFreshnessLevelGs_).join(','), 'GREEN,GREEN,AMBER,AMBER,RED,RED', 'freshness level: under 12 h is GREEN, 12 h up to 24 h AMBER, at least 24 h RED (a stale lead is at least a day old)');
     {
       const fresh = function (level, text) { return { level: level, ageHours: level === 'UNKNOWN' ? null : 4, newest: null, text: text || level + ': text' }; };
       const mk = function (fr) { return cycleReportDataGs_({ window: win, ledgerRows: [L('allIssues17', 'ACCEPTED', { leads_sent: 2 })], exclusionRows: [], incidentRows: [], configProblems: [], freshness: fr }); };
       TestAssertEqual_(mk(fresh('GREEN')).allClear, true, 'freshness data: GREEN does not change anything');
-      const amber = mk(fresh('AMBER', 'AMBER: the newest lead was assigned 4 h ago'));
+      const amber = mk(fresh('AMBER', 'AMBER: the newest lead was assigned 14 h ago'));
       TestAssertEqual_(amber.allClear + ',' + amber.attention.length + ',' + amber.attention[0].status, 'false,1,LEADS AMBER', 'freshness data: AMBER is an attention item and means not all clear');
       TestAssertEqual_(mk(fresh('RED')).attention[0].status, 'LEADS RED', 'freshness data: RED too');
       TestAssertEqual_(mk(fresh('UNKNOWN')).allClear, true, 'freshness data: UNKNOWN (cannot be judged) is shown but never raised as a problem it cannot prove');
-      TestAssertContains_(cycleReportRenderGs_(amber, now).plainBody, 'Leads tab freshness | AMBER: the newest lead was assigned 4 h ago', 'freshness render: the readiness table shows the text');
+      TestAssertContains_(cycleReportRenderGs_(amber, now).plainBody, 'Leads tab freshness | AMBER: the newest lead was assigned 14 h ago', 'freshness render: the readiness table shows the text');
       TestAssertContains_(cycleReportRenderGs_(amber, now).plainBody, 'LEADS AMBER', 'freshness render: and the attention table lists it');
     }
     {
@@ -217,17 +217,18 @@ function runCycleReportTests_() {
       const withLead = function (when) { return function (header) { return [TestCR_leadRow_(header, { lead_id: 'L-F', client_id: 'C-F', lead_assigned_at: when })]; }; };
       const g = freshOf(withLead(hoursAgo(1)));
       TestAssertEqual_(g.level + ',' + Math.round(g.ageHours), 'GREEN,1', 'freshness: a lead assigned an hour ago is GREEN');
-      TestAssertEqual_(freshOf(withLead(hoursAgo(4))).level, 'AMBER', 'freshness: 4 hours is AMBER');
-      TestAssertEqual_(freshOf(withLead(hoursAgo(6))).level, 'RED', 'freshness: 6 hours is RED');
-      TestAssertContains_(freshOf(withLead(hoursAgo(6))).text, 'would describe stale data', 'freshness: RED says why it matters');
+      TestAssertEqual_(freshOf(withLead(hoursAgo(14))).level, 'AMBER', 'freshness: 14 hours is AMBER');
+      TestAssertEqual_(freshOf(withLead(hoursAgo(30))).level, 'RED', 'freshness: 30 hours is RED');
+      TestAssertEqual_(freshOf(withLead(hoursAgo(6))).level, 'GREEN', 'freshness: 6 hours is still GREEN - a quiet spell is not a stale tab');
+      TestAssertContains_(freshOf(withLead(hoursAgo(30))).text, 'would describe stale data', 'freshness: RED says why it matters');
       const mixed = freshOf(function (header) {
-        return [TestCR_leadRow_(header, { lead_id: 'L-1', client_id: 'C-1', lead_assigned_at: hoursAgo(6) }), TestCR_leadRow_(header, { lead_id: 'L-2', client_id: 'C-2', lead_assigned_at: new Date(Date.now() + 5 * 3600000) })];
+        return [TestCR_leadRow_(header, { lead_id: 'L-1', client_id: 'C-1', lead_assigned_at: hoursAgo(30) }), TestCR_leadRow_(header, { lead_id: 'L-2', client_id: 'C-2', lead_assigned_at: new Date(Date.now() + 5 * 3600000) })];
       });
       TestAssertEqual_(mixed.level, 'RED', 'freshness: an assignment time in the future is ignored (bad data cannot make a stale tab look fresh)');
       TestAssertEqual_(freshOf(null).level, 'UNKNOWN', 'freshness: a Leads tab with no leads is UNKNOWN');
       TestAssertEqual_(cycleLeadsFreshnessGs_(TestMockSpreadsheet_({}), new Date()).level, 'UNKNOWN', 'freshness: an unreadable Leads tab is UNKNOWN, not a crash');
       // end to end: a stale tab shows in the report that goes to Snehil
-      const ssS = TestCR_world_(function (header) { return [TestCR_leadRow_(header, { lead_id: 'L-STALE', client_id: 'C-STALE', lead_assigned_at: hoursAgo(6) })]; });
+      const ssS = TestCR_world_(function (header) { return [TestCR_leadRow_(header, { lead_id: 'L-STALE', client_id: 'C-STALE', lead_assigned_at: hoursAgo(30) })]; });
       TestCR_bind_(ssS);
       sendAllIssuesEmails();
       const built = sendEmailCycleReport_({ now: new Date(Date.now() + 60000) });

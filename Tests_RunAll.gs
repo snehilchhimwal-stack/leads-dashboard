@@ -8,7 +8,7 @@
  * runInteractionHistoryLoggerTestsNow, runOvernightEmailerTestsNow,
  * runAllIssuesEmailerTestsNow, runDailyRmIssueLogTestsNow,
  * runOpsChecklistRunnerTestsNow, runLeadFollowupsStalenessTestsNow,
- * runRmHierarchySyncTestsNow, runEmailLedgerTestsNow, runCycleReportTestsNow, runEmailSweepTestsNow, runEmailLifecycleFullCycleTestsNow) when you only want to check one
+ * runRmHierarchySyncTestsNow, runEmailLedgerTestsNow, runCycleReportTestsNow, runEmailSweepTestsNow, runOpsAuditTestsNow, runEmailLifecycleFullCycleTestsNow) when you only want to check one
  * concern after a change to just that file.
  *
  * NOTHING here sends a real email or touches your real spreadsheet — see
@@ -36,6 +36,7 @@ function runAllTests() {
     runEmailLedgerTests_,
     runCycleReportTests_,
     runEmailSweepTests_,
+    runOpsAuditTests_,
     runEmailLifecycleFullCycleTests_,
   ];
 

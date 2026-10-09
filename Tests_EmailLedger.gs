@@ -1448,20 +1448,20 @@ function runEmailLedgerTests_() {
       // ---- the pure helpers ----
       const freshOf = function (rowsFn) { const rd = readLeadsTab_(TestEL_world_(rowsFn)); return leadsFreshnessFromRowsGs_(rd.colIndex, rd.dataRows, new Date()); };
       const oneLead = function (h) { return function (header) { return [TestEL_leadRow_(header, { lead_id: 'L-F', client_id: 'C-F', lead_assigned_at: hrsAgo(h) })]; }; };
-      TestAssertEqual_([0, 3, 3.01, 5, 5.01, 30].map(leadsFreshnessLevelGs_).join(','), 'GREEN,GREEN,AMBER,AMBER,RED,RED', 'freshness level: up to 3 h GREEN, over 3 h AMBER, over 5 h RED');
-      TestAssertEqual_([1, 4, 6].map(function (h) { return freshOf(oneLead(h)).level; }).join(','), 'GREEN,AMBER,RED', 'freshness from rows: an hour old is GREEN, 4 h AMBER, 6 h RED');
+      TestAssertEqual_([0, 11.99, 12, 23.99, 24, 30].map(leadsFreshnessLevelGs_).join(','), 'GREEN,GREEN,AMBER,AMBER,RED,RED', 'freshness level: under 12 h GREEN, 12 h up to 24 h AMBER, at least 24 h RED (a stale lead is at least a day old)');
+      TestAssertEqual_([1, 6, 14, 30].map(function (h) { return freshOf(oneLead(h)).level; }).join(','), 'GREEN,GREEN,AMBER,RED', 'freshness from rows: an hour and 6 h are GREEN (a quiet spell), 14 h AMBER, 30 h RED');
       TestAssertEqual_(freshOf(function (header) { return [TestEL_leadRow_(header, { lead_id: 'L-1', client_id: 'C-1', lead_assigned_at: hrsAgo(30) }), TestEL_leadRow_(header, { lead_id: 'L-2', client_id: 'C-2', lead_assigned_at: hrsAgo(2) })]; }).level, 'GREEN', 'freshness from rows: the NEWEST lead decides, not the oldest');
-      TestAssertEqual_(freshOf(function (header) { return [TestEL_leadRow_(header, { lead_id: 'L-1', client_id: 'C-1', lead_assigned_at: hrsAgo(6) }), TestEL_leadRow_(header, { lead_id: 'L-2', client_id: 'C-2', lead_assigned_at: hrsAgo(-5) })]; }).level, 'RED', 'freshness from rows: a time in the future is ignored - bad data cannot make a stale tab look fresh');
+      TestAssertEqual_(freshOf(function (header) { return [TestEL_leadRow_(header, { lead_id: 'L-1', client_id: 'C-1', lead_assigned_at: hrsAgo(30) }), TestEL_leadRow_(header, { lead_id: 'L-2', client_id: 'C-2', lead_assigned_at: hrsAgo(-5) })]; }).level, 'RED', 'freshness from rows: a time in the future is ignored - bad data cannot make a stale tab look fresh');
       TestAssertEqual_(freshOf(function () { return []; }).level, 'UNKNOWN', 'freshness from rows: no leads is UNKNOWN, never a guess');
-      TestAssertContains_(freshOf(oneLead(6)).text, 'older than 5 h', 'freshness from rows: RED names the 5 h line');
-      TestAssertContains_(freshOf(oneLead(4)).text, 'older than 3 h', 'freshness from rows: AMBER names the 3 h line');
+      TestAssertContains_(freshOf(oneLead(30)).text, 'at least 24 h old', 'freshness from rows: RED names the 24 h line');
+      TestAssertContains_(freshOf(oneLead(14)).text, 'at least 12 h old', 'freshness from rows: AMBER names the 12 h line');
 
-      const redSec = staleLeadsNoticeSectionGs_(freshOf(oneLead(6)));
+      const redSec = staleLeadsNoticeSectionGs_(freshOf(oneLead(30)));
       TestAssertEqual_(redSec.heading + '|' + redSec.columns.join(',') + '|' + redSec.rows.length, STALE_HEAD + '|Notice|3', 'notice section: a heading, one column, three plain sentences');
-      TestAssertContains_(redSec.rows[0][0], '6 h ago', 'notice section: it says how old the newest lead is');
+      TestAssertContains_(redSec.rows[0][0], '30 h ago', 'notice section: it says how old the newest lead is');
       TestAssertContains_(redSec.rows[0][0], 'IST', 'notice section: …and when it was assigned, in IST');
       TestAssertContains_(redSec.rows[2][0], 'CRM', 'notice section: …and what to do about it');
-      TestAssertEqual_([oneLead(1), oneLead(4), function () { return []; }].map(function (f) { return String(staleLeadsNoticeSectionGs_(freshOf(f))); }).join(','), 'null,null,null', 'notice section: GREEN, AMBER and UNKNOWN produce no notice - only RED does');
+      TestAssertEqual_([oneLead(1), oneLead(14), function () { return []; }].map(function (f) { return String(staleLeadsNoticeSectionGs_(freshOf(f))); }).join(','), 'null,null,null', 'notice section: GREEN, AMBER and UNKNOWN produce no notice - only RED does');
       TestAssertEqual_(String(staleLeadsNoticeSectionGs_(null)) + ',' + String(staleLeadsNoticeSectionGs_({ level: 'RED', newest: null })), 'null,null', 'notice section: a missing or incomplete reading produces no notice');
       TestAssertEqual_(String(staleLeadsNoticeFromRowsGs_({}, 'not rows', new Date())), 'null', 'notice from rows: bad input is "no notice", never an exception (the warning is fail-open)');
 
@@ -1476,7 +1476,7 @@ function runEmailLedgerTests_() {
         });
       };
       {
-        const ss = staleWorld(6);
+        const ss = staleWorld(30);
         TestEL_bind_(ss);
         const got = capture(function () { sendAllIssuesEmails(); });
         TestAssertEqual_(TestGmailLog_.drafts.length, 1, '17:00 RED: the email is still sent - a stale tab never holds it');
@@ -1492,15 +1492,15 @@ function runEmailLedgerTests_() {
         TestAssertEqual_(led.length + ',' + led[0].status + ',' + led[0].leads_sent, '1,ACCEPTED,1', '17:00 RED: the ledger shows the email ACCEPTED with its lead');
         TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /fresh|stale/i.test(e.subject); }).length, 0, '17:00 RED: no separate alert email is raised for it');
       }
-      [1, 4].forEach(function (h) {
+      [1, 6, 14].forEach(function (h) {
         const ss = staleWorld(h);
         TestEL_bind_(ss);
         const got = capture(function () { sendAllIssuesEmails(); });
-        TestAssertEqual_(TestGmailLog_.drafts.length + ',' + got.single.length + ',' + noticeCount(got.single[0]), '1,1,0', '17:00 at ' + h + ' h: sent, and no notice (only RED, over 5 h, gets one)');
+        TestAssertEqual_(TestGmailLog_.drafts.length + ',' + got.single.length + ',' + noticeCount(got.single[0]), '1,1,0', '17:00 at ' + h + ' h: sent, and no notice (only RED, at least 24 h, gets one)');
       });
       {
         // an ordinary bucket AND a CH-level report in one run: both carry the notice, last
-        const ss = staleWorld(6, [{ lead_id: 'L-CH', client_id: 'C-CH', RM: 'Test CH Self' }]);
+        const ss = staleWorld(30, [{ lead_id: 'L-CH', client_id: 'C-CH', RM: 'Test CH Self' }]);
         TestEL_bind_(ss);
         const got = capture(function () { sendAllIssuesEmails(); });
         TestAssertEqual_(TestGmailLog_.drafts.length + ',' + got.single.length, '2,2', '17:00 RED with a CH-held lead: the bucket email and the CH-level report both go out');
@@ -1510,7 +1510,7 @@ function runEmailLedgerTests_() {
       }
       {
         // the gate drops one lead and the bucket is re-built: the second build keeps the notice
-        const ss = staleWorld(6, [{ lead_id: 'L-MULTI', client_id: 'C-MULTI', lead_assigned_at: hrsAgo(7) }]);
+        const ss = staleWorld(30, [{ lead_id: 'L-MULTI', client_id: 'C-MULTI', lead_assigned_at: hrsAgo(31) }]);
         TestEL_bind_(ss);
         const got = capture(function () {
           const wrapped = renderOvernightReportEmailHTML_;
@@ -1529,14 +1529,14 @@ function runEmailLedgerTests_() {
         const realFresh = leadsFreshnessFromRowsGs_;
         leadsFreshnessFromRowsGs_ = function () { throw new Error('simulated freshness failure'); };
         let got;
-        try { TestEL_bind_(staleWorld(6)); got = capture(function () { sendAllIssuesEmails(); }); } finally { leadsFreshnessFromRowsGs_ = realFresh; }
+        try { TestEL_bind_(staleWorld(30)); got = capture(function () { sendAllIssuesEmails(); }); } finally { leadsFreshnessFromRowsGs_ = realFresh; }
         TestAssertEqual_(TestGmailLog_.drafts.length + ',' + noticeCount(got.single[0]), '1,0', 'fail-open: an error in the freshness check never stops the email - it just has no notice');
       }
       {
         // a recovery re-send judges the tab at the time of THAT send
         const mk = function () {
           const ss = TestEL_world_(function (header) {
-            return [flaggedLead(header, { lead_id: 'L-PUNE', client_id: 'C-PUNE', region: 'Pune' }), flaggedLead(header, { lead_id: 'L-THANE', client_id: 'C-THANE', region: 'Thane' }), markerLead(header, 6)];
+            return [flaggedLead(header, { lead_id: 'L-PUNE', client_id: 'C-PUNE', region: 'Pune' }), flaggedLead(header, { lead_id: 'L-THANE', client_id: 'C-THANE', region: 'Thane' }), markerLead(header, 30)];
           });
           TestEL_bind_(ss);
           failingGmailFor('L-PUNE');
@@ -1586,7 +1586,7 @@ function runEmailLedgerTests_() {
         TestAssertEqual_(ledgerRows(w, 'morning10')[0].status + ',' + ledgerRows(w, 'followup13')[0].status, 'ACCEPTED,ACCEPTED', 'GREEN tab: both are ACCEPTED as before');
       }
       {
-        // the 10:00 CH-level overnight report: leads assigned the evening before are well over 5 h old
+        // the 10:00 CH-level overnight report: its leads are from last evening on, so the tab can never be a day stale at 10:00 for real - the RED reading is forced here to prove the wiring
         const header = TestFixture_leadsHeader_();
         const banner = header.map(function () { return ''; });
         const nowO = new Date();
@@ -1600,7 +1600,10 @@ function runEmailLedgerTests_() {
           TestEL_leadRow_(header, { lead_id: 'L-CH', client_id: 'C-CH', RM: 'Test CH Self', lead_assigned_at: eveningBefore }),
         ]);
         TestEL_bind_(ssO);
-        const got = capture(function () { sendOvernightMorningEmails(); });
+        const realNotice = staleLeadsNoticeFromRowsGs_;
+        staleLeadsNoticeFromRowsGs_ = function () { return staleLeadsNoticeSectionGs_({ level: 'RED', ageHours: 30, newest: new Date(Date.now() - 30 * 3600000) }); };
+        let got;
+        try { got = capture(function () { sendOvernightMorningEmails(); }); } finally { staleLeadsNoticeFromRowsGs_ = realNotice; }
         TestAssertEqual_(got.two.length + ',' + got.standalone.length, '1,1', '10:00 RED: the combined email and the CH-level overnight report were both built');
         TestAssert_(isLastNotice(got.two[0][1]), '10:00 RED: the combined email ends with the notice');
         TestAssert_(isLastNotice(got.standalone[0]), '10:00 RED: the CH-level overnight report ends with it too');

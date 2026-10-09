@@ -838,6 +838,14 @@ function emailJobScheduleGs_() {
   // EmailSweep.gs (Email Ops EO-5): the daily 15:45 bounce/reply sweep that feeds the 16:30 report.
   if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: '15:45 bounce/reply sweep' };
   if (typeof CYCLE_REPORT_HOUR_ !== 'undefined') schedule.sendEmailCycleReport = { hour: CYCLE_REPORT_HOUR_, minute: CYCLE_REPORT_MINUTE_, label: '16:30 cycle report' };
+  // OpsAudit.gs (Email Ops EO-3 / EO-4): the three silent audits that follow each email job (11:15, 14:00, 18:00). A silent job that stops running is invisible by design,
+  // so the watchdog watches them like any other. Only watched once that file is part of the project.
+  if (typeof OPS_AUDIT_SPECS_ !== 'undefined') {
+    Object.keys(OPS_AUDIT_SPECS_).forEach(function (k) {
+      const a = OPS_AUDIT_SPECS_[k];
+      schedule[a.job] = { hour: a.hour, minute: a.minute, label: pad2Gs_(a.hour) + ':' + pad2Gs_(a.minute) + ' audit of the ' + a.label };
+    });
+  }
   return schedule;
 }
 function emailJobRunKeyGs_(jobName) { return 'EMAIL_JOB_RUN_' + jobName; }
@@ -1016,14 +1024,15 @@ function showEmailJobRunsNow() {
 
 // ---- Leads-tab freshness and the stale-data notice (Email Ops EO-10; plan decision D4 and the 2026-10-09 answer) ----
 // The Leads tab is refreshed about every other hour, at varying times, and carries no "last imported" cell, so its freshness is judged from the newest lead
-// assignment time: more than 3 h old = AMBER, more than 5 h = RED. If the refresh process ever writes a timestamp cell, use that instead. A RED tab never holds an email:
+// assignment time: at least 12 h old = AMBER, at least 24 h = RED ("stale" - decided 2026-10-09: a stale lead must be at least 24 hours old; leads arrive irregularly, so a
+// shorter gap is just a quiet spell). If the refresh process ever writes a timestamp cell, use that instead. A RED tab never holds an email:
 // every email that is sent carries a separate "Data freshness notice" section at its very bottom (staleLeadsNoticeSectionGs_), and the 16:30 report lists it.
-const LEADS_FRESH_AMBER_HOURS_ = 3;
-const LEADS_FRESH_RED_HOURS_ = 5;
+const LEADS_FRESH_AMBER_HOURS_ = 12;
+const LEADS_FRESH_RED_HOURS_ = 24;
 
 function leadsFreshnessLevelGs_(ageHours) {
-  if (ageHours > LEADS_FRESH_RED_HOURS_) return 'RED';
-  if (ageHours > LEADS_FRESH_AMBER_HOURS_) return 'AMBER';
+  if (ageHours >= LEADS_FRESH_RED_HOURS_) return 'RED';
+  if (ageHours >= LEADS_FRESH_AMBER_HOURS_) return 'AMBER';
   return 'GREEN';
 }
 
@@ -1040,7 +1049,7 @@ function leadsFreshnessFromRowsGs_(colIndex, dataRows, now) {
   const level = leadsFreshnessLevelGs_(ageHours);
   const when = Utilities.formatDate(newest, 'Asia/Kolkata', 'd MMM HH:mm');
   const text = level + ': the newest lead was assigned ' + (Math.round(ageHours * 10) / 10) + ' h ago (' + when + ' IST)' +
-    (level === 'GREEN' ? '' : ' - older than ' + (level === 'RED' ? LEADS_FRESH_RED_HOURS_ : LEADS_FRESH_AMBER_HOURS_) + ' h; the Leads tab refresh (about every 2 h) may be late, so the 17:00 emails would describe stale data');
+    (level === 'GREEN' ? '' : ' - at least ' + (level === 'RED' ? LEADS_FRESH_RED_HOURS_ : LEADS_FRESH_AMBER_HOURS_) + ' h old; the Leads tab refresh (about every 2 h) may have stopped, so the emails would describe stale data');
   return { level: level, ageHours: ageHours, newest: newest, text: text };
 }
 

@@ -773,7 +773,11 @@ function runEmailInfraTests_() {
       const iso = function (hhmm) { return at(hhmm).toISOString(); };
       const rec = function (job, r) { writeEmailJobRunGs_(job, Object.assign({ day: todayDay }, r)); };
       const M = 'sendOvernightMorningEmails', F = 'sendOvernightFollowupEmails', A = 'sendAllIssuesEmails';
-      const kinds = function (ps) { return ps.map(function (p) { return p.job + ':' + p.kind; }).sort().join(','); };
+      // The three OpsAudit.gs audits (11:15, 14:00, 18:00) are on the schedule too once that file is part of the project; their own deadlines are tested in
+      // Tests_OpsAudit.gs, so here they are left out of the lists (kinds) and recorded as done where alerts are counted (auditsDone).
+      const isAuditJob = function (job) { return job.indexOf('audit') === 0; };
+      const kinds = function (ps) { return ps.filter(function (p) { return !isAuditJob(p.job); }).map(function (p) { return p.job + ':' + p.kind; }).sort().join(','); };
+      const auditsDone = function () { ['auditMorningEmails', 'auditFollowupEmails', 'auditAllIssuesEmails'].forEach(function (j) { rec(j, { startedAt: iso('00:01'), finishedAt: iso('00:02'), status: 'completed' }); }); };
       try {
         // ---- the run record itself (through withEmailJobLockGs_) ----
         PropertiesService = TestMockPropertiesService_();
@@ -857,6 +861,7 @@ function runEmailInfraTests_() {
 
         // ---- checkEmailJobsCompletedGs_: alerts once per job/day/kind ----
         PropertiesService = TestMockPropertiesService_();
+        auditsDone();
         const alertsOf = function (fn) { const before = TestGmailLog_.sent.length; const r = fn(); return { result: r, alerts: TestGmailLog_.sent.slice(before) }; };
         const first = alertsOf(function () { return checkEmailJobsCompletedGs_(at('10:35')); });
         TestAssertEqual_(first.alerts.length, 1, 'watchdog: a job that never started produces exactly one alert');
@@ -881,6 +886,7 @@ function runEmailInfraTests_() {
         TestAssertEqual_(nextDay.alerts.length, 1, 'watchdog: the next day\'s missing run alerts again (the dedupe is per day)');
         // A failed run is reported once even though the job sent its own alert (that alert may not have arrived).
         PropertiesService = TestMockPropertiesService_();
+        auditsDone();
         rec(F, { startedAt: iso('13:01'), finishedAt: iso('13:03'), status: 'failed', error: 'boom' });
         rec(M, { startedAt: iso('10:03'), finishedAt: iso('10:07'), status: 'completed' });
         const failAlerts = alertsOf(function () { return checkEmailJobsCompletedGs_(at('13:40')); });

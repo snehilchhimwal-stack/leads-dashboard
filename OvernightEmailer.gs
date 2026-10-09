@@ -979,7 +979,7 @@ function sendOvernightMorningEmails_(opts) {
   // judged against this snapshot (passed to sendCombinedMorningEmail_ below).
   const leadsData = readLeadsTab_(ss);
   const { colIndex, dataRows } = leadsData;
-  // Leads tab RED (> 5 h old): every email of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
+  // Leads tab RED (newest lead at least 24 h old): every email of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
   const staleNotice = staleLeadsNoticeFromRowsGs_(colIndex, dataRows, now);
   const recipients = loadRegionRecipients_(ss);
   // Loaded ONCE here and threaded through resolveRecipientEmailsForRegion_
@@ -1916,7 +1916,7 @@ function sendOvernightFollowupEmails_(opts) {
   // The ONE whole-sheet read of the run (email audit P8 / F8) — Section 1's classification AND every bucket's Checkpoint 2 use it.
   const leadsData = readLeadsTab_(ss);
   const { colIndex, dataRows } = leadsData;
-  // Leads tab RED (> 5 h old): every reply of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
+  // Leads tab RED (newest lead at least 24 h old): every reply of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
   const staleNotice = staleLeadsNoticeFromRowsGs_(colIndex, dataRows, now);
   // buildMovementLogMapsGs_ (MovementTracker.gs) reads Movement_Log ONCE
   // and derives both maps from that one read — see
