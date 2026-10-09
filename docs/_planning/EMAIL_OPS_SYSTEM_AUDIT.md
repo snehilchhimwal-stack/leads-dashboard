@@ -5,6 +5,20 @@ Source: the "Senior Sales Operations Manager / Workflow Architect / Email Proces
 fault-isolation rules, 13:00 audit, 17:00 primary send, follow-ups, end-of-day report, six-table schema).
 Builds on `docs/_planning/EMAIL_AUDIT.md` (P1-P18c, all deployed) - read that first; this document does not repeat it.
 
+## 0. Decisions recorded 2026-10-09 (these override anything below that disagrees)
+
+| # | Question | Decision |
+|---|---|---|
+| D1 | Who gets reports, and when | **Snehil only** (the ops-alert address). **One report at 16:30 every day** covering the whole cycle that started at the previous day's 17:00 (that 17:00 send, today's 10:00 and 13:00, bounces/replies found since, follow-ups, incidents, rates) - sent when everything is fine **and** when it is not |
+| D2 | When an error is reported | **After the rest of that job's emails are confirmed sent.** An error never delays or interrupts the safe work: alerts raised during a job are held, and sent once as one message at the end of the job, starting with a confirmation line ("N of M other bucket emails accepted"). A failure of the whole job (nothing left to confirm) is sent at once. The 13:00 / 17:00 audit passes run silently when clean and email only on an exception |
+| D3 | Lead-level isolation | **Yes - drop only the defective lead.** The rest of that bucket's email still goes out. A bucket with no valid lead left is recorded as excluded. Every dropped lead is recorded with its reason |
+| D4 | Leads-tab freshness | The tab refreshes about **every other hour, at varying times**; no "last imported" cell exists. Default gate: newest lead evidence older than 3 h on a working day = AMBER, older than 5 h = RED. If the refresh process can write one timestamp cell, the gate becomes exact (a one-cell change on your side; not required) |
+| D5 | Late sends | Default: a blocked 17:00 bucket recovered up to **18:30** is sent late; after that it is recorded "rescheduled" and not sent |
+
+Consequences already folded into the parts below: the separate 13:35 / 17:35 / 19:00 emails are gone (their checks still run,
+silently, and feed the 16:30 report); `Email_Ledger_Leads` is now exclusion-only (see section 6); EO-2 also owns the held-alert
+mechanism; EO-1 is built in two steps (EO-1a: ledger + the 17:00 job; EO-1b: the 10:00 and 13:00 jobs).
+
 ## 1. Goal
 
 Turn the existing three-email pipeline (10:00 overnight + checkpoint 1, 13:00 checkpoint 2, **17:00 all-issues - the primary send**)
@@ -112,7 +126,7 @@ Reuse what exists; add only what is genuinely missing (no second copy of lead da
 | Spec table | Decision |
 |---|---|
 | A. Lead Master | **Reuse** Leads tab (CRM export) + `Daily_RM_Issues` + `Lead_Followups`. No new sheet. Lead-level status per email lives in the ledger's lead child rows |
-| B. Email Activity Log | **NEW `Email_Ledger`** (one row per bucket email) + **`Email_Ledger_Leads`** (one row per lead per email; keeps lead-level and email-level counts separate) |
+| B. Email Activity Log | **NEW `Email_Ledger`** (one row per bucket email; the leads it carries are kept in its `lead_ids_json` cell, so lead-level counts come from there) + **`Email_Ledger_Exclusions`** (one row per lead or bucket that did NOT go, with the reason - small, because only the exceptions are stored) |
 | C. Follow-up Tracker | **Derived view** (a function + a report section) over `Lead_Followups` + the checkpoint JSON; add a sheet only if the view proves too slow |
 | D. Daily Quality Checklist | **NEW `Daily_Checklist`** (A-K stages x checks, auto-evaluated, one row per check per day) |
 | E. Incident and Exception Log | **NEW `Incident_Log`** (fed by `notifyOpsAlertGs_` + the isolation paths) |
@@ -167,19 +181,20 @@ user a manual paste + Ctrl+S; parts inside a wave are built and tested together 
 
 | Part | Delivers | Touches | Size | Needs |
 |---|---|---|---|---|
-| **EO-1** | `Email_Ledger` + `Email_Ledger_Leads`, hook in `sendGuardedEmailGs_`, `EXCLUDED/BLOCKED` records at the skip points of both emailers, fail-open | new `EmailLedger.gs` + `Tests_EmailLedger.gs`; `EmailInfra.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs` | L | - |
-| **EO-2** | `Incident_Log`, auto-feed from `notifyOpsAlertGs_`, incident ids, scope (item / partial / system), continuity decision text | `EmailLedger.gs` (or `IncidentLog.gs`), `EmailInfra.gs` | M | EO-1 |
+| **EO-1a** | `Email_Ledger` + `Email_Ledger_Exclusions` and the **17:00 job** wired to them: buckets recorded PLANNED per region (one batch write), then ACCEPTED / FAILED / BLOCKED / EXCLUDED with message + thread id; skip points (unresolvable recipient, region already sent, excluded RM) recorded with reasons; **per-lead isolation (D3): a defective lead is dropped and recorded, the rest of the bucket goes**; fail-open | new `EmailLedger.gs` + `Tests_EmailLedger.gs`; `AllIssuesEmailer.gs` only (the shared sender is not touched, so the 10:00/13:00 jobs are unaffected) | L | - |
+| **EO-1b** | The same ledger wiring for the **10:00 and 13:00 jobs** (and the CH-level reports) | `OvernightEmailer.gs` | M | EO-1a |
+| **EO-2** | `Incident_Log` fed from `notifyOpsAlertGs_` (id, scope, continuity decision) **plus the held-alert mechanism (D2)**: alerts raised during a job are held and sent once, after the job, behind a "N of M other emails accepted" line; a whole-job failure is sent at once | `EmailLedger.gs`, `EmailInfra.gs` | M | EO-1a |
 | *Deploy wave 1* | | | | |
-| **EO-3** | **13:00 exception report** at ~13:35 (after the job's watchdog deadline): expected vs actual per bucket, confirmed failures vs "no evidence", disruptions + whether unaffected emails continued. Emailed to the owners; if sending is impossible, written as a labelled alert sheet row, and never reported as "sent" unless it was | new `OpsAudit.gs` + tests; `EmailInfra.gs` schedule | M | EO-1, EO-2 |
-| **EO-4** | **17:00 pre-send validation** (eligible / excluded + reasons / defective, per-bucket hold only for defective ones) and **post-send reconciliation** (~17:35: planned / attempted / accepted / failed / blocked / excluded / delayed; discrepancy count) | `OpsAudit.gs`, `AllIssuesEmailer.gs` | L | EO-1, EO-2 |
+| **EO-3** | **13:00 audit pass** (~13:35, silent when clean): expected vs actual per bucket, confirmed failure vs "no evidence", disruptions and whether unaffected emails continued. Emails Snehil only on an exception (after the rest is confirmed, D2); always feeds the 16:30 report | new `OpsAudit.gs` + tests; `EmailInfra.gs` schedule | M | EO-1a/b, EO-2 |
+| **EO-4** | **17:00 pre-send validation** (eligible / excluded + reasons / defective leads dropped) and **post-send reconciliation** (~17:35, silent when clean): planned / attempted / accepted / failed / blocked / excluded / delayed; discrepancy count; late-send window to 18:30 (D5) | `OpsAudit.gs`, `AllIssuesEmailer.gs` | L | EO-1a, EO-2 |
 | **EO-5** | Bounce + reply sweep: bounces matched to the ledger by recipient + time, replies by `thread_id`; sets `BOUNCED / REPLIED / NO_BOUNCE_SEEN` | new `EmailSweep.gs` + tests | M | EO-1 |
 | *Deploy wave 2* | | | | |
 | **EO-6** | `Daily_Checklist` stages A-K, auto-evaluated checks, GREEN/AMBER/RED/GREY, severities, "missing evidence is AMBER, never RED" | new `DailyChecklist.gs` + tests | L | EO-1..5 |
 | **EO-7** | Follow-up tracker view + the "no follow-up after reply/bounce/ineligible" rule | `DailyChecklist.gs` / `LeadFollowupsStaleness.gs` read-only helpers | M | EO-5 |
-| **EO-8** | End-of-day report (~19:00): the spec's 25 counts and 9 rates with numerator/denominator and period; `Daily_Report` row; email to owners | new `DailyReport.gs` + tests | L | EO-1..7 |
+| **EO-8** | **16:30 cycle report** (previous 17:00 -> today 16:30), always sent to Snehil: the spec's 25 counts and 9 rates with numerator, denominator and period; `Daily_Report` row; readiness section for the coming 17:00 (freshness, config problems, open incidents). Needs a minute field in the watchdog schedule | new `DailyReport.gs` + tests; `EmailInfra.gs` | L | EO-1..7 |
 | **EO-9** | Recovery: `recoverBlockedEmailsNow()` (revalidate -> window check -> send / reschedule -> documented outcome) + ledger-checked retries (consult ledger, classify temporary vs permanent) | `EmailLedger.gs`, emailers | M | EO-1, EO-2 |
 | *Deploy wave 3* | | | | |
-| **EO-10** | Freshness / data-quality gate before 17:00 (Leads-tab recency, row-count sanity, duplicate-id check) -> AMBER/RED, holds only what truly depends on the data | `OpsAudit.gs` | M | Q3 answer |
+| **EO-10** | Leads-tab freshness gate before 17:00 (D4: AMBER > 3 h, RED > 5 h of newest-lead age on a working day; row-count sanity; duplicate-id check); holds only what depends on the data | `OpsAudit.gs` | M | - |
 | **EO-11** | Fault-injection E2E: invalid lead, failed email, duplicate-send risk, data-source outage, platform outage, excluded recipient, delayed follow-up, mixed batch - each mutation-proved, run at awkward clock times/zones | `Tests_EmailOps_E2E.gs` | M | EO-1..9 |
 | **EO-12** | Operating manual (the spec's 14-part output) + `HANDOVER`/`OPS_CHECKLIST`/`docs/` records + deploy register | docs only | M | everything |
 | *Deploy wave 4* | | | | |
@@ -193,14 +208,14 @@ a deploy-register row, and the post-deploy `setupXxx()` for any new trigger.
 
 1. Emails stay internal; no outbound email to leads is introduced.
 2. The ledger records **accepted**, never "delivered"; opens are not tracked (no tracking pixel).
-3. Owners and recipients of the exception / end-of-day reports: same three people as the RM-hierarchy sync report.
-4. Report times: 13:35 exception report, 17:35 reconciliation, 19:00 end-of-day report (IST), each watched by the existing watchdog.
+3. Report recipient: Snehil only (decision D1).
+4. Report times: the 16:30 cycle report (IST) is always sent and watched by the watchdog; the 13:35 and 17:35 audit passes run silently and email only on an exception (D1, D2). The watchdog's schedule table needs a minute field for the 16:30 job.
 5. Severity mapping: CRITICAL = a whole job produced no email / the platform refused everything / an excluded recipient was emailed;
    HIGH = a region's bucket set failed or planned-vs-actual differs materially; MEDIUM = one bucket / one lead; LOW = administrative.
 6. A ledger or report failure never blocks an email (fail open + one alert per day).
 7. Nothing in this plan calls a live data-modifying function; every deploy follows the existing hash-verified paste procedure.
 
-## 11. Questions that genuinely change the build (answer when convenient; defaults above apply otherwise)
+## 11. Questions - ANSWERED 2026-10-09 (see section 0; kept for the record)
 
 1. **Report recipients and times** - are the defaults in assumptions 3 and 4 right?
 2. **Lead-level isolation (spec rule 1)** - today a bucket email is the smallest unit: one bad address blocks that bucket, not the others.
