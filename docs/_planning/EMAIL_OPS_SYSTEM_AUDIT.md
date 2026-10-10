@@ -15,12 +15,13 @@ Builds on `docs/_planning/EMAIL_AUDIT.md` (P1-P18c, all deployed) - read that fi
 | EO-5 | the 15:45 bounce / reply sweep (feeds the report; alerts on a new bounce) | `EmailSweep.gs` (new) | `GS-017` |
 | EO-9 / EO-9b | recovery of failed emails: `recoverFailedAllIssuesBucketsNow()` (until 18:30), `recoverFailedMorningBucketsNow()` (until 12:45), `recoverFailedFollowupBucketsNow()` (until 16:00); FAILED / BLOCKED / never-attempted (PLANNED) buckets only, never UNCONFIRMED | `EmailLedger.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs` | `GS-015` FN-409, `GS-001`, `GS-010` FN-410 |
 | EO-3 / EO-4 | three silent audits (~11:15, ~14:00, ~18:00) that compare the ledger with `Overnight_Log` / `AllIssues_Log`; one ops alert only on an exception | `OpsAudit.gs` (new) | `GS-018` |
+| EO-6 | the daily checklist A-K: eleven stages with a GREEN / AMBER / RED / GREY flag and evidence each, in the 16:30 report and the `Daily_Checklist` tab | `DailyChecklist.gs` (new), `CycleReport.gs` | `GS-019`, `SHEET-023` |
 
-All fourteen files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs` and their four `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
+All sixteen files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs` and their five `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
 `Tests_EmailInfra.gs`, `Tests_Mocks.gs`, `Tests_RunAll.gs` are changed. Nothing is live until pasted into the Sheet's Apps Script editor (CLAUDE.md; `docs/STALENESS_TRACKER.md` deploy register).
 
 **Put it live (in this order, with Snehil at the keyboard for Ctrl+S):**
-1. Paste the 14 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
+1. Paste the 16 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each (each installs its daily trigger(s) and replaces only its own earlier ones).
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()` (all read-only). The first audit after the ledger is first pasted may say "Email_Ledger has none for the ... job" - expected once, for the jobs that ran before the ledger existed.
 4. The tabs `Email_Ledger`, `Email_Ledger_Exclusions` and `Incident_Log` create themselves on the first 17:00 run / first alert. After that day's 17:00 run, run `showEmailLedgerTodayNow()`; the next day expect the 15:45 sweep and the 16:30 report.
@@ -29,7 +30,7 @@ Rollback: paste the previous versions from git (`git show <sha>:EmailInfra.gs` e
 
 Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER from 12 h / RED from 24 h - D7; nothing is blocked) and the `Daily_Report` row per day (EO-8b). **D6 (2026-10-09): a RED tab never holds an email; every email carries a separate bottom "Data freshness notice" section instead.**
 
-**Not built yet:** EO-6 (daily checklist A-K with GREEN/AMBER/RED/GREY) and EO-7 (follow-up tracker). Everything else in the plan is built (deployment is the user's step - see the runbook above).
+**Not built yet:** EO-7 (follow-up tracker). Everything else in the plan is built (deployment is the user's step - see the runbook above).
 
 Also built: EO-11 as acceptance scenarios inside the existing suites (invalid lead, failed email, duplicate-send risk, data-source outage, platform outage + recovery, excluded RM, mixed batch - table at the end of the manual) and EO-12, the operating manual: `docs/EMAIL_OPS_OPERATING_MANUAL.md`.
 

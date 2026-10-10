@@ -255,6 +255,9 @@ function runDailyChecklistTests_() {
       ledgerSheet.getRange(r17.rowNo, emailLedgerCol_('status'), 1, 1).setValues([['ACCEPTED']]);
       PropertiesService.getScriptProperties().setProperty('EMAIL_AUDIT_LAST_auditAllIssuesEmails', JSON.stringify({ day: istDayKeyGs_(reportNow), ranAt: new Date().toISOString(), status: 'exceptions', count: 1, codes: ['UNFINISHED'], reason: '' }));
       TestAssertContains_(damaged(), 'G:GREEN H:GREEN I:RED', 'real cycle, the 17:00 audit found an exception: the 17:00 stage is RED');
+      const realProblems0 = emailJobProblemsGs_;
+      emailJobProblemsGs_ = function () { throw new Error('simulated: the run records cannot be read'); };
+      try { TestAssertContains_(damaged(), 'A:AMBER', 'real cycle, the job run records cannot be read: the start-of-day stage is AMBER (missing evidence), never GREEN and never RED'); } finally { emailJobProblemsGs_ = realProblems0; }
       const realProblems = emailJobProblemsGs_;
       emailJobProblemsGs_ = function () { return [{ job: 'sendOvernightFollowupEmails', kind: 'failed', detail: 'boom' }]; }; // what the watchdog reports for a failed run (its own clock rules are tested in Tests_EmailInfra.gs)
       try { TestAssertContains_(damaged(), 'A:RED', 'real cycle, the watchdog reports a failed job: the start-of-day stage is RED'); } finally { emailJobProblemsGs_ = realProblems; }

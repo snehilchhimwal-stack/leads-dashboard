@@ -105,6 +105,8 @@ Missing evidence is never reported as a confirmed failure: it is AMBER/`UNKNOWN`
 | J Follow-up monitoring | bounces and replies (15:45 sweep) | automatic | sweep columns, the report |
 | K End-of-day reconciliation | **the 16:30 report** | automatic; **you read it** | the email, `Daily_Report` |
 
+The report evaluates this table itself and shows it as "Daily checklist (A-K)" with a flag and the evidence per stage (also stored in the `Daily_Checklist` tab): GREEN done and supported; AMBER look, or the evidence is missing; RED a failure is on record; GREY not applicable. `showDailyChecklistNow()` previews it.
+
 Never mark an action complete because it was planned or attempted: a ledger row stays `PLANNED`/`ATTEMPTING` until a result is recorded, and the report counts such rows as unfinished.
 
 ## 6. After the 13:00 run - what an error looks like
@@ -212,12 +214,12 @@ No notification is claimed sent unless the send path confirmed it: an incident i
 
 ## 13. Roadmap
 
-Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-9b 10:00/13:00 recovery, EO-3/EO-4 silent audits, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
-Planned: EO-6 a per-check daily checklist sheet with GREEN/AMBER/RED/GREY cells, EO-7 follow-up tracker view and the stop-after-reply rule.
+Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-9b 10:00/13:00 recovery, EO-3/EO-4 silent audits, EO-6 daily checklist, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
+Planned: EO-7 follow-up tracker view and the stop-after-reply rule.
 
 ## 14. First five actions
 
-1. Paste the 14 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
+1. Paste the 16 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each.
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()`.
 4. After the next 17:00 run, run `showEmailLedgerTodayNow()`; next day expect the 16:30 report.
