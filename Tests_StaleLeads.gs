@@ -185,6 +185,9 @@ function runStaleLeadsTests_() {
       TestAssertContains_(wb[2].subheading, 'Pune', 'split: a stale copy of a banded table keeps its region in the sub-heading');
       const wb2 = splitStaleSectionsGs_(withBands, { a: new Date(hrs(30)), b: new Date(hrs(31)), c: new Date(hrs(32)) });
       TestAssertEqual_(wb2.map(function (s) { return s.heading + ':' + s.regionBand; }).join(','), 'B1:Thane,A1:Stale leads - no update for more than 24 hours,A2:undefined', 'split: a region with no fresh lead left loses its band and its tables');
+      // the band also moves on when the next table of the region is only PARTLY stale
+      const wb3 = splitStaleSectionsGs_([sec('A1', ['a', 'b'], { regionBand: 'Pune' }), sec('A2', ['c', 'e'])], { a: new Date(hrs(30)), b: new Date(hrs(31)), e: new Date(hrs(32)) });
+      TestAssertEqual_(wb3[0].heading + ':' + wb3[0].regionBand + ':' + wb3[0].rows.length, 'A2:Pune:1', 'split: the band of a region passes to its next table even when that table loses some rows too');
       // the plain-text twin carries the block too
       const text = plainTextFromReportOptsGs_({ title: 't', sections: splitStaleSectionsGs_([sec('X', ['P', 'Q'])], { P: new Date(hrs(30)) }) });
       TestAssertContains_(text, '== Stale leads - no update for more than 24 hours ==', 'split: the plain-text version has the band');

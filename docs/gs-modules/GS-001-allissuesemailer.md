@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `8ebf41a` - the 17:00 recovery runs on the shared driver and also re-sends PLANNED buckets (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-10 against commit `59db11b` - stale leads are held in a bottom block (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -247,6 +247,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 **2026-10-09** (`ea5fdc5`, Email Ops, decision D6): `sendAllIssuesEmails_` judges the Leads tab's freshness once per run from the rows it already read (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when the tab is RED, a RED Leads tab (newest lead assigned at least 24 h ago) now adds a separate **"Data freshness notice"** section at the very bottom of every email (17:00 bucket and CH-level, 10:00 combined and CH-level, 13:00 reply) - the lead tables above stay complete and **no email is ever held** for it (user decision D6, 2026-10-09). The section is carried in the per-bucket context (so the quarantine-and-resend keeps it) and passed to `notifyChLevelIssuesGs_`; the recovery job re-judges the tab at its own send time. Nothing is held. **Not live until pasted.**
 
 **2026-10-09** (`f774462`, Email Ops EO-9b): the recovery's target reader, cutoff test and driver are now the shared `GS-015` FN-409 (this file keeps its wrappers and its own cutoff constants, CFG-116); buckets left PLANNED by a run that died are targets too (`GS-015` RULE-058). **Not live until pasted.**
+
+**2026-10-10** (`59db11b`, decision D8): the 2026-10-09 tab-level notice above was **withdrawn**. Instead `sendAllIssuesEmails_` puts a `staleSince` date on every flagged lead (`staleSinceOfRowGs_`, `GS-021`) and both the bucket email and the CH-level report move the stale leads (no update for more than 24 h) into a separate block at the bottom (`splitStaleSectionsGs_`); the leads stay in the body and in the counts. **Not live until pasted.**
 
 ## Revalidation trigger
 

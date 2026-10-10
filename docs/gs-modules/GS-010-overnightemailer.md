@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `8ebf41a` - the 10:00 / 13:00 recoveries (FN-410; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-10 against commit `59db11b` - stale leads are held in a bottom block (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -137,7 +137,7 @@ their own.
 | FN-236 | `sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)` `#L1454` | a thread id + content | a reply on that Gmail thread | raw **Advanced Gmail Service** call | — | FN-232, FN-280, `backfillTodaysOvernightLogRecipientsNow` | specific — uses the raw API because `GmailThread.reply()`/`replyAll()` hard-code the recipient to "sender of the last message" (a real production bug this works around) |
 | FN-237 | `formatFollowupAgeGs_(updatedAt, now)` / `overnightStatusLabelGs_` (in `GS-005`) `#L1262` | a timestamp | a human age string | none | — | FN-232 | reusable |
 | FN-238 | `notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel)` `#L134` | CH-level RMs + leads | a CH-level rollup email | Gmail send | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-231 | specific — called from inside `resolveRecipientEmailsForRegion_` (`GS-004` FN-…, `fireAlerts:true`), itself only reached from FN-231's `alreadyLoggedRegionsToday`-guarded branch — confirmed already idempotent during the Step 8/11 audit |
-| FN-239 | `setupOvernightEmailer()` `#L2280` | — | installs the 10:00 + 13:00 triggers; **also calls `setupRmHierarchy()`** | creates triggers; runs `GS-011` setup | `ScriptApp`, `setupRmHierarchy` (`GS-011`) | Apps Script editor (manual) | specific |
+| FN-239 | `setupOvernightEmailer()` `#L2279` | — | installs the 10:00 + 13:00 triggers; **also calls `setupRmHierarchy()`** | creates triggers; runs `GS-011` setup | `ScriptApp`, `setupRmHierarchy` (`GS-011`) | Apps Script editor (manual) | specific |
 | FN-272 | `buildOvernightSectionOptsGs_(region, leads, dateLabel, win)` `#L372` | a bucket's leads | Section 1's full `renderOvernightReportEmailHTML_` opts | none (pure) | — | FN-233, FN-275 | reusable — **extracted 2026-09-23 so a standalone overnight email and Section 1 of the combined email share one source of truth** |
 | FN-273 | `buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, originalDateLabel, snapshotEntries, checkpointResults)` `#L591` | the 17:00 snapshot + a checkpoint's comparison results | Section 2's full `renderOvernightReportEmailHTML_` opts, grouped by RM | none (pure) | `allIssuesCheckpointStateLabelGs_` `#L516` (private helper, same file) | FN-275, FN-280 | reusable — **joins `computeAllIssuesCheckpointGs_`'s output (`GS-012` FN-270, no RM/TL) back to the original snapshot entries (which have RM/TL) by `lead_id`; reused UNCHANGED for Checkpoint 2 (Step 7), just a different `checkpointLabel`/`checkpointResults`** **2026-09-26: lists and counts ONLY still-unresolved leads (via `allIssuesCheckpointIsActiveGs_`, `GS-012`) — a resolved / not-found lead is never shown, and the single KPI tile reads "Lead(s) Still Unresolved".** |
 | FN-274 | `renderTwoSectionEmailHTML_(section1Opts, section2Opts)` `#L652` | both sections' opts | the combined email HTML — two full `renderOvernightReportEmailHTML_` renders concatenated with a labeled divider | none (pure) | `renderOvernightReportEmailHTML_` (`GS-004`) ×2 | FN-275, FN-280 | reusable — **deliberately does NOT modify `renderOvernightReportEmailHTML_`'s own signature** (design doc Part 8: "wrap, don't modify" — that function also backs every `GS-001` single-section email) |
@@ -523,6 +523,8 @@ ending the session.
 **2026-10-09** (`ea5fdc5`, Email Ops, decision D6): `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` judge the Leads tab's freshness once per run (`staleLeadsNoticeFromRowsGs_`, `GS-004` FN-408) and, when it is RED, the notice is appended as the last section of Section 2 of the combined 10:00 email and of the 13:00 reply, and as the last section of the CH-level overnight report. It is passed through each bucket's ledger context; nothing is held. `sendOneOvernightEmail_` (the standalone, untriggered path) is deliberately unchanged. **Not live until pasted.**
 
 **2026-10-09** (`f774462`, Email Ops EO-9b): `recoverFailedMorningBucketsNow()` (until 12:45 IST) and `recoverFailedFollowupBucketsNow()` (until 16:00 IST) re-send just the failed, blocked or never-attempted 10:00 emails / 13:00 replies of the day; `sendOvernightMorningEmails_` and `sendOvernightFollowupEmails_` take an optional `{ onlyEmailIds }` (recovery only). With no argument they behave exactly as before. **Not live until pasted.**
+
+**2026-10-10** (`59db11b`, decision D8): the 2026-10-09 tab-level notice above was **withdrawn**. Instead the 10:00 and 13:00 jobs put a `staleSince` date on every lead they list (`GS-021`) and move the stale ones (no update for more than 24 h) into a separate block at the bottom of Section 1 (10:00 overnight leads, 13:00 still-unresolved), of Section 2 (the checkpoint tables) and of the CH-level overnight report; `leadsData.lastChangeMap` carries the Movement_Log history to the checkpoint lookups. The leads stay in the body and in the counts. **Not live until pasted.**
 
 ## Revalidation trigger
 

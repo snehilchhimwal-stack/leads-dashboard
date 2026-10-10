@@ -17,19 +17,20 @@ Builds on `docs/_planning/EMAIL_AUDIT.md` (P1-P18c, all deployed) - read that fi
 | EO-3 / EO-4 | three silent audits (~11:15, ~14:00, ~18:00) that compare the ledger with `Overnight_Log` / `AllIssues_Log`; one ops alert only on an exception | `OpsAudit.gs` (new) | `GS-018` |
 | EO-6 | the daily checklist A-K: eleven stages with a GREEN / AMBER / RED / GREY flag and evidence each, in the 16:30 report and the `Daily_Checklist` tab | `DailyChecklist.gs` (new), `CycleReport.gs` | `GS-019`, `SHEET-023` |
 | EO-7 | the follow-up tracker: each 17:00 bucket's two checkpoints COMPLETED / NOT_NEEDED / BLOCKED / OVERDUE / DUE / FUTURE, a bounced 17:00 email marked STOP (a status, not a behaviour); in the 16:30 report and the `Followup_Tracker` tab | `FollowupTracker.gs` (new), `EmailLedger.gs`, `CycleReport.gs` | `GS-020`, `SHEET-024` |
+| D8 | stale leads (no update for more than 24 h, whenever created) held in a red block at the bottom of every automatic email; judged from the Movement_Log content-hash history | `StaleLeads.gs` (new), `MovementTracker.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs` | `GS-021` |
 
-All eighteen files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs`, `FollowupTracker.gs` and their six `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
+All twenty files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs`, `FollowupTracker.gs`, `StaleLeads.gs` and their seven `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
 `Tests_EmailInfra.gs`, `Tests_Mocks.gs`, `Tests_RunAll.gs` are changed. Nothing is live until pasted into the Sheet's Apps Script editor (CLAUDE.md; `docs/STALENESS_TRACKER.md` deploy register).
 
 **Put it live (in this order, with Snehil at the keyboard for Ctrl+S):**
-1. Paste the 18 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
+1. Paste the 20 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each (each installs its daily trigger(s) and replaces only its own earlier ones).
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()` (all read-only). The first audit after the ledger is first pasted may say "Email_Ledger has none for the ... job" - expected once, for the jobs that ran before the ledger existed.
 4. The tabs `Email_Ledger`, `Email_Ledger_Exclusions` and `Incident_Log` create themselves on the first 17:00 run / first alert. After that day's 17:00 run, run `showEmailLedgerTodayNow()`; the next day expect the 15:45 sweep and the 16:30 report.
 5. Update the deploy register (`python3 test/match-live-gs.py ... --apply`).
 Rollback: paste the previous versions from git (`git show <sha>:EmailInfra.gs` etc.); the three new tabs can simply be left or hidden.
 
-Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER from 12 h / RED from 24 h - D7; nothing is blocked) and the `Daily_Report` row per day (EO-8b). **D6 (2026-10-09): a RED tab never holds an email; every email carries a separate bottom "Data freshness notice" section instead.**
+Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER over 3 h / RED over 5 h - D4; nothing is blocked) and the `Daily_Report` row per day (EO-8b). **D8 (2026-10-10): a stale LEAD - no update for more than 24 h, whenever created - is held in a separate block at the bottom of every email (`StaleLeads.gs`).**
 
 **Not built yet:** nothing from this plan. The one open decision is whether a bounce or a reply should stop follow-ups automatically (today a bounce only marks the tracker row STOP). Deployment is the user's step - see the runbook above.
 
@@ -42,10 +43,11 @@ Also built: EO-11 as acceptance scenarios inside the existing suites (invalid le
 | D1 | Who gets reports, and when | **Snehil only** (the ops-alert address). **One report at 16:30 every day** covering the whole cycle that started at the previous day's 17:00 (that 17:00 send, today's 10:00 and 13:00, bounces/replies found since, follow-ups, incidents, rates) - sent when everything is fine **and** when it is not |
 | D2 | When an error is reported | **After the rest of that job's emails are confirmed sent.** An error never delays or interrupts the safe work: alerts raised during a job are held, and sent once as one message at the end of the job, starting with a confirmation line ("N of M other bucket emails accepted"). A failure of the whole job (nothing left to confirm) is sent at once. The 13:00 / 17:00 audit passes run silently when clean and email only on an exception |
 | D3 | Lead-level isolation | **Yes - drop only the defective lead.** The rest of that bucket's email still goes out. A bucket with no valid lead left is recorded as excluded. Every dropped lead is recorded with its reason |
-| D4 | Leads-tab freshness | The tab refreshes about **every other hour, at varying times**; no "last imported" cell exists. Default gate (first guess: 3 h / 5 h; **changed by D7 on 2026-10-09 to 12 h AMBER / 24 h RED** - leads arrive irregularly, so a few hours is only a quiet spell). If the refresh process can write one timestamp cell, the gate becomes exact (a one-cell change on your side; not required) |
+| D4 | Leads-tab freshness | The tab refreshes about **every other hour, at varying times**; no "last imported" cell exists. Default gate: newest lead evidence older than 3 h = AMBER, older than 5 h = RED (a 16:30 report warning only). (A 2026-10-09 change to 12 h / 24 h rested on a misreading and was reverted.) If the refresh process can write one timestamp cell, the gate becomes exact (a one-cell change on your side; not required) |
 | D5 | Late sends | Default: a blocked 17:00 bucket recovered up to **18:30** is sent late; after that it is recorded "rescheduled" and not sent |
-| D6 | Stale Leads tab | **Decided 2026-10-09:** a RED Leads tab (newest lead at least 24 h old, D7) does NOT hold or block any email. Every email carries a separate "Data freshness notice" section as its last section, and the 16:30 report still lists the tab as AMBER/RED |
-| D7 | What "stale" means | **Decided 2026-10-09 (user):** a stale lead must be **at least 24 hours old**. The Leads tab is RED (stale) when its newest lead was assigned 24 h or more ago; the AMBER warning (report only) starts at 12 h - that 12 h is an assumed default, easy to change (`LEADS_FRESH_AMBER_HOURS_`) |
+| D6 | Stale Leads tab | *Withdrawn 2026-10-10* - a bottom "Data freshness notice" for a stale Leads TAB rested on a misreading of "stale lead" (see D8) |
+| D7 | What "stale" means | *Withdrawn 2026-10-10* - replaced by D8 |
+| D8 | Stale leads | **Decided 2026-10-10 (user):** a stale lead is one with **no update at all for more than 24 hours** - no stage change, no comment added, no call-count increase - **no matter when it was created or assigned**. Stale leads are "held at the bottom in a separate part of the email": every automatic email (17:00 bucket and CH-level, 10:00 combined and CH-level, 13:00 reply) lists them in a red block after the ordinary tables; they stay in the email and its counts |
 
 Consequences already folded into the parts below: the separate 13:35 / 17:35 / 19:00 emails are gone (their checks still run,
 silently, and feed the 16:30 report); `Email_Ledger_Leads` is now exclusion-only (see section 6); EO-2 also owns the held-alert
@@ -226,7 +228,7 @@ user a manual paste + Ctrl+S; parts inside a wave are built and tested together 
 | **EO-8** | **16:30 cycle report** (previous 17:00 -> today 16:30), always sent to Snehil: the spec's 25 counts and 9 rates with numerator, denominator and period; `Daily_Report` row; readiness section for the coming 17:00 (freshness, config problems, open incidents). Needs a minute field in the watchdog schedule | new `DailyReport.gs` + tests; `EmailInfra.gs` | L | EO-1..7 |
 | **EO-9** | Recovery: `recoverBlockedEmailsNow()` (revalidate -> window check -> send / reschedule -> documented outcome) + ledger-checked retries (consult ledger, classify temporary vs permanent) | `EmailLedger.gs`, emailers | M | EO-1, EO-2 |
 | *Deploy wave 3* | | | | |
-| **EO-10** | Leads-tab freshness (D4/D7: AMBER from 12 h, RED from 24 h of newest-lead age). **Not a gate (D6): a RED tab adds a bottom notice to every email; nothing is held** - built; row-count sanity and a duplicate-id check are not built | `OpsAudit.gs` | M | - |
+| **EO-10** | Leads-tab freshness (D4: AMBER > 3 h, RED > 5 h of newest-lead age) as a 16:30 report warning only - built; row-count sanity and a duplicate-id check are not built | `OpsAudit.gs` | M | - |
 | **EO-11** | Fault-injection E2E: invalid lead, failed email, duplicate-send risk, data-source outage, platform outage, excluded recipient, delayed follow-up, mixed batch - each mutation-proved, run at awkward clock times/zones | `Tests_EmailOps_E2E.gs` | M | EO-1..9 |
 | **EO-12** | Operating manual (the spec's 14-part output) + `HANDOVER`/`OPS_CHECKLIST`/`docs/` records + deploy register | docs only | M | everything |
 | *Deploy wave 4* | | | | |

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `8ebf41a` - revalidated after the bottom data-freshness notice (email content only; no change to the Gmail send itself) |
+| **Last Verified** | 2026-10-10 against commit `59db11b` - revalidated after the stale-lead block (email content only; no change to the Gmail send itself) |
 
 ## Purpose / reason to exist
 
@@ -187,6 +187,8 @@ note doesn't read as ignored.
 **Revalidated 2026-10-09** `b1dbc3a`: flagged after `EmailInfra.gs` advanced (`GS-004` `FN-323`/`FN-324`, Email Ops EO-1a). The send gate now also reports WHICH counted leads were absent from a body (`missingLeadIds`), so the 17:00 emailer can drop just those leads and resend the rest; the Gmail send itself, its scopes, recipients and the browser grant are unchanged. The 17:00 job also records each send in a new ledger (`GS-015`), using the `GmailMessage` ids `send()` already returns.
 
 **2026-10-09** (`ea5fdc5`, Email Ops, decision D6): email CONTENT only - a RED Leads tab adds a bottom "Data freshness notice" section (`GS-004` FN-408). The notice carries no lead ids, so the send-safety gate's lead check is unaffected; the Gmail send path itself is unchanged.
+
+**2026-10-10** (`59db11b`, decision D8): the 2026-10-09 "Data freshness notice" was withdrawn; emails instead hold stale LEADS in a bottom block (`GS-021`) - email content only, every lead stays in the body, so the send-safety gate's lead check and the Gmail send path are unaffected.
 
 ## Revalidation trigger
 
