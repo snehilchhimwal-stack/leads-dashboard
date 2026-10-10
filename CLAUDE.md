@@ -3,6 +3,11 @@
 Quick orientation and the gotchas that actually bite. For depth on any of
 this, see `HANDOVER.md` — this file deliberately doesn't duplicate it.
 
+**New to this project, or taking it over from another Claude account?** Read
+`docs/TEAM_CLAUDE_HANDOVER.md` first (written 2026-10-10): the working
+agreements with Snehil, the safety rules, every subsystem, and a full account
+of what was built but is unused, withdrawn or superseded — and why.
+
 ## What this is
 
 Two independent halves sharing one Google Sheet, never talking to each
