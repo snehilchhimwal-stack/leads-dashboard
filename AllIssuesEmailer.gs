@@ -227,6 +227,7 @@ function sendAllIssuesEmails_(opts) {
   const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
   const baselineMap = movementMaps.baselineMap;
   const lastSnapshotMap = movementMaps.lastSnapshotMap;
+  const lastChangeMap = movementMaps.lastChangeMap || {}; // for the stale-lead block (decision D8)
   Logger.log('[timing] buildMovementLogMapsGs_ done at ' + elapsed_() + ' — all preliminary reads finished, starting the per-region send loop');
 
   // Flat candidate list first, deduped by customer identity, THEN grouped
@@ -270,6 +271,7 @@ function sendAllIssuesEmails_(opts) {
       status: overnightStatusLabelGs_(stage),
       issueLabel: issue.label,
       followup: overnightFollowupHintGs_(row, colIndex, now, baselineEntry),
+      staleSince: staleSinceOfRowGs_(row, colIndex, lastChangeMap, now),
     });
   });
 
@@ -291,7 +293,7 @@ function sendAllIssuesEmails_(opts) {
     if (!byRegion[groupKey]) byRegion[groupKey] = [];
     byRegion[groupKey].push({
       lead_id: l.lead_id, RM: l.RM, TL: l.TL, region: l.region,
-      status: l.status, issueLabel: l.issueLabel, followup: l.followup,
+      status: l.status, issueLabel: l.issueLabel, followup: l.followup, staleSince: l.staleSince,
     });
   });
 
@@ -505,6 +507,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).',
     };
+    reportOpts.sections = splitStaleSectionsGs_(reportOpts.sections, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom
     const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
     // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
     const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
@@ -593,6 +596,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     sections: sections,
     footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
   };
+  reportOpts.sections = splitStaleSectionsGs_(reportOpts.sections, staleSinceMapGs_(leads)); // stale leads (no update for more than 24 h) are held at the bottom
   const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(reportOpts);
   // Plain-text part = a one-line count summary + the full lead list, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +

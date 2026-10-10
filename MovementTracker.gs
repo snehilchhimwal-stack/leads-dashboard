@@ -331,13 +331,13 @@ const SLA_HISTORY_COLUMNS_ = [
 // come first (37 of 764 open Google Non-UTM leads had a different baseline; 3 were wrongly NOT flagged "Behind on Today's
 // Calls"). js/tab-movement.js's buildTodayCallBaseline/lastSnapshotBefore key the same way - keep the two in step.
 //
-// ONLY THE THREE COLUMNS IT NEEDS are read (email audit F23): this sheet is ~48K rows x 26 columns and the full-width read
-// was most of snapshotPeriodic's run time.
+// ONLY THE FIVE COLUMNS IT NEEDS are read (email audit F23; RM and content_hash added 2026-10-10 for the stale-lead check, leadStaleStateGs_): this sheet is
+// ~48K rows x 26 columns and the full-width read was most of snapshotPeriodic's run time.
 function _readMovementLogRowsGs_(ss) {
   const out = [];
   const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   if (!sheet) return out;
-  const data = _readMovementLogColumnsGs_(sheet, ['snapshot_at', 'lead_id', 'call_attempts']);
+  const data = _readMovementLogColumnsGs_(sheet, ['snapshot_at', 'lead_id', 'call_attempts', 'RM', CONTENT_HASH_COLUMN_]);
   if (!data.rowCount || data.idx.snapshot_at === -1 || data.idx.call_attempts === -1 || data.idx.lead_id === -1) return out;
 
   for (let i = 0; i < data.rowCount; i++) {
@@ -345,7 +345,11 @@ function _readMovementLogRowsGs_(ss) {
     if (!(ts instanceof Date)) continue;
     const leadId = String(data.cols.lead_id[i][0] || '').trim();
     if (!leadId) continue; // no lead id: nothing a live lead could ever look this row up by
-    out.push({ key: leadId, atMs: ts.getTime(), call_attempts: Number(data.cols.call_attempts[i][0]) || 0 });
+    out.push({
+      key: leadId, atMs: ts.getTime(), call_attempts: Number(data.cols.call_attempts[i][0]) || 0,
+      dedupKey: _dedupKeyGs_(leadId, data.idx.RM === -1 ? '' : data.cols.RM[i][0]), // lead id + RM, the same identity the snapshot dedup uses
+      hash: data.idx[CONTENT_HASH_COLUMN_] === -1 ? '' : String(data.cols[CONTENT_HASH_COLUMN_][i][0] || '').trim(), // '' for a row captured before hashing existed
+    });
   }
   return out;
 }
@@ -378,6 +382,19 @@ function _collapseLatestByKeyGs_(rows, cutoffMs) {
     if (r.atMs >= cutoffMs) return;
     const cur = map[r.key];
     if (!cur || r.atMs > cur.atMs) map[r.key] = { atMs: r.atMs, call_attempts: r.call_attempts };
+  });
+  return map;
+}
+
+// For every lead (lead id + RM), the MOST RECENT Movement_Log row that carries a content hash: { atMs, hash }. Because the snapshot only writes a row when a lead's tracked
+// content differs from its latest row (content-hash dedup), that row's time is the last time the lead was OBSERVED to change - a stage change, a new comment, a call-count
+// increase, a connect, a reassignment. Pure, over rows already read by _readMovementLogRowsGs_.
+function _collapseLatestChangeGs_(rows) {
+  const map = {};
+  rows.forEach(function (r) {
+    if (!r.hash) return;
+    const cur = map[r.dedupKey];
+    if (!cur || r.atMs > cur.atMs) map[r.dedupKey] = { atMs: r.atMs, hash: r.hash };
   });
   return map;
 }
@@ -489,7 +506,7 @@ function buildMovementLogMapsGs_(ss, now) {
   const detailedBaseline = _collapseLatestByKeyGs_(rows, todayStart);
   const baselineMap = {};
   Object.keys(detailedBaseline).forEach(function (key) { baselineMap[key] = detailedBaseline[key].call_attempts; });
-  return { baselineMap: baselineMap, lastSnapshotMap: _collapseLatestByKeyGs_(rows, now.getTime()) };
+  return { baselineMap: baselineMap, lastSnapshotMap: _collapseLatestByKeyGs_(rows, now.getTime()), lastChangeMap: _collapseLatestChangeGs_(rows) };
 }
 
 function ensureSlaHistorySheet_(ss) {
