@@ -214,6 +214,8 @@ nobody separately ran either check after they started appearing in the
 
 ### Automatic email
 
+- [ ] **A 10:00 `Morning email failed` / 13:00 `1pm follow-up failed` alert** — fix the cause and run `recoverFailedMorningBucketsNow()` before 12:45 IST or `recoverFailedFollowupBucketsNow()` before 16:00 IST: each re-sends only the failed email, not its siblings (`...ForceNow()` past the cutoff, on purpose).
+- [ ] **An `Email audit (...)` alert** (silent audits near 11:15 / 14:00 / 18:00 speak only when the ledger and `Overnight_Log` / `AllIssues_Log` disagree) — read the finding: `ACCEPTED_WITHOUT_LOG` means a bucket's log row is missing and the next job will skip it; `UNFINISHED` means a run died (recover PLANNED ones, check Gmail Sent for ATTEMPTING ones). Preview any time with `showEmailAuditNow()`.
 - [ ] **A 17:00 `All-issues email FAILED` / `BLOCKED` alert** — fix the cause (the address, the Gmail restriction) and run `recoverFailedAllIssuesBucketsNow()` before 18:30 IST: it re-sends only the failed bucket, not its siblings. An `UNCONFIRMED` bucket is not re-sent (check Gmail Sent first).
 - [ ] **Daily: read the 16:30 cycle report** (`CycleReport.gs`, added 2026-10-09) — one email to Snehil near 16:30 IST. `all clear` means every planned
       email reached a final result and no incident above LOW happened in the cycle; `need attention` lists what to look at; `no emails recorded`

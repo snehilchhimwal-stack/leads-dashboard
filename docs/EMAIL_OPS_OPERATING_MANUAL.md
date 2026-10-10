@@ -62,7 +62,7 @@ Status: **B** built, **P** partial, **X** outside this system (the Homesfy CRM),
 | 15 | Follow-up scheduling / execution | Checkpoint 1 (10:00) and 2 (13:00) | next day | `AllIssues_Log` checkpoint columns, `Lead_Followups` | a skipped checkpoint -> MEDIUM | yes (per bucket) | P (a follow-up tracker view is Plan) |
 | 16 | Reply / bounce / engagement monitoring | `EmailSweep.gs` | 15:45 daily | the three sweep columns | search fails -> `UNKNOWN`, never "no bounce" | yes | B (opens: not available) |
 | 17 | Lead status updates / next action | CRM | - | - | n/a here | - | X |
-| 18 | Exception resolution + recovery | `recoverFailedAllIssuesBucketsNow` | until 18:30 | ledger attempts, SKIPPED reason | still failing -> alert again; past 18:30 -> not sent late | yes | B (17:00 only; 10:00/13:00 Plan) |
+| 18 | Exception resolution + recovery | `recoverFailedAllIssuesBucketsNow` (17:00), `recoverFailedMorningBucketsNow` (10:00), `recoverFailedFollowupBucketsNow` (13:00) | until 18:30 / 12:45 / 16:00 | ledger attempts, SKIPPED reason | still failing -> alert again; past the cutoff -> not sent late | yes | B |
 | 19 | End-of-day reconciliation + report | `CycleReport.gs` | 16:30 daily (watchdog 17:00) | the email; `Daily_Report` row | not sent by 17:00 -> CRITICAL watchdog alert | yes | B |
 
 Responsible owner for every row where a person must act: **Snehil**. Escalation: the alert already goes to Snehil; there is no further tier in this system.
@@ -99,9 +99,9 @@ Missing evidence is never reported as a confirmed failure: it is AMBER/`UNKNOWN`
 | D Reason for contact | every lead line carries its issue type | automatic | the email |
 | E Email preparation | buckets resolved and PLANNED | automatic | `Email_Ledger` |
 | F 13:00 checkpoint | the threaded reply | automatic | ledger `followup13` |
-| G Immediate post-13:00 audit | a failure is emailed after the run (D2) | automatic | held alert + Incident_Log |
+| G Immediate post-13:00 audit | a failure is emailed after the run (D2); the 14:00 silent audit checks the 13:00 replies against their logs | automatic | held alert + Incident_Log; `EMAIL_AUDIT_LAST_auditFollowupEmails` |
 | H 17:00 preparation | as E | automatic | as E |
-| I 17:00 send + verification | send, per-bucket isolation, ACCEPTED/FAILED; recovery until 18:30 | automatic; **you** run `recoverFailedAllIssuesBucketsNow()` after fixing a cause | ledger, AllIssues_Log |
+| I 17:00 send + verification | send, per-bucket isolation, ACCEPTED/FAILED; the 18:00 silent audit; recovery until 18:30 | automatic; **you** run `recoverFailedAllIssuesBucketsNow()` after fixing a cause | ledger, AllIssues_Log |
 | J Follow-up monitoring | bounces and replies (15:45 sweep) | automatic | sweep columns, the report |
 | K End-of-day reconciliation | **the 16:30 report** | automatic; **you read it** | the email, `Daily_Report` |
 
@@ -131,7 +131,7 @@ For each issue the alert gives: the lead/email, expected vs actual, severity (In
 
 Before 17:00 (the 16:30 report's "Ready for 17:00?" table): recipient addresses resolve; no held alerts waiting; Leads tab fresh (GREEN) or its AMBER/RED noted.
 At 17:00 (automatic): the Leads tab is read once; flagged leads become buckets per region; each bucket is PLANNED, then ATTEMPTING, then ACCEPTED/FAILED/UNCONFIRMED/BLOCKED; defective leads are dropped individually and recorded; the same-day re-run guard stops a region being sent twice.
-After 17:00: failures arrive as one held alert; fix the cause and run `recoverFailedAllIssuesBucketsNow()` before 18:30; next day 15:45 the sweep records bounces and replies; 16:30 the report reconciles planned vs accepted vs failed vs left out.
+After 17:00: failures arrive as one held alert; fix the cause and run `recoverFailedAllIssuesBucketsNow()` before 18:30 (the same for the morning: `recoverFailedMorningBucketsNow()` before 12:45, `recoverFailedFollowupBucketsNow()` before 16:00); about 18:00 a silent audit checks the 17:00 records and speaks only if they disagree; next day 15:45 the sweep records bounces and replies; 16:30 the report reconciles planned vs accepted vs failed vs left out.
 
 The reconciliation numbers (all in the report, each with numerator and denominator): planned, accepted by Gmail, skipped, failed, unconfirmed, blocked, unfinished, leads sent, leads left out (with reasons), bounced, replies, incidents.
 There is no "delivered" number and no "opened" number, by design.
@@ -201,7 +201,8 @@ Duplicates are prevented by deterministic email ids (a re-run finds its own row)
 | Held alerts | inside those jobs | Incident_Log | Snehil, after the run | released by the watchdog after 45 min if the run died | yes |
 | Bounce / reply sweep | 15:45 daily (no job lock) | ledger + Gmail search/threads | Snehil on a new bounce | a failed search -> `UNKNOWN`, retried next day | yes |
 | Cycle report | 16:30 daily (no job lock) | the three evidence tabs, Leads tab | Snehil (every day) | a crash alerts at once and re-throws; the watchdog flags a missing report from 17:00 | yes |
-| Recovery | manual `recoverFailedAllIssuesBucketsNow()` | ledger FAILED/BLOCKED | Snehil if still failing | until 18:30; `...ForceNow` overrides on purpose | yes |
+| Recovery | manual `recoverFailedAllIssuesBucketsNow()` / `recoverFailedMorningBucketsNow()` / `recoverFailedFollowupBucketsNow()` | ledger FAILED / BLOCKED / PLANNED (never UNCONFIRMED or ATTEMPTING) | Snehil if still failing | until 18:30 / 12:45 / 16:00; `...ForceNow` overrides on purpose | yes |
+| Silent audits | ~11:15, ~14:00, ~18:00 daily (no job lock) | ledger + `Overnight_Log` + `AllIssues_Log` | Snehil, only on an exception | a job still running is deferred, never alerted; an unreadable input alerts once as "could not run" | yes |
 | Watchdog | hourly | run records | Snehil | one alert per job per day per problem | - |
 
 **Stale Leads tab (D6).** When the newest lead on the Leads tab was assigned at least 24 h ago (RED - a stale lead is at least a day old, D7), the 17:00, 10:00 and 13:00 emails and the CH-level reports are sent as normal, and each ends with a red "Data freshness notice" section (how old the newest lead is; a listed lead may already be handled; check the CRM before acting). AMBER (12 h up to 24 h) and UNKNOWN add nothing to the emails; both still show in the 16:30 report. The notice is judged at the moment of each send (a re-send after the tab refreshed has none) and is fail-open: if the check errors, the email goes without it.
@@ -211,14 +212,14 @@ No notification is claimed sent unless the send path confirmed it: an incident i
 
 ## 13. Roadmap
 
-Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
-Planned: EO-3/EO-4 a separate silent audit pass at 13:35 / 17:35 (the held alert and the report already cover most of it), EO-6 a per-check daily checklist sheet with GREEN/AMBER/RED/GREY cells, EO-7 follow-up tracker view and the stop-after-reply rule, EO-9b recovery for the 10:00/13:00 emails.
+Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-9b 10:00/13:00 recovery, EO-3/EO-4 silent audits, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
+Planned: EO-6 a per-check daily checklist sheet with GREEN/AMBER/RED/GREY cells, EO-7 follow-up tracker view and the stop-after-reply rule.
 
 ## 14. First five actions
 
-1. Paste the 12 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
-2. Run `setupEmailCycleReportTrigger()` and `setupEmailSweepTrigger()` once each.
-3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`.
+1. Paste the 14 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
+2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each.
+3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()`.
 4. After the next 17:00 run, run `showEmailLedgerTodayNow()`; next day expect the 16:30 report.
 5. Record the deploy (`python3 test/match-live-gs.py ... --apply`).
 
