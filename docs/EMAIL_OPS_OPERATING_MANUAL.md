@@ -59,7 +59,7 @@ Status: **B** built, **P** partial, **X** outside this system (the Homesfy CRM),
 | 12 | 17:00 preparation | `sendAllIssuesEmails_` | 17:00 | ledger rows PLANNED per region in one write | a crash before planning -> CRITICAL, sent at once | n/a | B |
 | 13 | 17:00 validation + send | the send gate, per-lead isolation | 17:00 (watchdog 17:30) | per-bucket status | see phases 4, 5, 9 | yes (per bucket / per lead) | B |
 | 14 | Post-send verification + reconciliation | the ledger, the sweep, the 16:30 report | 15:45 sweep, 16:30 report | `bounce_status`, `reply_status`, `swept_at`; Daily_Report row | bounce -> HIGH alert; PLANNED/ATTEMPTING left over = outcome unknown -> attention | yes | B |
-| 15 | Follow-up scheduling / execution | Checkpoint 1 (10:00) and 2 (13:00) | next day | `AllIssues_Log` checkpoint columns, `Lead_Followups` | a skipped checkpoint -> MEDIUM | yes (per bucket) | P (a follow-up tracker view is Plan) |
+| 15 | Follow-up scheduling / execution | Checkpoint 1 (10:00) and 2 (13:00) | next day | `AllIssues_Log` checkpoint columns, `Lead_Followups` | a skipped checkpoint -> MEDIUM | yes (per bucket) | B (the tracker lists every checkpoint) |
 | 16 | Reply / bounce / engagement monitoring | `EmailSweep.gs` | 15:45 daily | the three sweep columns | search fails -> `UNKNOWN`, never "no bounce" | yes | B (opens: not available) |
 | 17 | Lead status updates / next action | CRM | - | - | n/a here | - | X |
 | 18 | Exception resolution + recovery | `recoverFailedAllIssuesBucketsNow` (17:00), `recoverFailedMorningBucketsNow` (10:00), `recoverFailedFollowupBucketsNow` (13:00) | until 18:30 / 12:45 / 16:00 | ledger attempts, SKIPPED reason | still failing -> alert again; past the cutoff -> not sent late | yes | B |
@@ -160,7 +160,7 @@ Rules that never bend: a safety check is never bypassed to keep going (a refused
 ## 9. Follow-ups
 
 What exists: Checkpoint 1 (next day 10:00) and Checkpoint 2 (13:00) re-check yesterday's flagged leads against the current data and email only what is still unresolved (`AllIssues_Log` checkpoint columns;
-`Lead_Followups` for the suggested actions). Not built: a due/overdue/blocked follow-up tracker view and a rule that stops a follow-up after a reply or bounce (the sweep now provides the data) - roadmap EO-7.
+`Lead_Followups` for the suggested actions). The **follow-up tracker** (`Followup_Tracker`, also a section of the 16:30 report) lists, for every 17:00 bucket, where Checkpoint 1 and Checkpoint 2 stand: COMPLETED, NOT_NEEDED, BLOCKED (a failure, an unconfirmed send or a run that died is on record), OVERDUE (30 minutes past its hour with nothing recorded), DUE or FUTURE. A bounced 17:00 email marks the row **STOP** (the recipient never got it); a reply is shown only. STOP is a status for you to act on - the jobs still send as before. Whether a bounce or reply should stop follow-ups automatically is an open decision for you.
 
 ## 10. The 16:30 report (template)
 
@@ -180,7 +180,7 @@ Ready for 17:00?  Leads tab freshness | GREEN: the newest lead was assigned 1.2 
 ```
 
 Rates and their definitions: **email execution rate** = accepted / (planned - skipped); lead-level counts (leads sent, leads left out) are kept apart from email-level counts (an email carries many leads).
-Reply rate, verified-delivery rate and follow-up completion rate are not reported yet (delivery is unobservable; the follow-up tracker is not built).
+Reply rate and verified-delivery rate are not reported (delivery is unobservable); follow-up completion is shown as the tracker's counts, not as a rate.
 
 ## 11. Master tracker schema (where each table lives)
 
@@ -214,12 +214,12 @@ No notification is claimed sent unless the send path confirmed it: an incident i
 
 ## 13. Roadmap
 
-Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-9b 10:00/13:00 recovery, EO-3/EO-4 silent audits, EO-6 daily checklist, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
-Planned: EO-7 follow-up tracker view and the stop-after-reply rule.
+Built: EO-1a/1b ledger (17:00, 10:00, 13:00, CH-level), EO-2 incident log + held alerts, EO-5 sweep, EO-8 report + daily row, EO-9 17:00 recovery, EO-9b 10:00/13:00 recovery, EO-3/EO-4 silent audits, EO-6 daily checklist, EO-7 follow-up tracker, EO-10 freshness warning + the bottom notice on every email (D6), EO-11 acceptance scenarios (as tests).
+Planned: nothing more from the original plan. Open decision: should a bounce or a reply stop the follow-ups automatically (today a bounce only marks the row STOP)?
 
 ## 14. First five actions
 
-1. Paste the 16 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
+1. Paste the 18 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each.
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()`.
 4. After the next 17:00 run, run `showEmailLedgerTodayNow()`; next day expect the 16:30 report.
@@ -237,5 +237,5 @@ All in `Tests_EmailLedger.gs`, `Tests_CycleReport.gs`, `Tests_EmailSweep.gs` (ev
 | CRM / data-source outage | "crash" (CRITICAL, sent at once); "freshness: an unreadable Leads tab is UNKNOWN" |
 | Sending-platform outage | "outage:" and "outage recovery:" (all FAILED, one consolidated alert, both recovered) |
 | Unsubscribe / suppression | "excluded RM:" (never emailed to the chain; backstop only) |
-| Delayed follow-up | "resolved before 13:00", "nothing for 13:00" (skipped with reason); the follow-up tracker is planned |
+| Delayed follow-up | "resolved before 13:00", "nothing for 13:00" (skipped with reason); the follow-up tracker lists it as BLOCKED or OVERDUE |
 | Mixed batch | "held alert:" (one bucket fails, the other is fine, one alert, 1 of 2 confirmed); "one bad lead"; "recovery:" with a sibling |

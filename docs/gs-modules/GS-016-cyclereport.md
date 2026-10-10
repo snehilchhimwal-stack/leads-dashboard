@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `f475d10` - the report builds and shows the daily checklist (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-09 against commit `d9e2b97` - the report builds and shows the follow-up tracker (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -142,6 +142,8 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 **2026-10-09** (`ea5fdc5`, Email Ops, decision D6): the freshness rules and thresholds (CFG-114) moved to `EmailInfra.gs` (`GS-004` FN-408); FN-404 is now two thin wrappers over them, behaviour unchanged. The emailers use the same rules to add RULE-057's bottom notice. **Not live until pasted.**
 
 **2026-10-09** (`f475d10`, Email Ops EO-6): the report gathers the watchdog's job problems and the audits' last results (`cycleReportJobProblemsGs_`, `cycleReportAuditsGs_`), builds the daily checklist (`GS-019` FN-415, fail-open) into `data.checklist`, shows it as a "Daily checklist (A-K)" section before "Ready for 17:00?" and stores the rows in `Daily_Checklist` (`SHEET-023`) after the send. With `DailyChecklist.gs` absent the report is exactly as before. **Not live until pasted.**
+
+**2026-10-09** (`d9e2b97`, Email Ops EO-7): the report reads the cycle day's 17:00 buckets from `AllIssues_Log`, builds the follow-up tracker (`GS-020` FN-420, fail-open) into `data.followups`, shows its sections before the daily checklist and stores the rows in `Followup_Tracker` (`SHEET-024`) after the send. With `FollowupTracker.gs` absent the report is exactly as before. **Not live until pasted.**
 
 ## Revalidation trigger
 

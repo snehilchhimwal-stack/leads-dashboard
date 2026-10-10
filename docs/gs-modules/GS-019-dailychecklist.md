@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `f475d10` - created (Email Ops EO-6) |
+| **Last Verified** | 2026-10-09 against commit `d9e2b97` - the rows are written through the shared one-block-per-day writer (see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -26,7 +26,7 @@ ATTEMPTING is unfinished, so its stage is RED.
 
 - Evaluate the eleven stages as a pure function of the report's data (`dailyChecklistGs_`) - no sheet reads of its own.
 - Render the report section (`dailyChecklistSectionGs_`; red accent when any stage is RED).
-- Store the rows, one set per IST day, replacing (never duplicating) a same-day re-send (`dailyChecklistRecordGs_`); fail-open; TEST MODE writes nothing.
+- Store the rows, one set per IST day, replacing (never duplicating) a same-day re-send (`dailyChecklistRecordGs_`, through `GS-015` FN-422); fail-open; TEST MODE writes nothing.
 - `showDailyChecklistNow()` logs the checklist as it would be built right now (read-only, first in the file because the editor's Run lags one selection).
 
 ## Trigger schedule
@@ -118,6 +118,8 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 ## Version / change reference
 
 **2026-10-09** (`f475d10`): file created - Email Ops EO-6. `CycleReport.gs` gathers the job problems and audit results, builds the checklist (fail-open), adds the "Daily checklist (A-K)" section before "Ready for 17:00?" and stores the rows after the send. **Not live until pasted.**
+
+**2026-10-09** (`d9e2b97`, Email Ops EO-7): `dailyChecklistRecordGs_` now writes its block through the shared `GS-015` FN-422 instead of its own copy of the replace-or-append code; behaviour unchanged. **Not live until pasted.**
 
 ## Revalidation trigger
 

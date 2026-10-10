@@ -85,7 +85,7 @@ function followupTrackerGs_(input) {
       blockedBy: (cp1.status === 'BLOCKED' || cp1.status === 'OVERDUE') ? 'Checkpoint 1 did not happen, so there is no 10:00 thread to reply in' : '',
     });
     let email = '';
-    if (m0 && m0.status === 'ACCEPTED' && /^BOUNCED/.test(String(m0.bounce_status || ''))) email = 'BOUNCED';
+    if (m0 && /^BOUNCED/.test(String(m0.bounce_status || ''))) email = 'BOUNCED'; // the sweep only looks at emails Gmail accepted or may have accepted
     else if (m0 && /^REPLIED/.test(String(m0.reply_status || ''))) email = 'REPLIED';
     const stop = email === 'BOUNCED';
     counts.cp1[cp1.status]++; counts.cp2[cp2.status]++;

@@ -86,6 +86,8 @@ function runFollowupTrackerTests_() {
       TestAssertEqual_(t.rows[0].cp1.status, 'COMPLETED', 'tracker: STOP is a status only - the checkpoints are still judged on their own evidence');
       const r = track([TestFT_log_({ cp1At: 'x', cp2At: 'y' })], [TestFT_led_('allIssues17', 'ACCEPTED', { reply_status: 'REPLIED (2)' })]);
       TestAssertEqual_(r.rows[0].email + ',' + r.rows[0].stop + ',' + r.attention.length, 'REPLIED,false,0', 'tracker: a reply is shown but does not stop or flag anything');
+      const unc = track([TestFT_log_({ cp1At: 'x', cp2At: 'y' })], [TestFT_led_('allIssues17', 'UNCONFIRMED', { bounce_status: 'BOUNCED (550)' })]);
+      TestAssertEqual_(unc.rows[0].email + ',' + unc.rows[0].stop, 'BOUNCED,true', 'tracker: an UNCONFIRMED 17:00 email that bounced is STOP too (a bounce is proof it did not arrive)');
       const nb = track([TestFT_log_({ cp1At: 'x', cp2At: 'y' })], [TestFT_led_('allIssues17', 'ACCEPTED', { bounce_status: 'NO_BOUNCE_SEEN' })]);
       TestAssertEqual_(nb.rows[0].email + ',' + nb.rows[0].stop, ',false', 'tracker: "no bounce seen" is not a status');
     }

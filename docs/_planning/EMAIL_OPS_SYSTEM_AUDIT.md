@@ -16,12 +16,13 @@ Builds on `docs/_planning/EMAIL_AUDIT.md` (P1-P18c, all deployed) - read that fi
 | EO-9 / EO-9b | recovery of failed emails: `recoverFailedAllIssuesBucketsNow()` (until 18:30), `recoverFailedMorningBucketsNow()` (until 12:45), `recoverFailedFollowupBucketsNow()` (until 16:00); FAILED / BLOCKED / never-attempted (PLANNED) buckets only, never UNCONFIRMED | `EmailLedger.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs` | `GS-015` FN-409, `GS-001`, `GS-010` FN-410 |
 | EO-3 / EO-4 | three silent audits (~11:15, ~14:00, ~18:00) that compare the ledger with `Overnight_Log` / `AllIssues_Log`; one ops alert only on an exception | `OpsAudit.gs` (new) | `GS-018` |
 | EO-6 | the daily checklist A-K: eleven stages with a GREEN / AMBER / RED / GREY flag and evidence each, in the 16:30 report and the `Daily_Checklist` tab | `DailyChecklist.gs` (new), `CycleReport.gs` | `GS-019`, `SHEET-023` |
+| EO-7 | the follow-up tracker: each 17:00 bucket's two checkpoints COMPLETED / NOT_NEEDED / BLOCKED / OVERDUE / DUE / FUTURE, a bounced 17:00 email marked STOP (a status, not a behaviour); in the 16:30 report and the `Followup_Tracker` tab | `FollowupTracker.gs` (new), `EmailLedger.gs`, `CycleReport.gs` | `GS-020`, `SHEET-024` |
 
-All sixteen files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs` and their five `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
+All eighteen files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs`, `FollowupTracker.gs` and their six `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
 `Tests_EmailInfra.gs`, `Tests_Mocks.gs`, `Tests_RunAll.gs` are changed. Nothing is live until pasted into the Sheet's Apps Script editor (CLAUDE.md; `docs/STALENESS_TRACKER.md` deploy register).
 
 **Put it live (in this order, with Snehil at the keyboard for Ctrl+S):**
-1. Paste the 16 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
+1. Paste the 18 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each (each installs its daily trigger(s) and replaces only its own earlier ones).
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()` (all read-only). The first audit after the ledger is first pasted may say "Email_Ledger has none for the ... job" - expected once, for the jobs that ran before the ledger existed.
 4. The tabs `Email_Ledger`, `Email_Ledger_Exclusions` and `Incident_Log` create themselves on the first 17:00 run / first alert. After that day's 17:00 run, run `showEmailLedgerTodayNow()`; the next day expect the 15:45 sweep and the 16:30 report.
@@ -30,7 +31,7 @@ Rollback: paste the previous versions from git (`git show <sha>:EmailInfra.gs` e
 
 Also built: EO-10 as a warning in the 16:30 report (Leads-tab freshness, AMBER from 12 h / RED from 24 h - D7; nothing is blocked) and the `Daily_Report` row per day (EO-8b). **D6 (2026-10-09): a RED tab never holds an email; every email carries a separate bottom "Data freshness notice" section instead.**
 
-**Not built yet:** EO-7 (follow-up tracker). Everything else in the plan is built (deployment is the user's step - see the runbook above).
+**Not built yet:** nothing from this plan. The one open decision is whether a bounce or a reply should stop follow-ups automatically (today a bounce only marks the tracker row STOP). Deployment is the user's step - see the runbook above.
 
 Also built: EO-11 as acceptance scenarios inside the existing suites (invalid lead, failed email, duplicate-send risk, data-source outage, platform outage + recovery, excluded RM, mixed batch - table at the end of the manual) and EO-12, the operating manual: `docs/EMAIL_OPS_OPERATING_MANUAL.md`.
 
@@ -119,7 +120,7 @@ Legend: **C** covered, **P** partial, **G** gap, **X** outside this repo.
 | 12 | 17:00 prepare | P | `sendAllIssuesEmails_` builds lists | No separate pre-send **validation report** |
 | 13 | 17:00 pre-send validation + send | P | Gate + isolation | Pre-send summary (eligible/excluded/defective) not produced; defects found only as thrown errors |
 | 14 | **Post-send verification + reconciliation** | **G** | - | Planned vs attempted vs accepted vs failed vs blocked: nowhere |
-| 15 | Follow-up scheduling / execution | P | `Lead_Followups`, checkpoint 1/2 | No due / overdue / blocked tracker; no "do not follow up after reply/bounce" rule |
+| 15 | Follow-up scheduling / execution | B | `Lead_Followups`, checkpoint 1/2 | The tracker (EO-7) lists due / overdue / blocked; a bounce marks STOP (no automatic "do not follow up" rule - open decision) |
 | 16 | **Reply / bounce / engagement monitoring** | **G** | `thread_id` is stored | Nothing reads replies or bounces |
 | 17 | Lead status update / next action | P | `Lead_Followups` carries the suggested next action | Status itself lives in the CRM (X) |
 | 18 | **Exception resolution + recovery** | **G/P** | Alerts say "run it by hand" | No incident record, no blocked-item queue, no revalidate-then-resume path |
