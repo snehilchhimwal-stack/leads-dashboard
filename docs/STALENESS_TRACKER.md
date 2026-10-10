@@ -91,27 +91,27 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `AllIssuesEmailer.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `Core.gs` | `78e47f5` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
-| `CycleReport.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
-| `DailyChecklist.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `CycleReport.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `DailyChecklist.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `EmailInfra.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
-| `EmailLedger.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
-| `EmailReroute.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
-| `EmailSweep.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `EmailLedger.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `EmailReroute.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `EmailSweep.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `FollowupEngine.gs` | `cba3a82` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
-| `FollowupTracker.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `FollowupTracker.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `MovementTracker.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
-| `OpsAudit.gs` | `8ebf41a` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `OpsAudit.gs` | `8ebf41a` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `OpsChecklistRunner.gs` | `c416a01` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
-| `OvernightEmailer.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `OvernightEmailer.gs` | `000c1e6` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `RmHierarchy.gs` | `d897529` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `RmHierarchySync.gs` | `3dc9852` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `SlaEngine.gs` | `7799e44` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
-| `StaleLeads.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `StaleLeads.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 | `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 
 ### Known live-vs-repo differences
@@ -282,6 +282,8 @@ One line per sweep: date — what was found — what was fixed / left open.
 - 2026-10-10 — **Email Operations System deployed** (`ec19415`; `GS-015`..`GS-022`, `SHEET-019`..`SHEET-025`). 24 files pasted from the working tree into the live project (the user pressed Ctrl+S): 8 existing (`OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `EmailInfra.gs`, `MovementTracker.gs`, `Tests_Mocks.gs`, `Tests_RunAll.gs`, `Tests_EmailInfra.gs` and `Tests_MovementTracker.gs`, whose 2026-10-08 test-only fix had never been pasted) and 16 new (`EmailLedger`, `CycleReport`, `EmailSweep`, `EmailReroute`, `OpsAudit`, `DailyChecklist`, `FollowupTracker`, `StaleLeads` + their `Tests_` files). Dry run first (every upload equalled HEAD, every old live hash still matched), then `pushEditOperations` per model, re-read after a reload: all 48 live files match HEAD (`match-live-gs.py --apply`; the 8 new production files now have register rows). Adding a file in the editor needs the tab in the FOREGROUND (a hidden tab leaves "Adding file..." stuck) and several seconds between additions. Live `runAllTests()` after the Google authorization: 3340 passed, 0 failed across 23 files. The three `setupXxx()` runs (sweep: four triggers, report, audits) follow separately.
 
 - 2026-10-10 17:04 — **first scheduled run on the new code (`sendAllIssuesEmails`) FAILED** after 50 s with `Service Spreadsheets timed out` (HANDOVER section 8): the new tabs were created inside the job and the spreadsheet service stalled; the 17:00 emails were re-sent by hand at 17:12 (28 buckets, 0 failed, 102 s). The three `setupXxx()` runs (four sweep triggers, the 16:30 report, the audits) were NOT run that day - they wait for the user's go-ahead; until then the hourly watchdog flags the new jobs as never started.
+
+- 2026-10-10 17:27 — **follow-up fix deployed and triggers installed** (`000c1e6`; `GS-015` FN-433). 9 files pasted (the user saved), all 47 non-private live files match HEAD (`match-live-gs.py --apply`): the jobs' first log-tab reads are retried and `precreateEmailOpsTabsNow()` (run by the user 17:26, 30 s) created `Email_Reroutes`, `Daily_Report`, `Daily_Checklist`, `Followup_Tracker` (the other three tabs already existed). Then the user ran `setupEmailSweepTrigger()` (four sweep triggers), `setupEmailCycleReportTrigger()` and `setupOpsAuditTriggers()` (all Completed 17:27): the triggers page lists 19 triggers, the 8 new ones being `sweepEmailBouncesAndReplies`, `sweepBouncesAfterMorning` / `Followup` / `AllIssues`, `sendEmailCycleReport` and `auditMorningEmails` / `auditFollowupEmails` / `auditAllIssuesEmails`. The permission classifier blocked the agent from selecting/running a `setupXxx()` function in the live editor ("Production Deploy"), so the user ran the four manual steps. First scheduled runs to check: `sweepBouncesAfterAllIssues` ~17:30 and `auditAllIssuesEmails` ~18:00 today, `sendEmailCycleReport` ~16:30 tomorrow.
 
 ## Current status
 
