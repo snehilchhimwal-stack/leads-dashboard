@@ -1161,6 +1161,28 @@ test) Sheet, and use the browser console directly.
   retries that platform error (§4.3.4 P12); (3) ops alerts retry and fall back to a second send path (P9).
   After fixing the cause, run the job's `…Now` function by hand — its "already sent today" guards stop it
   re-sending what already went out — and the watchdog goes quiet once the run completes.
+- **WATCHDOG: `snapshotPeriodic` "did not finish"** does not necessarily mean the platform's 30-minute hard
+  kill — `snapshotPeriodic`'s own try/catch (`MovementTracker.gs`) is supposed to write `status: 'failed'`
+  (with the real error) to its run record before re-throwing, so the watchdog only ever reports "stuck"
+  (never finished) when something bypassed that catch entirely. Real incident, 2026-10-09 18:51 IST: the
+  Executions list showed `snapshotPeriodic` ended after **1,360s (~22.7 min — under the 30-minute limit)**
+  with status **Failed**, cloud log `"We're sorry, the JavaScript engine reported an unexpected error. Error
+  code INTERNAL."`, ~21 minutes after the last `[timing]` line (`hash lookup read at 66s`) and before the
+  next one (`core capture: … appended`) ever printed — i.e. it crashed mid-loop inside the per-lead
+  content-hash computation (`_leadContentHashGs_`'s `Utilities.computeDigest(SHA_256, …)` call, once per
+  lead — 8,430 leads this run), not during any of the Oct-7-added optional/prune phases. This is a known,
+  occasional Apps Script platform reliability fault with `Utilities.computeDigest()` under heavy
+  single-execution call volume — not a bug in this project's logic, and not something the Oct-7 time-budget
+  fix (§9, `SNAPSHOT_OPTIONAL_PHASE_DEADLINE_SECONDS_`) could have prevented, since the crash happened in the
+  UNCONDITIONAL core-capture phase before that budget check is ever reached. A platform-level "Error code
+  INTERNAL" crash is NOT a normal thrown JS error — it does not reliably unwind through a script's own
+  try/catch, which is exactly why the run record stayed `running` instead of updating to `failed`. No data
+  was lost (the whole `out` array is written in one `setValues()` call only after the per-lead loop
+  completes, so a mid-loop crash writes nothing — no partial/corrupt rows) and no manual action was actually
+  required: the next scheduled run (Oct 10, 00:18 IST, ~5.5h later) captured normally and the watchdog's own
+  "stuck" marker was superseded by that run's own `completed` record. Only 1 of ~11 `snapshotPeriodic` runs
+  in the surrounding 48h window hit this — treat a single occurrence as expected occasional platform noise,
+  not a regression, unless it starts recurring.
 - **Recipient routing looks wrong** (an issue email went to the wrong
   manager, or fell back to a generic address): check `RM_Hierarchy` /
   `Manager_Directory` sheet tabs for a blank/stale email against that RM's
