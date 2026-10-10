@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - the redirect before the gate and the four sweep checks on the schedule (Email Ops EO-13) |
+| **Last Verified** | 2026-10-10 against commit `ec19415` - the redirect before the gate and the four sweep checks on the schedule (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -278,7 +278,7 @@ local `.gs` tests pass (+1 new).
 
 **2026-10-10** (`59db11b`, decision D8): the bottom "Data freshness notice" and its helpers (`staleLeadsNoticeSectionGs_`, `staleLeadsNoticeFromRowsGs_`, EXC-132) were **withdrawn** - they rested on a misreading of "stale lead"; FN-408 keeps only the Leads-tab freshness reading (CFG-114 back to 3 h / 5 h, a 16:30 report warning). The real stale-lead block lives in `StaleLeads.gs` (`GS-021`). **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): `sendGuardedEmailGs_` calls `emailRerouteApplyGs_` (`GS-022`) before the safety gate so a bounced address is replaced by the person next in the hierarchy; `emailJobScheduleGs_` lists the sweep at 15:30 and the three bounce-only checks (10:30, 13:30, 17:30). **Not live until pasted.**
+**2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): `sendGuardedEmailGs_` calls `emailRerouteApplyGs_` (`GS-022`) before the safety gate so a bounced address is replaced by the person next in the hierarchy; `emailJobScheduleGs_` lists the sweep at 15:30 and the three bounce-only checks (10:30, 13:30, 17:30). **Not live until pasted.**
 
 ## Revalidation trigger
 

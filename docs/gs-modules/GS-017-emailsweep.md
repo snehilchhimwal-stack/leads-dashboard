@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - four checks a day, bounce-only mode, the hand-off to `GS-022` (Email Ops EO-13) |
+| **Last Verified** | 2026-10-10 against commit `ec19415` - four checks a day, bounce-only mode, the hand-off to `GS-022` (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -131,7 +131,7 @@ Apps Script backend; four time-driven jobs (10:30, 13:30, 15:30, 17:30 IST) with
 
 **2026-10-09** (`93a120a`, Email Ops review): moved from 16:10 to 15:45 so it reliably finishes before the 16:30 report, and the entry point uses `runEmailJobTrackedGs_` instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): the sweep now runs four times a day (the full sweep moved from 15:45 to 15:30; bounce-only checks at 10:30, 13:30 and 17:30), the minimum age of an email dropped from 30 to 10 minutes, a bounce is matched through the address an email REALLY went to, and every bounced row is handed to `EmailReroute.gs` after the statuses are written; the new-bounce alert states what was done for each email. **Not live until pasted; re-run `setupEmailSweepTrigger()`.**
+**2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): the sweep now runs four times a day (the full sweep moved from 15:45 to 15:30; bounce-only checks at 10:30, 13:30 and 17:30), the minimum age of an email dropped from 30 to 10 minutes, a bounce is matched through the address an email REALLY went to, and every bounced row is handed to `EmailReroute.gs` after the statuses are written; the new-bounce alert states what was done for each email. **Not live until pasted; re-run `setupEmailSweepTrigger()`.**
 
 ## Revalidation trigger
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - the redirect in the threaded reply (Email Ops EO-13) |
+| **Last Verified** | 2026-10-10 against commit `ec19415` - the redirect in the threaded reply (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -526,7 +526,7 @@ ending the session.
 
 **2026-10-10** (`59db11b`, decision D8): the 2026-10-09 tab-level notice above was **withdrawn**. Instead the 10:00 and 13:00 jobs put a `staleSince` date on every lead they list (`GS-021`) and move the stale ones (no update for more than 24 h) into a separate block at the bottom of Section 1 (10:00 overnight leads, 13:00 still-unresolved), of Section 2 (the checkpoint tables) and of the CH-level overnight report; `leadsData.lastChangeMap` carries the Movement_Log history to the checkpoint lookups. The leads stay in the body and in the counts. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): `sendThreadedGmailReply_` (the 13:00 follow-up) calls `emailRerouteApplyGs_` (`GS-022`) before the safety gate, so the follow-up of a bucket whose address bounced goes to the person next in the hierarchy. The stored recipients (`Overnight_Log`, `AllIssues_Log`) are unchanged. **Not live until pasted.**
+**2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): `sendThreadedGmailReply_` (the 13:00 follow-up) calls `emailRerouteApplyGs_` (`GS-022`) before the safety gate, so the follow-up of a bucket whose address bounced goes to the person next in the hierarchy. The stored recipients (`Overnight_Log`, `AllIssues_Log`) are unchanged. **Not live until pasted.**
 
 ## Revalidation trigger
 

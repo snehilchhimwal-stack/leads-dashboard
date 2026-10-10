@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - a re-routed bounce reads REROUTED (Email Ops EO-13) |
+| **Last Verified** | 2026-10-10 against commit `ec19415` - a re-routed bounce reads REROUTED (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -120,7 +120,7 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-09** (`d9e2b97`): file created - Email Ops EO-7. `CycleReport.gs` reads the cycle day's 17:00 buckets, builds the tracker (fail-open) into `data.followups`, shows its sections before the daily checklist and stores the rows after the send. `EmailLedger.gs` gained `emailLedgerReplaceDayBlockGs_` (`GS-015` FN-422), which `DailyChecklist.gs` now also uses. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): a bounced 17:00 email whose copy to the next person was accepted reads `REROUTED` instead of STOP. **Not live until pasted.**
+**2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): a bounced 17:00 email whose copy to the next person was accepted reads `REROUTED` instead of STOP. **Not live until pasted.**
 
 ## Revalidation trigger
 

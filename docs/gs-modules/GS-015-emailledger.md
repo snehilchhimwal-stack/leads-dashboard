@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00, 10:00 and 13:00 jobs and both CH-level reports) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - the `reroute` job and the redirect note (Email Ops EO-13) |
+| **Last Verified** | 2026-10-10 against commit `ec19415` - the `reroute` job and the redirect note (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -167,7 +167,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 **2026-10-09** (`d9e2b97`, Email Ops EO-7): `emailLedgerReplaceDayBlockGs_` (FN-422) is the one writer for the tabs that keep one block of rows per report day (`Daily_Checklist`, `Followup_Tracker`); it reads only the tab's last rows to find the day's block. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): `EMAIL_LEDGER_JOB_LABELS_` gained `reroute` ("Re-sent after a bounce" - the ledger job of a copy re-sent to the next person in the hierarchy, id `RR|<original email id>`, `GS-022`), and `emailLedgerAttemptGs_` / `emailLedgerResultGs_` write the redirect note of `GS-022` into `status_reason` of an ACCEPTED/UNCONFIRMED row ("re-routed to X (the bounced Y)") and always consume it. **Not live until pasted.**
+**2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): `EMAIL_LEDGER_JOB_LABELS_` gained `reroute` ("Re-sent after a bounce" - the ledger job of a copy re-sent to the next person in the hierarchy, id `RR|<original email id>`, `GS-022`), and `emailLedgerAttemptGs_` / `emailLedgerResultGs_` write the redirect note of `GS-022` into `status_reason` of an ACCEPTED/UNCONFIRMED row ("re-routed to X (the bounced Y)") and always consume it. **Not live until pasted.**
 
 ## Revalidation trigger
 

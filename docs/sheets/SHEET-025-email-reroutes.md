@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created by the first bounce after `GS-022` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - created (Email Ops EO-13, decision D9) |
+| **Last Verified** | 2026-10-10 against commit `ec19415` - created (Email Ops EO-13, decision D9) |
 
 ## Purpose / reason to exist
 
@@ -109,7 +109,7 @@ The live tab; header authored in `EmailReroute.gs` (`EMAIL_REROUTE_HEADERS_`).
 
 ## Version / change reference
 
-**2026-10-10** (`PENDING_SHA`): tab created. **Not live until pasted.**
+**2026-10-10** (`ec19415`): tab created. **Not live until pasted.**
 
 ## Revalidation trigger
 
