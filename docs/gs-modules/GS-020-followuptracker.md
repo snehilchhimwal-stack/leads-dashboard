@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
+| **Last Verified** | 2026-10-10 against commit `000c1e6` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
 
 ## Purpose / reason to exist
 
@@ -122,7 +122,7 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): a bounced 17:00 email whose copy to the next person was accepted reads `REROUTED` instead of STOP. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`): `FOLLOWUP_TRACKER_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
+**2026-10-10** (`000c1e6`): `FOLLOWUP_TRACKER_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
 
 ## Revalidation trigger
 

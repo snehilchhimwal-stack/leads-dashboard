@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - the first read of AllIssues_Log is retried (Email Ops, after the first live run) |
+| **Last Verified** | 2026-10-10 against commit `000c1e6` - the first read of AllIssues_Log is retried (Email Ops, after the first live run) |
 
 ## Purpose / reason to exist
 
@@ -250,7 +250,7 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-10-10** (`59db11b`, decision D8): the 2026-10-09 tab-level notice above was **withdrawn**. Instead `sendAllIssuesEmails_` puts a `staleSince` date on every flagged lead (`staleSinceOfRowGs_`, `GS-021`) and both the bucket email and the CH-level report move the stale leads (no update for more than 24 h) into a separate block at the bottom (`splitStaleSectionsGs_`); the leads stay in the body and in the counts. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`): `ensureAllIssuesLogSheet_` retries a transient Sheets error (it opens the tab through `ensureAllIssuesLogSheetOnce_`), and the job's first read of the tab's size goes through `lastRowRetryGs_` (`GS-015`): the 2026-10-10 17:04 run died on exactly that unprotected call (HANDOVER section 8). **Not live until pasted.**
+**2026-10-10** (`000c1e6`): `ensureAllIssuesLogSheet_` retries a transient Sheets error (it opens the tab through `ensureAllIssuesLogSheetOnce_`), and the job's first read of the tab's size goes through `lastRowRetryGs_` (`GS-015`): the 2026-10-10 17:04 run died on exactly that unprotected call (HANDOVER section 8). **Not live until pasted.**
 
 ## Revalidation trigger
 

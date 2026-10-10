@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
+| **Last Verified** | 2026-10-10 against commit `000c1e6` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
 
 ## Purpose / reason to exist
 
@@ -123,7 +123,7 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): stage J is AMBER (not RED) when every bounced email was re-routed to the next person in the hierarchy - the address still needs fixing - and RED when any bounce was NOT re-routed. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`): `DAILY_CHECKLIST_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
+**2026-10-10** (`000c1e6`): `DAILY_CHECKLIST_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
 
 ## Revalidation trigger
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - the log-tab size reads are retried (Email Ops, after the first live run) |
+| **Last Verified** | 2026-10-10 against commit `000c1e6` - the log-tab size reads are retried (Email Ops, after the first live run) |
 
 ## Purpose / reason to exist
 
@@ -528,7 +528,7 @@ ending the session.
 
 **2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): `sendThreadedGmailReply_` (the 13:00 follow-up) calls `emailRerouteApplyGs_` (`GS-022`) before the safety gate, so the follow-up of a bucket whose address bounced goes to the person next in the hierarchy. The stored recipients (`Overnight_Log`, `AllIssues_Log`) are unchanged. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`): the jobs' reads of the log tabs' size go through `lastRowRetryGs_` (`GS-015`), so one Sheets timeout no longer ends the 10:00 or 13:00 job (the same fix as the 17:00 job, HANDOVER section 8). **Not live until pasted.**
+**2026-10-10** (`000c1e6`): the jobs' reads of the log tabs' size go through `lastRowRetryGs_` (`GS-015`), so one Sheets timeout no longer ends the 10:00 or 13:00 job (the same fix as the 17:00 job, HANDOVER section 8). **Not live until pasted.**
 
 ## Revalidation trigger
 

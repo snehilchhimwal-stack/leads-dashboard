@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00, 10:00 and 13:00 jobs and both CH-level reports) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - first-read retry helper and the tab pre-creation helper (Email Ops, after the first live run) |
+| **Last Verified** | 2026-10-10 against commit `000c1e6` - first-read retry helper and the tab pre-creation helper (Email Ops, after the first live run) |
 
 ## Purpose / reason to exist
 
@@ -171,7 +171,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 **2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): `EMAIL_LEDGER_JOB_LABELS_` gained `reroute` ("Re-sent after a bounce" - the ledger job of a copy re-sent to the next person in the hierarchy, id `RR|<original email id>`, `GS-022`), and `emailLedgerAttemptGs_` / `emailLedgerResultGs_` write the redirect note of `GS-022` into `status_reason` of an ACCEPTED/UNCONFIRMED row ("re-routed to X (the bounced Y)") and always consume it. **Not live until pasted.**
 
-**2026-10-10** (`PENDING_SHA`): after the first live 17:00 run on this code crashed on a Sheets timeout (HANDOVER section 8): `lastRowRetryGs_` (a tab's last row, retried on a transient error) and `precreateEmailOpsTabsNow()` (a one-off helper run by hand at a quiet moment that creates every Email Ops tab - `Email_Ledger`, `Email_Ledger_Exclusions`, `Incident_Log`, `Email_Reroutes`, `Daily_Report`, `Daily_Checklist`, `Followup_Tracker` - with its header; a tab with the right header is left as it is, a foreign header is reported and not touched). The plain-text column lists became constants shared with the writers. **Not live until pasted.**
+**2026-10-10** (`000c1e6`): after the first live 17:00 run on this code crashed on a Sheets timeout (HANDOVER section 8): `lastRowRetryGs_` (a tab's last row, retried on a transient error) and `precreateEmailOpsTabsNow()` (a one-off helper run by hand at a quiet moment that creates every Email Ops tab - `Email_Ledger`, `Email_Ledger_Exclusions`, `Incident_Log`, `Email_Reroutes`, `Daily_Report`, `Daily_Checklist`, `Followup_Tracker` - with its header; a tab with the right header is left as it is, a foreign header is reported and not touched). The plain-text column lists became constants shared with the writers. **Not live until pasted.**
 
 ## Revalidation trigger
 
