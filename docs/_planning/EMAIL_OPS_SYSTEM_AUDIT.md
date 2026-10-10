@@ -19,11 +19,11 @@ Builds on `docs/_planning/EMAIL_AUDIT.md` (P1-P18c, all deployed) - read that fi
 | EO-7 | the follow-up tracker: each 17:00 bucket's two checkpoints COMPLETED / NOT_NEEDED / BLOCKED / OVERDUE / DUE / FUTURE, a bounced 17:00 email marked STOP (a status, not a behaviour); in the 16:30 report and the `Followup_Tracker` tab | `FollowupTracker.gs` (new), `EmailLedger.gs`, `CycleReport.gs` | `GS-020`, `SHEET-024` |
 | D8 | stale leads (no update for more than 24 h, whenever created) held in a red block at the bottom of every automatic email; judged from the Movement_Log content-hash history | `StaleLeads.gs` (new), `MovementTracker.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs` | `GS-021` |
 
-All twenty files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs`, `FollowupTracker.gs`, `StaleLeads.gs` and their seven `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`,
+All twenty-one files are in one folder, `Downloads\Email-Ops-package`: `EmailLedger.gs`, `CycleReport.gs`, `EmailSweep.gs`, `OpsAudit.gs`, `DailyChecklist.gs`, `FollowupTracker.gs`, `StaleLeads.gs` and their seven `Tests_` files are NEW; `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailInfra.gs`, `MovementTracker.gs`,
 `Tests_EmailInfra.gs`, `Tests_Mocks.gs`, `Tests_RunAll.gs` are changed. Nothing is live until pasted into the Sheet's Apps Script editor (CLAUDE.md; `docs/STALENESS_TRACKER.md` deploy register).
 
 **Put it live (in this order, with Snehil at the keyboard for Ctrl+S):**
-1. Paste the 20 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
+1. Paste the 21 files (new ones via "+" -> Script -> Rename). Run `runAllTests()` once and read the total (nothing sends, nothing touches the real sheet).
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` and `setupOpsAuditTriggers()` once each (each installs its daily trigger(s) and replaces only its own earlier ones).
 3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()` (all read-only). The first audit after the ledger is first pasted may say "Email_Ledger has none for the ... job" - expected once, for the jobs that ran before the ledger existed.
 4. The tabs `Email_Ledger`, `Email_Ledger_Exclusions` and `Incident_Log` create themselves on the first 17:00 run / first alert. After that day's 17:00 run, run `showEmailLedgerTodayNow()`; the next day expect the 15:45 sweep and the 16:30 report.
