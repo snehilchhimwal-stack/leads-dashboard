@@ -1022,17 +1022,16 @@ function showEmailJobRunsNow() {
   Logger.log('snapshotPeriodic: ' + JSON.stringify(readEmailJobRunGs_('snapshotPeriodic')));
 }
 
-// ---- Leads-tab freshness and the stale-data notice (Email Ops EO-10; plan decision D4 and the 2026-10-09 answer) ----
+// ---- Leads-tab freshness (Email Ops EO-10; plan decision D4) ----
 // The Leads tab is refreshed about every other hour, at varying times, and carries no "last imported" cell, so its freshness is judged from the newest lead
-// assignment time: at least 12 h old = AMBER, at least 24 h = RED ("stale" - decided 2026-10-09: a stale lead must be at least 24 hours old; leads arrive irregularly, so a
-// shorter gap is just a quiet spell). If the refresh process ever writes a timestamp cell, use that instead. A RED tab never holds an email:
-// every email that is sent carries a separate "Data freshness notice" section at its very bottom (staleLeadsNoticeSectionGs_), and the 16:30 report lists it.
-const LEADS_FRESH_AMBER_HOURS_ = 12;
-const LEADS_FRESH_RED_HOURS_ = 24;
+// assignment time: more than 3 h old = AMBER, more than 5 h = RED. If the refresh process ever writes a timestamp cell, use that instead. It is a WARNING in the 16:30
+// report only - it never changes or holds an email. (Not to be confused with a STALE LEAD - one with no activity for more than 24 h - see leadStaleStateGs_, MovementTracker.gs.)
+const LEADS_FRESH_AMBER_HOURS_ = 3;
+const LEADS_FRESH_RED_HOURS_ = 5;
 
 function leadsFreshnessLevelGs_(ageHours) {
-  if (ageHours >= LEADS_FRESH_RED_HOURS_) return 'RED';
-  if (ageHours >= LEADS_FRESH_AMBER_HOURS_) return 'AMBER';
+  if (ageHours > LEADS_FRESH_RED_HOURS_) return 'RED';
+  if (ageHours > LEADS_FRESH_AMBER_HOURS_) return 'AMBER';
   return 'GREEN';
 }
 
@@ -1049,30 +1048,8 @@ function leadsFreshnessFromRowsGs_(colIndex, dataRows, now) {
   const level = leadsFreshnessLevelGs_(ageHours);
   const when = Utilities.formatDate(newest, 'Asia/Kolkata', 'd MMM HH:mm');
   const text = level + ': the newest lead was assigned ' + (Math.round(ageHours * 10) / 10) + ' h ago (' + when + ' IST)' +
-    (level === 'GREEN' ? '' : ' - at least ' + (level === 'RED' ? LEADS_FRESH_RED_HOURS_ : LEADS_FRESH_AMBER_HOURS_) + ' h old; the Leads tab refresh (about every 2 h) may have stopped, so the emails would describe stale data');
+    (level === 'GREEN' ? '' : ' - older than ' + (level === 'RED' ? LEADS_FRESH_RED_HOURS_ : LEADS_FRESH_AMBER_HOURS_) + ' h; the Leads tab refresh (about every 2 h) may be late, so the 17:00 emails would describe stale data');
   return { level: level, ageHours: ageHours, newest: newest, text: text };
-}
-
-// What the emailers call: the notice for these Leads-tab rows, or null. Fail-open on purpose - a warning can never stop an email, so any error means "no notice".
-function staleLeadsNoticeFromRowsGs_(colIndex, dataRows, now) {
-  try { return staleLeadsNoticeSectionGs_(leadsFreshnessFromRowsGs_(colIndex, dataRows, now)); } catch (e) { return null; }
-}
-
-// The separate bottom section every email gets when the Leads tab is RED (null otherwise): the lead tables above stay complete, the warning stays apart.
-function staleLeadsNoticeSectionGs_(freshness) {
-  if (!freshness || freshness.level !== 'RED' || !freshness.newest) return null;
-  const when = Utilities.formatDate(freshness.newest, 'Asia/Kolkata', 'd MMM HH:mm');
-  return {
-    heading: 'Data freshness notice',
-    subheading: 'Kept apart at the bottom of this email on purpose - the lead tables above are complete.',
-    accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
-    columns: ['Notice'],
-    rows: [
-      ['The Leads tab looks out of date: the newest lead was assigned ' + (Math.round(freshness.ageHours * 10) / 10) + ' h ago (' + when + ' IST).'],
-      ['This email is built from that data, so recent calls, comments or stage changes may not be in it - a lead listed above may already have been handled.'],
-      ["Check the lead's current status in the CRM before acting on it."],
-    ],
-  };
 }
 
 // ---- Plain-text twin of a report email (email audit P2 / F13) ----
@@ -1189,7 +1166,6 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   const dateLabel = (opts && opts.dateLabel) || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   const hierarchyData = opts && opts.hierarchyData;
   const ledger = opts && opts.ledger; // Email Ops EO-1b: the evidence trail, passed on to the CH-level report
-  const staleNotice = opts && opts.staleNotice; // the bottom "Data freshness notice" section, when the Leads tab is RED
   const futworkRmNames = rmNames.filter(isFutworkRmNameGs_);
   const regularRmNames = rmNames.filter(function (n) { return !isFutworkRmNameGs_(n); });
   const pnlHeadEmail = regionPnlHeadEmailGs_(ss, region, hierarchyData);
@@ -1198,7 +1174,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
     return { to: b.primaryEmail, cc: withRegionPnlHeadCcGs_(pnlHeadEmail, b.primaryEmail, b.cc.join(',')), rmNames: b.rmNames, source: 'RM_Hierarchy (' + b.primaryRole + ': ' + b.primaryName + ')', bucketLabel: b.primaryName, primaryRole: b.primaryRole };
   });
 
-  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel, ledger, staleNotice);
+  if (fireAlerts) notifyChLevelLeadsGs_(region, resolved.chLevelRms, rmToLeads, dateLabel, ledger);
 
   let trulyUnresolved = [];
   if (resolved.unresolved.length) {

@@ -131,7 +131,7 @@ const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 // shared with the real per-RM emails this run) — see
 // resolveRecipientEmailsForRegion_'s own comment on both; either can be
 // omitted (empty leads, or a freshly-computed dateLabel).
-function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger, staleNotice) {
+function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger) {
   if (!chLevelRms.length) return;
   const byCh = groupChLevelRmsByCh_(chLevelRms); // chName -> { chEmail, chRole, rmNames: [] }
   const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
@@ -228,7 +228,6 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger,
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically.',
     };
-    if (staleNotice) reportOpts.sections = reportOpts.sections.concat([staleNotice]); // the separate bottom notice when the Leads tab is RED
     const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
     // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
     const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
@@ -807,7 +806,6 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     return null;
   }
 
-  if (ctx.staleNotice) section2Opts.sections = (section2Opts.sections || []).concat([ctx.staleNotice]); // the separate bottom notice when the Leads tab is RED
   const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
   const plainBody = 'Combined morning digest for ' + regionDisplay + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
@@ -979,8 +977,6 @@ function sendOvernightMorningEmails_(opts) {
   // judged against this snapshot (passed to sendCombinedMorningEmail_ below).
   const leadsData = readLeadsTab_(ss);
   const { colIndex, dataRows } = leadsData;
-  // Leads tab RED (newest lead at least 24 h old): every email of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
-  const staleNotice = staleLeadsNoticeFromRowsGs_(colIndex, dataRows, now);
   const recipients = loadRegionRecipients_(ss);
   // Loaded ONCE here and threaded through resolveRecipientEmailsForRegion_
   // below (via opts.hierarchyData) instead of letting each region's own
@@ -1180,7 +1176,7 @@ function sendOvernightMorningEmails_(opts) {
           if (!rmToLeads[l.RM]) rmToLeads[l.RM] = [];
           rmToLeads[l.RM].push(l);
         });
-        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: !recoverIds, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData, ledger: ledger, staleNotice: staleNotice });
+        const resolution = resolveRecipientEmailsForRegion_(ss, region, rmNames, recipients, { fireAlerts: !recoverIds, rmToLeads: rmToLeads, dateLabel: dateLabel, hierarchyData: hierarchyData, ledger: ledger });
 
         // RMs with no resolvable recipient anywhere AND no
         // Region_Recipients fallback either — their leads got no
@@ -1260,7 +1256,7 @@ function sendOvernightMorningEmails_(opts) {
       const bucketSkippedReason = (section1SkippedReason === 'already_sent' && !loggedRecipientsToday[checkpoint1PendingKeyGs_(region, emailKey)])
         ? 'already_sent_not_to_you' : section1SkippedReason;
       try {
-        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason, leadsData, { ledger: ledger, emailId: ledgerMeta[emailKey].emailId, staleNotice: staleNotice });
+        failure = sendCombinedMorningEmail_(ss, logSheet, allIssuesLogSheet, region, s1, s2, dateLabel, todayKey, now, win, baselineMap, bucketSkippedReason, leadsData, { ledger: ledger, emailId: ledgerMeta[emailKey].emailId });
       } catch (bucketErr) {
         Logger.log('Combined morning email threw for ' + region + ' (' + emailKey + '): ' + bucketErr);
         emailLedgerFailIfOpenGs_(ledger, ledgerMeta[emailKey].emailId, 'Unexpected error: ' + bucketErr);
@@ -1725,7 +1721,6 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     return;
   }
 
-  if (ctx.staleNotice) section2Opts.sections = (section2Opts.sections || []).concat([ctx.staleNotice]); // the separate bottom notice when the Leads tab is RED
   const html = (testModeBanner ? testModeBanner.html : '') + renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + region + ': Section 1 (Overnight Follow-up) ' +
@@ -1916,8 +1911,6 @@ function sendOvernightFollowupEmails_(opts) {
   // The ONE whole-sheet read of the run (email audit P8 / F8) — Section 1's classification AND every bucket's Checkpoint 2 use it.
   const leadsData = readLeadsTab_(ss);
   const { colIndex, dataRows } = leadsData;
-  // Leads tab RED (newest lead at least 24 h old): every reply of this run carries a separate bottom "Data freshness notice" section; nothing is held (2026-10-09 answer).
-  const staleNotice = staleLeadsNoticeFromRowsGs_(colIndex, dataRows, now);
   // buildMovementLogMapsGs_ (MovementTracker.gs) reads Movement_Log ONCE
   // and derives both maps from that one read — see
   // sendOvernightMorningEmails' identical comment above. Detailed feeds
@@ -2119,7 +2112,7 @@ function sendOvernightFollowupEmails_(opts) {
     const subject = 'Re: ' + (r.subject || (r.region + ' Google Overnight Leads'));
     // One bucket throwing (2026-09-25: an oversize checkpoint cell) must not stop every OTHER bucket's follow-up.
     try {
-      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap, leadsData, { ledger: ledger, emailId: r.ledgerId, staleNotice: staleNotice });
+      sendCombinedFollowupEmail_(ss, logSheet, r.rowNumber, allIssuesLogSheet, r.region, r.threadId, sendTo, sendCc, subject, testModeBanner, r.unresolvedRows, section2Input, now, baselineMap, leadsData, { ledger: ledger, emailId: r.ledgerId });
     } catch (bucketErr) {
       Logger.log('Combined follow-up threw for ' + r.region + ' (thread ' + r.threadId + '): ' + bucketErr);
       emailLedgerFailIfOpenGs_(ledger, r.ledgerId, 'unexpected error: ' + bucketErr);
