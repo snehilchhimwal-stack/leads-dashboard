@@ -91,20 +91,28 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `7799e44` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `Core.gs` | `78e47f5` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `EmailInfra.gs` | `d897529` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `MovementTracker.gs` | `58ab8e1` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `OvernightEmailer.gs` | `7799e44` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `RmHierarchy.gs` | `d897529` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `RmHierarchySync.gs` | `3dc9852` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `SlaEngine.gs` | `7799e44` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
-| `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-09 | read directly from the live editor by hash-match (2026-10-09) |
+| `AllIssuesEmailer.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `Core.gs` | `78e47f5` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `CycleReport.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `DailyChecklist.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `EmailInfra.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `EmailLedger.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `EmailReroute.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `EmailSweep.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `FollowupEngine.gs` | `cba3a82` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `FollowupTracker.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `MovementTracker.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `OpsAudit.gs` | `8ebf41a` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `OvernightEmailer.gs` | `ec19415` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `RmHierarchy.gs` | `d897529` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `RmHierarchySync.gs` | `3dc9852` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `SlaEngine.gs` | `7799e44` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
+| `StaleLeads.gs` | `59db11b` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10; pasted that day) |
+| `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-10 | read directly from the live editor by hash-match (2026-10-10) |
 
 ### Known live-vs-repo differences
 
@@ -272,6 +280,8 @@ One line per sweep: date — what was found — what was fixed / left open.
   middle-name matches are worth a human glance (could be a different person with the same first and last name).
 
 ## Current status
+
+- 2026-10-10 — **Email Operations System deployed** (`ec19415`; `GS-015`..`GS-022`, `SHEET-019`..`SHEET-025`). 24 files pasted from the working tree into the live project (the user pressed Ctrl+S): 8 existing (`OvernightEmailer.gs`, `AllIssuesEmailer.gs`, `EmailInfra.gs`, `MovementTracker.gs`, `Tests_Mocks.gs`, `Tests_RunAll.gs`, `Tests_EmailInfra.gs` and `Tests_MovementTracker.gs`, whose 2026-10-08 test-only fix had never been pasted) and 16 new (`EmailLedger`, `CycleReport`, `EmailSweep`, `EmailReroute`, `OpsAudit`, `DailyChecklist`, `FollowupTracker`, `StaleLeads` + their `Tests_` files). Dry run first (every upload equalled HEAD, every old live hash still matched), then `pushEditOperations` per model, re-read after a reload: all 48 live files match HEAD (`match-live-gs.py --apply`; the 8 new production files now have register rows). Adding a file in the editor needs the tab in the FOREGROUND (a hidden tab leaves "Adding file..." stuck) and several seconds between additions. The three `setupXxx()` runs (sweep: four triggers, report, audits) follow separately.
 
 <!-- AUTO:BEGIN -->
 
