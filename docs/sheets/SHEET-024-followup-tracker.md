@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created by the first 16:30 report after `GS-020` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `d9e2b97` - created (Email Ops EO-7) |
+| **Last Verified** | 2026-10-09 against commit `b6e714b` - created (Email Ops EO-7) |
 
 ## Purpose / reason to exist
 
