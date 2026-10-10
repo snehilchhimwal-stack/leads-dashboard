@@ -673,7 +673,7 @@ function renderTwoSectionEmailHTML_(section1Opts, section2Opts) {
 function loadYesterdaysAllIssuesBucketsGs_(ss, now) {
   const yesterdayKey = istDayKeyGs_(new Date(now.getTime() - 24 * 3600 * 1000));
   const logSheet = ensureAllIssuesLogSheet_(ss); // AllIssuesEmailer.gs -- already a required file for this project (see this file's own header)
-  const lastRow = logSheet.getLastRow();
+  const lastRow = lastRowRetryGs_(logSheet);
   const byRegion = {};
   if (lastRow < 2) return byRegion;
 
@@ -1116,7 +1116,7 @@ function sendOvernightMorningEmails_(opts) {
   // region-level guard above says "this region ran", NOT "this recipient got their email", and the label a Section-2-only
   // bucket shows must not claim the second.
   const loggedRecipientsToday = {};
-  const priorLastRow = logSheet.getLastRow();
+  const priorLastRow = lastRowRetryGs_(logSheet);
   if (priorLastRow >= 2) {
     withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 6).getValues(); }, 'read Overnight_Log for idempotency check')
       .forEach(function (r) {
@@ -1621,7 +1621,7 @@ function checkpoint1PendingKeyGs_(region, to) {
 function loadTodaysCheckpoint1PendingGs_(ss, now) {
   const todayKey = istDayKeyGs_(now);
   const logSheet = ensureAllIssuesLogSheet_(ss);
-  const lastRow = logSheet.getLastRow();
+  const lastRow = lastRowRetryGs_(logSheet);
   const byEmail = {};
   if (lastRow < 2) return byEmail;
 
@@ -1892,7 +1892,7 @@ function sendOvernightFollowupEmails_(opts) {
   const now = new Date();
   const todayKey = istDayKeyGs_(now);
   const logSheet = ensureOvernightLogSheet_(ss);
-  const lastRow = logSheet.getLastRow();
+  const lastRow = lastRowRetryGs_(logSheet);
   if (lastRow < 2) return;
 
   // 9 columns, not 8 — col I (index 8) is followup_sent_at (Step 8/11's
@@ -2211,7 +2211,7 @@ function backfillTodaysOvernightLogRecipientsNow() {
   const todayKey = istDayKeyGs_(now);
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
   const logSheet = ensureOvernightLogSheet_(ss);
-  const lastRow = logSheet.getLastRow();
+  const lastRow = lastRowRetryGs_(logSheet);
   if (lastRow < 2) { Logger.log('Overnight_Log is empty — nothing to backfill.'); return; }
 
   const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'read Overnight_Log for backfill');
@@ -2408,7 +2408,7 @@ function debugFollowupStatusNow() {
   Logger.log('=== debugFollowupStatusNow — today (IST) = ' + todayKey + ', run at ' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') + ' ===');
 
   const logSheet = ensureOvernightLogSheet_(ss);
-  const lastRow = logSheet.getLastRow();
+  const lastRow = lastRowRetryGs_(logSheet);
   if (lastRow < 2) { Logger.log('Overnight_Log has NO rows at all (lastRow=' + lastRow + '). The 10am morning email has never logged anything in this sheet — check whether sendOvernightMorningEmails has ever run (Executions log).'); return; }
 
   const logRows = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 9).getValues(); }, 'debug: read Overnight_Log');

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `ec19415` - created (Email Ops EO-13, decision D9) |
+| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
 
 ## Purpose / reason to exist
 
@@ -126,6 +126,8 @@ Apps Script backend; a pure/near-pure helper layer used by the sweep and by the 
 ## Version / change reference
 
 **2026-10-10** (`ec19415`): file created - Email Ops EO-13, decision D9. `EmailSweep.gs` now checks four times a day and hands every bounce to this file; `sendGuardedEmailGs_` / `sendThreadedGmailReply_` redirect; `EmailLedger.gs` writes the redirect note; the 16:30 report, checklist stage J and the follow-up tracker read the outcome. **Not live until pasted.**
+
+**2026-10-10** (`PENDING_SHA`): `EMAIL_REROUTE_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
 
 ## Revalidation trigger
 

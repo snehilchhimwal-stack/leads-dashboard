@@ -1427,6 +1427,83 @@ function runEmailLedgerTests_() {
       }
     }
 
+    // ---- (12) the first-read retry and the one-off tab pre-creation (after the first 17:00 run on this code crashed, HANDOVER section 8) ----
+    {
+      // lastRowRetryGs_: a transient timeout is retried, a real error is not
+      const mkSheet = function (failures, message) {
+        let calls = 0;
+        return { getName: function () { return 'T'; }, getLastRow: function () { calls++; if (calls <= failures) throw new Error(message); return 7; }, calls: function () { return calls; } };
+      };
+      const flaky = mkSheet(2, 'Service Spreadsheets timed out while accessing document with id abc');
+      TestAssertEqual_(lastRowRetryGs_(flaky) + ',' + flaky.calls(), '7,3', 'first read: a Sheets timeout is retried (twice here) and then succeeds');
+      const hard = mkSheet(9, 'Service Spreadsheets timed out while accessing document');
+      TestAssertThrows_(function () { lastRowRetryGs_(hard); }, 'first read: a timeout that never clears still ends in the error (after 4 attempts)');
+      TestAssertEqual_(hard.calls(), 4, 'first read: …exactly 4 attempts');
+      const broken = mkSheet(9, 'Range not found');
+      TestAssertThrows_(function () { lastRowRetryGs_(broken); }, 'first read: a real error is thrown at once');
+      TestAssertEqual_(broken.calls(), 1, 'first read: …without retries');
+
+      // ensureAllIssuesLogSheet_ retries too (the call the crashed run died on)
+      const ssFlaky = TestMockSpreadsheet_({});
+      const realGet = ssFlaky.getSheetByName;
+      let gets = 0;
+      ssFlaky.getSheetByName = function (n) { gets++; if (gets === 1) throw new Error('Service Spreadsheets timed out while accessing document'); return realGet(n); };
+      const logSheet = ensureAllIssuesLogSheet_(ssFlaky);
+      TestAssert_(!!logSheet && logSheet.getLastRow() === 1 && gets >= 2, 'AllIssues_Log: opened (created) after one Sheets timeout instead of crashing the job');
+
+      // precreateEmailOpsTabsNow on an empty workbook creates every tab with its own header
+      const ssP = TestMockSpreadsheet_({});
+      SpreadsheetApp.getActiveSpreadsheet = function () { return ssP; };
+      const first = precreateEmailOpsTabsNow();
+      const expected = [[EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_], [EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_], [EMAIL_INCIDENT_LOG_SHEET_, EMAIL_INCIDENT_HEADERS_],
+        [EMAIL_REROUTE_SHEET_, EMAIL_REROUTE_HEADERS_], [CYCLE_REPORT_DAILY_SHEET_, CYCLE_REPORT_DAILY_HEADERS_], [DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_], [FOLLOWUP_TRACKER_SHEET_, FOLLOWUP_TRACKER_HEADERS_]];
+      TestAssertEqual_(first.created.length + ',' + first.existed.length + ',' + first.failed.length, '7,0,0', 'pre-create: seven tabs created on an empty workbook');
+      expected.forEach(function (e) {
+        const sh = ssP.getSheetByName(e[0]);
+        TestAssert_(!!sh && JSON.stringify(sh.getRange(1, 1, 1, e[1].length).getValues()[0]) === JSON.stringify(e[1]), 'pre-create: ' + e[0] + ' exists with its own header row');
+      });
+      // the writers accept the tabs it made (same header, no complaint) and a data row survives a second run
+      const ledgerSheet = ssP.getSheetByName(EMAIL_LEDGER_SHEET_);
+      ledgerSheet.getRange(2, 1, 1, 2).setValues([['2026-10-10|x', '2026-10-10']]);
+      const second = precreateEmailOpsTabsNow();
+      TestAssertEqual_(second.created.length + ',' + second.existed.length + ',' + second.failed.length, '0,7,0', 'pre-create: a second run changes nothing (seven already there)');
+      TestAssertEqual_(ledgerSheet.getLastRow() + ',' + ledgerSheet.getRange(2, 1, 1, 1).getValue(), '2,2026-10-10|x', 'pre-create: …and leaves existing rows untouched');
+      const h = emailLedgerOpenGs_(ssP);
+      TestAssert_(emailLedgerLiveGs_(h) && !h.failures, 'pre-create: the ledger opens on the pre-created tabs without a complaint');
+      // the plain-text columns (so Sheets never turns a day key or an id into a Date): every pre-created tab asks for them
+      const asked = {};
+      const ssN = TestMockSpreadsheet_({});
+      const realIns = ssN.insertSheet;
+      ssN.insertSheet = function (n) {
+        const sh = realIns(n);
+        const realRange = sh.getRange;
+        sh.getRange = function (r, c) { const range = realRange.apply(sh, arguments); range.setNumberFormat = function (f) { (asked[n] = asked[n] || []).push(c + ':' + f); return range; }; return range; };
+        return sh;
+      };
+      SpreadsheetApp.getActiveSpreadsheet = function () { return ssN; };
+      precreateEmailOpsTabsNow();
+      const want = {};
+      want[EMAIL_LEDGER_SHEET_] = '1:@,2:@'; want[EMAIL_LEDGER_EXCLUSIONS_SHEET_] = '2:@,6:@'; want[EMAIL_INCIDENT_LOG_SHEET_] = '1:@,2:@'; want[EMAIL_REROUTE_SHEET_] = '3:@,5:@,9:@';
+      want[CYCLE_REPORT_DAILY_SHEET_] = '1:@'; want[DAILY_CHECKLIST_SHEET_] = '1:@'; want[FOLLOWUP_TRACKER_SHEET_] = '1:@';
+      Object.keys(want).forEach(function (n) { TestAssertEqual_((asked[n] || []).join(','), want[n], 'pre-create: ' + n + ' gets its plain-text columns'); });
+      // a tab with a foreign header is reported, not touched, and does not stop the others
+      const ssF = TestMockSpreadsheet_({});
+      ssF.insertSheet(EMAIL_REROUTE_SHEET_).getRange(1, 1, 1, 2).setValues([['mine', 'not ours']]);
+      SpreadsheetApp.getActiveSpreadsheet = function () { return ssF; };
+      const mixed = precreateEmailOpsTabsNow();
+      TestAssertEqual_(mixed.created.length + ',' + mixed.failed.length, '6,1', 'pre-create: a tab with a foreign header is reported (failed), the other six are created');
+      TestAssertContains_(mixed.failed[0], EMAIL_REROUTE_SHEET_, 'pre-create: …naming the tab');
+      TestAssertEqual_(ssF.getSheetByName(EMAIL_REROUTE_SHEET_).getRange(1, 1, 1, 2).getValues()[0].join('|'), 'mine|not ours', 'pre-create: …and its content is left alone');
+      // a timeout while creating is retried
+      const ssT = TestMockSpreadsheet_({});
+      const realInsert = ssT.insertSheet;
+      let inserts = 0;
+      ssT.insertSheet = function (n) { inserts++; if (inserts === 1) throw new Error('Service Spreadsheets timed out while accessing document'); return realInsert(n); };
+      SpreadsheetApp.getActiveSpreadsheet = function () { return ssT; };
+      const timedOut = precreateEmailOpsTabsNow();
+      TestAssertEqual_(timedOut.created.length + ',' + timedOut.failed.length, '7,0', 'pre-create: a timeout while adding a tab is retried and all seven are created');
+    }
+
     // ---- (11) the 10:00 / 13:00 jobs are untouched by the gate change (they ignore missingLeadIds) ----
     TestAssertOnlyTestEmails_();
   } finally {

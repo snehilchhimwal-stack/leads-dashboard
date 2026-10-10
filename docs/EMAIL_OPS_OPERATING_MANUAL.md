@@ -227,7 +227,7 @@ Planned: nothing more from the original plan. The earlier open question - should
 
 1. Paste the 23 files from `Downloads\Email-Ops-package` (new files via "+" -> Script); run `runAllTests()` and read the total.
 2. Run `setupEmailCycleReportTrigger()`, `setupEmailSweepTrigger()` (it installs FOUR triggers - the bounce checks) and `setupOpsAuditTriggers()` once each.
-3. Preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()`.
+3. Run `precreateEmailOpsTabsNow()` once at a quiet moment (not near 10:00, 13:00, 16:30 or 17:00): it creates every Email Ops tab ahead of time, because adding a tab inside a running job stalled this workbook's spreadsheet service and crashed the first 17:00 run (`HANDOVER.md` section 8). Then preview without sending: `showEmailCycleReportNow()`, `showEmailSweepPlanNow()`, `showEmailLedgerTodayNow()`, `showEmailAuditNow()`.
 4. After the next 17:00 run, run `showEmailLedgerTodayNow()`; next day expect the 16:30 report.
 5. Record the deploy (`python3 test/match-live-gs.py ... --apply`).
 

@@ -28,6 +28,7 @@ function showFollowupTrackerNow() {
 
 const FOLLOWUP_TRACKER_SHEET_ = 'Followup_Tracker';
 const FOLLOWUP_TRACKER_HEADERS_ = ['report_day', 'cycle_day', 'region', 'bucket', 'role', 'recipient', 'leads', 'checkpoint1', 'checkpoint1_note', 'checkpoint2', 'checkpoint2_note', 'email_status', 'stop', 'evaluated_at'];
+const FOLLOWUP_TRACKER_TEXT_COLUMNS_ = [1]; // report_day kept as plain text
 const FOLLOWUP_TRACKER_CP1_HOUR_ = 10; // IST - the 10:00 email (Checkpoint 1)
 const FOLLOWUP_TRACKER_CP2_HOUR_ = 13; // IST - the 13:00 reply (Checkpoint 2)
 const FOLLOWUP_TRACKER_GRACE_MINUTES_ = 30; // a checkpoint is DUE for this long after its hour, then OVERDUE (the watchdog gives a job the same 30 minutes)
@@ -162,7 +163,7 @@ function followupTrackerReadLogGs_(ss, dayKey) {
 function followupTrackerRecordGs_(ss, t, now) {
   if (TEST_MODE_OVERRIDE_EMAIL_ || !t || !t.rows.length) return;
   try {
-    const sheet = emailLedgerEnsureSheetGs_(ss, FOLLOWUP_TRACKER_SHEET_, FOLLOWUP_TRACKER_HEADERS_, [1]);
+    const sheet = emailLedgerEnsureSheetGs_(ss, FOLLOWUP_TRACKER_SHEET_, FOLLOWUP_TRACKER_HEADERS_, FOLLOWUP_TRACKER_TEXT_COLUMNS_);
     const day = istDayKeyGs_(now);
     const out = t.rows.map(function (r) {
       return [day, t.cycleDay, r.region, r.bucket, r.role, r.to, r.leads, r.cp1.status, String(r.cp1.note).slice(0, 300), r.cp2.status, String(r.cp2.note).slice(0, 300), r.email, r.stop ? 'yes' : '', now];

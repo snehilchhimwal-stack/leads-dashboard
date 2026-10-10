@@ -130,7 +130,12 @@ function allIssuesDateRangeLabelGs_(win) {
 // row; a row from BEFORE this change (or a 17:00 run where nothing
 // happened to populate them) simply has 5 blank cells, same as any
 // other missing-header backfill this function already tolerates.
+// Retried on a transient Sheets error: the 17:00 job's first call into the spreadsheet after the preliminary reads used to be unprotected (HANDOVER section 8, 2026-10-10).
+// Idempotent: a retry after a timeout that actually created the tab finds it and carries on.
 function ensureAllIssuesLogSheet_(ss) {
+  return withRetry_(function () { return ensureAllIssuesLogSheetOnce_(ss); }, 'open AllIssues_Log');
+}
+function ensureAllIssuesLogSheetOnce_(ss) {
   let sheet = ss.getSheetByName(ALL_ISSUES_LOG_SHEET_);
   const headers = ['date', 'region', 'bucket_label', 'primary_role', 'to', 'cc', 'lead_count', 'sent_at', 'thread_id',
     'issue_snapshot_json', 'checkpoint1_json', 'checkpoint1_sent_at', 'checkpoint2_json', 'checkpoint2_sent_at'];
@@ -310,7 +315,7 @@ function sendAllIssuesEmails_(opts) {
   // sendOvernightMorningEmails uses against Overnight_Log, applied here
   // against AllIssues_Log instead.
   const alreadyLoggedRegionsToday = {};
-  const priorLastRow = logSheet.getLastRow();
+  const priorLastRow = lastRowRetryGs_(logSheet);
   if (priorLastRow >= 2) {
     withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 2).getValues(); }, 'read AllIssues_Log for idempotency check')
       .forEach(function (r) {

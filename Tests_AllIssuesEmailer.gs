@@ -383,6 +383,18 @@ function runAllIssuesEmailerTests_() {
       } finally { logSheetD.appendRow = realAppend; }
     }
 
+    // ---- 2026-10-10: the job's first read of AllIssues_Log is retried (the first live run on the Email Ops code crashed on exactly this call - HANDOVER section 8) ----
+    {
+      const logSheetR = ensureAllIssuesLogSheet_(ss);
+      const realLast = logSheetR.getLastRow;
+      let lastCalls = 0;
+      logSheetR.getLastRow = function () { lastCalls++; if (lastCalls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); return realLast.apply(logSheetR, arguments); };
+      let crashed = '';
+      try { sendAllIssuesEmails_(); } catch (e) { crashed = String((e && e.message) || e); } finally { logSheetR.getLastRow = realLast; }
+      TestAssertEqual_(crashed, '', 'sendAllIssuesEmails_: one Sheets timeout on the first AllIssues_Log read no longer ends the job');
+      TestAssert_(lastCalls >= 2, 'sendAllIssuesEmails_: ...the read was retried (' + lastCalls + ' calls)');
+    }
+
     // ---- email audit P9 (F21): the 17:00 job leaves a run record, and a crash is recorded ----
     {
       PropertiesService = TestMockPropertiesService_();

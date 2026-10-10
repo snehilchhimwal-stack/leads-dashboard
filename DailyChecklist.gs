@@ -23,6 +23,7 @@ function showDailyChecklistNow() {
 
 const DAILY_CHECKLIST_SHEET_ = 'Daily_Checklist';
 const DAILY_CHECKLIST_HEADERS_ = ['report_day', 'stage', 'check', 'flag', 'evidence', 'evaluated_at'];
+const DAILY_CHECKLIST_TEXT_COLUMNS_ = [1]; // report_day kept as plain text
 const DAILY_CHECKLIST_STAGES_ = 11; // A..K
 const DAILY_CHECKLIST_FLAG_RANK_ = { RED: 3, AMBER: 2, GREEN: 1, GREY: 0 };
 
@@ -176,7 +177,7 @@ function dailyChecklistSectionGs_(rows) {
 function dailyChecklistRecordGs_(ss, rows, now) {
   if (TEST_MODE_OVERRIDE_EMAIL_ || !rows || !rows.length) return;
   try {
-    const sheet = emailLedgerEnsureSheetGs_(ss, DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_, [1]);
+    const sheet = emailLedgerEnsureSheetGs_(ss, DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_, DAILY_CHECKLIST_TEXT_COLUMNS_);
     const day = istDayKeyGs_(now);
     const out = rows.map(function (r) { return [day, r.stage, r.name, r.flag, String(r.evidence).slice(0, 500), now]; });
     emailLedgerReplaceDayBlockGs_(sheet, out, day, 'Daily_Checklist'); // today's rows are the contiguous block at the bottom of the tab

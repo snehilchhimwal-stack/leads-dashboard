@@ -33,6 +33,7 @@ const CYCLE_REPORT_MAX_ROWS_ = 30; // per table, so a bad day cannot make the re
 const CYCLE_REPORT_DAILY_SHEET_ = 'Daily_Report';
 const CYCLE_REPORT_DAILY_HEADERS_ = ['report_day', 'sent_at', 'window_start', 'window_end', 'planned', 'accepted', 'skipped', 'failed', 'unconfirmed', 'blocked',
   'unfinished', 'leads_sent', 'bounced', 'replied', 'leads_left_out', 'regions_skipped', 'incidents', 'serious_incidents', 'all_clear', 'leads_freshness', 'leads_age_hours'];
+const CYCLE_REPORT_DAILY_TEXT_COLUMNS_ = [1]; // report_day kept as plain text
 const CYCLE_REPORT_JOB_ORDER_ = ['allIssues17', 'chLevel17', 'morning10', 'chLevel10', 'followup13'];
 
 // 16:30 of the previous IST day -> now. Before today's 16:30 the cycle that just ended is the one before, so the window reaches one day further back.
@@ -265,7 +266,7 @@ function cycleLeadsFreshnessGs_(ss, now) {
 function cycleReportRecordDailyGs_(ss, data, now) {
   if (TEST_MODE_OVERRIDE_EMAIL_) return;
   try {
-    const sheet = emailLedgerEnsureSheetGs_(ss, CYCLE_REPORT_DAILY_SHEET_, CYCLE_REPORT_DAILY_HEADERS_, [1]);
+    const sheet = emailLedgerEnsureSheetGs_(ss, CYCLE_REPORT_DAILY_SHEET_, CYCLE_REPORT_DAILY_HEADERS_, CYCLE_REPORT_DAILY_TEXT_COLUMNS_);
     const t = data.totals, fr = data.freshness;
     const day = istDayKeyGs_(now);
     const row = [day, now, data.cycle.start, data.cycle.end, t.planned, t.accepted, t.skipped, t.failed, t.unconfirmed, t.blocked, t.unfinished, t.leadsSent,

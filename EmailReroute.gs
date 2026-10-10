@@ -40,6 +40,7 @@ function showEmailReroutesNow() {
 
 const EMAIL_REROUTE_SHEET_ = 'Email_Reroutes';
 const EMAIL_REROUTE_HEADERS_ = ['created_at', 'expires_at', 'dead_email', 'dead_name', 'new_email', 'new_name', 'new_role', 'via', 'source_email_id', 'source_job', 'status', 'note'];
+const EMAIL_REROUTE_TEXT_COLUMNS_ = [3, 5, 9]; // dead_email, new_email, source_email_id kept as plain text
 const EMAIL_REROUTE_DAYS_ = 14;               // how long a dead address stays redirected before it is tried again
 const EMAIL_REROUTE_MAX_HOPS_ = 6;            // a chain of replacements is followed at most this far (a loop falls back to the original address)
 const EMAIL_REROUTE_CACHE_MS_ = 120000;       // the table is read once per two minutes of a run, not once per email
@@ -252,7 +253,7 @@ function emailRerouteRecordGs_(ss, spec, now) {
     return emailRerouteIsActiveGs_(e, nowMs) && emailRerouteLowerGs_(e.dead_email) === emailRerouteLowerGs_(spec.deadEmail);
   })[0];
   if (existing) return { created: false, row: existing };
-  const sheet = emailLedgerEnsureSheetGs_(ss, EMAIL_REROUTE_SHEET_, EMAIL_REROUTE_HEADERS_, [3, 5, 9]);
+  const sheet = emailLedgerEnsureSheetGs_(ss, EMAIL_REROUTE_SHEET_, EMAIL_REROUTE_HEADERS_, EMAIL_REROUTE_TEXT_COLUMNS_);
   const created = new Date(nowMs), expires = new Date(nowMs + EMAIL_REROUTE_DAYS_ * 24 * 3600 * 1000);
   const values = [created, expires, spec.deadEmail, spec.deadName || '', spec.newEmail, spec.newName || '', spec.newRole || '', spec.via, spec.sourceId || '', spec.sourceJob || '', 'ACTIVE', String(spec.note || '').slice(0, 300)];
   emailLedgerAppendBlockGs_(sheet, [values], function (probe) { return probe instanceof Date && probe.getTime() === created.getTime(); }, 'append Email_Reroutes row');

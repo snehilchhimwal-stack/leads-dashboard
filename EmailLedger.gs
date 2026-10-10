@@ -123,6 +123,10 @@ const EMAIL_LEDGER_HEADERS_ = ['email_id', 'cycle_day', 'job', 'region', 'bucket
   'leads_planned', 'planned_at', 'attempted_at', 'finished_at', 'status', 'status_reason', 'attempts', 'message_id', 'thread_id',
   'leads_sent', 'lead_ids_json', 'bounce_status', 'reply_status', 'swept_at']; // the last three are filled by the bounce/reply sweep (EO-5)
 const EMAIL_LEDGER_EXCLUSION_HEADERS_ = ['recorded_at', 'cycle_day', 'job', 'region', 'kind', 'lead_id', 'rm', 'email_id', 'reason'];
+// The columns kept as plain text (1-based), so Sheets never turns a day key or an id into a Date/number - one source for the writer AND for precreateEmailOpsTabsNow.
+const EMAIL_LEDGER_TEXT_COLUMNS_ = [1, 2];
+const EMAIL_LEDGER_EXCLUSION_TEXT_COLUMNS_ = [2, 6];
+const EMAIL_INCIDENT_TEXT_COLUMNS_ = [1, 2];
 const EMAIL_LEDGER_STATUS_ = {
   PLANNED: 'PLANNED', ATTEMPTING: 'ATTEMPTING', ACCEPTED: 'ACCEPTED', FAILED: 'FAILED', UNCONFIRMED: 'UNCONFIRMED', BLOCKED: 'BLOCKED',
   SKIPPED: 'SKIPPED', // planned, then deliberately not sent: there was nothing to say (a genuine final outcome, not a failure)
@@ -247,6 +251,46 @@ function emailLedgerEnsureSheetGs_(ss, name, headers, textColumns) {
   return sheet;
 }
 
+// A tab's last row, retried on a transient Sheets error ("Service Spreadsheets timed out ..."). The email jobs' FIRST read of their log tabs used to be unprotected, so a
+// single timeout ended the whole job (the 2026-10-09/10 first 17:00 run on this code, HANDOVER section 8).
+function lastRowRetryGs_(sheet) {
+  let name = 'a tab';
+  try { name = sheet.getName(); } catch (e) { name = 'a tab'; }
+  return withRetry_(function () { return sheet.getLastRow(); }, 'read the size of ' + name);
+}
+
+// One-off, run by hand at a QUIET moment: creates every tab of the Email Operations System that would otherwise be created for the first time INSIDE a running job
+// (Email_Ledger, Email_Ledger_Exclusions, Incident_Log, Email_Reroutes, Daily_Report, Daily_Checklist, Followup_Tracker). Why: in this very large workbook (thousands of leads,
+// a live MySQL import, dozens of tabs) adding a tab makes the spreadsheet service time out for a while, and the first 17:00 run on this code created three tabs mid-job and crashed
+// (HANDOVER section 8). Safe to run any number of times: a tab that already has the right header is left exactly as it is; one with a different header is reported and NOT touched.
+// Returns { created: [name], existed: [name], failed: [text] } and logs the same. (Not read-only: it adds empty tabs with their header row.)
+function precreateEmailOpsTabsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const specs = [
+    [EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_, EMAIL_LEDGER_TEXT_COLUMNS_],
+    [EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_, EMAIL_LEDGER_EXCLUSION_TEXT_COLUMNS_],
+    [EMAIL_INCIDENT_LOG_SHEET_, EMAIL_INCIDENT_HEADERS_, EMAIL_INCIDENT_TEXT_COLUMNS_],
+  ];
+  if (typeof EMAIL_REROUTE_SHEET_ !== 'undefined') specs.push([EMAIL_REROUTE_SHEET_, EMAIL_REROUTE_HEADERS_, EMAIL_REROUTE_TEXT_COLUMNS_]);
+  if (typeof CYCLE_REPORT_DAILY_SHEET_ !== 'undefined') specs.push([CYCLE_REPORT_DAILY_SHEET_, CYCLE_REPORT_DAILY_HEADERS_, CYCLE_REPORT_DAILY_TEXT_COLUMNS_]);
+  if (typeof DAILY_CHECKLIST_SHEET_ !== 'undefined') specs.push([DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_, DAILY_CHECKLIST_TEXT_COLUMNS_]);
+  if (typeof FOLLOWUP_TRACKER_SHEET_ !== 'undefined') specs.push([FOLLOWUP_TRACKER_SHEET_, FOLLOWUP_TRACKER_HEADERS_, FOLLOWUP_TRACKER_TEXT_COLUMNS_]);
+  const out = { created: [], existed: [], failed: [] };
+  specs.forEach(function (s) {
+    const name = s[0];
+    try {
+      const had = !!withRetry_(function () { return ss.getSheetByName(name); }, 'look for ' + name);
+      withRetry_(function () { return emailLedgerEnsureSheetGs_(ss, name, s[1], s[2]); }, 'create ' + name);
+      (had ? out.existed : out.created).push(name);
+      if (!had) { SpreadsheetApp.flush(); Utilities.sleep(3000); } // let the spreadsheet settle before the next structural change
+    } catch (e) {
+      out.failed.push(name + ': ' + String((e && e.message) || e));
+    }
+  });
+  Logger.log('precreateEmailOpsTabsNow: created ' + (out.created.join(', ') || '(none)') + '; already there ' + (out.existed.join(', ') || '(none)') + (out.failed.length ? '; FAILED ' + out.failed.join(' | ') : '') + '.');
+  return out;
+}
+
 // Opens (creating on first use) both sheets and indexes the existing email ids. Returns a handle, or null in TEST MODE; when the
 // sheets cannot be opened the handle is returned DISABLED (every later call is a no-op and the failure is reported at the end).
 function emailLedgerOpenGs_(ss) {
@@ -254,8 +298,8 @@ function emailLedgerOpenGs_(ss) {
   const h = { ledger: null, exclusions: null, rowById: {}, rows: {}, failures: 0, lastError: '', disabled: false };
   emailLedgerSetActiveGs_(h); // a held alert (EO-2) states how many of THIS run's emails went out
   try {
-    h.ledger = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_, [1, 2]);
-    h.exclusions = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_, [2, 6]);
+    h.ledger = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_, EMAIL_LEDGER_TEXT_COLUMNS_);
+    h.exclusions = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_, EMAIL_LEDGER_EXCLUSION_TEXT_COLUMNS_);
     const last = h.ledger.getLastRow();
     if (last >= 2) {
       h.ledger.getRange(2, 1, last - 1, 1).getValues().forEach(function (r, i) {
@@ -504,7 +548,7 @@ function incidentSeverityGs_(subject) {
 function emailIncidentSheetGs_(create) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!create && !ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_)) return null;
-  return emailLedgerEnsureSheetGs_(ss, EMAIL_INCIDENT_LOG_SHEET_, EMAIL_INCIDENT_HEADERS_, [1, 2]);
+  return emailLedgerEnsureSheetGs_(ss, EMAIL_INCIDENT_LOG_SHEET_, EMAIL_INCIDENT_HEADERS_, EMAIL_INCIDENT_TEXT_COLUMNS_);
 }
 
 // Records an alert as an incident and returns its id ('' when it could not be recorded - never throws).
