@@ -67,6 +67,12 @@ function runFollowupTrackerTests_() {
       TestAssertEqual_(t.rows[0].cp1.status + ',' + t.rows[0].cp2.status, 'OVERDUE,BLOCKED', 'tracker: nothing recorded for Checkpoint 1 at 16:30 -> OVERDUE, and Checkpoint 2 is blocked by it');
     }
     {
+      // the tracker's own due times: Checkpoint 1 at 10:00, Checkpoint 2 at 13:00, each DUE for 30 minutes and then OVERDUE
+      const at = function (hhmm) { return track([TestFT_log_()], [], hhmm); };
+      TestAssertEqual_([at('09:59'), at('10:15'), at('10:45')].map(function (t) { return t.rows[0].cp1.status; }).join(','), 'FUTURE,DUE,OVERDUE', 'tracker: Checkpoint 1 is FUTURE before 10:00, DUE at 10:15 and OVERDUE at 10:45');
+      TestAssertEqual_(track([TestFT_log_({ cp1At: 'x' })], [], '12:59').rows[0].cp2.status + ',' + track([TestFT_log_({ cp1At: 'x' })], [], '13:15').rows[0].cp2.status + ',' + track([TestFT_log_({ cp1At: 'x' })], [], '13:45').rows[0].cp2.status, 'FUTURE,DUE,OVERDUE', 'tracker: Checkpoint 2 is FUTURE before 13:00, DUE at 13:15 and OVERDUE at 13:45');
+    }
+    {
       // the day of the 17:00 email, evening: both checkpoints are still in the future
       const t = track([TestFT_log_()], [TestFT_led_('allIssues17', 'ACCEPTED')], '18:00', TESTFT_DAY_);
       TestAssertEqual_(t.rows[0].cp1.status + ',' + t.rows[0].cp2.status + ',' + t.attention.length, 'FUTURE,FUTURE,0', 'tracker: on the evening of the 17:00 email both checkpoints are FUTURE and nothing needs attention');
