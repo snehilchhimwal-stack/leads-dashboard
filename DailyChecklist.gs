@@ -178,18 +178,7 @@ function dailyChecklistRecordGs_(ss, rows, now) {
     const sheet = emailLedgerEnsureSheetGs_(ss, DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_, [1]);
     const day = istDayKeyGs_(now);
     const out = rows.map(function (r) { return [day, r.stage, r.name, r.flag, String(r.evidence).slice(0, 500), now]; });
-    // today's rows are the contiguous block at the bottom of the tab
-    let last = sheet.getLastRow();
-    let first = last + 1;
-    while (first > 2 && emailLedgerDayKeyOfGs_(sheet.getRange(first - 1, 1, 1, 1).getValue()) === day) first--;
-    if (first <= last) {
-      if (last - first + 1 === out.length) {
-        writeUnlessTestModeGs_(function () { sheet.getRange(first, 1, out.length, out[0].length).setValues(out); }, 'update the Daily_Checklist rows');
-        return;
-      }
-      writeUnlessTestModeGs_(function () { sheet.deleteRows(first, last - first + 1); }, 'clear a partial Daily_Checklist block');
-    }
-    emailLedgerAppendBlockGs_(sheet, out, function (probe) { return emailLedgerDayKeyOfGs_(probe) === day; }, 'append the Daily_Checklist rows');
+    emailLedgerReplaceDayBlockGs_(sheet, out, day, 'Daily_Checklist'); // today's rows are the contiguous block at the bottom of the tab
   } catch (e) {
     Logger.log('Daily_Checklist rows not written - the report email is NOT affected: ' + e);
   }

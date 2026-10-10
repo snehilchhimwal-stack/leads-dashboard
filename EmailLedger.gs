@@ -29,6 +29,26 @@
 
 // Read-only helper FIRST in the file (the editor's Run button has run the previously selected function before - see HANDOVER).
 // Logs how many bucket emails today's ledger holds per status. Writes nothing.
+// Writes one day's block of rows at the bottom of a tab (the first column is the day key): replaces the day's existing block - in place when the size is the same, else it is
+// cleared and the new block appended - or appends a new block. For the tabs that keep one block of rows per report day (Daily_Checklist, Followup_Tracker). Throws on a write
+// failure; the callers swallow it (the report email never depends on these tabs).
+function emailLedgerReplaceDayBlockGs_(sheet, rows, day, label) {
+  const last = sheet.getLastRow();
+  const span = Math.min(Math.max(last - 1, 0), Math.max(120, rows.length * 3));
+  const days = span > 0 ? sheet.getRange(last - span + 1, 1, span, 1).getValues() : [];
+  let count = 0;
+  while (count < days.length && emailLedgerDayKeyOfGs_(days[days.length - 1 - count][0]) === day) count++;
+  const first = last - count + 1;
+  if (count > 0) {
+    if (count === rows.length) {
+      writeUnlessTestModeGs_(function () { sheet.getRange(first, 1, rows.length, rows[0].length).setValues(rows); }, 'update the ' + label + ' rows');
+      return;
+    }
+    writeUnlessTestModeGs_(function () { sheet.deleteRows(first, count); }, 'clear a partial ' + label + ' block');
+  }
+  emailLedgerAppendBlockGs_(sheet, rows, function (probe) { return emailLedgerDayKeyOfGs_(probe) === day; }, 'append the ' + label + ' rows');
+}
+
 // ---- Recovery of failed emails (Email Ops EO-9 / EO-9b; plan decisions D3 and D5; spec rules 4 and 6) ----
 // Today's recoverable emails of ONE job, read from the ledger: [{ emailId, region, bucket, status }]. FAILED and BLOCKED (the send was refused) and PLANNED (the run
 // died before it reached the bucket: nothing was attempted, so nothing can be duplicated - the recovery runs under the job lock, so a live job's own PLANNED rows are

@@ -58,6 +58,7 @@ const PRODUCTION_FILES = [
   'EmailSweep.gs',
   'OpsAudit.gs',
   'DailyChecklist.gs',
+  'FollowupTracker.gs',
 ];
 
 const TEST_FILES = [
@@ -81,6 +82,7 @@ const TEST_FILES = [
   'Tests_EmailSweep.gs',
   'Tests_OpsAudit.gs',
   'Tests_DailyChecklist.gs',
+  'Tests_FollowupTracker.gs',
   'Tests_EmailLifecycleFullCycle.gs',
   'Tests_RunAll.gs',
 ];

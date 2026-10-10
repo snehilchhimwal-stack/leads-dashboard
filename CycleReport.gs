@@ -51,7 +51,8 @@ function cycleReportInWindowGs_(value, win) {
 function cycleRateGs_(n, d) { return d > 0 ? n + ' of ' + d + ' (' + Math.round(100 * n / d) + '%)' : 'n/a'; }
 
 // Pure: the numbers and lists of the report. input = { ledgerRows, exclusionRows, incidentRows, window, configProblems, freshness, jobProblems, audits }
-// (jobProblems / audits feed the daily checklist, DailyChecklist.gs - optional).
+// (jobProblems / audits feed the daily checklist, DailyChecklist.gs - optional; followupLog, the cycle day's AllIssues_Log buckets or null when unreadable, feeds the
+// follow-up tracker, FollowupTracker.gs - optional).
 function cycleReportDataGs_(input) {
   const win = input.window;
   const ledger = (input.ledgerRows || []).filter(function (r) { return cycleReportInWindowGs_(r.planned_at, win); });
@@ -116,8 +117,16 @@ function cycleReportDataGs_(input) {
   const data = {
     cycle: win, totals: totals, byJob: byJob, attention: attention, exclusions: { leads: leadsLeftOut, regions: regionsSkipped, reasons: reasons },
     incidents: incidents, bySeverity: bySeverity, seriousIncidents: serious.length, heldNow: heldNow, configProblems: input.configProblems || [],
-    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep, freshness: fr, checklist: null,
+    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep, freshness: fr, checklist: null, followups: null,
   };
+  // The follow-up tracker (EO-7) - fail-open like the checklist. Only when the caller supplied the log (undefined = not asked; null = could not be read).
+  if (typeof followupTrackerGs_ === 'function' && input.followupLog !== undefined) {
+    const cycleDay = istDayKeyGs_(win.start);
+    try {
+      data.followups = input.followupLog === null ? { cycleDay: cycleDay, rows: [], counts: null, attention: [], unreadable: true }
+        : followupTrackerGs_({ cycleDay: cycleDay, logRows: input.followupLog, ledgerRows: ledger, now: win.end });
+    } catch (e) { Logger.log('Follow-up tracker not built - the report is NOT affected: ' + e); }
+  }
   // The daily checklist A-K (EO-6) - fail-open: a problem in it only means the report has no checklist section.
   if (typeof dailyChecklistGs_ === 'function') {
     try { data.checklist = dailyChecklistGs_({ data: data, jobProblems: input.jobProblems === undefined ? null : input.jobProblems, audits: input.audits || {} }); } catch (e) { Logger.log('Daily checklist not built - the report is NOT affected: ' + e); }
@@ -184,6 +193,7 @@ function cycleReportRenderGs_(data, now) {
       rows: data.incidents.slice(0, CYCLE_REPORT_MAX_ROWS_).map(function (i) { return [fmt(i.detected_at), i.severity, i.job || '-', i.subject, i.notification + (i.notified_at instanceof Date ? ' ' + fmt(i.notified_at) : '')]; }),
     });
   }
+  if (data.followups && typeof followupTrackerSectionsGs_ === 'function') followupTrackerSectionsGs_(data.followups).forEach(function (sec) { sections.push(sec); });
   if (data.checklist && typeof dailyChecklistSectionGs_ === 'function') sections.push(dailyChecklistSectionGs_(data.checklist));
   sections.push({
     heading: 'Ready for 17:00?', columns: ['Check', 'Result'],
@@ -273,6 +283,7 @@ function buildEmailCycleReportGs_(ss, now) {
     freshness: cycleLeadsFreshnessGs_(ss, now),
     jobProblems: cycleReportJobProblemsGs_(now),
     audits: cycleReportAuditsGs_(),
+    followupLog: typeof followupTrackerReadLogGs_ === 'function' ? followupTrackerReadLogGs_(ss, startKey) : undefined,
   });
   const rendered = cycleReportRenderGs_(data, now);
   rendered.data = data;
@@ -298,6 +309,7 @@ function sendEmailCycleReport_(opts) {
   }
   cycleReportRecordDailyGs_(ss, built.data, now);
   if (typeof dailyChecklistRecordGs_ === 'function') dailyChecklistRecordGs_(ss, built.data.checklist, now);
+  if (typeof followupTrackerRecordGs_ === 'function') followupTrackerRecordGs_(ss, built.data.followups, now);
   Logger.log('Cycle report sent: ' + built.subject);
   return built;
 }
