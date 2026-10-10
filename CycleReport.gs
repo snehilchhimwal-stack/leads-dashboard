@@ -50,7 +50,8 @@ function cycleReportInWindowGs_(value, win) {
 // "6 of 7 (86%)" - the numerator and denominator are always shown.
 function cycleRateGs_(n, d) { return d > 0 ? n + ' of ' + d + ' (' + Math.round(100 * n / d) + '%)' : 'n/a'; }
 
-// Pure: the numbers and lists of the report. input = { ledgerRows, exclusionRows, incidentRows, window, configProblems }.
+// Pure: the numbers and lists of the report. input = { ledgerRows, exclusionRows, incidentRows, window, configProblems, freshness, jobProblems, audits }
+// (jobProblems / audits feed the daily checklist, DailyChecklist.gs - optional).
 function cycleReportDataGs_(input) {
   const win = input.window;
   const ledger = (input.ledgerRows || []).filter(function (r) { return cycleReportInWindowGs_(r.planned_at, win); });
@@ -112,11 +113,16 @@ function cycleReportDataGs_(input) {
   }
   const attemptable = totals.planned - totals.skipped;
   const allClear = totals.planned > 0 && attention.length === 0 && serious.length === 0;
-  return {
+  const data = {
     cycle: win, totals: totals, byJob: byJob, attention: attention, exclusions: { leads: leadsLeftOut, regions: regionsSkipped, reasons: reasons },
     incidents: incidents, bySeverity: bySeverity, seriousIncidents: serious.length, heldNow: heldNow, configProblems: input.configProblems || [],
-    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep, freshness: fr,
+    attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep, freshness: fr, checklist: null,
   };
+  // The daily checklist A-K (EO-6) - fail-open: a problem in it only means the report has no checklist section.
+  if (typeof dailyChecklistGs_ === 'function') {
+    try { data.checklist = dailyChecklistGs_({ data: data, jobProblems: input.jobProblems === undefined ? null : input.jobProblems, audits: input.audits || {} }); } catch (e) { Logger.log('Daily checklist not built - the report is NOT affected: ' + e); }
+  }
+  return data;
 }
 
 // Pure: { subject, html, plainBody } from the data.
@@ -178,6 +184,7 @@ function cycleReportRenderGs_(data, now) {
       rows: data.incidents.slice(0, CYCLE_REPORT_MAX_ROWS_).map(function (i) { return [fmt(i.detected_at), i.severity, i.job || '-', i.subject, i.notification + (i.notified_at instanceof Date ? ' ' + fmt(i.notified_at) : '')]; }),
     });
   }
+  if (data.checklist && typeof dailyChecklistSectionGs_ === 'function') sections.push(dailyChecklistSectionGs_(data.checklist));
   sections.push({
     heading: 'Ready for 17:00?', columns: ['Check', 'Result'],
     rows: [
@@ -240,6 +247,19 @@ function cycleReportRecordDailyGs_(ss, data, now) {
   }
 }
 
+// The watchdog's view of today's runs (emailJobProblemsGs_), or null when it cannot be read - the checklist then says so instead of guessing.
+function cycleReportJobProblemsGs_(now) {
+  try { return emailJobProblemsGs_(now); } catch (e) { return null; }
+}
+
+// The last result of each silent audit (OpsAudit.gs), for the checklist: { morning, followup, allIssues } - each a record or null.
+function cycleReportAuditsGs_() {
+  const out = {};
+  if (typeof OPS_AUDIT_SPECS_ === 'undefined' || typeof opsAuditReadRecordGs_ !== 'function') return out;
+  Object.keys(OPS_AUDIT_SPECS_).forEach(function (k) { out[k] = opsAuditReadRecordGs_(OPS_AUDIT_SPECS_[k]); });
+  return out;
+}
+
 // Reads the three evidence tabs and builds the report for `now`. Pure apart from reading the spreadsheet.
 function buildEmailCycleReportGs_(ss, now) {
   const win = cycleReportWindowGs_(now);
@@ -251,6 +271,8 @@ function buildEmailCycleReportGs_(ss, now) {
     incidentRows: emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_), EMAIL_INCIDENT_HEADERS_, startKey),
     configProblems: typeof emailConfigProblemsGs_ === 'function' ? emailConfigProblemsGs_() : [],
     freshness: cycleLeadsFreshnessGs_(ss, now),
+    jobProblems: cycleReportJobProblemsGs_(now),
+    audits: cycleReportAuditsGs_(),
   });
   const rendered = cycleReportRenderGs_(data, now);
   rendered.data = data;
@@ -275,6 +297,7 @@ function sendEmailCycleReport_(opts) {
     try { PropertiesService.getScriptProperties().setProperty(CYCLE_REPORT_SENT_PROPERTY_, day); } catch (e2) { Logger.log('Could not record the cycle report as sent (it may be sent twice today): ' + e2); }
   }
   cycleReportRecordDailyGs_(ss, built.data, now);
+  if (typeof dailyChecklistRecordGs_ === 'function') dailyChecklistRecordGs_(ss, built.data.checklist, now);
   Logger.log('Cycle report sent: ' + built.subject);
   return built;
 }
