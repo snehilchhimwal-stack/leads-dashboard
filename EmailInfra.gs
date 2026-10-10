@@ -705,7 +705,10 @@ function sendBlockedErrorGs_(label, problems, missingLeadIds) {
 // THE single sender for every report email: validate the exact payload, then draft+send it with the retry rules in
 // withSendRetry_. Throws (never sends) when the payload fails validation.
 function sendGuardedEmailGs_(msg, label) {
-  const prepared = prepareOutgoingEmailGs_(msg);
+  // Email Ops EO-13 (decision D9, EmailReroute.gs): a recipient whose address bounced is swapped for the person next in the hierarchy (or the ops address) BEFORE the gate,
+  // so the gate validates the payload that is really sent. Returns the message untouched when no re-route applies or anything goes wrong.
+  const routed = typeof emailRerouteApplyGs_ === 'function' ? emailRerouteApplyGs_(msg) : msg;
+  const prepared = prepareOutgoingEmailGs_(routed);
   if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems, prepared.missingLeadIds);
   const m = prepared.msg;
   const options = { name: 'Homesfy Lead Ops' };
@@ -835,8 +838,12 @@ function emailJobScheduleGs_() {
   if (typeof RMSYNC_RUN_HOUR_ !== 'undefined') schedule.syncRmHierarchyNightly = { hour: RMSYNC_RUN_HOUR_, label: '23:15 RM hierarchy sync' };
   // CycleReport.gs (Email Ops EO-8): the daily 16:30 report to Snehil. A job with a `minute` is due at hour:minute, so its deadline is that plus
   // EMAIL_JOB_DEADLINE_MINUTES_ (17:00 for this one). Only watched once that file is part of the project.
-  // EmailSweep.gs (Email Ops EO-5): the daily 15:45 bounce/reply sweep that feeds the 16:30 report.
-  if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: '15:45 bounce/reply sweep' };
+  // EmailSweep.gs (Email Ops EO-5 / EO-13): the daily 15:30 bounce/reply sweep that feeds the 16:30 report, and the bounce-only checks 30 minutes after each email job (10:30,
+  // 13:30, 17:30 - decision D9). Only watched once that file is part of the project.
+  if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: pad2Gs_(EMAIL_SWEEP_HOUR_) + ':' + pad2Gs_(EMAIL_SWEEP_MINUTE_) + ' bounce/reply sweep' };
+  if (typeof EMAIL_SWEEP_SLOTS_ !== 'undefined') {
+    EMAIL_SWEEP_SLOTS_.forEach(function (slot) { schedule[slot.job] = { hour: slot.hour, minute: slot.minute, label: pad2Gs_(slot.hour) + ':' + pad2Gs_(slot.minute) + ' bounce check (' + slot.after + ')' }; });
+  }
   if (typeof CYCLE_REPORT_HOUR_ !== 'undefined') schedule.sendEmailCycleReport = { hour: CYCLE_REPORT_HOUR_, minute: CYCLE_REPORT_MINUTE_, label: '16:30 cycle report' };
   // OpsAudit.gs (Email Ops EO-3 / EO-4): the three silent audits that follow each email job (11:15, 14:00, 18:00). A silent job that stops running is invisible by design,
   // so the watchdog watches them like any other. Only watched once that file is part of the project.

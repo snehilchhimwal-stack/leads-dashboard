@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `59db11b` - the tab notice withdrawn; thresholds back to 3 h / 5 h (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - re-routed bounces and the re-route section (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -145,6 +145,8 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 **2026-10-09** (`d9e2b97`, Email Ops EO-7): the report reads the cycle day's 17:00 buckets from `AllIssues_Log`, builds the follow-up tracker (`GS-020` FN-420, fail-open) into `data.followups`, shows its sections before the daily checklist and stores the rows in `Followup_Tracker` (`SHEET-024`) after the send. With `FollowupTracker.gs` absent the report is exactly as before. **Not live until pasted.**
 
 **2026-10-10** (`59db11b`, decision D8): RULE-057 (a RED tab adds a bottom notice to every email) was **withdrawn** and the thresholds are back to 3 h / 5 h - see `GS-004` and `GS-021`. **Not live until pasted.**
+
+**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): the report counts bounced emails that were re-sent to the next person as "re-routed" (status `BOUNCED - RE-ROUTED`; a Cc-only bounce counts too), gains a "Re-routed addresses in force" section from `Email_Reroutes` (`SHEET-025`), and says "the 15:30 sweep" (was 15:45). **Not live until pasted.**
 
 ## Revalidation trigger
 

@@ -131,7 +131,7 @@ const EMAIL_LEDGER_STATUS_ = {
 // Human names of the jobs, for every report that lists them (the 16:30 cycle report, the bounce alert).
 const EMAIL_LEDGER_JOB_LABELS_ = {
   allIssues17: '17:00 All-Issues', chLevel17: 'CH-level (17:00)', morning10: '10:00 Overnight + Checkpoint 1',
-  chLevel10: 'CH-level (10:00)', followup13: '13:00 follow-up',
+  chLevel10: 'CH-level (10:00)', followup13: '13:00 follow-up', reroute: 'Re-sent after a bounce',
 };
 
 // Rows of an evidence tab whose day column (column B in all three tabs) is on/after startDayKey, as objects keyed by header name, each with its
@@ -334,6 +334,7 @@ function emailLedgerPatchGs_(h, emailId, label, mutate) {
 
 // The send is about to start. A row left in ATTEMPTING afterwards is the evidence that the run died mid-send.
 function emailLedgerAttemptGs_(h, emailId) {
+  if (typeof emailRerouteClearNoteGs_ === 'function') emailRerouteClearNoteGs_(); // EmailReroute.gs: a redirect note belongs to the send that is about to start
   emailLedgerPatchGs_(h, emailId, 'attempt', function (row) {
     row[emailLedgerCol_('attempted_at') - 1] = new Date();
     row[emailLedgerCol_('finished_at') - 1] = '';
@@ -345,11 +346,15 @@ function emailLedgerAttemptGs_(h, emailId) {
 
 // The send ended. result = { status, reason, messageId, threadId, leadIds } (leadIds = the leads the email really carried).
 function emailLedgerResultGs_(h, emailId, result) {
+  // A send that was redirected to another address (EmailReroute.gs) says so in its row; the note is always consumed so it can never leak into the next row.
+  const rerouteNote = typeof emailRerouteTakeNoteGs_ === 'function' ? emailRerouteTakeNoteGs_() : '';
+  const reason = (result.status === EMAIL_LEDGER_STATUS_.ACCEPTED || result.status === EMAIL_LEDGER_STATUS_.UNCONFIRMED) && rerouteNote
+    ? (result.reason ? result.reason + '; ' : '') + rerouteNote : result.reason;
   emailLedgerPatchGs_(h, emailId, 'result', function (row) {
     const ids = result.leadIds || [];
     row[emailLedgerCol_('finished_at') - 1] = new Date();
     row[emailLedgerCol_('status') - 1] = result.status;
-    row[emailLedgerCol_('status_reason') - 1] = String(result.reason || '').slice(0, 500);
+    row[emailLedgerCol_('status_reason') - 1] = String(reason || '').slice(0, 500);
     row[emailLedgerCol_('message_id') - 1] = result.messageId || '';
     row[emailLedgerCol_('thread_id') - 1] = result.threadId || '';
     row[emailLedgerCol_('leads_sent') - 1] = result.status === EMAIL_LEDGER_STATUS_.ACCEPTED ? ids.length : 0;

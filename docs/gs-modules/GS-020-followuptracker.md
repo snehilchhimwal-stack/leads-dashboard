@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `b6e714b` - created (Email Ops EO-7) |
+| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - a re-routed bounce reads REROUTED (Email Ops EO-13) |
 
 ## Purpose / reason to exist
 
@@ -17,8 +17,9 @@ thread). The tracker lists, for each 17:00 bucket of the report's cycle, where e
 and whether the 17:00 email itself bounced or got a reply. The 16:30 report (`GS-016`) shows the counts and the items that need a look; the rows are stored in the
 `Followup_Tracker` tab (`SHEET-024`). Plan: `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` (EO-7).
 
-**STOP is a status, not a behaviour.** A bounced 17:00 email marks its row `STOP`: the recipient never received it, so their follow-ups are pointless until the address is fixed.
-Nothing here changes what the 10:00 or 13:00 jobs send; whether replies or bounces should stop follow-ups automatically is a decision for the user.
+**A bounce is REROUTED, not stopped (decision D9, 2026-10-10).** A bounced 17:00 email is re-sent to the person next in the hierarchy (`GS-022`) and that bucket's follow-ups go to them too, so its row reads `REROUTED`
+and raises nothing. Only a bounce that could NOT be re-routed (the re-send failed or was refused, or it was found too late) still marks the row `STOP`: the recipient never received the email, so a human has to act.
+Nothing here changes what the 10:00 or 13:00 jobs send.
 
 ## Responsibilities
 
@@ -49,7 +50,7 @@ Never - no trigger of its own.
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
 | RULE-064 | A checkpoint's status, in this order: ledger SKIPPED = `NOT_NEEDED`; ACCEPTED = `COMPLETED` (noting a missing log stamp); FAILED / BLOCKED / UNCONFIRMED / PLANNED / ATTEMPTING = `BLOCKED`; a log stamp alone = `COMPLETED`; a known blocker = `BLOCKED` (Checkpoint 2 when Checkpoint 1 is BLOCKED or OVERDUE - there is no 10:00 thread to reply in); then the clock: before its hour `FUTURE`, from the hour `DUE`, 30 minutes after it `OVERDUE`. The ledger outranks the stamp; a planned or attempted email is never "completed" | FN-419, FN-420 | `GS-019` RULE-062 (the same unfinished-is-a-problem principle) |
-| RULE-065 | A 17:00 email that bounced (ACCEPTED by Gmail, then a delivery-failure message) marks its row STOP and is listed for attention; a reply is shown but flags nothing. STOP changes nothing that is sent | FN-420 | `GS-017` RULE-052/053 (how a bounce is found) |
+| RULE-065 | A 17:00 email that bounced (ACCEPTED by Gmail, then a delivery-failure message) reads `REROUTED` when its copy to the next person in the hierarchy (the ledger row `RR|<email id>`, job `reroute`) is ACCEPTED, and raises nothing; otherwise it marks its row STOP and is listed for attention. A reply is shown but flags nothing. Neither changes anything that is sent | FN-420 | `GS-017` RULE-052/053 (how a bounce is found) |
 
 ## Config constants - `CFG-XXX` sub-table
 
@@ -118,6 +119,8 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 ## Version / change reference
 
 **2026-10-09** (`d9e2b97`): file created - Email Ops EO-7. `CycleReport.gs` reads the cycle day's 17:00 buckets, builds the tracker (fail-open) into `data.followups`, shows its sections before the daily checklist and stores the rows after the send. `EmailLedger.gs` gained `emailLedgerReplaceDayBlockGs_` (`GS-015` FN-422), which `DailyChecklist.gs` now also uses. **Not live until pasted.**
+
+**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): a bounced 17:00 email whose copy to the next person was accepted reads `REROUTED` instead of STOP. **Not live until pasted.**
 
 ## Revalidation trigger
 

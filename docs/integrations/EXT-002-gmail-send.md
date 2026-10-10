@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `59db11b` - revalidated after the stale-lead block (email content only; no change to the Gmail send itself) |
+| **Last Verified** | 2026-10-10 against commit `PENDING_SHA` - the redirect of a bounced address before the gate (Email Ops EO-13; the Gmail send itself is unchanged) |
 
 ## Purpose / reason to exist
 
@@ -189,6 +189,8 @@ note doesn't read as ignored.
 **2026-10-09** (`ea5fdc5`, Email Ops, decision D6): email CONTENT only - a RED Leads tab adds a bottom "Data freshness notice" section (`GS-004` FN-408). The notice carries no lead ids, so the send-safety gate's lead check is unaffected; the Gmail send path itself is unchanged.
 
 **2026-10-10** (`59db11b`, decision D8): the 2026-10-09 "Data freshness notice" was withdrawn; emails instead hold stale LEADS in a bottom block (`GS-021`) - email content only, every lead stays in the body, so the send-safety gate's lead check and the Gmail send path are unaffected.
+
+**2026-10-10** (`PENDING_SHA`, Email Ops EO-13, decision D9): `sendGuardedEmailGs_` and `sendThreadedGmailReply_` now swap an address that bounced for the person next in the hierarchy (the ops address when nobody is above) just before the safety gate (`GS-022` `emailRerouteApplyGs_`, `SHEET-025`); the Gmail calls themselves are unchanged. **Not live until pasted.**
 
 ## Revalidation trigger
 

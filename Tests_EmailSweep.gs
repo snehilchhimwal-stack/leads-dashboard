@@ -55,6 +55,9 @@ function TestSW_row_(ss, rowNo) {
 
 function runEmailSweepTests_() {
   TestEnv_setUp_('Tests_EmailSweep', TestMockSpreadsheet_({}));
+  // The bounce escalation (EmailReroute.gs) has its own suite (Tests_EmailReroute.gs); here the sweep is judged on its own.
+  const realRerouteHandler = emailRerouteHandleBouncesGs_;
+  emailRerouteHandleBouncesGs_ = function () { return {}; };
   try {
     const t0 = new Date('2026-10-08T17:05:00+05:30');
     const row = function (extra) { return Object.assign({ status: 'ACCEPTED', finished_at: t0, to: 'boss@x.test', cc: 'lead@x.test, other@x.test', subject: 'Test A1 One (A1) google Leads With Issue (06-Oct-2026 to 08-Oct-2026)' }, extra || {}); };
@@ -68,8 +71,8 @@ function runEmailSweepTests_() {
     TestAssertEqual_(emailSweepIsCandidateGs_(row({ status: 'UNCONFIRMED' }), now), true, 'candidate: an UNCONFIRMED email may have been delivered, so it is checked too');
     TestAssertEqual_(emailSweepIsCandidateGs_(row({ status: 'FAILED' }), now), false, 'candidate: a failed email never went out');
     TestAssertEqual_(emailSweepIsCandidateGs_(row({ status: 'SKIPPED' }), now), false, 'candidate: a skipped email was never sent');
-    TestAssertEqual_(emailSweepIsCandidateGs_(row(), minutesAfter(20)), false, 'candidate: 20 minutes old is too soon (a clean result would prove nothing)');
-    TestAssertEqual_(emailSweepIsCandidateGs_(row(), minutesAfter(31)), true, 'candidate: 31 minutes old is enough');
+    TestAssertEqual_(emailSweepIsCandidateGs_(row(), minutesAfter(5)), false, 'candidate: 5 minutes old is too soon (a bounce has not had time to arrive)');
+    TestAssertEqual_(emailSweepIsCandidateGs_(row(), minutesAfter(11)), true, 'candidate: 11 minutes old is enough (the next check looks again anyway)');
     TestAssertEqual_(emailSweepIsCandidateGs_(row(), new Date(t0.getTime() + 4 * 24 * 3600000)), false, 'candidate: older than 3 days is no longer swept');
     TestAssertEqual_(emailSweepIsCandidateGs_(row({ finished_at: '' }), now), false, 'candidate: no finish time, no sweep');
 
@@ -110,7 +113,7 @@ function runEmailSweepTests_() {
       const e1 = TestSW_ledgerRow_(ss, h, { bucket: 'Bounced One', to: 'a@x.test', cc: 'ccA@x.test', subject: 'Subject A', threadId: 'T1' });
       const e2 = TestSW_ledgerRow_(ss, h, { bucket: 'Replied Two', to: 'b@x.test', subject: 'Subject B', threadId: 'T2' });
       const e3 = TestSW_ledgerRow_(ss, h, { bucket: 'Clean Three', to: 'c@x.test', subject: 'Subject C', threadId: 'T3' });
-      const e4 = TestSW_ledgerRow_(ss, h, { bucket: 'Too Recent', to: 'd@x.test', subject: 'Subject D', threadId: 'T4', minutesAgo: 10 });
+      const e4 = TestSW_ledgerRow_(ss, h, { bucket: 'Too Recent', to: 'd@x.test', subject: 'Subject D', threadId: 'T4', minutesAgo: 5 });
       const e5 = TestSW_ledgerRow_(ss, h, { bucket: 'Failed Five', to: 'e@x.test', subject: 'Subject E', threadId: '', status: 'FAILED' });
       const own = '"Homesfy Lead Ops" <ops@x.test>';
       TestSW_gmail_(
@@ -223,19 +226,20 @@ function runEmailSweepTests_() {
       ScriptApp = TestMockScriptApp_(['sweepEmailBouncesAndReplies', 'other']);
       setupEmailSweepTrigger();
       const spec = ScriptApp._state.created[0];
-      TestAssertEqual_(ScriptApp._state.created.length + ',' + spec.fnName + ',' + spec.hour + ',' + spec.minute + ',' + spec.tz, '1,sweepEmailBouncesAndReplies,15,45,Asia/Kolkata', 'setup: one daily trigger near 15:45 IST');
+      TestAssertEqual_(ScriptApp._state.created.length + ',' + spec.fnName + ',' + spec.hour + ',' + spec.minute + ',' + spec.tz, '4,sweepEmailBouncesAndReplies,15,30,Asia/Kolkata', 'setup: the full sweep daily near 15:30 IST (plus the three bounce-only checks - see Tests_EmailReroute.gs)');
       TestAssertEqual_(ScriptApp._state.deleted.join(','), 'sweepEmailBouncesAndReplies', 'setup: only its own earlier trigger is deleted');
 
       PropertiesService = TestMockPropertiesService_(); // no run records: the watchdog sees a sweep that never started
       const sched = emailJobScheduleGs_().sweepEmailBouncesAndReplies;
-      TestAssertEqual_(sched ? sched.hour + ':' + sched.minute + ' ' + sched.label : 'missing', '15:45 15:45 bounce/reply sweep', 'watchdog: the sweep is on the schedule');
+      TestAssertEqual_(sched ? sched.hour + ':' + sched.minute + ' ' + sched.label : 'missing', '15:30 15:30 bounce/reply sweep', 'watchdog: the sweep is on the schedule');
       const late = emailJobProblemsGs_(new Date('2026-10-09T16:20:00+05:30')).filter(function (p) { return p.job === 'sweepEmailBouncesAndReplies'; });
       TestAssertEqual_(late.length + ',' + (late[0] ? late[0].kind : ''), '1,never_started', 'watchdog: at 16:20 a sweep that did not run is flagged');
-      TestAssertContains_(late[0] ? late[0].detail : '', 'should have started by 16:15 IST', 'watchdog: …with its 16:15 deadline');
+      TestAssertContains_(late[0] ? late[0].detail : '', 'should have started by 16:00 IST', 'watchdog: …with its 16:00 deadline');
     }
 
     TestAssertOnlyTestEmails_();
   } finally {
+    emailRerouteHandleBouncesGs_ = realRerouteHandler;
     TEST_MODE_OVERRIDE_EMAIL_ = '';
     TestEnv_tearDown_();
   }

@@ -774,10 +774,11 @@ function runEmailInfraTests_() {
       const rec = function (job, r) { writeEmailJobRunGs_(job, Object.assign({ day: todayDay }, r)); };
       const M = 'sendOvernightMorningEmails', F = 'sendOvernightFollowupEmails', A = 'sendAllIssuesEmails';
       // The three OpsAudit.gs audits (11:15, 14:00, 18:00) are on the schedule too once that file is part of the project; their own deadlines are tested in
-      // Tests_OpsAudit.gs, so here they are left out of the lists (kinds) and recorded as done where alerts are counted (auditsDone).
-      const isAuditJob = function (job) { return job.indexOf('audit') === 0; };
+      // Tests_OpsAudit.gs, so here they are left out of the lists (kinds) and recorded as done where alerts are counted (auditsDone). The three bounce-only checks of
+      // EmailSweep.gs (10:30, 13:30, 17:30 - decision D9) are in the same position: their deadlines are tested in Tests_EmailReroute.gs.
+      const isAuditJob = function (job) { return job.indexOf('audit') === 0 || job.indexOf('sweepBouncesAfter') === 0; };
       const kinds = function (ps) { return ps.filter(function (p) { return !isAuditJob(p.job); }).map(function (p) { return p.job + ':' + p.kind; }).sort().join(','); };
-      const auditsDone = function () { ['auditMorningEmails', 'auditFollowupEmails', 'auditAllIssuesEmails'].forEach(function (j) { rec(j, { startedAt: iso('00:01'), finishedAt: iso('00:02'), status: 'completed' }); }); };
+      const auditsDone = function () { ['auditMorningEmails', 'auditFollowupEmails', 'auditAllIssuesEmails', 'sweepBouncesAfterMorning', 'sweepBouncesAfterFollowup', 'sweepBouncesAfterAllIssues'].forEach(function (j) { rec(j, { startedAt: iso('00:01'), finishedAt: iso('00:02'), status: 'completed' }); }); };
       try {
         // ---- the run record itself (through withEmailJobLockGs_) ----
         PropertiesService = TestMockPropertiesService_();
@@ -834,7 +835,7 @@ function runEmailInfraTests_() {
         TestAssertEqual_(kinds(emailJobProblemsGs_(at('10:30'))), M + ':never_started', 'watchdog: at the deadline, a job with no record for today never started');
         TestAssertEqual_(kinds(emailJobProblemsGs_(at('13:29'))), M + ':never_started', 'watchdog: the 13:00 job is not due until 13:30');
         // The 16:30 cycle report (CycleReport.gs) is a fourth scheduled job once that file is part of the project; its own deadline (17:00) is tested in Tests_CycleReport.gs.
-        TestAssertEqual_(kinds(emailJobProblemsGs_(at('18:00'))), A + ':never_started,sendEmailCycleReport:never_started,' + F + ':never_started,' + M + ':never_started,sweepEmailBouncesAndReplies:never_started', 'watchdog: after 17:30 all three missing email jobs, the 16:30 cycle report and the 15:45 bounce/reply sweep are reported');
+        TestAssertEqual_(kinds(emailJobProblemsGs_(at('18:00'))), A + ':never_started,sendEmailCycleReport:never_started,' + F + ':never_started,' + M + ':never_started,sweepEmailBouncesAndReplies:never_started', 'watchdog: after 17:30 all three missing email jobs, the 16:30 cycle report and the 15:30 bounce/reply sweep are reported');
         const nev = emailJobProblemsGs_(at('10:31'))[0];
         TestAssert_(/10:30 IST/.test(nev.detail) && /10:00 Overnight/.test(nev.detail), 'watchdog: the message names the job and its deadline');
 

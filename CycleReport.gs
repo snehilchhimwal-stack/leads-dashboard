@@ -52,7 +52,8 @@ function cycleRateGs_(n, d) { return d > 0 ? n + ' of ' + d + ' (' + Math.round(
 
 // Pure: the numbers and lists of the report. input = { ledgerRows, exclusionRows, incidentRows, window, configProblems, freshness, jobProblems, audits }
 // (jobProblems / audits feed the daily checklist, DailyChecklist.gs - optional; followupLog, the cycle day's AllIssues_Log buckets or null when unreadable, feeds the
-// follow-up tracker, FollowupTracker.gs - optional).
+// follow-up tracker, FollowupTracker.gs - optional; reroutes, the Email_Reroutes rows, tells which bounces were handled - EmailReroute.gs, optional).
+// A bounce is HANDLED when its email was re-sent to the person next in the hierarchy (an ACCEPTED 'RR|<email id>' ledger row) or only a Cc address bounced.
 function cycleReportDataGs_(input) {
   const win = input.window;
   const ledger = (input.ledgerRows || []).filter(function (r) { return cycleReportInWindowGs_(r.planned_at, win); });
@@ -64,7 +65,11 @@ function cycleReportDataGs_(input) {
   const totals = newCounts();
   const attention = [];
   // Bounce/reply evidence from the daily sweep (EmailSweep.gs): only for emails Gmail accepted (or may have accepted).
-  const sweep = { bounced: 0, replied: 0, noBounce: 0, notSwept: 0, lastSweep: null, replies: [] };
+  const sweep = { bounced: 0, rerouted: 0, replied: 0, noBounce: 0, notSwept: 0, lastSweep: null, replies: [] };
+  const rerouteRows = input.reroutes || [];
+  const rrById = {}, ccOnlyById = {};
+  ledger.forEach(function (r) { if (r.job === 'reroute') rrById[r.email_id] = r; });
+  rerouteRows.forEach(function (e) { if (String(e.note || '') === 'cc only' && e.source_email_id) ccOnlyById[e.source_email_id] = e; });
   ledger.forEach(function (r) {
     const job = String(r.job || '');
     const c = byJob[job] = byJob[job] || newCounts();
@@ -82,7 +87,16 @@ function cycleReportDataGs_(input) {
       const bs = String(r.bounce_status || ''), rs = String(r.reply_status || '');
       if (/^BOUNCED/.test(bs)) {
         sweep.bounced++;
-        attention.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: 'BOUNCED', reason: 'Gmail accepted it but a delivery-failure message came back (' + bs + ') - the recipient did not get it' });
+        const rr = rrById['RR|' + r.email_id];
+        const resent = !!(rr && String(rr.status) === 'ACCEPTED');
+        if (resent || ccOnlyById[r.email_id]) {
+          sweep.rerouted++;
+          attention.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: 'BOUNCED - RE-ROUTED', reason: (resent
+            ? 'a delivery-failure message came back (' + bs + '); the email was re-sent to ' + rr.to
+            : 'only a Cc address bounced (' + bs + '); the To recipient received it') + ' - fix the address in Manager_Directory' });
+        } else {
+          attention.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: 'BOUNCED', reason: 'Gmail accepted it but a delivery-failure message came back (' + bs + ') - the recipient did not get it' });
+        }
       } else if (bs === 'NO_BOUNCE_SEEN') sweep.noBounce++;
       else sweep.notSwept++;
       if (/^REPLIED/.test(rs)) { sweep.replied++; sweep.replies.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: rs }); }
@@ -118,6 +132,7 @@ function cycleReportDataGs_(input) {
     cycle: win, totals: totals, byJob: byJob, attention: attention, exclusions: { leads: leadsLeftOut, regions: regionsSkipped, reasons: reasons },
     incidents: incidents, bySeverity: bySeverity, seriousIncidents: serious.length, heldNow: heldNow, configProblems: input.configProblems || [],
     attemptable: attemptable, allClear: allClear, empty: totals.planned === 0, sweep: sweep, freshness: fr, checklist: null, followups: null,
+    reroutes: rerouteRows.filter(function (e) { return typeof emailRerouteIsActiveGs_ === 'function' && emailRerouteIsActiveGs_(e, win.end.getTime()); }),
   };
   // The follow-up tracker (EO-7) - fail-open like the checklist. Only when the caller supplied the log (undefined = not asked; null = could not be read).
   if (typeof followupTrackerGs_ === 'function' && input.followupLog !== undefined) {
@@ -163,8 +178,18 @@ function cycleReportRenderGs_(data, now) {
     sections.push({
       heading: 'Bounces and replies', subheading: sw.lastSweep ? 'Checked by the sweep at ' + fmt(sw.lastSweep) + ' IST. "No bounce found" is NOT proof of delivery.' : 'The bounce/reply sweep has not run for these emails yet.',
       columns: ['What', 'Emails'],
-      rows: [['Bounced (accepted by Gmail, then a delivery-failure message came back)', sw.bounced], ['Replies received', sw.replied], ['No bounce found', sw.noBounce], ['Not checked yet', sw.notSwept]],
+      rows: [['Bounced (accepted by Gmail, then a delivery-failure message came back)', sw.bounced], ['...of which re-routed to the next person in the hierarchy', sw.rerouted], ['Replies received', sw.replied], ['No bounce found', sw.noBounce], ['Not checked yet', sw.notSwept]],
     });
+    if (data.reroutes.length) {
+      sections.push({
+        heading: 'Re-routed addresses in force (' + data.reroutes.length + ')', accent: { fg: '#b45309', headerBg: '#fef3c7', bg: '#fffbeb' },
+        subheading: 'Every email to the address on the left goes to the person on the right until the date shown (then the address is tried again). Fix the address in Manager_Directory to end it sooner.',
+        columns: ['Bounced address', 'Now goes to', 'Since (IST)', 'Until', 'Why'],
+        rows: data.reroutes.slice(0, CYCLE_REPORT_MAX_ROWS_).map(function (e) {
+          return [(e.dead_name ? e.dead_name + ' ' : '') + e.dead_email, (e.new_name ? e.new_name + ' ' : '') + e.new_email + (e.via === 'ops fallback' ? ' (nobody above on record)' : ''), fmt(e.created_at), Utilities.formatDate(e.expires_at, 'Asia/Kolkata', 'd MMM'), e.note || e.source_job || ''];
+        }),
+      });
+    }
     if (sw.replies.length) {
       sections.push({
         heading: 'Replies received (' + sw.replied + ')', columns: ['Email', 'Region', 'Bucket / recipient', 'Replies'],
@@ -201,7 +226,7 @@ function cycleReportRenderGs_(data, now) {
       ['Recipient addresses resolve', data.configProblems.length ? data.configProblems.length + ' problem(s): ' + data.configProblems.map(function (p) { return p.detail; }).join(' | ') : 'OK'],
       ['Alerts waiting to be sent', data.heldNow ? data.heldNow + ' held alert(s) - a job may have been killed; the watchdog releases them' : 'none'],
       ['Leads tab freshness', data.freshness ? data.freshness.text : 'not checked'],
-      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 15:45 sweep has not run yet); ') + 'delivery and opens cannot be seen from Apps Script'],
+      ['Not tracked yet', (data.sweep.lastSweep ? '' : 'bounces and replies (the 15:30 sweep has not run yet); ') + 'delivery and opens cannot be seen from Apps Script'],
     ],
   });
 
@@ -257,6 +282,11 @@ function cycleReportRecordDailyGs_(ss, data, now) {
   }
 }
 
+// The Email_Reroutes rows (EmailReroute.gs), [] when that file is not installed or the tab cannot be read - the report then simply lists no re-routes.
+function cycleReportRerouteRowsGs_(ss) {
+  try { return typeof emailRerouteReadEntriesGs_ === 'function' ? emailRerouteReadEntriesGs_(ss) : []; } catch (e) { return []; }
+}
+
 // The watchdog's view of today's runs (emailJobProblemsGs_), or null when it cannot be read - the checklist then says so instead of guessing.
 function cycleReportJobProblemsGs_(now) {
   try { return emailJobProblemsGs_(now); } catch (e) { return null; }
@@ -284,6 +314,7 @@ function buildEmailCycleReportGs_(ss, now) {
     jobProblems: cycleReportJobProblemsGs_(now),
     audits: cycleReportAuditsGs_(),
     followupLog: typeof followupTrackerReadLogGs_ === 'function' ? followupTrackerReadLogGs_(ss, startKey) : undefined,
+    reroutes: cycleReportRerouteRowsGs_(ss),
   });
   const rendered = cycleReportRenderGs_(data, now);
   rendered.data = data;

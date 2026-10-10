@@ -1452,6 +1452,12 @@ function formatFollowupAgeGs_(updatedAt, now) {
  * withSendRetry_'s own comment for the real production case this covers.
  */
 function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody) {
+  // Email Ops EO-13 (decision D9, EmailReroute.gs): the follow-up of a bucket whose address bounced goes to the person next in the hierarchy. The stored recipients (Overnight_Log,
+  // AllIssues_Log) stay the original ones; the swap happens here, before the gate, on the payload that is really sent.
+  if (typeof emailRerouteApplyGs_ === 'function') {
+    const routed = emailRerouteApplyGs_({ to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody });
+    to = routed.to; cc = routed.cc; plainBody = routed.plainBody; htmlBody = routed.htmlBody;
+  }
   // Same send-safety gate as every other report email (EmailInfra.gs). This path builds a RAW MIME message by hand, so it
   // is also where an address or subject carrying a line break would become a header-injection / corrupt-header bug —
   // prepareOutgoingEmailGs_ rejects such an address and collapses a line break in the subject before anything is built.

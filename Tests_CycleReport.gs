@@ -97,7 +97,7 @@ function runCycleReportTests_() {
     TestAssertContains_(bad.plainBody, 'Left out of emails', 'render: the exclusions table is present');
     TestAssertContains_(bad.plainBody, 'ops address missing', 'render: a recipient-address problem is shown under "Ready for 17:00?"');
     TestAssertContains_(bad.plainBody, '1 held alert(s)', 'render: held alerts are shown');
-    TestAssertContains_(bad.plainBody, 'bounces and replies (the 15:45 sweep has not run yet); delivery and opens cannot be seen from Apps Script', 'render: what is NOT tracked yet is stated, not hidden');
+    TestAssertContains_(bad.plainBody, 'bounces and replies (the 15:30 sweep has not run yet); delivery and opens cannot be seen from Apps Script', 'render: what is NOT tracked yet is stated, not hidden');
     TestAssertEqual_(data.sweep.notSwept + ',' + data.sweep.bounced + ',' + data.sweep.replied, '4,0,0', 'data: with no sweep evidence the four accepted/unconfirmed emails are "not checked yet"');
     TestAssertContains_(bad.plainBody, 'The bounce/reply sweep has not run for these emails yet.', 'render: the bounces section says the sweep has not run');
 
@@ -121,7 +121,7 @@ function runCycleReportTests_() {
       TestAssertContains_(sr.plainBody, 'Replies received (1)', 'sweep render: replies are listed');
       TestAssertContains_(sr.plainBody, 'Chatty', 'sweep render: …by bucket');
       TestAssertContains_(sr.plainBody, 'BOUNCED', 'sweep render: the bounce is in the attention table');
-      TestAssert_(sr.plainBody.indexOf('the 15:45 sweep has not run yet') === -1, 'sweep render: once swept, the "not run yet" note is gone');
+      TestAssert_(sr.plainBody.indexOf('the 15:30 sweep has not run yet') === -1, 'sweep render: once swept, the "not run yet" note is gone');
       TestAssertContains_(sr.plainBody, 'delivery and opens cannot be seen from Apps Script', 'sweep render: …but what Apps Script can never see is still stated');
       TestAssertContains_(sr.plainBody, 'Leads tab freshness | not checked', 'sweep render: with no freshness check supplied the row says not checked');
     }

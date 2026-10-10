@@ -8,9 +8,9 @@
  * DUE (its time has come) or FUTURE - and whether the 17:00 email itself bounced or got a reply. The 16:30 report (CycleReport.gs) shows the counts and the items that need
  * a look, and the rows are stored in the Followup_Tracker tab, one block per report day.
  *
- * STOP, NOT SKIP. A bounced 17:00 email marks its row STOP: the recipient never received the email, so their follow-ups are pointless until the address is fixed. That is a
- * status for a human to act on - this file never changes what the 10:00 / 13:00 jobs send. (Whether replies or bounces should stop follow-ups automatically is a decision for the
- * user; see the plan.)
+ * BOUNCED = REROUTED, NOT STOPPED. Decision D9 (EmailReroute.gs): a bounced 17:00 email is re-sent to the person next in the hierarchy (the ops address when nobody is above) and
+ * that bucket's later follow-ups go to them too - so a bounce no longer stops anything, and the row reads REROUTED. Only a bounce that could NOT be re-routed (the re-send failed,
+ * or it was found too late) still marks the row STOP: a status for a human to act on. This file never changes what the 10:00 / 13:00 jobs send.
  *
  * It only READS evidence (the ledger rows the report already has, plus AllIssues_Log) and writes its own tab. It never blocks, re-sends or alerts; a failure to read the log or
  * store the rows leaves the report as it was.
@@ -67,7 +67,9 @@ function followupCheckpointStatusGs_(s) {
 function followupTrackerGs_(input) {
   const day = input.cycleDay, next = followupNextDayGs_(day), now = input.now;
   const ledgerBy = { allIssues17: {}, morning10: {}, followup13: {} };
+  const rerouteBy = {}; // 'RR|<email id>' -> the ledger row of the copy re-sent after a bounce (EmailReroute.gs)
   (input.ledgerRows || []).forEach(function (r) {
+    if (r.job === 'reroute') rerouteBy[r.email_id] = r;
     const m = ledgerBy[r.job];
     // the 17:00 rows are the cycle day's; the 10:00 / 13:00 rows are the next day's (a recovery re-uses the same id, so there is one row per bucket)
     if (m && emailLedgerDayKeyOfGs_(r.cycle_day) === (r.job === 'allIssues17' ? day : next)) m[followupKeyGs_(r.region, r.to)] = r;
@@ -85,14 +87,17 @@ function followupTrackerGs_(input) {
       blockedBy: (cp1.status === 'BLOCKED' || cp1.status === 'OVERDUE') ? 'Checkpoint 1 did not happen, so there is no 10:00 thread to reply in' : '',
     });
     let email = '';
-    if (m0 && /^BOUNCED/.test(String(m0.bounce_status || ''))) email = 'BOUNCED'; // the sweep only looks at emails Gmail accepted or may have accepted
+    if (m0 && /^BOUNCED/.test(String(m0.bounce_status || ''))) { // the sweep only looks at emails Gmail accepted or may have accepted
+      const rr = rerouteBy['RR|' + m0.email_id];
+      email = rr && String(rr.status) === 'ACCEPTED' ? 'REROUTED' : 'BOUNCED';
+    }
     else if (m0 && /^REPLIED/.test(String(m0.reply_status || ''))) email = 'REPLIED';
     const stop = email === 'BOUNCED';
     counts.cp1[cp1.status]++; counts.cp2[cp2.status]++;
     const base = { region: l.region, bucket: l.label, to: l.to };
     if (cp1.status === 'BLOCKED' || cp1.status === 'OVERDUE') attention.push(Object.assign({ checkpoint: '1 (10:00)', status: cp1.status, note: cp1.note }, base));
     if (cp2.status === 'BLOCKED' || cp2.status === 'OVERDUE') attention.push(Object.assign({ checkpoint: '2 (13:00)', status: cp2.status, note: cp2.note }, base));
-    if (stop) attention.push(Object.assign({ checkpoint: '-', status: 'STOP', note: 'the 17:00 email bounced - this recipient never received it, so their follow-ups are pointless until the address is fixed' }, base));
+    if (stop) attention.push(Object.assign({ checkpoint: '-', status: 'STOP', note: 'the 17:00 email bounced and could not be re-routed - this recipient never received it, so their follow-ups are pointless until the address is fixed' }, base));
     return { region: l.region, bucket: l.label, role: l.role, to: l.to, leads: l.leadCount, cp1: cp1, cp2: cp2, email: email, stop: stop };
   });
   return { cycleDay: day, rows: rows, counts: counts, attention: attention };
@@ -109,7 +114,7 @@ function followupTrackerSectionsGs_(t) {
   const line = function (name, c) { return [name, c.COMPLETED, c.NOT_NEEDED, c.BLOCKED, c.OVERDUE, c.DUE, c.FUTURE]; };
   const sections = [{
     heading: 'Follow-ups from the 17:00 emails of ' + t.cycleDay + ' (' + t.rows.length + ' bucket(s))',
-    subheading: 'Completed = done. Not needed = nothing was left to follow up. Blocked = a failure or an unfinished run is on record. Overdue = past its time and nothing recorded. A bounced 17:00 email is marked STOP (a status only - nothing is changed automatically).',
+    subheading: 'Completed = done. Not needed = nothing was left to follow up. Blocked = a failure or an unfinished run is on record. Overdue = past its time and nothing recorded. A bounced 17:00 email is re-sent to the next person in the hierarchy and its follow-ups go to them (REROUTED); only one that could not be re-routed is marked STOP.',
     columns: ['Checkpoint', 'Completed', 'Not needed', 'Blocked', 'Overdue', 'Due', 'Future'],
     rows: [line('1 - the 10:00 email', t.counts.cp1), line('2 - the 13:00 reply', t.counts.cp2)],
   }];
