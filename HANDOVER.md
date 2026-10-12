@@ -2244,7 +2244,13 @@ side; (3) `js/tab-oppmonitor.js`'s own live-computation fallback
 (`_oppMonitorComputeLiveMetrics`) has no Google/Non-UTM/Search filter in
 its code at all, despite its header comment claiming it matches the
 external workflow's scoping — found while researching this change,
-unrelated to it.
+unrelated to it. **(3) fixed 2026-10-12** (code audit H-2): live rows now
+read `allParsedLeads` (not the filtered `leads`), apply the
+`passesGoogleNonUtmSearchGs_` scope, and respect the leads tab's ~7-day
+coverage window; `opp_at` also now parses as a date (audit G-5) — see
+`JS-025` and `docs/_planning/OPP_MONITOR_DATA_GAP_2026-10-12.md` (which
+also records why the OFFICIAL Opp Monitor numbers are paused: the
+analytics DB's `dim_leads` is missing 15–40% of leads).
 
 ### 9.7.4 Vendor (Futwork) + admin exclusion — added 2026-09-29
 

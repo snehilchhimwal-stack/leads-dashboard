@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/tab-oppmonitor.js` (445 lines) |
+| **Location** | `js/tab-oppmonitor.js` (560 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
@@ -26,9 +26,32 @@ the production dashboard itself.
 period/month slot with no official Sheet row yet (most usefully the one
 still in progress) is computed live, right here, from
 `lead_assigned_at`/`opp_at`, and rendered with a "Live" tag. It's no
-longer a pure display-only file (still reads no `filterState` — the
-official AND live numbers are both fixed aggregates for the tab's own
-stated scope, not sliceable by the shared filters).
+longer a pure display-only file.
+
+**Changed 2026-10-12 (code audit H-2, H-19, H-20, G-5):**
+- Live rows now read `allParsedLeads`, not the global `leads`. `leads` is
+  `allParsedLeads` after the shared filter bar (default Assigned range =
+  last 7 days, plus any Project/Region/Source filter picked on another
+  tab); the bar is hidden on this tab, so those filters silently zeroed or
+  skewed most live rows. The old "reads no `filterState`" claim was
+  technically true but misleading, since `leads` already embodied it.
+- Live rows are scoped to **Google Non-UTM/Search** (same rule as
+  `passesGoogleNonUtmSearchGs_`, `GS-004` `EmailInfra.gs`). There was no
+  source filter at all before.
+- The leads tab is a rolling ~7-day window, so a period it only partly
+  covers is computed over the covered days only and tagged
+  "Live · partial (from <date>)"; a period entirely before the window gets
+  no live row.
+- No change badge is drawn between rows that aren't comparable: a partial
+  row, or an official row vs a live row. The official Jul/Aug 2026 rows
+  were measured over all Google leads with an 18:30-to-18:30 "day"
+  (`docs/_planning/OPP_MONITOR_DATA_GAP_2026-10-12.md`).
+- A customer's earliest `opp_at` across RM copies is used; a real 0 renders
+  as "0"; a fetch error shows a checklist notice instead of 12 "Pending"
+  chips.
+- `opp_at` itself only started parsing on 2026-10-12: it was missing from
+  `fetchAndRender`'s date-column list (`JS-003`, audit G-5), so a
+  date-typed `opp_at` cell read as blank and every live figure as 0%.
 
 ## Responsibilities
 
@@ -49,8 +72,14 @@ stated scope, not sliceable by the shared filters).
   / `_oppMonitorLivePeriodRow` / `_oppMonitorLiveMonthRow` /
   `_oppMonitorPeriodDayRange` / `_oppMonitorDateStr` / `_oppMonitorOrdinal`
   — fills a period/month slot lacking an official row by computing the
-  same metrics from `leads`, scoped by `lead_assigned_at`'s IST calendar
-  day. Never overrides a slot that already has a real Sheet row.
+  same metrics from `allParsedLeads` (Google Non-UTM/Search only), scoped
+  by `lead_assigned_at`'s IST calendar day and by the leads tab's own
+  coverage window. Never overrides a slot that already has a real Sheet
+  row.
+- **Live scope + coverage (added 2026-10-12)**: `_oppMonitorInLiveScope` /
+  `_oppMonitorLiveCoverageStart` / `_oppMonitorEarliestOpp` (FN-434).
+- **Row rendering rules (added 2026-10-12)**: `_oppMonitorComparable` /
+  `_oppMonitorCountText` / `_oppMonitorLiveTagHtml` (FN-435).
 
 ## Load order / position
 
@@ -63,24 +92,27 @@ needs `wowDeltaBadgeHtml` from that file, plus everything from the
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-259 | `fetchOppMonitorData(sheetId)` `#L80` | a sheet id | populates `oppMonitorPeriodRows`/`oppMonitorMonthRows`; sets both fetch-state vars | 2 parallel Sheets reads | `_fetchOppMonitorTab` (FN-260) | `fetchAndRender` (`js/core-fetch-and-render.js`, best-effort, non-blocking) | specific — the tab's own loader, independent of every other fetch in the app |
-| FN-260 | `_fetchOppMonitorTab(sheetId, tabName, columns)` `#L49` | sheet id, tab name, column list | `{rows, state}` | one Sheets read | `sheetsApiValuesGet` / `valuesToGvizShape` (`JS-009`) | FN-259 (called twice, once per sheet) | reusable — generic small-table reader, mirrors `fetchRmHierarchyForRollup` (`JS-022`)'s missing-tab-is-not-an-error pattern |
-| FN-261 | `renderOppMonitorTab()` `#L441` | `oppMonitorPeriodRows`/`oppMonitorMonthRows`, global `leads`, `_renderNow` | the checklist + 2 tables in `#tab-oppmonitor` | DOM writes | `_renderOppMonitorChecklist`/`_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` (`#L240`/`#L321`/`#L382`) | `renderAll` (`JS-012`) | specific |
-| FN-262 | `oppMonitorPctDelta(curPct, prevPct)` / `_oppMonitorPctCellHtml(curPct, prevPct)` `#L96/#L102` | two already-computed percentages | `{cur, prev, delta}` / a table-cell HTML string | none | `wowDeltaBadgeHtml` (`JS-024`) | FN-261's 3 render helpers | reusable — unlike `wowPctDelta` (`JS-024`), diffs two stored percentages directly rather than deriving cur/prev from raw counts, since this tab never has a local numerator/denominator to recompute from |
-| FN-263 | `_oppMonitorYearMonth(date)` / `_oppMonitorShiftYearMonth(yearMonth, n)` `#L109/#L114` | a date / a `"YYYY-MM"` string + integer | the IST year-month key / that key shifted by n months | none | `istParts` (`JS-005`) | FN-261's 3 render helpers | reusable within this file |
-| FN-264 | `_oppMonitorMonthName(yearMonth)` `#L121` | a `"YYYY-MM"` string | `"<Month name> YYYY"`, or the raw input if unparseable | none | — | `_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` | reusable within this file — local month-name array, not a reuse of `reports-build.js`'s `IST_MONTHS` (no cross-file dependency for a 12-item constant) |
-| FN-267 | `_oppMonitorOrdinal(n)` / `_oppMonitorPeriodDayRange(yearMonth, periodNumber)` / `_oppMonitorDateStr(yearMonth, day)` `#L143/#L153/#L161` (added 2026-09-21) | a day number / a year-month + period number / a year-month + day | `"1st"`/`"21st"` etc. / `{fromDay, toDay, label}` matching the exact `period_label` style a sourced row has / a `"YYYY-MM-DD"` string | none | — | FN-268, FN-269 | reusable within this file |
-| FN-268 | `_oppMonitorComputeLiveMetrics(leadsArr, yearMonth, fromDay, toDay)` `#L170` (added 2026-09-21) | the global `leads` array, a year-month, a day range | `null` if no leads in scope, else `{total_leads, same_day_count, h48_count, same_day_pct, h48_pct, avg_hrs_to_opp, avg_days_to_opp, _live:true}` | none (pure) | `parseDate` (`JS-006`), `istParts`/`istSameDay` (`JS-005`) | FN-269 | specific — same-day = `opp_at` on the same IST calendar day as `lead_assigned_at`; within-48h = the gap `<=48` hours; a negative gap (data anomaly, not a real conversion — same defensive guard the 2026-09-21 ClickHouse epoch-zero-sentinel incident showed is genuinely necessary) is excluded from every metric |
-| FN-269 | `_oppMonitorLivePeriodRow(yearMonth, periodNumber, leadsArr)` / `_oppMonitorLiveMonthRow(yearMonth, leadsArr)` `#L206/#L217` (added 2026-09-21) | a year-month (+ period number) + `leads` | a synthesized row in the exact shape a real `Opp_Monitor_Period`/`Month` row has (`source:'live'`), or `null` | none | FN-267, FN-268 | `_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` | specific — lets the existing render code display a live row identically to a sourced one, only the `_live` flag/tag differ |
+| FN-259 | `fetchOppMonitorData(sheetId)` `#L85` | a sheet id | populates `oppMonitorPeriodRows`/`oppMonitorMonthRows`; sets both fetch-state vars | 2 parallel Sheets reads | `_fetchOppMonitorTab` (FN-260) | `fetchAndRender` (`js/core-fetch-and-render.js`, best-effort, non-blocking) | specific — the tab's own loader, independent of every other fetch in the app |
+| FN-260 | `_fetchOppMonitorTab(sheetId, tabName, columns)` `#L54` | sheet id, tab name, column list | `{rows, state}` | one Sheets read | `sheetsApiValuesGet` / `valuesToGvizShape` (`JS-009`) | FN-259 (called twice, once per sheet) | reusable — generic small-table reader, mirrors `fetchRmHierarchyForRollup` (`JS-022`)'s missing-tab-is-not-an-error pattern |
+| FN-261 | `renderOppMonitorTab()` `#L556` | `oppMonitorPeriodRows`/`oppMonitorMonthRows`, global `allParsedLeads` (not `leads`, since 2026-10-12), `_renderNow` | the checklist + 2 tables in `#tab-oppmonitor` | DOM writes | `_renderOppMonitorChecklist`/`_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` (`#L308`/`#L431`/`#L496`) | `renderAll` (`JS-012`) | specific |
+| FN-262 | `oppMonitorPctDelta(curPct, prevPct)` / `_oppMonitorPctCellHtml(curPct, prevPct)` `#L101/#L107` | two already-computed percentages | `{cur, prev, delta}` / a table-cell HTML string | none | `wowDeltaBadgeHtml` (`JS-024`) | FN-261's 3 render helpers | reusable — unlike `wowPctDelta` (`JS-024`), diffs two stored percentages directly rather than deriving cur/prev from raw counts, since this tab never has a local numerator/denominator to recompute from |
+| FN-263 | `_oppMonitorYearMonth(date)` / `_oppMonitorShiftYearMonth(yearMonth, n)` `#L114/#L119` | a date / a `"YYYY-MM"` string + integer | the IST year-month key / that key shifted by n months | none | `istParts` (`JS-005`) | FN-261's 3 render helpers | reusable within this file |
+| FN-264 | `_oppMonitorMonthName(yearMonth)` `#L126` | a `"YYYY-MM"` string | `"<Month name> YYYY"`, or the raw input if unparseable | none | — | `_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` | reusable within this file — local month-name array, not a reuse of `reports-build.js`'s `IST_MONTHS` (no cross-file dependency for a 12-item constant) |
+| FN-267 | `_oppMonitorOrdinal(n)` / `_oppMonitorPeriodDayRange(yearMonth, periodNumber)` / `_oppMonitorDateStr(yearMonth, day)` `#L151/#L161/#L169` (added 2026-09-21) | a day number / a year-month + period number / a year-month + day | `"1st"`/`"21st"` etc. / `{fromDay, toDay, label}` matching the exact `period_label` style a sourced row has / a `"YYYY-MM-DD"` string | none | — | FN-268, FN-269 | reusable within this file |
+| FN-268 | `_oppMonitorComputeLiveMetrics(leadsArr, yearMonth, fromDay, toDay, coverageStart)` `#L230` (added 2026-09-21; scope + coverage 2026-10-12) | `allParsedLeads`, a year-month, a day range, the leads tab's first covered IST day | `null` if the range ends before `coverageStart` or has no in-scope leads, else `{total_leads, same_day_count, h48_count, same_day_pct, h48_pct, avg_hrs_to_opp, avg_days_to_opp, _live:true, _partial, _coveredFrom}` (`_partial` when the range starts before `coverageStart`; only covered days counted) | none (pure) | FN-434, `parseDate` (`JS-006`), `istParts`/`istSameDay` (`JS-005`) | FN-269 | specific — same-day = `opp_at` on the same IST calendar day as `lead_assigned_at`; within-48h = the gap `<=48` hours; a negative gap (data anomaly, not a real conversion — same defensive guard the 2026-09-21 ClickHouse epoch-zero-sentinel incident showed is genuinely necessary) is excluded from every metric |
+| FN-269 | `_oppMonitorLivePeriodRow(yearMonth, periodNumber, allLeadsArr, coverageStart)` / `_oppMonitorLiveMonthRow(yearMonth, allLeadsArr, coverageStart)` `#L274/#L285` (added 2026-09-21) | a year-month (+ period number) + `allParsedLeads` + coverage start | a synthesized row in the exact shape a real `Opp_Monitor_Period`/`Month` row has (`source:'live'`), or `null` | none | FN-267, FN-268 | `_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` | specific — lets the existing render code display a live row identically to a sourced one, only the `_live`/`_partial` flags/tag differ |
+| FN-434 | `_oppMonitorInLiveScope(l)` / `_oppMonitorLiveCoverageStart(allLeadsArr)` / `_oppMonitorEarliestOpp(l)` `#L186/#L198/#L212` (added 2026-10-12) | a lead / `allParsedLeads` / a lead | `true` for `group_source` google + `source_bucket` Non-UTM/Search (trimmed, case-insensitive) / the earliest IST assignment day in the leads tab (`"YYYY-MM-DD"`) or `null` / the earliest `opp_at` across the customer and its `copySplits` | none (pure) | `parseDate` (`JS-006`), `istParts` (`JS-005`) | FN-268, FN-261's table renderers | specific — the scope rule mirrors `passesGoogleNonUtmSearchGs_` (`GS-004`) by hand (browser can't call Apps Script) |
+| FN-435 | `_oppMonitorComparable(row, prevRow)` / `_oppMonitorCountText(v)` / `_oppMonitorLiveTagHtml(row)` `#L389/#L396/#L400` (added 2026-10-12) | two rows / a count / a row | whether a change badge may be drawn (both complete AND both official or both live) / the count as text (`0` stays `"0"`) / the Live or "Live · partial (from …)" chip HTML | none | `esc` (`JS-010`) | `_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` | specific |
 
 ## Exceptions — `EXC-XXX` sub-table
 
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
 | EXC-094 | `Opp_Monitor_Period`/`Opp_Monitor_Month` tab doesn't exist yet (Sheets API 400 on the range) | `_fetchOppMonitorTab` returns `state:'missing'`, never throws | checklist shows a "no data yet" notice; tables show their own empty-state notice |
-| EXC-095 | a genuine fetch failure (non-400) | `state:'error'` | a distinct "could not read — check the tab exists and is shared correctly" notice, not silently blank |
+| EXC-095 | a genuine fetch failure (non-400) | `state:'error'` | a distinct "could not read — check the tab exists and is shared correctly" notice on each table, not silently blank; since 2026-10-12 the checklist shows its own "Could not read …" notice too, instead of 12 "Pending" chips (audit H-20) |
 | EXC-096 | a period/month with no row for the current 3-month window | simply omitted from the table | no dash row, no placeholder — consistent with the "no backfill" design decision |
-| EXC-098 | a period/month with no sourced row AND no `leads` in scope for that window either (added 2026-09-21) | `_oppMonitorComputeLiveMetrics` returns `null`; the row stays omitted, same as `EXC-096` | slot is simply absent, never a live row showing `0`/`—` — "genuinely nothing happened" reads differently from "0 of 0" |
+| EXC-098 | a period/month with no sourced row AND no in-scope leads for that window, or a window that ends before the leads tab's coverage start (added 2026-09-21; coverage case 2026-10-12) | `_oppMonitorComputeLiveMetrics` returns `null`; the row stays omitted, same as `EXC-096` | slot is simply absent, never a live row showing `0`/`—` — "genuinely nothing happened" reads differently from "0 of 0" |
+| EXC-143 | a period/month with no sourced row that STARTS before the leads tab's coverage start (the tab keeps ~7 days) (added 2026-10-12) | computed over the covered days only; `_partial:true`, `_coveredFrom` set; never compared with a neighbouring row | tagged "Live · partial (from YYYY-MM-DD)" with the date range starting at that day, and no change badge either side |
 
 ## Data lineage
 
@@ -89,8 +121,9 @@ written externally) → `fetchOppMonitorData` (FN-259) →
 `oppMonitorPeriodRows`/`oppMonitorMonthRows` (state) →
 `renderOppMonitorTab` (FN-261) → screen. **Second lineage, added
 2026-09-21**: `SHEET-001` (`leads`, via `HEADER_ALIASES.opp_at`) →
-`allParsedLeads`/`leads` (`JS-003`) → `_oppMonitorComputeLiveMetrics`
-(FN-268, read directly from the global `leads`, no separate fetch) →
+`allParsedLeads` (`JS-003`) → `_oppMonitorComputeLiveMetrics`
+(FN-268, read directly from the global `allParsedLeads` -- the filtered
+`leads` until 2026-10-12 -- no separate fetch) →
 `_oppMonitorLivePeriodRow`/`_oppMonitorLiveMonthRow` (FN-269) → the same
 render functions, for any slot the first lineage didn't fill. Nothing
 persists back; this file has no write path at all — a live row is
@@ -98,9 +131,10 @@ recomputed on every render, never cached or written to a Sheet.
 
 ## Data sources accessed
 
-`SHEET-016`, `SHEET-017` (own reads via `sheetsApiValuesGet`). `leads`
-(global state, `JS-003`/`JS-009` — added 2026-09-21, read directly, no
-own fetch). Auth: `gateAccessToken` (`JS-001`, indirectly via `JS-009`).
+`SHEET-016`, `SHEET-017` (own reads via `sheetsApiValuesGet`).
+`allParsedLeads` (global state, `JS-003`/`JS-009` — added 2026-09-21 as
+`leads`, switched to `allParsedLeads` 2026-10-12; read directly, no own
+fetch). Auth: `gateAccessToken` (`JS-001`, indirectly via `JS-009`).
 Integration: `EXT-001`.
 
 ## Data written / modified
@@ -152,8 +186,8 @@ recalculation to cache, it's pure display).
 - **Depends On:** `JS-005` (`istParts`, `istSameDay`), `JS-006`
   (`_renderNow`, `parseDate` — the latter added as a real dependency
   2026-09-21), `JS-009` (`sheetsApiValuesGet`, `valuesToGvizShape`,
-  `gvizCellRaw`, `HEADER_ALIASES.opp_at`), `JS-003` (the global `leads`
-  array this file now reads directly), `JS-010` (`esc`), `JS-024`
+  `gvizCellRaw`, `HEADER_ALIASES.opp_at`), `JS-003` (the global
+  `allParsedLeads` array this file reads directly), `JS-010` (`esc`), `JS-024`
   (`wowDeltaBadgeHtml`), `EXT-001`, `SHEET-001` (`leads`, via `opp_at`),
   `SHEET-016`, `SHEET-017`
 - **Used By:** `JS-003` (`fetchOppMonitorData`/`renderOppMonitorTab`
@@ -192,7 +226,27 @@ recalculation to cache, it's pure display).
   values (25.0%/50.0%/50 hrs/2.08 days) AND that a slot with a real sourced
   row is never overridden even with qualifying `leads` in scope (94/94
   pass). Also confirmed against the real production `leads` tab's own
-  `opp_at` data via the signed-in dashboard.
+  `opp_at` data via the signed-in dashboard. **Correction (2026-10-12):**
+  that live check can't have seen real Opp% figures — `opp_at` is a
+  date-typed cell and wasn't in `fetchAndRender`'s date-column list
+  (audit G-5), so it parsed as blank for every lead.
+- **Status (2026-10-12):** revalidated for the H-2/H-19/H-20/G-5 fixes.
+  `tests/frontend-harness.html` gained 12 assertions covering:
+  - live rows appearing with the filtered `leads` empty
+  - out-of-scope leads (Google Discovery, Meta Search) excluded, with
+    sub-source spelling normalised
+  - no change badge between an official row and a live row, while official
+    rows keep theirs
+  - partial coverage tagged, its date range and month row included
+  - a real 0 rendered as "0"
+  - nothing invented before the covered window
+  - earliest `opp_at` across RM copies
+  - the checklist's fetch-error notice
+  - (in block 7) a date-serial `opp_at` parsed through the real
+    `fetchAndRender()`
+
+  279/279 pass. Against the pre-fix code, exactly those 12 fail and every
+  other assertion still passes.
 
 ## Version / change reference
 
@@ -202,7 +256,10 @@ the opp-count/avg-days/avg-hrs table columns, and the Scope line added to
 `dashboard.html`'s `#tab-oppmonitor` intro text. Revalidated 2026-09-21
 for the live-computation feature (file grew 324L → 445L) — this record's
 "reads neither `leads` nor `filterState`" claim is now half-true (still
-no `filterState`) and has been corrected throughout.
+no `filterState`) and has been corrected throughout. Revalidated
+2026-10-12 for the audit fixes (file 445L → 560L): live rows read
+`allParsedLeads` with a Google Non-UTM/Search scope and coverage window,
+FN-434/FN-435 and EXC-143 added, every `#Lnn` anchor re-read from source.
 
 ## Revalidation trigger
 
@@ -211,8 +268,11 @@ changes (`OPP_MONITOR_PERIOD_COLUMNS`/`OPP_MONITOR_MONTH_COLUMNS`); the
 underlying workflow's step count/structure changes (currently 3
 periods x 3 steps + 3 month-level steps = 12); `wowDeltaBadgeHtml`'s
 signature changes (`JS-024`); the live-computation methodology changes
-(same-day/48h-hour thresholds, the negative-gap exclusion guard);
-`HEADER_ALIASES.opp_at` (`JS-009`) changes.
+(same-day/48h-hour thresholds, the negative-gap exclusion guard, the
+Non-UTM/Search scope rule, the coverage-window rule);
+`HEADER_ALIASES.opp_at` (`JS-009`) changes; `passesGoogleNonUtmSearchGs_`
+(`GS-004`) changes (the scope rule here mirrors it by hand); the leads
+tab's import window changes from ~7 days.
 
 ## Handover relationship
 

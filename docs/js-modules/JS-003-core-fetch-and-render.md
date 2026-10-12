@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-fetch-and-render.js` (665 lines) |
+| **Location** | `js/core-fetch-and-render.js` (697 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
@@ -43,8 +43,8 @@ Seventh in the real order — after every core parsing/model file, before
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-015 | `fetchAndRender()` `#L27` | reads `#sheetIdInput` / `#tabNameInput` | writes `allParsedLeads`; triggers `renderAll()` and dependent tab renders. Each parsed lead now also carries `opp_at` (added 2026-09-21, ISO string or `''` — mirrors `lead_assigned_at`'s `getDate()`/`toISOString()` pattern), read via `js/tab-oppmonitor.js`'s live same-day/48h Opp% computation. | Sheets read, DOM overlay, `_currentSheetId` set via callee, source-mix computation | `gateTokenValid` (`JS-001`), `sheetsApiValuesGet` (`JS-009`), `valuesToGvizShape` (`JS-009`), `enrichLead` (`JS-006`), `applyFiltersAndRender` (`JS-004`), `fetchMovementLog` (`JS-021`), `fetchRmHierarchyForRollup` (`JS-022`), `renderAll` (`JS-012`) | `handleGateSignInClick` (`JS-001`), `#refreshBtn` / `#changeSourceBtn` (`DASH-001`) | specific (the app entry pipeline) |
-| FN-016 | `mergeRowsIntoOneLead(rows)` `#L353` (internal) | array of raw rows for one family | one merged lead: `collatedFrom` (distinct `lead_id` count), `collatedRMs`, `collatedLeadIds`, `collatedRegions`, MAX'd counters, furthest stage | none (pure) | `canonicalStage` / `isClosedStage` (`JS-006`), region helpers | `fetchAndRender` (FN-015) only | specific |
-| FN-017 | `_ufFind(x)` / `_ufUnion(a,b)` `#L286/#L290` (internal) | row indices | union-find structure over rows sharing `lead_id` OR `client_id`+similar-region | none | — | `fetchAndRender` (FN-015) | specific |
+| FN-016 | `mergeRowsIntoOneLead(rows)` `#L361` (internal) | array of raw rows for one family | one merged lead: `collatedFrom` (distinct `lead_id` count), `collatedRMs`, `collatedLeadIds`, `collatedRegions`, MAX'd counters, furthest stage | none (pure) | `canonicalStage` / `isClosedStage` (`JS-006`), region helpers | `fetchAndRender` (FN-015) only | specific |
+| FN-017 | `_ufFind(x)` / `_ufUnion(a,b)` `#L294/#L298` (internal) | row indices | union-find structure over rows sharing `lead_id` OR `client_id`+similar-region | none | — | `fetchAndRender` (FN-015) | specific |
 | FN-018 | `showError(html)` / `hideError()` `#L13/#L19` | HTML string | toggles `#errorBanner` | DOM write | — | `fetchAndRender` (FN-015), other modules on a caught error | reusable |
 | FN-019 | `setPulse(live)` `#L23` | bool | toggles the live-data pulse indicator | DOM write | — | `fetchAndRender` (FN-015) | reusable |
 
@@ -167,6 +167,8 @@ used too, not just an explicit tab-switch click. Fire-and-forget,
 never throws, no change to this function's own pipeline/error handling.
 
 **2026-10-07** (`7799e44`, email audit P15 / F18): `mergeRowsIntoOneLead` adds `callAttemptsByLeadId` (`{lead_id: that lead's call_attempts}`, the max over the lead's own rows) to a merged multi-lead record, next to the unchanged `call_attempts` (the max over all its leads). `callsTodayFromBaseline` (`JS-006` `FN-346`) needs the per-lead figures to subtract each lead's own pre-today baseline. A single-lead record does not carry the field. The comment above `call_attempts` was also corrected: the counter is per LEAD (every RM copy of one lead id is identical), not per client. `tests/frontend-harness.html` asserts the field on the pipeline's C013 customer (L013/L014). Live as soon as GitHub Pages deploys.
+
+**2026-10-12** (code audit G-5): `isDateColLabel` (the list of columns whose Sheets-API serial numbers are converted to dates before parsing) now includes `HEADER_ALIASES.opp_at`. `opp_at` is a real date-typed cell in the leads tab, so it arrived as a raw serial number that `gvizCellDate` can't parse: every lead's `opp_at` read as `''`, and every Opp Monitor live figure as 0%. A comment above `isDateColLabel` now states the rule: every column read through `getDate()` must be listed. `tests/frontend-harness.html` block 7 sends `opp_at` as a date serial through the real `fetchAndRender()` and asserts it parses to the right instant (and a blank cell stays `''`).
 
 ## Revalidation trigger
 

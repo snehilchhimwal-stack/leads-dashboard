@@ -80,8 +80,16 @@ async function fetchAndRender(){
       throw err;
     }
 
+    // Every column read through getDate() below must be listed here: a
+    // date-typed cell arrives from the Sheets API as a serial number, and
+    // only these columns get it converted -- anything else stays a raw
+    // number, which gvizCellDate() can't parse (returns null). opp_at was
+    // missing until 2026-10-12 (audit G-5): it IS a real date cell in the
+    // leads tab, so every lead's opp_at read as blank and every Opp Monitor
+    // live figure as 0%.
     const isDateColLabel = (label) =>
-      HEADER_ALIASES.lead_assigned_at.indexOf(label) !== -1 || HEADER_ALIASES.last_connect_time.indexOf(label) !== -1;
+      HEADER_ALIASES.lead_assigned_at.indexOf(label) !== -1 || HEADER_ALIASES.last_connect_time.indexOf(label) !== -1
+      || HEADER_ALIASES.opp_at.indexOf(label) !== -1;
     const table = valuesToGvizShape(values, isDateColLabel);
     const cols = table.cols;
     const dataRowsRaw = table.rows.map(r => r.c || []);

@@ -1926,13 +1926,15 @@
       return [];
     };
 
-    // This block's tables now also read the global `leads` array (live
-    // computation, added 2026-09-21) — pin it to empty here so every
-    // assertion below is deliberately testing "no sourced row AND no
-    // leads to compute live from" rather than accidentally inheriting
-    // whatever the earlier main-flow fixture happened to leave behind.
+    // This block's tables also compute "Live" rows from `allParsedLeads`
+    // (since 2026-10-12; the filtered `leads` before that -- audit H-2).
+    // Pin BOTH to empty here so every assertion below is deliberately
+    // testing "no sourced row AND no leads to compute live from" rather than
+    // accidentally inheriting whatever the earlier main-flow fixture left.
     const _oppMonitorPriorLeads = leads;
+    const _oppMonitorPriorAllParsed = allParsedLeads;
     leads = [];
+    allParsedLeads = [];
 
     let oppThrew = null;
     try {
@@ -1966,41 +1968,105 @@
       assert('Monthly trend table lists July and August but not the absent September row', monthTableText.indexOf('July 2026') !== -1 && monthTableText.indexOf('August 2026') !== -1 && monthTableText.indexOf('2026-09') === -1);
       assert('Monthly trend table shows opp counts and Avg Days/Hrs to Opp', monthTableText.indexOf('960') !== -1 && monthTableText.indexOf('0.93') !== -1 && monthTableText.indexOf('22.3') !== -1); // July month row
 
-      // ---- Live computation (2026-09-21): Sep P3 has no sourced row —
-      // give it 4 synthetic leads inside its 21st-30th window and confirm
-      // a correctly-computed "Live" row now fills that gap.
+      // ---- Live computation (2026-09-21; scope/coverage fixed 2026-10-12):
+      // Sep P3 has no sourced row — give it 4 in-scope synthetic leads
+      // inside its 21st-30th window and confirm a correctly-computed "Live"
+      // row now fills that gap.
       // A: same-day (6h) and within-48h. B: exactly 48h -- boundary, must
       // count as within-48h. C: never reached Opportunity (opp_at blank)
       // -- counts toward total only. D: 96h -- neither same-day nor
       // within-48h, still counts toward the average.
       // Expected: total=4, same_day=1 (25.0%), h48=2 (50.0%),
       // avg_hrs=(6+48+96)/3=50.0, avg_days=50/24=2.08.
-      leads = [
-        { lead_id: 'live-a', lead_assigned_at: '2026-09-21T04:00:00.000Z', opp_at: '2026-09-21T10:00:00.000Z' },
-        { lead_id: 'live-b', lead_assigned_at: '2026-09-22T04:00:00.000Z', opp_at: '2026-09-24T04:00:00.000Z' },
-        { lead_id: 'live-c', lead_assigned_at: '2026-09-25T04:00:00.000Z', opp_at: '' },
-        { lead_id: 'live-d', lead_assigned_at: '2026-09-28T04:00:00.000Z', opp_at: '2026-10-02T04:00:00.000Z' },
+      // Sub-source spellings deliberately vary in case/whitespace -- the
+      // scope rule normalises them exactly like passesGoogleNonUtmSearchGs_.
+      const inScope = (o) => Object.assign({ group_source: 'google', source_bucket: 'Search' }, o);
+      const liveFixture = [
+        inScope({ lead_id: 'live-a', lead_assigned_at: '2026-09-21T04:00:00.000Z', opp_at: '2026-09-21T10:00:00.000Z' }),
+        inScope({ lead_id: 'live-b', lead_assigned_at: '2026-09-22T04:00:00.000Z', opp_at: '2026-09-24T04:00:00.000Z', group_source: ' Google ', source_bucket: 'non-utm' }),
+        inScope({ lead_id: 'live-c', lead_assigned_at: '2026-09-25T04:00:00.000Z', opp_at: '', source_bucket: ' SEARCH ' }),
+        inScope({ lead_id: 'live-d', lead_assigned_at: '2026-09-28T04:00:00.000Z', opp_at: '2026-10-02T04:00:00.000Z', source_bucket: 'Non-UTM' }),
+        // OUT of scope (H-2 scope fix): a Google Discovery lead and a Meta
+        // Search lead, both same-day conversions in the same window. Counted,
+        // they'd turn 25.0%/50.0% into 50.0%/66.7% -- so 25.0%/50.0% proves
+        // they were excluded.
+        { lead_id: 'out-1', group_source: 'google', source_bucket: 'Discovery', lead_assigned_at: '2026-09-23T04:00:00.000Z', opp_at: '2026-09-23T05:00:00.000Z' },
+        { lead_id: 'out-2', group_source: 'meta', source_bucket: 'Search', lead_assigned_at: '2026-09-24T04:00:00.000Z', opp_at: '2026-09-24T05:00:00.000Z' },
       ];
+      allParsedLeads = liveFixture;
+      // The filtered `leads` is deliberately EMPTY (as if the hidden
+      // filter bar's default 7-day range excluded every one of them): the
+      // live row must still appear, proving it no longer reads `leads`.
+      leads = [];
       renderOppMonitorTab();
       const livePeriodText = oppTextOf('oppMonitorPeriodTable');
       assert('Live computation: Sep P3 now shows a Live-tagged row', /Live/.test(livePeriodText) && livePeriodText.indexOf('21st') !== -1);
+      assert('Live rows come from allParsedLeads, not the filtered `leads` (audit H-2): the row appears with `leads` empty', /Live/.test(livePeriodText));
       // 25.0%/50.0% only arise from total=4, same_day=1, h48=2 — a
       // narrower, more precise check than asserting "4" appears somewhere
       // in concatenated cell text.
-      assert('Live computation: same-day% = 25.0, 48h% = 50.0 (implies total=4, same_day=1, h48=2)', livePeriodText.indexOf('25.0%') !== -1 && livePeriodText.indexOf('50.0%') !== -1);
+      assert('Live computation: same-day% = 25.0, 48h% = 50.0 (implies total=4, same_day=1, h48=2 -- the 2 out-of-scope leads excluded)', livePeriodText.indexOf('25.0%') !== -1 && livePeriodText.indexOf('50.0%') !== -1);
       assert('Live computation: avg hrs/days to Opp = 50 / 2.08', livePeriodText.indexOf('50') !== -1 && livePeriodText.indexOf('2.08') !== -1);
+      // Sep P2 is an OFFICIAL row (41.0%); a live row is measured differently,
+      // so no change badge may compare them (25.0 vs 41.0 would read ▼ 16.0pp).
+      assert('No change badge between an official row and a live row (no "16.0pp")', livePeriodText.indexOf('16.0pp') === -1, livePeriodText);
+      assert('Official rows still get their change badge (Sep P1 vs Aug P3: ▲ 2.0pp)', /▲ 2\.0pp/.test(livePeriodText));
+
+      // Coverage (the leads tab keeps ~7 days): drop the two earliest
+      // leads so the earliest assignment in allParsedLeads is 2026-09-25.
+      // Sep P3 (21st-30th) is then only partly covered -> flagged partial,
+      // counted from the 25th only (C + D: total=2, same_day=0, h48=0).
+      allParsedLeads = liveFixture.filter(l => l.lead_id !== 'live-a' && l.lead_id !== 'live-b' && l.lead_id !== 'out-1' && l.lead_id !== 'out-2');
+      renderOppMonitorTab();
+      const partialText = oppTextOf('oppMonitorPeriodTable');
+      assert('A period the leads tab only partly covers is tagged "Live · partial (from 2026-09-25)"', partialText.indexOf('Live · partial (from 2026-09-25)') !== -1, partialText);
+      assert('…its date range starts at the first covered day', partialText.indexOf('2026-09-25 – 2026-09-30') !== -1, partialText);
+      const p3Row = Array.from(document.querySelectorAll('#oppMonitorPeriodTable tbody tr')).find(tr => /partial/.test(tr.textContent));
+      const p3Cells = p3Row ? Array.from(p3Row.children).map(td => td.textContent.trim()) : [];
+      // Columns: Month | Period | Date range | Total | Same-Day Opps | Same-Day% | 48h Opps | 48h% | Avg days | Avg hrs
+      assert('A real zero renders as "0", not a blank cell (audit H-19)', p3Cells[3] === '2' && p3Cells[4] === '0' && p3Cells[6] === '0', JSON.stringify(p3Cells));
+      const partialMonthText = oppTextOf('oppMonitorMonthTable');
+      assert('The month table flags the live September month as partial too (covered from the 25th)', partialMonthText.indexOf('Live · partial (from 2026-09-25)') !== -1, partialMonthText);
+
+      // A period that ends before the leads tab's window can't be computed
+      // at all -> no invented row. Coverage from Sep 25 means a lead dated
+      // in Sep P2's window doesn't exist in the tab; Sep P2 keeps its
+      // official row, and nothing before it gains a live row.
+      assert('Nothing before the covered window gets a live row (only one Live row present)', (partialText.match(/Live/g) || []).length === 1, partialText);
+
+      // Earliest Opportunity across RM copies: the merged record keeps the
+      // furthest-progressed copy's opp_at (next day here), but one copy
+      // reached Opportunity the same day -> counts as same-day.
+      allParsedLeads = [
+        inScope({ lead_id: 'cp-1', lead_assigned_at: '2026-09-21T04:00:00.000Z', opp_at: '2026-09-22T06:00:00.000Z',
+          copySplits: [{ lead_id: 'cp-1', opp_at: '2026-09-22T06:00:00.000Z' }, { lead_id: 'cp-1b', opp_at: '2026-09-21T06:00:00.000Z' }] }),
+      ];
+      renderOppMonitorTab();
+      assert('Same-day uses the EARLIEST opp_at across a customer\'s RM copies (100.0%)', oppTextOf('oppMonitorPeriodTable').indexOf('100.0%') !== -1, oppTextOf('oppMonitorPeriodTable'));
 
       // A slot that already has a real Opp_Monitor_Period row must never
       // be overridden by a live computation, even with qualifying leads
       // in scope — give July P1's exact window a synthetic lead too and
       // confirm July P1 still shows the SOURCED 37.7%-style figures
       // (300/400 counts from the fixture above), not a live recompute.
-      leads.push({ lead_id: 'live-e', lead_assigned_at: '2026-07-05T04:00:00.000Z', opp_at: '2026-07-05T05:00:00.000Z' });
+      allParsedLeads = liveFixture.concat([inScope({ lead_id: 'live-e', lead_assigned_at: '2026-07-05T04:00:00.000Z', opp_at: '2026-07-05T05:00:00.000Z' })]);
       renderOppMonitorTab();
       const sourcedStillWinsText = oppTextOf('oppMonitorPeriodTable');
       assert('Live computation never overrides an existing sourced row (July P1 still shows its real 300/400 counts)', sourcedStillWinsText.indexOf('300') !== -1 && sourcedStillWinsText.indexOf('400') !== -1);
 
+      // A read error must not masquerade as "12 steps pending" (audit H-20).
+      const _harnessOppGet = sheetsApiValuesGet;
+      sheetsApiValuesGet = async function () { const e = new Error('boom'); e.status = 500; throw e; };
+      await fetchOppMonitorData('harness-sheet-id');
+      renderOppMonitorTab();
+      assert('A fetch error shows a "Could not read" notice in the checklist instead of Pending chips (audit H-20)',
+        oppTextOf('oppMonitorChecklistNotice').indexOf('Could not read Opp_Monitor_Period / Opp_Monitor_Month') !== -1
+        && document.getElementById('oppMonitorChecklist').innerHTML === '', oppTextOf('oppMonitorChecklistNotice'));
+      sheetsApiValuesGet = _harnessOppGet;
+      await fetchOppMonitorData('harness-sheet-id');
+
       leads = _oppMonitorPriorLeads;
+      allParsedLeads = _oppMonitorPriorAllParsed;
       renderOppMonitorTab();
 
       // Filter-bar hiding — the one behavior this tab uniquely owns.
@@ -2037,13 +2103,20 @@
       client: 'Client ' + id, lead_assigned_at: ago(createdH), group_source: 'Google', source_bucket: 'Organic', current_stage: stage,
       client_id: client, last_connect_time: ago(0.5), call_attempts: attempts,
     });
-    const e2eLeadValues = [headers.slice(),
-      e2eLead('E101', 'C-E1', 'Not Updated', 60, 13),
-      e2eLead('E102', 'C-E1', 'Suspect', 60, 9),
-      e2eLead('E201', 'C-E2', 'Suspect', 60, 2),
-      e2eLead('E301', 'C-E3', 'Suspect', 60, 7),
-      e2eLead('E401', 'C-E4', 'Suspect', 5, 6),
-      e2eLead('E402', 'C-E5', 'Suspect', 5, 2),
+    // Plus an opp_at column (audit G-5, 2026-10-12): in the real leads tab
+    // it's a date-typed cell, which the Sheets API returns as a SERIAL
+    // NUMBER. E301 carries one (30h ago); every other lead leaves it blank.
+    // Before the fix opp_at wasn't in fetchAndRender's date-column list,
+    // so the serial stayed a raw number and parsed to '' for every lead.
+    const e2eOppSerial = serialAgo(30);
+    const withOpp = (r, opp) => r.concat([opp]);
+    const e2eLeadValues = [headers.concat(['opp_at']),
+      withOpp(e2eLead('E101', 'C-E1', 'Not Updated', 60, 13), ''),
+      withOpp(e2eLead('E102', 'C-E1', 'Suspect', 60, 9), ''),
+      withOpp(e2eLead('E201', 'C-E2', 'Suspect', 60, 2), ''),
+      withOpp(e2eLead('E301', 'C-E3', 'Suspect', 60, 7), e2eOppSerial),
+      withOpp(e2eLead('E401', 'C-E4', 'Suspect', 5, 6), ''),
+      withOpp(e2eLead('E402', 'C-E5', 'Suspect', 5, 2), ''),
     ];
     const mlHeader = MOVEMENT_LOG_COLUMNS.concat(['content_hash']);
     const mlRow = (atH, leadId, client, attempts) => mlHeader.map(key => {
@@ -2103,6 +2176,13 @@
         ['E101', 'E201', 'E402'].every(id => dueText.indexOf(id) !== -1), dueText.slice(0, 200));
       assert('E2E snapshot->render: …and does NOT name E102 (the sibling), E301 or E401',
         ['E102', 'E301', 'E401'].every(id => dueText.indexOf(id) === -1), dueText.slice(0, 200));
+
+      const e301 = allParsedLeads.find(l => String(l.lead_id) === 'E301');
+      const e301Opp = e301 && e301.opp_at ? new Date(e301.opp_at).getTime() : null;
+      assert('opp_at sent as a date serial is parsed, not dropped (audit G-5): E301\'s opp_at = 30h ago, to the second',
+        e301Opp !== null && Math.abs(e301Opp - (Date.now() - 30 * H)) < 2000, e301 ? JSON.stringify(e301.opp_at) : 'no E301');
+      const e101 = allParsedLeads.find(l => String(l.lead_id) === 'E101' || (l.collatedLeadIds || []).indexOf('E101') !== -1);
+      assert('…and a blank opp_at cell stays blank', !!e101 && e101.opp_at === '', e101 ? JSON.stringify(e101.opp_at) : 'no E101');
 
       const merged = leads.find(l => l.client_id === 'C-E1');
       assert('E2E snapshot->render: the merged customer record for C-E1 carries both leads\' counters and is NOT behind (its best lead made 5 calls)',

@@ -291,6 +291,13 @@ button removed at the user's request — see UI relationships / Tabs it
 contains above and `TAB-001`'s own record. 9 tabs still exist (no module
 removed), but only 8 have a tab-bar button now.
 
+**2026-10-12** (code audit H-2/G-5): orthogonal change — only
+`TAB-009`'s Scope paragraph in `#tab-oppmonitor` was reworded. It now
+names the Sub-source rule (Non-UTM or Search) and says live rows can't be
+compared with the all-Google official Jul/Aug rows. It also explains the
+"Live · partial" tag (the leads tab keeps ~7 days). No tab, button,
+script or load order changed; see `TAB-009` / `JS-025`.
+
 ## Revalidation trigger
 
 Any of: a `js/*.js` file added or removed (changes the module count and

@@ -49,11 +49,14 @@ dashboard.
 
 ## Inputs (which in-memory state arrays / filter state it reads)
 
-**Still no `filterState`**, but as of 2026-09-21 it DOES read the global
-`leads` array (for the live-computation gap-fill — see Purpose). Inputs:
-its own fetched `oppMonitorPeriodRows` / `oppMonitorMonthRows` (`JS-025`),
-`leads` (`JS-003`), and `_renderNow` (`JS-006`, for "which month is
-current").
+**No `filterState`, directly or indirectly.** Since 2026-10-12 the
+live-computation gap-fill reads `allParsedLeads` (every lead the leads tab
+holds). From 2026-09-21 it read the global `leads` instead, which is
+`allParsedLeads` AFTER the hidden shared filter bar (default last 7 days),
+so the filters leaked in invisibly (code audit H-2). Inputs: its own
+fetched `oppMonitorPeriodRows` / `oppMonitorMonthRows` (`JS-025`),
+`allParsedLeads` (`JS-003`), and `_renderNow` (`JS-006`, for "which month
+is current").
 
 ## Outputs / what it renders
 
@@ -68,8 +71,11 @@ vs the immediately preceding period (chronological, crossing month
 boundaries correctly — a month's Period 1 compares against the prior
 month's Period 3). Per month: the same metrics + deltas vs the prior
 month. A slot with no official Sheet row is filled with a live-computed
-row (tagged "Live") whenever there's a qualifying lead in scope
-(2026-09-21); otherwise it's simply omitted, never a blank placeholder. A
+row (tagged "Live", or "Live · partial" when the leads tab only covers
+part of it) whenever there's a qualifying lead in scope (2026-09-21);
+otherwise it's simply omitted, never a blank placeholder. No delta is
+shown next to a partial row or between an official and a live row
+(2026-10-12). A
 slot that already has an official row is never overridden by a live
 computation, even if qualifying leads exist for that window.
 
@@ -117,12 +123,27 @@ None.
   official Sheet row invented after the fact, and the already-recorded
   July/August 2026 history was never touched by the 2026-09-21 change —
   this was an explicit user decision, not a technical limitation.
-- **Live computation (2026-09-21)**: methodology matches the external
-  analytics session's own exactly — same-day = `opp_at` on the same IST
-  calendar day as `lead_assigned_at`; within-48h = the gap `<=48` hours; a
-  negative gap (a data anomaly, not a real conversion) is excluded from
-  every metric. Never overrides a slot with a real official row, even
-  with qualifying leads in scope — see `JS-025` FN-268/269.
+- **Live computation (2026-09-21; corrected 2026-10-12)**: same-day =
+  `opp_at` on the same IST calendar day as `lead_assigned_at`; within-48h
+  = the gap `<=48` hours; a negative gap (a data anomaly, not a real
+  conversion) is excluded from every metric. Never overrides a slot with a
+  real official row, even with qualifying leads in scope — see `JS-025`
+  FN-268/269. Since 2026-10-12:
+  - **Scope:** Google Non-UTM/Search only (`passesGoogleNonUtmSearchGs_`'s
+    rule).
+  - **Coverage:** the leads tab keeps ~7 days, so a period it only partly
+    covers is computed over the covered days and tagged
+    "Live · partial (from <date>)"; one before the window gets no row.
+  - **Comparisons:** no change badge is drawn next to a partial row or
+    between an official row and a live row.
+  - **Not the same method as the official rows.** The original "matches the
+    external session exactly" claim was wrong: the official Jul/Aug 2026
+    rows used ALL Google leads and an 18:30-to-18:30 "day" (timezone
+    double-shift), reconstructed and proven 2026-10-12 —
+    `docs/_planning/OPP_MONITOR_DATA_GAP_2026-10-12.md`.
+- **Official numbers paused (2026-10-12)**: the analytics DB's `dim_leads`
+  is missing 15–40% of leads, so no new official rows are written until
+  that's fixed (same doc).
 - Delta-badge rendering reuses `wowDeltaBadgeHtml` (`JS-024`) unmodified —
   no new visual language introduced for this tab.
 
