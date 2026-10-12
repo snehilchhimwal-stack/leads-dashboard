@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-30 against commit `55bf870` — revalidated in this sweep (all function/constant line anchors, live-computation methodology re-checked against source), no drift found |
+| **Last Verified** | 2026-10-12 against commit `2e33f8d` — Opp Monitor live-figure fixes (audit H-2/H-19/H-20/G-5): every FN-/EXC- row and `#Lnn` anchor re-read from source; FN-434/435, EXC-143 added |
 
 ## Purpose / reason to exist
 

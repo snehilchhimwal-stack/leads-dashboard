@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-03 against commit (`9efec5d`) — reviewed after `dashboard.html` changed again (`TAB-001` Morning Brief's `#tabBar` button removed, unrelated section); this tab's own markup/`js/tab-oppmonitor.js` untouched, no content change here |
+| **Last Verified** | 2026-10-12 against commit `2e33f8d` — live figures fixed (allParsedLeads, Non-UTM/Search scope, coverage window, no cross-method deltas); Scope text reworded; official numbers paused (data gap) |
 
 ## Purpose / reason to exist
 

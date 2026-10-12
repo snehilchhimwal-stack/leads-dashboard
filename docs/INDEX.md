@@ -158,7 +158,7 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | DATA-001, EXT-001, JS-001, JS-003, JS-004, SHEET-001, SHEET-011, TAB-001, TAB-002, TAB-003, TAB-004, TAB-005, TAB-006, TAB-007, TAB-008, TAB-009 | none | 2026-10-03 (`9efec5d`) |
+| DASH-001 | DASH- | Leads Dashboard | `dashboard.html` + `js/*.js` | Closed + Monitored | DATA-001, EXT-001, JS-001, JS-003, JS-004, SHEET-001, SHEET-011, TAB-001, TAB-002, TAB-003, TAB-004, TAB-005, TAB-006, TAB-007, TAB-008, TAB-009 | none | 2026-10-12 (`2e33f8d`) |
 
 ### `TAB-` — dashboard UI tabs (confirm the tab↔`JS-` mapping in `DOC-026`)
 
@@ -172,7 +172,7 @@ Every `Record Status` is `Not Started` — no record file exists yet.
 | TAB-006 | TAB- | Audit | `js/tab-audit.js` (JS-019) | Closed + Monitored | JS-004, JS-006, JS-007, JS-019 | DASH-001 | 2026-09-29 (`4a06803`) |
 | TAB-007 | TAB- | Movement | `js/tab-movement.js` (JS-021) | Closed + Monitored | DATA-005, EXT-001, EXT-002, JS-003, JS-009, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-002, SHEET-004, SHEET-011, SHEET-015 | DASH-001 | 2026-10-07 (`7799e44`) |
 | TAB-008 | TAB- | Tracking | `js/tab-tracking.js` (JS-024) | Closed + Monitored | EXT-001, JS-004, JS-014, JS-018, JS-021, JS-024, SHEET-002, SHEET-005, SHEET-008 | DASH-001 | 2026-09-29 (`b21849e`) |
-| TAB-009 | TAB- | Opp Monitor | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` (JS-025) | Validated | EXT-001, JS-025, SHEET-001, SHEET-016, SHEET-017 | DASH-001 | 2026-10-03 (`9efec5d`) |
+| TAB-009 | TAB- | Opp Monitor | `dashboard.html` `#tab-oppmonitor`; `js/tab-oppmonitor.js` (JS-025) | Validated | EXT-001, JS-025, SHEET-001, SHEET-016, SHEET-017 | DASH-001 | 2026-10-12 (`2e33f8d`) |
 
 ### `BTN-` / `UI-` — tab sub-components (detail lives in the owning `TAB-XXX` record, no own file)
 
@@ -213,7 +213,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 |---|---|---|---|---|---|---|---|
 | JS-001 | JS- | core-auth | `js/core-auth.js` | Closed + Monitored | EXT-003, JS-003, JS-004, JS-015 | DASH-001, JS-003, JS-004, JS-009, JS-011, JS-015, JS-018 | 2026-09-30 (`c82ec67`) |
 | JS-002 | JS- | core-collation | `js/core-collation.js` | Closed + Monitored | JS-003, JS-010 | DATA-001, JS-004, JS-010, JS-012, JS-014, JS-019, JS-021, JS-024 | 2026-09-29 (`4a06803`) |
-| JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | EXT-001, JS-001, JS-004, JS-006, JS-007, JS-009, JS-010, JS-012, JS-014, JS-018, JS-021, JS-022, JS-025, SHEET-001 | DASH-001, DATA-001, JS-001, JS-002, JS-018, JS-021, JS-022, JS-023, JS-025, TAB-004, TAB-007 | 2026-10-07 (`7799e44`) |
+| JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | EXT-001, JS-001, JS-004, JS-006, JS-007, JS-009, JS-010, JS-012, JS-014, JS-018, JS-021, JS-022, JS-025, SHEET-001 | DASH-001, DATA-001, JS-001, JS-002, JS-018, JS-021, JS-022, JS-023, JS-025, TAB-004, TAB-007 | 2026-10-12 (`2e33f8d`) |
 | JS-004 | JS- | core-filters | `js/core-filters.js` | Closed + Monitored | EXT-001, EXT-003, JS-001, JS-002, JS-005, JS-006, JS-009, JS-010, JS-012, JS-014, JS-018, SHEET-005 | DASH-001, DATA-001, JS-001, JS-003, JS-012, JS-014, JS-019, JS-020, JS-024, TAB-002, TAB-006, TAB-008 | 2026-09-30 (`d358cb9`) |
 | JS-005 | JS- | core-foundation | `js/core-foundation.js` | Closed + Monitored | none | DATA-001, DATA-002, JS-004, JS-006, JS-007, JS-008, JS-009, JS-010, JS-012, JS-014, JS-017, JS-019, JS-020, JS-021, JS-023, JS-024, JS-025 | 2026-09-18 (`4bbb58c`) |
 | JS-006 | JS- | core-lead-model | `js/core-lead-model.js` | Closed + Monitored | JS-005, JS-007, JS-021, SHEET-001, SHEET-002 | DATA-001, DATA-002, DATA-003, JS-003, JS-004, JS-007, JS-008, JS-009, JS-012, JS-014, JS-017, JS-018, JS-019, JS-021, JS-023, JS-024, JS-025, TAB-002, TAB-003, TAB-006 | 2026-10-07 (`7799e44`) |
@@ -235,7 +235,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | JS-022 | JS- | tab-repeat-offenders | `js/tab-repeat-offenders.js` | Closed + Monitored | EXT-001, EXT-003, JS-003, JS-008, JS-009, JS-010, JS-014, JS-017, JS-021, SHEET-002, SHEET-003, SHEET-006 | JS-003, JS-008, JS-012, JS-013, TAB-004 | 2026-09-30 (`5802f35`) |
 | JS-023 | JS- | tab-rmtimeline | `js/tab-rmtimeline.js` | Closed + Monitored | JS-003, JS-005, JS-006, JS-007, JS-011, JS-014, JS-019, JS-021, JS-024, SHEET-002 | JS-011, JS-012, TAB-005 | 2026-09-30 (`fc956a0`) |
 | JS-024 | JS- | tab-tracking | `js/tab-tracking.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-014, JS-018, JS-021, SHEET-002, SHEET-005, SHEET-008 | JS-012, JS-023, JS-025, TAB-005, TAB-008 | 2026-09-29 (`b21849e`) |
-| JS-025 | JS- | tab-oppmonitor | `js/tab-oppmonitor.js` | Validated | JS-003, JS-005, JS-006, JS-009, JS-010, JS-024, EXT-001, SHEET-001, SHEET-016, SHEET-017 | JS-003, JS-012, TAB-009 | 2026-09-30 (`55bf870`) |
+| JS-025 | JS- | tab-oppmonitor | `js/tab-oppmonitor.js` | Validated | JS-003, JS-005, JS-006, JS-009, JS-010, JS-024, EXT-001, SHEET-001, SHEET-016, SHEET-017 | JS-003, JS-012, TAB-009 | 2026-10-12 (`2e33f8d`) |
 
 ### `GS-` — Apps Script backend modules (production; `Tests_*.gs` excluded per `DOC-007`)
 

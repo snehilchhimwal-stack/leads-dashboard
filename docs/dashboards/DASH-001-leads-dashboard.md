@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit (`9efec5d`) — `TAB-001`'s `#tabBar` button removed; 8 of 9 tabs unaffected |
+| **Last Verified** | 2026-10-12 against commit `2e33f8d` — only `TAB-009`'s Scope paragraph reworded; tabs, buttons, scripts and load order unchanged |
 
 ## Purpose / reason to exist
 

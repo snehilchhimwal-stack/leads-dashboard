@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): a merged customer record carries each lead's own `call_attempts` (`callAttemptsByLeadId`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-12 against commit `2e33f8d` — `isDateColLabel` now includes `opp_at` (audit G-5); FN-016/017 anchors re-fixed; line count corrected |
 
 ## Purpose / reason to exist
 
