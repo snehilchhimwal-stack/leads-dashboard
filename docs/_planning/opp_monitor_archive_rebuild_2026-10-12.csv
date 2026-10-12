@@ -1,0 +1,7 @@
+period_key,year_month,period_number,period_label,date_from,date_to,total_leads,same_day_count,h48_count,same_day_pct,h48_pct,avg_days_to_opp,avg_hrs_to_opp,source,scope,denominator,coverage_note,removed_from_sheet
+2026-09_P2,2026-09,2,11th–20th,2026-09-11,2026-09-20,1147,320,409,27.9,35.7,0.95,22.74,archive_rebuild,Google Non-UTM/Search (Movement_Log archive),all leads (incl. never-qualified leads missing from dim_leads),complete,2026-10-12 (replaced by backfill_mcp)
+2026-09_P3,2026-09,3,21st–30th,2026-09-21,2026-09-30,1062,336,429,31.6,40.4,0.65,15.49,archive_rebuild,Google Non-UTM/Search (Movement_Log archive),all leads (incl. never-qualified leads missing from dim_leads),complete,2026-10-12 (replaced by backfill_mcp)
+2026-09_P1,2026-09,1,1st–10th,2026-09-01,2026-09-10,561,158,194,28.2,34.6,,26.57,archive_rebuild,Google Non-UTM/Search (Movement_Log archive),all leads,PARTIAL: archive starts ~Sep 4,never written
+2026-10_P1,2026-10,1,1st–10th,2026-10-01,2026-10-10,427,144,180,33.7,42.2,,14.87,archive_rebuild,Google Non-UTM/Search (Movement_Log archive),all leads,PARTIAL: archive ends Oct 5 morning,never written
+2026-09_P2_dimonly,2026-09,2,11th–20th,2026-09-11,2026-09-20,756,,,42.3,54.1,,,archive_rebuild,Google Non-UTM/Search (Movement_Log archive),dim_leads only,comparison,never written
+2026-09_P3_dimonly,2026-09,3,21st–30th,2026-09-21,2026-09-30,737,,,45.5,58.1,,,archive_rebuild,Google Non-UTM/Search (Movement_Log archive),dim_leads only,comparison,never written

@@ -1,0 +1,9 @@
+period_key,total_leads,same_day_count,h48_count,same_day_pct,h48_pct,avg_days_to_opp,avg_hrs_to_opp,updated_at,source,note
+2026-07_P1,1175,443,513,37.7,43.7,0.78,18.77,2026-09-18 19:45,backfill_mcp,original row before 2026-10-12 rewrite (18:30-18:30 day; double IST shift)
+2026-07_P2,1370,415,480,30.3,35,0.85,20.45,2026-09-18 19:45,backfill_mcp,original row before 2026-10-12 rewrite
+2026-07_P3,1574,517,606,32.8,38.5,1.11,26.52,2026-09-18 19:45,backfill_mcp,original row before 2026-10-12 rewrite
+2026-08_P1,1589,477,585,30,36.8,1.18,28.32,2026-09-18 19:45,backfill_mcp,original row before 2026-10-12 rewrite
+2026-08_P2,1363,537,630,39.4,46.2,0.94,22.48,2026-09-18 19:45,backfill_mcp,original row before 2026-10-12 rewrite
+2026-08_P3,1275,513,581,40.2,45.6,0.87,20.76,2026-09-18 19:45,backfill_mcp,original row before 2026-10-12 rewrite
+2026-07 (month),4119,1375,1599,33.4,38.8,0.93,22.23,2026-09-18 19:45,backfill_mcp,original Opp_Monitor_Month row before 2026-10-12 rewrite
+2026-08 (month),4227,1527,1796,36.1,42.5,1,23.91,2026-09-18 19:45,backfill_mcp,original Opp_Monitor_Month row before 2026-10-12 rewrite

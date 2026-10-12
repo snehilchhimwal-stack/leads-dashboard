@@ -96,7 +96,64 @@ IST day, July/August same-day Opp% is **1–5 points lower** than recorded
   `Opp_Monitor_Month` only July/August. **September (all 3 periods +
   month) and October P1 were never recorded** — the recurring To-Do tasks
   for them are overdue.
-- Nothing has been written to either tab on 2026-10-12.
+- **Update (later 2026-10-12, Snehil's decision):** Sep P1–P3, Oct P1 and
+  the September month row are now written, all with `source = backfill_mcp`.
+  They are computed from analytics only:
+  - **Scope:** all Google, `dim_leads` only.
+  - **Same-day:** a midnight-to-midnight IST day.
+
+  Analytics alone cannot isolate Non-UTM/Search. Google channels are only
+  `website`/`IVR`/`Web-Whatsapp`/`chat`, and Discovery arrives via `website`
+  alongside Search and Non-UTM. So these rows include Discovery. They are
+  also inflated by the §6 finding.
+
+  The interim `archive_rebuild` Sep P2/P3 rows (Non-UTM/Search, all leads)
+  were replaced. They are kept for comparison in
+  `opp_monitor_archive_rebuild_2026-10-12.csv` next to this file.
+
+  The new `period_label` cells are self-contained formulas
+  (`="1st"&UNICHAR(8211)&"10th"`), because the browser couldn't type an
+  en-dash. They reference no other cell.
+
+  Written values:
+
+  | Period | Leads | Same-day | 48h | Avg hrs |
+  |---|---|---|---|---|
+  | Sep 1–10 | 1,010 | 36.8% | 45.2% | 23.5 |
+  | Sep 11–20 | 1,086 | 34.5% | 44.8% | 24.79 |
+  | Sep 21–30 | 992 | 39.9% | 51.3% | 16.84 |
+  | Oct 1–10 | 812 | 39.2% | 50.7% | 15.35 |
+  | Sep month | 3,088 | 37.0% | 47.1% | 21.64 |
+
+  Oct P1 was computed on 2026-10-12. Its last day's leads had not quite
+  completed their 48h window.
+- **Jul/Aug rewritten (2026-10-12, per §4.1).** All six period rows and both
+  month rows were recomputed with the same method:
+  - analytics only, all Google, `dim_leads` only
+  - same-day on a midnight-to-midnight IST day
+
+  Lead counts moved slightly too (e.g. Aug P2 1,363 → 1,400), because
+  `dim_leads` has picked up late-arriving leads since 2026-09-18. The
+  previous values are kept in `opp_monitor_jul_aug_original_rows_2026-10-12.csv`.
+  Every Opp Monitor row now uses one method, so the Jul → Oct trend is
+  like-for-like.
+- **No new capture job is needed for Non-UTM/Search.**
+  `snapshotPeriodic` (MovementTracker.gs, 00/06/12/18 IST) already records
+  every lead with `source_bucket` and `opp_at` into the `Movement_Log` tab.
+  `pruneMovementLog_` copies rows older than 7 days to Drive
+  ("Leads Dashboard Archive/Movement_Log") before deleting them, and keeps
+  them indefinitely. That is why the Drive CSVs end about 7 days before
+  today.
+
+  Since Phase 6, a row is written only when a lead's content changes. It is
+  still enough to scope Non-UTM/Search: every lead appears at least once,
+  and reaching Opportunity is itself a change.
+
+  To produce Non-UTM/Search periods:
+  1. Take lead ids from the Drive archive plus the live tab.
+  2. Take creation and first-Opportunity times from analytics
+     (`dim_leads.created_at`, else the first `fact_stage_history.changed_at`).
+  3. Use all leads as the denominator (§6).
 
 ## 4. Decisions taken (Snehil, 2026-10-12) — apply when resuming
 
@@ -119,3 +176,56 @@ IST day, July/August same-day Opp% is **1–5 points lower** than recorded
   7-day window (an Apps Script job, like the existing nightly captures) —
   a complete, correctly-scoped source from the day it starts. September
   can't be recovered this way.
+
+## 6. September rebuilt from the Movement_Log archive (later 2026-10-12)
+
+**Source.** The Drive folder `Movement_Log` (id
+`1GaK9-tvS4ffsI3Drl1CwJYwRp_mSfSI8`) holds 70 CSVs of 6-hourly `leads`
+snapshots, covering Sep 10 to Oct 5 morning. There are no files for
+Sep 18, 19, 20 or 24. Only files from about Sep 21 onward have an `opp_at`
+column. The archive gave **scope**: 4,059 Google lead ids, of which 3,248
+are Non-UTM/Search.
+
+**Method.**
+- **Creation time:** `dim_leads.created_at`. Where that is missing, the
+  lead's first `fact_stage_history.changed_at`. On leads that have both, the
+  first stage change comes a median of 64s after creation and falls on the
+  same IST day 95% of the time.
+- **First Opportunity:** the first transition to `'Opportunity'`.
+- **Same day:** a midnight-to-midnight IST day.
+- **48h:** at most 48 hours after creation.
+- **Average hours:** taken over converted leads.
+- **Denominator: all leads.** Every Non-UTM/Search lead in the archive,
+  whether or not `dim_leads` has it. This matches the dashboard's live
+  computation.
+
+| Period | Leads | Same-day | 48h | Avg hrs | Written? |
+|---|---|---|---|---|---|
+| Sep 11–20 | 1,147 | 320 (27.9%) | 409 (35.7%) | 22.74 | Yes |
+| Sep 21–30 | 1,062 | 336 (31.6%) | 429 (40.4%) | 15.49 | Yes |
+| Sep 1–10 | 561 (partial, archive starts ~Sep 4) | 158 | 194 | 26.57 | No |
+| Oct 1–5 morning | 427 (partial, archive ends) | 144 | 180 | 14.87 | No |
+
+The September month and Oct P1 rows were not written either. They would
+be partial, and the Sheet has no column to mark a row as partial.
+
+**Coverage check.** Each day, the archive holds 80–90% of the Google leads
+in `dim_leads`. That held on the four days with no archive file too, since
+later snapshots still captured those leads. The ~15% the archive lacks
+almost never convert: 1.4% same-day, against 44.5% for those it holds.
+They are most likely leads that were never assigned.
+
+**Key finding: what the `dim_leads` gap actually is.** Of the 1,072
+Non-UTM/Search leads missing from `dim_leads`, the Sheet's own snapshots
+show 1,003 as still Suspect and 68 as Not Updated. Only **1** ever reached
+Opportunity. The analytics stage history agrees independently: zero
+Opportunity transitions for them. So `dim_leads` appears to hold only
+leads that have moved past Suspect.
+
+The consequence is that any Opp% with `dim_leads` as its denominator
+leaves out never-qualified leads and is **inflated**. On Sep 11–30, the
+`dim_leads`-only same-day figure is 42–46%, against 28–32% over all leads.
+
+**Not yet checked: July/August.** The July/August official rows (`backfill_mcp`)
+may be inflated the same way, if the gap existed then. Check this before
+rewriting them per §4.1, or comparing them with September.
