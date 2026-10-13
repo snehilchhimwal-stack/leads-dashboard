@@ -29,18 +29,37 @@
 const OPP_MONITOR_PERIOD_TAB_NAME = 'Opp_Monitor_Period';
 const OPP_MONITOR_MONTH_TAB_NAME = 'Opp_Monitor_Month';
 
+// ---- All-leads method (2026-10-13) ----
+// Official rows from 2026-09-11 on are measured over ALL leads -- every
+// Google lead the Sheet's own Movement_Log saw, including the ones that
+// never got past Suspect (the analytics DB's dim_leads drops those, which
+// inflated earlier figures). Such rows carry source = 'all_leads' and a
+// per-lead-type breakdown in the *_leads / *_same_day / *_h48 columns
+// below. The headline columns (total_leads, same_day_*, h48_*) stay Google
+// Search + Non-UTM; Discovery is stored only in its own columns. Older rows
+// (other `source` values) keep their own method and are never compared
+// with all-leads rows -- see _oppMonitorComparable. Procedure:
+// docs/_planning/OPP_MONITOR_DATA_GAP_2026-10-12.md section 7.
+const OPP_MONITOR_ALL_LEADS_SOURCE = 'all_leads';
+const OPP_MONITOR_LEAD_TYPES = [
+  { key: 'search', label: 'Search' },
+  { key: 'nonutm', label: 'Non-UTM' },
+  { key: 'discovery', label: 'Discovery' },
+];
+const OPP_MONITOR_TYPE_COLUMNS = [].concat(...OPP_MONITOR_LEAD_TYPES.map(t => [`${t.key}_leads`, `${t.key}_same_day`, `${t.key}_h48`]));
+
 const OPP_MONITOR_PERIOD_COLUMNS = [
   'period_key', 'year_month', 'period_number', 'period_label', 'date_from', 'date_to',
   'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
   'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at',
   'updated_at', 'source', 'avg_days_to_opp', 'avg_hrs_to_opp',
-];
+].concat(OPP_MONITOR_TYPE_COLUMNS);
 const OPP_MONITOR_MONTH_COLUMNS = [
   'month_key', 'year_month', 'month_label',
   'total_leads', 'same_day_count', 'h48_count', 'same_day_pct', 'h48_pct',
   'step1_status', 'step1_at', 'step2_status', 'step2_at', 'step3_status', 'step3_at',
   'updated_at', 'source', 'avg_days_to_opp', 'avg_hrs_to_opp',
-];
+].concat(OPP_MONITOR_TYPE_COLUMNS);
 
 let oppMonitorPeriodFetchState = 'idle'; // 'idle'|'loading'|'ok'|'missing'|'error'
 let oppMonitorMonthFetchState = 'idle';
@@ -54,7 +73,7 @@ let oppMonitorMonthRows = [];
 async function _fetchOppMonitorTab(sheetId, tabName, columns){
   let values;
   try {
-    values = await sheetsApiValuesGet(sheetId, `${tabName}!A1:Z`);
+    values = await sheetsApiValuesGet(sheetId, `${tabName}!A1:AZ`); // A1:Z cut off the per-lead-type columns (2026-10-13)
   } catch (err) {
     return { rows: [], state: err.status === 400 ? 'missing' : 'error' };
   }
@@ -184,9 +203,19 @@ function _oppMonitorDateStr(yearMonth, day){
 // apply (passesGoogleNonUtmSearchGs_, EmailInfra.gs) and the scope this tab
 // is labelled with.
 function _oppMonitorInLiveScope(l){
-  if (String(l.group_source || '').trim().toLowerCase() !== 'google') return false;
+  const type = _oppMonitorLeadType(l);
+  return type === 'search' || type === 'nonutm';
+}
+
+// Lead type for the per-type breakdown: 'search' | 'nonutm' | 'discovery'
+// for a Google lead with that sub-source, null for anything else.
+function _oppMonitorLeadType(l){
+  if (String(l.group_source || '').trim().toLowerCase() !== 'google') return null;
   const bucket = String(l.source_bucket || '').trim().toLowerCase();
-  return bucket === 'non-utm' || bucket === 'search';
+  if (bucket === 'search') return 'search';
+  if (bucket === 'non-utm') return 'nonutm';
+  if (bucket === 'discovery') return 'discovery';
+  return null;
 }
 
 // The leads tab is a rolling window (the MySQL import keeps roughly the
@@ -234,26 +263,44 @@ function _oppMonitorComputeLiveMetrics(leadsArr, yearMonth, fromDay, toDay, cove
   if (!coverageStart || periodTo < coverageStart) return null; // the tab holds none of this period
   const partial = periodFrom < coverageStart;
   let total = 0, sameDay = 0, h48 = 0, hoursSum = 0, hoursCount = 0;
+  // Per-lead-type counts (2026-10-13): Search and Non-UTM also feed the
+  // headline; Discovery is counted here only.
+  const byType = {};
+  OPP_MONITOR_LEAD_TYPES.forEach(t => { byType[t.key] = { leads: 0, sameDay: 0, h48: 0 }; });
   (leadsArr || []).forEach(l => {
-    if (!_oppMonitorInLiveScope(l)) return;
+    const type = _oppMonitorLeadType(l);
+    if (!type) return;
     const created = parseDate(l.lead_assigned_at);
     if (!created) return;
     const p = istParts(created);
     if (p.y !== ty || (p.mo + 1) !== tmo || p.d < fromDay || p.d > toDay) return;
     if (_oppMonitorDateStr(yearMonth, p.d) < coverageStart) return;
-    total++;
+    const inHeadline = _oppMonitorInLiveScope(l);
+    byType[type].leads++;
+    if (inHeadline) total++;
     const opp = _oppMonitorEarliestOpp(l);
     if (!opp) return;
     const hours = (opp - created) / 36e5;
     if (hours < 0) return; // data anomaly — never a real conversion
-    if (istSameDay(created, opp)) sameDay++;
-    if (hours <= 48) h48++;
+    const isSameDay = istSameDay(created, opp);
+    const isH48 = hours <= 48;
+    if (isSameDay) byType[type].sameDay++;
+    if (isH48) byType[type].h48++;
+    if (!inHeadline) return;
+    if (isSameDay) sameDay++;
+    if (isH48) h48++;
     hoursSum += hours;
     hoursCount++;
   });
   if (!total) return null;
   const avgHrs = hoursCount ? hoursSum / hoursCount : null;
-  return {
+  const typeFields = {};
+  OPP_MONITOR_LEAD_TYPES.forEach(t => {
+    typeFields[`${t.key}_leads`] = byType[t.key].leads;
+    typeFields[`${t.key}_same_day`] = byType[t.key].sameDay;
+    typeFields[`${t.key}_h48`] = byType[t.key].h48;
+  });
+  return Object.assign(typeFields, {
     total_leads: total,
     same_day_count: sameDay,
     h48_count: h48,
@@ -264,7 +311,7 @@ function _oppMonitorComputeLiveMetrics(leadsArr, yearMonth, fromDay, toDay, cove
     _live: true,
     _partial: partial,
     _coveredFrom: partial ? coverageStart : null,
-  };
+  });
 }
 
 // Synthesizes a period/month row in the exact shape a real
@@ -385,11 +432,28 @@ function _renderOppMonitorChecklist(){
 // measured the same way over their whole range: never across a partial
 // live row (missing its earliest days), and never between an official row
 // and a live one (different population and day boundary -- see the Live
-// computation section above). Otherwise no delta badge is shown at all.
+// computation section above), and never between two official rows recorded
+// with different methods (different `source`, e.g. an analytics-only
+// backfill next to an all-leads row -- 2026-10-13). Otherwise no delta
+// badge is shown at all.
 function _oppMonitorComparable(row, prevRow){
   if (!row || !prevRow) return false;
   if (row._partial || prevRow._partial) return false;
-  return !!row._live === !!prevRow._live;
+  if (!!row._live !== !!prevRow._live) return false;
+  if (!row._live && String(row.source || '').trim() !== String(prevRow.source || '').trim()) return false;
+  return true;
+}
+
+// True when a row carries the per-lead-type breakdown (all-leads rows and
+// live rows do; older official rows don't).
+function _oppMonitorHasTypeBreakdown(row){
+  return !!row && OPP_MONITOR_LEAD_TYPES.some(t => row[`${t.key}_leads`] !== '' && row[`${t.key}_leads`] != null);
+}
+
+function _oppMonitorTypePctText(count, leads){
+  const n = Number(leads), c = Number(count);
+  if (!n || isNaN(n) || isNaN(c)) return '—';
+  return (c / n * 100).toFixed(1) + '%';
 }
 
 // A real 0 is "0", not a blank cell (audit H-19); only a missing value is blank.
@@ -553,8 +617,57 @@ function _renderOppMonitorMonthTable(){
   if (countEl) countEl.textContent = bodyRows.length ? String(bodyRows.length) : '';
 }
 
+// --------------------------- By lead type (2026-10-13) ---------------------------
+// One row per period that carries the per-type breakdown (all-leads
+// official rows, or live rows), split into Search / Non-UTM / Discovery.
+// Older official rows have no breakdown and are simply not listed here.
+
+function _renderOppMonitorTypeTable(){
+  const tableEl = document.getElementById('oppMonitorTypeTable');
+  const noticeEl = document.getElementById('oppMonitorTypeNotice');
+  const countEl = document.getElementById('oppMonitorTypeCount');
+  if (!tableEl) return;
+  const thead = tableEl.querySelector('thead');
+  const tbody = tableEl.querySelector('tbody');
+
+  if (oppMonitorPeriodFetchState === 'error') {
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+    if (noticeEl) { noticeEl.style.display = 'block'; noticeEl.textContent = 'Could not read Opp_Monitor_Period — check the sheet tab exists and is shared correctly.'; }
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
+  const coverageStart = _oppMonitorLiveCoverageStart(allParsedLeads);
+  const rows = _oppMonitorOrderedPeriodSlots().map(slot => {
+    const sourced = oppMonitorPeriodRows.find(r => r.year_month === slot.year_month && String(r.period_number) === String(slot.period_number));
+    if (sourced) return sourced;
+    return _oppMonitorLivePeriodRow(slot.year_month, slot.period_number, allParsedLeads, coverageStart);
+  }).filter(_oppMonitorHasTypeBreakdown);
+
+  thead.innerHTML = '<tr><th rowspan="2">Month</th><th rowspan="2">Period</th>'
+    + OPP_MONITOR_LEAD_TYPES.map(t => `<th colspan="3">${esc(t.label)}</th>`).join('')
+    + '</tr><tr>' + OPP_MONITOR_LEAD_TYPES.map(() => '<th>Leads</th><th>Same-Day%</th><th>48h%</th>').join('') + '</tr>';
+
+  tbody.innerHTML = rows.map(row => `<tr>
+      <td>${esc(_oppMonitorMonthName(row.year_month))}</td>
+      <td>${esc(row.period_label || `P${row.period_number}`)}${_oppMonitorLiveTagHtml(row)}</td>
+      ${OPP_MONITOR_LEAD_TYPES.map(t => {
+        const leadsN = row[`${t.key}_leads`];
+        return `<td>${esc(_oppMonitorCountText(leadsN))}</td><td>${_oppMonitorTypePctText(row[`${t.key}_same_day`], leadsN)}</td><td>${_oppMonitorTypePctText(row[`${t.key}_h48`], leadsN)}</td>`;
+      }).join('')}
+    </tr>`).join('');
+
+  if (noticeEl) {
+    noticeEl.style.display = rows.length ? 'none' : 'block';
+    noticeEl.textContent = rows.length ? '' : 'No lead-type breakdown for these periods. It exists for all-leads rows (from 11 Sep 2026) and live rows.';
+  }
+  if (countEl) countEl.textContent = rows.length ? String(rows.length) : '';
+}
+
 function renderOppMonitorTab(){
   _renderOppMonitorChecklist();
   _renderOppMonitorPeriodTable();
+  _renderOppMonitorTypeTable();
   _renderOppMonitorMonthTable();
 }

@@ -2012,6 +2012,38 @@
       assert('No change badge between an official row and a live row (no "16.0pp")', livePeriodText.indexOf('16.0pp') === -1, livePeriodText);
       assert('Official rows still get their change badge (Sep P1 vs Aug P3: ▲ 2.0pp)', /▲ 2\.0pp/.test(livePeriodText));
 
+      // ---- By Lead Type (2026-10-13): the live Sep P3 row splits into
+      // Search (live-a same-day, live-c never) = 2 leads, 50.0% / 50.0%;
+      // Non-UTM (live-b exactly 48h, live-d 96h) = 2 leads, 0.0% / 50.0%;
+      // Discovery (out-1, same-day) = 1 lead, 100.0% / 100.0% -- Discovery is
+      // shown here even though it is excluded from the headline above.
+      const typeRow = Array.from(document.querySelectorAll('#oppMonitorTypeTable tbody tr')).find(tr => /Live/.test(tr.textContent));
+      const typeCells = typeRow ? Array.from(typeRow.children).map(td => td.textContent.trim()) : [];
+      // Columns: Month | Period | Search leads/SD%/48h% | Non-UTM leads/SD%/48h% | Discovery leads/SD%/48h%
+      assert('By Lead Type: the live row splits Search / Non-UTM / Discovery correctly',
+        JSON.stringify(typeCells.slice(2)) === JSON.stringify(['2', '50.0%', '50.0%', '2', '0.0%', '50.0%', '1', '100.0%', '100.0%']), JSON.stringify(typeCells));
+      assert('By Lead Type: official rows without a breakdown are not listed (only the live row)',
+        document.querySelectorAll('#oppMonitorTypeTable tbody tr').length === 1, String(document.querySelectorAll('#oppMonitorTypeTable tbody tr').length));
+
+      // An all-leads official row: breakdown columns present, and no change
+      // badge against the previous row recorded with a different method
+      // (Sep P1 'Claude session' 40.0% -> Sep P2 'all_leads' 41.0% would
+      // otherwise read ▲ 1.0pp).
+      const _oppSavedRows = oppMonitorPeriodRows;
+      oppMonitorPeriodRows = _oppSavedRows.map(r => r.period_key !== '2026-09_P2' ? r : Object.assign({}, r, {
+        source: 'all_leads', search_leads: 600, search_same_day: 210, search_h48: 270,
+        nonutm_leads: 400, nonutm_same_day: 100, nonutm_h48: 130, discovery_leads: 250, discovery_same_day: 50, discovery_h48: 70,
+      }));
+      renderOppMonitorTab();
+      const sepP2Row = Array.from(document.querySelectorAll('#oppMonitorPeriodTable tbody tr')).find(tr => /September 2026/.test(tr.textContent) && /11th-20th/.test(tr.textContent));
+      const sepP2Text = sepP2Row ? sepP2Row.textContent : '';
+      assert('No change badge between official rows recorded with different methods (Sep P2 row has no "pp")', !!sepP2Row && sepP2Text.indexOf('pp') === -1, sepP2Text);
+      const typeText = oppTextOf('oppMonitorTypeTable');
+      assert('By Lead Type lists the all-leads official row with its percentages (Search 35.0%, Discovery 20.0%)',
+        typeText.indexOf('35.0%') !== -1 && typeText.indexOf('20.0%') !== -1 && typeText.indexOf('11th-20th') !== -1, typeText);
+      oppMonitorPeriodRows = _oppSavedRows;
+      renderOppMonitorTab();
+
       // Coverage (the leads tab keeps ~7 days): drop the two earliest
       // leads so the earliest assignment in allParsedLeads is 2026-09-25.
       // Sep P3 (21st-30th) is then only partly covered -> flagged partial,
