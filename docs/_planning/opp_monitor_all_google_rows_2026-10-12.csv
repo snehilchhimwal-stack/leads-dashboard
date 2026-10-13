@@ -1,0 +1,14 @@
+period_key,total_leads,same_day_count,h48_count,same_day_pct,h48_pct,avg_days_to_opp,avg_hrs_to_opp,source,note
+2026-07_P1,1173,388,508,33.1,43.3,0.79,19.05,backfill_mcp,all Google (incl. Discovery); dim_leads only; replaced 2026-10-13 by mcp_nus_projfilter
+2026-07_P2,1381,361,489,26.1,35.4,0.85,20.41,backfill_mcp,
+2026-07_P3,1558,467,597,30,38.3,1.12,26.98,backfill_mcp,
+2026-08_P1,1600,460,589,28.8,36.8,1.22,29.39,backfill_mcp,
+2026-08_P2,1400,500,626,35.7,44.7,1.24,29.79,backfill_mcp,
+2026-08_P3,1304,470,581,36,44.6,1.01,24.29,backfill_mcp,
+2026-09_P1,1010,372,457,36.8,45.2,0.98,23.5,backfill_mcp,
+2026-09_P2,1086,375,487,34.5,44.8,1.03,24.79,backfill_mcp,
+2026-09_P3,992,396,509,39.9,51.3,0.7,16.84,backfill_mcp,
+2026-10_P1,812,318,412,39.2,50.7,0.64,15.35,backfill_mcp,
+2026-07 (month),4112,1216,1594,29.6,38.8,0.94,22.46,backfill_mcp,
+2026-08 (month),4304,1430,1796,33.2,41.7,1.16,27.91,backfill_mcp,
+2026-09 (month),3088,1143,1453,37,47.1,0.9,21.64,backfill_mcp,

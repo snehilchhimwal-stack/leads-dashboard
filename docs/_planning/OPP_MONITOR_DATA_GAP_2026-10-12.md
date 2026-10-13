@@ -229,3 +229,63 @@ leaves out never-qualified leads and is **inflated**. On Sep 11–30, the
 **Not yet checked: July/August.** The July/August official rows (`backfill_mcp`)
 may be inflated the same way, if the gap existed then. Check this before
 rewriting them per §4.1, or comparing them with September.
+
+## 7. Standing procedure: the all-leads method (decided 2026-10-13)
+
+Every official Opp Monitor row from **11 Sep 2026** on is produced this way.
+Rows before that keep their older analytics-only method; they are not
+rebuilt and no change badge is drawn across the two (`JS-025` EXC-144).
+
+**Who runs it:** a Claude session, by hand, once each period has fully
+closed. That means the period's last day plus 48 hours, so every lead has
+had its full 48h window. There is no Apps Script job for this; that was
+decided against on 2026-10-13.
+
+**1. Lead list and labels: the Sheet, not analytics.**
+- Take every lead with `group_source` = Google from `Movement_Log`. Use the
+  live tab for the last ~7 days, and the Drive archive
+  ("Leads Dashboard Archive/Movement_Log") for older rows.
+- Label each lead from `source_bucket`: Search, Non-UTM or Discovery.
+- Rows are written only when a lead changes, so every lead appears at least
+  once.
+- Read the live tab well before its rows age out (7 days). The archive keeps
+  them after that.
+
+**2. Times: analytics (MCP).**
+- **Creation:** `dim_leads.created_at`. Where the lead is missing from
+  `dim_leads` (leads that never got past Suspect), use its first
+  `fact_stage_history.changed_at` instead. On leads with both, that falls a
+  median of 64s after creation, and on the same IST day 95% of the time.
+- **First Opportunity:** the first `fact_stage_history` transition to
+  `'Opportunity'`.
+
+**3. Metrics, per period and per type.** Assign each lead to a period by its
+creation date in IST.
+- **Same-day:** the first Opportunity is on the same IST calendar day as
+  creation (midnight to midnight).
+- **48h:** the first Opportunity is at most 48 hours after creation.
+- **Denominator:** **all** leads, including those that never progressed.
+- **Average hours:** taken over leads that converted.
+
+**4. Coverage check before writing.** For each creation day, compare the
+labelled leads with `dim_leads` Google leads for that day. Days below about
+85% mean an archive file is missing: find it before writing. Otherwise
+record the gap in `source` or the docs.
+
+**5. Write the row.**
+- **Headline** (`total_leads`, `same_day_count`, `h48_count`, `same_day_pct`,
+  `h48_pct`, `avg_*`): Search + Non-UTM.
+- **Breakdown:** `search_*`, `nonutm_*` and `discovery_*`, each with leads,
+  same-day and 48h counts.
+- **`source`:** `all_leads`.
+- **Steps:** steps 1–2 Done; step 3 (leadership email) as the workflow
+  dictates.
+- **Months:** the same rule, summed over the month's periods. A month whose
+  periods are not all all-leads keeps its older row.
+
+**Why:** the analytics `dim_leads` table omits leads that never got past
+Suspect. That is about a third of Non-UTM/Search leads and over half of
+Discovery leads, and almost none of them reach Opportunity. So any
+`dim_leads`-only figure reads 7–25 points high. The Sheet's `source_bucket`
+is also the only place Search, Non-UTM and Discovery are told apart: in
+analytics, Search and Discovery both arrive through the `website` channel.

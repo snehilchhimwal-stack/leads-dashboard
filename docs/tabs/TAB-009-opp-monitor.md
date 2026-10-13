@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-12 against commit `2e33f8d` — live figures fixed (allParsedLeads, Non-UTM/Search scope, coverage window, no cross-method deltas); Scope text reworded; official numbers paused (data gap) |
+| **Last Verified** | 2026-10-13 against commit `fb25233` — all-leads method (from 11 Sep 2026): per-lead-type columns and a By Lead Type table (Search / Non-UTM / Discovery); no badge between rows recorded with different methods; Scope text updated |
 
 ## Purpose / reason to exist
 
@@ -40,6 +40,9 @@ unaffected — step completion genuinely can't be computed, only recorded.
   period-over-period delta badges).
 - Render a Monthly Trend table (current + last 2 months, month-over-month
   delta badges).
+- Render a By Lead Type table (since 2026-10-13): for each period row that
+  carries the breakdown, Leads / Same-day% / 48h% for Google Search,
+  Non-UTM and Discovery separately.
 
 ## Who / what uses it
 
@@ -141,6 +144,17 @@ None.
     rows used ALL Google leads and an 18:30-to-18:30 "day" (timezone
     double-shift), reconstructed and proven 2026-10-12 —
     `docs/_planning/OPP_MONITOR_DATA_GAP_2026-10-12.md`.
+- **All-leads method (2026-10-13).** Official rows from 11 Sep 2026 on
+  carry `source = all_leads`: every Google lead the Sheet's own
+  Movement_Log saw (including leads that never got past Suspect), labelled
+  Search / Non-UTM / Discovery from `source_bucket`, with creation and
+  first-Opportunity times from analytics. The headline columns stay Search
+  + Non-UTM; each type's leads / same-day / 48h counts are stored in
+  `search_*`, `nonutm_*`, `discovery_*` columns and shown under By Lead
+  Type. Rows before 11 Sep keep their older analytics-only method, and no
+  change badge is drawn between rows with different `source` (`JS-025`
+  EXC-144). Procedure: `docs/_planning/OPP_MONITOR_DATA_GAP_2026-10-12.md`
+  §7.
 - **Official numbers paused (2026-10-12)**: the analytics DB's `dim_leads`
   is missing 15–40% of leads, so no new official rows are written until
   that's fixed (same doc).

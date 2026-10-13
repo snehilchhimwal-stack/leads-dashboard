@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-09-18 against commit `f853a1c` |
+| **Last Verified** | 2026-10-13 against commit `fb25233` — 9 per-lead-type columns added (Search / Non-UTM / Discovery x leads, same-day, 48h); `source` now names the method (`all_leads`) |
 
 ## Purpose / reason to exist
 
@@ -21,7 +21,7 @@ Dashboard tool the workflow's recurring reminders actually live in.
 
 ## Data stored
 
-Up to 3 rows per month (one per period), 21 columns: identity + date
+Up to 3 rows per month (one per period), 30 columns (21 until 2026-10-13): identity + date
 range, the raw counts and percentages an external analytics session
 computed, average time-to-first-Opportunity-transition (days/hours,
 averaged over converted leads only), and per-step status/timestamp pairs
@@ -56,8 +56,11 @@ a writer exists that doesn't.
 | `step2_status` / `step2_at` | text | analysis | |
 | `step3_status` / `step3_at` | text | leadership email | |
 | `updated_at` | text | last write timestamp | |
-| `source` | text | who/what wrote the row (e.g. `"Claude session"`) | |
+| `source` | text | who/what wrote the row, which also names the method: `all_leads` (from 11 Sep 2026: every Google lead the Sheet's Movement_Log saw, incl. never-qualified leads; headline = Search + Non-UTM) or an older analytics-only value such as `backfill_mcp` | rows with different `source` are never compared (no change badge) — `JS-025` EXC-144 |
 | `avg_days_to_opp` / `avg_hrs_to_opp` | number | mean time from lead creation to first `Opportunity`-stage transition | averaged over converted leads only (leads with no Opportunity transition are excluded, not counted as 0); added 2026-09-18 alongside the per-period opp-count columns being surfaced in the Period Results table |
+| `search_leads` / `search_same_day` / `search_h48` | number | Google **Search** leads in the period, and how many reached Opportunity same-day / within 48h | added 2026-10-13 (all-leads rows only; blank on older rows); percentages are derived in the browser |
+| `nonutm_leads` / `nonutm_same_day` / `nonutm_h48` | number | the same for Google **Non-UTM** leads | added 2026-10-13 |
+| `discovery_leads` / `discovery_same_day` / `discovery_h48` | number | the same for Google **Discovery** leads — stored for the breakdown only, never part of the headline columns | added 2026-10-13 |
 
 Exact list: `js/tab-oppmonitor.js` `OPP_MONITOR_PERIOD_COLUMNS`.
 
