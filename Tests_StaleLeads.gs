@@ -165,6 +165,25 @@ function runStaleLeadsTests_() {
       const two = splitStaleSectionsGs_([sec('X', ['P', 'Q', 'R'])], { P: new Date(hrs(26)), Q: new Date(hrs(60)), R: new Date(hrs(40)) });
       TestAssertEqual_(two.length + ',' + two[0].rows.map(function (r) { return r[0]; }).join(','), '1,Q,R,P', 'split: the stale copy lists the quietest lead first');
     }
+    // ================= the headline count says how many are in the stale block (real case 2026-10-13: "2 Leads Still Unresolved" over a table of 1) =================
+    {
+      const sec = function (ids) { return { heading: 'Akash', subheading: '', columns: ['Lead ID', 'Original Issue (17:00)', 'Current State'], rows: ids.map(function (id) { return [id, 'x', 'y']; }) }; };
+      const opts = { kpis: [{ value: 2, label: 'Leads Still Unresolved' }], sections: [sec(['2254062', '2253765'])] };
+      const n = applyStaleSplitGs_(opts, { '2253765': new Date(hrs(30)) });
+      TestAssertEqual_(n + ',' + opts.staleCount, '1,1', 'stale count: one lead moved to the stale block is counted');
+      TestAssertEqual_(opts.kpis.map(function (k) { return k.value + ' ' + k.label; }).join(' / '), '2 Leads Still Unresolved / 1 of these is stale - listed at the bottom', 'stale count: the headline keeps the full count, and the tile right after it says how many are at the bottom');
+      TestAssertEqual_(opts.sections[0].rows.length + ',' + opts.sections[1].rows.length, '1,1', 'stale count: the table above holds 1 and the stale block 1, matching the tiles');
+      TestAssertEqual_(staleCountNoteGs_(opts.staleCount) + '|' + staleCountNoteGs_(0) + '|' + staleCountNoteGs_(undefined), ' (1 of them stale, listed at the bottom)||', 'stale count: the plain-text note, and nothing when none are stale');
+      const many = { kpis: [{ value: 3, label: 'Leads Flagged' }, { value: 1, label: 'RM Affected' }], sections: [sec(['P', 'Q', 'R']), sec(['P'])] };
+      applyStaleSplitGs_(many, { P: new Date(hrs(30)), Q: new Date(hrs(40)) });
+      TestAssertEqual_(many.staleCount + '|' + many.kpis.map(function (k) { return k.label; }).join(','), '2|Leads Flagged,of these are stale - listed at the bottom,RM Affected', 'stale count: a lead listed twice is counted once; plural label; the tile sits right after the headline');
+      const none = { kpis: [{ value: 1, label: 'Lead Flagged' }], sections: [sec(['P'])] };
+      const before = none.sections;
+      TestAssertEqual_(applyStaleSplitGs_(none, {}) + ',' + none.staleCount + ',' + none.kpis.length + ',' + (none.sections === before), '0,0,1,true', 'stale count: nothing stale changes nothing but staleCount (0)');
+      const empty = { kpis: [], sections: [sec(['P'])] };
+      applyStaleSplitGs_(empty, { P: new Date(hrs(30)) });
+      TestAssertEqual_(empty.kpis.length + ',' + empty.kpis[0].value, '1,1', 'stale count: a report with no tiles gets just the stale tile');
+    }
     {
       const sec = function (heading, ids, extra) {
         return Object.assign({ heading: heading, subheading: '', columns: ['Lead ID', 'Issue'], rows: ids.map(function (id) { return [id, 'x']; }) }, extra || {});

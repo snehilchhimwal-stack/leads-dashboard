@@ -109,3 +109,34 @@ function splitStaleSectionsGs_(sections, staleSince) {
   stale[0].regionBand = 'Stale leads - no update for more than ' + LEAD_STALE_HOURS_ + ' hours';
   return fresh.concat(stale);
 }
+
+// How many different leads of these sections splitStaleSectionsGs_ would move to the stale block. Pure.
+function staleLeadCountGs_(sections, staleSince) {
+  if (!sections || !staleSince) return 0;
+  const seen = {};
+  sections.forEach(function (sec) {
+    if (!sec || !sec.columns || !sec.rows || sec.columns[0] !== 'Lead ID') return;
+    sec.rows.forEach(function (r) { if (staleSince[String(r[0])]) seen[String(r[0])] = true; });
+  });
+  return Object.keys(seen).length;
+}
+
+// Every report's way of holding its stale leads at the bottom: splits opts.sections (splitStaleSectionsGs_) AND says so next to the headline
+// count, so the count and the table under it never seem to disagree. Real case, 2026-10-13: Niraj Patil's 10:00 and 13:00 emails said
+// "2 Leads Still Unresolved" over a table of 1 lead - the other was in the stale block further down. The headline still counts every lead
+// (the stale ones are still in the email); a second tile right after it reads "1 of these is stale - listed at the bottom". Sets
+// opts.staleCount (for a one-line plain-text summary) and returns it. Changes opts in place; nothing stale -> only staleCount (0) is set.
+function applyStaleSplitGs_(opts, staleSince) {
+  const n = staleLeadCountGs_(opts.sections, staleSince);
+  opts.staleCount = n;
+  if (!n) return 0;
+  opts.sections = splitStaleSectionsGs_(opts.sections, staleSince);
+  const tile = { value: n, label: n === 1 ? 'of these is stale - listed at the bottom' : 'of these are stale - listed at the bottom', bg: '#fef2f2', fg: '#dc2626' };
+  const kpis = (opts.kpis || []).slice();
+  kpis.splice(kpis.length ? 1 : 0, 0, tile);
+  opts.kpis = kpis;
+  return n;
+}
+
+// The words added to a one-line plain-text count when some of those leads are in the stale block. Pure.
+function staleCountNoteGs_(n) { return n ? ' (' + n + ' of them stale, listed at the bottom)' : ''; }

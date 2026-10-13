@@ -512,7 +512,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).',
     };
-    reportOpts.sections = splitStaleSectionsGs_(reportOpts.sections, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom
+    applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
     const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
     // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
     const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
@@ -601,7 +601,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     sections: sections,
     footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
   };
-  reportOpts.sections = splitStaleSectionsGs_(reportOpts.sections, staleSinceMapGs_(leads)); // stale leads (no update for more than 24 h) are held at the bottom
+  applyStaleSplitGs_(reportOpts, staleSinceMapGs_(leads)); // stale leads (no update for more than 24 h) are held at the bottom, and the headline count says so
   const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(reportOpts);
   // Plain-text part = a one-line count summary + the full lead list, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +

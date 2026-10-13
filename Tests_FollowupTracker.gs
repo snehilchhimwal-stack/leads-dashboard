@@ -73,6 +73,35 @@ function runFollowupTrackerTests_() {
       TestAssertEqual_(track([TestFT_log_({ cp1At: 'x' })], [], '12:59').rows[0].cp2.status + ',' + track([TestFT_log_({ cp1At: 'x' })], [], '13:15').rows[0].cp2.status + ',' + track([TestFT_log_({ cp1At: 'x' })], [], '13:45').rows[0].cp2.status, 'FUTURE,DUE,OVERDUE', 'tracker: Checkpoint 2 is FUTURE before 13:00, DUE at 13:15 and OVERDUE at 13:45');
     }
     {
+      // finished after 17:00: the leads were resolved before 10:00, so the 10:00 email was SKIPPED and the 13:00 job never ran for the bucket
+      // (real case: Central / Sachin Rana, 2026-10-11 -> 12; the log carried a Checkpoint 1 stamp, the ledger said SKIPPED)
+      const skip10 = TestFT_led_('morning10', 'SKIPPED', { status_reason: 'no overnight leads and no Checkpoint 1 lead is still unresolved' });
+      const t = track([TestFT_log_({ cp1At: '2026-10-10 10:04:32' })], [TestFT_led_('allIssues17', 'ACCEPTED'), skip10], '16:30');
+      TestAssertEqual_(t.rows[0].cp1.status + ',' + t.rows[0].cp2.status + ',' + t.attention.length, 'NOT_NEEDED,NOT_NEEDED,0', 'tracker: a bucket finished after 17:00 needs neither checkpoint - no OVERDUE false alarm at 13:00');
+      TestAssertContains_(t.rows[0].cp2.note, 'nothing was left after 17:00', 'tracker: …and Checkpoint 2 says why');
+      TestAssertEqual_(t.counts.cp2.NOT_NEEDED + ',' + t.counts.cp2.OVERDUE, '1,0', 'tracker: …and is counted as not needed, not overdue');
+      TestAssertEqual_(track([TestFT_log_()], [TestFT_led_('allIssues17', 'ACCEPTED'), skip10], '09:00', TESTFT_DAY_).rows[0].cp2.status, 'NOT_NEEDED', 'tracker: …at any time of day once Checkpoint 1 is recorded as not needed');
+      // a failed or unfinished 13:00 attempt after a SKIPPED 10:00 had nothing to follow up: NOT_NEEDED (the user, 2026-10-13), and the note says what is on record
+      ['FAILED', 'BLOCKED', 'UNCONFIRMED', 'PLANNED', 'ATTEMPTING'].forEach(function (st) {
+        const f = track([TestFT_log_()], [TestFT_led_('allIssues17', 'ACCEPTED'), skip10, TestFT_led_('followup13', st, { status_reason: 'Gmail said no' })], '16:30');
+        TestAssertEqual_(f.rows[0].cp2.status + ',' + f.attention.length, 'NOT_NEEDED,0', 'tracker: a ' + st + ' 13:00 attempt after a SKIPPED 10:00 is NOT_NEEDED and needs no attention');
+        TestAssertContains_(f.rows[0].cp2.note, 'on record as ' + st, 'tracker: ...and the ' + st + ' attempt is named in the note');
+      });
+      // a 13:00 email that really went out after a SKIPPED 10:00 is shown as what it was
+      TestAssertEqual_(track([TestFT_log_()], [TestFT_led_('allIssues17', 'ACCEPTED'), skip10, TestFT_led_('followup13', 'ACCEPTED')], '16:30').rows[0].cp2.status, 'COMPLETED', 'tracker: an ACCEPTED 13:00 email after a SKIPPED 10:00 is COMPLETED');
+      TestAssertEqual_(track([TestFT_log_({ cp2At: '2026-10-10 13:02:00' })], [TestFT_led_('allIssues17', 'ACCEPTED'), skip10], '16:30').rows[0].cp2.status, 'COMPLETED', 'tracker: a 13:00 log stamp after a SKIPPED 10:00 is COMPLETED');
+    }
+    {
+      // finished after 10:00: the 10:00 email went out, the leads were resolved before 13:00, so the 13:00 job recorded SKIPPED
+      const t = track([TestFT_log_({ cp1At: '2026-10-10 10:01:00' })], [TestFT_led_('allIssues17', 'ACCEPTED'), TestFT_led_('morning10', 'ACCEPTED'),
+        TestFT_led_('followup13', 'SKIPPED', { status_reason: 'nothing unresolved in either section' })], '16:30');
+      TestAssertEqual_(t.rows[0].cp1.status + ',' + t.rows[0].cp2.status + ',' + t.attention.length, 'COMPLETED,NOT_NEEDED,0', 'tracker: a bucket finished after 10:00 is COMPLETED / NOT_NEEDED, nothing needs attention');
+      TestAssertContains_(t.rows[0].cp2.note, 'nothing unresolved in either section', 'tracker: …with the 13:00 job reason');
+      // but a 10:00 email that went out with nothing recorded at 13:00 is still a real OVERDUE
+      const o = track([TestFT_log_({ cp1At: '2026-10-10 10:01:00' })], [TestFT_led_('allIssues17', 'ACCEPTED'), TestFT_led_('morning10', 'ACCEPTED')], '16:30');
+      TestAssertEqual_(o.rows[0].cp2.status, 'OVERDUE', 'tracker: a sent 10:00 email with no 13:00 record at all is still OVERDUE');
+    }
+    {
       // the day of the 17:00 email, evening: both checkpoints are still in the future
       const t = track([TestFT_log_()], [TestFT_led_('allIssues17', 'ACCEPTED')], '18:00', TESTFT_DAY_);
       TestAssertEqual_(t.rows[0].cp1.status + ',' + t.rows[0].cp2.status + ',' + t.attention.length, 'FUTURE,FUTURE,0', 'tracker: on the evening of the 17:00 email both checkpoints are FUTURE and nothing needs attention');

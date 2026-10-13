@@ -83,10 +83,19 @@ function followupTrackerGs_(input) {
     const key = followupKeyGs_(l.region, l.to);
     const m1 = ledgerBy.morning10[key], m2 = ledgerBy.followup13[key], m0 = ledgerBy.allIssues17[key];
     const cp1 = followupCheckpointStatusGs_({ stamp: l.cp1At, ledgerStatus: m1 && m1.status, ledgerReason: m1 && m1.status_reason, dueAt: dueAt(FOLLOWUP_TRACKER_CP1_HOUR_), now: now });
-    const cp2 = followupCheckpointStatusGs_({
-      stamp: l.cp2At, ledgerStatus: m2 && m2.status, ledgerReason: m2 && m2.status_reason, dueAt: dueAt(FOLLOWUP_TRACKER_CP2_HOUR_), now: now,
-      blockedBy: (cp1.status === 'BLOCKED' || cp1.status === 'OVERDUE') ? 'Checkpoint 1 did not happen, so there is no 10:00 thread to reply in' : '',
-    });
+    // A bucket with nothing left after 17:00 (Checkpoint 1 NOT_NEEDED) has nothing for 13:00 to follow up either: the 13:00 job only replies
+    // to the buckets the 10:00 job sent, so normally it records nothing, and that silence used to read as OVERDUE (a false alarm, first seen
+    // 2026-10-11/12). Per the user (2026-10-13) Checkpoint 2 is then NOT_NEEDED whatever the 13:00 records say - a failed or unfinished 13:00
+    // attempt on such a bucket had nothing to deliver. The one exception is a 13:00 email that really went out (ACCEPTED, or a log stamp):
+    // that is shown as COMPLETED, because something was sent. A bucket with nothing left after 10:00 needs no rule here: the 13:00 job
+    // records it as SKIPPED, which is NOT_NEEDED already.
+    const cp2Sent = (m2 && m2.status === 'ACCEPTED') || (!m2 && l.cp2At);
+    const cp2 = (cp1.status === 'NOT_NEEDED' && !cp2Sent)
+      ? { status: 'NOT_NEEDED', note: 'nothing was left after 17:00 - Checkpoint 1 was not needed, so no 13:00 reply is due' + (m2 && m2.status ? ' (a 13:00 attempt is on record as ' + m2.status + ', but it had nothing to follow up)' : '') }
+      : followupCheckpointStatusGs_({
+        stamp: l.cp2At, ledgerStatus: m2 && m2.status, ledgerReason: m2 && m2.status_reason, dueAt: dueAt(FOLLOWUP_TRACKER_CP2_HOUR_), now: now,
+        blockedBy: (cp1.status === 'BLOCKED' || cp1.status === 'OVERDUE') ? 'Checkpoint 1 did not happen, so there is no 10:00 thread to reply in' : '',
+      });
     let email = '';
     if (m0 && /^BOUNCED/.test(String(m0.bounce_status || ''))) { // the sweep only looks at emails Gmail accepted or may have accepted
       const rr = rerouteBy['RR|' + m0.email_id];
@@ -115,7 +124,7 @@ function followupTrackerSectionsGs_(t) {
   const line = function (name, c) { return [name, c.COMPLETED, c.NOT_NEEDED, c.BLOCKED, c.OVERDUE, c.DUE, c.FUTURE]; };
   const sections = [{
     heading: 'Follow-ups from the 17:00 emails of ' + t.cycleDay + ' (' + t.rows.length + ' bucket(s))',
-    subheading: 'Completed = done. Not needed = nothing was left to follow up. Blocked = a failure or an unfinished run is on record. Overdue = past its time and nothing recorded. A bounced 17:00 email is re-sent to the next person in the hierarchy and its follow-ups go to them (REROUTED); only one that could not be re-routed is marked STOP.',
+    subheading: 'Completed = done. Not needed = nothing was left to follow up (a bucket with nothing left after 17:00 needs neither checkpoint; one with nothing left after 10:00 needs no 13:00 reply). Blocked = a failure or an unfinished run is on record. Overdue = past its time and nothing recorded. A bounced 17:00 email is re-sent to the next person in the hierarchy and its follow-ups go to them (REROUTED); only one that could not be re-routed is marked STOP.',
     columns: ['Checkpoint', 'Completed', 'Not needed', 'Blocked', 'Overdue', 'Due', 'Future'],
     rows: [line('1 - the 10:00 email', t.counts.cp1), line('2 - the 13:00 reply', t.counts.cp2)],
   }];

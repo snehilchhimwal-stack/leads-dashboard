@@ -228,7 +228,7 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger)
       }),
       footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically.',
     };
-    reportOpts.sections = splitStaleSectionsGs_(reportOpts.sections, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom
+    applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
     const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
     // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
     const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
@@ -393,7 +393,7 @@ function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
     })
     : rmKeys.map(function (rm) { return makeRmSection_(rm, byRM[rm].leads); });
 
-  return Object.assign({
+  const opts = Object.assign({
     title: 'Overnight Leads',
     subtitle: Utilities.formatDate(win.from, 'Asia/Kolkata', 'd MMM, h:mm a') + ' – ' + Utilities.formatDate(win.to, 'Asia/Kolkata', 'd MMM, h:mm a') + ' IST',
     kpis: [
@@ -402,9 +402,11 @@ function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
       { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
     ],
     action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
-    sections: splitStaleSectionsGs_(sections, staleSinceMapGs_(leads)), // stale leads (no update for more than 24 h) are held at the bottom
+    sections: sections,
     footerNote: 'Status reflects the CURRENT live sheet as of this run, not frozen at the window end time. Leads already at Opportunity+ or closed are excluded — a follow-up on this same thread will land around 1pm showing which of any flagged leads above are still unresolved.',
   }, regionHeaderOptsGs_(region, leads));
+  applyStaleSplitGs_(opts, staleSinceMapGs_(leads)); // stale leads (no update for more than 24 h) are held at the bottom, and the headline count says so
+  return opts;
 }
 
 // STATUS (confirmed 2026-10-03, dead-code audit): superseded in the real
@@ -807,11 +809,11 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     return null;
   }
 
-  if (checkpoint1Results) section2Opts.sections = splitStaleSectionsGs_(section2Opts.sections, staleSinceForLeadIdsGs_(checkpoint1Results.map(function (r) { return r.lead_id; }), leadsData, now)); // stale leads are held at the bottom
+  if (checkpoint1Results) applyStaleSplitGs_(section2Opts, staleSinceForLeadIdsGs_(checkpoint1Results.map(function (r) { return r.lead_id; }), leadsData, now)); // stale leads are held at the bottom, and the headline count says so
   const html = renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
   const plainBody = 'Combined morning digest for ' + regionDisplay + bucketNote + ' (' + dateLabel + '): Section 1 (Overnight) ' +
-    section1Leads.length + ' lead(s); Section 2 (Checkpoint 1) ' + activeCheckpoint1Count + ' unresolved lead(s).\n\n' +
+    section1Leads.length + ' lead(s)' + staleCountNoteGs_(section1Opts.staleCount) + '; Section 2 (Checkpoint 1) ' + activeCheckpoint1Count + ' unresolved lead(s)' + staleCountNoteGs_(section2Opts.staleCount) + '.\n\n' +
     plainTextTwoSectionGs_(section1Opts, section2Opts);
 
   // The leads this email counts: Section 1's overnight leads + Checkpoint 1's still-unresolved leads. The send gate checks
@@ -1577,17 +1579,19 @@ function buildOvernightFollowupSectionOptsGs_(region, unresolvedRows) {
       rows: rows.map(function (row) { return [row.lead_id, row.RM || 'Unassigned', row.detail, row.suggestion || '—']; }),
     };
   };
-  return Object.assign({
+  const opts = Object.assign({
     title: '1pm Follow-up',
     subtitle: "Re-checking this morning's flagged leads",
     kpis: [
       { value: unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
     ],
-    sections: splitStaleSectionsGs_(region === FUTWORK_REGION_KEY_
+    sections: region === FUTWORK_REGION_KEY_
       ? sectionsByRegionGs_(unresolvedRows, function (r, regionRows) { return [makeSection_(regionRows)]; })
-      : [makeSection_(unresolvedRows)], staleSinceMapGs_(unresolvedRows)), // stale leads (no update for more than 24 h) are held at the bottom
+      : [makeSection_(unresolvedRows)],
     footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
   }, regionHeaderOptsGs_(region, unresolvedRows));
+  applyStaleSplitGs_(opts, staleSinceMapGs_(unresolvedRows)); // stale leads (no update for more than 24 h) are held at the bottom, and the headline count says so
+  return opts;
 }
 
 // Section 1 placeholder for a bucket that has Checkpoint 2 content but
@@ -1731,11 +1735,11 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
     return;
   }
 
-  if (checkpoint2Results) section2Opts.sections = splitStaleSectionsGs_(section2Opts.sections, staleSinceForLeadIdsGs_(checkpoint2Results.map(function (r) { return r.lead_id; }), leadsData, now)); // stale leads are held at the bottom
+  if (checkpoint2Results) applyStaleSplitGs_(section2Opts, staleSinceForLeadIdsGs_(checkpoint2Results.map(function (r) { return r.lead_id; }), leadsData, now)); // stale leads are held at the bottom, and the headline count says so
   const html = (testModeBanner ? testModeBanner.html : '') + renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
   const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + region + ': Section 1 (Overnight Follow-up) ' +
-    section1UnresolvedRows.length + ' still unresolved; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count + ' unresolved lead(s).\n\n' +
+    section1UnresolvedRows.length + ' still unresolved' + staleCountNoteGs_(section1Opts.staleCount) + '; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count + ' unresolved lead(s)' + staleCountNoteGs_(section2Opts.staleCount) + '.\n\n' +
     plainTextTwoSectionGs_(section1Opts, section2Opts);
 
   // The send-safety gate runs ONCE here, on the exact payload both send paths below would use, with the leads this email
