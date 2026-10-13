@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-13 against commit `e06e781` |
 
 ## Purpose / reason to exist
 
@@ -50,7 +50,7 @@ cohort comparisons (`TAB-008`).
 | `snapshot_at` | datetime | the run instant — **the upsert key** |
 | `source` | text | which writer produced the row (`movement` / `browser` / `backfill`) |
 
-Exact list: `MovementTracker.gs` `SLA_HISTORY_COLUMNS_` `#L185`.
+Exact list: `MovementTracker.gs` `SLA_HISTORY_COLUMNS_` `#L312`.
 
 ## Writers
 
@@ -146,17 +146,22 @@ The live `SLA_History` tab; schema `SLA_HISTORY_COLUMNS_`
 
 ## Validation
 
-- **Method:** column list read from `SLA_HISTORY_COLUMNS_` `#L185` at
-  `c82ec67`; two-writer parity per `LOGIC_AUDIT.md` Part 4 §4.7;
+- **Method:** column list re-read from `SLA_HISTORY_COLUMNS_` `#L312` at
+  `e06e781` (weekly doc spot-check, cycle 6 — anchor had drifted from
+  `#L185` as `MovementTracker.gs` grew; column list itself unchanged);
+  two-writer parity per `LOGIC_AUDIT.md` Part 4 §4.7;
   `Tests_MovementTracker.gs` asserts the header. `tests/frontend-harness.html`
   exercises `upsertSlaHistoryRows` (write boundary mocked).
 - **Evidence:** `LOGIC_AUDIT.md` Part 4 §4.7; `.github/workflows/test.yml`.
-- **Status:** Validated 2026-09-10 (non-lifecycle); lifecycle `TBD`
+- **Status:** Validated 2026-10-13 (non-lifecycle); lifecycle `TBD`
   (`DOC-036`).
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-032`.
+Verified at `c82ec67` (record created by `DOC-032`); line-anchor
+re-verified at `e06e781` (weekly doc spot-check, cycle 6 — `#L185` →
+`#L312`, `MovementTracker.gs` grew in the interim; no other field
+changed).
 
 ## Revalidation trigger
 

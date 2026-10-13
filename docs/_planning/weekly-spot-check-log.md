@@ -351,3 +351,103 @@ full coverage (25/25 `js/`, 13/13 `.gs`). No `.gs`/`js/` source touched,
 so `node test/run-gs-tests.js` was not re-run for this change. GitHub
 Actions confirmed green on the pushed commit(s) before this entry was
 finalized.
+
+---
+
+## Cycle 6 — 2026-10-13 (run by Claude, scheduled cloud routine)
+
+Checked `SHEET-005` (`SLA_History`), `SHEET-012` (`Region_Recipients`),
+`JS-010` (`core-ui.js`), `DATA-003` (the comment-classification
+pipeline), `DATA-005` (the region-email pipeline) — none checked in
+cycles 1-5; all five also had the oldest still-unrevisited `Last
+Verified` dates in the catalog going in (`2026-09-10`/`c82ec67`,
+matching this log's own established selection heuristic from cycle 4).
+Note: like cycle 5, this cycle's own local clone started out shallow
+(50-commit default) — unshallowed (`git fetch --unshallow`) and
+confirmed level with `origin/master` before doing anything else, since
+an honest "what changed since `Last Verified`" comparison needs full
+history. 4/5 records had real, fixed line-anchor drift; 1/5 (`JS-010`)
+was fully clean.
+
+**`SHEET-005`** — real drift, fixed. Its one line-anchor citation,
+`MovementTracker.gs` `SLA_HISTORY_COLUMNS_` `#L185`, had drifted to real
+`#L312` — the file grew substantially since `c82ec67` (now 1718 lines).
+The column list itself (`date`/`openTotal`/`breachedTotal`/5 per-check
+counts/`snapshot_at`/`source`) matched the record exactly; this was pure
+anchor slippage, not a described-behavior mismatch. Fixed the anchor,
+`## Validation`/`## Version / change reference`, `Last Verified` and
+`docs/INDEX.md`'s row bumped to `2026-10-13 (e06e781)`.
+
+**`SHEET-012`** — real drift, fixed, same class but much larger
+magnitude. The header citation `EmailInfra.gs` `#L280` (`['region',
+'to', 'cc']`) had drifted to real `#L1114` — `EmailInfra.gs` grew
+552 → 1444 lines since `c82ec67`, from the Email Ledger / CycleReport /
+EmailSweep / OpsAudit batch that landed 2026-10-08..10 (`GS-015`
+through `GS-022`, none of which this record depends on, but all of
+which share the file). The header value, the writer/reader function
+names, and the "backend-only, separate from the dashboard's
+`localStorage` recipient editor" claim all still matched real source.
+Fixed the anchor, `## Validation`/`## Version / change reference`,
+`Last Verified` and `docs/INDEX.md`'s row bumped to
+`2026-10-13 (e06e781)`.
+
+**`JS-010`** — fully clean. File length (159 lines) and all 7 `#Lnn`
+`FN-XXX` anchors, `CFG-023` (`MAX_CARDS = 200`), and the two `#L`-cited
+state symbols (`_logLeadRegistry` `#L78`, `_loadingOverlayDepth`/
+`_loadingOverlayHeavyDepth` `#L33`/`#L41`) all checked exactly against
+real `js/core-ui.js`; the cross-reference claim that `_logLeadRegistry`
+is cleared at `JS-012` `#L164` was independently re-verified against
+`js/overview-distribution-people-ops.js` too. `git log` confirms the
+file hasn't changed since the record's `4bbb58c` verification commit —
+consistent with finding no drift. `Last Verified` left as-is (no change
+made, nothing to re-date).
+
+**`DATA-003`** — real drift, fixed, one anchor out of four. Three of
+the four cited function anchors (`OUTCOME_RULES` `#L230`, `inferOutcome`
+`#L569`, `OUTCOME_RULES_GS_` `#L147`, `inferOutcomeGs_` `#L403`) matched
+exactly. The fourth, `js/sheets-writeback.js` `pushLeadsToFollowups`
+`#L187`, had drifted to real `#L208` (confirmed correct *at* `c82ec67`
+via `git show c82ec67:js/sheets-writeback.js`; the file grew in 4
+intervening commits). The column-layout claim this anchor supports
+("column E/H by script, column F left blank for a human") was
+independently re-read from the function's own preceding comment and
+still matches. Did not attempt to re-verify the "`OUTCOME_RULES` (~110
+signals) vs `OUTCOME_RULES_GS_` (~30 rules)" count comparison in `##
+Known gaps` — that section already states the gap is open and tracked
+on `GS-005`, so it's a live flagged item, not a stale stated fact, and
+out of this cycle's remit to re-litigate without a clear unit-for-unit
+recount method. Fixed the one anchor, `## Validation`/`## Version /
+change reference`, `Last Verified` and `docs/INDEX.md`'s row bumped to
+`2026-10-13 (e06e781)`.
+
+**`DATA-005`** — real drift, fixed, the largest magnitude this cycle.
+4 of its 6 cited line anchors had drifted, all from the same cause: the
+2026-10-08..10 Email Ledger/CycleReport/EmailSweep/OpsAudit batch grew
+`OvernightEmailer.gs` 1409→2517 lines, `EmailInfra.gs` 552→1444,
+`AllIssuesEmailer.gs` 561→844, and `js/reports-gmail.js` 411→499 lines.
+`performGmailSend` `#L270`→real `#L339`; `sendOvernightMorningEmails_`
+`#L465`→real `#L968`; `sendAllIssuesEmails_` `#L153`→real `#L196`;
+`resolveRecipientEmailsForRegion_` `#L336`→real `#L1170`. The other two
+(`effectiveRegion` `#L80`, `buildRegionReports` `#L410`) were unchanged.
+Also independently re-confirmed the record's central claim — the
+**HIGH** Loan-region finding (`## Known gaps`) is still open, not
+fixed: `project_region` remains absent from `HEADER_ALIASES_`
+(`Core.gs`) and `SNAPSHOT_COLUMNS_` (`MovementTracker.gs` `#L105`), and
+the email-send call sites still resolve region via `mainRegionForGs_`
+alone, with no Loan override. Found and noted (but did not misread as
+a fix): a new `_effectiveRegionGs_` helper now exists
+(`MovementTracker.gs` `#L1063`) — it's a GROUP_SOURCE-only port added
+for the unrelated Movement-snapshot/daily-cohort pipeline (`GS-008`),
+not wired into any of the three email-send call sites this record
+covers, so the HIGH finding's status is unchanged. Fixed all 4 anchors,
+`## Validation`/`## Version / change reference`, `Last Verified` and
+`docs/INDEX.md`'s row bumped to `2026-10-13 (e06e781)`.
+
+Verified before push: `python3 test/check-catalog.py` clean (all
+blocking checks A-C, plus F-P — including `D` showing no last-verified
+drift and `I`/`N`/`P`'s literal/exception/function-existence checks
+clean); `node test/check-docs-coverage.js` full coverage (25/25 `js/`,
+22/22 `.gs`); `node test/run-gs-tests.js` 3370/3370 passing (unaffected —
+no `.gs`/`js/` source touched, run anyway as a sanity check since Node
+was available this session). GitHub Actions confirmed green on the
+pushed commit before this entry was finalized.

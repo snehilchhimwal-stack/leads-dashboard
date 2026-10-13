@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-13 against commit `e06e781` |
 
 ## Purpose / reason to exist
 
@@ -139,27 +139,48 @@ Part 7 §18 HIGH / MEDIUM #3 / LOW #1.
 
 `js/reports-build.js` `effectiveRegion` `#L80` / `buildRegionReports`
 `#L410`; `js/reports-ui.js` `renderReports` `#L387`; `js/reports-gmail.js`
-`performGmailSend` `#L270`; `OvernightEmailer.gs` `sendOvernightMorningEmails_`
-`#L465`; `AllIssuesEmailer.gs` `sendAllIssuesEmails_` `#L153`;
-`EmailInfra.gs` `resolveRecipientEmailsForRegion_` `#L336`.
+`performGmailSend` `#L339`; `OvernightEmailer.gs` `sendOvernightMorningEmails_`
+`#L968`; `AllIssuesEmailer.gs` `sendAllIssuesEmails_` `#L196`;
+`EmailInfra.gs` `resolveRecipientEmailsForRegion_` `#L1170`.
 
 ## Validation
 
 - **Method:** traced against `LOGIC_AUDIT.md` Part 3 §3.5/§3.7/§3.9 +
   Part 4 §4.3/§4.4 (the region-map diff + the HIGH Loan finding) + Part 7
-  §18 at `c82ec67`. `tests/frontend-harness.html` runs
+  §18 at `c82ec67`; re-checked at `e06e781` (weekly doc spot-check, cycle
+  6) — 4 of the 6 cited line anchors had drifted from the heavy growth of
+  `OvernightEmailer.gs` (1409→2517 lines), `EmailInfra.gs` (552→1444),
+  `AllIssuesEmailer.gs` (561→844) and `js/reports-gmail.js` (411→499)
+  since `c82ec67` (the Email Ledger / CycleReport / EmailSweep / OpsAudit
+  batch, 2026-10-08..10): `performGmailSend` `#L270`→`#L339`,
+  `sendOvernightMorningEmails_` `#L465`→`#L968`, `sendAllIssuesEmails_`
+  `#L153`→`#L196`, `resolveRecipientEmailsForRegion_` `#L336`→`#L1170`.
+  The HIGH Loan-region finding was independently re-confirmed as still
+  open: `project_region` is still absent from `HEADER_ALIASES_`
+  (`Core.gs`) and `SNAPSHOT_COLUMNS_` (`MovementTracker.gs` `#L105`), and
+  `OvernightEmailer.gs`/`AllIssuesEmailer.gs`/`EmailInfra.gs`'s
+  recipient/report-building call sites still call only
+  `mainRegionForGs_`, never an `effectiveRegion`-equivalent Loan override
+  — a new `_effectiveRegionGs_` helper now exists (`MovementTracker.gs`
+  `#L1063`, added for the Movement/cohort pipeline's own region
+  resolution) but it is not wired into the email-send paths this record
+  covers, so the finding is unchanged, not fixed.
+  `tests/frontend-harness.html` runs
   `buildRegionReports` / `renderReports` (mocked I/O + wait);
   `Tests_OvernightEmailer.gs` / `Tests_AllIssuesEmailer.gs` /
   `Tests_EmailInfra.gs` / `Tests_RmHierarchy.gs` cover the backend path.
 - **Evidence:** `LOGIC_AUDIT.md` Part 4 §4.4, Part 7 §18;
   `.github/workflows/test.yml`; `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10 (flow is correct as documented; the
+- **Status:** Validated 2026-10-13 (flow is correct as documented; the
   HIGH finding is a **known unresolved defect within the flow**, not a
-  doc gap).
+  doc gap — re-confirmed still open this cycle).
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-034`.
+Verified at `c82ec67` (record created by `DOC-034`); line anchors
+re-verified at `e06e781` (weekly doc spot-check, cycle 6 — 4 of 6
+anchors drifted, see `## Validation`; no described behavior changed, and
+the HIGH finding remains unfixed).
 
 ## Revalidation trigger
 

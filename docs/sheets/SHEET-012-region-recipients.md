@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-13 against commit `e06e781` |
 
 ## Purpose / reason to exist
 
@@ -53,7 +53,7 @@ backend-only.
 | `to` | text | To address list (comma/newline separated) |
 | `cc` | text | Cc address list |
 
-Exact header: `EmailInfra.gs` `#L280` (`['region', 'to', 'cc']`).
+Exact header: `EmailInfra.gs` `#L1114` (`['region', 'to', 'cc']`).
 
 ## Writers
 
@@ -142,17 +142,24 @@ The live `Region_Recipients` tab; header authored by `EmailInfra.gs`.
 
 ## Validation
 
-- **Method:** header read from `EmailInfra.gs` `#L280` at `c82ec67`; the
-  backend-only / separate-from-dashboard status cross-checked against
-  `LOGIC_AUDIT.md` Part 3 §3.7. `Tests_EmailInfra.gs` in CI.
+- **Method:** header re-read from `EmailInfra.gs` `#L1114` at `e06e781`
+  (weekly doc spot-check, cycle 6 — anchor had drifted from `#L280`;
+  `EmailInfra.gs` grew 552 → 1444 lines since `c82ec67` from the Email
+  Ledger / CycleReport / EmailSweep / OpsAudit batch, 2026-10-08..10;
+  header value itself unchanged); the backend-only /
+  separate-from-dashboard status cross-checked against `LOGIC_AUDIT.md`
+  Part 3 §3.7. `Tests_EmailInfra.gs` in CI.
 - **Evidence:** `.github/workflows/test.yml` (`Tests_EmailInfra.gs`,
   last green run); `LOGIC_AUDIT.md` Part 3 §3.7.
-- **Status:** Validated 2026-09-10 (non-lifecycle); lifecycle framing
+- **Status:** Validated 2026-10-13 (non-lifecycle); lifecycle framing
   `TBD` (`DOC-036`).
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-032`.
+Verified at `c82ec67` (record created by `DOC-032`); line-anchor
+re-verified at `e06e781` (weekly doc spot-check, cycle 6 — `#L280` →
+`#L1114`, `EmailInfra.gs` grew substantially in the interim; no other
+field changed).
 
 ## Revalidation trigger
 

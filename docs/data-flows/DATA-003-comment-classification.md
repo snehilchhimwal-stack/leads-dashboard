@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-13 against commit `e06e781` |
 
 ## Purpose / reason to exist
 
@@ -121,21 +121,29 @@ try/catch-isolated inside `snapshotOpenLeads_` (`GS-013` EXC-090).
 
 `js/core-outcome-engine.js` `OUTCOME_RULES` `#L230` / `inferOutcome`
 `#L569`; `FollowupEngine.gs` `OUTCOME_RULES_GS_` `#L147` / `inferOutcomeGs_`
-`#L403`; `js/sheets-writeback.js` `pushLeadsToFollowups` `#L187`.
+`#L403`; `js/sheets-writeback.js` `pushLeadsToFollowups` `#L208`.
 
 ## Validation
 
 - **Method:** traced against `LOGIC_AUDIT.md` Part 3 §3.2/§3.4 + Part 4
-  §4.1 (the full rule diff) at `c82ec67`. `tests/frontend-harness.html`
+  §4.1 (the full rule diff) at `c82ec67`; re-checked at `e06e781`
+  (weekly doc spot-check, cycle 6) — the `OUTCOME_RULES`/
+  `OUTCOME_RULES_GS_`/`pushLeadsToFollowups` line anchors cited above were
+  re-grepped against current source: `pushLeadsToFollowups` had drifted
+  `#L187` → `#L208` (`js/sheets-writeback.js` grew since `c82ec67`); the
+  other three anchors (`#L230`, `#L569`, `#L147`, `#L403`) and the
+  behavior they describe were unchanged. `tests/frontend-harness.html`
   runs comments with known outcomes; `Tests_FollowupEngine.gs` /
   `Tests_UnmatchedCommentLogger.gs` cover the backend.
 - **Evidence:** `LOGIC_AUDIT.md` Part 4 §4.1; `.github/workflows/test.yml`;
   `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10.
+- **Status:** Validated 2026-10-13.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-034`.
+Verified at `c82ec67` (record created by `DOC-034`); line-anchor
+re-verified at `e06e781` (weekly doc spot-check, cycle 6 — `#L187` →
+`#L208` for `pushLeadsToFollowups`; no other field changed).
 
 ## Revalidation trigger
 
