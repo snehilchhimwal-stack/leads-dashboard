@@ -119,6 +119,23 @@ function runRmHierarchyTests_() {
     }
     TestAssert_(RESTRICTED_CC_PRIMARY_NAMES_.indexOf('test a1 restrictedcc') === -1, 'RESTRICTED_CC_PRIMARY_NAMES_: test entry cleaned up, never leaks into a later test');
 
+    // ---- EXTRA_CC_FOR_RM_: a per-RM extra cc that survives the
+    // restricted-cc hard override (2026-10-13, Aarya Sadanam -> Manisha
+    // rathod with Neha Mishra kept in cc). Same mock and push/splice pattern.
+    RESTRICTED_CC_PRIMARY_NAMES_.push('test a1 restrictedcc');
+    EXTRA_CC_FOR_RM_['test rm restrictedcc'] = ['Test RH RestrictedCc'];
+    try {
+      const withExtraCc = resolveRecipientBucketsForRms_(restrictedCcSs, ['Test RM RestrictedCc']);
+      TestAssertEqual_(withExtraCc.buckets[0].primaryName, 'Test A1 RestrictedCc', 'EXTRA_CC_FOR_RM_: the primary (To) is unaffected');
+      TestAssertEqual_(withExtraCc.buckets[0].cc.length, 2, 'EXTRA_CC_FOR_RM_: cc is Snehil Chhimwal plus the one extra name');
+      TestAssert_(withExtraCc.buckets[0].cc.indexOf(TEST_EMAIL_CH_) !== -1 && withExtraCc.buckets[0].cc.indexOf(TEST_EMAIL_SECONDARY_) !== -1, 'EXTRA_CC_FOR_RM_: the extra cc is added after the restricted override, not wiped by it');
+    } finally {
+      RESTRICTED_CC_PRIMARY_NAMES_.splice(RESTRICTED_CC_PRIMARY_NAMES_.indexOf('test a1 restrictedcc'), 1);
+      delete EXTRA_CC_FOR_RM_['test rm restrictedcc'];
+    }
+    TestAssert_(!EXTRA_CC_FOR_RM_['test rm restrictedcc'], 'EXTRA_CC_FOR_RM_: test entry cleaned up');
+    TestAssert_(Array.isArray(EXTRA_CC_FOR_RM_['aarya sadanam']) && EXTRA_CC_FOR_RM_['aarya sadanam'][0] === 'Neha Mishra', 'EXTRA_CC_FOR_RM_: production entry keeps Neha Mishra in cc for Aarya Sadanam');
+
     // ---- LOAN_TEAM_CH_NAME_: loan-team RMs bypass their tl/tm/rh straight
     // to their ch, with no cc at all (confirmed by the user directly,
     // 2026-10-03) -- a self-contained mock with a 3-tier chain (RM ->

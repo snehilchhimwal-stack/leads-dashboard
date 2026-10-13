@@ -211,7 +211,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Akshay More','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Loan','BDM','Yogesh Choudhari','','','','Mayur Panjari'],
   ['Thane','S1','Avinash Khare','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
-  ['Hyderabad','S1','Parusharothu Vinay Varma','Vemula Ajay','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made Vemula Ajay's manager (see her own row + the 2026-09-21 HR export refresh)
+  ['Hyderabad','S1','Parusharothu Vinay Varma','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Sourcing - Pune','TM','Yash Kalal','','','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Rutuja Daule','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Chandrakant Bhagat','','Sampada Pawar','','Vidya Jadhav'],
@@ -220,9 +220,6 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Pravin Kharat','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Thane','S1','Saurabh M S','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
   ['Thane','A1','Niraj Patil','','','Swapnil Gowalkar','Bipin More'],
-  ['Western','S1','Pratapkumar Yadav','','Minas Patel','','Rahul Gandhi'],
-  ['Western','S1','Sonam Dubey','','Minas Patel','','Rahul Gandhi'],
-  ['Hyderabad','A1','Vemula Ajay','','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made his manager (see her own row below)
   // 2026-09-22, from the 2026-09-21 HR export: Zoya Fathima (H6556) is a
   // new hire (joined 2026-09-16, role='Cluster Head' in the export) placed
   // over Vemula Ajay's whole Hyderabad cluster. Her own export row has
@@ -238,7 +235,6 @@ const RM_HIERARCHY_RAW_ = [
   // top of this table). Same pattern as Vidya Jadhav/Bipin More -> Shitij
   // Kaushal above.
   ['Hyderabad','Cluster Head','Zoya Fathima','','','','Mukesh Mishra'],
-  ['Western','S1','Saravash Upadhyay','','Minas Patel','','Rahul Gandhi'],
   ['Harbour','S1','Nitin Devariya','Yash Sharma','','','Sanjyota Bhosale'],
   ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Loan','BDM','Angad Yadav','','','','Mayur Panjari'],
@@ -254,8 +250,8 @@ const RM_HIERARCHY_RAW_ = [
   ['HNI','S1','Sahil Gupta','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Thane','S1','Mohit Manwani','','Sanket Yadav','','Bipin More'],
   ['Thane','A1','Ganesh Saroj','','','Swapnil Gowalkar','Bipin More'],
-  ['Pune','S1','Nagmma Mujnayak','','Ayaz Bagwan','','Sourabh Sareen'],
-  ['Hyderabad','S1','Maagathoti Adilakshmi','Vemula Ajay','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made Vemula Ajay's manager (see her own row + the 2026-09-21 HR export refresh)
+  ['Pune','S1','Nagmma Mujnayak','Firoj Shaikh','','','Sourabh Sareen'], // 2026-10-13 HR Live: under Firoj Shaikh (was tm Ayaz Bagwan)
+  ['Hyderabad','S1','Maagathoti Adilakshmi','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Navi Mumbai','S1','Jayesh Parab','Avinash Kumar','','','Vidya Jadhav'],
   ['Bangalore','S1','Praveen R','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Western','A1','Prathmesh S Pandey','','','','Rahul Gandhi'],
@@ -264,7 +260,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','S1','Lovkesh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Bangalore','S1','Mhd Haseebulla','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Western','S1','Kundan Singh','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Hyderabad','S1','Vadlapudi Divya','Vemula Ajay','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made Vemula Ajay's manager (see her own row + the 2026-09-21 HR export refresh)
+  ['Hyderabad','S1','Vadlapudi Divya','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Thane','S1','Avinash Das','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Somanath Sangle','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Divya Rohela','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
@@ -300,7 +296,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','S1','Eknidhi Chabra','','Minas Patel','','Rahul Gandhi'],
   ['Western','S1','Gajanan Jadhav','','Minas Patel','','Rahul Gandhi'],
   ['Western','TM','Minas Patel','','','','Rahul Gandhi'],
-  ['Central','S1','Zeya Shaikh','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left); real current manager per HR export is Kumar Babu
+  ['Central','S1','Zeya Shaikh','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left), set to Kumar Babu; 2026-10-13 HR Live: moved under Sachin Rana
   ['Pune','S1','Gaurav Gunjal','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Arpita Varte','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Thane','S1','Aman Gupta','Amit Upadhyay','','','Bipin More'],
@@ -313,7 +309,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','S1','Riya Yadav','','Minas Patel','','Rahul Gandhi'],
   ['Central','S1','Mayuresh Chavan','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left); real current manager per HR export is Kumar Babu
   ['Sourcing - Pune','S3','Anagha Sangole','','Yash Kalal','','Sourabh Sareen'],
-  ['Hyderabad','S1','Peddapally Veera Shivaji','Vemula Ajay','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made Vemula Ajay's manager (see her own row + the 2026-09-21 HR export refresh)
+  ['Hyderabad','S1','Peddapally Veera Shivaji','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Thane','S1','Hitesh Jaiswar','Amit Upadhyay','','','Bipin More'],
   ['Navi Mumbai','S1','Kartik Shirsat','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Rinky Bidare','','Sampada Pawar','','Vidya Jadhav'],
@@ -321,7 +317,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Kishan Lohar','Amit Upadhyay','','','Bipin More'],
   ['Navi Mumbai','S1','Suman Pujari','Avinash Kumar','','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Tejal Nikam','Avinash Kumar','','','Vidya Jadhav'],
-  ['Hyderabad','S1','G Anand Kumar','Vemula Ajay','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made Vemula Ajay's manager (see her own row + the 2026-09-21 HR export refresh)
+  ['Hyderabad','S1','G Anand Kumar','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Loan','A1','Zahid Shaikh','','','','Mayur Panjari'],
   ['Pune','S1','Aadesh Narwade','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
@@ -330,9 +326,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Rahul Singh','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
   ['Pune','S1','Aabid Khan','Firoj Shaikh','','','Sourabh Sareen'],
   ['HNI','S1','Mohammed Rafiq Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
-  ['HNI','S1','Adil Shaikh','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Loan','BDM','Husen Shaikh','','','','Mayur Panjari'],
-  ['Loan','Executive','Narayan Dhimar','','','','Mayur Panjari'],
   ['Central','S1','Rohit Gupta','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','A1','Kumar Babu','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Loan','BDM','Krishna Nayak','','','','Mayur Panjari'],
@@ -367,8 +361,8 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','S1','Harshith S','','Sampada Pawar','','Vidya Jadhav'],
   ['Pune','S1','Adinath Munde','','Rahul Poudel','','Sourabh Sareen'],
   ['Loan','Executive','Gayatri Kukade','','','','Mayur Panjari'],
-  ['Pune','S1','Buddhabhushan Wakode','','Rahul Poudel','','Sourabh Sareen'],
-  ['Commercial','S3','Aarya Sadanam','','','','Neha Mishra'],
+  ['Pune','S1','Buddhabhushan Wakode','Hitesh Choudhary','Rahul Poudel','','Sourabh Sareen'], // 2026-10-13 HR Live: under new A1 Hitesh Choudhary (role change 2026-10-09)
+  ['Commercial','S3','Aarya Sadanam','Manisha rathod','','Snehil Chhimwal','Neha Mishra'], // 2026-10-13 (confirmed by the user): reports to Manisha rathod -> Snehil Chhimwal; Neha Mishra stays in cc via EXTRA_CC_FOR_RM_
   ['Loan','Executive','Divya Dalvi','Zahid Shaikh','','','Mayur Panjari'],
   ['Loan','BDM','Mohammad Azaz Izhar Ansari','','','','Mayur Panjari'],
   ['Loan','Executive','Priyanka Shede','Zahid Shaikh','','','Mayur Panjari'],
@@ -390,7 +384,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','S1','Shreyang Chudasama','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Bangalore','S1','Kavya B R','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],
-  ['Pune','S1','Vijay Kshirsagar','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Vijay Kshirsagar','Hitesh Choudhary','Rahul Poudel','','Sourabh Sareen'], // 2026-10-13 HR Live: under new A1 Hitesh Choudhary (role change 2026-10-09)
   ['Pune','S1','Pranav Mhatale','','Ayaz Bagwan','','Sourabh Sareen'], // renamed 2026-09-09 from "Pranav Vilas Mhatale" per the fresher HR Live export -- same person, same chain
   ['Leadership','Commercial Head','Neha Mishra','','','',''],
   ['Leadership','Cluster Head','Mukesh Mishra','','','',''],
@@ -403,9 +397,9 @@ const RM_HIERARCHY_RAW_ = [
   // manager/Cc target, never himself a flagged RM with a blank chain to
   // self-alert on.
   ['Leadership','Leadership','Shitij Kaushal','','','',''],
-  ['Hyderabad','S1','G Kumar','Vemula Ajay','','','Zoya Fathima'], // 2026-09-22: Zoya Fathima made Vemula Ajay's manager (see her own row + the 2026-09-21 HR export refresh)
+  ['Hyderabad','S1','G Kumar','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
-  ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'], // confirmed by the user 2026-10-13 -- leads-sheet alias of "Mohd Faizan Shaikh"
   ['Harbour','S1','Atharva P Belose','Yash Sharma','','','Sanjyota Bhosale'],
   // 3 more alias rows, found 2026-08-31 via a real "Leads Not Sent" ops
   // report — same pattern as the 4 above (the leads sheet's own RM column
@@ -413,10 +407,11 @@ const RM_HIERARCHY_RAW_ = [
   // previously known/reported until they actually caused a no-recipient
   // failure.
   ['Central','A1','Akash Ugale','','','','Sanjyota Bhosale'], // leads sheet drops the middle "A" — real row: "Akash A Ugale"
-  ['Hyderabad','S1','Peddapally Shivaji','Vemula Ajay','','','Zoya Fathima'], // leads sheet drops the middle "Veera" — real row: "Peddapally Veera Shivaji"; ch updated 2026-09-22, same reason as her own row
+  ['Hyderabad','S1','Peddapally Shivaji','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Pune','S1','Shaikh Wasim Shaikh Harun','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'], // leads sheet uses the full "<given> <father's name>" form — real row: "Wasim Shaikh"
   // 2 more, found via auditUnresolvedRmsNow's first real run (2026-08-31).
   ['Pune','City Lead','Sourabh Sareen Pnl','','','',''], // leads sheet appends " Pnl" (P&L) — real row: "Sourabh Sareen"
+  ['Leadership','Cluster Head','Mukesh Mishra Admin','','','',''], // confirmed by the user 2026-10-13 -- leads-sheet alias of "Mukesh Mishra" (same person; email resolves via the RmHierarchy.private.gs alias row)
   ['Loan','BDM','Mohmmad Azaz Izhar Anasair','','','','Mayur Panjari'], // leads sheet misspells both names — real row: "Mohammad Azaz Izhar Ansari"
   // Confirmed by the user directly (not a guess) — same person as "Kavya B R".
   ['Bangalore','S1','Kavya Gowda','Mainuddin T','','Romen Singh','Mukesh Mishra'],
@@ -435,12 +430,12 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Jay Renavikar','','Rahul Poudel','','Sourabh Sareen'],
   ['Sourcing - Pune','S3','Pranali Dalavi','','Yash Kalal','','Sourabh Sareen'],
   // AUTO-REFRESH 2026-09-22 from HR Live  - Sheet1 (2).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
-  ['Hyderabad','S1','Chandrababu Seenathur','Vemula Ajay','','','Zoya Fathima'],
+  ['Hyderabad','S1','Chandrababu Seenathur','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   // AUTO-REFRESH 2026-09-29 from HR Live  - Sheet1 (4).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
-  ['Central','S1','Ajay Gupta','','','','Sanjyota Bhosale'],
+  ['Central','S1','Ajay Gupta','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-10-13 HR Live: under new TM Sanket Patil
   ['Thane','S1','Disha Singh','','','','Bipin More'],
   ['Thane','S1','Pratik Singh','','','','Bipin More'],
-  ['Central','S1','Shruti Sharma','','','','Sanjyota Bhosale'],
+  ['Central','S1','Shruti Sharma','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-10-13 HR Live: under new TM Sanket Patil
   // Dhiraj Chhoda, Vishal Chavan, Chandni Khatoon, Pranav Deshmukh, Darshana Javeri, Amit Dere left the company,
   // confirmed by the user 2026-09-30 (last seen in the 2026-09-21/23 HR export, absent from 2026-09-29's) -- same
   // handling as Prathamesh A Pande/Mukesh Yadav above -- rows removed. None had direct reports (all S1/S3, no one's
@@ -454,7 +449,8 @@ const RM_HIERARCHY_RAW_ = [
   // Shresth Bhuwania, and Nikhil Goud (whose full HR name is Nikhil Shamakuri Goud, per the user -- the separate
   // "Shamakuri Goud" row was a partial-name duplicate of this SAME person, not an independent RM, removed too).
   // Checked: none of these 9 are referenced as anyone else's tl/tm/rh/ch. All had zero leads currently assigned.
-  // Kavya Gowda (Bangalore) is a DIFFERENT open question, deliberately NOT touched here -- she never matches any
+  // RESOLVED 2026-10-13: the user confirmed Kavya Gowda is an alias of "Kavya B R" (see her row above).
+  // Original note: Kavya Gowda (Bangalore) is a DIFFERENT open question, deliberately NOT touched here -- she never matches any
   // of 5 HR exports going back to 2026-08-31 by name at all (unlike the above, never even a stale prior match), yet
   // she has 51 real leads (36 still Suspect) in the live leads tab right now -- needs a direct check with HR/the
   // region, not a mechanical "absent from export = departed" call the way the rest of this batch was.
@@ -476,6 +472,30 @@ const RM_HIERARCHY_RAW_ = [
   // existing rows above (the real "Mohammad Azaz Izhar Ansari" and the earlier-known alias "Mohmmad Azaz Izhar
   // Anasair") -- same person, same resolved chain, confirmed by the user directly.
   ['Loan','BDM','Mohmmad Azaz izhar ansari','','','','Mayur Panjari'],
+  // Pratapkumar Yadav, Sonam Dubey, Saravash Upadhyay (Western), Adil Shaikh (HNI) and Narayan Dhimar (Loan) left
+  // the company, confirmed by the user 2026-10-13 (absent from every HR export since 2026-09-29) -- rows removed.
+  // None was anyone's tl/tm/rh/ch. Vemula Ajay (Hyderabad A1) also left (absent from HR Live 2026-10-13, confirmed
+  // by the user) -- row removed and all his reports moved straight under Zoya Fathima.
+  // AUTO-REFRESH 2026-10-13 from the live HR roster sheet: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
+  ['Thane','S1','Asgar Sayyed','','','Swapnil Gowalkar','Bipin More'],
+  ['Hyderabad','S1','Balamurali Sivakumar','','','','Zoya Fathima'],
+  ['HNI','S1','Bhanu Singh','','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Bhargav Parghi','','','','Abhhijjit Gandhii'],
+  ['Central','S1','Danish Shaikh','','Akash A Ugale','','Sanjyota Bhosale'], // HR spells it "Akash A ugale"
+  ['Thane','S1','Diksha Bhosle','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
+  ['Pune','A1','Hitesh Choudhary','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Jay Renaviker','','Rahul Poudel','','Sourabh Sareen'], // HR Live's 2026-10-13 spelling -- same person as the "Jay Renavikar" row above, kept so either spelling resolves
+  ['Pune','S1','Kanhaiya Kumar','Rohit Rathod','','','Sourabh Sareen'],
+  ['Thane','A1','Mayuresh Jadhav','','','','Bipin More'],
+  ['Bangalore','S1','Nikhil Bagri','Mainuddin T','','Romen Singh',''],
+  ['Thane','S1','Reshma Shaikh','','','','Bipin More'],
+  ['HNI','S1','Rishav Sharma','','','','Abhhijjit Gandhii'],
+  ['Loan','BDM','Sanjay Verma','','','','Mayur Panjari'], // 2026-10-13: Loan team under Mayur Panjari (confirmed by the user; HR's team column said Thane)
+  ['Central','TM','Sanket Patil','','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Suryapratap Singh','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Hyderabad','S1','Tharun Chalumuri','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Central','S1','Vishal Singh','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Pune','S1','Rushikesh Nigade','Hitesh Choudhary','Rahul Poudel','','Sourabh Sareen'], // 2026-10-13: added by hand -- the refresh script couldn't resolve tl until Hitesh Choudhary's own row existed
 ];
 
 // Case/whitespace-normalized name — used to match a person's name in
@@ -1106,6 +1126,17 @@ function leadershipEmailByNameGs_(nameLower) {
 // (DailyRmIssueLog.gs's reportRmPerformanceNow only Logger.logs).
 let RESTRICTED_CC_PRIMARY_NAMES_ = ['rajesh muni', 'manisha rathod'];
 
+// Extra cc for one specific REPORTING RM, added on top of whatever cc their
+// bucket ends up with -- including after RESTRICTED_CC_PRIMARY_NAMES_'s hard
+// override, which is the point. Confirmed by the user directly 2026-10-13:
+// Aarya Sadanam (Commercial) now reports to Manisha rathod -> Snehil
+// Chhimwal, but Neha Mishra (Commercial Head) must stay in cc on her
+// emails. Without this, Manisha's restricted cc would leave only Snehil.
+// Emails are resolved per region, and Aarya is the only Commercial RM under
+// Manisha, so this cc does not reach Manisha's Pre Sales reports' emails.
+// Keyed lowercase RM name -> manager names (looked up like any other cc).
+let EXTRA_CC_FOR_RM_ = { 'aarya sadanam': ['Neha Mishra'] };
+
 // Loan team (Mayur Panjari's reports — CFG-054's 'Loan' region rows):
 // confirmed by the user directly 2026-10-03 — a loan-team RM's issue
 // email must go straight to Mayur Panjari, with NO cc at all (not even
@@ -1314,7 +1345,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
     const key = primaryName.toLowerCase();
     const primaryChain = data.byRmNameLower[key] || chain;
 
-    if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, primaryRole: primaryChain.role, ccSet: new Set(), rmNames: [] };
+    if (!buckets[key]) buckets[key] = { primaryName: primaryName, primaryEmail: primaryEmail, primaryRole: primaryChain.role, ccSet: new Set(), extraCc: new Set(), rmNames: [] };
     const ccCandidates = [primaryChain.rh, primaryChain.ch];
     if (TM_STILL_CC_.indexOf(String(primaryChain.tm || '').trim().toLowerCase()) !== -1) {
       ccCandidates.push(primaryChain.tm);
@@ -1325,6 +1356,10 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
       if (email) buckets[key].ccSet.add(email);
     });
     buckets[key].rmNames.push(rmName);
+    (EXTRA_CC_FOR_RM_[String(rmName).trim().toLowerCase()] || []).forEach(function (name) {
+      const email = data.emailByManagerNameLower[String(name).trim().toLowerCase()];
+      if (email) buckets[key].extraCc.add(email);
+    });
   });
 
   const bucketList = Object.keys(buckets).sort().map(function (key) {
@@ -1345,6 +1380,7 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
     } else {
       alwaysCcEmailsGs_().forEach(function (e) { b.ccSet.add(e); });
     }
+    b.extraCc.forEach(function (e) { b.ccSet.add(e); }); // EXTRA_CC_FOR_RM_ -- applied after every override above
     b.ccSet.delete(b.primaryEmail); // don't cc someone already in To
     return { primaryName: b.primaryName, primaryEmail: b.primaryEmail, primaryRole: b.primaryRole, cc: Array.from(b.ccSet), rmNames: b.rmNames };
   });
