@@ -289,3 +289,21 @@ Discovery leads, and almost none of them reach Opportunity. So any
 `dim_leads`-only figure reads 7–25 points high. The Sheet's `source_bucket`
 is also the only place Search, Non-UTM and Discovery are told apart: in
 analytics, Search and Discovery both arrive through the `website` channel.
+
+**First run (2026-10-13).** Sep P2, Sep P3 and Oct P1 were written with
+`source = all_leads`, with the breakdown in V:AD of `Opp_Monitor_Period`.
+Headline same-day / 48h: 27.9% / 35.7%, 31.6% / 40.4% and 30.1% / 38.6%.
+
+`Opp_Monitor_Month` still has only 18 columns (A–R). Its nine breakdown
+columns must be added before the first all-leads month row (October 2026)
+is written.
+
+**Coverage exception on 5 Oct 2026:**
+- 63 Google leads were created between 13:20 and 14:24 IST, mostly
+  `website`, and assigned to six RMs.
+- They were later closed: mostly Not Enquired, Ringing or Not Contactable,
+  spread over Oct 5–12.
+- 61 of them never appeared in `Movement_Log`, so they are outside the
+  all-leads population. Most likely a bulk import or re-push; this was not
+  confirmed with the import owner.
+- That day shows 42% coverage. Every other day of Oct 1–10 is 76–100%.
