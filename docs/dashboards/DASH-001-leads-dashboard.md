@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-13 against commit `fb25233` — `TAB-009` gained a By Lead Type section (`#sec-oppmonitor-types`) and its Scope paragraph describes the all-leads method; other tabs, buttons, scripts and load order unchanged |
+| **Last Verified** | 2026-10-13 against commit `4030402` — `TAB-009` gained a By Lead Type section (`#sec-oppmonitor-types`) and its Scope paragraph describes the all-leads method; other tabs, buttons, scripts and load order unchanged |
 
 ## Purpose / reason to exist
 

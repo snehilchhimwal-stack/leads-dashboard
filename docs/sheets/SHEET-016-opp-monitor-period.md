@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-13 against commit `fb25233` — 9 per-lead-type columns added (Search / Non-UTM / Discovery x leads, same-day, 48h); `source` now names the method (`all_leads`) |
+| **Last Verified** | 2026-10-13 against commit `4030402` — 9 per-lead-type columns added (Search / Non-UTM / Discovery x leads, same-day, 48h); `source` now names the method (`all_leads`) |
 
 ## Purpose / reason to exist
 

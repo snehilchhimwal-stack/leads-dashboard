@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-13 against commit `fb25233` — all-leads method + per-lead-type (Search/Non-UTM/Discovery) columns and "By Lead Type" table; no badge across methods; FN-436/437, EXC-144 added, every `#Lnn` anchor re-read |
+| **Last Verified** | 2026-10-13 against commit `4030402` — all-leads method + per-lead-type (Search/Non-UTM/Discovery) columns and "By Lead Type" table; no badge across methods; FN-436/437, EXC-144 added, every `#Lnn` anchor re-read |
 
 ## Purpose / reason to exist
 
@@ -269,7 +269,7 @@ no `filterState`) and has been corrected throughout. Revalidated
 2026-10-12 for the audit fixes (file 445L → 560L): live rows read
 `allParsedLeads` with a Google Non-UTM/Search scope and coverage window,
 FN-434/FN-435 and EXC-143 added, every `#Lnn` anchor re-read from source.
-Revalidated 2026-10-13 at `fb25233` for the all-leads method: per-lead-type
+Revalidated 2026-10-13 at `4030402` for the all-leads method: per-lead-type
 columns (read range widened to `A1:AZ`), the By Lead Type table, the
 per-type live counts and the same-`source` badge rule; FN-436/FN-437 and
 EXC-144 added.

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-13 against commit `fb25233` — all-leads method (from 11 Sep 2026): per-lead-type columns and a By Lead Type table (Search / Non-UTM / Discovery); no badge between rows recorded with different methods; Scope text updated |
+| **Last Verified** | 2026-10-13 against commit `4030402` — all-leads method (from 11 Sep 2026): per-lead-type columns and a By Lead Type table (Search / Non-UTM / Discovery); no badge between rows recorded with different methods; Scope text updated |
 
 ## Purpose / reason to exist
 
