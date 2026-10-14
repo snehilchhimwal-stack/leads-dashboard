@@ -2256,6 +2256,28 @@
     movementSnapshots = priorMovementSnapshots;
   }
 
+  // ---- FE-1..3 (2026-10-13): false fuzzy outcome matches ----
+  // The same phrases Tests_FollowupEngine.gs asserts against inferOutcomeGs_; the two runtimes must agree.
+  if (typeof inferOutcome === 'function') {
+    const fe = s => inferOutcome(s);
+    assert('inferOutcome (FE-1): "Client still deciding" is NOT Call Declined', fe('Client still deciding') !== 'Call Declined', fe('Client still deciding'));
+    assert('inferOutcome (FE-1): "declining" / "declined" / "call declined" are still Call Declined',
+      fe('declining') === 'Call Declined' && fe('declined') === 'Call Declined' && fe('call declined') === 'Call Declined');
+    assert('inferOutcome (FE-2): "Voice broken" is NOT CP/Broker', fe('Voice broken') !== 'Channel Partner / Broker Lead', fe('Voice broken'));
+    assert('inferOutcome (FE-2): "He is a broker" / "works with brokers" are still CP/Broker',
+      fe('He is a broker') === 'Channel Partner / Broker Lead' && fe('works with brokers') === 'Channel Partner / Broker Lead');
+    assert('inferOutcome (FE-3): "bringing wife next week" is NOT Ringing', fe('bringing wife next week') !== 'Ringing / RNR', fe('bringing wife next week'));
+    assert('inferOutcome (FE-3): "Ringing" / "rining" are still Ringing / RNR, "RNR" still RNR',
+      fe('Ringing') === 'Ringing / RNR' && fe('rining') === 'Ringing / RNR' && fe('RNR') === 'RNR');
+    assert('inferOutcome (FE-3): "asked to let him know the price" / "will try to let you know" are NOT Resale/Rental',
+      fe('asked to let him know the price') !== 'Resale / Rental (Out of Scope)' && fe('will try to let you know') !== 'Resale / Rental (Out of Scope)',
+      fe('asked to let him know the price') + ' / ' + fe('will try to let you know'));
+    assert('inferOutcome (FE-3): "flat is to let" / "wants a to-let flat" / "resale only" are still Resale/Rental',
+      ['flat is to let', 'wants a to-let flat', 'resale only'].every(s => fe(s) === 'Resale / Rental (Out of Scope)'));
+  } else {
+    assert('inferOutcome is loaded (FE-1..3 checks)', false, 'typeof inferOutcome = ' + typeof inferOutcome);
+  }
+
   statusEl.textContent = 'Done: ' + results.pass + ' passed, ' + results.fail + ' failed.';
   statusEl.style.color = results.fail ? '#ff5d5d' : '#4ade80';
   window.__harnessResults = results;

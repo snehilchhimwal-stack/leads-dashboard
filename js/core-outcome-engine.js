@@ -10,6 +10,15 @@
 // formatters (istStamp/fmtWorkingWait) that sit right beside them in the
 // original file. Split out of core.js (Phase 2 — see HANDOVER.md). Pure
 // code motion — no logic changed.
+//
+// Twin: FollowupEngine.gs (the emails). OUTCOME_RULES/FOLLOWUP_SUGGESTIONS
+// must stay identical there. INTENDED differences in the follow-up TEXT
+// (FE-5, 2026-10-13 - documented, not bugs): the email appends its
+// FOLLOWUP_MODIFIERS_GS_ clauses (budget/time/channel/decision-maker),
+// which the dashboard does not show; unmatchedFollowUp here adds the
+// entry's timestamp; suggestedFollowUp has a closing_reason tier the
+// email never needs (it only lists open leads); the last_comment
+// fallback here credits l.RM, the email leaves it blank.
 // ============================================================
 
 // A lead's comment history lives in TWO columns — internal_status_comments
@@ -158,8 +167,15 @@ function _typoBudget(targetLen){
   if (targetLen <= 8) return 1;
   return 2;
 }
+// Signal words that only ever match EXACTLY, with no typo budget (FE-1..3, 2026-10-13): each sits within its budget of a
+// common, unrelated word - 'declining' of "deciding" (2 edits), 'broker' of "broken" (1), 'ringing' of "bringing" (1) - so
+// "client still deciding" read as Call Declined, "voice broken" as CP/Broker and "bringing wife" as Ringing. The real typos
+// worth keeping get literal entries in the rule instead ('rining', 'brokers'), the 'buzy'/'disconect' precedent.
+// KEEP IN SYNC with FollowupEngine.gs _EXACT_ONLY_SIGNAL_WORDS_GS_.
+const _EXACT_ONLY_SIGNAL_WORDS = new Set(['declining', 'broker', 'ringing']);
 function _wordsMatch(word, target){
   if (word === target) return true;
+  if (_EXACT_ONLY_SIGNAL_WORDS.has(target)) return false;
   const budget = _typoBudget(target.length);
   if (!budget || Math.abs(word.length - target.length) > budget) return false; // cheap pre-filter before the real (more expensive) distance check
   return _editDistance(word, target) <= budget;
@@ -201,6 +217,16 @@ function _signalMatches(commentWords, signal){
 }
 function _anySignal(commentWords, signals){
   return signals.some(s => _signalMatches(commentWords, s));
+}
+// "to let" as the property type ("flat is to let", "to-let board", "to let his flat") - but not the ordinary verb phrase
+// "to let him/her/me/us/them/you know" or "to let know" (FE-3, 2026-10-13). KEEP IN SYNC with FollowupEngine.gs _hasToLetPropertyGs_.
+const _TO_LET_NOT_PROPERTY_NEXT = new Set(['him', 'her', 'me', 'us', 'them', 'you', 'know']);
+function _hasToLetProperty(commentWords){
+  for (let i = 0; i + 1 < commentWords.length; i++){
+    if (commentWords[i] !== 'to' || commentWords[i + 1] !== 'let') continue;
+    if (!_TO_LET_NOT_PROPERTY_NEXT.has(commentWords[i + 2])) return true;
+  }
+  return false;
 }
 
 // One outcome per entry, checked IN ORDER — the first rule that matches
@@ -342,7 +368,7 @@ const OUTCOME_RULES = [
   // internal telecalling shorthand this specific and this frequent is
   // safe at zero typo tolerance.
   { outcome: 'Channel Partner / Broker Lead', signals: [
-      'channel partner', 'broker', 'cp', 'real estate advisor',
+      'channel partner', 'broker', 'brokers', 'cp', 'real estate advisor',
     ] },
   // NEW outcome — "BPCL" (Budget, Possession timeline, Configuration,
   // Location — Homesfy-internal shorthand, confirmed 2026-08-28) was left
@@ -358,9 +384,9 @@ const OUTCOME_RULES = [
   // We only sell first-sale (developer/builder to buyer) — a client
   // wanting resale or rental was never in scope, so this is a genuine,
   // valid reason to close, same standing as Booked Elsewhere, not a
-  // "lost interest" to chase. 'resale'/'resell'/'second hand'/'to let'
+  // "lost interest" to chase. 'resale'/'resell'/'second hand'
   // name the property TYPE unambiguously, so they're safe as plain
-  // signals. "rent"/"rental"/"renting" are NOT — "on rent currently but
+  // signals ('to let' is not - see _hasToLetProperty). "rent"/"rental"/"renting" are NOT — "on rent currently but
   // wants own home" and "currently renting, wants to buy" both contain
   // those words while meaning the OPPOSITE of this outcome (describing
   // the client's PRESENT arrangement, not their ask). The test below only
@@ -368,8 +394,10 @@ const OUTCOME_RULES = [
   // (want/need/looking/require/search) AND there's no "current(ly)" in
   // the same comment — that combination is what actually distinguishes
   // "I need a place on rent" from "I currently rent".
-  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand', 'to let'],
+  // FE-3 (2026-10-13): 'to let' moved from `signals` into the test - as a plain phrase it matched "asked to let him know".
+  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand'],
     test: (c, w) => {
+      if (_hasToLetProperty(w)) return true;
       if (!_anySignal(w, ['rent', 'rental', 'renting'])) return false;
       if (_anySignal(w, ['current', 'currently'])) return false;
       return _anySignal(w, ['want', 'wants', 'need', 'needs', 'looking', 'require', 'requires', 'searching', 'search']);
@@ -392,7 +420,7 @@ const OUTCOME_RULES = [
   // word signal would wrongly fire on the latter. The anchored regex only
   // matches when "ring"/"ring -" is the WHOLE comment, the same shape the
   // real shorthand notes actually take, not just any mention of the word.
-  { outcome: 'Ringing / RNR', signals: ['ringing'], test: (c) => /^ring\s*-?\s*$/.test(c) },
+  { outcome: 'Ringing / RNR', signals: ['ringing', 'rining'], test: (c) => /^ring\s*-?\s*$/.test(c) },
   // Word-boundary matching (not a bare substring) already keeps "disc"
   // from matching inside "discussed"/"discount"/"disclose" — see
   // _signalMatches, which only ever compares whole tokens.
@@ -699,7 +727,7 @@ function unmatchedFollowUp(comment, loggedBy, ts){
 // (unattributed — there's no name on it to prove it belongs to someone
 // ELSE, so it isn't discarded just for lacking structure). An entry
 // logged under a matched, DIFFERENT name is still excluded. Mirrors
-// OvernightEmailer.gs's latestOutcomeGs_ — keep in sync.
+// FollowupEngine.gs's latestOutcomeGs_ — keep in sync.
 function latestFamilyOutcome(l){
   const ownerName = String(l.RM || '').trim().toLowerCase();
   const allEntries = parseActionLog(combinedCommentsText(l));
@@ -834,7 +862,7 @@ function suggestedFollowUp(l){
   return noCommentFollowUp(l);
 }
 
-// Dashboard counterpart to OvernightEmailer.gs's noCommentFollowUpGs_ —
+// Dashboard counterpart to FollowupEngine.gs's noCommentFollowUpGs_ —
 // see that function's own comment for the full reasoning. Fired from
 // suggestedFollowUp above when the lead's own assigned RM hasn't logged
 // any usable comment (or closing reason) at all — instead of a flat

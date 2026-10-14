@@ -1,7 +1,7 @@
 /**
  * Followup Engine — the comment-classification and Suggested Follow-up
  * text engine, a port of dashboard.html's own inferOutcome/OUTCOME_RULES/
- * FOLLOWUP_SUGGESTIONS (js/core.js). Used by OvernightEmailer.gs's own
+ * FOLLOWUP_SUGGESTIONS (js/core-outcome-engine.js). Used by OvernightEmailer.gs's own
  * send path AND by AllIssuesEmailer.gs (both call overnightFollowupHintGs_
  * directly) — genuinely shared, not specific to either script, even
  * though several function names below still carry an "overnight" prefix
@@ -22,11 +22,20 @@
  * often misspelled — every signal below is checked with typo tolerance (a
  * comment word within a small edit distance of a signal word counts as
  * that signal) so a spelling mistake attributes to its nearest real
- * keyword automatically. Kept traceable to js/core.js: OUTCOME_RULES_GS_
+ * keyword automatically. Kept traceable to js/core-outcome-engine.js: OUTCOME_RULES_GS_
  * and FOLLOWUP_SUGGESTIONS_GS_ below must stay in sync with that file's
  * OUTCOME_RULES/FOLLOWUP_SUGGESTIONS — mirror any change there here too.
- * See js/core.js for the full rationale behind each rule's ordering,
+ * See js/core-outcome-engine.js for the full rationale behind each rule's ordering,
  * signal choice, and typo-budget sizing.
+ *
+ * INTENDED differences from the dashboard's Suggested Follow-up (FE-5, 2026-10-13 - documented, not bugs; the outcome
+ * rules themselves must stay identical):
+ *   - the email appends FOLLOWUP_MODIFIERS_GS_ clauses (budget, preferred time/channel, decision-maker); the dashboard
+ *     shows the primary suggestion only.
+ *   - unmatchedFollowUpGs_ quotes the logger but not the timestamp, and its blank-comment line is shorter.
+ *   - no closing_reason tier: emailed leads are open, so the dashboard's "Lead closed (...)" line never applies here.
+ *   - latestOutcomeGs_'s last_comment fallback leaves loggedBy blank (the dashboard fills in the RM).
+ *   - comment timestamps are read in the fixed "YYYY-MM-DD HH:MM" IST form only (the dashboard uses parseDate).
  *
  * Depends on Core.gs (getVal_, canonicalStage_, istDayKeyGs_) — load
  * order between files doesn't matter to Apps Script.
@@ -51,9 +60,12 @@ function parseDatedCommentEntries_(internalComments, stageComments) {
   if (!combined) return [];
   const dates = [];
   combined.split('|').forEach(function (entry) {
-    const m = entry.trim().match(/-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
+    // SE-3 (2026-10-13): the same entry regex as parseActionLog (JS) and latestOutcomeGs_ below - a "Name:" prefix is
+    // required. Without it an unattributed dated line counted here but not on the dashboard, so the email and the
+    // dashboard could disagree on Follow-up Overdue / Behind on Today's Calls.
+    const m = entry.trim().match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
     if (!m) return;
-    const d = new Date(m[1].replace(' ', 'T') + ':00+05:30');
+    const d = new Date(m[3].replace(' ', 'T') + ':00+05:30');
     if (!isNaN(d.getTime())) dates.push(d);
   });
   return dates;
@@ -102,8 +114,15 @@ function _typoBudgetGs_(targetLen) {
   if (targetLen <= 8) return 1;
   return 2;
 }
+// Signal words that only ever match EXACTLY, with no typo budget (FE-1..3, 2026-10-13): each sits within its budget of a
+// common, unrelated word - 'declining' of "deciding" (2 edits), 'broker' of "broken" (1), 'ringing' of "bringing" (1) - so
+// "client still deciding" read as Call Declined, "voice broken" as CP/Broker and "bringing wife" as Ringing. The real typos
+// worth keeping get literal entries in the rule instead ('rining', 'brokers'), the 'buzy'/'disconect' precedent.
+// KEEP IN SYNC with js/core-outcome-engine.js _EXACT_ONLY_SIGNAL_WORDS.
+const _EXACT_ONLY_SIGNAL_WORDS_GS_ = { declining: true, broker: true, ringing: true };
 function _wordsMatchGs_(word, target) {
   if (word === target) return true;
+  if (_EXACT_ONLY_SIGNAL_WORDS_GS_[target] === true) return false;
   const budget = _typoBudgetGs_(target.length);
   if (!budget || Math.abs(word.length - target.length) > budget) return false;
   return _editDistanceGs_(word, target) <= budget;
@@ -131,6 +150,16 @@ function _signalMatchesGs_(commentWords, signal) {
 }
 function _anySignalGs_(commentWords, signals) {
   return signals.some(function (s) { return _signalMatchesGs_(commentWords, s); });
+}
+// "to let" as the property type ("flat is to let", "to-let board", "to let his flat") - but not the ordinary verb phrase
+// "to let him/her/me/us/them/you know" or "to let know" (FE-3, 2026-10-13). KEEP IN SYNC with js/core-outcome-engine.js _hasToLetProperty.
+const _TO_LET_NOT_PROPERTY_NEXT_GS_ = { him: true, her: true, me: true, us: true, them: true, you: true, know: true };
+function _hasToLetPropertyGs_(commentWords) {
+  for (let i = 0; i + 1 < commentWords.length; i++) {
+    if (commentWords[i] !== 'to' || commentWords[i + 1] !== 'let') continue;
+    if (_TO_LET_NOT_PROPERTY_NEXT_GS_[commentWords[i + 2]] !== true) return true;
+  }
+  return false;
 }
 
 // This array was audited against a real batch of ~400 rows pulled from
@@ -246,7 +275,7 @@ const OUTCOME_RULES_GS_ = [
   // internal telecalling shorthand this specific and this frequent is
   // safe at zero typo tolerance.
   { outcome: 'Channel Partner / Broker Lead', signals: [
-      'channel partner', 'broker', 'cp', 'real estate advisor',
+      'channel partner', 'broker', 'brokers', 'cp', 'real estate advisor',
     ] },
   // NEW outcome — "BPCL" (Budget, Possession timeline, Configuration,
   // Location — Homesfy-internal shorthand, confirmed 2026-08-28) was left
@@ -259,8 +288,10 @@ const OUTCOME_RULES_GS_ = [
       if (!_anySignalGs_(w, ['bpcl'])) return false;
       return _anySignalGs_(w, ['not', 'nahi', 'didnt', 'doesnt', 'no']);
     } },
-  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand', 'to let'],
+  // FE-3 (2026-10-13): 'to let' moved from `signals` into the test - as a plain phrase it matched "asked to let him know".
+  { outcome: 'Resale / Rental (Out of Scope)', signals: ['resale', 'resell', 'second hand'],
     test: function (c, w) {
+      if (_hasToLetPropertyGs_(w)) return true;
       if (!_anySignalGs_(w, ['rent', 'rental', 'renting'])) return false;
       if (_anySignalGs_(w, ['current', 'currently'])) return false;
       return _anySignalGs_(w, ['want', 'wants', 'need', 'needs', 'looking', 'require', 'requires', 'searching', 'search']);
@@ -278,7 +309,7 @@ const OUTCOME_RULES_GS_ = [
       // phrasings of the same "couldn't reach them" meaning.
       'no respond', 'not respond', 'not response', 'not attending', 'not able to connect',
     ] },
-  { outcome: 'Ringing / RNR', signals: ['ringing'], test: function (c) { return /^ring\s*-?\s*$/.test(c); } },
+  { outcome: 'Ringing / RNR', signals: ['ringing', 'rining'], test: function (c) { return /^ring\s*-?\s*$/.test(c); } },
   { outcome: 'Disconnected', signals: [
       'disconnected', 'call disc', 'disc', 'network issue', 'network problem', 'poor network',
       'call not connecting', 'call not connected', 'call not connect', 'not getting connected',
@@ -503,7 +534,9 @@ const FOLLOWUP_MODIFIERS_GS_ = [
       // Explicit time ("after 6pm", "before 10 am", "by 7pm") — quote the
       // exact phrase back, since "call them back at the right time" is
       // far more useful with the actual time attached.
-      const explicit = c.match(/\b(after|before|around|by)\s*(\d{1,2})(?:[:.]\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b/);
+      // FE-4 (2026-10-13): the hour must carry am/pm or minutes ("after 6pm", "around 5:30") - a bare number read "after 2
+      // days" / "by 3 weeks" as a clock time. Minutes followed by a money unit ("around 1.25 cr") are a budget, not a time.
+      const explicit = c.match(/\b(after|before|around|by)\s*\d{1,2}(?:\s*(?:am|pm|a\.m\.?|p\.m\.?)|[:.]\d{2}(?!\s*(?:cr|crore|crores|lac|lacs|lakh|lakhs|l|k)\b)(?:\s*(?:am|pm|a\.m\.?|p\.m\.?))?)(?![a-z0-9])/);
       if (explicit) {
         return 'They mentioned a specific time ("' + explicit[0].trim() + '") — target the callback for then, not a random slot.';
       }
@@ -569,7 +602,7 @@ function detectFollowupModifiersGs_(comment, primaryOutcome) {
 
 // Own-comment text only (internal_status_comments + stage_comments,
 // pipe-joined) — NOT the dashboard's own richer collateFamilyComments
-// (js/core.js), which also folds in every sibling copy of the SAME
+// (js/core-outcome-engine.js), which also folds in every sibling copy of the SAME
 // customer across other regions/sources. That sibling collation depends on
 // the dashboard's own in-browser identity-clustering over the WHOLE
 // fetched dataset — state that only exists in a signed-in browser tab, not
@@ -593,7 +626,7 @@ function overnightStatusLabelGs_(stage) {
   return String(stage || '').trim() || 'Unrecognized Stage';
 }
 
-// Port of the dashboard's own suggestedFollowUp (js/core.js) — see
+// Port of the dashboard's own suggestedFollowUp (js/core-outcome-engine.js) — see
 // inferOutcomeGs_/OUTCOME_RULES_GS_/FOLLOWUP_SUGGESTIONS_GS_ above for the
 // keyword engine this reads combinedCommentsTextGs_ through. Scoped to
 // THIS row's own comments only — see latestOutcomeGs_'s own comment for
@@ -668,7 +701,7 @@ function noCommentFollowUpGs_(row, colIndex, now, baselineEntry) {
     ' made since the last check. Keep trying to connect, and also send a WhatsApp message.';
 }
 
-// Single-copy, owner-filtered port of js/core.js's latestFamilyOutcome —
+// Single-copy, owner-filtered port of js/core-outcome-engine.js's latestFamilyOutcome —
 // see that function's own comment for the real production case this
 // filtering fixes. Sibling RM copies of the same customer are NOT pooled
 // in, and neither is any comment entry logged by someone other than
@@ -720,7 +753,7 @@ function latestOutcomeGs_(row, colIndex) {
     // match, here's the (blank) latest note" is still more honest than
     // silently reverting to an earlier fallback tier (e.g. "no contact
     // made yet") once the owner really did log multiple attempts, just
-    // without notes. Mirrors js/core.js's latestFamilyOutcome — keep in
+    // without notes. Mirrors js/core-outcome-engine.js's latestFamilyOutcome — keep in
     // sync.
     const withText = entries.filter(function (e) { return e.comment; });
     const candidates = withText.length ? withText : entries;

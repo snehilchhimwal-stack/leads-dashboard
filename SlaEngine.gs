@@ -38,11 +38,31 @@ const FIRST_CONTACT_SLA_MINUTES_ = 10;
 const WORK_START_HOUR_ = 9;
 const WORK_END_HOUR_ = 19;
 
+// SE-2 (2026-10-13): lead_assigned_at / last_connect_time read the way the dashboard's parseDate (js/core-lead-model.js)
+// reads them. A real Date cell is used as is (an invalid one is null). A text cell is parsed too, instead of being treated as
+// "no date": "YYYY-MM-DD HH:MM[:SS]" (space or T) and a bare "YYYY-MM-DD" are IST wall time (+05:30), and anything else is
+// handed to new Date() (which handles an explicit zone such as "...Z" / "+05:30"). Numbers and other types stay null, as before.
+function parseSlaDateGs_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (!s) return null;
+  const dt = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  let d;
+  if (dt) d = new Date(dt[1] + '-' + dt[2] + '-' + dt[3] + 'T' + dt[4] + ':' + dt[5] + ':' + (dt[6] || '00') + '+05:30');
+  else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) d = new Date(s + 'T00:00:00+05:30');
+  else d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 // Faithful port of the 5 SLA rules dashboard.html's enrichLead computes —
 // see that function for the canonical definitions this must stay
 // traceable back to. Only computes what SLA_History needs (isOpenLead +
 // the 5 rules), not the many other fields enrichLead also derives purely
 // for the dashboard's own UI (sibling pooling, multi-agent detection, etc.)
+// DR-10 (2026-10-13): KEEP IN SYNC with DailyRmIssueLog.gs computeRmPerfEligibilityGs_, which copies this function's
+// open / dated / grace / 48h eligibility - a change to those gates here must be made there too. (As of 2026-10-13 that copy
+// still reads lead_assigned_at / last_connect_time as Date cells only; it should use parseSlaDateGs_ like this one, SE-2.)
 function computeSlaFlags_(row, colIndex, now, baselineMap) {
   const stage = getVal_(row, colIndex, 'current_stage');
   const closingReason = getVal_(row, colIndex, 'closing_reason');
@@ -57,7 +77,7 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   if (!isOpenLead) return flags;
 
   const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
-  const created = createdRaw instanceof Date ? createdRaw : null;
+  const created = parseSlaDateGs_(createdRaw); // SE-2
   if (!created) return flags; // undatable — no rule can fire, same as enrichLead's ageHours=null path
 
   const ageHours = (now.getTime() - created.getTime()) / 36e5;
@@ -81,7 +101,7 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   flags.stageStuck48h = past48h && pastGrace;
 
   const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
-  const connectDate = connectTimeRaw instanceof Date ? connectTimeRaw : null;
+  const connectDate = parseSlaDateGs_(connectTimeRaw); // SE-2
   const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
 
   // Deliberately grace-exempt, same as dashboard.html — see its own
@@ -281,7 +301,11 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leads
     }
     const wasRank = priorityIndexOf(priorLabel);
     const isRank = priorityIndexOf(issue.label);
-    const escalated = wasRank !== -1 && isRank !== -1 && isRank < wasRank; // lower index = higher priority
+    // SE-1 (2026-10-13, product decision): "Behind on Today's Calls" counts calls since IST midnight against a FULL-day
+    // minimum, so at 10:00 / 13:00 most leads read as behind just because the day has started. A move INTO that label is
+    // therefore reported as category_changed, never escalated. (17:00 flags and computeSlaFlags_ itself are unchanged.)
+    const escalated = wasRank !== -1 && isRank !== -1 && isRank < wasRank // lower index = higher priority
+      && issue.label !== "Behind on Today's Calls";
     return { lead_id: entry.lead_id, state: escalated ? 'escalated' : 'category_changed', currentIssueLabel: issue.label, currentStatus: currentStatus };
   });
 }

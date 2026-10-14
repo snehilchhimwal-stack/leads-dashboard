@@ -228,6 +228,31 @@ function runOpsChecklistRunnerTests_() {
     TestAssert_(boundaryUsage.stale.some(function (c) { return c.id === 'tab-morning' && !c.neverUsed; }),
       'checkStaleComponents_: a component last used 30 days + 1 minute ago IS stale (just past the boundary)');
 
+    // ---- OC-3 (2026-10-13): duplicate rows for one id - the NEWEST use wins, wherever it sits ----
+    const dupSs = TestMockSpreadsheet_({
+      'Feature_Usage': TestMockSheet_('Feature_Usage', [
+        FEATURE_USAGE_HEADER_TEST_,
+        ['tab-overview', '2026-11-14 10:00:00', 7, '2026-09-20 08:00:00'], // newer
+        ['tab-overview', '2026-09-01 10:00:00', 2, '2026-09-01 08:00:00'], // older duplicate, LAST
+        ['tab-morning', '', 1, '2026-09-01 08:00:00'],                     // undated row first...
+        ['tab-morning', '2026-11-14 10:00:00', 4, '2026-09-01 08:00:00'],  // ...then a dated one
+      ]),
+    });
+    const dupUsage = checkStaleComponents_(dupSs, usageNow);
+    TestAssert_(dupUsage.recent.some(function (c) { return c.id === 'tab-overview'; }) && !dupUsage.stale.some(function (c) { return c.id === 'tab-overview'; }),
+      'checkStaleComponents_ (OC-3): an older duplicate row listed LAST does not make a recently-used tab stale');
+    TestAssert_(dupUsage.recent.some(function (c) { return c.id === 'tab-morning'; }), 'checkStaleComponents_ (OC-3): a dated row beats an undated duplicate for the same id');
+
+    // ---- OC-1 (2026-10-13): one check that throws does not abort the weekly summary ----
+    const realFreshness = checkMovementLogFreshness_;
+    let oc1Summary = null, oc1Threw = null;
+    checkMovementLogFreshness_ = function () { throw new Error('simulated freshness failure'); };
+    try { oc1Summary = buildWeeklyOpsChecklistSummary_(cleanSs, now); } catch (e) { oc1Threw = e; } finally { checkMovementLogFreshness_ = realFreshness; }
+    TestAssert_(oc1Threw === null && !!oc1Summary, 'buildWeeklyOpsChecklistSummary_ (OC-1): a check that throws does not abort the summary');
+    TestAssertEqual_(oc1Summary && oc1Summary.issueCount, 1, 'buildWeeklyOpsChecklistSummary_ (OC-1): the failed check counts as one issue');
+    TestAssertContains_(oc1Summary ? oc1Summary.lines.join('\n') : '', 'Movement_Log freshness check FAILED (simulated freshness failure)', 'buildWeeklyOpsChecklistSummary_ (OC-1): the failure is named in the email');
+    TestAssertContains_(oc1Summary ? oc1Summary.lines.join('\n') : '', 'Cell budget', 'buildWeeklyOpsChecklistSummary_ (OC-1): the checks after it still ran');
+
     // ---- checkStaleComponents_: "missing tracking data" -- a row EXISTS
     // for a component but last_used_at is blank/malformed (a hand-edited
     // cell, a partial write, or data predating this column). Must be

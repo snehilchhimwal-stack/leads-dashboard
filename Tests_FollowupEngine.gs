@@ -51,6 +51,30 @@ function runFollowupEngineTests_() {
     TestAssertContains_(FOLLOWUP_SUGGESTIONS_GS_['Already Visited (Other Project)'], 'DIFFERENT project options', 'FOLLOWUP_SUGGESTIONS_GS_: "Already Visited" suggests sharing different options rather than diagnosing which case it is');
     TestAssertEqual_(inferOutcomeGs_('site visit scheduled for tomorrow'), 'Visit Arranged', 'inferOutcomeGs_: "site visit" still resolves to Visit Arranged, not Already Visited — no collision from the new rule');
 
+    // ---- FE-1..3 (2026-10-13): short signal words that fuzzy-matched unrelated words. The same phrases are asserted against
+    // the JS twin in tests/frontend-harness.html. ----
+    TestAssert_(inferOutcomeGs_('Client still deciding') !== 'Call Declined', 'inferOutcomeGs_ (FE-1): "still deciding" is NOT Call Declined (got ' + inferOutcomeGs_('Client still deciding') + ')');
+    TestAssertEqual_(inferOutcomeGs_('declining'), 'Call Declined', 'inferOutcomeGs_ (FE-1): exact "declining" is still Call Declined');
+    TestAssertEqual_(inferOutcomeGs_('declined'), 'Call Declined', 'inferOutcomeGs_ (FE-1): "declined" is still Call Declined');
+    TestAssertEqual_(inferOutcomeGs_('call declined'), 'Call Declined', 'inferOutcomeGs_ (FE-1): "call declined" is still Call Declined');
+    TestAssert_(inferOutcomeGs_('Voice broken') !== 'Channel Partner / Broker Lead', 'inferOutcomeGs_ (FE-2): "voice broken" is NOT CP/Broker (got ' + inferOutcomeGs_('Voice broken') + ')');
+    TestAssertEqual_(inferOutcomeGs_('He is a broker'), 'Channel Partner / Broker Lead', 'inferOutcomeGs_ (FE-2): "broker" is still CP/Broker');
+    TestAssertEqual_(inferOutcomeGs_('works with brokers'), 'Channel Partner / Broker Lead', 'inferOutcomeGs_ (FE-2): plural "brokers" is still CP/Broker (literal entry)');
+    TestAssert_(inferOutcomeGs_('bringing wife next week') !== 'Ringing / RNR', 'inferOutcomeGs_ (FE-3): "bringing wife" is NOT Ringing (got ' + inferOutcomeGs_('bringing wife next week') + ')');
+    TestAssertEqual_(inferOutcomeGs_('ringing no answer later'), 'RNR', 'inferOutcomeGs_ (FE-3): RNR rule still wins over Ringing when both are present');
+    TestAssertEqual_(inferOutcomeGs_('Ringing'), 'Ringing / RNR', 'inferOutcomeGs_ (FE-3): exact "Ringing" still resolves');
+    TestAssertEqual_(inferOutcomeGs_('rining'), 'Ringing / RNR', 'inferOutcomeGs_ (FE-3): the common typo "rining" still resolves (literal entry)');
+    TestAssertEqual_(inferOutcomeGs_('RNR'), 'RNR', 'inferOutcomeGs_ (FE-3): "RNR" still resolves');
+    TestAssert_(inferOutcomeGs_('asked to let him know the price') !== 'Resale / Rental (Out of Scope)', 'inferOutcomeGs_ (FE-3): "asked to let him know" is NOT Resale/Rental (got ' + inferOutcomeGs_('asked to let him know the price') + ')');
+    TestAssert_(inferOutcomeGs_('will try to let you know') !== 'Resale / Rental (Out of Scope)', 'inferOutcomeGs_ (FE-3): "to let you know" is NOT Resale/Rental');
+    TestAssertEqual_(inferOutcomeGs_('flat is to let'), 'Resale / Rental (Out of Scope)', 'inferOutcomeGs_ (FE-3): "flat is to let" is still Resale/Rental');
+    TestAssertEqual_(inferOutcomeGs_('wants a to-let flat'), 'Resale / Rental (Out of Scope)', 'inferOutcomeGs_ (FE-3): "to-let flat" is still Resale/Rental');
+    TestAssertEqual_(inferOutcomeGs_('resale only'), 'Resale / Rental (Out of Scope)', 'inferOutcomeGs_ (FE-3): "resale" is unchanged');
+
+    // ---- SE-3 (2026-10-13): dated entries need the "Name:" prefix, like the dashboard's parseActionLog ----
+    TestAssertEqual_(countTodayCommentEntries_('Test RM One: Ringing - 2026-08-17 10:00 | Ringing - 2026-08-17 11:00', '', now), 1, 'countTodayCommentEntries_ (SE-3): an entry without a "Name:" prefix is not counted');
+    TestAssertEqual_(latestCommentTimestamp_('Test RM One: Busy - 2026-08-17 09:00 | no name - 2026-08-17 12:00', '').getTime(), new Date('2026-08-17T09:00:00+05:30').getTime(), 'latestCommentTimestamp_ (SE-3): an unprefixed later entry does not count as the latest comment');
+
     // ---- FOLLOWUP_SUGGESTIONS_GS_ completeness ----
     // Every outcome inferOutcomeGs_ can possibly return must have a
     // suggestion — a missing one would silently print "undefined" in a
@@ -83,6 +107,13 @@ function runFollowupEngineTests_() {
 
     clauses = detectFollowupModifiersGs_('Call after 7pm please', 'DNP');
     TestAssertContains_(clauses.join(' '), 'after 7pm', 'detectFollowupModifiersGs_: preferredTime quotes back the exact time phrase found');
+
+    // FE-4 (2026-10-13): an hour needs am/pm or minutes; a number of days/weeks or a budget is not a time.
+    TestAssert_(detectFollowupModifiersGs_('call after 2 days', 'DNP').join(' ').indexOf('specific time') === -1, 'detectFollowupModifiersGs_ (FE-4): "after 2 days" is NOT read as a specific time');
+    TestAssert_(detectFollowupModifiersGs_('budget around 1.25 cr', 'Update').join(' ').indexOf('specific time') === -1, 'detectFollowupModifiersGs_ (FE-4): "around 1.25 cr" is NOT read as a specific time');
+    TestAssertContains_(detectFollowupModifiersGs_('call around 5:30', 'DNP').join(' '), '"around 5:30"', 'detectFollowupModifiersGs_ (FE-4): minutes alone still count ("around 5:30")');
+    TestAssertContains_(detectFollowupModifiersGs_('call before 10 a.m. tomorrow', 'DNP').join(' '), '"before 10 a.m."', 'detectFollowupModifiersGs_ (FE-4): "before 10 a.m." still counts');
+    TestAssertContains_(detectFollowupModifiersGs_('call by 5.30pm', 'DNP').join(' '), '"by 5.30pm"', 'detectFollowupModifiersGs_ (FE-4): "by 5.30pm" still counts');
 
     clauses = detectFollowupModifiersGs_('Prefer evening calls only', 'DNP');
     TestAssertContains_(clauses.join(' '), 'evening', 'detectFollowupModifiersGs_: preferredTime falls back to a part-of-day match with no exact hour');
