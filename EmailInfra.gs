@@ -140,7 +140,32 @@ function emailConfigProblemsGs_() {
       if (!resolvedEmailForNameGs_(name)) problems.push({ key: 'leadership:' + name.toLowerCase(), detail: 'no address for "' + name + '" in the private employee table — the leadership Cc is being SKIPPED for them on every email.' });
     });
   }
+  problems.push.apply(problems, pnlHeadConfigProblemsGs_());
   return problems;
+}
+
+// EI-11 (audit 2026-10-13): a P&L head's address comes from Manager_Directory, not the private table, so a missing row dropped
+// the region's P&L Cc on every run with only a Logger line. Read-only: the sheets are only read when both already exist (never
+// created here), and an unreadable directory is logged, not reported (the watchdog must not alert on its own read failure).
+function pnlHeadConfigProblemsGs_() {
+  const names = {};
+  Object.keys(REGION_PNL_HEAD_CC_ || {}).forEach(function (region) {
+    const name = String(REGION_PNL_HEAD_CC_[region] || '').trim();
+    if (name) (names[name] = names[name] || []).push(region);
+  });
+  if (!Object.keys(names).length) return [];
+  let emails;
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss || typeof ss.getSheetByName !== 'function' || !ss.getSheetByName(RM_HIERARCHY_SHEET_) || !ss.getSheetByName(MANAGER_DIRECTORY_SHEET_)) return [];
+    emails = loadRmHierarchyAndEmails_(ss).emailByManagerNameLower || {};
+  } catch (e) {
+    Logger.log('pnlHeadConfigProblemsGs_: Manager_Directory could not be read — P&L Cc not checked: ' + e);
+    return [];
+  }
+  return Object.keys(names).filter(function (name) { return !String(emails[name.toLowerCase()] || '').trim(); }).map(function (name) {
+    return { key: 'pnl:' + name.toLowerCase(), detail: 'no address for the P&L head "' + name + '" in Manager_Directory — the P&L Cc is being SKIPPED on every email for ' + names[name].join(', ') + '.' };
+  });
 }
 
 // Logs where each configured address comes from (the Executions log) — for a human checking a deploy.
@@ -288,7 +313,19 @@ function markChReportSentGs_(kind, region, chName) {
   if (TEST_MODE_OVERRIDE_EMAIL_) return false;
   try {
     if (typeof PropertiesService === 'undefined') return false;
-    const keys = readChReportsTodayGs_(kind) || [];
+    // EI-3 (audit 2026-10-13): a failed READ (the Properties service erred) must not be followed by a write — writing [this key]
+    // alone would erase today's earlier marks, and a same-day re-run would re-send those reports. Not marking fails open. A record
+    // that was read but cannot be parsed is damaged, not unknown: it is replaced (repaired), as before.
+    let raw;
+    try {
+      raw = PropertiesService.getScriptProperties().getProperty(chReportPropertyGs_(kind));
+    } catch (readErr) {
+      Logger.log('CH-level report record (' + kind + ') could not be read — not overwriting it; this report may be re-sent by a same-day re-run: ' + readErr);
+      return false;
+    }
+    let rec = null;
+    try { rec = raw ? JSON.parse(raw) : null; } catch (parseErr) { rec = null; }
+    const keys = (rec && rec.day === istDayKeyGs_(new Date()) && Array.isArray(rec.keys)) ? rec.keys : [];
     const key = chReportKeyGs_(region, chName);
     if (keys.indexOf(key) === -1) keys.push(key);
     PropertiesService.getScriptProperties().setProperty(chReportPropertyGs_(kind), JSON.stringify({ day: istDayKeyGs_(new Date()), keys: keys }));
@@ -398,7 +435,10 @@ function sendOpsAlertViaGmailApiGs_(subject, body) {
   const encodedSubject = /^[\x20-\x7e]*$/.test(cleanSubject)
     ? cleanSubject
     : '=?UTF-8?B?' + Utilities.base64Encode(Utilities.newBlob(cleanSubject).getBytes()) + '?=';
-  const mime = ['To: ' + opsAlertEmailGs_(), 'Subject: ' + encodedSubject, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n');
+  // EI-10 (audit 2026-10-13): the body (em dashes, stack traces with long lines) was sent as raw 8-bit text under an implied
+  // 7bit encoding. It is now base64 (76-character lines), which is valid for any content.
+  const encodedBody = Utilities.base64Encode(Utilities.newBlob(String(body)).getBytes()).replace(/(.{76})/g, '$1\r\n');
+  const mime = ['To: ' + opsAlertEmailGs_(), 'Subject: ' + encodedSubject, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', encodedBody].join('\r\n');
   return Gmail.Users.Messages.send({ raw: Utilities.base64EncodeWebSafe(Utilities.newBlob(mime).getBytes()) }, 'me');
 }
 
@@ -422,18 +462,24 @@ function istStampGs_(date) {
 // small alerts scattered across the run. Reused directly by
 // AllIssuesEmailer.gs — no separate copy needed just because the run
 // that produced the entries is different.
-function notifyLeadSendFailuresGs_(entries) {
+// opts (optional; EI-2, audit 2026-10-13 — the 17:00 run used to get the overnight job's wording): { emailLabel: the kind of
+// email the leads missed (default 'overnight'), retryNote: what a later run does about them (default: the overnight window
+// note), runLabel: a prefix for the subject, e.g. 'Recovery' }.
+function notifyLeadSendFailuresGs_(entries, opts) {
   if (!entries.length) return;
+  const o = opts || {};
+  const emailLabel = o.emailLabel || 'overnight';
+  const retryNote = o.retryNote || 'the window is fixed to this morning\'s run, so tomorrow\'s run will NOT retry them.';
   const dateLabel = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
-  const subject = 'Leads NOT sent (' + entries.length + ') - ' + dateLabel;
+  const subject = (o.runLabel ? o.runLabel + ': ' : '') + 'Leads NOT sent (' + entries.length + ') - ' + dateLabel;
   const html = renderOvernightReportEmailHTML_({
     title: 'Leads Not Sent',
     region: 'All regions',
-    subtitle: entries.length + ' lead(s) got no automated overnight email this run',
+    subtitle: entries.length + ' lead(s) got no automated ' + emailLabel + ' email this run',
     kpis: [
       { value: entries.length, label: entries.length === 1 ? 'Lead Not Sent' : 'Leads Not Sent', bg: '#fee2e2', fg: '#dc2626' },
     ],
-    action: 'Review each row below and either fix the underlying RM_Hierarchy/Manager_Directory gap, or follow up on these leads manually — the window is fixed to this morning\'s run, so tomorrow\'s run will NOT retry them.',
+    action: 'Review each row below and either fix the underlying RM_Hierarchy/Manager_Directory gap, or follow up on these leads manually — ' + retryNote,
     sections: [{
       heading: 'Not Sent', accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       columns: ['Lead ID', 'RM', 'To', 'Cc', 'Reason'],
@@ -448,6 +494,13 @@ function notifyLeadSendFailuresGs_(entries) {
     GmailApp.sendEmail(opsAlertEmailGs_(), subject, plainBody, { htmlBody: html });
   } catch (e) {
     Logger.log('notifyLeadSendFailuresGs_ failed to send its own report: ' + e);
+    // EI-1 (audit 2026-10-13): the Gmail trouble that caused these failures most likely also failed this one call, and the
+    // report was then lost. Fall back to the ops alert path (incident record, retries, the Advanced Gmail Service) as plain text.
+    try {
+      notifyOpsAlertGs_(subject, ['The HTML "Leads NOT sent" report could not be sent (' + e + '), so here it is as plain text.', ''].concat(plainBody.split('\n')));
+    } catch (e2) {
+      Logger.log('notifyLeadSendFailuresGs_: the plain-text fallback failed too: ' + e2);
+    }
   }
 }
 
@@ -575,6 +628,9 @@ function withRetry_(fn, label) {
 //     freshly-created draft isn't always instantly resolvable by that
 //     internal lookup) — exactly the kind of brief, transient condition a
 //     short retry clears, not a permission or logic problem.
+// EI-5 (audit 2026-10-13): each attempt creates its own draft, so a send that finally fails can leave up to 3 identical drafts.
+// They are NOT deleted here (after a "not found" race the draft cannot be looked up by id either, and deleting the wrong one
+// is worse than leaving one); instead the All-Issues failure alerts (AllIssuesEmailer.gs) say several drafts may exist and only one is to be sent.
 function withSendRetry_(fn, label) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -644,6 +700,20 @@ function visibleTextOfHtmlGs_(html) {
     .replace(/\s+/g, ' ').trim();
 }
 
+// EI-4 (audit 2026-10-13): true when `id` appears in `text` as a whole token — not inside a longer id or word. A plain substring
+// check counted lead 123 as present inside 41234, so a body missing a lead could still pass the gate.
+function textContainsIdGs_(text, id) {
+  const s = String(text == null ? '' : text), needle = String(id);
+  if (!needle) return false;
+  let from = 0, at;
+  while ((at = s.indexOf(needle, from)) !== -1) {
+    const before = at > 0 ? s.charAt(at - 1) : '', after = s.charAt(at + needle.length);
+    if (!/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after)) return true;
+    from = at + 1;
+  }
+  return false;
+}
+
 // Normalizes a message (CR/LF in the subject collapsed — a header can never carry a line break) and returns
 // { msg: <the exact payload that will be sent>, problems: [...] }. `msg` = { to, cc, subject, plainBody, htmlBody, leadIds }.
 // leadIds (optional) is the list of lead ids this report email CLAIMS to report: when given, it must be non-empty and every
@@ -674,8 +744,8 @@ function prepareOutgoingEmailGs_(msg) {
     if (!ids.length) {
       problems.push('the email reports no leads — nothing to send');
     } else {
-      const missingPlain = ids.filter(function (id) { return plainBody.indexOf(id) === -1; });
-      const missingHtml = htmlBody === undefined ? [] : ids.filter(function (id) { return visible.indexOf(id) === -1; });
+      const missingPlain = ids.filter(function (id) { return !textContainsIdGs_(plainBody, id); });
+      const missingHtml = htmlBody === undefined ? [] : ids.filter(function (id) { return !textContainsIdGs_(visible, id); });
       if (missingPlain.length) problems.push('lead(s) counted but missing from the plain-text body: ' + missingPlain.slice(0, 5).join(', '));
       if (missingHtml.length) problems.push('lead(s) counted but missing from the HTML body: ' + missingHtml.slice(0, 5).join(', '));
       missingLeadIds = ids.filter(function (id) { return missingPlain.indexOf(id) !== -1 || missingHtml.indexOf(id) !== -1; });
@@ -829,28 +899,30 @@ const EMAIL_JOB_DEADLINE_MINUTES_ = 30; // a job should have STARTED by its sche
 const EMAIL_JOB_MAX_RUN_MINUTES_ = 35;  // a run still `running` this long after it started died (Apps Script's cap is 30)
 function emailJobScheduleGs_() {
   const schedule = {
-    sendOvernightMorningEmails: { hour: 10, label: '10:00 Overnight + Checkpoint 1 emails' },
-    sendOvernightFollowupEmails: { hour: 13, label: '13:00 follow-up replies' },
-    sendAllIssuesEmails: { hour: ALL_ISSUES_RUN_HOUR_, label: '17:00 All-Issues emails' },
+    sendOvernightMorningEmails: { hour: 10, label: '10:00 Overnight + Checkpoint 1 emails', manual: 'sendOvernightMorningEmailsNow' },
+    sendOvernightFollowupEmails: { hour: 13, label: '13:00 follow-up replies', manual: 'sendOvernightFollowupEmailsNow' },
+    sendAllIssuesEmails: { hour: ALL_ISSUES_RUN_HOUR_, label: '17:00 All-Issues emails', manual: 'sendAllIssuesEmailsNow' },
   };
+  // `manual` (EI-6, audit 2026-10-13): the function a human runs by hand to make up a missed run. The watchdog hint used to say
+  // "<job>Now", which does not exist for the sweep checks.
   // RmHierarchySync.gs (2026-10-08): the nightly HR-roster sync. Not an email job, but it shares the lock + run record, and a night
   // it silently does not run is a night the hierarchy keeps drifting. Only watched once that file is part of the project.
-  if (typeof RMSYNC_RUN_HOUR_ !== 'undefined') schedule.syncRmHierarchyNightly = { hour: RMSYNC_RUN_HOUR_, label: '23:15 RM hierarchy sync' };
+  if (typeof RMSYNC_RUN_HOUR_ !== 'undefined') schedule.syncRmHierarchyNightly = { hour: RMSYNC_RUN_HOUR_, label: '23:15 RM hierarchy sync', manual: 'syncRmHierarchyNightlyNow' };
   // CycleReport.gs (Email Ops EO-8): the daily 16:30 report to Snehil. A job with a `minute` is due at hour:minute, so its deadline is that plus
   // EMAIL_JOB_DEADLINE_MINUTES_ (17:00 for this one). Only watched once that file is part of the project.
   // EmailSweep.gs (Email Ops EO-5 / EO-13): the daily 15:30 bounce/reply sweep that feeds the 16:30 report, and the bounce-only checks 30 minutes after each email job (10:30,
   // 13:30, 17:30 - decision D9). Only watched once that file is part of the project.
-  if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: pad2Gs_(EMAIL_SWEEP_HOUR_) + ':' + pad2Gs_(EMAIL_SWEEP_MINUTE_) + ' bounce/reply sweep' };
+  if (typeof EMAIL_SWEEP_HOUR_ !== 'undefined') schedule.sweepEmailBouncesAndReplies = { hour: EMAIL_SWEEP_HOUR_, minute: EMAIL_SWEEP_MINUTE_, label: pad2Gs_(EMAIL_SWEEP_HOUR_) + ':' + pad2Gs_(EMAIL_SWEEP_MINUTE_) + ' bounce/reply sweep', manual: 'sweepEmailBouncesAndRepliesNow' };
   if (typeof EMAIL_SWEEP_SLOTS_ !== 'undefined') {
-    EMAIL_SWEEP_SLOTS_.forEach(function (slot) { schedule[slot.job] = { hour: slot.hour, minute: slot.minute, label: pad2Gs_(slot.hour) + ':' + pad2Gs_(slot.minute) + ' bounce check (' + slot.after + ')' }; });
+    EMAIL_SWEEP_SLOTS_.forEach(function (slot) { schedule[slot.job] = { hour: slot.hour, minute: slot.minute, label: pad2Gs_(slot.hour) + ':' + pad2Gs_(slot.minute) + ' bounce check (' + slot.after + ')', manual: slot.fn }; });
   }
-  if (typeof CYCLE_REPORT_HOUR_ !== 'undefined') schedule.sendEmailCycleReport = { hour: CYCLE_REPORT_HOUR_, minute: CYCLE_REPORT_MINUTE_, label: '16:30 cycle report' };
+  if (typeof CYCLE_REPORT_HOUR_ !== 'undefined') schedule.sendEmailCycleReport = { hour: CYCLE_REPORT_HOUR_, minute: CYCLE_REPORT_MINUTE_, label: '16:30 cycle report', manual: 'sendEmailCycleReportNow' };
   // OpsAudit.gs (Email Ops EO-3 / EO-4): the three silent audits that follow each email job (11:15, 14:00, 18:00). A silent job that stops running is invisible by design,
   // so the watchdog watches them like any other. Only watched once that file is part of the project.
   if (typeof OPS_AUDIT_SPECS_ !== 'undefined') {
     Object.keys(OPS_AUDIT_SPECS_).forEach(function (k) {
       const a = OPS_AUDIT_SPECS_[k];
-      schedule[a.job] = { hour: a.hour, minute: a.minute, label: pad2Gs_(a.hour) + ':' + pad2Gs_(a.minute) + ' audit of the ' + a.label };
+      schedule[a.job] = { hour: a.hour, minute: a.minute, label: pad2Gs_(a.hour) + ':' + pad2Gs_(a.minute) + ' audit of the ' + a.label, manual: a.job + 'Now' };
     });
   }
   return schedule;
@@ -896,10 +968,12 @@ function runEmailJobTrackedGs_(jobName, fn) {
   const day = istDayKeyGs_(started);
   writeEmailJobRunGs_(jobName, { day: day, startedAt: started.toISOString(), status: 'running' });
   const holding = EMAIL_ALERT_HOLD_JOBS_.indexOf(jobName) !== -1; // EO-2: the three email jobs hold their alerts until they have ended
-  if (holding) emailAlertHoldStartGs_(jobName);
   let failure = null;
   let failed = false;
   try {
+    // EI-12 (audit 2026-10-13): inside the try, so a failure here is recorded as `failed` and re-thrown, never a record left
+    // `running` for the watchdog to mistake for a killed run.
+    if (holding) emailAlertHoldStartGs_(jobName);
     fn();
   } catch (e) {
     failure = e;
@@ -952,8 +1026,10 @@ function checkEmailJobsCompletedGs_(now) {
   // (reported once per RUN, not once per day - it runs four times a day) and `hint`.
   const problems = emailJobProblemsGs_(now).concat(typeof snapshotRunProblemsGs_ === 'function' ? snapshotRunProblemsGs_(now) : []);
   const day = istDayKeyGs_(now);
+  const schedule = emailJobScheduleGs_();
   problems.forEach(function (p) {
     const alertedKey = emailJobAlertedKeyGs_(p.job);
+    const manual = (schedule[p.job] && schedule[p.job].manual) || p.job; // EI-6: the real by-hand function, never a made-up "<job>Now"
     const marker = p.marker || (day + '|' + p.kind);
     if (p.kind !== 'unreadable') {
       let already = null;
@@ -967,7 +1043,8 @@ function checkEmailJobsCompletedGs_(now) {
       '',
       p.hint ? p.hint
         : p.kind === 'never_started' || p.kind === 'stuck'
-          ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + p.job + 'Now by hand (it is safe to re-run: its "already sent today" guards stop it re-sending what already went out).'
+          // EI-6 (audit 2026-10-13): no longer promises a re-run is "safe" — a run killed mid-send may not have recorded its last email.
+          ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + manual + '() by hand. Before you do, check today\'s Email_Ledger rows for this job: a row left ATTEMPTING or UNCONFIRMED may already have been delivered. The job\'s "already sent today" guards skip what was recorded as sent, but a run that died mid-send may not have recorded its last email.'
           : 'See the Executions list for the full error. This watchdog alerts once per day per job and problem.',
     ]);
     if (p.kind !== 'unreadable') {
@@ -1185,7 +1262,7 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
 
   let trulyUnresolved = [];
   if (resolved.unresolved.length) {
-    const legacy = legacyRecipients[region];
+    const legacy = legacyRecipientForRegionGs_(legacyRecipients, region);
     if (legacy) {
       // ALWAYS_CC_EMAILS_ (RmHierarchy.gs) applies even on the legacy
       // fallback path — it's an unconditional business requirement on every
@@ -1260,6 +1337,19 @@ function resolveRecipientEmailsForRegion_(ss, region, rmNames, legacyRecipients,
   return { results: mergedResults, trulyUnresolved: trulyUnresolved, chLevelRms: resolved.chLevelRms };
 }
 
+// EI-8 (audit 2026-10-13): the Region_Recipients row for a region, matched on normRegionKeyGs_ (case, spacing, -/_) — the exact,
+// case-sensitive lookup missed a hand-typed "navi mumbai", so those RMs fell through to the CH backstop. An exact key still wins.
+function legacyRecipientForRegionGs_(legacyRecipients, region) {
+  const map = legacyRecipients || {};
+  if (map[region]) return map[region];
+  const want = normRegionKeyGs_(region);
+  const keys = Object.keys(map);
+  for (let i = 0; i < keys.length; i++) {
+    if (normRegionKeyGs_(keys[i]) === want && map[keys[i]]) return map[keys[i]];
+  }
+  return null;
+}
+
 // Merges resolved recipient buckets that share a To address (case-insensitive, trimmed) into one: the first bucket keeps its
 // label/role/address, takes the union of the RM names, and the union of the Cc addresses (never the To address itself, never
 // a repeat); `source` shows every origin. A bucket with no To address is left alone (the send gate reports it). Pure — the
@@ -1292,8 +1382,11 @@ function mergeBucketsByAddressGs_(buckets) {
   return merged;
 }
 
+// EI-9 (audit 2026-10-13): a read path no longer creates the tab — a missing Region_Recipients simply means "no fallback
+// configured" ({}). The tab is still created by the one-time setup (setupOvernightEmailer, OvernightEmailer.gs).
 function loadRegionRecipients_(ss) {
-  const sheet = ensureRegionRecipientsSheet_(ss);
+  const sheet = withRetry_(function () { return ss.getSheetByName(REGION_RECIPIENTS_SHEET_); }, 'check for existing Region_Recipients');
+  if (!sheet) return {};
   return withRetry_(function () {
     const lastRow = sheet.getLastRow();
     const map = {};
