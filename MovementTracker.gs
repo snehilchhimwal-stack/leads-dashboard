@@ -161,8 +161,28 @@ const CONTENT_HASH_COLUMN_ = 'content_hash';
 // live copy was hashing with — so its digests differed from the
 // browser's ('\0') for every lead. test/check-staleness.py (detector H)
 // flags any raw control character in a .gs file for this reason.
+//
+// 2026-10-14: the date fields are rendered by istFormatGs_ (Core.gs, plain arithmetic) instead of one Utilities.formatDate service
+// call per date per lead - about 20k calls per snapshot run, the bulk of the core capture's time when the platform is slow. The string
+// is byte-identical (a different one would make every lead look changed and re-append the whole table once);
+// _leadContentHashViaServiceGs_ below keeps the original service-call version as the reference the tests and
+// benchmarkSnapshotCostNow() compare against. Nothing in production calls it.
 const CONTENT_HASH_DATE_FIELDS_ ={ lead_assigned_at: true, last_connect_time: true, opp_at: true };
 function _leadContentHashGs_(getFieldValue) {
+  const parts = SNAPSHOT_COLUMNS_.map(function (key) {
+    const v = getFieldValue(key);
+    if (CONTENT_HASH_DATE_FIELDS_[key]) {
+      return v instanceof Date ? istFormatGs_(v, 'yyyy-MM-dd HH:mm:ss') : '';
+    }
+    return v === null || v === undefined ? '' : String(v);
+  });
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, parts.join('\u0000'));
+  return bytes.map(function (b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
+}
+
+// The pre-2026-10-14 implementation, character for character: one Utilities.formatDate call per date field. REFERENCE ONLY - used by
+// Tests_MovementTracker.gs and benchmarkSnapshotCostNow() to prove _leadContentHashGs_ still produces the same digest for the same lead.
+function _leadContentHashViaServiceGs_(getFieldValue) {
   const parts = SNAPSHOT_COLUMNS_.map(function (key) {
     const v = getFieldValue(key);
     if (CONTENT_HASH_DATE_FIELDS_[key]) {
@@ -577,6 +597,50 @@ function writeSlaHistorySnapshot_(ss, dataRows, colIndex, now) {
 // run does it. The deadline leaves ~16 minutes for the slowest single phase to finish before the platform's 30-minute kill.
 const SNAPSHOT_OPTIONAL_PHASE_DEADLINE_SECONDS_ = 840;
 
+// ---- Maintenance that cannot be starved (2026-10-14) ----
+// 14 Oct 06:08: every per-lead step ran 3-10x slower than usual (core capture 266 s, SLA_History write 261 s, Comment_History log 360 s),
+// the run was at 946 s when it reached the maintenance steps at the END of the list, and all four were skipped. That is the budget doing its
+// job - but those four are the ones that keep the workbook under its 10-million-cell wall, and under a SLOW PLATFORM they are always last
+// in line. Now a run that skips any of them records them as OWED (Script Property SNAPSHOT_MAINTENANCE_OWED), and the NEXT run does the
+// maintenance straight after its core capture, before the SLA_History / comment steps (which then take the budget hit instead: the comment
+// steps catch up on the following run, SLA_History loses one trend point). So the maintenance waits at most one run, however slow the platform is.
+// The watchdog (snapshotRunProblemsGs_) only speaks up when the same maintenance has been owed for SNAPSHOT_MAINTENANCE_ALERT_RUNS_ runs in a row or
+// SNAPSHOT_MAINTENANCE_ALERT_HOURS_ hours - one skip is expected noise that heals itself at the next run.
+const SNAPSHOT_MAINTENANCE_PHASES_ = ['Movement_Log prune', 'Comment_History prune', 'Unmatched_Comments_Log prune', 'Daily_Cohort_History persist'];
+const SNAPSHOT_MAINTENANCE_OWED_PROPERTY_ = 'SNAPSHOT_MAINTENANCE_OWED';
+const SNAPSHOT_MAINTENANCE_ALERT_RUNS_ = 2;
+const SNAPSHOT_MAINTENANCE_ALERT_HOURS_ = 12;
+
+// { phaseName: { since: ISO time it first became owed, runs: how many runs in a row have skipped it } } - only known maintenance phases.
+// Fail-open: an unreadable or malformed property means "nothing owed" (the run then simply uses the normal order).
+function readSnapshotMaintenanceOwedGs_() {
+  const out = {};
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_);
+    const rec = raw ? JSON.parse(raw) : null;
+    if (!rec || typeof rec.phases !== 'object' || !rec.phases) return out;
+    Object.keys(rec.phases).forEach(function (name) {
+      const e = rec.phases[name];
+      if (SNAPSHOT_MAINTENANCE_PHASES_.indexOf(name) === -1 || !e || typeof e !== 'object') return;
+      out[name] = { since: String(e.since || ''), runs: Math.max(1, Number(e.runs) || 1) };
+    });
+  } catch (e) {
+    return {};
+  }
+  return out;
+}
+
+// Writes the owed set (an empty set deletes the property). Never throws - the snapshot must not fail over its own bookkeeping.
+function writeSnapshotMaintenanceOwedGs_(owed) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (!Object.keys(owed).length) props.deleteProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_);
+    else props.setProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_, JSON.stringify({ phases: owed }));
+  } catch (e) {
+    Logger.log('Snapshot maintenance-owed record could not be written (the snapshot itself is unaffected): ' + e);
+  }
+}
+
 // Runs one optional phase if the run is still inside its time budget. ctx = { nowMs: () => ms, startedMs, deadlineS, skipped: [],
 // errors: [], failed: [{phase, message}] } (a plain object so a test can drive the clock). A phase that throws is logged, recorded in
 // ctx.failed (so it is emailed and shown in Movement_Log_Runs) and the run carries on - UNLESS
@@ -612,7 +676,8 @@ function runSnapshotPhaseGs_(ctx, name, fn, rethrow) {
  *
  * `opts` is a test hook only: { nowMs: () => ms, deadlineSeconds } replaces the
  * wall clock / the optional-phase budget so a test can simulate a slow run.
- * Returns { leadCountSeen, leadsChanged, totalSeconds, skipped: [phase names], failed: [phase names that threw], timings: ["step 12s", ...] },
+ * Returns { leadCountSeen, leadsChanged, totalSeconds, skipped: [phase names], failed: [phase names that threw], timings: ["step 12s", ...],
+ * maintenanceOwed: [{ phase, since, runs }] (maintenance skipped for budget - done first next run), maintenanceFirst: this run did it first },
  * or null when the tab has nothing to snapshot.
  */
 function snapshotOpenLeads_(label, opts) {
@@ -654,8 +719,10 @@ function snapshotOpenLeads_(label, opts) {
   // Movement_Log row is CONFIRMED (its ingestion run is still recorded
   // below via Movement_Log_Runs) but does NOT get a new duplicate row —
   // see _leadContentHashGs_'s own header for exactly what's hashed and why.
+  const readS = sinceStartS(); // the leads-tab read, logged above
   const latestHashByKey = _latestContentHashByKeyGs_(ss);
-  Logger.log('[timing] hash lookup read at ' + sinceStartS() + 's');
+  const lookupS = sinceStartS();
+  Logger.log('[timing] hash lookup read at ' + lookupS + 's');
 
   let leadCountSeen = 0;
   const out = [];
@@ -675,6 +742,8 @@ function snapshotOpenLeads_(label, opts) {
     record.push(hash);
     out.push(record);
   });
+  const hashedS = sinceStartS();
+  Logger.log('[timing] hashed ' + leadCountSeen + ' leads at ' + hashedS + 's (' + out.length + ' changed)');
 
   if (out.length) {
     const logSheet = ensureMovementLogSheet_(ss);
@@ -682,8 +751,11 @@ function snapshotOpenLeads_(label, opts) {
     const startRow = logSheet.getLastRow() + 1;
     logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
   }
-  Logger.log('[timing] core capture: ' + out.length + ' changed of ' + leadCountSeen + ' leads, appended by ' + sinceStartS() + 's');
-  ctx.timings.push('core capture (read, hash, append) ' + sinceStartS() + 's');
+  const coreS = sinceStartS();
+  Logger.log('[timing] core capture: ' + out.length + ' changed of ' + leadCountSeen + ' leads, appended by ' + coreS + 's');
+  // Where the core capture's time went (2026-10-14): on 14 Oct 06:08 it took 266 s against ~88 s and the log could not say whether the
+  // reads, the per-lead hashing or the append was slow. phase_s now carries "[read, hash lookup, hashing, append]" so the next slow run says.
+  ctx.timings.push('core capture (read, hash, append) ' + coreS + 's [read ' + readS + 's, hash lookup ' + (lookupS - readS) + 's, hashing ' + (hashedS - lookupS) + 's, append ' + (coreS - hashedS) + 's]');
 
   // The run record, written as soon as the core capture is down and ALWAYS (even when out.length is 0 — a run happened whether
   // or not any lead's content changed; keeping those two concepts independent is what Phase 6 of the Lead History &
@@ -701,36 +773,52 @@ function snapshotOpenLeads_(label, opts) {
     runsSheet = null;
   }
 
-  // ---- Optional phases, in priority order, each only while the run is inside its time budget ----
-  // Computed from the SAME dataRows/colIndex read above. The today's-calls baseline it looks up is "the latest snapshot strictly
-  // BEFORE the start of today (IST)", so this run's own rows - appended above, stamped `now` - can never be what it reads.
-  runSnapshotPhaseGs_(ctx, 'SLA_History write', function () { writeSlaHistorySnapshot_(ss, dataRows, colIndex, now); });
-
-  // Same dataRows/colIndex, same wrapped-so-it-can-never-block-the-real-
-  // capture treatment as the SLA_History write just above — see
-  // UnmatchedCommentLogger.gs's own header for why this lives here
-  // rather than on its own trigger.
-  runSnapshotPhaseGs_(ctx, 'Unmatched_Comments_Log scan', function () { scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now); });
-
-  // See InteractionHistoryLogger.gs's own header for why this exists (the
-  // forward-looking capture decision from the "No real interaction-history
-  // data exists anywhere" To-Do task, 2026-09-05).
-  runSnapshotPhaseGs_(ctx, 'Comment_History log', function () { logInteractionHistoryGs_(ss, dataRows, colIndex, now); });
-
-  // Pruning old rows is independent of whether any lead's content changed this time. A failure here is re-thrown at the end
-  // (after the run record) so the execution still shows Failed.
-  runSnapshotPhaseGs_(ctx, 'Movement_Log prune', function () { pruneMovementLog_(ss); }, true);
-
-  // Added 2026-09-29 — see each file's own header ("PRUNING" / "AGE-BASED PRUNING") for why these exist: the cell-budget
-  // diagnostic (Core.gs) found both tabs large enough (2026-09-28) that Snehil confirmed a 30-day retention window for both.
-  runSnapshotPhaseGs_(ctx, 'Comment_History prune', function () { pruneCommentHistory_(ss); });
-  runSnapshotPhaseGs_(ctx, 'Unmatched_Comments_Log prune', function () { pruneUnmatchedCommentsLog_(ss); });
-
-  // Runs LAST, after Movement_Log's own prune, so it reads Movement_Log's
-  // true current (post-prune) retained range rather than a stale
-  // about-to-be-trimmed one. See persistDailyCohortHistoryGs_'s own header
-  // comment for why this needs to run unattended at all.
-  runSnapshotPhaseGs_(ctx, 'Daily_Cohort_History persist', function () { persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now); });
+  // ---- Optional phases, each only while the run is inside its time budget ----
+  // DATA steps - computed from the SAME dataRows/colIndex read above, each wrapped so it can never block the real capture - and
+  // MAINTENANCE steps (pruning, cohort history). Normal order: data first, maintenance last, because a skipped data step loses data
+  // while a skipped maintenance step only waits. When the PREVIOUS run skipped maintenance (it is "owed", see above) the maintenance
+  // goes FIRST this time, so a slow platform can never starve it twice in a row.
+  const owedBefore = readSnapshotMaintenanceOwedGs_();
+  const maintenanceFirst = Object.keys(owedBefore).length > 0;
+  const dataPhases = [
+    // The today's-calls baseline SLA_History looks up is "the latest snapshot strictly BEFORE the start of today (IST)", so this
+    // run's own rows - appended above, stamped `now` - can never be what it reads.
+    { name: 'SLA_History write', run: function () { writeSlaHistorySnapshot_(ss, dataRows, colIndex, now); } },
+    // See UnmatchedCommentLogger.gs's own header for why this lives here rather than on its own trigger.
+    { name: 'Unmatched_Comments_Log scan', run: function () { scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now); } },
+    // See InteractionHistoryLogger.gs's own header for why this exists (the forward-looking capture decision from the
+    // "No real interaction-history data exists anywhere" To-Do task, 2026-09-05).
+    { name: 'Comment_History log', run: function () { logInteractionHistoryGs_(ss, dataRows, colIndex, now); } },
+  ];
+  const maintenancePhases = [
+    // Pruning old rows is independent of whether any lead's content changed this time. A failure here is re-thrown at the end
+    // (after the run record) so the execution still shows Failed.
+    { name: 'Movement_Log prune', run: function () { pruneMovementLog_(ss); }, rethrow: true },
+    // Added 2026-09-29 - see each file's own header ("PRUNING" / "AGE-BASED PRUNING") for why these exist: the cell-budget
+    // diagnostic (Core.gs) found both tabs large enough (2026-09-28) that Snehil confirmed a 30-day retention window for both.
+    { name: 'Comment_History prune', run: function () { pruneCommentHistory_(ss); } },
+    { name: 'Unmatched_Comments_Log prune', run: function () { pruneUnmatchedCommentsLog_(ss); } },
+    // After Movement_Log's own prune, so it reads Movement_Log's true current (post-prune) retained range rather than a stale
+    // about-to-be-trimmed one. See persistDailyCohortHistoryGs_'s own header comment for why this needs to run unattended at all.
+    { name: 'Daily_Cohort_History persist', run: function () { persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now); } },
+  ];
+  if (maintenanceFirst) {
+    Logger.log('[timing] maintenance owed from the previous run (' + Object.keys(owedBefore).join(', ') + ') - running it BEFORE the SLA_History / comment steps this time.');
+  }
+  (maintenanceFirst ? maintenancePhases.concat(dataPhases) : dataPhases.concat(maintenancePhases)).forEach(function (p) {
+    runSnapshotPhaseGs_(ctx, p.name, p.run, p.rethrow);
+  });
+  // What is STILL owed after this run: every maintenance step skipped for budget (a step that ran, or threw - it is alerted on its own -
+  // is no longer owed). `since` and `runs` carry over so the watchdog can tell a one-off skip from a pattern.
+  const owedAfter = {};
+  const owedNowIso = new Date().toISOString();
+  maintenancePhases.forEach(function (p) {
+    if (ctx.skipped.indexOf(p.name) === -1) return;
+    const prev = owedBefore[p.name];
+    owedAfter[p.name] = { since: prev && prev.since ? prev.since : owedNowIso, runs: prev ? prev.runs + 1 : 1 };
+  });
+  writeSnapshotMaintenanceOwedGs_(owedAfter);
+  ctx.owed = Object.keys(owedAfter).map(function (name) { return { phase: name, since: owedAfter[name].since, runs: owedAfter[name].runs }; });
 
   const totalSeconds = sinceStartS();
   Logger.log('[timing] snapshot finished in ' + totalSeconds + 's' + (ctx.skipped.length ? ' - SKIPPED: ' + ctx.skipped.join(', ') : ''));
@@ -749,7 +837,7 @@ function snapshotOpenLeads_(label, opts) {
     Logger.log('Snapshot phase-failure alert failed (the capture itself is complete): ' + e);
   }
   if (ctx.errors.length) throw ctx.errors[0];
-  return { leadCountSeen: leadCountSeen, leadsChanged: out.length, totalSeconds: totalSeconds, skipped: ctx.skipped.slice(), failed: ctx.failed.map(function (f) { return f.phase; }), timings: ctx.timings.slice() };
+  return { leadCountSeen: leadCountSeen, leadsChanged: out.length, totalSeconds: totalSeconds, skipped: ctx.skipped.slice(), failed: ctx.failed.map(function (f) { return f.phase; }), timings: ctx.timings.slice(), maintenanceOwed: ctx.owed.slice(), maintenanceFirst: maintenanceFirst };
 }
 
 // A phase that FAILED (threw) used to be only logged: nobody was told, so the Comment_History / Unmatched_Comments_Log prunes
@@ -1332,6 +1420,117 @@ function persistDailyCohortHistoryNow() {
   Logger.log('Daily_Cohort_History persist run complete.');
 }
 
+// ---- Read-only benchmark + proof of the pure-JS IST formatter (2026-10-14) ----
+// Run from the editor (function dropdown -> benchmarkSnapshotCostNow -> Run; READ THE EXECUTION LOG afterwards to confirm this was the
+// function that ran). READ-ONLY: it reads the leads tab once and writes, sends and deletes nothing. It answers two questions against the REAL
+// Utilities service, which the local/CI test runs cannot (their Utilities is a shim that does the same arithmetic):
+//   1. does istFormatGs_ return exactly what Utilities.formatDate returns - for a spread of instants from 1946 to 2060 and the edges that
+//      matter (a second either side of an IST midnight, the 1946 boundary, a leap day, a year end), in all three patterns the code uses;
+//   2. on ~1,000 REAL leads, is the content hash of the new _leadContentHashGs_ the same as the reference, are the SLA flags the same with
+//      the service-call istDayKeyGs_ and with the arithmetic one - and what does each cost per lead?
+// Look for "RESULT" lines: every mismatch count must be 0. The per-call and per-lead milliseconds are the evidence for how much of a
+// snapshot run was service-call time; the projected seconds assume the same rate for every lead in the tab.
+function benchmarkSnapshotCostNow() {
+  const startedMs = Date.now();
+  const patterns = ['yyyy-MM-dd', 'yyyy-MM-dd HH:mm', 'yyyy-MM-dd HH:mm:ss'];
+
+  // 1. the formatter against the real service
+  const samples = benchmarkSampleInstantsGs_(1500);
+  let formatMismatches = 0;
+  let firstBad = '';
+  patterns.forEach(function (p) {
+    samples.forEach(function (d) {
+      const viaService = Utilities.formatDate(d, 'Asia/Kolkata', p);
+      const viaArithmetic = istFormatGs_(d, p);
+      if (viaService !== viaArithmetic) {
+        formatMismatches++;
+        if (!firstBad) firstBad = d.toISOString() + ' [' + p + '] service=' + viaService + ' arithmetic=' + viaArithmetic;
+      }
+    });
+  });
+  Logger.log('RESULT formatter: ' + formatMismatches + ' mismatch(es) in ' + (samples.length * patterns.length) + ' comparisons' + (firstBad ? ' - FIRST: ' + firstBad : ''));
+
+  // 2. the cost of one call
+  const n = samples.length;
+  let t0 = Date.now();
+  for (let i = 0; i < n; i++) Utilities.formatDate(samples[i], 'Asia/Kolkata', 'yyyy-MM-dd');
+  const serviceMs = Date.now() - t0;
+  const repeats = 40;
+  t0 = Date.now();
+  for (let r = 0; r < repeats; r++) for (let i = 0; i < n; i++) istFormatGs_(samples[i], 'yyyy-MM-dd');
+  const arithmeticMs = (Date.now() - t0) / repeats;
+  const sampleText = 'x'.repeat(420);
+  t0 = Date.now();
+  for (let i = 0; i < n; i++) Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, sampleText + i);
+  const digestMs = Date.now() - t0;
+  Logger.log('RESULT per call: Utilities.formatDate ' + (serviceMs / n).toFixed(3) + ' ms | istFormatGs_ ' + (arithmeticMs / n).toFixed(4) + ' ms | Utilities.computeDigest ' + (digestMs / n).toFixed(3) + ' ms (' + n + ' calls each)');
+
+  // 3. real leads: same hash, same flags, and what each costs
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const src = ss.getSheetByName(resolveTabName_(ss));
+  if (!src || src.getLastRow() < 3) { Logger.log('RESULT leads: nothing to read from the leads tab.'); return { formatMismatches: formatMismatches }; }
+  const lastCol = src.getLastColumn();
+  const totalRows = src.getLastRow() - 2;
+  const colIndex = buildColIndex_(src.getRange(2, 1, 1, lastCol).getValues()[0]);
+  const take = Math.min(1000, totalRows);
+  const rows = src.getRange(3, 1, take, lastCol).getValues();
+  const accessor = function (row) { return function (key) { return getVal_(row, colIndex, key); }; };
+
+  let hashMismatches = 0;
+  t0 = Date.now();
+  const newHashes = rows.map(function (row) { return _leadContentHashGs_(accessor(row)); });
+  const newHashMs = Date.now() - t0;
+  t0 = Date.now();
+  const refHashes = rows.map(function (row) { return _leadContentHashViaServiceGs_(accessor(row)); });
+  const refHashMs = Date.now() - t0;
+  newHashes.forEach(function (h, i) { if (h !== refHashes[i]) hashMismatches++; });
+
+  const now = new Date();
+  let flagMismatches = 0;
+  const realDayKey = istDayKeyGs_;
+  t0 = Date.now();
+  const newFlags = rows.map(function (row) { return JSON.stringify(computeSlaFlags_(row, colIndex, now, {})); });
+  const newSlaMs = Date.now() - t0;
+  let refFlags;
+  let refSlaMs;
+  istDayKeyGs_ = function (d) { return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd'); }; // the pre-2026-10-14 implementation; restored below
+  try {
+    t0 = Date.now();
+    refFlags = rows.map(function (row) { return JSON.stringify(computeSlaFlags_(row, colIndex, now, {})); });
+    refSlaMs = Date.now() - t0;
+  } finally {
+    istDayKeyGs_ = realDayKey;
+  }
+  newFlags.forEach(function (f, i) { if (f !== refFlags[i]) flagMismatches++; });
+
+  const scale = totalRows / take;
+  Logger.log('RESULT hash: ' + hashMismatches + ' mismatch(es) of ' + take + ' real leads | new ' + (newHashMs / take).toFixed(3) + ' ms/lead vs reference ' + (refHashMs / take).toFixed(3) + ' ms/lead -> projected for all ' + totalRows + ' leads: ' + Math.round(newHashMs * scale / 1000) + ' s vs ' + Math.round(refHashMs * scale / 1000) + ' s');
+  Logger.log('RESULT SLA flags: ' + flagMismatches + ' mismatch(es) of ' + take + ' real leads | new ' + (newSlaMs / take).toFixed(3) + ' ms/lead vs service-call version ' + (refSlaMs / take).toFixed(3) + ' ms/lead -> projected for all ' + totalRows + ' leads: ' + Math.round(newSlaMs * scale / 1000) + ' s vs ' + Math.round(refSlaMs * scale / 1000) + ' s');
+  const ok = formatMismatches === 0 && hashMismatches === 0 && flagMismatches === 0;
+  Logger.log('RESULT ' + (ok ? 'PASS - the arithmetic formatter is identical to the service on everything checked' : 'FAIL - do NOT keep the arithmetic formatter; see the mismatches above') + ' (' + Math.round((Date.now() - startedMs) / 1000) + ' s)');
+  return { formatMismatches: formatMismatches, hashMismatches: hashMismatches, flagMismatches: flagMismatches, ok: ok };
+}
+
+// Deterministic instants for benchmarkSnapshotCostNow: a pseudo-random spread over 1946-2060 plus the edges that matter.
+function benchmarkSampleInstantsGs_(count) {
+  const lo = IST_FAST_MIN_MS_;
+  const hi = Date.UTC(2060, 0, 1);
+  const out = [];
+  let x = 20261014;
+  for (let i = 0; i < count; i++) {
+    x = (x * 1664525 + 1013904223) % 4294967296;
+    out.push(new Date(lo + Math.floor((x / 4294967296) * (hi - lo))));
+  }
+  [
+    Date.UTC(2026, 9, 13, 18, 29, 59), Date.UTC(2026, 9, 13, 18, 30, 0), Date.UTC(2026, 9, 13, 18, 30, 1), // a second either side of an IST midnight
+    IST_FAST_MIN_MS_ - 1, IST_FAST_MIN_MS_, IST_FAST_MIN_MS_ + 1,                                       // the edge of the arithmetic path
+    Date.UTC(2024, 1, 29, 18, 29, 59), Date.UTC(2024, 1, 29, 18, 30, 0),                               // a leap day
+    Date.UTC(2025, 11, 31, 18, 29, 59), Date.UTC(2025, 11, 31, 18, 30, 0),                             // a year end
+    Date.UTC(2026, 0, 1, 0, 0, 0), Date.UTC(2100, 0, 1, 0, 0, 0),
+  ].forEach(function (ms) { out.push(new Date(ms)); });
+  return out;
+}
+
 // ---- Trigger entry point ----
 // Label is generated from the actual moment the trigger fires rather than
 // a fixed target time, since an every-N-hours trigger's real firing times
@@ -1361,6 +1560,7 @@ function snapshotPeriodic() {
     totalSeconds: summary ? summary.totalSeconds : 0,
     skipped: summary ? summary.skipped : [],
     failed: summary ? summary.failed : [],
+    maintenanceOwed: summary && summary.maintenanceOwed ? summary.maintenanceOwed : [],
   }));
 }
 
@@ -1392,7 +1592,30 @@ function snapshotRunProblemsGs_(now) {
     return make('overdue', 'The newest Movement_Log snapshot started at ' + at + ' (' + (ageMin / 60).toFixed(1) + ' hours ago); snapshotPeriodic runs four times a day, so at least one scheduled run did not happen.', 'Check Triggers (clock icon) for a paused or deleted snapshotPeriodic trigger (setupMovementTracking reinstalls them), and the Executions list for failures.');
   }
   if (rec.status === 'completed' && rec.skipped && rec.skipped.length) {
-    return make('degraded', 'The Movement_Log snapshot that started at ' + at + ' finished in ' + rec.totalSeconds + 's but skipped: ' + rec.skipped.join(', ') + ' - it ran out of its time budget, so that work waits for the next run. The call baselines in the emails are not affected (the core capture is always done first).', checkHint);
+    // 2026-10-14: a single skip of MAINTENANCE (the prunes, the cohort history) is expected noise on a slow run and heals itself - the next
+    // run does it first (see SNAPSHOT_MAINTENANCE_OWED_PROPERTY_). It is reported only when it has been owed for
+    // SNAPSHOT_MAINTENANCE_ALERT_RUNS_ runs in a row or SNAPSHOT_MAINTENANCE_ALERT_HOURS_ hours. Skipped DATA steps (SLA_History write, the
+    // comment scan/log) are still reported at once: the SLA_History point for that run is gone for good.
+    const dataSkipped = rec.skipped.filter(function (name) { return SNAPSHOT_MAINTENANCE_PHASES_.indexOf(name) === -1; });
+    const owed = Array.isArray(rec.maintenanceOwed) ? rec.maintenanceOwed : [];
+    const owedLong = owed.filter(function (o) {
+      const sinceMs = new Date(o && o.since).getTime();
+      return (o && Number(o.runs) >= SNAPSHOT_MAINTENANCE_ALERT_RUNS_) || (!isNaN(sinceMs) && (now.getTime() - sinceMs) / 3600000 >= SNAPSHOT_MAINTENANCE_ALERT_HOURS_);
+    });
+    if (dataSkipped.length || owedLong.length) {
+      let detail = 'The Movement_Log snapshot that started at ' + at + ' finished in ' + rec.totalSeconds + 's but skipped: ' + rec.skipped.join(', ') + ' - it ran out of its time budget.';
+      if (dataSkipped.length) detail += ' The SLA_History / comment steps that were skipped are not redone for this run.';
+      if (owedLong.length) {
+        const sinceMs0 = new Date(owedLong[0].since).getTime();
+        const sinceTxt = isNaN(sinceMs0) ? 'an earlier run' : istFormatGs_(new Date(sinceMs0), 'yyyy-MM-dd HH:mm') + ' IST';
+        detail += ' The maintenance (' + owedLong.map(function (o) { return o.phase; }).join(', ') + ') has now been waiting ' + Math.max.apply(null, owedLong.map(function (o) { return Number(o.runs) || 1; })) + ' run(s) in a row, since '
+          + sinceTxt + ' - each run now does it first, so the platform is running very slowly.';
+      } else if (rec.skipped.length > dataSkipped.length) {
+        detail += ' The maintenance steps wait for the next run, which does them first.';
+      }
+      detail += ' The call baselines in the emails are not affected (the core capture is always done first).';
+      return make('degraded', detail, checkHint);
+    }
   }
   return [];
 }

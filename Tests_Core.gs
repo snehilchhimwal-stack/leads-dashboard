@@ -88,6 +88,53 @@ function runCoreTests_() {
     TestAssertEqual_(pad2Gs_(3), '03', 'pad2Gs_: single digit gets zero-padded');
     TestAssertEqual_(pad2Gs_(13), '13', 'pad2Gs_: double digit passes through unpadded');
 
+    // ---- istFormatGs_ (2026-10-14): IST formatting without a Utilities service call ----
+    // The snapshot's per-lead loops made ~70k Utilities.formatDate calls per run and ran 3-10x slower when the platform was slow
+    // (HANDOVER.md section 8). The result must be byte-identical to Utilities.formatDate(..., 'Asia/Kolkata', pattern): the content hash of
+    // every lead depends on it. Known literals first (an oracle that is not Utilities), then equivalence against Utilities. NOTE: in the
+    // local/CI runs Utilities is a shim that does the same arithmetic; the live runAllTests() and benchmarkSnapshotCostNow() compare
+    // against the REAL service.
+    TestAssertEqual_(istFormatGs_(new Date('2026-10-13T18:29:59Z'), 'yyyy-MM-dd HH:mm:ss'), '2026-10-13 23:59:59', 'istFormatGs_: one second before IST midnight is still the same IST day');
+    TestAssertEqual_(istFormatGs_(new Date('2026-10-13T18:30:00Z'), 'yyyy-MM-dd HH:mm:ss'), '2026-10-14 00:00:00', 'istFormatGs_: IST midnight starts the next IST day');
+    TestAssertEqual_(istFormatGs_(new Date('2026-10-13T18:30:00Z'), 'yyyy-MM-dd'), '2026-10-14', 'istFormatGs_: day pattern');
+    TestAssertEqual_(istFormatGs_(new Date('2026-10-13T18:30:00Z'), 'yyyy-MM-dd HH:mm'), '2026-10-14 00:00', 'istFormatGs_: minute pattern');
+    TestAssertEqual_(istFormatGs_(new Date('2024-02-29T18:30:00Z'), 'yyyy-MM-dd HH:mm:ss'), '2024-03-01 00:00:00', 'istFormatGs_: a leap day rolls into March');
+    TestAssertEqual_(istFormatGs_(new Date('2025-12-31T18:30:00Z'), 'yyyy-MM-dd HH:mm:ss'), '2026-01-01 00:00:00', 'istFormatGs_: a year end rolls into the new year');
+    TestAssertEqual_(istFormatGs_(new Date(Date.UTC(1946, 0, 1)), 'yyyy-MM-dd HH:mm:ss'), '1946-01-01 05:30:00', 'istFormatGs_: the first instant of the arithmetic range');
+    TestAssertEqual_(istFormatGs_(new Date('2026-08-15T10:30:45+05:30'), 'yyyy-MM-dd HH:mm:ss'), '2026-08-15 10:30:45', 'istFormatGs_: seconds are kept, milliseconds dropped');
+    TestAssertEqual_(istFormatGs_(new Date(new Date('2026-08-15T10:30:45+05:30').getTime() + 999), 'yyyy-MM-dd HH:mm:ss'), '2026-08-15 10:30:45', 'istFormatGs_: 999 ms later is still the same second (floors, like the service)');
+    let istMismatches = 0;
+    let istSeed = 20261014;
+    const istPatterns = ['yyyy-MM-dd', 'yyyy-MM-dd HH:mm', 'yyyy-MM-dd HH:mm:ss'];
+    for (let i = 0; i < 2000; i++) {
+      istSeed = (istSeed * 1664525 + 1013904223) % 4294967296;
+      const d = new Date(IST_FAST_MIN_MS_ + Math.floor((istSeed / 4294967296) * (Date.UTC(2060, 0, 1) - IST_FAST_MIN_MS_)));
+      istPatterns.forEach(function (p) { if (istFormatGs_(d, p) !== Utilities.formatDate(d, 'Asia/Kolkata', p)) istMismatches++; });
+    }
+    TestAssertEqual_(istMismatches, 0, 'istFormatGs_: identical to Utilities.formatDate for 2,000 instants from 1946 to 2060 in all three patterns');
+    const istRealUtilities = Utilities;
+    let istServiceCalls = 0;
+    Utilities = Object.assign({}, istRealUtilities, { formatDate: function () { istServiceCalls++; return istRealUtilities.formatDate.apply(istRealUtilities, arguments); } });
+    try {
+      for (let i = 0; i < 100; i++) istDayKeyGs_(new Date(1760000000000 + i * 86400000));
+      TestAssertEqual_(istServiceCalls, 0, 'istFormatGs_: 100 istDayKeyGs_ calls make NO Utilities.formatDate service call');
+      const oldCell = new Date(Date.UTC(1899, 11, 30, 3, 0, 0)); // a time-only sheet cell comes back dated 1899
+      const viaFallback = istFormatGs_(oldCell, 'yyyy-MM-dd HH:mm:ss');
+      TestAssertEqual_(istServiceCalls, 1, 'istFormatGs_: an instant before 1946 (a time-only cell dated 1899) goes to the real service, so it behaves exactly as before');
+      TestAssertEqual_(viaFallback, istRealUtilities.formatDate(oldCell, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), 'istFormatGs_: …and returns the service\'s own answer');
+      istFormatGs_(new Date('2026-08-15T10:30:45+05:30'), 'MMM d, yyyy');
+      TestAssertEqual_(istServiceCalls, 2, 'istFormatGs_: a pattern it does not implement goes to the real service (one more call than the 1899 case above)');
+      let invalidThrew = false;
+      const callsBeforeInvalid = istServiceCalls;
+      try { istFormatGs_(new Date('not a date'), 'yyyy-MM-dd'); } catch (e) { invalidThrew = true; }
+      TestAssertEqual_(istServiceCalls, callsBeforeInvalid + 1, 'istFormatGs_: an invalid Date goes to the real service instead of throwing from toISOString' + (invalidThrew ? ' (the service itself threw)' : ''));
+      const callsBeforeString = istServiceCalls;
+      try { istFormatGs_('2026-08-15', 'yyyy-MM-dd'); } catch (e) { /* the real service decides what a non-Date does */ }
+      TestAssertEqual_(istServiceCalls, callsBeforeString + 1, 'istFormatGs_: a non-Date input goes to the real service');
+    } finally {
+      Utilities = istRealUtilities;
+    }
+
     // ---- parseIstDayKeyOrDateGs_ (added 2026-09-29) ----
     const realDateCell = new Date('2026-08-15T00:00:00');
     TestAssertEqual_(parseIstDayKeyOrDateGs_(realDateCell), realDateCell, 'parseIstDayKeyOrDateGs_: a real Date cell passes through unchanged');
@@ -115,6 +162,28 @@ function runCoreTests_() {
 
     TestAssertEqual_(businessMinutesBetweenGs_(workDayPlus1h, workDayStart), 0, 'businessMinutesBetweenGs_: end before start returns 0, not negative');
     TestAssertEqual_(businessMinutesBetweenGs_(null, workDayPlus1h), 0, 'businessMinutesBetweenGs_: null start returns 0 instead of throwing');
+
+    // ---- businessMinutesBetweenGs_ cannot loop forever on a wrong day key (2026-10-14) ----
+    // The loop ends only because each pass moves the cursor to the next IST midnight. A day key that is wrong at a day boundary (a formatter
+    // bug) used to freeze the cursor and HANG the snapshot and every email job. It is now forward-only and capped at 4,000 passes.
+    const realDayKeyBm = istDayKeyGs_;
+    let bmKeyCalls = 0;
+    istDayKeyGs_ = function (d) { bmKeyCalls++; return Utilities.formatDate(new Date(d.getTime() - 60000), 'Asia/Kolkata', 'yyyy-MM-dd'); }; // one minute short: 00:00:30 IST reads as the previous day
+    try {
+      const bmWrongKey = businessMinutesBetweenGs_(new Date('2026-10-14T00:00:30+05:30'), new Date('2026-10-17T12:00:00+05:30'));
+      TestAssert_(typeof bmWrongKey === 'number' && isFinite(bmWrongKey), 'businessMinutesBetweenGs_: a wrong day key still returns a number');
+      TestAssert_(bmKeyCalls < 50, 'businessMinutesBetweenGs_: …after a handful of passes, not thousands (forward-only cursor; day-key calls: ' + bmKeyCalls + ')');
+    } finally {
+      istDayKeyGs_ = realDayKeyBm;
+    }
+    let bmCapCalls = 0;
+    istDayKeyGs_ = function (d) { bmCapCalls++; return realDayKeyBm(d); };
+    try {
+      businessMinutesBetweenGs_(new Date('2000-01-01T00:00:00+05:30'), new Date('2100-01-01T00:00:00+05:30')); // 36,500 days
+      TestAssert_(bmCapCalls <= 4000, 'businessMinutesBetweenGs_: an absurdly long span stops at the 4,000-pass cap instead of walking every day (day-key calls: ' + bmCapCalls + ')');
+    } finally {
+      istDayKeyGs_ = realDayKeyBm;
+    }
 
     // ---- esc_ ----
     TestAssertEqual_(esc_('<b>Tom & "Jerry"</b>'), '&lt;b&gt;Tom &amp; &quot;Jerry&quot;&lt;/b&gt;', 'esc_: escapes <, >, &, " for safe HTML embedding');

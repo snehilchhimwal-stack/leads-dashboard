@@ -1174,6 +1174,18 @@ function runMovementTrackerTests_() {
       TestAssertContains_(String(slowRunRow[5]), 'Movement_Log prune', 'F23 slow run: …and skipped_phases names what was skipped');
       TestAssertEqual_(String(slowRunRow[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('phase_s')]).indexOf('SLA_History write'), -1, 'F23 slow run: …and a skipped step has no timing (it did not run)');
 
+      // ---- 2026-10-14: maintenance skipped for budget is OWED, and the next run does it FIRST ----
+      // Real incident (14 Oct 06:08): every per-lead step ran 3-10x slower, the run reached the maintenance steps at 946 s and skipped all four.
+      TestAssertEqual_(slowSummary.maintenanceOwed.map(function (o) { return o.phase; }).join(' | '), SNAPSHOT_MAINTENANCE_PHASES_.join(' | '), 'owed maintenance: a run that skipped the four maintenance steps reports all four as owed');
+      const owedAfterSlow = readSnapshotMaintenanceOwedGs_();
+      TestAssert_(Object.keys(owedAfterSlow).length === 4 && SNAPSHOT_MAINTENANCE_PHASES_.every(function (n) { return owedAfterSlow[n] && owedAfterSlow[n].runs === 1 && !isNaN(new Date(owedAfterSlow[n].since).getTime()); }), 'owed maintenance: …and persists them (one run each, with a start time) in a Script Property');
+      const afterSlow = capture_('after the slow run');
+      TestAssertEqual_(afterSlow.maintenanceFirst, true, 'owed maintenance: the NEXT run does the maintenance first');
+      TestAssertEqual_(afterSlow.timings.map(function (x) { return x.replace(/ \d+s.*$/, ''); }).join(' | '), 'core capture (read, hash, append) | Movement_Log prune | Comment_History prune | Unmatched_Comments_Log prune | Daily_Cohort_History persist | SLA_History write | Unmatched_Comments_Log scan | Comment_History log', 'owed maintenance: …core capture, then the four maintenance steps in their usual order, then the SLA_History / comment steps');
+      TestAssertEqual_(afterSlow.skipped.length, 0, 'owed maintenance: …and inside the budget nothing is skipped');
+      TestAssertEqual_(afterSlow.maintenanceOwed.length, 0, 'owed maintenance: …and nothing is owed any more');
+      TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_), null, 'owed maintenance: …the Script Property is deleted, not left empty');
+
       const slaBeforeNormal = ss.getSheetByName('SLA_History').getLastRow();
       const normalRunsBefore = ss.getSheetByName('Movement_Log_Runs').getLastRow();
       const normalSummary = capture_('normal run');
@@ -1183,8 +1195,106 @@ function runMovementTrackerTests_() {
       TestAssert_(typeof normalRunRow[4] === 'number' && normalRunRow[4] >= 0 && normalRunRow[5] === '', 'F23 normal run: total_s is a number and skipped_phases is empty');
       TestAssertEqual_(normalSummary.leadCountSeen, 4, 'F23 normal run: the summary reports the leads seen (blank lead_id excluded)');
       const phaseS = String(normalRunRow[MOVEMENT_LOG_RUNS_COLUMNS_.indexOf('phase_s')]);
-      TestAssert_(/^core capture \(read, hash, append\) \d+s \| SLA_History write \d+s \| Unmatched_Comments_Log scan \d+s \| Comment_History log \d+s \| Movement_Log prune \d+s \| Comment_History prune \d+s \| Unmatched_Comments_Log prune \d+s \| Daily_Cohort_History persist \d+s$/.test(phaseS), 'F23 normal run: Movement_Log_Runs.phase_s shows where the time went - the core capture, then each step in order (' + phaseS + ')');
+      TestAssert_(/^core capture \(read, hash, append\) \d+s \[read \d+s, hash lookup \d+s, hashing \d+s, append \d+s\] \| SLA_History write \d+s \| Unmatched_Comments_Log scan \d+s \| Comment_History log \d+s \| Movement_Log prune \d+s \| Comment_History prune \d+s \| Unmatched_Comments_Log prune \d+s \| Daily_Cohort_History persist \d+s$/.test(phaseS), 'F23 normal run: Movement_Log_Runs.phase_s shows where the time went - the core capture, then each step in order (' + phaseS + ')');
       TestAssertEqual_(normalSummary.timings.length, 8, 'F23 normal run: the summary carries the same 8 timings');
+
+      // ---- 2026-10-14: phase order and the owed-maintenance bookkeeping, driven by a fake clock and stubbed phases ----
+      // Each stub records that it ran and advances the fake clock, so "the SLA step took 15 minutes" is one line.
+      const realPh = { sla: writeSlaHistorySnapshot_, um: scanUnmatchedCommentsGs_, ch: logInteractionHistoryGs_, mlp: pruneMovementLog_, chp: pruneCommentHistory_, ump: pruneUnmatchedCommentsLog_, coh: persistDailyCohortHistoryGs_ };
+      const realPropsPh = PropertiesService;
+      let fakeMs = 0;
+      let phaseOrder = [];
+      let advanceMs = {};
+      const stubPhases = function () {
+        writeSlaHistorySnapshot_ = function () { phaseOrder.push('SLA'); fakeMs += (advanceMs.SLA || 1000); };
+        scanUnmatchedCommentsGs_ = function () { phaseOrder.push('UMs'); fakeMs += (advanceMs.UMs || 1000); };
+        logInteractionHistoryGs_ = function () { phaseOrder.push('CHl'); fakeMs += (advanceMs.CHl || 1000); };
+        pruneMovementLog_ = function () { phaseOrder.push('MLp'); fakeMs += (advanceMs.MLp || 1000); };
+        pruneCommentHistory_ = function () { phaseOrder.push('CHp'); fakeMs += (advanceMs.CHp || 1000); };
+        pruneUnmatchedCommentsLog_ = function () { phaseOrder.push('UMp'); fakeMs += (advanceMs.UMp || 1000); };
+        persistDailyCohortHistoryGs_ = function () { phaseOrder.push('COH'); fakeMs += (advanceMs.COH || 1000); };
+      };
+      const restorePhases = function () {
+        writeSlaHistorySnapshot_ = realPh.sla; scanUnmatchedCommentsGs_ = realPh.um; logInteractionHistoryGs_ = realPh.ch;
+        pruneMovementLog_ = realPh.mlp; pruneCommentHistory_ = realPh.chp; pruneUnmatchedCommentsLog_ = realPh.ump; persistDailyCohortHistoryGs_ = realPh.coh;
+      };
+      const runFake = function (label, advance) {
+        phaseOrder = [];
+        advanceMs = advance || {};
+        fakeMs = 0;
+        return capture_(label, { nowMs: function () { return fakeMs; } });
+      };
+      try {
+        stubPhases();
+        PropertiesService = TestMockPropertiesService_();
+        // (A) a normal run: data first, maintenance last, nothing owed afterwards
+        const phA = runFake('phase order normal');
+        TestAssertEqual_(phaseOrder.join(','), 'SLA,UMs,CHl,MLp,CHp,UMp,COH', 'phase order: with nothing owed the run does the data steps first and the maintenance last (as before)');
+        TestAssert_(phA.maintenanceFirst === false && phA.maintenanceOwed.length === 0 && phA.skipped.length === 0, 'phase order: …nothing owed, nothing skipped');
+        TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_), null, 'phase order: …and no owed record is written');
+        // (B) a slow data step (15 minutes) pushes the run past the budget: everything after it is skipped, the maintenance is owed
+        const phB = runFake('phase order slow data', { SLA: 900000 });
+        TestAssertEqual_(phaseOrder.join(','), 'SLA', 'phase order: a 15-minute SLA_History step leaves no budget for anything after it');
+        TestAssertEqual_(phB.skipped.join(' | '), 'Unmatched_Comments_Log scan | Comment_History log | Movement_Log prune | Comment_History prune | Unmatched_Comments_Log prune | Daily_Cohort_History persist', 'phase order: …the rest is skipped by name');
+        TestAssertEqual_(phB.maintenanceOwed.map(function (o) { return o.phase + ':' + o.runs; }).join(' | '), 'Movement_Log prune:1 | Comment_History prune:1 | Unmatched_Comments_Log prune:1 | Daily_Cohort_History persist:1', 'phase order: …and exactly the four maintenance steps are owed (the skipped comment steps are not: they catch up by themselves)');
+        const sinceB = readSnapshotMaintenanceOwedGs_()['Movement_Log prune'].since;
+        // (C) the next run does the maintenance FIRST; the slow data step now takes the budget hit instead
+        const phC = runFake('phase order owed', { SLA: 900000 });
+        TestAssertEqual_(phaseOrder.join(','), 'MLp,CHp,UMp,COH,SLA', 'owed maintenance: with the maintenance owed the next run does it BEFORE the SLA_History step, even when that step is slow');
+        TestAssertEqual_(phC.skipped.join(' | '), 'Unmatched_Comments_Log scan | Comment_History log', 'owed maintenance: …and the comment steps (which catch up next run) are what is skipped this time');
+        TestAssert_(phC.maintenanceFirst === true && phC.maintenanceOwed.length === 0, 'owed maintenance: …nothing is owed any more');
+        TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_), null, 'owed maintenance: …and the record is deleted');
+        // (D) the maintenance itself is slow while owed: what it did not reach stays owed, the run count grows, the original start time is kept
+        runFake('phase order slow data again', { SLA: 900000 });
+        const sinceD = readSnapshotMaintenanceOwedGs_()['Movement_Log prune'].since;
+        const phD = runFake('phase order slow maintenance', { MLp: 900000 });
+        TestAssertEqual_(phaseOrder.join(','), 'MLp', 'owed maintenance: a 15-minute Movement_Log prune leaves no budget for the rest');
+        TestAssertEqual_(phD.maintenanceOwed.map(function (o) { return o.phase + ':' + o.runs; }).join(' | '), 'Comment_History prune:2 | Unmatched_Comments_Log prune:2 | Daily_Cohort_History persist:2', 'owed maintenance: …the steps it did not reach are owed for a SECOND run in a row; the prune that ran is not owed any more');
+        TestAssertEqual_(readSnapshotMaintenanceOwedGs_()['Comment_History prune'].since, sinceD, 'owed maintenance: …and keep the time they first became owed');
+        TestAssert_(!isNaN(new Date(sinceB).getTime()) && !isNaN(new Date(sinceD).getTime()), 'owed maintenance: …a real timestamp');
+        // (E) a failing step is not "owed" - it is alerted on its own and retried by the normal order
+        runFake('phase order owed cleared');
+        PropertiesService = TestMockPropertiesService_();
+        pruneCommentHistory_ = function () { phaseOrder.push('CHp'); throw new Error('prune broke (owed test)'); };
+        const phE = runFake('phase order failing step');
+        TestAssertEqual_(phE.failed.join(','), 'Comment_History prune', 'owed maintenance: a maintenance step that THROWS is reported as failed');
+        TestAssertEqual_(phE.maintenanceOwed.length, 0, 'owed maintenance: …and is not recorded as owed (only a skip for budget is)');
+        // (F) the Properties service is broken or holds rubbish: the run still works, in the normal order
+        PropertiesService = TestMockPropertiesService_({ failReads: true, failWrites: true });
+        pruneCommentHistory_ = function () { phaseOrder.push('CHp'); fakeMs += 1000; };
+        const phF = runFake('phase order properties broken', { SLA: 900000 });
+        TestAssertEqual_(phaseOrder.join(','), 'SLA', 'owed maintenance: an unreadable Properties service means "nothing owed" - the normal order, and the run does not fail');
+        TestAssertEqual_(phF.maintenanceOwed.length, 4, 'owed maintenance: …the summary still reports what is owed (it just could not be saved)');
+        TestAssertEqual_(JSON.stringify(readSnapshotMaintenanceOwedGs_()), '{}', 'owed maintenance: reading with a broken Properties service gives {}, not a throw');
+        PropertiesService = TestMockPropertiesService_();
+        PropertiesService.getScriptProperties().setProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_, '{not json');
+        TestAssertEqual_(JSON.stringify(readSnapshotMaintenanceOwedGs_()), '{}', 'owed maintenance: malformed JSON in the property is treated as nothing owed');
+        PropertiesService.getScriptProperties().setProperty(SNAPSHOT_MAINTENANCE_OWED_PROPERTY_, JSON.stringify({ phases: { 'Bogus step': { since: 'x', runs: 5 }, 'Movement_Log prune': { since: '2026-10-14T00:38:00.000Z', runs: 0 } } }));
+        const mixedOwed = readSnapshotMaintenanceOwedGs_();
+        TestAssert_(Object.keys(mixedOwed).join() === 'Movement_Log prune' && mixedOwed['Movement_Log prune'].runs === 1, 'owed maintenance: an unknown step name is ignored and a run count below 1 reads as 1');
+        TestAssertEqual_(SNAPSHOT_MAINTENANCE_PHASES_.join(' | '), 'Movement_Log prune | Comment_History prune | Unmatched_Comments_Log prune | Daily_Cohort_History persist', 'owed maintenance: the list of maintenance steps is the one the phase table uses');
+      } finally {
+        restorePhases();
+        PropertiesService = realPropsPh;
+      }
+
+      // ---- 2026-10-14: the content hash is unchanged by the arithmetic date formatter ----
+      // _leadContentHashGs_ renders its date fields with istFormatGs_; a different string would make every lead look changed and re-append the table.
+      // Compared with the pre-change service-call version on varied cells: real dates, blanks, string cells, a time-only cell dated 1899.
+      let hashSeed = 7;
+      const hashRnd = function () { hashSeed = (hashSeed * 1664525 + 1013904223) % 4294967296; return hashSeed / 4294967296; };
+      let hashDiffs = 0;
+      for (let hi = 0; hi < 300; hi++) {
+        const hf = {};
+        SNAPSHOT_COLUMNS_.forEach(function (k) { hf[k] = 'v' + Math.floor(hashRnd() * 1000); });
+        ['lead_assigned_at', 'last_connect_time', 'opp_at'].forEach(function (k) {
+          const r = hashRnd();
+          hf[k] = r < 0.15 ? '' : r < 0.25 ? '2026-10-13 10:00:00' : r < 0.3 ? new Date(Date.UTC(1899, 11, 30, 3, 0, 0)) : new Date(1.7e12 + Math.floor(hashRnd() * 3e10));
+        });
+        const hget = function (k) { return hf[k]; };
+        if (_leadContentHashGs_(hget) !== _leadContentHashViaServiceGs_(hget)) hashDiffs++;
+      }
+      TestAssertEqual_(hashDiffs, 0, 'content hash: identical to the service-call reference for 300 varied leads (dates, blanks, string cells, a time-only 1899 cell)');
 
       // A prune that throws still fails the run - but only AFTER the run record is complete and the later phases have run.
       const realPrune = pruneMovementLog_;

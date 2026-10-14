@@ -727,6 +727,7 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     try { snapshotPeriodic(); } finally { snapshotOpenLeads_ = realSnapshotOpenLeads; }
     const record4c = readEmailJobRunGs_('snapshotPeriodic');
     TestAssert_(record4c.status === 'completed' && record4c.skipped.length === 7, 'E2E watchdog: a budget-starved run still completes and records the 7 skipped phases');
+    TestAssertEqual_(record4c.maintenanceOwed.map(function (o) { return o.phase; }).join(' | '), SNAPSHOT_MAINTENANCE_PHASES_.join(' | '), 'E2E watchdog: …and the run record carries the four maintenance steps as owed (the next run does them first)');
     TestAssertEqual_(ss4.getSheetByName('SLA_History').getLastRow(), slaBefore4, 'E2E watchdog: …the optional SLA_History write was the first thing skipped');
     TestAssertEqual_(TestEFC_movementRows_(ss4).length, mlBefore4 + 1, 'E2E watchdog: …but the core Movement_Log capture was kept (the one changed lead got its row)');
     const runsLast4 = ss4.getSheetByName('Movement_Log_Runs');

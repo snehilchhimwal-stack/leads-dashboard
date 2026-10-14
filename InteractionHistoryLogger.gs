@@ -126,8 +126,10 @@ function logInteractionHistoryGs_(ss, dataRows, colIndex, now) {
         const leadId = String(r[1] || '').trim();
         const comment = String(r[6] || '').trim();
         const commentAtRaw = r[7];
+        // istFormatGs_ (Core.gs): the same string as Utilities.formatDate(..., 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') without a service call
+        // per row - this loop runs once per existing Comment_History row (tens of thousands) every snapshot run (2026-10-14).
         const commentAt = commentAtRaw instanceof Date
-          ? Utilities.formatDate(commentAtRaw, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
+          ? istFormatGs_(commentAtRaw, 'yyyy-MM-dd HH:mm')
           : String(commentAtRaw || '').trim();
         if (leadId) alreadyLogged[leadId + '|' + (commentAt || comment)] = true;
       });

@@ -919,10 +919,34 @@ function runEmailInfraTests_() {
         TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), '', 'snapshot watchdog: a clean completed run is fine');
         TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('14:08'))), '', 'snapshot watchdog: …and 8 hours later, still inside the 8-hour grace window');
         TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('14:09'))), S + ':overdue', 'snapshot watchdog: no new run for more than 8 hours means a scheduled run did not happen');
+        // 2026-10-14: ONE run that skipped only MAINTENANCE (the prunes, the cohort history) is expected noise on a slow run - the next run does it
+        // first - so it is not reported. It is reported when the same maintenance has been owed for 2 runs in a row or for 12 hours; a skipped DATA
+        // step (SLA_History write, the comment scan/log) is reported at once, because that run's SLA_History point is gone for good.
+        const owedAt = function (since, runs, phases) { return (phases || ['Movement_Log prune', 'Daily_Cohort_History persist']).map(function (p) { return { phase: p, since: since, runs: runs }; }); };
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune', 'Daily_Cohort_History persist'], maintenanceOwed: owedAt(iso('06:22'), 1) });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), '', 'snapshot watchdog: a first skip of maintenance only is NOT reported (the next run does it first)');
         rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune', 'Daily_Cohort_History persist'] });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), '', 'snapshot watchdog: …nor is an older-format record that has no maintenanceOwed field');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune', 'Daily_Cohort_History persist'], maintenanceOwed: owedAt(iso('00:30'), 2) });
         const sSkipped = snapshotRunProblemsGs_(at('07:00'));
-        TestAssertEqual_(kinds(sSkipped), S + ':degraded', 'snapshot watchdog: a run that skipped phases to stay inside its time budget is reported');
+        TestAssertEqual_(kinds(sSkipped), S + ':degraded', 'snapshot watchdog: maintenance owed for 2 runs in a row is reported');
         TestAssert_(/Movement_Log prune, Daily_Cohort_History persist/.test(sSkipped[0].detail) && /850s/.test(sSkipped[0].detail), 'snapshot watchdog: …naming the skipped phases and the run time');
+        TestAssert_(/2 run\(s\) in a row/.test(sSkipped[0].detail) && /00:30 IST/.test(sSkipped[0].detail), 'snapshot watchdog: …saying how many runs in a row and since when');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune'], maintenanceOwed: owedAt(new Date(at('07:00').getTime() - 12 * 3600000).toISOString(), 1, ['Movement_Log prune']) });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), S + ':degraded', 'snapshot watchdog: maintenance owed for exactly 12 hours is reported even after a single run');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune'], maintenanceOwed: owedAt(new Date(at('07:00').getTime() - 12 * 3600000 + 60000).toISOString(), 1, ['Movement_Log prune']) });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), '', 'snapshot watchdog: …but not at 11 hours 59 minutes');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['SLA_History write', 'Unmatched_Comments_Log scan'], maintenanceOwed: [] });
+        const sData = snapshotRunProblemsGs_(at('07:00'));
+        TestAssertEqual_(kinds(sData), S + ':degraded', 'snapshot watchdog: a skipped DATA step (SLA_History write) is reported at once');
+        TestAssert_(/SLA_History write, Unmatched_Comments_Log scan/.test(sData[0].detail) && /not redone/.test(sData[0].detail), 'snapshot watchdog: …naming it and saying it is not redone for that run');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Comment_History log', 'Movement_Log prune'], maintenanceOwed: owedAt(iso('06:22'), 1, ['Movement_Log prune']) });
+        const sMixed = snapshotRunProblemsGs_(at('07:00'));
+        TestAssert_(kinds(sMixed) === S + ':degraded' && /Comment_History log, Movement_Log prune/.test(sMixed[0].detail) && /wait for the next run, which does them first/.test(sMixed[0].detail), 'snapshot watchdog: a data skip together with a first maintenance skip is reported, and says the maintenance waits for the next run');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune'], maintenanceOwed: [{ phase: 'Movement_Log prune', since: 'not a time', runs: 1 }] });
+        TestAssertEqual_(kinds(snapshotRunProblemsGs_(at('07:00'))), '', 'snapshot watchdog: an unreadable since time on a first skip is silent, not a throw');
+        rec(S, { startedAt: iso('06:08'), finishedAt: iso('06:22'), status: 'completed', totalSeconds: 850, skipped: ['Movement_Log prune'], maintenanceOwed: [{ phase: 'Movement_Log prune', since: 'not a time', runs: 3 }] });
+        TestAssert_(/an earlier run/.test(snapshotRunProblemsGs_(at('07:00'))[0].detail), 'snapshot watchdog: …and an unreadable since time on a repeated skip still reports, saying "an earlier run"');
         rec(S, { startedAt: iso('06:08'), status: 'running' });
         TestAssertEqual_(snapshotRunProblemsGs_(at('16:00')).length, 1, 'snapshot watchdog: a record that is BOTH stuck and overdue is one problem, not two (two would re-alert each other every hour)');
         TestAssertEqual_(snapshotRunProblemsGs_(at('16:00'))[0].kind, 'stuck', 'snapshot watchdog: …and stuck is the one reported');

@@ -179,8 +179,37 @@ function getVal_(row, colIndex, key) {
   return v == null ? '' : v;
 }
 
+// IST formatting WITHOUT a service call (2026-10-14, snapshotPeriodic slowness - HANDOVER.md section 8).
+// Utilities.formatDate is a call into a Google service. The snapshot's per-lead loops make tens of thousands of them per run
+// (about 20k hashing the leads, about 50k computing SLA flags: two per lead plus one per dated comment entry), and the 14 Oct 06:08
+// run took 3-10x its usual time in exactly those loops while the single big reads stayed normal. IST is UTC+05:30 all year (no
+// daylight saving since 1945), so the three formats this codebase uses are plain arithmetic on the instant.
+// The fast path is only taken for instants from 1946-01-01 to 9999-01-01 (where Asia/Kolkata is exactly +05:30 and toISOString is
+// the plain 4-digit-year form); anything else - an invalid date, a time-only sheet cell dated 1899, a non-Date - goes to the
+// real Utilities.formatDate, so those cases behave exactly as before. The result is byte-identical to
+// Utilities.formatDate(date, 'Asia/Kolkata', pattern): benchmarkSnapshotCostNow() (MovementTracker.gs) proves it against the REAL
+// Utilities in the live runtime, and the content hash of every lead depends on it (a different string = every lead re-appended).
+const IST_OFFSET_MS_ = 19800000; // +05:30
+const IST_FAST_MIN_MS_ = Date.UTC(1946, 0, 1);
+const IST_FAST_MAX_MS_ = Date.UTC(9999, 0, 1);
+function istFormatGs_(date, pattern) {
+  const ms = date instanceof Date ? date.getTime() : NaN;
+  if (ms >= IST_FAST_MIN_MS_ && ms < IST_FAST_MAX_MS_) {
+    if (pattern === 'yyyy-MM-dd') return new Date(ms + IST_OFFSET_MS_).toISOString().slice(0, 10);
+    if (pattern === 'yyyy-MM-dd HH:mm') {
+      const iso = new Date(ms + IST_OFFSET_MS_).toISOString();
+      return iso.slice(0, 10) + ' ' + iso.slice(11, 16);
+    }
+    if (pattern === 'yyyy-MM-dd HH:mm:ss') {
+      const iso = new Date(ms + IST_OFFSET_MS_).toISOString();
+      return iso.slice(0, 10) + ' ' + iso.slice(11, 19);
+    }
+  }
+  return Utilities.formatDate(date, 'Asia/Kolkata', pattern);
+}
+
 function istDayKeyGs_(date) {
-  return Utilities.formatDate(date, 'Asia/Kolkata', 'yyyy-MM-dd');
+  return istFormatGs_(date, 'yyyy-MM-dd');
 }
 
 function pad2Gs_(n) { return (n < 10 ? '0' : '') + n; }
@@ -218,7 +247,10 @@ function businessMinutesBetweenGs_(start, end) {
   let totalMs = 0;
   let cursor = new Date(start.getTime());
 
-  while (cursor < end) {
+  // The `guard` cap and the forward-only cursor below were added 2026-10-14: this loop ends only because each pass moves the cursor to the
+  // NEXT IST midnight. If a day key were ever wrong at a day boundary (a formatter bug) the cursor would stay put and this would never
+  // return - a hang, not a failure, in the snapshot and in every email job. 4,000 passes is eleven years of days.
+  for (let guard = 0; cursor < end && guard < 4000; guard++) {
     const dayKey = istDayKeyGs_(cursor);
     const dayOpen = new Date(dayKey + 'T' + pad2Gs_(WORK_START_HOUR_) + ':00:00+05:30');
     const dayClose = new Date(dayKey + 'T' + pad2Gs_(WORK_END_HOUR_) + ':00:00+05:30');
@@ -228,7 +260,8 @@ function businessMinutesBetweenGs_(start, end) {
     const segEnd = end < dayClose ? end : dayClose;
     if (segEnd > segStart) totalMs += (segEnd.getTime() - segStart.getTime());
 
-    cursor = new Date(midnight.getTime() + 24 * 60 * 60 * 1000); // next IST day's midnight — IST has no DST, so a fixed 24h jump is always correct
+    const nextMidnight = new Date(midnight.getTime() + 24 * 60 * 60 * 1000); // next IST day's midnight — IST has no DST, so a fixed 24h jump is always correct
+    cursor = nextMidnight > cursor ? nextMidnight : new Date(cursor.getTime() + 24 * 60 * 60 * 1000); // forward-only, whatever the day key said
   }
   return totalMs / 60000;
 }

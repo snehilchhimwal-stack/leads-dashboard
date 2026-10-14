@@ -171,8 +171,10 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
         const leadId = String(r[1] || '').trim();
         const comment = String(r[5] || '').trim();
         const commentAtRaw = r[6];
+        // istFormatGs_ (Core.gs): the same string as Utilities.formatDate(..., 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') without a service call
+        // per existing row, on every snapshot run (2026-10-14).
         const commentAt = commentAtRaw instanceof Date
-          ? Utilities.formatDate(commentAtRaw, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
+          ? istFormatGs_(commentAtRaw, 'yyyy-MM-dd HH:mm')
           : String(commentAtRaw || '').trim();
         if (leadId) alreadyLogged[leadId + '|' + (commentAt || comment)] = true;
       });
@@ -290,7 +292,7 @@ function dedupeUnmatchedCommentsNow() {
     const comment = String(row[5] || '').trim();
     const commentAtRaw = row[6];
     const commentAt = commentAtRaw instanceof Date
-      ? Utilities.formatDate(commentAtRaw, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
+      ? istFormatGs_(commentAtRaw, 'yyyy-MM-dd HH:mm')
       : String(commentAtRaw || '').trim();
     const key = leadId + '|' + (commentAt || comment);
     const existing = byKey[key];
