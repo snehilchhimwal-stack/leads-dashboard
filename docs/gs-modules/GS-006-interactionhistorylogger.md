@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-14 against commit `PENDING_SHA` - the Comment_History dedup read formats `comment_at` with `istFormatGs_` (no service call per row) |
+| **Last Verified** | 2026-10-14 against commit `c590758` - the Comment_History dedup read formats `comment_at` with `istFormatGs_` (no service call per row) |
 
 ## Purpose / reason to exist
 
@@ -165,7 +165,7 @@ newest scheduled subsystem at the time of the 2026-09-07 audit.
 
 **2026-10-08** (`78e47f5`, email audit P18): `pruneCommentHistory_` archives through `archiveChunksVerifiedGs_` (`GS-002` FN-352): a failed proof trashes the files it wrote, a retry reuses the identical archive, and the `archive_log.csv` row is written only after the rows are gone. A prune archives first, proves the archive, then deletes. When the proof (or a later sheet write) failed, the files it had written stayed in Drive and the next run - 4 a day - wrote another identical copy: 14 extra `Comment_History` and 18 extra `Unmatched_Comments_Log` archives sat in Drive from 2026-10-03. Fixed in `Core.gs` (`FN-350`..`FN-353`): an identical archive is reused, a failed proof trashes the files that call created, and the `archive_log.csv` row is written only after the rows are gone. `docs/_planning/EMAIL_AUDIT.md` P18. **Not live until pasted.**
 
-**2026-10-14** (`PENDING_SHA`): `logInteractionHistoryGs_`'s dedup read (one pass over every existing Comment_History row, every snapshot run) formats a Date-typed `comment_at` with `istFormatGs_` (`GS-002` FN-438) instead of one `Utilities.formatDate` service call per row; the key string is identical. On 14 Oct 06:08 this step took 360 s against a 61 s median while the platform was slow (`GS-008` change note). **Not live until pasted.**
+**2026-10-14** (`c590758`): `logInteractionHistoryGs_`'s dedup read (one pass over every existing Comment_History row, every snapshot run) formats a Date-typed `comment_at` with `istFormatGs_` (`GS-002` FN-438) instead of one `Utilities.formatDate` service call per row; the key string is identical. On 14 Oct 06:08 this step took 360 s against a 61 s median while the platform was slow (`GS-008` change note). **Not live until pasted.**
 
 ## Revalidation trigger
 

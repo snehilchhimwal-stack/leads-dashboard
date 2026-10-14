@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-14 against commit `PENDING_SHA` - `istFormatGs_` (FN-438): IST formatting without a Utilities service call (snapshotPeriodic slowness) |
+| **Last Verified** | 2026-10-14 against commit `c590758` - `istFormatGs_` (FN-438): IST formatting without a Utilities service call (snapshotPeriodic slowness) |
 
 ## Purpose / reason to exist
 
@@ -183,7 +183,7 @@ the same day).
 
 **2026-10-08** (`78e47f5`, email audit P18): `archiveRowsToDriveCsv_` takes `opts` (`skipManifest`, `info`) and now reuses an identical existing archive; new `FN-350`..`FN-353`. A prune archives first, proves the archive, then deletes. When the proof (or a later sheet write) failed, the files it had written stayed in Drive and the next run - 4 a day - wrote another identical copy: 14 extra `Comment_History` and 18 extra `Unmatched_Comments_Log` archives sat in Drive from 2026-10-03. Fixed in `Core.gs` (`FN-350`..`FN-353`): an identical archive is reused, a failed proof trashes the files that call created, and the `archive_log.csv` row is written only after the rows are gone. `docs/_planning/EMAIL_AUDIT.md` P18. **Not live until pasted.**
 
-**2026-10-14** (`PENDING_SHA`): `istFormatGs_` (FN-438, `CFG-124`) added and `istDayKeyGs_` (FN-180) now uses it. Why: the snapshot's per-lead loops (hashing every lead, computing SLA flags) made tens of thousands of `Utilities.formatDate` service calls per run and ran 3-10x slower when the platform was slow (the 14 Oct 06:08 run took 946 s and skipped its maintenance steps; `HANDOVER.md` section 8). The result is byte-identical to the service (asserted in `Tests_Core.gs` and, against the REAL service, by `benchmarkSnapshotCostNow()`), so no lead's content hash changes. Also: `businessMinutesBetweenGs_` (FN-185) now advances its cursor forward-only and stops after 4,000 passes - it ended only because each pass reached the next IST midnight, so a day key that was ever wrong at a day boundary would have frozen it (a hang in the snapshot and every email job, found when the formatter mutations hung the test run instead of failing it). **Not live until pasted.**
+**2026-10-14** (`c590758`): `istFormatGs_` (FN-438, `CFG-124`) added and `istDayKeyGs_` (FN-180) now uses it. Why: the snapshot's per-lead loops (hashing every lead, computing SLA flags) made tens of thousands of `Utilities.formatDate` service calls per run and ran 3-10x slower when the platform was slow (the 14 Oct 06:08 run took 946 s and skipped its maintenance steps; `HANDOVER.md` section 8). The result is byte-identical to the service (asserted in `Tests_Core.gs` and, against the REAL service, by `benchmarkSnapshotCostNow()`), so no lead's content hash changes. Also: `businessMinutesBetweenGs_` (FN-185) now advances its cursor forward-only and stops after 4,000 passes - it ended only because each pass reached the next IST midnight, so a day key that was ever wrong at a day boundary would have frozen it (a hang in the snapshot and every email job, found when the formatter mutations hung the test run instead of failing it). **Not live until pasted.**
 
 ## Revalidation trigger
 

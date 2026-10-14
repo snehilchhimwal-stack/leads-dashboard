@@ -549,7 +549,7 @@ Because no one else knew this codebase, a heavy documentation system grew around
 
 1. **Architecture changes update `HANDOVER.md` in the same commit** (it went a full week unmentioned through real redesigns on 2026-09-02→09 despite saying not to).
 2. **Resolve check D's drift for records *your own* change caused before the session ends.** D is advisory because it can't tell your drift from old debt, but advisory ≠ ignorable (2026-09-21: eight records sat drifted/with `(pending commit)`).
-3. **Never leave `(pending commit)` as a final `Last Verified`.** The working pattern: write a `PENDING_SHA` token, commit, then replace it with the real sha in the next commit (and remap again after any `git pull --rebase`).
+3. **Never leave `(pending commit)` as a final `Last Verified`.** The working pattern: write a `c590758` token, commit, then replace it with the real sha in the next commit (and remap again after any `git pull --rebase`).
 4. **Adding a stale-prone fact? Register it** in `FACT_CLAIMS`.
 5. After changing anything that reads/writes `Lead_Followups`, read `LEAD_FOLLOWUPS_STALENESS.md` first and add new consumers to its map.
 6. After changing email routing/automatic-email/worst-performer logic, run `OPS_CHECKLIST.md`'s pre- and post-deploy items *in addition to* the test suite (it catches "correct but silently incomplete": an unthreaded argument, a rolling-vs-calendar window, a drifted constant).
