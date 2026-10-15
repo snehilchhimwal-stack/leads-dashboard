@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-outcome-engine.js` (934 lines — the largest core file) |
+| **Location** | `js/core-outcome-engine.js` (961 lines — the largest core file) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): `noCommentFollowUp` reads the lead's own snapshot via `lastSnapshotForLead` (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes FE-1..3, FE-5 (8ef279d): exact-only 'declining'/'broker'/'ringing', 'to let' as property type only, documented email-vs-dashboard differences |
 
 ## Purpose / reason to exist
 
@@ -43,32 +43,35 @@ core-fetch-and-render → …`).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-042 | `inferOutcome(comment)` `#L569` | a comment string | an outcome label (cached in `_inferOutcomeCache`) | populates the cache | `_inferOutcomeUncached` (FN-043) | `enrichLead` (`JS-006`), Audit, reports, RM Timeline | reusable — the classifier entry point |
-| FN-043 | `_inferOutcomeUncached(comment)` `#L576` | a comment | outcome label | none | `_signalMatches` (FN-046), walks `OUTCOME_RULES` | FN-042 | specific |
-| FN-044 | `parseActionLog(text)` `#L72` | raw action-log text | `[{at, by, comment}]` entries (cached in `_actionLogCache`) | populates the cache | `parseDate` (`JS-006`) | `enrichLead` (`JS-006`), Audit (`JS-019`), RM Timeline (`JS-023`) | reusable |
-| FN-045 | `_editDistance(a, b)` / `_typoBudget(targetLen)` `#L110/#L156` | two strings / a length | edit distance / allowed budget (0 for ≤4, 1 for ≤8, 2 above) | none | — | `_wordsMatch` (FN-046) | reusable |
-| FN-046 | `_wordsMatch` / `_signalMatches(commentWords, signal)` `#L161/#L190` | tokenised comment + a signal | bool (typo-tolerant) | none | FN-045, `_signalWordsOf` (cached) | FN-043 | specific — documented false-positive case ("busy"/"buy"/"bus") |
-| FN-047 | `combinedCommentsText(l)` / `hasAnyCommentField(l)` / `hasAnyNarrativeComment(l)` `#L21/#L36/#L52` | a lead | joined text / bools | none | — | `enrichLead` (`JS-006`), card renderers | reusable |
-| FN-048 | `suggestedFollowUp(l)` `#L818` | a lead | a follow-up text string | none | `latestFamilyOutcome` (FN-050), `FOLLOWUP_SUGGESTIONS` | Operations cards, reports | reusable |
-| FN-049 | `noCommentFollowUp(l)` / `unmatchedFollowUp(comment, loggedBy, ts)` `#L853/#L650` | a lead / a comment | fallback follow-up text | none | baseline `Map` | `suggestedFollowUp` (FN-048), unmatched-comment path | reusable |
-| FN-050 | `latestFamilyOutcome(l)` / `collateFamilyComments(row)` / `commentsForCopy(copy, fallbackRM)` / `sortCommentEntries(entries)` `#L703/#L784/#L748/#L769` | a lead / row | latest outcome / merged & sorted comment history | none | `parseActionLog` (FN-044), `inferOutcome` (FN-042) | card renderers, Audit, RM Timeline | reusable |
+| FN-042 | `inferOutcome(comment)` `#L597` | a comment string | an outcome label (cached in `_inferOutcomeCache`) | populates the cache | `_inferOutcomeUncached` (FN-043) | `enrichLead` (`JS-006`), Audit, reports, RM Timeline | reusable — the classifier entry point |
+| FN-043 | `_inferOutcomeUncached(comment)` `#L604` | a comment | outcome label | none | `_signalMatches` (FN-046), walks `OUTCOME_RULES` | FN-042 | specific |
+| FN-044 | `parseActionLog(text)` `#L81` | raw action-log text | `[{at, by, comment}]` entries (cached in `_actionLogCache`) | populates the cache | `parseDate` (`JS-006`) | `enrichLead` (`JS-006`), Audit (`JS-019`), RM Timeline (`JS-023`) | reusable |
+| FN-045 | `_editDistance(a, b)` / `_typoBudget(targetLen)` `#L119/#L165` | two strings / a length | edit distance / allowed budget (0 for ≤4, 1 for ≤8, 2 above) | none | — | `_wordsMatch` (FN-046) | reusable |
+| FN-046 | `_wordsMatch` / `_signalMatches(commentWords, signal)` `#L176/#L206` | tokenised comment + a signal | bool (typo-tolerant; since 2026-10-15 a target in `_EXACT_ONLY_SIGNAL_WORDS` matches only exactly - RULE-085) | none | FN-045, `_signalWordsOf` (cached) | FN-043 | specific — documented false-positive case ("busy"/"buy"/"bus") |
+| FN-047 | `combinedCommentsText(l)` / `hasAnyCommentField(l)` / `hasAnyNarrativeComment(l)` `#L30/#L45/#L61` | a lead | joined text / bools | none | — | `enrichLead` (`JS-006`), card renderers | reusable |
+| FN-048 | `suggestedFollowUp(l)` `#L846` | a lead | a follow-up text string | none | `latestFamilyOutcome` (FN-050), `FOLLOWUP_SUGGESTIONS` | Operations cards, reports | reusable |
+| FN-049 | `noCommentFollowUp(l)` / `unmatchedFollowUp(comment, loggedBy, ts)` `#L881/#L678` | a lead / a comment | fallback follow-up text | none | baseline `Map` | `suggestedFollowUp` (FN-048), unmatched-comment path | reusable |
+| FN-050 | `latestFamilyOutcome(l)` / `collateFamilyComments(row)` / `commentsForCopy(copy, fallbackRM)` / `sortCommentEntries(entries)` `#L731/#L812/#L776/#L797` | a lead / row | latest outcome / merged & sorted comment history | none | `parseActionLog` (FN-044), `inferOutcome` (FN-042) | card renderers, Audit, RM Timeline | reusable |
 | FN-051 | `istStamp` / `isoStampIST` | a Date | IST-formatted timestamp string | none | `istParts` (`JS-005`) | timestamps in cards, writeback | reusable |
+| FN-522 | `_hasToLetProperty(commentWords)` `#L224` (added 2026-10-15) | a tokenised comment | `true` when the words `to let` appear and the next word is not in `_TO_LET_NOT_PROPERTY_NEXT` (him/her/me/us/them/you/know) | none (pure) | - | the `Resale / Rental (Out of Scope)` rule's `test()` in `OUTCOME_RULES` | specific - **audit 2026-10-13 FE-3**; twin of `_hasToLetPropertyGs_` (`GS-005` FN-521) |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
 | ID | Rule | Where | Duplicated in (`GS-XXX`)? | Notes |
 |---|---|---|---|---|
-| RULE-009 | `OUTCOME_RULES` — 31 ordered rules (~110 individual keyword signals across them); first match wins | `OUTCOME_RULES` `#L230`–`#L556` + FN-043 | **Yes — `FollowupEngine.gs` `OUTCOME_RULES_GS_` (`GS-005`), also 31 rules** — full pairwise diff (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): zero drift, byte-identical `test()` bodies, confirmed | the single largest duplicated-logic surface in the app |
+| RULE-009 | `OUTCOME_RULES` — 31 ordered rules (~110 individual keyword signals across them); first match wins | `OUTCOME_RULES` `#L256`–`#L584` + FN-043 | **Yes — `FollowupEngine.gs` `OUTCOME_RULES_GS_` (`GS-005`), also 31 rules** — full pairwise diff (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): zero drift, byte-identical `test()` bodies, confirmed | the single largest duplicated-logic surface in the app |
 | RULE-010 | Length-scaled typo tolerance: 0 typos for signals ≤4 chars, 1 for ≤8, 2 above | FN-045 | Yes — `FollowupEngine.gs` mirrors the matcher | documented false-positive: "busy"/"buy"/"bus" |
-| RULE-011 | A blank / punctuation-only comment classifies as `No Real Update` | FN-043 `#L586` | Yes | — |
-| RULE-012 | `FOLLOWUP_SUGGESTIONS[outcome]` is pure advisory text; a human overwrites `Lead_Followups` col F if they review in time | `FOLLOWUP_SUGGESTIONS` `#L607` + FN-048 | Yes — `FOLLOWUP_SUGGESTIONS_GS_` (`FollowupEngine.gs`) | `LOGIC_AUDIT.md` Part 3 §3.4 |
+| RULE-011 | A blank / punctuation-only comment classifies as `No Real Update` | FN-043 `#L614` | Yes | — |
+| RULE-012 | `FOLLOWUP_SUGGESTIONS[outcome]` is pure advisory text; a human overwrites `Lead_Followups` col F if they review in time | `FOLLOWUP_SUGGESTIONS` `#L635` + FN-048 | Yes — `FOLLOWUP_SUGGESTIONS_GS_` (`FollowupEngine.gs`) | `LOGIC_AUDIT.md` Part 3 §3.4 |
+| RULE-085 | Exact-only signal words: 'declining', 'broker' and 'ringing' get NO typo budget (each is within budget of a common unrelated word: "deciding", "broken", "bringing"); the real typos worth keeping are literal signals instead ('brokers', 'rining') | `_EXACT_ONLY_SIGNAL_WORDS` `#L175` + `_wordsMatch` (FN-046) | Yes - `_EXACT_ONLY_SIGNAL_WORDS_GS_` (`GS-005` CFG-142) | added 2026-10-15, audit 2026-10-13 FE-1/FE-2; KEEP IN SYNC |
+| RULE-086 | "to let" means Resale / Rental only as a property type ("flat is to let", "to-let board"); "to let him/her/me/us/them/you know" and "to let know" do not count | `_TO_LET_NOT_PROPERTY_NEXT` `#L223` + `_hasToLetProperty` (FN-522), called from the Resale / Rental rule's `test()` | Yes - `_hasToLetPropertyGs_` (`GS-005` FN-521, CFG-142) | added 2026-10-15, audit 2026-10-13 FE-3; before it, 'to let' was a plain signal and "asked to let him know" closed a lead as out of scope |
 
 ## Exceptions — `EXC-XXX` sub-table
 
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
 | EXC-012 | comment matches no `OUTCOME_RULES` signal | falls through to `unmatchedFollowUp` ("Manual review required…") and is logged for review | card shows a "read the comments and log a specific next action" prompt; backend logs it to `Unmatched_Comments_Log` (`GS-013`) |
-| EXC-013 | typo matcher false positive | accepted risk — documented, not guarded | rare mis-classification (e.g. "buy" → "busy") |
+| EXC-013 | typo matcher false positive | accepted risk — documented, not guarded (the three known collisions deciding/broken/bringing are closed by RULE-085 since 2026-10-15) | rare mis-classification (e.g. "buy" → "busy") |
 
 ## Data lineage
 
@@ -105,7 +108,7 @@ vs ~30" framing wasn't actually a disagreement — one tally was counting
 individual keyword strings across all 31 rules, the other the rule count
 itself, undercounted by one.) `FOLLOWUP_SUGGESTIONS` ↔
 `FOLLOWUP_SUGGESTIONS_GS_`. The typo matcher is re-implemented on the
-backend. All must be kept in sync (`HANDOVER.md` §6).
+backend. All must be kept in sync (`HANDOVER.md` §6). The FE-1..3 changes (2026-10-15) were made on both sides in one commit. INTENDED differences in the follow-up TEXT are listed in both files' header comments (FE-5): the email appends `FOLLOWUP_MODIFIERS_GS_` clauses the dashboard does not show; `unmatchedFollowUp` here adds the entry's timestamp; `suggestedFollowUp` has a closing_reason tier the email never needs; the last_comment fallback here credits `l.RM`, the email leaves it blank.
 
 ## UI relationships
 
@@ -155,6 +158,8 @@ Part 4 §4.1; `CLAUDE.md` (duplication gotcha); `GS-013`
 Verified at `c82ec67`; record created by DOC-027.
 
 **2026-10-07** (`7799e44`, email audit P15 / F18): `noCommentFollowUp` (`FN-049`) looks its snapshot up through `lastSnapshotForLead` (`JS-006` `FN-347`) — the lead's OWN last snapshot (a merged record: the lead with the highest counter) instead of the customer-keyed entry, so a sibling lead's counter no longer decides "no new call attempts" vs "N more". Twin: `OvernightEmailer.gs` / `AllIssuesEmailer.gs`'s `lastSnapshotMap[leadId]`. Live as soon as GitHub Pages deploys.
+
+**2026-10-15** (`8ef279d`, audit 2026-10-13 FE-1..3, FE-5): twin of the `FollowupEngine.gs` change (`GS-005`). 'declining', 'broker' and 'ringing' now match only exactly (RULE-085), so "still deciding", "voice broken" and "bringing wife" no longer read as Call Declined / CP-Broker / Ringing; 'brokers' and 'rining' were added as literal signals. 'to let' left the Resale / Rental signals and matches only as a property type via `_hasToLetProperty` (FN-522, RULE-086). The header comment lists the intended email-vs-dashboard differences (FE-5); stale `OvernightEmailer.gs` references now name `FollowupEngine.gs`. Assertions in `tests/frontend-harness.html`. Live after push to GitHub Pages (repo not pushed yet).
 
 ## Revalidation trigger
 

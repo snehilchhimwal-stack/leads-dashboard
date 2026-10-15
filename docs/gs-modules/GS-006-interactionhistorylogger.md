@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `InteractionHistoryLogger.gs` (284 lines) |
+| **Location** | `InteractionHistoryLogger.gs` (331 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-14 against commit `c590758` - the Comment_History dedup read formats `comment_at` with `istFormatGs_` (no service call per row) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes IH-01..03 (450565a): no re-logging of pruned comments, normalised dedup keys, withRetry_ in the prune |
 
 ## Purpose / reason to exist
 
@@ -56,12 +56,20 @@ Movement hub fire.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-212 | `logInteractionHistoryGs_(ss, dataRows, colIndex, now)` `#L116` | the open-lead rows + column index + now | appends one `Comment_History` row per genuinely-new comment | Sheets append; dedup against existing rows | `latestOutcomeGs_` (`GS-005`), `commentHistoryDedupKeyGs_` (FN-213) | `snapshotOpenLeads_` (`GS-008`), `logInteractionHistoryNow` (FN-215) | specific |
-| FN-213 | `commentHistoryDedupKeyGs_(leadId, outcomeEntry)` `#L105` | lead id + a comment entry | a dedup key | none | — | FN-212 | specific |
+| FN-212 | `logInteractionHistoryGs_(ss, dataRows, colIndex, now)` `#L174` | the open-lead rows + column index + now | appends one `Comment_History` row per genuinely-new comment; **since 2026-10-13 skips a comment whose own day is older than the 30-day retention cutoff (IH-01, FN-508, RULE-083)** - its row was or is about to be pruned, and the live-tab-only dedup used to log it again every 30 days | Sheets append (the `comment_at` cells are formatted as text first and written as the whitespace-normalised ts, IH-02); dedup against existing rows read back through `commentHistoryReadBackKeyGs_` (FN-507) | `latestOutcomeGs_` (`GS-005`), `commentHistoryDedupKeyGs_` (FN-213), FN-507, FN-508 | `snapshotOpenLeads_` (`GS-008`), `logInteractionHistoryNow` (FN-215) | specific |
+| FN-213 | `commentHistoryDedupKeyGs_(leadId, outcomeEntry)` `#L110` | lead id + a comment entry | a dedup key `leadId|ts` (ts whitespace-normalised since 2026-10-13, IH-02) or `leadId|comment` when there is no ts | none | `commentTsNormaliseGs_` (FN-507) | FN-212; `unmatchedCommentDedupKeyGs_` (`GS-013`, now delegates here) | specific |
+| FN-507 | `commentTsNormaliseGs_(ts)` `#L115` / `commentHistoryReadBackKeyGs_(leadId, commentAtRaw, comment, tz)` `#L123` / `commentLogSheetTimeZoneGs_(ss)` `#L136` / `commentAtTextFormatGs_(sheet, startRow, col, numRows)` `#L145` (added 2026-10-13, IH-02) | a ts / a logged row's cells + the spreadsheet zone / spreadsheet / a target range | the ts with every whitespace run collapsed / the key a logged row reads back as (a Date-coerced `comment_at` is formatted in the SPREADSHEET's zone - `istFormatGs_` when that is IST - else the normalised text) / the spreadsheet's zone, IST on failure / nothing | `commentAtTextFormatGs_` sets the `comment_at` cells to plain text (`@`) before a write; fail-open | `istFormatGs_` (`GS-002`), `Utilities.formatDate` | FN-212; `GS-013` scan, clear and dedupe tools | reusable - shared with `UnmatchedCommentLogger.gs` so write key and read-back key cannot drift |
+| FN-508 | `commentBeyondRetentionGs_(ts, now, retentionDays)` `#L160` (added 2026-10-13, IH-01/UC-01) | a comment ts, now, the log's retention days | `true` when the ts's day is before `now - retentionDays` (same day arithmetic as the prunes, `parseIstDayKeyOrDateGs_`); `false` with no ts | none (pure) | `parseIstDayKeyOrDateGs_` (`GS-002`), FN-507 | FN-212; `scanUnmatchedCommentsGs_` (`GS-013`) | reusable - RULE-083 |
 | FN-214 | `ensureCommentHistorySheet_(ss)` `#L87` | spreadsheet | ensures `Comment_History` exists with the right header | may create/repair the tab | — | FN-212 | specific |
-| FN-215 | `logInteractionHistoryNow()` `#L181` | — | runs FN-212 once by hand | Sheets append | FN-212 | Apps Script editor (manual) | specific |
-| FN-307 | `pruneCommentHistory_(ss)` `#L215` (added 2026-09-29) | a spreadsheet | none | archives (chunked, `COMMENT_HISTORY_ARCHIVE_CHUNK_`) then removes rows older than `COMMENT_HISTORY_RETENTION_DAYS_` (30); no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306) | `snapshotOpenLeads_` (`GS-008`), `pruneCommentHistoryNow` | specific — follows `pruneMovementLog_`'s crash-safety ordering (`GS-008`) exactly |
-| FN-308 | `pruneCommentHistoryNow()` `#L270` (added 2026-09-29) | — | runs FN-307 once by hand | as FN-307 | FN-307 | Apps Script editor (manual) | specific |
+| FN-215 | `logInteractionHistoryNow()` `#L238` | — | runs FN-212 once by hand | Sheets append | FN-212 | Apps Script editor (manual) | specific |
+| FN-307 | `pruneCommentHistory_(ss)` `#L272` (added 2026-09-29) | a spreadsheet | none | archives (chunked, `COMMENT_HISTORY_ARCHIVE_CHUNK_`) then removes rows older than `COMMENT_HISTORY_RETENTION_DAYS_` (30); no-op if nothing is old enough | `archiveRowsToDriveCsv_` (`GS-002` FN-265), `parseIstDayKeyOrDateGs_` (`GS-002` FN-306); every sheet call through `withRetry_` since 2026-10-13 (IH-03) | `snapshotOpenLeads_` (`GS-008`), `pruneCommentHistoryNow` | specific — follows `pruneMovementLog_`'s crash-safety ordering (`GS-008`) exactly |
+| FN-308 | `pruneCommentHistoryNow()` `#L329` (added 2026-09-29) | — | runs FN-307 once by hand | as FN-307 | FN-307 | Apps Script editor (manual) | specific |
+
+## Business rules implemented — `RULE-XXX` sub-table
+
+| ID | Rule | Where | Duplicated elsewhere? |
+|---|---|---|---|
+| RULE-083 | A comment whose own day (its `yyyy-MM-dd` ts) is older than the log's retention window is never logged as new (2026-10-13, IH-01/UC-01): the prune drops a row by the day it was LOGGED, which is never before the comment's own day, so such a comment's row is gone or about to go. A comment with no ts is not affected (its age is unknown) | FN-508 via FN-212 (`Comment_History`, 30 days) and `GS-013` `scanUnmatchedCommentsGs_` (`Unmatched_Comments_Log`, 30 days) | no (one shared helper) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -73,7 +81,7 @@ Movement hub fire.
 
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
-| EXC-068 | a comment's `comment_at` is Sheets-coerced from string to Date (defeating string-equality dedup) | the dedup key is comment-text-based, not purely timestamp-based | reduced exposure to the coercion class that bit `UnmatchedCommentLogger.gs` (`GS-013`) |
+| EXC-068 | a comment's `comment_at` is Sheets-coerced from string to Date (defeating string-equality dedup) | the dedup key is comment-text-based, not purely timestamp-based; since 2026-10-13 (IH-02) new `comment_at` cells are written as text, and a Date-coerced old cell is read back in the spreadsheet's own zone (FN-507) | reduced exposure to the coercion class that bit `UnmatchedCommentLogger.gs` (`GS-013`) |
 | EXC-069 | `Comment_History` grows large (updated 2026-09-29 — see Purpose) | **pruned automatically since 2026-09-29** — `pruneCommentHistory_` (FN-307) archives-then-removes rows older than 30 days on the same 4×/day trigger | the live tab stays bounded; nothing is lost — everything pruned is archived to Drive first |
 | EXC-104 | the archive's own row count doesn't match the number of rows about to be dropped (added 2026-09-29) | `pruneCommentHistory_` throws, refuses to touch the sheet | a human sees the error in Executions rather than silently losing rows — same discipline as `EXC-102` (`GS-008`) |
 
@@ -166,6 +174,8 @@ newest scheduled subsystem at the time of the 2026-09-07 audit.
 **2026-10-08** (`78e47f5`, email audit P18): `pruneCommentHistory_` archives through `archiveChunksVerifiedGs_` (`GS-002` FN-352): a failed proof trashes the files it wrote, a retry reuses the identical archive, and the `archive_log.csv` row is written only after the rows are gone. A prune archives first, proves the archive, then deletes. When the proof (or a later sheet write) failed, the files it had written stayed in Drive and the next run - 4 a day - wrote another identical copy: 14 extra `Comment_History` and 18 extra `Unmatched_Comments_Log` archives sat in Drive from 2026-10-03. Fixed in `Core.gs` (`FN-350`..`FN-353`): an identical archive is reused, a failed proof trashes the files that call created, and the `archive_log.csv` row is written only after the rows are gone. `docs/_planning/EMAIL_AUDIT.md` P18. **Not live until pasted.**
 
 **2026-10-14** (`c590758`): `logInteractionHistoryGs_`'s dedup read (one pass over every existing Comment_History row, every snapshot run) formats a Date-typed `comment_at` with `istFormatGs_` (`GS-002` FN-438) instead of one `Utilities.formatDate` service call per row; the key string is identical. On 14 Oct 06:08 this step took 360 s against a 61 s median while the platform was slow (`GS-008` change note). **Not live until pasted.**
+
+**2026-10-15** (`450565a`, audit 2026-10-13 IH-01, IH-02, IH-03): **IH-01** - a comment older than the 30-day retention window is no longer re-logged as a new interaction every 30 days after its row was pruned (FN-508, RULE-083). **IH-02** - the dedup key normalises whitespace in the ts, new `comment_at` cells are written as text, and the read-back key is built by one shared helper (FN-507, also used by `GS-013`) that formats a Date-coerced cell in the spreadsheet's own zone. **IH-03** - every sheet call in `pruneCommentHistory_` goes through `withRetry_`. **Not live until pasted.**
 
 ## Revalidation trigger
 

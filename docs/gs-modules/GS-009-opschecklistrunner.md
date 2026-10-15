@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `OpsChecklistRunner.gs` (312 lines) |
+| **Location** | `OpsChecklistRunner.gs` (344 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `c416a01` — email audit P13: the weekly summary is addressed through `opsAlertEmailGs_()` (see `## Version / change reference`) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes OC-1, OC-3 (8ef279d): each weekly check isolated; newest Feature_Usage row per id wins |
 
 ## Purpose / reason to exist
 
@@ -57,11 +57,11 @@ automatically.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-227 | `runWeeklyOpsChecklist_(ss, now)` `#L270` | an injected spreadsheet + a fixed `now` | builds the summary and sends one email | Gmail send | `buildWeeklyOpsChecklistSummary_` (FN-228), `withSendRetry_` (`GS-004`) | `runWeeklyOpsChecklistNow` (FN-229), `Tests_OpsChecklistRunner.gs` | reusable — **the testable core** (split out this session, `daba775`, so tests pass a fixed `now` instead of drifting `new Date()`) |
-| FN-228 | `buildWeeklyOpsChecklistSummary_(ss, now)` `#L154` | spreadsheet + now | the 5-check pass/fail summary text | none (reads sheets) | `auditUnresolvedRms_` / `auditManagerDirectoryEmailGaps_` (`GS-011`), `checkMovementLogFreshness_` (`GS-008`), `computeWorkbookCellUsageGs_`/`fmtCellsGs_` (`GS-002` FN-301/302, added 2026-09-28), `checkStaleComponents_` (FN-322, added 2026-10-03) | FN-227 | reusable |
-| FN-229 | `runWeeklyOpsChecklistNow()` `#L289` | — | thin wrapper: `runWeeklyOpsChecklist_(SpreadsheetApp.getActiveSpreadsheet(), new Date())` | Gmail send (via FN-227) | FN-227 | the Monday trigger; Apps Script editor (manual) | specific — the production entry point |
-| FN-230 | `setupWeeklyOpsChecklistTrigger()` `#L300` | — | installs the Monday ~09:00 IST trigger (deleting any prior one for `runWeeklyOpsChecklistNow`) | creates a trigger | `ScriptApp` | Apps Script editor (manual) | specific |
-| FN-322 | `checkStaleComponents_(ss, now)` / `parseFeatureUsageTimestampGs_(cell)` `#L107/#L89` (added 2026-10-03) | spreadsheet + now | `{status, stale, neverObserved, recent}` — every tracked tab bucketed | reads `Feature_Usage` (`SHEET-018`) | `withRetry_` (`GS-004`) | FN-228 | reusable — a never-observed tab is promoted into `stale` once `FEATURE_USAGE_TRACKING_STARTED_GS_` (`CFG-084`) is itself more than `STALE_COMPONENT_DAYS_GS_` (`CFG-083`) days in the past, see the function's own comment for why the two buckets are kept separate before that point |
+| FN-227 | `runWeeklyOpsChecklist_(ss, now)` `#L302` | an injected spreadsheet + a fixed `now` | builds the summary and sends one email | Gmail send | `buildWeeklyOpsChecklistSummary_` (FN-228), `withSendRetry_` (`GS-004`) | `runWeeklyOpsChecklistNow` (FN-229), `Tests_OpsChecklistRunner.gs` | reusable — **the testable core** (split out this session, `daba775`, so tests pass a fixed `now` instead of drifting `new Date()`) |
+| FN-228 | `buildWeeklyOpsChecklistSummary_(ss, now)` `#L159` | spreadsheet + now | the 5-check pass/fail summary text; since 2026-10-15 (OC-1) each check runs in its own `try`, so one that throws adds a "... check FAILED (message) - the other checks still ran; run this check by hand." line and counts as one issue (EXC-166) instead of aborting the whole summary | none (reads sheets) | `auditUnresolvedRms_` / `auditManagerDirectoryEmailGaps_` (`GS-011`), `checkMovementLogFreshness_` (`GS-008`), `computeWorkbookCellUsageGs_`/`fmtCellsGs_` (`GS-002` FN-301/302, added 2026-09-28), `checkStaleComponents_` (FN-322, added 2026-10-03) | FN-227 | reusable |
+| FN-229 | `runWeeklyOpsChecklistNow()` `#L321` | — | thin wrapper: `runWeeklyOpsChecklist_(SpreadsheetApp.getActiveSpreadsheet(), new Date())` | Gmail send (via FN-227) | FN-227 | the Monday trigger; Apps Script editor (manual) | specific — the production entry point |
+| FN-230 | `setupWeeklyOpsChecklistTrigger()` `#L332` | — | installs the Monday ~09:00 IST trigger (deleting any prior one for `runWeeklyOpsChecklistNow`) | creates a trigger | `ScriptApp` | Apps Script editor (manual) | specific |
+| FN-322 | `checkStaleComponents_(ss, now)` / `parseFeatureUsageTimestampGs_(cell)` `#L107/#L89` (added 2026-10-03) | spreadsheet + now | `{status, stale, neverObserved, recent}` — every tracked tab bucketed; since 2026-10-15 (OC-3) when an id has several `Feature_Usage` rows the one with the NEWEST timestamp wins (was: whichever row came last, so an older duplicate could make a live tab look stale) | reads `Feature_Usage` (`SHEET-018`) | `withRetry_` (`GS-004`) | FN-228 | reusable — a never-observed tab is promoted into `stale` once `FEATURE_USAGE_TRACKING_STARTED_GS_` (`CFG-084`) is itself more than `STALE_COMPONENT_DAYS_GS_` (`CFG-083`) days in the past, see the function's own comment for why the two buckets are kept separate before that point |
 
 ## Significant config — `CFG-XXX` sub-table
 
@@ -81,6 +81,7 @@ automatically.
 | EXC-101 | the workbook's total declared cell usage crosses `WORKBOOK_CELL_ALERT_WARN_PCT_`/`WORKBOOK_CELL_ALERT_CRITICAL_PCT_` (`GS-002` CFG-071) — added 2026-09-28 after 3 real 10M-cell crashes (`HANDOVER.md` §9.2/9.3, 09-06/09-19/09-24) | `issueCount` incremented once (WARN and CRITICAL are mutually exclusive, never both); the summary names the top 3 tabs by cell count | the Monday email reads "Cell budget WARNING" or "CELL BUDGET CRITICAL" with the largest tabs named; CRITICAL also names `pruneMovementLogNow()`/`pruneDailyRmIssueLogNow()` as the immediate recovery |
 | EXC-107 | `Feature_Usage` (`SHEET-018`) doesn't exist yet — added 2026-10-03 | `checkStaleComponents_` returns `status: 'missing'`; `buildWeeklyOpsChecklistSummary_` reports it as an informational line, **not** an issue (`issueCount` untouched) | the Monday email reads "Feature usage tracking: Feature_Usage sheet not found yet" — expected until someone signs into the dashboard at least once after Part 3 shipped |
 | EXC-108 | a tracked tab has zero `Feature_Usage` rows, but `FEATURE_USAGE_TRACKING_STARTED_GS_` (`CFG-084`) is not yet `STALE_COMPONENT_DAYS_GS_` (`CFG-083`) days in the past — added 2026-10-03 | that tab is bucketed `neverObserved`, **not** `stale`; contributes 0 to `issueCount` | the Monday email names it in a separate, non-alarming "never recorded as used yet … expected for a while" line, distinct from the numbered "N tab(s) to review" section |
+| EXC-166 | one of the five weekly checks (RM hierarchy, Manager_Directory, Movement_Log freshness, cell budget, feature usage) throws - added 2026-10-15, audit 2026-10-13 OC-1 | caught in `buildWeeklyOpsChecklistSummary_` (FN-228); `issueCount` +1; the other checks still run | the Monday email has a "<check> check FAILED (<message>) - the other checks still ran; run this check by hand." line; before OC-1 the throw aborted the whole summary and no email was sent |
 
 ## Data lineage
 
@@ -105,7 +106,7 @@ via `GS-002` `computeWorkbookCellUsageGs_` (added 2026-09-28; reads
 
 ## Failure / error behaviour
 
-Read-only apart from the send; a send failure retries then raises. The
+Read-only apart from the send; a send failure retries then raises. Since 2026-10-15 (OC-1) a check that throws is reported in the email as FAILED and the other checks still run (EXC-166). The
 core `runWeeklyOpsChecklist_` was split from the wrapper this session
 specifically so a real-clock-vs-fixture mismatch stops failing CI
 (EXC-077, `daba775`).
@@ -233,6 +234,8 @@ production code changed — 7 new boundary-case assertions added to
 Validation above for the full list). Test-only commit.
 
 **2026-10-07** (`c416a01`, email audit P13): `runWeeklyOpsChecklist_` addresses its weekly summary through `opsAlertEmailGs_()` (`GS-004` FN-338) instead of reading the `OPS_ALERT_EMAIL_` variable (now a blank test override). Same recipient in production. (The line count above was also stale: 153 -> 312.) **Not live until pasted.**
+
+**2026-10-15** (`8ef279d`, audit 2026-10-13 OC-1, OC-3): `buildWeeklyOpsChecklistSummary_` wraps each of its five checks in its own `try`; a throwing check becomes a "... check FAILED (...) - run this check by hand" line counted as one issue (EXC-166) instead of aborting the Monday email. `checkStaleComponents_` keeps the newest `Feature_Usage` row per component id rather than the last one read, so an older duplicate row (two tabs recording at once) cannot make a live tab look stale. Tests in `Tests_OpsChecklistRunner.gs`. **Not live until pasted.**
 
 ## Revalidation trigger
 

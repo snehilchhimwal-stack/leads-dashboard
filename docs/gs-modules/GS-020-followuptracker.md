@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `000c1e6` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - Checkpoint 2 NOT_NEEDED rule (e8d33f8) and audit 2026-10-13 fixes FT-1/2/3 (7ef68d3) |
 
 ## Purpose / reason to exist
 
@@ -41,15 +41,16 @@ Never - no trigger of its own.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-419 | `followupCheckpointStatusGs_(s)` / `followupKeyGs_` / `followupNextDayGs_` | `{stamp, ledgerStatus, ledgerReason, dueAt, now, blockedBy}` | `{ status, note }` | none (pure) | - | FN-420 | specific - RULE-064 |
-| FN-420 | `followupTrackerGs_(input)` | `{ cycleDay, logRows, ledgerRows, now }` | `{ cycleDay, rows, counts: {cp1, cp2}, attention }` | none (pure) | FN-419 | `GS-016` `cycleReportDataGs_` | specific - RULE-064 / RULE-065 |
-| FN-421 | `followupTrackerSectionsGs_(t)` / `followupTrackerReadLogGs_(ss, dayKey)` / `followupTrackerRecordGs_(ss, t, now)` / `showFollowupTrackerNow()` | the tracker, the workbook, the time | the report sections; the day's 17:00 bucket rows or null; none; none | reads `AllIssues_Log` (narrow columns); writes `Followup_Tracker` (replace-or-append, fail-open); the preview only logs | `emailLedgerEnsureSheetGs_`, `emailLedgerReplaceDayBlockGs_` (`GS-015` FN-422) | `GS-016` | specific |
+| FN-419 | `followupCheckpointStatusGs_(s)` / `followupKeyGs_(region, to, label)` / `followupNextDayGs_` | `{stamp, ledgerStatus, ledgerReason, dueAt, now, blockedBy}`; region, recipient(s), optional bucket label | `{ status, note }`; the match key region + recipients (a recipient list split on `,`/`;`, trimmed, lower-cased, sorted - FT-1), plus the label when one is given | none (pure) | - | FN-420 | specific - RULE-064 |
+| FN-420 | `followupTrackerGs_(input)` | `{ cycleDay, logRows, ledgerRows, now }` | `{ cycleDay, rows, counts: {cp1, cp2}, attention }` | none (pure); the 17:00 ledger row is matched on region + recipients + bucket label (two 17:00 buckets of a region can go to one person - FT-1), falling back to region + recipients; the 10:00 / 13:00 rows on region + recipients only; Checkpoint 2 is NOT_NEEDED when Checkpoint 1 is (RULE-081) | FN-419 | `GS-016` `cycleReportDataGs_` | specific - RULE-064 / RULE-065 / RULE-081 |
+| FN-421 | `followupTrackerSectionsGs_(t)` / `followupTrackerReadLogGs_(ss, dayKey)` / `followupTrackerRecordGs_(ss, t, now)` / `showFollowupTrackerNow()` | the tracker, the workbook, the time | the report sections; the day's 17:00 bucket rows or null; none; none | reads `AllIssues_Log` (narrow columns; the span from the day's first to last row, filtered by day, so another day's row in between is dropped - FT-2); writes `Followup_Tracker` (replace-or-append, fail-open; a same-day re-send with no bucket clears the earlier block in an existing tab, an unreadable log changes nothing - FT-3); the preview only logs | `emailLedgerEnsureSheetGs_`, `emailLedgerReplaceDayBlockGs_` (`GS-015` FN-422) | `GS-016` | specific |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
 | RULE-064 | A checkpoint's status, in this order: ledger SKIPPED = `NOT_NEEDED`; ACCEPTED = `COMPLETED` (noting a missing log stamp); FAILED / BLOCKED / UNCONFIRMED / PLANNED / ATTEMPTING = `BLOCKED`; a log stamp alone = `COMPLETED`; a known blocker = `BLOCKED` (Checkpoint 2 when Checkpoint 1 is BLOCKED or OVERDUE - there is no 10:00 thread to reply in); then the clock: before its hour `FUTURE`, from the hour `DUE`, 30 minutes after it `OVERDUE`. The ledger outranks the stamp; a planned or attempted email is never "completed" | FN-419, FN-420 | `GS-019` RULE-062 (the same unfinished-is-a-problem principle) |
+| RULE-081 | Once Checkpoint 1 is `NOT_NEEDED` (nothing was left after 17:00), Checkpoint 2 is `NOT_NEEDED` too, whatever the 13:00 records say - the 13:00 job only replies to buckets the 10:00 job sent, so its silence used to read as OVERDUE (false alarms 2026-10-11/12; the user's rule 2026-10-13); a failed or unfinished 13:00 attempt on such a bucket had nothing to deliver and is only noted. The one exception: a 13:00 email that really went out (ledger ACCEPTED, or with no ledger row a log stamp) is `COMPLETED`. A bucket with nothing left after 10:00 needs no special rule - the 13:00 job records it SKIPPED, which is NOT_NEEDED already | FN-420 | - |
 | RULE-065 | A 17:00 email that bounced (ACCEPTED by Gmail, then a delivery-failure message) reads `REROUTED` when its copy to the next person in the hierarchy (the ledger row `RR|<email id>`, job `reroute`) is ACCEPTED, and raises nothing; otherwise it marks its row STOP and is listed for attention. A reply is shown but flags nothing. Neither changes anything that is sent | FN-420 | `GS-017` RULE-052/053 (how a bounce is found) |
 
 ## Config constants - `CFG-XXX` sub-table
@@ -74,7 +75,7 @@ Never - no trigger of its own.
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
 | `SHEET-013` `AllIssues_Log` | Read | FN-421 | date, region, bucket, role, recipient, lead count and the two checkpoint stamps only (not the large JSON columns) |
-| `SHEET-024` `Followup_Tracker` | Read + write | FN-421 | today's contiguous block at the bottom is replaced (or appended) once the report is sent |
+| `SHEET-024` `Followup_Tracker` | Read + write | FN-421 | today's block at the bottom is replaced (or appended, or cleared when the day has no bucket) once the report is sent (`GS-015` FN-422) |
 
 ## Failure / error behaviour
 
@@ -124,6 +125,10 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-10** (`000c1e6`): `FOLLOWUP_TRACKER_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
 
+**2026-10-13** (`e8d33f8`): once Checkpoint 1 is NOT_NEEDED, Checkpoint 2 is NOT_NEEDED too unless a 13:00 email really went out (then COMPLETED) - fixes the false OVERDUE of 2026-10-11/12 (RULE-081); the report's subheading explains both NOT_NEEDED cases. **Live** (confirmed in the Apps Script editor 2026-10-14 - `docs/STALENESS_TRACKER.md` deploy register).
+
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 FT-1, FT-2, FT-3): recipient lists are normalised in the match key and the 17:00 row is matched with its bucket label, so two 17:00 buckets of one region to the same person no longer share one ledger row (FT-1). The `AllIssues_Log` reader drops another day's rows inside the day's span instead of assuming the block is contiguous (FT-2). A same-day re-send with no bucket now clears the earlier `Followup_Tracker` block (existing tab only), and an unreadable log writes nothing (FT-3). **Not live until pasted.**
+
 ## Revalidation trigger
 
 Any commit touching `FollowupTracker.gs` or `Tests_FollowupTracker.gs`; the `AllIssues_Log` columns (checkpoint stamps); the ledger's statuses or sweep columns; the 10:00 / 13:00 hours.
@@ -134,7 +139,7 @@ Any commit touching `FollowupTracker.gs` or `Tests_FollowupTracker.gs`; the `All
 
 ## Lifecycle / retention
 
-`SHEET-024`: one row per 17:00 bucket per report day, never pruned (about 50 a day).
+`SHEET-024`: one row per 17:00 bucket per report day (about 50 a day); rows older than 90 days are archived to Drive and removed by the 16:30 report since `7ef68d3` (`GS-015` RULE-079).
 
 ## Next action
 

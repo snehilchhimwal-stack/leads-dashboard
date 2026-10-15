@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `ec19415` - the redirect of a bounced address before the gate (Email Ops EO-13; the Gmail send itself is unchanged) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 EmailInfra fixes (09eb9ca): base64 body on the Gmail-API ops alert, plain-alert fallback for the "Leads NOT sent" report; `js/reports-gmail.js` unchanged |
 
 ## Purpose / reason to exist
 
@@ -67,6 +67,8 @@ same-thread replies, the raw **Advanced Gmail Service** (because
 | a send fails after one succeeded (bulk) | button restored to its prior **"Sent"** state, not bare "Send" (`JS-015` EXC-027) |
 | `GmailThread.reply()` would send to the last sender | worked around by `sendThreadedGmailReply_` via the Advanced Gmail Service (`GS-010` EXC-080) |
 | Gmail quota exhausted | backend: `withSendRetry_` then an ops alert; browser: the send fails visibly |
+| the "Leads NOT sent" HTML report (`notifyLeadSendFailuresGs_`) fails to send | since 2026-10-13: re-sent as a plain-text ops alert via `notifyOpsAlertGs_` (GmailApp, then the Advanced Gmail Service) (`GS-004` EXC-150) |
+| a backend send fails after all 3 `withSendRetry_` attempts | each attempt made its own draft, so up to 3 identical drafts may sit in Gmail Drafts (not deleted); the 17:00 failure alerts say to send only one (`GS-004` FN-196, `GS-001` FN-176) |
 | `TEST_MODE_OVERRIDE_EMAIL` / `_` set | **every** recipient silently redirected — a footgun on both runtimes (`JS-016` CFG-024 / `GS-004` CFG-039). Backend only, since 2026-09-25: TEST MODE also writes NO production state (log rows/checkpoint columns), and CH-level reports + Section-2-only buckets now honor it too (they used to reach real inboxes) |
 
 ## Rate-limit / retry behaviour
@@ -118,9 +120,9 @@ Part 3 §3.9, Part 6 findings; `CLAUDE.md`.
 
 ## Source of truth
 
-`js/reports-gmail.js` `performGmailSend` `#L270`, `buildRawEmail` `#L244`,
+`js/reports-gmail.js` `performGmailSend` `#L339`, `buildRawEmail` `#L250`,
 `DEFAULT_CLIENT_ID` `~#L42`; `OvernightEmailer.gs` `sendThreadedGmailReply_`
-`#L801`; `EmailInfra.gs` `withSendRetry_` `#L239`.
+`#L1544`; `EmailInfra.gs` `withSendRetry_` `#L634`.
 
 ## Validation
 
@@ -191,6 +193,8 @@ note doesn't read as ignored.
 **2026-10-10** (`59db11b`, decision D8): the 2026-10-09 "Data freshness notice" was withdrawn; emails instead hold stale LEADS in a bottom block (`GS-021`) - email content only, every lead stays in the body, so the send-safety gate's lead check and the Gmail send path are unaffected.
 
 **2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): `sendGuardedEmailGs_` and `sendThreadedGmailReply_` now swap an address that bounced for the person next in the hierarchy (the ops address when nobody is above) just before the safety gate (`GS-022` `emailRerouteApplyGs_`, `SHEET-025`); the Gmail calls themselves are unchanged. **Not live until pasted.**
+
+**2026-10-15** (`09eb9ca`, audit 2026-10-13 EI-1/EI-5/EI-10): the raw MIME of the ops alert sent through the Advanced Gmail Service (`sendOpsAlertViaGmailApiGs_`, `GS-004` FN-331) now base64-encodes the body (`Content-Transfer-Encoding: base64`, 76-character lines) instead of sending raw 8-bit text (EI-10). A "Leads NOT sent" report that fails is re-sent as a plain ops alert (EI-1). EI-5 is wording only: the draft-per-attempt behaviour of `withSendRetry_` is unchanged and is now explained in the 17:00 alerts. The other EI fixes in that commit (Region_Recipients lookup, send-gate id matching, watchdog, CH marks) do not touch the send mechanism; the scopes and `js/reports-gmail.js` (no commits since `ec19415`) are unchanged. **Not live until pasted.**
 
 ## Revalidation trigger
 

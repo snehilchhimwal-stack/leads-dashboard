@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `b21849e` — reviewed after `js/tab-tracking.js` lost `evidenceAtDeadline` (moved to `js/tab-movement.js`, see `JS-024`, `HANDOVER.md` §9.7.3); a global function, still called identically by this file's own cohort computations regardless of which file defines it — no behavior change to the Tracking tab |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 MT-01 follow-up (1f51394): browser cohort coverage floor, twin of the `persistDailyCohortHistoryGs_` retention filter |
 
 ## Purpose / reason to exist
 
@@ -108,6 +108,10 @@ by RM Timeline (`TAB-005` / `JS-023`).
   (`LOGIC_AUDIT.md` Part 1 §4c).
 - The staleness guard in `renderDailyCohortByRegion` refuses live
   recomputation past retention — shows "NA" not a wrong number.
+- Since 2026-10-15, "earliest coverage" counts only snapshots from the
+  last 7 days (`MOVEMENT_LOG_COVERAGE_DAYS`, twin of `MovementTracker.gs`'s
+  `MOVEMENT_LOG_RETENTION_DAYS`): the old rows MT-01's prune keeps for
+  quiet leads must not make long-past days eligible (`JS-024` EXC-167).
 - `evidenceAtDeadline()` prefers nearest snapshot at-or-before, falls
   forward, else returns `null` rather than guessing.
 - `upsert*` writes use `RAW` value-input to stop Sheets auto-converting
@@ -156,6 +160,8 @@ only).
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-026.
+
+**2026-10-15** (`1f51394`, audit 2026-10-13 MT-01 follow-up, `js/tab-tracking.js` only): `eligibleDailyCohortDates` now ignores `Movement_Log` snapshots older than `MOVEMENT_LOG_COVERAGE_DAYS` (7, kept equal to `MovementTracker.gs`'s `MOVEMENT_LOG_RETENTION_DAYS`) when finding the earliest coverage, and returns no dates when nothing is inside that window. Why: since MT-01 the `Movement_Log` prune keeps each live lead's newest row however old it is, so those rows would have moved "earliest coverage" back by weeks and made long-past, never-archived days newly eligible with degraded evidence. Twin of the retention filter in `persistDailyCohortHistoryGs_` (`GS-008`), which drops those rows before the Apps Script cohort phase; the browser floor applies only to the earliest-coverage bound (the floor uses the browser clock, `Date.now()`). Live after push to GitHub Pages (repo not pushed yet).
 
 ## Revalidation trigger
 

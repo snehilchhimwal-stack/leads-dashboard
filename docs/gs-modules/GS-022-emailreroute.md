@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `000c1e6` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes ER-1..6, ES-3 (7ef68d3): history view of ended rows, no re-made rows after a manual end, ledger-gated and locked re-send |
 
 ## Purpose / reason to exist
 
@@ -41,20 +41,22 @@ Never for this file. (`setupEmailSweepTrigger()` of `GS-017` must be re-run once
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-427 | `emailRerouteIsActiveGs_` / `emailRerouteMapGs_` / `emailRerouteResolveGs_` / `emailRerouteTranslateAddressesGs_` | table rows, a moment, addresses | which rows are in force; `{ dead: row }`; the end of a chain; `{ to, cc, changes }` | none (pure) | - | FN-430, FN-432 | specific - RULE-068 |
+| FN-427 | `emailRerouteIsActiveGs_` / `emailRerouteMapGs_(entries, atMs, history)` / `emailRerouteResolveGs_` / `emailRerouteTranslateAddressesGs_` | table rows, a moment, addresses | which rows are in force; `{ dead: row }` (with `history`, as the table was at that past moment, ENDED rows included - FN-485); the end of a chain; `{ to, cc, changes }` | none (pure) | FN-485 | FN-430, FN-432 | specific - RULE-068 |
+| FN-485 | `emailRerouteWasInForceGs_(e, atMs)` `#L87` | a table row, a past moment | whether the row (ACTIVE or ENDED) was in force then - created at or before it and `expires_at` after it | none (pure) | - | FN-427 (history mode), used by `emailRerouteEffectiveAddressesGs_` and the bounce matcher in FN-432 - never for a live redirect | specific - ER-6, RULE-069 |
 | FN-428 | `emailRerouteNextGs_(data, deadEmail, nameHint, opsEmail)` | the hierarchy data, the dead address, the bucket name, the ops address | `{ email, name, role, via, deadName }` or null | none (pure) | - | FN-432 | specific - RULE-068 |
-| FN-429 | `emailRerouteReadEntriesGs_` / `emailRerouteEntriesCachedGs_` / `emailRerouteRecordGs_` / `endAllEmailReroutesNow` / `showEmailReroutesNow` | the workbook | the rows; a new row; a count | reads/writes `Email_Reroutes` (`SHEET-025`); the cache is per run (two minutes) | `emailLedgerEnsureSheetGs_`, `emailLedgerAppendBlockGs_` (`GS-015`) | FN-430, FN-432, `GS-016`, `GS-017` | specific - RULE-069 |
+| FN-429 | `emailRerouteReadEntriesGs_` / `emailRerouteEntriesCachedGs_` / `emailRerouteRecordGs_` / `endAllEmailReroutesNow` / `showEmailReroutesNow` | the workbook | the rows; a new row; a count | reads/writes `Email_Reroutes` (`SHEET-025`); the cache is per run (two minutes); `endAllEmailReroutesNow` sets `status` ENDED and `expires_at` to the moment it ended the row (ER-6) | `emailLedgerEnsureSheetGs_`, `emailLedgerAppendBlockGs_` (`GS-015`) | FN-430, FN-432, `GS-016`, `GS-017` | specific - RULE-069 |
 | FN-430 | `emailRerouteApplyGs_(msg)` / `emailRerouteBannerGs_` / `emailRerouteNoteTextGs_` / `emailRerouteTakeNoteGs_` / `emailRerouteClearNoteGs_` | an outgoing message | the message to send (a dead address swapped, a banner in front) or the same object | none; sets the note the ledger row will carry | FN-427, FN-429, `esc_` (`GS-002`) | `sendGuardedEmailGs_` (`GS-004`), `sendThreadedGmailReply_` (`GS-010`), `GS-015` | specific - RULE-071 |
-| FN-431 | `emailRerouteResendGs_(ss, row, now)` / `emailRerouteWindowOpenGs_(row, now)` | a bounced ledger row | `{ ok, text }`; whether it may still be re-sent | reads the original Gmail message; one email; one `reroute` ledger row (`RR|<email id>`) | `emailLedgerTrackSendGs_` (`GS-015`), `sendGuardedEmailGs_` (`GS-004`) | FN-432 | specific - RULE-070 |
-| FN-432 | `emailRerouteHandleBouncesGs_(ss, items, ledgerRows, now)` / `emailRerouteEffectiveAddressesGs_` / `emailRerouteHierarchyGs_` | the bounced ledger rows with their bounce messages | `{ emailId: { action, text } }` | records rows; re-sends; never throws to the sweep | FN-427..FN-431, `loadRmHierarchyAndEmails_` (`GS-011`), `opsAlertEmailGs_` (`GS-004`) | `sweepEmailBouncesAndReplies_` (`GS-017`) | specific - RULE-070 |
+| FN-431 | `emailRerouteResendGs_(ss, row, now)` / `emailRerouteWindowOpenGs_(row, now)` | a bounced ledger row | `{ ok, text }`; whether it may still be re-sent | reads the original Gmail message; plans the copy's `reroute` ledger row FIRST and sends nothing without it (ER-5); one email to the addresses recorded in that row, with the banner added here (ER-4) | `emailLedgerPlanGs_`, `emailLedgerTrackSendGs_` (`GS-015`), `sendGuardedEmailGs_` (`GS-004`), `emailRerouteBannerGs_`, `emailRerouteNoteTextGs_` | FN-432 | specific - RULE-070 |
+| FN-486 | `emailRerouteWithLockGs_(fn)` `#L389` | a function (the re-send) | its result, or null when an email job holds the script lock (fn NOT run) | takes the script lock (`tryLock`, 5 s) only for fn's duration; a lock service error runs fn without it (fail-open) | `LockService` | FN-432 | specific - ES-3, RULE-070 |
+| FN-432 | `emailRerouteHandleBouncesGs_(ss, items, ledgerRows, now)` / `emailRerouteEffectiveAddressesGs_` / `emailRerouteHierarchyGs_` | the bounced ledger rows with their bounce messages | `{ emailId: { action, text } }` (new actions `ENDED`, `DEFERRED`) | records rows; re-sends (under FN-486); never throws to the sweep | FN-427..FN-431, FN-486, `emailSweepBounceFailedAddressesGs_` / `emailSweepBounceNamesGs_` (`GS-017` FN-483), `loadRmHierarchyAndEmails_` (`GS-011`), `opsAlertEmailGs_` (`GS-004`) | `sweepEmailBouncesAndReplies_` (`GS-017`) | specific - RULE-070 |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
 | RULE-068 | A dead To address is replaced by the person next in the hierarchy: from the dead person's own `RM_Hierarchy` row TL, TM, RH, CH - the first with an email in `Manager_Directory` and a different address; nobody (or an address that is nobody in the directory) = the ops address, marked `ops fallback`. A dead Cc is replaced the same way, or DROPPED when its chain ends at the ops fallback (the ops address is not added to other people's mail); a replacement already in To is not repeated in Cc. A replacement that bounces gets its own row, so the chain climbs one level per bounce and ends at the ops address; a loop or a chain longer than 6 falls back to the original address. The ops address itself has nobody above it - nothing is re-routed for it | FN-427, FN-428 | the dashboard's manual flow is NOT re-routed (decision D9: left as it is) |
-| RULE-069 | A row lasts 14 days (then the dead address is tried again), is ignored once ended (`endAllEmailReroutesNow()`), and never applies to an email sent before it was created. A second bounce of an address that already has a row in force adds no row. A row stops mattering by itself when the directory holds a different address for the person | FN-429 | - |
-| RULE-070 | The bounced email is re-sent ONCE, from its own Gmail message (`message_id` in the ledger), to the replacement, only while the original job's late-send window is open (17:00 -> 18:30, 10:00 -> 12:45, 13:00 -> 16:00, on the email's own IST day - decision D5; a copy that bounces again gets 3 hours). Every bounced row is looked at on every check, so a step that failed (the hierarchy could not be read, the send failed or was refused by the gate) is retried until the window closes; a copy left `ACCEPTED` / `UNCONFIRMED` / `ATTEMPTING` is never sent again; one left `FAILED` / `BLOCKED` is. Only a bounce of the To address triggers a re-send (a Cc bounce changes the Cc only); reports that go to the ops address are never re-routed | FN-431, FN-432 | `GS-015` RULE-046 (the same no-duplicate-send principle) |
+| RULE-069 | A row lasts 14 days (then the dead address is tried again), is ignored once ended (`endAllEmailReroutesNow()`), and never applies to an email sent before it was created. A second bounce of an address that already has a row in force adds no row. A row stops mattering by itself when the directory holds a different address for the person. A row made at or after a bounce (since ENDED by hand, or expired) means that bounce was handled: the sweep's re-reads of the same 3-day-old bounce never make a new row (which used to undo `endAllEmailReroutesNow()` at the next check) - only a NEWER bounce does, and the outcome reads `ENDED` (ER-2). For history (whom an email sent at a past moment really went to) an ENDED row still counts up to the moment it was ended (ER-6) | FN-429, FN-432, FN-485 | - |
+| RULE-070 | The bounced email is re-sent ONCE, from its own Gmail message (`message_id` in the ledger), to the replacement, only while the original job's late-send window is open (17:00 -> 18:30, 10:00 -> 12:45, 13:00 -> 16:00, on the email's own IST day - decision D5; a copy that bounces again gets 3 hours). Every bounced row is looked at on every check, so a step that failed (the hierarchy could not be read, the send failed or was refused by the gate) is retried until the window closes; a copy left `ACCEPTED` / `UNCONFIRMED` / `ATTEMPTING` is never sent again; one left `FAILED` / `BLOCKED` is. Only a bounce of the To address triggers a re-send (a Cc bounce changes the Cc only); reports that go to the ops address are never re-routed. Which addresses bounced is decided by whole-address matching and, when the bounce states them, only its failed addresses (ER-1/ER-3, `GS-017` RULE-052). The copy's ledger row is the only record that it went out, so it is a gate: no ledger or no planned row = no send, the next check retries (ER-5). The copy goes to the addresses recorded in its row, with the banner added at re-send time - never left to the fail-open redirect, which on a stale table sent it to the dead address (ER-4). The re-send runs under the script lock (5 s `tryLock`); when an email job holds it the outcome is `DEFERRED` and the next check re-sends while the window is open (ES-3) | FN-431, FN-432, FN-486 | `GS-015` RULE-046 (the same no-duplicate-send principle) |
 | RULE-071 | The redirect happens on the payload that is really sent, BEFORE the safety gate (so the gate judges it), leaves the stored recipients (logs, ledger) unchanged, puts a banner in the html and plain text when a To changed, and is written into the ledger row of that send (`status_reason`: "re-routed to X (the bounced Y)"). It is fail-open: any error, an unreadable table, TEST MODE, or no row in force = the email goes to its original address, untouched (the very same object) | FN-430 | - |
 
 ## Config constants - `CFG-XXX` sub-table
@@ -62,6 +64,7 @@ Never for this file. (`setupEmailSweepTrigger()` of `GS-017` must be re-run once
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
 | CFG-122 | `EMAIL_REROUTE_DAYS_`, `EMAIL_REROUTE_MAX_HOPS_`, `EMAIL_REROUTE_CACHE_MS_`, `EMAIL_REROUTE_RESEND_MAX_HOURS_` | `14`, `6`, 120000, `3` | how long a row lasts; the longest chain followed; how long the table is cached in a run; the window for a copy that bounces again | how long a dead address stays redirected; the chain depth; the read cost; how late a second-level copy may still go |
+| CFG-136 | `EMAIL_REROUTE_LOCK_WAIT_MS_` | `5000` | how long a re-send waits for the script lock before it is left to the next check (ES-3) | how often a re-send near an email job is deferred; how long the sweep can block |
 
 ## Exceptions - `EXC-XXX` sub-table
 
@@ -70,6 +73,8 @@ Never for this file. (`setupEmailSweepTrigger()` of `GS-017` must be re-run once
 | EXC-140 | the hierarchy (`RM_Hierarchy` / `Manager_Directory`) cannot be read after a bounce | no row is made and nothing is sent to a guessed person; the outcome is `ERROR`; the next check retries | the alert says "no re-route made yet ... the next check retries" |
 | EXC-141 | the original email cannot be copied (no Gmail message id recorded, or Gmail cannot read it, or the gate refuses the copy) | the redirect row is still made (later emails are redirected); nothing is re-sent; the outcome says why | the alert says "NOT re-sent ..." with the reason |
 | EXC-142 | the `Email_Reroutes` tab cannot be read when an email is sent | the table reads as empty; the email goes to its original address | none - exactly the behaviour before this file existed |
+| EXC-158 | the ledger cannot be opened, or the copy's own ledger row could not be planned (ER-5) | nothing is re-sent (`RESEND_FAILED` with the reason); the next check retries while the window is open | the alert says "NOT re-sent: the ledger ..." |
+| EXC-159 | an email job holds the script lock when a re-send is due (ES-3) | the re-send is not attempted; outcome `DEFERRED`; the next check re-sends while the window is open | the alert says "NOT re-sent yet: an email job holds the script lock" |
 
 ## Data lineage
 
@@ -79,13 +84,13 @@ Never for this file. (`setupEmailSweepTrigger()` of `GS-017` must be re-run once
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
-| `SHEET-025` `Email_Reroutes` | Read + append; status cell on a manual end | FN-429, FN-432 | created on the first bounce |
+| `SHEET-025` `Email_Reroutes` | Read + append; `status` and `expires_at` cells on a manual end | FN-429, FN-432 | created on the first bounce (or by `precreateEmailOpsTabsNow`); rows over 90 days old (by `created_at`) archived + removed by the 16:30 report (`GS-015` RULE-079) |
 | `SHEET-019` `Email_Ledger` | Write (through the ledger API) | FN-431 | the copy's own row, job `reroute` |
 | `SHEET-006` / `SHEET-007` `RM_Hierarchy` / `Manager_Directory` | Read (through `GS-011`) | FN-432 | who is above the dead person |
 
 ## Failure / error behaviour
 
-Fail-open everywhere (see RULE-071, EXC-140..142). A bounce record is written BEFORE the escalation runs, so a failure here never loses it.
+Fail-open everywhere for normal sends (see RULE-071, EXC-140..142). The one deliberate exception is the bounce re-send, which is NOT sent without its ledger row (EXC-158) or while an email job holds the script lock (EXC-159) - both retried by the next check. A bounce record is written BEFORE the escalation runs, so a failure here never loses it.
 
 ## Cross-runtime duplication
 
@@ -129,6 +134,8 @@ Apps Script backend; a pure/near-pure helper layer used by the sweep and by the 
 
 **2026-10-10** (`000c1e6`): `EMAIL_REROUTE_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
 
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 ER-1..ER-6, ES-3): which addresses a bounce names now uses the sweep's whole-address / failed-address matching (ER-1, ER-3; `GS-017` FN-483). A bounce already handled by a row since ended by hand no longer re-creates it (ER-2, outcome `ENDED`); `endAllEmailReroutesNow` stamps `expires_at` and the history view counts ENDED rows up to then (ER-6; FN-485). The re-send is gated on its own ledger row (ER-5; EXC-158), goes to the addresses recorded in that row with the banner added directly (ER-4), and runs under a short script lock, else `DEFERRED` (ES-3; FN-486, CFG-136, EXC-159). **Not live until pasted.**
+
 ## Revalidation trigger
 
 Any commit touching `EmailReroute.gs` or `Tests_EmailReroute.gs`; the shape of an `Email_Ledger` row; `sendGuardedEmailGs_` / `sendThreadedGmailReply_`; the late-send cutoffs; `loadRmHierarchyAndEmails_`.
@@ -139,7 +146,7 @@ Any commit touching `EmailReroute.gs` or `Tests_EmailReroute.gs`; the shape of a
 
 ## Lifecycle / retention
 
-Rows in `Email_Reroutes` are never removed (a handful a month); see `SHEET-025`.
+Rows in `Email_Reroutes` older than 90 days (by `created_at`) are archived to Drive and removed by the 16:30 report since `7ef68d3` (`GS-015` RULE-079); see `SHEET-025`.
 
 ## Next action
 

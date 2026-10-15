@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `59db11b` - created (Email Ops decision D8) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - stale-count tile (e8d33f8); audit 2026-10-13 fixes SL-01..03 (2146e13) |
 
 ## Purpose / reason to exist
 
@@ -21,6 +21,7 @@ its body, so the send-safety gate, the ledger and the lead counts are unaffected
 
 - Judge one live lead (`leadStaleStateGs_`): stale only when its live content still hashes the same as its latest `Movement_Log` row AND that row is more than 24 h old; a live row that already differs from its latest snapshot changed after it (not stale); a lead with no history is not stale (no evidence either way).
 - Put the Date a stale lead last changed on each lead (`staleSinceOfRowGs_`), and look it up for the checkpoint tables (`staleSinceForLeadIdsGs_`, `staleSinceMapGs_`).
+- Count and announce (`applyStaleSplitGs_`, 2026-10-13): count the distinct leads the split will move (`staleLeadCountGs_`), split the sections, and insert a red KPI tile right after the headline count ("n of these is/are stale - listed at the bottom"); sets `opts.staleCount`, which callers turn into a plain-text note with `staleCountNoteGs_`.
 - Split a report (`splitStaleSectionsGs_`): move every stale row of every "Lead ID" table into a copy of that table with a "No update since" column, oldest first, under one red band "Stale leads - no update for more than 24 hours" at the bottom; a table left empty disappears (its region band passes on); nothing stale returns the input untouched.
 
 ## Trigger schedule
@@ -35,16 +36,17 @@ Never.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-424 | `leadStaleStateGs_(row, colIndex, lastChangeMap, now)` / `staleSinceOfRowGs_(...)` | a live leads-tab row, its column index, the change map, the time | `{ stale, lastChangeAt, reason }` / the Date a stale lead last changed, else null (fail-open) | none (pure) | `_dedupKeyGs_`, `_leadContentHashGs_` (`GS-008`), `getVal_` (`GS-002`) | `GS-001`, `GS-010` | specific - RULE-066 |
-| FN-425 | `staleSinceMapGs_(items)` / `staleSinceForLeadIdsGs_(leadIds, leadsData, now)` | leads carrying `staleSince` / lead ids and `{ colIndex, dataRows, lastChangeMap }` | `{ leadId: Date }` | none (pure; the second is fail-open: `{}` on any problem) | FN-424 | `GS-001`, `GS-010` | specific |
-| FN-426 | `splitStaleSectionsGs_(sections, staleSince)` | a report's sections, `{ leadId: Date }` | the sections with the stale block at the bottom (or the same array) | none (pure; never modifies its input) | - | `GS-001`, `GS-010` | specific - RULE-067 |
+| FN-424 | `leadStaleStateGs_(row, colIndex, lastChangeMap, now)` `#L35` / `staleSinceOfRowGs_(...)` `#L27` | a live leads-tab row, its column index, the change map, the time | `{ stale, lastChangeAt, reason }` / the Date a stale lead last changed, else null (fail-open) | none (pure) | `_dedupKeyGs_`, `_leadContentHashGs_` (`GS-008`), `getVal_` (`GS-002`) | `GS-001`, `GS-010` | specific - RULE-066 |
+| FN-425 | `staleSinceMapGs_(items)` `#L51` / `staleSinceForLeadIdsGs_(leadIds, leadsData, now)` `#L64` | leads carrying `staleSince` / lead ids and `{ colIndex, dataRows, lastChangeMap }` | `{ leadId: Date }`; a lead with several live rows (one per RM) is stale only when EVERY row is stale, dated by the LATEST of their last changes (SL-02, 2026-10-13) | none (pure; the second is fail-open: `{}` on any problem) | FN-424 | `GS-001`, `GS-010` | specific |
+| FN-426 | `splitStaleSectionsGs_(sections, staleSince)` `#L88` | a report's sections, `{ leadId: Date }` | the sections with the stale block at the bottom (or the same array) | none (pure; never modifies its input) | - | FN-500 (and tests) | specific - RULE-067 |
+| FN-500 | `applyStaleSplitGs_(opts, staleSince)` `#L137` (+ `staleLeadCountGs_` `#L122`, `staleCountNoteGs_(n)` `#L150`) | a report's opts (`sections`, `kpis`), `{ leadId: Date }` | the number of distinct stale leads (`staleLeadCountGs_`: distinct `Lead ID` values of `Lead ID` tables found in `staleSince`); `staleCountNoteGs_` returns ` (n of them stale, listed at the bottom)` or `''` | **mutates opts**: always sets `opts.staleCount`; when n > 0 replaces `opts.sections` with the split and inserts a red tile `{ value: n, label: 'of these is/are stale - listed at the bottom' }` at `kpis` index 1 (index 0 when there are no kpis) | FN-426 | `GS-001` (17:00 bucket + CH-level), `GS-010` (10:00, 13:00, CH-level overnight; checkpoint tables via FN-425) | specific - RULE-067 |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
 | RULE-066 | A lead is stale when it has had no update for MORE than 24 hours (exactly 24 h is not stale), judged from the Movement_Log content-hash history: unchanged since its latest snapshot and that snapshot is older than 24 h. The lead's creation / assignment time is never consulted. Because the snapshot runs four times a day and the observed time is never earlier than the real change, a lead is only called stale when it has really been quiet for more than 24 h (one quiet for 24-30 h may be missed). No history, a change since the snapshot, or any error means "not stale" | FN-424 | the dashboard's own "Stalled Leads" (`js/`) is a different, older rule (assigned 2+ days ago, no comment in 6+ h) and is unchanged |
-| RULE-067 | Stale leads are held in a separate red block at the bottom of the email, oldest first, with their last-update time; they are never removed from the email or its counts; an email whose leads are all stale is still sent (only the block); the block exists in the HTML and the plain text; nothing stale = the email is exactly as before | FN-426 | - |
+| RULE-067 | Stale leads are held in a separate red block at the bottom of the email, oldest first, with their last-update time; they are never removed from the email or its counts - the headline count still includes them, and a tile right after it (and a note in the one-line plain-text summary) says how many of them are in the stale block (2026-10-13, FN-500); an email whose leads are all stale is still sent (only the block); the block exists in the HTML and the plain text; nothing stale = the email is exactly as before | FN-426, FN-500 | - |
 
 ## Config constants - `CFG-XXX` sub-table
 
@@ -70,7 +72,7 @@ Live `leads` tab row + `Movement_Log` (`SHEET-002`: `snapshot_at`, `lead_id`, `R
 
 ## Failure / error behaviour
 
-Fail-open everywhere: any problem means "no stale block" and the email goes out as before.
+Fail-open everywhere: any problem means "no stale block" and the email goes out as before (with `staleCount` 0, so no tile and no note).
 
 ## Cross-runtime duplication
 
@@ -111,6 +113,8 @@ Apps Script backend; a pure helper layer used by the three email jobs.
 ## Version / change reference
 
 **2026-10-10** (`59db11b`): file created - decision D8. `MovementTracker.gs` reads two more `Movement_Log` columns (`RM`, `content_hash`) and returns a `lastChangeMap` (`GS-008` FN-423); `AllIssuesEmailer.gs` and `OvernightEmailer.gs` put `staleSince` on each lead and split every report. **Not live until pasted.**
+
+**2026-10-15** (`e8d33f8`): new `applyStaleSplitGs_` (FN-500, with `staleLeadCountGs_` / `staleCountNoteGs_`) is now every email's single entry point for the stale block: it splits the sections and adds a tile next to the headline count saying how many of the counted leads are stale and listed at the bottom, plus a plain-text note in the 10:00 / 13:00 one-line summaries (real case 2026-10-13: a "2 Leads Still Unresolved" email over a table of 1). The headline count is unchanged. (`2146e13`, audit 2026-10-13 SL-01, SL-02, SL-03): SL-02 - `staleSinceForLeadIdsGs_` calls a multi-RM lead stale only when every one of its rows is stale, dated by the latest last change (was: any stale row); SL-01 is fixed in `GS-008` (the 7-day prune keeps each live lead's newest `Movement_Log` row, MT-01), so a quiet lead no longer loses its stale date every 7 days; SL-03 - comments now point at the right file. **Live** (confirmed in the Apps Script editor 2026-10-14 - `docs/STALENESS_TRACKER.md` deploy register).
 
 ## Revalidation trigger
 

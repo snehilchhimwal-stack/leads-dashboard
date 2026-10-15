@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created by the first 16:30 report after `GS-016` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `bc39815` - created (Email Ops EO-10 / EO-8b) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - 90-day retention added (audit 2026-10-13 EL-6, `7ef68d3`) |
 
 ## Purpose / reason to exist
 
@@ -56,9 +56,9 @@ Written by the 16:30 `sendEmailCycleReport` trigger (`GS-016`).
 ## Data Lifecycle
 
 - **Data Type:** historical (one row a day).
-- **Retention Period:** none - about 365 small rows a year.
-- **Enforced By:** None.
-- **Archive / Delete Behavior:** grows by one row a day; nothing removes rows.
+- **Retention Period:** 90 days since the 2026-10-13 audit fix EL-6 (`7ef68d3`, pending paste) - `EMAIL_LEDGER_RETENTION_DAYS_`, the same window as `Email_Ledger`.
+- **Enforced By:** `pruneEmailOpsTabsGs_` (`GS-015`), run by the 16:30 cycle report (`GS-016`) after its email; fail-open per tab (a missing tab, an unrecognised header or a failed archive leaves the tab alone); TEST MODE prunes nothing.
+- **Archive / Delete Behavior:** the leading rows older than the window are archived to a Drive CSV first, then removed (`emailLedgerPruneLeadingGs_`, the ledger's own prune).
 - **Sensitivity:** operational counts only.
 
 ## Sensitivity & operational importance (DOC-038)
@@ -107,6 +107,8 @@ The live tab; header authored in `CycleReport.gs` (`CYCLE_REPORT_DAILY_HEADERS_`
 
 **2026-10-09** (`bc39815`): tab created. **Not live until pasted.**
 
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 EL-6): the tab now has 90-day retention - `pruneEmailOpsTabsGs_` (`GS-015`), called by the 16:30 cycle report after its email, archives rows older than `EMAIL_LEDGER_RETENTION_DAYS_` to Drive and removes them; fail-open per tab. **Not live until pasted.**
+
 ## Revalidation trigger
 
 The header constant changes; the report's numbers change.
@@ -117,7 +119,7 @@ The header constant changes; the report's numbers change.
 
 ## Lifecycle / retention
 
-None.
+90 days, archived to Drive first, enforced by `pruneEmailOpsTabsGs_` (`GS-015`) from the 16:30 cycle report since `7ef68d3` (audit EL-6, pending paste). Before that: none.
 
 ## Next action
 

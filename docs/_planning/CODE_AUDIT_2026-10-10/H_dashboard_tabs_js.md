@@ -331,7 +331,7 @@ Each tile's subline is the top key's share. "Distinct customers" = `familyKeyOf`
 | ID | Sev | Location | Confidence |
 |---|---|---|---|
 | H-1 | HIGH | `tab-tracking.js:31,93,110`; `tab-rmtimeline.js:192`; `tab-movement.js:535,808` | CONFIRMED (code); live since `641398e` |
-| H-2 | HIGH | `tab-oppmonitor.js:348,411` (+ `core-filters.js:96,265-275`) | CONFIRMED |
+| H-2 | HIGH | `tab-oppmonitor.js:348,411` (+ `core-filters.js:96,265-275`) | CONFIRMED - **FIXED 2e33f8d (2026-10-12)** |
 | H-3 | HIGH | `tab-tracking.js:1316-1342` | CONFIRMED (logic); size of the error SUSPECTED |
 | H-4 | MED | `tab-movement.js:448` via `tab-tracking.js:979,987,1006,1015` | CONFIRMED (logic); frequency SUSPECTED low |
 | H-5 | MED | `tab-tracking.js:1267-1277, 1442-1455` | CONFIRMED |
@@ -348,8 +348,8 @@ Each tile's subline is the top key's share. "Distinct customers" = `familyKeyOf`
 | H-16 | LOW | `tab-audit.js:291-294` | CONFIRMED |
 | H-17 | LOW | `tab-rmtimeline.js:94,171,196` | CONFIRMED |
 | H-18 | LOW | `overview…js:193,1098` | CONFIRMED (by design, confusing) |
-| H-19 | LOW | `tab-oppmonitor.js:362-365,423-426` | CONFIRMED |
-| H-20 | LOW | `tab-oppmonitor.js:246-256` | CONFIRMED |
+| H-19 | LOW | `tab-oppmonitor.js:362-365,423-426` | CONFIRMED - **FIXED 2e33f8d (2026-10-12)** |
+| H-20 | LOW | `tab-oppmonitor.js:246-256` | CONFIRMED - **FIXED 2e33f8d (2026-10-12)** |
 | H-21 | LOW | `tab-tracking.js:658-659,1157,1394` | SUSPECTED |
 | H-22 | LOW | `tab-morning.js:220` vs `overview…js:58-75` | SUSPECTED |
 | H-23 | LOW | `overview…js:895` (+ 865) | CONFIRMED |
@@ -368,7 +368,7 @@ Since `641398e` (2026-09-11, "Lead History & Versioning Review, Phase 6"), `Move
 - `distinctMovementSnapshotRuns` time options label `(N leads)` = changed rows.
 Failure scenario: a region with 300 open leads of which 40 changed in the 12:00 run plots "Total Leads in System = 40" at 12:00, and the From/To table shows large swings that only reflect activity, not backlog. Fix direction (for the owner): carry each lead's last-known row forward to every run listed in `Movement_Log_Runs` before tallying (an as-of join), and do the same for the stall walk.
 
-**H-2 (HIGH) — Opp Monitor "Live" rows are computed from the filtered `leads`, which defaults to the last 7 days.**
+**H-2 (HIGH) — Opp Monitor "Live" rows are computed from the filtered `leads`, which defaults to the last 7 days.** **FIXED 2e33f8d (2026-10-12)**
 `_renderOppMonitorPeriodTable`/`_renderOppMonitorMonthTable` pass the global `leads`. `leads` = `allParsedLeads.filter(passesFilters)` (`core-filters.js:88-96`), and `buildFilterUI` sets the Assigned range to today−7..today whenever it is empty (`core-filters.js:265-275`). The filter bar is hidden on this tab (`TABS_HIDING_FILTER_BAR`), so the user can neither see nor change it there. Consequences: (a) by default, every live row for months −2 and −1 and for current-month periods older than about 8 days is computed from zero or a few leads — usually null (row missing) or wildly partial; (b) any Project/Region/Source filter chosen on another tab silently changes the "company-wide" live numbers; (c) the live computation is not restricted to Google Non-UTM/Search, while the official rows and the tab's stated scope are. The record `docs/js-modules/JS-025-tab-oppmonitor.md` (and the file header L4–10) says the tab "still reads no `filterState`" — technically true, but `leads` already embodies it. Fix direction: compute live rows from `allParsedLeads` with an explicit Google Non-UTM/Search source predicate.
 
 **H-3 (HIGH) — Week-over-Week recomputes aged-out days from degraded evidence.**
@@ -407,9 +407,9 @@ Daily Cohort by Region builds visible rows only from `REGION_GROUP_MAP` regions,
 
 **H-18 (LOW) — Same label, two numbers.** The "Behind on Today's Calls" KPI tile counts all ages (L193); the Operations section badge counts only `<48h` (L1098), with the `>48h` rows listed below it. The code calls this intentional, but nothing on the KPI tile says so; a reader comparing the two sees a mismatch.
 
-**H-19 (LOW) — Opp Monitor renders a real zero as blank.** `esc(String(row.same_day_count || ''))` (and `total_leads`, `h48_count`): a period with 0 same-day opps shows an empty cell rather than "0".
+**H-19 (LOW) — Opp Monitor renders a real zero as blank.** **FIXED 2e33f8d (2026-10-12)** `esc(String(row.same_day_count || ''))` (and `total_leads`, `h48_count`): a period with 0 same-day opps shows an empty cell rather than "0".
 
-**H-20 (LOW) — Opp Monitor checklist hides fetch errors.** When both tabs are in `error` state (permission/network), the checklist renders 12 "Pending" chips and no notice. Only `missing` + `missing` shows a message. The tables do show an error notice.
+**H-20 (LOW) — Opp Monitor checklist hides fetch errors.** **FIXED 2e33f8d (2026-10-12)** When both tabs are in `error` state (permission/network), the checklist renders 12 "Pending" chips and no notice. Only `missing` + `missing` shows a message. The tables do show an error notice.
 
 **H-21 (LOW, SUSPECTED) — Async render race.** `renderDailyCohortByRegion` and `renderWeekOverWeekCohort` are async, called without `await` or a run token on every `renderAll`. If two passes overlap (quick filter clicks while an archive fetch is pending), the older pass can resolve last and overwrite the newer table. Repeat Offenders solved the same problem with `_repeatOffendersRunId`.
 

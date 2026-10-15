@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `FollowupEngine.gs` (739 lines) |
+| **Location** | `FollowupEngine.gs` (772 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `c82ec67` — source unchanged since creation; corrected a real content error found in this sweep: the "~30-vs-~110 rule-count gap, unresolved" claim was stale — `LOGIC_AUDIT.md` §4.1 already resolved it (31/31 exact match) 3 days before this record was even created, never corrected here since |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes FE-1..5, SE-3, X-1 (8ef279d): exact-only signal words, 'to let' as property type only, stricter time modifier, Name:-prefixed dated entries |
 
 ## Purpose / reason to exist
 
@@ -48,28 +48,30 @@ next trigger fire of whatever calls it (`GS-010` / `GS-001` / `GS-013` /
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-205 | `inferOutcomeGs_(comment)` `#L403` | a comment string | an outcome label | none | `_signalMatchesGs_` (FN-207), walks `OUTCOME_RULES_GS_` | `latestOutcomeGs_` (FN-209), `GS-013`, `GS-006`, `GS-010`, `GS-001` | reusable — **twin of `inferOutcome` (`JS-007`)** |
-| FN-206 | `_editDistanceGs_(a,b)` / `_typoBudgetGs_(targetLen)` / `_wordsMatchGs_(word, target)` `#L77/#L100/#L105` | strings / a length | edit distance / budget (0 for ≤4, 1 for ≤8, 2 above) / a match bool | none | — | FN-207 | reusable — mirrors the client typo matcher |
-| FN-207 | `_signalMatchesGs_(commentWords, signal)` / `_anySignalGs_(commentWords, signals)` / `_signalWordsOfGs_(signal)` / `_wordsOfGs_(text)` `#L120/#L132/#L115/#L111` | tokenised comment + signal(s) | bool | none | FN-206 | FN-205 | reusable |
-| FN-208 | `overnightFollowupHintGs_(row, colIndex, now, baselineEntry)` / `noCommentFollowUpGs_(row, colIndex, now, baselineEntry)` / `unmatchedFollowUpGs_(comment, loggedBy)` `#L635/#L658/#L454` | a lead row / a comment | follow-up text (from `FOLLOWUP_SUGGESTIONS_GS_` or a fallback) | none | `latestOutcomeGs_` (FN-209) | `GS-010`, `GS-001` | reusable — **twins of `suggestedFollowUp` / `noCommentFollowUp` / `unmatchedFollowUp` (`JS-007`)** |
-| FN-209 | `latestOutcomeGs_(row, colIndex)` / `detectFollowupModifiersGs_(comment, primaryOutcome)` `#L693/#L557` | a lead row / a comment | latest outcome / detected modifiers | none | FN-205, `combinedCommentsTextGs_` (FN-211) | `GS-013`, `GS-006`, `GS-010` | reusable |
-| FN-210 | `parseDatedCommentEntries_(internalComments, stageComments)` / `latestCommentTimestamp_(...)` / `countTodayCommentEntries_(..., now)` `#L47/#L62/#L68` | comment fields | dated entries / latest timestamp / today's count | none | — | `computeSlaFlags_` (`GS-012`), FN-209 | reusable — shared with `SlaEngine.gs` |
-| FN-211 | `combinedCommentsTextGs_(row, colIndex)` / `overnightStatusLabelGs_(stage)` `#L580/#L590` | a row / a stage | joined comment text / a status label | none | — | FN-205, FN-209, `GS-010` | reusable |
+| FN-205 | `inferOutcomeGs_(comment)` `#L434` | a comment string | an outcome label | none | `_signalMatchesGs_` (FN-207), walks `OUTCOME_RULES_GS_` | `latestOutcomeGs_` (FN-209), `GS-013`, `GS-006`, `GS-010`, `GS-001` | reusable — **twin of `inferOutcome` (`JS-007`)** |
+| FN-206 | `_editDistanceGs_(a,b)` / `_typoBudgetGs_(targetLen)` / `_wordsMatchGs_(word, target)` `#L89/#L112/#L123` | strings / a length | edit distance / budget (0 for ≤4, 1 for ≤8, 2 above) / a match bool - since 2026-10-15 a target in `_EXACT_ONLY_SIGNAL_WORDS_GS_` (CFG-142: 'declining', 'broker', 'ringing') matches only exactly | none | — | FN-207 | reusable — mirrors the client typo matcher |
+| FN-207 | `_signalMatchesGs_(commentWords, signal)` / `_anySignalGs_(commentWords, signals)` / `_signalWordsOfGs_(signal)` / `_wordsOfGs_(text)` `#L139/#L151/#L134/#L130` | tokenised comment + signal(s) | bool | none | FN-206 | FN-205 | reusable |
+| FN-208 | `overnightFollowupHintGs_(row, colIndex, now, baselineEntry)` / `noCommentFollowUpGs_(row, colIndex, now, baselineEntry)` / `unmatchedFollowUpGs_(comment, loggedBy)` `#L668/#L691/#L485` | a lead row / a comment | follow-up text (from `FOLLOWUP_SUGGESTIONS_GS_` or a fallback) | none | `latestOutcomeGs_` (FN-209) | `GS-010`, `GS-001` | reusable — **twins of `suggestedFollowUp` / `noCommentFollowUp` / `unmatchedFollowUp` (`JS-007`)** |
+| FN-209 | `latestOutcomeGs_(row, colIndex)` / `detectFollowupModifiersGs_(comment, primaryOutcome)` `#L726/#L590` | a lead row / a comment | latest outcome / detected modifiers | none | FN-205, `combinedCommentsTextGs_` (FN-211) | `GS-013`, `GS-006`, `GS-010` | reusable - since 2026-10-15 (FE-4) the "specific time" modifier needs am/pm or minutes on the hour ("after 6pm", "around 5:30"); a bare number ("after 2 days") or minutes followed by a money unit ("around 1.25 cr") is not a time |
+| FN-210 | `parseDatedCommentEntries_(internalComments, stageComments)` / `latestCommentTimestamp_(...)` / `countTodayCommentEntries_(..., now)` `#L56/#L74/#L80` | comment fields | dated entries / latest timestamp / today's count | none | — | `computeSlaFlags_` (`GS-012`), FN-209 | reusable — shared with `SlaEngine.gs`; since 2026-10-15 (SE-3) an entry counts only in the `Name: text - YYYY-MM-DD HH:MM` shape (same regex as the JS `parseActionLog` and `latestOutcomeGs_`), so an unattributed dated line no longer counts here while the dashboard ignores it |
+| FN-211 | `combinedCommentsTextGs_(row, colIndex)` / `overnightStatusLabelGs_(stage)` `#L613/#L623` | a row / a stage | joined comment text / a status label | none | — | FN-205, FN-209, `GS-010` | reusable |
+| FN-521 | `_hasToLetPropertyGs_(commentWords)` `#L157` (added 2026-10-15) | a tokenised comment | `true` when the words `to let` appear and the next word is not one of `_TO_LET_NOT_PROPERTY_NEXT_GS_` (him/her/me/us/them/you/know) | none (pure) | - | the `Resale / Rental (Out of Scope)` rule's `test()` in `OUTCOME_RULES_GS_` | specific - **audit 2026-10-13 FE-3**: 'to let' was a plain signal and matched "asked to let him know"; twin of `_hasToLetProperty` (`JS-007` FN-522) |
 
 ## Config constants — `CFG-XXX` sub-table
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-041 | `OUTCOME_RULES_GS_` `#L147`–`#L401` | 31 ordered rules | the comment classifier | **twin `OUTCOME_RULES` (`JS-007` RULE-009)** — full pairwise diff (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): all 31 rules match exactly, same order, byte-identical `test()` bodies — zero drift, confirmed |
+| CFG-041 | `OUTCOME_RULES_GS_` `#L176`–`#L432` | 31 ordered rules | the comment classifier | **twin `OUTCOME_RULES` (`JS-007` RULE-009)** — full pairwise diff (`LOGIC_AUDIT.md` Part 4 §4.1, 2026-09-07): all 31 rules match exactly, same order, byte-identical `test()` bodies — zero drift, confirmed |
 | CFG-042 | `FOLLOWUP_SUGGESTIONS_GS_` | outcome → advisory text | the algorithmic follow-up fallback | **twin `FOLLOWUP_SUGGESTIONS` (`JS-007` RULE-012)** |
 | CFG-043 | typo budget thresholds | 0 / 1 / 2 by length | typo tolerance | matcher behaviour; mirrors `JS-007` RULE-010 |
+| CFG-142 | `_EXACT_ONLY_SIGNAL_WORDS_GS_` `#L122` / `_TO_LET_NOT_PROPERTY_NEXT_GS_` `#L156` (added 2026-10-15) | `{declining, broker, ringing}` / `{him, her, me, us, them, you, know}` | signal words that get NO typo budget (each is within budget of a common unrelated word: deciding, broken, bringing) / the next words that make "to let" a verb phrase, not a property type | `_wordsMatchGs_` (FN-206) and `_hasToLetPropertyGs_` (FN-521); **twins `_EXACT_ONLY_SIGNAL_WORDS` / `_TO_LET_NOT_PROPERTY_NEXT` (`JS-007` RULE-085/RULE-086) - KEEP IN SYNC**. Real typos are added as literal signals instead ('brokers', 'rining') |
 
 ## Exceptions — `EXC-XXX` sub-table
 
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
 | EXC-066 | a comment matches no rule | `unmatchedFollowUpGs_` returns a manual-review string; `GS-013` logs it to `Unmatched_Comments_Log` | the email shows a "read the comments, log a next action" prompt; the classifier gap is surfaced for review |
-| EXC-067 | typo false positive | accepted risk (mirrors the client) | rare mis-classification |
+| EXC-067 | typo false positive | accepted risk (mirrors the client); since 2026-10-15 (FE-1..3) the three known collisions are closed by exact-only matching (CFG-142) | rare mis-classification |
 
 ## Data lineage
 
@@ -101,7 +103,7 @@ the same 31 outcome categories in the identical priority order — the
 keyword strings across all 31 rules, not a different category count;
 "~30" simply undercounted by one on the other side. A direct pairwise
 diff (every outcome name, signal list, and `test()` body) confirmed zero
-drift. Every rule change must still be made on both sides (`HANDOVER.md`
+drift. The FE-1..3 changes (2026-10-15) were made on both sides in the same commit. FE-5 (2026-10-13) documents the INTENDED differences in the follow-up text, in both files' header comments: the email appends `FOLLOWUP_MODIFIERS_GS_` clauses, `unmatchedFollowUpGs_` omits the timestamp, there is no closing_reason tier (emailed leads are open), the last_comment fallback leaves loggedBy blank, and timestamps are read only in the fixed IST form. Every rule change must still be made on both sides (`HANDOVER.md`
 §6) — this resolution says the two sides currently agree, not that they
 can drift apart safely.
 
@@ -152,6 +154,8 @@ Part 4 §4.1; `CLAUDE.md` (duplication gotcha); `GS-013`
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-029.
+
+**2026-10-15** (`8ef279d`, audit 2026-10-13 FE-1..5, SE-3, X-1): 'declining', 'broker' and 'ringing' now match only exactly (`_EXACT_ONLY_SIGNAL_WORDS_GS_`, CFG-142), so "still deciding", "voice broken" and "bringing wife" no longer read as Call Declined / CP-Broker / Ringing; 'brokers' and 'rining' were added as literal signals (FE-1, FE-2). 'to let' left the Resale / Rental signals and is matched by `_hasToLetPropertyGs_` (FN-521) only as a property type, not in "to let him know" (FE-3). The "specific time" follow-up modifier needs am/pm or minutes, so "after 2 days" is no longer quoted as a clock time (FE-4). `parseDatedCommentEntries_` (FN-210) requires the `Name:` prefix like the dashboard, so the email and dashboard agree on Follow-up Overdue / Behind on Today's Calls (SE-3). Header comments now list the intended email-vs-dashboard differences (FE-5) and point at `js/core-outcome-engine.js` instead of the old `js/core.js` (X-1). The JS twin changed in the same commit (`JS-007`). Tests in `Tests_FollowupEngine.gs` and `tests/frontend-harness.html`. **Not live until pasted.**
 
 ## Revalidation trigger
 

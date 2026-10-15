@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `ec19415` - four checks a day, bounce-only mode, the hand-off to `GS-022` (Email Ops EO-13) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes ES-1..4, ER-1/ER-3 (7ef68d3): whole-address bounce matching, recorded bounces kept, moved-rows guard |
 
 ## Purpose / reason to exist
 
@@ -27,7 +27,7 @@ reported as delivered, and a bounce Gmail does not file as a mailer-daemon messa
 - In a bounce-only run (`opts.bouncesOnly`) touch nothing but `bounce_status`: the reply columns and `swept_at` ("last full sweep") stay as they were and no thread is read.
 - Find bounces (`GmailApp.search` for mailer-daemon / postmaster, `emailSweepFetchBouncesGs_`) and match each to an email (`emailSweepMatchBounceGs_`).
 - Find replies in each email's thread (`emailSweepFetchThreadGs_`, `emailSweepRepliesGs_`): later messages from someone other than the sending account.
-- Write the result for the whole range in ONE call, stop after a time budget (4.5 minutes), alert on new bounces, never throw on a Gmail error.
+- Write the result for the whole range in ONE call - but only after re-checking that the rows did not move since they were read (`emailSweepBlockMovedGs_`) - stop after a time budget (4.5 minutes), alert on new bounces, never throw on a Gmail error.
 - AFTER the statuses are written, hand every bounced row (new or old) to `emailRerouteHandleBouncesGs_` (`GS-022`) and put what it did next to each new bounce in the alert; a failure there is recorded in the summary, never lost.
 
 ## Trigger schedule
@@ -46,9 +46,11 @@ First install (run `setupEmailSweepTrigger()` once after pasting) - **and once m
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-399 | `emailSweepIsCandidateGs_(row, now)` / `emailSweepAddressesGs_` | a ledger row object, the time | whether to sweep it; lower-cased addresses | none (pure) | - | FN-402 | specific - RULE-051 |
-| FN-400 | `emailSweepMatchBounceGs_(row, bounces, extraRecipients)` | a ledger row, `[{at, subject, body}]`, the addresses a re-route really sent it to | the bounce that belongs to it, or null | none (pure) | `emailSweepAddressesGs_` | FN-402 | specific - RULE-052 |
+| FN-400 | `emailSweepMatchBounceGs_(row, bounces, extraRecipients)` | a ledger row, `[{at, subject, body}]`, the addresses a re-route really sent it to | the bounce that belongs to it, or null | none (pure) | `emailSweepAddressesGs_`, FN-483 | FN-402 | specific - RULE-052 |
+| FN-483 | `emailSweepTextNamesAddressGs_(text, address)` / `emailSweepBounceFailedAddressesGs_(text)` / `emailSweepBounceNamesGs_(text, failed, address)` + `EMAIL_SWEEP_FAILED_ADDRESS_RES_` `#L59/#L79/#L92` | a bounce text, an address | whether the text names the address as a WHOLE address (ER-3); the addresses the bounce itself reports as failed (`Final-Recipient: rfc822; ...`, "wasn't delivered to ..."), or []; whether the address counts as bounced (only the failed ones when the bounce states them - ER-1) | none (pure) | - | FN-400, `emailRerouteHandleBouncesGs_` (`GS-022`) | reusable - RULE-052 |
 | FN-401 | `emailSweepRepliesGs_(row, messages, ownAddress)` / `emailSweepIsOwnGs_` / `emailSweepIsBounceSenderGs_` | a ledger row, `[{from, date}]` | `{count, latest}` | none (pure) | - | FN-402 | specific |
-| FN-402 | `sweepEmailBouncesAndReplies_(opts)` / `emailSweepFetchBouncesGs_` / `emailSweepFetchThreadGs_` / `emailSweepReadRowsGs_` | `{now, maxRunMs, bouncesOnly}` | `{checked, bounced, replied, newBounces, unswept, errors, reroutes}` | reads Gmail; one write to `Email_Ledger`; one ops alert for new bounces (with what was done per email); the escalation of `GS-022` | `emailLedgerReadRowsGs_` (`GS-015`), `notifyOpsAlertGs_`, `writeUnlessTestModeGs_` (`GS-004`), `emailRerouteHandleBouncesGs_`, `emailRerouteEffectiveAddressesGs_` (`GS-022`) | FN-403 | specific - RULE-053 |
+| FN-402 | `sweepEmailBouncesAndReplies_(opts)` / `emailSweepFetchBouncesGs_` / `emailSweepFetchThreadGs_` / `emailSweepReadRowsGs_` | `{now, maxRunMs, bouncesOnly}` | `{checked, bounced, replied, newBounces, unswept, errors, reroutes, writeSkipped?}` | reads Gmail (a bounce search that returns its 100-thread cap sets `bounceSearchCapped` - ES-4); one write to `Email_Ledger`, skipped when the rows moved (FN-484); one ops alert for new bounces (with what was done per email); the escalation of `GS-022` | `emailLedgerReadRowsGs_` (`GS-015`), `notifyOpsAlertGs_`, `writeUnlessTestModeGs_` (`GS-004`), `emailRerouteHandleBouncesGs_`, `emailRerouteEffectiveAddressesGs_` (`GS-022`), FN-484 | FN-403 | specific - RULE-053 |
+| FN-484 | `emailSweepBlockMovedGs_(sheet, rows)` `#L201` | the ledger sheet, the rows as read (with `rowNo`) | true when the first or last row no longer holds the same `email_id` (or the re-read fails) | reads two cells | - | FN-402 | specific - ES-2 |
 | FN-403 | `sweepEmailBouncesAndReplies()` / `sweepBouncesAfterMorning()` / `sweepBouncesAfterFollowup()` / `sweepBouncesAfterAllIssues()` / `sweepEmailBouncesAndRepliesNow()` / `setupEmailSweepTrigger()` / `showEmailSweepPlanNow()` | - | - | the run record (no job lock); a crash alerts ops at once and re-throws; trigger install; a read-only count in the log | `withEmailJobLockGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
 
 ## Business rules implemented - `RULE-XXX` sub-table
@@ -56,8 +58,8 @@ First install (run `setupEmailSweepTrigger()` once after pasting) - **and once m
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
 | RULE-051 | Only ACCEPTED/UNCONFIRMED emails are swept, and only once they are 10 minutes old (a bounce arrives within minutes; a clean result is only ever "no bounce seen" and the next check looks again - this was 30 minutes before decision D9) and while they are under 3 days old | FN-399 | - |
-| RULE-052 | A bounce belongs to an email only when it names one of that email's recipients (To or Cc) AND (quotes the email's subject, OR arrived within 15 minutes of the send), no earlier than a minute before the send and no later than 24 hours after it - so two emails to the same person are not both blamed for one bounce | FN-400 | - |
-| RULE-053 | A status is never stronger than the evidence: no bounce found = `NO_BOUNCE_SEEN` (never "delivered"); a failed bounce search = `UNKNOWN (the bounce search failed)`; an unreadable thread = `UNKNOWN (the thread could not be read)`; no thread id = `UNKNOWN (no thread id recorded)` | FN-402 | `GS-015` RULE-043 |
+| RULE-052 | A bounce belongs to an email only when it names one of that email's recipients (To or Cc) - as a whole address, so `raj@x` is not found inside `suraj@x` (ER-3), and, when the bounce states its failed addresses (`Final-Recipient`, "wasn't delivered to"), only those count, not an address merely quoted in the returned original (ER-1) - AND (quotes the email's subject, OR arrived within 15 minutes of the send), no earlier than a minute before the send and no later than 24 hours after it - so two emails to the same person are not both blamed for one bounce | FN-400 | - |
+| RULE-053 | A status is never stronger than the evidence: no bounce found = `NO_BOUNCE_SEEN` (never "delivered"); a failed bounce search = `UNKNOWN (the bounce search failed)`; an unreadable thread = `UNKNOWN (the thread could not be read)`; no thread id = `UNKNOWN (no thread id recorded)`. A recorded `BOUNCED` is never overwritten by a failed or capped bounce search (no evidence that it went away - ES-1/ES-4); it is kept and still counted | FN-402 | `GS-015` RULE-043 |
 
 ## Config constants - `CFG-XXX` sub-table
 
@@ -69,9 +71,11 @@ First install (run `setupEmailSweepTrigger()` once after pasting) - **and once m
 
 | ID | Condition | Handling | User-visible result |
 |---|---|---|---|
-| EXC-126 | the Gmail bounce search fails | recorded in the summary; every checked email reads `UNKNOWN (the bounce search failed)`; replies are still checked | nothing is claimed about bounces; the next sweep retries |
+| EXC-126 | the Gmail bounce search fails | recorded in the summary; every checked email reads `UNKNOWN (the bounce search failed)` - except one already `BOUNCED`, which keeps that status (ES-1); replies are still checked | nothing is claimed about bounces; the report shows "Check failed" (`GS-016`), checklist J is AMBER (`GS-019`); the next sweep retries |
 | EXC-127 | a thread cannot be read | that email reads `UNKNOWN (the thread could not be read)`; the sweep goes on | the report shows it as unknown |
 | EXC-128 | the 4.5-minute budget runs out | the remaining emails are counted as unswept and left blank for the next sweep | none |
+| EXC-156 | the ledger rows moved between the read and the write (the 17:00 job's prune deleted leading rows; the sweep holds no job lock) - ES-2 | nothing is written, re-routed or alerted this run (`writeSkipped`, an error in the summary); the next check redoes it from a fresh read | a log line |
+| EXC-157 | the bounce search returns its cap of 100 threads (older bounces may be missing) - ES-4 | logged; a row already `BOUNCED` keeps its status this run | none |
 
 ## Data lineage
 
@@ -81,11 +85,11 @@ First install (run `setupEmailSweepTrigger()` once after pasting) - **and once m
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
-| `SHEET-019` `Email_Ledger` | Read + write | FN-402 | only the `bounce_status`, `reply_status`, `swept_at` columns, in one call |
+| `SHEET-019` `Email_Ledger` | Read + write | FN-402, FN-484 | only the `bounce_status`, `reply_status`, `swept_at` columns, in one call, after re-reading the `email_id` of the block's first and last rows |
 
 ## Failure / error behaviour
 
-A Gmail error never stops the sweep; a crash alerts ops at once and re-throws.
+A Gmail error never stops the sweep; a crash alerts ops at once and re-throws. It runs without the job lock and does overlap the email jobs (the old "nothing overlaps" note was wrong - ES-2/ES-3): rows that moved are not written (EXC-156), and a bounce re-send takes the script lock briefly (`GS-022`).
 
 ## Cross-runtime duplication
 
@@ -132,6 +136,8 @@ Apps Script backend; four time-driven jobs (10:30, 13:30, 15:30, 17:30 IST) with
 **2026-10-09** (`93a120a`, Email Ops review): moved from 16:10 to 15:45 so it reliably finishes before the 16:30 report, and the entry point uses `runEmailJobTrackedGs_` instead of `withEmailJobLockGs_` - deliberately WITHOUT the script-wide job lock (a `nearMinute` trigger fires up to 15 minutes either side of its minute, and holding the lock near 17:00 could make the primary 17:00 send skip). **Not live until pasted.**
 
 **2026-10-10** (`ec19415`, Email Ops EO-13, decision D9): the sweep now runs four times a day (the full sweep moved from 15:45 to 15:30; bounce-only checks at 10:30, 13:30 and 17:30), the minimum age of an email dropped from 30 to 10 minutes, a bounce is matched through the address an email REALLY went to, and every bounced row is handed to `EmailReroute.gs` after the statuses are written; the new-bounce alert states what was done for each email. **Not live until pasted; re-run `setupEmailSweepTrigger()`.**
+
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 ES-1, ES-2, ES-3, ES-4, ER-1, ER-3): a bounce now names an address only as a whole address, and only the addresses the bounce reports as failed count when it states them (FN-483, shared with `GS-022`; RULE-052). A failed or capped (100 threads) bounce search no longer overwrites a recorded `BOUNCED` (ES-1/ES-4; RULE-053, EXC-157). Before writing, the sweep checks the ledger rows did not move (a prune) and otherwise writes nothing that run (ES-2; FN-484, EXC-156); the entry-point comment now says the sweep overlaps the email jobs and points to the re-send lock in `GS-022` (ES-3). No trigger change. **Not live until pasted.**
 
 ## Revalidation trigger
 

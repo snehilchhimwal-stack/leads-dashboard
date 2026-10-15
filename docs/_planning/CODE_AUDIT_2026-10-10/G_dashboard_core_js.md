@@ -731,7 +731,7 @@ used by `js/core-rm-performance.js:541-556` and `:1008-1012`.
 - **Fix.** Add an `error_callback` that flushes the resolvers, and de-duplicate
   concurrent sign-ins.
 
-**G-5 — MED — SUSPECTED (depends on the `opp_at` cell type).**
+**G-5 — MED — SUSPECTED (depends on the `opp_at` cell type).** **FIXED 2e33f8d (2026-10-12)**
 `js/core-fetch-and-render.js:83-84` with `js/core-sheets-fetch.js:159,174-190`.
 - **What is wrong.** `isDateColLabel` covers only the `lead_assigned_at` and
   `last_connect_time` aliases. If `leads.opp_at` is a date-typed cell (as

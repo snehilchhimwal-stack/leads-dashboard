@@ -141,7 +141,8 @@ from the coercion bug → `dedupeUnmatchedCommentsNow()` (EXC-089).
   host), `GS-013`, `SHEET-001` (`leads`), `EXT-001`, `DATA-003`
 - **Used By:** `GS-008`, `GS-013` — only (writer); a human (reviewer)
 - **Related:** `SHEET-009` (`Comment_History` — the sibling piggyback
-  logger); `GS-005` / `JS-007` (the classifier this loop improves)
+  logger); `SHEET-026` (`Unmatched_Comments_Cleared` — keys of rows cleared
+  from this tab, so the scan does not re-log them; added 2026-10-15, UC-01); `GS-005` / `JS-007` (the classifier this loop improves)
 
 ## Source of truth
 

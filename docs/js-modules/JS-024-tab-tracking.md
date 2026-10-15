@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/tab-tracking.js` (1458 lines) |
+| **Location** | `js/tab-tracking.js` (1466 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `b21849e` |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 MT-01 follow-up (1f51394): browser cohort coverage floor, twin of the `persistDailyCohortHistoryGs_` retention filter |
 
 ## Purpose / reason to exist
 
@@ -52,12 +52,12 @@ tab-rmtimeline → …`), so `buildTrackingChartSvg` is defined before
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-163 | `computeZeroTo48hCohort()` / `computeCohortComparison(regionFilter, fromAt, toAt)` `#L262/#L110` | `movementSnapshots` | the 0–48h cohort outcome / a windowed cohort comparison | none | `evidenceAtDeadline` (`JS-021` FN-162, moved there 2026-09-29), `buildMovementHistories` (`JS-021`), `passesMovementFilters` (`JS-021`) | `render48hCohort` (FN-167), `renderTrackingTab` (FN-166) | specific |
-| FN-164 | `computeDailyCohortByRegion(dateKey, opts)` / `eligibleDailyCohortDates()` / `_dailyCohortLiveByKeyCache(leadsArr)` `#L927/#L1038/#L911` | a date key | per-region cohort outcomes for that day; the dates it is valid to compute live | memoisation cache | `evidenceAtDeadline` (`JS-021` FN-162), `mainRegionFor` / `effectiveRegion` (`JS-014`) | `renderDailyCohortByRegion` (FN-168), `persistDailyCohortHistory` (FN-169) | specific — **refuses live recompute past retention** (shows "NA") |
+| FN-164 | `computeDailyCohortByRegion(dateKey, opts)` / `eligibleDailyCohortDates()` / `_dailyCohortLiveByKeyCache(leadsArr)` `#L927/#L1040/#L911` | a date key | per-region cohort outcomes for that day; the dates it is valid to compute live | memoisation cache | `evidenceAtDeadline` (`JS-021` FN-162), `mainRegionFor` / `effectiveRegion` (`JS-014`) | `renderDailyCohortByRegion` (FN-168), `persistDailyCohortHistory` (FN-169) | specific — **refuses live recompute past retention** (shows "NA"); since 2026-10-15 `eligibleDailyCohortDates` takes its earliest coverage only from snapshots within `MOVEMENT_LOG_COVERAGE_DAYS` `#L1039` (7, twin of `MOVEMENT_LOG_RETENTION_DAYS`, `GS-008` CFG-047 - keep equal), audit 2026-10-13 MT-01 follow-up |
 | FN-165 | `buildTrackingChartSvg(allRuns, fromAt, toAt)` / `_ensureChartHoverTip()` / `splitDailyAndScatter(runs)` `#L344/#L486/#L316` | issue-tally runs + a window | the trend-chart SVG (native `<title>` tooltips today) | injects one shared hover-tip element | `computeIssueTalliesByRun` (FN-170) | `renderTrackingTab` (FN-166), **`JS-023` `renderRMIssueHistory` (verbatim reuse)** | reusable |
 | FN-166 | `renderTrackingTab()` `#L642` | `movementSnapshots` | renders every Tracking section | DOM writes | FN-163..FN-165, `getPickedTrackingWindow` (FN-171) | `renderAll` (`JS-012`) | specific |
-| FN-167 | `render48hCohort()` / `renderWeekOverWeekCohort()` `#L822/#L1394` | computed cohorts | the 0–48h + week-over-week tables | DOM writes | FN-163, `computeWeekOverWeekCohort` (FN-172), `wowPctCellHtml` / `wowDeltaBadgeHtml` | FN-166 | specific |
-| FN-168 | `renderDailyCohortByRegion()` `#L1157` | a picked date | the Daily Cohort by Region table | DOM write; **staleness guard** — refuses live recomputation past `Movement_Log` retention, shows "NA" | FN-164 | FN-166 | specific |
-| FN-169 | `persistDailyCohortHistory()` `#L1112` | eligible dates | upserts `Daily_Cohort_History` rows | Sheets write via `upsertDailyCohortHistoryRows` (`JS-018`); **never re-writes an already-archived date** | `eligibleDailyCohortDates` (FN-164), `JS-018` | auto after a snapshot; `#backfillDailyCohortHistoryBtn` (`BTN-021`) | specific |
+| FN-167 | `render48hCohort()` / `renderWeekOverWeekCohort()` `#L822/#L1402` | computed cohorts | the 0–48h + week-over-week tables | DOM writes | FN-163, `computeWeekOverWeekCohort` (FN-172), `wowPctCellHtml` / `wowDeltaBadgeHtml` | FN-166 | specific |
+| FN-168 | `renderDailyCohortByRegion()` `#L1165` | a picked date | the Daily Cohort by Region table | DOM write; **staleness guard** — refuses live recomputation past `Movement_Log` retention, shows "NA" | FN-164 | FN-166 | specific |
+| FN-169 | `persistDailyCohortHistory()` `#L1120` | eligible dates | upserts `Daily_Cohort_History` rows | Sheets write via `upsertDailyCohortHistoryRows` (`JS-018`); **never re-writes an already-archived date** | `eligibleDailyCohortDates` (FN-164), `JS-018` | auto after a snapshot; `#backfillDailyCohortHistoryBtn` (`BTN-021`) | specific |
 | FN-170 | `computeIssueTalliesByRun(regionFilter)` / `findRunTally(runs, at)` `#L31/#L93` | `movementSnapshots` | per-run issue tallies | none | `JS-021` FN-162 | FN-165, RM Timeline (`JS-023`) | reusable |
 | FN-171 | `getPickedTrackingWindow()` / `trackingPopulateSnapshotSelectors()` `#L628/#L606` | the snapshot pickers | the selected From/To window | DOM | `populateMovementDateSelect` etc. (`JS-021`) | FN-166 | specific |
 | FN-172 | `computeWeekOverWeekCohort()` / `weekOverWeekDateKeys()` / `wowPctDelta` / `wowDeltaBadgeHtml` / `wowPctCellHtml` `#L1336`–`#L1403` | two week windows | the week-over-week cohort deltas + badge/cell HTML | none | FN-164, `JS-021` FN-162 | FN-167 | specific |
@@ -79,6 +79,7 @@ tab-rmtimeline → …`), so `buildTrackingChartSvg` is defined before
 | EXC-052 | requested cohort date is older than `Movement_Log` retention and not archived | FN-168 shows "NA"; FN-169 skips it | "NA" cell, not a fabricated number |
 | EXC-053 | `Daily_Cohort_History` backfill partial failure | re-runnable (upsert by key) | status line shows the error; retry |
 | EXC-054 | `Clear SLA History` / `Clear Daily Cohort History` mid-operation failure | rows may be partially deleted | status line shows the error |
+| EXC-167 | every loaded `Movement_Log` snapshot is older than `MOVEMENT_LOG_COVERAGE_DAYS` (7 days; e.g. only the old rows MT-01's prune keeps for quiet leads) - added 2026-10-15 | `eligibleDailyCohortDates` (FN-164) returns `[]` | no day is computed live or auto-archived from that data; affected days read "NA" (as EXC-052) instead of a number built from weeks-old evidence |
 
 ## Data lineage
 
@@ -115,7 +116,7 @@ the status line.
 `persistDailyCohortHistory`'s never-re-archive rule and the
 `Daily_Cohort_History` schema match `MovementTracker.gs`'s own cohort
 persist (`GS-008`) — "written by both a browser path and an Apps Script
-path with matching schema" (`LOGIC_AUDIT.md` Part 1 §4d). `SLA_History`
+path with matching schema" (`LOGIC_AUDIT.md` Part 1 §4d). Since 2026-10-15 the coverage floor in `eligibleDailyCohortDates` (`MOVEMENT_LOG_COVERAGE_DAYS`) is the twin of `persistDailyCohortHistoryGs_`'s filter to rows within `MOVEMENT_LOG_RETENTION_DAYS` (`GS-008`); the two values must stay equal. `SLA_History`
 schema is shared with the same file's SLA_History write.
 
 ## UI relationships
@@ -167,6 +168,8 @@ through `JS-018`). Belongs to `TAB-008`.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-028.
+
+**2026-10-15** (`1f51394`, audit 2026-10-13 MT-01 follow-up): `eligibleDailyCohortDates` now ignores `Movement_Log` snapshots older than `MOVEMENT_LOG_COVERAGE_DAYS` (7, kept equal to `MovementTracker.gs`'s `MOVEMENT_LOG_RETENTION_DAYS`) when finding the earliest coverage, and returns no dates when nothing is inside that window. Why: since MT-01 the `Movement_Log` prune keeps each live lead's newest row however old it is, so those rows would have moved "earliest coverage" back by weeks and made long-past, never-archived days newly eligible with degraded evidence. Twin of the retention filter in `persistDailyCohortHistoryGs_` (`GS-008`), which drops those rows before the Apps Script cohort phase; the browser floor applies only to the earliest-coverage bound (the floor uses the browser clock, `Date.now()`). Live after push to GitHub Pages (repo not pushed yet). See EXC-167.
 
 ## Revalidation trigger
 

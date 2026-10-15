@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created on the first ops alert after `GS-015` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `f46ebc7` - created (Email Ops EO-2) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - 90-day retention added (audit 2026-10-13 EL-6, `7ef68d3`) |
 
 ## Purpose / reason to exist
 
@@ -78,9 +78,9 @@ Written whenever an alert is raised. Read by the hourly `emailJobWatchdog` trigg
 ## Data Lifecycle
 
 - **Data Type:** historical (incident record).
-- **Retention Period:** none yet - a few rows a day; revisit with the 16:30 cycle report (EO-8).
-- **Enforced By:** None.
-- **Archive / Delete Behavior:** grows slowly; nothing removes rows.
+- **Retention Period:** 90 days since the 2026-10-13 audit fix EL-6 (`7ef68d3`, pending paste) - `EMAIL_LEDGER_RETENTION_DAYS_`, the same window as `Email_Ledger`.
+- **Enforced By:** `pruneEmailOpsTabsGs_` (`GS-015`), run by the 16:30 cycle report (`GS-016`) after its email; fail-open per tab (a missing tab, an unrecognised header or a failed archive leaves the tab alone); TEST MODE prunes nothing.
+- **Archive / Delete Behavior:** the leading rows older than the window are archived to a Drive CSV first, then removed (`emailLedgerPruneLeadingGs_`, the ledger's own prune).
 - **Sensitivity:** operational - alert text can name recipients and lead ids.
 
 ## Sensitivity & operational importance (DOC-038)
@@ -130,6 +130,8 @@ The live tab; header authored in `EmailLedger.gs` (`EMAIL_INCIDENT_HEADERS_`).
 
 **2026-10-09** (`f46ebc7`): tab created by Email Ops EO-2. **Not live until pasted.**
 
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 EL-6): the tab now has 90-day retention - `pruneEmailOpsTabsGs_` (`GS-015`), called by the 16:30 cycle report after its email, archives rows older than `EMAIL_LEDGER_RETENTION_DAYS_` to Drive and removes them; fail-open per tab. **Not live until pasted.**
+
 ## Revalidation trigger
 
 The header constant changes; `notifyOpsAlertGs_` or the job wrapper changes; the release window changes.
@@ -140,7 +142,7 @@ The header constant changes; `notifyOpsAlertGs_` or the job wrapper changes; the
 
 ## Lifecycle / retention
 
-None yet.
+90 days, archived to Drive first, enforced by `pruneEmailOpsTabsGs_` (`GS-015`) from the 16:30 cycle report since `7ef68d3` (audit EL-6, pending paste). Before that: none.
 
 ## Next action
 

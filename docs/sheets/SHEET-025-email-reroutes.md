@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (created by the first bounce after `GS-022` is pasted) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `ec19415` - created (Email Ops EO-13, decision D9) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - 90-day retention added (audit 2026-10-13 EL-6, `7ef68d3`) |
 
 ## Purpose / reason to exist
 
@@ -59,9 +59,9 @@ The bounce checks (10:30, 13:30, 15:30, 17:30; `GS-017`) write it; every send re
 ## Data Lifecycle
 
 - **Data Type:** historical (one row per dead address per 14 days; a handful a month).
-- **Retention Period:** none.
-- **Enforced By:** None - rows expire by their `expires_at` but stay in the tab.
-- **Archive / Delete Behavior:** nothing removes rows; delete old `ENDED`/expired rows by hand if the tab grows.
+- **Retention Period:** 90 days since the 2026-10-13 audit fix EL-6 (`7ef68d3`, pending paste) - `EMAIL_LEDGER_RETENTION_DAYS_`, the same window as `Email_Ledger`.
+- **Enforced By:** `pruneEmailOpsTabsGs_` (`GS-015`), run by the 16:30 cycle report (`GS-016`) after its email; fail-open per tab (a missing tab, an unrecognised header or a failed archive leaves the tab alone); TEST MODE prunes nothing.
+- **Archive / Delete Behavior:** the leading rows older than the window are archived to a Drive CSV first, then removed (`emailLedgerPruneLeadingGs_`, the ledger's own prune).
 - **Sensitivity:** internal manager names and email addresses; no lead data.
 
 ## Sensitivity & operational importance (DOC-038)
@@ -111,6 +111,8 @@ The live tab; header authored in `EmailReroute.gs` (`EMAIL_REROUTE_HEADERS_`).
 
 **2026-10-10** (`ec19415`): tab created. **Not live until pasted.**
 
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 EL-6): the tab now has 90-day retention - `pruneEmailOpsTabsGs_` (`GS-015`), called by the 16:30 cycle report after its email, archives rows older than `EMAIL_LEDGER_RETENTION_DAYS_` to Drive and removes them; fail-open per tab. Also in `7ef68d3` (ER-2/ER-6): `endAllEmailReroutesNow` now writes `expires_at` (the moment it ended the row), ENDED rows count as history up to that time, and the sweep does not recreate a re-route when a row for that address (ENDED included) is newer than the bounce. **Not live until pasted.**
+
 ## Revalidation trigger
 
 The header constant changes; the meaning of `status`, `via` or `note` changes.
@@ -121,7 +123,7 @@ The header constant changes; the meaning of `status`, `via` or `note` changes.
 
 ## Lifecycle / retention
 
-None yet.
+90 days, archived to Drive first, enforced by `pruneEmailOpsTabsGs_` (`GS-015`) from the 16:30 cycle report since `7ef68d3` (audit EL-6, pending paste). Before that: none.
 
 ## Next action
 

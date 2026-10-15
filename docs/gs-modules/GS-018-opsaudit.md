@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-09 against commit `8ebf41a` - created (Email Ops EO-3 / EO-4) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 OE-05/AI-2 (8ef279d): UNFINISHED alert tells CH-level reports to be re-sent by hand |
 
 ## Purpose / reason to exist
 
@@ -20,7 +20,7 @@ Plan: `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` (EO-3 / EO-4; spec "reconcile e
 
 ## Responsibilities
 
-- `UNFINISHED` - a bucket left PLANNED or ATTEMPTING after its job ended (the run died); names the matching recovery.
+- `UNFINISHED` - a bucket left PLANNED or ATTEMPTING after its job ended (the run died); names the matching recovery for bucket rows, and (since 2026-10-15) says a CH-level report (`chLevel10` / `chLevel17`) must be checked in Gmail Sent and re-sent by hand, since no recovery re-sends those.
 - `ACCEPTED_WITHOUT_LOG` - Gmail accepted a bucket email but its Overnight_Log / AllIssues_Log row is missing (the next job would skip it).
 - `LOG_WITHOUT_LEDGER` - a working-log row with no ledger row; or NO ledger rows at all for a job that did send (one finding, not one per row).
 - `DUPLICATE_LOG` - the same recipient logged twice for the same region and day (a possible double send).
@@ -42,7 +42,7 @@ First install (run `setupOpsAuditTriggers()` once after pasting) and whenever an
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-411 | `opsAuditUnfinishedGs_` / `opsAuditAcceptedWithoutLogGs_` / `opsAuditLogWithoutLedgerGs_` / `opsAuditDuplicateLogGs_` / `opsAuditCheckpoint1GapsGs_` / `opsAuditFollowupGapsGs_` | ledger rows and working-log rows as plain objects | a finding `{code, severity, summary, count, items, more, why, action}` or `null` | none (pure) | `opsAuditKeyGs_`, `opsAuditFindingGs_` | FN-412 | specific - RULE-060 / RULE-061 |
+| FN-411 | `opsAuditUnfinishedGs_` / `opsAuditAcceptedWithoutLogGs_` / `opsAuditLogWithoutLedgerGs_` / `opsAuditDuplicateLogGs_` / `opsAuditCheckpoint1GapsGs_` / `opsAuditFollowupGapsGs_` | ledger rows and working-log rows as plain objects | a finding `{code, severity, summary, count, items, more, why, action}` or `null`; since 2026-10-15 (OE-05/AI-2) the `UNFINISHED` action points only bucket rows (morning10 / allIssues17 / followup13) at the recovery function and lists any open `chLevel10` / `chLevel17` rows separately as "check Gmail Sent, then re-send by hand" | none (pure) | `opsAuditKeyGs_`, `opsAuditFindingGs_` | FN-412 | specific - RULE-060 / RULE-061 |
 | FN-412 | `opsAuditMorningRulesGs_` / `opsAuditFollowupRulesGs_` / `opsAuditAllIssuesRulesGs_` | `{ledger, allIssuesLog, prevAllIssuesLog, overnightLog}` | the findings of that audit | none (pure) | FN-411 | FN-413 | specific |
 | FN-413 | `opsAuditRun_(spec, opts)` / `opsAuditJobStateGs_` / `opsAuditReadAllIssuesLogGs_` / `opsAuditReadOvernightLogGs_` / `opsAuditRecordGs_` / `opsAuditReadRecordGs_` | an audit spec, `{now, dryRun}` | `{job, day, status: clean / exceptions / deferred / skipped / failed, reason, findings}` | reads the ledger and the two working logs (narrow columns); one ops alert when there are findings (or when it could not run); writes the "last audit" property; a dry run or TEST MODE sends and records nothing | `emailLedgerReadRowsGs_` (`GS-015`), `readEmailJobRunGs_`, `notifyOpsAlertGs_` (`GS-004`) | FN-414 | specific - RULE-060 |
 | FN-414 | `auditMorningEmails()` / `auditFollowupEmails()` / `auditAllIssuesEmails()` (+ `...Now`) / `setupOpsAuditTriggers()` / `showEmailAuditNow()` / `opsAuditEntryGs_` | - | - | the run record (no job lock); a crash alerts ops at once and re-throws; trigger install; a read-only dry run in the log | `runEmailJobTrackedGs_` (`GS-004`) | the triggers / Apps Script editor | specific |
@@ -124,6 +124,8 @@ Apps Script backend; three time-driven jobs with run records watched by the hour
 ## Version / change reference
 
 **2026-10-09** (`8ebf41a`): file created - Email Ops EO-3 / EO-4. `emailJobScheduleGs_` (`GS-004` FN-332) lists the three audits once this file is part of the project. **Not live until pasted.**
+
+**2026-10-15** (`8ef279d`, audit 2026-10-13 OE-05 / AI-2): `opsAuditUnfinishedGs_` (FN-411) no longer tells the reader to run the recovery for a CH-level report left PLANNED/ATTEMPTING - the recovery functions only re-send bucket rows. Open `chLevel10` / `chLevel17` rows are named in a separate sentence: check Gmail Sent, then re-send by hand. The finding's code, severity and items are unchanged. Test in `Tests_OpsAudit.gs`. **Not live until pasted.**
 
 ## Revalidation trigger
 

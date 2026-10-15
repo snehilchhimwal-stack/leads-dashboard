@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-10 against commit `000c1e6` - plain-text column constant for the tab pre-creation helper (no behaviour change) |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fix DC-2/CR-3 (7ef68d3): stage J AMBER when the bounce search failed |
 
 ## Purpose / reason to exist
 
@@ -41,15 +41,15 @@ Never - no trigger of its own.
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-415 | `dailyChecklistGs_(input)` | `{ data (the report's cycle data), jobProblems (the watchdog's problems, or null when unreadable), audits: { morning, followup, allIssues } }` | the eleven rows `[{ stage, name, flag, evidence }]` | none (pure) | FN-416 | `GS-016` `cycleReportDataGs_` | specific - RULE-062 / RULE-063 |
+| FN-415 | `dailyChecklistGs_(input)` | `{ data (the report's cycle data, incl. the sweep counts with checkFailed), jobProblems (the watchdog's problems, or null when unreadable), audits: { morning, followup, allIssues } }` | the eleven rows `[{ stage, name, flag, evidence }]` | none (pure) | FN-416 | `GS-016` `cycleReportDataGs_` | specific - RULE-062 / RULE-063 |
 | FN-416 | `dailyChecklistWorstGs_` / `dailyChecklistCountsGs_` / `dailyChecklistSendFlagGs_` / `dailyChecklistSendTextGs_` / `dailyChecklistAuditGs_` | flags / per-job counts / one audit record and the cycle window | the worst flag; summed counts or null; a flag; the evidence text; `{ flag, text }` | none (pure) | - | FN-415 | specific |
-| FN-417 | `dailyChecklistSectionGs_(rows)` / `dailyChecklistRecordGs_(ss, rows, now)` / `showDailyChecklistNow()` | the rows, the workbook, the time | the report section; none; none | the record function writes `Daily_Checklist` (replace-or-append, fail-open); the preview only logs | `emailLedgerEnsureSheetGs_`, `emailLedgerAppendBlockGs_` (`GS-015`), `writeUnlessTestModeGs_` (`GS-004`) | `GS-016` | specific |
+| FN-417 | `dailyChecklistSectionGs_(rows)` / `dailyChecklistRecordGs_(ss, rows, now)` / `showDailyChecklistNow()` | the rows, the workbook, the time | the report section; none; none | the record function writes `Daily_Checklist` (replace-or-append, fail-open); the preview only logs | `emailLedgerEnsureSheetGs_`, `emailLedgerReplaceDayBlockGs_` (`GS-015` FN-422) | `GS-016` | specific |
 
 ## Business rules implemented - `RULE-XXX` sub-table
 
 | ID | Rule | Where | Duplicated elsewhere? |
 |---|---|---|---|
-| RULE-062 | A stage is RED only on a recorded failure (a failed / blocked / unfinished email, an audit exception, a bounce, a failed or never-started job, a RED Leads tab); AMBER when something needs a look (unconfirmed, left out with a reason, a deferred audit) OR when the evidence is missing (no row for the job, no audit result in the cycle, an unreadable record, the sweep has not run); GREY only when the stage does not apply (no 10:00 email to reply to, nothing accepted to monitor). A planned or attempted email never counts as done | FN-415 | the manual's "flags" table (`docs/EMAIL_OPS_OPERATING_MANUAL.md` section 4) |
+| RULE-062 | A stage is RED only on a recorded failure (a failed / blocked / unfinished email, an audit exception, a bounce, a failed or never-started job, a RED Leads tab); AMBER when something needs a look (unconfirmed, left out with a reason, a deferred audit) OR when the evidence is missing (no row for the job, no audit result in the cycle, an unreadable record, the sweep has not run, the sweep's bounce search failed for an accepted email - stage J, "missing evidence, not a bounce"); GREY only when the stage does not apply (no 10:00 email to reply to, nothing accepted to monitor). A planned or attempted email never counts as done | FN-415 | the manual's "flags" table (`docs/EMAIL_OPS_OPERATING_MANUAL.md` section 4) |
 | RULE-063 | K, the end-of-day reconciliation, is the worst of A-J, and never GREEN while a serious incident is open or alerts are still held | FN-415 | - |
 
 ## Config constants - `CFG-XXX` sub-table
@@ -73,7 +73,7 @@ The report's data (`GS-016`) <- `SHEET-019` Email_Ledger, `SHEET-020` Email_Ledg
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
-| `SHEET-023` `Daily_Checklist` | Read + write | FN-417 | today's contiguous block at the bottom is replaced (or appended) once the report is sent |
+| `SHEET-023` `Daily_Checklist` | Read + write | FN-417 | today's block at the bottom is replaced (or appended) once the report is sent (`GS-015` FN-422) |
 
 ## Failure / error behaviour
 
@@ -125,6 +125,8 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-10** (`000c1e6`): `DAILY_CHECKLIST_TEXT_COLUMNS_` constant (shared with `precreateEmailOpsTabsNow`, `GS-015`); no behaviour change **Not live until pasted.**
 
+**2026-10-15** (`7ef68d3`, audit 2026-10-13 DC-2, CR-3): stage J reads the report's new `checkFailed` count (accepted emails whose bounce status is `UNKNOWN (...)`) and is AMBER - "could not be checked: the bounce search failed (missing evidence, not a bounce)" - when nothing bounced but some could not be checked; before, such emails were reported as "not checked yet". **Not live until pasted.**
+
 ## Revalidation trigger
 
 Any commit touching `DailyChecklist.gs` or `Tests_DailyChecklist.gs`; the report's data shape (`cycleReportDataGs_`); the audits' record shape (`OpsAudit.gs`).
@@ -135,7 +137,7 @@ Any commit touching `DailyChecklist.gs` or `Tests_DailyChecklist.gs`; the report
 
 ## Lifecycle / retention
 
-`SHEET-023`: eleven rows a day, never pruned.
+`SHEET-023`: eleven rows a day; rows older than 90 days are archived to Drive and removed by the 16:30 report since `7ef68d3` (`GS-015` RULE-079).
 
 ## Next action
 

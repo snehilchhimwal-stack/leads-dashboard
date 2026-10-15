@@ -86,8 +86,8 @@ Found independently by four auditors. HANDOVER §9.7.3 had flagged it as "worth 
 | G-1 / E-5 / H-1 / H-3 / A-1 / E-1 / E-2 ✔ | §2 above |
 | D-1 ✔ | `CycleReport.gs:40-45` — a 16:30 trigger that fires before 16:30 (nearMinute fires 16:15–16:45) makes the window start two days back: the report covers ~48 h and repeats yesterday's emails |
 | D-2 / B-2 ✔ (logic; confirm on one real bounce) | Bounce matching is "any To/Cc address appears anywhere in the bounce text". Gmail bounces quote the original headers, so one bounce can mark other emails bounced and mark healthy Cc addresses (leadership, RH) dead → replaced by their manager for 14 days |
-| H-2 ✔ | Opp Monitor "Live" rows are computed from the filtered `leads` (default last 7 days, plus any project/region filter) while the filter bar is hidden on that tab |
-| G-5 ✔ (logic; confirm the cell type) | `opp_at` is not in the dashboard's date-column list; read as a raw serial number it parses to blank. If the sheet stores it as a real date, every live Opp% is 0 |
+| H-2 ✔ | Opp Monitor "Live" rows are computed from the filtered `leads` (default last 7 days, plus any project/region filter) while the filter bar is hidden on that tab - **FIXED 2e33f8d (2026-10-12)** |
+| G-5 ✔ (logic; confirm the cell type) | `opp_at` is not in the dashboard's date-column list; read as a raw serial number it parses to blank. If the sheet stores it as a real date, every live Opp% is 0 - **FIXED 2e33f8d (2026-10-12)** |
 
 **MEDIUM**
 | Id | Finding |
@@ -175,7 +175,7 @@ the core JS; every function name the top-level docs cite exists.
 3. **The Movement_Log census problem (§2):** one design decision — either make readers carry each lead forward from its last row
    ("last observation carried forward"), or write a cheap per-run heartbeat — then fix the RM-performance engine (both runtimes), Tracking,
    the stale-lead prune interaction and the backfills against it.
-4. **Dashboard:** H-2 (use `allParsedLeads`), G-5, G-3/G-4, H-4.
+4. **Dashboard:** H-2 (use `allParsedLeads`), G-5, G-3/G-4, H-4. **H-2 and G-5 FIXED 2e33f8d (2026-10-12)**
 5. **Docs:** the harmful-if-followed items in §4 first, then the trigger index, HANDOVER §1/§4.3/§4.3.5/§5/§9.7.1, `OPS_CHECKLIST.md`, the
    operating manual, then the catalog record drift (K/L/M fix lists).
 6. Decisions in §5.

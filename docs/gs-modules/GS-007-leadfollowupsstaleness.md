@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `LeadFollowupsStaleness.gs` (99 lines) |
+| **Location** | `LeadFollowupsStaleness.gs` (101 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `6e4c904` — revalidated in this sweep (rule specs, all threshold constants, formatting-range claim re-checked against source), no drift found |
+| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fix LF-01 (rule range follows the tab's row allocation) (2146e13) |
 
 ## Purpose / reason to exist
 
@@ -26,7 +26,9 @@ set, are evaluated live by Sheets on every recalculation.
 - `buildLeadFollowupsStalenessRuleSpecs_` — produce the amber/red
   conditional-format rule specs (formula, background, font colour).
 - `setupLeadFollowupsStalenessFormatting` — apply those rules to
-  `Lead_Followups!A2:H` (rows 2..`LEAD_FOLLOWUPS_STALE_ROWS_`).
+  `Lead_Followups!A2:H`, covering the larger of rows 2..1000
+  (`LEAD_FOLLOWUPS_STALE_ROWS_`) and the tab's whole current row
+  allocation (`getMaxRows()`, LF-01).
 
 ## Trigger schedule
 
@@ -39,8 +41,10 @@ continuously, with no script involvement.
 
 Re-run `setupLeadFollowupsStalenessFormatting()` when: the amber/red hour
 thresholds change; the `Lead_Followups` column layout changes (the rules
-are anchored to column G and a fixed row range); the row-count ceiling
-(`LEAD_FOLLOWUPS_STALE_ROWS_`) needs raising; or the `Lead_Followups` tab
+are anchored to column G and the row range sized at run time); the tab
+has grown past the row allocation it had at the last run (the range is
+`max(getMaxRows()-1, LEAD_FOLLOWUPS_STALE_ROWS_)`, fixed when the rules
+are written); or the `Lead_Followups` tab
 was deleted and recreated (a Generate cycle recreates the tab but not
 the formatting).
 
@@ -48,8 +52,8 @@ the formatting).
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-216 | `buildLeadFollowupsStalenessRuleSpecs_()` `#L58` | — | an array of `{formula, background, fontColor}` specs — amber past `LEAD_FOLLOWUPS_AMBER_HOURS_`, red past `LEAD_FOLLOWUPS_RED_HOURS_`, both measured from column G | none (pure) | — | FN-217 | specific |
-| FN-217 | `setupLeadFollowupsStalenessFormatting()` `#L80` | — | applies the conditional-format rules to `Lead_Followups!A2:H` | **replaces** the tab's conditional-format rules via `sheet.setConditionalFormatRules(...)`; logs | FN-216, `SpreadsheetApp` | Apps Script editor (manual, one-time) | specific |
+| FN-216 | `buildLeadFollowupsStalenessRuleSpecs_()` `#L60` | — | an array of `{formula, background, fontColor}` specs — amber past `LEAD_FOLLOWUPS_AMBER_HOURS_`, red past `LEAD_FOLLOWUPS_RED_HOURS_`, both measured from column G | none (pure) | — | FN-217 | specific |
+| FN-217 | `setupLeadFollowupsStalenessFormatting()` `#L82` | — | applies the conditional-format rules to `Lead_Followups!A2:H`, `Math.max(sheet.getMaxRows() - 1, LEAD_FOLLOWUPS_STALE_ROWS_)` rows from row 2 (LF-01) | **replaces** the tab's conditional-format rules via `sheet.setConditionalFormatRules(...)`; logs | FN-216, `SpreadsheetApp` | Apps Script editor (manual, one-time) | specific |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -57,7 +61,7 @@ the formatting).
 |---|---|---|---|---|
 | CFG-044 | `LEAD_FOLLOWUPS_AMBER_HOURS_` | 12 (hours) | how old column G must be before a row goes amber | the amber rule — **requires `setupLeadFollowupsStalenessFormatting()` re-run** |
 | CFG-045 | `LEAD_FOLLOWUPS_RED_HOURS_` | 24 (hours) | how old before a row goes red | the red rule — requires the re-run |
-| CFG-046 | `LEAD_FOLLOWUPS_STALE_ROWS_` | a fixed row-count ceiling | how many rows the rules cover | rows beyond it get no highlight — raise + re-run if `Lead_Followups` grows past it |
+| CFG-046 | `LEAD_FOLLOWUPS_STALE_ROWS_` | 999 (the MINIMUM range, A2:H1000) | the floor of how many rows the rules cover; since LF-01 (2026-10-13) the range is the tab's whole allocation when that is larger | rows added to the tab after a run get no highlight - re-run setup if `Lead_Followups` grows past what it had then |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -77,7 +81,7 @@ against column G (`updated_at`, written by `pushLeadsToFollowups`,
 
 | `SHEET-XXX` | Read / Write | Which `FN-XXX` | Notes |
 |---|---|---|---|
-| `SHEET-004` `Lead_Followups` | Write (conditional-format rules only — **no data cells**) | FN-217 | anchored to column G / rows 2..`LEAD_FOLLOWUPS_STALE_ROWS_` |
+| `SHEET-004` `Lead_Followups` | Write (conditional-format rules only — **no data cells**) | FN-217 | anchored to column G / rows 2..max(1000, the tab's row allocation at setup time) |
 
 ## Failure / error behaviour
 
@@ -145,6 +149,12 @@ staleness reasoning this file operationalises for the sheet surface);
 Verified at `c82ec67`; record created by DOC-029. Added 2026-09-09
 (same day as `OpsChecklistRunner.gs`); not present at the 2026-09-07
 `LOGIC_AUDIT.md` audit.
+
+**2026-10-15** (`2146e13`, audit 2026-10-13 LF-01): `setupLeadFollowupsStalenessFormatting`
+now sizes the rule range as `Math.max(sheet.getMaxRows() - 1, LEAD_FOLLOWUPS_STALE_ROWS_)`
+rows, so rows past 1,000 are formatted too; `LEAD_FOLLOWUPS_STALE_ROWS_` (999) is now
+only the minimum. Rows added after a run still need a re-run of setup. **Not live until
+pasted** (and setup re-run).
 
 ## Revalidation trigger
 
