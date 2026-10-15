@@ -444,6 +444,16 @@ function _latestContentHashByKeyGs_(ss) {
   return out;
 }
 
+// The same { dedupKey: latest hash } map as _latestContentHashByKeyGs_, from rows _readMovementLogRowsGs_ already read (MT-04,
+// 2026-10-13) - so snapshotOpenLeads_ reads Movement_Log once for both the dedup and the SLA baseline. Same rules: rows with
+// no hash are skipped and the first of two equal timestamps wins (_collapseLatestChangeGs_ uses a strict >, like the reader).
+function _latestContentHashFromRowsGs_(rows) {
+  const latest = _collapseLatestChangeGs_(rows);
+  const out = {};
+  Object.keys(latest).forEach(function (k) { out[k] = latest[k].hash; });
+  return out;
+}
+
 // Content-hash dedup identity of ONE leads-tab row: lead_id + RM. NOT client_id:
 // a customer's several rows (one per RM/assignment) all share a client_id, so only
 // one of them could ever match the single hash stored under that key and every
@@ -539,8 +549,17 @@ function ensureSlaHistorySheet_(ss) {
 // rare trigger double-fire either (see pruneMovementLog_), so this stays
 // consistent with that precedent rather than adding one-sided defensive
 // code for this write path only.
-function writeSlaHistorySnapshot_(ss, dataRows, colIndex, now) {
-  const baselineMap = buildTodayCallBaselineGs_(ss, now);
+// `mlRows` (optional, MT-04 2026-10-13): rows snapshotOpenLeads_ already read with _readMovementLogRowsGs_ - the baseline is
+// derived from them instead of a second read of Movement_Log. Omitted = read it here, as before.
+function writeSlaHistorySnapshot_(ss, dataRows, colIndex, now, mlRows) {
+  let baselineMap;
+  if (mlRows) {
+    const detailed = _collapseLatestByKeyGs_(mlRows, new Date(istDayKeyGs_(now) + 'T00:00:00+05:30').getTime());
+    baselineMap = {};
+    Object.keys(detailed).forEach(function (key) { baselineMap[key] = detailed[key].call_attempts; });
+  } else {
+    baselineMap = buildTodayCallBaselineGs_(ss, now);
+  }
   const checkKeys = ['inactiveRmNewLead', 'isNotUpdated', 'followupOverdue', 'underCalledToday', 'stageStuck48h'];
   const byCheck = {};
   checkKeys.forEach(function (k) { byCheck[k] = 0; });
@@ -636,7 +655,20 @@ function snapshotOpenLeads_(label, opts) {
 
   const lastRow = src.getLastRow();
   const lastCol = src.getLastColumn();
-  if (lastRow < 3) return null; // nothing but a banner/header row — nothing to snapshot
+  if (lastRow < 3) {
+    // Nothing but a banner/header row — nothing to snapshot. MT-06 (2026-10-13): still write a Movement_Log_Runs row (0 leads),
+    // so that sheet and the snapshotPeriodic run record (which says `completed`) agree that a run happened.
+    const emptyNow = new Date();
+    const emptyLabel = label || Utilities.formatDate(emptyNow, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') + ' IST';
+    try {
+      const emptyRuns = ensureMovementLogRunsSheet_(ss);
+      emptyRuns.getRange(emptyRuns.getLastRow() + 1, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length)
+        .setValues([[emptyNow, emptyLabel, 0, 0, sinceStartS(), '', '', 'leads tab has no data rows - nothing to capture']]);
+    } catch (e) {
+      Logger.log('Movement_Log_Runs write failed (empty leads tab): ' + e);
+    }
+    return { leadCountSeen: 0, leadsChanged: 0, totalSeconds: sinceStartS(), skipped: [], failed: [], timings: [] };
+  }
 
   const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
   const colIndex = buildColIndex_(headerRow);
@@ -654,7 +686,14 @@ function snapshotOpenLeads_(label, opts) {
   // Movement_Log row is CONFIRMED (its ingestion run is still recorded
   // below via Movement_Log_Runs) but does NOT get a new duplicate row —
   // see _leadContentHashGs_'s own header for exactly what's hashed and why.
-  const latestHashByKey = _latestContentHashByKeyGs_(ss);
+  //
+  // MT-04 (2026-10-13): ONE narrow read serves both the hash lookup and the SLA_History phase's today's-calls baseline (the
+  // two read overlapping columns separately before). Reading it before this run's append changes neither answer: the
+  // baseline only looks at rows before the start of today, and this run's rows are stamped `now`. The Daily_Cohort_History
+  // phase still reads for itself: it needs other columns AND the post-prune sheet with this run's rows, so sharing would
+  // change its output.
+  const mlRows = _readMovementLogRowsGs_(ss);
+  const latestHashByKey = _latestContentHashFromRowsGs_(mlRows);
   Logger.log('[timing] hash lookup read at ' + sinceStartS() + 's');
 
   let leadCountSeen = 0;
@@ -677,10 +716,14 @@ function snapshotOpenLeads_(label, opts) {
   });
 
   if (out.length) {
-    const logSheet = ensureMovementLogSheet_(ss);
-    assertMovementLogHeaderAligned_(logSheet);
-    const startRow = logSheet.getLastRow() + 1;
-    logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
+    // Under the Movement_Log lock (MT-03) so a prune's deleteRows cannot shift rows between getLastRow() and the write;
+    // runs anyway if the lock stays busy.
+    withMovementLogLockGs_(MOVEMENT_LOG_APPEND_LOCK_WAIT_MS_, 'Movement_Log append', function () {
+      const logSheet = ensureMovementLogSheet_(ss);
+      assertMovementLogHeaderAligned_(logSheet);
+      const startRow = logSheet.getLastRow() + 1;
+      logSheet.getRange(startRow, 1, out.length, out[0].length).setValues(out);
+    }, true);
   }
   Logger.log('[timing] core capture: ' + out.length + ' changed of ' + leadCountSeen + ' leads, appended by ' + sinceStartS() + 's');
   ctx.timings.push('core capture (read, hash, append) ' + sinceStartS() + 's');
@@ -704,7 +747,7 @@ function snapshotOpenLeads_(label, opts) {
   // ---- Optional phases, in priority order, each only while the run is inside its time budget ----
   // Computed from the SAME dataRows/colIndex read above. The today's-calls baseline it looks up is "the latest snapshot strictly
   // BEFORE the start of today (IST)", so this run's own rows - appended above, stamped `now` - can never be what it reads.
-  runSnapshotPhaseGs_(ctx, 'SLA_History write', function () { writeSlaHistorySnapshot_(ss, dataRows, colIndex, now); });
+  runSnapshotPhaseGs_(ctx, 'SLA_History write', function () { writeSlaHistorySnapshot_(ss, dataRows, colIndex, now, mlRows); });
 
   // Same dataRows/colIndex, same wrapped-so-it-can-never-block-the-real-
   // capture treatment as the SLA_History write just above — see
@@ -719,7 +762,12 @@ function snapshotOpenLeads_(label, opts) {
 
   // Pruning old rows is independent of whether any lead's content changed this time. A failure here is re-thrown at the end
   // (after the run record) so the execution still shows Failed.
-  runSnapshotPhaseGs_(ctx, 'Movement_Log prune', function () { pruneMovementLog_(ss); }, true);
+  // liveKeys (MT-01): a lead still in the leads tab keeps its newest row even once it is older than the retention window.
+  // A prune skipped because the script lock was busy (MT-03) is noted in phase_s, NOT in skipped_phases: that list means
+  // "out of time budget" to the watchdog (snapshotRunProblemsGs_ 'degraded'), and the next run prunes anyway.
+  runSnapshotPhaseGs_(ctx, 'Movement_Log prune', function () {
+    if (pruneMovementLog_(ss, _liveDedupKeysGs_(dataRows, colIndex)) === MOVEMENT_LOG_PRUNE_LOCK_BUSY_) ctx.timings.push('Movement_Log prune ' + MOVEMENT_LOG_PRUNE_LOCK_BUSY_);
+  }, true);
 
   // Added 2026-09-29 — see each file's own header ("PRUNING" / "AGE-BASED PRUNING") for why these exist: the cell-budget
   // diagnostic (Core.gs) found both tabs large enough (2026-09-28) that Snehil confirmed a 30-day retention window for both.
@@ -777,7 +825,13 @@ function alertSnapshotPhaseFailuresGs_(failed, label, now) {
   lines.push('');
   lines.push('The capture itself (Movement_Log rows, the call baselines every email uses) is NOT affected. A failed prune means that tab keeps growing past its retention window until it succeeds; a failed log or scan means that run\'s rows are missing from it. Each step is retried on the next run (every 6 hours).');
   lines.push('This email is sent once per day per step. Full error text: the Apps Script Executions list, this run, log lines starting with the step name.');
-  notifyOpsAlertGs_('Movement snapshot: ' + fresh.map(function (f) { return f.phase; }).join(', ') + ' FAILED', lines);
+  const sent = notifyOpsAlertGs_('Movement snapshot: ' + fresh.map(function (f) { return f.phase; }).join(', ') + ' FAILED', lines);
+  // MT-09 (2026-10-13): only a SENT alert counts as "alerted today" - a failed send is retried on the next run (6 h later)
+  // instead of being silently marked done.
+  if (!sent) {
+    Logger.log('alertSnapshotPhaseFailuresGs_: the alert could not be sent - not marked, so the next run tries again.');
+    return 0;
+  }
   try {
     PropertiesService.getScriptProperties().setProperty(SNAPSHOT_PHASE_ALERT_PROPERTY_, JSON.stringify({ day: day, phases: already.concat(fresh.map(function (f) { return f.phase; })) }));
   } catch (e2) {
@@ -831,7 +885,88 @@ function alertSnapshotPhaseFailuresGs_(failed, label, now) {
 // is cleared first, so there is still no window in which in-retention data is erased). Anything that is not a clean prefix - a
 // restored/backfilled older row sitting later in the sheet, a blank or non-date cell in the middle, or EVERY row expired (Sheets
 // refuses to delete all non-frozen rows) - falls through to the full rewrite below, which is unchanged.
-function pruneMovementLog_(ss) {
+//
+// KEEPS EACH LEAD'S NEWEST ROW EVEN WHEN IT HAS EXPIRED (MT-01, 2026-10-13). Since content-hash dedup, a lead that has not
+// changed has ONE row - its last change - and pruning it made the next capture re-append the lead as a fake "change" stamped
+// now: the stale flag / "No update since" reset every 7 days (SL-01), and the call baselines lost the lead until then. Now an
+// expired row survives when it is the newest row of its _dedupKeyGs_ (lead id + RM) and that key is in `liveKeys` (the keys of
+// the live leads tab; omitted = read from the leads tab here, and every key is protected if that read fails). A key that has left the
+// leads tab is not protected, which keeps the sheet bounded by the leads tab. Those protected rows stay at the TOP of the sheet
+// (they are the oldest), so the expired rows are still a prefix and the fast path becomes a prefix COMPACTION: read only the
+// expired prefix, write its protected rows back at the top, delete the rest of the prefix in one deleteRows. In-retention rows
+// are never touched. A run killed between that write and the delete leaves duplicate copies of protected rows (identical
+// content and time, so every reader treats them as one) that the next prune drops.
+//
+// LOCKED (MT-03, 2026-10-13): the whole prune holds the script lock - see withMovementLogLockGs_ for why only this section and
+// the append. If another job holds it, the prune is SKIPPED (returns MOVEMENT_LOG_PRUNE_LOCK_BUSY_) - it is idempotent, so
+// the next run does it.
+function pruneMovementLog_(ss, liveKeys) {
+  if (liveKeys === undefined) liveKeys = _readLiveDedupKeysGs_(ss); // callers without the rows (captureDailyRmIssues_, pruneMovementLogNow)
+  const r =withMovementLogLockGs_(MOVEMENT_LOG_PRUNE_LOCK_WAIT_MS_, 'Movement_Log prune', function () { _pruneMovementLogLockedGs_(ss, liveKeys); }, false);
+  return r.ran ? undefined : MOVEMENT_LOG_PRUNE_LOCK_BUSY_;
+}
+
+// Pure: which Movement_Log data rows survive a prune. stamps / leadIds / rms are single-column getValues() arrays (leadIds /
+// rms may be null when the sheet has no such column). Returns { keep: [bool per row], expiredCount, expiredIsPrefix, dropCount }.
+function _movementLogPrunePlanGs_(stamps, leadIds, rms, cutoffMs, liveKeys) {
+  const n = stamps.length;
+  const keyOf = function (i) {
+    const ts = stamps[i][0];
+    if (!(ts instanceof Date) || !leadIds) return null;
+    const id = String(leadIds[i][0] === null || leadIds[i][0] === undefined ? '' : leadIds[i][0]).trim();
+    return id ? _dedupKeyGs_(id, rms ? rms[i][0] : '') : null;
+  };
+  const keys = [];
+  const newestIdx = {};
+  for (let i = 0; i < n; i++) {
+    const key = keyOf(i);
+    keys.push(key);
+    if (key === null) continue;
+    const cur = newestIdx[key];
+    if (cur === undefined || stamps[i][0].getTime() >= stamps[cur][0].getTime()) newestIdx[key] = i; // a tie goes to the later row
+  }
+  const keep = [];
+  let expiredCount = 0, dropCount = 0, keptSeen = false, expiredIsPrefix = true;
+  for (let i = 0; i < n; i++) {
+    const ts = stamps[i][0];
+    if (ts instanceof Date && ts.getTime() >= cutoffMs) { keep.push(true); keptSeen = true; continue; }
+    expiredCount++;
+    if (keptSeen) expiredIsPrefix = false; // an expired row AFTER an in-retention one - not a prefix
+    const key = keys[i];
+    const protectedRow = key !== null && newestIdx[key] === i && (!liveKeys || liveKeys[key] === true);
+    keep.push(protectedRow);
+    if (!protectedRow) dropCount++;
+  }
+  return { keep: keep, expiredCount: expiredCount, expiredIsPrefix: expiredIsPrefix, dropCount: dropCount };
+}
+
+// { dedupKey: true } for every row of the live leads tab - the `liveKeys` pruneMovementLog_ protects (MT-01). Pure.
+function _liveDedupKeysGs_(dataRows, colIndex) {
+  const out = {};
+  (dataRows || []).forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (leadId) out[_dedupKeyGs_(leadId, getVal_(row, colIndex, 'RM'))] = true;
+  });
+  return out;
+}
+
+// The live keys read straight from the leads tab, for a prune caller that has not read it. Deliberately NOT readLeadsTab_
+// (a caller may be about to fail on that read; the prune runs first on purpose - captureDailyRmIssues_). No tab, an empty tab
+// or any error -> null, which protects EVERY key's newest row: when in doubt, keep.
+function _readLiveDedupKeysGs_(ss) {
+  try {
+    const src = ss.getSheetByName(resolveTabName_(ss));
+    if (!src || src.getLastRow() < 3) return null;
+    const lastCol = src.getLastColumn();
+    const keys = _liveDedupKeysGs_(src.getRange(3, 1, src.getLastRow() - 2, lastCol).getValues(), buildColIndex_(src.getRange(2, 1, 1, lastCol).getValues()[0]));
+    return Object.keys(keys).length ? keys : null;
+  } catch (e) {
+    Logger.log('Movement_Log prune: the leads tab could not be read (' + e + ') - every lead\'s newest row is kept.');
+    return null;
+  }
+}
+
+function _pruneMovementLogLockedGs_(ss, liveKeys) {
   const logSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   if (!logSheet) return;
   const lastRow = logSheet.getLastRow();
@@ -840,34 +975,32 @@ function pruneMovementLog_(ss) {
 
   // Narrow pre-check: just the snapshot_at column (column A - this function has always read the timestamp from index 0).
   const stamps = logSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  let expiredCount = 0;
-  let keptSeen = false;
-  let expiredIsPrefix = true;
-  for (let i = 0; i < stamps.length; i++) {
-    const ts = stamps[i][0];
-    if (ts instanceof Date && ts >= cutoff) { keptSeen = true; continue; }
-    expiredCount++;
-    if (keptSeen) expiredIsPrefix = false; // an expired row AFTER a kept one - not a prefix
-  }
-  if (!expiredCount) return; // nothing to prune — don't touch the sheet at all
+  if (!stamps.some(function (r) { return !(r[0] instanceof Date && r[0] >= cutoff); })) return; // nothing expired — don't touch the sheet at all
 
   const lastCol = logSheet.getLastColumn();
   const header = logSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  // Two more single columns (MT-01): lead id + RM, to find each key's newest row.
+  const leadIdCol = header.indexOf('lead_id');
+  const rmCol = header.indexOf('RM');
+  const leadIds = leadIdCol === -1 ? null : logSheet.getRange(2, leadIdCol + 1, lastRow - 1, 1).getValues();
+  const rms = rmCol === -1 ? null : logSheet.getRange(2, rmCol + 1, lastRow - 1, 1).getValues();
+  const plan = _movementLogPrunePlanGs_(stamps, leadIds, rms, cutoff.getTime(), liveKeys);
+  if (!plan.dropCount) return; // every expired row is a protected newest row — nothing to prune
 
-  if (expiredIsPrefix && expiredCount < lastRow - 1) {
-    const droppedPrefix = logSheet.getRange(2, 1, expiredCount, lastCol).getValues();
-    archiveDroppedMovementLogRowsGs_(header, droppedPrefix); // archive FIRST; a failure throws before anything is deleted
-    logSheet.deleteRows(2, expiredCount);
-    shrinkMovementLogAllocationGs_(logSheet, lastRow - 1 - expiredCount);
+  if (plan.expiredIsPrefix && plan.dropCount < lastRow - 1) {
+    const prefix = logSheet.getRange(2, 1, plan.expiredCount, lastCol).getValues();
+    const keptPrefix = [];
+    const droppedPrefix = [];
+    prefix.forEach(function (row, i) { (plan.keep[i] ? keptPrefix : droppedPrefix).push(row); });
+    archiveDroppedMovementLogRowsGs_(header, droppedPrefix); // archive FIRST; a failure throws before anything is changed
+    if (keptPrefix.length) logSheet.getRange(2, 1, keptPrefix.length, lastCol).setValues(keptPrefix);
+    logSheet.deleteRows(2 + keptPrefix.length, droppedPrefix.length);
+    shrinkMovementLogAllocationGs_(logSheet, lastRow - 1 - droppedPrefix.length);
     return;
   }
 
   const values = logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  const isKeptRow_ = function (row) {
-    const ts = row[0];
-    return ts instanceof Date && ts >= cutoff;
-  };
-  const kept = values.filter(isKeptRow_);
+  const kept = values.filter(function (row, i) { return plan.keep[i]; });
 
   if (kept.length === values.length) return; // nothing to prune — don't touch the sheet at all
 
@@ -875,7 +1008,7 @@ function pruneMovementLog_(ss) {
   // archiveRowsToDriveCsv_'s own comment (Core.gs) for why this is a Drive
   // CSV rather than an in-workbook backup, and why it runs on every prune
   // now instead of only removeEarlyCorruptedMovementLogDataNow's one-off.
-  const dropped = values.filter(function (row) { return !isKeptRow_(row); });
+  const dropped = values.filter(function (row, i) { return !plan.keep[i]; });
   archiveDroppedMovementLogRowsGs_(header, dropped);
 
   if (kept.length) {
@@ -929,10 +1062,55 @@ function shrinkMovementLogAllocationGs_(logSheet, keptCount) {
   // snapshotOpenLeads_), pruning could never run again to self-heal once
   // the sheet was already over the edge; see pruneMovementLogNow for the
   // one-time manual recovery that's needed once that's already happened.
-  const neededRows = 1 + keptCount + MOVEMENT_LOG_ROW_HEADROOM_;
+  //
+  // MT-03 (2026-10-13): sized from a FRESH getLastRow() as well as keptCount - a row appended while the prune ran (the browser's
+  // write-back takes no Apps Script lock) sits past keptCount and must never fall inside the deleted tail.
+  const neededRows = Math.max(1 + keptCount, logSheet.getLastRow()) + MOVEMENT_LOG_ROW_HEADROOM_;
   const maxRows = logSheet.getMaxRows();
   if (maxRows > neededRows) {
     logSheet.deleteRows(neededRows + 1, maxRows - neededRows);
+  }
+}
+
+// ---- Movement_Log write lock (MT-03, 2026-10-13) ----
+// The prune's read -> rewrite -> delete -> shrink and the snapshot's append used to run with no lock, so a manual snapshotNow
+// alongside the trigger (or the 22:50 captureDailyRmIssues_ prune) could interleave with them. This is the SAME script lock the
+// email jobs take (withEmailJobLockGs_, EmailInfra.gs), and an email job waits only EMAIL_JOB_LOCK_WAIT_MS_ (30 s) before it
+// SKIPS. A whole snapshot run takes 5-30 minutes, so holding the lock for the run would skip emails; only the two short writing
+// sections hold it: the append (seconds) and the prune (normally well under a minute). The hash read and every optional phase
+// stay unlocked - a duplicate append from two overlapping captures is harmless (identical content; the dedup and stale readers
+// collapse it). The browser's own Movement_Log write-back cannot take this lock at all; the shrink's fresh getLastRow() covers it.
+// `runIfBusy`: the append runs anyway when the lock is busy (a lost capture is worse than a racing one); the prune is skipped.
+// A lock service that errors fails OPEN (runs unlocked), the same rule withEmailJobLockGs_ follows. Returns { ran, value }.
+const MOVEMENT_LOG_PRUNE_LOCK_WAIT_MS_ = 10000;
+const MOVEMENT_LOG_APPEND_LOCK_WAIT_MS_ = 30000;
+const MOVEMENT_LOG_PRUNE_LOCK_BUSY_ = 'skipped: script lock busy';
+function withMovementLogLockGs_(waitMs, what, fn, runIfBusy) {
+  let lock = null;
+  let acquired = false;
+  try {
+    if (typeof LockService !== 'undefined') {
+      lock = LockService.getScriptLock();
+      acquired = !!lock.tryLock(waitMs);
+    }
+  } catch (e) {
+    Logger.log(what + ': the script lock could not be used (' + e + ') - running without it.');
+    lock = null;
+    acquired = false;
+  }
+  if (lock && !acquired) {
+    if (!runIfBusy) {
+      Logger.log(what + ' SKIPPED: another job holds the script lock; the next run does it.');
+      return { ran: false };
+    }
+    Logger.log(what + ': another job holds the script lock - running without it.');
+  }
+  try {
+    return { ran: true, value: fn() };
+  } finally {
+    if (lock && acquired) {
+      try { lock.releaseLock(); } catch (relErr) { Logger.log(what + ': releaseLock failed: ' + relErr); }
+    }
   }
 }
 
@@ -944,6 +1122,7 @@ function shrinkMovementLogAllocationGs_(logSheet, keptCount) {
 // sheet is already over the edge, the normal periodic trigger can't
 // self-heal; this runs the (now row-shrinking) prune directly, without
 // needing a successful snapshot append first. Safe to re-run any time.
+// No liveKeys here (MT-01): pruneMovementLog_ reads them from the leads tab itself.
 function pruneMovementLogNow() {
   pruneMovementLog_(SpreadsheetApp.getActiveSpreadsheet());
 }
@@ -1144,17 +1323,16 @@ function _buildLiveLeadIndexGs_(dataRows, colIndex) {
 // browser-UI concept only), matching persistDailyCohortHistory's own
 // ignoreFilters:true call, since a persisted archive row must reflect
 // reality regardless of who has the dashboard open with which filters.
-function computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now) {
+//
+// `byKeyPrebuilt` (optional, MT-11 2026-10-13): historyRows grouped by key (_groupHistoryByKeyGs_). A caller computing several
+// dates passes it so the grouping is built once, not once per date. Omitted = built here, as before; same result either way.
+function computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now, byKeyPrebuilt) {
   const dayStart = new Date(dateKey + 'T00:00:00+05:30');
   const dayEnd = new Date(dateKey + 'T23:59:59+05:30');
   const nowMs = now.getTime();
   const sameDayDeadlineMs = Math.min(dayEnd.getTime(), nowMs);
 
-  const byKey = {};
-  historyRows.forEach(function (r) {
-    if (!byKey[r.key]) byKey[r.key] = [];
-    byKey[r.key].push(r);
-  });
+  const byKey = byKeyPrebuilt || _groupHistoryByKeyGs_(historyRows);
 
   // Every lead with Movement_Log history, PLUS any live-only lead
   // Movement_Log never captured at all — same union computeDailyCohortByRegion
@@ -1209,6 +1387,16 @@ function computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now) {
   });
 
   return byRegion;
+}
+
+// { key: [history rows of that key] } - pure; see computeDailyCohortByRegionGs_'s byKeyPrebuilt.
+function _groupHistoryByKeyGs_(historyRows) {
+  const byKey = {};
+  historyRows.forEach(function (r) {
+    if (!byKey[r.key]) byKey[r.key] = [];
+    byKey[r.key].push(r);
+  });
+  return byKey;
 }
 
 // Port of upsertDailyCohortHistoryRows (js/sheets-writeback.js): upserts
@@ -1275,14 +1463,21 @@ function _readArchivedDailyCohortDatesGs_(ss) {
   if (lastRow < 2) return out;
   const values = sheet.getRange(2, 2, lastRow - 1, 1).getValues(); // column B = date
   values.forEach(function (r) {
-    const d = String(r[0] || '').trim();
+    // MT-02 (2026-10-13): a date Sheets auto-converted to a Date cell is keyed by its IST day, so the write-once guard still
+    // matches it. Checked live 2026-10-13: the column holds text today; this only guards against a future conversion.
+    const d = r[0] instanceof Date ? istDayKeyGs_(r[0]) : String(r[0] || '').trim();
     if (d) out[d] = true;
   });
   return out;
 }
 
 function persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now) {
-  const historyRows = _readMovementLogHistoryRowsGs_(ss);
+  // Only rows inside the retention window (MT-01, 2026-10-13). The prune now keeps a quiet lead's newest row however old it
+  // is; without this filter those rows would move the "earliest coverage" back by weeks (making long-past, never-archived
+  // days newly eligible with degraded evidence - the case this section's header forbids) and could change which day a
+  // customer is counted on. Filtering gives this phase exactly the input it had before the prune kept such rows.
+  const coverageFromMs = now.getTime() - MOVEMENT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const historyRows = _readMovementLogHistoryRowsGs_(ss).filter(function (r) { return r.atMs >= coverageFromMs; });
   if (!historyRows.length) return;
 
   const eligibleDates = eligibleDailyCohortDatesGs_(historyRows, now);
@@ -1298,8 +1493,9 @@ function persistDailyCohortHistoryGs_(ss, dataRows, colIndex, now) {
   const liveByKey = _buildLiveLeadIndexGs_(dataRows, colIndex);
 
   const entries = [];
+  const byKey = _groupHistoryByKeyGs_(historyRows); // once for every date (MT-11)
   newDates.forEach(function (dateKey) {
-    const byRegion = computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now);
+    const byRegion = computeDailyCohortByRegionGs_(dateKey, historyRows, liveByKey, now, byKey);
     Object.keys(byRegion).forEach(function (region) {
       const stats = byRegion[region];
       if (!stats.created) return;
@@ -1525,12 +1721,19 @@ function checkMovementLogFreshnessNow() {
 // per-workbook cell budget the live data already needs room in. A Drive
 // file has no such ceiling, and the ~kept majority isn't at risk (it's
 // staying in the sheet), so only the doomed rows need a safety copy.
+//
+// DEPRECATED (MT-05, 2026-10-13): its job finished in Sep 2026 - every row it targets is long past the 7-day prune. It is
+// kept (not deleted) only as the record of that incident. It still CLEARS then rewrites the sheet, the pattern the prune's
+// 2026-09-12 incident note bans, so it now does nothing at all unless there is really something to remove (no sheet, no data
+// rows, or no row before the cutoff = log and return); never re-run it as a routine tool.
 function removeEarlyCorruptedMovementLogDataNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
   const CHUNK = 10000;
+  if (!sheet) { Logger.log('Movement_Log not found - nothing to remove.'); return; }
 
   const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Movement_Log has no data rows - nothing to remove.'); return; }
   const lastCol = sheet.getLastColumn();
   const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
@@ -1541,6 +1744,7 @@ function removeEarlyCorruptedMovementLogDataNow() {
   values.forEach(function (row) {
     (row[0] instanceof Date && row[0] >= cutoff ? kept : removed).push(row);
   });
+  if (!removed.length) { Logger.log('No Movement_Log row is before 12 Sep 2026 IST - nothing to remove (already done).'); return; }
 
   const csvEscape = function (cell) {
     if (cell instanceof Date) return cell.toISOString();

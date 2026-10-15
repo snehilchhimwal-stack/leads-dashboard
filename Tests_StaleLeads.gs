@@ -1,7 +1,7 @@
 /**
  * Tests: stale leads (decision D8, 2026-10-10) - a lead with no update at all for more than 24 hours, whenever it was created or assigned, is shown in a separate block at the
- * bottom of every email. Covers leadStaleStateGs_ / _collapseLatestChangeGs_ / staleSinceOfRowGs_ (MovementTracker.gs) and splitStaleSectionsGs_ / staleSinceMapGs_ /
- * staleSinceForLeadIdsGs_ (EmailInfra.gs), then the real 17:00, 10:00 and 13:00 jobs and both CH-level reports against a fake workbook with a real-shaped Movement_Log.
+ * bottom of every email. Covers _collapseLatestChangeGs_ (MovementTracker.gs) and leadStaleStateGs_ / staleSinceOfRowGs_ / splitStaleSectionsGs_ / staleSinceMapGs_ /
+ * staleSinceForLeadIdsGs_ (StaleLeads.gs; SL-03 2026-10-13: this header used to name the wrong files), then the real 17:00, 10:00 and 13:00 jobs and both CH-level reports against a fake workbook with a real-shaped Movement_Log.
  * Run runStaleLeadsTestsNow() from the function dropdown, or via runAllTests() (Tests_RunAll.gs). Everything is in-memory; nothing is sent for real.
  */
 
@@ -142,6 +142,15 @@ function runStaleLeadsTests_() {
       TestAssertEqual_(Object.keys(staleSinceForLeadIdsGs_(['L-2'], leadsData, now)).length, 0, 'staleSinceForLeadIds: a lead that is not stale gives nothing');
       TestAssertEqual_(Object.keys(staleSinceForLeadIdsGs_(['L-1'], { colIndex: r1.colIndex, dataRows: rows }, now)).length + ',' + Object.keys(staleSinceForLeadIdsGs_(['L-1'], null, now)).length, '0,0', 'staleSinceForLeadIds: no change map or no data -> nothing is called stale');
       TestAssertEqual_(Object.keys(staleSinceForLeadIdsGs_(['L-1'], { colIndex: r1.colIndex, dataRows: 'not rows', lastChangeMap: {} }, now)).length, 0, 'staleSinceForLeadIds: fail-open on bad data');
+      // SL-02 (2026-10-13): a lead with one row per RM is stale only when EVERY row is stale, dated by the latest change.
+      const m1 = TestSL_row_({ lead_id: 'L-M', RM: 'Test RM One' }), m2 = TestSL_row_({ lead_id: 'L-M', RM: 'Test RM Two' });
+      const multi = function (h1, h2) {
+        return staleSinceForLeadIdsGs_(['L-M'], { colIndex: m1.colIndex, dataRows: [m1.row, m2.row], lastChangeMap: { 'L-M|Test RM One': TestSL_entry_(m1, hrs(h1)), 'L-M|Test RM Two': TestSL_entry_(m2, hrs(h2)) } }, now);
+      };
+      TestAssertEqual_(Object.keys(multi(30, 3)).length + ',' + Object.keys(multi(3, 30)).length, '0,0', 'SL-02: a multi-RM lead whose OTHER copy changed 3 h ago is not stale (whichever row comes first)');
+      const both = multi(30, 40);
+      TestAssertEqual_(both['L-M'] && both['L-M'].getTime(), hrs(30), 'SL-02: every copy stale -> stale, since the LATEST of their changes (30 h, not 40 h)');
+      TestAssertEqual_(String(staleSinceOfRowGs_(m1.row, m1.colIndex, { 'L-M|Test RM One': TestSL_entry_(m1, hrs(30)) }, now) && 'stale'), 'stale', 'SL-02: the per-row verdict (staleSinceOfRowGs_) is unchanged - that RM\'s own copy is still stale');
     }
 
     // ================= splitting a report =================

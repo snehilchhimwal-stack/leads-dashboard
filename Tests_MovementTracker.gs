@@ -407,7 +407,7 @@ function runMovementTrackerTests_() {
     DriveApp = mockDriveForPrune;
     let keptRows;
     try {
-      pruneMovementLog_(pruneSs);
+      pruneMovementLog_(pruneSs, {}); // {} = no live keys: this test is about the retention cutoff itself, not MT-01's newest-row protection
       keptRows = pruneSheet.getRange(2, 1, pruneSheet.getLastRow() - 1, pruneHeader.length).getValues();
     } finally {
       DriveApp = realDriveForPrune;
@@ -483,7 +483,7 @@ function runMovementTrackerTests_() {
       ];
       const mixedSheet = TestMockSheet_('Movement_Log', [mixedHeader].concat(mixedRows));
       mixedSs._sheets['Movement_Log'] = mixedSheet;
-      pruneMovementLog_(mixedSs);
+      pruneMovementLog_(mixedSs, {});
       TestAssertEqual_(mixedSheet.getLastRow(), 1 + 3, 'pruneMovementLog_ (multi-row kept): exactly 3 rows survive (header + 3), the 2 old ones dropped');
       const mixedKept = mixedSheet.getRange(2, 1, 3, mixedHeader.length).getValues();
       const keptLeadIds = mixedKept.map(function (r) { return r[SNAPSHOT_COLUMNS_.indexOf('lead_id') + 2]; });
@@ -1077,7 +1077,7 @@ function runMovementTrackerTests_() {
         const prefixSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(10, 'L-O10'), prRow(9, 'L-O9'), prRow(5, 'L-R5'), prRow(3, 'L-R3'), prRow(1, 'L-R1'), prRow(0.1, 'L-R0')]);
         prefixSheet._maxRows = 20000;
         const prefixSpy = spySheet(prefixSheet);
-        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': prefixSheet }));
+        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': prefixSheet }), {}); // no live keys: every expired row is droppable
         const leadIdCol0 = 2 + SNAPSHOT_COLUMNS_.indexOf('lead_id');
         const prefixKept = prefixSheet.getRange(2, 1, prefixSheet.getLastRow() - 1, mlHeader.length).getValues();
         TestAssertEqual_(prefixKept.map(function (r) { return r[leadIdCol0]; }).join(','), 'L-R5,L-R3,L-R1,L-R0', 'F23 prune fast path: the 4 in-retention rows survive, in their original order');
@@ -1106,7 +1106,7 @@ function runMovementTrackerTests_() {
         DriveApp = drv;
         const gapSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(10, 'L-O10'), prRow(2, 'L-R2'), prRow(11, 'L-O11'), prRow(1, 'L-R1')]);
         const gapSpy = spySheet(gapSheet);
-        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': gapSheet }));
+        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': gapSheet }), {});
         const gapKept = gapSheet.getRange(2, 1, gapSheet.getLastRow() - 1, mlHeader.length).getValues();
         TestAssertEqual_(gapKept.map(function (r) { return r[leadIdCol0]; }).join(','), 'L-R2,L-R1', 'F23 prune fallback: a non-prefix expiry falls back to the full rewrite and keeps exactly the in-retention rows, in order');
         TestAssert_(gapSpy.writes >= 1, 'F23 prune fallback: the rewrite really happened (the kept rows were written back)');
@@ -1119,7 +1119,7 @@ function runMovementTrackerTests_() {
         const allOldSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(10, 'L-O10')]);
         const allOldSpy = spySheet(allOldSheet);
         let allOldThrew = false;
-        try { pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': allOldSheet })); } catch (e) { allOldThrew = true; }
+        try { pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': allOldSheet }), {}); } catch (e) { allOldThrew = true; }
         TestAssert_(!allOldThrew && allOldSheet.getLastRow() === 1, 'F23 prune: every row expired -> no error and only the header is left');
         TestAssert_(!allOldSpy.deletes.some(function (d) { return d[0] === 2 && d[1] === 2; }), 'F23 prune: every row expired -> it does NOT try to deleteRows every non-frozen row (which Sheets would refuse)');
 
@@ -1128,13 +1128,163 @@ function runMovementTrackerTests_() {
         const keepSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(3, 'L-R3')]);
         const keepSpy = spySheet(keepSheet);
         let keepErr = '';
-        try { pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': keepSheet })); } catch (e) { keepErr = String(e); }
+        try { pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': keepSheet }), {}); } catch (e) { keepErr = String(e); }
         TestAssertContains_(keepErr, 'Drive is down', 'F23 prune: a failed archive throws (the run record then says failed)');
         TestAssertEqual_(keepSheet.getLastRow(), 3, 'F23 prune: …and NOTHING was deleted - the expired row is still in the sheet');
         TestAssertEqual_(keepSpy.deletes.length + keepSpy.writes + keepSpy.clears, 0, 'F23 prune: …no delete, write or clear was even attempted before the archive succeeded');
+
+        // ---- MT-01 (2026-10-13): the prune keeps each live lead's NEWEST row, however old ----
+        drv = TestMockDriveApp_();
+        DriveApp = drv;
+        const quiet = TestSL_row_({ lead_id: 'L-Q', client_id: 'C-Q', RM: 'Test RM One' }); // a live leads-tab row, unchanged for 10 days
+        const quietAt = TestFixture_daysAgo_(pNow, 10);
+        const quietMlRow = [quietAt, 'lbl-L-Q'].concat(SNAPSHOT_COLUMNS_.map(function (k) { return getVal_(quiet.row, quiet.colIndex, k); }))
+          .concat([_leadContentHashGs_(function (k) { return getVal_(quiet.row, quiet.colIndex, k); })]);
+        const quietSheet = TestMockSheet_('Movement_Log', [mlHeader, quietMlRow,
+          mlRow(TestFixture_daysAgo_(pNow, 9), 'L-D', 'C-D', 1, 'Test RM One', 'h-old', 'lbl-dup-old'),   // superseded by the 2-day-old row below
+          mlRow(TestFixture_daysAgo_(pNow, 8), 'L-GONE', 'C-G', 1, 'Test RM One', 'h-g', 'lbl-gone'),      // newest of its key, but no longer in the leads tab
+          mlRow(TestFixture_daysAgo_(pNow, 2), 'L-D', 'C-D', 1, 'Test RM One', 'h-new', 'lbl-dup-new'),
+          mlRow(TestFixture_daysAgo_(pNow, 1), 'L-R', 'C-R', 1, 'Test RM One', 'h-r', 'lbl-recent')]);
+        quietSheet._maxRows = 20000;
+        const quietSs = TestMockSpreadsheet_({ 'Movement_Log': quietSheet });
+        const live = { 'L-Q|Test RM One': true, 'L-D|Test RM One': true, 'L-R|Test RM One': true };
+        const staleBefore = leadStaleStateGs_(quiet.row, quiet.colIndex, buildMovementLogMapsGs_(quietSs, pNow).lastChangeMap, pNow);
+        const quietSpy = spySheet(quietSheet);
+        pruneMovementLog_(quietSs, live);
+        const quietLabels = quietSheet.getRange(2, 2, quietSheet.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; }).join(',');
+        TestAssertEqual_(quietLabels, 'lbl-L-Q,lbl-dup-new,lbl-recent', 'MT-01 prune: a lead unchanged for 10 days keeps its only row; an expired duplicate and a lead no longer in the leads tab are still pruned');
+        const staleAfter = leadStaleStateGs_(quiet.row, quiet.colIndex, buildMovementLogMapsGs_(quietSs, pNow).lastChangeMap, pNow);
+        TestAssert_(staleBefore.stale && staleAfter.stale && staleAfter.lastChangeAt.getTime() === quietAt.getTime(), 'MT-01 prune: the quiet lead is still stale afterwards and its stale date is unchanged (10 days ago) - SL-01');
+        TestAssertEqual_(quietSpy.deletes[0].join(','), '3,2', 'MT-01 prune: the expired prefix is compacted - its kept row written back at the top, the 2 dropped rows removed in ONE deleteRows');
+        TestAssert_(!quietSpy.reads.some(function (r) { return r.nr === 5 && r.nc > 1; }), 'MT-01 prune: no full-width read of the whole sheet (prefix compaction, not the full rewrite)');
+        const quietCsv = drv._folders[ARCHIVE_ROOT_FOLDER_]._folders['Movement_Log']._filesList[0]._content;
+        TestAssert_(quietCsv.indexOf('lbl-dup-old') >= 0 && quietCsv.indexOf('lbl-gone') >= 0 && quietCsv.indexOf('lbl-L-Q') === -1 && quietCsv.indexOf('lbl-dup-new') === -1, 'MT-01 prune: only the dropped rows are archived to Drive');
+        const quietSpy2 = spySheet(quietSheet);
+        pruneMovementLog_(quietSs, live);
+        TestAssertEqual_(quietSpy2.writes + quietSpy2.clears + quietSpy2.deletes.length, 0, 'MT-01 prune: a second run with only the protected row expired changes nothing');
+        // No liveKeys and no readable leads tab (pruneMovementLogNow / captureDailyRmIssues_ read it themselves): every key's newest row is protected.
+        const noKeysSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(8, 'L-GONE'), prRow(1, 'L-R1')]);
+        pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': noKeysSheet }));
+        TestAssertEqual_(noKeysSheet.getLastRow(), 3, 'MT-01 prune: without liveKeys or a leads tab, the newest row of every key is kept (when in doubt, keep)');
+        const tiePlan = _movementLogPrunePlanGs_([[TestFixture_daysAgo_(pNow, 9)], [TestFixture_daysAgo_(pNow, 9)]], [['L-T'], ['L-T']], [['A'], ['A']], pNow.getTime() - 7 * 86400000, null);
+        TestAssertEqual_(tiePlan.keep.join(',') + '|' + tiePlan.dropCount, 'false,true|1', 'MT-01 prune plan: two identical copies (a killed compaction) collapse to ONE kept row, the later one');
+
+        // ---- MT-03 (2026-10-13): the prune holds the script lock, and is skipped (not run unlocked) when another job holds it ----
+        const realLock = LockService;
+        try {
+          LockService = TestMockLockService_({ denyLock: true });
+          const busySheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(1, 'L-R1')]);
+          const busySpy = spySheet(busySheet);
+          const busy = pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': busySheet }), {});
+          TestAssertEqual_(busy, MOVEMENT_LOG_PRUNE_LOCK_BUSY_, 'MT-03: with the script lock busy the prune is skipped and says so');
+          TestAssertEqual_(busySpy.reads.length + busySpy.writes + busySpy.deletes.length, 0, 'MT-03: …and does not touch the sheet at all');
+          LockService = TestMockLockService_();
+          pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(1, 'L-R1')]) }), {});
+          TestAssert_(LockService._state.tryLockCalls === 1 && LockService._state.releases === 1, 'MT-03: a normal prune takes the lock once and releases it');
+          LockService = TestMockLockService_({ throwOnGet: true });
+          const brokenSheet = TestMockSheet_('Movement_Log', [mlHeader, prRow(12, 'L-O12'), prRow(1, 'L-R1')]);
+          pruneMovementLog_(TestMockSpreadsheet_({ 'Movement_Log': brokenSheet }), {});
+          TestAssertEqual_(brokenSheet.getLastRow(), 2, 'MT-03: a lock service that errors fails OPEN - the prune still runs');
+        } finally {
+          LockService = realLock;
+        }
+        // The shrink is sized from a FRESH getLastRow(): a row appended while the prune ran is never in the deleted tail.
+        const shrinkRows = [mlHeader];
+        for (let i = 0; i < 10; i++) shrinkRows.push(prRow(1, 'L-S' + i));
+        const shrinkSheet = TestMockSheet_('Movement_Log', shrinkRows);
+        shrinkSheet._maxRows = 20000;
+        shrinkMovementLogAllocationGs_(shrinkSheet, 1); // the prune thought only 1 row was left
+        TestAssert_(shrinkSheet.getLastRow() === 11 && shrinkSheet.getMaxRows() >= 11 + MOVEMENT_LOG_ROW_HEADROOM_, 'MT-03: the shrink keeps every row actually present (fresh getLastRow), not just the count the prune expected');
+
+        // ---- MT-05 (2026-10-13): the deprecated one-off does nothing when there is nothing to remove ----
+        const realSsApp = SpreadsheetApp;
+        try {
+          drv = TestMockDriveApp_();
+          DriveApp = drv;
+          const recentOnly = TestMockSheet_('Movement_Log', [mlHeader, prRow(2, 'L-R2'), prRow(1, 'L-R1')]);
+          const recentSpy = spySheet(recentOnly);
+          const roSs = TestMockSpreadsheet_({ 'Movement_Log': recentOnly });
+          SpreadsheetApp = Object.assign({}, realSsApp, { getActiveSpreadsheet: function () { return roSs; } });
+          removeEarlyCorruptedMovementLogDataNow();
+          TestAssertEqual_(recentSpy.writes + recentSpy.clears + recentSpy.deletes.length, 0, 'MT-05: no row before the cutoff -> nothing is cleared, rewritten or deleted');
+          TestAssertEqual_(Object.keys(drv._files || {}).length + Object.keys(drv._folders || {}).length, 0, 'MT-05: …and no Drive backup is written');
+          const noMl = TestMockSpreadsheet_({});
+          SpreadsheetApp = Object.assign({}, realSsApp, { getActiveSpreadsheet: function () { return noMl; } });
+          let noMlThrew = false;
+          try { removeEarlyCorruptedMovementLogDataNow(); } catch (e) { noMlThrew = true; }
+          TestAssert_(!noMlThrew, 'MT-05: a missing Movement_Log is logged, not a TypeError');
+        } finally {
+          SpreadsheetApp = realSsApp;
+        }
       } finally {
         DriveApp = realDriveF23;
       }
+
+      // ---- MT-04 (2026-10-13): one Movement_Log read gives the same hash map and the same baseline as the separate reads ----
+      TestAssertEqual_(JSON.stringify(_latestContentHashFromRowsGs_(_readMovementLogRowsGs_(hashSs))), JSON.stringify(_latestContentHashByKeyGs_(hashSs)), 'MT-04: the hash map from the shared read equals _latestContentHashByKeyGs_');
+      (function () {
+        const read = readLeadsTab_(ss);
+        const sla = ss.getSheetByName('SLA_History') || ensureSlaHistorySheet_(ss);
+        writeSlaHistorySnapshot_(ss, read.dataRows, read.colIndex, f18Now);
+        writeSlaHistorySnapshot_(ss, read.dataRows, read.colIndex, f18Now, _readMovementLogRowsGs_(ss));
+        const last2 = sla.getRange(sla.getLastRow() - 1, 1, 2, SLA_HISTORY_COLUMNS_.length).getValues();
+        TestAssertEqual_(JSON.stringify(last2[1]), JSON.stringify(last2[0]), 'MT-04: SLA_History gets the identical row from the shared read as from its own read');
+      })();
+
+      // ---- MT-06 (2026-10-13): an empty leads tab still records the run (0 leads) ----
+      (function () {
+        const emptySs = TestMockSpreadsheet_({ 'leads': TestMockSheet_('leads', [bannerRow, leadsHeader]) });
+        const realSsApp = SpreadsheetApp;
+        let emptySummary;
+        SpreadsheetApp = Object.assign({}, realSsApp, { getActiveSpreadsheet: function () { return emptySs; } });
+        try { emptySummary = snapshotOpenLeads_('empty run'); } finally { SpreadsheetApp = realSsApp; }
+        const emptyRuns = emptySs.getSheetByName('Movement_Log_Runs');
+        TestAssert_(!!emptyRuns && emptyRuns.getLastRow() === 2, 'MT-06: an empty leads tab still writes a Movement_Log_Runs row');
+        const er = emptyRuns.getRange(2, 1, 1, 4).getValues()[0];
+        TestAssertEqual_(er[1] + '|' + er[2] + '|' + er[3], 'empty run|0|0', 'MT-06: …with 0 leads seen and 0 changed');
+        TestAssertEqual_(emptySummary && emptySummary.leadCountSeen, 0, 'MT-06: the summary (what snapshotPeriodic records as completed) agrees: 0 leads');
+      })();
+
+      // ---- MT-09 (2026-10-13): a phase alert that could not be sent is not marked as sent ----
+      (function () {
+        PropertiesService = TestMockPropertiesService_();
+        const realNotify = notifyOpsAlertGs_;
+        notifyOpsAlertGs_ = function () { return false; };
+        let first;
+        try { first = alertSnapshotPhaseFailuresGs_([{ phase: 'Test phase', message: 'boom' }], 'lbl', f18Now); } finally { notifyOpsAlertGs_ = realNotify; }
+        TestAssertEqual_(first, 0, 'MT-09: a failed send reports 0 alerts sent');
+        TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(SNAPSHOT_PHASE_ALERT_PROPERTY_), null, 'MT-09: …and is NOT recorded as alerted for the day');
+        TestAssertEqual_(alertSnapshotPhaseFailuresGs_([{ phase: 'Test phase', message: 'boom' }], 'lbl', f18Now), 1, 'MT-09: so the next run tries again and sends it');
+        TestAssertEqual_(alertSnapshotPhaseFailuresGs_([{ phase: 'Test phase', message: 'boom' }], 'lbl', f18Now), 0, 'MT-09: once sent, it is not repeated that day');
+        PropertiesService = TestMockPropertiesService_();
+      })();
+
+      // ---- MT-11 / MT-02 / MT-01 cohort guard (2026-10-13) ----
+      (function () {
+        const cNow = new Date();
+        function cohortRow(daysAgo, leadId, assignedDaysAgo, stage) {
+          return [TestFixture_daysAgo_(cNow, daysAgo), 'x'].concat(SNAPSHOT_COLUMNS_.map(function (c) {
+            if (c === 'lead_id') return leadId;
+            if (c === 'client_id') return 'C-' + leadId;
+            if (c === 'region') return 'Pune';
+            if (c === 'current_stage') return stage || 'Suspect';
+            if (c === 'lead_assigned_at') return TestFixture_daysAgo_(cNow, assignedDaysAgo);
+            return '';
+          })).concat(['h']);
+        }
+        const cohortSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [mlHeader,
+          cohortRow(20, 'L-OLD', 20.2),            // a quiet lead's newest row, kept by the prune (MT-01) though 20 days old
+          cohortRow(3, 'L-NEW', 3.2), cohortRow(2.5, 'L-NEW', 3.2, 'Opportunity')]) });
+        const hist = _readMovementLogHistoryRowsGs_(cohortSs);
+        const dateKey = istDayKeyGs_(TestFixture_daysAgo_(cNow, 3.2));
+        TestAssertEqual_(JSON.stringify(computeDailyCohortByRegionGs_(dateKey, hist, {}, cNow, _groupHistoryByKeyGs_(hist))), JSON.stringify(computeDailyCohortByRegionGs_(dateKey, hist, {}, cNow)), 'MT-11: a prebuilt by-key grouping gives the identical cohort');
+        persistDailyCohortHistoryGs_(cohortSs, [], {}, cNow);
+        const dch = cohortSs.getSheetByName(DAILY_COHORT_HISTORY_SHEET_);
+        const dates = dch ? dch.getRange(2, 2, dch.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; }).join(',') : '';
+        TestAssertEqual_(dates, dateKey, 'MT-01 cohort guard: a row older than the retention window (kept by the prune) does not make its long-past day eligible - only the in-window day is written');
+        const dateCellSs = TestMockSpreadsheet_({ 'Daily_Cohort_History': TestMockSheet_('Daily_Cohort_History', [DAILY_COHORT_HISTORY_COLUMNS_, ['2026-10-10|Pune', new Date('2026-10-10T00:00:00+05:30'), 'Pune'], ['2026-10-11|Pune', '2026-10-11', 'Pune']]) });
+        TestAssertEqual_(Object.keys(_readArchivedDailyCohortDatesGs_(dateCellSs)).sort().join(','), '2026-10-10,2026-10-11', 'MT-02: a date cell Sheets turned into a Date still matches the write-once guard by its IST day');
+      })();
 
       // ---- F23: the phase runner and the time budget ----
       let clockMs = 0;

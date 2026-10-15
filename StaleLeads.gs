@@ -13,12 +13,13 @@
 
 // ==================== Stale leads (decision D8, 2026-10-10) ====================
 // A STALE LEAD is one with no update at all for MORE than 24 hours - no stage change, no comment added, no call-count increase, nothing - NO MATTER WHEN it was created or
-// assigned (user definition, 2026-10-10). The emails show stale leads in a separate block at the bottom (EmailInfra.gs splitStaleSectionsGs_).
+// assigned (user definition, 2026-10-10). The emails show stale leads in a separate block at the bottom (splitStaleSectionsGs_, below).
 //
 // How it is judged from what the system already keeps: the snapshot job writes a Movement_Log row for a lead ONLY when its tracked content (stage, comments, call counts,
 // connect time, RM, ...) differs from its latest row, so the latest row's time is the last observed change. A lead is stale when its LIVE content still hashes the same as
 // that row (nothing changed since the snapshot) AND that row is more than 24 h old. A live row that already differs from its latest snapshot changed within the last
-// snapshot gap, so it is not stale; a lead with no history (new, or pruned) is not stale - there is no evidence either way. The snapshot runs four times a day, so the
+// snapshot gap, so it is not stale; a lead with no history (new, or no longer in the leads tab) is not stale - there is no evidence either way. (The 7-day prune
+// keeps a live lead's newest row however old it is - MT-01, 2026-10-13 - so a quiet lead no longer loses its history, and its stale date, every 7 days: SL-01.) The snapshot runs four times a day, so the
 // observed time is never earlier than the real change: a lead is only ever called stale when it has really been quiet for more than 24 h.
 const LEAD_STALE_HOURS_ = 24;
 
@@ -42,7 +43,7 @@ function leadStaleStateGs_(row, colIndex, lastChangeMap, now) {
 }
 
 // ---- Stale leads in the emails (decision D8, 2026-10-10) ----
-// A STALE LEAD (MovementTracker.gs leadStaleStateGs_) is one with no update at all for more than 24 hours, whenever it was created or assigned. Every email lists such leads in a
+// A STALE LEAD (leadStaleStateGs_, above) is one with no update at all for more than 24 hours, whenever it was created or assigned. Every email lists such leads in a
 // SEPARATE block at the very bottom ("held at the bottom"), after the ordinary tables - they are still in the email (every lead the email counts stays in its body, so the
 // send-safety gate is unaffected), just apart from the leads that need first-contact attention. Nothing about who receives the email changes.
 
@@ -55,17 +56,24 @@ function staleSinceMapGs_(items) {
 
 // { leadId: Date } for the stale ones among `leadIds`, judged against the live leads-tab rows in leadsData = { colIndex, dataRows, lastChangeMap }. Fail-open: {} (nothing is
 // called stale) if the rows or the Movement_Log history are missing or anything throws - a warning block must never stop an email.
+//
+// A lead with SEVERAL live rows (one per RM) is stale only when EVERY one of its rows is stale (SL-02, 2026-10-13), and its date is the LATEST of their last changes. The
+// per-row verdict is staleSinceOfRowGs_'s, unchanged; this only decides how a lead-id-keyed caller (the 10:00 / 13:00 checkpoint tables, which carry no RM) combines them.
+// It used to take ANY stale row, so a lead whose other RM copy changed an hour ago was still called "no update for more than 24 hours" - against the definition above
+// ("no update at all"). Erring toward "not stale" is also this module's fail-open direction. Single-row leads (the large majority) are unaffected.
 function staleSinceForLeadIdsGs_(leadIds, leadsData, now) {
   const map = {};
   try {
     if (!leadsData || !leadsData.dataRows || !leadsData.colIndex || !leadsData.lastChangeMap) return map;
     const wanted = {};
     (leadIds || []).forEach(function (id) { wanted[String(id)] = true; });
+    const notStale = {};
     leadsData.dataRows.forEach(function (row) {
       const id = String(getVal_(row, leadsData.colIndex, 'lead_id') || '').trim();
-      if (!id || !wanted[id] || map[id]) return;
+      if (!id || !wanted[id] || notStale[id]) return;
       const st = leadStaleStateGs_(row, leadsData.colIndex, leadsData.lastChangeMap, now);
-      if (st.stale) map[id] = st.lastChangeAt;
+      if (!st.stale) { notStale[id] = true; delete map[id]; return; }
+      if (!map[id] || st.lastChangeAt.getTime() > map[id].getTime()) map[id] = st.lastChangeAt;
     });
   } catch (e) {
     Logger.log('Stale-lead check failed - the email is sent without a stale block: ' + e);
