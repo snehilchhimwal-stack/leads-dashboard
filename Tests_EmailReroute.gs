@@ -648,6 +648,86 @@ function runEmailRerouteTests_() {
       } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
     }
 
+    // ================= audit 2026-10-13: ER-2 / ER-3 / ER-1 / ER-4 / ER-5 / ER-6 / ES-3 =================
+    const rrWorld = function () {
+      const ss = TestMockSpreadsheet_({});
+      TestRR_bind_(ss);
+      emailRerouteHierarchyGs_ = function () { return TestRR_hierarchy_(); };
+      emailRerouteWindowOpenGs_ = function () { return true; };
+      const h = emailLedgerOpenGs_(ss);
+      const subject = 'A1/Dead Dan/google/Leads With Issue/10 Oct 2026';
+      const e1 = TestRR_ledgerRow_(ss, h, { bucket: 'Dead Dan', to: DEAD, subject: subject, messageId: 'M1' });
+      const msgs = { M1: { subject: subject, html: '<p>L-100</p>', plain: 'Lead L-100' } };
+      return { ss: ss, h: h, e1: e1, subject: subject, msgs: msgs };
+    };
+    {
+      // ER-2: "end all" sticks - the next check does not re-create the row from the same (older) bounce; a NEWER bounce does
+      const w = rrWorld();
+      TestRR_gmail_([TestRR_bounce_(w.e1.finished, DEAD, w.subject)], w.msgs);
+      TestAssertEqual_(sweepEmailBouncesAndReplies_({ now: nowSweep }).reroutes[w.e1.id].action, 'RESENT', 'ER-2: first the bounce is re-routed');
+      endAllEmailReroutesNow();
+      const ended = TestRR_entries_(w.ss)[0];
+      TestAssert_(ended.status === 'ENDED' && ended.expires_at.getTime() <= Date.now(), 'ER-6: ending a row stamps when it stopped applying (expires_at)');
+      const drafts = TestGmailLog_.drafts.length;
+      const s2 = sweepEmailBouncesAndReplies_({ now: new Date(nowSweep.getTime() + 60000) });
+      TestAssertEqual_(s2.reroutes[w.e1.id].action + ',' + TestRR_entries_(w.ss).length + ',' + (TestGmailLog_.drafts.length - drafts), 'ENDED,1,0', 'ER-2: after endAllEmailReroutesNow the same bounce makes no new row and sends nothing');
+      TestRR_gmail_([TestSW_msg_('Mail Delivery Subsystem <mailer-daemon@googlemail.com>', new Date(Date.now() + 1000), 'Delivery Status Notification (Failure)', 'Message to ' + DEAD + ' could not be delivered. Subject: ' + w.subject)], w.msgs);
+      sweepEmailBouncesAndReplies_({ now: new Date(Date.now() + 120000) });
+      TestAssertEqual_(TestRR_entries_(w.ss).map(function (e) { return e.status; }).join(','), 'ENDED,ACTIVE', 'ER-2: a bounce NEWER than the ended row makes a new one');
+    }
+    {
+      // ER-6: whom an email really went to, while a row that has since been ENDED was in force
+      const row = { to: 'dead@x.test', cc: '', finished_at: new Date('2026-10-05T10:00:00+05:30') };
+      TestAssertEqual_(emailRerouteEffectiveAddressesGs_(row, [TestRR_entry_({ status: 'ENDED', expires_at: new Date('2026-10-06T10:00:00+05:30') })]).join('|'), 'boss@x.test', 'ER-6: a row ended AFTER the send still tells where that email went');
+      TestAssertEqual_(emailRerouteEffectiveAddressesGs_(row, [TestRR_entry_({ status: 'ENDED', expires_at: new Date('2026-10-04T10:00:00+05:30') })]).length, 0, 'ER-6: …one ended BEFORE the send does not');
+      TestAssertEqual_(Object.keys(emailRerouteMapGs_([TestRR_entry_({ status: 'ENDED' })], at('2026-10-05T10:00:00+05:30'))).length, 0, 'ER-6: an ENDED row never redirects a live send');
+    }
+    {
+      // ER-3 + ER-1 inside the escalation: whole addresses, and only the address the bounce states as failed
+      const w = rrWorld();
+      const row = TestRR_ledgerById_(w.ss, w.e1.id);
+      const noisy = { at: new Date(w.e1.finished.getTime() + 60000), subject: 'Delivery Status Notification (Failure)', body: 'Message to x' + DEAD + ' could not be delivered' };
+      TestAssertEqual_(emailRerouteHandleBouncesGs_(w.ss, [{ row: row, bounce: noisy }], [row], nowSweep)[w.e1.id].action + ',' + TestRR_entries_(w.ss).length, 'NONE,0', 'ER-3: a bounce for "x' + DEAD + '" is not taken for ' + DEAD);
+      const boss = Object.assign({}, row, { to: BOSS, cc: DEAD });
+      const stated = { at: noisy.at, subject: 'Delivery Status Notification (Failure)', body: '** Address not found **\nYour message wasn\'t delivered to ' + DEAD + ' because the address couldn\'t be found.\nFinal-Recipient: rfc822; ' + DEAD + '\nAction: failed\n\nTo: ' + BOSS + '\nCc: ' + DEAD };
+      TestAssertEqual_(emailRerouteHandleBouncesGs_(w.ss, [{ row: boss, bounce: stated }], [row], nowSweep)[w.e1.id].action + ',' + TestGmailLog_.drafts.length, 'CC_ONLY,0', 'ER-1: the To quoted in the returned original is not taken for bounced - only the stated Final-Recipient (a Cc) is');
+    }
+    {
+      // ES-3: the re-send waits for the script lock; when an email job holds it the re-send is left to the next check
+      const w = rrWorld();
+      TestRR_gmail_([TestRR_bounce_(w.e1.finished, DEAD, w.subject)], w.msgs);
+      LockService = TestMockLockService_({ denyLock: true });
+      let s;
+      try { s = sweepEmailBouncesAndReplies_({ now: nowSweep }); } finally { LockService = TestMockLockService_(); }
+      TestAssertEqual_(s.reroutes[w.e1.id].action + ',' + TestGmailLog_.drafts.length + ',' + TestRR_entries_(w.ss).length, 'DEFERRED,0,1', 'ES-3: lock busy -> not re-sent yet (the redirect row is made)');
+      const s2 = sweepEmailBouncesAndReplies_({ now: new Date(nowSweep.getTime() + 60000) });
+      TestAssertEqual_(s2.reroutes[w.e1.id].action + ',' + TestGmailLog_.drafts.length + ',' + LockService._state.tryLockCalls + ',' + LockService._state.releases, 'RESENT,1,1,1', 'ES-3: the next check re-sends it under the lock and releases it');
+    }
+    {
+      // ER-4: the copy goes where its ledger row says, even when the sender's own (fail-open) redirect sees no table
+      const w = rrWorld();
+      TestRR_gmail_([TestRR_bounce_(w.e1.finished, DEAD, w.subject)], w.msgs);
+      const realCached = emailRerouteEntriesCachedGs_;
+      emailRerouteEntriesCachedGs_ = function () { return []; };
+      try { sweepEmailBouncesAndReplies_({ now: nowSweep }); } finally { emailRerouteEntriesCachedGs_ = realCached; }
+      const rr = TestRR_ledgerById_(w.ss, 'RR|' + w.e1.id);
+      TestAssertEqual_(TestGmailLog_.drafts.length + ',' + TestGmailLog_.drafts[0].to + ',' + rr.to, '1,' + BOSS + ',' + BOSS, 'ER-4: the copy is sent to the replacement its row records, never to the dead address');
+      TestAssert_(TestGmailLog_.drafts[0].htmlBody.indexOf('Re-routed to you') !== -1 && rr.status_reason.indexOf('re-routed to ' + BOSS) !== -1, 'ER-4: …with the banner and the re-route note');
+    }
+    {
+      // ER-5: no ledger row for the copy -> no copy (otherwise every check would send it again)
+      const w = rrWorld();
+      TestRR_gmail_([TestRR_bounce_(w.e1.finished, DEAD, w.subject)], w.msgs);
+      const realOpen = emailLedgerOpenGs_;
+      emailLedgerOpenGs_ = function () { return { ledger: null, exclusions: null, rowById: {}, rows: {}, failures: 1, lastError: 'open: simulated', disabled: true }; };
+      let s;
+      try { s = sweepEmailBouncesAndReplies_({ now: nowSweep }); } finally { emailLedgerOpenGs_ = realOpen; }
+      TestAssertEqual_(s.reroutes[w.e1.id].action + ',' + TestGmailLog_.drafts.length, 'RESEND_FAILED,0', 'ER-5: with the ledger off the copy is not sent');
+      TestAssertContains_(s.reroutes[w.e1.id].text, 'the next check retries', 'ER-5: …and is retried by the next check');
+      const s2 = sweepEmailBouncesAndReplies_({ now: new Date(nowSweep.getTime() + 60000) });
+      TestAssertEqual_(s2.reroutes[w.e1.id].action + ',' + TestGmailLog_.drafts.length, 'RESENT,1', 'ER-5: once the ledger works it is sent exactly once');
+    }
+
     // ================= the bounce-only checks =================
     {
       const ss = TestMockSpreadsheet_({});

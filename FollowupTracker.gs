@@ -35,9 +35,13 @@ const FOLLOWUP_TRACKER_GRACE_MINUTES_ = 30; // a checkpoint is DUE for this long
 const FOLLOWUP_TRACKER_STATUSES_ = ['COMPLETED', 'NOT_NEEDED', 'BLOCKED', 'OVERDUE', 'DUE', 'FUTURE'];
 const FOLLOWUP_TRACKER_MAX_ROWS_ = 30; // items listed in the report's attention table
 
-// "region|recipient", lower-cased: how a log row and a ledger row of the same bucket are matched.
-function followupKeyGs_(region, to) {
-  return String(region == null ? '' : region).trim().toLowerCase() + '|' + String(to == null ? '' : to).trim().toLowerCase();
+// "region|recipient", lower-cased: how a log row and a ledger row of the same bucket are matched. FT-1 (audit 2026-10-13): a recipient LIST is normalised (split on , or ;,
+// trimmed, sorted) so "a@x, b@y" and "b@y,a@x" are one key. `label` (optional) is added for the 17:00 rows only: two 17:00 buckets of one region can go to the same person,
+// while the 10:00 / 13:00 emails are combined per recipient across labels - so the checkpoints must keep matching on region|recipient alone.
+function followupKeyGs_(region, to, label) {
+  const list = String(to == null ? '' : to).split(/[,;]/).map(function (a) { return a.trim().toLowerCase(); }).filter(Boolean).sort().join(',');
+  const key = String(region == null ? '' : region).trim().toLowerCase() + '|' + list;
+  return label === undefined ? key : key + '|' + String(label == null ? '' : label).trim().toLowerCase();
 }
 
 // The IST day after a day key (yyyy-MM-dd).
@@ -68,12 +72,16 @@ function followupCheckpointStatusGs_(s) {
 function followupTrackerGs_(input) {
   const day = input.cycleDay, next = followupNextDayGs_(day), now = input.now;
   const ledgerBy = { allIssues17: {}, morning10: {}, followup13: {} };
+  const allIssuesByLabel = {}; // FT-1: region|recipient|label -> the 17:00 row (ledgerBy.allIssues17 stays the fallback for rows recorded without a label)
   const rerouteBy = {}; // 'RR|<email id>' -> the ledger row of the copy re-sent after a bounce (EmailReroute.gs)
   (input.ledgerRows || []).forEach(function (r) {
     if (r.job === 'reroute') rerouteBy[r.email_id] = r;
     const m = ledgerBy[r.job];
     // the 17:00 rows are the cycle day's; the 10:00 / 13:00 rows are the next day's (a recovery re-uses the same id, so there is one row per bucket)
-    if (m && emailLedgerDayKeyOfGs_(r.cycle_day) === (r.job === 'allIssues17' ? day : next)) m[followupKeyGs_(r.region, r.to)] = r;
+    if (m && emailLedgerDayKeyOfGs_(r.cycle_day) === (r.job === 'allIssues17' ? day : next)) {
+      m[followupKeyGs_(r.region, r.to)] = r;
+      if (r.job === 'allIssues17') allIssuesByLabel[followupKeyGs_(r.region, r.to, r.bucket_label)] = r;
+    }
   });
   const dueAt = function (hour) { return new Date(next + 'T' + pad2Gs_(hour) + ':00:00+05:30'); };
   const newCounts = function () { const c = {}; FOLLOWUP_TRACKER_STATUSES_.forEach(function (k) { c[k] = 0; }); return c; };
@@ -81,7 +89,7 @@ function followupTrackerGs_(input) {
   const attention = [];
   const rows = (input.logRows || []).map(function (l) {
     const key = followupKeyGs_(l.region, l.to);
-    const m1 = ledgerBy.morning10[key], m2 = ledgerBy.followup13[key], m0 = ledgerBy.allIssues17[key];
+    const m1 = ledgerBy.morning10[key], m2 = ledgerBy.followup13[key], m0 = allIssuesByLabel[followupKeyGs_(l.region, l.to, l.label)] || ledgerBy.allIssues17[key];
     const cp1 = followupCheckpointStatusGs_({ stamp: l.cp1At, ledgerStatus: m1 && m1.status, ledgerReason: m1 && m1.status_reason, dueAt: dueAt(FOLLOWUP_TRACKER_CP1_HOUR_), now: now });
     // A bucket with nothing left after 17:00 (Checkpoint 1 NOT_NEEDED) has nothing for 13:00 to follow up either: the 13:00 job only replies
     // to the buckets the 10:00 job sent, so normally it records nothing, and that silence used to read as OVERDUE (a false alarm, first seen
@@ -147,21 +155,25 @@ function followupTrackerReadLogGs_(ss, dayKey) {
     if (!sheet || sheet.getLastRow() < 2) return [];
     const last = sheet.getLastRow();
     const days = sheet.getRange(2, 1, last - 1, 1).getValues();
-    let first = -1, count = 0;
+    // FT-2 (audit 2026-10-13): the day's rows were assumed contiguous - the span from its first to its last row is read and filtered by day, so a row of another day
+    // in between is not taken for one of this day's buckets.
+    let first = -1, lastIdx = -1;
     for (let i = 0; i < days.length; i++) {
       const d = emailLedgerDayKeyOfGs_(days[i][0]);
-      if (d === dayKey) { if (first === -1) first = i; count++; } else if (first !== -1 && d > dayKey) break;
+      if (d === dayKey) { if (first === -1) first = i; lastIdx = i; } else if (first !== -1 && d > dayKey) break;
     }
     if (first === -1) return [];
+    const count = lastIdx - first + 1;
     const main = sheet.getRange(first + 2, 1, count, 9).getValues();   // date .. thread_id
     const cps = sheet.getRange(first + 2, 12, count, 3).getValues();   // checkpoint1_sent_at, checkpoint2_json, checkpoint2_sent_at
     return main.map(function (r, i) {
+      if (emailLedgerDayKeyOfGs_(days[first + i][0]) !== dayKey) return null;
       const label = String(r[2] || '');
       return {
         region: label === FUTWORK_REGION_KEY_ ? FUTWORK_REGION_KEY_ : String(r[1] || '').trim(), label: label, role: String(r[3] || ''),
         to: String(r[4] || '').trim(), leadCount: r[6], cp1At: cps[i][0], cp2At: cps[i][2],
       };
-    }).filter(function (l) { return l.to; });
+    }).filter(function (l) { return l && l.to; });
   } catch (e) {
     Logger.log('Follow-up tracker: AllIssues_Log could not be read - ' + e);
     return null;
@@ -170,7 +182,10 @@ function followupTrackerReadLogGs_(ss, dayKey) {
 
 // Stores the tracker rows in Followup_Tracker: one block per report day, replaced (not duplicated) when the report is sent again the same day. Fail-open; TEST MODE writes nothing.
 function followupTrackerRecordGs_(ss, t, now) {
-  if (TEST_MODE_OVERRIDE_EMAIL_ || !t || !t.rows.length) return;
+  if (TEST_MODE_OVERRIDE_EMAIL_ || !t || t.unreadable) return;
+  // FT-3 (audit 2026-10-13): a same-day re-send that now has NO bucket used to leave the earlier block standing; it is cleared (an existing tab only - no tab is created for
+  // nothing). An unreadable log is missing evidence, so it changes nothing.
+  if (!t.rows.length && !ss.getSheetByName(FOLLOWUP_TRACKER_SHEET_)) return;
   try {
     const sheet = emailLedgerEnsureSheetGs_(ss, FOLLOWUP_TRACKER_SHEET_, FOLLOWUP_TRACKER_HEADERS_, FOLLOWUP_TRACKER_TEXT_COLUMNS_);
     const day = istDayKeyGs_(now);

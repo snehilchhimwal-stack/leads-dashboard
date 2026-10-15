@@ -53,6 +53,12 @@ function runCycleReportTests_() {
     TestAssertEqual_(morning.start.toISOString(), '2026-10-07T11:00:00.000Z', 'window: a manual run before 16:30 reaches one cycle further back (the cycle that just ended plus today so far)');
     const atBoundary = cycleReportWindowGs_(new Date('2026-10-09T16:30:00+05:30'));
     TestAssertEqual_(atBoundary.start.toISOString(), '2026-10-08T11:00:00.000Z', 'window: exactly 16:30 counts as the new boundary');
+    // CR-1 (audit 2026-10-13): the nearMinute(30) trigger can fire from 16:15 - from 16:00 the run is today's report (yesterday 16:30 -> now), never a ~48 h window
+    ['16:15', '16:20', '16:29', '16:30', '16:45'].forEach(function (hhmm) {
+      const w = cycleReportWindowGs_(new Date('2026-10-09T' + hhmm + ':00+05:30'));
+      TestAssertEqual_(w.start.toISOString() + ' ' + w.boundary.toISOString(), '2026-10-08T11:00:00.000Z 2026-10-09T11:00:00.000Z', 'CR-1: a run at ' + hhmm + ' starts at yesterday 16:30 and its cycle ends today 16:30');
+    });
+    TestAssertEqual_(cycleReportWindowGs_(new Date('2026-10-09T15:59:00+05:30')).start.toISOString(), '2026-10-07T11:00:00.000Z', 'CR-1: a manual run before 16:00 still shows the cycle that ended yesterday plus today so far');
     TestAssertEqual_(cycleRateGs_(6, 7) + ',' + cycleRateGs_(0, 0) + ',' + cycleRateGs_(3, 3), '6 of 7 (86%),n/a,3 of 3 (100%)', 'rate: numerator and denominator are always shown; no denominator reads n/a');
 
     // ================= the numbers (pure) =================
@@ -125,6 +131,14 @@ function runCycleReportTests_() {
       TestAssertContains_(sr.plainBody, 'delivery and opens cannot be seen from Apps Script', 'sweep render: …but what Apps Script can never see is still stated');
       TestAssertContains_(sr.plainBody, 'Leads tab freshness | not checked', 'sweep render: with no freshness check supplied the row says not checked');
     }
+    {
+      // CR-3 (audit 2026-10-13): a failed bounce search is "check failed", not "not checked yet"; checklist J says so
+      const cf = cycleReportDataGs_({ window: win, ledgerRows: [L('allIssues17', 'ACCEPTED', { swept_at: inWin(2), bounce_status: 'UNKNOWN (the bounce search failed)', reply_status: 'NO_REPLY_SEEN' })], exclusionRows: [], incidentRows: [] });
+      TestAssertEqual_(cf.sweep.checkFailed + ',' + cf.sweep.notSwept, '1,0', 'CR-3: an UNKNOWN bounce status counts as "check failed"');
+      const j = cf.checklist.filter(function (r) { return r.stage === 'J'; })[0];
+      TestAssertEqual_(j.flag + ',' + (j.evidence.indexOf('bounce search failed') !== -1), 'AMBER,true', 'CR-3: checklist J is AMBER and names the failed search');
+      TestAssertContains_(cycleReportRenderGs_(cf, new Date('2026-10-09T16:35:00+05:30')).plainBody, 'Check failed', 'CR-3: the bounces table has the row');
+    }
     TestAssertContains_(bad.plainBody, '3 of 7 (43%) accepted by Gmail', 'render: the execution rate shows numerator and denominator');
     TestAssertContains_(bad.html, 'Daily Cycle Report', 'render: the HTML carries the title');
     const good = cycleReportRenderGs_(clean, now);
@@ -196,6 +210,26 @@ function runCycleReportTests_() {
       TestAssertEqual_(TestGmailLog_.drafts.length, 2, 'report (test mode): the once-a-day guard is not consumed or honoured');
       TestAssertContains_(TestGmailLog_.drafts[0].subject, '[TEST MODE]', 'report (test mode): the subject says so');
       TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(CYCLE_REPORT_SENT_PROPERTY_), null, 'report (test mode): nothing is recorded as sent');
+    }
+
+    {
+      // CR-2 (audit 2026-10-13): the scheduled run stops at 16:30, so 17:00 rows planned after it are counted tomorrow only; a manual run still shows them
+      const ss = TestCR_world_(null);
+      TestCR_bind_(ss);
+      const h = emailLedgerOpenGs_(ss);
+      const plan = function (id, day) { return { emailId: id, job: 'allIssues17', dayKey: day, region: 'Pune', bucketLabel: id, primaryRole: 'A1', to: TEST_EMAIL_PRIMARY_, leadIds: ['1'], initialStatus: 'SKIPPED' }; };
+      emailLedgerPlanGs_(h, [plan('YDAY', '2026-10-08'), plan('TODAY', '2026-10-09')]);
+      const sh = ss.getSheetByName(EMAIL_LEDGER_SHEET_);
+      sh.getRange(h.rowById.YDAY, emailLedgerCol_('planned_at'), 1, 1).setValues([[new Date('2026-10-08T17:01:00+05:30')]]);
+      sh.getRange(h.rowById.TODAY, emailLedgerCol_('planned_at'), 1, 1).setValues([[new Date('2026-10-09T16:46:00+05:30')]]);
+      const at = new Date('2026-10-09T16:50:00+05:30');
+      const sched = buildEmailCycleReportGs_(ss, at, { scheduled: true }), manual = buildEmailCycleReportGs_(ss, at);
+      TestAssertEqual_(sched.data.totals.planned + ',' + sched.data.cycle.end.toISOString() + ',' + manual.data.totals.planned, '1,2026-10-09T11:00:00.000Z,2', 'CR-2: the scheduled report ends at 16:30 and leaves today\'s 17:00 rows to tomorrow; a manual run still counts them');
+      const realBuild = buildEmailCycleReportGs_;
+      let seen = null;
+      buildEmailCycleReportGs_ = function (s2, n, o) { seen = o; return realBuild(s2, n, o); };
+      try { sendEmailCycleReport(); } finally { buildEmailCycleReportGs_ = realBuild; }
+      TestAssertEqual_(!!(seen && seen.scheduled), true, 'CR-2: the trigger entry point builds the scheduled report');
     }
 
     // ================= Leads-tab freshness (decision D4) =================

@@ -48,6 +48,7 @@ const EMAIL_REROUTE_RESEND_MAX_HOURS_ = 3;    // a re-sent copy that bounces aga
 const EMAIL_REROUTE_JOB_ = 'reroute';         // the ledger job of a re-sent copy
 const EMAIL_REROUTE_VIA_HIERARCHY_ = 'hierarchy';
 const EMAIL_REROUTE_VIA_OPS_ = 'ops fallback';
+const EMAIL_REROUTE_LOCK_WAIT_MS_ = 5000;     // ES-3: how long a re-send waits for the script lock before it is left to the next check
 
 let EMAIL_REROUTE_CACHE_ = null; // { key, at, entries } - the table as read, per run
 let EMAIL_REROUTE_NOTE_ = '';    // what the last send was redirected from/to; the ledger writes it into the row's status_reason (emailRerouteTakeNoteGs_)
@@ -80,11 +81,22 @@ function emailRerouteIsActiveGs_(e, atMs) {
   return created.getTime() <= atMs && expires.getTime() > atMs;
 }
 
-// { deadAddressLowerCase: row } for the rows in force at atMs (the newest wins when two rows name the same address).
-function emailRerouteMapGs_(entries, atMs) {
+// Was this row in force at a PAST moment atMs? ER-6 (audit 2026-10-13): a row ended by hand was in force before it was ended, and the bounce matcher must still see whom
+// an email sent then really went to. ENDED rows count, up to their expires_at (endAllEmailReroutesNow sets it to the moment it ended them). Only for history, never for
+// a live redirect.
+function emailRerouteWasInForceGs_(e, atMs) {
+  if (!e || !/^(ACTIVE|ENDED)$/.test(String(e.status || '').trim())) return false;
+  const created = emailRerouteDateGs_(e.created_at), expires = emailRerouteDateGs_(e.expires_at);
+  if (!created || !expires) return false;
+  return created.getTime() <= atMs && expires.getTime() > atMs;
+}
+
+// { deadAddressLowerCase: row } for the rows in force at atMs (the newest wins when two rows name the same address). history = true: as they were at a past moment,
+// ENDED rows included (emailRerouteWasInForceGs_).
+function emailRerouteMapGs_(entries, atMs, history) {
   const map = {};
   (entries || []).forEach(function (e) {
-    if (!emailRerouteIsActiveGs_(e, atMs)) return;
+    if (!(history ? emailRerouteWasInForceGs_(e, atMs) : emailRerouteIsActiveGs_(e, atMs))) return;
     const k = emailRerouteLowerGs_(e.dead_email);
     if (k && emailRerouteLowerGs_(e.new_email)) map[k] = e;
   });
@@ -208,7 +220,7 @@ function emailRerouteWindowOpenGs_(row, now) {
 function emailRerouteEffectiveAddressesGs_(row, entries) {
   const at = emailRerouteDateGs_(row.finished_at);
   if (!at) return [];
-  const map = emailRerouteMapGs_(entries, at.getTime());
+  const map = emailRerouteMapGs_(entries, at.getTime(), true);
   if (!Object.keys(map).length) return [];
   const tr = emailRerouteTranslateAddressesGs_(row.to, row.cc, map);
   if (!tr.changes.length) return [];
@@ -274,6 +286,8 @@ function endAllEmailReroutesNow() {
   emailRerouteReadEntriesGs_(ss).forEach(function (e) {
     if (!emailRerouteIsActiveGs_(e, nowMs)) return;
     sheet.getRange(e.rowNo, EMAIL_REROUTE_HEADERS_.indexOf('status') + 1, 1, 1).setValue('ENDED');
+    // ER-6: expires_at becomes the moment it ended, so the history view (emailRerouteWasInForceGs_) knows when it stopped applying.
+    sheet.getRange(e.rowNo, EMAIL_REROUTE_HEADERS_.indexOf('expires_at') + 1, 1, 1).setValue(new Date(nowMs));
     ended++;
   });
   emailRerouteResetCacheGs_();
@@ -347,9 +361,19 @@ function emailRerouteResendGs_(ss, row, now) {
     emailId: emailId, job: EMAIL_REROUTE_JOB_, dayKey: istDayKeyGs_(now), region: row.region, bucketLabel: row.bucket_label, primaryRole: row.primary_role,
     to: tr.to.join(','), cc: tr.cc.join(','), subject: subject, leadIds: leadIds,
   };
+  // ER-5 (audit 2026-10-13): the copy's ledger row is the ONLY record that it went out - the next check reads it to avoid a second copy. With no row (ledger off, or the plan
+  // write failed) every check would send it again, so here the ledger is a gate: no row, no send; the next check retries.
+  if (!emailLedgerLiveGs_(h)) { emailLedgerFinishGs_(h, 'the bounce re-route'); return { ok: false, text: 'NOT re-sent: the ledger could not be opened, so the copy could not be recorded (it would be sent again by every check) - the next check retries' }; }
+  emailLedgerPlanGs_(h, [meta]);
+  if (!h.rowById[emailId]) { emailLedgerFinishGs_(h, 'the bounce re-route'); return { ok: false, text: 'NOT re-sent: the ledger row for the copy could not be written (it would be sent again by every check) - the next check retries' }; }
+  // ER-4 (audit 2026-10-13): the copy is sent to the addresses recorded in its row (tr, from the table read just now), with the banner added here - no longer left to the
+  // fail-open redirect inside the sender, which on a stale or unreadable table sent it to the DEAD address while the row named the replacement.
+  const toChanges = tr.changes.filter(function (c) { return c.part === 'to'; });
+  const banner = emailRerouteBannerGs_(toChanges);
   try {
     emailLedgerTrackSendGs_(h, meta, function () {
-      return sendGuardedEmailGs_({ to: row.to, cc: row.cc, subject: subject, plainBody: plain, htmlBody: html, leadIds: leadIds.length ? leadIds : undefined }, 'send re-routed copy (' + row.region + ' / ' + (row.bucket_label || row.to) + ')');
+      EMAIL_REROUTE_NOTE_ = emailRerouteNoteTextGs_(tr.changes); // after the attempt cleared it: the copy's row says what was redirected
+      return sendGuardedEmailGs_({ to: meta.to, cc: meta.cc, subject: subject, plainBody: banner.plain + String(plain == null ? '' : plain), htmlBody: html === undefined || html === null ? html : banner.html + String(html), leadIds: leadIds.length ? leadIds : undefined }, 'send re-routed copy (' + row.region + ' / ' + (row.bucket_label || row.to) + ')');
     });
   } catch (e4) {
     return { ok: false, text: 're-send to ' + tr.to.join(',') + ' FAILED - ' + String((e4 && e4.message) || e4) };
@@ -357,6 +381,27 @@ function emailRerouteResendGs_(ss, row, now) {
     emailLedgerFinishGs_(h, 'the bounce re-route');
   }
   return { ok: true, text: 're-sent to ' + tr.to.join(',') + ' at ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'HH:mm') + ' IST' };
+}
+
+// Runs fn under the script lock, held only for its duration. ES-3 (audit 2026-10-13): a re-send appends to Email_Ledger, which the email jobs append to under that lock -
+// two appenders could pick the same row. Returns null (fn NOT run) when a job holds the lock: the re-send is left to the next check. A lock service that errors is not a
+// reason to drop the re-send (same fail-open rule as withEmailJobLockGs_): fn then runs without it.
+function emailRerouteWithLockGs_(fn) {
+  if (typeof LockService === 'undefined') return fn();
+  let lock = null, acquired = false;
+  try {
+    lock = LockService.getScriptLock();
+    acquired = lock.tryLock(EMAIL_REROUTE_LOCK_WAIT_MS_);
+  } catch (e) {
+    Logger.log('Email re-route: the script lock could not be used (' + e + ') - re-sending without it.');
+    return fn();
+  }
+  if (!acquired) return null;
+  try {
+    return fn();
+  } finally {
+    try { lock.releaseLock(); } catch (e2) { Logger.log('Email re-route: releasing the script lock failed: ' + e2); }
+  }
 }
 
 // items = [{ row (a ledger row object), bounce ({ at, subject, body }) }] - every ledger row the sweep matched to a bounce, new or old. ledgerRows = the rows the sweep read (they
@@ -386,18 +431,26 @@ function emailRerouteHandleBouncesGs_(ss, items, ledgerRows, now) {
       const finished = emailRerouteDateGs_(row.finished_at);
       if (!finished) { set(row, 'NONE', 'no send time recorded - nothing re-routed'); return; }
       // who the email really went to, and which of them the bounce names
-      const sent = emailRerouteTranslateAddressesGs_(row.to, row.cc, emailRerouteMapGs_(entries, finished.getTime()));
+      // (ER-6: as the table was AT the send, rows ended by hand since included)
+      const sent = emailRerouteTranslateAddressesGs_(row.to, row.cc, emailRerouteMapGs_(entries, finished.getTime(), true));
       const text = (String(bounce.subject || '') + '\n' + String(bounce.body || '')).toLowerCase().replace(/\s+/g, ' ');
+      // ER-3 / ER-1 (audit 2026-10-13): whole addresses only, and only the failed ones when the bounce states them (EmailSweep.gs)
+      const failed = emailSweepBounceFailedAddressesGs_(text);
       const named = {};
-      sent.to.forEach(function (a) { if (text.indexOf(a.toLowerCase()) !== -1) named[a.toLowerCase()] = 'to'; });
-      sent.cc.forEach(function (a) { if (text.indexOf(a.toLowerCase()) !== -1 && !named[a.toLowerCase()]) named[a.toLowerCase()] = 'cc'; });
+      sent.to.forEach(function (a) { if (emailSweepBounceNamesGs_(text, failed, a)) named[a.toLowerCase()] = 'to'; });
+      sent.cc.forEach(function (a) { if (emailSweepBounceNamesGs_(text, failed, a) && !named[a.toLowerCase()]) named[a.toLowerCase()] = 'cc'; });
       const bounced = Object.keys(named).filter(function (a) { return a !== emailRerouteLowerGs_(opsEmail); });
       if (!bounced.length) { set(row, 'NONE', 'the bounce names only the ops address - nothing to re-route'); return; }
 
       // a row for every bounced address that has none in force
       let hierFailed = false;
+      const endedSince = {};
+      const bounceAt = emailRerouteDateGs_(bounce.at);
       bounced.forEach(function (a) {
         if (emailRerouteMapGs_(entries, now.getTime())[a]) return;
+        // ER-2 (audit 2026-10-13): a row for this address made at or after this bounce (now ENDED by hand, or expired) means the bounce was already handled - the sweep
+        // re-reads 3 days of bounces, and re-creating the row undid endAllEmailReroutesNow() at the next check. Only a NEWER bounce makes a new row.
+        if (bounceAt && entries.some(function (e) { const c = emailRerouteDateGs_(e.created_at); return emailRerouteLowerGs_(e.dead_email) === a && c && c.getTime() >= bounceAt.getTime(); })) { endedSince[a] = true; return; }
         const h = loadHier();
         if (!h) { hierFailed = true; return; }
         const hint = row.job === EMAIL_LEDGER_JOB_ALL_ISSUES_ && emailRerouteLowerGs_(row.to) === a ? row.bucket_label : '';
@@ -413,12 +466,14 @@ function emailRerouteHandleBouncesGs_(ss, items, ledgerRows, now) {
 
       const mapNow = emailRerouteMapGs_(entries, now.getTime());
       const target = emailRerouteResolveGs_(mapNow, toBounced[0]);
+      if (!target.changed && endedSince[toBounced[0]]) { set(row, 'ENDED', 'not re-routed again: the re-route made for ' + toBounced[0] + ' after this bounce was ended (or has expired) - only a newer bounce makes a new one'); return; }
       if (!target.changed) { set(row, 'ERROR', 'no re-route is in force for ' + toBounced[0] + ' - nothing re-sent'); return; }
       const rr = rrById['RR|' + row.email_id];
       if (rr && /^(ACCEPTED|UNCONFIRMED|ATTEMPTING)$/.test(String(rr.status))) { set(row, 'ALREADY', 're-sent already to ' + rr.to + ' (' + rr.status + ')'); return; }
       if (!emailRerouteWindowOpenGs_(row, now)) { set(row, 'TOO_OLD', 'NOT re-sent: too long after the send (past the late-send cutoff); every later email to ' + toBounced[0] + ' goes to ' + target.address); return; }
       if (!row.message_id) { set(row, 'NO_ID', 'NOT re-sent: the Gmail message id was not recorded, so the original cannot be copied; every later email to ' + toBounced[0] + ' goes to ' + target.address); return; }
-      const res = emailRerouteResendGs_(ss, row, now);
+      const res = emailRerouteWithLockGs_(function () { return emailRerouteResendGs_(ss, row, now); });
+      if (res === null) { set(row, 'DEFERRED', 'NOT re-sent yet: an email job holds the script lock - the next check re-sends it (while its late-send window is open)'); return; }
       set(row, res.ok ? 'RESENT' : 'RESEND_FAILED', res.text);
     } catch (e) {
       set(row, 'ERROR', 're-route failed - ' + String((e && e.message) || e));

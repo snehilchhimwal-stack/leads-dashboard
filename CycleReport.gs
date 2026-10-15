@@ -37,11 +37,15 @@ const CYCLE_REPORT_DAILY_TEXT_COLUMNS_ = [1]; // report_day kept as plain text
 const CYCLE_REPORT_JOB_ORDER_ = ['allIssues17', 'chLevel17', 'morning10', 'chLevel10', 'followup13'];
 
 // 16:30 of the previous IST day -> now. Before today's 16:30 the cycle that just ended is the one before, so the window reaches one day further back.
+// CR-1 (audit 2026-10-13): the nearMinute(30) trigger can fire from 16:15, and a run before 16:30 used to take YESTERDAY's 16:30 as its boundary - a ~48 h window and
+// the wrong 17:00 day for the follow-up tracker, kept for the day by the once-a-day guard. From CYCLE_REPORT_EARLY_MINUTES_ before 16:30 the run IS today's report, so
+// today's 16:30 is the boundary. `boundary` = the 16:30 that ends this cycle (the scheduled run's window stops there - CR-2, buildEmailCycleReportGs_).
+const CYCLE_REPORT_EARLY_MINUTES_ = 30;
 function cycleReportWindowGs_(now) {
   const dayMs = 24 * 3600 * 1000;
   const todayAt = new Date(istDayKeyGs_(now) + 'T' + pad2Gs_(CYCLE_REPORT_HOUR_) + ':' + pad2Gs_(CYCLE_REPORT_MINUTE_) + ':00+05:30');
-  const lastBoundary = now.getTime() >= todayAt.getTime() ? todayAt : new Date(todayAt.getTime() - dayMs);
-  return { start: new Date(lastBoundary.getTime() - dayMs), end: now };
+  const lastBoundary = now.getTime() >= todayAt.getTime() - CYCLE_REPORT_EARLY_MINUTES_ * 60000 ? todayAt : new Date(todayAt.getTime() - dayMs);
+  return { start: new Date(lastBoundary.getTime() - dayMs), end: now, boundary: lastBoundary };
 }
 
 function cycleReportInWindowGs_(value, win) {
@@ -66,7 +70,8 @@ function cycleReportDataGs_(input) {
   const totals = newCounts();
   const attention = [];
   // Bounce/reply evidence from the daily sweep (EmailSweep.gs): only for emails Gmail accepted (or may have accepted).
-  const sweep = { bounced: 0, rerouted: 0, replied: 0, noBounce: 0, notSwept: 0, lastSweep: null, replies: [] };
+  // checkFailed (CR-3, audit 2026-10-13): the sweep looked but its bounce search failed ('UNKNOWN (...)') - shown apart from "not checked yet", which it is not.
+  const sweep = { bounced: 0, rerouted: 0, replied: 0, noBounce: 0, notSwept: 0, checkFailed: 0, lastSweep: null, replies: [] };
   const rerouteRows = input.reroutes || [];
   const rrById = {}, ccOnlyById = {};
   ledger.forEach(function (r) { if (r.job === 'reroute') rrById[r.email_id] = r; });
@@ -99,6 +104,7 @@ function cycleReportDataGs_(input) {
           attention.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: 'BOUNCED', reason: 'Gmail accepted it but a delivery-failure message came back (' + bs + ') - the recipient did not get it' });
         }
       } else if (bs === 'NO_BOUNCE_SEEN') sweep.noBounce++;
+      else if (/^UNKNOWN/.test(bs)) sweep.checkFailed++;
       else sweep.notSwept++;
       if (/^REPLIED/.test(rs)) { sweep.replied++; sweep.replies.push({ job: job, region: r.region, bucket: r.bucket_label || r.to, status: rs }); }
       if (r.swept_at instanceof Date && (!sweep.lastSweep || r.swept_at.getTime() > sweep.lastSweep.getTime())) sweep.lastSweep = r.swept_at;
@@ -179,7 +185,7 @@ function cycleReportRenderGs_(data, now) {
     sections.push({
       heading: 'Bounces and replies', subheading: sw.lastSweep ? 'Checked by the sweep at ' + fmt(sw.lastSweep) + ' IST. "No bounce found" is NOT proof of delivery.' : 'The bounce/reply sweep has not run for these emails yet.',
       columns: ['What', 'Emails'],
-      rows: [['Bounced (accepted by Gmail, then a delivery-failure message came back)', sw.bounced], ['...of which re-routed to the next person in the hierarchy', sw.rerouted], ['Replies received', sw.replied], ['No bounce found', sw.noBounce], ['Not checked yet', sw.notSwept]],
+      rows: [['Bounced (accepted by Gmail, then a delivery-failure message came back)', sw.bounced], ['...of which re-routed to the next person in the hierarchy', sw.rerouted], ['Replies received', sw.replied], ['No bounce found', sw.noBounce], ['Check failed (the bounce search failed - looked at again by the next check)', sw.checkFailed], ['Not checked yet', sw.notSwept]],
     });
     if (data.reroutes.length) {
       sections.push({
@@ -302,8 +308,11 @@ function cycleReportAuditsGs_() {
 }
 
 // Reads the three evidence tabs and builds the report for `now`. Pure apart from reading the spreadsheet.
-function buildEmailCycleReportGs_(ss, now) {
+// opts.scheduled (the daily trigger): the window stops at the 16:30 boundary - CR-2 (audit 2026-10-13): a trigger that fires after 16:30 (up to 16:45) overlaps the
+// 17:00 job, whose rows planned after 16:30 were counted in today's report AND tomorrow's. A manual run still shows everything up to the moment it runs.
+function buildEmailCycleReportGs_(ss, now, opts) {
   const win = cycleReportWindowGs_(now);
+  if (opts && opts.scheduled && win.end.getTime() > win.boundary.getTime()) win.end = win.boundary;
   const startKey = istDayKeyGs_(win.start);
   const data = cycleReportDataGs_({
     window: win,
@@ -322,7 +331,7 @@ function buildEmailCycleReportGs_(ss, now) {
   return rendered;
 }
 
-// The real run. opts.now (tests), opts.force (skip the once-a-day guard).
+// The real run. opts.now (tests), opts.force (skip the once-a-day guard), opts.scheduled (the trigger: the window stops at 16:30 - CR-2).
 function sendEmailCycleReport_(opts) {
   const o = opts || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -333,7 +342,7 @@ function sendEmailCycleReport_(opts) {
     try { sentDay = PropertiesService.getScriptProperties().getProperty(CYCLE_REPORT_SENT_PROPERTY_) || ''; } catch (e) { sentDay = ''; }
     if (sentDay === day) { Logger.log('Cycle report for ' + day + ' was already sent today - not sending again (use sendEmailCycleReportNow to send it on purpose).'); return null; }
   }
-  const built = buildEmailCycleReportGs_(ss, now);
+  const built = buildEmailCycleReportGs_(ss, now, { scheduled: !!o.scheduled });
   const to = TEST_MODE_OVERRIDE_EMAIL_ || opsAlertEmailGs_();
   sendGuardedEmailGs_({ to: to, subject: (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + built.subject, plainBody: built.plainBody, htmlBody: built.html }, 'send the 16:30 cycle report');
   if (!TEST_MODE_OVERRIDE_EMAIL_) {
@@ -342,6 +351,8 @@ function sendEmailCycleReport_(opts) {
   cycleReportRecordDailyGs_(ss, built.data, now);
   if (typeof dailyChecklistRecordGs_ === 'function') dailyChecklistRecordGs_(ss, built.data.checklist, now);
   if (typeof followupTrackerRecordGs_ === 'function') followupTrackerRecordGs_(ss, built.data.followups, now);
+  // EL-6 (audit 2026-10-13): retention for Incident_Log, Email_Reroutes and this report's own tabs (EmailLedger.gs) - once a day, after the email; fail-open per tab.
+  if (typeof pruneEmailOpsTabsGs_ === 'function') { try { pruneEmailOpsTabsGs_(ss, now); } catch (e3) { Logger.log('Email Ops retention not run - the report is NOT affected: ' + e3); } }
   Logger.log('Cycle report sent: ' + built.subject);
   return built;
 }
@@ -352,7 +363,7 @@ function sendEmailCycleReport_(opts) {
 function sendEmailCycleReport() {
   runEmailJobTrackedGs_(CYCLE_REPORT_JOB_, function () {
     try {
-      sendEmailCycleReport_();
+      sendEmailCycleReport_({ scheduled: true });
     } catch (e) {
       notifyOpsAlertGs_('sendEmailCycleReport crashed - the 16:30 cycle report was NOT sent', ['Error: ' + (e && e.stack ? e.stack : e)], { immediate: true });
       throw e;

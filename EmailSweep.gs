@@ -54,6 +54,47 @@ function emailSweepAddressesGs_(text) {
   return String(text || '').split(',').map(function (a) { return a.trim().toLowerCase(); }).filter(Boolean);
 }
 
+// Does `text` name `address` as a whole address? ER-3 (audit 2026-10-13): a plain indexOf found "raj@x.test" inside "suraj@x.test", so the wrong person got a 14-day
+// re-route and a re-send. The match must not be preceded by an address character, nor followed by one (or by a dot that continues the domain). Case-insensitive. Pure.
+function emailSweepTextNamesAddressGs_(text, address) {
+  const a = String(address == null ? '' : address).trim().toLowerCase();
+  if (!a) return false;
+  const t = String(text == null ? '' : text).toLowerCase();
+  for (let i = t.indexOf(a); i !== -1; i = t.indexOf(a, i + 1)) {
+    const before = i > 0 ? t.charAt(i - 1) : '', after = t.charAt(i + a.length), next = t.charAt(i + a.length + 1);
+    if (/[a-z0-9._%+\-]/.test(before)) continue;
+    if (/[a-z0-9_%+\-]/.test(after) || (after === '.' && /[a-z0-9\-]/.test(next))) continue;
+    return true;
+  }
+  return false;
+}
+
+// The addresses a delivery-failure message itself reports as failed - its "Final-Recipient: rfc822; addr" lines and Gmail's "wasn't delivered to addr" text - lower-cased,
+// or [] when it states none that way. ER-1 (audit 2026-10-13): when it does, only those count as bounced, so an address that is merely quoted in the returned original (its
+// To/Cc headers) is not taken for a dead one. A real Gmail bounce (checked 2026-10-10) states both. Pure.
+const EMAIL_SWEEP_FAILED_ADDRESS_RES_ = [
+  /final-recipient:\s*rfc822\s*;\s*<?([a-z0-9._%+\-]+@[a-z0-9\-]+(?:\.[a-z0-9\-]+)+)/g,
+  /(?:wasn't|wasn’t|was not) delivered to\s+<?([a-z0-9._%+\-]+@[a-z0-9\-]+(?:\.[a-z0-9\-]+)+)/g,
+];
+function emailSweepBounceFailedAddressesGs_(text) {
+  const t = String(text == null ? '' : text).toLowerCase();
+  const out = [];
+  EMAIL_SWEEP_FAILED_ADDRESS_RES_.forEach(function (pattern) {
+    const re = new RegExp(pattern.source, 'g');
+    let m;
+    while ((m = re.exec(t)) !== null) { if (out.indexOf(m[1]) === -1) out.push(m[1]); }
+  });
+  return out;
+}
+
+// Does this bounce text name `address` as a bounced recipient? `failed` = emailSweepBounceFailedAddressesGs_(text): when the bounce states its failed addresses, only
+// those count (ER-1); otherwise any whole-address mention does (ER-3). Shared with EmailReroute.gs. Pure.
+function emailSweepBounceNamesGs_(text, failed, address) {
+  const a = String(address == null ? '' : address).trim().toLowerCase();
+  if (!a) return false;
+  return failed && failed.length ? failed.indexOf(a) !== -1 : emailSweepTextNamesAddressGs_(text, a);
+}
+
 // Is this ledger row (an object keyed by header) one the sweep should look at at `now`?
 function emailSweepIsCandidateGs_(row, now) {
   if (row.status !== 'ACCEPTED' && row.status !== 'UNCONFIRMED') return false;
@@ -76,7 +117,8 @@ function emailSweepMatchBounceGs_(row, bounces, extraRecipients) {
     const at = b.at instanceof Date ? b.at.getTime() : NaN;
     if (isNaN(at) || at < finished - 60000 || at > finished + 24 * 3600 * 1000) continue;
     const text = (String(b.subject || '') + '\n' + String(b.body || '')).toLowerCase().replace(/\s+/g, ' ');
-    if (!recipients.some(function (a) { return text.indexOf(a) !== -1; })) continue;
+    const failed = emailSweepBounceFailedAddressesGs_(text);
+    if (!recipients.some(function (a) { return emailSweepBounceNamesGs_(text, failed, a); })) continue;
     if ((subj && text.indexOf(subj) !== -1) || at - finished <= EMAIL_SWEEP_QUICK_BOUNCE_MS_) return b;
   }
   return null;
@@ -125,6 +167,11 @@ function emailSweepFetchBouncesGs_(state) {
   const out = [];
   try {
     const threads = GmailApp.search(EMAIL_SWEEP_BOUNCE_QUERY_, 0, EMAIL_SWEEP_BOUNCE_MAX_THREADS_);
+    // ES-4 (audit 2026-10-13): a full page means older bounce threads may be missing from this read - an earlier BOUNCED record must not be lost to that.
+    if (threads.length >= EMAIL_SWEEP_BOUNCE_MAX_THREADS_) {
+      state.bounceSearchCapped = true;
+      Logger.log('Email sweep: the bounce search returned its cap of ' + EMAIL_SWEEP_BOUNCE_MAX_THREADS_ + ' threads - older bounces may not have been read; recorded bounces are kept.');
+    }
     threads.forEach(function (t) {
       t.getMessages().forEach(function (m) {
         if (!emailSweepIsBounceSenderGs_(m.getFrom())) return;
@@ -149,6 +196,16 @@ function emailSweepFetchThreadGs_(threadId) {
 
 // ---- the run ----
 
+// True when the first or last of `rows` (as read, each with its rowNo) no longer holds the same email_id - the rows moved since they were read (ES-2). A failed read
+// counts as moved: writing blind is what this guards against.
+function emailSweepBlockMovedGs_(sheet, rows) {
+  try {
+    return [rows[0], rows[rows.length - 1]].some(function (r) { return String(sheet.getRange(r.rowNo, 1, 1, 1).getValue()).trim() !== String(r.email_id).trim(); });
+  } catch (e) {
+    return true;
+  }
+}
+
 // The sweep. opts.now / opts.maxRunMs (tests); opts.bouncesOnly (the checks after each email job): look for bounces only - the reply columns and swept_at are left as they were.
 // Returns { checked, bounced, replied, newBounces: [row], unswept, errors, reroutes: { emailId: { action, text } } }.
 function sweepEmailBouncesAndReplies_(opts) {
@@ -157,7 +214,7 @@ function sweepEmailBouncesAndReplies_(opts) {
   const started = Date.now();
   const budgetMs = o.maxRunMs === undefined ? EMAIL_SWEEP_MAX_RUN_MS_ : o.maxRunMs; // (tests shrink it)
   const bouncesOnly = !!o.bouncesOnly;
-  const state = { errors: [], bounceSearchFailed: false };
+  const state = { errors: [], bounceSearchFailed: false, bounceSearchCapped: false };
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(EMAIL_LEDGER_SHEET_);
   const summary = { checked: 0, bounced: 0, replied: 0, newBounces: [], unswept: 0, errors: state.errors, reroutes: {} };
@@ -187,7 +244,13 @@ function sweepEmailBouncesAndReplies_(opts) {
     if (Date.now() - started > budgetMs) { summary.unswept++; return; }
     summary.checked++;
     const bounce = emailSweepMatchBounceGs_(r, bounces, typeof emailRerouteEffectiveAddressesGs_ === 'function' ? emailRerouteEffectiveAddressesGs_(r, rerouteEntries) : []);
-    const bounceStatus = bounce ? 'BOUNCED ' + emailSweepStampGs_(bounce.at) : (state.bounceSearchFailed ? 'UNKNOWN (the bounce search failed)' : 'NO_BOUNCE_SEEN');
+    let bounceStatus = bounce ? 'BOUNCED ' + emailSweepStampGs_(bounce.at) : (state.bounceSearchFailed ? 'UNKNOWN (the bounce search failed)' : 'NO_BOUNCE_SEEN');
+    // ES-1 / ES-4 (audit 2026-10-13): a failed or capped search is no evidence that a recorded bounce went away - overwriting it hid the bounce from the report,
+    // checklist J and the tracker. It is kept (and still counted); its re-route is retried by the next check that reads the bounce message again.
+    if (!bounce && /^BOUNCED/.test(String(r.bounce_status || '')) && (state.bounceSearchFailed || state.bounceSearchCapped)) {
+      bounceStatus = String(r.bounce_status);
+      summary.bounced++;
+    }
     if (bounce) {
       summary.bounced++;
       bouncedItems.push({ row: r, bounce: bounce });
@@ -209,6 +272,15 @@ function sweepEmailBouncesAndReplies_(opts) {
     block[indexByRowNo[r.rowNo]] = [bounceStatus, replyStatus, stamp];
   });
 
+  // ES-2 (audit 2026-10-13): the sweep takes no job lock, and the 17:00 job's ledger prune deletes LEADING rows - between the read above and this write every value
+  // would then land on the wrong row. The ids at both ends of the block are read again; if either moved, nothing is written (nor re-routed or alerted) this run - the
+  // next check redoes it all from a fresh read.
+  if (emailSweepBlockMovedGs_(sheet, rows)) {
+    summary.writeSkipped = true;
+    state.errors.push('the ledger rows moved while the sweep ran (a prune?) - nothing written; the next check redoes it');
+    Logger.log('Email sweep: the ledger rows moved while the sweep ran - nothing written this run; the next check redoes it.');
+    return summary;
+  }
   writeUnlessTestModeGs_(function () {
     sheet.getRange(first, colBounce + 1, block.length, 3).setValues(block);
   }, 'write the bounce/reply sweep to Email_Ledger');
@@ -236,10 +308,11 @@ function sweepEmailBouncesAndReplies_(opts) {
   return summary;
 }
 
-// Trigger entry point: the run record (so the watchdog sees it) but deliberately NOT the script-wide job lock - a nearMinute trigger can fire up to 15 minutes either
-// side of its minute, and holding the lock near 17:00 could make the 17:00 job skip its own send. The sweep only reads Gmail and writes the ledger's three sweep
-// columns, which no send ever touches (a bounce also lets EmailReroute.gs add a row to its own tab and re-send the bounced email, which no email job touches either).
-// A crash alerts ops at once and re-throws.
+// Trigger entry point: the run record (so the watchdog sees it) but deliberately NOT the script-wide job lock for the run - a nearMinute trigger can fire up to 15 minutes
+// either side of its minute, and holding the lock near 17:00 could make the 17:00 job skip its own send. It DOES overlap the email jobs (ES-2/ES-3, audit 2026-10-13 -
+// the old "nothing overlaps" note was wrong): the 17:00 job's prune deletes leading ledger rows, so the sweep re-checks its rows before writing them back
+// (emailSweepBlockMovedGs_); and a bounce re-send appends to Email_Ledger like the jobs do, so EmailReroute.gs takes the script lock briefly (tryLock, a few seconds) around
+// each re-send and leaves it to the next check when a job holds it. A crash alerts ops at once and re-throws.
 function sweepEmailBouncesAndReplies() {
   runEmailJobTrackedGs_(EMAIL_SWEEP_JOB_, function () {
     try {

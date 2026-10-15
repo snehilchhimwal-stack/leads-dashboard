@@ -147,6 +147,7 @@ function dailyChecklistGs_(input) {
   if (!accepted) add('J', 'Follow-up monitoring: bounces and replies', 'GREY', 'no accepted email to monitor');
   else if (sw.bounced > (sw.rerouted || 0)) add('J', 'Follow-up monitoring: bounces and replies', 'RED', (sw.bounced - (sw.rerouted || 0)) + ' of ' + sw.bounced + ' bounced email(s) were NOT re-routed (accepted by Gmail, then a delivery-failure message came back)');
   else if (sw.bounced) add('J', 'Follow-up monitoring: bounces and replies', 'AMBER', sw.bounced + ' email(s) bounced and were all re-routed to the next person in the hierarchy - the address still needs fixing in Manager_Directory');
+  else if (sw.checkFailed) add('J', 'Follow-up monitoring: bounces and replies', 'AMBER', sw.checkFailed + ' accepted email(s) could not be checked: the bounce search failed (missing evidence, not a bounce)'); // CR-3, audit 2026-10-13
   else if (!sw.lastSweep || sw.notSwept) add('J', 'Follow-up monitoring: bounces and replies', 'AMBER', sw.lastSweep ? sw.notSwept + ' accepted email(s) not checked yet' : 'the bounce / reply sweep has not run for these emails');
   else add('J', 'Follow-up monitoring: bounces and replies', 'GREEN', 'no bounce found for ' + sw.noBounce + ' email(s) (not proof of delivery); ' + sw.replied + ' with a reply');
 

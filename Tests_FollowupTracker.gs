@@ -198,6 +198,37 @@ function runFollowupTrackerTests_() {
       emailLedgerReplaceDayBlockGs_(long, [['d9', 'a'], ['d9', 'b']], 'd9', 'T');
       emailLedgerReplaceDayBlockGs_(long, [['d9', 'c'], ['d9', 'd'], ['d9', 'e']], 'd9', 'T');
       TestAssertEqual_(long.getLastRow() + ',' + vals(long).slice(-3).join(','), '304,d9:c,d9:d,d9:e', 'block: with 300 old rows above, only the day\'s block changes');
+      // EL-9 (audit 2026-10-13): a day block longer than the first scan chunk is found whole
+      const longDay = mk();
+      const many = [['d0', 'keep']];
+      for (let i = 0; i < 300; i++) many.push(['d5', String(i)]);
+      longDay.getRange(2, 1, many.length, 2).setValues(many);
+      emailLedgerReplaceDayBlockGs_(longDay, [['d5', 'a'], ['d5', 'b']], 'd5', 'T');
+      TestAssertEqual_(vals(longDay).join(','), 'd0:keep,d5:a,d5:b', 'EL-9: a 300-row block of the day is replaced whole - no stale rows are left above it');
+      // EL-4: a retried delete whose first attempt landed must not delete the previous day's rows
+      const retried = mk();
+      retried.getRange(2, 1, 4, 2).setValues([['d1', 'p'], ['d1', 'q'], ['d2', 'x'], ['d2', 'y']]);
+      const realDelete = retried.deleteRows;
+      let calls = 0;
+      retried.deleteRows = function (a, b) { calls++; realDelete.call(retried, a, b); if (calls === 1) throw new Error('Service Spreadsheets timed out while accessing document'); };
+      emailLedgerReplaceDayBlockGs_(retried, [['d2', 'z']], 'd2', 'T');
+      TestAssertEqual_(vals(retried).join(',') + ' / deletes ' + calls, 'd1:p,d1:q,d2:z / deletes 1', 'EL-4: the retry sees the block is already gone and deletes nothing more - the previous day survives');
+      // FT-3 helper side: an empty block only clears the day
+      const clear = mk();
+      clear.getRange(2, 1, 3, 2).setValues([['d1', 'p'], ['d2', 'x'], ['d2', 'y']]);
+      emailLedgerReplaceDayBlockGs_(clear, [], 'd2', 'T');
+      TestAssertEqual_(vals(clear).join(','), 'd1:p', 'FT-3: no rows clears the day\'s block and appends nothing');
+    }
+
+    // ================= audit 2026-10-13: FT-1 keys =================
+    {
+      TestAssertEqual_(followupKeyGs_('Pune', 'b@x.test; A@x.test') === followupKeyGs_('pune', ' a@x.test ,b@x.test'), true, 'FT-1: recipient lists that differ only in order, spacing, case or separator are one key');
+      TestAssertEqual_(followupKeyGs_('Pune', 'a@x.test', 'L1') !== followupKeyGs_('Pune', 'a@x.test', 'L2'), true, 'FT-1: with a label, two buckets to the same person are two keys');
+      // two 17:00 buckets of one region to the same person: each gets its own 17:00 row (bounce status), both share the per-recipient 10:00 / 13:00 emails
+      const t = track([TestFT_log_({ label: 'One' }), TestFT_log_({ label: 'Two' })], [
+        TestFT_led_('allIssues17', 'ACCEPTED', { bucket_label: 'One', bounce_status: 'BOUNCED x' }), TestFT_led_('allIssues17', 'ACCEPTED', { bucket_label: 'Two' }),
+        TestFT_led_('morning10', 'ACCEPTED', { to: ' A@x.test ' }), TestFT_led_('followup13', 'ACCEPTED')]);
+      TestAssertEqual_(t.rows.map(function (r) { return r.bucket + ':' + r.email + ':' + r.cp1.status + ':' + r.cp2.status; }).join(','), 'One:BOUNCED:COMPLETED:COMPLETED,Two::COMPLETED:COMPLETED', 'FT-1: the bounce belongs to its own bucket only; the 10:00 email still matches by recipient (spacing/case ignored)');
     }
 
     // ================= the reader =================
@@ -230,6 +261,11 @@ function runFollowupTrackerTests_() {
       log.appendRow([today, 'Thane', 'No Recipient', 'A1', '', '', 2, new Date(), 'th', '[]', '', '', '', '']);
       const all = followupTrackerReadLogGs_(ss, today);
       TestAssertEqual_(all.map(function (r) { return r.region + ':' + r.to; }).join(','), 'Pune:' + TEST_EMAIL_PRIMARY_ + ',Futwork:f@x.test', 'reader: the Futwork bucket is keyed by the Futwork pseudo-region; a row without a recipient is dropped');
+      // FT-2: a row of another day in between is not read as one of this day's buckets
+      log.appendRow(['2020-01-01', 'Thane', 'Other Day', 'A1', 'o@x.test', '', 2, new Date(), 'th', '[]', '', '', '', '']);
+      log.appendRow([today, 'Thane', 'Late Row', 'A1', 'l@x.test', '', 2, new Date(), 'th', '[]', '', '', '', '']);
+      const split = followupTrackerReadLogGs_(ss, today);
+      TestAssertEqual_(split.map(function (r) { return r.label; }).join(','), 'Test A1 One,Futwork,Late Row', 'FT-2: the day\'s rows on both sides of another day\'s row are read; the other day\'s row is not');
     }
 
     // ================= the Followup_Tracker tab =================
@@ -258,6 +294,15 @@ function runFollowupTrackerTests_() {
       const ss4 = TestMockSpreadsheet_({});
       followupTrackerRecordGs_(ss4, track([], []), now);
       TestAssert_(!ss4.getSheetByName(FOLLOWUP_TRACKER_SHEET_), 'tab: with no bucket there is nothing to store and no tab is created');
+      // FT-3: a same-day re-send that now has no bucket clears the day's earlier block; an unreadable log leaves it
+      const ss5 = TestMockSpreadsheet_({});
+      const read5 = function () { return TestEL_objects_(ss5.getSheetByName(FOLLOWUP_TRACKER_SHEET_), FOLLOWUP_TRACKER_HEADERS_); };
+      followupTrackerRecordGs_(ss5, t, new Date(now.getTime() - 24 * 3600 * 1000));
+      followupTrackerRecordGs_(ss5, t, now);
+      followupTrackerRecordGs_(ss5, { cycleDay: TESTFT_DAY_, rows: [], counts: null, attention: [], unreadable: true }, now);
+      TestAssertEqual_(read5().length, 4, 'FT-3: an unreadable log changes nothing');
+      followupTrackerRecordGs_(ss5, track([], []), now);
+      TestAssertEqual_(read5().length + ',' + read5()[0].report_day, '2,' + istDayKeyGs_(new Date(now.getTime() - 24 * 3600 * 1000)), 'FT-3: no bucket on a re-send clears that day\'s block (the day before is kept)');
       const realEnsure = emailLedgerEnsureSheetGs_;
       emailLedgerEnsureSheetGs_ = function () { throw new Error('simulated: the tab cannot be opened'); };
       let threw = false;
