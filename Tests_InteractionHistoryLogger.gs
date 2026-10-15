@@ -108,7 +108,7 @@ function runInteractionHistoryLoggerTests_() {
     // ---- logInteractionHistoryNow (reads the leads tab itself) ----
     const freshSs = TestMockSpreadsheet_({});
     freshSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
-      TestIHL_row_(header, { lead_id: 'L-STANDALONE', internal_status_comments: 'Test RM One: Something entirely standalone - 2026-08-15 09:00' }),
+      TestIHL_row_(header, { lead_id: 'L-STANDALONE', internal_status_comments: 'Test RM One: Something entirely standalone - ' + Utilities.formatDate(TestFixture_daysAgo_(new Date(), 1), 'Asia/Kolkata', 'yyyy-MM-dd') + ' 09:00' /* real clock: must sit inside the 30-day window (IH-01/UC-01) */ }),
     ]);
     const realSs = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return freshSs; }, flush: function () {} };
@@ -311,6 +311,44 @@ function runInteractionHistoryLoggerTests_() {
       TestAssertEqual_(rtLedger.length, 2, 'pruneCommentHistory_ (failed write): archive_log.csv lists the archive exactly once (header + 1)');
     } finally {
       DriveApp = realDriveForPrune_;
+    }
+
+    // ---- IH-02 (2026-10-13): ts whitespace normalised before keys; comment_at written normalised ----
+    TestAssertEqual_(commentTsNormaliseGs_(' 2026-08-15   10:00 '), '2026-08-15 10:00', 'commentTsNormaliseGs_: collapses whitespace runs and trims');
+    TestAssertEqual_(commentHistoryDedupKeyGs_('L-1', { ts: '2026-08-15  10:00', comment: 'x' }), commentHistoryDedupKeyGs_('L-1', { ts: '2026-08-15 10:00', comment: 'y' }),
+      'commentHistoryDedupKeyGs_: the same comment keys identically however the ts was spaced');
+    TestAssertEqual_(commentHistoryReadBackKeyGs_('L-1', new Date('2026-08-15T10:00:00+05:30'), 'x', null), 'L-1|2026-08-15 10:00',
+      'commentHistoryReadBackKeyGs_: a Date-converted comment_at cell reads back as the written text (IST fallback zone)');
+    TestAssertEqual_(commentHistoryReadBackKeyGs_('L-1', '2026-08-15  10:00', 'x', null), 'L-1|2026-08-15 10:00', 'commentHistoryReadBackKeyGs_: a text cell is normalised too');
+    TestAssertEqual_(commentLogSheetTimeZoneGs_(TestMockSpreadsheet_({})), 'Asia/Kolkata', 'commentLogSheetTimeZoneGs_: falls back to IST when the spreadsheet zone cannot be read');
+    const wsSs = TestMockSpreadsheet_({});
+    const wsRows = [banner, header, TestIHL_row_(header, { lead_id: 'L-WS', client_id: 'C-WS', internal_status_comments: 'Test RM One: Will call back - 2026-08-15  10:00' })];
+    const wsRead = { colIndex: buildColIndex_(header), dataRows: wsRows.slice(2) };
+    TestAssertEqual_(logInteractionHistoryGs_(wsSs, wsRead.dataRows, wsRead.colIndex, now), 1, 'logInteractionHistoryGs_ (IH-02): a double-spaced ts is logged once');
+    const wsSheet = wsSs.getSheetByName(COMMENT_HISTORY_SHEET_);
+    TestAssertEqual_(wsSheet.getRange(2, 8, 1, 1).getValues()[0][0], '2026-08-15 10:00', 'logInteractionHistoryGs_ (IH-02): comment_at is written as the normalised text');
+    TestAssertEqual_(logInteractionHistoryGs_(wsSs, wsRead.dataRows, wsRead.colIndex, now), 0, 'logInteractionHistoryGs_ (IH-02): the second run reads it back as already logged');
+
+    // ---- IH-01 (2026-10-13): a comment older than the retention window is not logged again after the prune ----
+    TestAssert_(commentBeyondRetentionGs_('2026-07-01 10:00', now, COMMENT_HISTORY_RETENTION_DAYS_), 'commentBeyondRetentionGs_: a 47-day-old comment is beyond the 30-day window');
+    TestAssert_(!commentBeyondRetentionGs_('2026-08-10 10:00', now, COMMENT_HISTORY_RETENTION_DAYS_), 'commentBeyondRetentionGs_: a 7-day-old comment is inside it');
+    TestAssert_(!commentBeyondRetentionGs_(null, now, COMMENT_HISTORY_RETENTION_DAYS_), 'commentBeyondRetentionGs_: no ts (last_comment fallback) is never treated as old');
+    const reNow = new Date();
+    const reOldTs = Utilities.formatDate(TestFixture_daysAgo_(reNow, 45), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm');
+    const reLoggedDay = istDayKeyGs_(TestFixture_daysAgo_(reNow, 44));
+    const reSs = TestMockSpreadsheet_({});
+    const reSheet = TestMockSheet_(COMMENT_HISTORY_SHEET_, [COMMENT_HISTORY_COLUMNS_, [reLoggedDay, 'L-OLD', 'C-OLD', 'Test RM One', 'Pune', 'P', 'Will call back', reOldTs, reLoggedDay + ' 10:00:00']]);
+    reSs._sheets[COMMENT_HISTORY_SHEET_] = reSheet;
+    const reRows = [banner, header, TestIHL_row_(header, { lead_id: 'L-OLD', client_id: 'C-OLD', internal_status_comments: 'Test RM One: Will call back - ' + reOldTs })];
+    const realDriveIh01 = DriveApp;
+    DriveApp = TestMockDriveApp_();
+    try {
+      pruneCommentHistory_(reSs);
+      TestAssertEqual_(reSheet.getLastRow(), 1, 'IH-01 fixture: the 44-day-old row is pruned');
+      TestAssertEqual_(logInteractionHistoryGs_(reSs, reRows.slice(2), buildColIndex_(header), reNow), 0,
+        'logInteractionHistoryGs_ (IH-01): prune, then scan - the pruned comment (still the lead\'s latest) is NOT logged again');
+    } finally {
+      DriveApp = realDriveIh01;
     }
   } finally {
     TestEnv_tearDown_();

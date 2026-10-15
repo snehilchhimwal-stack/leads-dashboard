@@ -136,12 +136,75 @@ function captureDailyRmIssues() {
   try {
     captureDailyRmIssues_();
   } catch (e) {
-    notifyOpsAlertGs_('captureDailyRmIssues crashed — tonight\'s RM issue log was NOT captured', [
-      'captureDailyRmIssues threw before completing, so no rows were written for tonight.',
+    // The write is chunked, so a crash can leave PART of tonight written (DR-12, 2026-10-13: this used to say "no rows were
+    // written"). A re-run the same night completes it - see DAILY_RM_ISSUE_DONE_PROPERTY_.
+    notifyOpsAlertGs_('captureDailyRmIssues crashed — tonight\'s RM issue log was NOT fully captured', [
+      'captureDailyRmIssues threw before completing, so tonight\'s rows are missing or only partly written.',
+      'Run captureDailyRmIssuesNow() again tonight (IST) to complete it: it appends only the leads not yet written.',
       'Error: ' + (e && e.stack ? e.stack : e),
     ]);
     throw e;
   }
+}
+
+// Completion marker (DR-03, 2026-10-13). The guard used to be "any row dated today exists", so a night whose chunked write died
+// part-way could never be completed: every re-run saw today's first rows and skipped. Now the LAST step of a capture records today's
+// IST day key in this Script Property, and only that marker means "tonight is done". Without it, a re-run appends only the lead_ids
+// tonight's partial rows do not already hold (append-only, chosen over "clear today's rows and rewrite": it never deletes a row, so
+// it cannot reintroduce the clear-then-write data loss the prunes were rebuilt to avoid, and a rerun that dies too still only adds).
+const DAILY_RM_ISSUE_DONE_PROPERTY_ = 'DAILY_RM_ISSUE_DONE';
+
+function dailyRmIssueDoneDayGs_() {
+  try {
+    if (typeof PropertiesService === 'undefined') return '';
+    return String(PropertiesService.getScriptProperties().getProperty(DAILY_RM_ISSUE_DONE_PROPERTY_) || '');
+  } catch (e) {
+    Logger.log('Could not read ' + DAILY_RM_ISSUE_DONE_PROPERTY_ + ' (' + e + ') - falling back to the per-lead check.');
+    return '';
+  }
+}
+
+function markDailyRmIssueDoneGs_(dayKey) {
+  if (typeof PropertiesService === 'undefined') return;
+  withRetry_(function () { PropertiesService.getScriptProperties().setProperty(DAILY_RM_ISSUE_DONE_PROPERTY_, dayKey); }, 'record ' + DAILY_RM_ISSUE_DONE_PROPERTY_);
+}
+
+// Every row is written by POSITION in DAILY_RM_ISSUE_LOG_COLUMNS_ order, and ensureDailyRmIssueLogSheet_ only ever APPENDS missing
+// headers - so a header that was hand-reordered (or a column inserted) would silently put every value under the wrong heading.
+// Returns '' when the first DAILY_RM_ISSUE_LOG_COLUMNS_.length headers match exactly, else a description of the first mismatch
+// (DR-11, 2026-10-13). Extra columns AFTER ours are allowed (nothing writes there).
+function dailyRmIssueHeaderMisalignmentGs_(logSheet) {
+  const lastCol = logSheet.getLastColumn();
+  const header = lastCol > 0 ? withRetry_(function () { return logSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Daily_RM_Issues header for alignment check') : [];
+  for (let i = 0; i < DAILY_RM_ISSUE_LOG_COLUMNS_.length; i++) {
+    const got = String(header[i] === null || header[i] === undefined ? '' : header[i]).trim();
+    if (got !== DAILY_RM_ISSUE_LOG_COLUMNS_[i]) {
+      return 'column ' + (i + 1) + ' is "' + got + '", expected "' + DAILY_RM_ISSUE_LOG_COLUMNS_[i] + '" (expected order: ' + DAILY_RM_ISSUE_LOG_COLUMNS_.join(', ') + ')';
+    }
+  }
+  return '';
+}
+
+// The manual tools' version of the check above: refuse to write rather than misplace values.
+function assertDailyRmIssueHeaderAlignedGs_(logSheet) {
+  const problem = dailyRmIssueHeaderMisalignmentGs_(logSheet);
+  if (problem) throw new Error('Daily_RM_Issues header is out of order - refusing to write: ' + problem);
+}
+
+// lead_id -> true for every row already dated `dayKey` (a partly written night, DR-03). Reads only columns A..E (date..lead_id).
+function dailyRmIssueLeadIdsForDayGs_(logSheet, dayKey) {
+  const out = { count: 0, ids: {} };
+  const lastRow = logSheet.getLastRow();
+  if (lastRow < 2) return out;
+  const leadIdx = DAILY_RM_ISSUE_LOG_COLUMNS_.indexOf('lead_id');
+  withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, leadIdx + 1).getValues(); }, 'read Daily_RM_Issues for idempotency check')
+    .forEach(function (r) {
+      if (dailyRmIssueDateKeyGs_(r[0]) !== dayKey) return;
+      out.count++;
+      const id = String(r[leadIdx] === null || r[leadIdx] === undefined ? '' : r[leadIdx]).trim();
+      if (id) out.ids[id] = true;
+    });
+  return out;
 }
 
 function captureDailyRmIssues_() {
@@ -151,23 +214,30 @@ function captureDailyRmIssues_() {
 
   const logSheet = ensureDailyRmIssueLogSheet_(ss);
 
-  // Idempotency guard FIRST — needs neither pruning nor tonight's rows, so
+  // Header order check FIRST (DR-11): a misordered header would put tonight's values under the wrong headings. Alert and stop
+  // without writing; returning (not throwing) keeps it to this one alert instead of a second "crashed" one from the wrapper.
+  const headerProblem = dailyRmIssueHeaderMisalignmentGs_(logSheet);
+  if (headerProblem) {
+    notifyOpsAlertGs_('captureDailyRmIssues stopped — Daily_RM_Issues header is out of order', [
+      'Tonight\'s RM issue log was NOT captured, because rows are written by column position and the header does not match.',
+      headerProblem,
+      'Put the header back in that order (move columns, do not rename), then run captureDailyRmIssuesNow().',
+    ]);
+    Logger.log('Skipping capture - Daily_RM_Issues header is out of order: ' + headerProblem);
+    return;
+  }
+
+  // Idempotency guard next — needs neither pruning nor tonight's rows, so
   // a double-fire (or a manual re-run the same night) bails out as cheaply
   // as possible instead of paying for a full company scan and a prune pass
-  // first. Same per-day pattern Overnight_Log/AllIssues_Log already use.
-  const priorLastRow = logSheet.getLastRow();
-  if (priorLastRow >= 2) {
-    const existingDates = withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 1).getValues(); }, 'read Daily_RM_Issues for idempotency check');
-    const alreadyCaptured = existingDates.some(function (r) {
-      const cell = r[0];
-      const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
-      return key === todayKey;
-    });
-    if (alreadyCaptured) {
-      Logger.log('Skipping capture — Daily_RM_Issues already has rows dated today (' + todayKey + ').');
-      return;
-    }
+  // first. The completion marker decides (DR-03, see DAILY_RM_ISSUE_DONE_PROPERTY_);
+  // rows dated today without it are a partly written night, completed below.
+  if (dailyRmIssueDoneDayGs_() === todayKey) {
+    Logger.log('Skipping capture — tonight (' + todayKey + ') is already fully captured (' + DAILY_RM_ISSUE_DONE_PROPERTY_ + ').');
+    return;
   }
+  const partial = dailyRmIssueLeadIdsForDayGs_(logSheet, todayKey);
+  if (partial.count) Logger.log('Daily_RM_Issues already holds ' + partial.count + ' row(s) dated ' + todayKey + ' without a completion marker - completing tonight with the missing leads only.');
 
   // Free Movement_Log's stale rows/grid BEFORE the scan or any write (2026-09-25, 3rd 10M-cell incident):
   // snapshotOpenLeads_ prunes only AFTER its own write, so once it starts failing nothing ever shrinks it.
@@ -191,6 +261,8 @@ function captureDailyRmIssues_() {
     const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
     if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed — no issue to log
 
+    if (partial.ids[leadId]) return; // already written by tonight's earlier, interrupted run (DR-03)
+
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // same priority order Operations' own combined view uses
     if (!issue) return; // open, in scope, but flagged for nothing right now
@@ -204,8 +276,6 @@ function captureDailyRmIssues_() {
     ]);
   });
 
-  if (!rows.length) { Logger.log('No open leads currently flagged for any SLA issue — nothing to log tonight.'); return; }
-
   // Prune NOW, knowing exactly how many rows tonight needs — the actual
   // fix for the 2026-09-19 recurrence of the "10,000,000 cells" crash.
   // Pruning used to run before rows.length was known and sized the sheet
@@ -215,35 +285,53 @@ function captureDailyRmIssues_() {
   // WORKBOOK over its ceiling. Passing rows.length lets
   // pruneDailyRmIssueLog_ size the sheet to fit kept + tonight's rows
   // exactly, so the write below never needs to grow the grid at all.
+  // Runs on a quiet night too (rows.length 0): returning before it, as this
+  // used to, skipped the retention prune on every night with nothing flagged
+  // (DR-04, 2026-10-13).
   pruneDailyRmIssueLog_(ss, rows.length, { colIndex: colIndex, dataRows: dataRows });
 
-  // Chunked writes — same BACKFILL_CHUNK_SIZE_ pattern
-  // backfillOneDayFromMovementLog_ already uses, applied here to the main
-  // nightly capture itself. This function scans the whole company every
-  // night by design (see this file's own header), so its write is
-  // comparably large every single night — a real production incident
-  // (2026-09-01: a 475s run wrote zero rows, most likely a single
-  // oversized setValues() call failing non-transiently) showed that a
-  // one-shot write for the whole night's rows makes an all-or-nothing
-  // failure the norm, not an edge case. Chunking means a failure partway
-  // through loses only the rows after the failed chunk, not the entire
-  // night's capture — and each chunk still gets withRetry_'s own
-  // transient-error retry on top.
-  let startRow = logSheet.getLastRow() + 1;
-  const firstWriteRow = startRow;
+  if (!rows.length) {
+    Logger.log('No ' + (partial.count ? 'further ' : '') + 'open leads currently flagged for any SLA issue — nothing to log tonight.');
+    markDailyRmIssueDoneGs_(todayKey);
+    return;
+  }
+
+  // Chunked, text-formatted, read-back-verified write - see writeDailyRmIssueRowsGs_. This function scans the whole company every
+  // night by design (see this file's own header), so its write is comparably large every single night — a real production incident
+  // (2026-09-01: a 475s run wrote zero rows, most likely a single oversized setValues() call failing non-transiently) showed that a
+  // one-shot write makes an all-or-nothing failure the norm. Chunking means a failure partway through loses only the rows after the
+  // failed chunk, and the completion marker below (DR-03) lets a re-run add exactly those.
+  writeDailyRmIssueRowsGs_(logSheet, rows, 'capture-write');
+  markDailyRmIssueDoneGs_(todayKey); // only after the last chunk and its read-back
+  const rmCount = new Set(rows.map(function (r) { return r[1]; })).size;
+  Logger.log('Captured ' + rows.length + ' flagged lead(s) across ' + rmCount + ' RM(s) for ' + todayKey + (partial.count ? ' (completing a partly written night)' : '') + '.');
+}
+
+// Appends `rows` (DAILY_RM_ISSUE_LOG_COLUMNS_ order) below the sheet's last row. Shared by the nightly capture and both Movement_Log
+// backfills (DR-06/DR-07, 2026-10-13: the backfills used to write one unchunked setValues() with plain Date cells and no grid sizing).
+//   1. Grows the row grid FIRST when the rows would not fit, so a workbook at its 10M-cell ceiling fails here, before any row is
+//      written, instead of mid-write (a no-op for the capture, whose prune already sized the grid).
+//   2. Date cells become IST text and the target date columns are formatted as text (email audit P18c).
+//   3. BACKFILL_CHUNK_SIZE_ chunks, each with withRetry_.
+//   4. The date columns are read back and re-written if blank (reassertDateColumnsGs_, recorded under `phase`).
+function writeDailyRmIssueRowsGs_(logSheet, rows, phase) {
+  if (!rows.length) return;
+  const firstWriteRow = logSheet.getLastRow() + 1;
+  const neededRows = firstWriteRow - 1 + rows.length;
+  const maxRows = logSheet.getMaxRows();
+  if (maxRows < neededRows) logSheet.insertRowsAfter(maxRows, neededRows - maxRows);
   // Date cells go in as text (see dailyRmIssueTextCellGs_): written as dates they were lost for all but the last chunk.
   dailyRmIssueTextRowsGs_(rows);
   setDailyRmIssueTextFormatGs_(logSheet, firstWriteRow, rows.length);
+  let startRow = firstWriteRow;
   for (let i = 0; i < rows.length; i += BACKFILL_CHUNK_SIZE_) {
     const chunk = rows.slice(i, i + BACKFILL_CHUNK_SIZE_);
-    withRetry_(function () { logSheet.getRange(startRow, 1, chunk.length, chunk[0].length).setValues(chunk); }, 'write Daily_RM_Issues chunk (rows ' + i + '-' + (i + chunk.length) + ')');
+    withRetry_(function () { logSheet.getRange(startRow, 1, chunk.length, chunk[0].length).setValues(chunk); }, 'write Daily_RM_Issues chunk (' + phase + ', rows ' + i + '-' + (i + chunk.length) + ')');
     startRow += chunk.length;
   }
-  // Read the date columns back and re-write any cell that came back blank (email audit P18, 2026-10-08): the nightly rows must keep
+  // Read the date columns back and re-write any cell that came back blank (email audit P18, 2026-10-08): the rows must keep
   // the date they were written with. Nothing is emailed; a repair is recorded in DAILY_RM_ISSUE_DIAG.
-  reassertDateColumnsGs_(logSheet, firstWriteRow, rows, DAILY_RM_ISSUE_DATE_COLS_, 'capture-write');
-  const rmCount = new Set(rows.map(function (r) { return r[1]; })).size;
-  Logger.log('Captured ' + rows.length + ' flagged lead(s) across ' + rmCount + ' RM(s) for ' + todayKey + '.');
+  reassertDateColumnsGs_(logSheet, firstWriteRow, rows, DAILY_RM_ISSUE_DATE_COLS_, phase);
 }
 
 function captureDailyRmIssuesNow() { captureDailyRmIssues_(); }
@@ -557,14 +645,16 @@ function refillDailyRmIssueAssignedAtNow() {
 // gotcha UnmatchedCommentLogger.gs's dedupeUnmatchedCommentsNow exists to
 // recover from for comment_at), so a cell here can read back as EITHER
 // type depending on how it happened to be written. The cutoff comparison
-// below normalizes both shapes the same way captureDailyRmIssues_'s own
-// idempotency check already does (line ~144), rather than assuming one.
+// below normalizes both shapes (dailyRmIssueDateKeyGs_), the same way
+// captureDailyRmIssues_'s own idempotency check does, rather than assuming one.
 function pruneDailyRmIssueLog_(ss, incomingRowCount, leadsRead) {
   incomingRowCount = incomingRowCount || 0;
   const logSheet = ss.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
   if (!logSheet) return;
   const lastRow = logSheet.getLastRow();
-  if (lastRow < 2) return;
+  // An empty tab still gets its grid sized (DR-05, 2026-10-13): returning here skipped the sizing below, so a tab emptied by hand
+  // kept its whole old allocation, and the first night after it had to grow the grid inside the write - the 10M-cell failure mode.
+  if (lastRow < 2) { sizeDailyRmIssueGridGs_(logSheet, 0, incomingRowCount); return; }
   const lastCol = logSheet.getLastColumn();
   const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for pruning');
   const cutoffKey = istDayKeyGs_(new Date(Date.now() - DAILY_RM_ISSUE_LOG_RETENTION_DAYS_ * 24 * 60 * 60 * 1000));
@@ -614,7 +704,9 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount, leadsRead) {
     // Every row has a readable date now (repairDailyRmIssueDatesGs_), so the label is always a real date range.
     const droppedDateKeys = dropped.map(function (row) { return dailyRmIssueDateKeyGs_(row[0]); }).sort();
     const rowDateRangeLabel = droppedDateKeys[0] + '_to_' + droppedDateKeys[droppedDateKeys.length - 1];
-    const archive = archiveChunksVerifiedGs_('Daily_RM_Issues', header, dropped, rowDateRangeLabel, dropped.length, false);
+    // 5,000-row files (DR-09, 2026-10-13): one file per prune could hit Drive's file-size limit (removeStaleMovementLogBackupTabNow_
+    // did, MovementTracker.gs), and a failed archive fails the nightly capture. Same chunk as the comment-log prunes.
+    const archive = archiveChunksVerifiedGs_('Daily_RM_Issues', header, dropped, rowDateRangeLabel, DAILY_RM_ISSUE_ARCHIVE_CHUNK_, true);
 
     // Write the kept rows to their final position FIRST, then clear only the leftover tail - never clear-then-write, so an
     // interruption cannot land on a sheet whose still-in-retention rows are erased and not yet written back (the same ordering
@@ -631,15 +723,22 @@ function pruneDailyRmIssueLog_(ss, incomingRowCount, leadsRead) {
     commitArchiveManifestGs_('Daily_RM_Issues', archive);
   }
 
-  // incomingRowCount is the caller's own about-to-be-written row count —
-  // captureDailyRmIssues_ passes rows.length (known before this call now
-  // runs); the manual recovery entry point pruneDailyRmIssueLogNow has no
-  // pending write, so it defaults to 0. Sizing around it, not just
-  // DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ alone, is what actually prevents the
-  // write immediately after this call from needing to expand the sheet's
-  // row grid (see captureDailyRmIssues_'s own call-site comment for the
-  // full incident this fixes).
-  const neededRows = 1 + kept.length + incomingRowCount + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_;
+  sizeDailyRmIssueGridGs_(logSheet, kept.length, incomingRowCount);
+}
+
+const DAILY_RM_ISSUE_ARCHIVE_CHUNK_ = 5000;
+
+// Sizes the row grid to header + keptRows + incomingRowCount + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_, shrinking or growing.
+// incomingRowCount is the caller's own about-to-be-written row count —
+// captureDailyRmIssues_ passes rows.length (known before the prune
+// runs); the manual recovery entry point pruneDailyRmIssueLogNow has no
+// pending write, so it defaults to 0. Sizing around it, not just
+// DAILY_RM_ISSUE_LOG_ROW_HEADROOM_ alone, is what actually prevents the
+// write immediately after the prune from needing to expand the sheet's
+// row grid (see captureDailyRmIssues_'s own call-site comment for the
+// full incident this fixes).
+function sizeDailyRmIssueGridGs_(logSheet, keptRows, incomingRowCount) {
+  const neededRows = 1 + keptRows + (incomingRowCount || 0) + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_;
   const maxRows = logSheet.getMaxRows();
   if (maxRows > neededRows) {
     logSheet.deleteRows(neededRows + 1, maxRows - neededRows);
@@ -672,18 +771,114 @@ function pruneDailyRmIssueLogNow() {
   pruneDailyRmIssueLog_(SpreadsheetApp.getActiveSpreadsheet());
 }
 
+// Each day's reconstructed lead states, as of that day's cutoff (DR-01, 2026-10-13). Since Movement_Log's content-hash dedup
+// (MovementTracker.gs, Phase 6) a snapshot run writes a row ONLY for a lead whose content changed, so the rows stamped with a day's
+// last run are no longer "every lead" - an untouched (neglected) lead may have had no row for days. The backfills used to read only
+// those rows, so exactly the neglected leads were never back-filled. Now a day's state is, per lead_id, its LATEST row at or before
+// the day's cutoff (the day's last snapshot_at), whichever day that row is from; the caller still drops leads that row says are closed.
+// Limit: a lead whose last row has aged out of Movement_Log's retention has no row at all and cannot be rebuilt (the earliest
+// retained days are therefore the least complete).
+// Returns [{ dayKey, asOf: Date, rows: [row] }] ascending by day, one per IST day with at least one Movement_Log row; onlyDayKey
+// (optional) restricts the output to that one day.
+function dailyRmIssueStatesByDayGs_(allRows, snapAtIdx, colIndex, onlyDayKey) {
+  const dated = [];
+  const dayKeyByMs = {}; // a run shares one timestamp - format each once, not per row
+  allRows.forEach(function (row) {
+    const ts = row[snapAtIdx];
+    if (!(ts instanceof Date) || isNaN(ts.getTime())) return;
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const ms = ts.getTime();
+    if (dayKeyByMs[ms] === undefined) dayKeyByMs[ms] = istDayKeyGs_(ts);
+    dated.push({ ms: ms, ts: ts, dayKey: dayKeyByMs[ms], leadId: leadId, row: row });
+  });
+  dated.sort(function (a, b) { return a.ms - b.ms; }); // stable: equal timestamps keep sheet order, so the later row wins below
+  const cutoffByDay = {};
+  dated.forEach(function (d) { if (!cutoffByDay[d.dayKey] || d.ms > cutoffByDay[d.dayKey].getTime()) cutoffByDay[d.dayKey] = d.ts; });
+  const latestByLead = {};
+  const out = [];
+  let i = 0;
+  Object.keys(cutoffByDay).sort().forEach(function (dayKey) {
+    const cutoffMs = cutoffByDay[dayKey].getTime();
+    while (i < dated.length && dated[i].ms <= cutoffMs) { latestByLead[dated[i].leadId] = dated[i].row; i++; }
+    if (onlyDayKey && dayKey !== onlyDayKey) return;
+    out.push({ dayKey: dayKey, asOf: cutoffByDay[dayKey], rows: Object.keys(latestByLead).map(function (id) { return latestByLead[id]; }) });
+  });
+  return out;
+}
+
+// The Daily_RM_Issues rows for one reconstructed day (dailyRmIssueStatesByDayGs_ entry): every lead still open per its own row and
+// flagged as of the day's cutoff. Same columns and rules as the nightly capture.
+function dailyRmIssueRowsForStateGs_(ss, state, colIndex) {
+  const asOf = state.asOf;
+  const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, asOf); }, 'buildMovementLogMapsGs_ (backfill ' + state.dayKey + ')').baselineMap;
+  const capturedAtValue = Utilities.formatDate(asOf, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  const out = [];
+  state.rows.forEach(function (row) {
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+    const closingReason = getVal_(row, colIndex, 'closing_reason');
+    // Read dynamically via colIndex, same as every other field — for a
+    // row captured before 2026-09-01 (predating lead_closing_reason
+    // being added to SNAPSHOT_COLUMNS_), colIndex simply won't map it
+    // and this reads as ''. See backfillDailyRmIssuesFromMovementLog_'s
+    // header note on why that's a known, narrow limitation for OLDER history.
+    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
+
+    const flags = computeSlaFlags_(row, colIndex, asOf, baselineMap);
+    const issue = primaryIssueGs_(flags);
+    if (!issue) return;
+
+    const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+    out.push([
+      state.dayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
+      leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, capturedAtValue,
+      // TL/group_source/source_bucket were part of SNAPSHOT_COLUMNS_ from the very start, so every Movement_Log row carries them.
+      getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
+      getVal_(row, colIndex, 'lead_assigned_at'),
+    ]);
+  });
+  return out;
+}
+
+// Movement_Log read shared by both backfills: { header, snapAtIdx, colIndex, allRows } or null (logged) when there is nothing to read.
+function readMovementLogForBackfillGs_(ss) {
+  const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
+  if (!movementSheet) { Logger.log('Movement_Log does not exist yet — nothing to backfill.'); return null; }
+  const lastRow = movementSheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Movement_Log is empty — nothing to backfill.'); return null; }
+  const lastCol = movementSheet.getLastColumn();
+  const header = withRetry_(function () { return movementSheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Movement_Log header for backfill');
+  const snapAtIdx = header.indexOf('snapshot_at'); // not in HEADER_ALIASES_ — read positionally, same as every other Movement_Log reader
+  if (snapAtIdx === -1) { Logger.log('Movement_Log has no snapshot_at column — cannot backfill.'); return null; }
+  const allRows = withRetry_(function () { return movementSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Movement_Log for backfill');
+  return { snapAtIdx: snapAtIdx, colIndex: buildColIndex_(header), allRows: allRows };
+}
+
+// IST day keys Daily_RM_Issues already has rows for -> true.
+function dailyRmIssueCapturedDaysGs_(logSheet) {
+  const out = {};
+  const lastRow = logSheet.getLastRow();
+  if (lastRow < 2) return out;
+  withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, 1).getValues(); }, 'read Daily_RM_Issues for backfill idempotency check')
+    .forEach(function (r) { const key = dailyRmIssueDateKeyGs_(r[0]); if (key) out[key] = true; });
+  return out;
+}
+
 /**
  * One-time (or occasional) backfill: reconstructs Daily_RM_Issues for
- * every day Movement_Log still retains a snapshot for, using each day's
- * own LATEST snapshot run as the "as of" state — the closest available
- * stand-in for what the real 22:50 IST capture would have recorded,
- * since Movement_Log's 4x-daily captures (00:00/06:00/12:00/18:00 IST —
- * SNAPSHOT_HOURS_ below) never include a literal 22:50 snapshot; 18:00
- * is the closest one before it lands. Skips any day Daily_RM_Issues
- * ALREADY has rows for (the SAME per-day idempotency guard
- * captureDailyRmIssues_ itself uses), so this is always safe to re-run
- * and can never duplicate or overwrite a night the real trigger already
- * captured for real.
+ * every day Movement_Log still retains a snapshot for, as of each day's
+ * LATEST snapshot run — the closest available stand-in for what the real
+ * 22:50 IST capture would have recorded, since Movement_Log's 4x-daily
+ * captures (00:00/06:00/12:00/18:00 IST) never include a literal 22:50
+ * snapshot; 18:00 is the closest one before it lands. Each lead's state
+ * is its latest row at or before that run, not only the rows stamped
+ * with it (DR-01, 2026-10-13 — see dailyRmIssueStatesByDayGs_). Skips any
+ * day Daily_RM_Issues ALREADY has rows for, so this is always safe to
+ * re-run and can never duplicate or overwrite a night the real trigger
+ * already captured.
  *
  * KNOWN LIMITATION, narrower since 2026-09-01 — rm_is_active and
  * lead_closing_reason were added to SNAPSHOT_COLUMNS_ (MovementTracker.gs)
@@ -691,120 +886,40 @@ function pruneDailyRmIssueLogNow() {
  * real values for both, and this function reads them dynamically (via
  * colIndex, same as every other field here) — no special-casing needed.
  * A row captured BEFORE that change has neither column at all, so for
- * any day whose latest snapshot predates it:
+ * any lead whose latest row predates it:
  *   - inactiveRmNewLead can never fire (rm_is_active reads as blank,
  *     which computeSlaFlags_ treats as "not inactive").
  *   - a lead closed ONLY via the sheet's own lead_closing_reason column
  *     (not the RM-entered closing_reason) is still counted open here,
  *     and may show up flagged for something else instead of being
  *     correctly excluded as closed.
- * Every night captureDailyRmIssues_ itself runs live (once
- * setupDailyRmIssueLog() is installed) reads the real leads tab and has
- * neither gap, regardless of date — this only ever affects days
- * reconstructed from Movement_Log history predating the column addition.
+ * Every night captureDailyRmIssues_ itself runs live reads the real leads
+ * tab and has neither gap.
  *
- * Pure read of Movement_Log + one append to Daily_RM_Issues; never
- * touches the real leads tab. Returns
+ * Pure read of Movement_Log + an append to Daily_RM_Issues (through
+ * writeDailyRmIssueRowsGs_, the capture's own write path); never touches
+ * the real leads tab. Returns
  * {daysBackfilled: [string], daysSkipped: [string], rowsWritten: number}.
  */
 function backfillDailyRmIssuesFromMovementLog_(ss) {
   const logSheet = ensureDailyRmIssueLogSheet_(ss);
-  const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
-  if (!movementSheet) { Logger.log('Movement_Log does not exist yet — nothing to backfill.'); return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 }; }
-  const lastRow = movementSheet.getLastRow();
-  if (lastRow < 2) { Logger.log('Movement_Log is empty — nothing to backfill.'); return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 }; }
+  assertDailyRmIssueHeaderAlignedGs_(logSheet); // DR-11: rows are written by position
+  const ml = readMovementLogForBackfillGs_(ss);
+  if (!ml) return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 };
 
-  const lastCol = movementSheet.getLastColumn();
-  const header = movementSheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const snapAtIdx = header.indexOf('snapshot_at'); // not in HEADER_ALIASES_ — read positionally, same as _readMovementLogRowsGs_
-  if (snapAtIdx === -1) { Logger.log('Movement_Log has no snapshot_at column — cannot backfill.'); return { daysBackfilled: [], daysSkipped: [], rowsWritten: 0 }; }
-  const colIndex = buildColIndex_(header);
-
-  const allRows = withRetry_(function () { return movementSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Movement_Log for backfill');
-
-  // Group by IST day, keeping only each day's LATEST snapshot_at — every
-  // lead captured together in one snapshotOpenLeads_ run shares that
-  // exact same timestamp, so grouping on it correctly picks up the whole
-  // run, not just one row.
-  const latestByDay = {}; // dayKey -> { tsMs, ts, rows: [] }
-  allRows.forEach(function (row) {
-    const ts = row[snapAtIdx];
-    if (!(ts instanceof Date)) return;
-    const dayKey = istDayKeyGs_(ts);
-    const tsMs = ts.getTime();
-    if (!latestByDay[dayKey] || tsMs > latestByDay[dayKey].tsMs) {
-      latestByDay[dayKey] = { tsMs: tsMs, ts: ts, rows: [] };
-    }
-  });
-  allRows.forEach(function (row) {
-    const ts = row[snapAtIdx];
-    if (!(ts instanceof Date)) return;
-    const dayKey = istDayKeyGs_(ts);
-    const entry = latestByDay[dayKey];
-    if (entry && ts.getTime() === entry.tsMs) entry.rows.push(row);
-  });
-
-  const alreadyCaptured = {};
-  const priorLastRow = logSheet.getLastRow();
-  if (priorLastRow >= 2) {
-    withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 1).getValues(); }, 'read Daily_RM_Issues for backfill idempotency check')
-      .forEach(function (r) {
-        const cell = r[0];
-        const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
-        if (key) alreadyCaptured[key] = true;
-      });
-  }
-
+  const alreadyCaptured = dailyRmIssueCapturedDaysGs_(logSheet);
   const daysBackfilled = [];
   const daysSkipped = [];
   const allNewRows = [];
 
-  Object.keys(latestByDay).sort().forEach(function (dayKey) {
-    if (alreadyCaptured[dayKey]) { daysSkipped.push(dayKey); return; }
-    const entry = latestByDay[dayKey];
-    const asOf = entry.ts;
-    const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, asOf); }, 'buildMovementLogMapsGs_ (backfill ' + dayKey + ')').baselineMap;
-    const capturedAtValue = Utilities.formatDate(asOf, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
-
-    let dayRowCount = 0;
-    entry.rows.forEach(function (row) {
-      const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-      if (!leadId) return;
-      const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-      const closingReason = getVal_(row, colIndex, 'closing_reason');
-      // Read dynamically via colIndex, same as every other field — for a
-      // row captured before 2026-09-01 (predating lead_closing_reason
-      // being added to SNAPSHOT_COLUMNS_), colIndex simply won't map it
-      // and this reads as '', same as explicitly passing '' used to.
-      // See this function's own header note on why that's a known,
-      // narrow limitation for OLDER history rather than a bug.
-      const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-      if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
-
-      const flags = computeSlaFlags_(row, colIndex, asOf, baselineMap);
-      const issue = primaryIssueGs_(flags);
-      if (!issue) return;
-
-      const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
-      allNewRows.push([
-        dayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
-        leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, capturedAtValue,
-        // TL/group_source/source_bucket were part of SNAPSHOT_COLUMNS_
-        // from the very start (unlike rm_is_active/lead_closing_reason —
-        // see this function's own header note), so every Movement_Log
-        // row, old or new, already carries real values for these three.
-        getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
-      getVal_(row, colIndex, 'lead_assigned_at'),
-      ]);
-      dayRowCount++;
-    });
-    daysBackfilled.push(dayKey + ' (' + dayRowCount + ' flagged lead(s), as of ' + capturedAtValue + ')');
+  dailyRmIssueStatesByDayGs_(ml.allRows, ml.snapAtIdx, ml.colIndex, null).forEach(function (state) {
+    if (alreadyCaptured[state.dayKey]) { daysSkipped.push(state.dayKey); return; }
+    const dayRows = dailyRmIssueRowsForStateGs_(ss, state, ml.colIndex);
+    Array.prototype.push.apply(allNewRows, dayRows);
+    daysBackfilled.push(state.dayKey + ' (' + dayRows.length + ' flagged lead(s), as of ' + Utilities.formatDate(state.asOf, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss') + ')');
   });
 
-  if (allNewRows.length) {
-    const startRow = logSheet.getLastRow() + 1;
-    withRetry_(function () { logSheet.getRange(startRow, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows); }, 'write Daily_RM_Issues backfill rows');
-  }
+  writeDailyRmIssueRowsGs_(logSheet, allNewRows, 'backfill-write'); // DR-06/DR-07: chunked, text dates, grid sized first
 
   Logger.log('Backfilled ' + daysBackfilled.length + ' day(s) (' + allNewRows.length + ' total flagged-lead row(s)): ' + (daysBackfilled.join('; ') || '(none)'));
   if (daysSkipped.length) Logger.log('Skipped ' + daysSkipped.length + ' day(s) Daily_RM_Issues already has rows for: ' + daysSkipped.join(', '));
@@ -818,31 +933,29 @@ function backfillDailyRmIssuesFromMovementLogNow() {
   backfillDailyRmIssuesFromMovementLog_(ss);
 }
 
-// How many rows go in a single Daily_RM_Issues setValues() call within
-// backfillOneDayFromMovementLog_ below. captureDailyRmIssues_ itself (the
-// real nightly trigger) writes its whole night in ONE call, and a real
-// 2026-09-01 run took ~475s and produced zero rows for that day — a
-// single oversized write is the most likely place that failed. This
-// function writes the SAME kind of data but in bounded chunks instead:
-// if one chunk fails, everything before it is already durably saved
-// rather than losing the whole day to one call.
+// How many rows go in a single Daily_RM_Issues setValues() call — every
+// write to this tab goes through writeDailyRmIssueRowsGs_ in chunks of
+// this size (the nightly capture included; DR-12, 2026-10-13: this
+// comment used to say the capture wrote its whole night in ONE call). A
+// real 2026-09-01 run took ~475s and produced zero rows for that day — a
+// single oversized write is the most likely place that failed. If one
+// chunk fails, everything before it is already durably saved.
 const BACKFILL_CHUNK_SIZE_ = 5000;
 
 /**
  * Backfills Daily_RM_Issues for exactly ONE missed day (real 2026-09-01
  * incident: the 22:50 IST trigger ran for ~475s but wrote zero rows for
- * that night), from Movement_Log's LATEST retained snapshot that falls on
- * that IST calendar day — same "closest available stand-in for the real
- * 22:50 capture" reasoning as backfillDailyRmIssuesFromMovementLog_
- * above, and the same per-day idempotency guard (skips and returns
+ * that night), as of Movement_Log's LATEST retained snapshot on that IST
+ * calendar day — same reconstruction (each lead's latest row at or before
+ * that snapshot, DR-01) and the same per-day idempotency guard as
+ * backfillDailyRmIssuesFromMovementLog_ above (skips and returns
  * {skipped:true} if Daily_RM_Issues already has rows for dayKey).
  *
- * Deliberately narrower than backfillDailyRmIssuesFromMovementLog_,
- * rather than just calling it: that function sweeps and writes EVERY
- * day Movement_Log still retains in one combined pass — fine for a
- * one-time historical rebuild, but overkill (and higher blast radius)
- * for "last night's trigger looks like it missed, catch up just that
- * one night." This only ever reads and writes the ONE day asked for.
+ * Deliberately narrower than backfillDailyRmIssuesFromMovementLog_: that
+ * function writes EVERY day Movement_Log still retains in one combined
+ * pass — fine for a one-time historical rebuild, but a higher blast radius
+ * than "last night's trigger looks like it missed, catch up just that one
+ * night." This only ever writes the ONE day asked for.
  *
  * TIME-SENSITIVE, same as the multi-day version: Movement_Log only
  * retains 7 days, so dayKey needs to still be within that window.
@@ -851,85 +964,27 @@ const BACKFILL_CHUNK_SIZE_ = 5000;
  */
 function backfillOneDayFromMovementLog_(ss, dayKey) {
   const logSheet = ensureDailyRmIssueLogSheet_(ss);
-
-  const priorLastRow = logSheet.getLastRow();
-  if (priorLastRow >= 2) {
-    const alreadyCaptured = withRetry_(function () { return logSheet.getRange(2, 1, priorLastRow - 1, 1).getValues(); }, 'read Daily_RM_Issues for single-day backfill idempotency check')
-      .some(function (r) {
-        const cell = r[0];
-        const key = cell instanceof Date ? istDayKeyGs_(cell) : String(cell);
-        return key === dayKey;
-      });
-    if (alreadyCaptured) {
-      Logger.log('Skipping ' + dayKey + ' — Daily_RM_Issues already has rows for that day.');
-      return { rowsWritten: 0, skipped: true };
-    }
+  assertDailyRmIssueHeaderAlignedGs_(logSheet); // DR-11
+  if (dailyRmIssueCapturedDaysGs_(logSheet)[dayKey]) {
+    Logger.log('Skipping ' + dayKey + ' — Daily_RM_Issues already has rows for that day.');
+    return { rowsWritten: 0, skipped: true };
   }
 
-  const movementSheet = ss.getSheetByName(MOVEMENT_LOG_SHEET);
-  if (!movementSheet) { Logger.log('Movement_Log does not exist — cannot backfill ' + dayKey + '.'); return { rowsWritten: 0, skipped: false }; }
-  const mLastRow = movementSheet.getLastRow();
-  if (mLastRow < 2) { Logger.log('Movement_Log is empty — cannot backfill ' + dayKey + '.'); return { rowsWritten: 0, skipped: false }; }
-  const mLastCol = movementSheet.getLastColumn();
-  const mHeader = withRetry_(function () { return movementSheet.getRange(1, 1, 1, mLastCol).getValues()[0]; }, 'read Movement_Log header for single-day backfill');
-  const snapAtIdx = mHeader.indexOf('snapshot_at'); // not in HEADER_ALIASES_ — read positionally, same as every other Movement_Log reader
-  if (snapAtIdx === -1) { Logger.log('Movement_Log has no snapshot_at column — cannot backfill.'); return { rowsWritten: 0, skipped: false }; }
-  const colIndex = buildColIndex_(mHeader);
-  const allRows = withRetry_(function () { return movementSheet.getRange(2, 1, mLastRow - 1, mLastCol).getValues(); }, 'read Movement_Log for single-day backfill');
-
-  // This day's LATEST snapshot_at only — same "one snapshotOpenLeads_ run
-  // shares one exact timestamp" grouping backfillDailyRmIssuesFromMovementLog_
-  // uses, just scoped to one day instead of every day at once.
-  let latestTs = null;
-  allRows.forEach(function (row) {
-    const ts = row[snapAtIdx];
-    if (!(ts instanceof Date) || istDayKeyGs_(ts) !== dayKey) return;
-    if (!latestTs || ts.getTime() > latestTs.getTime()) latestTs = ts;
-  });
-  if (!latestTs) {
+  const ml = readMovementLogForBackfillGs_(ss);
+  if (!ml) return { rowsWritten: 0, skipped: false };
+  const state = dailyRmIssueStatesByDayGs_(ml.allRows, ml.snapAtIdx, ml.colIndex, dayKey)[0];
+  if (!state) {
     Logger.log('No Movement_Log snapshot found for ' + dayKey + ' — it may already have aged out of the 7-day retention window.');
     return { rowsWritten: 0, skipped: false };
   }
-  const latestRows = allRows.filter(function (row) { const ts = row[snapAtIdx]; return ts instanceof Date && ts.getTime() === latestTs.getTime(); });
-
-  const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, latestTs); }, 'buildMovementLogMapsGs_ (single-day backfill ' + dayKey + ')').baselineMap;
-  const capturedAtValue = Utilities.formatDate(latestTs, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
-
-  const newRows = [];
-  latestRows.forEach(function (row) {
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    if (!leadId) return;
-    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    const closingReason = getVal_(row, colIndex, 'closing_reason');
-    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return;
-
-    const flags = computeSlaFlags_(row, colIndex, latestTs, baselineMap);
-    const issue = primaryIssueGs_(flags);
-    if (!issue) return;
-
-    const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
-    newRows.push([
-      dayKey, RM, getVal_(row, colIndex, 'region'), getVal_(row, colIndex, 'project'),
-      leadId, getVal_(row, colIndex, 'client_id'), issue.key, issue.label, capturedAtValue,
-      getVal_(row, colIndex, 'TL'), getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'),
-      getVal_(row, colIndex, 'lead_assigned_at'),
-    ]);
-  });
-
+  const capturedAtValue = Utilities.formatDate(state.asOf, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  const newRows = dailyRmIssueRowsForStateGs_(ss, state, ml.colIndex);
   if (!newRows.length) {
     Logger.log('No open leads were flagged as of ' + dayKey + '\'s latest Movement_Log snapshot (' + capturedAtValue + ') — nothing to backfill.');
     return { rowsWritten: 0, skipped: false };
   }
 
-  // Chunked writes — see BACKFILL_CHUNK_SIZE_'s own comment above.
-  let startRow = logSheet.getLastRow() + 1;
-  for (let i = 0; i < newRows.length; i += BACKFILL_CHUNK_SIZE_) {
-    const chunk = newRows.slice(i, i + BACKFILL_CHUNK_SIZE_);
-    withRetry_(function () { logSheet.getRange(startRow, 1, chunk.length, chunk[0].length).setValues(chunk); }, 'write single-day backfill chunk (' + dayKey + ', rows ' + i + '-' + (i + chunk.length) + ')');
-    startRow += chunk.length;
-  }
-
+  writeDailyRmIssueRowsGs_(logSheet, newRows, 'backfill-one-day-write'); // DR-06/DR-07
   Logger.log('Backfilled ' + dayKey + ': ' + newRows.length + ' flagged lead row(s), as of Movement_Log snapshot ' + capturedAtValue + '.');
   return { rowsWritten: newRows.length, skipped: false };
 }
@@ -975,8 +1030,10 @@ function backfillOneDayFromMovementLogNow(dayKey) {
  * unresolvable rather than silently skipped. Run this as soon as
  * possible after noticing incomplete rows, before more history prunes.
  *
- * Batched as 3 whole-column writes (not one write per row), so this
- * stays fast even across tens of thousands of rows. Console-callable
+ * One write per repaired column, spanning only the first to the last
+ * changed row (DR-08, 2026-10-13: it used to rewrite all four columns
+ * top to bottom, unchanged rows included), as text with a read-back
+ * check (persistDailyRmIssueColumnGs_). Console-callable
  * (function dropdown -> Run).
  */
 function repairDailyRmIssuesMissingFieldsNow() {
@@ -1026,10 +1083,12 @@ function repairDailyRmIssuesMissingFieldsNow() {
   });
 
   const values = withRetry_(function () { return logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Daily_RM_Issues for repair');
-  const tlCol = [], gsCol = [], sbCol = [], laCol = [];
+  // Changed row indexes per column (DR-08, 2026-10-13): only the span of rows that really changed is written, through the capture's
+  // own text-format + read-back helper (persistDailyRmIssueColumnGs_), instead of rewriting four whole columns.
+  const changed = { TL: [], group_source: [], source_bucket: [], lead_assigned_at: [] };
   let repaired = 0, unresolvable = 0, alreadyComplete = 0;
 
-  values.forEach(function (row) {
+  values.forEach(function (row, rowIdx) {
     const tl = row[colIdx.TL], gs = row[colIdx.group_source], sb = row[colIdx.source_bucket];
     const la = hasLeadAssignedCol ? row[colIdx.lead_assigned_at] : null;
     // Checked independently — a row can have TL/group_source/source_bucket
@@ -1040,16 +1099,12 @@ function repairDailyRmIssuesMissingFieldsNow() {
 
     if (!needsTlGsSb && !needsLa) {
       alreadyComplete++;
-      tlCol.push([tl]); gsCol.push([gs]); sbCol.push([sb]);
-      if (hasLeadAssignedCol) laCol.push([la]);
       return;
     }
     const leadId = String(row[colIdx.lead_id] || '').trim();
     const candidates = byLeadId[leadId];
     if (!candidates || !candidates.length) {
-      unresolvable++;
-      tlCol.push([tl]); gsCol.push([gs]); sbCol.push([sb]); // leave blank — nothing to repair from
-      if (hasLeadAssignedCol) laCol.push([la]);
+      unresolvable++; // left blank — nothing to repair from
       return;
     }
     const capturedAtRaw = row[colIdx.captured_at];
@@ -1068,19 +1123,19 @@ function repairDailyRmIssuesMissingFieldsNow() {
         if (diff < bestDiff) { bestDiff = diff; best = c; }
       });
     }
-    tlCol.push([needsTlGsSb ? best.TL : tl]);
-    gsCol.push([needsTlGsSb ? best.group_source : gs]);
-    sbCol.push([needsTlGsSb ? best.source_bucket : sb]);
-    if (hasLeadAssignedCol) laCol.push([needsLa ? best.lead_assigned_at : la]);
+    if (needsTlGsSb) {
+      ['TL', 'group_source', 'source_bucket'].forEach(function (f) { row[colIdx[f]] = best[f]; changed[f].push(rowIdx); });
+    }
+    if (needsLa && !dailyRmIssueBlankCellGs_(best.lead_assigned_at)) {
+      row[colIdx.lead_assigned_at] = best.lead_assigned_at;
+      changed.lead_assigned_at.push(rowIdx);
+    }
     repaired++;
   });
 
-  withRetry_(function () { logSheet.getRange(2, colIdx.TL + 1, tlCol.length, 1).setValues(tlCol); }, 'write repaired TL column');
-  withRetry_(function () { logSheet.getRange(2, colIdx.group_source + 1, gsCol.length, 1).setValues(gsCol); }, 'write repaired group_source column');
-  withRetry_(function () { logSheet.getRange(2, colIdx.source_bucket + 1, sbCol.length, 1).setValues(sbCol); }, 'write repaired source_bucket column');
-  if (hasLeadAssignedCol) {
-    withRetry_(function () { logSheet.getRange(2, colIdx.lead_assigned_at + 1, laCol.length, 1).setValues(laCol); }, 'write repaired lead_assigned_at column');
-  }
+  ['TL', 'group_source', 'source_bucket', 'lead_assigned_at'].forEach(function (f) {
+    if (changed[f].length) persistDailyRmIssueColumnGs_(logSheet, values, changed[f], colIdx[f], 'repair-' + f);
+  });
 
   Logger.log(
     'Repair done: ' + repaired + ' row(s) filled in from Movement_Log, ' + alreadyComplete +
@@ -1162,7 +1217,7 @@ const RM_PERF_CONFIDENCE_THRESHOLD_GS_ = 0.40;
 
 // Eligibility gate + display label per rule — ported from
 // js/core-rm-performance.js's RM_PERF_RULES (same keys, same conditions,
-// see that file for the full per-rule rationale). inactiveRmNewLade is
+// see that file for the full per-rule rationale). inactiveRmNewLead is
 // included here (for eligibility bookkeeping/routingIssueDays) but stays
 // excluded from RM_PERF_SCORED_RULE_KEYS_GS_ above, so it never enters the
 // composite score — a routing/assignment failure, not an RM execution one.
@@ -1307,18 +1362,32 @@ function _rmPerfDaysBetweenKeysGs_(a, b) {
 // The eligibility-window context computeSlaFlags_ derives internally but
 // doesn't expose — see this section's own header comment for why this is
 // a deliberate, minimal duplication of DERIVATION (not of rule logic).
+// KEEP IN SYNC with computeSlaFlags_ (SlaEngine.gs): pastGrace, isUnder48h,
+// the creation-day test, hasConnected and neverConnectedPastWindow must use
+// the SAME constants (LEAD_GRACE_HOURS_, LEAD_LIFECYCLE_HOURS_,
+// FIRST_CONTACT_SLA_MINUTES_) and the SAME conditions it uses. If a rule's
+// gate changes there, change it here in the same commit, or the RM
+// Performance report counts a lead eligible for a rule it cannot violate
+// (or the reverse). Nothing checks this automatically (DR-10, 2026-10-13).
 // Returns null for an undatable lead (no lead_assigned_at), same early-out
 // computeSlaFlags_ itself uses.
+// The date cells are read the SAME way computeSlaFlags_ reads them: through
+// SlaEngine.gs's parseSlaDateGs_ when it exists (it also parses the
+// 'yyyy-MM-dd HH:mm[:ss]' text cells, as IST), else Date cells only, as before
+// — so this stays identical to computeSlaFlags_ on either side of that change.
+function rmPerfDateCellGs_(v) {
+  if (typeof parseSlaDateGs_ === 'function') return parseSlaDateGs_(v);
+  return v instanceof Date ? v : null;
+}
+
 function computeRmPerfEligibilityGs_(row, colIndex, now) {
-  const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
-  const created = createdRaw instanceof Date ? createdRaw : null;
+  const created = rmPerfDateCellGs_(getVal_(row, colIndex, 'lead_assigned_at'));
   if (!created) return null;
   const ageHours = (now.getTime() - created.getTime()) / 36e5;
   const pastGrace = ageHours >= LEAD_GRACE_HOURS_;
   const isUnder48h = ageHours <= LEAD_LIFECYCLE_HOURS_;
   const isCreatedThatDay = istDayKeyGs_(created) === istDayKeyGs_(now);
-  const connectTimeRaw = getVal_(row, colIndex, 'last_connect_time');
-  const connectDate = connectTimeRaw instanceof Date ? connectTimeRaw : null;
+  const connectDate = rmPerfDateCellGs_(getVal_(row, colIndex, 'last_connect_time'));
   const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
   const neverConnectedPastWindow = isUnder48h && !connectDate &&
     businessMinutesBetweenGs_(created, now) > FIRST_CONTACT_SLA_MINUTES_;
@@ -1327,6 +1396,20 @@ function computeRmPerfEligibilityGs_(row, colIndex, now) {
     hasConnected: hasConnected, neverConnectedPastWindow: neverConnectedPastWindow,
   };
 }
+
+// Forward-fill switch (DR-02, 2026-10-13) — twin of js/core-rm-performance.js's
+// RM_PERF_FORWARD_FILL_CAPTURE_DAYS; KEEP IDENTICAL. Since Movement_Log's
+// content-hash dedup (MovementTracker.gs, Phase 6) a snapshot run writes a
+// row only for a lead whose content CHANGED, so "no row that day" now means
+// "unchanged", not "not observed". Without forward-fill an untouched
+// (neglected) lead produced no observation on the days it was neglected:
+// under-counted exactly where it matters, and its violation streak broke.
+// With it ON, a lead with no row on a capture day (a day with at least one
+// Movement_Log row) is observed that day from its last known row, as of
+// that day's last snapshot. Off = the pre-2026-10-13 behaviour. A constant
+// rather than an unconditional change because it moves rates, streaks and
+// classifications on the leaderboard; flip both runtimes together.
+const RM_PERF_FORWARD_FILL_CAPTURE_DAYS_GS_ = true;
 
 /**
  * Stage 1 — walks every retained Movement_Log row, keeps the LATEST
@@ -1339,6 +1422,11 @@ function computeRmPerfEligibilityGs_(row, colIndex, now) {
  * lead-by-lead) so buildMovementLogMapsGs_ — a full Movement_Log rescan —
  * runs once per distinct day, not once per lead, same granularity
  * backfillDailyRmIssuesFromMovementLog_ already uses for the same reason.
+ * With RM_PERF_FORWARD_FILL_CAPTURE_DAYS_GS_ on, a capture day on which a
+ * lead has NO row at all is filled from the lead's latest earlier row,
+ * evaluated as of that day's last snapshot (see the constant's comment);
+ * a day on which the lead has rows is never filled, even when those rows
+ * are all excluded.
  * Unfiltered — no dashboard top-bar filter concept applies to a console
  * function, same as computeRepeatOffenderRmsGs_ before it.
  */
@@ -1362,11 +1450,21 @@ function reconstructRmPerformanceObservationsGs_(ss) {
   const roleByNameLowerGs_ = buildRmHierarchyRoleByNameLowerGs_(ss);
 
   const latestByLeadDay = {}; // "leadId|dayKey" -> {row, ts, dayKey, leadId}
+  const captureDayTs = {}; // dayKey -> that day's latest snapshot_at, over every row (DR-02)
+  const anyRowByLead = {}; // leadId -> {dayKey: {row, ts}} latest row of each day, BEFORE the exclusion check (DR-02)
+  const dayKeyByMs = {};
   allRows.forEach(function (row) {
     const ts = row[snapAtIdx];
     if (!(ts instanceof Date)) return;
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
+    const ms = ts.getTime();
+    if (dayKeyByMs[ms] === undefined) dayKeyByMs[ms] = istDayKeyGs_(ts);
+    const anyDayKey = dayKeyByMs[ms];
+    if (!captureDayTs[anyDayKey] || ms > captureDayTs[anyDayKey].getTime()) captureDayTs[anyDayKey] = ts;
+    if (!anyRowByLead[leadId]) anyRowByLead[leadId] = {};
+    const anyCur = anyRowByLead[leadId][anyDayKey];
+    if (!anyCur || ms >= anyCur.ts.getTime()) anyRowByLead[leadId][anyDayKey] = { row: row, ts: ts };
     // Leadership (Cluster Head/City Lead/Commercial Head/A1/TM/RH, or a
     // specific known-leadership name with no resolvable RM_Hierarchy row)
     // is excluded ENTIRELY here, before any observation is ever emitted —
@@ -1376,12 +1474,28 @@ function reconstructRmPerformanceObservationsGs_(ss) {
     // inflate this report's totals even if their own row were merely
     // hidden downstream.
     if (rmPerfIsLeadershipExcludedGs_(getVal_(row, colIndex, 'RM'), roleByNameLowerGs_)) return;
-    const dayKey = istDayKeyGs_(ts);
+    const dayKey = anyDayKey;
     const mapKey = leadId + '|' + dayKey;
     if (!latestByLeadDay[mapKey] || ts.getTime() > latestByLeadDay[mapKey].ts.getTime()) {
       latestByLeadDay[mapKey] = { row: row, ts: ts, dayKey: dayKey, leadId: leadId };
     }
   });
+
+  // Forward-fill (DR-02): for every capture day after a lead's first row on which it has no row at all, its latest earlier row
+  // stands in, timed at that day's last snapshot. The stand-in row still goes through the exclusion check, like any real row.
+  if (RM_PERF_FORWARD_FILL_CAPTURE_DAYS_GS_) {
+    const captureDays = Object.keys(captureDayTs).sort();
+    Object.keys(anyRowByLead).forEach(function (leadId) {
+      const byDay = anyRowByLead[leadId];
+      let last = null;
+      captureDays.forEach(function (dayKey) {
+        if (byDay[dayKey]) { last = byDay[dayKey]; return; }
+        if (!last) return; // before this lead's first retained row - nothing known
+        if (rmPerfIsLeadershipExcludedGs_(getVal_(last.row, colIndex, 'RM'), roleByNameLowerGs_)) return;
+        latestByLeadDay[leadId + '|' + dayKey] = { row: last.row, ts: captureDayTs[dayKey], dayKey: dayKey, leadId: leadId, filled: true };
+      });
+    });
+  }
 
   const rowsByDay = {};
   Object.keys(latestByLeadDay).forEach(function (mapKey) {

@@ -28,6 +28,12 @@ function TestDRIL_row_(overrides) {
   return header.map(function (key) { return merged[key]; });
 }
 
+// The DR-03 completion marker is ONE Script Property, while these tests run captures against many separate mock spreadsheets on the
+// same day - so each fresh-spreadsheet capture starts with the marker cleared, as the first capture of a real night would.
+function TestDRIL_resetDone_() {
+  PropertiesService.getScriptProperties().deleteProperty(DAILY_RM_ISSUE_DONE_PROPERTY_);
+}
+
 function runDailyRmIssueLogTests_() {
   const now = new Date();
   const header = TestFixture_leadsHeader_();
@@ -79,6 +85,7 @@ function runDailyRmIssueLogTests_() {
     TestAssertEqual_(healSheet.getRange(2, 2, 1, 1).getValues()[0][0], 'Test RM One', 'ensureDailyRmIssueLogSheet_: self-healing the header never touches existing data rows');
 
     // ---- captureDailyRmIssuesNow(): first run tonight ----
+    TestDRIL_resetDone_();
     captureDailyRmIssuesNow();
     TestAssertEqual_(logSheet.getLastRow(), 3, 'captureDailyRmIssuesNow: exactly 2 data rows written (the 2 flagged leads; clean/closed/blank-id are all correctly excluded)');
 
@@ -126,6 +133,7 @@ function runDailyRmIssueLogTests_() {
     const realSsForBigTest = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return bigSs; }, flush: function () {} };
     try {
+      TestDRIL_resetDone_();
       captureDailyRmIssuesNow();
       const bigLogSheet = bigSs.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
       TestAssertEqual_(bigLogSheet.getLastRow(), bigRowCount + 1, 'captureDailyRmIssuesNow (chunked write): every one of ' + bigRowCount + ' flagged leads is written — none lost across the ' + Math.ceil(bigRowCount / BACKFILL_CHUNK_SIZE_) + '-chunk boundary');
@@ -146,6 +154,7 @@ function runDailyRmIssueLogTests_() {
     const realSs = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return quietSs; }, flush: function () {} };
     try {
+      TestDRIL_resetDone_();
       captureDailyRmIssuesNow();
       const quietLogSheet = quietSs.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
       TestAssert_(!!quietLogSheet && quietLogSheet.getLastRow() === 1, 'captureDailyRmIssuesNow: a night with nothing flagged writes no rows (header only) and does not throw');
@@ -303,6 +312,7 @@ function runDailyRmIssueLogTests_() {
     SpreadsheetApp = { getActiveSpreadsheet: function () { return intSs; }, flush: function () {} };
     DriveApp = mockDriveForInt;
     try {
+      TestDRIL_resetDone_();
       captureDailyRmIssuesNow();
       const intRows = intLogSheet.getRange(2, 1, intLogSheet.getLastRow() - 1, prLogHeader.length).getValues();
       const intTags = intRows.map(function (r) { return r[1]; });
@@ -337,6 +347,7 @@ function runDailyRmIssueLogTests_() {
       SpreadsheetApp = { getActiveSpreadsheet: function () { return upSs; }, flush: function () {} };
       DriveApp = TestMockDriveApp_();
       readLeadsTab_ = function () { throw new Error('simulated scan failure'); };
+      TestDRIL_resetDone_();
       TestAssertThrows_(function () { captureDailyRmIssues_(); }, 'captureDailyRmIssues_: the simulated scan failure still propagates (this fixture really does crash after the up-front prune)');
       const upTags = upMl.getRange(2, 1, upMl.getLastRow() - 1, mlHeader.length).getValues().map(function (r) { return r[1]; });
       TestAssertEqual_(upTags.indexOf('ml-old'), -1, 'captureDailyRmIssues_: Movement_Log\'s stale row is pruned BEFORE the company scan, so it is gone even though the scan then crashed');
@@ -353,6 +364,7 @@ function runDailyRmIssueLogTests_() {
       gdMl._maxRows = 20000;
       gdSs._sheets['Movement_Log'] = gdMl;
       SpreadsheetApp = { getActiveSpreadsheet: function () { return gdSs; }, flush: function () {} };
+      PropertiesService.getScriptProperties().setProperty(DAILY_RM_ISSUE_DONE_PROPERTY_, istDayKeyGs_(upFrontNow)); // tonight already completed (DR-03 marker)
       captureDailyRmIssues_();
       TestAssertEqual_(gdMl.getLastRow(), 2, 'captureDailyRmIssues_: an idempotency-guard early return does NOT run the Movement_Log prune (a double-fire stays cheap)');
       TestAssertEqual_(gdMl.getMaxRows(), 20000, 'captureDailyRmIssues_: an idempotency-guard early return leaves Movement_Log\'s grid untouched');
@@ -362,6 +374,7 @@ function runDailyRmIssueLogTests_() {
       pfSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
       SpreadsheetApp = { getActiveSpreadsheet: function () { return pfSs; }, flush: function () {} };
       pruneMovementLog_ = function () { throw new Error('simulated Drive archive failure'); };
+      TestDRIL_resetDone_();
       captureDailyRmIssues_();
       const pfLog = pfSs.getSheetByName(DAILY_RM_ISSUE_LOG_SHEET_);
       const pfTags = pfLog.getRange(2, 1, pfLog.getLastRow() - 1, prLogHeader.length).getValues().map(function (r) { return r[1]; });
@@ -515,6 +528,7 @@ function runDailyRmIssueLogTests_() {
       diCapSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diCapSheet;
       SpreadsheetApp = { getActiveSpreadsheet: function () { return diCapSs; }, flush: function () {} };
       DriveApp = TestMockDriveApp_();
+      TestDRIL_resetDone_();
       captureDailyRmIssues_();
       const diCapRows = diCapSheet.getRange(2, 1, diCapSheet.getLastRow() - 1, prLogHeader.length).getValues();
       TestAssert_(diCapRows.length >= 1, 'fixture check: the capture wrote the flagged lead');
@@ -533,6 +547,7 @@ function runDailyRmIssueLogTests_() {
       diTxtSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = diTxtSheet;
       SpreadsheetApp = { getActiveSpreadsheet: function () { return diTxtSs; }, flush: function () {} };
       DriveApp = TestMockDriveApp_();
+      TestDRIL_resetDone_();
       captureDailyRmIssues_();
       const diTxtRows = diTxtSheet.getRange(2, 1, diTxtSheet.getLastRow() - 1, prLogHeader.length).getValues();
       TestAssert_(diTxtRows.length >= 1 && diTxtRows.every(function (r) { return !!diKey(r[0]); }), 'captureDailyRmIssues_: when a plain re-write still reads back blank, the date is stored as text and sticks');
@@ -545,6 +560,7 @@ function runDailyRmIssueLogTests_() {
       diOkSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
       SpreadsheetApp = { getActiveSpreadsheet: function () { return diOkSs; }, flush: function () {} };
       DriveApp = TestMockDriveApp_();
+      TestDRIL_resetDone_();
       captureDailyRmIssues_();
       TestAssertEqual_(diProps().length, 0, 'captureDailyRmIssues_: a clean write leaves no date-integrity record');
 
@@ -744,6 +760,7 @@ function runDailyRmIssueLogTests_() {
       const raRealReadLeads = readLeadsTab_;
       let raCapReads = 0;
       readLeadsTab_ = function (s2) { raCapReads++; return raRealReadLeads(s2); };
+      TestDRIL_resetDone_();
       try { captureDailyRmIssues_(); } finally { readLeadsTab_ = raRealReadLeads; }
       TestAssertEqual_(raCapReads, 1, 'captureDailyRmIssues_: the Leads tab is read once per night - the refill inside the prune reuses the capture read');
       TestAssert_(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(raCapSheet.getRange(2, asIdx + 1, 1, 1).getValues()[0][0])), 'captureDailyRmIssues_: an older row that had lost its lead_assigned_at is refilled in the same run');
@@ -776,6 +793,7 @@ function runDailyRmIssueLogTests_() {
       txCapSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = txCapSheet;
       SpreadsheetApp = { getActiveSpreadsheet: function () { return txCapSs; }, flush: function () {} };
       DriveApp = TestMockDriveApp_();
+      TestDRIL_resetDone_();
       captureDailyRmIssues_();
       const txCapRow = txCapSheet.getRange(2, 1, 1, prLogHeader.length).getValues()[0];
       TestAssert_(typeof txCapRow[0] === 'string' && typeof txCapRow[8] === 'string' && typeof txCapRow[12] === 'string', 'captureDailyRmIssues_: date, captured_at and lead_assigned_at are written as text, not as Date objects');
@@ -953,6 +971,12 @@ function runDailyRmIssueLogTests_() {
     ['GoodA', 'GoodB', 'GoodC'].forEach(function (rm) {
       for (let i = 1; i <= 8; i++) { rmPerfB.sheet.appendRow(rmPerfCleanRow_(rmPerfB.header, 'B-' + rm + '-L' + i, rm, feb1)); }
     });
+    // The one-day leads CLOSE on day 2 (DR-02, 2026-10-13): with forward-fill a lead with no later row is "unchanged", i.e. still
+    // open and aging, so "eligible just 1 day" now has to be written the way Movement_Log would record it - a closing row.
+    const feb2 = rmPerfDay_('2026-02-02');
+    const rmPerfBClose = function (leadId, rm) { rmPerfB.sheet.appendRow(rmPerfRowFor_(rmPerfB.header, { snapshot_at: feb2, lead_id: leadId, client_id: 'C-' + leadId, RM: rm, closing_reason: 'Not interested', lead_assigned_at: rmPerfLeadAssignedAt_(feb1) })); };
+    for (let i = 1; i <= 7; i++) rmPerfBClose('B-WATCH-OK' + i, 'Watch1');
+    ['GoodA', 'GoodB', 'GoodC'].forEach(function (rm) { for (let i = 1; i <= 8; i++) rmPerfBClose('B-' + rm + '-L' + i, rm); });
 
     const rmPerfBResults = computeRmPerformanceGs_(rmPerfB.ss);
     const rmPerfBByName = {}; rmPerfBResults.forEach(function (r) { rmPerfBByName[r.name] = r; });
@@ -1174,9 +1198,9 @@ function runDailyRmIssueLogTests_() {
     const day2At = TestFixture_daysAgo_(now, 2);
     const day3At = TestFixture_daysAgo_(now, 1); // this day is pre-seeded into Daily_RM_Issues below — must be skipped
 
-    // Day 1: TWO runs. The early run's only lead (L-EARLYONLY) must NOT
-    // survive into the backfill — only the later run's rows should.
-    movementSheet.appendRow(bfRow({ snapshot_at: day1Early, lead_id: 'L-EARLYONLY', client_id: 'C-EARLYONLY', lead_assigned_at: TestFixture_hoursAgo_(day1Early, 1) }));
+    // Day 1: TWO runs. Since content-hash dedup a run only writes CHANGED leads, so L-EARLYONLY (only in the early run) is unchanged
+    // at the later run and must still be back-filled (DR-01, 2026-10-13 - it used to be dropped as "not in the latest run").
+    movementSheet.appendRow(bfRow({ snapshot_at: day1Early, lead_id: 'L-EARLYONLY', client_id: 'C-EARLYONLY', lead_assigned_at: TestFixture_hoursAgo_(day1Early, 60) }));
     movementSheet.appendRow(bfRow({ snapshot_at: day1Late, lead_id: 'L-DAY1-FLAGGED', client_id: 'C-DAY1-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(day1Late, 60) })); // well past 48h as of day1Late
     movementSheet.appendRow(bfRow({ snapshot_at: day1Late, lead_id: 'L-DAY1-CLOSED', client_id: 'C-DAY1-CLOSED', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(day1Late, 60) }));
 
@@ -1204,17 +1228,22 @@ function runDailyRmIssueLogTests_() {
 
     const bfLoggedRows = bfLogSheet.getRange(2, 1, bfLogSheet.getLastRow() - 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
     const bfByLeadId = {};
-    bfLoggedRows.forEach(function (r) { bfByLeadId[r[4]] = r; });
+    const bfByLeadDay = {};
+    bfLoggedRows.forEach(function (r) { if (!bfByLeadId[r[4]]) bfByLeadId[r[4]] = r; bfByLeadDay[r[4] + '|' + dailyRmIssueDateKeyGs_(r[0])] = r; });
+    const bfD1 = istDayKeyGs_(day1Late), bfD2 = istDayKeyGs_(day2At);
 
-    TestAssert_(!bfByLeadId['L-EARLYONLY'], 'backfillDailyRmIssuesFromMovementLog_: a lead only present in an EARLIER same-day run is correctly excluded — only the day\'s LATEST run counts');
-    TestAssert_(!!bfByLeadId['L-DAY1-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: a flagged open lead from the day\'s latest run is backfilled');
-    TestAssert_(!bfByLeadId['L-DAY1-CLOSED'], 'backfillDailyRmIssuesFromMovementLog_: a closed lead is correctly excluded, even from the day\'s latest run');
-    TestAssert_(!!bfByLeadId['L-DAY2-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: day 2 (a single-run day) is backfilled too');
+    TestAssert_(!!bfByLeadDay['L-EARLYONLY|' + bfD1], 'backfillDailyRmIssuesFromMovementLog_ (DR-01): a lead whose only row is an EARLIER same-day run (unchanged at the later run) is back-filled');
+    TestAssert_(!!bfByLeadDay['L-DAY1-FLAGGED|' + bfD1], 'backfillDailyRmIssuesFromMovementLog_: a flagged open lead from the day\'s latest run is backfilled');
+    TestAssert_(!!bfByLeadDay['L-DAY1-FLAGGED|' + bfD2], 'backfillDailyRmIssuesFromMovementLog_ (DR-01): a lead whose only row is days old (dedup: unchanged since) is still back-filled on the later day');
+    TestAssert_(!bfByLeadId['L-DAY1-CLOSED'], 'backfillDailyRmIssuesFromMovementLog_: a closed lead is correctly excluded, on every day');
+    TestAssert_(!!bfByLeadDay['L-DAY2-FLAGGED|' + bfD2] && !bfByLeadDay['L-DAY2-FLAGGED|' + bfD1], 'backfillDailyRmIssuesFromMovementLog_: day 2\'s new lead is back-filled on day 2 and never before its first row');
+    TestAssert_(typeof bfByLeadDay['L-DAY1-FLAGGED|' + bfD1][0] === 'string' && typeof bfByLeadDay['L-DAY1-FLAGGED|' + bfD1][8] === 'string', 'backfillDailyRmIssuesFromMovementLog_ (DR-06): date and captured_at are written as text, through the capture\'s write path');
     TestAssert_(!bfByLeadId['L-DAY2-CLOSED-VIA-LEADCLOSING'], 'backfillDailyRmIssuesFromMovementLog_: a lead closed ONLY via lead_closing_reason is correctly excluded — proves lead_closing_reason is now really read from Movement_Log, not just documented as fixed');
     TestAssert_(!bfByLeadId['L-DAY3-FLAGGED'], 'backfillDailyRmIssuesFromMovementLog_: day 3\'s Movement_Log data is NOT backfilled — Daily_RM_Issues already had a row for that day');
     TestAssertEqual_(bfByLeadId['L-ALREADY-CAPTURED'][6], 'stageStuck48h', 'backfillDailyRmIssuesFromMovementLog_: the pre-seeded day-3 row itself is left untouched');
 
     TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][0], istDayKeyGs_(day1Late), 'backfillDailyRmIssuesFromMovementLog_: date column uses the snapshot\'s own IST day, not today');
+    TestAssertEqual_(bfByLeadDay['L-DAY1-FLAGGED|' + bfD2][0], bfD2, 'backfillDailyRmIssuesFromMovementLog_ (DR-01): the carried-forward row is dated the day it was rebuilt for');
     TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][1], 'Test RM One', 'backfillDailyRmIssuesFromMovementLog_: RM column correct');
     TestAssertEqual_(bfByLeadId['L-DAY1-FLAGGED'][5], 'C-DAY1-FLAGGED', 'backfillDailyRmIssuesFromMovementLog_: client_id column correct');
     TestAssert_(!!String(bfByLeadId['L-DAY1-FLAGGED'][8] || '').trim(), 'backfillDailyRmIssuesFromMovementLog_: captured_at is populated, using the snapshot\'s own time');
@@ -1266,25 +1295,29 @@ function runDailyRmIssueLogTests_() {
     const odLate = TestFixture_hoursAgo_(new Date(istDayKeyGs_(odTargetDay) + 'T12:00:00+05:30'), -3); // 15:00 IST — the day's latest run, should win
     const odOtherDay = TestFixture_daysAgo_(now, 2); // a DIFFERENT day, present in Movement_Log — must be left alone
 
-    odMovementSheet.appendRow(odRow({ snapshot_at: odEarly, lead_id: 'L-OD-EARLYONLY', client_id: 'C-OD-EARLYONLY', lead_assigned_at: TestFixture_hoursAgo_(odEarly, 1) }));
+    odMovementSheet.appendRow(odRow({ snapshot_at: odEarly, lead_id: 'L-OD-EARLYONLY', client_id: 'C-OD-EARLYONLY', lead_assigned_at: TestFixture_hoursAgo_(odEarly, 60) }));
     odMovementSheet.appendRow(odRow({ snapshot_at: odLate, lead_id: 'L-OD-FLAGGED', client_id: 'C-OD-FLAGGED', lead_assigned_at: TestFixture_hoursAgo_(odLate, 60) }));
     odMovementSheet.appendRow(odRow({ snapshot_at: odLate, lead_id: 'L-OD-CLOSED', client_id: 'C-OD-CLOSED', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(odLate, 60) }));
     odMovementSheet.appendRow(odRow({ snapshot_at: odOtherDay, lead_id: 'L-OD-OTHERDAY', client_id: 'C-OD-OTHERDAY', lead_assigned_at: TestFixture_hoursAgo_(odOtherDay, 60) }));
+    // A row AFTER the target day's cutoff must not leak back into it.
+    odMovementSheet.appendRow(odRow({ snapshot_at: now, lead_id: 'L-OD-LATER', client_id: 'C-OD-LATER', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
 
     const odLogSheet = ensureDailyRmIssueLogSheet_(odSs);
     const odResult = backfillOneDayFromMovementLog_(odSs, odTargetDayKey);
 
     TestAssertEqual_(odResult.skipped, false, 'backfillOneDayFromMovementLog_: a genuinely missing day is not reported as skipped');
-    TestAssertEqual_(odResult.rowsWritten, 1, 'backfillOneDayFromMovementLog_: writes exactly 1 row (the one flagged, open lead from the target day\'s LATEST run)');
+    TestAssertEqual_(odResult.rowsWritten, 3, 'backfillOneDayFromMovementLog_ (DR-01): writes the 3 flagged open leads whose latest row at or before the day\'s last run says so - the latest run\'s lead, an earlier same-day run\'s and an earlier day\'s');
 
     const odLoggedRows = odLogSheet.getRange(2, 1, odLogSheet.getLastRow() - 1, DAILY_RM_ISSUE_LOG_COLUMNS_.length).getValues();
     const odById = {};
     odLoggedRows.forEach(function (r) { odById[r[4]] = r; });
 
-    TestAssert_(!odById['L-OD-EARLYONLY'], 'backfillOneDayFromMovementLog_: a lead only present in an EARLIER same-day run is excluded — only the day\'s latest run counts');
+    TestAssert_(!!odById['L-OD-EARLYONLY'], 'backfillOneDayFromMovementLog_ (DR-01): a lead only present in an EARLIER same-day run (unchanged since) is back-filled');
     TestAssert_(!!odById['L-OD-FLAGGED'], 'backfillOneDayFromMovementLog_: the flagged open lead from the target day\'s latest run is backfilled');
     TestAssert_(!odById['L-OD-CLOSED'], 'backfillOneDayFromMovementLog_: a closed lead is excluded even from the latest run');
-    TestAssert_(!odById['L-OD-OTHERDAY'], 'backfillOneDayFromMovementLog_: a DIFFERENT day\'s Movement_Log data is left alone — only the requested dayKey is touched');
+    TestAssert_(!!odById['L-OD-OTHERDAY'] && odById['L-OD-OTHERDAY'][0] === odTargetDayKey, 'backfillOneDayFromMovementLog_ (DR-01): a lead whose only row is a day older (dedup-shaped history) is back-filled ON the requested day');
+    TestAssert_(!odById['L-OD-LATER'], 'backfillOneDayFromMovementLog_: a row after the requested day\'s cutoff is not used');
+    TestAssert_(odLoggedRows.every(function (r) { return dailyRmIssueDateKeyGs_(r[0]) === odTargetDayKey; }), 'backfillOneDayFromMovementLog_: only the requested dayKey is written');
     TestAssertEqual_(odById['L-OD-FLAGGED'][0], odTargetDayKey, 'backfillOneDayFromMovementLog_: date column is the requested dayKey, not today');
     TestAssertEqual_(odById['L-OD-FLAGGED'][9], 'Test A1 One', 'backfillOneDayFromMovementLog_: TL column captured from Movement_Log');
     TestAssertEqual_(odById['L-OD-FLAGGED'][10], 'google', 'backfillOneDayFromMovementLog_: group_source column captured');
@@ -1422,12 +1455,154 @@ function runDailyRmIssueLogTests_() {
     const realReadLeadsTab = readLeadsTab_;
     readLeadsTab_ = function () { throw new Error('simulated total failure — Sheets error withRetry_ could not recover from'); };
     try {
+      TestDRIL_resetDone_();
       TestAssertThrows_(function () { captureDailyRmIssues(); }, 'captureDailyRmIssues: a total crash still re-throws — the Apps Script Executions log correctly shows this run as Failed, never silently swallowed');
       TestAssert_(TestGmailLog_.sent.some(function (e) { return /captureDailyRmIssues crashed/.test(e.subject); }), 'captureDailyRmIssues: a total crash fires an ops alert BEFORE re-throwing, naming the crash explicitly');
     } finally {
       readLeadsTab_ = realReadLeadsTab;
       SpreadsheetApp = realSs4;
     }
+
+    // ==================== 2026-10-13 audit fixes (DR-02..DR-11) ====================
+    const auRealSs = SpreadsheetApp;
+    const auRealDrive = DriveApp;
+    try {
+      DriveApp = TestMockDriveApp_();
+      const auUseSs = function (s) { SpreadsheetApp = { getActiveSpreadsheet: function () { return s; }, flush: function () {} }; };
+      const auToday = istDayKeyGs_(new Date());
+      const auLogRow = function (leadId) { return [auToday, 'Test RM One', 'Pune', 'Test Project', leadId, 'C-' + leadId, 'stageStuck48h', 'Stuck 48h+', auToday + ' 22:50:00', 'Test A1 One', 'google', 'Non-UTM', '']; };
+
+      // ---- DR-03: a partly written night is completed (missing leads appended), then the marker makes reruns no-ops ----
+      const ptSs = TestMockSpreadsheet_({});
+      ptSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow, flaggedRow2]);
+      const ptLog = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [DAILY_RM_ISSUE_LOG_COLUMNS_, auLogRow('L-FLAGGED')]);
+      ptSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = ptLog;
+      auUseSs(ptSs);
+      TestDRIL_resetDone_();
+      captureDailyRmIssues_();
+      const ptIds = ptLog.getRange(2, 5, ptLog.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; });
+      TestAssertEqual_(ptIds.filter(function (id) { return id === 'L-FLAGGED'; }).length, 1, 'captureDailyRmIssues_ (DR-03): a lead already written by tonight\'s interrupted run is not written twice');
+      TestAssertEqual_(ptIds.filter(function (id) { return id === 'L-FLAGGED-2'; }).length, 1, 'captureDailyRmIssues_ (DR-03): rows dated today WITHOUT the completion marker no longer block the night - the missing lead is appended');
+      TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(DAILY_RM_ISSUE_DONE_PROPERTY_), auToday, 'captureDailyRmIssues_ (DR-03): the completion marker records tonight after the last chunk');
+      const ptRowsAfter = ptLog.getLastRow();
+      captureDailyRmIssues_();
+      TestAssertEqual_(ptLog.getLastRow(), ptRowsAfter, 'captureDailyRmIssues_ (DR-03): with the marker set, a rerun the same night writes nothing');
+
+      // ---- DR-04: a quiet night (nothing flagged) still runs the retention prune, and records the marker ----
+      const qtSs = TestMockSpreadsheet_({});
+      qtSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, cleanRow]);
+      const qtLog = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [DAILY_RM_ISSUE_LOG_COLUMNS_, prRow_(TestFixture_daysAgo_(realNowForPrune, 40), 'qt-stale')]);
+      qtSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = qtLog;
+      auUseSs(qtSs);
+      TestDRIL_resetDone_();
+      captureDailyRmIssues_();
+      TestAssertEqual_(qtLog.getLastRow(), 1, 'captureDailyRmIssues_ (DR-04): a quiet night still prunes rows older than the retention window');
+      TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(DAILY_RM_ISSUE_DONE_PROPERTY_), auToday, 'captureDailyRmIssues_ (DR-04): a quiet night is recorded as complete too');
+
+      // ---- DR-05: an EMPTY tab still has its grid sized ----
+      const emSs = TestMockSpreadsheet_({});
+      const emLog = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [DAILY_RM_ISSUE_LOG_COLUMNS_]);
+      emLog._maxRows = 50000;
+      emSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = emLog;
+      pruneDailyRmIssueLog_(emSs, 100);
+      TestAssertEqual_(emLog.getMaxRows(), 1 + 100 + DAILY_RM_ISSUE_LOG_ROW_HEADROOM_, 'pruneDailyRmIssueLog_ (DR-05): an empty (header-only) tab is sized to header + incoming + headroom, not left at its old allocation');
+
+      // ---- DR-09: dropped rows are archived in 5,000-row files ----
+      const chRows = [DAILY_RM_ISSUE_LOG_COLUMNS_];
+      for (let i = 0; i < DAILY_RM_ISSUE_ARCHIVE_CHUNK_ + 3; i++) chRows.push(prRow_(istDayKeyGs_(TestFixture_daysAgo_(realNowForPrune, 40)), 'ch-' + i));
+      const chSs = TestMockSpreadsheet_({});
+      const chLog = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, chRows);
+      chSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = chLog;
+      DriveApp = TestMockDriveApp_();
+      pruneDailyRmIssueLog_(chSs);
+      const chFolder = DriveApp._folders[ARCHIVE_ROOT_FOLDER_]._folders['Daily_RM_Issues'];
+      TestAssertEqual_(chFolder._filesList.length, 2, 'pruneDailyRmIssueLog_ (DR-09): ' + (DAILY_RM_ISSUE_ARCHIVE_CHUNK_ + 3) + ' dropped rows go into 2 Drive files, not one');
+      TestAssertEqual_(chLog.getLastRow(), 1, 'pruneDailyRmIssueLog_ (DR-09): every dropped row is still removed');
+
+      // ---- DR-11: a misordered header stops the capture with an ops alert; the backfills refuse to write ----
+      const hoSs = TestMockSpreadsheet_({});
+      hoSs._sheets['leads'] = TestMockSheet_('leads', [banner, header, flaggedRow]);
+      const hoHeader = DAILY_RM_ISSUE_LOG_COLUMNS_.slice();
+      hoHeader[1] = 'region'; hoHeader[2] = 'RM';
+      const hoLog = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [hoHeader]);
+      hoSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = hoLog;
+      auUseSs(hoSs);
+      TestDRIL_resetDone_();
+      const hoSentBefore = TestGmailLog_.sent.length;
+      captureDailyRmIssues();
+      TestAssertEqual_(hoLog.getLastRow(), 1, 'captureDailyRmIssues (DR-11): a misordered header means nothing is written');
+      TestAssert_(TestGmailLog_.sent.slice(hoSentBefore).some(function (e) { return /header is out of order/.test(e.subject); }), 'captureDailyRmIssues (DR-11): ops are alerted via notifyOpsAlertGs_');
+      TestAssert_(!PropertiesService.getScriptProperties().getProperty(DAILY_RM_ISSUE_DONE_PROPERTY_), 'captureDailyRmIssues (DR-11): the night is NOT marked complete');
+      TestAssertEqual_(dailyRmIssueHeaderMisalignmentGs_(TestMockSheet_('x', [DAILY_RM_ISSUE_LOG_COLUMNS_.concat(['extra'])])), '', 'dailyRmIssueHeaderMisalignmentGs_: extra columns after ours are allowed');
+      TestAssertThrows_(function () { backfillOneDayFromMovementLog_(hoSs, auToday); }, 'backfillOneDayFromMovementLog_ (DR-11): refuses to write under a misordered header');
+
+      // ---- DR-07: the backfill write grows the grid BEFORE writing ----
+      const gwSs = TestMockSpreadsheet_({});
+      const gwLog = ensureDailyRmIssueLogSheet_(gwSs);
+      gwLog._maxRows = 1;
+      const gwRows = [auLogRow('L-GW-1'), auLogRow('L-GW-2'), auLogRow('L-GW-3')];
+      const gwRealSetValues = [];
+      const gwRealGetRange = gwLog.getRange;
+      gwLog.getRange = function (r, c, nr, nc) {
+        const rng = gwRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        rng.setValues = function (v) { gwRealSetValues.push(gwLog.getMaxRows() >= r + nr - 1); return realSet.call(rng, v); };
+        return rng;
+      };
+      writeDailyRmIssueRowsGs_(gwLog, gwRows, 'test-write');
+      TestAssert_(gwRealSetValues.length > 0 && gwRealSetValues.every(Boolean), 'writeDailyRmIssueRowsGs_ (DR-07): the grid already fits every row when each setValues runs');
+      TestAssertEqual_(gwLog.getLastRow(), 4, 'writeDailyRmIssueRowsGs_: all rows written');
+
+      // ---- DR-08: the repair writes only the changed span ----
+      const rpSs = TestMockSpreadsheet_({});
+      const rpMl = ensureMovementLogSheet_(rpSs);
+      const rpMlHeader = rpMl.getRange(1, 1, 1, rpMl.getLastColumn()).getValues()[0];
+      rpMl.appendRow(rpMlHeader.map(function (k) { return ({ snapshot_at: new Date(), lead_id: 'L-RP-INC', TL: 'Real A1', group_source: 'facebook', source_bucket: 'UTM', lead_assigned_at: '' })[k] || ''; }));
+      const rpComplete = auLogRow('L-RP-OK'); rpComplete[12] = auToday + ' 09:00:00';
+      const rpInc = auLogRow('L-RP-INC'); rpInc[9] = ''; rpInc[10] = ''; rpInc[11] = ''; rpInc[12] = 'x';
+      const rpLog = TestMockSheet_(DAILY_RM_ISSUE_LOG_SHEET_, [DAILY_RM_ISSUE_LOG_COLUMNS_, rpComplete, rpInc]);
+      rpSs._sheets[DAILY_RM_ISSUE_LOG_SHEET_] = rpLog;
+      const rpWrites = [];
+      const rpRealGetRange = rpLog.getRange;
+      rpLog.getRange = function (r, c, nr, nc) {
+        const rng = rpRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues;
+        rng.setValues = function (v) { rpWrites.push(r + ':' + c + ':' + nr); return realSet.call(rng, v); };
+        return rng;
+      };
+      auUseSs(rpSs);
+      repairDailyRmIssuesMissingFieldsNow();
+      TestAssertEqual_(rpLog.getRange(3, 10, 1, 3).getValues()[0].join(','), 'Real A1,facebook,UTM', 'repairDailyRmIssuesMissingFieldsNow: the incomplete row is filled from Movement_Log');
+      TestAssert_(rpWrites.length > 0 && rpWrites.every(function (w) { return w.split(':')[0] === '3' && w.split(':')[2] === '1'; }), 'repairDailyRmIssuesMissingFieldsNow (DR-08): only the changed row is written, not whole columns (' + rpWrites.join(' ') + ')');
+    } finally {
+      SpreadsheetApp = auRealSs;
+      DriveApp = auRealDrive;
+    }
+
+    // ---- DR-02: forward-fill of the last known row onto capture days (twin of tests/frontend-harness.html "Forward-fill") ----
+    TestAssertEqual_(RM_PERF_FORWARD_FILL_CAPTURE_DAYS_GS_, true, 'RM_PERF_FORWARD_FILL_CAPTURE_DAYS_GS_: the forward-fill switch is ON');
+    const ffSheet = rmPerfMakeSheet_();
+    const ffD1 = new Date('2026-09-01T18:00:00+05:30'), ffD2 = new Date('2026-09-02T18:00:00+05:30'), ffD3 = new Date('2026-09-03T18:00:00+05:30');
+    const ffAssigned = new Date(ffD1.getTime() - 10 * 3600000);
+    const ffRow = function (leadId, at, extra) { return rmPerfRowFor_(ffSheet.header, Object.assign({ snapshot_at: at, lead_id: leadId, client_id: 'C-' + leadId, RM: 'FF RM', current_stage: 'Suspect', lead_assigned_at: ffAssigned }, extra || {})); };
+    [ffRow('FF-ANCHOR', ffD1), ffRow('FF-ANCHOR', ffD2, { call_attempts: 1 }), ffRow('FF-ANCHOR', ffD3, { call_attempts: 2 }),
+      ffRow('FF-STALE', ffD1), ffRow('FF-CLOSES', ffD1), ffRow('FF-CLOSES', ffD2, { closing_reason: 'Not interested' }), ffRow('FF-LATE', ffD2)]
+      .forEach(function (r) { ffSheet.sheet.appendRow(r); });
+    const ffObs = reconstructRmPerformanceObservationsGs_(ffSheet.ss);
+    const ffDays = function (id) { return Object.keys(ffObs.filter(function (o) { return o.leadId === id; }).reduce(function (m, o) { m[o.dayKey] = true; return m; }, {})).sort().join(','); };
+    const ffK1 = istDayKeyGs_(ffD1), ffK2 = istDayKeyGs_(ffD2), ffK3 = istDayKeyGs_(ffD3);
+    TestAssertEqual_(ffDays('FF-STALE'), [ffK1, ffK2, ffK3].join(','), 'reconstructRmPerformanceObservationsGs_ (DR-02): a lead whose only row is day 1 is still observed on days 2 and 3 (dedup-shaped history)');
+    TestAssertEqual_(ffDays('FF-CLOSES'), ffK1, 'reconstructRmPerformanceObservationsGs_ (DR-02): a lead whose latest row says closed is not observed after it closed');
+    TestAssertEqual_(ffDays('FF-LATE'), [ffK2, ffK3].join(','), 'reconstructRmPerformanceObservationsGs_ (DR-02): nothing is invented before a lead\'s first row');
+    TestAssert_(ffObs.some(function (o) { return o.leadId === 'FF-STALE' && o.dayKey === ffK3 && o.rule === 'stageStuck48h' && o.violated; }),
+      'reconstructRmPerformanceObservationsGs_ (DR-02): a filled day is evaluated as of that day (58h old on day 3, so stageStuck48h)');
+
+    // ---- computeRmPerfEligibilityGs_ reads dates like computeSlaFlags_ (parseSlaDateGs_ when present; Date cells either way) ----
+    const elHeader = TestFixture_leadsHeader_();
+    const elNow = new Date('2026-09-02T18:00:00+05:30');
+    const elCtx = computeRmPerfEligibilityGs_(TestDRIL_row_({ lead_assigned_at: new Date(elNow.getTime() - 10 * 3600000), last_connect_time: new Date(elNow.getTime() - 3600000) }), buildColIndex_(elHeader), elNow);
+    TestAssert_(!!elCtx && elCtx.pastGrace && elCtx.isUnder48h && elCtx.hasConnected && elCtx.isCreatedThatDay, 'computeRmPerfEligibilityGs_: Date cells are read the same with or without SlaEngine.gs\'s parseSlaDateGs_');
+    TestAssertEqual_(computeRmPerfEligibilityGs_(TestDRIL_row_({ lead_assigned_at: '' }), buildColIndex_(elHeader), elNow), null, 'computeRmPerfEligibilityGs_: a blank lead_assigned_at is undatable (null)');
   } finally {
     TestEnv_tearDown_();
   }

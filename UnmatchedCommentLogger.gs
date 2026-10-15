@@ -125,8 +125,81 @@ function ensureUnmatchedCommentsLogSheet_(ss) {
 // timestamp) never gets logged twice. Falls back to the raw comment TEXT
 // when there's no timestamp at all (the last_comment-field fallback path
 // in latestOutcomeGs_, which has no timestamp to key off).
+//
+// Delegates to InteractionHistoryLogger.gs's commentHistoryDedupKeyGs_ (2026-10-13 audit: the two were byte-identical copies), so
+// both logs normalise the ts the same way (IH-02).
 function unmatchedCommentDedupKeyGs_(leadId, outcomeEntry) {
-  return leadId + '|' + (outcomeEntry.ts || outcomeEntry.comment);
+  return commentHistoryDedupKeyGs_(leadId, outcomeEntry);
+}
+
+// The `reviewed` cell as a real boolean (UC-03, 2026-10-13): a checkbox reads back true/false, but a pasted or typed cell can read
+// back as the TEXT "TRUE"/"FALSE", and !!"FALSE" is true - which would have cleared an unreviewed row.
+function unmatchedCommentIsReviewedGs_(v) {
+  if (v === true) return true;
+  return String(v === null || v === undefined ? '' : v).trim().toUpperCase() === 'TRUE';
+}
+
+// logged_at as comparable 'yyyy-MM-dd HH:mm:ss' text (UC-03): written as text, but a cell Sheets turned into a Date reads back as
+// one, and comparing a Date with a string with `<` compares NaN / string forms, not times.
+function unmatchedCommentLoggedAtKeyGs_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  return String(v === null || v === undefined ? '' : v).trim();
+}
+
+// ==================== Cleared-review memory (UC-01, 2026-10-13) ====================
+// clearReviewedUnmatchedCommentsNow removes reviewed rows, and the scan's dedup only sees the live tab - so a reviewed comment that
+// was still the lead's latest came straight back, UNREVIEWED, on the next 6-hourly run, undoing the review. The retention check
+// (commentBeyondRetentionGs_) covers rows the 30-day prune removed; this covers rows a human cleared while still inside that window.
+// The keys of cleared rows are kept in a small hidden tab, two text columns: the dedup key and the day it stops mattering (the
+// comment's own day, after which the retention check takes over; the clearing day for a comment with no ts). Chosen over a Script
+// Property because a review batch can be hundreds of keys (a property holds ~9 KB), and over keeping the rows (the point of clearing
+// them is a short review queue). Entries older than UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ are dropped on every clear, so the tab
+// stays at most one retention window of cleared rows. A comment with no ts can come back once that window has passed.
+const UNMATCHED_COMMENTS_CLEARED_SHEET_ = 'Unmatched_Comments_Cleared';
+const UNMATCHED_COMMENTS_CLEARED_COLUMNS_ = ['key', 'day'];
+
+function unmatchedClearedEntryLiveGs_(dayCell, now) {
+  const d = parseIstDayKeyOrDateGs_(dayCell);
+  return !d || d >= new Date(now.getTime() - UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_ * 24 * 60 * 60 * 1000); // unreadable: kept
+}
+
+// key -> 'day' for every live entry; {} when the tab does not exist yet.
+function readClearedUnmatchedKeysGs_(ss, now) {
+  const out = {};
+  const sheet = ss.getSheetByName(UNMATCHED_COMMENTS_CLEARED_SHEET_);
+  if (!sheet) return out;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return out;
+  withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, 2).getValues(); }, 'read Unmatched_Comments_Cleared')
+    .forEach(function (r) {
+      const key = String(r[0] === null || r[0] === undefined ? '' : r[0]).trim();
+      if (key && unmatchedClearedEntryLiveGs_(r[1], now)) out[key] = dailyRmIssueDateKeyGs_(r[1]) || String(r[1] || '');
+    });
+  return out;
+}
+
+// Adds `entries` ([{key, day}]) to the cleared-key tab, dropping expired ones; the tab is small, so it is rewritten whole -
+// written first, then only the leftover tail cleared (never clear-then-write).
+function recordClearedUnmatchedKeysGs_(ss, entries, now) {
+  if (!entries.length) return;
+  let sheet = ss.getSheetByName(UNMATCHED_COMMENTS_CLEARED_SHEET_);
+  if (!sheet) {
+    sheet = withRetry_(function () { return ss.insertSheet(UNMATCHED_COMMENTS_CLEARED_SHEET_); }, 'insert Unmatched_Comments_Cleared');
+    withRetry_(function () { sheet.getRange(1, 1, 1, 2).setValues([UNMATCHED_COMMENTS_CLEARED_COLUMNS_]); }, 'write Unmatched_Comments_Cleared header');
+    try { if (typeof sheet.hideSheet === 'function') sheet.hideSheet(); } catch (e) { Logger.log('Could not hide ' + UNMATCHED_COMMENTS_CLEARED_SHEET_ + ': ' + e); }
+  }
+  const merged = readClearedUnmatchedKeysGs_(ss, now);
+  entries.forEach(function (en) { merged[en.key] = en.day; });
+  const rows = Object.keys(merged).map(function (k) { return [k, merged[k]]; });
+  const lastRow = sheet.getLastRow();
+  if (rows.length) {
+    const range = sheet.getRange(2, 1, rows.length, 2);
+    if (typeof range.setNumberFormat === 'function') range.setNumberFormat('@');
+    withRetry_(function () { range.setValues(rows); }, 'write Unmatched_Comments_Cleared');
+  }
+  if (lastRow - 1 > rows.length) {
+    withRetry_(function () { sheet.getRange(2 + rows.length, 1, (lastRow - 1) - rows.length, 2).clearContent(); }, 'clear Unmatched_Comments_Cleared tail');
+  }
 }
 
 /**
@@ -166,19 +239,18 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
     // OvernightEmailer.gs's Overnight_Log read, Movement_Log) — reformat
     // a Date-typed cell back to the exact string format the write side
     // uses before building the key, same as those.
+    // Same key as the write side, via the shared read-back helper (IH-02: ts whitespace normalised, a Date cell formatted in the
+    // spreadsheet's own zone).
+    const tz = commentLogSheetTimeZoneGs_(ss);
     withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, 7).getValues(); }, 'read Unmatched_Comments_Log for de-dup')
       .forEach(function (r) {
         const leadId = String(r[1] || '').trim();
-        const comment = String(r[5] || '').trim();
-        const commentAtRaw = r[6];
-        // istFormatGs_ (Core.gs): the same string as Utilities.formatDate(..., 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') without a service call
-        // per existing row, on every snapshot run (2026-10-14).
-        const commentAt = commentAtRaw instanceof Date
-          ? istFormatGs_(commentAtRaw, 'yyyy-MM-dd HH:mm')
-          : String(commentAtRaw || '').trim();
-        if (leadId) alreadyLogged[leadId + '|' + (commentAt || comment)] = true;
+        if (leadId) alreadyLogged[commentHistoryReadBackKeyGs_(leadId, r[6], r[5], tz)] = true;
       });
   }
+  // Comments a human already reviewed and cleared count as logged too (UC-01).
+  const cleared = readClearedUnmatchedKeysGs_(ss, now);
+  Object.keys(cleared).forEach(function (k) { alreadyLogged[k] = true; });
 
   const todayKey = istDayKeyGs_(now);
   const loggedAtValue = Utilities.formatDate(now, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
@@ -197,6 +269,9 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
     if (!latest || !latest.comment) return; // no owner-logged comment at all — nothing to classify
     if (latest.outcome !== 'Update') return; // matched a real rule (or is the punctuation-only "No Real Update") — nothing to review
 
+    // Older than the retention window: its row has been (or is about to be) pruned, so it is not new (UC-01).
+    if (commentBeyondRetentionGs_(latest.ts, now, UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_)) return;
+
     const key = unmatchedCommentDedupKeyGs_(leadId, latest);
     if (alreadyLogged[key]) return; // already logged this exact comment before — see this file's own volume-control note
     alreadyLogged[key] = true; // guard against the SAME lead appearing twice within this one run too (shouldn't normally happen, but stay defensive)
@@ -206,16 +281,18 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
       String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned',
       String(getVal_(row, colIndex, 'region') || '').trim(),
       String(getVal_(row, colIndex, 'project') || '').trim(),
-      latest.comment, latest.ts || '', loggedAtValue, false, '',
+      latest.comment, commentTsNormaliseGs_(latest.ts), loggedAtValue, false, '',
     ]);
   });
 
   if (newRows.length) {
+    const startRow = sheet.getLastRow() + 1;
+    commentAtTextFormatGs_(sheet, startRow, UNMATCHED_COMMENTS_LOG_COLUMNS_.indexOf('comment_at') + 1, newRows.length); // IH-02
     withRetry_(function () {
-      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, UNMATCHED_COMMENTS_LOG_COLUMNS_.length).setValues(newRows);
+      sheet.getRange(startRow, 1, newRows.length, UNMATCHED_COMMENTS_LOG_COLUMNS_.length).setValues(newRows);
     }, 'append Unmatched_Comments_Log rows');
     withRetry_(function () {
-      sheet.getRange(sheet.getLastRow() - newRows.length + 1, 9, newRows.length, 1).insertCheckboxes();
+      sheet.getRange(startRow, 9, newRows.length, 1).insertCheckboxes();
     }, 'insert Unmatched_Comments_Log reviewed checkboxes');
   }
 
@@ -236,10 +313,13 @@ function scanUnmatchedCommentsNow() {
 // ONE-OFF MAINTENANCE — deletes every row currently checked "reviewed",
 // once you've actually gone through them (this is deliberately a manual
 // step, not automatic, since only a human should decide a review batch
-// is really done). Rewrites the whole data range with only the
-// not-yet-reviewed rows kept — same simple, safe approach
-// pruneMovementLog_ (MovementTracker.gs) uses for its own row removal.
-// Safe to re-run any time; a sheet with nothing reviewed yet is a no-op.
+// is really done). Rewrites the data range with only the not-yet-reviewed
+// rows kept: kept rows written FIRST, then only the leftover tail cleared
+// (UC-02, 2026-10-13: it used to clear everything first, so an
+// interruption between the two steps lost every unreviewed row too). The
+// cleared rows' keys are remembered first (UC-01, see
+// UNMATCHED_COMMENTS_CLEARED_SHEET_) so the next scan does not bring them
+// back unreviewed. Safe to re-run any time; nothing reviewed = no-op.
 function clearReviewedUnmatchedCommentsNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(UNMATCHED_COMMENTS_LOG_SHEET_);
@@ -248,16 +328,39 @@ function clearReviewedUnmatchedCommentsNow() {
   if (lastRow < 2) { Logger.log('Unmatched_Comments_Log is empty — nothing to clear.'); return; }
 
   const lastCol = UNMATCHED_COMMENTS_LOG_COLUMNS_.length;
-  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  const kept = values.filter(function (row) { return !row[8]; }); // column 9 (index 8) = reviewed
+  const values = withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Unmatched_Comments_Log for clearing');
+  const kept = values.filter(function (row) { return !unmatchedCommentIsReviewedGs_(row[8]); }); // column 9 (index 8) = reviewed
   const clearedCount = values.length - kept.length;
+  if (!clearedCount) { Logger.log('Nothing is marked reviewed - nothing to clear.'); return; }
 
-  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
-  if (kept.length) {
-    sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
-    sheet.getRange(2, 9, kept.length, 1).insertCheckboxes();
-  }
+  const now = new Date();
+  const todayKey = istDayKeyGs_(now);
+  const tz = commentLogSheetTimeZoneGs_(ss);
+  const clearedEntries = [];
+  values.forEach(function (row) {
+    if (!unmatchedCommentIsReviewedGs_(row[8])) return;
+    const leadId = String(row[1] || '').trim();
+    if (!leadId) return;
+    const key = commentHistoryReadBackKeyGs_(leadId, row[6], row[5], tz);
+    const m = /\|(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}$/.exec(key);
+    clearedEntries.push({ key: key, day: m ? m[1] : todayKey });
+  });
+  recordClearedUnmatchedKeysGs_(ss, clearedEntries, now); // before the rows go: an interruption then only leaves them in place
+
+  writeKeptUnmatchedRowsGs_(sheet, kept, lastRow, lastCol);
   Logger.log('Cleared ' + clearedCount + ' reviewed row(s) out of ' + values.length + ' total; ' + kept.length + ' not-yet-reviewed row(s) kept.');
+}
+
+// Writes `kept` to rows 2.. FIRST (checkboxes back on the reviewed column), then clears only the leftover tail up to `lastRow` -
+// never clear-then-write (UC-02, 2026-10-13), the same ordering pruneUnmatchedCommentsLog_ below uses.
+function writeKeptUnmatchedRowsGs_(sheet, kept, lastRow, lastCol) {
+  if (kept.length) {
+    withRetry_(function () { sheet.getRange(2, 1, kept.length, lastCol).setValues(kept); }, 'rewrite kept Unmatched_Comments_Log rows');
+    withRetry_(function () { sheet.getRange(2, 9, kept.length, 1).insertCheckboxes(); }, 'restore Unmatched_Comments_Log reviewed checkboxes');
+  }
+  if (lastRow - 1 > kept.length) {
+    withRetry_(function () { sheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent(); }, 'clear Unmatched_Comments_Log tail');
+  }
 }
 
 // ONE-OFF RECOVERY — run this ONCE after syncing the 2026-09-03 de-dup fix
@@ -271,7 +374,7 @@ function clearReviewedUnmatchedCommentsNow() {
 // key (oldest `date`/`logged_at` — the first time this comment was truly
 // new) UNLESS a later duplicate is marked reviewed=true, in which case
 // that reviewed one wins, so no review work already done gets silently
-// discarded. Same clear-and-rewrite approach as clearReviewedUnmatchedCommentsNow.
+// discarded. Same write-kept-then-clear-tail approach as clearReviewedUnmatchedCommentsNow (UC-02).
 // Safe to re-run — a sheet with no duplicates left is a no-op. Not meant
 // to run repeatedly: once this bug is actually fixed in the live project,
 // new duplicates should stop appearing on their own.
@@ -283,36 +386,30 @@ function dedupeUnmatchedCommentsNow() {
   if (lastRow < 2) { Logger.log('Unmatched_Comments_Log is empty — nothing to dedupe.'); return; }
 
   const lastCol = UNMATCHED_COMMENTS_LOG_COLUMNS_.length;
-  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const values = withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Unmatched_Comments_Log for dedupe');
+  const tz = commentLogSheetTimeZoneGs_(ss);
 
   const byKey = {}; // key -> the row currently kept for it
   values.forEach(function (row) {
     const leadId = String(row[1] || '').trim();
     if (!leadId) return;
-    const comment = String(row[5] || '').trim();
-    const commentAtRaw = row[6];
-    const commentAt = commentAtRaw instanceof Date
-      ? istFormatGs_(commentAtRaw, 'yyyy-MM-dd HH:mm')
-      : String(commentAtRaw || '').trim();
-    const key = leadId + '|' + (commentAt || comment);
+    const key = commentHistoryReadBackKeyGs_(leadId, row[6], row[5], tz);
     const existing = byKey[key];
     if (!existing) { byKey[key] = row; return; }
     // Prefer a reviewed duplicate over an unreviewed one (never lose
     // review work already done); otherwise keep whichever has the
     // earlier logged_at (column 8, index 7) — the original first-seen row.
-    const existingReviewed = !!existing[8], rowReviewed = !!row[8];
+    // Both cells normalised before comparing (UC-03).
+    const existingReviewed = unmatchedCommentIsReviewedGs_(existing[8]), rowReviewed = unmatchedCommentIsReviewedGs_(row[8]);
     if (rowReviewed && !existingReviewed) { byKey[key] = row; return; }
-    if (rowReviewed === existingReviewed && row[7] < existing[7]) { byKey[key] = row; }
+    if (rowReviewed === existingReviewed && unmatchedCommentLoggedAtKeyGs_(row[7]) < unmatchedCommentLoggedAtKeyGs_(existing[7])) { byKey[key] = row; }
   });
 
   const kept = Object.keys(byKey).map(function (k) { return byKey[k]; });
   const clearedCount = values.length - kept.length;
+  if (!clearedCount) { Logger.log('No duplicates - nothing to dedupe.'); return; }
 
-  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
-  if (kept.length) {
-    sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
-    sheet.getRange(2, 9, kept.length, 1).insertCheckboxes();
-  }
+  writeKeptUnmatchedRowsGs_(sheet, kept, lastRow, lastCol);
   Logger.log('Deduped: removed ' + clearedCount + ' duplicate row(s) out of ' + values.length + ' total; ' + kept.length + ' unique row(s) kept.');
 }
 
