@@ -1606,6 +1606,272 @@ function runOvernightEmailerTests_() {
 
     TestAssertOnlyTestEmails_();
 
+    // ================= audit fixes 2026-10-13 (OE-01..OE-15, CODE-AUDIT-APPS-SCRIPT-2026-10-13.md) =================
+    {
+      const realGetSs = SpreadsheetApp.getActiveSpreadsheet;
+      const realGmailAppA = GmailApp, realGmailA = Gmail, realPropsA = PropertiesService;
+      const L = EMAIL_LEDGER_HEADERS_;
+      const dayToday = istDayKeyGs_(new Date());
+      const noonToday = new Date(dayToday + 'T12:00:00+05:30');
+      const ledgerOf = function (ssX, job) { const sh = ssX.getSheetByName(EMAIL_LEDGER_SHEET_); return (sh ? TestEL_objects_(sh, L) : []).filter(function (r) { return !job || r.job === job; }); };
+      const failingGmailFor = function (leadId) {
+        const realCD = GmailApp.createDraft;
+        GmailApp.createDraft = function (to, subject, body, options) {
+          if (!leadId || String((options && options.htmlBody) || '').indexOf(leadId) !== -1) return { send: function () { throw new Error('Gmail operation not allowed for this user'); } };
+          return realCD.apply(GmailApp, arguments);
+        };
+      };
+      // A Pune lead and a Thane lead assigned yesterday evening (inside the overnight window), flagged by a clock-independent rule.
+      const morningWorld = function (extra) {
+        const eve = new Date(istDayKeyGs_(new Date(Date.now() - 24 * 3600 * 1000)) + 'T18:00:00+05:30');
+        const ssW = TestMockSpreadsheet_({
+          'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+          'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        });
+        const row = function (o) { return TestEL_leadRow_(header, Object.assign({ RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: eve }, o)); };
+        ssW._sheets['leads'] = TestMockSheet_('leads', [banner, header, row({ lead_id: 'L-PUNE', client_id: 'C-PUNE', region: 'Pune' }), row({ lead_id: 'L-THANE', client_id: 'C-THANE', region: 'Thane' })]
+          .concat((extra || []).map(row)));
+        return ssW;
+      };
+      const setSheetCell = function (sheet, matchCol, matchValue, col, value) {
+        const vals = sheet.getRange(1, 1, sheet.getLastRow(), Math.max(matchCol, col)).getValues();
+        for (let i = 0; i < vals.length; i++) if (vals[i][matchCol - 1] === matchValue) { sheet.getRange(i + 1, col, 1, 1).setValues([[value]]); return i + 1; }
+        return 0;
+      };
+      try {
+        // ---- OE-01 (10:00): BLOCKED/FAILED, the address is corrected, recovery sends to the new address ----
+        {
+          const ssR = morningWorld();
+          TestEL_bind_(ssR);
+          failingGmailFor('L-PUNE');
+          sendOvernightMorningEmails();
+          GmailApp = TestMockGmailApp_({});
+          TestGmailLog_.sent.length = 0;
+          const oldPune = ledgerOf(ssR, 'morning10').filter(function (r) { return r.region === 'Pune'; });
+          TestAssertEqual_(oldPune.length + ',' + oldPune[0].status, '1,FAILED', 'OE-01 10:00 address fixed: set up - the Pune bucket failed');
+          setSheetCell(ssR.getSheetByName('Manager_Directory'), 1, 'Test A1 One', 4, TEST_EMAIL_SECONDARY_); // the documented fix
+          const draftsBefore = TestGmailLog_.drafts.length;
+          recoverFailedMorningBuckets_({ now: noonToday });
+          const newDrafts = TestGmailLog_.drafts.slice(draftsBefore);
+          TestAssertEqual_(newDrafts.length + ',' + (newDrafts[0] ? newDrafts[0].to : ''), '1,' + TEST_EMAIL_SECONDARY_, 'OE-01 10:00 address fixed: the recovery sends the Pune bucket once, to the corrected address');
+          TestAssertContains_(newDrafts[0] ? newDrafts[0].htmlBody : '', 'L-PUNE', 'OE-01 10:00 address fixed: …carrying the failed lead');
+          const pune = ledgerOf(ssR, 'morning10').filter(function (r) { return r.region === 'Pune'; });
+          const oldRow = pune.filter(function (r) { return r.email_id === oldPune[0].email_id; })[0];
+          const newRow = pune.filter(function (r) { return r.email_id !== oldPune[0].email_id; })[0];
+          TestAssertEqual_(oldRow.status + ',' + (newRow ? newRow.status + ',' + newRow.to : ''), 'SKIPPED,ACCEPTED,' + TEST_EMAIL_SECONDARY_, 'OE-01 10:00 address fixed: the old id is closed SKIPPED and the new id is ACCEPTED');
+          TestAssertContains_(oldRow.status_reason, 're-sent as', 'OE-01 10:00 address fixed: …the old row says which row re-sent it');
+          TestAssertEqual_(ledgerOf(ssR, 'morning10').filter(function (r) { return r.region === 'Thane'; }).map(function (r) { return r.status + ':' + r.attempts; }).join(','), 'ACCEPTED:1', 'OE-01 10:00 address fixed: the other region is not touched');
+        }
+
+        // ---- OE-01 (10:00): the routing changed (a different bucket, no lead list on the failed row) -> ops alert, row left FAILED ----
+        {
+          const ssR = morningWorld();
+          TestEL_bind_(ssR);
+          failingGmailFor('L-PUNE');
+          sendOvernightMorningEmails();
+          GmailApp = TestMockGmailApp_({});
+          TestGmailLog_.sent.length = 0;
+          setSheetCell(ssR.getSheetByName('RM_Hierarchy'), 3, 'Test RM One', 4, 'Test A1 Two');
+          ssR._sheets['RM_Hierarchy'].appendRow(['Test Region', 'A1', 'Test A1 Two', '', '', '', 'Test CH Self', false, '', '']);
+          ssR._sheets['Manager_Directory'].appendRow(['Test A1 Two', 'TL', 'Test Region', TEST_EMAIL_SECONDARY_, 1, 'manual']);
+          const draftsBefore = TestGmailLog_.drafts.length;
+          recoverFailedMorningBuckets_({ now: noonToday });
+          TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore, 'OE-01 10:00 routing changed: an unmatched bucket is not sent on a guess');
+          const alert = TestGmailLog_.sent.filter(function (e) { return /10:00 recovery: failed email\(s\) could not be matched - Pune/.test(e.subject); })[0];
+          TestAssert_(!!alert, 'OE-01 10:00 routing changed: ops are alerted instead of a silent SKIPPED');
+          TestAssertContains_(alert ? alert.body : '', 'L-PUNE', 'OE-01 10:00 routing changed: …naming the unsent lead');
+          TestAssertEqual_(ledgerOf(ssR, 'morning10').filter(function (r) { return r.region === 'Pune'; }).map(function (r) { return r.status; }).join(','), 'FAILED', 'OE-01 10:00 routing changed: the failed row is left FAILED (its leads are still unsent), not closed');
+        }
+
+        // ---- OE-01 (13:00): the reply failed, the stored address is corrected by hand, the recovery sends it ----
+        {
+          const ssR = morningWorld();
+          TestEL_bind_(ssR);
+          sendOvernightMorningEmails();
+          const logSh = ssR.getSheetByName('Overnight_Log');
+          const puneThread = String(logSh.getRange(2, 1, 2, 3).getValues().filter(function (r) { return r[1] === 'Pune'; })[0][2]);
+          const realSend = Gmail.Users.Messages.send;
+          Gmail.Users.Messages.send = function (payload) { if (payload.threadId === puneThread) throw new Error('Gmail operation not allowed for this user'); return realSend.apply(this, arguments); };
+          failingGmailFor('L-PUNE');
+          sendOvernightFollowupEmails();
+          Gmail.Users.Messages.send = realSend;
+          GmailApp = TestMockGmailApp_({});
+          TestGmailLog_.sent.length = 0;
+          const oldId = ledgerOf(ssR, 'followup13').filter(function (r) { return r.region === 'Pune'; })[0];
+          TestAssertEqual_(oldId.status, 'FAILED', 'OE-01 13:00: set up - the Pune reply failed');
+          setSheetCell(logSh, 2, 'Pune', 6, TEST_EMAIL_SECONDARY_);
+          const repliesBefore = TestGmailLog_.threadReplies.length;
+          recoverFailedFollowupBuckets_({ now: noonToday });
+          TestAssertEqual_(TestGmailLog_.threadReplies.length - repliesBefore, 1, 'OE-01 13:00: the recovery sends the reply once, under the corrected address');
+          const rows = ledgerOf(ssR, 'followup13').filter(function (r) { return r.region === 'Pune'; });
+          const oldRow = rows.filter(function (r) { return r.email_id === oldId.email_id; })[0];
+          const newRow = rows.filter(function (r) { return r.email_id !== oldId.email_id; })[0];
+          TestAssertEqual_(oldRow.status + ',' + (newRow ? newRow.status + ',' + newRow.to : ''), 'SKIPPED,ACCEPTED,' + TEST_EMAIL_SECONDARY_, 'OE-01 13:00: the old id is closed SKIPPED, the new one ACCEPTED');
+          TestAssertContains_(oldRow.status_reason, 're-sent as', 'OE-01 13:00: …with the reason');
+        }
+
+        // ---- OE-02: a Checkpoint 1 with no 13:00 thread and an unresolved lead -> ops alert ----
+        {
+          TestEL_bind_(TestMockSpreadsheet_({}));
+          const realCompute = computeAllIssuesCheckpointGs_;
+          let state = 'reopened';
+          computeAllIssuesCheckpointGs_ = function (ssX, entries) { return entries.map(function (e) { return { lead_id: e.lead_id, state: state, currentIssueLabel: 'Not Updated' }; }); };
+          try {
+            const pending = {
+              'pune|a@x': { to: TEST_EMAIL_PRIMARY_, bucketLabel: 'Test A1 One', checkpoint1Entries: [{ lead_id: 'L-REOPEN' }] },
+              'pune|b@x': { to: TEST_EMAIL_PRIMARY_, bucketLabel: 'Other', checkpoint1Entries: [{ lead_id: 'L-CONSUMED' }] },
+            };
+            alertUnconsumedCheckpoint2Gs_(TestMockSpreadsheet_({}), pending, { 'pune|b@x': true }, new Date(), {}, null);
+            const a = TestGmailLog_.sent.filter(function (e) { return /no 10:00 thread/.test(e.subject); });
+            TestAssertEqual_(a.length, 1, 'OE-02: an unconsumed Checkpoint 2 with an unresolved lead alerts ops once');
+            TestAssert_(a[0] && a[0].body.indexOf('L-REOPEN') !== -1 && a[0].body.indexOf('L-CONSUMED') === -1, 'OE-02: …naming only the lead no reply carried');
+            state = 'resolved';
+            TestGmailLog_.sent.length = 0;
+            alertUnconsumedCheckpoint2Gs_(TestMockSpreadsheet_({}), pending, {}, new Date(), {}, null);
+            TestAssertEqual_(TestGmailLog_.sent.length, 0, 'OE-02: nothing to say when every lead is resolved');
+          } finally { computeAllIssuesCheckpointGs_ = realCompute; }
+        }
+
+        // ---- OE-03: the Overnight_Log append fails after a successful send -> ops alert ----
+        {
+          const ssR = morningWorld();
+          TestEL_bind_(ssR);
+          const realAppend = appendRowOnceGs_;
+          appendRowOnceGs_ = function () { return function () { throw new Error('simulated append failure'); }; };
+          try { sendOvernightMorningEmails(); } finally { appendRowOnceGs_ = realAppend; }
+          TestAssert_(TestGmailLog_.drafts.length >= 2, 'OE-03: the emails themselves still went out');
+          TestAssert_(TestGmailLog_.sent.some(function (e) { return /Overnight_Log row NOT written - Pune/.test(e.subject + ' ' + e.body); }), 'OE-03: a failed Overnight_Log append after a send alerts ops (no 13:00 thread otherwise)');
+        }
+
+        // ---- OE-05: a CH-level report failing for an ordinary Gmail reason alerts ops ----
+        {
+          const ssR = morningWorld([{ lead_id: 'L-CHX', client_id: 'C-CHX', RM: 'Test CH Self', region: 'Pune' }]);
+          TestEL_bind_(ssR);
+          failingGmailFor('L-CHX');
+          sendOvernightMorningEmails();
+          const a = TestGmailLog_.sent.filter(function (e) { return /CH-level overnight report FAILED - Pune/.test(e.subject); })[0];
+          TestAssert_(!!a, 'OE-05: a non-gate CH-level failure alerts ops');
+          TestAssertContains_(a ? a.body : '', 're-send by hand', 'OE-05: …saying CH-level reports have no recovery job');
+        }
+
+        // ---- OE-06: a suggestion typed into column F between the read and the write survives ----
+        {
+          const lfHeaderA = ['lead_id', 'region', 'RM', 'issue', 'collated_comments', 'suggested_followup', 'updated_at', 'own_comments'];
+          const lfSsA = TestMockSpreadsheet_({ 'Lead_Followups': TestMockSheet_('Lead_Followups', [lfHeaderA, ['L-RACE', 'Pune', 'Test RM One', 'x', 'old', '', '', 'old']]) });
+          const sh = lfSsA.getSheetByName('Lead_Followups');
+          const realGR = sh.getRange;
+          let typed = false;
+          sh.getRange = function (r, c, nr, nc) {
+            const rg = realGR.apply(sh, arguments);
+            if (c === 1 && nc === 8 && !typed) {
+              const realGV = rg.getValues;
+              rg.getValues = function () { const v = realGV.apply(rg, arguments); typed = true; realGR.call(sh, 2, 6, 1, 1).setValues([['typed meanwhile']]); return v; };
+            }
+            return rg;
+          };
+          pushUnresolvedToLeadFollowups_(lfSsA, [{ lead_id: 'L-RACE', region: 'Pune', RM: 'Test RM One', issue: 'x', comments: 'new' }]);
+          sh.getRange = realGR;
+          const after = sh.getRange(2, 1, 1, 8).getValues()[0];
+          TestAssertEqual_(after[5] + ',' + after[4], 'typed meanwhile,new', 'OE-06: column F typed during the push is not overwritten, while E is still updated');
+        }
+
+        // ---- OE-07 / OE-08: TEST MODE writes no Overnight_Log row; the backfill uses the current subject format ----
+        {
+          const ssR = morningWorld();
+          TestEL_bind_(ssR);
+          const logSh = ensureOvernightLogSheet_(ssR);
+          TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+          try {
+            sendOneOvernightEmail_(ssR, logSh, 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1', source: 'test' },
+              [{ lead_id: 'L-PUNE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', followup: 'x', issue: { key: 'k', label: 'K' } }], '13 Oct 2026', dayToday, new Date(), win);
+            TestAssertEqual_(logSh.getLastRow(), 1, 'OE-07: sendOneOvernightEmail_ in TEST MODE writes no production Overnight_Log row');
+            logSh.appendRow([dayToday, 'Pune', 'thr-bf', JSON.stringify([{ lead_id: 'L-PUNE', issueKey: 'k', issueLabel: 'K' }]), 'x', '', '', '']);
+            backfillTodaysOvernightLogRecipientsNow();
+            TestAssertEqual_(String(logSh.getRange(2, 6, 1, 1).getValue()), '', 'OE-08: the backfill writes nothing in TEST MODE');
+          } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+          backfillTodaysOvernightLogRecipientsNow();
+          TestAssertEqual_(String(logSh.getRange(2, 8, 1, 1).getValue()), '(Test A1 One) Pune Google Overnight + Follow-up Digest - ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy'), 'OE-08: the backfilled subject uses the current combined-email format');
+          TestAssertEqual_(combinedMorningSubjectGs_('Ayaz', 'TM', 'Pune', '1 Oct 2026'), '(Ayaz - TM) Pune Google Overnight + Follow-up Digest - 1 Oct 2026', 'OE-08: combinedMorningSubjectGs_ adds the tier qualifier for a non-A1 primary');
+        }
+
+        // ---- OE-10: a failed combined email reports only the still-unresolved Checkpoint 1 leads ----
+        {
+          const ssR = TestMockSpreadsheet_({});
+          TestEL_bind_(ssR);
+          GmailApp.createDraft = function () { return { send: function () { throw new Error('Gmail operation not allowed for this user'); } }; };
+          const realCompute = computeAllIssuesCheckpointGs_;
+          computeAllIssuesCheckpointGs_ = function () { return [{ lead_id: 'L-OPEN', state: 'still_open', currentIssueLabel: 'Not Updated' }, { lead_id: 'L-DONE', state: 'resolved' }]; };
+          try {
+            const s2 = { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1', rowNumbers: [2],
+              snapshotEntries: [{ lead_id: 'L-OPEN', RM: 'Test RM One', TL: 'Test A1 One', issueLabel: 'Not Updated' }, { lead_id: 'L-DONE', RM: 'Test RM One', TL: 'Test A1 One', issueLabel: 'Not Updated' }] };
+            const res = sendCombinedMorningEmail_(ssR, ensureOvernightLogSheet_(ssR), ensureAllIssuesLogSheet_(ssR), 'Pune', null, s2, '13 Oct 2026', dayToday, new Date(), win, {}, null,
+              { colIndex: {}, dataRows: [], lastChangeMap: {} });
+            TestAssertEqual_(res && res.section2Leads ? res.section2Leads.map(function (l) { return l.lead_id; }).join(',') : '(none)', 'L-OPEN', 'OE-10: the failure result lists only the still-unresolved Checkpoint 1 lead');
+            const a = TestGmailLog_.sent.filter(function (e) { return /Combined morning email FAILED/.test(e.subject); })[0];
+            TestAssert_(a && a.body.indexOf('L-OPEN') !== -1 && a.body.indexOf('L-DONE') === -1, 'OE-10: the failure alert does not report the resolved lead as not sent');
+          } finally { computeAllIssuesCheckpointGs_ = realCompute; }
+        }
+
+        // ---- OE-11: followup_sent_at cannot be written after a reply went out -> ops alert ----
+        {
+          const ssR = morningWorld();
+          TestEL_bind_(ssR);
+          sendOvernightMorningEmails();
+          const realWrite = writeUnlessTestModeGs_;
+          writeUnlessTestModeGs_ = function (fn, label) { if (/^write followup_sent_at/.test(label)) throw new Error('simulated write failure'); return realWrite(fn, label); };
+          try { sendOvernightFollowupEmails(); } finally { writeUnlessTestModeGs_ = realWrite; }
+          TestAssert_(TestGmailLog_.threadReplies.length >= 1, 'OE-11: set up - the reply went out');
+          TestAssert_(TestGmailLog_.sent.some(function (e) { return /followup_sent_at NOT written/.test(e.subject + ' ' + e.body); }), 'OE-11: a lost followup_sent_at write alerts ops (a re-run would duplicate the reply)');
+        }
+
+        // ---- OE-12: the loaders use the sheet they are given instead of ensuring it again ----
+        {
+          const ssR = TestMockSpreadsheet_({});
+          const sheetA = ensureAllIssuesLogSheet_(ssR);
+          const realEnsure = ensureAllIssuesLogSheet_;
+          ensureAllIssuesLogSheet_ = function () { throw new Error('ensure called again'); };
+          try {
+            TestAssertEqual_(Object.keys(loadYesterdaysAllIssuesBucketsGs_(ssR, new Date(), sheetA)).length + ',' + Object.keys(loadTodaysCheckpoint1PendingGs_(ssR, new Date(), sheetA)).length, '0,0', 'OE-12: both AllIssues_Log loaders read the passed sheet without a second ensure');
+          } finally { ensureAllIssuesLogSheet_ = realEnsure; }
+        }
+
+        // ---- EI-13 (overnight half): an empty leads tab alerts ops, and the run still completes ----
+        {
+          const ssR = morningWorld();
+          ssR._sheets['leads'] = TestMockSheet_('leads', [banner, header]);
+          TestEL_bind_(ssR);
+          sendOvernightMorningEmails();
+          TestAssert_(TestGmailLog_.sent.some(function (e) { return /leads tab has NO data rows/.test(e.subject); }), 'EI-13: a leads tab with zero data rows alerts ops');
+          TestAssert_(!TestGmailLog_.sent.some(function (e) { return /crashed/.test(e.subject); }), 'EI-13: …and the run completes (no crash alert)');
+        }
+
+        // ---- OE-13: the raw threaded reply's Subject header is RFC 2047 encoded when non-ASCII ----
+        TestAssertEqual_(mimeSubjectHeaderValueGs_('Re: (A) Pune Digest - 1 Oct'), 'Re: (A) Pune Digest - 1 Oct', 'OE-13: an ASCII subject is sent as is');
+        TestAssertEqual_(mimeSubjectHeaderValueGs_('Re: Pune — Digest').indexOf('=?UTF-8?B?'), 0, 'OE-13: a non-ASCII subject becomes an RFC 2047 encoded word');
+        TestAssertEqual_(mimeSubjectHeaderValueGs_('a\r\nBcc: x@y').indexOf('\n'), -1, 'OE-13: a line break can never reach the header');
+
+        // ---- OE-04: downloadNoIssueLeadsNow uses the production scope (Google + Non-UTM/Search) ----
+        {
+          const ssR = TestMockSpreadsheet_({});
+          ssR._sheets['leads'] = TestMockSheet_('leads', [banner, header,
+            TestOE_leadRow_(header, { lead_id: 'L-NONUTM', client_id: 'C-1', lead_assigned_at: midWindow, source_bucket: 'Non-UTM' }),
+            TestOE_leadRow_(header, { lead_id: 'L-DISPLAY', client_id: 'C-2', lead_assigned_at: midWindow, source_bucket: 'Display' })]);
+          TestEL_bind_(ssR);
+          downloadNoIssueLeadsNow();
+          const dbg = ssR.getSheetByName('Debug_NoIssueLeads');
+          const ids = dbg.getLastRow() >= 2 ? dbg.getRange(2, 1, dbg.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; }) : [];
+          TestAssert_(ids.indexOf('L-DISPLAY') === -1, 'OE-04: a Google lead outside Non-UTM/Search is not listed (the real morning email excludes it)');
+          TestAssert_(ids.indexOf('L-NONUTM') !== -1, 'OE-04: …while an in-scope lead still is');
+        }
+      } finally {
+        TEST_MODE_OVERRIDE_EMAIL_ = '';
+        SpreadsheetApp.getActiveSpreadsheet = realGetSs;
+        GmailApp = realGmailAppA; Gmail = realGmailA; PropertiesService = realPropsA;
+      }
+    }
+
+    TestAssertOnlyTestEmails_();
+
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in either
     // real run must alert ops before it aborts, not fail silently — same
     // reasoning/pattern as sendAllIssuesEmails' own wrapper
