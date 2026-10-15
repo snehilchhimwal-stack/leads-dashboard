@@ -72,6 +72,13 @@ function runOpsAuditTests_() {
       TestAssertContains_(f.action, 'recoverFailedAllIssuesBucketsNow()', 'unfinished: the matching recovery is named');
       TestAssertContains_(f.action, 'ATTEMPTING one is NOT re-sent', 'unfinished: the ambiguous case is not offered for re-sending');
       TestAssertEqual_(String(opsAuditUnfinishedGs_([led(), led({ status: 'SKIPPED' })], 'x')), 'null', 'unfinished: nothing open -> no finding');
+      // OE-05/AI-2 (2026-10-13): a CH-level row has no recovery path - the action says re-send by hand, not "run the recovery".
+      const chOnly = opsAuditUnfinishedGs_([led({ job: 'chLevel17', status: 'PLANNED', bucket_label: 'CH Report' })], 'recoverFailedAllIssuesBucketsNow()');
+      TestAssert_(chOnly.action.indexOf('Run recoverFailedAllIssuesBucketsNow()') === -1, 'unfinished (CH-level only): the action does NOT tell you to run the recovery');
+      TestAssertContains_(chOnly.action, 'is a CH-level report (Pune / CH Report), which recoverFailedAllIssuesBucketsNow() cannot re-send', 'unfinished (CH-level only): it says the CH-level report cannot be re-sent by the recovery');
+      TestAssertContains_(chOnly.action, 're-send by hand', 'unfinished (CH-level only): it says to re-send by hand');
+      const chMixed = opsAuditUnfinishedGs_([led({ status: 'PLANNED' }), led({ job: 'chLevel10', status: 'ATTEMPTING', bucket_label: 'CH' })], 'recoverFailedMorningBucketsNow()');
+      TestAssert_(chMixed.action.indexOf('Run recoverFailedMorningBucketsNow()') === 0 && chMixed.action.indexOf('1 of them is a CH-level report') !== -1, 'unfinished (mixed): the recovery is offered for the bucket rows and the CH-level row is called out separately');
     }
     // ---- ACCEPTED_WITHOUT_LOG ----
     {

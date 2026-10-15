@@ -125,7 +125,12 @@ function checkStaleComponents_(ss, now) {
   const byComponent = {};
   values.forEach(function (r) {
     const id = String(r[0] || '').trim();
-    if (id) byComponent[id] = { lastUsedAt: parseFeatureUsageTimestampGs_(r[1]), useCount: r[2] };
+    if (!id) return;
+    // OC-3 (2026-10-13): an id can appear on more than one row (two tabs recording at once); the NEWEST use wins, not
+    // whichever row happens to be last - otherwise an older duplicate could make a live tab look stale.
+    const at = parseFeatureUsageTimestampGs_(r[1]);
+    const prev = byComponent[id];
+    if (!prev || (at && (!prev.lastUsedAt || at.getTime() > prev.lastUsedAt.getTime()))) byComponent[id] = { lastUsedAt: at, useCount: r[2] };
   });
 
   const neverObserved = [], stale = [], recent = [];
@@ -155,86 +160,113 @@ function buildWeeklyOpsChecklistSummary_(ss, now) {
   const lines = [];
   let issueCount = 0;
 
-  const unresolvedRms = withRetry_(function () { return auditUnresolvedRms_(ss); }, 'buildWeeklyOpsChecklistSummary_: auditUnresolvedRms_');
-  if (unresolvedRms.length) {
-    issueCount += unresolvedRms.length;
-    lines.push(unresolvedRms.length + ' RM name(s) do not resolve in RM_Hierarchy (run auditUnresolvedRmsNow for full detail):');
-    unresolvedRms.slice(0, 10).forEach(function (r) { lines.push('  - ' + r.name + ' (' + r.count + ' open lead(s))'); });
-    if (unresolvedRms.length > 10) lines.push('  ...+' + (unresolvedRms.length - 10) + ' more');
-  } else {
-    lines.push('RM hierarchy: every open lead\'s RM resolves fine. No gaps.');
-  }
-
-  const managerGaps = auditManagerDirectoryEmailGaps_(ss);
-  if (managerGaps === null) {
-    issueCount++;
-    lines.push('Manager_Directory: sheet not found — run setupRmHierarchy.');
-  } else if (managerGaps.length) {
-    issueCount += managerGaps.length;
-    lines.push(managerGaps.length + ' manager(s) have real reports but no email in Manager_Directory (run auditManagerDirectoryEmailGapsNow for full detail):');
-    managerGaps.slice(0, 10).forEach(function (g) { lines.push('  - ' + g.name + ' (' + g.reportCount + ' report(s))'); });
-    if (managerGaps.length > 10) lines.push('  ...+' + (managerGaps.length - 10) + ' more');
-  } else {
-    lines.push('Manager_Directory: every manager with real reports has an email on file. No gaps.');
-  }
-
-  const freshness = checkMovementLogFreshness_(ss, now);
-  if (freshness.status === 'fresh') {
-    lines.push('Movement_Log: fresh — last capture ' + freshness.ageHours.toFixed(1) + 'h ago.');
-  } else if (freshness.status === 'stale') {
-    issueCount++;
-    lines.push('Movement_Log: STALE — last capture ' + freshness.ageHours.toFixed(1) + 'h ago. Check Triggers (clock icon) for a paused/deleted snapshotPeriodic (run checkMovementLogFreshnessNow for full detail).');
-  } else {
-    issueCount++;
-    lines.push('Movement_Log: ' + freshness.status + ' — run checkMovementLogFreshnessNow for full detail.');
-  }
-
-  // Cell-budget check (Core.gs) — the workbook's shared 10M-cell ceiling,
-  // summed across every tab's DECLARED grid, not just Movement_Log/
-  // Daily_RM_Issues' own retention windows. WARN/CRITICAL thresholds are
-  // percentages of the ceiling (WORKBOOK_CELL_ALERT_WARN_PCT_/
-  // WORKBOOK_CELL_ALERT_CRITICAL_PCT_), not an absolute row count, since
-  // the mix of tabs and their per-row width both drift over time. Always
-  // names the top 3 tabs by cell count — Movement_Log/Daily_RM_Issues have
-  // their own scheduled prune, but a CRITICAL reading means their normal
-  // 7-day cadence hasn't kept up (same "an after-write prune can't
-  // self-heal" trap as the 09-24 incident) and pruneMovementLogNow() /
-  // pruneDailyRmIssueLogNow() need running by hand now, not next capture.
-  const cellUsage = computeWorkbookCellUsageGs_(ss);
-  const cellPct = (cellUsage.pctUsed * 100).toFixed(1) + '%';
-  const topTabsLine = cellUsage.sheets.slice(0, 3).map(function (s) { return s.name + ' (' + fmtCellsGs_(s.cells) + ')'; }).join(', ');
-  if (cellUsage.pctUsed >= WORKBOOK_CELL_ALERT_CRITICAL_PCT_) {
-    issueCount++;
-    lines.push('CELL BUDGET CRITICAL: ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct +
-      ') — a capture WILL crash soon (HANDOVER.md section 9.2/9.3). Run pruneMovementLogNow() / pruneDailyRmIssueLogNow() now. Largest tabs: ' + topTabsLine + '.');
-  } else if (cellUsage.pctUsed >= WORKBOOK_CELL_ALERT_WARN_PCT_) {
-    issueCount++;
-    lines.push('Cell budget WARNING: ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct +
-      '). Largest tabs: ' + topTabsLine + '. Not urgent yet — worth a look before it is (run reportWorkbookCellUsageNow() for the full breakdown).');
-  } else {
-    lines.push('Cell budget: healthy — ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct + '). Largest: ' + topTabsLine + '.');
-  }
-
-  // Stale-component check (Part 4, 2026-10-03) — see checkStaleComponents_'s
-  // own header for the neverObserved vs. stale distinction and the
-  // rollout-grace reasoning.
-  const componentUsage = checkStaleComponents_(ss, now);
-  if (componentUsage.status === 'missing') {
-    lines.push('Feature usage tracking: Feature_Usage sheet not found yet — it is created on first use by the dashboard\'s recordComponentUsage (js/sheets-writeback.js). Nothing to report until someone signs in and uses a tracked tab.');
-  } else {
-    if (componentUsage.stale.length) {
-      issueCount += componentUsage.stale.length;
-      lines.push(componentUsage.stale.length + ' dashboard tab(s) not used in ' + STALE_COMPONENT_DAYS_GS_ + '+ days (run check-staleness on this before assuming the feature is dead — see docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md):');
-      componentUsage.stale.forEach(function (c) {
-        lines.push('  - ' + c.id + (c.neverUsed ? ' (never recorded as used — Feature_Usage has had a full ' + STALE_COMPONENT_DAYS_GS_ + '-day window)' : ' (' + c.ageDays.toFixed(0) + 'd ago, used ' + c.useCount + ' time(s) total)'));
-      });
+  // OC-1 (2026-10-13): each check is isolated - one that throws is reported as an issue in the email instead of aborting the
+  // whole weekly summary (and so every other check's result with it).
+  try {
+    const unresolvedRms = withRetry_(function () { return auditUnresolvedRms_(ss); }, 'buildWeeklyOpsChecklistSummary_: auditUnresolvedRms_');
+    if (unresolvedRms.length) {
+      issueCount += unresolvedRms.length;
+      lines.push(unresolvedRms.length + ' RM name(s) do not resolve in RM_Hierarchy (run auditUnresolvedRmsNow for full detail):');
+      unresolvedRms.slice(0, 10).forEach(function (r) { lines.push('  - ' + r.name + ' (' + r.count + ' open lead(s))'); });
+      if (unresolvedRms.length > 10) lines.push('  ...+' + (unresolvedRms.length - 10) + ' more');
+    } else {
+      lines.push('RM hierarchy: every open lead\'s RM resolves fine. No gaps.');
     }
-    if (componentUsage.neverObserved.length) {
-      lines.push(componentUsage.neverObserved.length + ' dashboard tab(s) never recorded as used yet: ' + componentUsage.neverObserved.join(', ') + ' — expected for a while right after Feature_Usage tracking started; worth a look if it persists past ' + STALE_COMPONENT_DAYS_GS_ + ' days.');
+  } catch (e) {
+    issueCount++;
+    lines.push('RM hierarchy check FAILED (' + (e && e.message ? e.message : e) + ') - the other checks still ran; run this check by hand.');
+  }
+
+  try {
+    const managerGaps = auditManagerDirectoryEmailGaps_(ss);
+    if (managerGaps === null) {
+      issueCount++;
+      lines.push('Manager_Directory: sheet not found — run setupRmHierarchy.');
+    } else if (managerGaps.length) {
+      issueCount += managerGaps.length;
+      lines.push(managerGaps.length + ' manager(s) have real reports but no email in Manager_Directory (run auditManagerDirectoryEmailGapsNow for full detail):');
+      managerGaps.slice(0, 10).forEach(function (g) { lines.push('  - ' + g.name + ' (' + g.reportCount + ' report(s))'); });
+      if (managerGaps.length > 10) lines.push('  ...+' + (managerGaps.length - 10) + ' more');
+    } else {
+      lines.push('Manager_Directory: every manager with real reports has an email on file. No gaps.');
     }
-    if (!componentUsage.stale.length && !componentUsage.neverObserved.length) {
-      lines.push('Feature usage: all ' + TRACKED_COMPONENT_IDS_GS_.length + ' tracked tab(s) used within the last ' + STALE_COMPONENT_DAYS_GS_ + ' days.');
+  } catch (e) {
+    issueCount++;
+    lines.push('Manager_Directory check FAILED (' + (e && e.message ? e.message : e) + ') - the other checks still ran; run this check by hand.');
+  }
+
+  try {
+    const freshness = checkMovementLogFreshness_(ss, now);
+    if (freshness.status === 'fresh') {
+      lines.push('Movement_Log: fresh — last capture ' + freshness.ageHours.toFixed(1) + 'h ago.');
+    } else if (freshness.status === 'stale') {
+      issueCount++;
+      lines.push('Movement_Log: STALE — last capture ' + freshness.ageHours.toFixed(1) + 'h ago. Check Triggers (clock icon) for a paused/deleted snapshotPeriodic (run checkMovementLogFreshnessNow for full detail).');
+    } else {
+      issueCount++;
+      lines.push('Movement_Log: ' + freshness.status + ' — run checkMovementLogFreshnessNow for full detail.');
     }
+  } catch (e) {
+    issueCount++;
+    lines.push('Movement_Log freshness check FAILED (' + (e && e.message ? e.message : e) + ') - the other checks still ran; run this check by hand.');
+  }
+
+  try {
+    // Cell-budget check (Core.gs) — the workbook's shared 10M-cell ceiling,
+    // summed across every tab's DECLARED grid, not just Movement_Log/
+    // Daily_RM_Issues' own retention windows. WARN/CRITICAL thresholds are
+    // percentages of the ceiling (WORKBOOK_CELL_ALERT_WARN_PCT_/
+    // WORKBOOK_CELL_ALERT_CRITICAL_PCT_), not an absolute row count, since
+    // the mix of tabs and their per-row width both drift over time. Always
+    // names the top 3 tabs by cell count — Movement_Log/Daily_RM_Issues have
+    // their own scheduled prune, but a CRITICAL reading means their normal
+    // 7-day cadence hasn't kept up (same "an after-write prune can't
+    // self-heal" trap as the 09-24 incident) and pruneMovementLogNow() /
+    // pruneDailyRmIssueLogNow() need running by hand now, not next capture.
+    const cellUsage = computeWorkbookCellUsageGs_(ss);
+    const cellPct = (cellUsage.pctUsed * 100).toFixed(1) + '%';
+    const topTabsLine = cellUsage.sheets.slice(0, 3).map(function (s) { return s.name + ' (' + fmtCellsGs_(s.cells) + ')'; }).join(', ');
+    if (cellUsage.pctUsed >= WORKBOOK_CELL_ALERT_CRITICAL_PCT_) {
+      issueCount++;
+      lines.push('CELL BUDGET CRITICAL: ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct +
+        ') — a capture WILL crash soon (HANDOVER.md section 9.2/9.3). Run pruneMovementLogNow() / pruneDailyRmIssueLogNow() now. Largest tabs: ' + topTabsLine + '.');
+    } else if (cellUsage.pctUsed >= WORKBOOK_CELL_ALERT_WARN_PCT_) {
+      issueCount++;
+      lines.push('Cell budget WARNING: ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct +
+        '). Largest tabs: ' + topTabsLine + '. Not urgent yet — worth a look before it is (run reportWorkbookCellUsageNow() for the full breakdown).');
+    } else {
+      lines.push('Cell budget: healthy — ' + fmtCellsGs_(cellUsage.totalCells) + ' / ' + fmtCellsGs_(cellUsage.ceiling) + ' cells (' + cellPct + '). Largest: ' + topTabsLine + '.');
+    }
+  } catch (e) {
+    issueCount++;
+    lines.push('Cell budget check FAILED (' + (e && e.message ? e.message : e) + ') - the other checks still ran; run this check by hand.');
+  }
+
+  try {
+    // Stale-component check (Part 4, 2026-10-03) — see checkStaleComponents_'s
+    // own header for the neverObserved vs. stale distinction and the
+    // rollout-grace reasoning.
+    const componentUsage = checkStaleComponents_(ss, now);
+    if (componentUsage.status === 'missing') {
+      lines.push('Feature usage tracking: Feature_Usage sheet not found yet — it is created on first use by the dashboard\'s recordComponentUsage (js/sheets-writeback.js). Nothing to report until someone signs in and uses a tracked tab.');
+    } else {
+      if (componentUsage.stale.length) {
+        issueCount += componentUsage.stale.length;
+        lines.push(componentUsage.stale.length + ' dashboard tab(s) not used in ' + STALE_COMPONENT_DAYS_GS_ + '+ days (run check-staleness on this before assuming the feature is dead — see docs/_planning/DEAD_CODE_AUDIT_2026-10-03.md):');
+        componentUsage.stale.forEach(function (c) {
+          lines.push('  - ' + c.id + (c.neverUsed ? ' (never recorded as used — Feature_Usage has had a full ' + STALE_COMPONENT_DAYS_GS_ + '-day window)' : ' (' + c.ageDays.toFixed(0) + 'd ago, used ' + c.useCount + ' time(s) total)'));
+        });
+      }
+      if (componentUsage.neverObserved.length) {
+        lines.push(componentUsage.neverObserved.length + ' dashboard tab(s) never recorded as used yet: ' + componentUsage.neverObserved.join(', ') + ' — expected for a while right after Feature_Usage tracking started; worth a look if it persists past ' + STALE_COMPONENT_DAYS_GS_ + ' days.');
+      }
+      if (!componentUsage.stale.length && !componentUsage.neverObserved.length) {
+        lines.push('Feature usage: all ' + TRACKED_COMPONENT_IDS_GS_.length + ' tracked tab(s) used within the last ' + STALE_COMPONENT_DAYS_GS_ + ' days.');
+      }
+    }
+  } catch (e) {
+    issueCount++;
+    lines.push('Feature usage check FAILED (' + (e && e.message ? e.message : e) + ') - the other checks still ran; run this check by hand.');
   }
 
   lines.push('');

@@ -83,10 +83,21 @@ function opsAuditTopSeverityGs_(findings) {
 function opsAuditUnfinishedGs_(ledgerRows, recoveryName) {
   const open = ledgerRows.filter(function (r) { return r.status === 'PLANNED' || r.status === 'ATTEMPTING'; });
   if (!open.length) return null;
+  // OE-05/AI-2 (2026-10-13): the recovery functions only re-send bucket rows (morning10 / allIssues17 / followup13); a CH-level
+  // report (chLevel10 / chLevel17) has no recovery path, so pointing at the recovery for it was wrong - it is re-sent by hand.
+  const isChLevel = function (r) { return r.job === 'chLevel10' || r.job === 'chLevel17'; };
+  const chOpen = open.filter(isChLevel);
+  const bucketOpen = open.length - chOpen.length;
+  const actions = [];
+  if (bucketOpen) actions.push('Run ' + recoveryName + ' to re-send the PLANNED ones (the cutoff applies). An ATTEMPTING one is NOT re-sent automatically: check Gmail Sent first.');
+  if (chOpen.length) {
+    actions.push(chOpen.length + ' of them ' + (chOpen.length === 1 ? 'is a CH-level report' : 'are CH-level reports') + ' (' +
+      chOpen.map(opsAuditLabelGs_).join(', ') + '), which ' + recoveryName + ' cannot re-send: check Gmail Sent, then re-send by hand.');
+  }
   return opsAuditFindingGs_('UNFINISHED', 'HIGH', open.length + ' email(s) were planned but never finished',
     open.map(function (r) { return opsAuditLabelGs_(r) + ' (' + r.status + ')'; }),
     'The run died or was stopped after planning them. PLANNED means no send was attempted; ATTEMPTING means the send was in progress and may have gone out.',
-    'Run ' + recoveryName + ' to re-send the PLANNED ones (the cutoff applies). An ATTEMPTING one is NOT re-sent automatically: check Gmail Sent first.');
+    actions.join(' '));
 }
 
 // Gmail accepted a bucket email but the working log the next job reads has no row for it.

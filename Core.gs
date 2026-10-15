@@ -325,13 +325,13 @@ function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel, opts
   if (!rows || !rows.length) return null;
   const options = opts || {};
   const root = archiveRootFolderGs_();
-  const subFolders = root.getFoldersByName(tableName);
-  const folder = subFolders.hasNext() ? subFolders.next() : root.createFolder(tableName);
+  const folder = firstUntrashedDriveItemGs_(root.getFoldersByName(tableName)) || root.createFolder(tableName); // CO-1
 
+  // CO-2 (2026-10-13): a lone \r is quoted too - some CSV readers end the record there.
   const csvEscape = function (cell) {
     if (cell instanceof Date) return cell.toISOString();
     const s = String(cell == null ? '' : cell);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const csv = [header].concat(rows).map(function (row) {
     return row.map(csvEscape).join(',');
@@ -362,8 +362,21 @@ function archiveRowsToDriveCsv_(tableName, header, rows, rowDateRangeLabel, opts
 
 // The shared "Leads Dashboard Archive" folder (created on first use).
 function archiveRootFolderGs_() {
-  const rootFolders = DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_);
-  return rootFolders.hasNext() ? rootFolders.next() : DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+  return firstUntrashedDriveItemGs_(DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_)) || DriveApp.createFolder(ARCHIVE_ROOT_FOLDER_);
+}
+
+// First item of a DriveApp file/folder iterator that is not in the Trash, or null. CO-1 (2026-10-13): DriveApp's by-name and
+// getFiles() iterators can return trashed items, and a trashed archive must never be reused (it empties after ~30 days, so rows
+// pruned "into" it would be lost). An item without isTrashed() (older test mocks) counts as live.
+function isDriveItemTrashedGs_(item) {
+  return !!item && typeof item.isTrashed === 'function' && item.isTrashed() === true;
+}
+function firstUntrashedDriveItemGs_(iter) {
+  while (iter.hasNext()) {
+    const item = iter.next();
+    if (!isDriveItemTrashedGs_(item)) return item;
+  }
+  return null;
 }
 
 // A file in `folder` (not trashed) whose name starts with `namePrefix` and whose text is exactly `csv`, or null. Only files that
@@ -373,6 +386,7 @@ function findIdenticalArchiveFileGs_(folder, namePrefix, csv) {
   while (files.hasNext()) {
     const f = files.next();
     if (String(f.getName()).indexOf(namePrefix) !== 0) continue;
+    if (isDriveItemTrashedGs_(f)) continue; // CO-1 (2026-10-13): the "(not trashed)" above was not enforced
     if (f.getBlob().getDataAsString() === csv) return f;
   }
   return null;
@@ -420,8 +434,8 @@ function commitArchiveManifestGs_(tableName, entries) {
   if (!entries || !entries.length) return;
   try {
     const root = archiveRootFolderGs_();
-    const existing = root.getFilesByName(ARCHIVE_MANIFEST_FILE_);
-    const known = existing.hasNext() ? existing.next().getBlob().getDataAsString() : '';
+    const manifest = firstUntrashedDriveItemGs_(root.getFilesByName(ARCHIVE_MANIFEST_FILE_)); // CO-1
+    const known = manifest ? manifest.getBlob().getDataAsString() : '';
     const stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
     entries.forEach(function (en) {
       const name = en.file.getName();
@@ -460,12 +474,11 @@ function countCsvRecordsGs_(text) {
 function archiveAppendManifestRow_(rootFolder, rowValues) {
   const csvEscape = function (v) {
     const s = String(v == null ? '' : v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const line = rowValues.map(csvEscape).join(',');
-  const existing = rootFolder.getFilesByName(ARCHIVE_MANIFEST_FILE_);
-  if (existing.hasNext()) {
-    const file = existing.next();
+  const file = firstUntrashedDriveItemGs_(rootFolder.getFilesByName(ARCHIVE_MANIFEST_FILE_)); // CO-1: never append to a trashed ledger
+  if (file) {
     file.setContent(file.getBlob().getDataAsString() + '\n' + line);
   } else {
     const header = 'archived_at,table,filename,row_date_range,row_count';

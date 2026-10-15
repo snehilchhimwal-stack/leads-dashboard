@@ -322,6 +322,55 @@ function runCoreTests_() {
       const idFile3 = archiveRowsToDriveCsv_('Id_Table', idHeader, idRows, idLabel);
       TestAssert_(idFile3 !== idFile1 && idFolder._filesList.length === 4, 'archiveRowsToDriveCsv_: a trashed copy is not reused - a fresh file is written');
 
+      // CO-1 (2026-10-13): real DriveApp iterators CAN return trashed items (the shared mock hides them). Simulate that: a folder
+      // whose getFiles() also hands back trashed files, and trashed root / table folders returned by name.
+      const trDrive = TestMockDriveApp_();
+      DriveApp = trDrive;
+      const trFirst = archiveRowsToDriveCsv_('Tr_Table', idHeader, idRows, idLabel);
+      const trFolder = trDrive._folders[ARCHIVE_ROOT_FOLDER_]._folders['Tr_Table'];
+      trFolder.getFiles = function () {
+        let i = 0;
+        return { hasNext: function () { return i < trFolder._filesList.length; }, next: function () { return trFolder._filesList[i++]; } };
+      };
+      trFirst.setTrashed(true);
+      const trInfo = {};
+      const trSecond = archiveRowsToDriveCsv_('Tr_Table', idHeader, idRows, idLabel, { info: trInfo });
+      TestAssert_(trSecond !== trFirst && trInfo.reused === false && !trSecond.isTrashed(), 'archiveRowsToDriveCsv_ (CO-1): an identical file that Drive still lists but is TRASHED is never reused - a new live file is written');
+      TestAssertEqual_(findIdenticalArchiveFileGs_(trFolder, 'Tr_Table_rows_' + idLabel + '_archived_', trFirst._content), trSecond, 'findIdenticalArchiveFileGs_ (CO-1): returns the live identical file, skipping the trashed one');
+
+      const tfDrive = TestMockDriveApp_();
+      DriveApp = tfDrive;
+      const tfTrashedRoot = TestMockDriveFolder_(ARCHIVE_ROOT_FOLDER_);
+      tfTrashedRoot.isTrashed = function () { return true; };
+      const tfLiveRoot = TestMockDriveFolder_(ARCHIVE_ROOT_FOLDER_);
+      tfLiveRoot.isTrashed = function () { return false; };
+      const tfTrashedTable = tfLiveRoot.createFolder('Tf_Table');
+      tfTrashedTable.isTrashed = function () { return true; };
+      tfDrive.getFoldersByName = function () {
+        const list = [tfTrashedRoot, tfLiveRoot];
+        let i = 0;
+        return { hasNext: function () { return i < list.length; }, next: function () { return list[i++]; } };
+      };
+      tfLiveRoot.getFoldersByName = function (n) {
+        const list = n === 'Tf_Table' ? [tfTrashedTable] : [];
+        let i = 0;
+        return { hasNext: function () { return i < list.length; }, next: function () { return list[i++]; } };
+      };
+      let tfCreatedTable = null;
+      tfLiveRoot.createFolder = function (n) { tfCreatedTable = TestMockDriveFolder_(n); return tfCreatedTable; };
+      TestAssertEqual_(archiveRootFolderGs_(), tfLiveRoot, 'archiveRootFolderGs_ (CO-1): a trashed archive root is skipped; the live one is used');
+      const tfFile = archiveRowsToDriveCsv_('Tf_Table', idHeader, idRows, idLabel);
+      TestAssert_(!!tfCreatedTable && tfCreatedTable._filesList[0] === tfFile && tfTrashedTable._filesList.length === 0, 'archiveRowsToDriveCsv_ (CO-1): a trashed table folder is skipped; the archive goes into a fresh live folder');
+
+      // CO-2 (2026-10-13): a lone carriage return is quoted, like a line feed.
+      const crDrive = TestMockDriveApp_();
+      DriveApp = crDrive;
+      const crFile = archiveRowsToDriveCsv_('Cr_Table', ['a', 'b'], [['x\ry', 'plain']], 'cr');
+      TestAssertEqual_(crFile._content, 'a,b\n"x\ry",plain', 'archiveRowsToDriveCsv_ (CO-2): a cell holding a lone \\r is quoted');
+      archiveAppendManifestRow_(crDrive._folders[ARCHIVE_ROOT_FOLDER_], ['t', 'x\ry']);
+      TestAssertContains_(crDrive._folders[ARCHIVE_ROOT_FOLDER_]._files[ARCHIVE_MANIFEST_FILE_]._content, '\nt,"x\ry"', 'archiveAppendManifestRow_ (CO-2): a lone \\r is quoted in the ledger too');
+      DriveApp = idDrive;
+
       // archiveChunksVerifiedGs_: chunking, part labels, the ledger written only on commit (and only once)
       const skDrive = TestMockDriveApp_();
       DriveApp = skDrive;

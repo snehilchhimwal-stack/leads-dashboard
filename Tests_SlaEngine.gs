@@ -205,6 +205,19 @@ function runSlaEngineTests_() {
     TestAssert_(flags.isOpenLead === true, 'computeSlaFlags_: an undatable open lead is still reported open...');
     TestAssertEqual_(primaryIssueGs_(flags), null, '...but with no rule able to fire since there is no created date to measure age from');
 
+    // ---- SE-2 (2026-10-13): text date cells are read like the dashboard's parseDate, not ignored ----
+    TestAssertEqual_(parseSlaDateGs_('2026-08-17 09:00').getTime(), new Date('2026-08-17T09:00:00+05:30').getTime(), 'parseSlaDateGs_ (SE-2): "YYYY-MM-DD HH:MM" text is IST wall time');
+    TestAssertEqual_(parseSlaDateGs_('2026-08-17T09:00:30').getTime(), new Date('2026-08-17T09:00:30+05:30').getTime(), 'parseSlaDateGs_ (SE-2): "YYYY-MM-DDTHH:MM:SS" text is IST wall time');
+    TestAssertEqual_(parseSlaDateGs_('2026-08-17').getTime(), new Date('2026-08-17T00:00:00+05:30').getTime(), 'parseSlaDateGs_ (SE-2): a bare "YYYY-MM-DD" is IST midnight');
+    TestAssertEqual_(parseSlaDateGs_('2026-08-17T03:30:00.000Z').getTime(), new Date('2026-08-17T09:00:00+05:30').getTime(), 'parseSlaDateGs_ (SE-2): an explicit zone is kept, not shifted again');
+    TestAssert_(parseSlaDateGs_('') === null && parseSlaDateGs_('Not reachable') === null && parseSlaDateGs_(45000) === null && parseSlaDateGs_(new Date('x')) === null, 'parseSlaDateGs_ (SE-2): blank, non-date text, numbers and invalid Dates are null');
+    f = TestSla_buildRow_({ lead_assigned_at: TestSla_isoMinusHours_(now, 5), call_attempts: 2, last_connect: 'Connected', last_connect_time: TestSla_isoMinusHours_(now, 0.5) });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.underCalledToday === true && flags.isNotUpdated === false, 'computeSlaFlags_ (SE-2): a TEXT lead_assigned_at (5h ago) and TEXT last_connect_time are used - underCalledToday fires, no never-connected flag');
+    f = TestSla_buildRow_({ lead_assigned_at: TestSla_isoMinusHours_(now, 5), call_attempts: 2 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === true, 'computeSlaFlags_ (SE-2): a TEXT lead_assigned_at with no connect time is never-connected past the window (Not Updated)');
+
     // ---- primaryIssueGs_ priority order ----
     // A lead that qualifies for both inactiveRmNewLead (highest priority)
     // and stageStuck48h (lowest priority) must report the higher one.
@@ -298,6 +311,16 @@ function runSlaEngineTests_() {
     // the function accepts its own output shape without special-casing.
     const ckSecondPass = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap);
     TestAssertEqual_(ckSecondPass[0].state, 'still_open', 'computeAllIssuesCheckpointGs_: reused verbatim on its own prior output (a checkpoint-shaped entry, not a raw snapshot entry) — proves the "reused for both checkpoints" design intent');
+
+    // SE-1 (2026-10-13, product decision): a move INTO "Behind on Today's Calls" at a checkpoint (it outranks Stuck 48h+) is
+    // category_changed, never escalated - the rule compares calls since midnight with a full-day minimum. A move into any
+    // other higher label is still escalated.
+    const ckSe1 = computeAllIssuesCheckpointGs_(ckSs, [
+      { lead_id: 'L-CK-STILLOPEN', issueLabel: 'Stuck 48h+' },
+      { lead_id: 'L-CK-ESCALATE', issueLabel: "Behind on Today's Calls" },
+    ], now, ckBaselineMap);
+    TestAssert_(ckSe1[0].currentIssueLabel === "Behind on Today's Calls" && ckSe1[0].state === 'category_changed', 'computeAllIssuesCheckpointGs_ (SE-1): Stuck 48h+ -> Behind on Today\'s Calls is category_changed, not escalated (got ' + ckSe1[0].state + ')');
+    TestAssert_(ckSe1[1].currentIssueLabel === 'Not Updated' && ckSe1[1].state === 'escalated', 'computeAllIssuesCheckpointGs_ (SE-1): Behind on Today\'s Calls -> Not Updated is still escalated');
 
     // ---- email audit P8 (F8): an optional `leadsData` snapshot replaces the per-call whole-sheet read ----
     {
