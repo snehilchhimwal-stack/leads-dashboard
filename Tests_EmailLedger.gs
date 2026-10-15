@@ -741,6 +741,117 @@ function runEmailLedgerTests_() {
       TestAssertEqual_(TestGmailLog_.sent.filter(function (e) { return /Held alert\(s\) released/.test(e.subject); }).length, 1, 'killed job: the next watchdog run does not release it a second time');
     }
 
+    // ---- audit 2026-10-13 (EL-1/2/3/5/6/7/8/10) ----
+    {
+      // EL-1: the same id twice in one plan batch is ONE row, and it does not stay PLANNED
+      const ss1 = TestMockSpreadsheet_({});
+      TestEL_bind_(ss1);
+      const h1 = emailLedgerOpenGs_(ss1);
+      const p = function (id, extra) { return Object.assign({ emailId: id, job: 'j', dayKey: dayKey, region: 'Pune', bucketLabel: 'B', primaryRole: 'A1', to: TEST_EMAIL_PRIMARY_, leadIds: ['1'] }, extra || {}); };
+      emailLedgerPlanGs_(h1, [p('DUP'), p('DUP'), p('OTHER')]);
+      emailLedgerResultGs_(h1, 'DUP', { status: 'ACCEPTED', leadIds: ['1'] });
+      const r1 = TestEL_objects_(ss1.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(r1.map(function (r) { return r.email_id + ':' + r.status; }).join(','), 'DUP:ACCEPTED,OTHER:PLANNED', 'EL-1: a duplicate id in one batch is planned once - no row is left PLANNED for ever');
+      // EL-2: a re-run that knows the final state settles a row left PLANNED, never one with a result
+      const h2 = emailLedgerOpenGs_(ss1);
+      emailLedgerPlanGs_(h2, [p('OTHER', { initialStatus: 'SKIPPED', initialReason: 'nothing to say' }), p('DUP', { initialStatus: 'SKIPPED', initialReason: 'x' })]);
+      const r2 = TestEL_objects_(ss1.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(r2.map(function (r) { return r.email_id + ':' + r.status; }).join(','), 'DUP:ACCEPTED,OTHER:SKIPPED', 'EL-2: initialStatus settles a still-PLANNED row on a re-run and leaves an ACCEPTED one alone');
+      TestAssertEqual_(r2[1].status_reason + ',' + (r2[1].finished_at instanceof Date), 'nothing to say,true', 'EL-2: …with its reason and finish time');
+      // EL-7: the confirmation line counts only what THIS run handled
+      const h3 = emailLedgerOpenGs_(ss1);
+      emailLedgerPlanGs_(h3, [p('DUP'), p('NEWONE')]);
+      emailLedgerAttemptGs_(h3, 'NEWONE');
+      emailLedgerResultGs_(h3, 'NEWONE', { status: 'FAILED', reason: 'x', leadIds: [] });
+      const line = emailLedgerConfirmationLineGs_();
+      TestAssertContains_(line, 'CONFIRMATION: 1 bucket email(s) were handled in this run - 0 accepted by Gmail, 1 failed', 'EL-7: a row loaded from an earlier run is not counted as this run\'s');
+      TestAssertContains_(line, '1 earlier result(s) from a previous run not counted', 'EL-7: …and the line says so');
+      emailLedgerResetActiveGs_();
+
+      // EL-5 + EL-8: a prune shifts the open handle; a blank day cell no longer stops the prune
+      DriveApp = TestMockDriveApp_();
+      const oldDay = istDayKeyGs_(new Date(Date.now() - (EMAIL_LEDGER_RETENTION_DAYS_ + 5) * 86400000));
+      const ss5 = TestMockSpreadsheet_({});
+      TestEL_bind_(ss5);
+      const h5 = emailLedgerOpenGs_(ss5);
+      emailLedgerPlanGs_(h5, [p('BLANK', { dayKey: '' }), p('OLD1', { dayKey: oldDay }), p('NEW1')]);
+      pruneEmailLedgerGs_(h5, new Date());
+      TestAssertEqual_(TestEL_objects_(ss5.getSheetByName(EMAIL_LEDGER_SHEET_), L).map(function (r) { return r.email_id; }).join(','), 'NEW1', 'EL-8: a blank day cell among the old leading rows is pruned with them instead of stopping the prune');
+      emailLedgerAttemptGs_(h5, 'NEW1');
+      emailLedgerResultGs_(h5, 'NEW1', { status: 'ACCEPTED', leadIds: ['1'] });
+      const r5 = TestEL_objects_(ss5.getSheetByName(EMAIL_LEDGER_SHEET_), L);
+      TestAssertEqual_(r5.length + ',' + r5[0].email_id + ',' + r5[0].status + ',' + h5.rowById.NEW1 + ',' + (h5.rowById.OLD1 === undefined), '1,NEW1,ACCEPTED,2,true', 'EL-5: after a prune the handle still writes into the right row (row numbers moved up, removed ids forgotten)');
+      const ssB = TestMockSpreadsheet_({});
+      const hB = emailLedgerOpenGs_(ssB);
+      emailLedgerPlanGs_(hB, [p('B1', { dayKey: '' }), p('N1')]);
+      pruneEmailLedgerGs_(hB, new Date());
+      TestAssertEqual_(TestEL_objects_(ssB.getSheetByName(EMAIL_LEDGER_SHEET_), L).length, 2, 'EL-8: a blank row that is not followed by an old one is left alone');
+
+      // EL-6: retention for the other Email Ops tabs
+      const ss6 = TestMockSpreadsheet_({});
+      TestEL_bind_(ss6);
+      const inc = emailIncidentSheetGs_(true);
+      inc.getRange(2, 1, 2, EMAIL_INCIDENT_HEADERS_.length).setValues([
+        ['INC-OLD', oldDay, new Date(Date.now() - 100 * 86400000), 'j', 'LOW', 'item', 's', 'd', 'no', 'Snehil', 'SENT', '', '', '', ''],
+        ['INC-NEW', dayKey, new Date(), 'j', 'LOW', 'item', 's', 'd', 'no', 'Snehil', 'SENT', '', '', '', '']]);
+      const dc = emailLedgerEnsureSheetGs_(ss6, DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_, DAILY_CHECKLIST_TEXT_COLUMNS_);
+      dc.getRange(2, 1, 2, 6).setValues([[oldDay, 'A', 'c', 'GREEN', 'e', new Date()], [dayKey, 'A', 'c', 'GREEN', 'e', new Date()]]);
+      ss6._sheets[FOLLOWUP_TRACKER_SHEET_] = TestMockSheet_(FOLLOWUP_TRACKER_SHEET_, [['not', 'the', 'header'], [oldDay, 'x', 'y']]);
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+      try { TestAssertEqual_(JSON.stringify(pruneEmailOpsTabsGs_(ss6, new Date())), '{}', 'EL-6: TEST MODE prunes nothing'); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+      const out6 = pruneEmailOpsTabsGs_(ss6, new Date());
+      TestAssertEqual_(out6[EMAIL_INCIDENT_LOG_SHEET_] + ',' + out6[DAILY_CHECKLIST_SHEET_], '1,1', 'EL-6: an old Incident_Log row and an old Daily_Checklist row are removed');
+      TestAssertEqual_(TestEL_objects_(inc, I).map(function (r) { return r.incident_id; }).join(','), 'INC-NEW', 'EL-6: …the recent incident stays');
+      TestAssertEqual_(ss6.getSheetByName(FOLLOWUP_TRACKER_SHEET_).getLastRow(), 2, 'EL-6: a tab whose header is not recognised is not touched');
+      TestAssert_(DriveApp.getFoldersByName(ARCHIVE_ROOT_FOLDER_).next().getFoldersByName(EMAIL_INCIDENT_LOG_SHEET_).hasNext(), 'EL-6: the removed incident was archived to Drive first');
+      DriveApp = realDrive;
+
+      // EL-10: two executions in the same second no longer mint the same incident id
+      const ss10 = TestMockSpreadsheet_({});
+      TestEL_bind_(ss10);
+      EMAIL_INCIDENT_SEQ_ = 0; EMAIL_INCIDENT_RUN_TOKEN_ = '1111';
+      const idA = incidentRecordGs_({ subject: 'A', bodyLines: [] });
+      EMAIL_INCIDENT_SEQ_ = 0; EMAIL_INCIDENT_RUN_TOKEN_ = '2222';
+      const idB = incidentRecordGs_({ subject: 'B', bodyLines: [] });
+      TestAssert_(/^INC-\d{8}-\d{6}-11111$/.test(idA) && /^INC-\d{8}-\d{6}-22221$/.test(idB), 'EL-10: the id carries a per-execution token before the sequence (' + idA + ', ' + idB + ')');
+      EMAIL_INCIDENT_RUN_TOKEN_ = '';
+      TestAssert_(/^INC-\d{8}-\d{6}-\d{5}$/.test(incidentRecordGs_({ subject: 'C', bodyLines: [] })), 'EL-10: a fresh execution picks a 4-digit token itself');
+
+      // EL-3: an alert whose send failed is sent again by the watchdog, a limited number of times
+      const ss3 = TestMockSpreadsheet_({});
+      TestEL_bind_(ss3);
+      const id3 = incidentRecordGs_({ subject: 'Lost alert FAILED', bodyLines: ['lost text'] });
+      incidentNotifiedGs_([id3], 'SEND-FAILED');
+      const realSend = sendOpsAlertNowGs_;
+      let sends = 0;
+      sendOpsAlertNowGs_ = function () { sends++; return false; };
+      try {
+        releaseHeldIncidentsGs_(new Date());
+        TestAssertEqual_(incidentRows(ss3)[0].notification, 'SEND-FAILED (retry 1)', 'EL-3: a failed re-send is counted');
+        releaseHeldIncidentsGs_(new Date());
+        TestAssertEqual_(incidentRows(ss3)[0].notification, 'SEND-FAILED (retry 2)', 'EL-3: …again');
+        TestAssertEqual_(releaseHeldIncidentsGs_(new Date()) + ',' + sends, '0,2', 'EL-3: after ' + EMAIL_INCIDENT_RETRY_MAX_ + ' re-sends it is not tried again');
+      } finally { sendOpsAlertNowGs_ = realSend; }
+      const id3b = incidentRecordGs_({ subject: 'Second lost alert FAILED', bodyLines: ['second text'] });
+      incidentNotifiedGs_([id3b], 'SEND-FAILED');
+      TestGmailLog_.sent.length = 0;
+      TestAssertEqual_(releaseHeldIncidentsGs_(new Date()), 1, 'EL-3: a fresh SEND-FAILED alert is picked up by the next watchdog run');
+      const again = TestGmailLog_.sent.filter(function (e) { return /Alert\(s\) sent again/.test(e.subject); });
+      TestAssertEqual_(again.length + ',' + (again[0] && again[0].body.indexOf('second text') !== -1), '1,true', 'EL-3: …and sent again with its text');
+      TestAssertEqual_(incidentRows(ss3)[1].notification, 'RELEASED', 'EL-3: …then marked RELEASED, so it is never sent a third time');
+      const oldFail = incidentRecordGs_({ subject: 'Ancient FAILED', bodyLines: [] });
+      incidentNotifiedGs_([oldFail], 'SEND-FAILED');
+      ss3.getSheetByName(EMAIL_INCIDENT_LOG_SHEET_).getRange(4, I.indexOf('detected_at') + 1, 1, 1).setValues([[new Date(Date.now() - 30 * 3600000)]]);
+      TestAssertEqual_(releaseHeldIncidentsGs_(new Date()), 0, 'EL-3: a SEND-FAILED alert older than ' + EMAIL_INCIDENT_RETRY_WINDOW_HOURS_ + ' h is not re-sent');
+      // the claim before the send: if the status cannot be written, nothing is sent (no hourly repeats)
+      const id3c = incidentRecordGs_({ subject: 'Third FAILED', bodyLines: [] });
+      incidentNotifiedGs_([id3c], 'SEND-FAILED');
+      const realNotified = incidentNotifiedGs_;
+      incidentNotifiedGs_ = function () { return 0; };
+      TestGmailLog_.sent.length = 0;
+      try { TestAssertEqual_(releaseHeldIncidentsGs_(new Date()) + ',' + TestGmailLog_.sent.length, '0,0', 'EL-3: when the incidents cannot be claimed nothing is sent'); } finally { incidentNotifiedGs_ = realNotified; }
+    }
+
     // ---- (27) test mode: alerts go at once, nothing is recorded ----
     {
       const ssT = TestMockSpreadsheet_({});

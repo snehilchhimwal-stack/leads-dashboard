@@ -31,21 +31,39 @@
 // Logs how many bucket emails today's ledger holds per status. Writes nothing.
 // Writes one day's block of rows at the bottom of a tab (the first column is the day key): replaces the day's existing block - in place when the size is the same, else it is
 // cleared and the new block appended - or appends a new block. For the tabs that keep one block of rows per report day (Daily_Checklist, Followup_Tracker). Throws on a write
-// failure; the callers swallow it (the report email never depends on these tabs).
+// failure; the callers swallow it (the report email never depends on these tabs). An empty `rows` only clears the day's block (FT-3, audit 2026-10-13).
 function emailLedgerReplaceDayBlockGs_(sheet, rows, day, label) {
+  const isDay = function (v) { return emailLedgerDayKeyOfGs_(v) === day; };
   const last = sheet.getLastRow();
-  const span = Math.min(Math.max(last - 1, 0), Math.max(120, rows.length * 3));
-  const days = span > 0 ? sheet.getRange(last - span + 1, 1, span, 1).getValues() : [];
-  let count = 0;
-  while (count < days.length && emailLedgerDayKeyOfGs_(days[days.length - 1 - count][0]) === day) count++;
+  // EL-9 (audit 2026-10-13): the block is scanned from the bottom in growing chunks until a row of another day (or the header) - a fixed span could stop inside a long
+  // block and leave its top rows behind as stale duplicates.
+  let count = 0, top = last, chunk = Math.max(120, rows.length * 3);
+  while (top >= 2) {
+    const span = Math.min(chunk, top - 1);
+    const vals = sheet.getRange(top - span + 1, 1, span, 1).getValues();
+    let i = vals.length - 1;
+    while (i >= 0 && isDay(vals[i][0])) i--;
+    count += vals.length - 1 - i;
+    if (i >= 0) break;
+    top -= span;
+    chunk *= 2;
+  }
   const first = last - count + 1;
   if (count > 0) {
-    if (count === rows.length) {
+    if (rows.length && count === rows.length) {
       writeUnlessTestModeGs_(function () { sheet.getRange(first, 1, rows.length, rows[0].length).setValues(rows); }, 'update the ' + label + ' rows');
       return;
     }
-    writeUnlessTestModeGs_(function () { sheet.deleteRows(first, count); }, 'clear a partial ' + label + ' block');
+    // EL-4 (audit 2026-10-13): a retry after a deleteRows that DID land would delete the rows above it (the previous day's). Inside the write the block is checked
+    // to be still there and still the day's; otherwise nothing is deleted.
+    writeUnlessTestModeGs_(function () {
+      if (sheet.getLastRow() !== last) return false;
+      if (!sheet.getRange(first, 1, count, 1).getValues().every(function (r) { return isDay(r[0]); })) return false;
+      sheet.deleteRows(first, count);
+      return true;
+    }, 'clear a partial ' + label + ' block');
   }
+  if (!rows.length) return;
   emailLedgerAppendBlockGs_(sheet, rows, function (probe) { return emailLedgerDayKeyOfGs_(probe) === day; }, 'append the ' + label + ' rows');
 }
 
@@ -295,7 +313,8 @@ function precreateEmailOpsTabsNow() {
 // sheets cannot be opened the handle is returned DISABLED (every later call is a no-op and the failure is reported at the end).
 function emailLedgerOpenGs_(ss) {
   if (TEST_MODE_OVERRIDE_EMAIL_) return null;
-  const h = { ledger: null, exclusions: null, rowById: {}, rows: {}, failures: 0, lastError: '', disabled: false };
+  // touched (EL-7): the rows THIS run planned or wrote a result into - a re-run also loads earlier runs' rows, which the confirmation line must not count as its own.
+  const h = { ledger: null, exclusions: null, rowById: {}, rows: {}, touched: {}, failures: 0, lastError: '', disabled: false };
   emailLedgerSetActiveGs_(h); // a held alert (EO-2) states how many of THIS run's emails went out
   try {
     h.ledger = emailLedgerEnsureSheetGs_(ss, EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_, EMAIL_LEDGER_TEXT_COLUMNS_);
@@ -342,10 +361,27 @@ function emailLedgerLoadRowGs_(h, emailId) {
 function emailLedgerPlanGs_(h, plans) {
   if (!emailLedgerLiveGs_(h) || !plans || !plans.length) return;
   emailLedgerGuardGs_(h, 'plan', function () {
-    const fresh = [];
+    const fresh = [], seen = {}, settle = [];
     plans.forEach(function (p) {
-      if (h.rowById[p.emailId]) { emailLedgerLoadRowGs_(h, p.emailId); return; }
+      // EL-1 (audit 2026-10-13): the same id twice in one batch appended two rows; the index kept the second, so the first stayed PLANNED for ever (an "unfinished"
+      // email that recovery kept targeting). The first plan of an id wins.
+      if (seen[p.emailId]) return;
+      seen[p.emailId] = true;
+      if (h.rowById[p.emailId]) {
+        emailLedgerLoadRowGs_(h, p.emailId);
+        // EL-2 (audit 2026-10-13): a re-run that already knows the final state (initialStatus) settles a row a crashed run left PLANNED; any other row keeps its result.
+        if (p.initialStatus && String(h.rows[h.rowById[p.emailId]][emailLedgerCol_('status') - 1]) === EMAIL_LEDGER_STATUS_.PLANNED) settle.push(p);
+        return;
+      }
       fresh.push(p);
+    });
+    settle.forEach(function (p) {
+      emailLedgerPatchGs_(h, p.emailId, 'plan', function (row) {
+        row[emailLedgerCol_('finished_at') - 1] = new Date();
+        row[emailLedgerCol_('status') - 1] = p.initialStatus;
+        row[emailLedgerCol_('status_reason') - 1] = String(p.initialReason || '').slice(0, 500);
+        row[emailLedgerCol_('leads_sent') - 1] = 0;
+      });
     });
     if (!fresh.length) return;
     const plannedAt = new Date();
@@ -358,7 +394,7 @@ function emailLedgerPlanGs_(h, plans) {
         jsonForCellGs_(p.leadIds, 'Email_Ledger lead_ids_json (' + p.emailId + ')'), '', '', ''];
     });
     const startRow = emailLedgerAppendBlockGs_(h.ledger, rows, function (probe) { return String(probe).trim() === rows[0][0]; }, 'append Email_Ledger rows');
-    rows.forEach(function (r, i) { h.rowById[r[0]] = startRow + i; h.rows[startRow + i] = r; });
+    rows.forEach(function (r, i) { h.rowById[r[0]] = startRow + i; h.rows[startRow + i] = r; if (h.touched) h.touched[startRow + i] = true; });
   });
 }
 
@@ -371,6 +407,7 @@ function emailLedgerPatchGs_(h, emailId, label, mutate) {
     if (!h.rows[rowNo]) emailLedgerLoadRowGs_(h, emailId);
     const row = h.rows[rowNo];
     mutate(row);
+    if (h.touched) h.touched[rowNo] = true; // EL-7: this run wrote a result into it
     const first = emailLedgerCol_('attempted_at'), last = emailLedgerCol_('lead_ids_json');
     writeUnlessTestModeGs_(function () { h.ledger.getRange(rowNo, first, 1, last - first + 1).setValues([row.slice(first - 1, last)]); }, 'update Email_Ledger row (' + label + ')');
   });
@@ -461,30 +498,81 @@ function emailLedgerTrackSendGs_(h, meta, sendFn) {
   return sent;
 }
 
-// Archives (to Drive, same as the other pruned logs) and then removes rows older than the retention window. Rows are appended in
-// time order, so only the LEADING old rows are removed; a sheet that is somehow out of order is only ever trimmed from the top.
+// Archives (to Drive) and then removes the LEADING rows of a tab whose day (column dayCol) is before cutoffKey; returns how many. Rows are appended in time order, so a
+// sheet that is somehow out of order is only ever trimmed from the top. EL-8 (audit 2026-10-13): a blank day cell used to stop the scan for good (nothing was ever pruned
+// again); a blank row among the old leading rows now goes with them - but never as the last row removed. Throws when the archive fails (then nothing is deleted).
+function emailLedgerPruneLeadingGs_(sheet, name, headers, dayCol, cutoffKey) {
+  const last = sheet.getLastRow();
+  if (last < 2) return 0;
+  const days = sheet.getRange(2, dayCol, last - 1, 1).getValues();
+  let old = 0, firstKey = '';
+  for (let i = 0; i < days.length; i++) {
+    const key = emailLedgerDayKeyOfGs_(days[i][0]);
+    if (!key) continue;
+    if (key >= cutoffKey) break;
+    old = i + 1;
+    if (!firstKey) firstKey = key;
+  }
+  if (!old) return 0;
+  const rows = sheet.getRange(2, 1, old, headers.length).getValues();
+  archiveRowsToDriveCsv_(name, headers, rows, firstKey + '_to_' + emailLedgerDayKeyOfGs_(days[old - 1][0])); // throws on failure -> nothing is deleted
+  sheet.deleteRows(2, old);
+  Logger.log('Pruned ' + old + ' ' + name + ' row(s) older than ' + cutoffKey + ' (archived to Drive first).');
+  return old;
+}
+
+// Archives (to Drive, same as the other pruned logs) and then removes rows older than the retention window (emailLedgerPruneLeadingGs_).
 function pruneEmailLedgerGs_(h, now) {
   if (!emailLedgerLiveGs_(h)) return;
   emailLedgerGuardGs_(h, 'prune', function () {
     const cutoffKey = istDayKeyGs_(new Date(now.getTime() - EMAIL_LEDGER_RETENTION_DAYS_ * 24 * 3600 * 1000));
-    [[h.ledger, EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_], [h.exclusions, EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_]].forEach(function (t) {
-      const sheet = t[0], last = sheet.getLastRow();
-      if (last < 2) return;
-      const days = sheet.getRange(2, 2, last - 1, 1).getValues();
-      let old = 0;
-      while (old < days.length) {
-        const key = emailLedgerDayKeyOfGs_(days[old][0]);
-        if (!key || key >= cutoffKey) break;
-        old++;
-      }
-      if (!old) return;
-      const rows = sheet.getRange(2, 1, old, t[2].length).getValues();
-      const first = emailLedgerDayKeyOfGs_(days[0][0]), lastOld = emailLedgerDayKeyOfGs_(days[old - 1][0]);
-      archiveRowsToDriveCsv_(t[1], t[2], rows, first + '_to_' + lastOld); // throws on failure -> nothing is deleted
-      sheet.deleteRows(2, old);
-      Logger.log('Pruned ' + old + ' ' + t[1] + ' row(s) older than ' + cutoffKey + ' (archived to Drive first).');
-    });
+    const removed = emailLedgerPruneLeadingGs_(h.ledger, EMAIL_LEDGER_SHEET_, EMAIL_LEDGER_HEADERS_, 2, cutoffKey);
+    if (removed) emailLedgerShiftHandleGs_(h, removed);
+    emailLedgerPruneLeadingGs_(h.exclusions, EMAIL_LEDGER_EXCLUSIONS_SHEET_, EMAIL_LEDGER_EXCLUSION_HEADERS_, 2, cutoffKey);
   });
+}
+
+// EL-5 (audit 2026-10-13): after `removed` leading ledger rows were deleted, the handle's row numbers point `removed` rows too low - a later patch through it would
+// write into another email's row. They are moved up with the sheet; the rows that were removed are forgotten.
+function emailLedgerShiftHandleGs_(h, removed) {
+  const shift = function (map, isIndex) {
+    const out = {};
+    Object.keys(map).forEach(function (k) {
+      const rowNo = isIndex ? map[k] : Number(k);
+      if (rowNo - removed < 2) return;
+      if (isIndex) out[k] = rowNo - removed; else out[rowNo - removed] = map[k];
+    });
+    return out;
+  };
+  h.rowById = shift(h.rowById, true);
+  h.rows = shift(h.rows, false);
+  if (h.touched) h.touched = shift(h.touched, false);
+}
+
+// EL-6 (audit 2026-10-13): the other Email Ops tabs had no retention - Incident_Log above all, read in full by the hourly watchdog. The same rule as the ledger: rows
+// older than EMAIL_LEDGER_RETENTION_DAYS_ are archived to Drive and removed. Driven by the 16:30 cycle report (CycleReport.gs), which owns three of these tabs. Fail-open
+// per tab (a tab that is missing, has another header or cannot be archived is left alone and logged); TEST MODE prunes nothing. Returns { tabName: rowsRemoved }.
+function pruneEmailOpsTabsGs_(ss, now) {
+  const out = {};
+  if (TEST_MODE_OVERRIDE_EMAIL_) return out;
+  const cutoffKey = istDayKeyGs_(new Date(now.getTime() - EMAIL_LEDGER_RETENTION_DAYS_ * 24 * 3600 * 1000));
+  const specs = [[EMAIL_INCIDENT_LOG_SHEET_, EMAIL_INCIDENT_HEADERS_, 2]]; // [tab, headers, day column]
+  if (typeof EMAIL_REROUTE_SHEET_ !== 'undefined') specs.push([EMAIL_REROUTE_SHEET_, EMAIL_REROUTE_HEADERS_, 1]); // created_at (a row is in force 14 days at most)
+  if (typeof CYCLE_REPORT_DAILY_SHEET_ !== 'undefined') specs.push([CYCLE_REPORT_DAILY_SHEET_, CYCLE_REPORT_DAILY_HEADERS_, 1]);
+  if (typeof DAILY_CHECKLIST_SHEET_ !== 'undefined') specs.push([DAILY_CHECKLIST_SHEET_, DAILY_CHECKLIST_HEADERS_, 1]);
+  if (typeof FOLLOWUP_TRACKER_SHEET_ !== 'undefined') specs.push([FOLLOWUP_TRACKER_SHEET_, FOLLOWUP_TRACKER_HEADERS_, 1]);
+  specs.forEach(function (t) {
+    try {
+      const sheet = ss.getSheetByName(t[0]);
+      if (!sheet || sheet.getLastRow() < 2) return;
+      const have = sheet.getRange(1, 1, 1, t[1].length).getValues()[0];
+      if (t[1].some(function (h, i) { return String(have[i] == null ? '' : have[i]).trim() !== h; })) { Logger.log('Retention: ' + t[0] + ' has a header it does not recognise - not pruned.'); return; }
+      out[t[0]] = emailLedgerPruneLeadingGs_(sheet, t[0], t[1], t[2], cutoffKey);
+    } catch (e) {
+      Logger.log('Retention: ' + t[0] + ' was not pruned (nothing removed) - ' + e);
+    }
+  });
+  return out;
 }
 
 // End of the job: one ops note if any ledger write failed (the emails themselves were not affected).
@@ -511,6 +599,9 @@ const EMAIL_INCIDENT_HEADERS_ = ['incident_id', 'day', 'detected_at', 'job', 'se
 const EMAIL_INCIDENT_RELEASE_AFTER_MINUTES_ = 45; // a HELD incident older than this belongs to a job that never finished
 let EMAIL_LEDGER_ACTIVE_ = null; // the ledger handle of the job running now (so a held alert can state how many emails went out)
 let EMAIL_INCIDENT_SEQ_ = 0;
+let EMAIL_INCIDENT_RUN_TOKEN_ = ''; // EL-10: four random digits per execution, so two runs in the same second never mint the same id
+const EMAIL_INCIDENT_RETRY_MAX_ = 2; // EL-3: a SEND-FAILED alert is sent again by the watchdog at most this many times
+const EMAIL_INCIDENT_RETRY_WINDOW_HOURS_ = 24; // ...and only while it is this recent
 
 function emailLedgerSetActiveGs_(h) { EMAIL_LEDGER_ACTIVE_ = h || null; }
 function emailLedgerResetActiveGs_() { EMAIL_LEDGER_ACTIVE_ = null; }
@@ -520,8 +611,9 @@ function emailLedgerConfirmationLineGs_() {
   const h = EMAIL_LEDGER_ACTIVE_;
   if (!emailLedgerLiveGs_(h)) return 'CONFIRMATION UNAVAILABLE: the email ledger was not active in this run, so the number of emails that went out cannot be stated.';
   const counts = {};
-  let total = 0;
+  let total = 0, earlier = 0;
   Object.keys(h.rows).forEach(function (rowNo) {
+    if (h.touched && !h.touched[rowNo]) { earlier++; return; } // EL-7: loaded from an earlier run, not handled by this one
     const status = String(h.rows[rowNo][emailLedgerCol_('status') - 1] || '');
     counts[status] = (counts[status] || 0) + 1;
     total++;
@@ -533,6 +625,7 @@ function emailLedgerConfirmationLineGs_() {
   if (counts.UNCONFIRMED) parts.push(counts.UNCONFIRMED + ' unconfirmed (may have been delivered)');
   if (counts.BLOCKED) parts.push(counts.BLOCKED + ' blocked by the send-safety gate');
   if (open) parts.push(open + ' left unfinished');
+  if (earlier) parts.push('(' + earlier + ' earlier result(s) from a previous run not counted)');
   return 'CONFIRMATION: ' + total + ' bucket email(s) were handled in this run - ' + parts.join(', ') + '. ("Accepted" means Gmail took the message; delivery and opens cannot be seen from here.) The alert(s) below were held until the rest of the run finished.';
 }
 
@@ -559,7 +652,10 @@ function incidentRecordGs_(info) {
     const sheet = emailIncidentSheetGs_(true);
     const now = new Date();
     const severity = info.severity || incidentSeverityGs_(info.subject);
-    const id = 'INC-' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyyMMdd-HHmmss') + '-' + (++EMAIL_INCIDENT_SEQ_);
+    // EL-10 (audit 2026-10-13): the sequence restarts in every execution, so two runs alerting in the same second made the same id (and one notification update marked
+    // both). A per-execution random token goes in front of the sequence; the id keeps its INC-yyyymmdd-hhmmss-<digits> shape.
+    if (!EMAIL_INCIDENT_RUN_TOKEN_) EMAIL_INCIDENT_RUN_TOKEN_ = String(1000 + Math.floor(Math.random() * 9000));
+    const id = 'INC-' + Utilities.formatDate(now, 'Asia/Kolkata', 'yyyyMMdd-HHmmss') + '-' + EMAIL_INCIDENT_RUN_TOKEN_ + (++EMAIL_INCIDENT_SEQ_);
     const row = [id, istDayKeyGs_(now), now, info.job || '', severity, info.scope || (severity === 'CRITICAL' ? 'system' : 'item'),
       String(info.subject || '').slice(0, 300), (info.bodyLines || []).join('\n').slice(0, 1500), severity === 'LOW' ? 'no' : 'yes', 'Snehil',
       info.held ? 'HELD' : 'PENDING', '', info.held ? 'Held until the rest of the run is confirmed sent (decision D2).' : 'Sent immediately: nothing else to confirm.', '', ''];
@@ -571,14 +667,15 @@ function incidentRecordGs_(info) {
   }
 }
 
-// Marks incidents as notified (status 'SENT', 'SEND-FAILED' or 'RELEASED') with the time and a continuity note. Never throws.
+// Marks incidents as notified (status 'SENT', 'SEND-FAILED' or 'RELEASED') with the time and a continuity note. Never throws. Returns how many rows were updated.
 function incidentNotifiedGs_(ids, status, continuity) {
   const wanted = {};
   (ids || []).filter(Boolean).forEach(function (id) { wanted[id] = true; });
-  if (!Object.keys(wanted).length || TEST_MODE_OVERRIDE_EMAIL_) return;
+  if (!Object.keys(wanted).length || TEST_MODE_OVERRIDE_EMAIL_) return 0;
+  let updated = 0;
   try {
     const sheet = emailIncidentSheetGs_(false);
-    if (!sheet || sheet.getLastRow() < 2) return;
+    if (!sheet || sheet.getLastRow() < 2) return 0;
     const last = sheet.getLastRow();
     const ids2 = sheet.getRange(2, 1, last - 1, 1).getValues();
     const first = EMAIL_INCIDENT_HEADERS_.indexOf('notification') + 1, count = 3; // notification, notified_at, continuity
@@ -587,14 +684,25 @@ function incidentNotifiedGs_(ids, status, continuity) {
       if (!wanted[id]) return;
       const cur = sheet.getRange(i + 2, first, 1, count).getValues()[0];
       writeUnlessTestModeGs_(function () { sheet.getRange(i + 2, first, 1, count).setValues([[status, new Date(), continuity || cur[2]]]); }, 'update Incident_Log ' + id);
+      updated++;
     });
   } catch (e) {
     Logger.log('Incident_Log update failed - the alert itself is NOT affected: ' + e);
   }
+  return updated;
+}
+
+// How many times the watchdog already re-sent a SEND-FAILED incident ('SEND-FAILED' = 0, 'SEND-FAILED (retry 2)' = 2), or -1 when it is not SEND-FAILED. Pure.
+function incidentSendRetriesGs_(notification) {
+  const m = /^SEND-FAILED(?: \(retry (\d+)\))?$/.exec(String(notification || '').trim());
+  return m ? Number(m[1] || 0) : -1;
 }
 
 // The watchdog's safety net: HELD incidents older than the release window belong to a job that was killed before it could send them.
 // Sends ONE message listing them and marks them RELEASED. Never throws.
+// EL-3 (audit 2026-10-13): an alert whose own send failed (SEND-FAILED) used to be lost; it is now sent again with the next release, at most EMAIL_INCIDENT_RETRY_MAX_
+// times and only within EMAIL_INCIDENT_RETRY_WINDOW_HOURS_. The rows are claimed (RELEASING) BEFORE the send: if that write fails nothing is sent this hour, and a status
+// write that fails after a good send leaves RELEASING, which is never sent again - before, a failed status write re-sent the same alerts every hour.
 function releaseHeldIncidentsGs_(now) {
   try {
     if (TEST_MODE_OVERRIDE_EMAIL_) return 0;
@@ -602,19 +710,36 @@ function releaseHeldIncidentsGs_(now) {
     if (!sheet || sheet.getLastRow() < 2) return 0;
     const col = function (n) { return EMAIL_INCIDENT_HEADERS_.indexOf(n); };
     const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, EMAIL_INCIDENT_HEADERS_.length).getValues();
-    const stale = rows.filter(function (r) {
-      const at = r[col('detected_at')];
-      return r[col('notification')] === 'HELD' && at instanceof Date && (now.getTime() - at.getTime()) / 60000 > EMAIL_INCIDENT_RELEASE_AFTER_MINUTES_;
+    const ageMinutes = function (r) { const at = r[col('detected_at')]; return at instanceof Date ? (now.getTime() - at.getTime()) / 60000 : -1; };
+    const held = rows.filter(function (r) { return r[col('notification')] === 'HELD' && ageMinutes(r) > EMAIL_INCIDENT_RELEASE_AFTER_MINUTES_; });
+    const retry = rows.filter(function (r) {
+      const n = incidentSendRetriesGs_(r[col('notification')]);
+      return n >= 0 && n < EMAIL_INCIDENT_RETRY_MAX_ && ageMinutes(r) >= 0 && ageMinutes(r) <= EMAIL_INCIDENT_RETRY_WINDOW_HOURS_ * 60;
     });
+    const stale = held.concat(retry);
     if (!stale.length) return 0;
-    const lines = ['The run that raised ' + (stale.length === 1 ? 'this alert' : 'these ' + stale.length + ' alerts') + ' never finished (it was probably killed by the platform), so the alert' + (stale.length === 1 ? ' was' : 's were') + ' never sent. Released now by the watchdog.', ''];
+    const idOf = function (r) { return r[col('incident_id')]; };
+    if (incidentNotifiedGs_(stale.map(idOf), 'RELEASING', 'Being sent by the watchdog.') < stale.length) { Logger.log('releaseHeldIncidentsGs_: the incidents could not be claimed - nothing sent; the next watchdog run retries.'); return 0; }
+    const lines = [];
+    if (held.length) lines.push('The run that raised ' + (held.length === 1 ? 'this alert' : 'these ' + held.length + ' alerts') + ' never finished (it was probably killed by the platform), so the alert' + (held.length === 1 ? ' was' : 's were') + ' never sent. Released now by the watchdog.', '');
+    if (retry.length) lines.push(retry.length + ' alert(s) below could not be sent when they were raised; the watchdog is sending them again.', '');
     stale.forEach(function (r) {
       lines.push('[' + r[col('severity')] + '] ' + r[col('subject')] + '  (' + r[col('incident_id')] + ', job ' + (r[col('job')] || '?') + ', ' + Utilities.formatDate(r[col('detected_at')], 'Asia/Kolkata', 'd MMM HH:mm') + ' IST)');
       lines.push(String(r[col('detail')] || ''));
       lines.push('');
     });
-    const sent = sendOpsAlertNowGs_('Held alert(s) released: their job never finished (' + stale.length + ')', lines);
-    incidentNotifiedGs_(stale.map(function (r) { return r[col('incident_id')]; }), sent ? 'RELEASED' : 'SEND-FAILED', 'Released by the watchdog: the job that held it never finished.');
+    const subject = held.length && !retry.length ? 'Held alert(s) released: their job never finished (' + stale.length + ')'
+      : !held.length ? 'Alert(s) sent again: their first send failed (' + stale.length + ')' : 'Held alert(s) released and failed alert(s) sent again (' + stale.length + ')';
+    const sent = sendOpsAlertNowGs_(subject, lines);
+    if (sent) {
+      incidentNotifiedGs_(held.map(idOf), 'RELEASED', 'Released by the watchdog: the job that held it never finished.');
+      incidentNotifiedGs_(retry.map(idOf), 'RELEASED', 'Sent again by the watchdog after its first send failed.');
+    } else {
+      incidentNotifiedGs_(held.map(idOf), 'SEND-FAILED', 'The watchdog could not send it either; it tries again.');
+      const byStatus = {};
+      retry.forEach(function (r) { const k = 'SEND-FAILED (retry ' + (incidentSendRetriesGs_(r[col('notification')]) + 1) + ')'; (byStatus[k] = byStatus[k] || []).push(idOf(r)); });
+      Object.keys(byStatus).forEach(function (k) { incidentNotifiedGs_(byStatus[k], k, 'The watchdog could not send it again.'); });
+    }
     return stale.length;
   } catch (e) {
     Logger.log('releaseHeldIncidentsGs_ failed: ' + e);

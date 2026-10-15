@@ -176,6 +176,58 @@ function runEmailSweepTests_() {
       TestAssertEqual_(TestSW_row_(ss, e1.rowNo).bounce_status, 'UNKNOWN (the bounce search failed)', 'failed search: the bounce status is UNKNOWN - never "no bounce seen"');
     }
 
+    // ---- audit 2026-10-13: ER-3 / ER-1 matching ----
+    {
+      TestAssertEqual_([emailSweepTextNamesAddressGs_('mail to suraj@x.test failed', 'raj@x.test'), emailSweepTextNamesAddressGs_('raj@x.test failed', 'raj@x.test'), emailSweepTextNamesAddressGs_('<RAJ@X.test>', 'raj@x.test'),
+        emailSweepTextNamesAddressGs_('raj@x.test.in', 'raj@x.test'), emailSweepTextNamesAddressGs_('raj@x.testing', 'raj@x.test'), emailSweepTextNamesAddressGs_('to raj@x.test.', 'raj@x.test'), emailSweepTextNamesAddressGs_('suraj@x.test and raj@x.test', 'raj@x.test')].join(','),
+        'false,true,true,false,false,true,true', 'ER-3: an address matches only as a whole address (raj@ is not inside suraj@, nor a longer domain)');
+      TestAssert_(emailSweepMatchBounceGs_(row({ to: 'raj@x.test', cc: '' }), [bounce(minutesAfter(3), 'The address suraj@x.test could not be reached')]) === null, 'ER-3: a bounce for suraj@ is not matched to an email for raj@');
+      const real = '** Address not found **\n\nYour message wasn\'t delivered to x@homesfy.in because the address couldn\'t be found.\nFinal-Recipient: rfc822; x@homesfy.in\nAction: failed\nStatus: 5.2.1\n\nTo: boss@x.test, x@homesfy.in';
+      TestAssertEqual_(emailSweepBounceFailedAddressesGs_(real).join(','), 'x@homesfy.in', 'ER-1: a real Gmail bounce states its failed address (Final-Recipient / "wasn\'t delivered to")');
+      TestAssertEqual_(emailSweepBounceFailedAddressesGs_('Message to a@x.test could not be delivered').length, 0, 'ER-1: a bounce that states none gives []');
+      TestAssert_(emailSweepMatchBounceGs_(row({ to: 'boss@x.test', cc: '' }), [bounce(minutesAfter(3), real)]) === null, 'ER-1: an address only quoted in the returned original is not taken for the bounced one');
+      const mine = bounce(minutesAfter(3), real);
+      TestAssert_(emailSweepMatchBounceGs_(row({ to: 'boss@x.test', cc: 'x@homesfy.in' }), [mine]) === mine, 'ER-1: the stated failed address matches');
+    }
+
+    // ---- audit 2026-10-13: ES-1 / ES-4 a recorded bounce survives a failed or capped search ----
+    {
+      const ss = TestMockSpreadsheet_({});
+      TestSW_bind_(ss);
+      const h = emailLedgerOpenGs_(ss);
+      const e1 = TestSW_ledgerRow_(ss, h, { bucket: 'Kept', to: 'a@x.test', subject: 'S', threadId: 'T1' });
+      ss.getSheetByName(EMAIL_LEDGER_SHEET_).getRange(e1.rowNo, emailLedgerCol_('bounce_status'), 1, 1).setValues([['BOUNCED 2026-10-08 17:03']]);
+      TestSW_gmail_([], { T1: [] }, { searchThrows: true });
+      const s1 = sweepEmailBouncesAndReplies_({ now: nowSweep });
+      TestAssertEqual_(TestSW_row_(ss, e1.rowNo).bounce_status + ',' + s1.bounced + ',' + s1.newBounces.length, 'BOUNCED 2026-10-08 17:03,1,0', 'ES-1: a failed search keeps the recorded BOUNCED status (still counted, not new)');
+      const noise = [];
+      for (let i = 0; i < EMAIL_SWEEP_BOUNCE_MAX_THREADS_; i++) noise.push(TestSW_msg_('mailer-daemon@googlemail.com', new Date(), 'Failure', 'nobody' + i + '@elsewhere.test failed'));
+      TestSW_gmail_(noise, { T1: [] });
+      sweepEmailBouncesAndReplies_({ now: nowSweep });
+      TestAssertEqual_(TestSW_row_(ss, e1.rowNo).bounce_status, 'BOUNCED 2026-10-08 17:03', 'ES-4: a search that hit its cap keeps it too (the bounce may be beyond the cap)');
+      TestSW_gmail_([], { T1: [] });
+      sweepEmailBouncesAndReplies_({ now: nowSweep });
+      TestAssertEqual_(TestSW_row_(ss, e1.rowNo).bounce_status, 'NO_BOUNCE_SEEN', 'ES-1: a complete, successful search is still believed');
+    }
+
+    // ---- audit 2026-10-13: ES-2 the rows moved (a prune) between the read and the write ----
+    {
+      const ss = TestMockSpreadsheet_({});
+      TestSW_bind_(ss);
+      const h = emailLedgerOpenGs_(ss);
+      const e1 = TestSW_ledgerRow_(ss, h, { bucket: 'First', to: 'a@x.test', subject: 'S', threadId: 'T1' });
+      const e2 = TestSW_ledgerRow_(ss, h, { bucket: 'Second', to: 'b@x.test', subject: 'S2', threadId: 'T2' });
+      const sheet = ss.getSheetByName(EMAIL_LEDGER_SHEET_);
+      const rowsRead = emailSweepReadRowsGs_(sheet, nowSweep);
+      TestAssertEqual_(emailSweepBlockMovedGs_(sheet, rowsRead), false, 'ES-2: unchanged rows have not moved');
+      TestSW_gmail_([], { T1: [], T2: [] });
+      const realSearch = GmailApp.search;
+      GmailApp.search = function () { sheet.deleteRows(2, 1); return realSearch.apply(null, arguments); }; // the 17:00 prune runs while the sweep reads Gmail
+      const s = sweepEmailBouncesAndReplies_({ now: nowSweep });
+      TestAssertEqual_(!!s.writeSkipped + ',' + TestSW_row_(ss, 2).email_id + ',' + TestSW_row_(ss, 2).bounce_status, 'true,' + e2.id + ',', 'ES-2: nothing is written onto the shifted rows; the next check redoes it');
+      TestAssert_(e1.id !== e2.id, 'ES-2: (two distinct rows)');
+    }
+
     // ---- the time budget ----
     {
       const ss = TestMockSpreadsheet_({});
