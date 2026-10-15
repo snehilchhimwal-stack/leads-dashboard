@@ -503,6 +503,56 @@ function rmPerfBetaPosteriorVariance(peer, raw, n, K){
   return (alpha * beta) / (total * total * (total + 1));
 }
 
+// Forward-fill switch (DR-02, 2026-10-13) — twin of DailyRmIssueLog.gs's
+// RM_PERF_FORWARD_FILL_CAPTURE_DAYS_GS_; KEEP IDENTICAL. Since Movement_Log's
+// content-hash dedup (MovementTracker.gs, Phase 6) a snapshot run writes a
+// row only for a lead whose content CHANGED, so "no record that day" now
+// means "unchanged", not "not observed". Without forward-fill an untouched
+// (neglected) lead produced no observation on the days it was neglected:
+// under-counted exactly where it matters, and its violation streak broke.
+// With it ON, a lead-copy with no record at all on a capture day (a day with
+// at least one Movement_Log record) is observed that day from its latest
+// earlier record, enriched as of that day's last snapshot. Off = the
+// pre-2026-10-13 behaviour. A constant rather than an unconditional change
+// because it moves rates, streaks and classifications; flip both runtimes
+// together.
+const RM_PERF_FORWARD_FILL_CAPTURE_DAYS = true;
+
+// dayKey -> that day's latest snapshot_at (a Date), over every record —
+// the capture days forward-fill fills (DR-02). Cached on the
+// movementSnapshots array itself, same convention as buildMovementHistories.
+let _rmPerfCaptureDaysCache = null;
+let _rmPerfCaptureDaysCacheSrc = null;
+function rmPerfCaptureDays(){
+  if (_rmPerfCaptureDaysCacheSrc === movementSnapshots) return _rmPerfCaptureDaysCache;
+  const byMs = new Map();
+  const out = new Map();
+  movementSnapshots.forEach(rec => {
+    if (!rec.snapshot_at) return;
+    const ms = rec.snapshot_at.getTime();
+    if (byMs.has(ms)) return;
+    byMs.set(ms, true);
+    const k = istDateKey(rec.snapshot_at);
+    const cur = out.get(k);
+    if (!cur || ms > cur.getTime()) out.set(k, rec.snapshot_at);
+  });
+  _rmPerfCaptureDaysCacheSrc = movementSnapshots;
+  _rmPerfCaptureDaysCache = out;
+  return out;
+}
+
+// enrichLeadAsOf for a forward-filled (record, capture-day instant) pair,
+// cached per record like enrichSnapshotCached (records are replaced
+// wholesale on every Movement_Log fetch, so the WeakMap never needs clearing).
+const _rmPerfFilledEnrichCache = new WeakMap();
+function rmPerfEnrichFilled(rec, asOf){
+  let perRec = _rmPerfFilledEnrichCache.get(rec);
+  if (!perRec) { perRec = new Map(); _rmPerfFilledEnrichCache.set(rec, perRec); }
+  const ms = asOf.getTime();
+  if (!perRec.has(ms)) perRec.set(ms, enrichLeadAsOf(rec, asOf));
+  return perRec.get(ms);
+}
+
 // Stage 1 — walk every retained Movement_Log lead-copy history and emit
 // one {name, lead_id, dayKey, rule, violated} record for every (lead, day,
 // rule) combination where the lead was actually ELIGIBLE for that rule.
@@ -526,6 +576,15 @@ function rmPerfBetaPosteriorVariance(peer, raw, n, K){
 // (00:00/06:00/12:00/18:00 IST) means that's the 18:00 capture when
 // present, the closest available proxy to Daily_RM_Issues' own 22:50 IST
 // nightly capture time.
+//
+// FORWARD-FILL (RM_PERF_FORWARD_FILL_CAPTURE_DAYS, DR-02): a capture day on
+// which the lead-copy has NO record at all (filtered or not) is observed
+// from the copy's latest earlier record, as of that day's last snapshot;
+// that stand-in record still has to pass the filters and the leadership
+// exclusion, like a real one. A day on which the copy HAS records is never
+// filled, even when none of them passes the filters — so "filtering is
+// per-record" (harness test 5) still holds. The last known record may come
+// from before the dateKeys range; only the emitted days are restricted.
 function reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierarchyByNameLower){
   const observations = [];
   if (typeof movementSnapshots === 'undefined' || !movementSnapshots.length) return observations;
@@ -536,11 +595,20 @@ function reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierar
   // RM_PERF_NAME_ALIASES' own comment for the full reasoning.
   const getKey = keyFn || (rec => rmPerfCanonicalRmName(rec.RM) || 'Unassigned');
 
+  const captureDays = RM_PERF_FORWARD_FILL_CAPTURE_DAYS ? rmPerfCaptureDays() : null;
+  const captureDayKeys = captureDays ? Array.from(captureDays.keys()).sort() : null;
+
   const byLead = buildMovementHistories();
   byLead.forEach(history => {
     splitHistoryByCopy(history).forEach(copyHistory => {
       const byDay = new Map(); // dayKey -> latest snapshot record that day
+      const anyByDay = new Map(); // dayKey -> latest record that day BEFORE filters/exclusion (DR-02)
       copyHistory.forEach(rec => {
+        if (captureDays) {
+          const anyKey = istDateKey(rec.snapshot_at);
+          const anyCur = anyByDay.get(anyKey);
+          if (!anyCur || rec.snapshot_at >= anyCur.snapshot_at) anyByDay.set(anyKey, rec);
+        }
         if (!passesRepeatOffenderFilters(rec, filters)) return;
         // Leadership (Cluster Head, or a specific known-leadership name
         // with no resolvable RM_Hierarchy row) is excluded ENTIRELY here,
@@ -555,19 +623,36 @@ function reconstructRmPerformanceObservations(dateKeys, keyFn, filters, rmHierar
         const cur = byDay.get(dayKey);
         if (!cur || rec.snapshot_at > cur.snapshot_at) byDay.set(dayKey, rec);
       });
-      if (!byDay.size) return;
 
-      Array.from(byDay.keys()).sort().forEach(dayKey => {
-        const rec = byDay.get(dayKey);
+      // dayKey -> { rec, asOf } — the real days, plus forward-filled ones (DR-02).
+      const chosen = new Map();
+      byDay.forEach((rec, dayKey) => chosen.set(dayKey, { rec: rec, asOf: null }));
+      if (captureDays) {
+        let last = null;
+        captureDayKeys.forEach(dayKey => {
+          if (anyByDay.has(dayKey)) { last = anyByDay.get(dayKey); return; }
+          if (!last) return; // before this copy's first retained record — nothing known
+          if (dateKeys && !dateKeys.has(dayKey)) return;
+          if (!passesRepeatOffenderFilters(last, filters)) return;
+          if (rmPerfIsLeadershipExcluded(last.RM, rmHierarchyByNameLower)) return;
+          chosen.set(dayKey, { rec: last, asOf: captureDays.get(dayKey) });
+        });
+      }
+      if (!chosen.size) return;
+
+      Array.from(chosen.keys()).sort().forEach(dayKey => {
+        const pick = chosen.get(dayKey);
+        const rec = pick.rec;
+        const asOf = pick.asOf || rec.snapshot_at;
         const groupKey = getKey(rec);
         if (!groupKey) return; // unresolvable for this rollup — excluded, not "Unassigned"
 
-        const enriched = enrichSnapshotCached(rec);
+        const enriched = pick.asOf ? rmPerfEnrichFilled(rec, asOf) : enrichSnapshotCached(rec);
         if (!enriched.isOpenLead) return; // a closed lead is eligible for nothing
 
         const ctx = {
           pastGrace: enriched.ageHours !== null && enriched.ageHours >= CONFIG.LEAD_GRACE_HOURS,
-          isCreatedThatDay: istSameDay(parseDate(rec.lead_assigned_at), rec.snapshot_at),
+          isCreatedThatDay: istSameDay(parseDate(rec.lead_assigned_at), asOf),
         };
 
         RM_PERF_RULES.forEach(rule => {

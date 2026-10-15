@@ -153,7 +153,7 @@ function runUnmatchedCommentLoggerTests_() {
     // ---- scanUnmatchedCommentsNow (reads the leads tab itself) ----
     const freshSs = TestMockSpreadsheet_({});
     freshSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
-      TestUCL_row_(header, { lead_id: 'L-STANDALONE', internal_status_comments: 'Test RM One: Something nobody recognizes at all - 2026-08-15 09:00' }),
+      TestUCL_row_(header, { lead_id: 'L-STANDALONE', internal_status_comments: 'Test RM One: Something nobody recognizes at all - ' + Utilities.formatDate(TestFixture_daysAgo_(new Date(), 1), 'Asia/Kolkata', 'yyyy-MM-dd') + ' 09:00' /* real clock: must sit inside the 30-day window (IH-01/UC-01) */ }),
     ]);
     const realSs = SpreadsheetApp;
     SpreadsheetApp = { getActiveSpreadsheet: function () { return freshSs; }, flush: function () {} };
@@ -330,6 +330,70 @@ function runUnmatchedCommentLoggerTests_() {
       TestAssertEqual_(rtRoot._files[ARCHIVE_MANIFEST_FILE_]._content.split('\n').length, 2, 'pruneUnmatchedCommentsLog_ (failed write): archive_log.csv lists the archive exactly once (header + 1)');
     } finally {
       DriveApp = realDriveForPrune2_;
+    }
+
+    // ---- unmatchedCommentDedupKeyGs_ delegates to commentHistoryDedupKeyGs_ (2026-10-13) ----
+    TestAssertEqual_(unmatchedCommentDedupKeyGs_('L-1', { ts: '2026-08-15  10:00', comment: 'x' }), commentHistoryDedupKeyGs_('L-1', { ts: '2026-08-15 10:00', comment: 'x' }),
+      'unmatchedCommentDedupKeyGs_: same key as commentHistoryDedupKeyGs_, ts whitespace normalised (IH-02)');
+
+    // ---- UC-03: reviewed / logged_at normalised before comparing ----
+    TestAssert_(unmatchedCommentIsReviewedGs_(true) && unmatchedCommentIsReviewedGs_('TRUE') && unmatchedCommentIsReviewedGs_(' true '), 'unmatchedCommentIsReviewedGs_: true and the text TRUE are reviewed');
+    TestAssert_(!unmatchedCommentIsReviewedGs_(false) && !unmatchedCommentIsReviewedGs_('FALSE') && !unmatchedCommentIsReviewedGs_(''), 'unmatchedCommentIsReviewedGs_: the TEXT "FALSE" is NOT reviewed (!!"FALSE" was true)');
+    TestAssertEqual_(unmatchedCommentLoggedAtKeyGs_(new Date('2026-08-15T10:00:00+05:30')), '2026-08-15 10:00:00', 'unmatchedCommentLoggedAtKeyGs_: a Date cell compares as IST text');
+
+    const ucHdr = UNMATCHED_COMMENTS_LOG_COLUMNS_;
+    const ucRow = function (leadId, ts, comment, loggedAt, reviewed) { return [istDayKeyGs_(new Date()), leadId, 'Test RM One', 'Pune', 'P', comment, ts, loggedAt, reviewed, '']; };
+    const realSsUc = SpreadsheetApp;
+    try {
+      // dedupe: a Date logged_at and a text logged_at compare by time; the text "FALSE" does not count as reviewed.
+      const ddSs = TestMockSpreadsheet_({});
+      const ddSheet = TestMockSheet_(UNMATCHED_COMMENTS_LOG_SHEET_, [ucHdr,
+        ucRow('L-DD', '2026-08-15 10:00', 'c', '2026-08-16 12:00:00', 'FALSE'),
+        ucRow('L-DD', '2026-08-15 10:00', 'c', new Date('2026-08-15T12:00:00+05:30'), false),
+        ucRow('L-KEEP', '2026-08-15 11:00', 'k', '2026-08-15 12:00:00', false)]);
+      ddSs._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = ddSheet;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ddSs; }, flush: function () {} };
+      dedupeUnmatchedCommentsNow();
+      const ddRows = ddSheet.getRange(2, 1, ddSheet.getLastRow() - 1, ucHdr.length).getValues();
+      TestAssertEqual_(ddRows.length, 2, 'dedupeUnmatchedCommentsNow: the duplicate pair collapses to one row, the other row is kept');
+      TestAssert_(ddRows[0][7] instanceof Date, 'dedupeUnmatchedCommentsNow (UC-03): the EARLIER logged_at wins even though it is a Date cell and the other is text');
+
+      // UC-02 + UC-01: clearing reviewed rows writes the kept rows first, and a cleared comment does not come back unreviewed.
+      const clNow = new Date();
+      const clTs = Utilities.formatDate(TestFixture_daysAgo_(clNow, 2), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm');
+      const clSs = TestMockSpreadsheet_({});
+      const clSheet = TestMockSheet_(UNMATCHED_COMMENTS_LOG_SHEET_, [ucHdr,
+        ucRow('L-REVIEWED', clTs, 'Client seemed happy with the pricing overall', '2026-08-16 12:00:00', true),
+        ucRow('L-OPEN', clTs, 'Client asked about parking', '2026-08-16 12:00:00', false)]);
+      clSs._sheets[UNMATCHED_COMMENTS_LOG_SHEET_] = clSheet;
+      const clOrder = [];
+      const clRealGetRange = clSheet.getRange;
+      clSheet.getRange = function (r, c, nr, nc) {
+        const rng = clRealGetRange(r, c, nr, nc);
+        const realSet = rng.setValues, realClear = rng.clearContent;
+        rng.setValues = function (v) { clOrder.push('write:' + r); return realSet.call(rng, v); };
+        rng.clearContent = function () { clOrder.push('clear:' + r); return realClear.call(rng); };
+        return rng;
+      };
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return clSs; }, flush: function () {} };
+      clearReviewedUnmatchedCommentsNow();
+      TestAssertEqual_(clOrder.join(','), 'write:2,clear:3', 'clearReviewedUnmatchedCommentsNow (UC-02): kept rows are written first, then only the tail is cleared');
+      TestAssertEqual_(clSheet.getLastRow(), 2, 'clearReviewedUnmatchedCommentsNow: the reviewed row is gone, the unreviewed one kept');
+      TestAssertEqual_(clSheet.getRange(2, 2, 1, 1).getValues()[0][0], 'L-OPEN', 'clearReviewedUnmatchedCommentsNow: the kept row is the unreviewed one');
+      TestAssert_(!!clSs.getSheetByName(UNMATCHED_COMMENTS_CLEARED_SHEET_), 'clearReviewedUnmatchedCommentsNow (UC-01): the cleared key is remembered in ' + UNMATCHED_COMMENTS_CLEARED_SHEET_);
+      const clLeadRows = [banner, header,
+        TestUCL_row_(header, { lead_id: 'L-REVIEWED', internal_status_comments: 'Test RM One: Client seemed happy with the pricing overall - ' + clTs }),
+        TestUCL_row_(header, { lead_id: 'L-OPEN', internal_status_comments: 'Test RM One: Client asked about parking - ' + clTs })];
+      const clAdded = scanUnmatchedCommentsGs_(clSs, clLeadRows.slice(2), buildColIndex_(header), clNow);
+      TestAssertEqual_(clAdded, 0, 'scanUnmatchedCommentsGs_ (UC-01): clear reviewed, then scan - the reviewed comment does NOT come back as unreviewed');
+
+      // UC-01, prune case: a comment older than the retention window is not re-logged after the prune removed it.
+      const pOldTs = Utilities.formatDate(TestFixture_daysAgo_(clNow, 45), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm');
+      const pSs = TestMockSpreadsheet_({});
+      const pRows = [banner, header, TestUCL_row_(header, { lead_id: 'L-AGED', internal_status_comments: 'Test RM One: Client seemed happy with the pricing overall - ' + pOldTs })];
+      TestAssertEqual_(scanUnmatchedCommentsGs_(pSs, pRows.slice(2), buildColIndex_(header), clNow), 0, 'scanUnmatchedCommentsGs_ (UC-01): a comment older than the 30-day window (already pruned) is not logged again');
+    } finally {
+      SpreadsheetApp = realSsUc;
     }
   } finally {
     TestEnv_tearDown_();

@@ -102,8 +102,61 @@ function ensureCommentHistorySheet_(ss) {
 // Comment - yyyy-MM-dd HH:mm" log format gives one, else the raw comment
 // text (the last_comment-field fallback path in latestOutcomeGs_, which
 // has no timestamp to key off).
+//
+// The ts is whitespace-normalised first (IH-02, 2026-10-13): latestOutcomeGs_'s
+// regex accepts any run of whitespace between date and time, so the same
+// comment could key as "2026-10-13  09:05" one run and "2026-10-13 09:05"
+// the next, depending on how the CRM sync spaced it.
 function commentHistoryDedupKeyGs_(leadId, outcomeEntry) {
-  return leadId + '|' + (outcomeEntry.ts || outcomeEntry.comment);
+  return leadId + '|' + (commentTsNormaliseGs_(outcomeEntry.ts) || outcomeEntry.comment);
+}
+
+// "yyyy-MM-dd HH:mm" with every whitespace run collapsed to one space; '' for no ts.
+function commentTsNormaliseGs_(ts) {
+  return String(ts === null || ts === undefined ? '' : ts).replace(/\s+/g, ' ').trim();
+}
+
+// The key a logged row reads back as — the read-side twin of commentHistoryDedupKeyGs_, shared with UnmatchedCommentLogger.gs.
+// A comment_at cell Sheets turned into a Date is formatted back in the SPREADSHEET's time zone (IH-02): that is the zone Sheets
+// parsed the text in, so it yields the original text even when the spreadsheet is not set to IST. New rows are written as text
+// (commentAtTextFormatGs_), so this only matters for rows written before 2026-10-13.
+function commentHistoryReadBackKeyGs_(leadId, commentAtRaw, comment, tz) {
+  const commentAt = commentAtRaw instanceof Date
+    ? Utilities.formatDate(commentAtRaw, tz || 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
+    : commentTsNormaliseGs_(commentAtRaw);
+  return leadId + '|' + (commentAt || String(comment === null || comment === undefined ? '' : comment).trim());
+}
+
+// The spreadsheet's own time zone, or IST when it cannot be read (or a test mock has none).
+function commentLogSheetTimeZoneGs_(ss) {
+  try {
+    if (ss && typeof ss.getSpreadsheetTimeZone === 'function') return ss.getSpreadsheetTimeZone() || 'Asia/Kolkata';
+  } catch (e) { /* fall through to IST */ }
+  return 'Asia/Kolkata';
+}
+
+// Formats `numRows` cells of column `col` from `startRow` as plain text before a write, so a "yyyy-MM-dd HH:mm" comment_at stays
+// the literal text and is never auto-converted to a Date (IH-02). Fail-open: the read-back handles a Date cell anyway.
+function commentAtTextFormatGs_(sheet, startRow, col, numRows) {
+  try {
+    const range = sheet.getRange(startRow, col, numRows, 1);
+    if (typeof range.setNumberFormat === 'function') range.setNumberFormat('@');
+  } catch (e) {
+    Logger.log('Could not format comment_at as text (' + e + ') - the read-back still handles a Date cell.');
+  }
+}
+
+// True when a comment's own ts falls on a day the log's retention prune would already have removed (IH-01/UC-01, 2026-10-13).
+// The prunes drop a row whose `date` (the day it was LOGGED) is before `now - retentionDays`, and a comment is always logged on or
+// after its own day - so a comment whose day is before the same cutoff can only be one whose row is gone (or about to go). Without
+// this check the dedup, which only sees the live tab, took such a comment for new and logged it again every 30 days. Same day
+// arithmetic as the prunes (parseIstDayKeyOrDateGs_), so the two cannot disagree at the boundary. No ts (the last_comment
+// fallback): false - its age is unknown.
+function commentBeyondRetentionGs_(ts, now, retentionDays) {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(commentTsNormaliseGs_(ts));
+  if (!m) return false;
+  const day = parseIstDayKeyOrDateGs_(m[1]);
+  return !!day && day < new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
 }
 
 /**
@@ -121,15 +174,11 @@ function logInteractionHistoryGs_(ss, dataRows, colIndex, now) {
     // Same Date-vs-string handling as UnmatchedCommentLogger.gs's
     // scanUnmatchedCommentsGs_ — see this file's own header for why this
     // has to be right from day one, not learned the hard way again.
+    const tz = commentLogSheetTimeZoneGs_(ss);
     withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, 8).getValues(); }, 'read Comment_History for de-dup')
       .forEach(function (r) {
         const leadId = String(r[1] || '').trim();
-        const comment = String(r[6] || '').trim();
-        const commentAtRaw = r[7];
-        const commentAt = commentAtRaw instanceof Date
-          ? Utilities.formatDate(commentAtRaw, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')
-          : String(commentAtRaw || '').trim();
-        if (leadId) alreadyLogged[leadId + '|' + (commentAt || comment)] = true;
+        if (leadId) alreadyLogged[commentHistoryReadBackKeyGs_(leadId, r[7], r[6], tz)] = true;
       });
   }
 
@@ -149,6 +198,9 @@ function logInteractionHistoryGs_(ss, dataRows, colIndex, now) {
     const latest = latestOutcomeGs_(row, colIndex);
     if (!latest || !latest.comment) return; // no owner-logged comment at all — nothing to record
 
+    // Older than the retention window: its row has been (or is about to be) pruned, so it is not new (IH-01).
+    if (commentBeyondRetentionGs_(latest.ts, now, COMMENT_HISTORY_RETENTION_DAYS_)) return;
+
     const key = commentHistoryDedupKeyGs_(leadId, latest);
     if (alreadyLogged[key]) return; // already logged this exact comment before — see this file's own volume-control note
     alreadyLogged[key] = true; // guard against the SAME lead appearing twice within this one run too (shouldn't normally happen, but stay defensive)
@@ -159,13 +211,15 @@ function logInteractionHistoryGs_(ss, dataRows, colIndex, now) {
       String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned',
       String(getVal_(row, colIndex, 'region') || '').trim(),
       String(getVal_(row, colIndex, 'project') || '').trim(),
-      latest.comment, latest.ts || '', loggedAtValue,
+      latest.comment, commentTsNormaliseGs_(latest.ts), loggedAtValue,
     ]);
   });
 
   if (newRows.length) {
+    const startRow = sheet.getLastRow() + 1;
+    commentAtTextFormatGs_(sheet, startRow, COMMENT_HISTORY_COLUMNS_.indexOf('comment_at') + 1, newRows.length); // IH-02
     withRetry_(function () {
-      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, COMMENT_HISTORY_COLUMNS_.length).setValues(newRows);
+      sheet.getRange(startRow, 1, newRows.length, COMMENT_HISTORY_COLUMNS_.length).setValues(newRows);
     }, 'append Comment_History rows');
   }
 
@@ -216,7 +270,9 @@ function pruneCommentHistory_(ss) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
   const lastCol = sheet.getLastColumn();
-  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  // Every sheet call in this prune goes through withRetry_ (IH-03, 2026-10-13), like the rest of this file: a transient Sheets
+  // error used to fail the prune (and log a failure in the snapshot run) on the first try.
+  const values = withRetry_(function () { return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues(); }, 'read Comment_History for pruning');
   const cutoff = new Date(Date.now() - COMMENT_HISTORY_RETENTION_DAYS_ * 24 * 60 * 60 * 1000);
   // date (column 0) is written by istDayKeyGs_ — see
   // parseIstDayKeyOrDateGs_'s own comment (Core.gs) for why the cell can
@@ -230,7 +286,7 @@ function pruneCommentHistory_(ss) {
   if (kept.length === values.length) return; // nothing old enough to prune — don't touch the sheet at all
 
   const dropped = values.filter(function (row) { return !isKeptRow_(row); });
-  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const header = withRetry_(function () { return sheet.getRange(1, 1, 1, lastCol).getValues()[0]; }, 'read Comment_History header for archiving');
   const droppedDates = dropped.map(function (row) { return parseIstDayKeyOrDateGs_(row[0]); }).filter(function (d) { return !!d; });
   const rowDateRangeLabel = droppedDates.length
     ? Utilities.formatDate(new Date(Math.min.apply(null, droppedDates.map(function (d) { return d.getTime(); }))), 'Asia/Kolkata', 'yyyy-MM-dd')
@@ -242,10 +298,10 @@ function pruneCommentHistory_(ss) {
   const archive = archiveChunksVerifiedGs_(COMMENT_HISTORY_SHEET_, header, dropped, rowDateRangeLabel, COMMENT_HISTORY_ARCHIVE_CHUNK_, true);
 
   if (kept.length) {
-    sheet.getRange(2, 1, kept.length, lastCol).setValues(kept);
+    withRetry_(function () { sheet.getRange(2, 1, kept.length, lastCol).setValues(kept); }, 'rewrite kept Comment_History rows');
   }
   if (lastRow - 1 > kept.length) {
-    sheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent();
+    withRetry_(function () { sheet.getRange(2 + kept.length, 1, (lastRow - 1) - kept.length, lastCol).clearContent(); }, 'clear Comment_History tail after pruned rewrite');
   }
 
   // Shrinks the sheet's declared row allocation, same reasoning as
@@ -255,7 +311,7 @@ function pruneCommentHistory_(ss) {
   const neededRows = 1 + kept.length + COMMENT_HISTORY_ROW_HEADROOM_;
   const maxRows = sheet.getMaxRows();
   if (maxRows > neededRows) {
-    sheet.deleteRows(neededRows + 1, maxRows - neededRows);
+    withRetry_(function () { sheet.deleteRows(neededRows + 1, maxRows - neededRows); }, 'shrink Comment_History row allocation');
   }
 
   commitArchiveManifestGs_(COMMENT_HISTORY_SHEET_, archive); // the ledger lists the archive only now that its rows are gone from the sheet

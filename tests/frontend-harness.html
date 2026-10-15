@@ -600,6 +600,48 @@
       Array.isArray(result) && result.length === 0, 'length=' + (result && result.length));
   })();
 
+  // 6b. Forward-fill onto capture days (DR-02, 2026-10-13) — twin of
+  // Tests_DailyRmIssueLog.gs's "reconstructRmPerformanceObservationsGs_
+  // forward-fill" block, same scenario. Since Movement_Log's content-hash
+  // dedup, an untouched lead gets no new record, so "no record that day"
+  // means "unchanged". FF-ANCHOR has a record on all 3 days (makes them
+  // capture days); FF-STALE only on day 1 (neglected afterwards); FF-CLOSES
+  // is open on day 1 and closed on day 2 (nothing after); FF-LATE first
+  // appears on day 2 (nothing known about day 1).
+  (function () {
+    const d1 = new Date('2026-09-01T18:00:00+05:30');
+    const d2 = new Date('2026-09-02T18:00:00+05:30');
+    const d3 = new Date('2026-09-03T18:00:00+05:30');
+    const assigned = new Date(d1.getTime() - 10 * 3600000).toISOString();
+    const ffRow = (leadId, at, extra) => _roFilterTestRow(Object.assign({ lead_id: leadId, client_id: 'C-' + leadId, RM: 'FF RM', snapshot_at: at, lead_assigned_at: assigned }, extra || {}));
+    const saved = movementSnapshots;
+    movementSnapshots = [
+      ffRow('FF-ANCHOR', d1), ffRow('FF-ANCHOR', d2, { call_attempts: 1 }), ffRow('FF-ANCHOR', d3, { call_attempts: 2 }),
+      ffRow('FF-STALE', d1),
+      ffRow('FF-CLOSES', d1), ffRow('FF-CLOSES', d2, { closing_reason: 'Not interested' }),
+      ffRow('FF-LATE', d2),
+    ];
+    let obs, d3Only;
+    try {
+      obs = reconstructRmPerformanceObservations(null, undefined, _roEmptyFilters(), null);
+      d3Only = reconstructRmPerformanceObservations(new Set([istDateKey(d3)]), undefined, _roEmptyFilters(), null);
+    } finally { movementSnapshots = saved; }
+    const daysFor = (list, id) => Array.from(new Set(list.filter(o => o.lead_id === id).map(o => o.dayKey))).sort().join(',');
+    const k1 = istDateKey(d1), k2 = istDateKey(d2), k3 = istDateKey(d3);
+    assert('Forward-fill: the switch RM_PERF_FORWARD_FILL_CAPTURE_DAYS is ON', RM_PERF_FORWARD_FILL_CAPTURE_DAYS === true);
+    assert('Forward-fill: a lead whose only record is day 1 is still observed on days 2 and 3 (dedup-shaped history)',
+      daysFor(obs, 'FF-STALE') === [k1, k2, k3].join(','), 'days=' + daysFor(obs, 'FF-STALE'));
+    assert('Forward-fill: a lead whose latest record says closed is not observed after it closed',
+      daysFor(obs, 'FF-CLOSES') === k1, 'days=' + daysFor(obs, 'FF-CLOSES'));
+    assert('Forward-fill: nothing is invented before a lead\'s first record',
+      daysFor(obs, 'FF-LATE') === [k2, k3].join(','), 'days=' + daysFor(obs, 'FF-LATE'));
+    assert('Forward-fill: a dateKeys range after the last record still sees the neglected lead (state carried from before the range)',
+      daysFor(d3Only, 'FF-STALE') === k3, 'days=' + daysFor(d3Only, 'FF-STALE'));
+    const staleD3 = obs.filter(o => o.lead_id === 'FF-STALE' && o.dayKey === k3);
+    assert('Forward-fill: a filled day is evaluated as of that day (FF-STALE, assigned 58h before day 3, violates stageStuck48h on day 3)',
+      staleD3.some(o => o.rule === 'stageStuck48h' && o.violated), 'day3=' + JSON.stringify(staleD3.map(o => o.rule + ':' + o.violated)));
+  })();
+
   // Shared fixture for tests 7-11 — enough distinct leads (>=
   // RM_PERF_MIN_VOLUME_LEADS) to actually rank and render, going through
   // the REAL async UI pipeline (renderRepeatOffenders/
