@@ -210,6 +210,14 @@ function sendAllIssuesEmails_(opts) {
   const win = allIssuesWindowGs_(now);
   const { colIndex, dataRows } = readLeadsTab_(ss); // EmailInfra.gs
   Logger.log('[timing] readLeadsTab_ done at ' + elapsed_() + ' (' + dataRows.length + ' rows)');
+  // EI-13 (audit 2026-10-13): an empty or truncated Leads tab used to mean zero emails and no word to anyone - it looked exactly
+  // like a quiet day. The run still completes (there is nothing to send); ops are told why.
+  if (!dataRows.length) {
+    notifyOpsAlertGs_('17:00 All-Issues: the Leads tab has NO data rows - no emails were sent', [
+      'readLeadsTab_ returned zero data rows (tab "' + resolveTabName_(ss) + '"), so the 17:00 All-Issues run had nothing to check and sent nothing.',
+      'Check the Leads tab refresh. Once the tab is filled again, run sendAllIssuesEmailsNow() by hand.',
+    ]);
+  }
   const recipients = loadRegionRecipients_(ss); // EmailInfra.gs — legacy fallback, same as overnight
   // Loaded ONCE and threaded through resolveRecipientEmailsForRegion_ below
   // (via opts.hierarchyData) instead of letting each region's own call
@@ -248,7 +256,7 @@ function sendAllIssuesEmails_(opts) {
 
     const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
     const created = createdRaw instanceof Date ? createdRaw : null;
-    if (!created || created < win.from || created > win.to) return; // not assigned in the last 48h
+    if (!created || created < win.from || created > win.to) return; // not assigned in the last 3 calendar days (allIssuesWindowGs_)
 
     const rawRegion = getVal_(row, colIndex, 'region');
     const main = mainRegionForGs_(rawRegion);
@@ -324,16 +332,41 @@ function sendAllIssuesEmails_(opts) {
         if (key === todayKey) alreadyLoggedRegionsToday[String(r[1] || '').trim()] = true;
       });
   }
+  // AI-3 (audit 2026-10-13): the log row is written AFTER the send, and its append failing is only logged - so a run that died
+  // between send and append, or whose append failed, left no row and a same-day re-run re-sent the whole region. The ledger
+  // records the send itself: a region with any 17:00 row today that is ACCEPTED (sent), or ATTEMPTING / UNCONFIRMED (may have
+  // been sent) is treated as already sent too. Not in TEST MODE or a recovery (the guard is bypassed there anyway). A ledger
+  // that cannot be read falls back to the log alone (logged) - the guard never blocks a run on its own failure.
+  if (!TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
+    try {
+      emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, todayKey).forEach(function (r) {
+        const status = String(r.status || '');
+        if (r.job === ledgerJob && emailLedgerDayKeyOfGs_(r.cycle_day) === todayKey &&
+          (status === EMAIL_LEDGER_STATUS_.ACCEPTED || status === EMAIL_LEDGER_STATUS_.ATTEMPTING || status === EMAIL_LEDGER_STATUS_.UNCONFIRMED)) {
+          const region = String(r.region || '').trim();
+          if (region && !alreadyLoggedRegionsToday[region]) {
+            Logger.log('Region ' + region + ' has no AllIssues_Log row today but the ledger shows a 17:00 email ' + status + ' (' + r.email_id + ') - treating it as already sent.');
+            alreadyLoggedRegionsToday[region] = true;
+          }
+        }
+      });
+    } catch (e) {
+      Logger.log('Email_Ledger could not be read for the "already sent today" guard - using AllIssues_Log alone: ' + e);
+    }
+  }
 
   const failedLeadEntries = [];
   const recoveredSeen = {}; // recovery only: the targeted email ids that this run produced a bucket for
-  let bucketSendCount = 0; // [timing] how many individual Gmail sends this run actually made — the send loop's own duration only means something alongside this count
+  // [timing] AI-9 (audit 2026-10-13): attempts and successes are counted apart - the old single counter was logged as "sent"
+  // but counted every attempt, failed ones included.
+  let bucketSendCount = 0; // bucket emails attempted - the send loop's own duration only means something alongside this count
+  let bucketSentOkCount = 0; // …of which Gmail accepted
 
   Object.keys(byRegion).sort().forEach(function (region) {
     const regionLeads = byRegion[region];
     if (!regionLeads.length) return;
     if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
-      Logger.log('Skipping ' + region + ' — already has an AllIssues_Log row dated today (' + todayKey + '); not re-sending.');
+      Logger.log('Skipping ' + region + ' — already sent today (' + todayKey + ', AllIssues_Log or Email_Ledger); not re-sending.');
       emailLedgerExcludeGs_(exLedger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', reason: 'already sent today - the re-run guard skipped ' + regionLeads.length + ' lead(s)' }]);
       return;
     }
@@ -341,7 +374,9 @@ function sendAllIssuesEmails_(opts) {
 
     // Per-lead isolation (plan decision D3): a lead that cannot be shown reliably is left out and recorded; the rest still goes.
     const split = emailLedgerSplitLeadsGs_(regionLeads);
-    split.defective.filter(function (d) { return !d.covered; }).forEach(function (d) { // a duplicate's first copy WAS sent - not "unsent"
+    // AI-1 (audit 2026-10-13): a recovery run walks EVERY region again, so collecting these here re-reported the original run's
+    // exclusions in a second all-regions "Leads NOT sent" email. Only the first run reports them (exLedger is null in recovery too).
+    if (!recoverIds) split.defective.filter(function (d) { return !d.covered; }).forEach(function (d) { // a duplicate's first copy WAS sent - not "unsent"
       failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: '', cc: '', reason: 'Left out of the email: ' + d.reason });
     });
     emailLedgerExcludeGs_(exLedger, split.defective.map(function (d) {
@@ -371,7 +406,7 @@ function sendAllIssuesEmails_(opts) {
     const unresolvedExclusions = [];
     resolution.trulyUnresolved.forEach(function (u) {
       (rmToLeads[u.rmName] || []).forEach(function (l) {
-        failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason });
+        if (!recoverIds) failedLeadEntries.push({ lead_id: l.lead_id, RM: u.rmName, to: '', cc: '', reason: u.reason }); // AI-1
         unresolvedExclusions.push({ job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: l.lead_id, rm: u.rmName, reason: 'no recipient could be resolved: ' + u.reason });
       });
     });
@@ -400,6 +435,7 @@ function sendAllIssuesEmails_(opts) {
       const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false };
       const failure = sendOneAllIssuesEmail_(ss, logSheet, region, b.rec, b.leads, dateLabel, todayKey, now, win, ledgerCtx);
       bucketSendCount++;
+      if (!failure) bucketSentOkCount++;
       // Leads the send-safety gate objected to individually were dropped from this bucket and the rest was resent (decision D3).
       ledgerCtx.dropped.forEach(function (d) {
         failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: b.rec.to, cc: b.rec.cc || '', reason: 'Left out of the email: ' + d.reason });
@@ -423,16 +459,20 @@ function sendAllIssuesEmails_(opts) {
       if (!recoveredSeen[id]) emailLedgerResultGs_(ledger, id, { status: EMAIL_LEDGER_STATUS_.SKIPPED, reason: 'recovery: no bucket with this id was produced - the flagged leads were resolved or the routing changed since the failure, so nothing was re-sent', leadIds: [] });
     });
   }
-  Logger.log('[timing] send loop finished at ' + elapsed_() + ' — ' + bucketSendCount + ' total bucket email(s) sent this run');
+  Logger.log('[timing] send loop finished at ' + elapsed_() + ' — ' + bucketSentOkCount + ' of ' + bucketSendCount + ' bucket email(s) sent this run');
 
   // Reused directly from EmailInfra.gs — same shape entries
   // ({lead_id, RM, to, cc, reason}), same consolidated report, sent to
-  // the same OPS_ALERT_EMAIL_. No need for a separate copy of this
-  // function just because the run that produced the entries is different.
-  notifyLeadSendFailuresGs_(failedLeadEntries);
+  // the ops address (opsAlertEmailGs_). The wording is this job's own (EI-2/AI-4, audit 2026-10-13: it used to say "overnight"
+  // and "tomorrow's run will NOT retry them", which is the 10:00 job's rule, not this one's).
+  notifyLeadSendFailuresGs_(failedLeadEntries, {
+    emailLabel: '17:00 All-Issues',
+    runLabel: recoverIds ? 'Recovery of failed 17:00 buckets' : '',
+    retryNote: 'the next 17:00 run lists a lead again only while it is still flagged and was assigned in the last 3 calendar days (IST).',
+  });
   pruneEmailLedgerGs_(ledger, now);
   emailLedgerFinishGs_(ledger, 'the 17:00 All-Issues run');
-  Logger.log('[timing] sendAllIssuesEmails_ finished — total ' + elapsed_() + ', ' + bucketSendCount + ' bucket email(s), ' + failedLeadEntries.length + ' failed lead entrie(s)');
+  Logger.log('[timing] sendAllIssuesEmails_ finished — total ' + elapsed_() + ', ' + bucketSentOkCount + ' of ' + bucketSendCount + ' bucket email(s) sent, ' + failedLeadEntries.length + ' lead(s) not sent');
 }
 
 // CH-level report for this script's own scope — same visual shell and
@@ -495,7 +535,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
     const reportOpts = {
       title: 'Leads With Issue',
       region: region,
-      subtitle: 'CH-level — ' + chName + ' · Google, Non-UTM/Search · last 48h',
+      subtitle: 'CH-level — ' + chName + ' · Google, Non-UTM/Search · last 3 calendar days', // AI-4: was "last 48h", which contradicted the footer
       kpis: [
         { value: allLeads.length, label: allLeads.length === 1 ? 'Lead Flagged' : 'Leads Flagged', bg: '#dbeafe', fg: '#2563eb' },
         { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
@@ -532,16 +572,27 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
       markChReportSentGs_(CH_REPORT_KINDS_.allIssues, region, chName);
     } catch (e) {
       Logger.log('notifyChLevelIssuesGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
-      if (e && e.blockedByGuard) notifyOpsAlertGs_('CH-level All-Issues report BLOCKED - ' + region + ' / ' + chName, [String(e.message || e)]);
+      // AI-2 (audit 2026-10-13): every failure is alerted, not only a gate block. A plain Gmail failure used to leave no trace a
+      // human would see, and these reports have no automatic recovery (recoverFailedAllIssuesBucketsNow only re-sends the
+      // allIssues17 buckets, never a chLevel17 report) - so the alert says how to re-send by hand.
+      notifyOpsAlertGs_('CH-level All-Issues report ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + region + ' / ' + chName, [
+        String((e && e.message) || e),
+        '',
+        'Leads in it (' + allLeads.length + '): ' + allLeads.map(function (l) { return l.lead_id; }).join(', '),
+        'CH-level reports are NOT covered by recoverFailedAllIssuesBucketsNow(). Re-send by hand: once the cause is fixed, the next sendAllIssuesEmailsNow() run sends this report again only if ' + region + ' has not been sent today (the region guard) - otherwise forward the leads above to ops/the CH yourself.' +
+          (e && e.blockedByGuard ? '' : ' Check Gmail Drafts first: createDraft() runs before send(), so one or more drafts of this report may already exist.'),
+      ]);
     }
   });
 }
 
 // Builds and sends ONE all-issues email for a single resolved bucket
-// (one A1/TM/RH, or the legacy Region_Recipients catch-all). Subject
-// format per explicit request: "<primaryRole>/<bucketLabel>/google/Leads
-// With Issue/<date>" — e.g. "A1/Omkar Ghate/google/Leads With Issue/27
-// Aug 2026". Returns null on success, or {reason} on failure — same
+// (one A1/TM/RH, or the legacy Region_Recipients catch-all). Subject:
+// "<bucketLabel> (<primaryRole>) google Leads With Issue (<from> to <to>)"
+// — see this file's header (AI-7, 2026-10-13: this comment still showed a
+// retired "<role>/<label>/google/..." format). The role is omitted when a
+// bucket has none (the Unmatched-RMs fallbacks), and a Futwork email shows
+// its regions instead. Returns null on success, or {reason} on failure — same
 // contract as sendOneOvernightEmail_, so the caller can fold a failure
 // into the shared notifyLeadSendFailuresGs_ report.
 //
@@ -550,7 +601,10 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
 // bucket is sent once more, instead of the whole bucket being blocked for one bad lead. Absent for direct callers (tests).
 function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win, ledgerCtx) {
   if (!leads.length) return null;
-  const ctx = ledgerCtx || {};
+  // AI-5 (audit 2026-10-13): the default needs its own `dropped` list - with a bare {} a direct caller whose send the gate
+  // objected to lead-by-lead crashed on ctx.dropped.push instead of getting the documented {reason}.
+  const ctx = ledgerCtx || { dropped: [] };
+  if (!ctx.dropped) ctx.dropped = [];
 
   const byRM = {};
   leads.forEach(function (l) {
@@ -562,8 +616,10 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
 
   const headerOpts = regionHeaderOptsGs_(region, leads);
   // A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
-  const subject = rec.bucketLabel + ' (' + (region === FUTWORK_REGION_KEY_ ? headerOpts.region : rec.primaryRole) + ') google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
-  const bucketNote = ' (' + rec.primaryRole + '/' + rec.bucketLabel + ')';
+  // AI-6 (audit 2026-10-13): a bucket with no role (the Unmatched-RMs fallbacks) read "Unmatched RMs () google ..." - the empty brackets are omitted.
+  const subjectRole = region === FUTWORK_REGION_KEY_ ? headerOpts.region : rec.primaryRole;
+  const subject = rec.bucketLabel + (subjectRole ? ' (' + subjectRole + ')' : '') + ' google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
+  const bucketNote = ' (' + (rec.primaryRole ? rec.primaryRole + '/' : '') + rec.bucketLabel + ')';
 
   const testModeBanner = rec.originalTo ? {
     html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
@@ -632,6 +688,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
           { ledger: ctx.ledger, emailId: ctx.emailId, dropped: ctx.dropped, isRetry: true });
       }
     }
+    // EI-5 (audit 2026-10-13): withSendRetry_ creates a NEW draft on every attempt, so after a failure up to 3 identical drafts
+    // may be waiting in Gmail Drafts. The texts below say so - sending more than one of them would duplicate the email.
+    const draftsNote = ' There may be up to 3 identical drafts (one per send attempt): send ONE and delete the rest.';
     // Same "operation not allowed" detection sendOneOvernightEmail_ uses —
     // createDraft(...).send() is two steps chained together, and a real
     // production case showed the DRAFT succeeds while the immediately-
@@ -646,20 +705,21 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     const failureReason = guardBlocked
       ? 'Email BLOCKED by the send-safety gate — nothing was drafted or sent: ' + e.guardProblems.join('; ')
       : isSendBlocked
-      ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send'
-      : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so the draft may already exist)';
+      ? 'Gmail send blocked ("operation not allowed") — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '", it was very likely created successfully and just needs a manual Send.' + draftsNote
+      : 'Send error: ' + e + ' — check Gmail Drafts too (createDraft() runs before send(), so a draft may already exist).' + draftsNote;
     try {
       notifyOpsAlertGs_('All-issues email FAILED - ' + region + bucketNote, [
         'Region: ' + region + bucketNote,
         'Intended recipient: ' + rec.to + (rec.cc ? (' (cc: ' + rec.cc + ')') : ''),
         'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
         '',
-        'These leads got no automated email this run — this script only covers the trailing 48h window, so tomorrow\'s run will re-check them only if they\'re still inside that window then.',
+        // AI-4 (audit 2026-10-13): the window is 3 calendar days (allIssuesWindowGs_), not a trailing 48h.
+        'These leads got no automated email this run — this script covers leads assigned in the last 3 calendar days (IST), so tomorrow\'s run re-checks them only if they are still flagged and inside that window then.',
         'Once the cause is fixed, run recoverFailedAllIssuesBucketsNow() before ' + ALL_ISSUES_LATE_CUTOFF_HOUR_ + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ' IST: it re-sends ONLY this bucket (its siblings are not repeated) and re-checks the leads first. After that time nothing is sent late.',
         guardBlocked
           ? 'The send-safety gate refused this payload before any draft was created: ' + e.guardProblems.join('; ') + '. Fix the underlying data (recipient address / content) and run the job by hand.'
           : isSendBlocked
-          ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically. If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
+          ? 'This looks like a Gmail SEND restriction, not a code error — check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '"; it was very likely created successfully and just needs a manual Send, which works fine since the block is on script-driven sends specifically.' + draftsNote + ' If this keeps happening, check Google Workspace Admin Console -> Security -> API Controls -> App Access Control for this Apps Script project.'
           // Any OTHER error here still carries the same underlying risk —
           // createDraft() and send() are chained, so this could be a
           // genuine failure before any draft existed, OR the draft could
@@ -667,7 +727,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
           // the branch above, just a different error text — real
           // production case: "Exception: Not found" from this exact
           // chain, no restriction keyword to key off of).
-          : 'Error: ' + e + '. Check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '" before assuming nothing was created — createDraft() succeeding while the chained send() fails looks exactly like this from here.',
+          : 'Error: ' + e + '. Check Gmail Drafts for a message to ' + rec.to + ' with subject "' + subject + '" before assuming nothing was created — createDraft() succeeding while the chained send() fails looks exactly like this from here.' + draftsNote,
       ]);
     } catch (alertErr) {
       Logger.log('notifyOpsAlertGs_ itself failed: ' + alertErr);
@@ -690,13 +750,11 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     // `leads` here IS the bucket's exact reported population, already in
     // the {lead_id, RM, TL, status, issueLabel, followup} shape the design
     // calls for (see byRegion's construction above) -- no re-derivation,
-    // just persisting what this email already sent. Same unguarded
-    // JSON.stringify-into-one-cell pattern Overnight_Log's own
-    // lead_ids_json already uses (OvernightEmailer.gs) -- a manager
-    // bucket's flagged-lead count has never approached the ~50,000-char
-    // Sheets cell limit in practice, so this follows that existing
-    // precedent rather than adding a new defensive check nothing else
-    // here has. Columns K-N (checkpoint1/2) are left blank -- written
+    // just persisting what this email already sent. Serialized through
+    // jsonForCellGs_ (EmailInfra.gs), which keeps the cell under Sheets'
+    // 50,000-character limit and alerts ops if it had to truncate (AI-7,
+    // 2026-10-13: this comment still described the older unguarded
+    // JSON.stringify). Columns K-N (checkpoint1/2) are left blank -- written
     // later by the 10:00/13:00 jobs (Steps 4-7).
     // Once-only append (email audit P7 / F10) — see appendRowOnceGs_; thread id (col I) is the row's identity.
     writeUnlessTestModeGs_(appendRowOnceGs_(logSheet, [now, region, rec.bucketLabel, rec.primaryRole, rec.to, rec.cc || '', leads.length, new Date(), threadId, jsonForCellGs_(leads, 'issue_snapshot_json (' + region + bucketNote + ')')], 8),

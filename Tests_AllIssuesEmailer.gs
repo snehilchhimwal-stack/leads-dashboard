@@ -505,6 +505,142 @@ function runAllIssuesEmailerTests_() {
       PropertiesService = TestMockPropertiesService_();
     }
 
+    // ============ Code audit 2026-10-13 (AI-*/EI-* findings for this file) ============
+    {
+      const realSsAudit = SpreadsheetApp;
+      const freshSs = function (leadRows) {
+        const s = TestMockSpreadsheet_({
+          'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+          'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        });
+        s._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header].concat(leadRows));
+        return s;
+      };
+      const useSs = function (s) { SpreadsheetApp = { getActiveSpreadsheet: function () { return s; }, flush: function () {} }; };
+      try {
+        // ---- AI-3: the "already sent today" guard also reads Email_Ledger ----
+        PropertiesService = TestMockPropertiesService_();
+        const ai3 = freshSs([TestAIE_leadRow_(header, { lead_id: 'L-AI3', client_id: 'C-AI3', RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false })]);
+        useSs(ai3);
+        const ai3Mine = function (from) { return TestGmailLog_.drafts.slice(from).filter(function (d) { return d.htmlBody.indexOf('L-AI3') !== -1; }).length; };
+        const ai3Start = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        TestAssertEqual_(ai3Mine(ai3Start), 1, 'AI-3: the first run sends the bucket');
+        // The AllIssues_Log append is lost (it failed, or the run died right after the send): only the ledger knows.
+        const ai3Log = ai3.getSheetByName('AllIssues_Log');
+        ai3Log.deleteRows(2, ai3Log.getLastRow() - 1);
+        const ai3Again = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        TestAssertEqual_(ai3Mine(ai3Again), 0, 'AI-3: with no AllIssues_Log row but an ACCEPTED ledger row today, a same-day re-run does NOT re-send the region');
+        const ai3Ledger = ai3.getSheetByName('Email_Ledger');
+        const statusCol = EMAIL_LEDGER_HEADERS_.indexOf('status') + 1;
+        const setStatus = function (st) {
+          for (let r = 2; r <= ai3Ledger.getLastRow(); r++) {
+            if (ai3Ledger.getRange(r, 3, 1, 1).getValue() === EMAIL_LEDGER_JOB_ALL_ISSUES_) ai3Ledger.getRange(r, statusCol, 1, 1).setValues([[st]]);
+          }
+        };
+        ['ATTEMPTING', 'UNCONFIRMED'].forEach(function (st) {
+          setStatus(st);
+          const b = TestGmailLog_.drafts.length;
+          sendAllIssuesEmails();
+          TestAssertEqual_(ai3Mine(b), 0, 'AI-3: a ledger row left ' + st + ' (it may have been delivered) also blocks the re-send');
+        });
+        setStatus('FAILED');
+        const ai3Failed = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        TestAssertEqual_(ai3Mine(ai3Failed), 1, 'AI-3: a FAILED ledger row (nothing went out) does not block the re-run');
+
+        // ---- EI-13: an empty Leads tab alerts ops instead of looking like a quiet day ----
+        useSs(freshSs([]));
+        const ei13Before = TestGmailLog_.sent.length;
+        sendAllIssuesEmails();
+        TestAssert_(TestGmailLog_.sent.slice(ei13Before).some(function (e) { return /Leads tab has NO data rows/.test(e.subject); }), 'EI-13: a Leads tab with zero data rows produces an ops alert');
+
+        // ---- AI-1 + EI-2: the "Leads NOT sent" report uses the 17:00 wording, and a recovery run does not repeat it ----
+        PropertiesService = TestMockPropertiesService_();
+        const longId = 'L-' + new Array(110).join('9'); // over 100 characters: left out of the email as defective (EmailLedger.gs)
+        const ai1 = freshSs([
+          TestAIE_leadRow_(header, { lead_id: 'L-AI1-OK', client_id: 'C-AI1-OK', RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+          TestAIE_leadRow_(header, { lead_id: longId, client_id: 'C-AI1-LONG', RM: 'Test RM One', region: 'Pune', lead_assigned_at: now, rm_is_active: false }),
+        ]);
+        useSs(ai1);
+        const reports = function (from) { return TestGmailLog_.sent.slice(from).filter(function (e) { return /Leads NOT sent/.test(e.subject); }); };
+        const ai1Before = TestGmailLog_.sent.length;
+        sendAllIssuesEmails();
+        const firstReports = reports(ai1Before);
+        TestAssertEqual_(firstReports.length, 1, 'AI-1: the first run reports the left-out lead once');
+        TestAssertContains_(firstReports[0] ? firstReports[0].htmlBody : '', '17:00 All-Issues', 'EI-2: the 17:00 "Leads NOT sent" report names its own email, not "overnight"');
+        TestAssert_(firstReports[0] && firstReports[0].htmlBody.indexOf('this morning') === -1, 'EI-2: …and does not carry the 10:00 job\'s "this morning\'s run" rule');
+        const recBefore = TestGmailLog_.sent.length;
+        sendAllIssuesEmails_({ onlyEmailIds: { 'no-such-bucket': true } });
+        TestAssertEqual_(reports(recBefore).length, 0, 'AI-1: a recovery run does NOT re-send the original run\'s all-regions "Leads NOT sent" report');
+      } finally { SpreadsheetApp = realSsAudit; PropertiesService = TestMockPropertiesService_(); }
+
+      // ---- AI-2 + AI-4: a CH-level report that fails for a normal Gmail reason is alerted, with a by-hand recovery note ----
+      {
+        const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];
+        const flagged = { 'Test CH Self': [{ lead_id: 'L-AI2', RM: 'Test CH Self', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'call' }] };
+        const realGmailAi2 = GmailApp;
+        GmailApp = TestMockGmailApp_({});
+        GmailApp.createDraft = function () { return { send: function () { throw new Error('Exception: Not found'); } }; };
+        const before = TestGmailLog_.sent.length;
+        try { notifyChLevelIssuesGs_('Pune', chRms, flagged, win); } finally { GmailApp = realGmailAi2; }
+        const alerts = TestGmailLog_.sent.slice(before).filter(function (e) { return /CH-level All-Issues report FAILED/.test(e.subject); });
+        TestAssertEqual_(alerts.length, 1, 'AI-2: a CH-level report failing with an ordinary Gmail error (not a gate block) alerts ops');
+        TestAssert_(alerts[0] && /L-AI2/.test(alerts[0].body) && /NOT covered by recoverFailedAllIssuesBucketsNow/.test(alerts[0].body) && /Drafts/.test(alerts[0].body), 'AI-2: …naming the leads, that the recovery does not cover it, and the Drafts to check');
+        const okBefore = TestGmailLog_.drafts.length;
+        notifyChLevelIssuesGs_('Pune', chRms, flagged, win);
+        const chHtml = TestGmailLog_.drafts.length > okBefore ? TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody : '';
+        TestAssert_(chHtml.indexOf('last 3 calendar days') !== -1 && chHtml.indexOf('last 48h') === -1, 'AI-4: the CH-level report subtitle says "last 3 calendar days", matching its footer, not "last 48h"');
+        PropertiesService = TestMockPropertiesService_();
+      }
+
+      // ---- AI-4 + EI-5: the bucket-failure alert wording ----
+      {
+        const realGmailEi5 = GmailApp;
+        GmailApp = TestMockGmailApp_({});
+        GmailApp.createDraft = function () { return { send: function () { throw new Error('Exception: Not found'); } }; };
+        const before = TestGmailLog_.sent.length;
+        let res = null;
+        try {
+          res = sendOneAllIssuesEmail_(ss, ensureAllIssuesLogSheet_(ss), 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+            [{ lead_id: 'L-EI5', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
+        } finally { GmailApp = realGmailEi5; }
+        TestAssertContains_(res ? res.reason : '', 'up to 3 identical drafts', 'EI-5: the failure reason says several drafts may exist (one per send attempt)');
+        const alert = TestGmailLog_.sent.slice(before).filter(function (e) { return /All-issues email FAILED/.test(e.subject); })[0];
+        TestAssert_(!!alert && /send ONE and delete the rest/.test(alert.body), 'EI-5: …and so does the ops alert');
+        TestAssert_(!!alert && alert.body.indexOf('48h') === -1 && /3 calendar days/.test(alert.body), 'AI-4: the alert describes the 3-calendar-day window, not a "trailing 48h"');
+      }
+
+      // ---- AI-6: a bucket with no role has no empty brackets in its subject ----
+      {
+        const before = TestGmailLog_.drafts.length;
+        sendOneAllIssuesEmail_(ss, ensureAllIssuesLogSheet_(ss), 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Unmatched RMs', primaryRole: '' },
+          [{ lead_id: 'L-AI6', RM: 'Someone Unknown', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
+        const d = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+        TestAssert_(TestGmailLog_.drafts.length === before + 1 && d.subject.indexOf('Unmatched RMs google Leads With Issue') === 0 && d.subject.indexOf('()') === -1, 'AI-6: an Unmatched-RMs bucket\'s subject reads "Unmatched RMs google Leads With Issue …", never "Unmatched RMs ()"');
+      }
+
+      // ---- AI-5: a direct call (no ledger context) whose send the gate objects to for ONE lead drops it and sends the rest ----
+      {
+        const realGuarded = sendGuardedEmailGs_;
+        let calls = 0;
+        sendGuardedEmailGs_ = function (msg, label) {
+          calls++;
+          if (calls === 1) throw sendBlockedErrorGs_(label, ['lead(s) counted but missing from the plain-text body: L-AI5-BAD'], ['L-AI5-BAD']);
+          return realGuarded(msg, label);
+        };
+        let threw = '', res = 'unset';
+        try {
+          res = sendOneAllIssuesEmail_(ss, ensureAllIssuesLogSheet_(ss), 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
+            [{ lead_id: 'L-AI5-OK', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' },
+             { lead_id: 'L-AI5-BAD', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
+        } catch (e) { threw = String(e); } finally { sendGuardedEmailGs_ = realGuarded; }
+        TestAssertEqual_(threw, '', 'AI-5: a direct call without a ledger context no longer crashes on ctx.dropped when the gate objects to one lead');
+        TestAssert_(res === null && calls === 2, 'AI-5: …the rest of the bucket is sent on the second try');
+      }
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- Top-level containment (2026-08-31): a crash ANYWHERE in the

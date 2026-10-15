@@ -732,7 +732,16 @@ function runEmailInfraTests_() {
         const fallbackMime = decodeRaw(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw);
         TestAssertContains_(fallbackMime, 'To: ' + OPS_ALERT_EMAIL_, 'notifyOpsAlertGs_ (second path): addressed to the ops address');
         TestAssertContains_(fallbackMime, 'Subject: =?UTF-8?B?', 'notifyOpsAlertGs_ (second path): a non-ASCII subject (the em dash) is sent as an RFC 2047 encoded word');
-        TestAssertContains_(fallbackMime, 'the body', 'notifyOpsAlertGs_ (second path): carries the body');
+        // EI-10 (audit 2026-10-13): the body is base64 with a declared transfer encoding, so it is decoded here before checking it.
+        TestAssertContains_(fallbackMime, 'Content-Transfer-Encoding: base64', 'notifyOpsAlertGs_ (second path, EI-10): the body declares its transfer encoding');
+        TestAssertContains_(decodeRaw(fallbackMime.split('\r\n\r\n').slice(1).join('')), 'the body', 'notifyOpsAlertGs_ (second path): carries the body');
+        {
+          notifyOpsAlertGs_('utf8 body', ['dash — here', new Array(200).join('x')]);
+          const utfMime = decodeRaw(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw);
+          const bodyPart = utfMime.split('\r\n\r\n').slice(1).join('');
+          TestAssert_(bodyPart.split('\r\n').every(function (l) { return l.length <= 76 && /^[A-Za-z0-9+\/=]*$/.test(l); }), 'notifyOpsAlertGs_ (second path, EI-10): the body is pure base64 in lines of at most 76 characters (no raw 8-bit text, no overlong line)');
+          TestAssertContains_(decodeRaw(bodyPart), 'dash — here', 'notifyOpsAlertGs_ (second path, EI-10): a non-ASCII body decodes back intact');
+        }
         TestAssert_(!/\r\n\r\n.*\r\nSubject:/.test(fallbackMime), 'notifyOpsAlertGs_ (second path): no header ends up in the body');
 
         // A plain-ASCII subject stays readable (no encoding).
@@ -1191,6 +1200,90 @@ function runEmailInfraTests_() {
         OPS_ALERT_EMAIL_ = saved.ops; CH_LEVEL_EMAIL_ = saved.ch; FUTWORK_ROUTE_EMAIL_ = saved.fw; ALWAYS_CC_EMAILS_ = saved.cc; LEADERSHIP_NAME_TO_EMAIL_ = saved.lead;
         lookupEmployeeEmail_ = saved.lookup; SpreadsheetApp = saved.ss;
       }
+    }
+
+    // ============ Code audit 2026-10-13 (EI-* findings) ============
+    {
+      // ---- EI-4: the send gate matches a lead id as a whole token, not a substring ----
+      const gate = function (plain, html, ids) { return prepareOutgoingEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 's', plainBody: plain, htmlBody: html, leadIds: ids }); };
+      TestAssertEqual_(gate('Lead 41234', '<p>41234</p>', ['123']).missingLeadIds.join(','), '123', 'EI-4: lead 123 is NOT counted as present inside 41234');
+      TestAssertEqual_(gate('Lead L-10', '<p>L-10</p>', ['L-1']).missingLeadIds.join(','), 'L-1', 'EI-4: lead L-1 is NOT counted as present inside L-10');
+      TestAssertEqual_(gate('Leads: 123, 41234', '<td>123</td><td>41234</td>', ['123', '41234']).problems.length, 0, 'EI-4: ids that are really there (next to punctuation or markup) still pass');
+      TestAssertEqual_(textContainsIdGs_('x123 then 123.', '123'), true, 'EI-4: a later whole-token occurrence is found after an embedded one');
+
+      // ---- EI-2 + EI-1: notifyLeadSendFailuresGs_ wording options, and the plain-text fallback ----
+      const entry = [{ lead_id: 'L-EI1', RM: 'Test RM One', to: TEST_EMAIL_PRIMARY_, cc: '', reason: 'Send error: x' }];
+      let before = TestGmailLog_.sent.length;
+      notifyLeadSendFailuresGs_(entry);
+      TestAssertContains_(TestGmailLog_.sent[TestGmailLog_.sent.length - 1].htmlBody, 'automated overnight email', 'EI-2: with no options the report keeps the overnight wording (the 10:00 caller is unchanged)');
+      notifyLeadSendFailuresGs_(entry, { emailLabel: '17:00 All-Issues', runLabel: 'Recovery', retryNote: 'custom retry note.' });
+      const worded = TestGmailLog_.sent[TestGmailLog_.sent.length - 1];
+      TestAssert_(/^Recovery: Leads NOT sent/.test(worded.subject) && /automated 17:00 All-Issues email/.test(worded.htmlBody) && /custom retry note/.test(worded.htmlBody) && worded.htmlBody.indexOf('this morning') === -1, 'EI-2: the caller\'s label, run prefix and retry note replace the overnight wording');
+      const realGmailEi1 = GmailApp;
+      GmailApp = TestMockGmailApp_({});
+      const plainSend = GmailApp.sendEmail;
+      GmailApp.sendEmail = function (to, subject, body, options) { if (options && options.htmlBody) throw new Error('Service error: Gmail'); return plainSend(to, subject, body, options); };
+      before = TestGmailLog_.sent.length;
+      let ei1Threw = false;
+      try { notifyLeadSendFailuresGs_(entry); } catch (e) { ei1Threw = true; } finally { GmailApp = realGmailEi1; }
+      const fallback = TestGmailLog_.sent.slice(before).filter(function (e) { return /Leads NOT sent/.test(e.subject); });
+      TestAssert_(!ei1Threw && fallback.length === 1 && /L-EI1/.test(fallback[0].body), 'EI-1: when the HTML report cannot be sent, the same report still reaches ops as a plain-text alert');
+
+      // ---- EI-3: a CH-report record that cannot be READ is not overwritten ----
+      const realPropsEi3 = PropertiesService;
+      let ei3Writes = 0;
+      PropertiesService = { getScriptProperties: function () { return { getProperty: function () { throw new Error('simulated read failure'); }, setProperty: function () { ei3Writes++; } }; } };
+      let ei3 = null;
+      try { ei3 = markChReportSentGs_(CH_REPORT_KINDS_.allIssues, 'Pune', 'Test CH Self'); } finally { PropertiesService = realPropsEi3; }
+      TestAssert_(ei3 === false && ei3Writes === 0, 'EI-3: after a failed read the mark is NOT written (it would erase today\'s earlier marks)');
+
+      // ---- EI-8: the Region_Recipients fallback is matched on the normalised region name ----
+      const ei8 = resolveRecipientEmailsForRegion_(ss, 'Navi Mumbai', ['Some Totally Unknown RM'], { 'navi  mumbai': { to: TEST_EMAIL_SECONDARY_, cc: '' } }, { fireAlerts: false });
+      TestAssertEqual_(ei8.results[0] && ei8.results[0].to, TEST_EMAIL_SECONDARY_, 'EI-8: a hand-typed "navi  mumbai" row is used for Navi Mumbai (not the CH backstop)');
+      TestAssertEqual_(legacyRecipientForRegionGs_({ 'Pune': { to: 'a@x.com' }, 'pune': { to: 'b@x.com' } }, 'Pune').to, 'a@x.com', 'EI-8: an exact key still wins');
+      TestAssertEqual_(legacyRecipientForRegionGs_({ 'Thane': { to: 'a@x.com' } }, 'Pune'), null, 'EI-8: no row -> null');
+
+      // ---- EI-9: reading Region_Recipients never creates the tab ----
+      const ei9Ss = TestMockSpreadsheet_({});
+      TestAssertEqual_(JSON.stringify(loadRegionRecipients_(ei9Ss)), '{}', 'EI-9: a missing Region_Recipients reads as "no fallback configured"');
+      TestAssertEqual_(ei9Ss.getSheetByName(REGION_RECIPIENTS_SHEET_), null, 'EI-9: …and the read did not create the tab');
+
+      // ---- EI-11: an unresolved P&L head is reported by the config check ----
+      const realPnl = REGION_PNL_HEAD_CC_;
+      REGION_PNL_HEAD_CC_ = { 'Pune': 'Test PnL Missing', 'Thane': 'Test A1 One' };
+      try {
+        const pnlKeys = emailConfigProblemsGs_().map(function (p) { return p.key; }).filter(function (k) { return k.indexOf('pnl:') === 0; });
+        TestAssertEqual_(pnlKeys.join(','), 'pnl:test pnl missing', 'EI-11: a P&L head with no Manager_Directory address is reported; one with an address is not');
+        const realSsEi11 = SpreadsheetApp;
+        const bare = TestMockSpreadsheet_({});
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return bare; }, flush: function () {} };
+        try {
+          TestAssertEqual_(pnlHeadConfigProblemsGs_().length, 0, 'EI-11: with no Manager_Directory tab nothing is reported');
+          TestAssertEqual_(bare.getSheetByName('Manager_Directory'), null, 'EI-11: …and the check created no tab (read-only)');
+        } finally { SpreadsheetApp = realSsEi11; }
+      } finally { REGION_PNL_HEAD_CC_ = realPnl; }
+
+      // ---- EI-6: the watchdog hint names a function that exists, and no longer promises "safe to re-run" ----
+      const realPropsEi6 = PropertiesService;
+      PropertiesService = TestMockPropertiesService_();
+      before = TestGmailLog_.sent.length;
+      try { checkEmailJobsCompletedGs_(new Date('2026-10-05T23:00:00+05:30')); } finally { PropertiesService = realPropsEi6; }
+      const wd = TestGmailLog_.sent.slice(before);
+      const sweepAlert = wd.filter(function (e) { return /WATCHDOG: sweepBouncesAfterMorning did not run/.test(e.subject); })[0];
+      TestAssert_(!!sweepAlert && /run sweepBouncesAfterMorning\(\) by hand/.test(sweepAlert.body) && sweepAlert.body.indexOf('sweepBouncesAfterMorningNow') === -1, 'EI-6: the sweep check\'s hint names its real function, not a non-existent "<job>Now"');
+      const aiAlert = wd.filter(function (e) { return /WATCHDOG: sendAllIssuesEmails did not run/.test(e.subject); })[0];
+      TestAssert_(!!aiAlert && /sendAllIssuesEmailsNow\(\)/.test(aiAlert.body) && /ATTEMPTING or UNCONFIRMED/.test(aiAlert.body) && aiAlert.body.indexOf('safe to re-run') === -1, 'EI-6: the email job\'s hint names its Now function and says to check the ledger first, instead of "safe to re-run"');
+
+      // ---- EI-12: a failure starting the alert hold is recorded as a failed run, never left "running" ----
+      const realHoldStart = emailAlertHoldStartGs_, realPropsEi12 = PropertiesService;
+      PropertiesService = TestMockPropertiesService_();
+      emailAlertHoldStartGs_ = function () { throw new Error('simulated hold-start failure'); };
+      let ranBody = false, ei12Threw = false, ei12Rec = null;
+      try {
+        try { runEmailJobTrackedGs_('sendAllIssuesEmails', function () { ranBody = true; }); } catch (e) { ei12Threw = /hold-start/.test(e.message); }
+        ei12Rec = readEmailJobRunGs_('sendAllIssuesEmails');
+      } finally { emailAlertHoldStartGs_ = realHoldStart; PropertiesService = realPropsEi12; EMAIL_ALERT_HOLD_ = null; }
+      TestAssert_(ei12Threw && !ranBody && !!ei12Rec && ei12Rec.status === 'failed', 'EI-12: the error is re-thrown and the run record says failed (not a stuck "running")');
     }
 
     TestAssertOnlyTestEmails_();
