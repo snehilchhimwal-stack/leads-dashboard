@@ -1035,13 +1035,21 @@ function computeDailyCohortByRegion(dateKey, opts){
 // persistDailyCohortHistory below and
 // backfillDailyCohortHistoryFromMovementLog (sheets-writeback.js) so the
 // bound only has to be right in one place.
+// Twin of MovementTracker.gs MOVEMENT_LOG_RETENTION_DAYS (keep equal).
+const MOVEMENT_LOG_COVERAGE_DAYS = 7;
 function eligibleDailyCohortDates(){
   if (!movementSnapshots.length) return [];
+  // Coverage starts no earlier than the retention window (MT-01, audit 2026-10-13, twin of persistDailyCohortHistoryGs_'s
+  // filter): the Movement_Log prune now keeps a quiet lead's newest row however old it is, and without this floor those rows
+  // would move "earliest coverage" back by weeks and make long-past, never-archived days newly eligible.
+  const coverageFloorMs = Date.now() - MOVEMENT_LOG_COVERAGE_DAYS * 24 * 3600 * 1000;
   let earliestSnapshotMs = null;
   movementSnapshots.forEach(rec => {
     const ms = rec.snapshot_at.getTime();
+    if (ms < coverageFloorMs) return;
     if (earliestSnapshotMs === null || ms < earliestSnapshotMs) earliestSnapshotMs = ms;
   });
+  if (earliestSnapshotMs === null) return [];
 
   const byLead = buildMovementHistories();
   const dayKeys = new Set();

@@ -681,18 +681,25 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     const origDelete3 = mlSheet3.deleteRows;
     mlSheet3.deleteRows = function (a, b) { deletes3.push([a, b]); return origDelete3.apply(mlSheet3, arguments); };
     ss3._sheets[monthShort] = TestMockSheet_(monthShort, TestEFC_e2eRows_(header, banner, created, now, D2));
-    snapshotPeriodic();                                                  // today: B and BUSY changed; the prune removes the 10-day-old prefix
+    snapshotPeriodic();                                                  // today: B and BUSY changed; the prune drops their superseded 10-day-old rows
     mlRows = TestEFC_movementRows_(ss3);
-    TestAssertEqual_(mlRows.map(function (r) { return r.lead_id; }).sort().join(','), 'E102,E301', 'E2E prune: after today\'s capture only the two changed leads have a row - the 10-day-old prefix is gone');
-    TestAssert_(mlRows.every(function (r) { return r.snapshot_at instanceof Date && r.snapshot_at.getTime() > now.getTime() - 3600000; }), 'E2E prune: every surviving row is today\'s capture');
-    TestAssertEqual_(deletes3[0].join(','), '2,4', 'E2E prune: the 4 expired rows (sheet rows 2-5) were removed by ONE deleteRows call, not a rewrite');
+    // MT-01 (audit 2026-10-13): a lead still in the leads tab keeps its newest row even once it is older than the retention window,
+    // so the unchanged E101/E201 keep their only (10-day-old) row; only E102/E301's superseded old rows are pruned.
+    TestAssertEqual_(mlRows.map(function (r) { return r.lead_id; }).sort().join(','), 'E101,E102,E201,E301', 'E2E prune: the unchanged leads keep their only row (MT-01); the changed leads have today\'s row');
+    const oldMs3 = old.getTime();
+    TestAssert_(mlRows.every(function (r) {
+      const t = r.snapshot_at instanceof Date ? r.snapshot_at.getTime() : NaN;
+      return (r.lead_id === 'E101' || r.lead_id === 'E201') ? t === oldMs3 : t > now.getTime() - 3600000;
+    }), 'E2E prune: E101/E201 keep their 10-day-old timestamp (their stale date is unchanged); E102/E301 are today\'s capture');
+    TestAssertEqual_(deletes3[0].join(','), '4,2', 'E2E prune: the kept rows are compacted to the top and the 2 superseded expired rows removed by ONE deleteRows call, not a rewrite');
     const archiveFolder3 = driveMock._folders[ARCHIVE_ROOT_FOLDER_] && driveMock._folders[ARCHIVE_ROOT_FOLDER_]._folders['Movement_Log'];
-    TestAssert_(!!archiveFolder3 && ['E101', 'E102', 'E201', 'E301'].every(function (id) { return archiveFolder3._filesList[0]._content.indexOf(id) !== -1; }), 'E2E prune: the removed rows were archived to Drive first - all four leads');
+    const archived3 = archiveFolder3 && archiveFolder3._filesList[0] ? archiveFolder3._filesList[0]._content : '';
+    TestAssert_(['E102', 'E301'].every(function (id) { return archived3.indexOf(id) !== -1; }) && ['E101', 'E201'].every(function (id) { return archived3.indexOf(id) === -1; }), 'E2E prune: only the removed rows (the old E102/E301 rows) were archived to Drive first');
     TestAssertEqual_(ss3.getSheetByName('Movement_Log').getRange(1, 1, 1, 2).getValues()[0].join(','), 'snapshot_at,snapshot_label', 'E2E prune: the header row is intact');
     const runRow3 = ss3.getSheetByName('Movement_Log_Runs').getRange(3, 1, 1, MOVEMENT_LOG_RUNS_COLUMNS_.length).getValues()[0];
     TestAssert_(runRow3[2] === 4 && runRow3[3] === 2 && typeof runRow3[4] === 'number' && runRow3[5] === '', 'E2E prune: the run record is complete (4 seen, 2 changed, total_s, nothing skipped)');
-    snapshotPeriodic();                                                  // the unchanged leads lost their only row to the prune; the next capture restores them
-    TestAssertEqual_(TestEFC_movementRows_(ss3).map(function (r) { return r.lead_id; }).sort().join(','), 'E101,E102,E201,E301', 'E2E prune: the next capture writes the two leads whose only row was pruned (existing behaviour: a lead unchanged for 7+ days is re-captured one run later)');
+    snapshotPeriodic();                                                  // nothing changed since: no lead is re-captured (MT-01 removed the old prune-then-recapture loop)
+    TestAssertEqual_(TestEFC_movementRows_(ss3).map(function (r) { return r.lead_id; }).sort().join(','), 'E101,E102,E201,E301', 'E2E prune: the next capture adds no row - the unchanged leads were never pruned, so there is nothing to re-capture');
     DriveApp = realDrive;
 
     // ===== SCENARIO 4: the watchdog reads the run record (F23) =====
