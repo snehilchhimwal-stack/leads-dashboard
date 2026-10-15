@@ -45,7 +45,9 @@
  * ================================================================================
  */
 
-const LEAD_FOLLOWUPS_STALE_ROWS_ = 999; // A2:H1000 — generous headroom past any realistic row count
+// The MINIMUM rule range (A2:H1000). LF-01 (2026-10-13): the range now covers the sheet's whole current allocation when that is
+// larger (getMaxRows), so rows past 1,000 are formatted too; re-run setup if the tab later grows past what it had then.
+const LEAD_FOLLOWUPS_STALE_ROWS_ = 999;
 const LEAD_FOLLOWUPS_AMBER_HOURS_ = 12;
 const LEAD_FOLLOWUPS_RED_HOURS_ = 24;
 
@@ -85,7 +87,7 @@ function setupLeadFollowupsStalenessFormatting() {
     return;
   }
 
-  const range = sheet.getRange(2, 1, LEAD_FOLLOWUPS_STALE_ROWS_, 8);
+  const range = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, LEAD_FOLLOWUPS_STALE_ROWS_), 8);
   const rules = buildLeadFollowupsStalenessRuleSpecs_().map(function (spec) {
     return SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied(spec.formula)

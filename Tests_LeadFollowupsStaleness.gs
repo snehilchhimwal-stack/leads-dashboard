@@ -68,6 +68,21 @@ function runLeadFollowupsStalenessTests_() {
     setupLeadFollowupsStalenessFormatting();
     SpreadsheetApp = realSpreadsheetApp;
     TestAssertEqual_(lfSheet.getConditionalFormatRules().length, 2, 'setupLeadFollowupsStalenessFormatting: re-running stays idempotent, still exactly 2 rules');
+
+    // ---- LF-01 (2026-10-13): the rule range covers the whole allocated sheet, not a fixed A2:H1000 ----
+    const rangeRowsFor = function (maxRows) {
+      const sh = TestMockSheet_('Lead_Followups', [['lead_id', 'region', 'RM', 'issue', 'collated_comments', 'suggested_followup', 'updated_at', 'own_comments']]);
+      sh._maxRows = maxRows;
+      const calls = [];
+      const orig = sh.getRange;
+      sh.getRange = function (r, c, nr, nc) { calls.push([r, c, nr, nc]); return orig.apply(sh, arguments); };
+      const s2 = TestMockSpreadsheet_({ 'Lead_Followups': sh });
+      SpreadsheetApp = Object.assign({}, realSpreadsheetApp, { getActiveSpreadsheet: function () { return s2; } });
+      try { setupLeadFollowupsStalenessFormatting(); } finally { SpreadsheetApp = realSpreadsheetApp; }
+      return calls.filter(function (a) { return a[0] === 2 && a[1] === 1 && a[3] === 8; }).map(function (a) { return a[2]; }).join(',');
+    };
+    TestAssertEqual_(rangeRowsFor(3000), '2999', 'LF-01: a 3,000-row sheet gets the rules on rows 2-3000 (rows past 1,000 are formatted)');
+    TestAssertEqual_(rangeRowsFor(50), '999', 'LF-01: a small sheet still gets the old A2:H1000 minimum');
   } finally {
     TestEnv_tearDown_();
   }
