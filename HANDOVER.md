@@ -927,7 +927,7 @@ Deliberately not done: AI-11, MT-07, MT-08, MT-10, MT-12, OC-2, OA-1, OA-2, OE-0
 - **Cycle window:** the 16:30 report's window is `[start, end)`, so a row at exactly 16:30:00 counts once. The daily checklist's audit window works the same way.
 - **UNCONFIRMED rows** keep their `lead_ids_json` (the email may have gone). FAILED and BLOCKED rows still record none.
 - **Sweep:** the earliest matching bounce time is recorded, and a recorded earlier time is never replaced by a later one.
-- **Still OPEN:** a same-day **manual re-run** of the 10:00 job re-sends an UNCONFIRMED or ATTEMPTING bucket (D5). A manual re-run of the 13:00 job re-sends an ATTEMPTING reply (D6). Until these are fixed, after a 10:00/13:00 crash or timeout, use the `recoverFailed...BucketsNow` functions, not a re-run of the job.
+- **D5/D6 (fixed after the 6ca53d2 deploy, NOT yet live):** a same-day manual re-run of the 10:00 or 13:00 job now skips every email whose `Email_Ledger` row today is ATTEMPTING or UNCONFIRMED, and an ACCEPTED one (10:00: unless it now carries a lead it did not; a later Section 2 still goes), like the 17:00 job (AI-3). Each skip is logged and recorded in `Email_Ledger_Exclusions`; the row is left for a human to check. FAILED buckets are still re-sent by a re-run. Files to paste: `OvernightEmailer.gs`, `EmailLedger.gs`, `Tests_EmailLifecycleMatrix.gs`. Until they are live, after a 10:00/13:00 crash or timeout use the `recoverFailed...BucketsNow` functions, not a re-run.
 
 ### 4.4 GitHub repo access
 

@@ -91,28 +91,28 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `e8d33f8` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `Core.gs` | `78e47f5` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `CycleReport.gs` | `000c1e6` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `DailyChecklist.gs` | `000c1e6` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `DailyRmIssueLog.gs` | `1cd1cfa` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `EmailInfra.gs` | `ec19415` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `EmailLedger.gs` | `000c1e6` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `EmailReroute.gs` | `000c1e6` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `EmailSweep.gs` | `ec19415` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `FollowupEngine.gs` | `cba3a82` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `FollowupTracker.gs` | `e8d33f8` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `InteractionHistoryLogger.gs` | `78e47f5` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `LeadFollowupsStaleness.gs` | `6e4c904` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `MovementTracker.gs` | `59db11b` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `OpsAudit.gs` | `8ebf41a` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `OpsChecklistRunner.gs` | `c416a01` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `OvernightEmailer.gs` | `e8d33f8` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `RmHierarchy.gs` | `a3a33a0` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `RmHierarchySync.gs` | `3dc9852` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `SlaEngine.gs` | `7799e44` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `StaleLeads.gs` | `e8d33f8` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
-| `UnmatchedCommentLogger.gs` | `78e47f5` | 2026-10-14 | read directly from the live editor by hash-match (2026-10-14) |
+| `AllIssuesEmailer.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `Core.gs` | `a7d9e12` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `CycleReport.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `DailyChecklist.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `DailyRmIssueLog.gs` | `450565a` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `EmailInfra.gs` | `09eb9ca` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `EmailLedger.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `EmailReroute.gs` | `7ef68d3` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `EmailSweep.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `FollowupEngine.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `FollowupTracker.gs` | `7ef68d3` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `InteractionHistoryLogger.gs` | `d94a417` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `MovementTracker.gs` | `bf4b3c7` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `OpsAudit.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `OpsChecklistRunner.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `OvernightEmailer.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `RmHierarchy.gs` | `a3a33a0` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `RmHierarchySync.gs` | `3dc9852` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `SlaEngine.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `StaleLeads.gs` | `2146e13` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `UnmatchedCommentLogger.gs` | `450565a` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 
 ### Known live-vs-repo differences
 
@@ -286,6 +286,8 @@ One line per sweep: date — what was found — what was fixed / left open.
 - 2026-10-10 17:27 — **follow-up fix deployed and triggers installed** (`000c1e6`; `GS-015` FN-433). 9 files pasted (the user saved), all 47 non-private live files match HEAD (`match-live-gs.py --apply`): the jobs' first log-tab reads are retried and `precreateEmailOpsTabsNow()` (run by the user 17:26, 30 s) created `Email_Reroutes`, `Daily_Report`, `Daily_Checklist`, `Followup_Tracker` (the other three tabs already existed). Then the user ran `setupEmailSweepTrigger()` (four sweep triggers), `setupEmailCycleReportTrigger()` and `setupOpsAuditTriggers()` (all Completed 17:27): the triggers page lists 19 triggers, the 8 new ones being `sweepEmailBouncesAndReplies`, `sweepBouncesAfterMorning` / `Followup` / `AllIssues`, `sendEmailCycleReport` and `auditMorningEmails` / `auditFollowupEmails` / `auditAllIssuesEmails`. The permission classifier blocked the agent from selecting/running a `setupXxx()` function in the live editor ("Production Deploy"), so the user ran the four manual steps. First scheduled runs to check: `sweepBouncesAfterAllIssues` ~17:30 and `auditAllIssuesEmails` ~18:00 today, `sendEmailCycleReport` ~16:30 tomorrow.
 
 - 2026-10-14 - **snapshotPeriodic slowness: fix written, NOT yet pasted.** The 06:08 run took 946 s and skipped its four maintenance steps (analysis in `HANDOVER.md` section 4.3.4 P19: every per-lead step 3-10x slower than its median while the single big reads were normal; the loops make ~70k `Utilities.formatDate` service calls per run). Change (`c590758`): `istFormatGs_` in `Core.gs` (arithmetic IST formatting, byte-identical), used by `istDayKeyGs_`, the content hash and the two comment-log dedup loops; maintenance skipped for budget is owed and done first by the next run; the watchdog is silent on a single maintenance skip; `benchmarkSnapshotCostNow()`. Files to paste: `Core.gs`, `MovementTracker.gs`, `InteractionHistoryLogger.gs`, `UnmatchedCommentLogger.gs`, `Tests_Core.gs`, `Tests_MovementTracker.gs`, `Tests_EmailInfra.gs`, `Tests_EmailLifecycleFullCycle.gs` (no trigger changed). Then run `benchmarkSnapshotCostNow()` once (every mismatch count must be 0) and `runAllTests()`. Also seen in Executions that day: `captureDailyRmIssues` timed out (1,802.9 s) on 2026-10-13 22:53.
+
+- 2026-10-16 - **deploy register: 6ca53d2 confirmed live (recorded by hand).** Production deploys today: `149762b` (audit 2026-10-13 fixes) and `6ca53d2` (email lifecycle fixes D1/D2/D4 + E2E suite). The live project was verified by checksum in the editor on 2026-10-16 (~17:07 IST) to hold exactly the commit `6ca53d2` version of every file, and `runAllTests` passed 3985/0 across 24 test files. No hash string was captured, so the rows were rewritten by hand in `match-live-gs.py --apply`'s format (each row = the newest commit at or before `6ca53d2` that touched the file). **Not yet live:** the D5/D6 fix (10:00/13:00 re-run guards read `Email_Ledger`; `OvernightEmailer.gs`, `EmailLedger.gs`, `Tests_EmailLifecycleMatrix.gs`), committed after this record - the D section will show it PENDING until pasted.
 
 ## Current status
 

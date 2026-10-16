@@ -159,6 +159,14 @@ function TestLM_ledgerSummary_(ss, job) {
     return r + '=' + (mine.length ? mine.map(function (x) { return x.status + '/' + x.attempts + '/' + x.leads_sent; }).join('+') : 'none');
   }).join(' ');
 }
+// The buckets a re-run guard skipped on the ledger's account (D5/D6): 'Region:STATUS' of every exclusion row of `job` that names an email id, sorted.
+function TestLM_guardSkips_(ss, job) {
+  const sh = ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_);
+  if (!sh) return '';
+  const H = EMAIL_LEDGER_EXCLUSION_HEADERS_;
+  return sh._data.slice(1).filter(function (r) { return r[H.indexOf('job')] === job && r[H.indexOf('email_id')] && /re-run guard skipped this/.test(r[H.indexOf('reason')]); })
+    .map(function (r) { return r[H.indexOf('region')] + ':' + (/already (\w+) today/.exec(r[H.indexOf('reason')]) || [])[1]; }).sort().join(',');
+}
 function TestLM_logRows_(ss) { const sh = ss.getSheetByName(ALL_ISSUES_LOG_SHEET_); return sh ? Math.max(0, sh.getLastRow() - 1) : 0; }
 
 // Wraps every setValues on the ledger sheet: fault(row, col, values, write) decides whether to write and/or throw.
@@ -591,7 +599,9 @@ function runEmailLifecycleMatrixTests_() {
       TestAssertEqual_(rec.targets.length + ',' + rec.ran, '0,false', 'M12a 10:00: the recovery does not target an UNCONFIRMED bucket');
       TestAssertEqual_(TestLM_deliveredSummary_(w.st), allOnce, 'M12a 10:00: after the recovery still exactly one delivery per bucket');
       sendOvernightMorningEmails_(); // a same-day MANUAL re-run of the main job
-      TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=2 Thane=1', 'KNOWN DEFECT D5: a same-day re-run of the 10:00 job re-sends the UNCONFIRMED Pune email (its region guard reads Overnight_Log only, and an UNCONFIRMED send is not logged there). Correct expectation once fixed: ' + allOnce);
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st), allOnce, 'M12a 10:00 (D5 fixed): a same-day re-run does not re-send the UNCONFIRMED Pune email (the ledger shows it may have been sent)');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J10), 'Bangalore=ACCEPTED/1/1 Pune=UNCONFIRMED/1/0 Thane=ACCEPTED/1/1', 'M12a 10:00 (D5 fixed): the re-run leaves every row as it was - Pune stays UNCONFIRMED for a human to check');
+      TestAssertEqual_(TestLM_guardSkips_(w.ss, J10), 'Pune:UNCONFIRMED', 'M12a 10:00 (D5 fixed): the ledger-only skip is recorded once in Email_Ledger_Exclusions with its email id and status (Bangalore/Thane are skipped by the Overnight_Log guard first, as before)');
       TestAssertEqual_(TestLM_ledger_(w.ss, J10).length, 3, 'M12a 10:00: no extra ledger rows');
     }
     // M12b: partial batch - first / middle / last refused, retries exhausted (3 provider attempts), then recovered
@@ -629,7 +639,31 @@ function runEmailLifecycleMatrixTests_() {
       TestAssertEqual_(recoverFailedMorningBuckets_({ now: noon }).targets.length, 0, 'M12d 10:00: the recovery alone re-sends nothing (ATTEMPTING is never re-sent; Thane has no row)');
       sendOvernightMorningEmails_(); // the repair the 17:00 job allows (M3): a same-day MANUAL re-run of the main job
       TestAssertEqual_(TestLM_delivered_(w.st, 'Thane') + ',' + TestLM_delivered_(w.st, 'Bangalore'), '1,1', 'M12d 10:00: the re-run sends the lost Thane email and does not repeat Bangalore');
-      TestAssertEqual_(TestLM_delivered_(w.st, 'Pune') + ',' + TestLM_ledgerSummary_(w.ss, J10), '2,Bangalore=ACCEPTED/1/1 Pune=ACCEPTED/2/1 Thane=ACCEPTED/1/1', 'KNOWN DEFECT D5: ...but re-sends the ATTEMPTING (possibly delivered) Pune email - a duplicate. Correct expectation once fixed: Pune delivered 1, its row left ATTEMPTING/1/0');
+      TestAssertEqual_(TestLM_delivered_(w.st, 'Pune') + ',' + TestLM_ledgerSummary_(w.ss, J10), '1,Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=ACCEPTED/1/1', 'M12d 10:00 (D5 fixed): ...and does not re-send the ATTEMPTING (possibly delivered) Pune email; its row is left ATTEMPTING for a human');
+    }
+    // M12f (D5 regression): a FAILED bucket is NOT "already sent" - a same-day manual re-run still sends it (only ACCEPTED / ATTEMPTING / UNCONFIRMED are skipped)
+    {
+      const w = TestLM_startMorning_();
+      w.st.script = function (key) { return key === 'Pune' ? { throwMsg: 'Gmail operation not allowed for this user', delivered: false } : null; };
+      sendOvernightMorningEmails_();
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J10), 'Bangalore=ACCEPTED/1/1 Pune=FAILED/1/0 Thane=ACCEPTED/1/1', 'M12f 10:00: set-up - Pune FAILED');
+      w.st.script = null;
+      sendOvernightMorningEmails_(); // a same-day MANUAL re-run of the main job, not the recovery
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st), allOnce, 'M12f 10:00 (D5 regression): the re-run re-sends the FAILED Pune email and repeats neither ACCEPTED sibling');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J10), 'Bangalore=ACCEPTED/1/1 Pune=ACCEPTED/2/1 Thane=ACCEPTED/1/1', 'M12f 10:00 (D5 regression): the FAILED row is reused (2nd attempt), not duplicated');
+      TestAssertEqual_(TestLM_guardSkips_(w.ss, J10), '', 'M12f 10:00 (D5 regression): nothing is recorded as skipped by the ledger guard');
+    }
+    // M12g (D5): an ACCEPTED bucket whose Overnight_Log row is missing (the OE-03 append failure) is not re-sent by a re-run either
+    {
+      const w = TestLM_startMorning_();
+      sendOvernightMorningEmails_();
+      const ol = w.ss.getSheetByName(OVERNIGHT_LOG_SHEET_);
+      const before = ol._data.length;
+      ol._data = ol._data.filter(function (r, i) { return i === 0 || r[1] !== 'Pune'; });
+      TestAssertEqual_(before - ol._data.length, 1, 'M12g 10:00: set-up - the Pune Overnight_Log row removed (as if its append had failed)');
+      sendOvernightMorningEmails_();
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st), allOnce, 'M12g 10:00 (D5 fixed): the re-run does not repeat the ACCEPTED Pune email (the ledger shows it sent with the same leads)');
+      TestAssertEqual_(TestLM_guardSkips_(w.ss, J10), 'Pune:ACCEPTED', 'M12g 10:00 (D5 fixed): the skip is recorded in Email_Ledger_Exclusions');
     }
     // M12e: Gmail ACCEPTED, then the ledger RESULT write fails
     {
@@ -704,7 +738,20 @@ function runEmailLifecycleMatrixTests_() {
       TestAssertEqual_(TestLM_deliveredSummary_(w.st), allOnce, 'M13d 13:00: after recovery - nothing lost, no duplicate');
       TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J13), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=ACCEPTED/1/1', 'M13d 13:00: after the recovery Pune stays ATTEMPTING (a human must check it), Thane ACCEPTED');
       sendOvernightFollowupEmails_(); // a same-day MANUAL re-run of the main job
-      TestAssertEqual_(TestLM_delivered_(w.st, 'Pune') + ',' + TestLM_delivered_(w.st, 'Thane') + ',' + TestLM_delivered_(w.st, 'Bangalore'), '2,1,1', 'KNOWN DEFECT D6: a same-day re-run of the 13:00 job re-sends the ATTEMPTING (possibly delivered) Pune reply - its guard is Overnight_Log.followup_sent_at, never written by the killed run. Correct expectation once fixed: 1,1,1');
+      TestAssertEqual_(TestLM_delivered_(w.st, 'Pune') + ',' + TestLM_delivered_(w.st, 'Thane') + ',' + TestLM_delivered_(w.st, 'Bangalore'), '1,1,1', 'M13d 13:00 (D6 fixed): a same-day re-run does not re-send the ATTEMPTING (possibly delivered) Pune reply, although the killed run never wrote its followup_sent_at');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J13), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=ACCEPTED/1/1', 'M13d 13:00 (D6 fixed): the re-run leaves Pune ATTEMPTING for a human');
+      TestAssertEqual_(TestLM_guardSkips_(w.ss, J13), 'Pune:ATTEMPTING', 'M13d 13:00 (D6 fixed): the ledger-only skip is recorded in Email_Ledger_Exclusions (Bangalore/Thane are skipped by followup_sent_at first, as before)');
+    }
+    // M13f (D6 regression): a FAILED reply is NOT "already sent" - a same-day manual re-run still sends it, threaded
+    {
+      const w = TestLM_startFollowup_();
+      w.st.script = function (key) { return key === 'Pune' ? { throwMsg: 'Gmail operation not allowed for this user', delivered: false } : null; };
+      sendOvernightFollowupEmails_();
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J13), 'Bangalore=ACCEPTED/1/1 Pune=FAILED/1/0 Thane=ACCEPTED/1/1', 'M13f 13:00: set-up - Pune FAILED');
+      w.st.script = null;
+      sendOvernightFollowupEmails_(); // a same-day MANUAL re-run of the main job, not the recovery
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st) + ',' + threads(w.st, 'Pune'), allOnce + ',1', 'M13f 13:00 (D6 regression): the re-run re-sends the FAILED Pune reply (threaded) and repeats neither ACCEPTED sibling');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J13), 'Bangalore=ACCEPTED/1/1 Pune=ACCEPTED/2/1 Thane=ACCEPTED/1/1', 'M13f 13:00 (D6 regression): the FAILED row is reused (2nd attempt), not duplicated');
     }
     // M13e: the reply is ACCEPTED, then the ledger RESULT write fails
     {

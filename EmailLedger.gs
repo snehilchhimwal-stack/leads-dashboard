@@ -187,6 +187,31 @@ function emailLedgerReadRowsGs_(sheet, headers, startDayKey) {
   });
 }
 
+// D5/D6 (2026-10-16): today's ids of `job` that the ledger shows as ACCEPTED (sent) or ATTEMPTING / UNCONFIRMED (may have been
+// sent), as { emailId: { status, leadIds } } - the 17:00 job's "already sent today" rule (AI-3), per email id, for the 10:00 and 13:00 re-run
+// guards. A FAILED / PLANNED / SKIPPED / BLOCKED id is not in it, so a re-run still sends it. Empty in TEST MODE and when the
+// ledger cannot be read (logged): the guard never blocks a run on its own failure. A recovery run never asks (recovering an
+// ATTEMPTING / UNCONFIRMED email is never automatic - a human checks it).
+function emailLedgerSentOrMaybeSentTodayGs_(ss, job, dayKey) {
+  const out = {};
+  if (TEST_MODE_OVERRIDE_EMAIL_) return out;
+  try {
+    emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, dayKey).forEach(function (r) {
+      const status = String(r.status || '');
+      const id = String(r.email_id == null ? '' : r.email_id).trim();
+      if (id && r.job === job && emailLedgerDayKeyOfGs_(r.cycle_day) === dayKey &&
+        (status === EMAIL_LEDGER_STATUS_.ACCEPTED || status === EMAIL_LEDGER_STATUS_.ATTEMPTING || status === EMAIL_LEDGER_STATUS_.UNCONFIRMED)) {
+        let leadIds = [];
+        try { leadIds = JSON.parse(String(r.lead_ids_json || '[]')).map(String); } catch (e) { leadIds = []; }
+        out[id] = { status: status, leadIds: leadIds };
+      }
+    });
+  } catch (e) {
+    Logger.log('Email_Ledger could not be read for the ' + job + ' "already sent today" guard - not skipping anything on its account: ' + e);
+  }
+  return out;
+}
+
 function emailLedgerCol_(name) { return EMAIL_LEDGER_HEADERS_.indexOf(name) + 1; } // 1-based sheet column
 
 // The day a ledger/exclusion cell belongs to: a real Date (Sheets turned the text into one) or the 'yyyy-MM-dd' text we wrote.

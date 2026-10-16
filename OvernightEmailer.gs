@@ -1145,6 +1145,12 @@ function sendOvernightMorningEmails_(opts) {
   // every ledger call below is a no-op and the emails go out exactly as before.
   const ledger = emailLedgerOpenGs_(ss);
   const ledgerJob = EMAIL_LEDGER_JOB_MORNING_;
+  // D5 (2026-10-16): the region guard below reads Overnight_Log, which an UNCONFIRMED send or a run killed mid-send never wrote,
+  // so a same-day re-run re-sent those buckets. A normal run also skips every bucket the ledger shows as ATTEMPTING / UNCONFIRMED
+  // today, and an ACCEPTED one unless it now carries a lead its sent email did not (a later Section 2 for a recipient whose
+  // Section 1 already went out is still sent - the documented "Section 2 proceeds separately" path). Same rule as the 17:00 job
+  // (AI-3). Not in a recovery, which picks its own targets; empty when the ledger is off.
+  const ledgerSentToday = (emailLedgerLiveGs_(ledger) && !recoverIds) ? emailLedgerSentOrMaybeSentTodayGs_(ss, ledgerJob, todayKey) : {};
 
   // Two-checkpoint email lifecycle redesign (Step 6/11) — yesterday's
   // 17:00 AllIssues_Log rows still awaiting Checkpoint 1, grouped by
@@ -1307,7 +1313,16 @@ function sendOvernightMorningEmails_(opts) {
       };
     });
     // Recovery: only the buckets the ledger shows as failed are planned and sent; the rest of the region was handled by the original run.
-    const unionToSend = recoverIds ? unionEmails.filter(function (k) { return recoverIds[ledgerMeta[k].emailId]; }) : unionEmails;
+    const unionToSend = recoverIds ? unionEmails.filter(function (k) { return recoverIds[ledgerMeta[k].emailId]; }) : unionEmails.filter(function (k) {
+      // D5: a bucket the ledger shows as sent (or possibly sent) today is not sent again; its row is left exactly as it is.
+      const prior = ledgerSentToday[ledgerMeta[k].emailId];
+      if (!prior) return true;
+      if (prior.status === EMAIL_LEDGER_STATUS_.ACCEPTED && ledgerMeta[k].leadIds.some(function (id) { return prior.leadIds.indexOf(id) === -1; })) return true;
+      const priorStatus = prior.status;
+      Logger.log('Skipping the 10:00 email for ' + region + ' (' + k + ') - already ' + priorStatus + ' today in Email_Ledger (' + ledgerMeta[k].emailId + '); not re-sending.');
+      emailLedgerExcludeGs_(ledger, [{ job: ledgerJob, dayKey: todayKey, region: region, kind: 'region', emailId: ledgerMeta[k].emailId, reason: 'already ' + priorStatus + ' today (Email_Ledger) - the re-run guard skipped this email (' + ledgerMeta[k].leadIds.length + ' lead(s))' }]);
+      return false;
+    });
     if (recoverIds) unionToSend.forEach(function (k) { recoveredSeen[ledgerMeta[k].emailId] = true; });
     if (recoverIds) {
       // OE-01: a bucket never planned today that stands in for a targeted one (same region/role/label, or overlapping leads)
@@ -2002,6 +2017,11 @@ function sendOvernightFollowupEmails_(opts) {
   const recoveryLedgerToday = recoverIds ? recoveryLedgerRowsTodayGs_(ss, todayKey) : null;
   const recoveredAs = {};
   const recoveryUnsentByRegion = {};
+  // D6 (2026-10-16): followup_sent_at (the guard in Pass 1) is never written by a run killed mid-send, so a same-day re-run re-sent
+  // an ATTEMPTING reply. A normal run also skips every reply the ledger shows as ACCEPTED / ATTEMPTING / UNCONFIRMED today (the
+  // 17:00 rule, AI-3); the skips are recorded as exclusions once the ledger is open below. Not in a recovery; empty in TEST MODE.
+  const ledgerSentToday = recoverIds ? {} : emailLedgerSentOrMaybeSentTodayGs_(ss, EMAIL_LEDGER_JOB_FOLLOWUP_, todayKey);
+  const ledgerSkipped = []; // exclusion rows for the replies skipped on the ledger's account
   const logSheet = ensureOvernightLogSheet_(ss);
   const lastRow = lastRowRetryGs_(logSheet);
   if (lastRow < 2) return;
@@ -2072,6 +2092,16 @@ function sendOvernightFollowupEmails_(opts) {
     const subject = String(run[7] || '').trim();
     let issueLog;
     try { issueLog = JSON.parse(run[3] || '[]'); } catch (e) { issueLog = []; }
+    if (!recoverIds) {
+      // D6: skipped like a row with followup_sent_at set (classification, Lead_Followups push and send); the row is left as it is.
+      const sentId = emailLedgerIdGs_(EMAIL_LEDGER_JOB_FOLLOWUP_, todayKey, run[1], '', '', to);
+      const priorStatus = ledgerSentToday[sentId] ? ledgerSentToday[sentId].status : '';
+      if (priorStatus) {
+        Logger.log('Skipping the 13:00 reply for ' + region + ' (' + to + ') - already ' + priorStatus + ' today in Email_Ledger (' + sentId + '); not re-sending.');
+        ledgerSkipped.push({ job: EMAIL_LEDGER_JOB_FOLLOWUP_, dayKey: todayKey, region: region, kind: 'region', emailId: sentId, reason: 'already ' + priorStatus + ' today (Email_Ledger) - the re-run guard skipped this reply (' + (Array.isArray(issueLog) ? issueLog.length : 0) + ' lead(s))' });
+        return;
+      }
+    }
     // OE-01 (audit 2026-10-13): set when this row is NOT a targeted id and was never planned today - it is either the stand-in
     // for a targeted reply whose id changed (its `to` was corrected in Overnight_Log by hand), or unsent work to report.
     let recoveryLeftoverId = '';
@@ -2158,6 +2188,7 @@ function sendOvernightFollowupEmails_(opts) {
   // write before the first send; a bucket already known to have nothing to send (nothing unresolved, no stored recipient) is
   // recorded directly as SKIPPED. The pre-pass mirrors the Section 2 hand-out of the loop below without changing any state of it.
   const ledger = emailLedgerOpenGs_(ss);
+  emailLedgerExcludeGs_(ledger, ledgerSkipped); // D6: the replies Pass 1 skipped because the ledger shows them sent today
   {
     const consumedForLedger = {};
     emailLedgerPlanGs_(ledger, perRegion.map(function (r) {

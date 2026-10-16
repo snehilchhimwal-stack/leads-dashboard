@@ -43,7 +43,7 @@ States: `PLANNED`, `ATTEMPTING`, `ACCEPTED`, `FAILED`, `UNCONFIRMED`, `BLOCKED`,
 
 Forbidden / never automatic [V]: ACCEPTED -> anything (`emailLedgerFailIfOpenGs_` guards it); UNCONFIRMED or ATTEMPTING -> re-send
 (recovery excludes them - since D2's fix per email id, so a stale FAILED/PLANNED copy of such an id is excluded too; the 17:00 re-run
-guard treats them as sent, AI-3; the 10:00 and 13:00 re-run guards do NOT - open defects D5/D6). There is no programmatic guard on *direct* calls of
+guard treats them as sent, AI-3; since the D5/D6 fix the 10:00 and 13:00 re-run guards read the ledger the same way, per email id). There is no programmatic guard on *direct* calls of
 `emailLedgerAttemptGs_` against an ACCEPTED row [A: callers never do it].
 
 Terminal: ACCEPTED, UNCONFIRMED, SKIPPED (final for automation). Recoverable same day until the late cutoff (17:00 -> 18:30, 10:00 -> 12:45,
@@ -57,9 +57,9 @@ Recovery is per IST day: at IST midnight yesterday's failures stop being targets
 | B1 | normal send | ACCEPTED + msg/thread ids, log row | Tests_EmailLedger (1),(12) |
 | B2 | definite refusal, retries exhausted | FAILED, 3 drafts, 0 delivered | **M2** (first/middle/last); 10:00 **M12b**; 13:00 **M13b** (3 threaded + 3 fallback) |
 | B3 | refusal x2 then accepted | ACCEPTED, 1 delivery, ledger attempts 1 | **M2b**; 10:00 **M12c**; 13:00 fallback accepted **M13c** |
-| B4 | timeout AFTER delivery | UNCONFIRMED, no retry; recovery + re-run send nothing | **M1** (+ Tests_EmailLedger (5),(37)); 13:00 **M13a**; 10:00 **M12a -> DEFECT D5** (re-run) |
+| B4 | timeout AFTER delivery | UNCONFIRMED, no retry; recovery + re-run send nothing | **M1** (+ Tests_EmailLedger (5),(37)); 13:00 **M13a**; 10:00 **M12a** (re-run: D5 fixed) |
 | B5 | gate refuses one lead / all leads | lead dropped / BLOCKED | Tests_EmailLedger (6),(7),(38) |
-| B6 | kill mid-send (delivered, unrecorded) | ATTEMPTING; re-run sends only never-planned regions | **M3**; 10:00 **M12d -> D5**; 13:00 **M13d** (recovery sends the PLANNED reply only) **-> D6** (re-run) |
+| B6 | kill mid-send (delivered, unrecorded) | ATTEMPTING; re-run sends only never-planned regions | **M3**; 10:00 **M12d** (D5 fixed); 13:00 **M13d** (recovery sends the PLANNED reply only; re-run: D6 fixed) |
 | B7 | kill before attempt | PLANNED; re-run reuses the row | **M3b**; Tests_EmailLedger 17:00 "run died" |
 | B8 | accepted, ledger result write fails | ATTEMPTING on sheet, log row, 1 ops note, no duplicate | **M4**; 10:00 **M12e**; 13:00 **M13e** |
 | B9 | accepted, AllIssues_Log append fails | ledger ACCEPTED blocks re-run | Tests_AllIssuesEmailer AI-3, Tests_OvernightEmailer OE-03 |
@@ -129,12 +129,12 @@ After the fixes (section 8): `TOTAL (local headless-browser run): 3985 passed, 0
 | O2 | **Fixed 2026-10-16** | EmailSweep.gs (first match in search order) | M8: `bounce_status` stamp can change between sweeps | cosmetic |
 | O3 | **Fixed 2026-10-16** (UNCONFIRMED only) | EmailLedger.gs:442 | M1: `lead_ids_json` becomes [] on UNCONFIRMED/FAILED rows | the ledger no longer lists which leads an UNCONFIRMED email may have delivered |
 
-| D5 | **Confirmed, OPEN** (found 2026-10-16 by M12) | OvernightEmailer.gs `sendOvernightMorningEmails_` region guard (Overnight_Log only) | M12a: a same-day re-run re-sends an UNCONFIRMED 10:00 bucket; M12d: re-sends an ATTEMPTING (killed mid-send) one | duplicate 10:00 email when an operator re-runs the job by hand (the repair that is safe for 17:00, M3); scheduled runs are once a day |
-| D6 | **Confirmed, OPEN** (found 2026-10-16 by M13) | OvernightEmailer.gs `sendOvernightFollowupEmails_` guard (`Overnight_Log.followup_sent_at` only) | M13d: a same-day re-run re-sends an ATTEMPTING (killed mid-send) 13:00 reply | duplicate threaded reply on a manual re-run after a crash |
+| D5 | **Fixed 2026-10-16** (found by M12) | OvernightEmailer.gs `sendOvernightMorningEmails_` region guard (Overnight_Log only) | M12a: a same-day re-run re-sent an UNCONFIRMED 10:00 bucket; M12d: re-sent an ATTEMPTING (killed mid-send) one | duplicate 10:00 email when an operator re-ran the job by hand; scheduled runs are once a day |
+| D6 | **Fixed 2026-10-16** (found by M13) | OvernightEmailer.gs `sendOvernightFollowupEmails_` guard (`Overnight_Log.followup_sent_at` only) | M13d: a same-day re-run re-sent an ATTEMPTING (killed mid-send) 13:00 reply | duplicate threaded reply on a manual re-run after a crash |
 | O4 | observation | OvernightEmailer.gs FN-443 `recoveryLeadOverlapTargetGs_` | code reading: a FAILED/BLOCKED row records `lead_ids_json` [], so the lead-overlap stand-in match only ever works for PLANNED targets | a recovery after a routing change may report a bucket as unsent instead of matching it |
 
 Known-defect assertions are labelled `KNOWN DEFECT Dn` in the test file; they pin the current behaviour and must be flipped when fixed.
-Open ones: D5 (M12a, M12d), D6 (M13d).
+Open ones: none (D5 and D6 fixed 2026-10-16; their assertions now pin the fix).
 
 ## 8. Fixes applied 2026-10-16 (uncommitted, not live until pasted)
 
@@ -148,4 +148,6 @@ Open ones: D5 (M12a, M12d), D6 (M13d).
 | O3 | an UNCONFIRMED row keeps the lead ids it may have delivered (`leads_sent` still 0; FAILED/BLOCKED unchanged). Consumers checked: recovery overlap matching only reads target rows (never UNCONFIRMED); OpsAudit, cycle report, follow-up tracker do not read `lead_ids_json`; the re-route re-send reads it only for its own gate | AllIssuesEmailer.gs, OvernightEmailer.gs (10:00 + 13:00), EmailLedger.gs `emailLedgerTrackSendGs_` | M1, M2, M12a, M13a |
 | O2 | the earliest matching bounce is recorded, and a recorded earlier time is never replaced by a later one | EmailSweep.gs `emailSweepMatchBounceGs_` + sweep loop | M8 |
 | MT-01 test | the cohort-guard fixture is clock-relative | Tests_MovementTracker.gs | runner `--at` 00:00:20 / 03:00 / 04:50 IST |
+| D5 | a normal (non-recovery) 10:00 run skips a bucket whose id is ATTEMPTING or UNCONFIRMED in today's ledger, and an ACCEPTED one unless it now carries a lead its sent email did not (the documented later-Section-2 send still goes); the skip is logged and recorded in `Email_Ledger_Exclusions` (kind `region`, with the email id); the row is left as it is. FAILED/PLANNED/SKIPPED/BLOCKED are still re-sent by a re-run. Ledger off / unreadable / TEST MODE: no skip | EmailLedger.gs `emailLedgerSentOrMaybeSentTodayGs_`; OvernightEmailer.gs `sendOvernightMorningEmails_` | M12a, M12d (flipped), M12f (FAILED still re-sent), M12g (ACCEPTED with no Overnight_Log row) |
+| D6 | a normal 13:00 run skips (in Pass 1, like a set `followup_sent_at`) a reply whose id is ACCEPTED/ATTEMPTING/UNCONFIRMED in today's ledger; logged and recorded in `Email_Ledger_Exclusions`; `followup_sent_at` is not written | EmailLedger.gs `emailLedgerSentOrMaybeSentTodayGs_`; OvernightEmailer.gs `sendOvernightFollowupEmails_` | M13d (flipped), M13f (FAILED still re-sent, threaded) |
 | registration | `Tests_E2E_Live.gs` is a documented live-only exception (must not be registered; registering it is a finding) | test/check-gs-registration.py | `python test/check-gs-registration.py` clean |
