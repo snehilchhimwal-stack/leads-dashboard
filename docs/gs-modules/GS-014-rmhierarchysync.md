@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (report-only until `enableRmHierarchySyncApplyNow` is run) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-16 against commit `(pending commit)` - one-off removal of confirmed leavers from the live tab (`FN-524`, `RULE-088`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-16 against commit `9bd7126` - one-off removal of confirmed leavers from the live tab (`FN-524`, `RULE-088`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -157,7 +157,7 @@ Apps Script backend; a time-driven job (23:15 IST) sharing the email jobs' lock,
 
 **2026-10-08** (`3dc9852`): the first report listed 19 possible leavers, 9 of them old spellings of people still in the HR sheet (Peddapally Shivaji, Atharva P Belose, Akash Ugale, Kavya Gowda, Sourabh Sareen Pnl, Jay Renavikar, Mamtaben S 1 Account and two Mohmmad Azaz spellings). `computeRmHierarchySyncPlanGs_` now recognises such a row (FN-377, RULE-042) and the report lists it once under "OLD SPELLINGS OF CURRENT STAFF" with the matched person and employee code; it is not counted as work in the subject. Report lines also carry the HR employee code (column A) for new people and manager-field items. **Not live until pasted.**
 
-**2026-10-16** (`(pending commit)`): `removeRmHierarchyLeaversNow()` / `removeRmHierarchyLeaversForceNow()` (`FN-524`, `RULE-088`) - the one-off, console-run removal of people the user has confirmed left (first batch: Jitendra Phulwaria, Atharva Belose, Atharva P Belose, also removed from `RM_HIERARCHY_RAW_`, `GS-011`). The nightly sync itself still never removes anyone; once the rows are gone it simply stops listing them, and their remembered report items are dropped. **Not live until pasted.**
+**2026-10-16** (`9bd7126`): `removeRmHierarchyLeaversNow()` / `removeRmHierarchyLeaversForceNow()` (`FN-524`, `RULE-088`) - the one-off, console-run removal of people the user has confirmed left (first batch: Jitendra Phulwaria, Atharva Belose, Atharva P Belose, also removed from `RM_HIERARCHY_RAW_`, `GS-011`). The nightly sync itself still never removes anyone; once the rows are gone it simply stops listing them, and their remembered report items are dropped. **Not live until pasted.**
 
 ## Revalidation trigger
 

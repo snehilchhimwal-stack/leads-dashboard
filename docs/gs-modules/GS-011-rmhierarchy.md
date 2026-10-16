@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-16 against commit `(pending commit)` - three confirmed leavers removed from `RM_HIERARCHY_RAW_` (Jitendra Phulwaria, Atharva Belose, alias Atharva P Belose); the live tab is cleared by `removeRmHierarchyLeaversNow` (`GS-014` `FN-524`) |
+| **Last Verified** | 2026-10-16 against commit `9bd7126` - three confirmed leavers removed from `RM_HIERARCHY_RAW_` (Jitendra Phulwaria, Atharva Belose, alias Atharva P Belose); the live tab is cleared by `removeRmHierarchyLeaversNow` (`GS-014` `FN-524`) |
 
 ## Purpose / reason to exist
 
@@ -348,7 +348,7 @@ Apps Script editor.
 
 **2026-10-13** (`a3a33a0`): refreshed `RM_HIERARCHY_RAW_` (`CFG-054`) from the live HR roster sheet with `test/refresh-rm-hierarchy.py --apply` plus hand edits, every decision confirmed by the user: 19 joiners added, 6 leavers removed (Vemula Ajay's 9 Hyderabad reports now sit directly under Zoya Fathima), 7 manager moves, and alias rows for Mohd Shaikh and Mukesh Mishra Admin. New `EXTRA_CC_FOR_RM_` (`CFG-123`) keeps Neha Mishra in cc for Aarya Sadanam now that she reports to Manisha rathod (a `CFG-080` restricted-cc primary). `Tests_RmHierarchy.gs`: 5 new assertions (extra cc survives the restricted override; production entry present). Full suite 3375/3375 via `run-gs-tests-headless.py`. Pasted into the Sheet's Apps Script and `rebuildRmHierarchy()` run the same day; the live `RM_Hierarchy` tab was checked row-for-row against the file (245 rows, identical).
 
-**2026-10-16** (`(pending commit)`): the user confirmed three people from the nightly sync report's POSSIBLE LEAVERS list have left - Jitendra Phulwaria (Navi Mumbai S1), Atharva Belose (Harbour S1) and his leads-sheet alias row Atharva P Belose. Their three rows are removed from `RM_HIERARCHY_RAW_` (`CFG-054`) so a rebuild cannot restore them; none was anyone's `tl`/`tm`/`rh`/`ch`. The live `RM_Hierarchy` tab is cleared separately by `removeRmHierarchyLeaversNow()` (`GS-014` `FN-524`), because once the sync is active the live tab, not this table, is the source of truth. `RmHierarchy.private.gs` (email table) is untouched; its entries for them are harmless. **Not live until pasted.**
+**2026-10-16** (`9bd7126`): the user confirmed three people from the nightly sync report's POSSIBLE LEAVERS list have left - Jitendra Phulwaria (Navi Mumbai S1), Atharva Belose (Harbour S1) and his leads-sheet alias row Atharva P Belose. Their three rows are removed from `RM_HIERARCHY_RAW_` (`CFG-054`) so a rebuild cannot restore them; none was anyone's `tl`/`tm`/`rh`/`ch`. The live `RM_Hierarchy` tab is cleared separately by `removeRmHierarchyLeaversNow()` (`GS-014` `FN-524`), because once the sync is active the live tab, not this table, is the source of truth. `RmHierarchy.private.gs` (email table) is untouched; its entries for them are harmless. **Not live until pasted.**
 
 ## Revalidation trigger
 
