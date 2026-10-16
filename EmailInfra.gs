@@ -341,6 +341,17 @@ function markChReportSentGs_(kind, region, chName) {
 const FUTWORK_REGION_KEY_ = 'Futwork';
 function regionKeyForRmGs_(rmName, region) { return isFutworkRmNameGs_(rmName) ? FUTWORK_REGION_KEY_ : region; }
 
+// 2026-10-16: a person whose 17:00 buckets are combined across regions (ALL_ISSUES_CONSOLIDATED_RECIPIENTS_, AllIssuesEmailer.gs)
+// gets ONE email keyed by this pseudo-region, e.g. 'Multi-region: Rajesh Muni'. Like Futwork, each lead keeps its real region,
+// and the 10:00 Checkpoint 1 / 13:00 Checkpoint 2 follow that one row as one bucket (isMultiRegionKeyGs_).
+const CONSOLIDATED_REGION_KEY_PREFIX_ = 'Multi-region: ';
+function consolidatedRegionKeyGs_(personName) { return CONSOLIDATED_REGION_KEY_PREFIX_ + String(personName || '').trim(); }
+// True for a pseudo-region whose leads span several real regions (Futwork, or a consolidated person's key).
+function isMultiRegionKeyGs_(regionKey) {
+  const k = String(regionKey || '');
+  return k === FUTWORK_REGION_KEY_ || k.indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === 0;
+}
+
 // Real regions (sorted) + lead counts for items carrying .region, e.g. { regions: ['Pune','Thane'], label: 'Pune (3) · Thane (1)' }.
 function regionSummaryGs_(items) {
   const counts = {};
@@ -349,11 +360,11 @@ function regionSummaryGs_(items) {
   return { regions: regions, counts: counts, label: regions.map(function (r) { return r + ' (' + counts[r] + ')'; }).join(' · ') };
 }
 
-// Header opts for an email: the region itself, or — for the Futwork pseudo-region — every real region spelled out.
+// Header opts for an email: the region itself, or — for a multi-region pseudo-region (Futwork, consolidated person) — every real region spelled out.
 function regionHeaderOptsGs_(regionKey, items) {
-  if (regionKey !== FUTWORK_REGION_KEY_) return { region: regionKey };
+  if (!isMultiRegionKeyGs_(regionKey)) return { region: regionKey };
   const s = regionSummaryGs_(items);
-  if (!s.regions.length) return { region: FUTWORK_REGION_KEY_ };
+  if (!s.regions.length) return { region: regionKey };
   return { region: s.regions.join(', '), regionLabel: (s.regions.length === 1 ? 'Region: ' : 'Regions: ') + s.label };
 }
 

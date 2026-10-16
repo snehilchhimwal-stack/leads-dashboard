@@ -394,7 +394,7 @@ function buildOvernightSectionOptsGs_(region, leads, dateLabel, win) {
       rows: rmLeads.map(function (l) { return [l.lead_id, l.status, l.followup]; }),
     };
   };
-  const sections = region === FUTWORK_REGION_KEY_
+  const sections = isMultiRegionKeyGs_(region)
     ? sectionsByRegionGs_(leads, function (r, regionLeads) {
       const byRm = {};
       regionLeads.forEach(function (l) { (byRm[l.RM] = byRm[l.RM] || []).push(l); });
@@ -634,7 +634,7 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
     };
   };
   // Futwork: one email spans several regions, so keep each region's RMs together under a region band.
-  const sections = region === FUTWORK_REGION_KEY_
+  const sections = isMultiRegionKeyGs_(region)
     ? sectionsByRegionGs_(activeEntries, function (r, regionEntries) {
       const byRm = {};
       regionEntries.forEach(function (e) {
@@ -779,6 +779,10 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     ? "Already sent separately earlier today — see this morning's earlier Overnight email for this team."
     : section1SkippedReason === 'already_sent_not_to_you'
     ? 'No Overnight email to you is recorded for today. This region already had an Overnight run earlier today, so its overnight leads were not re-sent in this run — if you did not receive that email, contact Lead Ops.'
+    // 2026-10-16: a consolidated 17:00 person's row (consolidatedRegionKeyGs_) has no overnight leads of its own - their overnight
+    // leads still go per region, in separate emails.
+    : String(region || '').indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === 0
+    ? "Overnight leads come in this morning's separate per-region emails — this email carries only the follow-up of yesterday's combined 17:00 report."
     : 'No overnight leads for your team today.';
   const section1Opts = section1
     ? buildOvernightSectionOptsGs_(region, section1Leads, dateLabel, win)
@@ -1697,7 +1701,7 @@ function buildOvernightFollowupSectionOptsGs_(region, unresolvedRows) {
     kpis: [
       { value: unresolvedRows.length, label: 'Still Unresolved', bg: '#fee2e2', fg: '#dc2626' },
     ],
-    sections: region === FUTWORK_REGION_KEY_
+    sections: isMultiRegionKeyGs_(region)
       ? sectionsByRegionGs_(unresolvedRows, function (r, regionRows) { return [makeSection_(regionRows)]; })
       : [makeSection_(unresolvedRows)],
     footerNote: 'A lead counts as still unresolved only if it’s flagged for the SAME issue it had at 10am — anything else (issue cleared, lead closed, lead reached Opportunity+, or no longer found) is dropped from this follow-up rather than shown here.',
@@ -2145,7 +2149,7 @@ function sendOvernightFollowupEmails_(opts) {
         const baselineEntry = lastSnapshotMap[String(entry.lead_id === null || entry.lead_id === undefined ? '' : entry.lead_id).trim()]; // per LEAD (email audit F18)
         // Real region of THIS lead (the log row's region can be the 'Futwork' pseudo-region) — used for the region bands
         // and the Lead_Followups push.
-        const leadRegion = region === FUTWORK_REGION_KEY_ ? (mainRegionForGs_(getVal_(row, colIndex, 'region')) || region) : region;
+        const leadRegion = isMultiRegionKeyGs_(region) ? (mainRegionForGs_(getVal_(row, colIndex, 'region')) || region) : region;
         unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: leadRegion, issue: entry.issueLabel, sourceRow: row, baselineEntry: baselineEntry, staleSince: staleSinceOfRowGs_(row, colIndex, leadsData.lastChangeMap, now) });
       } else {
         resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });

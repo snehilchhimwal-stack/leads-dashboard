@@ -77,6 +77,57 @@ const ALL_ISSUES_RUN_HOUR_ = 17; // IST (5pm) — one run a day, see setupAllIss
 const ALL_ISSUES_LATE_CUTOFF_HOUR_ = 18;
 const ALL_ISSUES_LATE_CUTOFF_MINUTE_ = 30;
 
+// 2026-10-16 (user request): these primary recipients (bucket primary name, case-insensitive) get ONE 17:00 email covering every
+// region they hold leads in, instead of one email per region — e.g. Rajesh Muni had three on 16 Oct (Western, SoBo, Central).
+// Same shape as the Futwork email: one pseudo-region (consolidatedRegionKeyGs_, EmailInfra.gs) so the ledger, AllIssues_Log,
+// the "already sent today" guard, recovery and the 10:00/13:00 checkpoints all see ONE bucket; each lead keeps its real region
+// (region bands in the email, regions spelled out in the subject). Cc is ONLY ALL_ISSUES_CONSOLIDATED_CC_NAME_ — none of the
+// per-region Cc lists (leadership, P&L head, EXTRA_CC_FOR_RM_) are carried over (user decision, 2026-10-16).
+// Only the 17:00 job is consolidated; the 10:00 Section 1 (overnight) still goes per region.
+const ALL_ISSUES_CONSOLIDATED_RECIPIENTS_ = ['rajesh muni', 'manisha rathod'];
+const ALL_ISSUES_CONSOLIDATED_CC_NAME_ = 'Snehil Chhimwal';
+// Test override, same convention as OPS_ALERT_EMAIL_ (EmailInfra.gs): blank = look the name up. Nothing in production assigns it.
+let ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = '';
+function allIssuesConsolidatedCcGs_() {
+  if (ALL_ISSUES_CONSOLIDATED_CC_EMAIL_) return ALL_ISSUES_CONSOLIDATED_CC_EMAIL_;
+  const resolved = resolvedEmailForNameGs_(ALL_ISSUES_CONSOLIDATED_CC_NAME_);
+  if (resolved) return resolved;
+  warnEmailConfigOnceGs_('allIssuesConsolidatedCc', 'no address for "' + ALL_ISSUES_CONSOLIDATED_CC_NAME_ + '" in the private employee table — the consolidated 17:00 emails are cc\'d to the ops address instead.');
+  return opsAlertEmailGs_();
+}
+function isAllIssuesConsolidatedRecipientGs_(bucketLabel) {
+  const k = String(bucketLabel || '').trim().toLowerCase();
+  return !!k && ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.some(function (n) { return String(n).trim().toLowerCase() === k; });
+}
+
+// One recipient record for a consolidated person, from their per-region buckets (sorted region order). To = the first region's
+// To (the same person — a different To elsewhere is logged, never silently dropped: it is added to Cc); Cc = the one configured
+// address. In TEST MODE the real recipients travel as originalTo/originalCc, exactly as for any other bucket.
+function consolidatedAllIssuesRecGs_(parts) {
+  const first = parts[0].rec;
+  const realTo = function (r) { return String(r.originalTo || r.to || '').trim(); };
+  const to = realTo(first);
+  const ccList = [];
+  const taken = {};
+  taken[to.toLowerCase()] = true;
+  const addCc = function (addr) { const a = String(addr || '').trim(); if (a && !taken[a.toLowerCase()]) { taken[a.toLowerCase()] = true; ccList.push(a); } };
+  parts.forEach(function (p) {
+    if (realTo(p.rec).toLowerCase() !== to.toLowerCase()) {
+      Logger.log('Consolidated 17:00 email for ' + first.bucketLabel + ': ' + p.region + ' resolved To ' + realTo(p.rec) + ' (not ' + to + ') - added to Cc.');
+      addCc(realTo(p.rec));
+    }
+  });
+  addCc(allIssuesConsolidatedCcGs_());
+  const cc = ccList.join(',') || undefined;
+  const rmNames = [];
+  parts.forEach(function (p) { p.rec.rmNames.forEach(function (n) { if (rmNames.indexOf(n) === -1) rmNames.push(n); }); });
+  const source = 'Consolidated across regions (' + parts.map(function (p) { return p.region; }).join(', ') + '; Cc ' + ALL_ISSUES_CONSOLIDATED_CC_NAME_ + ' only): ' +
+    parts.map(function (p) { return p.region + ' = ' + p.rec.source; }).join(' + ');
+  const rec = { to: to, cc: cc, rmNames: rmNames, source: source, bucketLabel: first.bucketLabel, primaryRole: first.primaryRole };
+  if (TEST_MODE_OVERRIDE_EMAIL_) return Object.assign(rec, { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, originalTo: to, originalCc: cc });
+  return rec;
+}
+
 // TODAY (IST) plus the ALL_ISSUES_WINDOW_DAYS_BACK_ full calendar days
 // before it — e.g. run on the 28th, covers the 26th, 27th, and 28th (up
 // to whenever this actually runs) in full. Anchored to IST midnight on
@@ -361,6 +412,39 @@ function sendAllIssuesEmails_(opts) {
   // but counted every attempt, failed ones included.
   let bucketSendCount = 0; // bucket emails attempted - the send loop's own duration only means something alongside this count
   let bucketSentOkCount = 0; // …of which Gmail accepted
+  // 2026-10-16: consolidated people's buckets, collected from every region and sent once after the region loop.
+  const consolidatedParts = {}; // lower-cased bucket label -> [{ region, rec, leads }]
+
+  // Records a region's (or a consolidated person's) buckets as PLANNED in one write.
+  const planBuckets_ = function (region, list) {
+    emailLedgerPlanGs_(ledger, list.filter(function (b) { return b.leads.length; }).map(function (b) {
+      return {
+        emailId: b.emailId, job: ledgerJob, dayKey: todayKey, region: region, bucketLabel: b.rec.bucketLabel, primaryRole: b.rec.primaryRole,
+        to: b.rec.to, cc: b.rec.cc, subject: allIssuesSubjectGs_(region, b.rec, b.leads, win), leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
+      };
+    }));
+  };
+  // Sends one bucket and folds its outcome into the run's counters and the "not sent" report.
+  const sendBucket_ = function (region, b) {
+    const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false };
+    const failure = sendOneAllIssuesEmail_(ss, logSheet, region, b.rec, b.leads, dateLabel, todayKey, now, win, ledgerCtx);
+    bucketSendCount++;
+    if (!failure) bucketSentOkCount++;
+    // Leads the send-safety gate objected to individually were dropped from this bucket and the rest was resent (decision D3).
+    ledgerCtx.dropped.forEach(function (d) {
+      failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: b.rec.to, cc: b.rec.cc || '', reason: 'Left out of the email: ' + d.reason });
+    });
+    emailLedgerExcludeGs_(ledger, ledgerCtx.dropped.map(function (d) {
+      return { job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: d.lead.lead_id, rm: d.lead.RM, emailId: b.emailId, reason: d.reason };
+    }));
+    if (failure) {
+      const droppedIds = {};
+      ledgerCtx.dropped.forEach(function (d) { droppedIds[String(d.lead.lead_id)] = true; }); // already listed above - not twice
+      b.leads.filter(function (l) { return !droppedIds[String(l.lead_id)]; }).forEach(function (l) {
+        failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: b.rec.to, cc: b.rec.cc || '', reason: failure.reason });
+      });
+    }
+  };
 
   Object.keys(byRegion).sort().forEach(function (region) {
     const regionLeads = byRegion[region];
@@ -414,44 +498,50 @@ function sendAllIssuesEmails_(opts) {
 
     // Every bucket email of this region is recorded as PLANNED in ONE write before the first send, so an email that never goes
     // out (a crash, a timeout kill) still leaves a row that says it should have.
-    const buckets = resolution.results.map(function (rec) {
+    const buckets = [];
+    resolution.results.forEach(function (rec) {
       const rmSet = new Set(rec.rmNames);
       const bucketLeads = flaggedLeads.filter(function (l) { return rmSet.has(l.RM); });
-      return { rec: rec, leads: bucketLeads, emailId: emailLedgerIdGs_(ledgerJob, todayKey, region, rec.primaryRole, rec.bucketLabel) };
+      // 2026-10-16: a consolidated person's bucket is set aside and sent once, for all regions, after this loop.
+      if (!isMultiRegionKeyGs_(region) && isAllIssuesConsolidatedRecipientGs_(rec.bucketLabel)) {
+        if (bucketLeads.length) {
+          const k = String(rec.bucketLabel).trim().toLowerCase();
+          (consolidatedParts[k] = consolidatedParts[k] || []).push({ region: region, rec: rec, leads: bucketLeads });
+        }
+        return;
+      }
+      buckets.push({ rec: rec, leads: bucketLeads, emailId: emailLedgerIdGs_(ledgerJob, todayKey, region, rec.primaryRole, rec.bucketLabel) });
     });
     let bucketsToSend = buckets;
     if (recoverIds) {
       bucketsToSend = buckets.filter(function (b) { return recoverIds[b.emailId]; });
       bucketsToSend.forEach(function (b) { recoveredSeen[b.emailId] = true; });
     }
-    emailLedgerPlanGs_(ledger, bucketsToSend.filter(function (b) { return b.leads.length; }).map(function (b) {
-      return {
-        emailId: b.emailId, job: ledgerJob, dayKey: todayKey, region: region, bucketLabel: b.rec.bucketLabel, primaryRole: b.rec.primaryRole,
-        to: b.rec.to, cc: b.rec.cc, subject: allIssuesSubjectGs_(region, b.rec, b.leads, win), leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
-      };
-    }));
-
-    bucketsToSend.forEach(function (b) {
-      const ledgerCtx = { ledger: ledger, emailId: b.emailId, dropped: [], isRetry: false };
-      const failure = sendOneAllIssuesEmail_(ss, logSheet, region, b.rec, b.leads, dateLabel, todayKey, now, win, ledgerCtx);
-      bucketSendCount++;
-      if (!failure) bucketSentOkCount++;
-      // Leads the send-safety gate objected to individually were dropped from this bucket and the rest was resent (decision D3).
-      ledgerCtx.dropped.forEach(function (d) {
-        failedLeadEntries.push({ lead_id: d.lead.lead_id, RM: d.lead.RM, to: b.rec.to, cc: b.rec.cc || '', reason: 'Left out of the email: ' + d.reason });
-      });
-      emailLedgerExcludeGs_(ledger, ledgerCtx.dropped.map(function (d) {
-        return { job: ledgerJob, dayKey: todayKey, region: region, kind: 'lead', leadId: d.lead.lead_id, rm: d.lead.RM, emailId: b.emailId, reason: d.reason };
-      }));
-      if (failure) {
-        const droppedIds = {};
-        ledgerCtx.dropped.forEach(function (d) { droppedIds[String(d.lead.lead_id)] = true; }); // already listed above - not twice
-        b.leads.filter(function (l) { return !droppedIds[String(l.lead_id)]; }).forEach(function (l) {
-          failedLeadEntries.push({ lead_id: l.lead_id, RM: l.RM, to: b.rec.to, cc: b.rec.cc || '', reason: failure.reason });
-        });
-      }
-    });
+    planBuckets_(region, bucketsToSend);
+    bucketsToSend.forEach(function (b) { sendBucket_(region, b); });
     Logger.log('[timing] ' + region + ' done at ' + elapsed_() + ' (' + resolution.results.length + ' bucket(s) this region, ' + ((Date.now() - regionStart_) / 1000).toFixed(1) + 's for this region)');
+  });
+
+  // 2026-10-16: ONE email per consolidated person, keyed by their own pseudo-region (consolidatedRegionKeyGs_) — that key is
+  // what the "already sent today" guard, the ledger id, AllIssues_Log and recovery see. A real region skipped by the re-run
+  // guard above contributes none of its leads here (its own row says it already ran today).
+  Object.keys(consolidatedParts).sort().forEach(function (k) {
+    const parts = consolidatedParts[k];
+    const rec = consolidatedAllIssuesRecGs_(parts);
+    const regionKey = consolidatedRegionKeyGs_(rec.bucketLabel);
+    const leads = dedupeByLeadIdGs_([].concat.apply([], parts.map(function (p) { return p.leads; })));
+    if (alreadyLoggedRegionsToday[regionKey] && !TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
+      Logger.log('Skipping ' + regionKey + ' — already sent today (' + todayKey + ', AllIssues_Log or Email_Ledger); not re-sending.');
+      emailLedgerExcludeGs_(exLedger, [{ job: ledgerJob, dayKey: todayKey, region: regionKey, kind: 'region', reason: 'already sent today - the re-run guard skipped ' + leads.length + ' lead(s)' }]);
+      return;
+    }
+    const b = { rec: rec, leads: leads, emailId: emailLedgerIdGs_(ledgerJob, todayKey, regionKey, rec.primaryRole, rec.bucketLabel) };
+    if (recoverIds) {
+      if (!recoverIds[b.emailId]) return;
+      recoveredSeen[b.emailId] = true;
+    }
+    planBuckets_(regionKey, [b]);
+    sendBucket_(regionKey, b);
   });
   if (recoverIds) {
     // A targeted bucket that this run did not produce (its leads were resolved meanwhile, or the routing changed): it is closed with the reason, never left failed without one.
@@ -591,7 +681,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
 // A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
 // AI-6 (audit 2026-10-13): a bucket with no role (the Unmatched-RMs fallbacks) read "Unmatched RMs () google ..." - the empty brackets are omitted.
 function allIssuesSubjectGs_(region, rec, leads, win) {
-  const subjectRole = region === FUTWORK_REGION_KEY_ ? regionHeaderOptsGs_(region, leads).region : rec.primaryRole;
+  const subjectRole = isMultiRegionKeyGs_(region) ? regionHeaderOptsGs_(region, leads).region : rec.primaryRole;
   return rec.bucketLabel + (subjectRole ? ' (' + subjectRole + ')' : '') + ' google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
 }
 
@@ -641,7 +731,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       rows: rmLeads.map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
     };
   };
-  const sections = region === FUTWORK_REGION_KEY_
+  const sections = isMultiRegionKeyGs_(region)
     ? sectionsByRegionGs_(leads, function (r, regionLeads) {
       const byRm = {};
       regionLeads.forEach(function (l) { (byRm[l.RM] = byRm[l.RM] || []).push(l); });

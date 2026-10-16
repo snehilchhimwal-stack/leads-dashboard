@@ -249,6 +249,99 @@ function runEmailLifecycleFullCycleTests_() {
     });
 
     {
+      // ==== 2026-10-16: a CONSOLIDATED person (ALL_ISSUES_CONSOLIDATED_RECIPIENTS_) gets ONE 17:00 email across three regions,
+      // Cc'd ONLY to the configured address; the one AllIssues_Log row then yields ONE Checkpoint 1 (10:00) and ONE Checkpoint 2
+      // (13:00). Other recipients keep their per-region emails and Cc. 'Test A1 One' stands in for Rajesh Muni / Manisha rathod. ====
+      ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.push('test a1 one');
+      ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = TEST_EMAIL_SECONDARY_;
+      const ssC = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ssC.getSheetByName('Manager_Directory').appendRow(['Test PnL Head', 'Head', 'Pune', TEST_EMAIL_CH_, 0, 'manual']);
+      REGION_PNL_HEAD_CC_ = { 'Pune': 'Test PnL Head', 'Central': 'Test PnL Head' };
+      const overdueRow = function (id, rm, region) {
+        return TestEFC_leadRow_(header, {
+          lead_id: id, client_id: 'C-' + id, RM: rm, region: region, current_stage: 'Suspect',
+          lead_assigned_at: TestFixture_hoursAgo_(now, 40),
+          last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+          internal_status_comments: rm + ': Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+        });
+      };
+      ssC._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        overdueRow('L-CONS-PUNE', 'Test RM One', 'Pune'),
+        overdueRow('L-CONS-THANE', 'Test RM Two', 'Thane'),
+        overdueRow('L-CONS-WEST', 'Test RM One', 'Western'),
+        overdueRow('L-OTHER-CENTRAL', 'Test RM Three', 'Central'), // Test TM One - not consolidated
+      ]);
+      const consIds = ['L-CONS-PUNE', 'L-CONS-THANE', 'L-CONS-WEST'];
+      const hasCons = function (text) { return consIds.some(function (id) { return String(text || '').indexOf(id) !== -1; }); };
+      const hasAllCons = function (text) { return consIds.every(function (id) { return String(text || '').indexOf(id) !== -1; }); };
+      const realSsC = SpreadsheetApp;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ssC; }, flush: function () {} };
+      try {
+        const tag = 'Consolidated person: ';
+        const key = consolidatedRegionKeyGs_('Test A1 One');
+        // ==== 17:00 ====
+        const d0 = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        const new17 = TestGmailLog_.drafts.slice(d0);
+        const cons17 = new17.filter(function (d) { return hasCons(d.htmlBody); });
+        TestAssertEqual_(cons17.length, 1, tag + '17:00 sends ONE email for leads in three regions, not one per region');
+        TestAssert_(hasAllCons(cons17[0].htmlBody), tag + '17:00 that one email carries all three regions\' leads');
+        TestAssertEqual_(cons17[0].to, TEST_EMAIL_PRIMARY_, tag + '17:00 To is the person');
+        TestAssertEqual_(cons17[0].cc, TEST_EMAIL_SECONDARY_, tag + '17:00 Cc is ONLY the configured address - no P&L head / leadership / per-region Cc');
+        TestAssertContains_(cons17[0].subject, 'Test A1 One (Pune, Thane, Western) google Leads With Issue', tag + '17:00 the subject spells out the regions');
+        TestAssertContains_(cons17[0].htmlBody, 'Regions: Pune (1) · Thane (1) · Western (1)', tag + '17:00 the header names each region with its count');
+        TestAssert_(cons17[0].htmlBody.indexOf('Pune — 1 lead') !== -1 && cons17[0].htmlBody.indexOf('Western — 1 lead') !== -1, tag + '17:00 each lead is shown under its own region band');
+        TestAssert_(cons17[0].htmlBody.indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === -1, tag + '17:00 the pseudo-region key is never shown');
+        const other17 = new17.filter(function (d) { return d.htmlBody.indexOf('L-OTHER-CENTRAL') !== -1; });
+        TestAssertEqual_(other17.length, 1, tag + '17:00 the other recipient still gets their own email');
+        TestAssert_(!hasCons(other17[0].htmlBody), tag + '17:00 no consolidated lead leaks into the other email');
+        TestAssertContains_(other17[0].cc, TEST_EMAIL_CH_, tag + '17:00 the other recipient keeps their per-region Cc (Central P&L head)');
+        const logC = ssC.getSheetByName('AllIssues_Log');
+        const rows17 = logC.getRange(2, 1, logC.getLastRow() - 1, 14).getValues();
+        const consRows = rows17.filter(function (r) { return r[1] === key; });
+        TestAssertEqual_(consRows.length, 1, tag + '17:00 ONE AllIssues_Log row, keyed by the pseudo-region');
+        TestAssertEqual_(rows17.length, 2, tag + '17:00 two rows in all (consolidated + the other recipient)');
+        TestAssertEqual_([consRows[0][2], consRows[0][4], consRows[0][5], consRows[0][6]].join('|'), 'Test A1 One|' + TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_ + '|3', tag + '17:00 the row stores label, To, the single Cc and 3 leads');
+        TestAssertEqual_(JSON.parse(consRows[0][9]).map(function (e) { return e.region; }).sort().join(','), 'Pune,Thane,Western', tag + '17:00 each snapshot entry keeps its real region');
+        const dRerun = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        TestAssertEqual_(TestGmailLog_.drafts.length, dRerun, tag + '17:00 a same-day re-run sends nothing new');
+
+        // ==== next day 10:00: Checkpoint 1 ====
+        logC.getRange(2, 1, logC.getLastRow() - 1, 1).setValues(rows17.map(function () { return [TestFixture_daysAgo_(now, 1)]; }));
+        const d1 = TestGmailLog_.drafts.length;
+        sendOvernightMorningEmails();
+        const cons10 = TestGmailLog_.drafts.slice(d1).filter(function (d) { return hasCons(d.htmlBody); });
+        TestAssertEqual_(cons10.length, 1, tag + '10:00 ONE Checkpoint 1 email for the consolidated row');
+        TestAssert_(hasAllCons(cons10[0].htmlBody), tag + '10:00 it lists all three leads');
+        TestAssertEqual_(cons10[0].to + '|' + cons10[0].cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, tag + '10:00 it uses the STORED 17:00 To and single Cc');
+        TestAssertContains_(cons10[0].subject, 'Pune, Thane, Western', tag + '10:00 the subject spells out the real regions');
+        TestAssertContains_(cons10[0].htmlBody, 'separate per-region emails', tag + '10:00 Section 1 says overnight leads come per region');
+        const consRow10 = logC.getRange(2, 1, logC.getLastRow() - 1, 14).getValues().filter(function (r) { return r[1] === key; })[0];
+        TestAssert_(!!consRow10[10] && !!consRow10[11], tag + '10:00 checkpoint1_json/sent_at written on the consolidated row');
+        TestAssertEqual_(JSON.parse(consRow10[10]).length, 3, tag + '10:00 checkpoint1_json covers all three leads');
+
+        // ==== 13:00: Checkpoint 2 ====
+        const r1 = TestGmailLog_.threadReplies.length;
+        sendOvernightFollowupEmails();
+        const cons13 = TestGmailLog_.threadReplies.slice(r1).filter(function (r) { return hasCons(TestOE_decodeRawMime_(r.raw)); });
+        TestAssertEqual_(cons13.length, 1, tag + '13:00 ONE Checkpoint 2 reply for the consolidated row');
+        TestAssertEqual_(cons13[0].threadId, cons10[0]._threadId, tag + '13:00 it replies in the 10:00 consolidated thread');
+        TestAssert_(hasAllCons(TestOE_decodeRawMime_(cons13[0].raw)), tag + '13:00 it lists all three leads');
+        const consRow13 = logC.getRange(2, 1, logC.getLastRow() - 1, 14).getValues().filter(function (r) { return r[1] === key; })[0];
+        TestAssert_(!!consRow13[12] && !!consRow13[13], tag + '13:00 checkpoint2_json/sent_at written on the consolidated row');
+      } finally {
+        SpreadsheetApp = realSsC;
+        REGION_PNL_HEAD_CC_ = {};
+        ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.pop();
+        ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = '';
+      }
+    }
+
+    {
       // ==== TEST MODE must never poison production state (2026-09-25 incident): a TEST MODE run of each
       // job first, THEN the real job — the real one must still behave exactly as if no test had run. ====
       const ss2 = TestMockSpreadsheet_({

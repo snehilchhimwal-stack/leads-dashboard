@@ -196,6 +196,8 @@ note doesn't read as ignored.
 
 **2026-10-15** (`09eb9ca`, audit 2026-10-13 EI-1/EI-5/EI-10): the raw MIME of the ops alert sent through the Advanced Gmail Service (`sendOpsAlertViaGmailApiGs_`, `GS-004` FN-331) now base64-encodes the body (`Content-Transfer-Encoding: base64`, 76-character lines) instead of sending raw 8-bit text (EI-10). A "Leads NOT sent" report that fails is re-sent as a plain ops alert (EI-1). EI-5 is wording only: the draft-per-attempt behaviour of `withSendRetry_` is unchanged and is now explained in the 17:00 alerts. The other EI fixes in that commit (Region_Recipients lookup, send-gate id matching, watchdog, CH marks) do not touch the send mechanism; the scopes and `js/reports-gmail.js` (no commits since `ec19415`) are unchanged. **Not live until pasted.**
 
+**2026-10-16** (`EmailInfra.gs` consolidated-region helpers, `GS-004`/`GS-001`): no change to how mail is sent. The 17:00 job sends one email (To the person, Cc one configured address) for each name in `ALL_ISSUES_CONSOLIDATED_RECIPIENTS_` instead of one per region, through the same `sendGuardedEmailGs_` path.
+
 ## Revalidation trigger
 
 The `gmail.send` scope or the shared Client ID changes; the raw MIME

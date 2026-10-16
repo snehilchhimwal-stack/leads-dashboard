@@ -967,6 +967,42 @@ function runEmailLedgerTests_() {
         TestAssertEqual_(TestGmailLog_.drafts.length + ',' + byRegion(w, 'Pune').status, (draftsBefore + 1) + ',ACCEPTED', 'region guard: a sibling already logged for the region does not stop the failed bucket being re-sent');
       }
 
+      // ---- (32e) 2026-10-16: a consolidated person's ONE cross-region email failed - the recovery re-sends that one email once ----
+      {
+        ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.push('test a1 one');
+        ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = TEST_EMAIL_SECONDARY_;
+        try {
+          const w = TestEL_world_(function (header, now) {
+            const row = function (id, region) { return TestEL_leadRow_(header, { lead_id: id, client_id: 'C-' + id, RM: 'Test RM One', region: region, lead_assigned_at: now, rm_is_active: false }); };
+            return [row('L-CONS-PUNE', 'Pune'), row('L-CONS-THANE', 'Thane'), row('L-CONS-WEST', 'Western')];
+          });
+          TestEL_bind_(w);
+          failingGmailFor('L-CONS-PUNE');
+          sendAllIssuesEmails();
+          GmailApp = TestMockGmailApp_({});
+          TestGmailLog_.sent.length = 0;
+          const key = consolidatedRegionKeyGs_('Test A1 One');
+          const consRows = ledgerOf(w).filter(function (r) { return r.job === EMAIL_LEDGER_JOB_ALL_ISSUES_; });
+          TestAssertEqual_(consRows.length + ',' + consRows[0].region + ',' + consRows[0].status, '1,' + key + ',FAILED', 'consolidated recovery: set up - ONE ledger row for the one cross-region email, FAILED');
+          const draftsBefore = TestGmailLog_.drafts.length;
+          const res = recoverFailedAllIssuesBuckets_({ now: noonToday });
+          TestAssertEqual_(res.ran + ',' + res.targets.length, 'true,1', 'consolidated recovery: the one failed email is the one target');
+          TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'consolidated recovery: exactly ONE email is re-sent, not one per region');
+          const resent = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+          TestAssert_(['L-CONS-PUNE', 'L-CONS-THANE', 'L-CONS-WEST'].every(function (id) { return resent.htmlBody.indexOf(id) !== -1; }), 'consolidated recovery: …carrying all three regions\' leads');
+          TestAssertEqual_(resent.cc, TEST_EMAIL_SECONDARY_, 'consolidated recovery: …with the single configured Cc');
+          const row = byRegion(w, key);
+          TestAssertEqual_([row.status, row.attempts, row.leads_sent].join(','), 'ACCEPTED,2,3', 'consolidated recovery: the same ledger row is now ACCEPTED after a second attempt');
+          TestAssertEqual_(ledgerOf(w).filter(function (r) { return r.job === EMAIL_LEDGER_JOB_ALL_ISSUES_; }).length, 1, 'consolidated recovery: no extra ledger rows');
+          TestAssertEqual_(w.getSheetByName('AllIssues_Log').getLastRow(), 2, 'consolidated recovery: one AllIssues_Log row (header + 1)');
+          const again = recoverFailedAllIssuesBuckets_({ now: noonToday });
+          TestAssertEqual_(again.ran + ',' + TestGmailLog_.drafts.length, 'false,' + (draftsBefore + 1), 'consolidated recovery: a second call finds nothing and sends nothing');
+        } finally {
+          ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.pop();
+          ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = '';
+        }
+      }
+
       // ---- (32c) an exclusion recorded by the original run is not recorded a second time by the recovery ----
       {
         const w = TestEL_world_(function (header, now) {
