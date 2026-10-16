@@ -931,11 +931,11 @@ Deliberately not done: AI-11, MT-07, MT-08, MT-10, MT-12, OC-2, OA-1, OA-2, OE-0
 - **Sweep:** the earliest matching bounce time is recorded, and a recorded earlier time is never replaced by a later one.
 - **D5/D6 (fixed after the 6ca53d2 deploy; live 2026-10-16 ~17:24 IST, runAllTests 3999/0):** a same-day manual re-run of the 10:00 or 13:00 job now skips every email whose `Email_Ledger` row today is ATTEMPTING or UNCONFIRMED, and an ACCEPTED one (10:00: unless it now carries a lead it did not; a later Section 2 still goes), like the 17:00 job (AI-3). Each skip is logged and recorded in `Email_Ledger_Exclusions`; the row is left for a human to check. FAILED buckets are still re-sent by a re-run. Files to paste: `OvernightEmailer.gs`, `EmailLedger.gs`, `Tests_EmailLifecycleMatrix.gs`.
 
-### 4.3.8 One 17:00 email per person for Rajesh Muni / Manisha rathod (2026-10-16 IST) - in the code, pending paste
+### 4.3.8 One 17:00, one 10:00 and one 13:00 email per person for Rajesh Muni / Manisha rathod (2026-10-16 IST) - 10:00/13:00 part pending paste
 
 - **What:** `ALL_ISSUES_CONSOLIDATED_RECIPIENTS_` (`AllIssuesEmailer.gs`) lists people whose 17:00 All-Issues buckets are combined across regions into ONE email (Futwork-style pseudo-region `Multi-region: <name>`; region bands; regions in the subject). Cc is ONLY Snehil Chhimwal (`ALL_ISSUES_CONSOLIDATED_CC_NAME_`, resolved by name) - no per-region/leadership/P&L-head/`EXTRA_CC_FOR_RM_` Cc. Add or remove a person by editing that list; `RmHierarchy*.gs` untouched.
-- **Downstream:** the one AllIssues_Log row gives one 10:00 Checkpoint 1 email (Section 2 only) and one 13:00 Checkpoint 2 reply. The 10:00 Section 1 (overnight) still goes per region.
-- **Files to paste:** `AllIssuesEmailer.gs`, `EmailInfra.gs`, `OvernightEmailer.gs` (+ `Tests_EmailLifecycleFullCycle.gs`, `Tests_EmailLedger.gs`). No trigger change.
+- **Downstream (10:00/13:00, same day, follow-up commit):** the same people get ONE 10:00 email like everyone else's combined morning email: Section 1 = their overnight leads from ALL regions (each under its real region band), then Section 2 = Checkpoint 1 of the consolidated row. `sendOvernightMorningEmails_` sets their per-region Section 1 buckets aside and re-keys them to `consolidatedRegionKeyGs_`, so the email has one `Overnight_Log` row (thread/To/Cc/subject), one `Email_Ledger` id, and the D5/"already sent today" guards and recovery all treat it as one bucket. The 13:00 job sends ONE reply into that thread (Section 1 follow-up, then Checkpoint 2). To = the person, Cc ONLY Snehil (`consolidatedAllIssuesRecGs_`). Everyone else unchanged.
+- **Files to paste:** `OvernightEmailer.gs` (+ `Tests_EmailLifecycleFullCycle.gs`, `Tests_EmailLedger.gs`); `AllIssuesEmailer.gs` changed by one comment only. The 17:00 part (`AllIssuesEmailer.gs`, `EmailInfra.gs`) is live since a21a10c. No trigger change.
 
 ### 4.4 GitHub repo access
 

@@ -310,29 +310,86 @@ function runEmailLifecycleFullCycleTests_() {
         sendAllIssuesEmails();
         TestAssertEqual_(TestGmailLog_.drafts.length, dRerun, tag + '17:00 a same-day re-run sends nothing new');
 
-        // ==== next day 10:00: Checkpoint 1 ====
+        // ==== next day 10:00: ONE combined email - Section 1 (overnight leads from three regions) FIRST, then Checkpoint 1 ====
         logC.getRange(2, 1, logC.getLastRow() - 1, 1).setValues(rows17.map(function () { return [TestFixture_daysAgo_(now, 1)]; }));
+        const winN = overnightWindowGs_(new Date());
+        const midNight = new Date((winN.from.getTime() + winN.to.getTime()) / 2);
+        const nightRow = function (id, rm, region) {
+          return TestEFC_leadRow_(header, { lead_id: id, client_id: 'C-' + id, RM: rm, region: region, current_stage: 'Not Updated', lead_assigned_at: midNight });
+        };
+        const leadsC = ssC.getSheetByName(monthShort);
+        leadsC.appendRow(nightRow('L-NIGHT-PUNE', 'Test RM One', 'Pune'));
+        leadsC.appendRow(nightRow('L-NIGHT-THANE', 'Test RM Two', 'Thane'));
+        leadsC.appendRow(nightRow('L-NIGHT-WEST', 'Test RM One', 'Western'));
+        leadsC.appendRow(nightRow('L-NIGHT-CENTRAL', 'Test RM Three', 'Central')); // the other recipient's overnight lead
+        const nightIds = ['L-NIGHT-PUNE', 'L-NIGHT-THANE', 'L-NIGHT-WEST'];
+        const hasNight = function (text) { return nightIds.some(function (id) { return String(text || '').indexOf(id) !== -1; }); };
+        const isConsMail = function (text) { return hasCons(text) || hasNight(text); };
         const d1 = TestGmailLog_.drafts.length;
         sendOvernightMorningEmails();
-        const cons10 = TestGmailLog_.drafts.slice(d1).filter(function (d) { return hasCons(d.htmlBody); });
-        TestAssertEqual_(cons10.length, 1, tag + '10:00 ONE Checkpoint 1 email for the consolidated row');
-        TestAssert_(hasAllCons(cons10[0].htmlBody), tag + '10:00 it lists all three leads');
-        TestAssertEqual_(cons10[0].to + '|' + cons10[0].cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, tag + '10:00 it uses the STORED 17:00 To and single Cc');
+        const new10 = TestGmailLog_.drafts.slice(d1);
+        const cons10 = new10.filter(function (d) { return isConsMail(d.htmlBody); });
+        TestAssertEqual_(cons10.length, 1, tag + '10:00 ONE email for the consolidated person (overnight leads from three regions + Checkpoint 1), not one per region');
+        const html10 = cons10[0].htmlBody;
+        TestAssert_(nightIds.every(function (id) { return html10.indexOf(id) !== -1; }), tag + '10:00 Section 1 carries the overnight leads of all three regions');
+        TestAssert_(hasAllCons(html10), tag + '10:00 Section 2 (Checkpoint 1) lists all three 17:00 leads');
+        const cp1At = html10.indexOf('Checkpoint 1');
+        TestAssert_(cp1At !== -1 && nightIds.every(function (id) { return html10.indexOf(id) < cp1At; }) && consIds.every(function (id) { return html10.indexOf(id) > cp1At; }), tag + '10:00 Section 1 (overnight) comes FIRST, then Section 2 (Checkpoint 1)');
+        TestAssert_(html10.indexOf('Pune — 1 lead') !== -1 && html10.indexOf('Thane — 1 lead') !== -1 && html10.indexOf('Western — 1 lead') !== -1, tag + '10:00 each overnight lead sits under its real region band');
+        TestAssert_(html10.indexOf('separate per-region') === -1 && html10.indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === -1, tag + '10:00 no "separate per-region emails" note and no pseudo-region key in the email');
+        TestAssertEqual_(cons10[0].to + '|' + cons10[0].cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, tag + '10:00 To is the person, Cc is ONLY the configured address');
         TestAssertContains_(cons10[0].subject, 'Pune, Thane, Western', tag + '10:00 the subject spells out the real regions');
-        TestAssertContains_(cons10[0].htmlBody, 'separate per-region emails', tag + '10:00 Section 1 says overnight leads come per region');
+        const other10 = new10.filter(function (d) { return d.htmlBody.indexOf('L-NIGHT-CENTRAL') !== -1; });
+        TestAssertEqual_(other10.length, 1, tag + '10:00 the other recipient still gets their own email');
+        TestAssert_(!isConsMail(other10[0].htmlBody), tag + '10:00 no consolidated lead leaks into the other email');
+        TestAssertContains_(other10[0].cc, TEST_EMAIL_CH_, tag + '10:00 the other recipient keeps their per-region Cc (Central P&L head)');
+        const oLog = ssC.getSheetByName('Overnight_Log');
+        const oRows = oLog.getRange(2, 1, oLog.getLastRow() - 1, 10).getValues();
+        const consO = oRows.filter(function (r) { return r[1] === key; });
+        TestAssertEqual_(consO.length, 1, tag + '10:00 ONE Overnight_Log row for the consolidated person, keyed by the pseudo-region');
+        TestAssert_(!oRows.some(function (r) { return r[1] !== key && JSON.parse(r[3] || '[]').some(function (e) { return nightIds.indexOf(e.lead_id) !== -1; }); }), tag + '10:00 no per-region Overnight_Log row carries the person\'s overnight leads');
+        TestAssertEqual_([consO[0][2], consO[0][5], consO[0][6], consO[0][7]].join('|'), cons10[0]._threadId + '|' + TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_ + '|' + cons10[0].subject, tag + '10:00 the row stores the thread, To, the single Cc and the subject for 13:00');
+        TestAssertEqual_(JSON.parse(consO[0][3]).map(function (e) { return e.lead_id; }).sort().join(','), nightIds.slice().sort().join(','), tag + '10:00 the row\'s lead_ids_json holds the three overnight leads');
+        const led10 = ssC.getSheetByName(EMAIL_LEDGER_SHEET_);
+        TestAssert_(!!led10, tag + '10:00 Email_Ledger exists');
+        if (led10) {
+          const lh = led10.getRange(1, 1, 1, led10.getLastColumn()).getValues()[0];
+          const lrows = led10.getRange(2, 1, led10.getLastRow() - 1, lh.length).getValues().map(function (r) { const o = {}; lh.forEach(function (h, i) { o[h] = r[i]; }); return o; });
+          const consL = lrows.filter(function (r) { return r.job === EMAIL_LEDGER_JOB_MORNING_ && r.region === key; });
+          TestAssertEqual_(consL.length + ',' + (consL[0] && consL[0].status) + ',' + (consL[0] && consL[0].subject), '1,ACCEPTED,' + cons10[0].subject, tag + '10:00 ONE Email_Ledger row (ACCEPTED) with the subject sent (D4)');
+          TestAssertEqual_(consL[0] ? JSON.parse(consL[0].lead_ids_json).length : -1, 6, tag + '10:00 the ledger row lists the 3 overnight + 3 Checkpoint 1 leads');
+        }
         const consRow10 = logC.getRange(2, 1, logC.getLastRow() - 1, 14).getValues().filter(function (r) { return r[1] === key; })[0];
         TestAssert_(!!consRow10[10] && !!consRow10[11], tag + '10:00 checkpoint1_json/sent_at written on the consolidated row');
         TestAssertEqual_(JSON.parse(consRow10[10]).length, 3, tag + '10:00 checkpoint1_json covers all three leads');
+        const dRe10 = TestGmailLog_.drafts.length;
+        sendOvernightMorningEmails();
+        TestAssertEqual_(TestGmailLog_.drafts.length, dRe10, tag + '10:00 a same-day re-run sends nothing new');
 
-        // ==== 13:00: Checkpoint 2 ====
+        // ==== 13:00: ONE reply in that thread - Section 1 follow-up FIRST, then Checkpoint 2 ====
+        ssC._sheets['Lead_Followups'] = TestMockSheet_('Lead_Followups', [['lead_id', 'region', 'RM', 'issue', 'collated_comments', 'suggested_followup', 'updated_at', 'own_comments']]);
         const r1 = TestGmailLog_.threadReplies.length;
         sendOvernightFollowupEmails();
-        const cons13 = TestGmailLog_.threadReplies.slice(r1).filter(function (r) { return hasCons(TestOE_decodeRawMime_(r.raw)); });
-        TestAssertEqual_(cons13.length, 1, tag + '13:00 ONE Checkpoint 2 reply for the consolidated row');
-        TestAssertEqual_(cons13[0].threadId, cons10[0]._threadId, tag + '13:00 it replies in the 10:00 consolidated thread');
-        TestAssert_(hasAllCons(TestOE_decodeRawMime_(cons13[0].raw)), tag + '13:00 it lists all three leads');
+        const cons13 = TestGmailLog_.threadReplies.slice(r1).filter(function (r) { return isConsMail(TestOE_decodeRawMime_(r.raw)); });
+        TestAssertEqual_(cons13.length, 1, tag + '13:00 ONE reply for the consolidated person');
+        TestAssertEqual_(cons13[0].threadId, cons10[0]._threadId, tag + '13:00 it replies in the one 10:00 thread');
+        const raw13 = TestOE_decodeRawMime_(cons13[0].raw);
+        TestAssert_(raw13.indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === -1, tag + '13:00 the pseudo-region key is never shown (plain text included)');
+        const html13 = raw13.slice(raw13.indexOf('text/html'));
+        const cp2At = html13.indexOf('Checkpoint 2');
+        TestAssert_(nightIds.every(function (id) { return html13.indexOf(id) !== -1 && html13.indexOf(id) < cp2At; }), tag + '13:00 Section 1 follow-up (the three overnight leads) comes FIRST');
+        TestAssert_(cp2At !== -1 && consIds.every(function (id) { return html13.indexOf(id) > cp2At; }), tag + '13:00 …then Checkpoint 2 with all three 17:00 leads');
+        TestAssert_(/^To: (.*)$/m.exec(raw13)[1].trim() === TEST_EMAIL_PRIMARY_ && /^Cc: (.*)$/m.exec(raw13)[1].trim() === TEST_EMAIL_SECONDARY_, tag + '13:00 To is the person, Cc is ONLY the configured address');
+        const consO13 = oLog.getRange(2, 1, oLog.getLastRow() - 1, 10).getValues().filter(function (r) { return r[1] === key; })[0];
+        TestAssert_(!!consO13[8], tag + '13:00 followup_sent_at written on the consolidated Overnight_Log row');
         const consRow13 = logC.getRange(2, 1, logC.getLastRow() - 1, 14).getValues().filter(function (r) { return r[1] === key; })[0];
         TestAssert_(!!consRow13[12] && !!consRow13[13], tag + '13:00 checkpoint2_json/sent_at written on the consolidated row');
+        const lf = ssC.getSheetByName('Lead_Followups');
+        const lfText = lf ? JSON.stringify(lf.getRange(1, 1, lf.getLastRow(), 8).getValues()) : '';
+        TestAssert_(nightIds.every(function (id) { return lfText.indexOf(id) !== -1; }), tag + '13:00 the overnight leads are pushed to Lead_Followups');
+        const rRe13 = TestGmailLog_.threadReplies.length;
+        sendOvernightFollowupEmails();
+        TestAssertEqual_(TestGmailLog_.threadReplies.length, rRe13, tag + '13:00 a same-day re-run sends nothing new');
       } finally {
         SpreadsheetApp = realSsC;
         REGION_PNL_HEAD_CC_ = {};

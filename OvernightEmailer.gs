@@ -779,10 +779,6 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     ? "Already sent separately earlier today — see this morning's earlier Overnight email for this team."
     : section1SkippedReason === 'already_sent_not_to_you'
     ? 'No Overnight email to you is recorded for today. This region already had an Overnight run earlier today, so its overnight leads were not re-sent in this run — if you did not receive that email, contact Lead Ops.'
-    // 2026-10-16: a consolidated 17:00 person's row (consolidatedRegionKeyGs_) has no overnight leads of its own - their overnight
-    // leads still go per region, in separate emails.
-    : String(region || '').indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === 0
-    ? "Overnight leads come in this morning's separate per-region emails — this email carries only the follow-up of yesterday's combined 17:00 report."
     : 'No overnight leads for your team today.';
   const section1Opts = section1
     ? buildOvernightSectionOptsGs_(region, section1Leads, dateLabel, win)
@@ -1205,19 +1201,23 @@ function sendOvernightMorningEmails_(opts) {
   // single consolidated report rather than several small alerts.
   const failedLeadEntries = [];
 
-  // Region union (design doc Part 7): today's Overnight regions and
-  // yesterday's still-pending AllIssues_Log regions are two
-  // independently-derived sets, not guaranteed to match — a region can
-  // have Checkpoint 1 content pending with zero overnight leads today,
-  // or vice versa. Both need to reach the loop below.
-  const allRegionsForThisRun = Object.keys(byRegion).concat(Object.keys(yesterdaysAllIssuesByRegion))
-    .filter(function (v, i, a) { return a.indexOf(v) === i; }).sort()
-    .filter(function (rg) { return !recoverRegions || recoverRegions[rg]; });
+  // 2026-10-16 (user request): a person in ALL_ISSUES_CONSOLIDATED_RECIPIENTS_ (AllIssuesEmailer.gs) gets ONE 10:00 email, like
+  // their one 17:00 email: Section 1 holds their overnight leads from EVERY region (each under its real region band), Section 2
+  // the Checkpoint 1 of their consolidated AllIssues_Log row. Their per-region Section 1 buckets are set aside in pass 1 below and
+  // re-keyed to their pseudo-region (consolidatedRegionKeyGs_), the key that row already carries - so the ledger id, Overnight_Log
+  // row, "already sent today" guard, recovery and the 13:00 reply all see ONE bucket. To = the person; Cc ONLY
+  // allIssuesConsolidatedCcGs_() (via consolidatedAllIssuesRecGs_). Everyone else is unchanged.
+  const section1ByRegion = {}; // region (or consolidated key) -> { byEmail: { lowercased 'to' -> { rec, leads } }, skippedReason }
+  const consolidatedSection1Parts = {}; // lower-cased bucket label -> [{ region, rec, leads }]
+  // Recovery of a consolidated email: its ledger row's region is the pseudo-region, so every real region is resolved again to
+  // rebuild its Section 1 (pass 2 still sends only the targeted ids).
+  const recoverConsolidated = !!recoverRegions && Object.keys(recoverRegions).some(function (rg) { return String(rg).indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === 0; });
 
-  allRegionsForThisRun.forEach(function (region) {
+  // ---- Pass 1: Section 1 buckets, per real region (and Futwork). ----
+  Object.keys(byRegion).sort().forEach(function (region) {
+    if (recoverRegions && !recoverRegions[region] && !(recoverConsolidated && !isMultiRegionKeyGs_(region))) return;
     const openLeads = byRegion[region] || [];
-    const checkpointRows = yesterdaysAllIssuesByRegion[region] || [];
-    if (!openLeads.length && !checkpointRows.length) return; // shouldn't happen given how the union above was built, but defensive
+    if (!openLeads.length) return;
 
     // ---- Section 1 buckets: EXACTLY the existing resolution logic,
     // only skipped when there are no overnight leads at all, or when
@@ -1233,7 +1233,7 @@ function sendOvernightMorningEmails_(opts) {
     // reader shouldn't have to guess between (sendCombinedMorningEmail_'s
     // own empty-state text uses this).
     let section1SkippedReason = null;
-    if (openLeads.length) {
+    { // (no overnight leads = returned above)
       if (alreadyLoggedRegionsToday[region] && !TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
         section1SkippedReason = 'already_sent';
         Logger.log('Section 1 (Overnight) skipped for ' + region + ' — already has an Overnight_Log row dated today (' + todayKey + '). Section 2 (Checkpoint 1), if any, still proceeds separately below.');
@@ -1270,10 +1270,53 @@ function sendOvernightMorningEmails_(opts) {
           const bucketLeads = openLeads.filter(function (l) { return rmSet.has(l.RM); });
           // originalTo (set only in TEST MODE) keeps the REAL recipient identity as the key, so buckets stay
           // separate and still union with Section 2's stored (real) recipient — same structure as production.
+          // 2026-10-16: a consolidated person's bucket is set aside and joined across regions below (never inside Futwork's email).
+          if (!isMultiRegionKeyGs_(region) && isAllIssuesConsolidatedRecipientGs_(rec.bucketLabel)) {
+            if (bucketLeads.length) {
+              const k = String(rec.bucketLabel).trim().toLowerCase();
+              (consolidatedSection1Parts[k] = consolidatedSection1Parts[k] || []).push({ region: region, rec: rec, leads: bucketLeads });
+            }
+            return;
+          }
           section1ByEmail[String(rec.originalTo || rec.to || '').trim().toLowerCase()] = { rec: rec, leads: bucketLeads };
         });
       }
     }
+    section1ByRegion[region] = { byEmail: section1ByEmail, skippedReason: section1SkippedReason };
+  });
+
+  // ---- Consolidated people: ONE Section 1 bucket each, under their pseudo-region. A real region skipped by the re-run guard
+  // above contributes none of its leads (its own Overnight_Log row says it already ran today) - same rule as the 17:00 job. ----
+  Object.keys(consolidatedSection1Parts).sort().forEach(function (k) {
+    const parts = consolidatedSection1Parts[k];
+    const rec = consolidatedAllIssuesRecGs_(parts); // To = the person, Cc = ONLY the configured address (TEST MODE: originalTo/originalCc)
+    const regionKey = consolidatedRegionKeyGs_(rec.bucketLabel);
+    if (recoverRegions && !recoverRegions[regionKey]) return;
+    const leads = dedupeByLeadIdGs_([].concat.apply([], parts.map(function (p) { return p.leads; })));
+    if (alreadyLoggedRegionsToday[regionKey] && !TEST_MODE_OVERRIDE_EMAIL_ && !recoverIds) {
+      Logger.log('Section 1 (Overnight) skipped for ' + regionKey + ' — already has an Overnight_Log row dated today (' + todayKey + ').');
+      emailLedgerExcludeGs_(ledger, [{ job: ledgerJob, dayKey: todayKey, region: regionKey, kind: 'region', reason: 'Section 1 (overnight) already sent today - the re-run guard skipped ' + leads.length + ' lead(s)' }]);
+      section1ByRegion[regionKey] = { byEmail: {}, skippedReason: 'already_sent' };
+      return;
+    }
+    const byEmail = {};
+    byEmail[String(rec.originalTo || rec.to || '').trim().toLowerCase()] = { rec: rec, leads: leads };
+    section1ByRegion[regionKey] = { byEmail: byEmail, skippedReason: null };
+  });
+
+  // Region union (design doc Part 7): today's Overnight regions (incl. consolidated people's pseudo-regions) and yesterday's
+  // still-pending AllIssues_Log regions are two independently-derived sets, not guaranteed to match — a region can have
+  // Checkpoint 1 content pending with zero overnight leads today, or vice versa. Both need to reach the loop below.
+  const allRegionsForThisRun = Object.keys(section1ByRegion).concat(Object.keys(yesterdaysAllIssuesByRegion))
+    .filter(function (v, i, a) { return a.indexOf(v) === i; }).sort()
+    .filter(function (rg) { return !recoverRegions || recoverRegions[rg]; });
+
+  // ---- Pass 2: one combined send per recipient, per region (or consolidated person). ----
+  allRegionsForThisRun.forEach(function (region) {
+    const s1Plan = section1ByRegion[region] || { byEmail: {}, skippedReason: null };
+    const section1ByEmail = s1Plan.byEmail;
+    const section1SkippedReason = s1Plan.skippedReason;
+    const checkpointRows = yesterdaysAllIssuesByRegion[region] || [];
 
     // ---- Section 2 buckets: yesterday's AllIssues_Log rows for this
     // region, keyed by their OWN STORED recipient — routing frozen at
@@ -1855,7 +1898,10 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   if (checkpoint2Results) applyStaleSplitGs_(section2Opts, staleSinceForLeadIdsGs_(checkpoint2Results.map(function (r) { return r.lead_id; }), leadsData, now)); // stale leads are held at the bottom, and the headline count says so
   const html = (testModeBanner ? testModeBanner.html : '') + renderTwoSectionEmailHTML_(section1Opts, section2Opts);
   // One-line summary + both sections as plain text, rendered from the same opts as the HTML (email audit P2).
-  const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + region + ': Section 1 (Overnight Follow-up) ' +
+  // 2026-10-16: a consolidated person's pseudo-region key ('Multi-region: <name>') is never shown - their real regions are.
+  const plainRegion = String(region || '').indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === 0
+    ? regionHeaderOptsGs_(region, section1UnresolvedRows.concat(section2Input ? section2Input.snapshotEntries : [])).region : region;
+  const plainBody = (testModeBanner ? testModeBanner.plain : '') + '1pm follow-up for ' + plainRegion + ': Section 1 (Overnight Follow-up) ' +
     section1UnresolvedRows.length + ' still unresolved' + staleCountNoteGs_(section1Opts.staleCount) + '; Section 2 (Checkpoint 2) ' + activeCheckpoint2Count + ' unresolved lead(s)' + staleCountNoteGs_(section2Opts.staleCount) + '.\n\n' +
     plainTextTwoSectionGs_(section1Opts, section2Opts);
 

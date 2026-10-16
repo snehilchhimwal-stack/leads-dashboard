@@ -83,7 +83,8 @@ const ALL_ISSUES_LATE_CUTOFF_MINUTE_ = 30;
 // the "already sent today" guard, recovery and the 10:00/13:00 checkpoints all see ONE bucket; each lead keeps its real region
 // (region bands in the email, regions spelled out in the subject). Cc is ONLY ALL_ISSUES_CONSOLIDATED_CC_NAME_ — none of the
 // per-region Cc lists (leadership, P&L head, EXTRA_CC_FOR_RM_) are carried over (user decision, 2026-10-16).
-// Only the 17:00 job is consolidated; the 10:00 Section 1 (overnight) still goes per region.
+// The 10:00 job (OvernightEmailer.gs) uses the same list and key: ONE 10:00 email (Section 1 overnight leads of every region, then
+// Checkpoint 1) and ONE 13:00 reply in that thread, Cc ONLY this address.
 const ALL_ISSUES_CONSOLIDATED_RECIPIENTS_ = ['rajesh muni', 'manisha rathod'];
 const ALL_ISSUES_CONSOLIDATED_CC_NAME_ = 'Snehil Chhimwal';
 // Test override, same convention as OPS_ALERT_EMAIL_ (EmailInfra.gs): blank = look the name up. Nothing in production assigns it.

@@ -1285,6 +1285,53 @@ function runEmailLedgerTests_() {
         TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, '10:00 recovery: the entry point sends nothing either');
       }
 
+      // ---- 10:00, 2026-10-16: a consolidated person's ONE cross-region email failed - the recovery re-sends that one email once ----
+      {
+        ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.push('test a1 one');
+        ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = TEST_EMAIL_SECONDARY_;
+        try {
+          const ss = morningWorld([{ lead_id: 'L-WEST', client_id: 'C-WEST', region: 'Western' }]);
+          TestEL_bind_(ss);
+          failingGmailFor('L-PUNE');
+          sendOvernightMorningEmails();
+          GmailApp = TestMockGmailApp_({});
+          TestGmailLog_.sent.length = 0;
+          const key = consolidatedRegionKeyGs_('Test A1 One');
+          const rows10 = ledgerOf(ss, 'morning10');
+          TestAssertEqual_(rows10.length + ',' + rows10[0].region + ',' + rows10[0].status, '1,' + key + ',FAILED', 'consolidated 10:00 recovery: set up - ONE ledger row for the one cross-region email, FAILED');
+          TestAssertEqual_(overnightRows(ss), 0, 'consolidated 10:00 recovery: set up - nothing in Overnight_Log for the failed email');
+          const draftsBefore = TestGmailLog_.drafts.length;
+          const res = recoverFailedMorningBuckets_({ now: noonToday });
+          TestAssertEqual_(res.ran + ',' + res.targets.length, 'true,1', 'consolidated 10:00 recovery: the one failed email is the one target');
+          TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'consolidated 10:00 recovery: exactly ONE email is re-sent, not one per region');
+          const resent = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
+          TestAssert_(['L-PUNE', 'L-THANE', 'L-WEST'].every(function (id) { return resent.htmlBody.indexOf(id) !== -1; }), 'consolidated 10:00 recovery: …carrying all three regions\' overnight leads');
+          TestAssertEqual_(resent.to + '|' + resent.cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, 'consolidated 10:00 recovery: …To the person, Cc ONLY the configured address');
+          const row = byRegion(ss, 'morning10', key);
+          TestAssertEqual_([row.status, row.attempts, row.leads_sent].join(','), 'ACCEPTED,2,3', 'consolidated 10:00 recovery: the same ledger row is now ACCEPTED after a second attempt');
+          TestAssertEqual_(ledgerOf(ss, 'morning10').length, 1, 'consolidated 10:00 recovery: no extra ledger rows');
+          const oLog = ss.getSheetByName('Overnight_Log');
+          TestAssertEqual_(overnightRows(ss) + ',' + oLog.getRange(2, 2).getValue(), '1,' + key, 'consolidated 10:00 recovery: ONE Overnight_Log row, keyed by the pseudo-region, so the 13:00 reply threads into it');
+          const again = recoverFailedMorningBuckets_({ now: noonToday });
+          TestAssertEqual_(again.ran + ',' + TestGmailLog_.drafts.length, 'false,' + (draftsBefore + 1), 'consolidated 10:00 recovery: a second call finds nothing and sends nothing');
+          sendOvernightMorningEmails();
+          TestAssertEqual_(TestGmailLog_.drafts.length, draftsBefore + 1, 'consolidated 10:00: a same-day manual re-run after the recovery sends nothing');
+          // 13:00: one reply into that one thread; then the 13:00 recovery and a re-run send nothing more.
+          const repliesBefore = TestGmailLog_.threadReplies.length;
+          sendOvernightFollowupEmails();
+          const replies = TestGmailLog_.threadReplies.slice(repliesBefore);
+          TestAssertEqual_(replies.length + ',' + (replies[0] && replies[0].threadId), '1,' + resent._threadId, 'consolidated 13:00: ONE reply, in the recovered 10:00 thread');
+          const f13 = ledgerOf(ss, 'followup13');
+          TestAssertEqual_(f13.length + ',' + (f13[0] && f13[0].region) + ',' + (f13[0] && f13[0].status), '1,' + key + ',ACCEPTED', 'consolidated 13:00: ONE ledger row, ACCEPTED');
+          recoverFailedFollowupBuckets_({ now: noonToday });
+          sendOvernightFollowupEmails();
+          TestAssertEqual_(TestGmailLog_.threadReplies.length, repliesBefore + 1, 'consolidated 13:00: the recovery and a re-run send nothing more');
+        } finally {
+          ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.pop();
+          ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = '';
+        }
+      }
+
       // ---- 10:00: the region already has a logged sibling email - the "already sent today" guard must not stop the recovery ----
       {
         const ss = failedPuneMorning();
