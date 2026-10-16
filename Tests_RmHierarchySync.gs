@@ -513,6 +513,125 @@ function runRmHierarchySyncTests_() {
       TestAssertEqual_(TestGmailLog_.sent.length, before + 1, 'report: the next night nothing is new, so nothing is sent');
       TestAssertOnlyTestEmails_();
     }
+    // ================= removeRmHierarchyLeaversGs_ (2026-10-16) =================
+    {
+      const leaverTab = function () {
+        return rmSyncTestTabRows_().concat([
+          ['Navi Mumbai', 'S1', 'Test Leaver One', '', '', '', 'Test CH Pune', false, '', ''],
+          ['Harbour', 'S1', 'Test  leaver TWO', 'Test A1 Pune', '', '', 'Test CH Pune', false, '', ''], // odd case/spacing still matches
+          ['Harbour', 'S1', 'Test Leaver Two Extra', 'Test A1 Pune', '', '', 'Test CH Pune', false, '', ''], // only a near name: kept
+          ['Harbour', 'S1', 'Test Leaver P Two', 'Test A1 Pune', '', '', 'Test CH Pune', false, '', ''],
+        ]);
+      };
+      const names = ['Test Leaver One', 'Test Leaver Two', 'Test Leaver P Two'];
+      const leadsTab = function (rows) {
+        return TestMockSheet_('leads', [['banner'], ['lead_id', 'RM', 'current_stage', 'closing_reason', 'lead_closing_reason']].concat(rows || []));
+      };
+      const backups = function () {
+        const root = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+        return root && root._folders['RM_Hierarchy_sync_backup'] ? root._folders['RM_Hierarchy_sync_backup']._filesList : [];
+      };
+      const others = ['Test CH Pune', 'Test RH Pune', 'Test TM Pune', 'Test A1 Pune', 'Test S1 Steady', 'Test Leaver Two Extra'];
+
+      // Clean removal: exact (normalised) matches go, everyone else stays, backup taken first, state forgotten.
+      {
+        const world = rmSyncTestWorld_({ tabRows: leaverTab() });
+        world.ss._sheets['leads'] = leadsTab([
+          ['L-1', 'Test Leaver One', 'Won', '', ''], // closed: does not block
+          ['L-2', 'Test Steady', 'Suspect', '', ''],
+        ]);
+        PropertiesService.getScriptProperties().setProperty(RMSYNC_STATE_PROPERTY_, JSON.stringify({ items: (function () {
+          const items = {}; items[rmSyncHashGs_('L|test leaver one')] = 1; items[rmSyncHashGs_('L|test steady other')] = 1; items[rmSyncHashGs_('A|test leaver p two|test leaver two')] = 1; return items;
+        })(), lastReminderDay: '', appliedEver: true }));
+        const before = rmSyncTestTabNames_(world.tab).length;
+        const res = removeRmHierarchyLeaversGs_(names, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(res.removed, ['Test Leaver One', 'Test  leaver TWO', 'Test Leaver P Two'], 'leavers: every exact (case/space-normalised) match is removed');
+        const after = rmSyncTestTabNames_(world.tab);
+        TestAssertEqual_(after.length, before - 3, 'leavers: exactly three rows are gone');
+        others.forEach(function (n) { TestAssert_(after.indexOf(n) !== -1, 'leavers: ' + n + ' is untouched'); });
+        TestAssertEqual_(rmSyncTestRow_(world.tab, 'Test Leaver Two Extra').tl, 'Test A1 Pune', 'leavers: a near-name row keeps its data (rows below a deleted one are not shifted wrongly)');
+        TestAssertEqual_(backups().length, 1, 'leavers: RM_Hierarchy is backed up to Drive');
+        TestAssertContains_(backups()[0]._content, 'Test Leaver P Two', 'leavers: the backup was taken BEFORE the rows were removed');
+        TestAssert_(!!res.backupUrl, 'leavers: the backup url is returned');
+        const state = rmSyncTestState_();
+        TestAssert_(!state.items[rmSyncHashGs_('L|test leaver one')] && !state.items[rmSyncHashGs_('A|test leaver p two|test leaver two')], 'leavers: the sync forgets the removed people');
+        TestAssert_(!!state.items[rmSyncHashGs_('L|test steady other')] && state.appliedEver === true, 'leavers: everything else in the sync state is kept');
+
+        // Idempotent: a second run finds nothing, writes nothing, makes no second backup.
+        const snapshot = JSON.stringify(world.tab._data);
+        const again = removeRmHierarchyLeaversGs_(names, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(again.removed, [], 'leavers: a re-run removes nothing');
+        TestAssertEqual_(again.notFound.slice().sort(), names.slice().sort(), 'leavers: a re-run reports every name as already gone');
+        TestAssertEqual_(JSON.stringify(world.tab._data), snapshot, 'leavers: a re-run writes nothing');
+        TestAssertEqual_(backups().length, 1, 'leavers: a re-run makes no new backup');
+
+        // The nightly plan no longer lists them (they are simply not in the tab any more).
+        const plan = computeRmHierarchySyncPlanGs_(parseHrRosterGs_(readHrRosterValuesGs_()), readRmHierarchyRowsGs_(world.tab), null);
+        TestAssert_(rmSyncTestNames_(plan.leavers).every(function (n) { return names.map(normPersonName_).indexOf(normPersonName_(n)) === -1; }), 'leavers: the nightly plan no longer lists the removed people');
+      }
+
+      // Open leads: that person is refused (lead ids returned), the others still go; force removes them too.
+      {
+        const world = rmSyncTestWorld_({ tabRows: leaverTab() });
+        world.ss._sheets['leads'] = leadsTab([
+          ['L-OPEN-1', 'Test Leaver One', 'Suspect', '', ''],
+          ['L-OPEN-2', ' test leaver one ', 'Suspect', '', ''],
+          ['L-CLOSED', 'Test Leaver One', '', 'Not interested', ''],
+          ['L-OTHER', 'Test Leaver Two Extra', 'Suspect', '', ''], // a near name's leads never block anyone
+        ]);
+        const res = removeRmHierarchyLeaversGs_(names, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(res.blocked.map(function (b) { return b.name + ':' + b.leadIds.join(','); }), ['Test Leaver One:L-OPEN-1,L-OPEN-2'], 'leavers: a person with open leads is refused and the open lead ids are listed (closed ones are not)');
+        TestAssertEqual_(res.removed, ['Test  leaver TWO', 'Test Leaver P Two'], 'leavers: the people without open leads are still removed');
+        TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Test Leaver One') !== -1, 'leavers: the refused person stays in the tab');
+        const forced = removeRmHierarchyLeaversGs_(names, { force: true, now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(forced.removed, ['Test Leaver One'], 'leavers: force removes the person despite open leads');
+        TestAssertEqual_(forced.blocked, [], 'leavers: nobody is refused when forced');
+        TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Test Leaver One') === -1, 'leavers: forced removal really deletes the row');
+      }
+
+      // No leads tab: refuses (nothing written) unless forced.
+      {
+        const world = rmSyncTestWorld_({ tabRows: leaverTab() });
+        const snapshot = JSON.stringify(world.tab._data);
+        TestAssertThrows_(function () { removeRmHierarchyLeaversGs_(names, { now: RMSYNC_TEST_THU_ }); }, 'leavers: a missing leads tab stops the removal');
+        TestAssertEqual_(JSON.stringify(world.tab._data), snapshot, 'leavers: ... and nothing was written');
+      }
+
+      // Side reports: a row naming a leaver as manager, and a Manager_Directory row, are reported but not changed.
+      {
+        const tab = leaverTab();
+        tab.push(['Pune', 'S1', 'Test Reports To Leaver', 'Test Leaver One', '', '', '', false, '', '']);
+        const dirRows = rmSyncTestDirRows_().concat([['Test Leaver One', 'TL', 'Navi Mumbai', '', 0, '']]);
+        const world = rmSyncTestWorld_({ tabRows: tab, dirRows: dirRows });
+        world.ss._sheets['leads'] = leadsTab([]);
+        const dirBefore = JSON.stringify(world.dir._data);
+        const res = removeRmHierarchyLeaversGs_(names, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(res.managerRefs, ['Test Reports To Leaver has TL = Test Leaver One'], 'leavers: a row still naming a leaver as manager is reported');
+        TestAssertEqual_(res.directoryRows.length, 1, 'leavers: a Manager_Directory row for a leaver is reported');
+        TestAssertEqual_(JSON.stringify(world.dir._data), dirBefore, 'leavers: Manager_Directory is never changed');
+        TestAssertEqual_(rmSyncTestRow_(world.tab, 'Test Reports To Leaver').tl, 'Test Leaver One', 'leavers: the reporting row is not changed');
+      }
+
+      // TEST MODE: says what it would remove, writes nothing (no tab change, no backup, no state).
+      {
+        const world = rmSyncTestWorld_({ tabRows: leaverTab() });
+        world.ss._sheets['leads'] = leadsTab([]);
+        const snapshot = JSON.stringify(world.tab._data);
+        TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+        let res;
+        try { res = removeRmHierarchyLeaversGs_(names, { now: RMSYNC_TEST_THU_ }); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+        TestAssertEqual_(res.wouldRemove.length, 3, 'leavers test mode: lists the three rows it would remove');
+        TestAssertEqual_(res.removed, [], 'leavers test mode: removes nothing');
+        TestAssertEqual_(JSON.stringify(world.tab._data), snapshot, 'leavers test mode: the tab is unchanged');
+        TestAssertEqual_(backups().length, 0, 'leavers test mode: no backup is written');
+        TestAssertEqual_(rmSyncTestState_(), null, 'leavers test mode: no state is saved');
+      }
+
+      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose'], 'leavers: the 2026-10-16 confirmed list');
+      const rawNames = RM_HIERARCHY_RAW_.map(function (r) { return normPersonName_(r[2]); });
+      RMSYNC_CONFIRMED_LEAVERS_.forEach(function (n) { TestAssert_(rawNames.indexOf(normPersonName_(n)) === -1, 'leavers: ' + n + ' is gone from RM_HIERARCHY_RAW_ too (a rebuild cannot restore them)'); });
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     lookupEmployeeEmail_ = realLookup;

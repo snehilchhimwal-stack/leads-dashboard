@@ -5,7 +5,7 @@
  * rebuildRmHierarchy(). Plan and rules: docs/_planning/RM_HIERARCHY_NIGHTLY_SYNC.md.
  *
  * WHAT IT NEVER DOES: remove a person. Someone who disappears from the HR sheet (or gets an Exit date) is only REPORTED — the row
- * stays in RM_Hierarchy until a human says remove. It never touches the Excluded / Note cells' existing text (a note is only
+ * stays in RM_Hierarchy until a human says remove (then: removeRmHierarchyLeaversNow, below - a one-off, console-run removal). It never touches the Excluded / Note cells' existing text (a note is only
  * appended to), never overwrites an existing Manager_Directory email, and never guesses: a chain slot it cannot resolve to
  * exactly one tier is reported for a person to decide (the HR sheet's chain columns are positional, not per-role — see
  * RmHierarchy.gs's header — so blind copying is the bug class this project has already paid for twice).
@@ -655,6 +655,156 @@ function runRmHierarchySyncGs_(opts) {
   Logger.log('RM hierarchy sync ' + day + ' [' + mode + ']: ' + plan.newJoiners.length + ' new, ' + plan.fixes.length + ' manager change(s), ' + plan.emailFills.length + ' email fill(s), ' + plan.directoryAdds.length + ' directory add(s); ' + plan.aliases.length + ' old spelling(s) recognised; ' + newAttention.length + ' new item(s) listed, ' + outstanding.length + ' still open.');
   return { mode: mode, plan: plan, held: held, newAttention: newAttention, outstanding: outstanding, reminders: reminders, applyProblems: applyResult.problems, recipients: recipients.to };
 }
+
+// ==================== Removing confirmed leavers (2026-10-16) ====================
+// The sync never removes anyone (see the header). When a person confirms that a listed "possible leaver" has left, the rows go in
+// two places: RM_HIERARCHY_RAW_ (RmHierarchy.gs, by hand, so a rebuild cannot bring them back) and the LIVE tab, by running
+// removeRmHierarchyLeaversNow() once. That function backs the tab up to Drive first (same folder as the sync's own backups), removes
+// ONLY rows whose name matches one of the names below exactly (case and spaces ignored), and is safe to re-run (a second run finds
+// nothing and writes nothing). Before removing anyone it checks the leads tab (read-only) for OPEN leads still assigned to that name:
+// those leads would route to the region fallback once the row is gone, so that person is NOT removed and the lead ids are logged
+// for reassignment - unless removeRmHierarchyLeaversForceNow() is run instead. Manager_Directory is only reported on, never changed.
+// Edit this list (and RM_HIERARCHY_RAW_) the next time a person confirms leavers; the 2026-10-16 batch is below.
+const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose'];
+const RMSYNC_LEAVER_LEAD_ID_LOG_LIMIT_ = 200;
+
+// Open leads per normalised RM name, for the names given. All open leads count (not only Google ones): every open lead under a
+// removed name loses its routing, and the person reassigning them needs the full list. Returns { found: bool, byName: { norm: [ids] } }.
+function rmSyncOpenLeadsForNamesGs_(ss, names) {
+  const wanted = {};
+  names.forEach(function (n) { wanted[normPersonName_(n)] = []; });
+  const src = ss.getSheetByName(resolveTabName_(ss));
+  if (!src) return { found: false, byName: wanted };
+  const lastRow = src.getLastRow();
+  const lastCol = src.getLastColumn();
+  if (lastRow < 3) return { found: true, byName: wanted };
+  const colIndex = buildColIndex_(src.getRange(2, 1, 1, lastCol).getValues()[0]);
+  src.getRange(3, 1, lastRow - 2, lastCol).getValues().forEach(function (row) {
+    const key = normPersonName_(getVal_(row, colIndex, 'RM'));
+    if (!key || !wanted.hasOwnProperty(key)) return;
+    if (!isOpenLead_(String(getVal_(row, colIndex, 'current_stage') || '').trim(), getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'))) return;
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    wanted[key].push(leadId || '(no lead id)');
+  });
+  return { found: true, byName: wanted };
+}
+
+// opts: { force, now }. Returns { removed, blocked: [{ name, leadIds }], notFound, wouldRemove, backupUrl, directoryRows, managerRefs, testMode }.
+// TEST MODE (TEST_MODE_OVERRIDE_EMAIL_ set) writes nothing: it only logs what it would remove.
+function removeRmHierarchyLeaversGs_(names, opts) {
+  const options = opts || {};
+  const force = options.force === true;
+  const testMode = !!TEST_MODE_OVERRIDE_EMAIL_;
+  const day = istDayKeyGs_(options.now || new Date());
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const result = { removed: [], blocked: [], notFound: [], wouldRemove: [], backupUrl: '', directoryRows: [], managerRefs: [], testMode: testMode };
+  const targets = {};
+  names.forEach(function (n) { targets[normPersonName_(n)] = n; });
+
+  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  if (!sheet) throw new Error('The RM_Hierarchy tab does not exist - nothing to remove.');
+  const tabHeader = sheet.getRange(1, 1, 1, RMSYNC_TAB_HEADER_.length).getValues()[0].map(function (v) { return rmSyncStr_(v).toLowerCase(); });
+  if (tabHeader.join('|') !== RMSYNC_TAB_HEADER_.join('|')) throw new Error('RM_Hierarchy\'s header row is not "' + RMSYNC_TAB_HEADER_.join(', ') + '", so nothing was removed.');
+  const rows = readRmHierarchyRowsGs_(sheet);
+  const matches = rows.filter(function (r) { return targets.hasOwnProperty(normPersonName_(r.name)); });
+  const matchedKeys = rmSyncUnique_(matches.map(function (r) { return normPersonName_(r.name); }));
+  Object.keys(targets).forEach(function (k) { if (matchedKeys.indexOf(k) === -1) result.notFound.push(targets[k]); });
+
+  // Read-only reports: anyone still naming a leaver as a manager, and any Manager_Directory row for them.
+  rows.forEach(function (r) {
+    if (targets.hasOwnProperty(normPersonName_(r.name))) return;
+    RMSYNC_FIELDS_.forEach(function (f) {
+      if (r[f] && targets.hasOwnProperty(normPersonName_(r[f]))) result.managerRefs.push(r.name + ' has ' + RMSYNC_FIELD_LABEL_[f] + ' = ' + r[f]);
+    });
+  });
+  const directorySheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
+  if (directorySheet) {
+    readManagerDirectoryRowsGs_(directorySheet).forEach(function (d) {
+      if (targets.hasOwnProperty(normPersonName_(d.name))) result.directoryRows.push(d.name + ' (row ' + d.rowNumber + ')');
+    });
+  }
+
+  if (!matches.length) {
+    Logger.log('Leaver removal: none of ' + names.join(', ') + ' is in RM_Hierarchy any more - nothing to do (already removed).');
+    rmSyncLogLeaverSideNotesGs_(result);
+    if (!testMode) rmSyncForgetLeaverItemsGs_(names);
+    return result;
+  }
+
+  const leads = rmSyncOpenLeadsForNamesGs_(ss, matchedKeys);
+  if (!leads.found && !force) throw new Error('The leads tab "' + resolveTabName_(ss) + '" was not found, so open leads could not be checked - nothing was removed. Run removeRmHierarchyLeaversForceNow() to remove anyway.');
+  const removable = {};
+  matchedKeys.forEach(function (k) {
+    const ids = leads.byName[k] || [];
+    const name = matches.filter(function (r) { return normPersonName_(r.name) === k; })[0].name;
+    if (ids.length) {
+      const shown = ids.slice(0, RMSYNC_LEAVER_LEAD_ID_LOG_LIMIT_);
+      Logger.log('Leaver removal: ' + name + ' still has ' + ids.length + ' OPEN lead(s): ' + shown.join(', ') + (ids.length > shown.length ? ' (+' + (ids.length - shown.length) + ' more)' : '') +
+        (force ? ' - removing anyway (forced); these leads route to the region fallback until reassigned.' : ' - NOT removed. Reassign these leads in the leads tab, then run removeRmHierarchyLeaversNow() again (or removeRmHierarchyLeaversForceNow() to remove anyway).'));
+      if (!force) { result.blocked.push({ name: name, leadIds: ids }); return; }
+    }
+    removable[k] = true;
+  });
+  const toRemove = matches.filter(function (r) { return removable[normPersonName_(r.name)]; });
+  result.wouldRemove = toRemove.map(function (r) { return r.name; });
+
+  if (testMode) {
+    Logger.log('Leaver removal [TEST MODE]: would remove ' + (result.wouldRemove.join(', ') || 'nobody') + ' - nothing was written.');
+    rmSyncLogLeaverSideNotesGs_(result);
+    return result;
+  }
+  if (toRemove.length) {
+    // No backup, no write.
+    const backup = archiveRowsToDriveCsv_('RM_Hierarchy_sync_backup', RMSYNC_TAB_HEADER_, rows.map(function (r) {
+      return [r.team, r.role, r.name, r.tl, r.tm, r.rh, r.ch, r.excluded, r.note, r.email];
+    }), 'before_leaver_removal_' + day, { skipManifest: true });
+    if (!backup) throw new Error('The Drive backup of RM_Hierarchy could not be made, so nothing was removed.');
+    result.backupUrl = backup.getUrl();
+    // Bottom-up, so the row numbers still to delete stay valid; each row's name is re-checked just before it is deleted.
+    toRemove.slice().sort(function (a, b) { return b.rowNumber - a.rowNumber; }).forEach(function (r) {
+      const nameNow = rmSyncStr_(sheet.getRange(r.rowNumber, 3, 1, 1).getValue());
+      if (normPersonName_(nameNow) !== normPersonName_(r.name)) {
+        Logger.log('Leaver removal: skipped ' + r.name + ' - row ' + r.rowNumber + ' changed since it was read (now "' + nameNow + '"). Re-run to try again.');
+        return;
+      }
+      withRetry_(function () { sheet.deleteRows(r.rowNumber, 1); }, 'remove leaver ' + r.name + ' from RM_Hierarchy');
+      result.removed.push(r.name);
+    });
+    result.removed.reverse();
+    Logger.log('Leaver removal: removed ' + result.removed.length + ' row(s) from RM_Hierarchy: ' + result.removed.join(', ') + '. Backup: ' + result.backupUrl);
+  }
+  rmSyncLogLeaverSideNotesGs_(result);
+  rmSyncForgetLeaverItemsGs_(result.removed.concat(result.notFound));
+  return result;
+}
+
+function rmSyncLogLeaverSideNotesGs_(result) {
+  if (result.notFound.length) Logger.log('Leaver removal: not in RM_Hierarchy (already removed, or never there): ' + result.notFound.join(', ') + '.');
+  if (result.managerRefs.length) Logger.log('Leaver removal: these rows still name a leaver as their manager (not changed - fix by hand): ' + result.managerRefs.join('; ') + '.');
+  if (result.directoryRows.length) Logger.log('Leaver removal: Manager_Directory still has a row for ' + result.directoryRows.join(', ') + ' (not changed).');
+}
+
+// Drops the sync's remembered "already reported" entries for these people, so nothing about them lingers in its state.
+function rmSyncForgetLeaverItemsGs_(names) {
+  if (!names.length) return;
+  const state = readRmSyncStateGs_();
+  const keys = names.map(normPersonName_);
+  let changed = false;
+  keys.forEach(function (k) {
+    const ids = ['L|' + k];
+    keys.forEach(function (other) { if (other !== k) ids.push('A|' + k + '|' + other); });
+    ids.forEach(function (id) {
+      const h = rmSyncHashGs_(id);
+      if (state.items[h]) { delete state.items[h]; changed = true; }
+    });
+  });
+  if (changed) writeRmSyncStateGs_(state);
+}
+
+// Run once from the editor: removes RMSYNC_CONFIRMED_LEAVERS_ from the live RM_Hierarchy tab (backup first; refuses for anyone with open leads).
+function removeRmHierarchyLeaversNow() { return removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, {}); }
+// Same, but removes a person even when open leads are still assigned to them (the lead ids are still logged).
+function removeRmHierarchyLeaversForceNow() { return removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, { force: true }); }
 
 // ==================== Entry points ====================
 

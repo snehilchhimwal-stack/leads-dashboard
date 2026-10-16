@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-10-16 (§4.3.7, email lifecycle defect fixes and the live deploy of the 2026-10-13 audit fixes), 2026-10-15 (§4.3.6, the 2026-10-13 Apps Script audit fixes; §4.3.5 stale count tile and follow-up tracker rule) and 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts, the 16:30 cycle report and the bounce/reply sweep).
+Written 2026-08-31, updated 2026-10-16 (§4.3.4, removing confirmed leavers with `removeRmHierarchyLeaversNow`; §4.3.7, email lifecycle defect fixes and the live deploy of the 2026-10-13 audit fixes), 2026-10-15 (§4.3.6, the 2026-10-13 Apps Script audit fixes; §4.3.5 stale count tile and follow-up tracker rule) and 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts, the 16:30 cycle report and the bounce/reply sweep).
 This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
@@ -801,6 +801,8 @@ first sight and again each Monday until a person says remove). More than 25 chan
 (`RM_Hierarchy_sync_backup`, `Manager_Directory_sync_backup`) before any write.
 
 **Old spellings (added the same day):** the leads sheet and `RM_Hierarchy` still carry old spellings and labels of people who ARE in the HR sheet ("Atharva P Belose" for "Atharva Belose", "Sourabh Sareen Pnl", "Mamtaben S 1 Account"); 9 of the first report's 19 "possible leavers" were these. A row missing from the HR sheet by exact name is now recognised as an old spelling when exactly one current HR person is a near match (`GS-014` RULE-042) and is listed once under "OLD SPELLINGS OF CURRENT STAFF" (with the matched person's employee code) instead of as a leaver; ambiguous or exited-only matches stay leavers, with the similar names shown. Nothing is changed or removed either way. Removing a row while leads are still assigned to that name sends those leads' emails to the region fallback, so reassign the leads first.
+
+**Removing confirmed leavers (2026-10-16):** when a person confirms that someone on the POSSIBLE LEAVERS list has left, take the rows out of `RM_HIERARCHY_RAW_` (so a rebuild cannot restore them), list the names in `RMSYNC_CONFIRMED_LEAVERS_` (`RmHierarchySync.gs`), paste, and run `removeRmHierarchyLeaversNow()` once. It backs the live tab up to Drive (`RM_Hierarchy_sync_backup`, `before_leaver_removal_<day>`), removes only rows whose name matches exactly (case/spaces ignored), and is safe to re-run. It first checks the leads tab for OPEN leads still assigned to each name: such a person is NOT removed and their lead ids are logged - reassign them, then run it again, or run `removeRmHierarchyLeaversForceNow()` to remove anyway (those leads then go to the region fallback). `Manager_Directory` rows and other rows naming them as manager are only reported. The sync stops listing them because they are no longer in the tab, and their remembered report items are dropped. First batch: Jitendra Phulwaria, Atharva Belose, Atharva P Belose.
 
 **Report:** emailed to Snehil Chhimwal, Sushil Kannojiya and Ashish Ivlekar (addresses resolved by name from the private employee table,
 else from the person's HR row) on nights with something to say.

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (report-only until `enableRmHierarchySyncApplyNow` is run) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-08 against commit `3dc9852` - old spellings of current staff are recognised instead of listed as leavers (`FN-377`, `RULE-042`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-16 against commit `(pending commit)` - one-off removal of confirmed leavers from the live tab (`FN-524`, `RULE-088`; see `## Version / change reference`) |
 
 ## Purpose / reason to exist
 
@@ -53,10 +53,11 @@ paste the file, run `setupRmHierarchySync()` once, then `syncRmHierarchyNightlyN
 | FN-371 | `rmSyncAttentionItemsGs_(plan)` / `rmSyncChangeLinesGs_(plan)` `#L402/#L422` | the plan | report lines; attention items with a stable id | none | — | FN-373, FN-374 | specific |
 | FN-372 | `buildRmHierarchySyncReportGs_(info)` / `rmSyncRecipientsGs_(hr)` `#L437/#L488` | run facts / the HR sheet | `{subject, body}` / the recipient addresses | none (recipients read the private table by name, then the HR row) | `resolvedEmailForNameGs_`, `opsAlertEmailGs_` (`GS-004`) | FN-373 | specific |
 | FN-373 | `runRmHierarchySyncGs_(opts)` `#L592` | `{now}` | the run summary | reads the HR sheet and both tabs; may write them (apply on); emails the report; saves state | all of the above | FN-374 | specific |
-| FN-374 | `syncRmHierarchyNightly()` / `syncRmHierarchyNightlyNow()` `#L663/#L678` | — | — | the lock + run record; alerts ops and re-throws on a crash | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
+| FN-374 | `syncRmHierarchyNightly()` / `syncRmHierarchyNightlyNow()` `#L813/#L828` | — | — | the lock + run record; alerts ops and re-throws on a crash | `withEmailJobLockGs_`, `notifyOpsAlertGs_` (`GS-004`) | the trigger / Apps Script editor | specific |
 | FN-375 | `setupRmHierarchySync()`, `enable/disableRmHierarchySyncApplyNow()`, `showRmHierarchySyncPlanNow()`, `showRmHierarchySyncStatusNow()` `#L681/#L695/#L699/#L64/#L81` | — | — | trigger install; Script Property switch; read-only logs | FN-367, FN-369 | Apps Script editor (manual) | specific |
 | FN-377 | `rmSyncNameTokensGs_`, `rmSyncEditDistanceGs_`, `rmSyncTokenCloseGs_`, `rmSyncNearNameGs_(rowName, person)` `#L97/#L128` | a name; an HR person | `true` when the name is an old spelling of that person | none (pure) | — | FN-369 | specific - RULE-042 |
 | FN-376 | `rmHierarchySyncIsActiveGs_()` `#L388` | — | `true` when apply is on or the sync has ever applied | none | — | `rebuildRmHierarchy` (`GS-011`) | specific |
+| FN-524 | `removeRmHierarchyLeaversGs_(names, opts)` / `removeRmHierarchyLeaversNow()` / `removeRmHierarchyLeaversForceNow()` (+ `rmSyncOpenLeadsForNamesGs_`, `rmSyncForgetLeaverItemsGs_`) `#L694/#L805/#L807/#L673/#L788` (added 2026-10-16) | names to remove (`RMSYNC_CONFIRMED_LEAVERS_`), `{force, now}` | `{removed, blocked, notFound, wouldRemove, backupUrl, directoryRows, managerRefs, testMode}` | Drive backup CSV of `RM_Hierarchy` (`RM_Hierarchy_sync_backup`, label `before_leaver_removal_<day>`), then deletes the matching rows; drops those people from the sync state. Reads the leads tab and `Manager_Directory` only. TEST MODE writes nothing | `archiveRowsToDriveCsv_`, `isOpenLead_`, `buildColIndex_` (`GS-002`), `normPersonName_` (`GS-011`), `withRetry_` (`GS-004`) | the Apps Script editor (one-off) | specific |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
@@ -67,6 +68,7 @@ paste the file, run `setupRmHierarchySync()` once, then `syncRmHierarchyNightlyN
 | RULE-040 | A person missing from the HR sheet or with an Exit date is only reported, never removed; reported on first sight, then every Monday while open | FN-369, FN-373 | — |
 | RULE-041 | A `Manager_Directory` email is filled only when blank; a different HR email is reported; a row is added only for a manager who is in the HR sheet | FN-369 | — |
 | RULE-042 | A row not in the HR sheet by exact name is an OLD SPELLING (not a leaver) only when exactly one current (not exited) HR person is a near match: same words ignoring initials, numbers and "Pnl"/"Account"; or one name's words are all in the other's (a dropped middle name, at least two shared words, at most two extra); or the same number of words each within a small edit distance (1 for 5-6 letters, 2 for 7+; a swap of neighbours counts once); or a label ending "Account" whose single remaining word is another person's first name. Zero, several or only-exited matches stay possible leavers, with the similar HR names listed | FN-377, FN-369 | — |
+| RULE-088 | A confirmed leaver is removed from the live tab only by a person running `removeRmHierarchyLeaversNow`: exact name match after case/space normalisation; a person with OPEN leads still assigned is refused (lead ids logged) unless the force variant is run; backup first, no backup no write; re-running is a no-op; `Manager_Directory` and other rows naming them are reported, never changed | FN-524 | - |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -154,6 +156,8 @@ Apps Script backend; a time-driven job (23:15 IST) sharing the email jobs' lock,
 `rebuildRmHierarchyForce`). **Not live until pasted.**
 
 **2026-10-08** (`3dc9852`): the first report listed 19 possible leavers, 9 of them old spellings of people still in the HR sheet (Peddapally Shivaji, Atharva P Belose, Akash Ugale, Kavya Gowda, Sourabh Sareen Pnl, Jay Renavikar, Mamtaben S 1 Account and two Mohmmad Azaz spellings). `computeRmHierarchySyncPlanGs_` now recognises such a row (FN-377, RULE-042) and the report lists it once under "OLD SPELLINGS OF CURRENT STAFF" with the matched person and employee code; it is not counted as work in the subject. Report lines also carry the HR employee code (column A) for new people and manager-field items. **Not live until pasted.**
+
+**2026-10-16** (`(pending commit)`): `removeRmHierarchyLeaversNow()` / `removeRmHierarchyLeaversForceNow()` (`FN-524`, `RULE-088`) - the one-off, console-run removal of people the user has confirmed left (first batch: Jitendra Phulwaria, Atharva Belose, Atharva P Belose, also removed from `RM_HIERARCHY_RAW_`, `GS-011`). The nightly sync itself still never removes anyone; once the rows are gone it simply stops listing them, and their remembered report items are dropped. **Not live until pasted.**
 
 ## Revalidation trigger
 

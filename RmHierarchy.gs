@@ -339,7 +339,6 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','S1','Md Muzamil','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','S1','Mohammed Hidayathulla','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Rajdeep Jalan','Rohit Rathod','','Sachindra Wadane','Sourabh Sareen'],
-  ['Navi Mumbai','S1','Jitendra Phulwaria','','','','Vidya Jadhav'],
   ['Central','S1','Sneha Upadhyay','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','S1','Wasim Shaikh','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'],
   ['HNI','Cluster Head','Abhhijjit Gandhii','','','',''],
@@ -354,7 +353,6 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Vivek Solanke','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['HNI','S1','Mohd Faizan Shaikh','','','','Abhhijjit Gandhii'],
   ['Sourcing - Pune','S3','Vidisha Kakade','','Yash Kalal','','Sourabh Sareen'],
-  ['Harbour','S1','Atharva Belose','Yash Sharma','','','Sanjyota Bhosale'],
   ['Thane','TM','Sanket Yadav','','','','Bipin More'],
   ['Pune','S1','Krish Sinha','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Akshay Dawle','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
@@ -400,7 +398,6 @@ const RM_HIERARCHY_RAW_ = [
   ['Hyderabad','S1','G Kumar','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'], // confirmed by the user 2026-10-13 -- leads-sheet alias of "Mohd Faizan Shaikh"
-  ['Harbour','S1','Atharva P Belose','Yash Sharma','','','Sanjyota Bhosale'],
   // 3 more alias rows, found 2026-08-31 via a real "Leads Not Sent" ops
   // report — same pattern as the 4 above (the leads sheet's own RM column
   // spells these differently than the HR export does), just not
@@ -476,6 +473,10 @@ const RM_HIERARCHY_RAW_ = [
   // the company, confirmed by the user 2026-10-13 (absent from every HR export since 2026-09-29) -- rows removed.
   // None was anyone's tl/tm/rh/ch. Vemula Ajay (Hyderabad A1) also left (absent from HR Live 2026-10-13, confirmed
   // by the user) -- row removed and all his reports moved straight under Zoya Fathima.
+  // Jitendra Phulwaria (Navi Mumbai S1), Atharva Belose (Harbour S1) and his leads-sheet alias row "Atharva P Belose"
+  // left the company, confirmed by the user 2026-10-16 off the nightly HR-sync report's POSSIBLE LEAVERS list -- rows
+  // removed here (so a rebuild can't restore them) and from the LIVE tab by removeRmHierarchyLeaversNow()
+  // (RmHierarchySync.gs). None was anyone's tl/tm/rh/ch.
   // AUTO-REFRESH 2026-10-13 from the live HR roster sheet: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Thane','S1','Asgar Sayyed','','','Swapnil Gowalkar','Bipin More'],
   ['Hyderabad','S1','Balamurali Sivakumar','','','','Zoya Fathima'],
