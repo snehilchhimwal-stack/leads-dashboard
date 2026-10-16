@@ -88,6 +88,7 @@ const TEST_FILES = [
   'Tests_FollowupTracker.gs',
   'Tests_StaleLeads.gs',
   'Tests_EmailLifecycleFullCycle.gs',
+  'Tests_EmailLifecycleMatrix.gs',
   'Tests_RunAll.gs',
 ];
 

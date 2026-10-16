@@ -56,6 +56,8 @@ function runDailyChecklistTests_() {
       const win = { start: new Date('2026-10-09T10:00:00Z'), end: new Date('2026-10-10T10:00:00Z') };
       const at = function (iso, o) { return Object.assign({ ranAt: iso, status: 'clean', count: 0, codes: [], reason: '' }, o || {}); };
       TestAssertEqual_(dailyChecklistAuditGs_(at('2026-10-10T08:00:00Z'), win, '13:00').flag, 'GREEN', 'audit: a clean result inside the cycle is GREEN');
+      TestAssertEqual_(dailyChecklistAuditGs_(at('2026-10-09T10:00:00.000Z'), win, 'x').flag + ',' + dailyChecklistAuditGs_(at('2026-10-10T09:59:59.999Z'), win, 'x').flag + ',' + dailyChecklistAuditGs_(at('2026-10-10T10:00:00.000Z'), win, 'x').flag,
+        'GREEN,GREEN,AMBER', 'audit: the cycle is [start, end) - a result at the start counts, one at exactly the end belongs to the next cycle (2026-10-16, O1)');
       const ex = dailyChecklistAuditGs_(at('2026-10-10T08:00:00Z', { status: 'exceptions', count: 2, codes: ['UNFINISHED', 'DUPLICATE_LOG'] }), win, '13:00');
       TestAssertEqual_(ex.flag + ',' + (ex.text.indexOf('2 exception(s): UNFINISHED, DUPLICATE_LOG') !== -1), 'RED,true', 'audit: exceptions are RED, with the count and codes');
       TestAssertEqual_(['deferred', 'skipped', 'failed'].map(function (s) { return dailyChecklistAuditGs_(at('2026-10-10T08:00:00Z', { status: s, reason: 'why' }), win, 'x').flag; }).join(','), 'AMBER,AMBER,AMBER', 'audit: deferred, skipped and failed are AMBER (not a confirmed failure)');

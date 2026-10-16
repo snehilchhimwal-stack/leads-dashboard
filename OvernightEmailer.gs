@@ -873,7 +873,9 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
       '',
       sendFailureReason,
     ]);
-    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: emailLedgerStatusForErrorGs_(e), reason: sendFailureReason, leadIds: [] });
+    const errStatus = emailLedgerStatusForErrorGs_(e);
+    // 2026-10-16 (O3): an UNCONFIRMED email may have been delivered - its row keeps the leads it carried (FAILED/BLOCKED rows still record none).
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: errStatus, reason: sendFailureReason, leadIds: errStatus === EMAIL_LEDGER_STATUS_.UNCONFIRMED ? claimedLeadIds.map(String) : [] });
   }
   if (!sendFailureReason) {
     // ACCEPTED = Gmail took the message; recorded BEFORE the Overnight_Log write below so a failure there cannot lose the evidence.
@@ -1297,9 +1299,11 @@ function sendOvernightMorningEmails_(opts) {
       const mRole = (m1 && m1.rec.primaryRole) || (m2 && m2.primaryRole) || '';
       const mLeadIds = (m1 ? m1.leads.map(function (l) { return String(l.lead_id); }) : []).concat(m2 ? m2.snapshotEntries.map(function (l) { return String(l.lead_id); }) : [])
         .filter(function (v, i, a) { return a.indexOf(v) === i; });
+      // D4 (2026-10-16): the subject the send will use (sendCombinedMorningEmail_ builds it the same way), so EmailSweep.gs can attribute a late bounce.
+      const mSubject = combinedMorningSubjectGs_(mLabel, mRole, regionHeaderOptsGs_(region, (m1 ? m1.leads : []).concat(m2 ? m2.snapshotEntries : [])).region, dateLabel);
       ledgerMeta[emailKey] = {
         emailId: emailLedgerIdGs_(ledgerJob, todayKey, region, mRole, mLabel, mTo), job: ledgerJob, dayKey: todayKey, region: region,
-        bucketLabel: mLabel, primaryRole: mRole, to: mTo, cc: (m1 && m1.rec.cc) || (m2 && m2.cc) || '', leadIds: mLeadIds,
+        bucketLabel: mLabel, primaryRole: mRole, to: mTo, cc: (m1 && m1.rec.cc) || (m2 && m2.cc) || '', subject: mSubject, leadIds: mLeadIds,
       };
     });
     // Recovery: only the buckets the ledger shows as failed are planned and sent; the rest of the region was handled by the original run.
@@ -1931,7 +1935,7 @@ function sendCombinedFollowupEmail_(ss, overnightLogSheet, overnightLogRowNumber
   // send ended ambiguously - may have gone), BLOCKED (the gate refused) or FAILED.
   emailLedgerResultGs_(ctx.ledger, ctx.emailId, outcome === 'sent'
     ? { status: EMAIL_LEDGER_STATUS_.ACCEPTED, messageId: sentIds.messageId, threadId: sentIds.threadId, leadIds: claimedLeadIds.map(String) }
-    : { status: outcome === 'unconfirmed' ? EMAIL_LEDGER_STATUS_.UNCONFIRMED : ledgerStatus, reason: resultNote, leadIds: [] });
+    : { status: outcome === 'unconfirmed' ? EMAIL_LEDGER_STATUS_.UNCONFIRMED : ledgerStatus, reason: resultNote, leadIds: outcome === 'unconfirmed' ? claimedLeadIds.map(String) : [] }); // O3 (2026-10-16): an UNCONFIRMED reply keeps its leads
 
   // checkpoint2_json/checkpoint2_sent_at -- changed 2026-10-05 (email audit P5 / F6): written ONLY when the reply was
   // delivered (or is unconfirmed — attempted and possibly delivered, so it must not be re-sent without a human looking). It

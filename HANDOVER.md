@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-10-15 (§4.3.6, the 2026-10-13 Apps Script audit fixes; §4.3.5 stale count tile and follow-up tracker rule) and 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts, the 16:30 cycle report and the bounce/reply sweep).
+Written 2026-08-31, updated 2026-10-16 (§4.3.7, email lifecycle defect fixes and the live deploy of the 2026-10-13 audit fixes), 2026-10-15 (§4.3.6, the 2026-10-13 Apps Script audit fixes; §4.3.5 stale count tile and follow-up tracker rule) and 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts, the 16:30 cycle report and the bounce/reply sweep).
 This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
@@ -903,7 +903,7 @@ An audit never blocks, re-sends or edits anything, takes no job lock, and leaves
 **Not live until pasted:** `EmailLedger.gs` (new), `AllIssuesEmailer.gs`, `EmailInfra.gs`, `Tests_EmailLedger.gs` (new), `Tests_Mocks.gs`,
 `Tests_RunAll.gs`, `OvernightEmailer.gs`, plus `CycleReport.gs`, `Tests_CycleReport.gs`, `EmailSweep.gs`, `Tests_EmailSweep.gs`, `OpsAudit.gs`, `Tests_OpsAudit.gs`, `DailyChecklist.gs`, `Tests_DailyChecklist.gs`, `FollowupTracker.gs`, `Tests_FollowupTracker.gs`, `StaleLeads.gs` and `Tests_StaleLeads.gs` (new), `EmailLedger.gs`, `CycleReport.gs`, `MovementTracker.gs`, `EmailInfra.gs` and `Tests_EmailInfra.gs`; the ledger and held alerts need no `setupXxx()`, the cycle report needs `setupEmailCycleReportTrigger()` once, the sweep `setupEmailSweepTrigger()` once and the audits `setupOpsAuditTriggers()` once. EO-2 adds nothing new to paste beyond these files (`Incident_Log` creates itself). Every part of the plan is now built; what remains is deployment.
 
-### 4.3.6 Apps Script code audit (2026-10-13) - fixes in the code, pending paste
+### 4.3.6 Apps Script code audit (2026-10-13) - fixes in the code, live since 2026-10-16 (§4.3.7)
 
 A read-only audit of the whole Apps Script project (report: `docs/_planning/CODE_AUDIT_2026-10-13_APPS_SCRIPT.md`; its `## Status (2026-10-15)` table says, per finding, DONE / PARTIAL / SKIPPED and the commit). The fixes were made on six branches and merged into `master` (`bd27cc2`..`a7d9e12`, follow-up `1f51394`), each with regression tests and a finding-ID comment at the change. **None is live until the changed `.gs` files and their `Tests_*.gs` are pasted** (`docs/STALENESS_TRACKER.md` deploy register lists them); no trigger changed, so no `setupXxx()` re-run is needed. The behaviour changes worth knowing:
 
@@ -915,6 +915,19 @@ A read-only audit of the whole Apps Script project (report: `docs/_planning/CODE
 - **Engines (`8ef279d`):** short outcome signal words (`declining`, `broker`, `ringing`) match exactly and `to let` only as a property type, in both runtimes (FE-1..3); text date cells parse like the dashboard's `parseDate` (SE-2); a checkpoint move into "Behind on Today's Calls" is `category_changed`, not `escalated` (SE-1); archive reuse skips trashed Drive files (CO-1); one failing weekly ops check no longer aborts the whole weekly email (OC-1).
 
 Deliberately not done: AI-11, MT-07, MT-08, MT-10, MT-12, OC-2, OA-1, OA-2, OE-09/EI-7, OE-16, DC-1, SE-4, AI-8/10/12/13 (reasons in the status table).
+
+### 4.3.7 Email lifecycle E2E fixes (2026-10-16 IST) - in the code, pending paste
+
+**Live deploy, 2026-10-16:** the 2026-10-13 audit fixes (§4.3.6) were pasted into the live editor; `runAllTests` there: **3749 passed, 0 failed**. The live end-to-end test `runLiveE2E` (`Tests_E2E_Live.gs`, run by hand only, never part of `runAllTests`) passed **11/11**, with its cleanup verified (`verifyLiveE2ECleanup`). The `docs/STALENESS_TRACKER.md` deploy register is refreshed only from live hashes (`test/match-live-gs.py`), not from this note.
+
+**Fixes after that deploy** (report: `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md` §7-8; tests: `Tests_EmailLifecycleMatrix.gs`). **Not live until `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `EmailLedger.gs`, `EmailSweep.gs`, `CycleReport.gs`, `DailyChecklist.gs` and the changed `Tests_*.gs` are pasted**; no trigger changed.
+- **D1:** a ledger plan write that landed but reported an error left the row PLANNED, and the recovery re-sent the delivered email. The plan now re-reads the ledger tail and finds its rows by `email_id`.
+- **D2:** recovery decides per `email_id`. An id with any ACCEPTED, UNCONFIRMED or ATTEMPTING row is never re-sent, even when a stale FAILED copy exists.
+- **D4:** the 17:00 and 10:00 ledger rows now record the subject that was sent, so a bounce more than 15 minutes late is attributed. A 13:00 reply's bounce (`Re: <subject>`) is still not counted on the 10:00 row (D3).
+- **Cycle window:** the 16:30 report's window is `[start, end)`, so a row at exactly 16:30:00 counts once. The daily checklist's audit window works the same way.
+- **UNCONFIRMED rows** keep their `lead_ids_json` (the email may have gone). FAILED and BLOCKED rows still record none.
+- **Sweep:** the earliest matching bounce time is recorded, and a recorded earlier time is never replaced by a later one.
+- **Still OPEN:** a same-day **manual re-run** of the 10:00 job re-sends an UNCONFIRMED or ATTEMPTING bucket (D5). A manual re-run of the 13:00 job re-sends an ATTEMPTING reply (D6). Until these are fixed, after a 10:00/13:00 crash or timeout, use the `recoverFailed...BucketsNow` functions, not a re-run of the job.
 
 ### 4.4 GitHub repo access
 

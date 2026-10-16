@@ -35,6 +35,14 @@ covers the two on-disk/in-repo registrations.
 RmHierarchy.private.gs is deliberately excluded -- it's gitignored (real
 employee data, CLAUDE.md's own documented exception), never in
 test/run-gs-tests.js's lists, and CI never has it.
+
+LIVE_MANUAL_TEST_FILES (added 2026-10-16): Tests_E2E_Live.gs is a LIVE,
+run-by-hand end-to-end test (runLiveE2E / cleanupLiveE2E /
+verifyLiveE2ECleanup in the Apps Script editor) that creates and trashes
+real Drive resources and sends a real email. It must NOT be in
+run-gs-tests.js's TEST_FILES nor in Tests_RunAll.gs's `suites` (so
+runAllTests and the headless runner never touch it). It is skipped by the
+disk scan, and its being registered in either place IS a finding.
 """
 
 import re
@@ -47,6 +55,7 @@ TESTS_RUNALL_GS = REPO_ROOT / "Tests_RunAll.gs"
 STRICT = "--strict" in sys.argv
 
 EXCLUDED_FROM_DISK_SCAN = {"RmHierarchy.private.gs"}
+LIVE_MANUAL_TEST_FILES = {"Tests_E2E_Live.gs"}  # see the docstring: never registered, never in runAllTests
 INFRA_TEST_FILES = {"Tests_Mocks.gs", "Tests_RunAll.gs"}
 
 # Test files that deliberately have NO matching production X.gs -- an
@@ -61,7 +70,8 @@ INFRA_TEST_FILES = {"Tests_Mocks.gs", "Tests_RunAll.gs"}
 # registrations (Tests_RunAll.gs's `suites` array, this script's own
 # TEST_FILES list) are still fully checked below -- only the "must have a
 # matching X.gs" check (#3) is skipped for files in this set.
-INTEGRATION_TEST_FILES_WITHOUT_OWN_PRODUCTION_FILE = {"Tests_EmailLifecycleFullCycle.gs"}
+# Tests_EmailLifecycleMatrix.gs added 2026-10-16: the email-lifecycle failure/branch matrix (same kind of integration suite).
+INTEGRATION_TEST_FILES_WITHOUT_OWN_PRODUCTION_FILE = {"Tests_EmailLifecycleFullCycle.gs", "Tests_EmailLifecycleMatrix.gs"}
 
 
 def extract_file_list(js_source, const_name):
@@ -123,7 +133,7 @@ def main():
 
     disk_gs_files = {
         p.name for p in REPO_ROOT.glob("*.gs")
-        if p.name not in EXCLUDED_FROM_DISK_SCAN
+        if p.name not in EXCLUDED_FROM_DISK_SCAN and p.name not in LIVE_MANUAL_TEST_FILES
     }
     disk_production = {f for f in disk_gs_files if not f.startswith("Tests_")}
     disk_test = {f for f in disk_gs_files if f.startswith("Tests_")}
@@ -135,6 +145,18 @@ def main():
         findings.append("MISSING from PRODUCTION_FILES: %s exists on disk but isn't registered in %s" % (f, RUN_GS_TESTS_JS.name))
     for f in sorted(disk_test - test_files):
         findings.append("MISSING from TEST_FILES: %s exists on disk but isn't registered in %s" % (f, RUN_GS_TESTS_JS.name))
+
+    # 1b. A live, manual-only test must never be registered (it would run in runAllTests / the headless runner)
+    for f in sorted(LIVE_MANUAL_TEST_FILES):
+        if f in test_files:
+            findings.append("LIVE TEST REGISTERED: %s is a live, manual-only test and must not be in %s's TEST_FILES" % (f, RUN_GS_TESTS_JS.name))
+        fn = test_file_to_suite_fn(f)
+        if fn and fn in suite_fns:
+            findings.append("LIVE TEST REGISTERED: %s (from %s) must not be in Tests_RunAll.gs's suites array" % (fn, f))
+        if fn and re.search(r"\b%s\s*\(" % re.escape(fn), gs_source):
+            findings.append("LIVE TEST REGISTERED: Tests_RunAll.gs calls %s (from %s)" % (fn, f))
+        if re.search(r"\b(runLiveE2E|cleanupLiveE2E|verifyLiveE2ECleanup)\b", gs_source):
+            findings.append("LIVE TEST REGISTERED: Tests_RunAll.gs references a live E2E entry point (%s)" % f)
 
     # 2. Registered -> disk (stale entries)
     for f in sorted(production_files - disk_production):

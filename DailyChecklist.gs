@@ -66,9 +66,10 @@ function dailyChecklistSendTextGs_(c) {
 }
 
 // One silent audit's last result, judged for this cycle: { flag, text }. A result recorded before the cycle began is no evidence for it.
+// The cycle window is [start, end) like cycleReportInWindowGs_ (CycleReport.gs, 2026-10-16): end exclusive.
 function dailyChecklistAuditGs_(rec, win, label) {
   const ranAt = rec && rec.ranAt ? new Date(rec.ranAt) : null;
-  if (!rec || !ranAt || isNaN(ranAt.getTime()) || ranAt.getTime() < win.start.getTime() || ranAt.getTime() > win.end.getTime()) {
+  if (!rec || !ranAt || isNaN(ranAt.getTime()) || ranAt.getTime() < win.start.getTime() || ranAt.getTime() >= win.end.getTime()) {
     return { flag: 'AMBER', text: 'the ' + label + ' audit has no result in this cycle' };
   }
   if (rec.status === 'clean') return { flag: 'GREEN', text: 'the ' + label + ' audit was clean' };

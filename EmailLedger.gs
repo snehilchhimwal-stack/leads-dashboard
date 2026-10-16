@@ -72,10 +72,23 @@ function emailLedgerReplaceDayBlockGs_(sheet, rows, day, label) {
 // died before it reached the bucket: nothing was attempted, so nothing can be duplicated - the recovery runs under the job lock, so a live job's own PLANNED rows are
 // never mistaken for abandoned ones). Never UNCONFIRMED or ATTEMPTING (the send may have gone out; a second copy is a duplicate) and never an ACCEPTED one.
 // Shared by the 17:00, 10:00 and 13:00 recoveries.
+// D2 (2026-10-16): decided per email_id, not per row - when ANY row of an id is ACCEPTED, UNCONFIRMED or ATTEMPTING (e.g. a stale FAILED copy restored from a
+// backup or left by a hand edit next to the real row), the email may already have gone and the id is not a target. One target per id.
 function emailLedgerRecoveryTargetsGs_(ss, now, job) {
   const day = istDayKeyGs_(now);
-  return emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, day)
-    .filter(function (r) { return r.job === job && emailLedgerDayKeyOfGs_(r.cycle_day) === day && (r.status === 'FAILED' || r.status === 'BLOCKED' || r.status === 'PLANNED'); })
+  const rows = emailLedgerReadRowsGs_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_, day)
+    .filter(function (r) { return r.job === job && emailLedgerDayKeyOfGs_(r.cycle_day) === day; });
+  const mayHaveGone = {}, seen = {};
+  rows.forEach(function (r) {
+    if (r.status === 'ACCEPTED' || r.status === 'UNCONFIRMED' || r.status === 'ATTEMPTING') mayHaveGone[String(r.email_id).trim()] = true;
+  });
+  return rows
+    .filter(function (r) {
+      const id = String(r.email_id).trim();
+      if (mayHaveGone[id] || seen[id] || !(r.status === 'FAILED' || r.status === 'BLOCKED' || r.status === 'PLANNED')) return false;
+      seen[id] = true;
+      return true;
+    })
     .map(function (r) { return { emailId: r.email_id, region: r.region, bucket: r.bucket_label, status: r.status }; });
 }
 
@@ -393,9 +406,38 @@ function emailLedgerPlanGs_(h, plans) {
         p.leadIds.length, plannedAt, '', done, p.initialStatus || EMAIL_LEDGER_STATUS_.PLANNED, String(p.initialReason || '').slice(0, 500), 0, '', '', 0,
         jsonForCellGs_(p.leadIds, 'Email_Ledger lead_ids_json (' + p.emailId + ')'), '', '', ''];
     });
-    const startRow = emailLedgerAppendBlockGs_(h.ledger, rows, function (probe) { return String(probe).trim() === rows[0][0]; }, 'append Email_Ledger rows');
+    let startRow;
+    try {
+      startRow = emailLedgerAppendBlockGs_(h.ledger, rows, function (probe) { return String(probe).trim() === rows[0][0]; }, 'append Email_Ledger rows');
+    } catch (e) {
+      // D1 (2026-10-16): a write can LAND and still report an error. Unindexed, its rows stayed PLANNED (attempt/result writes were no-ops) and the recovery
+      // re-sent the delivered email as "never attempted". Index whatever of this block is on the sheet, then report the failure as before.
+      emailLedgerRelocateGs_(h, rows);
+      throw e;
+    }
     rows.forEach(function (r, i) { h.rowById[r[0]] = startRow + i; h.rows[startRow + i] = r; if (h.touched) h.touched[startRow + i] = true; });
   });
+}
+
+// D1: finds the rows of a just-attempted plan block by email_id in the last rows of the ledger and indexes the ones that are there. Never throws.
+function emailLedgerRelocateGs_(h, rows) {
+  try {
+    const last = h.ledger.getLastRow();
+    const span = Math.min(last - 1, rows.length + 50);
+    if (span < 1) return;
+    const first = last - span + 1;
+    const want = {};
+    rows.forEach(function (r, i) { want[r[0]] = i; });
+    h.ledger.getRange(first, 1, span, 1).getValues().forEach(function (v, i) {
+      const id = String(v[0] == null ? '' : v[0]).trim();
+      if (want[id] === undefined || h.rowById[id]) return;
+      h.rowById[id] = first + i;
+      h.rows[first + i] = rows[want[id]];
+      if (h.touched) h.touched[first + i] = true;
+    });
+  } catch (e) {
+    Logger.log('Email ledger: could not re-read the plan block after a failed write: ' + e);
+  }
 }
 
 // Applies `mutate(row)` to one cached ledger row and rewrites its outcome columns.
@@ -425,7 +467,8 @@ function emailLedgerAttemptGs_(h, emailId) {
   });
 }
 
-// The send ended. result = { status, reason, messageId, threadId, leadIds } (leadIds = the leads the email really carried).
+// The send ended. result = { status, reason, messageId, threadId, leadIds } (leadIds = the leads the email really carried - or, for an UNCONFIRMED send,
+// may have carried; [] for FAILED/BLOCKED/SKIPPED). leads_sent counts only an ACCEPTED email's leads.
 function emailLedgerResultGs_(h, emailId, result) {
   // A send that was redirected to another address (EmailReroute.gs) says so in its row; the note is always consumed so it can never leak into the next row.
   const rerouteNote = typeof emailRerouteTakeNoteGs_ === 'function' ? emailRerouteTakeNoteGs_() : '';
@@ -490,7 +533,9 @@ function emailLedgerTrackSendGs_(h, meta, sendFn) {
   try {
     sent = sendFn();
   } catch (e) {
-    emailLedgerResultGs_(h, meta.emailId, { status: emailLedgerStatusForErrorGs_(e), reason: String((e && e.message) || e), leadIds: [] });
+    const errStatus = emailLedgerStatusForErrorGs_(e);
+    // O3 (2026-10-16): an UNCONFIRMED email may have been delivered - its row keeps its leads (FAILED/BLOCKED rows still record none).
+    emailLedgerResultGs_(h, meta.emailId, { status: errStatus, reason: String((e && e.message) || e), leadIds: errStatus === EMAIL_LEDGER_STATUS_.UNCONFIRMED ? (meta.leadIds || []) : [] });
     throw e;
   }
   const ids = emailLedgerSentIdsGs_(sent);

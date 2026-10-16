@@ -1272,11 +1272,15 @@ function runMovementTrackerTests_() {
             return '';
           })).concat(['h']);
         }
+        // Clock-relative (2026-10-16): L-NEW is assigned and first logged on the SAME IST day, 3 days back (logged at its IST noon). With fixed "3 / 3.2 days ago"
+        // offsets the assignment fell on the day BEFORE the earliest in-window row between 00:00 and ~04:48 IST, so that day was (correctly) not eligible.
+        const d3 = (cNow.getTime() - new Date(istDayKeyGs_(TestFixture_daysAgo_(cNow, 3)) + 'T12:00:00+05:30').getTime()) / 86400000; // 3.0 .. 3.5 days
         const cohortSs = TestMockSpreadsheet_({ 'Movement_Log': TestMockSheet_('Movement_Log', [mlHeader,
           cohortRow(20, 'L-OLD', 20.2),            // a quiet lead's newest row, kept by the prune (MT-01) though 20 days old
-          cohortRow(3, 'L-NEW', 3.2), cohortRow(2.5, 'L-NEW', 3.2, 'Opportunity')]) });
+          cohortRow(d3, 'L-NEW', d3 + 0.2), cohortRow(d3 - 0.5, 'L-NEW', d3 + 0.2, 'Opportunity')]) });
         const hist = _readMovementLogHistoryRowsGs_(cohortSs);
-        const dateKey = istDayKeyGs_(TestFixture_daysAgo_(cNow, 3.2));
+        const dateKey = istDayKeyGs_(TestFixture_daysAgo_(cNow, d3 + 0.2));
+        TestAssertEqual_(dateKey, istDayKeyGs_(TestFixture_daysAgo_(cNow, d3)), 'MT-01 cohort guard (set-up): L-NEW is assigned on the IST day of its first in-window row');
         TestAssertEqual_(JSON.stringify(computeDailyCohortByRegionGs_(dateKey, hist, {}, cNow, _groupHistoryByKeyGs_(hist))), JSON.stringify(computeDailyCohortByRegionGs_(dateKey, hist, {}, cNow)), 'MT-11: a prebuilt by-key grouping gives the identical cohort');
         persistDailyCohortHistoryGs_(cohortSs, [], {}, cNow);
         const dch = cohortSs.getSheetByName(DAILY_COHORT_HISTORY_SHEET_);

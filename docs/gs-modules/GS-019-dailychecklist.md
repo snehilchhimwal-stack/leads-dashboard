@@ -127,6 +127,8 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-15** (`7ef68d3`, audit 2026-10-13 DC-2, CR-3): stage J reads the report's new `checkFailed` count (accepted emails whose bounce status is `UNKNOWN (...)`) and is AMBER - "could not be checked: the bounce search failed (missing evidence, not a bounce)" - when nothing bounced but some could not be checked; before, such emails were reported as "not checked yet". **Not live until pasted.**
 
+**2026-10-16** (uncommitted; O1): `dailyChecklistAuditGs_` judges an audit result against the cycle window `[start, end)`, like `cycleReportInWindowGs_` (`GS-016`): a result at exactly the end belongs to the next cycle. `Tests_DailyChecklist.gs`. **Not live until pasted.**
+
 ## Revalidation trigger
 
 Any commit touching `DailyChecklist.gs` or `Tests_DailyChecklist.gs`; the report's data shape (`cycleReportDataGs_`); the audits' record shape (`OpsAudit.gs`).

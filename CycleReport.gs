@@ -48,8 +48,9 @@ function cycleReportWindowGs_(now) {
   return { start: new Date(lastBoundary.getTime() - dayMs), end: now, boundary: lastBoundary };
 }
 
+// [start, end): start inclusive, end EXCLUSIVE (2026-10-16, observation O1) - with both ends inclusive a row at exactly 16:30:00.000 counted in two consecutive reports.
 function cycleReportInWindowGs_(value, win) {
-  return value instanceof Date && value.getTime() >= win.start.getTime() && value.getTime() <= win.end.getTime();
+  return value instanceof Date && value.getTime() >= win.start.getTime() && value.getTime() < win.end.getTime();
 }
 
 // "6 of 7 (86%)" - the numerator and denominator are always shown.

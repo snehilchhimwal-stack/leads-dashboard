@@ -156,6 +156,8 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 
 **2026-10-15** (`7ef68d3`, audit 2026-10-13 CR-1, CR-2, CR-3, EL-6): a trigger that fires from 16:00 reports on today's cycle (CR-1, CFG-135), and the scheduled run's window stops at 16:30 so late-firing runs do not double-count the 17:00 job's rows (CR-2; RULE-080). The "Bounces and replies" section shows a failed bounce search as "Check failed" instead of "Not checked yet" (CR-3). After the send it runs the Email Ops tab retention (`GS-015` FN-481, RULE-079). **Not live until pasted.**
 
+**2026-10-16** (uncommitted; observation O1, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): `cycleReportInWindowGs_` is now `[start, end)` - start inclusive, end exclusive - so a row at exactly 16:30:00.000 is counted in one report (the next), not two. `Tests_EmailLifecycleMatrix.gs` M9. **Not live until pasted.**
+
 ## Revalidation trigger
 
 Any commit touching `CycleReport.gs` or `Tests_CycleReport.gs`; the evidence tabs' columns (`GS-015`); `emailJobScheduleGs_`.

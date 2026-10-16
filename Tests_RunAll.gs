@@ -8,7 +8,7 @@
  * runInteractionHistoryLoggerTestsNow, runOvernightEmailerTestsNow,
  * runAllIssuesEmailerTestsNow, runDailyRmIssueLogTestsNow,
  * runOpsChecklistRunnerTestsNow, runLeadFollowupsStalenessTestsNow,
- * runRmHierarchySyncTestsNow, runEmailLedgerTestsNow, runCycleReportTestsNow, runEmailSweepTestsNow, runEmailRerouteTestsNow, runOpsAuditTestsNow, runDailyChecklistTestsNow, runFollowupTrackerTestsNow, runStaleLeadsTestsNow, runEmailLifecycleFullCycleTestsNow) when you only want to check one
+ * runRmHierarchySyncTestsNow, runEmailLedgerTestsNow, runCycleReportTestsNow, runEmailSweepTestsNow, runEmailRerouteTestsNow, runOpsAuditTestsNow, runDailyChecklistTestsNow, runFollowupTrackerTestsNow, runStaleLeadsTestsNow, runEmailLifecycleFullCycleTestsNow, runEmailLifecycleMatrixTestsNow) when you only want to check one
  * concern after a change to just that file.
  *
  * NOTHING here sends a real email or touches your real spreadsheet — see
@@ -42,6 +42,7 @@ function runAllTests() {
     runFollowupTrackerTests_,
     runStaleLeadsTests_,
     runEmailLifecycleFullCycleTests_,
+    runEmailLifecycleMatrixTests_,
   ];
 
   Logger.log('=========================================');

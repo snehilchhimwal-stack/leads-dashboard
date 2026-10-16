@@ -105,13 +105,15 @@ function emailSweepIsCandidateGs_(row, now) {
 }
 
 // The bounce (from `bounces` = [{ at: Date, subject, body }]) that belongs to this ledger row, or null. Needs a recipient of the email in the
-// bounce text AND (the email's subject quoted in it, or the bounce arriving within 15 minutes of the send).
+// bounce text AND (the email's subject quoted in it, or the bounce arriving within 15 minutes of the send). When several match, the EARLIEST
+// (2026-10-16, O2: it used to be the first in Gmail's search order, so the recorded time could change from one sweep to the next).
 function emailSweepMatchBounceGs_(row, bounces, extraRecipients) {
   const finished = row.finished_at instanceof Date ? row.finished_at.getTime() : NaN;
   if (isNaN(finished)) return null;
   // extraRecipients: the addresses the email REALLY went to when a re-route redirected it (EmailReroute.gs) - a bounce names those, not the planned ones.
   const recipients = emailSweepAddressesGs_(row.to).concat(emailSweepAddressesGs_(row.cc)).concat(extraRecipients || []);
-  const subj = String(row.subject || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 50);
+  const subj = emailSweepRowSubjectGs_(row);
+  let best = null;
   for (let i = 0; i < bounces.length; i++) {
     const b = bounces[i];
     const at = b.at instanceof Date ? b.at.getTime() : NaN;
@@ -119,9 +121,26 @@ function emailSweepMatchBounceGs_(row, bounces, extraRecipients) {
     const text = (String(b.subject || '') + '\n' + String(b.body || '')).toLowerCase().replace(/\s+/g, ' ');
     const failed = emailSweepBounceFailedAddressesGs_(text);
     if (!recipients.some(function (a) { return emailSweepBounceNamesGs_(text, failed, a); })) continue;
-    if ((subj && text.indexOf(subj) !== -1) || at - finished <= EMAIL_SWEEP_QUICK_BOUNCE_MS_) return b;
+    if (((subj && emailSweepQuotesSubjectGs_(text, subj)) || at - finished <= EMAIL_SWEEP_QUICK_BOUNCE_MS_) && (!best || at < best.at.getTime())) best = b;
   }
-  return null;
+  return best;
+}
+
+// The subject a bounce of this row's email quotes (lower case, whitespace collapsed, first 50 characters). The 13:00 row stores the 10:00
+// subject it replies to (OvernightEmailer.gs), but the reply went out as "Re: <that subject>" - that is what its bounce quotes.
+function emailSweepRowSubjectGs_(row) {
+  let s = String(row.subject || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (s && row.job === EMAIL_LEDGER_JOB_FOLLOWUP_ && s.indexOf('re: ') !== 0) s = 're: ' + s;
+  return s.slice(0, 50);
+}
+
+// Does the (normalised) bounce text quote `subj`? D3 guard (2026-10-16, once D4 gave the 10:00 rows a subject): an occurrence preceded by
+// "re: " is the bounce of a REPLY in the same thread (the 13:00 follow-up), not of this email - unless this row's own subject is the "re: " one.
+function emailSweepQuotesSubjectGs_(text, subj) {
+  for (let k = text.indexOf(subj); k !== -1; k = text.indexOf(subj, k + 1)) {
+    if (text.slice(Math.max(0, k - 4), k) !== 're: ') return true;
+  }
+  return false;
 }
 
 function emailSweepIsOwnGs_(from, ownAddress) {
@@ -245,6 +264,9 @@ function sweepEmailBouncesAndReplies_(opts) {
     summary.checked++;
     const bounce = emailSweepMatchBounceGs_(r, bounces, typeof emailRerouteEffectiveAddressesGs_ === 'function' ? emailRerouteEffectiveAddressesGs_(r, rerouteEntries) : []);
     let bounceStatus = bounce ? 'BOUNCED ' + emailSweepStampGs_(bounce.at) : (state.bounceSearchFailed ? 'UNKNOWN (the bounce search failed)' : 'NO_BOUNCE_SEEN');
+    // O2 (2026-10-16): an already-recorded EARLIER bounce time is never replaced by a later one (e.g. the first notice has dropped out of the search).
+    const recorded = /^BOUNCED (\d{4}-\d{2}-\d{2} \d{2}:\d{2})/.exec(String(r.bounce_status || ''));
+    if (bounce && recorded && recorded[1] < bounceStatus.slice(8)) bounceStatus = String(r.bounce_status);
     // ES-1 / ES-4 (audit 2026-10-13): a failed or capped search is no evidence that a recorded bounce went away - overwriting it hid the bounce from the report,
     // checklist J and the tracker. It is kept (and still counted); its re-route is retried by the next check that reads the bounce message again.
     if (!bounce && /^BOUNCED/.test(String(r.bounce_status || '')) && (state.bounceSearchFailed || state.bounceSearchCapped)) {

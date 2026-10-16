@@ -427,7 +427,7 @@ function sendAllIssuesEmails_(opts) {
     emailLedgerPlanGs_(ledger, bucketsToSend.filter(function (b) { return b.leads.length; }).map(function (b) {
       return {
         emailId: b.emailId, job: ledgerJob, dayKey: todayKey, region: region, bucketLabel: b.rec.bucketLabel, primaryRole: b.rec.primaryRole,
-        to: b.rec.to, cc: b.rec.cc, leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
+        to: b.rec.to, cc: b.rec.cc, subject: allIssuesSubjectGs_(region, b.rec, b.leads, win), leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
       };
     }));
 
@@ -586,6 +586,15 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
   });
 }
 
+// The 17:00 bucket email's subject - one definition, shared with the Email_Ledger plan (D4, 2026-10-16: the plan recorded no subject, so
+// EmailSweep.gs could not attribute a bounce arriving more than 15 minutes after the send).
+// A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
+// AI-6 (audit 2026-10-13): a bucket with no role (the Unmatched-RMs fallbacks) read "Unmatched RMs () google ..." - the empty brackets are omitted.
+function allIssuesSubjectGs_(region, rec, leads, win) {
+  const subjectRole = region === FUTWORK_REGION_KEY_ ? regionHeaderOptsGs_(region, leads).region : rec.primaryRole;
+  return rec.bucketLabel + (subjectRole ? ' (' + subjectRole + ')' : '') + ' google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
+}
+
 // Builds and sends ONE all-issues email for a single resolved bucket
 // (one A1/TM/RH, or the legacy Region_Recipients catch-all). Subject:
 // "<bucketLabel> (<primaryRole>) google Leads With Issue (<from> to <to>)"
@@ -615,10 +624,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const issueTypeCount = Array.from(new Set(leads.map(function (l) { return l.issueLabel; }))).length;
 
   const headerOpts = regionHeaderOptsGs_(region, leads);
-  // A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
-  // AI-6 (audit 2026-10-13): a bucket with no role (the Unmatched-RMs fallbacks) read "Unmatched RMs () google ..." - the empty brackets are omitted.
-  const subjectRole = region === FUTWORK_REGION_KEY_ ? headerOpts.region : rec.primaryRole;
-  const subject = rec.bucketLabel + (subjectRole ? ' (' + subjectRole + ')' : '') + ' google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
+  const subject = allIssuesSubjectGs_(region, rec, leads, win);
   const bucketNote = ' (' + (rec.primaryRole ? rec.primaryRole + '/' : '') + rec.bucketLabel + ')';
 
   const testModeBanner = rec.originalTo ? {
@@ -732,7 +738,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     } catch (alertErr) {
       Logger.log('notifyOpsAlertGs_ itself failed: ' + alertErr);
     }
-    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: emailLedgerStatusForErrorGs_(e), reason: failureReason, leadIds: [] });
+    const errStatus = emailLedgerStatusForErrorGs_(e);
+    // 2026-10-16 (O3): an UNCONFIRMED email may have been delivered - its row keeps the leads it carried (FAILED/BLOCKED rows still record none).
+    emailLedgerResultGs_(ctx.ledger, ctx.emailId, { status: errStatus, reason: failureReason, leadIds: errStatus === EMAIL_LEDGER_STATUS_.UNCONFIRMED ? leads.map(function (l) { return String(l.lead_id); }) : [] });
     return { reason: failureReason };
   }
 
