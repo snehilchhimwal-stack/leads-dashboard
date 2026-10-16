@@ -91,12 +91,12 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `AllIssuesEmailer.gs` | `a21a10c` | 2026-10-16 | verified by checksum in editor 2026-10-16 (~18:00 IST): 17:00 consolidation (Rajesh Muni / Manisha rathod) pasted, runAllTests 4035/0 across 24 test files; recorded by hand, not by `match-live-gs.py --apply` |
 | `Core.gs` | `a7d9e12` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `CycleReport.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `DailyChecklist.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `DailyRmIssueLog.gs` | `450565a` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `EmailInfra.gs` | `09eb9ca` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `EmailInfra.gs` | `a21a10c` | 2026-10-16 | verified by checksum in editor 2026-10-16 (~18:00 IST): 17:00 consolidation (Rajesh Muni / Manisha rathod) pasted, runAllTests 4035/0 across 24 test files; recorded by hand, not by `match-live-gs.py --apply` |
 | `EmailLedger.gs` | `da197cd` | 2026-10-16 | verified by checksum in editor 2026-10-16 (~17:24 IST): D5/D6 fix pasted, runAllTests 3999/0 across 24 test files; recorded by hand, not by `match-live-gs.py --apply` |
 | `EmailReroute.gs` | `7ef68d3` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `EmailSweep.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
@@ -107,7 +107,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `MovementTracker.gs` | `bf4b3c7` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `OpsAudit.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `OpsChecklistRunner.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `OvernightEmailer.gs` | `da197cd` | 2026-10-16 | verified by checksum in editor 2026-10-16 (~17:24 IST): D5/D6 fix pasted, runAllTests 3999/0 across 24 test files; recorded by hand, not by `match-live-gs.py --apply` |
+| `OvernightEmailer.gs` | `a21a10c` | 2026-10-16 | verified by checksum in editor 2026-10-16 (~18:00 IST): 17:00 consolidation (Rajesh Muni / Manisha rathod) pasted, runAllTests 4035/0 across 24 test files; recorded by hand, not by `match-live-gs.py --apply` |
 | `RmHierarchy.gs` | `a3a33a0` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `RmHierarchySync.gs` | `3dc9852` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 | `SlaEngine.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
@@ -342,3 +342,4 @@ H. Raw control characters in .gs sources and .md docs: 0
 ```
 
 <!-- AUTO:END -->
+- 2026-10-16 - **deploy register: a21a10c live (recorded by hand).** 17:00 All-Issues consolidation for Rajesh Muni / Manisha rathod (one email per person, Cc Snehil only) pasted ~18:00 IST and verified by checksum in the editor; `runAllTests` 4035/0 across 24 test files. Today's 17:00 run (before the paste) used the old per-region emails; the first consolidated run is 2026-10-17 17:00.
