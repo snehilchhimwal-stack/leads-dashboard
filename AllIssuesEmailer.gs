@@ -599,7 +599,9 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
     // "City Lead", "Commercial Head", or "Leadership" for someone with no
     // RM_Hierarchy row at all), not a generic "CH" label — matches the
     // same "Name (real role)" shape the normal-bucket subject uses.
-    const subject = chName + ' (' + (entry.chRole || 'CH') + ') google Leads With Issue ' + dateRangeLabel;
+    // 2026-10-17: no role at all when the report goes to a no-role address (chLevelReportRoleGs_, EmailInfra.gs).
+    const shownChRole = chLevelReportRoleGs_(entry.chRole || 'CH');
+    const subject = chName + (shownChRole ? ' (' + shownChRole + ')' : '') + ' google Leads With Issue ' + dateRangeLabel;
 
     const split = splitSelfAndReportingRmNames_(chName, entry.rmNames);
     const selfRmNames = split.selfRmNames;

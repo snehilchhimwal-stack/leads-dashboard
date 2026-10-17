@@ -455,6 +455,53 @@ function runAllIssuesEmailerTests_() {
       TestAssertContains_(TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1].htmlBody, 'L-CHI', 'notifyChLevelIssuesGs_: the lead is in the HTML body');
     }
 
+    // ---- 2026-10-17: no role label in the CH-level reports (10:00 + 17:00) that go to a CH_REPORT_NO_ROLE_EMAILS_ address ----
+    {
+      const tag = 'CH-level no-role recipient: ';
+      TestAssertEqual_(JSON.stringify(TestEnv_realGlobals_.CH_REPORT_NO_ROLE_EMAILS_), JSON.stringify([TEST_EMAIL_PRIMARY_]), tag + 'production list is exactly the one address');
+      const chRms = [{ rmName: 'Test City Lead', chName: 'Test City Lead', chEmail: TEST_EMAIL_CH_, chRole: 'City Lead' }];
+      const issues = function (id) { return { 'Test City Lead': [{ lead_id: id, RM: 'Test City Lead', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'call' }] }; };
+      const night = function (id) { return { 'Test City Lead': [{ lead_id: id, RM: 'Test City Lead', TL: '', status: 'Suspect', followup: 'call' }] }; };
+      const noRole = function (t) { return String(t || '').replace(/Test City Lead/g, '').indexOf('City Lead') === -1; };
+      const both = function (n) {
+        PropertiesService = TestMockPropertiesService_();
+        const d0 = TestGmailLog_.drafts.length;
+        notifyChLevelIssuesGs_('Pune', chRms, issues('L-NR-I' + n), win);
+        notifyChLevelLeadsGs_('Pune', chRms, night('L-NR-O' + n), 'test date');
+        return TestGmailLog_.drafts.slice(d0);
+      };
+      const savedNoRole = CH_REPORT_NO_ROLE_EMAILS_;
+      try {
+        CH_REPORT_NO_ROLE_EMAILS_ = [' ' + TEST_EMAIL_PRIMARY_.toUpperCase() + ' ']; // the ops address (To) - case/space-insensitive
+        const a = both(1);
+        TestAssertEqual_(a.length, 2, tag + 'both reports sent');
+        TestAssertEqual_(a[0].subject.indexOf('Test City Lead google Leads With Issue'), 0, tag + '17:00 subject: name, no "(City Lead)"');
+        TestAssertContains_(a[1].subject, '(Test City Lead) Pune Google Overnight Leads', tag + '10:00 subject: name, no " - City Lead"');
+        TestAssert_(a.every(function (d) { return [d.subject, d.htmlBody, d.body].every(noRole); }), tag + 'no role label in subject, HTML or plain body of either report');
+
+        CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_SECONDARY_]; // not a recipient -> unchanged
+        const b = both(2);
+        TestAssertContains_(b[0].subject, 'Test City Lead (City Lead) google Leads With Issue', tag + 'other recipient: 17:00 role unchanged');
+        TestAssertContains_(b[1].subject, '(Test City Lead - City Lead) Pune', tag + 'other recipient: 10:00 role unchanged');
+
+        // TEST MODE: the REAL recipient decides, not the override address.
+        TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_SECONDARY_;
+        CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_PRIMARY_];
+        const c = both(3);
+        TestAssert_(c.length === 2 && c.every(function (d) { return d.to === TEST_EMAIL_SECONDARY_ && noRole(d.subject); }), tag + 'TEST MODE: sent to the override, role hidden because the real recipient matches');
+        CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_SECONDARY_];
+        const d = both(4);
+        TestAssert_(d.length === 2 && d.every(function (x) { return !noRole(x.subject); }), tag + 'TEST MODE: the override address itself does not hide the role');
+        TEST_MODE_OVERRIDE_EMAIL_ = '';
+        CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_CH_]; // the CH-level address (second To) also matches
+        TestAssertEqual_(chLevelReportRoleGs_('City Lead') + '|' + (CH_REPORT_NO_ROLE_EMAILS_ = [], chLevelReportRoleGs_('City Lead')), '|City Lead', tag + 'chLevelReportRoleGs_: any real To matches; empty list keeps the role');
+      } finally {
+        CH_REPORT_NO_ROLE_EMAILS_ = savedNoRole;
+        TEST_MODE_OVERRIDE_EMAIL_ = '';
+        PropertiesService = TestMockPropertiesService_();
+      }
+    }
+
     // ---- email audit P10 (F11): the CH-level issues report goes once a day per region + CH ----
     {
       const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];

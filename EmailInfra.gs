@@ -273,8 +273,23 @@ function jsonForCellGs_(entries, label) {
 // CH-level reports go to OPS + CH, or only the tester in TEST MODE (both sends used to ignore TEST MODE).
 function chLevelReportToGs_() {
   if (TEST_MODE_OVERRIDE_EMAIL_) return TEST_MODE_OVERRIDE_EMAIL_;
+  return chLevelReportRealToGs_();
+}
+// The real (pre-TEST-MODE-override) recipients of a CH-level report.
+function chLevelReportRealToGs_() {
   const ops = opsAlertEmailGs_(), ch = chLevelEmailGs_();
   return (ch && ch !== ops) ? ops + ',' + ch : ops; // chLevelEmailGs_ falls back to the ops address: never "a,a"
+}
+
+// 2026-10-17: the CH-level reports (10:00 notifyChLevelLeadsGs_, 17:00 notifyChLevelIssuesGs_) show NO role label (e.g.
+// "City Lead") when they go to one of these addresses - matched case-insensitively against the REAL recipients (in TEST MODE,
+// the address the report would have gone to before the override). Display only: the ledger id/primaryRole keep the role, and
+// every other recipient's CH-level report is unchanged. `let`: test override (Tests_Mocks.gs empties it; tests set their own).
+let CH_REPORT_NO_ROLE_EMAILS_ = ['snehil.chhimwal@gmail.com'];
+function chLevelReportRoleGs_(role) {
+  const no = (CH_REPORT_NO_ROLE_EMAILS_ || []).map(function (a) { return String(a || '').trim().toLowerCase(); }).filter(String);
+  const to = String(chLevelReportRealToGs_() || '').split(/[,;]/).map(function (a) { return a.replace(/.*</, '').replace(/>.*/, '').trim().toLowerCase(); });
+  return to.some(function (a) { return a && no.indexOf(a) !== -1; }) ? '' : String(role || '');
 }
 
 // CH-level reports once per day (email audit P10 / F11). A CH-level report (a CH personally holding leads, or an RM whose chain

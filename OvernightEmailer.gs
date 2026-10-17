@@ -143,7 +143,8 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger)
     // convention sendOneOvernightEmail_'s own normal-bucket subject
     // already uses for a non-A1 primary, just applied here too; this
     // subject previously showed no role indicator at all.
-    const roleQualifier = entry.chRole ? ' - ' + entry.chRole : '';
+    const shownChRole = chLevelReportRoleGs_(entry.chRole); // 2026-10-17: '' when the report goes to a no-role address (EmailInfra.gs)
+    const roleQualifier = shownChRole ? ' - ' + shownChRole : '';
     const subject = '(' + chName + roleQualifier + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
 
     // Two genuinely different situations can both land a name in
