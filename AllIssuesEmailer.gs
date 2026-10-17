@@ -85,7 +85,12 @@ const ALL_ISSUES_LATE_CUTOFF_MINUTE_ = 30;
 // per-region Cc lists (leadership, P&L head, EXTRA_CC_FOR_RM_) are carried over (user decision, 2026-10-16).
 // The 10:00 job (OvernightEmailer.gs) uses the same list and key: ONE 10:00 email (Section 1 overnight leads of every region, then
 // Checkpoint 1) and ONE 13:00 reply in that thread, Cc ONLY this address.
-const ALL_ISSUES_CONSOLIDATED_RECIPIENTS_ = ['rajesh muni', 'manisha rathod'];
+// 2026-10-17 (user request): Snehil Chhimwal is consolidated the same way. His buckets are the leads whose chain resolves to him
+// (e.g. Rajesh/Manisha personally holding a lead - their rh is Snehil); Rajesh's/Manisha's own S1s stay in THEIR buckets (every
+// RM lands in exactly one bucket, its primary's), so nothing is absorbed or sent twice. His Cc would be himself, so it is dropped
+// (consolidatedAllIssuesRecGs_): To = him, no Cc. No role label (his RM_Hierarchy row says "City Lead") is shown in any
+// consolidated person's email (emailRoleLabelGs_); RM_Hierarchy is unchanged, so routing is unchanged.
+const ALL_ISSUES_CONSOLIDATED_RECIPIENTS_ = ['rajesh muni', 'manisha rathod', 'snehil chhimwal'];
 const ALL_ISSUES_CONSOLIDATED_CC_NAME_ = 'Snehil Chhimwal';
 // Test override, same convention as OPS_ALERT_EMAIL_ (EmailInfra.gs): blank = look the name up. Nothing in production assigns it.
 let ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = '';
@@ -99,6 +104,12 @@ function allIssuesConsolidatedCcGs_() {
 function isAllIssuesConsolidatedRecipientGs_(bucketLabel) {
   const k = String(bucketLabel || '').trim().toLowerCase();
   return !!k && ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.some(function (n) { return String(n).trim().toLowerCase() === k; });
+}
+
+// The role shown in an email for a bucket: none for a consolidated person (2026-10-17: "City Lead" must never appear in Snehil's
+// emails; Rajesh/Manisha likewise), otherwise the bucket's recorded role. Display only - the ledger id and AllIssues_Log keep the role.
+function emailRoleLabelGs_(bucketLabel, primaryRole) {
+  return isAllIssuesConsolidatedRecipientGs_(bucketLabel) ? '' : String(primaryRole || '');
 }
 
 // One recipient record for a consolidated person, from their per-region buckets (sorted region order). To = the first region's
@@ -118,11 +129,13 @@ function consolidatedAllIssuesRecGs_(parts) {
       addCc(realTo(p.rec));
     }
   });
-  addCc(allIssuesConsolidatedCcGs_());
+  // The configured Cc is never added to that person's own email (Snehil Chhimwal IS the configured Cc) - by name, so a second
+  // address on file for him cannot sneak back in as a Cc; by address it is already dropped (taken[to]).
+  if (String(first.bucketLabel || '').trim().toLowerCase() !== String(ALL_ISSUES_CONSOLIDATED_CC_NAME_).trim().toLowerCase()) addCc(allIssuesConsolidatedCcGs_());
   const cc = ccList.join(',') || undefined;
   const rmNames = [];
   parts.forEach(function (p) { p.rec.rmNames.forEach(function (n) { if (rmNames.indexOf(n) === -1) rmNames.push(n); }); });
-  const source = 'Consolidated across regions (' + parts.map(function (p) { return p.region; }).join(', ') + '; Cc ' + ALL_ISSUES_CONSOLIDATED_CC_NAME_ + ' only): ' +
+  const source = 'Consolidated across regions (' + parts.map(function (p) { return p.region; }).join(', ') + '; ' + (cc ? 'Cc ' + cc : 'no Cc') + '): ' +
     parts.map(function (p) { return p.region + ' = ' + p.rec.source; }).join(' + ');
   const rec = { to: to, cc: cc, rmNames: rmNames, source: source, bucketLabel: first.bucketLabel, primaryRole: first.primaryRole };
   if (TEST_MODE_OVERRIDE_EMAIL_) return Object.assign(rec, { to: TEST_MODE_OVERRIDE_EMAIL_, cc: undefined, originalTo: to, originalCc: cc });
@@ -682,7 +695,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
 // A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
 // AI-6 (audit 2026-10-13): a bucket with no role (the Unmatched-RMs fallbacks) read "Unmatched RMs () google ..." - the empty brackets are omitted.
 function allIssuesSubjectGs_(region, rec, leads, win) {
-  const subjectRole = isMultiRegionKeyGs_(region) ? regionHeaderOptsGs_(region, leads).region : rec.primaryRole;
+  const subjectRole = isMultiRegionKeyGs_(region) ? regionHeaderOptsGs_(region, leads).region : emailRoleLabelGs_(rec.bucketLabel, rec.primaryRole);
   return rec.bucketLabel + (subjectRole ? ' (' + subjectRole + ')' : '') + ' google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
 }
 
@@ -717,6 +730,10 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const headerOpts = regionHeaderOptsGs_(region, leads);
   const subject = allIssuesSubjectGs_(region, rec, leads, win);
   const bucketNote = ' (' + (rec.primaryRole ? rec.primaryRole + '/' : '') + rec.bucketLabel + ')';
+  // What the plain-text part shows (2026-10-17): a consolidated person's real regions (never the pseudo-region key) and no role.
+  const shownRole = emailRoleLabelGs_(rec.bucketLabel, rec.primaryRole);
+  const plainNote = ' (' + (shownRole ? shownRole + '/' : '') + rec.bucketLabel + ')';
+  const plainRegion = String(region || '').indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === 0 ? headerOpts.region : region;
 
   const testModeBanner = rec.originalTo ? {
     html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
@@ -757,7 +774,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   applyStaleSplitGs_(reportOpts, staleSinceMapGs_(leads)); // stale leads (no update for more than 24 h) are held at the bottom, and the headline count says so
   const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(reportOpts);
   // Plain-text part = a one-line count summary + the full lead list, rendered from the same opts as the HTML (email audit P2).
-  const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + region + bucketNote + ' (' + dateLabel + '): ' + leads.length +
+  const plainBody = (testModeBanner ? testModeBanner.plain : '') + 'Leads with issue for ' + plainRegion + plainNote + ' (' + dateLabel + '): ' + leads.length +
     ' across ' + rmKeys.length + ' RM(s).\n\n' + plainTextReportGs_(reportOpts);
 
   Logger.log('All-issues email recipients for ' + region + bucketNote + ': ' + rec.source);

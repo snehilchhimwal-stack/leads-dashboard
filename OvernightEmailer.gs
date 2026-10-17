@@ -443,7 +443,8 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   });
   const rmKeys = Object.keys(byRM).sort();
 
-  const tierQualifier = (rec.primaryRole && rec.primaryRole !== 'A1') ? ' - ' + rec.primaryRole : '';
+  const shownRole = emailRoleLabelGs_(rec.bucketLabel, rec.primaryRole); // 2026-10-17: no role for a consolidated person
+  const tierQualifier = (shownRole && shownRole !== 'A1') ? ' - ' + shownRole : '';
   const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + tierQualifier + ') ' : '';
   // "Google" names the scope explicitly (every lead in this email passed
   // the group_source==="google" gate in sendOvernightMorningEmails, per
@@ -732,7 +733,8 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now, allIssuesLogSheet) {
 // The 10:00 combined email's subject — one definition, shared with backfillTodaysOvernightLogRecipientsNow (OE-08, audit
 // 2026-10-13: the backfill had kept the pre-2026-09-23 "Google Overnight Leads" format, so its rows named a subject no email had).
 function combinedMorningSubjectGs_(bucketLabel, primaryRole, regionDisplay, dateLabel) {
-  const tierQualifier = (primaryRole && primaryRole !== 'A1') ? ' - ' + primaryRole : '';
+  const shownRole = emailRoleLabelGs_(bucketLabel, primaryRole); // 2026-10-17: no role for a consolidated person (AllIssuesEmailer.gs)
+  const tierQualifier = (shownRole && shownRole !== 'A1') ? ' - ' + shownRole : '';
   const subjectPrefix = bucketLabel ? '(' + bucketLabel + tierQualifier + ') ' : '';
   return (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + subjectPrefix + regionDisplay + ' Google Overnight + Follow-up Digest - ' + dateLabel;
 }
@@ -799,7 +801,8 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
     section2Opts = buildAllIssuesCheckpointEmptyStateOptsGs_(region, checkpointTitle, "Nothing pending from yesterday's 17:00 report.");
   }
 
-  const tierQualifier = (primaryRole && primaryRole !== 'A1') ? ' - ' + primaryRole : '';
+  const shownRole = emailRoleLabelGs_(bucketLabel, primaryRole); // 2026-10-17: no role for a consolidated person (plain body too)
+  const tierQualifier = (shownRole && shownRole !== 'A1') ? ' - ' + shownRole : '';
   // The Futwork email spans several regions — spell them all out (real region names) instead of the pseudo-region key,
   // in the subject and on any empty-state section header.
   const combinedHeaderOpts = regionHeaderOptsGs_(region, section1Leads.concat(section2 ? section2.snapshotEntries : []));

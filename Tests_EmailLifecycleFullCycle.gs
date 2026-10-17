@@ -399,6 +399,120 @@ function runEmailLifecycleFullCycleTests_() {
     }
 
     {
+      // ==== 2026-10-17: Snehil Chhimwal consolidated too. 'Test City Lead' stands in for him: a "City Lead" row with a blank chain,
+      // the rh of 'Test Lead A' (an A1, i.e. Rajesh/Manisha) whose own S1 reports to Test Lead A. Test Lead A personally holding
+      // leads -> Test City Lead's bucket; the S1's leads -> Test Lead A's bucket. Both consolidated; the configured Cc IS Test City
+      // Lead's address. Expect: ONE email per job each, Test City Lead with NO Cc and no role label anywhere, Test Lead A Cc'd to
+      // him, no lead in both, nobody else affected. ====
+      ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.push('test lead a', 'test city lead');
+      ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = TEST_EMAIL_SECONDARY_;
+      const rowsS = TestFixture_rmHierarchyRows_().concat([
+        ['Pre Sales', 'City Lead', 'Test City Lead', '', '', '', '', false, '', ''],
+        ['Pre Sales', 'A1', 'Test Lead A', '', '', 'Test City Lead', '', false, '', ''],
+        ['Pre Sales', 'S1', 'Test S1 A', 'Test Lead A', '', 'Test City Lead', '', false, '', ''],
+      ]);
+      const ssS = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', rowsS),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+      });
+      ssS.getSheetByName('Manager_Directory').appendRow(['Test City Lead', 'City Lead', 'Pune', TEST_EMAIL_SECONDARY_, 3, 'manual']);
+      ssS.getSheetByName('Manager_Directory').appendRow(['Test Lead A', 'TL', 'Pune', TEST_EMAIL_PRIMARY_, 1, 'manual']);
+      const overdueRowS = function (id, rm, region) {
+        return TestEFC_leadRow_(header, {
+          lead_id: id, client_id: 'C-' + id, RM: rm, region: region, current_stage: 'Suspect',
+          lead_assigned_at: TestFixture_hoursAgo_(now, 40),
+          last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 10),
+          internal_status_comments: rm + ': Ringing - ' + Utilities.formatDate(TestFixture_hoursAgo_(now, 10), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'),
+        });
+      };
+      ssS._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        overdueRowS('L-CL-PUNE', 'Test Lead A', 'Pune'), // held by the A1 herself -> the City Lead's bucket
+        overdueRowS('L-CL-THANE', 'Test Lead A', 'Thane'),
+        overdueRowS('L-A-PUNE', 'Test S1 A', 'Pune'), // the A1's S1 -> the A1's bucket
+        overdueRowS('L-A-WEST', 'Test S1 A', 'Western'),
+        overdueRowS('L-OTHER-C', 'Test RM Three', 'Central'), // Test TM One - not consolidated
+      ]);
+      const clIds = ['L-CL-PUNE', 'L-CL-THANE'], aIds = ['L-A-PUNE', 'L-A-WEST'];
+      const has = function (ids, text) { return ids.some(function (id) { return String(text || '').indexOf(id) !== -1; }); };
+      const hasAll = function (ids, text) { return ids.every(function (id) { return String(text || '').indexOf(id) !== -1; }); };
+      const noRole = function (t) { return String(t || '').replace(/Test City Lead/g, '').indexOf('City Lead') === -1; };
+      const realSsS = SpreadsheetApp;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return ssS; }, flush: function () {} };
+      try {
+        const tag = 'Consolidated City Lead (Snehil): ';
+        // ==== 17:00 ====
+        const d0 = TestGmailLog_.drafts.length;
+        sendAllIssuesEmails();
+        const new17 = TestGmailLog_.drafts.slice(d0);
+        const cl17 = new17.filter(function (d) { return has(clIds, d.htmlBody); });
+        const a17 = new17.filter(function (d) { return has(aIds, d.htmlBody); });
+        TestAssertEqual_(cl17.length + ',' + a17.length, '1,1', tag + '17:00 ONE email for him and ONE for the A1, not one per region');
+        TestAssert_(hasAll(clIds, cl17[0].htmlBody) && !has(aIds, cl17[0].htmlBody), tag + '17:00 his email has exactly his leads (the A1\'s S1 leads are not absorbed)');
+        TestAssert_(hasAll(aIds, a17[0].htmlBody) && !has(clIds, a17[0].htmlBody), tag + '17:00 the A1\'s email has exactly hers (nothing sent twice)');
+        TestAssertEqual_(cl17[0].to + '|' + cl17[0].cc, TEST_EMAIL_SECONDARY_ + '|', tag + '17:00 To = him, NO Cc (the configured Cc is himself - dropped, not duplicated)');
+        TestAssertEqual_(a17[0].to + '|' + a17[0].cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, tag + '17:00 the A1 is still Cc\'d to him');
+        TestAssertContains_(cl17[0].subject, 'Test City Lead (Pune, Thane) google Leads With Issue', tag + '17:00 his subject shows the regions');
+        TestAssert_([cl17[0].subject, cl17[0].htmlBody, cl17[0].body].every(noRole), tag + '17:00 no role label ("City Lead") in subject, HTML or plain body');
+        TestAssert_(String(cl17[0].body).indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === -1, tag + '17:00 the plain body shows real regions, not the pseudo-region key');
+        TestAssertEqual_(new17.filter(function (d) { return d.htmlBody.indexOf('L-OTHER-C') !== -1; }).length, 1, tag + '17:00 the other recipient is unaffected');
+        const logS = ssS.getSheetByName('AllIssues_Log');
+        const rows17 = logS.getRange(2, 1, logS.getLastRow() - 1, 14).getValues();
+        TestAssertEqual_(rows17.length, 3, tag + '17:00 three AllIssues_Log rows (him, the A1, the other recipient)');
+
+        // ==== next day 10:00 ====
+        logS.getRange(2, 1, logS.getLastRow() - 1, 1).setValues(rows17.map(function () { return [TestFixture_daysAgo_(now, 1)]; }));
+        const winN = overnightWindowGs_(new Date());
+        const midNight = new Date((winN.from.getTime() + winN.to.getTime()) / 2);
+        const nightRowS = function (id, rm, region) {
+          return TestEFC_leadRow_(header, { lead_id: id, client_id: 'C-' + id, RM: rm, region: region, current_stage: 'Not Updated', lead_assigned_at: midNight });
+        };
+        const leadsS = ssS.getSheetByName(monthShort);
+        leadsS.appendRow(nightRowS('L-NCL-PUNE', 'Test Lead A', 'Pune'));
+        leadsS.appendRow(nightRowS('L-NCL-WEST', 'Test Lead A', 'Western'));
+        leadsS.appendRow(nightRowS('L-NA-THANE', 'Test S1 A', 'Thane'));
+        const clAll = clIds.concat(['L-NCL-PUNE', 'L-NCL-WEST']), aAll = aIds.concat(['L-NA-THANE']);
+        const d1 = TestGmailLog_.drafts.length;
+        sendOvernightMorningEmails();
+        const new10 = TestGmailLog_.drafts.slice(d1);
+        const cl10 = new10.filter(function (d) { return has(clAll, d.htmlBody); });
+        const a10 = new10.filter(function (d) { return has(aAll, d.htmlBody); });
+        TestAssertEqual_(cl10.length + ',' + a10.length, '1,1', tag + '10:00 ONE email for him and ONE for the A1');
+        TestAssert_(hasAll(clAll, cl10[0].htmlBody) && !has(aAll, cl10[0].htmlBody), tag + '10:00 his email: his overnight leads (two regions) + his Checkpoint 1, none of the A1\'s');
+        TestAssert_(hasAll(aAll, a10[0].htmlBody) && !has(clAll, a10[0].htmlBody), tag + '10:00 the A1\'s email: only hers');
+        TestAssertEqual_(cl10[0].to + '|' + cl10[0].cc, TEST_EMAIL_SECONDARY_ + '|', tag + '10:00 To = him, NO Cc');
+        TestAssertEqual_(a10[0].to + '|' + a10[0].cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, tag + '10:00 the A1 is still Cc\'d to him');
+        TestAssert_([cl10[0].subject, cl10[0].htmlBody, cl10[0].body].every(noRole), tag + '10:00 no role label ("City Lead") in subject, HTML or plain body');
+        TestAssertContains_(cl10[0].subject, '(Test City Lead) Pune, Thane, Western Google Overnight + Follow-up Digest', tag + '10:00 subject: name + real regions, no role');
+
+        // ==== 13:00 ====
+        ssS._sheets['Lead_Followups'] = TestMockSheet_('Lead_Followups', [['lead_id', 'region', 'RM', 'issue', 'collated_comments', 'suggested_followup', 'updated_at', 'own_comments']]);
+        const r1 = TestGmailLog_.threadReplies.length;
+        sendOvernightFollowupEmails();
+        const newR = TestGmailLog_.threadReplies.slice(r1).map(function (r) { return { threadId: r.threadId, raw: TestOE_decodeRawMime_(r.raw) }; });
+        const cl13 = newR.filter(function (r) { return has(clAll, r.raw); });
+        TestAssertEqual_(cl13.length + ',' + newR.filter(function (r) { return has(aAll, r.raw); }).length, '1,1', tag + '13:00 ONE reply for him and ONE for the A1');
+        TestAssertEqual_(cl13[0].threadId, cl10[0]._threadId, tag + '13:00 his reply is in his 10:00 thread');
+        TestAssert_(!has(aAll, cl13[0].raw), tag + '13:00 none of the A1\'s leads in his reply');
+        const ccLine = /^Cc: (.*)$/m.exec(cl13[0].raw);
+        TestAssert_(/^To: (.*)$/m.exec(cl13[0].raw)[1].trim() === TEST_EMAIL_SECONDARY_ && (!ccLine || !ccLine[1].trim()), tag + '13:00 To = him, NO Cc');
+        TestAssert_(noRole(cl13[0].raw), tag + '13:00 no role label ("City Lead") anywhere in the reply');
+
+        // The Cc is dropped by NAME too: the real Snehil Chhimwal's consolidated email never carries the configured Cc, even if the
+        // address it resolves to differs from the To on file.
+        ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = TEST_EMAIL_CH_;
+        const recN = consolidatedAllIssuesRecGs_([{ region: 'Pune', rec: { to: TEST_EMAIL_SECONDARY_, rmNames: ['X'], source: 's', bucketLabel: 'Snehil Chhimwal', primaryRole: 'City Lead' } }]);
+        TestAssertEqual_(recN.to + '|' + (recN.cc || ''), TEST_EMAIL_SECONDARY_ + '|', tag + 'the configured Cc is dropped by name for Snehil Chhimwal himself');
+        const recR = consolidatedAllIssuesRecGs_([{ region: 'Pune', rec: { to: TEST_EMAIL_PRIMARY_, rmNames: ['X'], source: 's', bucketLabel: 'Rajesh Muni', primaryRole: 'A1' } }]);
+        TestAssertEqual_(recR.cc, TEST_EMAIL_CH_, tag + '...while Rajesh Muni keeps the configured Cc');
+        TestAssertEqual_(emailRoleLabelGs_('Snehil Chhimwal', 'City Lead') + '|' + emailRoleLabelGs_('Test TM One', 'TM'), '|TM', tag + 'emailRoleLabelGs_: no role for a consolidated person, unchanged for others');
+      } finally {
+        SpreadsheetApp = realSsS;
+        ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.splice(ALL_ISSUES_CONSOLIDATED_RECIPIENTS_.indexOf('test lead a'), 2);
+        ALL_ISSUES_CONSOLIDATED_CC_EMAIL_ = '';
+      }
+    }
+
+    {
       // ==== TEST MODE must never poison production state (2026-09-25 incident): a TEST MODE run of each
       // job first, THEN the real job — the real one must still behave exactly as if no test had run. ====
       const ss2 = TestMockSpreadsheet_({
