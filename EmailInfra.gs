@@ -286,8 +286,12 @@ function chLevelReportRealToGs_() {
 // the address the report would have gone to before the override). Display only: the ledger id/primaryRole keep the role, and
 // every other recipient's CH-level report is unchanged. `let`: test override (Tests_Mocks.gs empties it; tests set their own).
 let CH_REPORT_NO_ROLE_EMAILS_ = ['snehil.chhimwal@gmail.com'];
+// 2026-10-19: also by NAME - the address is looked up in the private employee table (corporate addresses never live in this public
+// file), because his CH-level reports actually go to his work address. Same test-override convention as the list above.
+let CH_REPORT_NO_ROLE_NAMES_ = ['Snehil Chhimwal'];
 function chLevelReportRoleGs_(role) {
-  const no = (CH_REPORT_NO_ROLE_EMAILS_ || []).map(function (a) { return String(a || '').trim().toLowerCase(); }).filter(String);
+  const byName = (CH_REPORT_NO_ROLE_NAMES_ || []).map(function (n) { try { return resolvedEmailForNameGs_(n) || ''; } catch (e) { return ''; } });
+  const no = (CH_REPORT_NO_ROLE_EMAILS_ || []).concat(byName).map(function (a) { return String(a || '').trim().toLowerCase(); }).filter(String);
   const to = String(chLevelReportRealToGs_() || '').split(/[,;]/).map(function (a) { return a.replace(/.*</, '').replace(/>.*/, '').trim().toLowerCase(); });
   return to.some(function (a) { return a && no.indexOf(a) !== -1; }) ? '' : String(role || '');
 }

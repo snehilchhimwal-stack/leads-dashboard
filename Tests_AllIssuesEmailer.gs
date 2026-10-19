@@ -458,7 +458,7 @@ function runAllIssuesEmailerTests_() {
     // ---- 2026-10-17: no role label in the CH-level reports (10:00 + 17:00) that go to a CH_REPORT_NO_ROLE_EMAILS_ address ----
     {
       const tag = 'CH-level no-role recipient: ';
-      TestAssertEqual_(JSON.stringify(TestEnv_realGlobals_.CH_REPORT_NO_ROLE_EMAILS_), JSON.stringify([TEST_EMAIL_PRIMARY_]), tag + 'production list is exactly the one address');
+      TestAssertEqual_(JSON.stringify(TestEnv_realGlobals_.CH_REPORT_NO_ROLE_EMAILS_) + '|' + JSON.stringify(TestEnv_realGlobals_.CH_REPORT_NO_ROLE_NAMES_), JSON.stringify([TEST_EMAIL_PRIMARY_]) + '|' + JSON.stringify(['Snehil Chhimwal']), tag + 'production lists: the gmail address + Snehil Chhimwal by name');
       const chRms = [{ rmName: 'Test City Lead', chName: 'Test City Lead', chEmail: TEST_EMAIL_CH_, chRole: 'City Lead' }];
       const issues = function (id) { return { 'Test City Lead': [{ lead_id: id, RM: 'Test City Lead', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'call' }] }; };
       const night = function (id) { return { 'Test City Lead': [{ lead_id: id, RM: 'Test City Lead', TL: '', status: 'Suspect', followup: 'call' }] }; };

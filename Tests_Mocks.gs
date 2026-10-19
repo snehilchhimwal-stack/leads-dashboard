@@ -656,6 +656,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
     LEADERSHIP_NAME_TO_EMAIL_: LEADERSHIP_NAME_TO_EMAIL_,
     FUTWORK_ROUTE_EMAIL_: FUTWORK_ROUTE_EMAIL_, REGION_PNL_HEAD_CC_: REGION_PNL_HEAD_CC_,
     CH_REPORT_NO_ROLE_EMAILS_: CH_REPORT_NO_ROLE_EMAILS_,
+    CH_REPORT_NO_ROLE_NAMES_: CH_REPORT_NO_ROLE_NAMES_,
   };
 
   SpreadsheetApp = {
@@ -693,6 +694,7 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
   FUTWORK_ROUTE_EMAIL_ = TEST_EMAIL_PRIMARY_;
   REGION_PNL_HEAD_CC_ = {}; // no real P&L-head Cc during tests; tests that exercise it set their own synthetic map
   ALWAYS_CC_EMAILS_ = []; // no extra real leadership Cc during tests — see TestAssertOnlyTestEmails_
+  CH_REPORT_NO_ROLE_NAMES_ = [];
   CH_REPORT_NO_ROLE_EMAILS_ = []; // CH-level reports keep their role label in tests unless a test opts in (EmailInfra.gs)
   LEADERSHIP_NAME_TO_EMAIL_ = { 'test ceo self': TEST_EMAIL_CH_ }; // synthetic — see TestFixture_rmHierarchyRows_' own comment on "Test Ceo Self"
 
@@ -712,6 +714,7 @@ function TestEnv_tearDown_() {
   LEADERSHIP_NAME_TO_EMAIL_ = g.LEADERSHIP_NAME_TO_EMAIL_;
   FUTWORK_ROUTE_EMAIL_ = g.FUTWORK_ROUTE_EMAIL_; REGION_PNL_HEAD_CC_ = g.REGION_PNL_HEAD_CC_;
   CH_REPORT_NO_ROLE_EMAILS_ = g.CH_REPORT_NO_ROLE_EMAILS_;
+  CH_REPORT_NO_ROLE_NAMES_ = g.CH_REPORT_NO_ROLE_NAMES_;
 
   const r = TestResults_;
   Logger.log(r.file + ': ' + r.pass + ' passed, ' + r.fail + ' failed' + (r.fail ? (' — ' + r.failures.join('; ')) : ''));
