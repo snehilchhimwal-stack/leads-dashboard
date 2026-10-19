@@ -918,7 +918,7 @@ A read-only audit of the whole Apps Script project (report: `docs/_planning/CODE
 
 Deliberately not done: AI-11, MT-07, MT-08, MT-10, MT-12, OC-2, OA-1, OA-2, OE-09/EI-7, OE-16, DC-1, SE-4, AI-8/10/12/13 (reasons in the status table).
 
-### 4.3.7 Email lifecycle E2E fixes (2026-10-16 IST) - in the code, pending paste
+### 4.3.7 Email lifecycle E2E fixes (2026-10-16 IST) - live since 2026-10-16
 
 **Live deploy, 2026-10-16:** the 2026-10-13 audit fixes (§4.3.6) were pasted into the live editor; `runAllTests` there: **3749 passed, 0 failed**. The live end-to-end test `runLiveE2E` (`Tests_E2E_Live.gs`, run by hand only, never part of `runAllTests`) passed **11/11**, with its cleanup verified (`verifyLiveE2ECleanup`). The `docs/STALENESS_TRACKER.md` deploy register is refreshed only from live hashes (`test/match-live-gs.py`), not from this note.
 
@@ -941,7 +941,7 @@ Deliberately not done: AI-11, MT-07, MT-08, MT-10, MT-12, OC-2, OA-1, OA-2, OE-0
 - **Paste (2026-10-17):** `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `Tests_EmailLifecycleFullCycle.gs`. Paste before 17:00 so the next 10:00 reads a consolidated 17:00 row; pasted later, the first 10:00 still sends Section-2-only per-region emails from the old per-region rows (role-less subjects already).
 - **CH-level reports, no role (2026-10-17, user request):** the 10:00 (`notifyChLevelLeadsGs_`) and 17:00 (`notifyChLevelIssuesGs_`) CH-level reports drop the role label ("City Lead" etc.) from the subject - the only place it was rendered; HTML/plain bodies never carried it - when a REAL recipient (`chLevelReportRealToGs_`, pre-TEST-MODE-override) is in `CH_REPORT_NO_ROLE_EMAILS_` (`EmailInfra.gs`, = snehil.chhimwal@gmail.com, case-insensitive) via `chLevelReportRoleGs_`. Ledger ids/primaryRole unchanged; other recipients unchanged. Tests: `Tests_AllIssuesEmailer.gs` "CH-level no-role recipient" (mocks empty the list by default). Paste: `EmailInfra.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `Tests_AllIssuesEmailer.gs`, `Tests_Mocks.gs`.
 
-### 4.3.9 SLA rule changes (2026-10-19 IST, user request) - in the code, pending paste
+### 4.3.9 SLA rule changes (2026-10-19 IST, user request) - live since 2026-10-19 ~13:53 IST (runAllTests 4165/0)
 
 Three rule changes, made in the Apps Script code, the dashboard JS, the RM Performance eligibility mirrors, the tests and the docs together (§6 pairs):
 
@@ -965,6 +965,28 @@ a collaborator. **GitHub Pages source: "Deploy from a branch", `master` / `/`
 `pages-build-deployment` run finishing.
 
 ---
+
+### 4.3.10 The core issue rules - current reference (as of 2026-10-19 IST)
+
+The ONE place that states the rules the emails and the dashboard apply today (code: `SlaEngine.gs` `computeSlaFlags_` / `ISSUE_PRIORITY_GS_`; twin `js/core-lead-model.js` `enrichLead` / `ISSUE_PRIORITY`; eligibility mirrors `DailyRmIssueLog.gs` `RM_PERF_RULES_GS_` and `js/core-rm-performance.js` `RM_PERF_RULES`). Change all of them together.
+
+**Scope:** `group_source` = `google` AND `source_bucket` = `Non-UTM` or `Search` (`passesGoogleNonUtmSearchGs_`); the lead is **open** (`isOpenLead_`) and has a parseable `lead_assigned_at`. The 17:00 email covers leads assigned in the last 3 calendar days.
+
+**Constants:** grace `LEAD_GRACE_HOURS_` = 3 h; lifecycle `LEAD_LIFECYCLE_HOURS_` = 48 h; follow-up window `FOLLOWUP_REVIEW_HOURS_` = 4 h; daily minimum `MIN_CALLS_PER_DAY_` = 3.
+
+**The five issues, in priority order** (a lead is reported once, under the FIRST that matches):
+
+| # | Issue (key) | Fires when |
+|---|---|---|
+| 1 | Inactive-RM Lead Added (`inactiveRmNewLead`) | assigned **today** and the RM is inactive (`rm_is_active` = false/no/0/inactive/n). No grace. |
+| 2 | Not Updated (`isNotUpdated`) | stage text is still **"Not Updated"** and the lead is >= 3 h old. Nothing else. |
+| 3 | No follow up in last 4 hours (`followupOverdue`) | 3-48 h old, connected, and **more than 4 h** since the LATER of the last comment and the last call. There is no call-attempt timestamp column, so `last_connect_time` is the call time; with neither, the clock runs from assignment. |
+| 4 | Behind on Today's Calls (`underCalledToday`) | >= 3 h old and **fewer than 3 calls today**. Calls today = max(rise in `call_attempts` since the pre-today snapshot, dated comments logged today); for a lead assigned today, `call_attempts`. |
+| 5 | Stuck 48h+ (`stageStuck48h`) | more than 48 h old and still open. |
+
+**Stored labels:** rows written before 2026-10-19 say "Follow-up Overdue"; `canonicalIssueLabelGs_` maps that to "No follow up in last 4 hours" wherever a stored label is compared or shown. The 10:00/13:00 checkpoints re-check the same leads; a move INTO "Behind on Today's Calls" is "category changed", never "escalated".
+
+**History of these rules:** 2026-09-03 Not Updated no longer gated on < 48 h; 2026-10-19 the never-connected-past-10-minutes branch removed (dashboard keeps its separate "Not Connected in 10 Minutes" card), Follow-up Overdue renamed and re-based on last comment / last call, daily minimum 5 -> 3 (§4.3.9).
 
 ## 5. Data the Sheet holds
 

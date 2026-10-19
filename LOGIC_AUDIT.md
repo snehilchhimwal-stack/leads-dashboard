@@ -1758,7 +1758,7 @@ flowchart TB
     OPPCHECK -- no --> SLAGATE["SLA-eligible population"]
 
     SLAGATE --> R1["inactiveRmNewLead\nassigned today + rm_is_active=false"]
-    SLAGATE --> R2["isNotUpdated\nstage still literal 'not updated'\nOR never connected past 10min"]
+    SLAGATE --> R2["isNotUpdated\nstage still literal 'not updated'\n(10-min branch removed 2026-10-19)"]
     SLAGATE --> R3["followupOverdue\nconnected, quiet > 4h"]
     SLAGATE --> R4["underCalledToday\nattemptsToday < 5"]
     SLAGATE --> R5["stageStuck48h\nopen, past 48h, past grace"]
