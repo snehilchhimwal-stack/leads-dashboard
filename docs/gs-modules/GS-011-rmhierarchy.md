@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `HEAD-PENDING` - Thane TM Sanket Yadav removed from `RM_HIERARCHY_RAW_` (left; address bounced 2026-10-19) and his three S1s reassigned (Mohit Manwani -> A1 Ganesh Saroj; Riyan Jamadar, Tisha Valecha -> A1 Mayuresh Jadhav), pinned in `GS-014` `RULE-092`; also covers `9007a85` (Ajay Boharde added) |
+| **Last Verified** | 2026-10-19 against commit `2b67916` - Thane TM Sanket Yadav removed from `RM_HIERARCHY_RAW_` (left; address bounced 2026-10-19) and his three S1s reassigned (Mohit Manwani -> A1 Ganesh Saroj; Riyan Jamadar, Tisha Valecha -> A1 Mayuresh Jadhav), pinned in `GS-014` `RULE-092`; also covers `9007a85` (Ajay Boharde added) |
 
 ## Purpose / reason to exist
 
@@ -350,7 +350,7 @@ Apps Script editor.
 
 **2026-10-16** (`9bd7126`): the user confirmed three people from the nightly sync report's POSSIBLE LEAVERS list have left - Jitendra Phulwaria (Navi Mumbai S1), Atharva Belose (Harbour S1) and his leads-sheet alias row Atharva P Belose. Their three rows are removed from `RM_HIERARCHY_RAW_` (`CFG-054`) so a rebuild cannot restore them; none was anyone's `tl`/`tm`/`rh`/`ch`. The live `RM_Hierarchy` tab is cleared separately by `removeRmHierarchyLeaversNow()` (`GS-014` `FN-524`), because once the sync is active the live tab, not this table, is the source of truth. `RmHierarchy.private.gs` (email table) is untouched; its entries for them are harmless. **Not live until pasted.**
 
-**2026-10-19** (`HEAD-PENDING`): Thane TM Sanket Yadav left (his address bounced on 2026-10-19; `Email_Reroutes` already redirects his mail to Bipin More) - confirmed by the user, who reassigned his three S1s: Mohit Manwani -> A1 Ganesh Saroj (`Ganesh Saroj / - / Swapnil Gowalkar / Bipin More`), Riyan Jamadar and Tisha Valecha -> A1 Mayuresh Jadhav (`Mayuresh Jadhav / - / - / Bipin More`, as Mayuresh's own row). Sanket's row is removed from `RM_HIERARCHY_RAW_` (`CFG-054`); the three rows carry dated comments. The live tab is changed by `applyRmHierarchyReassignmentsNow()` then `removeRmHierarchyLeaversNow()` (`GS-014` `FN-531`, `FN-524`), and the nightly sync will not revert the three while HR Live still shows Sanket (`GS-014` `RULE-092`). `Tests_RmHierarchy.gs`'s Tisha Valecha assertion now expects A1 Mayuresh Jadhav. `RmHierarchy.private.gs` untouched. **Not live until pasted.**
+**2026-10-19** (`2b67916`): Thane TM Sanket Yadav left (his address bounced on 2026-10-19; `Email_Reroutes` already redirects his mail to Bipin More) - confirmed by the user, who reassigned his three S1s: Mohit Manwani -> A1 Ganesh Saroj (`Ganesh Saroj / - / Swapnil Gowalkar / Bipin More`), Riyan Jamadar and Tisha Valecha -> A1 Mayuresh Jadhav (`Mayuresh Jadhav / - / - / Bipin More`, as Mayuresh's own row). Sanket's row is removed from `RM_HIERARCHY_RAW_` (`CFG-054`); the three rows carry dated comments. The live tab is changed by `applyRmHierarchyReassignmentsNow()` then `removeRmHierarchyLeaversNow()` (`GS-014` `FN-531`, `FN-524`), and the nightly sync will not revert the three while HR Live still shows Sanket (`GS-014` `RULE-092`). `Tests_RmHierarchy.gs`'s Tisha Valecha assertion now expects A1 Mayuresh Jadhav. `RmHierarchy.private.gs` untouched. **Not live until pasted.**
 
 ## Revalidation trigger
 
