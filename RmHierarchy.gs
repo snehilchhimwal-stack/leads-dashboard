@@ -494,6 +494,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Loan','BDM','Sanjay Verma','','','','Mayur Panjari'], // 2026-10-13: Loan team under Mayur Panjari (confirmed by the user; HR's team column said Thane)
   ['Central','TM','Sanket Patil','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','S1','Suryapratap Singh','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Ajay Boharde','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-10-19 HR sync (H6585): new joiner, already added to the live tab by the nightly sync
   ['Hyderabad','S1','Tharun Chalumuri','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Central','S1','Vishal Singh','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','S1','Rushikesh Nigade','Hitesh Choudhary','Rahul Poudel','','Sourabh Sareen'], // 2026-10-13: added by hand -- the refresh script couldn't resolve tl until Hitesh Choudhary's own row existed
