@@ -126,6 +126,9 @@ function runRmHierarchySyncTests_() {
   const lookupTable = { 'snehil chhimwal': TEST_EMAIL_PRIMARY_, 'sushil kannojiya': TEST_EMAIL_CH_, 'ashish ivlekar': TEST_EMAIL_SECONDARY_ };
   lookupEmployeeEmail_ = function (name) { return lookupTable[String(name || '').trim().toLowerCase()] || ''; };
   const allThree = [TEST_EMAIL_CH_, TEST_EMAIL_PRIMARY_, TEST_EMAIL_SECONDARY_].sort();
+  // The real pinned overrides (2026-10-19) name live people: every test runs with none unless it supplies its own.
+  const realPins = rmSyncPinnedOverridesGs_;
+  rmSyncPinnedOverridesGs_ = function () { return []; };
   try {
     // ================= parseHrRosterGs_ =================
     {
@@ -513,6 +516,189 @@ function runRmHierarchySyncTests_() {
       TestAssertEqual_(TestGmailLog_.sent.length, before + 1, 'report: the next night nothing is new, so nothing is sent');
       TestAssertOnlyTestEmails_();
     }
+    // ================= Pinned user-confirmed changes + applyRmHierarchyReassignmentsGs_ (2026-10-19) =================
+    {
+      const A1 = 'Test A1 Pune', RH = 'Test RH Pune', CH = 'Test CH Pune', TM = 'Test TM Pune';
+      // HR Live still shows the OLD picture: Pin S1 One under the departed TM, Pin S1 Two under Test TM Pune, the leaver still current staff.
+      const pinPeople = function () {
+        return rmSyncTestPeople_().concat([
+          { name: 'Pin Old TM', role: 'TM', team: 'Pune', chain: [RH, CH] },
+          { name: 'Pin S1 One', role: 'S1', team: 'Pune', chain: ['Pin Old TM', CH] },
+          { name: 'Pin S1 Two', role: 'S1', team: 'Pune', chain: [TM] },
+        ]);
+      };
+      // Our tab already holds the user-confirmed values; the leaver's row is gone.
+      const pinTab = function () {
+        return rmSyncTestTabRows_().concat([
+          ['Pune', 'S1', 'Pin S1 One', A1, '', RH, CH, false, '', ''],
+          ['Pune', 'S1', 'Pin S1 Two', '', 'Pin New TM', '', '', false, '', ''],
+        ]);
+      };
+      const pins = [
+        { name: 'Pin S1 One', set: { tl: A1, tm: '', rh: RH, ch: CH }, was: ['Pin Old TM'], since: '2026-10-19', why: 'TM left' },
+        { name: 'Pin S1 Two', set: { tl: '', tm: 'Pin New TM', rh: '', ch: '' }, was: [TM], since: '2026-10-19' },
+        { name: 'Pin Old TM', leaver: true, since: '2026-10-19', why: 'left' },
+      ];
+      const hrRow = function (world, name) { return world.hrSheet._data.filter(function (r) { return r[1] === name; })[0]; };
+      const backups = function () {
+        const root = DriveApp._folders[ARCHIVE_ROOT_FOLDER_];
+        return root && root._folders['RM_Hierarchy_sync_backup'] ? root._folders['RM_Hierarchy_sync_backup']._filesList : [];
+      };
+
+      // The plan: without pins the sync would revert / re-add; with pins it does neither.
+      {
+        const world = rmSyncTestWorld_({ people: pinPeople(), tabRows: pinTab() });
+        const hr = parseHrRosterGs_(readHrRosterValuesGs_());
+        const rows = readRmHierarchyRowsGs_(world.tab);
+        const bare = computeRmHierarchySyncPlanGs_(hr, rows, readManagerDirectoryRowsGs_(world.dir));
+        TestAssert_(bare.fixes.some(function (f) { return f.name === 'Pin S1 Two' && f.newValue === TM; }), 'pins: (control) without a pin the sync would revert Pin S1 Two to HR\'s old TM');
+        TestAssert_(rmSyncTestNames_(bare.newJoiners).indexOf('Pin Old TM') !== -1, 'pins: (control) without a pin the departed TM would be re-added as a new joiner');
+        const plan = computeRmHierarchySyncPlanGs_(hr, rows, readManagerDirectoryRowsGs_(world.dir), { pins: pins, pinsDone: {} });
+        TestAssert_(plan.fixes.concat(plan.needsHuman).every(function (x) { return x.name !== 'Pin S1 One' && x.name !== 'Pin S1 Two'; }), 'pins: a pending pinned row gets no fix and no "needs a person" item');
+        TestAssert_(rmSyncTestNames_(plan.newJoiners).concat(rmSyncTestNames_(plan.newJoinersLow)).indexOf('Pin Old TM') === -1, 'pins: a pinned leaver is never re-added');
+        TestAssert_(plan.directoryAdds.every(function (d) { return d.name !== 'Pin Old TM'; }), 'pins: a pinned leaver is never added to Manager_Directory');
+        TestAssertEqual_(rmSyncTestNames_(plan.pinPending), ['Pin S1 One', 'Pin S1 Two', 'Pin Old TM'], 'pins: all three are pending while HR Live shows the old picture');
+        TestAssertEqual_(plan.pinResolved, [], 'pins: nothing matches HR yet');
+        // A confirmed leaver (RMSYNC_CONFIRMED_LEAVERS_) is never re-added either, even without a pin.
+        const sanketWorld = rmSyncTestWorld_({ people: rmSyncTestPeople_().concat([{ name: 'Sanket Yadav', role: 'TM', team: 'Pune', chain: [RH, CH] }]) });
+        const sanketPlan = computeRmHierarchySyncPlanGs_(parseHrRosterGs_(readHrRosterValuesGs_()), readRmHierarchyRowsGs_(sanketWorld.tab), null);
+        TestAssert_(rmSyncTestNames_(sanketPlan.newJoiners).indexOf('Sanket Yadav') === -1, 'pins: a confirmed leaver still current in HR Live is not re-added as a new joiner');
+      }
+
+      // The nightly run in APPLY mode: pins respected, PENDING section every night, then "now matches HR" once, then silence.
+      {
+        const world = rmSyncTestWorld_({ people: pinPeople(), tabRows: pinTab() });
+        rmSyncPinnedOverridesGs_ = function () { return pins; };
+        try {
+          rmSyncTestSetApply_(true);
+          const n0 = TestGmailLog_.sent.length;
+          const res = runRmHierarchySyncGs_({ now: RMSYNC_TEST_THU_ });
+          TestAssertEqual_(res.mode, 'APPLIED', 'pins apply: the night really applied');
+          TestAssertEqual_(rmSyncTestRow_(world.tab, 'Pin S1 Two').tm, 'Pin New TM', 'pins apply: APPLY mode does NOT revert a pinned change to HR\'s old manager');
+          TestAssertEqual_([rmSyncTestRow_(world.tab, 'Pin S1 One').tl, rmSyncTestRow_(world.tab, 'Pin S1 One').rh], [A1, RH], 'pins apply: the other pinned row is untouched');
+          TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Pin Old TM') === -1, 'pins apply: the pinned leaver is not re-added');
+          const mail1 = TestGmailLog_.sent[n0];
+          TestAssertContains_(mail1.body, 'PENDING IN HR LIVE', 'pins report: the pending section is in the email');
+          TestAssertContains_(mail1.body, 'Pin S1 Two (Pune, S1): ours TM Pin New TM', 'pins report: our value is shown');
+          TestAssertContains_(mail1.body, 'HR Live still lists Test TM Pune', 'pins report: HR\'s current value is shown');
+          TestAssertContains_(mail1.body, 'Pin Old TM: ours LEFT', 'pins report: the leaver is listed');
+          TestAssertContains_(mail1.body, 'the manager of 1: Pin S1 One', 'pins report: the leaver line says who HR still has under them');
+          TestAssertContains_(mail1.subject, '3 pending in HR Live', 'pins report: the subject counts the pending pins');
+
+          // Night 2: nothing else is new, yet the email still goes, with the pending section again.
+          runRmHierarchySyncGs_({ now: RMSYNC_TEST_FRI_ });
+          TestAssertEqual_(TestGmailLog_.sent.length, n0 + 2, 'pins report: sent again the next night although nothing else is new');
+          const mail2 = TestGmailLog_.sent[n0 + 1];
+          TestAssertContains_(mail2.body, 'PENDING IN HR LIVE', 'pins report: the pending section repeats every night (not silenced by the "already reported" state)');
+          TestAssert_(mail2.body.indexOf('NOW MATCHES HR') === -1, 'pins report: nothing is reported as matching yet');
+
+          // HR Live catches up: the new managers in the chains, the leaver given an Exit date and nobody under him.
+          const one = hrRow(world, 'Pin S1 One'); one[6] = A1; one[8] = RH; one[10] = CH; one[12] = '-';
+          const two = hrRow(world, 'Pin S1 Two'); two[6] = 'Pin New TM';
+          hrRow(world, 'Pin Old TM')[17] = '2026-10-19';
+          runRmHierarchySyncGs_({ now: new Date('2026-10-10T17:45:00Z') });
+          TestAssertEqual_(TestGmailLog_.sent.length, n0 + 3, 'pins report: the night HR matches, an email goes');
+          const mail3 = TestGmailLog_.sent[n0 + 2];
+          TestAssertContains_(mail3.body, 'NOW MATCHES HR', 'pins report: the catch-up is reported');
+          TestAssert_(mail3.body.indexOf('PENDING IN HR LIVE') === -1, 'pins report: nothing is pending any more');
+          ['Pin S1 One', 'Pin S1 Two', 'Pin Old TM'].forEach(function (n) { TestAssertContains_(mail3.body, '  * ' + n, 'pins report: ' + n + ' is listed as matching'); });
+          TestAssertEqual_(Object.keys(rmSyncTestState_().pinsDone).length, 3, 'pins state: the three matched pins are remembered');
+
+          // Night 4: reported once only - nothing new, nothing sent; the pins are inert.
+          runRmHierarchySyncGs_({ now: new Date('2026-10-11T17:45:00Z') });
+          TestAssertEqual_(TestGmailLog_.sent.length, n0 + 3, 'pins report: "now matches HR" is reported once, then the pin stops being listed');
+          TestAssertOnlyTestEmails_();
+        } finally {
+          rmSyncPinnedOverridesGs_ = function () { return []; };
+        }
+      }
+
+      // applyRmHierarchyReassignmentsGs_: backup, exact match, idempotent, directory only reported.
+      {
+        const tab = rmSyncTestTabRows_().concat([
+          ['Pune', 'S1', 'pin  s1 ONE', '', 'Pin Old TM', '', CH, false, 'old note', ''],
+          ['Pune', 'S1', 'Pin S1 One Extra', '', 'Pin Old TM', '', CH, false, '', ''], // a near name: untouched
+          ['Pune', 'S1', 'Pin S1 Two', '', 'Pin New TM', '', '', false, '', ''], // already as confirmed
+        ]);
+        const pinsPlus = pins.concat([{ name: 'Pin Nobody', set: { tl: A1, tm: '', rh: '', ch: '' } }]);
+        const world = rmSyncTestWorld_({ tabRows: tab });
+        const res = applyRmHierarchyReassignmentsGs_(pinsPlus, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(res.changed, ['pin  s1 ONE'], 'reassign: the exact (case/space-normalised) match is changed');
+        TestAssertEqual_(res.already, ['Pin S1 Two'], 'reassign: a row already as confirmed is left alone');
+        TestAssertEqual_(res.notFound, ['Pin Nobody'], 'reassign: a name not in the tab is reported');
+        const r = rmSyncTestRow_(world.tab, 'pin  s1 ONE');
+        TestAssertEqual_([r.tl, r.tm, r.rh, r.ch], [A1, '', RH, CH], 'reassign: tl/tm/rh/ch are set exactly');
+        TestAssertContains_(r.note, 'old note | reassigned 2026-10-08 (user-confirmed): tl (blank) -> Test A1 Pune, tm Pin Old TM -> (blank), rh (blank) -> Test RH Pune', 'reassign: the note is appended with what changed');
+        TestAssertEqual_(rmSyncTestRow_(world.tab, 'Pin S1 One Extra').tm, 'Pin Old TM', 'reassign: a near-name row is untouched');
+        TestAssertEqual_(backups().length, 1, 'reassign: the tab is backed up to Drive first');
+        TestAssertContains_(backups()[0]._content, 'Pin Old TM', 'reassign: the backup holds the old values');
+        TestAssertEqual_(res.problems, [], 'reassign: read-back is clean');
+        TestAssert_(res.directoryNotes.indexOf('Test A1 Pune has no Manager_Directory row') !== -1 && res.directoryNotes.indexOf('Test CH Pune has a Manager_Directory row with no email') !== -1, 'reassign: Manager_Directory gaps are reported');
+        const dirBefore = JSON.stringify(world.dir._data);
+        const snapshot = JSON.stringify(world.tab._data);
+        const again = applyRmHierarchyReassignmentsGs_(pinsPlus, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(again.changed, [], 'reassign: a re-run changes nothing');
+        TestAssertEqual_(JSON.stringify(world.tab._data), snapshot, 'reassign: a re-run writes nothing');
+        TestAssertEqual_(backups().length, 1, 'reassign: a re-run makes no new backup');
+        TestAssertEqual_(JSON.stringify(world.dir._data), dirBefore, 'reassign: Manager_Directory is never changed');
+      }
+      // TEST MODE: says what it would change, writes nothing.
+      {
+        const world = rmSyncTestWorld_({ tabRows: rmSyncTestTabRows_().concat([['Pune', 'S1', 'Pin S1 One', '', 'Pin Old TM', '', CH, false, '', '']]) });
+        const snapshot = JSON.stringify(world.tab._data);
+        TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+        let res;
+        try { res = applyRmHierarchyReassignmentsGs_(pins, { now: RMSYNC_TEST_THU_ }); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+        TestAssertEqual_(res.wouldChange.length, 1, 'reassign test mode: lists the row it would change');
+        TestAssertEqual_(res.changed, [], 'reassign test mode: changes nothing');
+        TestAssertEqual_(JSON.stringify(world.tab._data), snapshot, 'reassign test mode: the tab is unchanged');
+        TestAssertEqual_(backups().length, 0, 'reassign test mode: no backup is written');
+      }
+
+      // The real 2026-10-19 case: Sanket Yadav's three S1s, pinned with exactly the RM_HIERARCHY_RAW_ values, and Sanket as a leaver.
+      {
+        const real = realPins();
+        const byName = {};
+        real.forEach(function (p) { byName[p.name] = p; });
+        TestAssertEqual_(Object.keys(byName).sort(), ['Mohit Manwani', 'Riyan Jamadar', 'Sanket Yadav', 'Tisha Valecha'], 'real pins: the 2026-10-19 entries');
+        TestAssert_(byName['Sanket Yadav'].leaver === true, 'real pins: Sanket Yadav is a pinned leaver');
+        const raw = {};
+        RM_HIERARCHY_RAW_.forEach(function (r) { raw[normPersonName_(r[2])] = r; });
+        TestAssert_(!raw['sanket yadav'], 'real pins: Sanket Yadav is gone from RM_HIERARCHY_RAW_');
+        TestAssertEqual_(raw['mohit manwani'], ['Thane', 'S1', 'Mohit Manwani', 'Ganesh Saroj', '', 'Swapnil Gowalkar', 'Bipin More'], 'real pins: Mohit Manwani reports to A1 Ganesh Saroj in RM_HIERARCHY_RAW_');
+        ['Riyan Jamadar', 'Tisha Valecha'].forEach(function (n) {
+          TestAssertEqual_(raw[normPersonName_(n)], ['Thane', 'S1', n, 'Mayuresh Jadhav', '', '', 'Bipin More'], 'real pins: ' + n + ' reports to A1 Mayuresh Jadhav in RM_HIERARCHY_RAW_');
+        });
+        ['Mohit Manwani', 'Riyan Jamadar', 'Tisha Valecha'].forEach(function (n) {
+          const r = raw[normPersonName_(n)];
+          TestAssertEqual_([byName[n].set.tl, byName[n].set.tm, byName[n].set.rh, byName[n].set.ch], [r[3], r[4], r[5], r[6]], 'real pins: ' + n + '\'s pin equals the RM_HIERARCHY_RAW_ row');
+          TestAssertEqual_(byName[n].was, ['Sanket Yadav'], 'real pins: ' + n + ' was under Sanket Yadav');
+        });
+        TestAssert_(RM_HIERARCHY_RAW_.every(function (r) { return [r[3], r[4], r[5], r[6]].every(function (v) { return normPersonName_(v) !== 'sanket yadav'; }); }), 'real pins: nobody in RM_HIERARCHY_RAW_ still reports to Sanket Yadav');
+
+        // The real functions on a mock tab: reassign the three, then remove Sanket (refused while he has an open lead).
+        const tab = rmSyncTestTabRows_().concat([
+          ['Thane', 'S1', 'Mohit Manwani', '', 'Sanket Yadav', '', 'Bipin More', false, '', ''],
+          ['Thane', 'TM', 'Sanket Yadav', '', '', '', 'Bipin More', false, '', ''],
+          ['Thane', 'S1', 'Riyan Jamadar', '', 'Sanket Yadav', '', 'Bipin More', false, '', ''],
+          ['Thane', 'S1', 'Tisha Valecha', '', 'Sanket Yadav', '', 'Bipin More', false, '', ''],
+        ]);
+        const world = rmSyncTestWorld_({ tabRows: tab });
+        world.ss._sheets['leads'] = TestMockSheet_('leads', [['banner'], ['lead_id', 'RM', 'current_stage', 'closing_reason', 'lead_closing_reason'], ['L-SY-1', 'Sanket Yadav', 'Suspect', '', '']]);
+        const resA = applyRmHierarchyReassignmentsGs_(real, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(resA.changed, ['Mohit Manwani', 'Riyan Jamadar', 'Tisha Valecha'], 'real reassign: exactly the three S1s change');
+        TestAssertEqual_(['Mohit Manwani', 'Riyan Jamadar', 'Tisha Valecha'].map(function (n) { const r = rmSyncTestRow_(world.tab, n); return [r.tl, r.tm, r.rh, r.ch].join('/'); }),
+          ['Ganesh Saroj//Swapnil Gowalkar/Bipin More', 'Mayuresh Jadhav///Bipin More', 'Mayuresh Jadhav///Bipin More'], 'real reassign: the confirmed managers are on the live rows');
+        const blocked = removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(blocked.blocked.map(function (b) { return b.name + ':' + b.leadIds.join(','); }), ['Sanket Yadav:L-SY-1'], 'real leaver: Sanket Yadav is refused while he has an open lead, and the lead is listed');
+        TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Sanket Yadav') !== -1, 'real leaver: ... and stays in the tab');
+        TestAssertEqual_(blocked.managerRefs, [], 'real leaver: after the reassignment nobody names him as a manager');
+        world.ss._sheets['leads'] = TestMockSheet_('leads', [['banner'], ['lead_id', 'RM', 'current_stage', 'closing_reason', 'lead_closing_reason'], ['L-SY-1', 'Sanket Yadav', 'Won', '', '']]);
+        const removed = removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(removed.removed, ['Sanket Yadav'], 'real leaver: removed once no open lead is left');
+        TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Sanket Yadav') === -1, 'real leaver: gone from the tab');
+      }
+    }
     // ================= removeRmHierarchyLeaversGs_ (2026-10-16) =================
     {
       const leaverTab = function () {
@@ -627,7 +813,7 @@ function runRmHierarchySyncTests_() {
         TestAssertEqual_(rmSyncTestState_(), null, 'leavers test mode: no state is saved');
       }
 
-      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose'], 'leavers: the 2026-10-16 confirmed list');
+      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19)');
       const rawNames = RM_HIERARCHY_RAW_.map(function (r) { return normPersonName_(r[2]); });
       RMSYNC_CONFIRMED_LEAVERS_.forEach(function (n) { TestAssert_(rawNames.indexOf(normPersonName_(n)) === -1, 'leavers: ' + n + ' is gone from RM_HIERARCHY_RAW_ too (a rebuild cannot restore them)'); });
     }
@@ -635,6 +821,7 @@ function runRmHierarchySyncTests_() {
     TestAssertOnlyTestEmails_();
   } finally {
     lookupEmployeeEmail_ = realLookup;
+    rmSyncPinnedOverridesGs_ = realPins;
     DriveApp = realDrive;
     TEST_MODE_OVERRIDE_EMAIL_ = '';
     TestEnv_tearDown_();

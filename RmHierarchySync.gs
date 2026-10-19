@@ -5,7 +5,8 @@
  * rebuildRmHierarchy(). Plan and rules: docs/_planning/RM_HIERARCHY_NIGHTLY_SYNC.md.
  *
  * WHAT IT NEVER DOES: remove a person. Someone who disappears from the HR sheet (or gets an Exit date) is only REPORTED — the row
- * stays in RM_Hierarchy until a human says remove (then: removeRmHierarchyLeaversNow, below - a one-off, console-run removal). It never touches the Excluded / Note cells' existing text (a note is only
+ * stays in RM_Hierarchy until a human says remove (then: removeRmHierarchyLeaversNow, below - a one-off, console-run removal). Nor does it
+ * revert a PINNED user-confirmed change (RMSYNC_PINNED_OVERRIDES_, 2026-10-19) while HR Live still disagrees - it lists it nightly instead. It never touches the Excluded / Note cells' existing text (a note is only
  * appended to), never overwrites an existing Manager_Directory email, and never guesses: a chain slot it cannot resolve to
  * exactly one tier is reported for a person to decide (the HR sheet's chain columns are positional, not per-role — see
  * RmHierarchy.gs's header — so blind copying is the bug class this project has already paid for twice).
@@ -67,7 +68,8 @@ function showRmHierarchySyncPlanNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
   const directorySheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
-  const plan = computeRmHierarchySyncPlanGs_(hr, readRmHierarchyRowsGs_(sheet), directorySheet ? readManagerDirectoryRowsGs_(directorySheet) : null);
+  const plan = computeRmHierarchySyncPlanGs_(hr, readRmHierarchyRowsGs_(sheet), directorySheet ? readManagerDirectoryRowsGs_(directorySheet) : null,
+    { pins: rmSyncPinnedOverridesGs_(), pinsDone: readRmSyncStateGs_().pinsDone });
   const lines = rmSyncChangeLinesGs_(plan);
   Logger.log('Mode: ' + (rmHierarchySyncApplyEnabledGs_() ? 'APPLY' : 'report-only') + '. HR people: ' + hr.count + '.');
   [['New people', lines.joiners], ['Manager changes', lines.fixes], ['Manager_Directory', lines.directory]].forEach(function (s) {
@@ -76,6 +78,8 @@ function showRmHierarchySyncPlanNow() {
   const attention = rmSyncAttentionItemsGs_(plan);
   Logger.log('For a person (' + attention.length + '):');
   attention.forEach(function (i) { Logger.log(i.line); });
+  Logger.log('Pending in HR Live (' + plan.pinPending.length + '):'); plan.pinPending.forEach(function (p) { Logger.log(p.line); });
+  Logger.log('Now matching HR (' + plan.pinResolved.length + '):'); plan.pinResolved.forEach(function (p) { Logger.log(p.line); });
 }
 
 function showRmHierarchySyncStatusNow() {
@@ -233,8 +237,10 @@ function classifyRmSyncJoinerGs_(person, roleByKey) {
 
 // hr: parseHrRosterGs_'s result; rows: readRmHierarchyRowsGs_; directory: readManagerDirectoryRowsGs_ (or null when the tab is absent).
 // Returns what the sync would do and what it only reports. Pure: reads and writes nothing.
-function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
-  const plan = { newJoiners: [], newJoinersLow: [], fixes: [], needsHuman: [], leavers: [], aliases: [], emailFills: [], emailChanges: [], directoryAdds: [] };
+// opts (2026-10-19): { pins: RMSYNC_PINNED_OVERRIDES_-shaped entries, pinsDone: { hash(pin id): day } }. Omitted = no pins.
+function computeRmHierarchySyncPlanGs_(hr, rows, directory, opts) {
+  const options = opts || {};
+  const plan = { newJoiners: [], newJoinersLow: [], fixes: [], needsHuman: [], leavers: [], aliases: [], emailFills: [], emailChanges: [], directoryAdds: [], pinPending: [], pinResolved: [] };
   const people = hr.people;
   const hrList = Object.keys(people).map(function (k) { return people[k]; });
   const roleByKey = {};
@@ -242,9 +248,19 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
   rows.forEach(function (r) { const k = normPersonName_(r.name); roleByKey[k] = r.role.toLowerCase(); nameByKey[k] = r.name; });
   const canon = function (name) { return nameByKey[normPersonName_(name)] || name; };
 
+  // Pinned, user-confirmed changes (2026-10-19, RULE-092): a pending manager pin protects its row from being "fixed" back to HR;
+  // a confirmed leaver (pinned, or in RMSYNC_CONFIRMED_LEAVERS_) is never re-added, never written as anyone's manager, never a directory add.
+  const pinInfo = rmSyncEvaluatePinsGs_(options.pins || [], options.pinsDone || {}, hr, rows);
+  plan.pinPending = pinInfo.pending;
+  plan.pinResolved = pinInfo.resolved;
+  const leaverKeys = {};
+  RMSYNC_CONFIRMED_LEAVERS_.concat(pinInfo.leaverNames).forEach(function (n) { leaverKeys[normPersonName_(n)] = true; });
+  Object.keys(leaverKeys).forEach(function (k) { delete roleByKey[k]; });
+
   // Existing rows: possible leavers and stale manager fields.
   rows.forEach(function (row) {
     if (row.excluded) return; // a person hand-flagged Excluded is left entirely alone
+    if (pinInfo.protectedKeys[normPersonName_(row.name)]) return; // a pending user-confirmed change: never reverted (reported in PENDING IN HR LIVE)
     const person = people[normPersonName_(row.name)];
     if (!person) {
       // Not in the HR sheet by exact name: an old spelling of ONE current person is not a leaver; zero, several or only-exited matches stay leavers.
@@ -285,7 +301,7 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
   rows.forEach(function (r) { rowKeys[normPersonName_(r.name)] = true; });
   let pending = Object.keys(people).sort().map(function (k) { return { key: k, person: people[k] }; }).filter(function (p) {
     const role = p.person.role.toLowerCase();
-    return !rowKeys[p.key] && !p.person.exited && RMSYNC_SALES_ROLES_.indexOf(role) !== -1 && RMSYNC_OUT_OF_SCOPE_TEAMS_.indexOf(p.person.team.toLowerCase()) === -1;
+    return !rowKeys[p.key] && !leaverKeys[p.key] && !p.person.exited && RMSYNC_SALES_ROLES_.indexOf(role) !== -1 && RMSYNC_OUT_OF_SCOPE_TEAMS_.indexOf(p.person.team.toLowerCase()) === -1;
   });
   for (let pass = 0; pass < 4 && pending.length; pass++) {
     let progressed = false;
@@ -325,6 +341,7 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory) {
         const v = r[f];
         if (!v) return;
         const k = normPersonName_(v);
+        if (leaverKeys[k]) return;
         const m = managers[k] || (managers[k] = { name: canon(v), roles: {}, regions: {}, count: 0 });
         m.roles[RMSYNC_FIELD_LABEL_[f]] = true;
         if (r.team) m.regions[r.team] = true;
@@ -358,12 +375,12 @@ function rmSyncHashGs_(s) {
   return h.toString(16);
 }
 function readRmSyncStateGs_() {
-  const blank = { items: {}, lastReminderDay: '', appliedEver: false };
+  const blank = { items: {}, lastReminderDay: '', appliedEver: false, pinsDone: {} };
   try {
     const raw = PropertiesService.getScriptProperties().getProperty(RMSYNC_STATE_PROPERTY_);
     if (!raw) return blank;
     const parsed = JSON.parse(raw);
-    return { items: parsed.items || {}, lastReminderDay: parsed.lastReminderDay || '', appliedEver: !!parsed.appliedEver };
+    return { items: parsed.items || {}, lastReminderDay: parsed.lastReminderDay || '', appliedEver: !!parsed.appliedEver, pinsDone: parsed.pinsDone || {} };
   } catch (e) {
     Logger.log('RM hierarchy sync: could not read its state (' + e + ') - treating every item as new.');
     return blank;
@@ -465,6 +482,19 @@ function buildRmHierarchySyncReportGs_(info) {
   section('POSSIBLE LEAVERS - kept in RM_Hierarchy; tell Claude which to remove', 'leaver');
   section('OLD SPELLINGS OF CURRENT STAFF - recognised automatically, kept in RM_Hierarchy, nothing to do (check the match is right)', 'alias');
   section('MANAGER EMAIL DIFFERENCES', 'email');
+  // Pinned user-confirmed changes (RULE-092): listed EVERY night while HR Live disagrees - never silenced by the "already reported" state.
+  const pinPending = plan.pinPending || [];
+  const pinResolved = plan.pinResolved || [];
+  if (pinPending.length) {
+    body.push('PENDING IN HR LIVE (user-confirmed changes not yet in the HR sheet - kept as ours, listed every night until HR Live matches) (' + pinPending.length + '):');
+    body.push.apply(body, rmSyncLinesGs_(pinPending.map(function (p) { return p.line; })));
+    body.push('');
+  }
+  if (pinResolved.length) {
+    body.push('NOW MATCHES HR (user-confirmed changes HR Live has caught up with - listed this once; the entry can be deleted from RMSYNC_PINNED_OVERRIDES_) (' + pinResolved.length + '):');
+    body.push.apply(body, rmSyncLinesGs_(pinResolved.map(function (p) { return p.line; })));
+    body.push('');
+  }
   if (info.reminders.length) {
     body.push('MONDAY REMINDER - still open from earlier nights (' + info.reminders.length + '):');
     body.push.apply(body, rmSyncLinesGs_(info.reminders.map(function (i) { return i.line; })));
@@ -481,7 +511,8 @@ function buildRmHierarchySyncReportGs_(info) {
   }
   if (info.backupUrls.length) body.push('Backup of both tabs before this run: ' + info.backupUrls.join(' , '));
   const attention = info.newAttention.filter(function (i) { return i.kind !== 'alias'; }).length; // the old-spelling lines are information, not work
-  const subject = 'RM hierarchy sync ' + info.day + ' - ' + info.mode + ': ' + changeCount + ' change(s)' + (attention ? ', ' + attention + ' for a person to look at' : '');
+  const subject = 'RM hierarchy sync ' + info.day + ' - ' + info.mode + ': ' + changeCount + ' change(s)' + (attention ? ', ' + attention + ' for a person to look at' : '') +
+    ((plan.pinPending || []).length ? ', ' + plan.pinPending.length + ' pending in HR Live' : '');
   return { subject: subject, body: body.join('\n') };
 }
 
@@ -610,7 +641,8 @@ function runRmHierarchySyncGs_(opts) {
   const warnings = [];
   if (!directorySheet) warnings.push('the Manager_Directory tab does not exist, so manager emails were not checked.');
 
-  const plan = computeRmHierarchySyncPlanGs_(hr, rows, directory);
+  const state = readRmSyncStateGs_();
+  const plan = computeRmHierarchySyncPlanGs_(hr, rows, directory, { pins: rmSyncPinnedOverridesGs_(), pinsDone: state.pinsDone });
   const changeCount = plan.newJoiners.length + plan.fixes.length;
   const held = changeCount > RMSYNC_MAX_CHANGES_;
   const applyOn = rmHierarchySyncApplyEnabledGs_() && !testMode;
@@ -623,7 +655,6 @@ function runRmHierarchySyncGs_(opts) {
   }
 
   // What is new tonight vs. still open from earlier nights.
-  const state = readRmSyncStateGs_();
   const attention = rmSyncAttentionItemsGs_(plan);
   const newAttention = [];
   const outstanding = [];
@@ -637,7 +668,7 @@ function runRmHierarchySyncGs_(opts) {
 
   const recipients = rmSyncRecipientsGs_(hr);
   if (recipients.missing.length) warnings.push('no email address found for ' + recipients.missing.join(', ') + ' - they did not get this report.');
-  if (applyResult.problems.length || held || changeCount || plan.emailFills.length || plan.directoryAdds.length || newAttention.length || reminders.length || warnings.length) {
+  if (applyResult.problems.length || held || changeCount || plan.emailFills.length || plan.directoryAdds.length || newAttention.length || reminders.length || warnings.length || plan.pinPending.length || plan.pinResolved.length) {
     const report = buildRmHierarchySyncReportGs_({
       day: day, mode: mode, peopleCount: hr.count, rowCount: rows.length, plan: plan, changeLines: rmSyncChangeLinesGs_(plan),
       newAttention: newAttention, reminders: reminders, applyProblems: applyResult.problems, warnings: warnings, backupUrls: applyResult.backupUrls,
@@ -649,11 +680,13 @@ function runRmHierarchySyncGs_(opts) {
   }
 
   if (!testMode) {
-    const nextState = { items: nextItems, lastReminderDay: dueReminder ? day : state.lastReminderDay, appliedEver: state.appliedEver || (mode === 'APPLIED' && changeCount + plan.emailFills.length + plan.directoryAdds.length > 0) };
+    const pinsDone = Object.assign({}, state.pinsDone);
+    plan.pinResolved.forEach(function (p) { pinsDone[rmSyncHashGs_(p.id)] = day; }); // reported once as matching; inert from now on
+    const nextState = { items: nextItems, lastReminderDay: dueReminder ? day : state.lastReminderDay, appliedEver: state.appliedEver || (mode === 'APPLIED' && changeCount + plan.emailFills.length + plan.directoryAdds.length > 0), pinsDone: pinsDone };
     writeRmSyncStateGs_(nextState);
   }
-  Logger.log('RM hierarchy sync ' + day + ' [' + mode + ']: ' + plan.newJoiners.length + ' new, ' + plan.fixes.length + ' manager change(s), ' + plan.emailFills.length + ' email fill(s), ' + plan.directoryAdds.length + ' directory add(s); ' + plan.aliases.length + ' old spelling(s) recognised; ' + newAttention.length + ' new item(s) listed, ' + outstanding.length + ' still open.');
-  return { mode: mode, plan: plan, held: held, newAttention: newAttention, outstanding: outstanding, reminders: reminders, applyProblems: applyResult.problems, recipients: recipients.to };
+  Logger.log('RM hierarchy sync ' + day + ' [' + mode + ']: ' + plan.newJoiners.length + ' new, ' + plan.fixes.length + ' manager change(s), ' + plan.emailFills.length + ' email fill(s), ' + plan.directoryAdds.length + ' directory add(s); ' + plan.aliases.length + ' old spelling(s) recognised; ' + plan.pinPending.length + ' pinned change(s) pending in HR Live, ' + plan.pinResolved.length + ' now matching; ' + newAttention.length + ' new item(s) listed, ' + outstanding.length + ' still open.');
+  return { mode: mode, plan: plan, held: held, pinPending: plan.pinPending, pinResolved: plan.pinResolved, newAttention: newAttention, outstanding: outstanding, reminders: reminders, applyProblems: applyResult.problems, recipients: recipients.to };
 }
 
 // ==================== Removing confirmed leavers (2026-10-16) ====================
@@ -665,7 +698,9 @@ function runRmHierarchySyncGs_(opts) {
 // those leads would route to the region fallback once the row is gone, so that person is NOT removed and the lead ids are logged
 // for reassignment - unless removeRmHierarchyLeaversForceNow() is run instead. Manager_Directory is only reported on, never changed.
 // Edit this list (and RM_HIERARCHY_RAW_) the next time a person confirms leavers; the 2026-10-16 batch is below.
-const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose'];
+// 2026-10-19: Sanket Yadav (Thane TM; address bounced 2026-10-19) - run applyRmHierarchyReassignmentsNow first (his three S1s), then this.
+// A confirmed leaver is also never re-added by the nightly sync as a "new joiner" while HR Live still lists them (RULE-092).
+const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav'];
 const RMSYNC_LEAVER_LEAD_ID_LOG_LIMIT_ = 200;
 
 // Open leads per normalised RM name, for the names given. All open leads count (not only Google ones): every open lead under a
@@ -805,6 +840,181 @@ function rmSyncForgetLeaverItemsGs_(names) {
 function removeRmHierarchyLeaversNow() { return removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, {}); }
 // Same, but removes a person even when open leads are still assigned to them (the lead ids are still logged).
 function removeRmHierarchyLeaversForceNow() { return removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, { force: true }); }
+
+// ==================== Pinned, user-confirmed changes (2026-10-19) ====================
+// A change a person has confirmed BEFORE the HR roster sheet shows it. The nightly sync compares RM_Hierarchy with HR Live, so
+// without a pin it would "fix" such a row straight back to HR's old manager (apply mode) or nag about it as a mismatch. A pin:
+//   * protects the row: while HR still disagrees, the sync makes no fix and raises no "needs a person" item for that person;
+//   * is listed EVERY night under "PENDING IN HR LIVE" (HR's current value vs ours) - never silenced by the "already reported" state;
+//   * once HR Live agrees, is reported ONCE as "now matches HR" (remembered in the sync state, pinsDone) and then goes inert
+//     (no protection, no listing) - delete the entry at leisure.
+// Manager pin: { name, set: { tl, tm, rh, ch } (exactly what the row should hold; '' = blank), was: [old manager names], since, why }.
+//   HR "matches" when every non-blank value in `set` is in the person's current HR chain and none of `was` is.
+//   applyRmHierarchyReassignmentsNow() writes `set` onto the live tab (backup first, idempotent).
+// Leaver pin: { name, leaver: true, since, why } - also list the name in RMSYNC_CONFIRMED_LEAVERS_ (removal) and take it out of
+//   RM_HIERARCHY_RAW_. Pending while HR Live still lists the person as current staff or as any current person's manager.
+// Future cases: add an entry here (and, for a manager pin, the same values in RM_HIERARCHY_RAW_).
+const RMSYNC_PINNED_OVERRIDES_ = [
+  // 2026-10-19 (confirmed by the user): Thane TM Sanket Yadav left - his address bounced on 2026-10-19 (Email_Reroutes sends his mail to Bipin More).
+  { name: 'Mohit Manwani', set: { tl: 'Ganesh Saroj', tm: '', rh: 'Swapnil Gowalkar', ch: 'Bipin More' }, was: ['Sanket Yadav'], since: '2026-10-19', why: 'TM Sanket Yadav left; reassigned to A1 Ganesh Saroj by the user' },
+  { name: 'Riyan Jamadar', set: { tl: 'Mayuresh Jadhav', tm: '', rh: '', ch: 'Bipin More' }, was: ['Sanket Yadav'], since: '2026-10-19', why: 'TM Sanket Yadav left; reassigned to A1 Mayuresh Jadhav by the user' },
+  { name: 'Tisha Valecha', set: { tl: 'Mayuresh Jadhav', tm: '', rh: '', ch: 'Bipin More' }, was: ['Sanket Yadav'], since: '2026-10-19', why: 'TM Sanket Yadav left; reassigned to A1 Mayuresh Jadhav by the user' },
+  { name: 'Sanket Yadav', leaver: true, since: '2026-10-19', why: 'left - address bounced 2026-10-19' },
+];
+// Indirection so the tests can supply their own pins (the real ones name live people).
+function rmSyncPinnedOverridesGs_() { return RMSYNC_PINNED_OVERRIDES_; }
+
+function rmSyncPinIdGs_(pin) {
+  if (pin.leaver) return 'P|' + normPersonName_(pin.name) + '|leaver';
+  return 'P|' + normPersonName_(pin.name) + '|' + RMSYNC_FIELDS_.map(function (f) { return f + '=' + normPersonName_((pin.set || {})[f] || ''); }).join(',');
+}
+function rmSyncFieldsTextGs_(o) {
+  const parts = RMSYNC_FIELDS_.filter(function (f) { return o && o[f]; }).map(function (f) { return RMSYNC_FIELD_LABEL_[f] + ' ' + o[f]; });
+  return parts.length ? parts.join(', ') : 'no manager';
+}
+
+// Pure. Returns { pending: [{ id, name, line }], resolved: [{ id, name, line }], protectedKeys: { norm: true }, leaverNames: [] }.
+// A pin whose id is in pinsDone was already reported as matching: it is inert (in neither list, protects nothing).
+function rmSyncEvaluatePinsGs_(pins, pinsDone, hr, rows) {
+  const out = { pending: [], resolved: [], protectedKeys: {}, leaverNames: [] };
+  const people = hr.people;
+  const rowsByKey = {};
+  rows.forEach(function (r) { const k = normPersonName_(r.name); (rowsByKey[k] = rowsByKey[k] || []).push(r); });
+  pins.forEach(function (pin) {
+    const key = normPersonName_(pin.name);
+    const id = rmSyncPinIdGs_(pin);
+    if (pin.leaver) { out.leaverNames.push(pin.name); out.protectedKeys[key] = true; }
+    if (pinsDone[rmSyncHashGs_(id)]) return;
+    const person = people[key];
+    const current = !!person && !person.exited;
+    const tag = ' (user-confirmed ' + (pin.since || '?') + (pin.why ? ': ' + pin.why : '') + ')';
+    if (pin.leaver) {
+      const managerOf = Object.keys(people).filter(function (k) {
+        const p = people[k];
+        return !p.exited && k !== key && p.chainNames.map(normPersonName_).indexOf(key) !== -1;
+      }).map(function (k) { return people[k].rawName; }).sort();
+      const still = rowsByKey[key] ? ' - still in RM_Hierarchy: run removeRmHierarchyLeaversNow' : '';
+      if (current || managerOf.length) {
+        const hrSays = [];
+        if (current) hrSays.push('current staff (' + [person.team, person.role, person.code].filter(Boolean).join(', ') + ')');
+        if (managerOf.length) hrSays.push('the manager of ' + managerOf.length + ': ' + managerOf.join(', '));
+        out.pending.push({ id: id, name: pin.name, line: '  * ' + pin.name + ': ours LEFT (removed, never re-added)' + tag + ' - HR Live still lists them as ' + hrSays.join(' and ') + still });
+      } else {
+        out.resolved.push({ id: id, name: pin.name, line: '  * ' + pin.name + ': HR Live no longer lists them as staff or as anyone\'s manager - now matches HR (left)' + still });
+      }
+      return;
+    }
+    const ours = rmSyncFieldsTextGs_(pin.set);
+    const liveRows = rowsByKey[key] || [];
+    let liveNote = '';
+    if (!liveRows.length) liveNote = ' - NOTE: not in RM_Hierarchy';
+    else if (liveRows.some(function (r) { return RMSYNC_FIELDS_.some(function (f) { return normPersonName_(r[f]) !== normPersonName_((pin.set || {})[f] || ''); }); })) {
+      liveNote = ' - NOTE: the live RM_Hierarchy row still has ' + rmSyncFieldsTextGs_(liveRows[0]) + ': run applyRmHierarchyReassignmentsNow';
+    }
+    if (!current) {
+      out.resolved.push({ id: id, name: pin.name, line: '  * ' + pin.name + ': ' + (person ? 'has an Exit date in' : 'is not in') + ' the HR sheet any more - pin no longer needed (ours: ' + ours + ')' });
+      return;
+    }
+    const chainKeys = person.chainNames.map(normPersonName_);
+    const wanted = RMSYNC_FIELDS_.map(function (f) { return (pin.set || {})[f] || ''; }).filter(Boolean);
+    const matches = wanted.every(function (v) { return chainKeys.indexOf(normPersonName_(v)) !== -1; }) &&
+      (pin.was || []).every(function (w) { return chainKeys.indexOf(normPersonName_(w)) === -1; });
+    const hrText = person.chainNames.length ? person.chainNames.join(', ') : 'no manager';
+    const who = pin.name + ' (' + [person.team, person.role].filter(Boolean).join(', ') + ')';
+    if (matches) {
+      out.resolved.push({ id: id, name: pin.name, line: '  * ' + who + ': HR Live now lists ' + hrText + ' - now matches HR (ours: ' + ours + ')' + liveNote });
+      return;
+    }
+    out.protectedKeys[key] = true;
+    out.pending.push({ id: id, name: pin.name, line: '  * ' + who + ': ours ' + ours + tag + ' - HR Live still lists ' + hrText + '. Kept as ours, not reverted' + liveNote });
+  });
+  return out;
+}
+
+// One-off, console-run (2026-10-19): writes each manager pin's tl/tm/rh/ch onto the live RM_Hierarchy tab. Backup to Drive first (no
+// backup, no write); only rows whose name matches exactly (case/spaces ignored); a row already holding the values is left alone, so a
+// re-run writes nothing. TEST MODE writes nothing. Manager_Directory is only reported on (a pinned manager with no row / no email).
+// opts: { now }. Returns { changed, already, notFound, wouldChange, problems, backupUrl, directoryNotes, testMode }.
+function applyRmHierarchyReassignmentsGs_(pins, opts) {
+  const options = opts || {};
+  const testMode = !!TEST_MODE_OVERRIDE_EMAIL_;
+  const day = istDayKeyGs_(options.now || new Date());
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const result = { changed: [], already: [], notFound: [], wouldChange: [], problems: [], backupUrl: '', directoryNotes: [], testMode: testMode };
+  const managerPins = pins.filter(function (p) { return !p.leaver && p.set; });
+  const sheet = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  if (!sheet) throw new Error('The RM_Hierarchy tab does not exist - nothing to change.');
+  const tabHeader = sheet.getRange(1, 1, 1, RMSYNC_TAB_HEADER_.length).getValues()[0].map(function (v) { return rmSyncStr_(v).toLowerCase(); });
+  if (tabHeader.join('|') !== RMSYNC_TAB_HEADER_.join('|')) throw new Error('RM_Hierarchy\'s header row is not "' + RMSYNC_TAB_HEADER_.join(', ') + '", so nothing was changed.');
+  const rows = readRmHierarchyRowsGs_(sheet);
+  const todo = [];
+  managerPins.forEach(function (pin) {
+    const key = normPersonName_(pin.name);
+    const target = RMSYNC_FIELDS_.map(function (f) { return rmSyncStr_((pin.set || {})[f]); });
+    const matches = rows.filter(function (r) { return normPersonName_(r.name) === key; });
+    if (!matches.length) { result.notFound.push(pin.name); return; }
+    matches.forEach(function (r) {
+      const current = RMSYNC_FIELDS_.map(function (f) { return r[f]; });
+      if (current.join('|') === target.join('|')) { result.already.push(r.name); return; }
+      todo.push({ row: r, target: target, current: current });
+    });
+  });
+  result.wouldChange = todo.map(function (t) { return t.row.name + ': ' + rmSyncFieldsTextGs_(t.row) + ' -> ' + rmSyncFieldsTextGs_({ tl: t.target[0], tm: t.target[1], rh: t.target[2], ch: t.target[3] }); });
+
+  // Read-only: every pinned manager should have a Manager_Directory row with an email (only reported, never changed).
+  const directorySheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
+  const dirByKey = {};
+  if (directorySheet) readManagerDirectoryRowsGs_(directorySheet).forEach(function (d) { dirByKey[normPersonName_(d.name)] = d; });
+  const seen = {};
+  managerPins.forEach(function (pin) {
+    RMSYNC_FIELDS_.forEach(function (f) {
+      const v = rmSyncStr_((pin.set || {})[f]);
+      const k = normPersonName_(v);
+      if (!v || seen[k] || !directorySheet) return;
+      seen[k] = true;
+      if (!dirByKey[k]) result.directoryNotes.push(v + ' has no Manager_Directory row');
+      else if (!dirByKey[k].email) result.directoryNotes.push(v + ' has a Manager_Directory row with no email');
+    });
+  });
+
+  if (result.notFound.length) Logger.log('Reassignment: not in RM_Hierarchy (nothing changed for them): ' + result.notFound.join(', ') + '.');
+  if (result.already.length) Logger.log('Reassignment: already as confirmed (nothing to do): ' + result.already.join(', ') + '.');
+  if (result.directoryNotes.length) Logger.log('Reassignment: Manager_Directory (not changed): ' + result.directoryNotes.join('; ') + '.');
+  if (!todo.length) { Logger.log('Reassignment: nothing to change.'); return result; }
+  if (testMode) { Logger.log('Reassignment [TEST MODE]: would change ' + result.wouldChange.join('; ') + ' - nothing was written.'); return result; }
+
+  // No backup, no write.
+  const backup = archiveRowsToDriveCsv_('RM_Hierarchy_sync_backup', RMSYNC_TAB_HEADER_, rows.map(function (r) {
+    return [r.team, r.role, r.name, r.tl, r.tm, r.rh, r.ch, r.excluded, r.note, r.email];
+  }), 'before_reassignment_' + day, { skipManifest: true });
+  if (!backup) throw new Error('The Drive backup of RM_Hierarchy could not be made, so nothing was changed.');
+  result.backupUrl = backup.getUrl();
+  todo.forEach(function (t) {
+    const r = t.row;
+    const nameNow = rmSyncStr_(sheet.getRange(r.rowNumber, 3, 1, 1).getValue());
+    if (normPersonName_(nameNow) !== normPersonName_(r.name)) { result.problems.push('skipped ' + r.name + ': row ' + r.rowNumber + ' changed since it was read (now "' + nameNow + '") - re-run'); return; }
+    withRetry_(function () { sheet.getRange(r.rowNumber, RMSYNC_FIELD_COL_.tl, 1, 4).setValues([t.target]); }, 'reassign ' + r.name + ' in RM_Hierarchy');
+    const changes = RMSYNC_FIELDS_.map(function (f, i) {
+      return t.current[i] === t.target[i] ? '' : f + ' ' + (t.current[i] || '(blank)') + ' -> ' + (t.target[i] || '(blank)');
+    }).filter(Boolean).join(', ');
+    const noteNow = rmSyncStr_(sheet.getRange(r.rowNumber, 9, 1, 1).getValue());
+    const addition = 'reassigned ' + day + ' (user-confirmed): ' + changes;
+    withRetry_(function () { sheet.getRange(r.rowNumber, 9, 1, 1).setValue(noteNow ? noteNow + ' | ' + addition : addition); }, 'reassignment note for ' + r.name);
+    result.changed.push(r.name);
+  });
+  SpreadsheetApp.flush();
+  const after = readRmHierarchyRowsGs_(sheet);
+  todo.forEach(function (t) {
+    if (result.changed.indexOf(t.row.name) === -1) return;
+    const r = after.filter(function (a) { return a.rowNumber === t.row.rowNumber; })[0];
+    if (!r || RMSYNC_FIELDS_.map(function (f) { return r[f]; }).join('|') !== t.target.join('|')) result.problems.push('read-back mismatch: ' + t.row.name + ' is not ' + t.target.join(' / '));
+  });
+  Logger.log('Reassignment: changed ' + result.changed.length + ' row(s): ' + result.wouldChange.join('; ') + '. Backup: ' + result.backupUrl + (result.problems.length ? '. PROBLEMS: ' + result.problems.join('; ') : ''));
+  return result;
+}
+
+// Run once from the editor (2026-10-19): applies the manager pins above to the live tab. Run it BEFORE removeRmHierarchyLeaversNow.
+function applyRmHierarchyReassignmentsNow() { return applyRmHierarchyReassignmentsGs_(rmSyncPinnedOverridesGs_(), {}); }
 
 // ==================== Entry points ====================
 

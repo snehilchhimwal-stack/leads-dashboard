@@ -288,7 +288,8 @@ function runRmHierarchyTests_() {
 
     const tisha = realResolved.find(function (p) { return p.name === 'Tisha Valecha'; });
     TestAssert_(!!tisha, 'resolveRmHierarchy_: new hire "Tisha Valecha" has a row');
-    TestAssertEqual_(JSON.stringify({ tm: tisha && tisha.tm, ch: tisha && tisha.ch }), JSON.stringify({ tm: 'Sanket Yadav', ch: 'Bipin More' }), 'resolveRmHierarchy_: Tisha Valecha resolves through TM Sanket Yadav (her nearest manager is TM-tier by role, despite landing in the export A1 column)');
+    // 2026-10-19: TM Sanket Yadav left (confirmed by the user) -- Tisha now reports to A1 Mayuresh Jadhav (pinned in RmHierarchySync.gs).
+    TestAssertEqual_(JSON.stringify({ tl: tisha && tisha.tl, tm: tisha && tisha.tm, ch: tisha && tisha.ch }), JSON.stringify({ tl: 'Mayuresh Jadhav', tm: '', ch: 'Bipin More' }), 'resolveRmHierarchy_: Tisha Valecha reports to A1 Mayuresh Jadhav since TM Sanket Yadav left (2026-10-19)');
 
     // ---- 2026-09-30: 15 people confirmed departed against the 2026-09-29 HR Live export (compared against the
     // prior 2026-09-21/23 exports before touching anything, not guessed from a blind re-derive; same discipline as

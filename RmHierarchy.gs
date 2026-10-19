@@ -248,7 +248,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Akash Gaikwad','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
   ['Central','S1','Shubham Raj','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['HNI','S1','Sahil Gupta','Pritesh Shankhat','','','Abhhijjit Gandhii'],
-  ['Thane','S1','Mohit Manwani','','Sanket Yadav','','Bipin More'],
+  ['Thane','S1','Mohit Manwani','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'], // 2026-10-19 (confirmed by the user): TM Sanket Yadav left -- now under A1 Ganesh Saroj (pinned in RMSYNC_PINNED_OVERRIDES_ until HR Live shows it)
   ['Thane','A1','Ganesh Saroj','','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Nagmma Mujnayak','Firoj Shaikh','','','Sourabh Sareen'], // 2026-10-13 HR Live: under Firoj Shaikh (was tm Ayaz Bagwan)
   ['Hyderabad','S1','Maagathoti Adilakshmi','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
@@ -353,7 +353,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Vivek Solanke','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['HNI','S1','Mohd Faizan Shaikh','','','','Abhhijjit Gandhii'],
   ['Sourcing - Pune','S3','Vidisha Kakade','','Yash Kalal','','Sourabh Sareen'],
-  ['Thane','TM','Sanket Yadav','','','','Bipin More'],
+  // 2026-10-19: Thane TM Sanket Yadav removed -- left (address bounced 2026-10-19, confirmed by the user); his 3 S1s reassigned above/below. RMSYNC_CONFIRMED_LEAVERS_ removes him from the live tab.
   ['Pune','S1','Krish Sinha','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Akshay Dawle','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Harshith S','','Sampada Pawar','','Vidya Jadhav'],
@@ -366,7 +366,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Loan','Executive','Priyanka Shede','Zahid Shaikh','','','Mayur Panjari'],
   ['Bangalore','S1','Vijay Kumar E','Rahan Khan','','Romen Singh','Mukesh Mishra'],
   ['Central','S1','Farid Shaikh','Akash A Ugale','','','Sanjyota Bhosale'],
-  ['Thane','S1','Riyan Jamadar','','Sanket Yadav','','Bipin More'],
+  ['Thane','S1','Riyan Jamadar','Mayuresh Jadhav','','','Bipin More'], // 2026-10-19 (confirmed by the user): TM Sanket Yadav left -- now under A1 Mayuresh Jadhav (pinned in RMSYNC_PINNED_OVERRIDES_ until HR Live shows it)
   ['Loan','Executive','Mohd Ali Khan','Zahid Shaikh','','','Mayur Panjari'],
   // Mohd Ali Abdul Gaffar, added 2026-10-03 per the user directly, naming
   // the full current loan-BDM roster -- a distinct person from "Mohd Ali
@@ -422,7 +422,7 @@ const RM_HIERARCHY_RAW_ = [
   // roster vs. the 2026-08-31 export's; same "regenerate when the roster
   // changes meaningfully" process this file's own header documents).
   ['Thane','S1','Ayesha Shaikh','','','Swapnil Gowalkar','Bipin More'],
-  ['Thane','S1','Tisha Valecha','','Sanket Yadav','','Bipin More'],
+  ['Thane','S1','Tisha Valecha','Mayuresh Jadhav','','','Bipin More'], // 2026-10-19 (confirmed by the user): TM Sanket Yadav left -- now under A1 Mayuresh Jadhav (pinned in RMSYNC_PINNED_OVERRIDES_ until HR Live shows it)
   // AUTO-REFRESH 2026-09-22 from HR Live  - Sheet1 (2).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Pune','S1','Jay Renavikar','','Rahul Poudel','','Sourabh Sareen'],
   ['Sourcing - Pune','S3','Pranali Dalavi','','Yash Kalal','','Sourabh Sareen'],
