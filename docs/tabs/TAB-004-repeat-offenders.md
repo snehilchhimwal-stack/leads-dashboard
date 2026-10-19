@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence flagging (`HANDOVER.md` §9.7.5): new confidence annotation in the RM table |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; tooltip text only |
 
 ## Purpose / reason to exist
 

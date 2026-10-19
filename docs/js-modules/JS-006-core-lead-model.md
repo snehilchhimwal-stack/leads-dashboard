@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-lead-model.js` (449 lines) |
+| **Location** | `js/core-lead-model.js` (484 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P15 (F18): the call baselines are per lead id; `callsTodayFromBaseline` / `lastSnapshotForLead` added (`FN-346`/`FN-347`; see `## Version / change reference`) |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 449 -> 484 |
 
 ## Purpose / reason to exist
 

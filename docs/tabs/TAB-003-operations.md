@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit (`9efec5d`) — reviewed after `js/overview-distribution-people-ops.js` changed (Overview KPI-strip tile removal, `TAB-002`); this tab's own content untouched |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; Operations section titles/summaries |
 
 ## Purpose / reason to exist
 

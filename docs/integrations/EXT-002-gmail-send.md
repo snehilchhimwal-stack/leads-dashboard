@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Component / Record** | Active / Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 EmailInfra fixes (09eb9ca): base64 body on the Gmail-API ops alert, plain-alert fallback for the "Leads NOT sent" report; `js/reports-gmail.js` unchanged |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); the Gmail send path (GmailApp / Advanced Gmail Service, js/reports-gmail.js) is unchanged |
 
 ## Purpose / reason to exist
 
@@ -197,6 +197,8 @@ note doesn't read as ignored.
 **2026-10-15** (`09eb9ca`, audit 2026-10-13 EI-1/EI-5/EI-10): the raw MIME of the ops alert sent through the Advanced Gmail Service (`sendOpsAlertViaGmailApiGs_`, `GS-004` FN-331) now base64-encodes the body (`Content-Transfer-Encoding: base64`, 76-character lines) instead of sending raw 8-bit text (EI-10). A "Leads NOT sent" report that fails is re-sent as a plain ops alert (EI-1). EI-5 is wording only: the draft-per-attempt behaviour of `withSendRetry_` is unchanged and is now explained in the 17:00 alerts. The other EI fixes in that commit (Region_Recipients lookup, send-gate id matching, watchdog, CH marks) do not touch the send mechanism; the scopes and `js/reports-gmail.js` (no commits since `ec19415`) are unchanged. **Not live until pasted.**
 
 **2026-10-16** (`EmailInfra.gs` consolidated-region helpers, `GS-004`/`GS-001`): no change to how mail is sent. The 17:00 job sends one email (To the person, Cc one configured address) for each name in `ALL_ISSUES_CONSOLIDATED_RECIPIENTS_` instead of one per region, through the same `sendGuardedEmailGs_` path.
+
+**2026-10-17 / 2026-10-19** (`ce5c203`, `06a5084`, `GS-004`): `chLevelReportRealToGs_` / `chLevelReportRoleGs_` only change the role text shown in CH-level report subjects; recipients and the send path are unchanged.
 
 ## Revalidation trigger
 

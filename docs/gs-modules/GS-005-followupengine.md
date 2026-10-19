@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes FE-1..5, SE-3, X-1 (8ef279d): exact-only signal words, 'to let' as property type only, stricter time modifier, Name:-prefixed dated entries |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code (comment text only) |
 
 ## Purpose / reason to exist
 

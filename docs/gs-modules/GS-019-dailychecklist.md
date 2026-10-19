@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fix DC-2/CR-3 (7ef68d3): stage J AMBER when the bounce search failed |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); O1 note tagged 6ca53d2 |
 
 ## Purpose / reason to exist
 
@@ -127,7 +127,7 @@ Apps Script backend; evaluated inside the 16:30 report job (no trigger, no lock 
 
 **2026-10-15** (`7ef68d3`, audit 2026-10-13 DC-2, CR-3): stage J reads the report's new `checkFailed` count (accepted emails whose bounce status is `UNKNOWN (...)`) and is AMBER - "could not be checked: the bounce search failed (missing evidence, not a bounce)" - when nothing bounced but some could not be checked; before, such emails were reported as "not checked yet". **Not live until pasted.**
 
-**2026-10-16** (uncommitted; O1): `dailyChecklistAuditGs_` judges an audit result against the cycle window `[start, end)`, like `cycleReportInWindowGs_` (`GS-016`): a result at exactly the end belongs to the next cycle. `Tests_DailyChecklist.gs`. **Not live until pasted.**
+**2026-10-16** (`6ca53d2`; O1): `dailyChecklistAuditGs_` judges an audit result against the cycle window `[start, end)`, like `cycleReportInWindowGs_` (`GS-016`): a result at exactly the end belongs to the next cycle. `Tests_DailyChecklist.gs`. **Not live until pasted.**
 
 ## Revalidation trigger
 

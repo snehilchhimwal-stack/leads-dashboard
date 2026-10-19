@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 MT-01 follow-up (1f51394): browser cohort coverage floor, twin of the `persistDailyCohortHistoryGs_` retention filter |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code |
 
 ## Purpose / reason to exist
 

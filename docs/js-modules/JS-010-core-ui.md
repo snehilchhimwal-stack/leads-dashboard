@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - TTL re-read: js/core-ui.js unchanged since 1ea5152 (2026-09-02); function names, anchors and line count (159) re-checked |
 
 ## Purpose / reason to exist
 

@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `SlaEngine.gs` (357 lines) |
+| **Location** | `SlaEngine.gs` (366 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes SE-1, SE-2, DR-10 note (8ef279d): text date cells parsed like the dashboard; a move into Behind on Today's Calls is category_changed |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 357 -> 366 |
 
 ## Purpose / reason to exist
 

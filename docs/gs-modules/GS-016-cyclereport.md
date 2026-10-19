@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes CR-1/2/3, EL-6 (7ef68d3): early-trigger window, scheduled window stops at 16:30, "check failed" bounce count, Email Ops retention after the send |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); O1 note tagged 6ca53d2 |
 
 ## Purpose / reason to exist
 
@@ -156,7 +156,7 @@ Apps Script backend; a time-driven job (16:30 IST) with a run record watched by 
 
 **2026-10-15** (`7ef68d3`, audit 2026-10-13 CR-1, CR-2, CR-3, EL-6): a trigger that fires from 16:00 reports on today's cycle (CR-1, CFG-135), and the scheduled run's window stops at 16:30 so late-firing runs do not double-count the 17:00 job's rows (CR-2; RULE-080). The "Bounces and replies" section shows a failed bounce search as "Check failed" instead of "Not checked yet" (CR-3). After the send it runs the Email Ops tab retention (`GS-015` FN-481, RULE-079). **Not live until pasted.**
 
-**2026-10-16** (uncommitted; observation O1, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): `cycleReportInWindowGs_` is now `[start, end)` - start inclusive, end exclusive - so a row at exactly 16:30:00.000 is counted in one report (the next), not two. `Tests_EmailLifecycleMatrix.gs` M9. **Not live until pasted.**
+**2026-10-16** (`6ca53d2`; observation O1, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): `cycleReportInWindowGs_` is now `[start, end)` - start inclusive, end exclusive - so a row at exactly 16:30:00.000 is counted in one report (the next), not two. `Tests_EmailLifecycleMatrix.gs` M9. **Not live until pasted.**
 
 ## Revalidation trigger
 

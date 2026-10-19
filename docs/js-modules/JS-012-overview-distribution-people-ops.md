@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/overview-distribution-people-ops.js` (1595 lines — the largest tab file) |
+| **Location** | `js/overview-distribution-people-ops.js` (1571 lines — the largest tab file) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-03 against commit (`9efec5d`) |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 1595 -> 1571 |
 
 ## Purpose / reason to exist
 

@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/reports-build.js` (1283 lines) |
+| **Location** | `js/reports-build.js` (1281 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `71162ff` — revalidated in this sweep (all 9 FN-XXX line anchors, REGION_GROUP_MAP's 11-region count, the Loan-region-override gap re-checked against source); file moved past the prior cited commit but no claim this record makes was affected
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 1283 -> 1281 |
 
 ## Purpose / reason to exist
 

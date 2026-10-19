@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `EmailInfra.gs` (1537 lines) |
+| **Location** | `EmailInfra.gs` (1567 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes EI-1..EI-13 (09eb9ca) |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); line count corrected 1537 -> 1567; 2026-10-19 by-name no-role note added; FN-529/530, CFG-145/146 added |
 
 ## Purpose / reason to exist
 
@@ -92,6 +92,8 @@ Never — no `setupXxx()`, no schedule.
 | FN-460 | `legacyRecipientForRegionGs_(legacyRecipients, region)` `#L1372` | the `loadRegionRecipients_` map + a region | that region's `Region_Recipients` entry, or `null`: an exact key wins, else the first key equal under `normRegionKeyGs_` (case, spacing, `-`/`_`) | none (pure) | `normRegionKeyGs_` (FN-200) | `resolveRecipientEmailsForRegion_` (FN-198), legacy fallback branch | reusable — **added 2026-10-13 (audit EI-8)**, lookup side only: the map's keys and `loadRegionRecipients_` are unchanged; a hand-typed "navi mumbai" row no longer falls through to the CH backstop |
 | FN-461 | `textContainsIdGs_(text, id)` `#L735` | a body text + a lead id | `true` when the id occurs as a whole token (no letter, digit or `_` on either side) | none (pure) | — | `prepareOutgoingEmailGs_` (FN-323), plain and visible-HTML checks | reusable — **added 2026-10-13 (audit EI-4)**: the send gate used plain `indexOf`, so lead `123` counted as present inside `41234` |
 | FN-462 | `pnlHeadConfigProblemsGs_()` `#L150` | none | `[{key: 'pnl:<name>', detail}]` for each `REGION_PNL_HEAD_CC_` (CFG-070) name with no address in `Manager_Directory`, naming the regions affected | reads `RM_Hierarchy` / `Manager_Directory` via `loadRmHierarchyAndEmails_` (`GS-011`) only when both tabs already exist (never creates them); an unreadable directory is logged and returns `[]` | `loadRmHierarchyAndEmails_` (`GS-011`) | `emailConfigProblemsGs_` (FN-339), hence the watchdog's once-a-day config alert (FN-333) | specific — **added 2026-10-13 (audit EI-11)**: a missing P&L-head row used to drop that region's P&L Cc on every run with only a Logger line |
+| FN-529 | `chLevelReportRealToGs_()` `#L279` / `chLevelReportRoleGs_(role)` `#L292` | a CH role | the real (pre-TEST-MODE) CH-level To; the role to show, or '' when any real recipient is on the no-role list | none (`resolvedEmailForNameGs_` failures are swallowed) | `opsAlertEmailGs_` / `chLevelEmailGs_` / `resolvedEmailForNameGs_` (FN-338) | `notifyChLevelIssuesGs_` (`GS-001`), `notifyChLevelLeadsGs_` (`GS-010`) | specific — display only (2026-10-17 by address, 2026-10-19 by name) |
+| FN-530 | `consolidatedRegionKeyGs_(personName)` `#L367` / `isMultiRegionKeyGs_(regionKey)` `#L369` | a person's name / a region key | `'Multi-region: <name>'` / true for `FUTWORK_REGION_KEY_` or a consolidated key | none | — | `GS-001` 17:00, `GS-010` 10:00/13:00, `regionHeaderOptsGs_` (FN-292) | reusable — the pseudo-region convention for multi-region emails (2026-10-16) |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -114,6 +116,8 @@ Never — no `setupXxx()`, no schedule.
 | CFG-091 | `TRANSIENT_ERROR_RE_` `#L614` | `/timed out\|service (spreadsheets\|gmail\|error)\|internal error\|server error occurred/i` | the error wording `withRetry_` (FN-196) treats as Google's own transient hiccup and retries (4 attempts, 2 s + 4 s + 6 s backoff). `server error occurred` was added 2026-10-07 (email audit P12 / F22) — the platform's "We're sorry, a server error occurred. Please wait a bit and try again." ended the 2 Oct 13:00 run `Failed`. Deliberately narrow: a permanent refusal (quota, permission) is still thrown on the first attempt |
 | CFG-092 | `OPS_ALERT_NAME_` `#L61` / `CH_LEVEL_NAME_` `#L62` / `FUTWORK_ROUTE_NAME_` `#L63` (+ blank overrides `OPS_ALERT_EMAIL_` `#L85`, `CH_LEVEL_EMAIL_` `#L108`, `FUTWORK_ROUTE_EMAIL_` `#L119`) | `'Snehil Chhimwal'` / `'Ashish Ivlekar'` / `'Snehil Chhimwal'`; the three `*_EMAIL_` overrides are `''` | **added 2026-10-07 (email audit P13 / F24)** — the people the ops-alert, CH-level and Futwork-route addresses belong to. The repository is public, so it holds only these NAMES; each address is looked up from `RmHierarchy.private.gs` (git-ignored) at the moment it is needed, via the accessors in FN-338. Personnel change = edit the name here AND add the person's row to the private file |
 | CFG-114 | `LEADS_FRESH_AMBER_HOURS_`, `LEADS_FRESH_RED_HOURS_` | `3`, `5` | the Leads-tab freshness thresholds in hours (decision D4); moved here from `CycleReport.gs` on 2026-10-09 so the rules sit with the other shared helpers. A 16:30 report warning only - not the same thing as a *stale lead* (`GS-021`) | the 16:30 report's AMBER/RED for the Leads tab |
+| CFG-145 | `CH_REPORT_NO_ROLE_EMAILS_` `#L288` / `CH_REPORT_NO_ROLE_NAMES_` `#L291` (both `let`, test-overridable) | `['snehil.chhimwal@gmail.com']` / `['Snehil Chhimwal']` | CH-level reports to any of these (by address, or by the name's address in the private employee table) show no role label | `chLevelReportRoleGs_` (FN-529); `Tests_Mocks.gs` empties both |
+| CFG-146 | `CONSOLIDATED_REGION_KEY_PREFIX_` `#L366` | `'Multi-region: '` | prefix of a consolidated person's pseudo-region key | `consolidatedRegionKeyGs_` / `isMultiRegionKeyGs_` (FN-530); stored keys in `AllIssues_Log` / `Email_Ledger` carry it |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -291,6 +295,8 @@ local `.gs` tests pass (+1 new).
 **2026-10-16** (consolidated 17:00 recipients, `GS-001`): `CONSOLIDATED_REGION_KEY_PREFIX_` ('Multi-region: '), `consolidatedRegionKeyGs_(name)` and `isMultiRegionKeyGs_(key)` (true for `FUTWORK_REGION_KEY_` or a consolidated key). `regionHeaderOptsGs_` (FN-292) now spells out real regions for any multi-region key, and its no-regions fallback returns the key itself. `resolveRecipientEmailsForRegion_` is unchanged.
 
 **2026-10-17** (CH-level no-role, user request): `chLevelReportToGs_` now delegates to new `chLevelReportRealToGs_()` (ops + CH-level, ignoring TEST MODE). New `let CH_REPORT_NO_ROLE_EMAILS_ = ['snehil.chhimwal@gmail.com']` and `chLevelReportRoleGs_(role)`: '' when any real CH-level recipient matches the list (case-insensitive, trimmed), else the role. Used for the subjects of `notifyChLevelLeadsGs_` (`GS-010`) and `notifyChLevelIssuesGs_` (`GS-001`). `Tests_Mocks.gs` saves/empties/restores the list.
+
+**2026-10-19** (`06a5084`, CH-level no-role by name, user request): new `let CH_REPORT_NO_ROLE_NAMES_ = ['Snehil Chhimwal']` (CFG-145). `chLevelReportRoleGs_` (FN-529) also resolves each name through `resolvedEmailForNameGs_` (the private employee table; a lookup that throws counts as no address) and adds it to the no-role list, because his CH-level reports go to his work address, which never appears in this file. Display only, as before.
 
 ## Revalidation trigger
 

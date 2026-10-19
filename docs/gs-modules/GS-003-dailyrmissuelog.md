@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `GS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `DailyRmIssueLog.gs` (1783 lines) |
+| **Location** | `DailyRmIssueLog.gs` (1781 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes DR-01..DR-12 (450565a): completion marker, dedup-safe backfills, RM Performance forward-fill, shared write path |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 1783 -> 1781 |
 
 ## Purpose / reason to exist
 

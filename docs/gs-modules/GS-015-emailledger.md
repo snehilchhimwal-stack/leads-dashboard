@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active (wired into the 17:00, 10:00 and 13:00 jobs and both CH-level reports) |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes EL-1..10, FT-3 (7ef68d3): ledger plan/confirmation fixes, incident retry, Email Ops tab retention |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); change-note tags fixed (D1/D2 = 6ca53d2; D5/D6 = da197cd, live) |
 
 ## Purpose / reason to exist
 
@@ -183,9 +183,9 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 **2026-10-15** (`7ef68d3`, audit 2026-10-13 EL-1..EL-10, FT-3): the same email id twice in one plan batch is planned once (EL-1), and a re-run that knows the final state settles a row a crashed run left PLANNED (EL-2). A held/released alert's confirmation line counts only this run's rows (EL-7), and incident ids carry a per-execution token so two runs in one second cannot collide (EL-10). The watchdog claims incidents (RELEASING) before sending and re-sends a SEND-FAILED alert at most twice within 24 h (EL-3; FN-482, CFG-134, EXC-155). The day-block writer scans the whole day's block (EL-9), never deletes the previous day's rows on a retry (EL-4) and clears the block for an empty day (FT-3). Pruning is shared (FN-480): a blank day cell no longer stops it (EL-8) and the handle's row numbers follow a prune (EL-5). New `pruneEmailOpsTabsGs_` (FN-481, RULE-079) gives `Incident_Log`, `Email_Reroutes`, `Daily_Report`, `Daily_Checklist` and `Followup_Tracker` the same 90-day retention, run by the 16:30 report (EL-6). **Not live until pasted.**
 
-**2026-10-16** (uncommitted; email E2E defects D1/D2/O3, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): (D1) when the plan block write throws, `emailLedgerRelocateGs_` re-reads the ledger tail and indexes the rows of the block that DID land, so the attempt/result are recorded and the recovery never re-sends a delivered email as "never attempted"; the failure is still reported. (D2) `emailLedgerRecoveryTargetsGs_` decides per `email_id`: an id with any ACCEPTED/UNCONFIRMED/ATTEMPTING row is not a target, and an id is targeted once. (O3) `emailLedgerTrackSendGs_` keeps the lead ids on an UNCONFIRMED row (FAILED/BLOCKED still record none). Tests: `Tests_EmailLifecycleMatrix.gs` M1/M5/M6. **Not live until pasted.**
+**2026-10-16** (`6ca53d2`; email E2E defects D1/D2/O3, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): (D1) when the plan block write throws, `emailLedgerRelocateGs_` re-reads the ledger tail and indexes the rows of the block that DID land, so the attempt/result are recorded and the recovery never re-sends a delivered email as "never attempted"; the failure is still reported. (D2) `emailLedgerRecoveryTargetsGs_` decides per `email_id`: an id with any ACCEPTED/UNCONFIRMED/ATTEMPTING row is not a target, and an id is targeted once. (O3) `emailLedgerTrackSendGs_` keeps the lead ids on an UNCONFIRMED row (FAILED/BLOCKED still record none). Tests: `Tests_EmailLifecycleMatrix.gs` M1/M5/M6. **Not live until pasted.**
 
-**2026-10-16** (email E2E defects D5/D6; not yet live): new FN-487 `emailLedgerSentOrMaybeSentTodayGs_` - the 17:00 "already sent today" rule (AI-3) per email id, with each row's lead ids, for the 10:00 and 13:00 re-run guards (`GS-010`).
+**2026-10-16** (`da197cd`, email E2E defects D5/D6; live — deploy register: EmailLedger.gs confirmed at da197cd on 2026-10-16): new FN-487 `emailLedgerSentOrMaybeSentTodayGs_` - the 17:00 "already sent today" rule (AI-3) per email id, with each row's lead ids, for the 10:00 and 13:00 re-run guards (`GS-010`).
 
 ## Revalidation trigger
 

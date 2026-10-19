@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - TTL re-read: js/core-sheets-fetch.js unchanged since 55bf870 (2026-09-22); function names, anchors and line count (190) re-checked |
 
 ## Purpose / reason to exist
 

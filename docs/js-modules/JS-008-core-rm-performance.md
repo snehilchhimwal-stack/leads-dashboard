@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Type** | `JS-` (see `../NAMING_CONVENTIONS.md`) |
-| **Location** | `js/core-rm-performance.js` (1425 lines) |
+| **Location** | `js/core-rm-performance.js` (1422 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fix DR-02 JS twin (450565a): forward-fill last known record onto capture days |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 1425 -> 1422 |
 
 ## Purpose / reason to exist
 

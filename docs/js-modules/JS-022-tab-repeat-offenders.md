@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `5802f35` — posterior-confidence annotation added to `rmPerformanceTableHtml`'s Status chip (`JS-008` FN-318, HANDOVER.md §9.7.5) |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code |
 
 ## Purpose / reason to exist
 

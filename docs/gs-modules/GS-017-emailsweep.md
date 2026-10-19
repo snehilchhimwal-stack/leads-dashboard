@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-15 against commit `1f51394` - audit 2026-10-13 fixes ES-1..4, ER-1/ER-3 (7ef68d3): whole-address bounce matching, recorded bounces kept, moved-rows guard |
+| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); D3/D4/O2 note tagged 6ca53d2 |
 
 ## Purpose / reason to exist
 
@@ -139,7 +139,7 @@ Apps Script backend; four time-driven jobs (10:30, 13:30, 15:30, 17:30 IST) with
 
 **2026-10-15** (`7ef68d3`, audit 2026-10-13 ES-1, ES-2, ES-3, ES-4, ER-1, ER-3): a bounce now names an address only as a whole address, and only the addresses the bounce reports as failed count when it states them (FN-483, shared with `GS-022`; RULE-052). A failed or capped (100 threads) bounce search no longer overwrites a recorded `BOUNCED` (ES-1/ES-4; RULE-053, EXC-157). Before writing, the sweep checks the ledger rows did not move (a prune) and otherwise writes nothing that run (ES-2; FN-484, EXC-156); the entry-point comment now says the sweep overlaps the email jobs and points to the re-send lock in `GS-022` (ES-3). No trigger change. **Not live until pasted.**
 
-**2026-10-16** (uncommitted; D3/D4/O2, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): with the 10:00 and 17:00 rows now recording their subject (D4), a subject quoted as `Re: <subject>` no longer matches a row whose own subject lacks the `Re:` (the 13:00 reply's bounce stays off the 10:00 row - D3); a `followup13` row is matched by `Re: <stored 10:00 subject>` (`emailSweepRowSubjectGs_`, `emailSweepQuotesSubjectGs_`). When several bounces match, the EARLIEST is used, and an already-recorded earlier `BOUNCED` time is never replaced by a later one (O2). `Tests_EmailLifecycleMatrix.gs` M1/M8. **Not live until pasted.**
+**2026-10-16** (`6ca53d2`; D3/D4/O2, `docs/_planning/EMAIL_E2E_COVERAGE_2026-10-16.md`): with the 10:00 and 17:00 rows now recording their subject (D4), a subject quoted as `Re: <subject>` no longer matches a row whose own subject lacks the `Re:` (the 13:00 reply's bounce stays off the 10:00 row - D3); a `followup13` row is matched by `Re: <stored 10:00 subject>` (`emailSweepRowSubjectGs_`, `emailSweepQuotesSubjectGs_`). When several bounces match, the EARLIEST is used, and an already-recorded earlier `BOUNCED` time is never replaced by a later one (O2). `Tests_EmailLifecycleMatrix.gs` M1/M8. **Not live until pasted.**
 
 ## Revalidation trigger
 
