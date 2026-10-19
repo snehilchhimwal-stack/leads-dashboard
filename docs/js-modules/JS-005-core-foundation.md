@@ -52,7 +52,7 @@ mostly doesn't matter.
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-003 | `CONFIG.MIN_CALLS_PER_DAY` `#L32` | `5` | under-called-today threshold | `enrichLead` `underCalledToday` (`JS-006` RULE), `GS-012` `MIN_CALLS_PER_DAY_` twin |
+| CFG-003 | `CONFIG.MIN_CALLS_PER_DAY` `#L32` | `3` (was `5` until 2026-10-19) | under-called-today threshold | `enrichLead` `underCalledToday` (`JS-006` RULE), `GS-012` `MIN_CALLS_PER_DAY_` twin |
 | CFG-004 | `CONFIG.LEAD_LIFECYCLE_HOURS` `#L34` | `48` | stuck-48h boundary | `enrichLead` `stageStuck48h`; `GS-012` `LEAD_LIFECYCLE_HOURS_` twin |
 | CFG-005 | `CONFIG.FIRST_CONTACT_SLA_MINUTES` `#L35` | `10` | first-contact breach window | `enrichLead` `firstContactBreach`; `GS-012` twin |
 | CFG-006 | `CONFIG.LEAD_GRACE_HOURS` `#L49` | `3` | grace before SLA flags apply | `enrichLead`; `GS-012` `LEAD_GRACE_HOURS_` twin |
@@ -61,7 +61,7 @@ mostly doesn't matter.
 | CFG-009 | `CONFIG.FUNNEL_ORDER` `#L51` | 9-stage list | canonical funnel ordering | `canonicalStage` / `isOppOrAbove` (`JS-006`); `Core.gs` `FUNNEL_ORDER_` (ported verbatim) |
 | CFG-010 | `CONFIG.CLOSED_STAGE_EXACT` / `CLOSED_STAGE_STEMS` `#L85/#L86` | `['won','lost','junk','dead','not interested']` / `['cancel','close','reject']` | closed-stage detection | `isClosedStage` (`JS-006`); `Core.gs` `CLOSED_STAGE_EXACT_` / `_STEMS_` twins |
 | CFG-011 | `IST_OFFSET_MS` `#L135` | `330 * 60000` (+05:30, no DST) | the IST offset all helpers use | every IST helper here |
-| CFG-012 | `ISSUE_PRIORITY` `#L116` | ordered issue-type list | tie-break order for a lead's primary issue | Operations card ordering; `SlaEngine.gs` `primaryIssueGs_` shares the order |
+| CFG-012 | `ISSUE_PRIORITY` `#L116` | ordered issue-type list (`followupOverdue` labelled "No follow up in last 4 hours" since 2026-10-19, was "Follow-up Overdue (4h Post-Connect)") | tie-break order for a lead's primary issue | Operations card ordering; `SlaEngine.gs` `primaryIssueGs_` shares the order |
 
 ## Data lineage
 
@@ -134,6 +134,8 @@ None directly. `renderCardsByDay` output appears on `TAB-001` /
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-027.
+
+**2026-10-19** (user request): `CONFIG.MIN_CALLS_PER_DAY` 5 -> 3 (twin `MIN_CALLS_PER_DAY_`, `GS-012` CFG-059); `ISSUE_PRIORITY`'s `followupOverdue` label is now "No follow up in last 4 hours". The dashboard keys history on rule keys, so no stored label needed mapping on this side.
 
 ## Revalidation trigger
 

@@ -110,7 +110,7 @@ function runEmailLifecycleFullCycleTests_() {
       const snapshotWritten = JSON.parse(rowAfter17[9]);
       TestAssertEqual_(snapshotWritten.length, 1, 'Full cycle 17:00: the real snapshot has exactly 1 lead');
       TestAssertEqual_(snapshotWritten[0].lead_id, 'L-CYCLE', 'Full cycle 17:00: the real snapshot names L-CYCLE');
-      TestAssertEqual_(snapshotWritten[0].issueLabel, 'Follow-up Overdue', 'Full cycle 17:00: the real snapshot records the correct issue label');
+      TestAssertEqual_(snapshotWritten[0].issueLabel, 'No follow up in last 4 hours', 'Full cycle 17:00: the real snapshot records the correct issue label (renamed from Follow-up Overdue 2026-10-19)');
       TestAssert_(!rowAfter17[10] && !rowAfter17[11], 'Full cycle 17:00: checkpoint1_json/checkpoint1_sent_at are still blank — not written until the 10:00 job runs');
       TestAssertContains_(rowAfter17[5], TEST_EMAIL_SECONDARY_, 'Full cycle 17:00: the stored Cc (col F) includes the P&L head, so the next-day checkpoints carry it too');
 

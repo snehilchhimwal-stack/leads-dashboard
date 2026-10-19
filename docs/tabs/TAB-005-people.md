@@ -146,6 +146,8 @@ Empty `leads` → zeroed score tables.
 
 Verified at `c82ec67`; record created by DOC-026.
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `js/overview-distribution-people-ops.js`: People tooltips say fewer than 3 calls (was 5); label "No follow up in last 4 hours".
+
 ## Revalidation trigger
 
 Any commit touching `js/overview-distribution-people-ops.js` (score

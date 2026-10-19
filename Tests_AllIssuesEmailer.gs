@@ -37,11 +37,11 @@ function runAllIssuesEmailerTests_() {
     // reliably the same IST calendar day as `now` if this suite happens
     // to run within the first N hours after midnight IST.
     TestAIE_leadRow_(header, { lead_id: 'L-INACTIVE', client_id: 'C-INACTIVE', RM: 'Test RM One', lead_assigned_at: now, rm_is_active: false }),
-    // Not Updated: never connected past the 10-min window.
-    TestAIE_leadRow_(header, { lead_id: 'L-NOTUPDATED', client_id: 'C-NOTUPDATED', RM: 'Test RM Two', lead_assigned_at: midWindow, current_stage: 'Suspect' }),
+    // Not Updated: stage text 'Not Updated', past the 3h grace (midWindow is many hours back).
+    TestAIE_leadRow_(header, { lead_id: 'L-NOTUPDATED', client_id: 'C-NOTUPDATED', RM: 'Test RM Two', lead_assigned_at: midWindow, current_stage: 'Not Updated' }), // 2026-10-19: stage text is now the only Not Updated test
     // Behind on Today's Calls: created within window, few attempts, but
     // ALREADY connected (so it doesn't also trip Not Updated) and no
-    // stale comment (so it doesn't also trip Follow-up Overdue) —
+    // stale comment (so it doesn't also trip No follow up in last 4 hours) —
     // isolates underCalledToday as the ONLY thing flagged.
     TestAIE_leadRow_(header, {
       lead_id: 'L-UNDERCALLED', client_id: 'C-UNDERCALLED', RM: 'Test RM One', lead_assigned_at: TestFixture_hoursAgo_(now, 5),

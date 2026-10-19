@@ -29,7 +29,7 @@
 // ============================================================
 
 const CONFIG = {
-  MIN_CALLS_PER_DAY: 5,
+  MIN_CALLS_PER_DAY: 3,   // 2026-10-19: was 5 (user request); twin of SlaEngine.gs MIN_CALLS_PER_DAY_
   MIN_CALLS_AFTER_48H: 10,
   LEAD_LIFECYCLE_HOURS: 48,
   FIRST_CONTACT_SLA_MINUTES: 10,
@@ -106,7 +106,7 @@ const CONFIG = {
 // the 10-minute window) that already happened and can't be corrected —
 // unlike every other entry here, there is no follow-up action left to take
 // on the LEAD itself. Letting it sit in this shared priority list meant it
-// could outrank a genuinely still-actionable issue (e.g. Follow-up Overdue)
+// could outrank a genuinely still-actionable issue (e.g. No follow up in last 4 hours)
 // for the same lead in the combined report, hiding the thing someone could
 // actually still do something about, and it polluted "flagged"/"stalled"/
 // "remediate" stats built for things that DO get remediated. It still has
@@ -116,7 +116,7 @@ const CONFIG = {
 const ISSUE_PRIORITY = [
   { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added' },
   { key: 'isNotUpdated', label: 'Not Updated' },
-  { key: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)' },
+  { key: 'followupOverdue', label: 'No follow up in last 4 hours' },   // was 'Follow-up Overdue (4h Post-Connect)' until 2026-10-19
   { key: 'underCalledToday', label: "Behind on Today's Calls" },
   { key: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)' },
 ];

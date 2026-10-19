@@ -163,6 +163,8 @@ Verified at `c82ec67`; record created by DOC-026.
 
 **2026-10-15** (`1f51394`, audit 2026-10-13 MT-01 follow-up, `js/tab-tracking.js` only): `eligibleDailyCohortDates` now ignores `Movement_Log` snapshots older than `MOVEMENT_LOG_COVERAGE_DAYS` (7, kept equal to `MovementTracker.gs`'s `MOVEMENT_LOG_RETENTION_DAYS`) when finding the earliest coverage, and returns no dates when nothing is inside that window. Why: since MT-01 the `Movement_Log` prune keeps each live lead's newest row however old it is, so those rows would have moved "earliest coverage" back by weeks and made long-past, never-archived days newly eligible with degraded evidence. Twin of the retention filter in `persistDailyCohortHistoryGs_` (`GS-008`), which drops those rows before the Apps Script cohort phase; the browser floor applies only to the earliest-coverage bound (the floor uses the browser clock, `Date.now()`). Live after push to GitHub Pages (repo not pushed yet).
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): Tracking: the `followupOverdue` series is labelled "No follow up in last 4 hours" (keyed by rule key, so old days keep plotting).
+
 ## Revalidation trigger
 
 Any commit touching `js/tab-tracking.js`; `buildTrackingChartSvg` changes

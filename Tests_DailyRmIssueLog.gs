@@ -1603,6 +1603,16 @@ function runDailyRmIssueLogTests_() {
     const elCtx = computeRmPerfEligibilityGs_(TestDRIL_row_({ lead_assigned_at: new Date(elNow.getTime() - 10 * 3600000), last_connect_time: new Date(elNow.getTime() - 3600000) }), buildColIndex_(elHeader), elNow);
     TestAssert_(!!elCtx && elCtx.pastGrace && elCtx.isUnder48h && elCtx.hasConnected && elCtx.isCreatedThatDay, 'computeRmPerfEligibilityGs_: Date cells are read the same with or without SlaEngine.gs\'s parseSlaDateGs_');
     TestAssertEqual_(computeRmPerfEligibilityGs_(TestDRIL_row_({ lead_assigned_at: '' }), buildColIndex_(elHeader), elNow), null, 'computeRmPerfEligibilityGs_: a blank lead_assigned_at is undatable (null)');
+
+    // 2026-10-19: Not Updated lost its "never connected past 10 minutes" branch, so its eligibility is pastGrace alone - a
+    // never-connected lead 1h old is NOT eligible any more; at 4h it is. The renamed follow-up rule keeps its label in step.
+    const elNotUpdated = RM_PERF_RULES_GS_.filter(function (r) { return r.key === 'isNotUpdated'; })[0];
+    const elYoung = computeRmPerfEligibilityGs_(TestDRIL_row_({ lead_assigned_at: new Date(elNow.getTime() - 1 * 3600000), last_connect_time: '' }), buildColIndex_(elHeader), elNow);
+    const elOlder = computeRmPerfEligibilityGs_(TestDRIL_row_({ lead_assigned_at: new Date(elNow.getTime() - 4 * 3600000), last_connect_time: '' }), buildColIndex_(elHeader), elNow);
+    TestAssert_(elNotUpdated.eligible(elYoung) === false, 'RM_PERF_RULES_GS_ (2026-10-19): a never-connected lead 1h old is not eligible for Not Updated (inside grace)');
+    TestAssert_(elNotUpdated.eligible(elOlder) === true, 'RM_PERF_RULES_GS_ (2026-10-19): a lead 4h old is eligible for Not Updated (past grace)');
+    TestAssert_(!('neverConnectedPastWindow' in elYoung), 'computeRmPerfEligibilityGs_ (2026-10-19): no neverConnectedPastWindow field any more');
+    TestAssertEqual_(RM_PERF_RULES_GS_.filter(function (r) { return r.key === 'followupOverdue'; })[0].label, 'No follow up in last 4 hours', 'RM_PERF_RULES_GS_ (2026-10-19): followupOverdue carries the renamed label');
   } finally {
     TestEnv_tearDown_();
   }

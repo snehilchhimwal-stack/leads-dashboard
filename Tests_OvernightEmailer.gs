@@ -220,11 +220,8 @@ function runOvernightEmailerTests_() {
     // Checkpoint leads' CURRENT state, appended directly to the SAME
     // leads tab already in use — L-PUNE-RESOLVED and L-ALLDONE closed
     // (-> resolved), L-CKPT-PUNE / L-CKPT-HARBOUR still open with the
-    // literal 'Not Updated' stage text (-> still_open; deliberately NOT
-    // relying on the never-connected-past-10-minutes business-hours-gated
-    // path, which Tests_SlaEngine.gs already covers with a fixed clock —
-    // this file uses the real wall clock, so only a time-of-day-independent
-    // trigger belongs in a fixture here).
+    // literal 'Not Updated' stage text (-> still_open; since 2026-10-19 the
+    // stage text past grace is the only Not Updated trigger).
     ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-CKPT-PUNE', client_id: 'C-CKPT-PUNE', RM: 'Test RM One', current_stage: 'Not Updated', lead_assigned_at: TestFixture_hoursAgo_(now, 5) }));
     ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-PUNE-RESOLVED', client_id: 'C-PUNE-RESOLVED', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
     ss._sheets[monthShort].appendRow(TestOE_leadRow_(header, { lead_id: 'L-ALLDONE', client_id: 'C-ALLDONE', RM: 'Test RM Two', current_stage: 'Won', lead_assigned_at: TestFixture_hoursAgo_(now, 60) }));
@@ -1171,7 +1168,7 @@ function runOvernightEmailerTests_() {
       TestAssertContains_(d.body, 'Section 1 - Overnight Leads', '10:00 plain text: labels Section 1');
       TestAssertContains_(d.body, 'No overnight leads for your team today.', '10:00 plain text: shows Section 1\'s empty state');
       TestAssertContains_(d.body, 'Section 2 - Previous Day 17:00 All-Issues Follow-up', '10:00 plain text: labels Section 2');
-      TestAssertContains_(d.body, 'Still open — Follow-up Overdue', '10:00 plain text: carries the lead\'s current state');
+      TestAssertContains_(d.body, 'Still open — No follow up in last 4 hours', '10:00 plain text: carries the lead\'s current state (the stored legacy label "Follow-up Overdue" maps to the renamed one, so it stays still_open)');
       TestAssertContains_(d.body, 'Combined morning digest for Pune', '10:00 plain text: still opens with the one-line summary');
       TestAssertEqual_(d.body.split('Regards,').length - 1, 1, '10:00 plain text: one signature');
 

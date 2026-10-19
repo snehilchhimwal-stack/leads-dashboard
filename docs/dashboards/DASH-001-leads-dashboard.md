@@ -298,6 +298,8 @@ compared with the all-Google official Jul/Aug rows. It also explains the
 "Live · partial" tag (the leads tab keeps ~7 days). No tab, button,
 script or load order changed; see `TAB-009` / `JS-025`.
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `dashboard.html`: Operations texts follow the 2026-10-19 SLA rules (`GS-012` RULE-089/090, 3 calls a day): Not Updated is the stage text past grace only; the follow-up card is "No follow up in last 4 hours" (later of last comment and last connect); Behind on Today's Calls says fewer than 3.
+
 ## Revalidation trigger
 
 Any of: a `js/*.js` file added or removed (changes the module count and

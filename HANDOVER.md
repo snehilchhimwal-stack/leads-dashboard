@@ -18,7 +18,7 @@ flow has a record (`docs/INDEX.md` master table); `docs/INDEX.md` →
 `docs/_planning/OPEN_ITEMS.md` tracks what the build could not resolve
 (including this file's own §9.7 staleness).
 
-Written 2026-08-31, updated 2026-10-16 (§4.3.4, removing confirmed leavers with `removeRmHierarchyLeaversNow`; §4.3.7, email lifecycle defect fixes and the live deploy of the 2026-10-13 audit fixes), 2026-10-15 (§4.3.6, the 2026-10-13 Apps Script audit fixes; §4.3.5 stale count tile and follow-up tracker rule) and 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts, the 16:30 cycle report and the bounce/reply sweep).
+Written 2026-08-31, updated 2026-10-19 (§4.3.9, SLA rule changes: Not Updated, "No follow up in last 4 hours", 3 calls a day), 2026-10-16 (§4.3.4, removing confirmed leavers with `removeRmHierarchyLeaversNow`; §4.3.7, email lifecycle defect fixes and the live deploy of the 2026-10-13 audit fixes), 2026-10-15 (§4.3.6, the 2026-10-13 Apps Script audit fixes; §4.3.5 stale count tile and follow-up tracker rule) and 2026-10-09 (§4.3.5, the Email Operations System - the per-email ledger, held alerts, the 16:30 cycle report and the bounce/reply sweep).
 This file went a full week
 (2026-09-02 → 2026-09-09) without a single update despite real
 architectural changes landing in that window — the RM Performance
@@ -941,6 +941,18 @@ Deliberately not done: AI-11, MT-07, MT-08, MT-10, MT-12, OC-2, OA-1, OA-2, OE-0
 - **Paste (2026-10-17):** `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `Tests_EmailLifecycleFullCycle.gs`. Paste before 17:00 so the next 10:00 reads a consolidated 17:00 row; pasted later, the first 10:00 still sends Section-2-only per-region emails from the old per-region rows (role-less subjects already).
 - **CH-level reports, no role (2026-10-17, user request):** the 10:00 (`notifyChLevelLeadsGs_`) and 17:00 (`notifyChLevelIssuesGs_`) CH-level reports drop the role label ("City Lead" etc.) from the subject - the only place it was rendered; HTML/plain bodies never carried it - when a REAL recipient (`chLevelReportRealToGs_`, pre-TEST-MODE-override) is in `CH_REPORT_NO_ROLE_EMAILS_` (`EmailInfra.gs`, = snehil.chhimwal@gmail.com, case-insensitive) via `chLevelReportRoleGs_`. Ledger ids/primaryRole unchanged; other recipients unchanged. Tests: `Tests_AllIssuesEmailer.gs` "CH-level no-role recipient" (mocks empty the list by default). Paste: `EmailInfra.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `Tests_AllIssuesEmailer.gs`, `Tests_Mocks.gs`.
 
+### 4.3.9 SLA rule changes (2026-10-19 IST, user request) - in the code, pending paste
+
+Three rule changes, made in the Apps Script code, the dashboard JS, the RM Performance eligibility mirrors, the tests and the docs together (§6 pairs):
+
+- **Not Updated** is now only: open lead, at least 3 h since assignment (grace), canonical stage `not updated`. The old second branch ("never connected past the 10-business-minute window", which fired inside the grace whatever the stage text said) is gone - from `computeSlaFlags_` (`SlaEngine.gs`), `enrichLead` (`js/core-lead-model.js`, the `neverConnectedPastWindow` field is removed), and the eligibility mirrors `computeRmPerfEligibilityGs_` / `RM_PERF_RULES_GS_` (`DailyRmIssueLog.gs`) and `RM_PERF_RULES` (`js/core-rm-performance.js`), where Not Updated is now eligible on `pastGrace` alone. `FIRST_CONTACT_SLA_MINUTES_` was removed from `SlaEngine.gs` (nothing else used it); the dashboard's `CONFIG.FIRST_CONTACT_SLA_MINUTES` stays for the dashboard-only "Not Connected in 10 Minutes" card. Effect: a fresh lead that nobody has reached is no longer emailed as Not Updated during its first 3 h, and a never-connected lead whose stage is already past "Not Updated" is no longer Not Updated at all.
+- **"Follow-up Overdue" is renamed "No follow up in last 4 hours"** (the rule key `followupOverdue` is unchanged, so stored history keyed by rule stays readable). It now measures from the **later** of the last comment and the last call. The leads data has **no last-call-attempt timestamp column** (`HEADER_ALIASES_` has only `call_attempts` / `call_count` counters), so `last_connect_time` is used as the call time. With neither, the clock runs from assignment, as before. Gates kept: under 48 h, past grace, connected.
+- **Behind on Today's Calls**: minimum 3 calls a day (was 5) - `MIN_CALLS_PER_DAY_` and `CONFIG.MIN_CALLS_PER_DAY`, plus every UI/email text that said 5.
+
+**Stored labels.** AllIssues_Log snapshots (and Overnight issue logs) written before today say "Follow-up Overdue", and the checkpoints compare labels. `SlaEngine.gs` now has `LEGACY_ISSUE_LABELS_GS_` + `canonicalIssueLabelGs_`: `computeAllIssuesCheckpointGs_` maps the prior label (and its priority rank) through it, so tomorrow's 10:00 / 13:00 Checkpoint 1/2 read yesterday's "Follow-up Overdue" as the same issue (`still_open`, not `category_changed`), and the checkpoint/13:00 email rows show the new label. `Daily_RM_Issues.issue_label` keeps the old text on old rows; nothing reads that column for logic (readers key on `issue_key`), and the dashboard's Repeat Offenders / Tracking tabs key on rule keys and show the current label. If a label is ever renamed again, add the old text to `LEGACY_ISSUE_LABELS_GS_`.
+
+**Tests:** `Tests_SlaEngine.gs` (new rule cases, legacy-label checkpoint cases), `Tests_DailyRmIssueLog.gs` (eligibility), fixtures in `Tests_AllIssuesEmailer.gs` / `Tests_CycleReport.gs` / `Tests_EmailLedger.gs` (their Not Updated lead now uses the stage text), expected labels in `Tests_EmailLifecycleFullCycle.gs` / `Tests_OvernightEmailer.gs`; `tests/frontend-harness.html` section 2i-a2 is the JS twin. **Paste:** `SlaEngine.gs`, `DailyRmIssueLog.gs`, `AllIssuesEmailer.gs`, `OvernightEmailer.gs`, `FollowupEngine.gs` (comment only) and the changed `Tests_*.gs` files; paste before 17:00 so the 17:00 run and the next morning's checkpoints use the same rules. The dashboard goes live on push (GitHub Pages, §4.4).
+
 ### 4.4 GitHub repo access
 
 Push access to `github.com/snehilchhimwal-stack/leads-dashboard` is needed to
@@ -1413,7 +1425,7 @@ Repeat Offenders tab (`js/tab-repeat-offenders.js` + `js/core-rm-performance.js`
 `computeRmPerformance`) no longer uses "Avg Flagged" (instances ÷ flagged
 leads — see §9.7 for why that had no real denominator). It now ranks by a
 **severity-weighted, workload-adjusted composite score**: for each of the
-4 *scored* rules (Not Updated / Follow-up Overdue / Behind on Today's
+4 *scored* rules (Not Updated / No follow up in last 4 hours ("Follow-up Overdue" until 2026-10-19) / Behind on Today's
 Calls / Stuck 48h+ — "Inactive-RM Lead Added" is a routing issue, never
 scored), the RM's violation-day rate over their **eligible book** (every
 distinct lead eligible for that rule in the range, not just the flagged
@@ -1644,7 +1656,8 @@ long it actually sat untouched.
 `js/core-lead-model.js`'s `enrichLead`, kept in sync as always) no longer
 checks `isUnder48h`. It now fires purely on "stage text is literally 'not
 updated' past grace" OR "never connected past the 10-minute window" —
-full stop, regardless of age. `isNotUpdated` and `stageStuck48h` can now
+full stop, regardless of age. (2026-10-19: the never-connected branch was
+removed, §4.3.9.) `isNotUpdated` and `stageStuck48h` can now
 both be true for the same lead at once; `ISSUE_PRIORITY`/`ISSUE_PRIORITY_GS_`
 already ranks `isNotUpdated` above `stageStuck48h`, so such a lead is
 reported as "Not Updated," not silently absorbed into "Stuck 48h+."

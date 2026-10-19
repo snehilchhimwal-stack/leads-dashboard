@@ -30,7 +30,7 @@ function TestCR_world_(leadRowsFn) {
 function TestCR_standardLeads_(header, now, midWindow) {
   return [
     TestCR_leadRow_(header, { lead_id: 'L-INACTIVE', client_id: 'C-INACTIVE', RM: 'Test RM One', lead_assigned_at: now, rm_is_active: false }),
-    TestCR_leadRow_(header, { lead_id: 'L-NOTUPDATED', client_id: 'C-NOTUPDATED', RM: 'Test RM Two', lead_assigned_at: midWindow, current_stage: 'Suspect' }),
+    TestCR_leadRow_(header, { lead_id: 'L-NOTUPDATED', client_id: 'C-NOTUPDATED', RM: 'Test RM Two', lead_assigned_at: midWindow, current_stage: 'Not Updated' }), // 2026-10-19: stage text is now the only Not Updated test
   ];
 }
 

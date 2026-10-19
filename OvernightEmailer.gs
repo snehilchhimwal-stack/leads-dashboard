@@ -619,7 +619,7 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
     if (!allIssuesCheckpointIsActiveGs_(result)) return; // resolved / no longer found: never listed (2026-09-26)
     const rmKey = entry.RM || 'Unassigned';
     if (!byRM[rmKey]) byRM[rmKey] = { TL: entry.TL, rows: [] };
-    byRM[rmKey].rows.push([entry.lead_id, entry.issueLabel, allIssuesCheckpointStateLabelGs_(result)]);
+    byRM[rmKey].rows.push([entry.lead_id, canonicalIssueLabelGs_(entry.issueLabel), allIssuesCheckpointStateLabelGs_(result)]); // legacy label -> current (2026-10-19)
   });
   const rmKeys = Object.keys(byRM).sort();
 
@@ -642,7 +642,7 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
       regionEntries.forEach(function (e) {
         const k = e.RM || 'Unassigned';
         if (!byRm[k]) byRm[k] = { TL: e.TL, rows: [] };
-        byRm[k].rows.push([e.lead_id, e.issueLabel, allIssuesCheckpointStateLabelGs_(resultByLeadId[e.lead_id])]);
+        byRm[k].rows.push([e.lead_id, canonicalIssueLabelGs_(e.issueLabel), allIssuesCheckpointStateLabelGs_(resultByLeadId[e.lead_id])]);
       });
       return Object.keys(byRm).sort().map(function (rm) { return makeRmSection_(rm, byRm[rm].rows, byRm[rm].TL); });
     })
@@ -2200,9 +2200,9 @@ function sendOvernightFollowupEmails_(opts) {
         // Real region of THIS lead (the log row's region can be the 'Futwork' pseudo-region) — used for the region bands
         // and the Lead_Followups push.
         const leadRegion = isMultiRegionKeyGs_(region) ? (mainRegionForGs_(getVal_(row, colIndex, 'region')) || region) : region;
-        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + entry.issueLabel, region: leadRegion, issue: entry.issueLabel, sourceRow: row, baselineEntry: baselineEntry, staleSince: staleSinceOfRowGs_(row, colIndex, leadsData.lastChangeMap, now) });
+        unresolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Still: ' + canonicalIssueLabelGs_(entry.issueLabel), region: leadRegion, issue: canonicalIssueLabelGs_(entry.issueLabel), sourceRow: row, baselineEntry: baselineEntry, staleSince: staleSinceOfRowGs_(row, colIndex, leadsData.lastChangeMap, now) });
       } else {
-        resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + entry.issueLabel + ')' });
+        resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Resolved (' + canonicalIssueLabelGs_(entry.issueLabel) + ')' });
       }
     });
     if (recoveryLeftoverId) {

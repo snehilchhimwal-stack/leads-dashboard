@@ -165,6 +165,8 @@ project/RM breakdown table "Opp+" columns, `tab-tracking.js`,
 table — this removal only touched the Overview KPI-strip tile, not the
 underlying fields).
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `js/overview-distribution-people-ops.js`: column tooltips say fewer than 3 calls (was 5); the breach-by-check label and issue colour key use "No follow up in last 4 hours".
+
 ## Revalidation trigger
 
 Any commit touching `js/overview-distribution-people-ops.js` that alters

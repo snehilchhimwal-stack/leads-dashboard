@@ -270,6 +270,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-10-17** (CH-level no-role, user request): `notifyChLevelIssuesGs_`'s subject is `<CH> google Leads With Issue ...` with NO `(role)` when `chLevelReportRoleGs_` (`GS-004`) returns '' - i.e. a real recipient is in `CH_REPORT_NO_ROLE_EMAILS_`. The body never carried the role. Ledger `primaryRole`/id keep `entry.chRole`. Tests: `Tests_AllIssuesEmailer.gs` "CH-level no-role recipient".
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `AllIssuesEmailer.gs`: header comment and the email's action line name the renamed check "No follow up in last 4 hours" (was "Follow-up Overdue"). The rules themselves live in `GS-012` (RULE-089..091).
+
 ## Revalidation trigger
 
 Any commit touching `AllIssuesEmailer.gs` or `Tests_AllIssuesEmailer.gs`;

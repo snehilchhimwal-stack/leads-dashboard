@@ -27,10 +27,11 @@ timestamps / `call_attempts` — from `DATA-001` on the browser side, from
 
 1. **Browser:** `enrichLead` (`JS-006` FN-034, `RULE-005`..`RULE-008`)
    applies `CONFIG` thresholds (`JS-005` CFG-003..CFG-008) →
-   `firstContactBreach`, `neverConnected…`, `isNotUpdated`,
-   `stageStuck48h`, `followupOverdue` (+ recording / closed-no-comment /
+   `firstContactBreach`, `isNotUpdated`, `underCalledToday`,
+   `stageStuck48h`, `followupOverdue` ("No follow up in last 4 hours";
+   rules as of 2026-10-19: `GS-012` RULE-089/090) (+ recording / closed-no-comment /
    inactive-RM signals).
-2. **Backend:** `computeSlaFlags_` (`GS-012` FN-248, `RULE-033`..`RULE-034`)
+2. **Backend:** `computeSlaFlags_` (`GS-012` FN-248, `RULE-033`..`RULE-034`, `RULE-089`..`RULE-091`)
    — the port, with `SlaEngine.gs` thresholds (`GS-012` CFG-057..CFG-062).
 3. Headline issue: `ISSUE_PRIORITY` (`JS-005` CFG-012) / `primaryIssueGs_`
    (`GS-012` FN-249).

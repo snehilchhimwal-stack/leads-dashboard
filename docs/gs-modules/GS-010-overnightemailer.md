@@ -568,6 +568,8 @@ ending the session.
 
 **2026-10-17** (CH-level no-role, `GS-004`): `notifyChLevelLeadsGs_`'s subject drops ` - <role>` when `chLevelReportRoleGs_` returns '' (a real recipient is in `CH_REPORT_NO_ROLE_EMAILS_`). Body unchanged (never carried the role); ledger keeps the role.
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `OvernightEmailer.gs`: the Checkpoint 1/2 section rows and the 13:00 Overnight follow-up rows show a stored issue label through `canonicalIssueLabelGs_` (`GS-012` FN-525), so a log row written before the rename shows "No follow up in last 4 hours" instead of "Follow-up Overdue". Matching is still by `issueKey` / the checkpoint state.
+
 ## Revalidation trigger
 
 Any commit touching `OvernightEmailer.gs` or `Tests_OvernightEmailer.gs`;

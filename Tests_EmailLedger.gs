@@ -49,7 +49,7 @@ function TestEL_world_(leadRowsFn) {
 function TestEL_standardLeads_(header, now, midWindow) {
   return [
     TestEL_leadRow_(header, { lead_id: 'L-INACTIVE', client_id: 'C-INACTIVE', RM: 'Test RM One', lead_assigned_at: now, rm_is_active: false }),
-    TestEL_leadRow_(header, { lead_id: 'L-NOTUPDATED', client_id: 'C-NOTUPDATED', RM: 'Test RM Two', lead_assigned_at: midWindow, current_stage: 'Suspect' }),
+    TestEL_leadRow_(header, { lead_id: 'L-NOTUPDATED', client_id: 'C-NOTUPDATED', RM: 'Test RM Two', lead_assigned_at: midWindow, current_stage: 'Not Updated' }), // 2026-10-19: stage text is now the only Not Updated test
     TestEL_leadRow_(header, { lead_id: 'L-MULTI', client_id: 'C-MULTI', RM: 'Test RM One', lead_assigned_at: now, rm_is_active: false, call_attempts: 0 }),
   ];
 }

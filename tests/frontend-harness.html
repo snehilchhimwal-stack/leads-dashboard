@@ -67,11 +67,10 @@
 // ---- Freeze the clock (t-tf-5ad22d8e4c2e) ----
 // Every fixture is built relative to "now" (`ago(h)`), and the real app
 // stamps `_renderNow = new Date()` at the start of each render pass. The
-// SLA rules that count *working* minutes (9 AM–7 PM IST) —
-// `neverConnectedPastWindow`, "Behind on Today's Calls" — then behave
+// SLA rules that count *working* minutes (9 AM–7 PM IST) — the
+// 10-minute first-contact rule — and "Behind on Today's Calls" then behave
 // differently depending on the wall-clock time this harness happens to
-// run at (e.g. the L011 "missed first-contact inside the 3 h grace"
-// assertion is only meaningful during IST business hours). Pin Date to a
+// run at. Pin Date to a
 // fixed weekday IST-afternoon instant so the harness is deterministic in
 // CI regardless of when it runs.
 (function freezeClock() {
@@ -1016,17 +1015,20 @@
   (function () {
     const createdAt = new Date(Date.now() - 5 * 24 * 3600000);
     const rows = [];
+    // First snapshot at 4h (past the 3h grace): since 2026-10-19 a 1h-old
+    // never-connected lead is eligible for no scored rule, so a 1h snapshot
+    // would leave these RMs with no violation rows to join the cohort onto.
     // RegionHigh: 2 RMs, both converting 4/5 (80%).
     ['RH-RM1', 'RH-RM2'].forEach(rm => {
       for (let i = 1; i <= 5; i++) {
-        const snaps = i <= 4 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+        const snaps = i <= 4 ? [{ hOffset: 4, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 4, stage: 'Suspect' }];
         rows.push(..._roOppLead(rm, rm + '-' + i, createdAt, snaps).map(r => Object.assign(r, { region: 'RegionHigh' })));
       }
     });
     // RegionLow: 2 RMs, both converting 1/5 (20%).
     ['RL-RM1', 'RL-RM2'].forEach(rm => {
       for (let i = 1; i <= 5; i++) {
-        const snaps = i <= 1 ? [{ hOffset: 1, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 1, stage: 'Suspect' }];
+        const snaps = i <= 1 ? [{ hOffset: 4, stage: 'Suspect' }, { hOffset: 40, stage: 'Opportunity' }] : [{ hOffset: 4, stage: 'Suspect' }];
         rows.push(..._roOppLead(rm, rm + '-' + i, createdAt, snaps).map(r => Object.assign(r, { region: 'RegionLow' })));
       }
     });
@@ -1117,11 +1119,17 @@
       last_connect_time: new Date(new Date('2026-09-01T18:00:00+05:30').getTime() - 6 * 3600000).toISOString(),
     });
   }
+  // 2026-10-19: last_connect_time is 9h back (the same moment as its one
+  // comment). These confidence numbers were tuned when the follow-up rule
+  // read the comment alone, so this row was always follow-up-stale; since
+  // the rule now takes the LATER of comment and call, a 1h-old connect
+  // would make it clean and shift every peer composite below. Keeping the
+  // row's outcome unchanged keeps the tuned numbers valid.
   function _confCleanRow(rmName, leadId) {
     return _roFilterTestRow({
       lead_id: leadId, client_id: 'C-' + leadId, RM: rmName,
       current_stage: 'Connected', last_connect: 'Connected',
-      last_connect_time: new Date(new Date('2026-09-01T18:00:00+05:30').getTime() - 3600000).toISOString(),
+      last_connect_time: new Date(new Date('2026-09-01T18:00:00+05:30').getTime() - 9 * 3600000).toISOString(),
       last_comment: 'ok', internal_status_comments: 'RM: call 1 - 2026-09-01 09:00',
       call_attempts: 10, call_count: 10,
     });
@@ -1337,12 +1345,12 @@
       assert('underCalledToday 2026-10-01 fix: 5 today-dated comments clear the daily minimum even though call_attempts never moved off its own baseline (real Riya Yadav incident shape)',
         l.underCalledToday === false, 'expected cleared; got ' + l.underCalledToday);
 
-      // Only 4 comments today — still under the daily minimum
-      // (CONFIG.MIN_CALLS_PER_DAY = 5), so the fix must NOT over-correct
-      // into never flagging anything.
-      const comments4 = [9, 10, 11, 12].map(h =>
+      // Only 2 comments today — still under the daily minimum
+      // (CONFIG.MIN_CALLS_PER_DAY = 3 since 2026-10-19), so the fix must NOT
+      // over-correct into never flagging anything.
+      const comments2 = [9, 10].map(h =>
         'Test RM: Not Reachable - 2026-09-09 ' + String(h).padStart(2, '0') + ':00').join(' | ');
-      l = enrichLead(Object.assign({}, baseLead, { internal_status_comments: comments4 }));
+      l = enrichLead(Object.assign({}, baseLead, { internal_status_comments: comments2 }));
       assert('underCalledToday 2026-10-01 fix: still fires when even the comment count alone has not cleared the daily minimum (MAX, not an automatic pass)',
         l.underCalledToday === true, 'expected still flagged; got ' + l.underCalledToday);
 
@@ -1354,6 +1362,54 @@
         l.underCalledToday === false, 'expected cleared via delta alone; got ' + l.underCalledToday);
     } finally {
       _todayCallBaselineByKey = savedBaseline;
+      _renderNow = savedRenderNow;
+    }
+  })();
+
+  // ---- 2i-a2. SLA rule changes of 2026-10-19 (user request) — JS twin of Tests_SlaEngine.gs's 2026-10-19 cases ----
+  //   Not Updated: open, past the 3h grace, stage 'not updated' — nothing else (never-connected branch removed).
+  //   No follow up in last 4 hours (key followupOverdue): staleness from the LATER of last comment and last call
+  //     (last_connect_time stands in for the call; the export has no call-attempt timestamp); neither -> age.
+  //   Behind on Today's Calls: minimum 3 a day (was 5).
+  (function () {
+    const savedRenderNow = _renderNow;
+    _renderNow = new Date(); // the frozen clock: 2026-09-09 14:00 IST
+    const at = h => new Date(_renderNow.getTime() - h * 3600000);
+    const stamp = h => { const d = new Date(at(h).getTime() + 5.5 * 3600000); return d.toISOString().slice(0, 16).replace('T', ' '); };
+    const base = { lead_id: 'L-R19', client_id: 'C-R19', rm_is_active: true, call_attempts: 6 };
+    try {
+      assert('2026-10-19 rule set: CONFIG.MIN_CALLS_PER_DAY is 3', CONFIG.MIN_CALLS_PER_DAY === 3, 'got ' + CONFIG.MIN_CALLS_PER_DAY);
+      assert('2026-10-19 rule set: ISSUE_PRIORITY labels followupOverdue "No follow up in last 4 hours"',
+        ISSUE_PRIORITY.find(r => r.key === 'followupOverdue').label === 'No follow up in last 4 hours');
+      let l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(1) }));
+      assert('isNotUpdated (2026-10-19): a never-connected "Suspect" lead 1h old is NOT Not Updated', l.isNotUpdated === false, 'got ' + l.isNotUpdated);
+      l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(10) }));
+      assert('isNotUpdated (2026-10-19): a never-connected "Suspect" lead 10h old is NOT Not Updated (stage text is the only test)', l.isNotUpdated === false, 'got ' + l.isNotUpdated);
+      l = enrichLead(Object.assign({}, base, { current_stage: 'Not Updated', lead_assigned_at: at(2.9) }));
+      assert('isNotUpdated (2026-10-19): a "Not Updated" lead at 2.9h is inside grace', l.isNotUpdated === false, 'got ' + l.isNotUpdated);
+      l = enrichLead(Object.assign({}, base, { current_stage: 'Not Updated', lead_assigned_at: at(3) }));
+      assert('isNotUpdated (2026-10-19): a "Not Updated" lead at 3h is flagged', l.isNotUpdated === true, 'got ' + l.isNotUpdated);
+      assert('enrichLead (2026-10-19): no neverConnectedPastWindow field any more', !('neverConnectedPastWindow' in l));
+
+      const conn = (connH, commentH, ageH) => enrichLead(Object.assign({}, base, {
+        current_stage: 'Suspect', lead_assigned_at: at(ageH || 10), last_connect: 'Connected',
+        last_connect_time: connH == null ? '' : at(connH),
+        internal_status_comments: commentH == null ? '' : 'Test RM: Ringing - ' + stamp(commentH),
+      }));
+      assert('followupOverdue (2026-10-19): a call 1h ago resets the clock though the last comment is 6h old', conn(1, 6).followupOverdue === false);
+      assert('followupOverdue (2026-10-19): a comment 1h ago resets the clock though the last call is 6h old', conn(6, 1).followupOverdue === false);
+      assert('followupOverdue (2026-10-19): last call 5h and last comment 7h ago -> flagged', conn(5, 7).followupOverdue === true);
+      assert('followupOverdue (2026-10-19): no comment, call 3.5h ago -> not flagged', conn(3.5, null).followupOverdue === false);
+      assert('followupOverdue (2026-10-19): connected (text only), no comment, no call time -> age since assignment (10h) -> flagged', conn(null, null).followupOverdue === true);
+      assert('followupOverdue (2026-10-19): the under-48h gate is kept (50h-old lead never flagged)', conn(6, 6, 50).followupOverdue === false);
+
+      l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(5), call_attempts: 2 }));
+      assert("underCalledToday (2026-10-19): 2 attempts today on a lead assigned today is behind (minimum 3)", l.underCalledToday === true, 'got ' + l.underCalledToday);
+      l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(5), call_attempts: 3 }));
+      assert("underCalledToday (2026-10-19): exactly 3 attempts today meets the minimum", l.underCalledToday === false, 'got ' + l.underCalledToday);
+      l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(5), call_attempts: 4 }));
+      assert("underCalledToday (2026-10-19): 4 attempts today is no longer behind (was, under the old minimum of 5)", l.underCalledToday === false, 'got ' + l.underCalledToday);
+    } finally {
       _renderNow = savedRenderNow;
     }
   })();
@@ -1752,7 +1808,7 @@
       client: 'Client C', lead_assigned_at: ago(5), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Suspect',
       client_id: 'C003', last_connect_time: ago(4), call_attempts: 2,
       internal_status_comments: ago(4) + ' - Called, will call back later' }),
-    // L004 — Follow-up Overdue: last connect 6h ago (> the 4h review window).
+    // L004 — No follow up in last 4 hours: last connect AND last comment 6h ago (> 4h).
     row({ lead_id: 'L004', RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
       client: 'Client D', lead_assigned_at: ago(30), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Suspect',
       client_id: 'C004', last_connect_time: ago(6), call_attempts: 3,
@@ -1789,12 +1845,10 @@
       client: 'Client J', lead_assigned_at: ago(70), group_source: 'Google', source_bucket: 'Organic', current_stage: 'Booking',
       client_id: 'C010', call_attempts: 10, last_connect_time: ago(20),
       internal_status_comments: ago(20) + ' - Booking confirmed, documents signed' }),
-    // L011 — 30 min old, zero calls: per Not Updated's OWN documented rule
-    // (dashboard.html) this still surfaces there despite being inside the
-    // general 3h grace band, because it already missed the 10-minute
-    // first-contact window with literally zero contact — that specific
-    // clause is deliberately NOT grace-gated. L015 below is the real
-    // grace-period case (still inside the 10-minute window itself).
+    // L011 — 30 min old, zero calls, stage "Not Updated". Until 2026-10-19
+    // it surfaced under Not Updated through the grace-exempt "never
+    // connected past 10 minutes" branch; that branch is gone, so a lead
+    // inside the 3h grace is NOT listed, whatever its stage text.
     row({ lead_id: 'L011', RM: 'Kunal Joshi', TL: 'Aman Verma', rm_is_active: true, project: 'Riverside Residency', region: 'South',
       client: 'Client K', lead_assigned_at: ago(0.5), group_source: 'Google', source_bucket: 'PPC', current_stage: 'Not Updated',
       client_id: 'C011', call_attempts: 0 }),
@@ -1875,10 +1929,10 @@
 
     assert('Inactive-RM Lead Added lists L001', textOf('inactiveRmList').indexOf('L001') !== -1);
     assert('Not Updated lists L002', textOf('notUpdatedList').indexOf('L002') !== -1);
-    assert('Not Updated lists L011 (missed first-contact overrides the 3h grace band)', textOf('notUpdatedList').indexOf('L011') !== -1);
+    assert('Not Updated excludes L011 (30 min old: inside the 3h grace; the never-connected branch was removed 2026-10-19)', textOf('notUpdatedList').indexOf('L011') === -1);
     assert('Not Updated excludes L015 (still inside the 10-minute first-contact window)', textOf('notUpdatedList').indexOf('L015') === -1);
     assert('Not Connected in 10 Minutes lists L003', textOf('notConnList').indexOf('L003') !== -1);
-    assert('Follow-up Overdue lists L004', textOf('followupList').indexOf('L004') !== -1);
+    assert('No follow up in last 4 hours lists L004', textOf('followupList').indexOf('L004') !== -1);
     assert("Behind on Today's Calls lists L005", textOf('dueTodayList').indexOf('L005') !== -1);
     assert('Stuck (48h+, not Opportunity) lists L006', textOf('stuckList').indexOf('L006') !== -1);
     assert('Recording Not Working lists L007', textOf('recordingList').indexOf('L007') !== -1);

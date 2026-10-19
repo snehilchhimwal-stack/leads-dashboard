@@ -1,7 +1,7 @@
 /**
  * All-Issues Emailer — automatic email covering every one of the 5
- * Operations SLA checks (Inactive-RM Lead Added / Not Updated / Follow-up
- * Overdue / Behind on Today's Calls / Stuck 48h+), scoped to:
+ * Operations SLA checks (Inactive-RM Lead Added / Not Updated / No follow
+ * up in last 4 hours / Behind on Today's Calls / Stuck 48h+), scoped to:
  *   - Source = google, Sub-source = Non-UTM or Search only (see
  *     passesGoogleNonUtmSearchGs_, EmailInfra.gs)
  *   - Leads ASSIGNED in the last 3 calendar days (IST) — TODAY plus the 2
@@ -647,7 +647,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
         { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
         { value: issueTypeCount, label: issueTypeCount === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
       ],
-      action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, Follow-up Overdue, Behind on Today\'s Calls, Stuck 48h+).',
+      action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, No follow up in last 4 hours, Behind on Today\'s Calls, Stuck 48h+).',
       sections: rmKeys.map(function (rm) {
         return {
           heading: rm,
@@ -769,7 +769,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
       { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
       { value: issueTypeCount, label: issueTypeCount === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
     ],
-    action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, Follow-up Overdue, Behind on Today\'s Calls, Stuck 48h+).',
+    action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, No follow up in last 4 hours, Behind on Today\'s Calls, Stuck 48h+).',
     sections: sections,
     footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
   };

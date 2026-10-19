@@ -220,6 +220,8 @@ prior version). Revalidated 2026-09-21 for the live-computation feature —
 this record's "reads neither `leads` nor `filterState`" / "computes
 nothing" claims are now corrected throughout (still no `filterState`).
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `dashboard.html` changed for the 2026-10-19 SLA rule texts (Operations cards). Nothing on this tab changed.
+
 ## Revalidation trigger
 
 Any commit touching `js/tab-oppmonitor.js`; the `Opp_Monitor_Period` /

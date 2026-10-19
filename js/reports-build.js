@@ -223,15 +223,15 @@ const ISSUE_REPORT_META = {
   },
   notConnected: {
     flag: 'firstContactBreach', label: 'Not Connected in 10 Minutes',
-    intro: 'Reminder for the Regional Head: the following RMs did not connect with the client within the first 10 minutes of assignment, on the {SOURCE} leads below (contact did eventually happen — this is a record of how late, not a still-open task). This has already happened and cannot be corrected, so it is for visibility only, not an action list. Leads that still have not connected at all are reported under Not Updated instead.',
+    intro: 'Reminder for the Regional Head: the following RMs did not connect with the client within the first 10 minutes of assignment, on the {SOURCE} leads below (contact did eventually happen — this is a record of how late, not a still-open task). This has already happened and cannot be corrected, so it is for visibility only, not an action list.',
   },
   followupOverdue: {
-    flag: 'followupOverdue', label: 'Follow-up Overdue (4h Post-Connect)',
-    intro: 'Please find below the connected {SOURCE} leads with no CRM update in the last 4 hours.',
+    flag: 'followupOverdue', label: 'No follow up in last 4 hours',
+    intro: 'Please find below the connected {SOURCE} leads with no comment and no call in the last 4 hours.',
   },
   dueToday: {
     flag: 'underCalledToday', label: "Behind on Today's Calls",
-    intro: 'Please find below the {SOURCE} leads with fewer than 5 call attempts made today. For a lead assigned today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
+    intro: 'Please find below the {SOURCE} leads with fewer than 3 call attempts made today. For a lead assigned today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
   },
   stuck: {
     flag: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)',
@@ -252,10 +252,10 @@ const ISSUE_REPORT_META = {
 const ISSUE_ACTION_MAP = {
   inactiveRmNewLead: "Reassign this lead to an active RM immediately — it cannot be worked as currently routed.",
   firstContactBreach: "For the record, not for action — contact already happened, just after the 10-minute response window had passed, and that can't be corrected after the fact. Use this as a response-time SLA record per RM; no follow-up is needed on these specific leads.",
-  followupOverdue: "Reconnect with the customer without delay — the 4-hour post-connect follow-up window has lapsed.",
+  followupOverdue: "Reconnect with the customer without delay — there has been no comment and no call on this lead in the last 4 hours.",
   underCalledToday: `Complete the remaining call attempts today — see the Attempts Today column below for exactly how many more each lead needs to reach the ${CONFIG.MIN_CALLS_PER_DAY}/day SOP requirement.`,
   stageStuck48h: "Review this lead and either progress it toward Opportunity or close it out — it has been open more than 48 hours with no advancement.",
-  isNotUpdated: "Update the CRM with this lead's current status — no activity has been logged since it was assigned. If the customer has never been reached, attempt first contact immediately; the 10-minute response window has already been missed.",
+  isNotUpdated: "Update the CRM with this lead's current status — it is still in the Not Updated stage more than 3 hours after assignment.",
 };
 
 // reportableIssueFor() (used by the combined "all issues" report) returns
@@ -415,10 +415,8 @@ function buildRegionReports(issueKey){
 
   // No grace re-check here — enrichLead's pastGrace already gates every
   // flag except inactiveRmNewLead (deliberately never gated — the problem
-  // is a bad assignment, not RM speed) and isNotUpdated's
-  // neverConnectedPastWindow branch (deliberately exempt so a totally
-  // silent lead is never invisible for 3 hours). Re-testing age here at
-  // generation time used to re-block exactly those two, which is backwards:
+  // is a bad assignment, not RM speed). Re-testing age here at
+  // generation time used to re-block it, which is backwards:
   // `created` is fixed and `now` only moves forward between data-load time
   // and generation time, so a flag that already passed grace at load time
   // can never fail an age check again later — the re-check was a no-op for
@@ -599,7 +597,7 @@ function buildRegionReports(issueKey){
         }),
       })),
       footerNote: isReminder
-        ? 'This is a response-time SLA record, not an action list — every lead below has already connected, just after the 10-minute window. Leads that still have not connected at all are reported under Not Updated instead.'
+        ? 'This is a response-time SLA record, not an action list — every lead below has already connected, just after the 10-minute window.'
         : graceExplainer,
     });
 
@@ -659,9 +657,9 @@ function reportableIssueFor(l){
   // fixed while `now` only ever moves forward between data-load time and
   // generation time, a flag that already passed grace at load time can
   // never fail this same check again later — re-testing it here is a
-  // no-op for those three. isNotUpdated (via neverConnectedPastWindow) and
-  // inactiveRmNewLead are deliberately grace-EXEMPT by design (see their
-  // own comments in enrichLead) specifically so they fire inside the
+  // no-op for those (and for isNotUpdated, which is grace-gated too since
+  // 2026-10-19). inactiveRmNewLead is deliberately grace-EXEMPT by design
+  // (see its own comment in enrichLead) specifically so it fires inside the
   // window — a blanket re-check here used to silently re-block exactly
   // those, which is the whole bug: it could only ever suppress leads that
   // were never supposed to wait for grace in the first place.

@@ -578,7 +578,7 @@ function renderRMScoreTable(){
     return;
   }
   const BREACH_LABELS = {
-    firstContactBreach: 'Not Connected in 10 min', followupOverdue: 'Follow-up Overdue',
+    firstContactBreach: 'Not Connected in 10 min', followupOverdue: 'No follow up in last 4 hours',
     underCalledToday: "Behind on Today's Calls", stageStuck48h: 'Stuck 48h+', isNotUpdated: 'Not Updated',
   };
   tbody.innerHTML = rows.map(b => {
@@ -881,7 +881,7 @@ function renderRegionTable(){
   const table = document.getElementById('regionTable');
   table.querySelector('thead').innerHTML = `<tr>
     <th>Region</th><th>Reports as</th><th style="text-align:right">Total</th>
-    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right">Critical %</th>
     <th style="text-align:right">Not Conn. 10m</th><th style="text-align:right">No Attempts</th></tr>`;
 
@@ -925,7 +925,7 @@ function renderTLTable(){
   const table = document.getElementById('tlTable');
   table.querySelector('thead').innerHTML = `<tr>
     <th>TL</th><th style="text-align:right">RMs</th><th style="text-align:right">Total Leads</th>
-    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -963,7 +963,7 @@ function renderProjectTable(){
   table.querySelector('thead').innerHTML = `<tr>
     <th>Project</th><th style="text-align:right">Leads</th>
     <th style="text-align:right">Opp+</th><th style="text-align:right">Opp %</th>
-    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right" title="Payment received, paperwork pending">Soft Bk</th><th style="text-align:right">Booking</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -1039,7 +1039,7 @@ function renderRMTable(){
     <th style="text-align:right">Total</th><th style="text-align:right">Open</th>
     <th style="text-align:right" title="This RM's open-lead count vs the average open count across every RM carrying at least one open lead.">vs Avg (Open)</th>
     <th style="text-align:right">Opp+</th>
-    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 5 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
+    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -1068,7 +1068,7 @@ function renderRMTable(){
 }
 
 
-// Direct check #1: assigned today (calendar day), under 5 calls, open
+// Direct check #1: assigned today (calendar day), under 3 calls (CONFIG.MIN_CALLS_PER_DAY), open
 // (not closed, not Opportunity+). Starts from isOpenLead as the foundation
 // — a closed or Opportunity+ lead can never appear here. Covers every open
 // lead regardless of assignment date: attemptsToday is call_attempts for a
@@ -1412,7 +1412,7 @@ document.getElementById('dateToInput').addEventListener('change', () => {
 // for it used to sit here anyway, unreachable.
 const ISSUE_COLOR_MAP = {
   "Not Updated": 'var(--purple)',
-  "Follow-up Overdue (4h Post-Connect)": 'var(--red)',
+  "No follow up in last 4 hours": 'var(--red)',
   "Behind on Today's Calls": 'var(--blue)',
   "Leads Pending Beyond 48 Hours (Not Yet Opportunity)": 'var(--teal)',
   // Added for the Tracking tab's multi-series chart, the first place all

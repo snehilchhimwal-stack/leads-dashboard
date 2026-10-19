@@ -1,6 +1,6 @@
 /**
  * SLA Engine — the 5 SLA compliance rules (Inactive-RM Lead Added / Not
- * Updated / Follow-up Overdue / Behind on Today's Calls / Stuck 48h+),
+ * Updated / No follow up in last 4 hours / Behind on Today's Calls / Stuck 48h+),
  * faithfully ported from dashboard.html's enrichLead, plus the shared
  * priority order for picking "the" issue when a lead qualifies for more
  * than one. Used by MovementTracker.gs (writeSlaHistorySnapshot_, for the
@@ -16,7 +16,7 @@
  * file in a project) — this is a pure organization change.
  *
  * Depends on Core.gs (getVal_, isOpenLead_, canonicalStage_,
- * istDayKeyGs_, businessMinutesBetweenGs_) and FollowupEngine.gs
+ * istDayKeyGs_) and FollowupEngine.gs
  * (latestCommentTimestamp_, countTodayCommentEntries_) — load order
  * between files doesn't matter to Apps Script (see Core.gs's own note),
  * this is just documenting the real dependency.
@@ -32,9 +32,8 @@
 
 const LEAD_GRACE_HOURS_ = 3;
 const LEAD_LIFECYCLE_HOURS_ = 48;
-const MIN_CALLS_PER_DAY_ = 5;
+const MIN_CALLS_PER_DAY_ = 3; // 2026-10-19: was 5 (user request)
 const FOLLOWUP_REVIEW_HOURS_ = 4;
-const FIRST_CONTACT_SLA_MINUTES_ = 10;
 const WORK_START_HOUR_ = 9;
 const WORK_END_HOUR_ = 19;
 
@@ -104,14 +103,10 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   const connectDate = parseSlaDateGs_(connectTimeRaw); // SE-2
   const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
 
-  // Deliberately grace-exempt, same as dashboard.html — see its own
-  // comment on neverConnectedPastWindow: a silent lead shouldn't sit
-  // unflagged in the 10-min-to-3h gap this exists to catch.
-  const neverConnectedPastWindow = isUnder48h && !connectDate &&
-    businessMinutesBetweenGs_(created, now) > FIRST_CONTACT_SLA_MINUTES_;
-
-  // Not Updated — canonical stage text (once past grace), OR never
-  // connected past the 10-minute window regardless of stage text.
+  // Not Updated — open lead, past the 3h grace, canonical stage text is
+  // 'not updated'. Nothing else. (2026-10-19, user request: the old second
+  // branch — "never connected past the 10-business-minute window", which
+  // fired regardless of stage text and inside the grace — was removed.)
   //
   // Deliberately NOT gated on isUnder48h (2026-09-03 fix — real data check
   // found ~40% of leads whose stage is STILL literally "Not Updated" were
@@ -131,16 +126,19 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   // AllIssuesEmailer.gs/OvernightEmailer.gs report for such leads (now
   // "Not Updated" instead of "Stuck 48h+") — an intentional, requested
   // side effect, not an oversight.
-  flags.isNotUpdated = (pastGrace && canonicalStage_(stage) === 'not updated') || neverConnectedPastWindow;
+  flags.isNotUpdated = pastGrace && canonicalStage_(stage) === 'not updated';
 
-  // Follow-up Overdue (4h Post-Connect).
+  // No follow up in last 4 hours (key followupOverdue; label was "Follow-up
+  // Overdue" until 2026-10-19). Staleness is measured from the LATEST of the
+  // last comment and the last call. The leads data has no last-call-attempt
+  // timestamp column, so last_connect_time stands in for "last call". With
+  // neither, the clock runs from assignment (ageHours), as before.
+  // Gates kept: under 48h, past grace, connected.
   const internalComments = getVal_(row, colIndex, 'internal_status_comments');
   const stageComments = getVal_(row, colIndex, 'stage_comments');
   const lastCommentAt = latestCommentTimestamp_(internalComments, stageComments);
-  const hoursSinceConnect = connectDate ? (now.getTime() - connectDate.getTime()) / 36e5 : null;
-  const hoursSinceLastComment = lastCommentAt ? (now.getTime() - lastCommentAt.getTime()) / 36e5 : null;
-  const followupStaleHours = hoursSinceLastComment !== null ? hoursSinceLastComment
-    : (hoursSinceConnect !== null ? hoursSinceConnect : ageHours);
+  const lastTouchMs = Math.max(lastCommentAt ? lastCommentAt.getTime() : -Infinity, connectDate ? connectDate.getTime() : -Infinity);
+  const followupStaleHours = lastTouchMs !== -Infinity ? (now.getTime() - lastTouchMs) / 36e5 : ageHours;
   flags.followupOverdue = isUnder48h && pastGrace && hasConnected && followupStaleHours > FOLLOWUP_REVIEW_HOURS_;
 
   // Behind on Today's Calls.
@@ -188,10 +186,21 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
 const ISSUE_PRIORITY_GS_ = [
   { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added' },
   { key: 'isNotUpdated', label: 'Not Updated' },
-  { key: 'followupOverdue', label: 'Follow-up Overdue' },
+  { key: 'followupOverdue', label: 'No follow up in last 4 hours' },
   { key: 'underCalledToday', label: "Behind on Today's Calls" },
   { key: 'stageStuck48h', label: 'Stuck 48h+' },
 ];
+// Labels that were renamed. Stored rows (AllIssues_Log snapshots, Overnight
+// issue logs, Daily_RM_Issues.issue_label) keep the old text, so every
+// reader that compares or shows a stored label maps it through
+// canonicalIssueLabelGs_ first. 2026-10-19: "Follow-up Overdue" became
+// "No follow up in last 4 hours".
+const LEGACY_ISSUE_LABELS_GS_ = {
+  'Follow-up Overdue': 'No follow up in last 4 hours',
+};
+function canonicalIssueLabelGs_(label) {
+  return Object.prototype.hasOwnProperty.call(LEGACY_ISSUE_LABELS_GS_, label) ? LEGACY_ISSUE_LABELS_GS_[label] : label;
+}
 function primaryIssueGs_(flags) {
   for (let i = 0; i < ISSUE_PRIORITY_GS_.length; i++) {
     if (flags[ISSUE_PRIORITY_GS_[i].key]) return ISSUE_PRIORITY_GS_[i];
@@ -248,7 +257,7 @@ function primaryIssueGs_(flags) {
 // === false branch (true for nearly every lead by the time a checkpoint
 // runs, since the snapshot itself is never from earlier today).
 function allIssuesCheckpointPriorLabel_(entry) {
-  return entry.state !== undefined ? entry.currentIssueLabel : entry.issueLabel;
+  return canonicalIssueLabelGs_(entry.state !== undefined ? entry.currentIssueLabel : entry.issueLabel);
 }
 function allIssuesCheckpointPriorWasActive_(entry) {
   return entry.state !== 'resolved' && entry.state !== 'not_found';
@@ -275,7 +284,7 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leads
 
   const priorityIndexOf = function (label) {
     for (let i = 0; i < ISSUE_PRIORITY_GS_.length; i++) {
-      if (ISSUE_PRIORITY_GS_[i].label === label) return i;
+      if (ISSUE_PRIORITY_GS_[i].label === canonicalIssueLabelGs_(label)) return i;
     }
     return -1;
   };

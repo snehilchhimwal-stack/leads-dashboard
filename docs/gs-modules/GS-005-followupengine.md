@@ -157,6 +157,8 @@ Verified at `c82ec67`; record created by DOC-029.
 
 **2026-10-15** (`8ef279d`, audit 2026-10-13 FE-1..5, SE-3, X-1): 'declining', 'broker' and 'ringing' now match only exactly (`_EXACT_ONLY_SIGNAL_WORDS_GS_`, CFG-142), so "still deciding", "voice broken" and "bringing wife" no longer read as Call Declined / CP-Broker / Ringing; 'brokers' and 'rining' were added as literal signals (FE-1, FE-2). 'to let' left the Resale / Rental signals and is matched by `_hasToLetPropertyGs_` (FN-521) only as a property type, not in "to let him know" (FE-3). The "specific time" follow-up modifier needs am/pm or minutes, so "after 2 days" is no longer quoted as a clock time (FE-4). `parseDatedCommentEntries_` (FN-210) requires the `Name:` prefix like the dashboard, so the email and dashboard agree on Follow-up Overdue / Behind on Today's Calls (SE-3). Header comments now list the intended email-vs-dashboard differences (FE-5) and point at `js/core-outcome-engine.js` instead of the old `js/core.js` (X-1). The JS twin changed in the same commit (`JS-007`). Tests in `Tests_FollowupEngine.gs` and `tests/frontend-harness.html`. **Not live until pasted.**
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `FollowupEngine.gs`: comment only (the renamed "No follow up in last 4 hours" check). No behaviour change.
+
 ## Revalidation trigger
 
 Any commit touching `FollowupEngine.gs` or `Tests_FollowupEngine.gs`;

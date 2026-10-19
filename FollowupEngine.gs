@@ -62,7 +62,7 @@ function parseDatedCommentEntries_(internalComments, stageComments) {
   combined.split('|').forEach(function (entry) {
     // SE-3 (2026-10-13): the same entry regex as parseActionLog (JS) and latestOutcomeGs_ below - a "Name:" prefix is
     // required. Without it an unattributed dated line counted here but not on the dashboard, so the email and the
-    // dashboard could disagree on Follow-up Overdue / Behind on Today's Calls.
+    // dashboard could disagree on No follow up in last 4 hours / Behind on Today's Calls.
     const m = entry.trim().match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
     if (!m) return;
     const d = new Date(m[3].replace(' ', 'T') + ':00+05:30');

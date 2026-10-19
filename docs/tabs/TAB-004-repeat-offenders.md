@@ -231,6 +231,8 @@ closing the PDF/live-tab compute race). The scoring engine grew
 materially this session (`js/core-rm-performance.js` 485L → 869L) — new
 record reflects the post-session state.
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): Repeat Offenders: the score tooltips name "No follow up in last 4 hours"; Not Updated eligibility is `pastGrace` only (`JS-008`). History is keyed by rule key, so old days still count under the same rule.
+
 ## Revalidation trigger
 
 Any commit touching `js/tab-repeat-offenders.js`,

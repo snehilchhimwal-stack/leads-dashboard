@@ -176,6 +176,8 @@ among others — noted on those records only if they ever need their own
 mention; the behavior change lives entirely in this one shared handler,
 not per-tab).
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): Texts only: "fewer than 3 calls" (was 5), `ISSUE_COLOR_MAP` / breach label keyed on "No follow up in last 4 hours" (the label `ISSUE_PRIORITY` now carries).
+
 ## Revalidation trigger
 
 Any commit touching `js/overview-distribution-people-ops.js`; a KPI /

@@ -169,6 +169,8 @@ Generate blocked by the mutex (`JS-018`).
 Verified at `c82ec67`; record created by DOC-026; `BTN-XXX` set
 reconciled in DOC-031.
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): Operations: the follow-up card and its filter option read "No follow up in last 4 hours"; Not Updated / Behind on Today's Calls descriptions follow the 2026-10-19 rules (`GS-012` RULE-089/090, minimum 3 calls).
+
 ## Revalidation trigger
 
 Any commit touching `js/overview-distribution-people-ops.js`,

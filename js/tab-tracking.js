@@ -9,7 +9,7 @@
 const TRACKING_SHORT_LABEL = {
   inactiveRmNewLead: 'Inactive RM',
   isNotUpdated: 'Not Updated',
-  followupOverdue: 'Follow-up Overdue',
+  followupOverdue: 'No follow up in last 4 hours',
   underCalledToday: 'Behind on Calls',
   stageStuck48h: 'Stuck 48h+',
 };

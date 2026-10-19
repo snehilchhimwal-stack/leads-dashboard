@@ -1014,27 +1014,27 @@
 
       <section id="sec-notupdated">
       <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Not Updated</div><div class="section-count" id="notUpdatedCount"></div></div>
-      <div class="filter-summary">Open leads still sitting in "Not Updated", aged 3–48 hours. Deliberately narrower than the Funnel's Not Updated band, which shows every lead in that stage including closed ones, leads under the 3h grace, and leads past 48h (those appear under Stuck instead). Also includes any open, under-48h lead that has never connected at all past the 10-minute first-contact window, regardless of its stage text — see Not Connected in 10 Minutes below for the leads that DID eventually connect, just late.</div>
+      <div class="filter-summary">Open leads still sitting in "Not Updated", aged 3–48 hours. Deliberately narrower than the Funnel's Not Updated band, which shows every lead in that stage including closed ones, leads under the 3h grace, and leads past 48h (those appear under Stuck instead). The stage text is the only test: a lead that has never connected is not added here for that reason alone (rule changed 2026-10-19).</div>
       <div class="section-scroll"><div class="card-list" id="notUpdatedList"></div></div>
     </section>
 
     <section id="sec-notconn">
         <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Not Connected in 10 Minutes</div><div class="section-count" id="notConnCount"></div></div>
-        <div class="filter-summary">A retrospective SLA-miss marker: open, under-48h leads that DID connect, but only after the 10-minute first-contact window had already passed. A lead that still hasn't connected at all isn't shown here — it's filed under Not Updated above instead, since "nothing has happened yet" is a different signal from "we got there late."</div>
+        <div class="filter-summary">A retrospective SLA-miss marker: open, under-48h leads that DID connect, but only after the 10-minute first-contact window had already passed. A lead that still hasn't connected at all isn't shown here.</div>
         <div class="section-scroll"><div class="card-list" id="notConnList"></div></div>
       </section>
 
 
     <section id="sec-followup">
-      <div class="section-head"><div class="section-bar red"></div><div class="section-title">Follow-up Overdue (4h Post-Connect)</div><div class="section-count" id="followupCount"></div></div>
-      <div class="filter-summary">SOP Rule 4 — once connected, CRM must be reviewed every 4 hours. Applies regardless of call count, so well-called leads that have gone quiet still surface here.</div>
+      <div class="section-head"><div class="section-bar red"></div><div class="section-title">No follow up in last 4 hours</div><div class="section-count" id="followupCount"></div></div>
+      <div class="filter-summary">SOP Rule 4 — open, connected leads under 48 hours old (past the 3h grace) with no comment and no call in the last 4 hours. The clock runs from the later of the last comment and the last call; the export has no call-attempt timestamp, so the last connect time stands in for the last call.</div>
       <div class="section-scroll"><div class="card-list" id="followupList"></div></div>
     </section>
 
 
     <section id="sec-duetoday">
       <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Behind on Today's Calls</div><div class="section-count" id="dueTodayCount"></div></div>
-      <div class="filter-summary">Open leads (not closed, not Opportunity+) with fewer than 5 call attempts made TODAY (IST), past grace. For a lead assigned today, today's effort is the call_attempts column directly. For an older lead still open, there's no true per-day counter in the export, so this counts CRM-log entries timestamped today as the closest available proxy — undercounts if a real call wasn't logged as a comment.</div>
+      <div class="filter-summary">Open leads (not closed, not Opportunity+) with fewer than 3 call attempts made TODAY (IST), past grace. For a lead assigned today, today's effort is the call_attempts column directly. For an older lead still open, there's no true per-day counter in the export, so this counts CRM-log entries timestamped today as the closest available proxy — undercounts if a real call wasn't logged as a comment.</div>
       <div class="section-scroll"><div class="card-list" id="dueTodayList"></div></div>
     </section>
 
@@ -1079,7 +1079,7 @@
             <option value="inactiveRm">Inactive-RM Lead Added</option>
             <option value="notUpdated">Not Updated</option>
             <option value="notConnected">Not Connected in 10 Minutes</option>
-            <option value="followupOverdue">Follow-up Overdue (4h Post-Connect)</option>
+            <option value="followupOverdue">No follow up in last 4 hours</option>
             <option value="dueToday" selected>Behind on Today's Calls</option>
             <option value="stuck">Leads Pending Beyond 48 Hours (Not Yet Opportunity)</option>
           </select>

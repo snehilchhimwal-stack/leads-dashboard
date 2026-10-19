@@ -26,12 +26,9 @@ function TestSla_buildRow_(overrides) {
 function runSlaEngineTests_() {
   TestEnv_setUp_('Tests_SlaEngine', null);
   try {
-    // Fixed, not `new Date()` — deliberately: isNotUpdated's
-    // neverConnectedPastWindow check runs businessMinutesBetweenGs_
-    // (9am-7pm IST only), so a real "now" would make that one assertion
-    // flaky depending on what hour this suite happens to run at. Fixed
-    // to a safely-mid-workday Monday afternoon so every assertion below
-    // is 100% deterministic regardless of when the suite actually runs.
+    // Fixed, not `new Date()`, so every assertion below (comment-log
+    // timestamps, created-today tests) is deterministic regardless of when
+    // the suite actually runs: a mid-workday Monday afternoon.
     const now = new Date('2026-08-17T14:00:00+05:30');
 
     // ---- inactiveRmNewLead ----
@@ -61,17 +58,28 @@ function runSlaEngineTests_() {
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
     TestAssert_(flags.isNotUpdated === true, 'isNotUpdated: fires for canonical "not updated" stage once past the 3h grace period');
 
-    // Connected (so the separate grace-EXEMPT never-connected branch below
-    // can't also fire and confound this assertion) but still inside grace —
-    // isolates that the "not updated" STAGE-TEXT branch specifically
-    // requires pastGrace.
+    // Still inside grace — the stage-text rule requires pastGrace.
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 1), current_stage: 'Not Updated', last_connect_time: TestFixture_hoursAgo_(now, 0.5), last_connect: 'Connected' });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
     TestAssert_(flags.isNotUpdated === false, 'isNotUpdated: the not-updated-stage-text branch does not fire while still inside the 3h grace period');
 
+    // 2026-10-19 (user request): the old "never connected past the 10-business-minute window" branch is gone. Not Updated is
+    // now ONLY: open, past the 3h grace, canonical stage 'not updated'.
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 1), current_stage: 'Suspect' });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.isNotUpdated === true, 'isNotUpdated: never-connected-past-10-minutes fires even though "Suspect" is NOT the not-updated stage text (grace-exempt)');
+    TestAssert_(flags.isNotUpdated === false, 'isNotUpdated (2026-10-19): a never-connected "Suspect" lead 1h old is NOT Not Updated any more (never-connected branch removed)');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 10), current_stage: 'Suspect' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === false, 'isNotUpdated (2026-10-19): a never-connected "Suspect" lead past grace is not Not Updated either - the stage text is the only test');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 2.9), current_stage: 'Not Updated' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === false, 'isNotUpdated (2026-10-19): a never-connected "Not Updated" lead at 2.9h is still inside grace - not flagged');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 3), current_stage: 'Not Updated' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === true, 'isNotUpdated (2026-10-19): a "Not Updated" lead at exactly 3h (grace is >= 3h) is flagged');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), current_stage: 'Not Updated', closing_reason: 'Not interested' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === false, 'isNotUpdated (2026-10-19): a closed lead is never Not Updated, whatever its stage text');
 
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 1), current_stage: 'Suspect', last_connect_time: TestFixture_hoursAgo_(now, 0.5), last_connect: 'Connected' });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
@@ -110,22 +118,56 @@ function runSlaEngineTests_() {
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
     TestAssert_(flags.followupOverdue === false, 'followupOverdue: does not fire for a lead that has never connected at all');
 
+    // 2026-10-19 (user request): "No follow up in last 4 hours" measures from the LATEST of the last comment and the last call.
+    // The sheet has no last-call-attempt timestamp, so last_connect_time is the call time. Neither -> age since assignment.
+    f = TestSla_buildRow_({
+      lead_assigned_at: TestFixture_hoursAgo_(now, 10), current_stage: 'Suspect',
+      last_connect_time: TestFixture_hoursAgo_(now, 1), last_connect: 'Connected',
+      internal_status_comments: 'Test RM One: Ringing - ' + TestSla_isoMinusHours_(now, 6),
+    });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.followupOverdue === false, 'followupOverdue (2026-10-19): a call 1h ago resets the clock even though the last comment is 6h old');
+    f = TestSla_buildRow_({
+      lead_assigned_at: TestFixture_hoursAgo_(now, 10), current_stage: 'Suspect',
+      last_connect_time: TestFixture_hoursAgo_(now, 5), last_connect: 'Connected',
+      internal_status_comments: 'Test RM One: Ringing - ' + TestSla_isoMinusHours_(now, 7),
+    });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.followupOverdue === true, 'followupOverdue (2026-10-19): fires when BOTH the last call (5h) and the last comment (7h) are over 4h old');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 10), current_stage: 'Suspect', last_connect_time: TestFixture_hoursAgo_(now, 3.5), last_connect: 'Connected' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.followupOverdue === false, 'followupOverdue (2026-10-19): no comment, call 3.5h ago -> within 4h, not flagged');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 10), current_stage: 'Suspect', last_connect: 'Connected' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.followupOverdue === true, 'followupOverdue (2026-10-19): connected (text only), no comment and no call time -> falls back to age since assignment (10h) and fires');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 50), current_stage: 'Suspect', last_connect_time: TestFixture_hoursAgo_(now, 6), last_connect: 'Connected' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.followupOverdue === false, 'followupOverdue (2026-10-19): the under-48h gate is kept - a 50h-old lead is never flagged here');
+
     // ---- underCalledToday ----
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 2 });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday: fires when a lead created TODAY has fewer than 5 attempts logged');
+    TestAssert_(flags.underCalledToday === true, 'underCalledToday: fires when a lead created TODAY has fewer than 3 attempts logged (2 here)');
+
+    // 2026-10-19 (user request): the daily minimum is 3, not 5.
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 3 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.underCalledToday === false, 'underCalledToday (2026-10-19): exactly 3 attempts today meets the new minimum of 3');
+    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 4 });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.underCalledToday === false, 'underCalledToday (2026-10-19): 4 attempts today is no longer behind (it was under the old minimum of 5)');
 
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 6 });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday: does not fire once 5+ attempts are logged today');
+    TestAssert_(flags.underCalledToday === false, 'underCalledToday: does not fire with 6 attempts logged today');
 
     // Lead NOT created today: attemptsToday is computed against a
     // baseline (yesterday's known call_attempts), not the raw total.
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // 12 - 10 = 2 today, under 5
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // 12 - 10 = 2 today, under 3
     TestAssert_(flags.underCalledToday === true, 'underCalledToday: for an older lead, uses (current - baseline) attempts, not the raw lifetime total');
 
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 5 }); // 12 - 5 = 7 today, not under 5
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 5 }); // 12 - 5 = 7 today, not under 3
     TestAssert_(flags.underCalledToday === false, 'underCalledToday: correctly NOT flagged once (current - baseline) clears the daily minimum');
 
     // 2026-10-01 fix: the delta-vs-baseline can UNDERCOUNT when a real
@@ -146,14 +188,14 @@ function runSlaEngineTests_() {
     flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 10-10 = 0, but 5 dated comments logged today
     TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix: 5 today-dated comment entries clear the daily minimum even though call_attempts never moved off its own baseline (the real Riya Yadav incident shape)');
 
-    const underCalledComments4 = [0, 1, 2, 3].map(function (h) {
+    const underCalledComments2 = [0, 1].map(function (h) {
       return 'Test RM One: Not Reachable - ' + TestSla_isoMinusHours_(now, h);
     }).join(' | ');
     f = TestSla_buildRow_({
       lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
-      internal_status_comments: underCalledComments4,
+      internal_status_comments: underCalledComments2,
     });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 0, only 4 comments today -- still under the daily minimum
+    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 0, only 2 comments today -- still under the daily minimum of 3
     TestAssert_(flags.underCalledToday === true, 'underCalledToday 2026-10-01 fix: still correctly fires when even the comment count alone has not cleared the daily minimum (MAX, not an automatic pass)');
 
     // The fix must not weaken the ORIGINAL case the delta already
@@ -216,7 +258,10 @@ function runSlaEngineTests_() {
     TestAssert_(flags.underCalledToday === true && flags.isNotUpdated === false, 'computeSlaFlags_ (SE-2): a TEXT lead_assigned_at (5h ago) and TEXT last_connect_time are used - underCalledToday fires, no never-connected flag');
     f = TestSla_buildRow_({ lead_assigned_at: TestSla_isoMinusHours_(now, 5), call_attempts: 2 });
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.isNotUpdated === true, 'computeSlaFlags_ (SE-2): a TEXT lead_assigned_at with no connect time is never-connected past the window (Not Updated)');
+    TestAssert_(flags.isNotUpdated === false && flags.underCalledToday === true, 'computeSlaFlags_ (SE-2): a TEXT lead_assigned_at (5h ago) is read - underCalledToday fires; with no connect time and a "Suspect" stage it is NOT Not Updated (2026-10-19 rule)');
+    f = TestSla_buildRow_({ lead_assigned_at: TestSla_isoMinusHours_(now, 5), current_stage: 'Not Updated' });
+    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
+    TestAssert_(flags.isNotUpdated === true, 'computeSlaFlags_ (SE-2): a TEXT lead_assigned_at 5h ago with stage "Not Updated" is past grace -> Not Updated');
 
     // ---- primaryIssueGs_ priority order ----
     // A lead that qualifies for both inactiveRmNewLead (highest priority)
@@ -253,14 +298,12 @@ function runSlaEngineTests_() {
       }),
       // still_open — same underCalledToday issue as the prior entry.
       // last_connect/last_connect_time set (same pattern
-      // Tests_AllIssuesEmailer.gs's own L-UNDERCALLED fixture uses) so
-      // isNotUpdated's never-connected-past-10-minutes rule can't ALSO
-      // fire and outrank underCalledToday here.
+      // Tests_AllIssuesEmailer.gs's own L-UNDERCALLED fixture uses).
       TestAIE_leadRow_(ckHeader, {
         lead_id: 'L-CK-STILLOPEN', client_id: 'C-CK-STILLOPEN', lead_assigned_at: TestFixture_hoursAgo_(now, 5),
         call_attempts: 2, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5),
       }),
-      // category_changed (non-escalation) — was Follow-up Overdue (rank 2),
+      // category_changed (non-escalation) — was No follow up in last 4 hours (rank 2; stored under its legacy label),
       // now past 48h so only stageStuck48h (rank 4) can fire; a fixture
       // baseline keeps underCalledToday from also firing and confounding
       // which single issue wins.
@@ -269,7 +312,14 @@ function runSlaEngineTests_() {
       // (below) is a synthetic 'Stuck 48h+' (rank 4) to isolate the
       // ranking-comparison logic itself, same reasoning Tests_SlaEngine.gs
       // already uses above for primaryIssueGs_'s own forced-flag checks.
-      TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-ESCALATE', client_id: 'C-CK-ESCALATE', lead_assigned_at: TestFixture_hoursAgo_(now, 1), current_stage: 'Suspect' }),
+      TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-ESCALATE', client_id: 'C-CK-ESCALATE', lead_assigned_at: TestFixture_hoursAgo_(now, 5), current_stage: 'Not Updated' }),
+      // Legacy label (2026-10-19): connected 6h ago, last comment 6h ago, 6 calls today -> today's issue is
+      // "No follow up in last 4 hours"; its prior entry (below, separate call) carries the OLD stored label "Follow-up Overdue".
+      TestAIE_leadRow_(ckHeader, {
+        lead_id: 'L-CK-LEGACY', client_id: 'C-CK-LEGACY', lead_assigned_at: TestFixture_hoursAgo_(now, 10), call_attempts: 6,
+        last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 6),
+        internal_status_comments: 'Test RM One: Ringing - ' + TestSla_isoMinusHours_(now, 6),
+      }),
       // reopened — flagged again now; the PRIOR entry (below) is shaped
       // like a checkpoint RESULT with state:'resolved', proving this can
       // only be reached via a checkpoint's own prior output, not a raw
@@ -289,7 +339,7 @@ function runSlaEngineTests_() {
       { lead_id: 'L-CK-REOPEN', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
       { lead_id: 'L-CK-GONE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'f' },
     ];
-    const ckBaselineMap = { 'L-CK-CATCHANGE': 10 }; // 15 - 10 = 5 today, clears MIN_CALLS_PER_DAY_ so underCalledToday can't also fire on L-CK-CATCHANGE
+    const ckBaselineMap = { 'L-CK-CATCHANGE': 10 }; // 15 - 10 = 5 today, clears MIN_CALLS_PER_DAY_ (3) so underCalledToday can't also fire on L-CK-CATCHANGE
     const ckResults = computeAllIssuesCheckpointGs_(ckSs, ckPriorEntries, now, ckBaselineMap);
     const ckByLeadId = {};
     ckResults.forEach(function (r) { ckByLeadId[r.lead_id] = r; });
@@ -305,6 +355,19 @@ function runSlaEngineTests_() {
     TestAssertEqual_(ckByLeadId['L-CK-REOPEN'].state, 'reopened', 'computeAllIssuesCheckpointGs_: a lead whose PRIOR entry was already resolved, but is open+flagged again, is reopened (only reachable via a checkpoint-shaped prior entry)');
     TestAssertEqual_(ckByLeadId['L-CK-GONE'].state, 'not_found', 'computeAllIssuesCheckpointGs_: a lead_id no longer in the leads tab is not_found, never silently treated as resolved');
     TestAssertEqual_(ckByLeadId['L-CK-GONE'].currentIssueLabel, null, 'computeAllIssuesCheckpointGs_: not_found carries no current issue label');
+
+    // 2026-10-19: AllIssues_Log rows written before the rename carry "Follow-up Overdue". The checkpoint maps that legacy
+    // label to the current one, so the same issue reads as still_open (not category_changed), and ranks still work.
+    TestAssertEqual_(canonicalIssueLabelGs_('Follow-up Overdue'), 'No follow up in last 4 hours', 'canonicalIssueLabelGs_: the legacy label maps to the new one');
+    TestAssertEqual_(canonicalIssueLabelGs_('Not Updated'), 'Not Updated', 'canonicalIssueLabelGs_: a current label is returned unchanged');
+    const ckLegacy = computeAllIssuesCheckpointGs_(ckSs, [
+      { lead_id: 'L-CK-LEGACY', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'f' },
+      { lead_id: 'L-CK-ESCALATE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Follow-up Overdue', followup: 'f' },
+      { lead_id: 'L-CK-LEGACY', state: 'category_changed', currentIssueLabel: 'Follow-up Overdue', currentStatus: 'Suspect' },
+    ], now, ckBaselineMap);
+    TestAssert_(ckLegacy[0].state === 'still_open' && ckLegacy[0].currentIssueLabel === 'No follow up in last 4 hours', 'computeAllIssuesCheckpointGs_ (legacy label): a stored "Follow-up Overdue" snapshot vs today\'s "No follow up in last 4 hours" is still_open (got ' + ckLegacy[0].state + ')');
+    TestAssertEqual_(ckLegacy[1].state, 'escalated', 'computeAllIssuesCheckpointGs_ (legacy label): "Follow-up Overdue" (rank 2) -> Not Updated (rank 1) is still recognised as escalated');
+    TestAssertEqual_(ckLegacy[2].state, 'still_open', 'computeAllIssuesCheckpointGs_ (legacy label): a checkpoint-shaped prior entry with the legacy currentIssueLabel is mapped too (Checkpoint 2)');
 
     // Reused verbatim for a "second checkpoint" pass — feed one of THIS
     // call's own still_open results back in as the prior entry, proving

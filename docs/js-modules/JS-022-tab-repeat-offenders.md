@@ -182,6 +182,8 @@ canonical-result-cache addition. File grew 383L → 717L in the
 Architecture Redesign (`9dea24a`, 2026-09-12): `_repeatOffendersLastResult`/
 `_repeatOffendersRunId`, the PDF-button disable/re-enable.
 
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): Tooltip text only: "No follow up in last 4 hours" (was "Follow-up Overdue").
+
 ## Revalidation trigger
 
 Any commit touching `js/tab-repeat-offenders.js`; the worker message

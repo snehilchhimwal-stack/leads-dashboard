@@ -37,8 +37,7 @@
 //
 // Depends on (all loaded earlier in dashboard.html): core-foundation.js
 // (CONFIG, istDateKey, istSameDay, parseDate), core-lead-model.js
-// (businessMinutesBetween — used only indirectly, via enrichLead's own
-// neverConnectedPastWindow field), tab-movement.js (movementSnapshots,
+// (enrichLead's isUnder48h / hasConnected fields), tab-movement.js (movementSnapshots,
 // buildMovementHistories, splitHistoryByCopy, enrichSnapshotCached),
 // tab-repeat-offenders.js (passesRepeatOffenderFilters — the Movement_Log-
 // shaped filter matcher totalLeadsByKey already reuses for exactly this
@@ -167,7 +166,7 @@ const RM_PERF_CONCENTRATION_BREADTH_CEILING = 0.25; // violated leads must be <=
 
 // Per-rule eligibility gates, expressed purely in terms of what
 // enrichLead/enrichSnapshotCached ALREADY returns (ageHours, isUnder48h,
-// hasConnected, neverConnectedPastWindow — see core-lead-model.js) plus
+// hasConnected — see core-lead-model.js) plus
 // two cheap local derivations (pastGrace from ageHours, isCreatedThatDay
 // from istSameDay) — never a reimplementation of the rules themselves,
 // only of WHEN each one applies. Ported from SlaEngine.gs's
@@ -178,10 +177,8 @@ const RM_PERF_CONCENTRATION_BREADTH_CEILING = 0.25; // violated leads must be <=
 //     (computeSlaFlags_'s own comment: rm_is_active is a CURRENT snapshot,
 //     not historical, so this can only ever be evaluated "as of" a day
 //     that IS the creation day).
-//   isNotUpdated — eligible once pastGrace (3h), OR immediately via the
-//     neverConnectedPastWindow path (which itself already encodes "not
-//     connected, isUnder48h, >10 business minutes old" — reusing that
-//     returned field instead of re-deriving business-minutes here).
+//   isNotUpdated — eligible once pastGrace (3h). (Until 2026-10-19 also
+//     immediately via a "never connected past 10 minutes" path; removed.)
 //   followupOverdue — only ever applies to CONNECTED leads under 48h old,
 //     past grace.
 //   underCalledToday / stageStuck48h — both simply "open, past grace";
@@ -191,8 +188,8 @@ const RM_PERF_RULES = [
   { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added',
     eligible: (e, ctx) => ctx.isCreatedThatDay },
   { key: 'isNotUpdated', label: 'Not Updated',
-    eligible: (e, ctx) => ctx.pastGrace || e.neverConnectedPastWindow },
-  { key: 'followupOverdue', label: 'Follow-up Overdue',
+    eligible: (e, ctx) => ctx.pastGrace },
+  { key: 'followupOverdue', label: 'No follow up in last 4 hours',
     eligible: (e, ctx) => e.isUnder48h && ctx.pastGrace && e.hasConnected },
   { key: 'underCalledToday', label: "Behind on Today's Calls",
     eligible: (e, ctx) => ctx.pastGrace },

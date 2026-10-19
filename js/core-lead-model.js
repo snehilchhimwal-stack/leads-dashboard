@@ -270,13 +270,11 @@ function enrichLead(l){
   const isUnder48h = ageHours !== null && ageHours <= CONFIG.LEAD_LIFECYCLE_HOURS;
 
   // New Today: assigned today AND in the system at least 3 hours, so a lead
-  // that just arrived isn't immediately flagged for not having 5 calls yet.
+  // that just arrived isn't immediately flagged for not having its 3 calls yet.
   const isCreatedToday = istSameDay(created, now);   // IST calendar day, not the browser's
   // Grace period from lead assignment. Applies to every check below EXCEPT
-  // the 10-minute first-contact rule (firstContactBreach and its
-  // neverConnectedPastWindow counterpart below) — that rule is precisely
-  // the one that must fire inside this window, since it exists to catch
-  // leads nobody has touched at all.
+  // the 10-minute first-contact rule (firstContactBreach) and
+  // inactiveRmNewLead.
   const pastGrace = ageHours !== null && ageHours >= CONFIG.LEAD_GRACE_HOURS;
 
   // Connection signal, hoisted up from Rule 4 below — Rule 1 needs it too
@@ -295,10 +293,9 @@ function enrichLead(l){
   //   - Connected, but only after the 10-minute window had already
   //     passed: flagged HERE as a retrospective SLA miss — contact did
   //     happen, just late.
-  //   - Never connected at all, window passed: NOT flagged here anymore —
-  //     folded into Not Updated below instead, since "still nothing has
-  //     happened" is a different (and more accurate) story than "we were
-  //     late." See neverConnectedPastWindow below.
+  //   - Never connected at all: not flagged here. (Until 2026-10-19 it was
+  //     folded into Not Updated as a "never connected past the window"
+  //     branch; that branch was removed at the user's request.)
   let firstContactStatus = 'N/A';
   let businessMinsToConnect = null;
   if (created && connectDate) {
@@ -306,19 +303,6 @@ function enrichLead(l){
     firstContactStatus = businessMinsToConnect > CONFIG.FIRST_CONTACT_SLA_MINUTES ? 'BREACHED' : 'OK';
   }
   const firstContactBreach = isOpenLead && isUnder48h && firstContactStatus === 'BREACHED';
-
-  // The "otherwise" half of Rule 1 — still no VERIFIABLE connection once
-  // the 10-minute window has passed. Deliberately exempt from the 3-hour
-  // grace (like the old firstContactBreach was), so a silent lead doesn't
-  // sit unflagged anywhere in the 10-min–3h gap between this check and Not
-  // Updated's own grace period. Gated on !connectDate rather than
-  // !hasConnected: last_connect can hold non-empty text with
-  // last_connect_time blank/unparseable, which made hasConnected true
-  // with no way to ever compute businessMinsToConnect — that ambiguous
-  // case fell through both this AND firstContactBreach silently. connectDate
-  // specifically means "we have a timestamp we can act on."
-  const neverConnectedPastWindow = isOpenLead && isUnder48h && !connectDate &&
-    !!created && businessMinutesBetween(created, now) > CONFIG.FIRST_CONTACT_SLA_MINUTES;
 
   // Detect leads touched by more than one agent over time. The sheet's RM
   // column only shows the current assignee, but internal_status_comments
@@ -355,7 +339,7 @@ function enrichLead(l){
     }
   }
 
-  // Behind on Today's Calls ("5 calls/day", every day the lead stays open —
+  // Behind on Today's Calls ("3 calls/day" since 2026-10-19, was 5, every day the lead stays open —
   // not just its assignment day). For a lead assigned today, the lifetime-total
   // call_attempts IS today's effort (it didn't exist before today), so that
   // column is used directly. For a lead still open on day 2+, the export has
@@ -404,12 +388,10 @@ function enrichLead(l){
   // the whole point of it.
   const stageStuck48h = past48h && pastGrace;
 
-  // Not Updated: currently sitting in the very first funnel stage — never
-  // progressed since import. Also absorbs the "otherwise" half of Rule 1
-  // (neverConnectedPastWindow, computed above) — a lead nobody has
-  // connected with past the 10-minute window belongs here now, not under
-  // Not Connected in 10 Minutes, regardless of what its stage text happens
-  // to say.
+  // Not Updated: open, past the 3h grace, and currently sitting in the very
+  // first funnel stage ('not updated') — never progressed since import.
+  // Nothing else (2026-10-19: the "never connected past the 10-minute
+  // window" branch was removed at the user's request; twin of SlaEngine.gs).
   //
   // Deliberately NOT gated on isUnder48h (2026-09-03 fix — mirrors
   // SlaEngine.gs's computeSlaFlags_, see its own comment for the full
@@ -422,22 +404,24 @@ function enrichLead(l){
   // true for the same lead; ISSUE_PRIORITY ranks isNotUpdated above
   // stageStuck48h, so such a lead is still reported as "Not Updated", not
   // silently absorbed into "Stuck 48h+".
-  const isNotUpdated = isOpenLead &&
-    ((pastGrace && canonicalStage(l.current_stage) === 'not updated') || neverConnectedPastWindow);
+  const isNotUpdated = isOpenLead && pastGrace && canonicalStage(l.current_stage) === 'not updated';
 
   // SOP Rule 4 — Post-Connect Follow-up: once connected, CRM should be
   // reviewed every 4 hours. Deliberately independent of call count: a
   // well-called lead that has gone quiet after connecting is exactly what
   // this rule exists to catch.
   // hasConnected/connectDate computed earlier now (Rule 1 needs them too).
-  // When no comment has ever been logged, "hours since last comment" is
-  // undefined. Treating that as automatically overdue wrongly flags a lead
-  // connected 10 minutes ago, so the clock falls back to time since
-  // CONNECTION — Rule 4 is about review cadence after connecting.
+  // Shown as "No follow up in last 4 hours" (was "Follow-up Overdue (4h
+  // Post-Connect)" until 2026-10-19). Staleness runs from the LATEST of the
+  // last comment and the last call. The sheet has no last-call-attempt
+  // timestamp column, so last_connect_time stands in for the last call.
+  // With neither, the clock runs from assignment (ageHours), as before.
+  // Gates kept: open, under 48h, past grace, connected. Twin of SlaEngine.gs.
   const hoursSinceConnect = connectDate ? (now - connectDate) / 36e5 : null;
-  const followupStaleHours = hoursSinceLastComment !== null
-    ? hoursSinceLastComment
-    : (hoursSinceConnect !== null ? hoursSinceConnect : ageHours);
+  const followupStaleHours = (hoursSinceLastComment !== null && hoursSinceConnect !== null)
+    ? Math.min(hoursSinceLastComment, hoursSinceConnect)
+    : (hoursSinceLastComment !== null ? hoursSinceLastComment
+      : (hoursSinceConnect !== null ? hoursSinceConnect : ageHours));
   const followupOverdue = isOpenLead && isUnder48h && pastGrace && hasConnected &&
     followupStaleHours !== null && followupStaleHours > CONFIG.FOLLOWUP_REVIEW_HOURS;
 
@@ -487,7 +471,7 @@ function enrichLead(l){
 
   return Object.assign({}, l, {
     ageHours, oppOrAbove, excluded, hasClosingReason, isOpenLead, past48h, isUnder48h, stageStuck48h,
-    firstContactStatus, firstContactBreach, businessMinsToConnect, neverConnectedPastWindow,
+    firstContactStatus, firstContactBreach, businessMinsToConnect,
     agentCount, isMultiAgent,
     hoursSinceLastComment, lastCommentAt, isNotUpdated,
     followupOverdue, hasConnected, recordingNotWorking, recordingCommentsNoCalls, closedWithNoComment,

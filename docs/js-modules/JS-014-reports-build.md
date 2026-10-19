@@ -46,11 +46,11 @@ First of the 3 reports files (`reports-build` → `reports-gmail` →
 | FN-095 | `normRegionKey(s)` `#L65` | a raw region string | lowercased, `[\s\-_]+`→one space | none | — | FN-094, FN-096, `repeatOffendersRegionKey` (`JS-008`) | reusable |
 | FN-096 | `mainRegionFor(rawRegion)` `#L91` | a raw region | one of the 11 `REGION_GROUP_MAP` main regions (HNI / HNI-SoBo fold into SoBo) | none | `normRegionKey` (FN-095) | filters, tracking, repeat offenders, reports | reusable |
 | FN-097 | `buildRegionReports(issueKey)` `#L410` | an SLA issue key | `[{region, subject, body, html, leads}]` per region | none (pure) | `renderReportEmailHTML` (FN-100), `reportableIssueFor` (FN-099), `suggestedFollowUp` (`JS-007`), `dedupeToFamilies` (`JS-002`) | `reports-ui.js` (`JS-016`), `tab-movement.js` (`JS-021`) | reusable |
-| FN-098 | `buildRegionWiseReports(combineAll, followupLookup)` / `buildAllRegionReports()` `#L726/#L1264` | flags / a follow-up lookup | the region-wise / all-issues combined reports | none | FN-097, `groupItemsByReportRegion` (FN-101) | `JS-016` | reusable |
-| FN-099 | `reportableIssueFor(l)` `#L653` | a lead | its reportable issue key, or none | none | `enrichLead` output | FN-097 | specific — a blanket grace re-check that used to silently re-suppress `isNotUpdated` / `inactiveRmNewLead` was **removed as a no-op** (a real historical bug fix) |
+| FN-098 | `buildRegionWiseReports(combineAll, followupLookup)` / `buildAllRegionReports()` `#L724/#L1262` | flags / a follow-up lookup | the region-wise / all-issues combined reports | none | FN-097, `groupItemsByReportRegion` (FN-101) | `JS-016` | reusable |
+| FN-099 | `reportableIssueFor(l)` `#L651` | a lead | its reportable issue key, or none | none | `enrichLead` output | FN-097 | specific — a blanket grace re-check that used to silently re-suppress `isNotUpdated` / `inactiveRmNewLead` was **removed as a no-op** (a real historical bug fix) |
 | FN-100 | `renderReportEmailHTML(opts)` `#L344` | report options | the HTML email string | none | `esc` (`JS-010`), `attemptsTodayCell`, `istDayLabel` | FN-097, FN-098 | reusable — shared template |
 | FN-101 | `groupItemsByReportRegion(items)` / `expandCopySplits(item)` `#L150/#L140` | a lead list | per-report-region groups; copies expanded | none | `effectiveRegion` (FN-094) | FN-097, FN-098 | reusable |
-| FN-102 | `reportDateRange(includedLeads)` / `reportScopeNotice()` / `subjectScopeSuffix()` `#L678/#L178/#L325` | included leads / filter state | date-range text / a scope banner / a subject suffix | none | — | FN-097, FN-098 | reusable |
+| FN-102 | `reportDateRange(includedLeads)` / `reportScopeNotice()` / `subjectScopeSuffix()` `#L676/#L178/#L325` | included leads / filter state | date-range text / a scope banner / a subject suffix | none | — | FN-097, FN-098 | reusable |
 
 ## Business rules implemented — `RULE-XXX` sub-table
 
@@ -146,6 +146,8 @@ Part 7 §18 HIGH.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-028.
+
+**2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `ISSUE_REPORT_META.followupOverdue` is labelled "No follow up in last 4 hours" with an intro/action about no comment and no call in 4 hours; the Behind on Today's Calls intro says fewer than 3; the Not Updated action and the first-contact footers no longer say never-connected leads are filed under Not Updated.
 
 ## Revalidation trigger
 

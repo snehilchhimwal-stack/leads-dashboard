@@ -1178,7 +1178,7 @@ function setupDailyRmIssueLog() {
  * outcome — no rule logic is reimplemented a third time. The one thing
  * duplicated here is a ~15-line ELIGIBILITY-WINDOW derivation
  * (computeRmPerfEligibilityGs_ below) — pastGrace/isUnder48h/
- * isCreatedThatDay/hasConnected/neverConnectedPastWindow — because
+ * isCreatedThatDay/hasConnected — because
  * computeSlaFlags_ computes these internally but only returns the final
  * violation booleans, not the intermediate eligibility context this
  * engine also needs. This mirrors js/core-rm-performance.js's own design
@@ -1223,8 +1223,8 @@ const RM_PERF_CONFIDENCE_THRESHOLD_GS_ = 0.40;
 // composite score — a routing/assignment failure, not an RM execution one.
 const RM_PERF_RULES_GS_ = [
   { key: 'inactiveRmNewLead', label: 'Inactive-RM Lead Added', eligible: function (ctx) { return ctx.isCreatedThatDay; } },
-  { key: 'isNotUpdated', label: 'Not Updated', eligible: function (ctx) { return ctx.pastGrace || ctx.neverConnectedPastWindow; } },
-  { key: 'followupOverdue', label: 'Follow-up Overdue', eligible: function (ctx) { return ctx.isUnder48h && ctx.pastGrace && ctx.hasConnected; } },
+  { key: 'isNotUpdated', label: 'Not Updated', eligible: function (ctx) { return ctx.pastGrace; } }, // 2026-10-19: never-connected branch removed
+  { key: 'followupOverdue', label: 'No follow up in last 4 hours', eligible: function (ctx) { return ctx.isUnder48h && ctx.pastGrace && ctx.hasConnected; } },
   { key: 'underCalledToday', label: "Behind on Today's Calls", eligible: function (ctx) { return ctx.pastGrace; } },
   { key: 'stageStuck48h', label: 'Stuck 48h+', eligible: function (ctx) { return ctx.pastGrace; } },
 ];
@@ -1363,9 +1363,9 @@ function _rmPerfDaysBetweenKeysGs_(a, b) {
 // doesn't expose — see this section's own header comment for why this is
 // a deliberate, minimal duplication of DERIVATION (not of rule logic).
 // KEEP IN SYNC with computeSlaFlags_ (SlaEngine.gs): pastGrace, isUnder48h,
-// the creation-day test, hasConnected and neverConnectedPastWindow must use
-// the SAME constants (LEAD_GRACE_HOURS_, LEAD_LIFECYCLE_HOURS_,
-// FIRST_CONTACT_SLA_MINUTES_) and the SAME conditions it uses. If a rule's
+// the creation-day test and hasConnected must use
+// the SAME constants (LEAD_GRACE_HOURS_, LEAD_LIFECYCLE_HOURS_)
+// and the SAME conditions it uses. If a rule's
 // gate changes there, change it here in the same commit, or the RM
 // Performance report counts a lead eligible for a rule it cannot violate
 // (or the reverse). Nothing checks this automatically (DR-10, 2026-10-13).
@@ -1389,11 +1389,9 @@ function computeRmPerfEligibilityGs_(row, colIndex, now) {
   const isCreatedThatDay = istDayKeyGs_(created) === istDayKeyGs_(now);
   const connectDate = rmPerfDateCellGs_(getVal_(row, colIndex, 'last_connect_time'));
   const hasConnected = !!connectDate || !!String(getVal_(row, colIndex, 'last_connect') || '').trim();
-  const neverConnectedPastWindow = isUnder48h && !connectDate &&
-    businessMinutesBetweenGs_(created, now) > FIRST_CONTACT_SLA_MINUTES_;
   return {
     pastGrace: pastGrace, isUnder48h: isUnder48h, isCreatedThatDay: isCreatedThatDay,
-    hasConnected: hasConnected, neverConnectedPastWindow: neverConnectedPastWindow,
+    hasConnected: hasConnected,
   };
 }
 
