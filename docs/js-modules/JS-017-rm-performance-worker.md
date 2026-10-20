@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-29 against commit `b21849e` |
+| **Last Verified** | 2026-10-20 against commit `(pending commit)` (weekly doc spot-check) |
 
 ## Purpose / reason to exist
 
@@ -23,9 +23,11 @@ and so the worker and the on-screen tab run identical code.
 ## Responsibilities
 
 - `importScripts` the production compute stack.
-- Handle the inbound `{dateKeys, filters, rmHierarchyByNameLower}`
-  message.
-- Run `computeRmPerformance` per group key (RM, Region, A1-TM, RH) and
+- Handle the inbound `{snapshots, dateKeys, filters,
+  rmHierarchyByNameLower, nowMs}` message.
+- Run the per-group-key compute (RM, Region, A1-TM, RH) stage-by-stage
+  (not via `computeRmPerformance`'s one-shot wrapper) plus the
+  opp-conversion join (`reconstructRmOppCohort` et al.) and
   `computeRmPerformanceByRegion`, posting a `progress` message per stage.
 - Post one `done` message with `{rm, region, a1tm, rh, byRegion,
   stageCounts}` — or an `error` message with the stack.
@@ -42,15 +44,18 @@ Not in `dashboard.html`'s `<script src>` list — it is loaded as a
 
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
-| FN-119 | `onmessage(e)` `#L98` | `{dateKeys, filters, rmHierarchyByNameLower, nowMs}` (`nowMs` added 2026-09-29 — REQUIRED, the Worker runs on its own real clock and never sees the main thread's frozen test `Date`) | `postMessage` a series of `{type:'progress', stage}` (now including `'opp'`) then one `{type:'done', rm, region, a1tm, rh, byRegion, stageCounts}` — `rm`/`region`/`a1tm`/`rh` rows now also carry `opp`/`oppBasis`/`oppPeer`/`doubleFlag` — (or `{type:'error', message, stack}`) | runs the compute; posts messages | `passesRepeatOffenderFilters`, `computeRmPerformance`, `computeRmPerformanceByRegion`, `computeRmPerformanceWithOpp`, `reconstructRmOppCohort`, `aggregateRmOppConversion`, `classifyRmOppConversion`, `joinRmOppConversion`, `repeatOffendersRegionKey`, `rmPerfPrimaryManagerFor`, `rmPerfRhFor` (all `JS-008`, loaded via `importScripts`) | the `Worker` instance in `JS-022` | specific — the worker entry |
+| FN-119 | `onmessage(e)` `#L98` | `{snapshots, dateKeys, filters, rmHierarchyByNameLower, nowMs}` (`nowMs` added 2026-09-29 — REQUIRED, the Worker runs on its own real clock and never sees the main thread's frozen test `Date`) | `postMessage` a series of `{type:'progress', stage}` (now including `'opp'`) then one `{type:'done', rm, region, a1tm, rh, byRegion, stageCounts}` — `rm`/`region`/`a1tm`/`rh` rows now also carry `opp`/`oppBasis`/`oppPeer`/`doubleFlag` — (or `{type:'error', message, stack}`) | runs the compute; posts messages | `passesRepeatOffenderFilters`, `reconstructRmPerformanceObservations`, `aggregateRmPerformance`, `computeRmPerfPeerAverages`, `classifyRmPerformance`, `computeRmPerformanceWithOpp`, `computeRmPerformanceByRegion`, `reconstructRmOppCohort`, `aggregateRmOppConversion`, `classifyRmOppConversion`, `joinRmOppConversion`, `repeatOffendersRegionKey`, `rmPerfPrimaryManagerFor`, `rmPerfRhFor` (all `JS-008`, loaded via `importScripts`) | the `Worker` instance in `JS-022` | specific — the worker entry |
 | FN-120 | `_rmPerfWorkerClassificationCounts(list)` `#L94` | a result list | `{classification: count}` map | none | — | FN-119 (for `stageCounts`) | specific — a debug/telemetry helper |
 
 ## Message contract
 
-- **IN** (`postMessage` from `JS-022`): `{dateKeys, filters,
-  rmHierarchyByNameLower}`.
-- **OUT — progress**: `{type:'progress', stage:'rm'|'region'|'a1tm'|'rh'|'byRegion'}`
-  — 3–5 of these (`a1tm` / `rh` only when a hierarchy map is present).
+- **IN** (`postMessage` from `JS-022`): `{snapshots, dateKeys, filters,
+  rmHierarchyByNameLower, nowMs}` (`nowMs` added 2026-09-29, REQUIRED —
+  the worker never uses `Date.now()` itself, see `EXC-033`'s sibling note
+  in the file's own header comment).
+- **OUT — progress**: `{type:'progress', stage:'rm'|'region'|'a1tm'|'rh'|'byRegion'|'opp'}`
+  — 4–6 of these (`a1tm` / `rh` only when a hierarchy map is present;
+  `opp` added 2026-09-29 for the Opp-conversion join).
 - **OUT — done**: `{type:'done', rm, region, a1tm, rh, byRegion,
   stageCounts}` — exactly one. `byRegion` added 2026-09-09 (the
   "Region wise repeat offender list").
@@ -128,19 +133,28 @@ to `TAB-004`.
 
 ## Validation
 
-- **Method:** full read at `c82ec67`; the `importScripts` list (`#L64`–
-  `#L71`) and the message contract (`#L46`–`#L61` header + the `onmessage`
-  body `#L77`–`#L151`) confirmed directly. The compute it runs is
-  validated on `JS-008`. `tests/frontend-harness.html` exercises
-  `computeRmPerformance` on the main thread (the identical code path).
-- **Evidence:** `js/rm-performance-worker.js` source (message contract +
-  `importScripts` list); `JS-008` validation.
-- **Status:** Validated 2026-09-10.
+- **Method:** full re-read at current `HEAD` as part of the 2026-10-20
+  weekly doc spot-check — the `importScripts` list, the `onmessage` body,
+  and the real IN/OUT message shapes confirmed directly against source.
+  The compute it runs is validated on `JS-008`.
+  `tests/frontend-harness.html` exercises the same stage-by-stage
+  functions on the main thread (the identical code path).
+- **Evidence:** `js/rm-performance-worker.js` source at `HEAD` (message
+  contract + `importScripts` list); `JS-008` validation.
+- **Status:** Validated 2026-10-20.
 
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-028. The `byRegion` stage +
-`done`-message field were added 2026-09-09 (`812a3cb`).
+`done`-message field were added 2026-09-09 (`812a3cb`). Re-verified
+2026-10-20 (weekly doc spot-check, Cycle 7): the record's `FN-119` Calls
+column, Responsibilities, and Message-contract sections still described
+the pre-`b21849e` (2026-09-29, the Opp-conversion join) shape — fixed to
+name the real stage-by-stage calls (`reconstructRmPerformanceObservations`
+etc., not the bare `computeRmPerformance` wrapper this worker explicitly
+avoids), the real IN message fields (`snapshots`, `nowMs` — both
+present since before this fix but never listed in the Message-contract
+section), and the real `'opp'` progress stage (4–6 stages, not 3–5).
 
 ## Revalidation trigger
 

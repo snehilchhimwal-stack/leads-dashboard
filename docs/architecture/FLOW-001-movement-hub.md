@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-20 against commit `(pending commit)` (weekly doc spot-check) |
 
 ## Purpose / reason to exist
 
@@ -35,25 +35,28 @@ cross-tab joins lie.
 |---|---|---|
 | 1 | `TRIGGER` (see `apps-script-triggers.md`) | 4 `atHour(h).everyDays(1).inTimezone('Asia/Kolkata')` IST triggers, `h` ∈ `SNAPSHOT_HOURS_ = [0,6,12,18]` → `snapshotPeriodic` → `snapshotOpenLeads_` |
 | 2 | `GS-008` `MovementTracker.gs` | `snapshotOpenLeads_` reads the `leads` tab (`SHEET-001`), classifies via `Core.gs` + `SlaEngine.gs`, writes one `Movement_Log` (`SHEET-002`) row per open lead |
-| 3 | `GS-008` | in the **same** pass writes the matching `SLA_History` (`SHEET-005`) rows (two-writer schema-parity rule, `LOGIC_AUDIT.md` Part 4 §4.7) and, guarded, `Daily_Cohort_History` (`SHEET-008`) |
-| 4 | `GS-006` `InteractionHistoryLogger.gs` | piggyback — appends new comment rows to `Comment_History` (`SHEET-009`) for the same lead set |
-| 5 | `GS-013` `UnmatchedCommentLogger.gs` | piggyback — `scanUnmatchedCommentsGs_` appends any RM comment the classification keywords missed to `Unmatched_Comments_Log` (`SHEET-010`) |
+| 3 | `GS-008` | in the **same** pass writes the matching `SLA_History` (`SHEET-005`) rows (two-writer schema-parity rule, `LOGIC_AUDIT.md` Part 4 §4.7) and unconditionally logs a `Movement_Log_Runs` (`SHEET-015`) row via `ensureMovementLogRunsSheet_` (`MovementTracker.gs` `#L219`) |
+| 4 | `GS-013` `UnmatchedCommentLogger.gs` | piggyback (DATA phase) — `scanUnmatchedCommentsGs_` appends any RM comment the classification keywords missed to `Unmatched_Comments_Log` (`SHEET-010`) |
+| 5 | `GS-006` `InteractionHistoryLogger.gs` | piggyback (DATA phase) — appends new comment rows to `Comment_History` (`SHEET-009`) for the same lead set |
+| 6 | `GS-008` (maintenance phases) | `Movement_Log prune` (`pruneMovementLog_`), `Comment_History prune` (`pruneCommentHistory_`, added 2026-09-29), `Unmatched_Comments_Log prune` (`pruneUnmatchedCommentsLog_`, added 2026-09-29), then guarded `Daily_Cohort_History` persist (`persistDailyCohortHistoryGs_`) — normally run LAST, after the DATA phases (steps 4–5), but swapped to run FIRST if the previous pass had to skip maintenance for time ("owed", `MovementTracker.gs` `#L822-825`) |
 | — | `JS-018` `sheets-writeback.js` | the **browser** on-demand path (`#snapshotNowBtn` → `browserSnapshotOpenLeads`) writes the same `Movement_Log` / `SLA_History` shape, so a human can force a capture between triggers |
 
 ## Inputs / Outputs
 
 - **Triggered by:** the 4 daily IST time triggers (or the dashboard's
   Snapshot-now button).
-- **Produces:** `Movement_Log` + `SLA_History` rows (always);
-  `Daily_Cohort_History` (guarded); `Comment_History` +
-  `Unmatched_Comments_Log` appends (piggyback).
+- **Produces:** `Movement_Log` + `SLA_History` + `Movement_Log_Runs`
+  rows (always); `Daily_Cohort_History` (guarded); `Comment_History` +
+  `Unmatched_Comments_Log` appends (piggyback DATA phases); periodic
+  prunes of `Movement_Log` / `Comment_History` / `Unmatched_Comments_Log`
+  (maintenance phases, budget-permitting — see step 6).
 
 ## Data lineage
 
 `SHEET-001` (`leads`) → `snapshotOpenLeads_` (`GS-008`) → `SHEET-002` /
-`SHEET-005` / `SHEET-008`; the same lead set → `GS-006` → `SHEET-009`
-and `GS-013` → `SHEET-010`. Per-component detail: those records +
-`DATA-004` (the Movement snapshot pipeline as pure lineage).
+`SHEET-005` / `SHEET-008` / `SHEET-015`; the same lead set → `GS-013` →
+`SHEET-010` and `GS-006` → `SHEET-009`. Per-component detail: those
+records + `DATA-004` (the Movement snapshot pipeline as pure lineage).
 
 ## Business rules — `RULE-XXX` list
 
@@ -62,16 +65,27 @@ schema-parity rule (`SHEET-002` / `GS-008`), the reduced Loan-region
 override `_effectiveRegionGs_` (`GS-008`, because `project_region` isn't
 captured — the HIGH finding, see `DATA-005`), the machine-clock-relative
 prune cutoff `pruneMovementLog_` (`SHEET-002` `EXC-074`), the 7-day
-retention on `Movement_Log`.
+retention on `Movement_Log`, and the DATA-phases-before-MAINTENANCE-phases
+ordering (step 6) that swaps when maintenance is "owed" from a prior run.
 
 ## Exceptions & failure behaviour
 
 - A whole pass failing shows as **Failed** in the Apps Script Executions
-  log; the next scheduled pass self-heals (a missed day is tolerated —
-  `MovementTracker.gs` comment, ~`#L536`).
-- A **piggyback** logger throwing does **not** abort the snapshot — the
-  loggers are best-effort; `snapshotOpenLeads_` completes its own writes
-  first.
+  log. `snapshotRunProblemsGs_` (`MovementTracker.gs` `#L1770`) actively
+  flags `stuck`/`failed`/`overdue`/`degraded` runs rather than silently
+  tolerating them — a missed/failed pass is **not**, by itself, a
+  self-healing condition.
+- The one thing that genuinely self-heals quietly is a single run
+  skipping the MAINTENANCE phases only (step 6) for time budget — the
+  next run does them first (`SNAPSHOT_MAINTENANCE_OWED_PROPERTY_`,
+  `MovementTracker.gs` `#L1790-1792`), and it's only surfaced as a
+  problem once it's been owed for several runs/hours running
+  (`SNAPSHOT_MAINTENANCE_ALERT_RUNS_`/`_HOURS_`). A skipped DATA phase
+  (SLA_History, the comment scan/log) is reported immediately — that
+  data point is gone for good, not deferred.
+- A **piggyback** DATA-phase logger throwing does **not** abort the
+  snapshot — the loggers are best-effort; `snapshotOpenLeads_` completes
+  its own writes first.
 - `pruneMovementLog_` uses a machine-clock-relative cutoff — the one date
   boundary in `GS-008` not built through `istDayKeyGs_` (`LOGIC_AUDIT.md`
   Part 1 §4d).
@@ -95,7 +109,8 @@ retention on `Movement_Log`.
 ## Relationships
 
 - **Depends On:** `GS-006`, `GS-008`, `GS-013`, `JS-018`, `SHEET-001`,
-  `SHEET-002`, `SHEET-005`, `SHEET-008`, `SHEET-009`, `SHEET-010`
+  `SHEET-002`, `SHEET-005`, `SHEET-008`, `SHEET-009`, `SHEET-010`,
+  `SHEET-015`
 - **Used By:** `none` — an architecture overlay; nothing in the catalog
   *depends on* a `FLOW-`. Its participants carry their own reciprocal
   `Depends On` / `Used By` in the component graph (`INDEX.md`).
@@ -110,17 +125,28 @@ retention on `Movement_Log`.
 
 ## Validation
 
-- **Method:** traced against `LOGIC_AUDIT.md` Part 4 §4.5/§4.7 + the
-  `GS-006` / `GS-008` / `GS-013` records at `c82ec67`;
-  `Tests_MovementTracker.gs` covers the two-writer parity.
-- **Evidence:** `docs/validation/README.md` (`SHEET-002` retention row +
-  the `GS-` records); `.github/workflows/test.yml` last green run.
-- **Status:** Validated 2026-09-10.
+- **Method:** re-read directly against current `MovementTracker.gs`
+  (the `dataPhases`/`maintenancePhases` arrays, the `Movement_Log_Runs`
+  write, `snapshotRunProblemsGs_`) as part of the 2026-10-20 weekly
+  doc spot-check; `Tests_MovementTracker.gs` covers the two-writer
+  parity.
+- **Evidence:** `MovementTracker.gs` source at `HEAD`;
+  `docs/_planning/weekly-spot-check-log.md` (Cycle 7); `.github/workflows/test.yml`
+  last green run.
+- **Status:** Validated 2026-10-20.
 
 ## Version / change reference
 
 Record created by `t-tf-5ad22d8e4c2e` (2026-09-10), forensic-audit P2
-item 10. Verified against code at `c82ec67`.
+item 10; verified at `c82ec67`. Re-verified 2026-10-20 (weekly doc
+spot-check, Cycle 7): fixed the step-4/5 piggyback order (real code runs
+`UnmatchedCommentLogger.gs` before `InteractionHistoryLogger.gs`, not the
+reverse), added the `Movement_Log_Runs` (`SHEET-015`) write and the
+maintenance-phase group (the two 2026-09-29 prunes +
+`Daily_Cohort_History` persist, plus the owed-maintenance reordering)
+that had never been folded into this overlay, and replaced a stale
+`#L536` self-heal citation with the real current watchdog
+(`snapshotRunProblemsGs_`) behaviour.
 
 ## Revalidation trigger
 

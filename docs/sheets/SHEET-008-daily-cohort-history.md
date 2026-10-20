@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-20 against commit `(pending commit)` (weekly doc spot-check) |
 
 ## Purpose / reason to exist
 
@@ -33,7 +33,7 @@ the writing `source`.
 
 ## Source of the data
 
-**Two writers, identical schema** (`MovementTracker.gs` `#L559` comment:
+**Two writers, identical schema** (`MovementTracker.gs` `#L1272` comment:
 "Must exactly match `DAILY_COHORT_HISTORY_COLUMNS` in
 `js/sheets-writeback.js`"): `GS-008` `persistDailyCohortHistoryGs_` (in
 the 4×/day capture) and `JS-018` `upsertDailyCohortHistoryRows` /
@@ -58,8 +58,8 @@ the 4×/day capture) and `JS-018` `upsertDailyCohortHistoryRows` /
 | `updated_at` | datetime | last write |
 | `source` | text | `movement` / `browser` / `backfill` |
 
-Exact list: `MovementTracker.gs` `DAILY_COHORT_HISTORY_COLUMNS_` `#L561`
-== `js/sheets-writeback.js` `DAILY_COHORT_HISTORY_COLUMNS` `#L472`.
+Exact list: `MovementTracker.gs` `DAILY_COHORT_HISTORY_COLUMNS_` `#L1275`
+== `js/sheets-writeback.js` `DAILY_COHORT_HISTORY_COLUMNS` `#L493`.
 
 ## Writers
 
@@ -157,18 +157,23 @@ The live `Daily_Cohort_History` tab; schema
 
 ## Validation
 
-- **Method:** column list read from both constants at `c82ec67`
-  (confirmed identical); schema-parity + never-re-archive asserted in
-  `Tests_MovementTracker.gs`. `tests/frontend-harness.html` exercises
-  `upsertDailyCohortHistoryRows` (write boundary mocked).
-- **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c/§4d;
-  `.github/workflows/test.yml` (`Tests_MovementTracker.gs`, last green).
-- **Status:** Validated 2026-09-10 (non-lifecycle); lifecycle `TBD`
+- **Method:** column list re-read from both constants at current `HEAD`
+  (confirmed identical; only the line anchors had drifted) as part of
+  the 2026-10-20 weekly doc spot-check; schema-parity + never-re-archive
+  asserted in `Tests_MovementTracker.gs`. `tests/frontend-harness.html`
+  exercises `upsertDailyCohortHistoryRows` (write boundary mocked).
+- **Evidence:** `MovementTracker.gs` / `js/sheets-writeback.js` source at
+  `HEAD`; `LOGIC_AUDIT.md` Part 1 §4c/§4d; `.github/workflows/test.yml`
+  (`Tests_MovementTracker.gs`, last green).
+- **Status:** Validated 2026-10-20 (non-lifecycle); lifecycle `TBD`
   (`DOC-036`).
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-032`.
+Verified at `c82ec67`; record created by `DOC-032`. Re-verified
+2026-10-20 (weekly doc spot-check, Cycle 7): fixed 3 stale `#Lnn`
+line-anchor citations (`MovementTracker.gs` grew to 2145 lines since
+`c82ec67`) — no described-behavior drift found.
 
 ## Revalidation trigger
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-10 against commit `c82ec67` |
+| **Last Verified** | 2026-10-20 against commit `(pending commit)` (weekly doc spot-check) |
 
 ## Purpose / reason to exist
 
@@ -30,8 +30,14 @@ One row per dashboard-initiated send.
 ## Source of the data
 
 `JS-018` `logEmailSend` (+ `ensureSendLogSheet_` to create the tab),
-called fire-and-forget from `JS-015` `performGmailSend` and the
-`mailto:` path.
+called fire-and-forget from `JS-015` `performGmailSend`. **Needs human
+confirmation (2026-10-20 spot-check):** this line previously also named
+"the `mailto:` path" as a caller — real current code shows only
+`performGmailSend` (`js/reports-gmail.js` `#L377`) calls `logEmailSend`;
+the `mailto:` path does not log, independently corroborated by
+`docs/_planning/CODE_AUDIT_2026-10-10/M_catalog_sheets_flows_integrations.md:36`.
+Not clear whether this was already wrong at this record's `c82ec67`
+baseline or regressed later — left as a flag rather than a guessed fix.
 
 ## Destination / consumers
 
@@ -49,7 +55,7 @@ called fire-and-forget from `JS-015` `performGmailSend` and the
 | `lead_count` | number | leads covered |
 | `sent_by` | text | the signed-in user's email |
 
-Exact list: `js/sheets-writeback.js` `SEND_LOG_COLUMNS` `#L115`.
+Exact list: `js/sheets-writeback.js` `SEND_LOG_COLUMNS` `#L136`.
 
 ## Writers
 
@@ -66,9 +72,17 @@ Exact list: `js/sheets-writeback.js` `SEND_LOG_COLUMNS` `#L115`.
 
 ## Automation / triggers touching it
 
-None — written only by the dashboard's send buttons (`BTN-002`..`BTN-004`,
-`BTN-016` via `JS-015`). The **scheduled** emails log to `SHEET-013`
-(`AllIssues_Log`) / `SHEET-014` (`Overnight_Log`) instead, not here.
+None — written only from the browser's send path via `JS-015`
+`performGmailSend`. **Needs human confirmation (2026-10-20 spot-check):**
+the specific trigger buttons previously named here (`BTN-002`..`BTN-004`,
+`BTN-016`) build/export report cards but don't themselves call
+`performGmailSend` — the real senders are the per-report-card
+Send-via-Gmail buttons (`gmailBtn_${idx}` / `gmailAllBtn_${i}` in
+`js/reports-ui.js`, `overnightRptGmailBtn_${idx}` in `js/tab-movement.js`),
+none of which has its own catalogued `BTN-XXX` ID. Left flagged rather
+than guessing the right wording / whether new `BTN-` IDs should be
+registered. The **scheduled** emails log to `SHEET-013` (`AllIssues_Log`)
+/ `SHEET-014` (`Overnight_Log`) instead, not here.
 
 ## Apps Script functions touching it
 
@@ -140,18 +154,24 @@ The live `Send_Log` tab; schema `SEND_LOG_COLUMNS`
 
 ## Validation
 
-- **Method:** column list read from `SEND_LOG_COLUMNS` `#L115` at
+- **Method:** column list read from `SEND_LOG_COLUMNS` `#L136` at
   `c82ec67`; the fire-and-forget behaviour + no-reader status
   cross-checked against `LOGIC_AUDIT.md` Part 1 §4c.
   `tests/frontend-harness.html` exercises `logEmailSend` (write boundary
   mocked).
 - **Evidence:** `LOGIC_AUDIT.md` Part 1 §4c; `tests/frontend-harness.html`.
-- **Status:** Validated 2026-09-10 (non-lifecycle); lifecycle `TBD`
+- **Status:** Validated 2026-10-20 (non-lifecycle, with 2 open flags —
+  see Source of the data / Automation sections); lifecycle `TBD`
   (`DOC-036`).
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-032`.
+Verified at `c82ec67`; record created by `DOC-032`. Re-verified
+2026-10-20 (weekly doc spot-check, Cycle 7): fixed the stale
+`SEND_LOG_COLUMNS` line anchor (`#L115` → real `#L136`); flagged (not
+fixed — needs a human call) a possibly-wrong `mailto:`-path logging
+claim and the real but uncatalogued per-report-card send-trigger
+buttons replacing the previously-cited `BTN-002`..`BTN-004`/`BTN-016`.
 
 ## Revalidation trigger
 

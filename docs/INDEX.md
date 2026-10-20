@@ -227,7 +227,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 | JS-014 | JS- | reports-build | `js/reports-build.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-021 | DATA-005, EXT-002, JS-003, JS-004, JS-008, JS-012, JS-015, JS-016, JS-017, JS-021, JS-022, JS-023, JS-024, TAB-003, TAB-004, TAB-005, TAB-007, TAB-008 | 2026-10-19 (`94a90c4`) |
 | JS-015 | JS- | reports-gmail | `js/reports-gmail.js` | Closed + Monitored | EXT-002, JS-001, JS-014, JS-016, JS-018, SHEET-011 | JS-001, JS-016, SHEET-011, TAB-003, TAB-007 | 2026-10-07 (`b9e6c7b`) |
 | JS-016 | JS- | reports-ui | `js/reports-ui.js` | Closed + Monitored | JS-014, JS-015, JS-018, JS-020, SHEET-004 | DATA-003, EXT-002, JS-015, TAB-003, TAB-007 | 2026-10-07 (`c416a01`) |
-| JS-017 | JS- | rm-performance-worker | `js/rm-performance-worker.js` | Closed + Monitored | JS-005, JS-006, JS-007, JS-008, JS-014, JS-021 | JS-022, TAB-004 | 2026-09-29 (`b21849e`) |
+| JS-017 | JS- | rm-performance-worker | `js/rm-performance-worker.js` | Closed + Monitored | JS-005, JS-006, JS-007, JS-008, JS-014, JS-021 | JS-022, TAB-004 | 2026-10-20 (`pending commit`) |
 | JS-018 | JS- | sheets-writeback | `js/sheets-writeback.js` | Closed + Monitored | EXT-001, EXT-002, EXT-003, JS-001, JS-003, JS-006, JS-009, JS-021, SHEET-002, SHEET-004, SHEET-005, SHEET-008, SHEET-011, SHEET-015, SHEET-018 | DATA-003, DATA-004, JS-003, JS-004, JS-012, JS-015, JS-016, JS-021, JS-024, SHEET-002, SHEET-004, SHEET-005, SHEET-008, SHEET-011, SHEET-015, SHEET-018, TAB-003, TAB-007, TAB-008 | 2026-10-03 (`aa6f71b`) |
 | JS-019 | JS- | tab-audit | `js/tab-audit.js` | Closed + Monitored | JS-002, JS-004, JS-005, JS-006, JS-007, JS-010, JS-012 | JS-012, JS-023, TAB-005, TAB-006 | 2026-09-30 (`fc956a0`) |
 | JS-020 | JS- | tab-morning | `js/tab-morning.js` | Closed + Monitored | JS-004, JS-005, JS-010, JS-012 | JS-012, JS-016, JS-021, TAB-001 | 2026-09-30 (`c1f8bf9`) |
@@ -278,10 +278,10 @@ emails, never in this repo (`DOC-007`).
 | SHEET-005 | SHEET- | SLA_History | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / operational) | DATA-002, DATA-004, EXT-001, GS-008, JS-018, SHEET-002 | GS-008, JS-004, JS-018, JS-024, TAB-008 | 2026-10-13 (`e06e781`) |
 | SHEET-006 | SHEET- | RM_Hierarchy | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: CRITICAL / EMPLOYEE-DATA) | EXT-001, GS-011, RM_HIERARCHY_RAW_ (GS-011), RmHierarchy.private.gs (opt) | GS-001, GS-004, GS-009, GS-010, GS-011, GS-014, JS-008, JS-013, JS-022, SHEET-007, TAB-004 | 2026-10-07 (`c416a01`) |
 | SHEET-007 | SHEET- | Manager_Directory | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: CRITICAL / EMPLOYEE-DATA) | EXT-001, GS-011, SHEET-006 | GS-001, GS-004, GS-009, GS-010, GS-011, GS-014 | 2026-09-10 (`c82ec67`) |
-| SHEET-008 | SHEET- | Daily_Cohort_History | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / operational) | DATA-004, EXT-001, GS-008, JS-018, SHEET-002 | GS-008, JS-018, JS-024, TAB-008 | 2026-09-10 (`c82ec67`) |
+| SHEET-008 | SHEET- | Daily_Cohort_History | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / operational) | DATA-004, EXT-001, GS-008, JS-018, SHEET-002 | GS-008, JS-018, JS-024, TAB-008 | 2026-10-20 (`pending commit`) |
 | SHEET-009 | SHEET- | Comment_History | Google Sheet | Closed + Monitored (retention 30 days since 2026-09-29; DOC-038: LOW / COMMENT-TEXT) | DATA-003, EXT-001, GS-006, GS-008, SHEET-001 | GS-006, GS-008 | 2026-10-07 (`58ab8e1`) |
 | SHEET-010 | SHEET- | Unmatched_Comments_Log | Google Sheet | Closed + Monitored (retention 30 days since 2026-09-29, plus manual clear of reviewed rows; DOC-038: LOW / COMMENT-TEXT) | DATA-003, EXT-001, GS-005, GS-008, GS-013, SHEET-001 | GS-008, GS-013 | 2026-10-07 (`58ab8e1`) |
-| SHEET-011 | SHEET- | Send_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / contact-emails) | DATA-005, EXT-001, EXT-002, JS-015, JS-018 | DASH-001, JS-015, JS-018, JS-021, TAB-003, TAB-007 | 2026-09-10 (`c82ec67`) |
+| SHEET-011 | SHEET- | Send_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / contact-emails) | DATA-005, EXT-001, EXT-002, JS-015, JS-018 | DASH-001, JS-015, JS-018, JS-021, TAB-003, TAB-007 | 2026-10-20 (`pending commit`) |
 | SHEET-012 | SHEET- | Region_Recipients | Google Sheet | Closed + Monitored (lifecycle N/A config; DOC-038: IMPORTANT / contact-emails) | EXT-001, GS-004 | GS-001, GS-004, GS-010, GS-011 | 2026-10-13 (`e06e781`) |
 | SHEET-013 | SHEET- | AllIssues_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: LOW / contact-emails) | EXT-001, EXT-002, GS-001, GS-010 | GS-001, GS-010, GS-018, GS-020 | 2026-10-05 (`fe9b37f`) |
 | SHEET-014 | SHEET- | Overnight_Log | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: IMPORTANT / contact-emails) | EXT-001, EXT-002, GS-010 | GS-010, GS-018 | 2026-10-05 (`fe9b37f`) |
@@ -341,7 +341,7 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| FLOW-001 | FLOW- | Movement snapshot hub + piggyback loggers | `architecture/FLOW-001-movement-hub.md` | Closed + Monitored | GS-006, GS-008, GS-013, JS-018, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | none | 2026-09-10 (`c82ec67`) |
+| FLOW-001 | FLOW- | Movement snapshot hub + piggyback loggers | `architecture/FLOW-001-movement-hub.md` | Closed + Monitored | GS-006, GS-008, GS-013, JS-018, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | none | 2026-10-20 (`pending commit`) |
 | FLOW-002 | FLOW- | The 3-phase "Generate region emails" cycle | `architecture/FLOW-002-generate-cycle.md` | Closed + Monitored | EXT-002, GS-005, GS-010, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-004, SHEET-011 | none | 2026-09-10 (`c82ec67`) |
 
 ---
