@@ -451,3 +451,95 @@ clean); `node test/check-docs-coverage.js` full coverage (25/25 `js/`,
 no `.gs`/`js/` source touched, run anyway as a sanity check since Node
 was available this session). GitHub Actions confirmed green on the
 pushed commit before this entry was finalized.
+
+---
+
+## Cycle 7 — 2026-10-20 (run by Claude, scheduled cloud routine)
+
+Checked `SHEET-008` (`Daily_Cohort_History`), `SHEET-011` (`Send_Log`),
+`FLOW-001` (the Movement snapshot hub + piggyback-loggers overlay),
+`JS-017` (`rm-performance-worker.js`) — none checked in cycles 1-6, and
+(with `GS-014` as the one exception, never sampled but recently touched by
+unrelated RM-hierarchy work) all 4 had the oldest still-unrevisited `Last
+Verified` dates in the catalog going in (`SHEET-008`/`SHEET-011`/`FLOW-001`
+at `2026-09-10`/`c82ec67`, the catalog's original seed baseline; `JS-017`
+at `2026-09-29`/`b21849e`, the record's own `## Validation` section
+already internally inconsistent — it separately said "Validated
+2026-09-10"/`c82ec67`). Used 4 parallel investigation passes (one per
+record) to re-read each against current source independently, then
+reconciled and applied fixes by hand. All 4 had real, fixed drift;
+2 of the 4 also surfaced a judgment-call item flagged for human review
+rather than guessed at.
+
+**`SHEET-008`** — real drift, fixed, pure line-anchor slippage (no
+described-behavior mismatch). All 3 `#Lnn` citations into
+`MovementTracker.gs` (now 2145 lines) had drifted: the schema-parity
+comment `#L559`→real `#L1272`, `DAILY_COHORT_HISTORY_COLUMNS_`
+`#L561`→real `#L1275`; `js/sheets-writeback.js`'s
+`DAILY_COHORT_HISTORY_COLUMNS` `#L472`→real `#L493`. The 12-column list
+itself, the writer/reader function set, and the never-re-archive and
+NA-past-the-raw-window behaviors all still matched exactly.
+
+**`SHEET-011`** — real drift, fixed, plus 2 flagged (not guessed) items.
+The `SEND_LOG_COLUMNS` line anchor had drifted `#L115`→real `#L136` —
+fixed. Two separate claims could not be confidently resolved either way
+and were left as explicit flags rather than silently "corrected": (1)
+the record's "Source of the data" section names "the `mailto:` path" as
+a second caller of `logEmailSend` alongside `performGmailSend`, but real
+current code (and an independent 2026-10-10 code audit) shows only
+`performGmailSend` calls it — unclear whether this was wrong even at the
+record's `c82ec67` baseline or regressed later, so dating it needs a
+deeper `git blame` a future cycle should do; (2) the record names
+`BTN-002`..`BTN-004`/`BTN-016` as "the dashboard's send buttons", but
+those are the build/export buttons — the real Gmail-send triggers are
+per-report-card dynamic buttons (`gmailBtn_${idx}` etc.) with no
+catalogued `BTN-XXX` ID at all, and whether to reword this record or
+register new `BTN-` IDs is an editorial call left to a human.
+
+**`FLOW-001`** — real drift, fixed, the most substantial finding this
+cycle (an architecture overlay, not a single-file record, so it had
+drifted further without any single owning component's own revalidation
+catching it). Four distinct issues, all against `MovementTracker.gs`'s
+real current `dataPhases`/`maintenancePhases` structure: (1) the
+piggyback step order was reversed — the doc listed `GS-006`
+(`InteractionHistoryLogger.gs`) running before `GS-013`
+(`UnmatchedCommentLogger.gs`); real code runs `GS-013` first; (2) the
+hub's unconditional `Movement_Log_Runs` (`SHEET-015`) write — added
+2026-09-17, closing a `check-catalog.py` check-L gap, and already folded
+into `GS-008`'s own record back in spot-check cycle 2 — was never
+mentioned in this cross-file overlay at all; (3) a whole maintenance-
+phase group was missing: the two 2026-09-29 prunes (`Comment_History`,
+`Unmatched_Comments_Log`) and the "owed-maintenance-runs-first" reorder
+logic; (4) the Exceptions section cited a stale `#L536` (now unrelated
+code, `buildMovementLogMapsGs_`) for a "whole pass self-heals" claim that
+overstated real behavior — only a single skipped *maintenance* phase
+self-heals quietly (via `snapshotRunProblemsGs_`'s owed-tracking); a
+failed/overdue *pass* is actively flagged, not silently tolerated. Fixed
+the Participants table, Inputs/Outputs, Data lineage, Business rules,
+Exceptions, and `Depends On` (added `SHEET-015`, which `docs/INDEX.md`'s
+own row already listed — the record file alone was behind).
+
+**`JS-017`** — real drift, fixed. The record's Responsibilities, `FN-119`
+Calls column, and Message-contract sections all still described the
+pre-`b21849e` (2026-09-29, the Opp-conversion join) shape: the Calls
+column listed the bare `computeRmPerformance` wrapper, which the real
+file's own header comment explicitly says it avoids (calling
+`reconstructRmPerformanceObservations`/`aggregateRmPerformance`/
+`computeRmPerfPeerAverages`/`classifyRmPerformance` stage-by-stage
+instead) — confirmed zero bare `computeRmPerformance(` calls in the real
+file; the Message-contract section's IN shape omitted `snapshots` and
+`nowMs` (both real, present since before this fix); and its OUT-progress
+stage enum omitted the `'opp'` stage (real: 4-6 stages, not 3-5). All
+`#Lnn`/file-length citations matched exactly — this was a described-
+behavior gap, not anchor slippage.
+
+Verified before push: `python3 test/check-catalog.py` clean (all
+blocking checks A-C, F-P; the only note was `D` on the first of 2
+commits — `JS-017`'s "(pending commit)" placeholder before the real sha
+was known — resolved clean on the follow-up commit that swapped in
+`352d9fd`; the pre-existing `J` note on `LOGIC_AUDIT.md`'s immutability
+is unrelated to this cycle's edits); `node test/check-docs-coverage.js`
+full coverage (25/25 `js/`, 22/22 `.gs`). No `.gs`/`js/` source touched,
+so `node test/run-gs-tests.js` was not re-run. Pushed as `352d9fd`
+(the fixes) + `30eb58d` (the sha-swap housekeeping commit); GitHub
+Actions confirmed green on `30eb58d` before this entry was finalized.
