@@ -21,6 +21,12 @@ function runRmHierarchyTests_() {
     TestAssert_(isTopOfOrgRole_('City Lead') === true, 'isTopOfOrgRole_: recognizes City Lead');
     TestAssert_(isTopOfOrgRole_('Commercial Head') === true, 'isTopOfOrgRole_: recognizes Commercial Head');
     TestAssert_(isTopOfOrgRole_('TM') === false, 'isTopOfOrgRole_: TM is not top-of-org');
+    // 2026-10-21: a top-of-org alias row with no Manager_Directory row of its own resolves through the row's own email.
+    {
+      const hd = { emailByManagerNameLower: {}, byRmNameLower: { 'test alias admin': { role: 'Cluster Head', tl: '', tm: '', rh: '', ch: '', excluded: false, email: 'alias@test.invalid' }, 'test no email': { role: 'Cluster Head', tl: '', tm: '', rh: '', ch: '', excluded: false, email: '' } } };
+      const res = resolveRecipientBucketsForRms_(null, ['Test Alias Admin', 'Test No Email'], hd);
+      TestAssertEqual_(res.chLevelRms.map(function (c) { return c.rmName + ':' + c.chEmail; }).join(',') + '|' + res.unresolved.map(function (u) { return u.rmName; }).join(','), 'Test Alias Admin:alias@test.invalid|Test No Email', 'alias self-holder: the row email routes it to the CH-level report; no email anywhere stays unresolved');
+    }
     TestAssert_(isTopOfOrgRole_('') === false, 'isTopOfOrgRole_: blank role is not top-of-org');
 
     // ---- lookupRmChain_: exact + role-suffix-stripped fallback ----

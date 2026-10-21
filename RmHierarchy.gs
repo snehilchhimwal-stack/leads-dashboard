@@ -1052,6 +1052,7 @@ function loadRmHierarchyAndEmails_(ss) {
           tl: String(row[3] || '').trim(), tm: String(row[4] || '').trim(),
           rh: String(row[5] || '').trim(), ch: String(row[6] || '').trim(),
           excluded: !!row[7],
+          email: String(row[9] || '').trim(), // the row's own resolved address (rebuildRmHierarchy) - the self-holding fallback below
         };
       });
     }
@@ -1316,7 +1317,9 @@ function resolveRecipientBucketsForRms_(ss, rmNames, hierarchyData) {
     // gap (see isTopOfOrgRole_'s own comment on why this is a narrow,
     // real allowlist rather than judging by role tier broadly).
     if (!chain.tl && !chain.tm && !chain.rh && !chain.ch && isTopOfOrgRole_(chain.role)) {
-      const selfEmail = data.emailByManagerNameLower[String(rmName).trim().toLowerCase()];
+      // 2026-10-21: or the row's own email - an alias row (e.g. "Mukesh Mishra Admin", same person as "Mukesh Mishra") has no
+      // Manager_Directory row of its own, so its leads fell to the "Unmatched RMs (backstop)" email instead of the CH-level report.
+      const selfEmail = data.emailByManagerNameLower[String(rmName).trim().toLowerCase()] || chain.email || '';
       if (selfEmail) {
         // Real recorded role (e.g. "Cluster Head", "City Lead", "Commercial
         // Head") — whichever of the three isTopOfOrgRole_ matched, not a
