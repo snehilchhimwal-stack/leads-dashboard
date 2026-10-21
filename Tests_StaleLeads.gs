@@ -215,7 +215,7 @@ function runStaleLeadsTests_() {
       TestAssertEqual_(wb2.map(function (s) { return s.heading + ':' + s.regionBand; }).join(','), 'B1:Thane,A1:Stale leads - no update for more than 24 hours,A2:undefined', 'split: a region with no fresh lead left loses its band and its tables');
       // the band also moves on when the next table of the region is only PARTLY stale
       const wb3 = splitStaleSectionsGs_([sec('A1', ['a', 'b'], { regionBand: 'Pune' }), sec('A2', ['c', 'e'])], { a: new Date(hrs(30)), b: new Date(hrs(31)), e: new Date(hrs(32)) });
-      TestAssertEqual_(wb3[0].heading + ':' + wb3[0].regionBand + ':' + wb3[0].rows.length, 'A2:Pune (+3 stale, at the bottom):1', 'split: the band of a region passes to its next table even when that table loses some rows too');
+      TestAssertEqual_(wb3[0].heading + ':' + wb3[0].regionBand + ':' + wb3[0].rows.length, 'A2:Pune (+3 stale, at the bottom):1', 'split: the band of a region passes to its next table even when that table loses some rows too');
       // 2026-10-21: a counted band shows what stays above it; the stale copy names the region without the count (Rajesh Muni 21 Oct: "Central — 3 leads" over 2 rows).
       const cb = splitStaleSectionsGs_([sec('J', ['a', 'b', 'c'], { regionBand: 'Central — 3 leads', subheading: 'Manager: R' })], { c: new Date(hrs(30)) });
       TestAssertEqual_(cb[0].regionBand + '|' + cb[1].subheading, 'Central — 2 leads (+1 stale, at the bottom)|Central · Manager: R', 'split: a counted band is recounted; the stale copy drops the region count');
