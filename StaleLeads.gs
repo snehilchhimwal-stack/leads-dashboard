@@ -89,10 +89,17 @@ function splitStaleSectionsGs_(sections, staleSince) {
   if (!sections || !staleSince || !Object.keys(staleSince).length) return sections;
   const fresh = [], stale = [];
   let pendingBand = '';
+  // 2026-10-21: a band "Central — 3 leads" counted the region's stale leads too, so the region showed 3 but listed 2, and its
+  // stale copy repeated "3 leads" above 1 row. The fresh band now counts what stays above (+ "N stale, at the bottom") and the
+  // stale copy names the region only. curBand = the original band the table falls under (a band covers the tables after it).
+  let curBand = '';
+  const movedByBand = {};
   sections.forEach(function (sec) {
     if (!sec || !sec.columns || !sec.rows || sec.columns[0] !== 'Lead ID') { fresh.push(sec); return; }
+    if (sec.regionBand) curBand = sec.regionBand;
     const keep = [], moved = [];
     sec.rows.forEach(function (r) { (staleSince[String(r[0])] ? moved : keep).push(r); });
+    if (moved.length) movedByBand[curBand] = (movedByBand[curBand] || 0) + moved.length;
     if (!moved.length) {
       fresh.push(pendingBand && !sec.regionBand ? Object.assign({}, sec, { regionBand: pendingBand }) : sec);
       pendingBand = '';
@@ -107,15 +114,31 @@ function splitStaleSectionsGs_(sections, staleSince) {
     moved.sort(function (a, b) { return staleSince[String(a[0])].getTime() - staleSince[String(b[0])].getTime(); });
     stale.push(Object.assign({}, sec, {
       regionBand: undefined,
-      subheading: (sec.regionBand ? sec.regionBand + (sec.subheading ? ' · ' : '') : '') + (sec.subheading || ''),
+      subheading: (curBand ? staleBandNameGs_(curBand) + (sec.subheading ? ' · ' : '') : '') + (sec.subheading || ''),
       accent: { fg: '#dc2626', headerBg: '#fee2e2', bg: '#fef2f2' },
       columns: sec.columns.concat(['No update since']),
       rows: moved.map(function (r) { return r.concat([Utilities.formatDate(staleSince[String(r[0])], 'Asia/Kolkata', 'd MMM HH:mm') + ' IST']); }),
     }));
   });
   if (!stale.length) return sections;
+  fresh.forEach(function (sec, i) {
+    if (sec && sec.regionBand && movedByBand[sec.regionBand]) fresh[i] = Object.assign({}, sec, { regionBand: staleRecountBandGs_(sec.regionBand, movedByBand[sec.regionBand]) });
+  });
   stale[0].regionBand = 'Stale leads - no update for more than ' + LEAD_STALE_HOURS_ + ' hours';
   return fresh.concat(stale);
+}
+
+// "Central — 3 leads" -> "Central"; a band with no count is returned as it is. Pure.
+function staleBandNameGs_(band) {
+  return String(band).replace(/ — \d+ leads?$/, '');
+}
+// "Central — 3 leads" with 1 moved -> "Central — 2 leads (+1 stale, at the bottom)"; a band with no count only gets the note. Pure.
+function staleRecountBandGs_(band, moved) {
+  const m = /^(.*) — (\d+) leads?$/.exec(String(band));
+  const note = ' (+' + moved + ' stale, at the bottom)';
+  if (!m) return band + note;
+  const left = Math.max(0, Number(m[2]) - moved);
+  return m[1] + ' — ' + left + ' lead' + (left === 1 ? '' : 's') + note;
 }
 
 // How many different leads of these sections splitStaleSectionsGs_ would move to the stale block. Pure.

@@ -209,13 +209,17 @@ function runStaleLeadsTests_() {
       // Futwork-style region bands: the band follows the leads that stay
       const withBands = [sec('A1', ['a', 'b'], { regionBand: 'Pune' }), sec('A2', ['c'], {}), sec('B1', ['d'], { regionBand: 'Thane' })];
       const wb = splitStaleSectionsGs_(withBands, { a: new Date(hrs(30)), b: new Date(hrs(31)) });
-      TestAssertEqual_(wb.map(function (s) { return s.heading + ':' + s.regionBand; }).join(','), 'A2:Pune,B1:Thane,A1:Stale leads - no update for more than 24 hours', 'split: when a region\'s first table empties, the region band moves on to its next table');
+      TestAssertEqual_(wb.map(function (s) { return s.heading + ':' + s.regionBand; }).join(','), 'A2:Pune (+2 stale, at the bottom),B1:Thane,A1:Stale leads - no update for more than 24 hours', 'split: when a region\'s first table empties, the region band moves on to its next table');
       TestAssertContains_(wb[2].subheading, 'Pune', 'split: a stale copy of a banded table keeps its region in the sub-heading');
       const wb2 = splitStaleSectionsGs_(withBands, { a: new Date(hrs(30)), b: new Date(hrs(31)), c: new Date(hrs(32)) });
       TestAssertEqual_(wb2.map(function (s) { return s.heading + ':' + s.regionBand; }).join(','), 'B1:Thane,A1:Stale leads - no update for more than 24 hours,A2:undefined', 'split: a region with no fresh lead left loses its band and its tables');
       // the band also moves on when the next table of the region is only PARTLY stale
       const wb3 = splitStaleSectionsGs_([sec('A1', ['a', 'b'], { regionBand: 'Pune' }), sec('A2', ['c', 'e'])], { a: new Date(hrs(30)), b: new Date(hrs(31)), e: new Date(hrs(32)) });
-      TestAssertEqual_(wb3[0].heading + ':' + wb3[0].regionBand + ':' + wb3[0].rows.length, 'A2:Pune:1', 'split: the band of a region passes to its next table even when that table loses some rows too');
+      TestAssertEqual_(wb3[0].heading + ':' + wb3[0].regionBand + ':' + wb3[0].rows.length, 'A2:Pune (+3 stale, at the bottom):1', 'split: the band of a region passes to its next table even when that table loses some rows too');
+      // 2026-10-21: a counted band shows what stays above it; the stale copy names the region without the count (Rajesh Muni 21 Oct: "Central — 3 leads" over 2 rows).
+      const cb = splitStaleSectionsGs_([sec('J', ['a', 'b', 'c'], { regionBand: 'Central — 3 leads', subheading: 'Manager: R' })], { c: new Date(hrs(30)) });
+      TestAssertEqual_(cb[0].regionBand + '|' + cb[1].subheading, 'Central — 2 leads (+1 stale, at the bottom)|Central · Manager: R', 'split: a counted band is recounted; the stale copy drops the region count');
+      TestAssertEqual_(staleRecountBandGs_('Pune — 2 leads', 1) + '|' + staleBandNameGs_('Pune — 1 lead'), 'Pune — 1 lead (+1 stale, at the bottom)|Pune', 'split: singular lead after the recount; the name helper strips the count');
       // the plain-text twin carries the block too
       const text = plainTextFromReportOptsGs_({ title: 't', sections: splitStaleSectionsGs_([sec('X', ['P', 'Q'])], { P: new Date(hrs(30)) }) });
       TestAssertContains_(text, '== Stale leads - no update for more than 24 hours ==', 'split: the plain-text version has the band');
