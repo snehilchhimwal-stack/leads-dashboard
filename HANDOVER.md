@@ -591,6 +591,11 @@ code*, one bullet per plan step as each lands.
   per problem; the first alert arrives within about an hour of the deadline. **Install it once:** paste
   `EmailInfra.gs`, then run `setupEmailJobWatchdogTrigger()` (safe to re-run). After fixing a problem, run
   the job by hand (`…Now`) — a completed record silences the watchdog.
+  **Automatic recovery (2026-10-21):** for a **stuck** or **failed** 10:00 / 13:00 / 17:00 job the watchdog also runs that
+  job's recovery itself (`recoverFailedMorningBucketsNow` / `recoverFailedFollowupBucketsNow` / `recoverFailedAllIssuesBucketsNow`,
+  via `emailJobAutoRecoverGs_`), once per day per problem, and mails ops the outcome. It only re-sends PLANNED / FAILED / BLOCKED
+  emails, under the job lock and the late-send cutoff; ATTEMPTING / UNCONFIRMED still need a human check of Gmail Sent. A job
+  that **never started** is not recovered (nothing was planned) - run it by hand.
   (3) *Real send times.* `Overnight_Log.sent_at` / `followup_sent_at` and `AllIssues_Log.checkpoint1_sent_at`
   / `checkpoint2_sent_at` are stamped when the row is written (`istStampGs_`), not with the job's start
   time (3 Oct: a reply sent 13:12 was stamped 13:01:49).
@@ -824,10 +829,10 @@ shows Failed, nothing is written, and the hourly watchdog also flags a night it 
 
 Plan, audit and decisions: `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` (goal `g-tf-d895943847` in the To-Do Dashboard; decisions D1-D5 in its
 section 0: one 16:30 cycle report to Snehil only, errors emailed only after the rest of the job is confirmed sent, drop only the defective lead,
-Leads tab refreshes ~every 2 h, late-send cutoff 18:30). What exists so far is **EO-1a** (the ledger and the 17:00 job) and **EO-1b** (the 10:00 and 13:00 jobs and both CH-level reports, wired the same way: PLANNED per region/bucket in one write, ATTEMPTING, then the outcome with the Gmail ids; a bucket with nothing to say ends `SKIPPED`; the 10:00/13:00 ids carry the recipient).
+Leads tab refreshes ~every 2 h, late-send cutoff 18:30). What exists so far is **EO-1a** (the ledger and the 17:00 job) and **EO-1b** (the 10:00 and 13:00 jobs and both CH-level reports, wired the same way: since 2026-10-21 every bucket of the run (all regions + consolidated people) PLANNED in ONE write before the first send - after the 20 Oct 17:04 run was killed mid-Thane by a platform `Error code INTERNAL` and the regions after it, never planned, could not be recovered - ATTEMPTING, then the outcome with the Gmail ids; a bucket with nothing to say ends `SKIPPED`; the 10:00/13:00 ids carry the recipient).
 
 **Why.** Every older log is written only after a successful send, so the system knew what went out and could not know what should have gone out
-and did not. `EmailLedger.gs` (`GS-015`) records each 17:00 bucket email from the moment it is planned: `PLANNED` for a whole region in one write,
+and did not. `EmailLedger.gs` (`GS-015`) records each 17:00 bucket email from the moment it is planned: `PLANNED` for the **whole run** in one write before the first send (since 2026-10-21; it was per region),
 `ATTEMPTING` just before the send, then `ACCEPTED` (Gmail's `send()` returned a message - **not** "delivered" or "opened", Apps Script cannot see
 either), `FAILED` (definite error), `UNCONFIRMED` (a timeout-class error - the message may have gone) or `BLOCKED` (the send gate refused). A row
 stuck in `PLANNED`/`ATTEMPTING` means the run died before/during the send. Leads or regions that did not go out are in `Email_Ledger_Exclusions`

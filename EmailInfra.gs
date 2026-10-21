@@ -929,10 +929,11 @@ const EMAIL_JOB_DEADLINE_MINUTES_ = 30; // a job should have STARTED by its sche
 const EMAIL_JOB_MAX_RUN_MINUTES_ = 35;  // a run still `running` this long after it started died (Apps Script's cap is 30)
 function emailJobScheduleGs_() {
   const schedule = {
-    sendOvernightMorningEmails: { hour: 10, label: '10:00 Overnight + Checkpoint 1 emails', manual: 'sendOvernightMorningEmailsNow' },
-    sendOvernightFollowupEmails: { hour: 13, label: '13:00 follow-up replies', manual: 'sendOvernightFollowupEmailsNow' },
-    sendAllIssuesEmails: { hour: ALL_ISSUES_RUN_HOUR_, label: '17:00 All-Issues emails', manual: 'sendAllIssuesEmailsNow' },
+    sendOvernightMorningEmails: { hour: 10, label: '10:00 Overnight + Checkpoint 1 emails', manual: 'sendOvernightMorningEmailsNow', recover: 'recoverFailedMorningBucketsNow' },
+    sendOvernightFollowupEmails: { hour: 13, label: '13:00 follow-up replies', manual: 'sendOvernightFollowupEmailsNow', recover: 'recoverFailedFollowupBucketsNow' },
+    sendAllIssuesEmails: { hour: ALL_ISSUES_RUN_HOUR_, label: '17:00 All-Issues emails', manual: 'sendAllIssuesEmailsNow', recover: 'recoverFailedAllIssuesBucketsNow' },
   };
+  // `recover` (2026-10-21): the recovery the watchdog runs by itself when the job died or failed (emailJobAutoRecoverGs_).
   // `manual` (EI-6, audit 2026-10-13): the function a human runs by hand to make up a missed run. The watchdog hint used to say
   // "<job>Now", which does not exist for the sweep checks.
   // RmHierarchySync.gs (2026-10-08): the nightly HR-roster sync. Not an email job, but it shares the lock + run record, and a night
@@ -1077,6 +1078,7 @@ function checkEmailJobsCompletedGs_(now) {
           ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + manual + '() by hand. Before you do, check today\'s Email_Ledger rows for this job: a row left ATTEMPTING or UNCONFIRMED may already have been delivered. The job\'s "already sent today" guards skip what was recorded as sent, but a run that died mid-send may not have recorded its last email.'
           : 'See the Executions list for the full error. This watchdog alerts once per day per job and problem.',
     ]);
+    if (p.kind === 'stuck' || p.kind === 'failed') emailJobAutoRecoverGs_(p.job, schedule[p.job] && schedule[p.job].recover);
     if (p.kind !== 'unreadable') {
       try { PropertiesService.getScriptProperties().setProperty(alertedKey, marker); } catch (e2) { Logger.log('watchdog: could not record its alert for ' + p.job + ': ' + e2); }
     }
@@ -1101,6 +1103,27 @@ function checkEmailJobsCompletedGs_(now) {
   // Email Ops EO-2: alerts held by a job that was killed before it could send them are released here (EmailLedger.gs).
   if (typeof releaseHeldIncidentsGs_ === 'function') releaseHeldIncidentsGs_(now);
   return problems;
+}
+
+// 2026-10-21: after alerting that an email job died ('stuck') or failed, the watchdog runs that job's recovery itself (once - the
+// alert's own once-per-day marker gates this too). The recovery re-sends only never-attempted (PLANNED), FAILED and BLOCKED
+// emails, never an ATTEMPTING/UNCONFIRMED one, takes the job lock, and keeps its own late-send cutoff - so it cannot duplicate an
+// email or send one late. The hourly watchdog sees a 17:00/10:00/13:00 death at :06 of the next hour, inside each cutoff.
+// Never throws: its outcome goes to ops either way.
+function emailJobAutoRecoverGs_(job, recoverName) {
+  if (!recoverName) return null;
+  const fn = typeof globalThis !== 'undefined' ? globalThis[recoverName] : null;
+  if (typeof fn !== 'function') { Logger.log('watchdog: ' + recoverName + ' is not in this project - no automatic recovery for ' + job); return null; }
+  let outcome;
+  try {
+    fn();
+    outcome = recoverName + '() ran - it re-sent whatever ' + job + ' left PLANNED, FAILED or BLOCKED today (see its Executions log; past the cutoff it sends nothing).';
+  } catch (e) {
+    outcome = recoverName + '() failed: ' + e;
+  }
+  Logger.log('watchdog: automatic recovery for ' + job + ': ' + outcome);
+  notifyOpsAlertGs_('WATCHDOG: automatic recovery ran for ' + job, [outcome, '', 'An email left ATTEMPTING or UNCONFIRMED is never re-sent automatically: check Gmail Sent for it.']);
+  return outcome;
 }
 
 // The trigger entry point (installed by setupEmailJobWatchdogTrigger). Never throws into the platform — a watchdog that itself

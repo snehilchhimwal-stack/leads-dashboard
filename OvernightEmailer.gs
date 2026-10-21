@@ -1316,6 +1316,10 @@ function sendOvernightMorningEmails_(opts) {
     .filter(function (rg) { return !recoverRegions || recoverRegions[rg]; });
 
   // ---- Pass 2: one combined send per recipient, per region (or consolidated person). ----
+  // 2026-10-21: resolved for EVERY region first and planned in ONE write, then sent (the 17:00 job's 20 Oct INTERNAL kill left
+  // the regions after it unplanned, so the recovery could not re-send them). A kill at any point now leaves every unsent email
+  // PLANNED, which recoverFailedMorningBucketsNow (and the watchdog, by itself) re-sends.
+  const preparedRegions = []; // [{ region, section1ByEmail, section2ByEmail, section1SkippedReason, ledgerMeta, unionToSend }] in send order
   allRegionsForThisRun.forEach(function (region) {
     const s1Plan = section1ByRegion[region] || { byEmail: {}, skippedReason: null };
     const section1ByEmail = s1Plan.byEmail;
@@ -1346,8 +1350,7 @@ function sendOvernightMorningEmails_(opts) {
     const unionEmails = Object.keys(section1ByEmail).concat(Object.keys(section2ByEmail))
       .filter(function (v, i, a) { return a.indexOf(v) === i; });
 
-    // Every bucket email of this region is recorded as PLANNED in ONE write before the first send (its id is keyed by recipient).
-    const ledgerMeta = {};
+    const ledgerMeta = {}; // its ledger id is keyed by recipient
     unionEmails.forEach(function (emailKey) {
       const m1 = section1ByEmail[emailKey] || null;
       const m2 = section2ByEmail[emailKey] || null;
@@ -1391,9 +1394,14 @@ function sendOvernightMorningEmails_(opts) {
         }
       });
     }
-    emailLedgerPlanGs_(ledger, unionToSend.map(function (k) { return ledgerMeta[k]; }));
+    preparedRegions.push({ region: region, section1ByEmail: section1ByEmail, section2ByEmail: section2ByEmail, section1SkippedReason: section1SkippedReason, ledgerMeta: ledgerMeta, unionToSend: unionToSend });
+  });
 
-    unionToSend.forEach(function (emailKey) {
+  emailLedgerPlanGs_(ledger, [].concat.apply([], preparedRegions.map(function (p) { return p.unionToSend.map(function (k) { return p.ledgerMeta[k]; }); })));
+  preparedRegions.forEach(function (p) {
+    const region = p.region, section1ByEmail = p.section1ByEmail, section2ByEmail = p.section2ByEmail;
+    const section1SkippedReason = p.section1SkippedReason, ledgerMeta = p.ledgerMeta;
+    p.unionToSend.forEach(function (emailKey) {
       const s1 = section1ByEmail[emailKey] || null;
       const s2 = section2ByEmail[emailKey] || null;
       // One bucket throwing (a bad read/write, an oversize cell) must not stop every OTHER bucket — it is reported

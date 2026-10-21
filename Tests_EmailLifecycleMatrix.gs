@@ -288,21 +288,23 @@ function runEmailLifecycleMatrixTests_() {
     }
 
     // ================= M3: the run is KILLED mid-send (Pune delivered, the run died before recording it) =================
+    // 2026-10-21: every bucket of the run is planned before the first send, so Thane is PLANNED and the recovery alone repairs it.
     {
       const w = TestLM_start_();
       w.st.script = function (key, n) { return key === 'Pune' && n === 1 ? { kill: true, delivered: true } : null; };
       let killed = false;
       try { sendAllIssuesEmails_(); } catch (e) { killed = (e === w.st.kill); }
       TestAssert_(killed, 'M3: the kill escaped the job (nothing after the send ran)');
-      TestAssertEqual_(TestLM_ledgerSummary_(w.ss), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=none', 'M3: Pune is left ATTEMPTING (outcome unknown), Thane was never planned');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=PLANNED/0/0', 'M3: Pune is left ATTEMPTING (outcome unknown), Thane PLANNED (planned up front, never attempted)');
       TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=0', 'M3: before any repair - Thane lost so far, Pune delivered');
       const rec = recoverFailedAllIssuesBuckets_({ now: noon });
-      TestAssertEqual_(rec.targets.length, 0, 'M3: the recovery alone finds nothing (ATTEMPTING is never re-sent; Thane has no row) - see the coverage doc, operator must re-run the main job');
+      TestAssertEqual_(rec.targets.map(function (t) { return t.region + ':' + t.status; }).join(','), 'Thane:PLANNED', 'M3: the recovery alone targets Thane (PLANNED), never the ATTEMPTING Pune');
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=1', 'M3: the recovery sends Thane and repeats neither Bangalore nor Pune - nothing lost, no duplicate');
       sendAllIssuesEmails_();
-      TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=1', 'M3: a same-day re-run of the main job sends Thane and repeats neither Bangalore nor Pune - nothing lost, no duplicate');
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=1', 'M3: a same-day re-run of the main job after that sends nothing again');
       TestAssertEqual_(TestLM_ledgerSummary_(w.ss), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=ACCEPTED/1/1', 'M3: Pune stays ATTEMPTING (a human must check it), Thane ACCEPTED');
       const ex = TestEL_objects_(w.ss.getSheetByName(EMAIL_LEDGER_EXCLUSIONS_SHEET_), EMAIL_LEDGER_EXCLUSION_HEADERS_);
-      TestAssertEqual_(ex.filter(function (x) { return x.kind === 'region' && /already sent today/.test(x.reason); }).map(function (x) { return x.region; }).sort().join(','), 'Bangalore,Pune', 'M3: the re-run records exactly the two regions its guard skipped');
+      TestAssertEqual_(ex.filter(function (x) { return x.kind === 'region' && /already sent today/.test(x.reason); }).map(function (x) { return x.region; }).sort().join(','), 'Bangalore,Pune,Thane', 'M3: the re-run records the three regions its guard skipped');
     }
 
     // ---- M3b: killed BEFORE the attempt (while building Pune's email): the main re-run alone repairs everything ----
@@ -314,7 +316,7 @@ function runEmailLifecycleMatrixTests_() {
         return realRender.apply(null, arguments);
       };
       try { TestAssertThrows_(function () { sendAllIssuesEmails_(); }, 'M3b: the crash surfaces'); } finally { renderOvernightReportEmailHTML_ = realRender; }
-      TestAssertEqual_(TestLM_ledgerSummary_(w.ss), 'Bangalore=ACCEPTED/1/1 Pune=PLANNED/0/0 Thane=none', 'M3b: Pune PLANNED (never attempted), Thane never planned');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss), 'Bangalore=ACCEPTED/1/1 Pune=PLANNED/0/0 Thane=PLANNED/0/0', 'M3b: Pune and Thane PLANNED (planned up front, never attempted)');
       sendAllIssuesEmails_();
       TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=1', 'M3b: the re-run sends Pune and Thane once each');
       TestAssertEqual_(TestLM_ledgerSummary_(w.ss), 'Bangalore=ACCEPTED/1/1 Pune=ACCEPTED/1/1 Thane=ACCEPTED/1/1', 'M3b: Pune\'s existing row is reused (no second row), one attempt');
@@ -345,7 +347,8 @@ function runEmailLifecycleMatrixTests_() {
       emailLedgerOpenGs_(w.ss);
       let fired = false;
       TestLM_faultLedger_(w.ss, function (row, col, vals, write) {
-        if (!fired && col === 1 && String(vals[0][0]).indexOf('|Pune|') !== -1 && vals[0][statusIdx] === 'PLANNED') {
+        // 2026-10-21: the run's buckets are planned in ONE write, so the faulted write is the batch that holds Pune's row.
+        if (!fired && col === 1 && vals.some(function (r) { return String(r[0]).indexOf('|Pune|') !== -1 && r[statusIdx] === 'PLANNED'; })) {
           fired = true;
           if (landed) write(); // the append really landed (or, the control case, did not)...
           throw new Error('simulated: Sheets reported an error on the plan write'); // ...but the call failed (non-transient: not retried)
@@ -355,7 +358,7 @@ function runEmailLifecycleMatrixTests_() {
       const label = landed ? 'D1 fixed (write landed): ' : 'D1 control (write did not land): ';
       sendAllIssuesEmails_();
       TestAssertEqual_(TestLM_delivered_(w.st, 'Pune') + ',' + TestLM_logRows_(w.ss), '1,3', label + 'Pune was delivered and logged in AllIssues_Log');
-      TestAssertEqual_(TestLM_ledgerSummary_(w.ss), landed ? 'Bangalore=ACCEPTED/1/1 Pune=ACCEPTED/1/1 Thane=ACCEPTED/1/1' : 'Bangalore=ACCEPTED/1/1 Pune=none Thane=ACCEPTED/1/1',
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss), landed ? 'Bangalore=ACCEPTED/1/1 Pune=ACCEPTED/1/1 Thane=ACCEPTED/1/1' : 'Bangalore=none Pune=none Thane=none',
         label + (landed ? 'the landed row is found by its email_id and records the attempt and the acceptance' : 'no row exists, none is invented'));
       TestAssert_(TestGmailLog_.sent.some(function (e) { return /Email ledger: 1 write\(s\) failed/.test(e.subject); }), label + 'ops still get ONE "ledger write failed" note');
       const rec = recoverFailedAllIssuesBuckets_({ now: noon });
@@ -634,9 +637,10 @@ function runEmailLifecycleMatrixTests_() {
       let killed = false;
       try { sendOvernightMorningEmails_(); } catch (e) { killed = (e === w.st.kill); }
       TestAssert_(killed, 'M12d 10:00: the kill escaped the job');
-      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J10), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=none', 'M12d 10:00: Pune left ATTEMPTING (outcome unknown), Thane never planned');
+      TestAssertEqual_(TestLM_ledgerSummary_(w.ss, J10), 'Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=PLANNED/0/0', 'M12d 10:00: Pune left ATTEMPTING (outcome unknown), Thane PLANNED (2026-10-21: planned up front, never attempted)');
       TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=0', 'M12d 10:00: before any repair - Pune delivered, Thane not yet');
-      TestAssertEqual_(recoverFailedMorningBuckets_({ now: noon }).targets.length, 0, 'M12d 10:00: the recovery alone re-sends nothing (ATTEMPTING is never re-sent; Thane has no row)');
+      TestAssertEqual_(recoverFailedMorningBuckets_({ now: noon }).targets.map(function (t) { return t.region + ':' + t.status; }).join(','), 'Thane:PLANNED', 'M12d 10:00: the recovery alone targets Thane (PLANNED), never the ATTEMPTING Pune');
+      TestAssertEqual_(TestLM_deliveredSummary_(w.st), 'Bangalore=1 Pune=1 Thane=1', 'M12d 10:00: ...and sends it - nothing lost, no duplicate');
       sendOvernightMorningEmails_(); // the repair the 17:00 job allows (M3): a same-day MANUAL re-run of the main job
       TestAssertEqual_(TestLM_delivered_(w.st, 'Thane') + ',' + TestLM_delivered_(w.st, 'Bangalore'), '1,1', 'M12d 10:00: the re-run sends the lost Thane email and does not repeat Bangalore');
       TestAssertEqual_(TestLM_delivered_(w.st, 'Pune') + ',' + TestLM_ledgerSummary_(w.ss, J10), '1,Bangalore=ACCEPTED/1/1 Pune=ATTEMPTING/1/0 Thane=ACCEPTED/1/1', 'M12d 10:00 (D5 fixed): ...and does not re-send the ATTEMPTING (possibly delivered) Pune email; its row is left ATTEMPTING for a human');

@@ -429,14 +429,14 @@ function sendAllIssuesEmails_(opts) {
   // 2026-10-16: consolidated people's buckets, collected from every region and sent once after the region loop.
   const consolidatedParts = {}; // lower-cased bucket label -> [{ region, rec, leads }]
 
-  // Records a region's (or a consolidated person's) buckets as PLANNED in one write.
-  const planBuckets_ = function (region, list) {
-    emailLedgerPlanGs_(ledger, list.filter(function (b) { return b.leads.length; }).map(function (b) {
+  // The PLANNED ledger entries of a region's (or a consolidated person's) buckets.
+  const planEntries_ = function (region, list) {
+    return list.filter(function (b) { return b.leads.length; }).map(function (b) {
       return {
         emailId: b.emailId, job: ledgerJob, dayKey: todayKey, region: region, bucketLabel: b.rec.bucketLabel, primaryRole: b.rec.primaryRole,
         to: b.rec.to, cc: b.rec.cc, subject: allIssuesSubjectGs_(region, b.rec, b.leads, win), leadIds: b.leads.map(function (l) { return String(l.lead_id); }),
       };
-    }));
+    });
   };
   // Sends one bucket and folds its outcome into the run's counters and the "not sent" report.
   const sendBucket_ = function (region, b) {
@@ -460,6 +460,11 @@ function sendAllIssuesEmails_(opts) {
     }
   };
 
+  // 2026-10-21: two phases. 20 Oct 17:04 the platform killed the run ("JavaScript engine reported an unexpected error. Error code
+  // INTERNAL", uncatchable) mid-Thane; the regions after it and the consolidated emails had never been planned, so the recovery
+  // had nothing to re-send. Now every bucket of the run (all regions + consolidated) is resolved first and recorded PLANNED in ONE
+  // write, then sent - a kill at any point leaves every unsent email PLANNED, which the recovery (and the watchdog) re-sends.
+  const prepared = []; // [{ region, buckets, chLevel, resolveSecs }] in send order
   Object.keys(byRegion).sort().forEach(function (region) {
     const regionLeads = byRegion[region];
     if (!regionLeads.length) return;
@@ -499,7 +504,8 @@ function sendAllIssuesEmails_(opts) {
     // resolveRecipientBucketsForRms_ a second time with identical
     // arguments — that second call used to double this file's own share
     // of the per-region RM_Hierarchy/Manager_Directory reload cost.
-    if (!recoverIds) notifyChLevelIssuesGs_(region, resolution.chLevelRms, rmToLeads, win, ledger);
+    // (Sent in the send phase below, just before this region's buckets.)
+    const chLevel = recoverIds ? null : { chLevelRms: resolution.chLevelRms, rmToLeads: rmToLeads };
 
     const unresolvedExclusions = [];
     resolution.trulyUnresolved.forEach(function (u) {
@@ -510,8 +516,6 @@ function sendAllIssuesEmails_(opts) {
     });
     emailLedgerExcludeGs_(exLedger, unresolvedExclusions);
 
-    // Every bucket email of this region is recorded as PLANNED in ONE write before the first send, so an email that never goes
-    // out (a crash, a timeout kill) still leaves a row that says it should have.
     const buckets = [];
     resolution.results.forEach(function (rec) {
       const rmSet = new Set(rec.rmNames);
@@ -531,9 +535,7 @@ function sendAllIssuesEmails_(opts) {
       bucketsToSend = buckets.filter(function (b) { return recoverIds[b.emailId]; });
       bucketsToSend.forEach(function (b) { recoveredSeen[b.emailId] = true; });
     }
-    planBuckets_(region, bucketsToSend);
-    bucketsToSend.forEach(function (b) { sendBucket_(region, b); });
-    Logger.log('[timing] ' + region + ' done at ' + elapsed_() + ' (' + resolution.results.length + ' bucket(s) this region, ' + ((Date.now() - regionStart_) / 1000).toFixed(1) + 's for this region)');
+    prepared.push({ region: region, buckets: bucketsToSend, chLevel: chLevel, resolveSecs: (Date.now() - regionStart_) / 1000 });
   });
 
   // 2026-10-16: ONE email per consolidated person, keyed by their own pseudo-region (consolidatedRegionKeyGs_) — that key is
@@ -554,8 +556,17 @@ function sendAllIssuesEmails_(opts) {
       if (!recoverIds[b.emailId]) return;
       recoveredSeen[b.emailId] = true;
     }
-    planBuckets_(regionKey, [b]);
-    sendBucket_(regionKey, b);
+    prepared.push({ region: regionKey, buckets: [b], chLevel: null, resolveSecs: 0 });
+  });
+
+  // ONE PLANNED write for the whole run, then the sends.
+  emailLedgerPlanGs_(ledger, [].concat.apply([], prepared.map(function (p) { return planEntries_(p.region, p.buckets); })));
+  Logger.log('[timing] all ' + prepared.reduce(function (n, p) { return n + p.buckets.length; }, 0) + ' bucket(s) planned at ' + elapsed_());
+  prepared.forEach(function (p) {
+    const sendStart_ = Date.now();
+    if (p.chLevel) notifyChLevelIssuesGs_(p.region, p.chLevel.chLevelRms, p.chLevel.rmToLeads, win, ledger);
+    p.buckets.forEach(function (b) { sendBucket_(p.region, b); });
+    Logger.log('[timing] ' + p.region + ' done at ' + elapsed_() + ' (' + p.buckets.length + ' bucket(s), ' + p.resolveSecs.toFixed(1) + 's resolving + ' + ((Date.now() - sendStart_) / 1000).toFixed(1) + 's sending)');
   });
   if (recoverIds) {
     // A targeted bucket that this run did not produce (its leads were resolved meanwhile, or the routing changed): it is closed with the reason, never left failed without one.

@@ -884,7 +884,7 @@ function runEmailInfraTests_() {
         // The kind changes (the job started but never finished) -> a new alert.
         rec(M, { startedAt: iso('11:00'), status: 'running' });
         const third = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:50')); });
-        TestAssertEqual_(third.alerts.length, 1, 'watchdog: a DIFFERENT problem for the same job (now stuck) alerts again');
+        TestAssertEqual_(third.alerts.length, 2, 'watchdog: a DIFFERENT problem for the same job (now stuck) alerts again (+ the automatic recovery note)');
         TestAssertContains_(third.alerts[0].subject, 'did not finish', 'watchdog: …naming it as a job that did not finish');
         // A manual re-run fixes it -> silence.
         rec(M, { startedAt: iso('12:00'), finishedAt: iso('12:04'), status: 'completed' });
@@ -900,7 +900,7 @@ function runEmailInfraTests_() {
         rec(F, { startedAt: iso('13:01'), finishedAt: iso('13:03'), status: 'failed', error: 'boom' });
         rec(M, { startedAt: iso('10:03'), finishedAt: iso('10:07'), status: 'completed' });
         const failAlerts = alertsOf(function () { return checkEmailJobsCompletedGs_(at('13:40')); });
-        TestAssertEqual_(failAlerts.alerts.length, 1, 'watchdog: a failed run is alerted once');
+        TestAssertEqual_(failAlerts.alerts.length, 2, 'watchdog: a failed run is alerted once (+ the automatic recovery note)');
         TestAssertContains_(failAlerts.alerts[0].subject, 'sendOvernightFollowupEmails failed', 'watchdog: …as a failure');
         // Unreadable alerts every time (the dedupe record cannot be trusted).
         PropertiesService = TestMockPropertiesService_({ failReads: true });
@@ -908,6 +908,40 @@ function runEmailInfraTests_() {
         const u2 = alertsOf(function () { return checkEmailJobsCompletedGs_(at('10:36')); });
         TestAssert_(u1.alerts.length === 1 && u2.alerts.length === 1, 'watchdog: an unreadable record alerts on every check');
         TestAssertContains_(u1.alerts[0].subject, 'cannot be checked', 'watchdog: …saying it cannot be checked');
+        // ---- 2026-10-21: automatic recovery after a died/failed email job ----
+        {
+          const calls = [];
+          const names = ['recoverFailedMorningBucketsNow', 'recoverFailedFollowupBucketsNow', 'recoverFailedAllIssuesBucketsNow'];
+          const saved = names.map(function (n) { return globalThis[n]; });
+          try {
+            names.forEach(function (n) { globalThis[n] = function () { calls.push(n); if (n === 'recoverFailedMorningBucketsNow' && globalThis.__arThrow) throw new Error('lock busy'); }; });
+            PropertiesService = TestMockPropertiesService_();
+            auditsDone();
+            const never = alertsOf(function () { return checkEmailJobsCompletedGs_(at('10:35')); });
+            TestAssert_(calls.length === 0 && never.alerts.length === 1, 'auto-recovery: a job that never started is NOT recovered (nothing was planned) - alert only');
+            rec(M, { startedAt: iso('10:03'), status: 'running' });
+            const st = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:06')); });
+            TestAssertEqual_(calls.join(','), 'recoverFailedMorningBucketsNow', 'auto-recovery: a died (stuck) 10:00 run runs ITS recovery, once');
+            TestAssertContains_(st.alerts[1].subject, 'WATCHDOG: automatic recovery ran for sendOvernightMorningEmails', 'auto-recovery: ops are told it ran');
+            alertsOf(function () { return checkEmailJobsCompletedGs_(at('12:06')); });
+            TestAssertEqual_(calls.length, 1, 'auto-recovery: the next hourly check does not run it again (same once-per-day marker as the alert)');
+            rec(F, { startedAt: iso('13:01'), finishedAt: iso('13:03'), status: 'failed', error: 'boom' });
+            rec(M, { startedAt: iso('10:03'), finishedAt: iso('10:07'), status: 'completed' });
+            alertsOf(function () { return checkEmailJobsCompletedGs_(at('14:06')); });
+            TestAssertEqual_(calls.join(','), 'recoverFailedMorningBucketsNow,recoverFailedFollowupBucketsNow', 'auto-recovery: a failed 13:00 run runs the 13:00 recovery');
+            PropertiesService = TestMockPropertiesService_();
+            auditsDone();
+            globalThis.__arThrow = true;
+            rec(M, { startedAt: iso('10:03'), status: 'running' });
+            const thr = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:06')); });
+            TestAssertContains_(thr.alerts[1].body, 'recoverFailedMorningBucketsNow() failed: Error: lock busy', 'auto-recovery: a recovery that throws is reported, the watchdog carries on');
+            TestAssertEqual_(emailJobAutoRecoverGs_('x', 'noSuchRecoveryFn') + '|' + emailJobAutoRecoverGs_('x', ''), 'null|null', 'auto-recovery: a missing or absent recovery function does nothing');
+          } finally {
+            delete globalThis.__arThrow;
+            names.forEach(function (n, i) { globalThis[n] = saved[i]; });
+            PropertiesService = TestMockPropertiesService_();
+          }
+        }
 
         // ---- the Movement_Log snapshot job shares the watchdog (email audit F23) ----
         // snapshotPeriodic runs 4x a day, its snapshots are the "calls so far today" baseline behind every email, and it hit the
