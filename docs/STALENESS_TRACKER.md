@@ -111,7 +111,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `RmHierarchy.gs` | `2b67916` | 2026-10-19 | verified by checksum in editor 2026-10-19 (~15:30 IST): Ajay Boharde added; Sanket Yadav's 3 S1s reassigned + pinned overrides / PENDING IN HR LIVE report; runAllTests 4234/0; recorded by hand, not by `match-live-gs.py --apply` |
 | `RmHierarchySync.gs` | `2b67916` | 2026-10-19 | verified by checksum in editor 2026-10-19 (~15:30 IST): Ajay Boharde added; Sanket Yadav's 3 S1s reassigned + pinned overrides / PENDING IN HR LIVE report; runAllTests 4234/0; recorded by hand, not by `match-live-gs.py --apply` |
 | `SlaEngine.gs` | `4b83dae` | 2026-10-19 | verified by checksum in editor 2026-10-19 (~13:53 IST): SLA rule changes (Not Updated stage-only; No follow up in last 4 hours; 3 calls/day) pasted, runAllTests 4165/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `StaleLeads.gs` | `2146e13` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `StaleLeads.gs` | `e6bdcb0` | 2026-10-21 | verified by checksum in editor 2026-10-21: stale block recounts the region band and drops the count from the stale copy; pasted, runAllTests 4245/0; recorded by hand, not by `match-live-gs.py --apply` |
 | `UnmatchedCommentLogger.gs` | `450565a` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
 
 ### Known live-vs-repo differences
