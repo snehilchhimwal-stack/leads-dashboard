@@ -543,3 +543,100 @@ full coverage (25/25 `js/`, 22/22 `.gs`). No `.gs`/`js/` source touched,
 so `node test/run-gs-tests.js` was not re-run. Pushed as `352d9fd`
 (the fixes) + `30eb58d` (the sha-swap housekeeping commit); GitHub
 Actions confirmed green on `30eb58d` before this entry was finalized.
+
+---
+
+## Cycle 8 — 2026-10-27 (run by Claude, scheduled cloud routine)
+
+Checked `FLOW-002` (the 3-phase "Generate region emails" cycle),
+`SHEET-001` (`leads`), `JS-001` (`core-auth.js`), `JS-004`
+(`core-filters.js`) — none checked in cycles 1-7. `FLOW-002` was still at
+the catalog's original seed baseline (`2026-09-10`/`c82ec67`, the oldest
+unrevisited date left in the whole catalog, never re-checked since
+creation); `SHEET-001` (`2026-09-21`) and `JS-001` (`2026-09-30`) were
+also among the oldest remaining. Used 4 parallel investigation passes
+(one per record), then reconciled and applied fixes by hand. 3 of the 4
+had real drift (one of them substantial, a described-behavior mismatch
+rather than line-anchor slippage); `JS-004` was fully clean.
+
+**`FLOW-002`** — real, substantial drift, fixed. The record's central
+claim about how `Lead_Followups` col F (`suggested_followup`) gets filled
+was backwards: it described "the backend fills that text on its own
+schedule" and listed `OvernightEmailer.gs`'s `pushUnresolvedToLeadFollowups_`
+/ `FollowupEngine.gs`'s `waitForFollowupSuggestions_` as a step ("4a")
+that "computes and writes col F". Real current code says the opposite —
+`js/sheets-writeback.js` `pushLeadsToFollowups`'s own comment (`#L202-207`)
+and `OvernightEmailer.gs` `pushUnresolvedToLeadFollowups_`'s own comment
+(`#L1504-1508`) both state column F is deliberately preserved/never
+written by any backend logic; it's filled in by a human reading
+`collated_comments` (independently confirmed by
+`LEAD_FOLLOWUPS_STALENESS.md` consumer 4). `waitForFollowupSuggestions_`
+turned out to not belong in this flow at all — it's called only from a
+separate, already-documented automated trigger (the 13:00 IST email,
+consumer 4 above), not from the browser-triggered write→wait→build cycle
+this record covers; conflating the two made step "4a" doubly wrong.
+Fixed: the Purpose section's description of who fills col F, removed
+`waitForFollowupSuggestions_` from the participants table and
+`GS-005`/`FollowupEngine.gs` from `Depends On` (both record file and
+`docs/INDEX.md` row), corrected `pushUnresolvedToLeadFollowups_`'s own
+description, fixed the Step 3 column list (`A-E/G/H`, it had dropped `H`),
+and updated Data lineage / Business rules / Exceptions / Source of truth /
+Revalidation trigger to match. No `#Lnn` anchors were cited in this
+record (participants are named by function, not line) so this was a pure
+described-behavior fix, not anchor slippage.
+
+**`SHEET-001`** — real drift, fixed. The "Destination / consumers"
+section and the "Readers" table's `readLeadsTab_` row both cited the
+wrong caller set: `GS-008` (`MovementTracker.gs`) doesn't call
+`readLeadsTab_` at all — it reads the `leads` tab directly via
+`buildColIndex_`/`getVal_`, exactly as the record's own separate `GS-008`
+Readers row already said a few lines below, so this was an internally
+inconsistent claim, not just stale. Real callers of `readLeadsTab_`
+(`GS-004`/`Core.gs`) are `GS-001`, `GS-003`, `GS-006`, `GS-010`, `GS-012`,
+`GS-013`, `GS-016` — two of those (`GS-012`/`SlaEngine.gs`, added
+`51eb0ee` 2026-09-23; `GS-016`/`CycleReport.gs`, added `bc39815`
+2026-10-09) are genuinely new since the record's `55bf870` baseline;
+`GS-006`/`GS-013` predate the baseline and were already missing even
+then. Fixed both sections to the real current set.
+**Flagged, not fixed:** the `## Columns / fields` table omits the real,
+still-used `client` canonical key (present in both `HEADER_ALIASES` and
+`HEADER_ALIASES_` since before the record's creation, read by
+`js/overview-distribution-people-ops.js`) — a pre-existing gap, not new
+drift, left for human triage on whether a near-unused export-only field
+belongs in that summary table.
+
+**`JS-001`** — real drift, fixed, plus one pre-existing error fixed and
+one judgment call flagged. The `## Data lineage` section's citation of
+`core-sheets-fetch.js:103` for the `gateAccessToken` Bearer-token read
+site had drifted to real `#L110` (one intervening commit, `55bf870`,
+touched that file since the record's `c82ec67` baseline) — fixed. Also
+fixed a pre-existing (not new; the file itself hasn't changed since
+baseline) wrong "Called by" cell on `FN-002`
+(`initGateTokenClient`): the record listed both `gateSignIn` and
+`initAuthGate` as callers, but `initAuthGate` never calls it — confirmed
+via direct grep, only `gateSignIn` does. **Flagged, not fixed:** `JS-015`'s
+own record (`docs/js-modules/JS-015-reports-gmail.md`) lists `JS-001` in
+both its `Depends On` and `Used By`, but a full grep of `reports-gmail.js`
+for every `core-auth.js` export returns zero matches — the dependency
+direction looks backwards (it's `JS-001` that depends on `JS-015` for
+`getGmailClientId`, which `JS-001`'s own record already states correctly
+the other way). This is a cross-record relationship-direction question
+spanning two records' `Relationships` sections and both `INDEX.md` rows,
+not a simple citation fix — left for human review rather than guessed at.
+
+**`JS-004`** — fully clean. `git log d358cb9..HEAD -- js/core-filters.js`
+is empty (file unchanged since the record's baseline); file length
+(413 lines) and all 6 `#Lnn` `FN-XXX` anchors, 2 `CFG-`/`EXC-` line
+citations, and the load-order claim (9th, right before the tab files)
+all checked exactly against real current source. No drift.
+
+Verified before push: `python3 test/check-catalog.py` clean (all
+blocking checks A-C, F-P; the only `D` notes are the pre-existing
+`GS-001`/`GS-004`/`GS-010`/`GS-011`/`GS-021`/`EXT-002` single-commit
+drift notes and the pre-existing `J` note on `LOGIC_AUDIT.md`'s
+immutability, both unrelated to this cycle's edits); `node
+test/check-docs-coverage.js` full coverage (25/25 `js/`, 22/22 `.gs`).
+No `.gs`/`js/` source touched, so `node test/run-gs-tests.js` was not
+re-run. Pushed as `262c888` (the fixes) + `adddb65` (the sha-swap
+housekeeping commit); GitHub Actions confirmed green on `adddb65` before
+this entry was finalized.
