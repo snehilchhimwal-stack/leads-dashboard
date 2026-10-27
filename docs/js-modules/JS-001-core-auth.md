@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-27 against commit `(pending commit)` — weekly spot-check cycle 8 |
+| **Last Verified** | 2026-10-27 against commit `262c888` — weekly spot-check cycle 8 |
 
 ## Purpose / reason to exist
 
@@ -134,7 +134,7 @@ top-level actions, not a `TAB-XXX`.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by DOC-027. Re-verified 2026-10-27
-(weekly spot-check cycle 8, `(pending commit)`): the `core-sheets-fetch.js`
+(weekly spot-check cycle 8, `262c888`): the `core-sheets-fetch.js`
 Bearer-token read-site line anchor had drifted `#L103` → real `#L110`
 (file grew via `55bf870`); fixed. Also fixed a pre-existing (not new)
 error on FN-002's "Called by" cell — `initAuthGate` never calls

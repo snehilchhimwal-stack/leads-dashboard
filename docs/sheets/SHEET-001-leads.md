@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-27 against commit `(pending commit)` — weekly spot-check cycle 8 |
+| **Last Verified** | 2026-10-27 against commit `262c888` — weekly spot-check cycle 8 |
 
 ## Purpose / reason to exist
 
@@ -189,7 +189,7 @@ is defined by `HEADER_ALIASES` (`js/core-sheets-fetch.js`) /
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-032`. Re-verified
-2026-10-27 (weekly spot-check cycle 8, `(pending commit)`): "Destination /
+2026-10-27 (weekly spot-check cycle 8, `262c888`): "Destination /
 consumers" and the "Readers" table's `readLeadsTab_` row listed the wrong
 caller set — `GS-008` doesn't call `readLeadsTab_` (it reads the tab
 directly, as the record's own `GS-008` Readers row already said), and

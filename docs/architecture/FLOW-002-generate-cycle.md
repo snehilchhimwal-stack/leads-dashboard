@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-27 against commit `(pending commit)` — weekly spot-check cycle 8 |
+| **Last Verified** | 2026-10-27 against commit `262c888` — weekly spot-check cycle 8 |
 
 ## Purpose / reason to exist
 

@@ -211,7 +211,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| JS-001 | JS- | core-auth | `js/core-auth.js` | Closed + Monitored | EXT-003, JS-003, JS-004, JS-015 | DASH-001, JS-003, JS-004, JS-009, JS-011, JS-015, JS-018 | 2026-10-27 (`pending commit`) |
+| JS-001 | JS- | core-auth | `js/core-auth.js` | Closed + Monitored | EXT-003, JS-003, JS-004, JS-015 | DASH-001, JS-003, JS-004, JS-009, JS-011, JS-015, JS-018 | 2026-10-27 (`262c888`) |
 | JS-002 | JS- | core-collation | `js/core-collation.js` | Closed + Monitored | JS-003, JS-010 | DATA-001, JS-004, JS-010, JS-012, JS-014, JS-019, JS-021, JS-024 | 2026-09-29 (`4a06803`) |
 | JS-003 | JS- | core-fetch-and-render | `js/core-fetch-and-render.js` | Closed + Monitored | EXT-001, JS-001, JS-004, JS-006, JS-007, JS-009, JS-010, JS-012, JS-014, JS-018, JS-021, JS-022, JS-025, SHEET-001 | DASH-001, DATA-001, JS-001, JS-002, JS-018, JS-021, JS-022, JS-023, JS-025, TAB-004, TAB-007 | 2026-10-12 (`2e33f8d`) |
 | JS-004 | JS- | core-filters | `js/core-filters.js` | Closed + Monitored | EXT-001, EXT-003, JS-001, JS-002, JS-005, JS-006, JS-009, JS-010, JS-012, JS-014, JS-018, SHEET-005 | DASH-001, DATA-001, JS-001, JS-003, JS-012, JS-014, JS-019, JS-020, JS-024, TAB-002, TAB-006, TAB-008 | 2026-09-30 (`d358cb9`) |
@@ -271,7 +271,7 @@ emails, never in this repo (`DOC-007`).
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| SHEET-001 | SHEET- | leads (the live leads tab) | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: CRITICAL / contact+comment) | EXT-001, external CRM export | DASH-001, DATA-001, DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-006, GS-008, GS-010, GS-013, JS-003, JS-006, JS-009, JS-025, SHEET-002, SHEET-003, SHEET-004, SHEET-009, SHEET-010, TAB-009 | 2026-10-27 (`pending commit`) |
+| SHEET-001 | SHEET- | leads (the live leads tab) | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: CRITICAL / contact+comment) | EXT-001, external CRM export | DASH-001, DATA-001, DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-006, GS-008, GS-010, GS-013, JS-003, JS-006, JS-009, JS-025, SHEET-002, SHEET-003, SHEET-004, SHEET-009, SHEET-010, TAB-009 | 2026-10-27 (`262c888`) |
 | SHEET-002 | SHEET- | Movement_Log | Google Sheet | Closed + Monitored (lifecycle 7d confirmed; DOC-038: CRITICAL / operational) | EXT-001, GS-008, JS-018, SHEET-001 | DATA-002, DATA-004, GS-001, GS-003, GS-008, GS-009, GS-010, JS-006, JS-008, JS-013, JS-018, JS-021, JS-022, JS-023, JS-024, SHEET-003, SHEET-005, SHEET-008, TAB-004, TAB-007, TAB-008 | 2026-10-07 (`7799e44`) |
 | SHEET-003 | SHEET- | Daily_RM_Issues | Google Sheet | Closed + Monitored (lifecycle 7d confirmed; DOC-038: IMPORTANT / operational) | DATA-002, EXT-001, GS-003, SHEET-001, SHEET-002 | GS-003, JS-022, TAB-004 | 2026-10-08 (`1cd1cfa`) |
 | SHEET-004 | SHEET- | Lead_Followups | Google Sheet | Closed + Monitored (lifecycle DOC-036 -> TBD, feeds DOC-037; DOC-038: CRITICAL / comment-text) | EXT-001, GS-010, JS-018, SHEET-001 | DATA-003, DATA-005, GS-007, GS-010, JS-016, JS-018, JS-021, TAB-003, TAB-007 | 2026-10-05 (`6acea29`) |
@@ -342,7 +342,7 @@ non-ID'd index, `architecture/apps-script-triggers.md`.
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
 | FLOW-001 | FLOW- | Movement snapshot hub + piggyback loggers | `architecture/FLOW-001-movement-hub.md` | Closed + Monitored | GS-006, GS-008, GS-013, JS-018, SHEET-001, SHEET-002, SHEET-005, SHEET-008, SHEET-009, SHEET-010, SHEET-015 | none | 2026-10-20 (`352d9fd`) |
-| FLOW-002 | FLOW- | The 3-phase "Generate region emails" cycle | `architecture/FLOW-002-generate-cycle.md` | Closed + Monitored | EXT-002, GS-010, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-004, SHEET-011 | none | 2026-10-27 (`pending commit`) |
+| FLOW-002 | FLOW- | The 3-phase "Generate region emails" cycle | `architecture/FLOW-002-generate-cycle.md` | Closed + Monitored | EXT-002, GS-010, JS-014, JS-015, JS-016, JS-018, JS-021, SHEET-004, SHEET-011 | none | 2026-10-27 (`262c888`) |
 
 ---
 
