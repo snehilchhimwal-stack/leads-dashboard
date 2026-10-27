@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `c82ec67` — revalidated in this sweep (same source as EXT-003, function/constant line anchors re-checked), no drift found |
+| **Last Verified** | 2026-10-27 against commit `(pending commit)` — weekly spot-check cycle 8 |
 
 ## Purpose / reason to exist
 
@@ -43,7 +43,7 @@ real order pair-swaps it with `core-sheets-fetch` vs CLAUDE.md's list
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-001 | `gateTokenValid()` `#L35` | — | bool | reads `gateAccessToken` / `gateTokenExpiresAt` | — | `handleGateSignInClick` (FN-005), `sheetsApiValuesGet` (`JS-009`), `fetchAndRender` (`JS-003`), `core-filters.js` (`JS-004`), `sheets-writeback.js` (`JS-018`), `main.js` | reusable |
-| FN-002 | `initGateTokenClient(clientId)` `#L39` | Client ID | token client or `null` | creates the GIS token client | GIS `google.accounts.oauth2` (`EXT-003`) | `gateSignIn` (FN-004), `initAuthGate` (FN-006) | specific |
+| FN-002 | `initGateTokenClient(clientId)` `#L39` | Client ID | token client or `null` | creates the GIS token client | GIS `google.accounts.oauth2` (`EXT-003`) | `gateSignIn` (FN-004) | specific |
 | FN-003 | `fetchGateUserEmail()` `#L60` | — | sets `gateUserEmail` | one `fetch` to the userinfo endpoint | — | `handleGateSignInClick` (FN-005) | specific |
 | FN-004 | `gateSignIn()` `#L78` | — | Promise resolving when a token lands | requests a token, populates `gateAccessToken` / expiry | `initGateTokenClient` (FN-002) | `handleGateSignInClick` (FN-005), programmatic re-auth | reusable |
 | FN-005 | `handleGateSignInClick()` `#L109` | click | — | updates the signed-in badge, clears status, calls `fetchAndRender()` | `gateSignIn` (FN-004), `gateTokenValid` (FN-001), `fetchGateUserEmail` (FN-003), `fetchAndRender` (`JS-003`) | `#gateSignInBtn` click (`BTN` on `DASH-001`) | specific |
@@ -67,7 +67,7 @@ real order pair-swaps it with `core-sheets-fetch` vs CLAUDE.md's list
 
 External: Google Identity Services (`EXT-003`) → `gateAccessToken`
 (module state, bare `let` `#L30`) → read by name from
-`core-sheets-fetch.js:103` and `core-filters.js:215` and used as the
+`core-sheets-fetch.js:110` and `core-filters.js:215` and used as the
 `Authorization: Bearer` on every Sheets call. Nothing persists to a
 Sheet.
 
@@ -133,7 +133,13 @@ top-level actions, not a `TAB-XXX`.
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by DOC-027.
+Verified at `c82ec67`; record created by DOC-027. Re-verified 2026-10-27
+(weekly spot-check cycle 8, `(pending commit)`): the `core-sheets-fetch.js`
+Bearer-token read-site line anchor had drifted `#L103` → real `#L110`
+(file grew via `55bf870`); fixed. Also fixed a pre-existing (not new)
+error on FN-002's "Called by" cell — `initAuthGate` never calls
+`initGateTokenClient`, confirmed via `grep -n` on `js/core-auth.js`;
+only `gateSignIn` does.
 
 ## Revalidation trigger
 

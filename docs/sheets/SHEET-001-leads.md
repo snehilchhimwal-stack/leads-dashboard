@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-21 against commit `55bf870` |
+| **Last Verified** | 2026-10-27 against commit `(pending commit)` — weekly spot-check cycle 8 |
 
 ## Purpose / reason to exist
 
@@ -45,8 +45,10 @@ An **external CRM export** — manual/scheduled outside this project. No
 
 - `JS-009` `sheetsApiValuesGet` → `JS-003` `fetchAndRender` →
   `allParsedLeads` → every tab.
-- `GS-004` `readLeadsTab_` → every scheduled emailer (`GS-001`,
-  `GS-008`, `GS-010`) + `GS-003`.
+- `GS-004` `readLeadsTab_` → `GS-001`, `GS-003`, `GS-006`, `GS-010`,
+  `GS-012`, `GS-013`, `GS-016` (every scheduled emailer/logger that reads
+  leads via this helper; `GS-008` reads the tab directly instead — see
+  Readers below).
 
 ## Columns / fields
 
@@ -88,7 +90,7 @@ Exact header aliases: `js/core-sheets-fetch.js` `HEADER_ALIASES` `#L17`.
 | `JS-003` | `fetchAndRender` (FN-015) | parse → collate → `allParsedLeads` |
 | `GS-004` | `readLeadsTab_` (FN-197) | the one backend leads read |
 | `GS-008` | `snapshotOpenLeads_` (FN-218) | 4×/day snapshot into `Movement_Log` |
-| `GS-010` / `GS-001` / `GS-003` | via `readLeadsTab_` | scheduled emails + nightly census |
+| `GS-001` / `GS-003` / `GS-006` / `GS-010` / `GS-012` / `GS-013` / `GS-016` | via `readLeadsTab_` | scheduled emails, SLA engine, comment/followup loggers, cycle report |
 
 ## Automation / triggers touching it
 
@@ -186,7 +188,12 @@ is defined by `HEADER_ALIASES` (`js/core-sheets-fetch.js`) /
 
 ## Version / change reference
 
-Verified at `c82ec67`; record created by `DOC-032`.
+Verified at `c82ec67`; record created by `DOC-032`. Re-verified
+2026-10-27 (weekly spot-check cycle 8, `(pending commit)`): "Destination /
+consumers" and the "Readers" table's `readLeadsTab_` row listed the wrong
+caller set — `GS-008` doesn't call `readLeadsTab_` (it reads the tab
+directly, as the record's own `GS-008` Readers row already said), and
+`GS-006`/`GS-012`/`GS-013`/`GS-016` were missing entirely. Fixed both.
 
 ## Revalidation trigger
 
