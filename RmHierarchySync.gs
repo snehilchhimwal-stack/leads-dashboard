@@ -700,7 +700,7 @@ function runRmHierarchySyncGs_(opts) {
 // Edit this list (and RM_HIERARCHY_RAW_) the next time a person confirms leavers; the 2026-10-16 batch is below.
 // 2026-10-19: Sanket Yadav (Thane TM; address bounced 2026-10-19) - run applyRmHierarchyReassignmentsNow first (his three S1s), then this.
 // A confirmed leaver is also never re-added by the nightly sync as a "new joiner" while HR Live still lists them (RULE-092).
-const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav'];
+const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan']; // Rahul Chauhan: user-confirmed leaver 2026-11-02 (not in HR Live, no leads)
 const RMSYNC_LEAVER_LEAD_ID_LOG_LIMIT_ = 200;
 
 // Open leads per normalised RM name, for the names given. All open leads count (not only Google ones): every open lead under a

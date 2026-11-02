@@ -378,7 +378,6 @@ const RM_HIERARCHY_RAW_ = [
   // the Pre Sales team addition -- closes a gap before it has a chance to
   // cause a real "no recipient" miss, not in response to one yet.
   ['Loan','BDM','Mohd Ali Abdul Gaffar','','','','Mayur Panjari'],
-  ['Thane','S1','Rahul Chauhan','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Central','S1','Shreyang Chudasama','Akash A Ugale','','','Sanjyota Bhosale'],
   ['Bangalore','S1','Kavya B R','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],

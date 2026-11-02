@@ -813,7 +813,7 @@ function runRmHierarchySyncTests_() {
         TestAssertEqual_(rmSyncTestState_(), null, 'leavers test mode: no state is saved');
       }
 
-      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19)');
+      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19) + Rahul Chauhan (2026-11-02)');
       const rawNames = RM_HIERARCHY_RAW_.map(function (r) { return normPersonName_(r[2]); });
       RMSYNC_CONFIRMED_LEAVERS_.forEach(function (n) { TestAssert_(rawNames.indexOf(normPersonName_(n)) === -1, 'leavers: ' + n + ' is gone from RM_HIERARCHY_RAW_ too (a rebuild cannot restore them)'); });
     }
