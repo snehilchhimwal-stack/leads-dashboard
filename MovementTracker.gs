@@ -585,6 +585,7 @@ function writeSlaHistorySnapshot_(ss, dataRows, colIndex, now, mlRows) {
   checkKeys.forEach(function (k) { byCheck[k] = 0; });
 
   let openTotal = 0, breachedTotal = 0;
+  indexCustomerCallTotalsGs_(dataRows, colIndex); // 2026-11-02: the cumulative per-customer call rule (SlaEngine.gs)
   dataRows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;

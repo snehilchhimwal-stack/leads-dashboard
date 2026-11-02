@@ -814,6 +814,7 @@ function dailyRmIssueRowsForStateGs_(ss, state, colIndex) {
   const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, asOf); }, 'buildMovementLogMapsGs_ (backfill ' + state.dayKey + ')').baselineMap;
   const capturedAtValue = Utilities.formatDate(asOf, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
   const out = [];
+  if (colIndex) indexCustomerCallTotalsGs_(state.rows, colIndex); // 2026-11-02: cumulative per-customer call rule (SlaEngine.gs)
   state.rows.forEach(function (row) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
@@ -1509,6 +1510,7 @@ function reconstructRmPerformanceObservationsGs_(ss) {
     // timestamp is an equally valid anchor for the whole day's baseline.
     const baselineMap = withRetry_(function () { return buildMovementLogMapsGs_(ss, entries[0].ts); }, 'buildMovementLogMapsGs_ (RM performance, ' + dayKey + ')').baselineMap;
 
+    indexCustomerCallTotalsGs_(entries.map(function (e) { return e.row; }), colIndex); // 2026-11-02: cumulative per-customer call rule
     entries.forEach(function (entry) {
       const row = entry.row;
       const stage = getVal_(row, colIndex, 'current_stage');

@@ -253,7 +253,7 @@ const ISSUE_ACTION_MAP = {
   inactiveRmNewLead: "Reassign this lead to an active RM immediately — it cannot be worked as currently routed.",
   firstContactBreach: "For the record, not for action — contact already happened, just after the 10-minute response window had passed, and that can't be corrected after the fact. Use this as a response-time SLA record per RM; no follow-up is needed on these specific leads.",
   followupOverdue: "Reconnect with the customer without delay — there has been no comment and no call on this lead in the last 4 hours.",
-  underCalledToday: `Complete the remaining call attempts today — see the Attempts Today column below for exactly how many more each lead needs to reach the ${CONFIG.MIN_CALLS_PER_DAY}/day SOP requirement.`,
+  underCalledToday: `Complete the remaining call attempts — every RM's calls on the customer count together: ${CONFIG.MIN_CALLS_24H} within 24h of assignment, ${CONFIG.MIN_CALLS_48H} after. The Attempts column shows how many more each lead needs.`,
   stageStuck48h: "Review this lead and either progress it toward Opportunity or close it out — it has been open more than 48 hours with no advancement.",
   isNotUpdated: "Update the CRM with this lead's current status — it is still in the Not Updated stage more than 3 hours after assignment.",
 };
@@ -267,10 +267,11 @@ ISSUE_PRIORITY.forEach(rule => { _FLAG_BY_ISSUE_PRIORITY_LABEL[rule.label] = rul
 // Behind on Today's Calls is the one issue where a single static action
 // sentence can't say anything precise — every lead has its own attempts
 // count. This renders the actual made/needed numbers per lead instead.
-function attemptsTodayCell(attemptsToday){
-  const made = Number(attemptsToday) || 0;
-  const remaining = Math.max(0, CONFIG.MIN_CALLS_PER_DAY - made);
-  return `${made}/${CONFIG.MIN_CALLS_PER_DAY} (${remaining} more needed)`;
+// 2026-11-02: made = the customer's calls from every RM, target = 5 within 24h / 10 after (enrichLead's callTarget).
+function attemptsTodayCell(made, target){
+  made = Number(made) || 0;
+  target = Number(target) || CONFIG.MIN_CALLS_24H;
+  return `${made}/${target} (${Math.max(0, target - made)} more needed)`;
 }
 
 const IST_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -590,7 +591,7 @@ function buildRegionReports(issueKey){
           }
           cells.push(created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—');
           if (issueKey === 'dueToday') cells.push(l.isUnder48h ? '0–48h' : 'PAST 48h');
-          if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.attemptsToday));
+          if (issueKey === 'dueToday') cells.push(attemptsTodayCell(l.customerCallTotal, l.callTarget));
           if (isReminder) cells.push(fmtWorkingWait(l.businessMinsToConnect, 'late'));
           cells.push(suggestedFollowUp(l));
           return cells;
@@ -767,7 +768,7 @@ function buildRegionWiseReports(combineAll, followupLookup){
         _lastReportOutOfScopeNames[raw] = (_lastReportOutOfScopeNames[raw] || 0) + 1;
         return;
       }
-      rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_assigned_at: l.lead_assigned_at, attemptsToday: l.attemptsToday, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
+      rows.push({ mainRegion: main, subRegion: l.region || '—', lead_id: l.lead_id, RM: l.RM || '—', issue, lead_assigned_at: l.lead_assigned_at, attemptsToday: l.attemptsToday, customerCallTotal: l.customerCallTotal, callTarget: l.callTarget, businessMinsToConnect: l.businessMinsToConnect, siblingLeadIds: l.siblingLeadIds, siblingRMs: l.siblingRMs, internal_status_comments: l.internal_status_comments, stage_comments: l.stage_comments, last_comment: l.last_comment, closing_reason: l.closing_reason, siblingComments: l.siblingComments });
     });
 
     // Not Connected in 10 Minutes rides along in this same email as its own
@@ -1152,7 +1153,7 @@ ${EMAIL_SIGNATURE}`;
         rows: tally[issueName].map(r => {
           const created = parseDate(r.lead_assigned_at);
           const cells = [idsFor(r), r.subRegion, rmsFor(r), created ? ((now - created) / 36e5).toFixed(1) + 'h' : '—'];
-          if (isDueToday) cells.push(attemptsTodayCell(r.attemptsToday));
+          if (isDueToday) cells.push(attemptsTodayCell(r.customerCallTotal, r.callTarget));
           cells.push(followupTextFor(r));
           return cells;
         }),

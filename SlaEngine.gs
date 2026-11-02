@@ -32,7 +32,40 @@
 
 const LEAD_GRACE_HOURS_ = 3;
 const LEAD_LIFECYCLE_HOURS_ = 48;
-const MIN_CALLS_PER_DAY_ = 3; // 2026-10-19: was 5 (user request)
+const MIN_CALLS_PER_DAY_ = 3; // 2026-10-19: was 5 (user request). Since 2026-11-02 only the dashboard twin still uses a per-day count.
+// 2026-11-02 (user request): "Behind on Today's Calls" is cumulative per CUSTOMER - every RM's calls on the customer count
+// together - and must reach 5 within the first 24h after the customer's first assignment and 10 by 48h (and stay >= 10 after).
+const MIN_CALLS_24H_ = 5;
+const MIN_CALLS_48H_ = 10;
+
+// Customer (client_id, else lead_id) -> { total, firstAssigned }: total = the sum of call_attempts over the customer's DISTINCT
+// lead ids (every RM copy of one lead id carries the same counter, so a lead id counts once - its highest value); firstAssigned =
+// the earliest lead_assigned_at of those rows. Built by readLeadsTab_ and looked up per row; a row read any other way (tests,
+// a hand-built row) has no entry and falls back to its own counter and assignment time.
+let SLA_CALL_GROUP_BY_ROW_ = new WeakMap();
+function indexCustomerCallTotalsGs_(rows, colIndex) {
+  const groups = {};
+  const keyOf = function (row) {
+    const c = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    return c || ('l:' + String(getVal_(row, colIndex, 'lead_id') || '').trim());
+  };
+  rows.forEach(function (row) {
+    const id = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!id) return;
+    const g = groups[keyOf(row)] = groups[keyOf(row)] || { byLead: {}, firstAssigned: null };
+    g.byLead[id] = Math.max(g.byLead[id] || 0, Number(getVal_(row, colIndex, 'call_attempts')) || 0);
+    const at = parseSlaDateGs_(getVal_(row, colIndex, 'lead_assigned_at'));
+    if (at && (!g.firstAssigned || at < g.firstAssigned)) g.firstAssigned = at;
+  });
+  Object.keys(groups).forEach(function (k) {
+    const g = groups[k];
+    g.total = Object.keys(g.byLead).reduce(function (s, id) { return s + g.byLead[id]; }, 0);
+  });
+  rows.forEach(function (row) {
+    const g = groups[keyOf(row)];
+    if (g) SLA_CALL_GROUP_BY_ROW_.set(row, { total: g.total, firstAssigned: g.firstAssigned });
+  });
+}
 const FOLLOWUP_REVIEW_HOURS_ = 4;
 const WORK_START_HOUR_ = 9;
 const WORK_END_HOUR_ = 19;
@@ -141,42 +174,17 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   const followupStaleHours = lastTouchMs !== -Infinity ? (now.getTime() - lastTouchMs) / 36e5 : ageHours;
   flags.followupOverdue = isUnder48h && pastGrace && hasConnected && followupStaleHours > FOLLOWUP_REVIEW_HOURS_;
 
-  // Behind on Today's Calls.
-  //
-  // 2026-10-01 fix (real incident — lead 2245665/Riya Yadav, Minas Patel's
-  // Western team, confirmed live via a read-only diagnostic against the
-  // production sheet): the delta-vs-baseline approach alone can
-  // UNDERCOUNT — a real, dated, TODAY-timestamped "Calling Status/Comment
-  // : Not Reachable" entry existed in internal_status_comments, but
-  // call_attempts was identical to its own pre-today baseline (11 = 11),
-  // so the delta read 0 despite a genuine logged interaction today. The
-  // comment-count fallback (countTodayCommentEntries_) used to run ONLY
-  // when no baseline existed at all — now it's computed unconditionally
-  // (mirrors js/core-lead-model.js's loggedToday, always computed up
-  // front) and the delta branch takes MAX(delta, commentCount) instead of
-  // the delta alone. This doesn't reopen the original problem the delta
-  // was built to fix (an uncommented real call still wins via the delta,
-  // unaffected) and also can't be fooled by a commented interaction the
-  // counter failed to increment for. Sent a real, incorrect "Still open —
-  // Behind on Today's Calls" follow-up email (OvernightEmailer.gs
-  // Checkpoint 1+2) before this fix. Byte-for-byte mirror of the JS fix —
-  // keep both in sync (HANDOVER.md §6).
+  // Behind on Today's Calls (key underCalledToday; label kept so stored rows still match).
+  // 2026-11-02 (user request): cumulative per CUSTOMER - every RM's calls on the customer count together - against 5 within 24h
+  // of the customer's first assignment and 10 after that (MIN_CALLS_24H_ / MIN_CALLS_48H_). It replaced the per-RM "3 calls
+  // today" check (MIN_CALLS_PER_DAY_; its baseline/comment-count logic of 2026-10-01 and F18 went with it). The customer totals
+  // come from readLeadsTab_ (indexCustomerCallTotalsGs_); a row read any other way falls back to its own counter and age.
+  // baselineMap is no longer read by this function; the parameter stays so no caller has to change.
   const callAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
-  const commentCountToday = countTodayCommentEntries_(internalComments, stageComments, now);
-  let attemptsToday;
-  if (isCreatedToday) {
-    attemptsToday = callAttempts;
-  } else {
-    // Keyed by LEAD id, not client_id (email audit F18): call_attempts is a per-lead lifetime counter, and a customer's several
-    // leads carry different counters - under the old client key a lead was compared with whichever sibling's snapshot came first.
-    // (Every RM copy of ONE lead id carries the identical counter, so copies agree.) Mirrors js/core-lead-model.js enrichLead.
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    const baseline = leadId ? baselineMap[leadId] : undefined;
-    attemptsToday = baseline !== undefined
-      ? Math.max(0, callAttempts - baseline, commentCountToday)
-      : commentCountToday; // no pre-today baseline yet — same fallback as enrichLead's loggedToday
-  }
-  flags.underCalledToday = pastGrace && attemptsToday < MIN_CALLS_PER_DAY_;
+  const grp = SLA_CALL_GROUP_BY_ROW_.get(row) || { total: callAttempts, firstAssigned: created };
+  const customerAgeHours = (now.getTime() - (grp.firstAssigned || created).getTime()) / 36e5;
+  const callTarget = customerAgeHours <= 24 ? MIN_CALLS_24H_ : MIN_CALLS_48H_;
+  flags.underCalledToday = pastGrace && Math.max(grp.total, callAttempts) < callTarget;
 
   return flags;
 }

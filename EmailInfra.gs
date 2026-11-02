@@ -1472,9 +1472,39 @@ function readLeadsTab_(ss) {
     if (lastRow < 3) return { colIndex: {}, dataRows: [] };
     const headerRow = src.getRange(2, 1, 1, lastCol).getValues()[0];
     const colIndex = buildColIndex_(headerRow);
-    const dataRows = src.getRange(3, 1, lastRow - 2, lastCol).getValues();
+    const dataRows = dropTransferredLeadRowsGs_(src.getRange(3, 1, lastRow - 2, lastCol).getValues(), colIndex);
+    indexCustomerCallTotalsGs_(dataRows, colIndex); // SlaEngine.gs: the cumulative call rule reads it
     return { colIndex: colIndex, dataRows: dataRows };
   }, 'readLeadsTab_');
+}
+
+// 2026-11-02 (user request): a lead moved to another RM keeps the SAME lead_id, and the old RM's row stays in the sheet but
+// stops updating - it kept showing up in the emails. When one lead_id has rows under two or more RMs, only the rows of the RM
+// it was assigned to LAST (latest lead_assigned_at) are kept. A lead_id under one RM, or whose latest assignment cannot be told
+// apart (a tie or an undatable row), is left exactly as it is. Pure apart from the log line.
+function dropTransferredLeadRowsGs_(rows, colIndex) {
+  if (colIndex.lead_id === undefined || colIndex.RM === undefined) return rows;
+  const byId = {};
+  rows.forEach(function (row, i) {
+    const id = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (id) (byId[id] = byId[id] || []).push(i);
+  });
+  const drop = {};
+  let dropped = 0;
+  Object.keys(byId).forEach(function (id) {
+    const idx = byId[id];
+    if (idx.length < 2) return;
+    const rmOf = function (i) { return String(getVal_(rows[i], colIndex, 'RM') || '').trim().toLowerCase(); };
+    if (new Set(idx.map(rmOf)).size < 2) return;
+    const at = function (i) { const d = parseSlaDateGs_(getVal_(rows[i], colIndex, 'lead_assigned_at')); return d ? d.getTime() : NaN; };
+    if (idx.some(function (i) { return isNaN(at(i)); })) return;
+    const latest = Math.max.apply(null, idx.map(at));
+    const latestRms = new Set(idx.filter(function (i) { return at(i) === latest; }).map(rmOf));
+    if (latestRms.size !== 1) return; // two RMs share the latest time: cannot tell who holds it now
+    idx.forEach(function (i) { if (!latestRms.has(rmOf(i))) { drop[i] = true; dropped++; } });
+  });
+  if (dropped) Logger.log(dropped + ' leads-tab row(s) of leads since moved to another RM left out - the old RM copy no longer updates.');
+  return dropped ? rows.filter(function (r, i) { return !drop[i]; }) : rows;
 }
 
 // ============ CH-LEVEL REPORT GROUPING (shared) ============

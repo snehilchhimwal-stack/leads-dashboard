@@ -1107,7 +1107,7 @@ function renderDueTodayList(){
     return `<div class="alert-card amber-left">
       <div class="alert-id">${leadIdentityLine(l)}</div>
       <div class="alert-age mono">assigned ${esc(isoStampIST(l.lead_assigned_at))}</div>
-      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — ${l.isCreatedToday ? '<span class="chip red">New today</span> ' : ''}<span class="chip amber">${l.attemptsToday}/${CONFIG.MIN_CALLS_PER_DAY} attempts today</span></div>
+      <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — ${l.isCreatedToday ? '<span class="chip red">New today</span> ' : ''}<span class="chip amber">${l.customerCallTotal}/${l.callTarget} calls (all RMs)</span></div>
       ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
       ${logToggleMarkup(l, logId)}
     </div>`;

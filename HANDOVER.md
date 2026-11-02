@@ -979,7 +979,7 @@ The ONE place that states the rules the emails and the dashboard apply today (co
 
 **Scope:** `group_source` = `google` AND `source_bucket` = `Non-UTM` or `Search` (`passesGoogleNonUtmSearchGs_`); the lead is **open** (`isOpenLead_`) and has a parseable `lead_assigned_at`. The 17:00 email covers leads assigned in the last 3 calendar days.
 
-**Constants:** grace `LEAD_GRACE_HOURS_` = 3 h; lifecycle `LEAD_LIFECYCLE_HOURS_` = 48 h; follow-up window `FOLLOWUP_REVIEW_HOURS_` = 4 h; daily minimum `MIN_CALLS_PER_DAY_` = 3.
+**Constants:** grace `LEAD_GRACE_HOURS_` = 3 h; lifecycle `LEAD_LIFECYCLE_HOURS_` = 48 h; follow-up window `FOLLOWUP_REVIEW_HOURS_` = 4 h; call targets `MIN_CALLS_24H_` = 5 and `MIN_CALLS_48H_` = 10 (since 2026-11-02; `MIN_CALLS_PER_DAY_` = 3 is no longer the rule).
 
 **The five issues, in priority order** (a lead is reported once, under the FIRST that matches):
 
@@ -988,8 +988,10 @@ The ONE place that states the rules the emails and the dashboard apply today (co
 | 1 | Inactive-RM Lead Added (`inactiveRmNewLead`) | assigned **today** and the RM is inactive (`rm_is_active` = false/no/0/inactive/n). No grace. |
 | 2 | Not Updated (`isNotUpdated`) | stage text is still **"Not Updated"** and the lead is >= 3 h old. Nothing else. |
 | 3 | No follow up in last 4 hours (`followupOverdue`) | 3-48 h old, connected, and **more than 4 h** since the LATER of the last comment and the last call. There is no call-attempt timestamp column, so `last_connect_time` is the call time; with neither, the clock runs from assignment. |
-| 4 | Behind on Today's Calls (`underCalledToday`) | >= 3 h old and **fewer than 3 calls today**. Calls today = max(rise in `call_attempts` since the pre-today snapshot, dated comments logged today); for a lead assigned today, `call_attempts`. |
+| 4 | Behind on Today's Calls (`underCalledToday`) | **Since 2026-11-02:** >= 3 h old and the **customer's** calls from every RM together (sum of `call_attempts` over the customer's distinct lead ids; customer = `client_id`, else `lead_id`) are **under 5 within 24 h** of the customer's first assignment, or **under 10 after that**. Built by `indexCustomerCallTotalsGs_` (readLeadsTab_) / `indexCustomerCallTotals` (dashboard). Replaced the per-RM "3 calls today". |
 | 5 | Stuck 48h+ (`stageStuck48h`) | more than 48 h old and still open. |
+
+**Moved leads (2026-11-02):** a lead moved to another RM keeps its `lead_id`, and the old RM's row stays in the sheet but stops updating. When one `lead_id` has rows under two or more RMs, only the rows of the RM with the latest `lead_assigned_at` are read (`dropTransferredLeadRowsGs_` in `readLeadsTab_`; `dropTransferredLeadRows` on the dashboard). A tie or an undatable row leaves the lead as it is.
 
 **Stored labels:** rows written before 2026-10-19 say "Follow-up Overdue"; `canonicalIssueLabelGs_` maps that to "No follow up in last 4 hours" wherever a stored label is compared or shown. The 10:00/13:00 checkpoints re-check the same leads; a move INTO "Behind on Today's Calls" is "category changed", never "escalated".
 

@@ -238,6 +238,49 @@ function lastSnapshotForLead(l){
 // the CRM-comment proxy in that case; see enrichLeadAsOf for why.
 let _enrichingHistorical = false;
 
+// 2026-11-02 (user request), twin of EmailInfra.gs dropTransferredLeadRowsGs_: a lead moved to another RM keeps its lead_id and
+// the old RM's row stays in the sheet but stops updating. When one lead_id has rows under two or more RMs, only the rows of the
+// RM it was assigned to LAST are kept; a tie or an undatable row leaves the lead as it is.
+function dropTransferredLeadRows(rows){
+  const byId = new Map();
+  rows.forEach((r, i) => { const id = String(r.lead_id || '').trim(); if (id) { if (!byId.has(id)) byId.set(id, []); byId.get(id).push(i); } });
+  const drop = new Set();
+  const rmOf = i => String(rows[i].RM || '').trim().toLowerCase();
+  const at = i => { const d = parseDate(rows[i].lead_assigned_at); return d ? d.getTime() : NaN; };
+  byId.forEach(idx => {
+    if (idx.length < 2 || new Set(idx.map(rmOf)).size < 2 || idx.some(i => isNaN(at(i)))) return;
+    const latest = Math.max(...idx.map(at));
+    const latestRms = new Set(idx.filter(i => at(i) === latest).map(rmOf));
+    if (latestRms.size !== 1) return;
+    idx.forEach(i => { if (!latestRms.has(rmOf(i))) drop.add(i); });
+  });
+  return drop.size ? rows.filter((r, i) => !drop.has(i)) : rows;
+}
+
+// 2026-11-02, twin of SlaEngine.gs indexCustomerCallTotalsGs_: stamps every row with its customer's (client_id, else lead_id)
+// call total - each DISTINCT lead id once, its highest call_attempts - and the customer's earliest lead_assigned_at (ms).
+// mergeRowsIntoOneLead copies them from the primary row, so a merged unit carries them too.
+function indexCustomerCallTotals(rows){
+  const groups = new Map();
+  const keyOf = r => String(r.client_id || '').trim() || ('l:' + String(r.lead_id || '').trim());
+  rows.forEach(r => {
+    const id = String(r.lead_id || '').trim();
+    if (!id) return;
+    const k = keyOf(r);
+    if (!groups.has(k)) groups.set(k, { byLead: {}, first: null });
+    const g = groups.get(k);
+    g.byLead[id] = Math.max(g.byLead[id] || 0, Number(r.call_attempts) || 0);
+    const d = parseDate(r.lead_assigned_at);
+    if (d && (g.first === null || d.getTime() < g.first)) g.first = d.getTime();
+  });
+  rows.forEach(r => {
+    const g = groups.get(keyOf(r));
+    if (!g) return;
+    r.customerCallTotalAll = Object.keys(g.byLead).reduce((s, id) => s + g.byLead[id], 0);
+    r.customerFirstAssignedMs = g.first;
+  });
+}
+
 function enrichLead(l){
   const now = _renderNow;
   const created = parseDate(l.lead_assigned_at);
@@ -381,7 +424,15 @@ function enrichLead(l){
   } else {
     attemptsToday = loggedToday;
   }
-  const underCalledToday = isOpenLead && pastGrace && attemptsToday < CONFIG.MIN_CALLS_PER_DAY;
+  // 2026-11-02 (user request): cumulative per customer - a merged unit's lead ids each count once (callAttemptsByLeadId), its
+  // lead_assigned_at is already the earliest of them (mergeRowsIntoOneLead) - against 5 within 24h, 10 after. Twin of
+  // SlaEngine.gs computeSlaFlags_. attemptsToday stays for display only.
+  const customerCallTotal = l.customerCallTotalAll !== undefined ? l.customerCallTotalAll : (l.callAttemptsByLeadId
+    ? Object.keys(l.callAttemptsByLeadId).reduce((s, id) => s + (Number(l.callAttemptsByLeadId[id]) || 0), 0)
+    : (Number(l.call_attempts) || 0));
+  const customerAgeHours = l.customerFirstAssignedMs ? (now - l.customerFirstAssignedMs) / 36e5 : ageHours;
+  const callTarget = (customerAgeHours !== null && customerAgeHours > 24) ? CONFIG.MIN_CALLS_48H : CONFIG.MIN_CALLS_24H;
+  const underCalledToday = isOpenLead && pastGrace && Math.max(customerCallTotal, Number(l.call_attempts) || 0) < callTarget;
 
   // Stuck: open past 48hrs and still hasn't reached Opportunity — the one
   // check deliberately exempt from the isUnder48h scope, since being old is
@@ -476,7 +527,7 @@ function enrichLead(l){
     hoursSinceLastComment, lastCommentAt, isNotUpdated,
     followupOverdue, hasConnected, recordingNotWorking, recordingCommentsNoCalls, closedWithNoComment,
     rmIsInactive, inactiveRmNewLead,
-    attemptsToday, underCalledToday,
+    attemptsToday, underCalledToday, customerCallTotal, callTarget,
     collatedFrom: l.collatedFrom || 1, collatedRMs: l.collatedRMs || [], collatedLeadIds: l.collatedLeadIds || [],
     collatedRegions: l.collatedRegions || []
   });

@@ -29,7 +29,11 @@
 // ============================================================
 
 const CONFIG = {
-  MIN_CALLS_PER_DAY: 3,   // 2026-10-19: was 5 (user request); twin of SlaEngine.gs MIN_CALLS_PER_DAY_
+  MIN_CALLS_PER_DAY: 3,   // 2026-10-19: was 5 (user request); twin of SlaEngine.gs MIN_CALLS_PER_DAY_. Not the issue rule since 2026-11-02.
+  // 2026-11-02 (user request): "Behind on Today's Calls" = the customer's calls from EVERY RM together, at least 5 within 24h
+  // of the first assignment and 10 after. Twins of SlaEngine.gs MIN_CALLS_24H_ / MIN_CALLS_48H_.
+  MIN_CALLS_24H: 5,
+  MIN_CALLS_48H: 10,
   MIN_CALLS_AFTER_48H: 10,
   LEAD_LIFECYCLE_HOURS: 48,
   FIRST_CONTACT_SLA_MINUTES: 10,

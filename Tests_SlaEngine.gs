@@ -144,83 +144,44 @@ function runSlaEngineTests_() {
     flags = computeSlaFlags_(f.row, f.colIndex, now, {});
     TestAssert_(flags.followupOverdue === false, 'followupOverdue (2026-10-19): the under-48h gate is kept - a 50h-old lead is never flagged here');
 
-    // ---- underCalledToday ----
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 2 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday: fires when a lead created TODAY has fewer than 3 attempts logged (2 here)');
-
-    // 2026-10-19 (user request): the daily minimum is 3, not 5.
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 3 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday (2026-10-19): exactly 3 attempts today meets the new minimum of 3');
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 4 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday (2026-10-19): 4 attempts today is no longer behind (it was under the old minimum of 5)');
-
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 6 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, {});
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday: does not fire with 6 attempts logged today');
-
-    // Lead NOT created today: attemptsToday is computed against a
-    // baseline (yesterday's known call_attempts), not the raw total.
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // 12 - 10 = 2 today, under 3
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday: for an older lead, uses (current - baseline) attempts, not the raw lifetime total');
-
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 5 }); // 12 - 5 = 7 today, not under 3
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday: correctly NOT flagged once (current - baseline) clears the daily minimum');
-
-    // 2026-10-01 fix: the delta-vs-baseline can UNDERCOUNT when a real
-    // interaction was logged as a dated comment but call_attempts itself
-    // never incremented (real incident: lead 2245665/Riya Yadav —
-    // call_attempts identical to its own pre-today baseline, 11 = 11,
-    // despite a genuine today-dated "Not Reachable" comment; a real,
-    // incorrect "Still open — Behind on Today's Calls" follow-up email
-    // went out before this fix). attemptsToday now takes MAX(delta,
-    // today's comment count), not the delta alone.
-    const underCalledComments5 = [0, 1, 2, 3, 4].map(function (h) {
-      return 'Test RM One: Not Reachable - ' + TestSla_isoMinusHours_(now, h);
-    }).join(' | ');
-    f = TestSla_buildRow_({
-      lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
-      internal_status_comments: underCalledComments5,
-    });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 10-10 = 0, but 5 dated comments logged today
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix: 5 today-dated comment entries clear the daily minimum even though call_attempts never moved off its own baseline (the real Riya Yadav incident shape)');
-
-    const underCalledComments2 = [0, 1].map(function (h) {
-      return 'Test RM One: Not Reachable - ' + TestSla_isoMinusHours_(now, h);
-    }).join(' | ');
-    f = TestSla_buildRow_({
-      lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 10,
-      internal_status_comments: underCalledComments2,
-    });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 0, only 2 comments today -- still under the daily minimum of 3
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday 2026-10-01 fix: still correctly fires when even the comment count alone has not cleared the daily minimum (MAX, not an automatic pass)');
-
-    // The fix must not weaken the ORIGINAL case the delta already
-    // handled correctly: a real logged call that pushed call_attempts
-    // up, with zero comments today, still clears via the delta alone.
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 15 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-TEST': 10 }); // delta = 5, no comments at all today
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday 2026-10-01 fix sanity: a real call-attempts delta with zero same-day comments still clears the minimum via the delta alone, unaffected by the fix');
-
-    // Email audit F18 (2026-10-07): the baseline is looked up by LEAD id, not client_id. call_attempts is a per-lead counter, and
-    // a customer's several leads (one client_id, different lead_ids) each carry their own - under the old client key a lead was
-    // compared with whichever sibling's snapshot came first. Real data: 37 of 764 open Google Non-UTM leads had a different
-    // baseline; 3 were wrongly NOT flagged "Behind on Today's Calls" (e.g. lead 2246693: 17 attempts, own baseline 19 -> 0 today,
-    // but the shared client key held 7 -> read as 10 calls today).
-    f = TestSla_buildRow_({ lead_id: 'L-SIB-B', client_id: 'C-SHARED', lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 9 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-SIB-A': 13, 'L-SIB-B': 4, 'C-SHARED': 13 }); // own baseline 4 -> 5 calls today
-    TestAssert_(flags.underCalledToday === false, 'underCalledToday F18: a lead is measured against ITS OWN baseline, not a sibling lead of the same customer (sibling baseline 13 would have read 0 calls today and wrongly flagged it)');
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'L-SIB-A': 2, 'L-SIB-B': 9, 'C-SHARED': 2 }); // own baseline 9 -> 0 calls today
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday F18: a lead with no calls today is flagged even when a sibling lead of the same customer has a low baseline (sibling baseline 2 would have read 7 calls today and hidden it)');
-    f = TestSla_buildRow_({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { 'C-TEST': 0 }); // a map keyed by client id only: this lead has no baseline of its own
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday F18: a baseline stored under the client id is NOT used for the lead (no own baseline -> falls back to the comment count, 0 here)');
-    f = TestSla_buildRow_({ lead_id: '', lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 });
-    flags = computeSlaFlags_(f.row, f.colIndex, now, { '': 0, 'undefined': 0 });
-    TestAssert_(flags.underCalledToday === true, 'underCalledToday F18: a row with no lead id never matches a baseline entry');
+    // ---- underCalledToday (2026-11-02: cumulative per customer, 5 within 24h, 10 after) ----
+    const uc = function (fields, base) { const x = TestSla_buildRow_(fields); return computeSlaFlags_(x.row, x.colIndex, now, base || {}).underCalledToday; };
+    TestAssertEqual_([4, 5].map(function (n) { return uc({ lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: n }); }).join(','), 'true,false', 'underCalledToday: under 24h old, 4 calls is behind, 5 is not');
+    TestAssertEqual_([9, 10].map(function (n) { return uc({ lead_assigned_at: TestFixture_hoursAgo_(now, 30), call_attempts: n }); }).join(','), 'true,false', 'underCalledToday: past 24h, 9 calls is behind, 10 is not');
+    TestAssertEqual_(uc({ lead_assigned_at: TestFixture_daysAgo_(now, 2), call_attempts: 12 }, { 'L-TEST': 11 }), false, 'underCalledToday: the old per-day baseline is no longer used (12 lifetime calls clear 10, though only 1 was today)');
+    TestAssertEqual_(uc({ lead_assigned_at: TestFixture_hoursAgo_(now, 1), call_attempts: 0 }), false, 'underCalledToday: still inside the 3h grace');
+    {
+      // Customer totals: three RMs' leads of one customer pool their calls; a lead id copied under two RMs counts once.
+      const mk = function (o) { return TestSla_buildRow_(Object.assign({ client_id: 'C-POOL', current_stage: 'Suspect' }, o)); };
+      const r1 = mk({ lead_id: 'P1', RM: 'RM A', lead_assigned_at: TestFixture_hoursAgo_(now, 20), call_attempts: 2 });
+      const r2 = mk({ lead_id: 'P2', RM: 'RM B', lead_assigned_at: TestFixture_hoursAgo_(now, 10), call_attempts: 2 });
+      const r3 = mk({ lead_id: 'P3', RM: 'RM C', lead_assigned_at: TestFixture_hoursAgo_(now, 6), call_attempts: 1 });
+      const r3copy = mk({ lead_id: 'P3', RM: 'RM C', lead_assigned_at: TestFixture_hoursAgo_(now, 6), call_attempts: 1 });
+      const rows = [r1.row, r2.row, r3.row, r3copy.row];
+      indexCustomerCallTotalsGs_(rows, r1.colIndex);
+      TestAssertEqual_(SLA_CALL_GROUP_BY_ROW_.get(r2.row).total, 5, 'customer totals: 2 + 2 + 1 (P3 once, though it has two rows)');
+      TestAssertEqual_(rows.map(function (r) { return computeSlaFlags_(r, r1.colIndex, now, {}).underCalledToday; }).join(','), 'false,false,false,false', 'underCalledToday: 5 pooled calls clear the 24h target for every RM of the customer');
+      r1.row[r1.colIndex.lead_assigned_at] = TestFixture_hoursAgo_(now, 30); // the customer's FIRST assignment is now 30h ago -> target 10
+      indexCustomerCallTotalsGs_(rows, r1.colIndex);
+      TestAssertEqual_(computeSlaFlags_(r3.row, r1.colIndex, now, {}).underCalledToday, true, 'underCalledToday: the target follows the first assignment of the customer (30h ago -> 10), not the own assignment of this lead (6h)');
+    }
+    {
+      // A lead moved to another RM: same lead_id, the old RM's row stays but stops updating -> dropped by readLeadsTab_.
+      const mk = function (o) { return TestSla_buildRow_(Object.assign({ lead_id: 'T1', current_stage: 'Suspect' }, o)); };
+      const old = mk({ RM: 'Old RM', lead_assigned_at: TestFixture_daysAgo_(now, 2) });
+      const cur = mk({ RM: 'New RM', lead_assigned_at: TestFixture_hoursAgo_(now, 3) });
+      const solo = mk({ lead_id: 'T2', RM: 'Old RM', lead_assigned_at: TestFixture_daysAgo_(now, 2) });
+      const ci = old.colIndex;
+      const names = function (rs) { return rs.map(function (r) { return r[ci.lead_id] + ':' + r[ci.RM]; }).join(','); };
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([old.row, cur.row, solo.row], ci)), 'T1:New RM,T2:Old RM', 'transfer: the old RM copy of a moved lead is dropped; a lead under one RM is kept');
+      const tie = mk({ RM: 'Other RM', lead_assigned_at: cur.row[ci.lead_assigned_at] });
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([cur.row, tie.row], ci)), 'T1:New RM,T1:Other RM', 'transfer: two RMs at the same latest time - cannot tell who holds it, both kept');
+      const undated = mk({ RM: 'Undated RM', lead_assigned_at: '' });
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([old.row, cur.row, undated.row], ci)), 'T1:Old RM,T1:New RM,T1:Undated RM', 'transfer: an undatable copy - nothing dropped');
+      const dupSame = mk({ RM: 'New RM', lead_assigned_at: TestFixture_daysAgo_(now, 1) });
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([cur.row, dupSame.row], ci)), 'T1:New RM,T1:New RM', 'transfer: two copies under the SAME RM are not a transfer - both kept');
+    }
+    SLA_CALL_GROUP_BY_ROW_ = new WeakMap();
 
     // ---- stageStuck48h ----
     f = TestSla_buildRow_({ lead_assigned_at: TestFixture_hoursAgo_(now, 50) });

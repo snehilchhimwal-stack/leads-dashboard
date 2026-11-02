@@ -857,7 +857,7 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     TestAssert_(record1 && record1.status === 'completed' && typeof record1.totalSeconds === 'number' && record1.skipped.length === 0, 'E2E capture #1: the run record says completed, with a run time and no skipped phases');
     TestAssertEqual_(snapshotRunProblemsGs_(new Date()).length, 0, 'E2E capture #1: the watchdog sees nothing wrong with a clean run');
     const sla1 = ss1.getSheetByName('SLA_History').getRange(2, 1, 1, SLA_HISTORY_COLUMNS_.length).getValues()[0];
-    TestAssertEqual_(sla1[SLA_HISTORY_COLUMNS_.indexOf('underCalledToday')], 4, 'E2E capture #1: with no earlier snapshot there is no baseline, so all four read as under-called (comment-count fallback)');
+    TestAssertEqual_(sla1[SLA_HISTORY_COLUMNS_.indexOf('underCalledToday')], 2, 'E2E capture #1 (2026-11-02 cumulative rule): customer C-E1 pools 13 + 4 = 17 calls (not behind); E201 (2) and E301 (1) are under 10 -> 2 under-called');
 
     // A day passes: yesterday's capture. The sibling's snapshot is the LATER one on purpose (the F18 trap).
     TestEFC_ageMovementLog_(ss1, { E102: dayAndHourAgo, E101: dayAgo, E201: dayAgo, E301: dayAgo });
@@ -880,11 +880,11 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     TestAssertContains_(rowSolo, "Behind on Today's Calls", 'E2E 17:00: control - a lead with no calls today (2 -> 2) is still flagged behind');
     TestAssertContains_(rowSolo, 'no new call attempts', 'E2E 17:00: control - …with the "no new call attempts" follow-up');
     const rowBusy = rowOf(html1, 'E301');
-    TestAssertContains_(rowBusy, 'Stuck 48h+', 'E2E 17:00: control - a lead with 6 calls today (1 -> 7) is not behind');
+    TestAssertContains_(rowBusy, "Behind on Today's Calls", 'E2E 17:00 (2026-11-02): E301 has 7 calls in total, past 24h it needs 10 - behind, though 6 were today');
     TestAssertContains_(rowBusy, '6 more call attempts', 'E2E 17:00: control - …and its follow-up says 6 more attempts');
     const snapshotJson = JSON.parse(ss1.getSheetByName('AllIssues_Log').getRange(2, 10, 1, 1).getValues()[0][0]);
     TestAssertEqual_(snapshotJson.map(function (l) { return l.lead_id + ':' + l.issueLabel; }).sort().join('|'),
-      "E102:Stuck 48h+|E201:Behind on Today's Calls|E301:Stuck 48h+", 'E2E 17:00: the logged issue snapshot names exactly the same issue per lead as the email');
+      "E102:Stuck 48h+|E201:Behind on Today's Calls|E301:Behind on Today's Calls", 'E2E 17:00: the logged issue snapshot names exactly the same issue per lead as the email');
 
     // TODAY'S capture (#2), real, after the email. Only the two leads that changed get a new row.
     snapshotPeriodic();
@@ -902,11 +902,12 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     TestAssertEqual_(Object.keys(maps.baselineMap).sort().join(','), 'E101,E102,E201,E301', 'E2E capture #2: the maps are keyed by lead id only (no client-id or l: keys)');
     const todayRows = ss1._sheets[monthShort].getRange(3, 1, 4, header.length).getValues();
     const colIndexE2e = buildColIndex_(header);
+    indexCustomerCallTotalsGs_(todayRows, colIndexE2e); // as readLeadsTab_ does (2026-11-02 cumulative rule)
     const behind = {};
     todayRows.forEach(function (r) { behind[String(getVal_(r, colIndexE2e, 'lead_id'))] = computeSlaFlags_(r, colIndexE2e, mapsNow, maps.baselineMap).underCalledToday; });
-    TestAssertEqual_(JSON.stringify(behind), JSON.stringify({ E101: true, E102: false, E201: true, E301: false }), 'E2E shared table: per-lead "behind on today\'s calls" from the real Movement_Log (the browser test asserts the same table)');
+    TestAssertEqual_(JSON.stringify(behind), JSON.stringify({ E101: false, E102: false, E201: true, E301: true }), 'E2E shared table (2026-11-02): C-E1 pools 13 + 9 = 22 calls (neither lead behind); E201 (2) and E301 (7) are under 10');
     const sla2 = ss1.getSheetByName('SLA_History').getRange(3, 1, 1, SLA_HISTORY_COLUMNS_.length).getValues()[0];
-    TestAssertEqual_(sla2[SLA_HISTORY_COLUMNS_.indexOf('underCalledToday')], 2, 'E2E capture #2: SLA_History (written AFTER the capture now) counts 2 under-called - it did not read the run\'s own fresh rows as a baseline (that would give 3)');
+    TestAssertEqual_(sla2[SLA_HISTORY_COLUMNS_.indexOf('underCalledToday')], 2, 'E2E capture #2 (2026-11-02): SLA_History counts 2 under-called (E201, E301) - the pooled customer C-E1 is not');
     TestAssertEqual_(sla2[SLA_HISTORY_COLUMNS_.indexOf('openTotal')], 4, 'E2E capture #2: …over the 4 open leads');
 
     // ===== SCENARIO 2: the 10:00 overnight email reads the same real Movement_Log =====

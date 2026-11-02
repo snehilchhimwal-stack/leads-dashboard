@@ -154,7 +154,7 @@ async function fetchAndRender(){
       return gvizCellDate(cellsArr[idx]);
     };
 
-    const parsedLeads = dataRowsRaw
+    const parsedLeadsAll = dataRowsRaw
       .filter(c => String(gvizCellRaw(c[colIndex.lead_id])).trim() !== '')
       .map(c => {
         const createdDate = getDate(c, 'lead_assigned_at');
@@ -205,6 +205,9 @@ async function fetchAndRender(){
           lead_closing_comment: getVal(c, 'lead_closing_comment') || '',
         };
       });
+    // 2026-11-02: the old RM's copy of a lead moved to another RM (same lead_id) is dropped - twin of EmailInfra.gs.
+    const parsedLeads = dropTransferredLeadRows(parsedLeadsAll);
+    indexCustomerCallTotals(parsedLeads); // 2026-11-02: cumulative per-customer call rule (enrichLead)
 
     // Resilience check: any HEADER_ALIASES key no getVal/getDate call site
     // ever touched is dead — the exact condition that caused a false
