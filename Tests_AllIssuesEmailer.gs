@@ -296,6 +296,29 @@ function runAllIssuesEmailerTests_() {
       TestAssertContains_(f18Row, '5 more call attempts', 'F18 all-issues email: the follow-up compares with the lead\'s OWN last snapshot (4 -> 9 = 5 more attempts), not the sibling\'s (13)');
     }
 
+    // ---- 2026-11-02: a customer held by RMs under DIFFERENT managers is listed for each RM, with the pooled call count ----
+    {
+      const mrSs = TestMockSpreadsheet_({
+        'RM_Hierarchy': TestMockSheet_('RM_Hierarchy', TestFixture_rmHierarchyRows_()),
+        'Manager_Directory': TestMockSheet_('Manager_Directory', TestFixture_managerDirectoryRows_()),
+        'Movement_Log': TestMockSheet_('Movement_Log', [['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_)]),
+      });
+      const mrCreated = new Date(win.from.getTime() + 1); // >48h old: target 10
+      mrSs._sheets[monthShort] = TestMockSheet_(monthShort, [banner, header,
+        TestAIE_leadRow_(header, { lead_id: 'L-MR-1', client_id: 'C-MR', RM: 'Test RM One', current_stage: 'Suspect', lead_assigned_at: mrCreated, call_attempts: 1 }),
+        TestAIE_leadRow_(header, { lead_id: 'L-MR-2', client_id: 'C-MR', RM: 'Test RM Three', current_stage: 'Suspect', lead_assigned_at: mrCreated, call_attempts: 2 }),
+      ]);
+      const realSsMr = SpreadsheetApp;
+      const mrBefore = TestGmailLog_.drafts.length;
+      SpreadsheetApp = { getActiveSpreadsheet: function () { return mrSs; }, flush: function () {} };
+      try { sendAllIssuesEmails(); } finally { SpreadsheetApp = realSsMr; }
+      const mrDrafts = TestGmailLog_.drafts.slice(mrBefore);
+      const with1 = mrDrafts.filter(function (d) { return d.htmlBody.indexOf('L-MR-1') !== -1; });
+      const with2 = mrDrafts.filter(function (d) { return d.htmlBody.indexOf('L-MR-2') !== -1; });
+      TestAssert_(with1.length === 1 && with2.length === 1, 'per-RM listing: both RM copies of one customer are listed (no longer collapsed to one); each goes to its own manager bucket of the RM');
+      TestAssert_([with1[0], with2[0]].every(function (d) { return d && d.htmlBody.indexOf('Customer calls so far (all RMs): 3/10') !== -1; }), 'per-RM listing: both show the pooled count of the customer (1 + 2 = 3 of 10)');
+    }
+
     TestAssertOnlyTestEmails_();
 
     // ---- sendOneAllIssuesEmail_: Gmail-blocked failure path (direct call) ----

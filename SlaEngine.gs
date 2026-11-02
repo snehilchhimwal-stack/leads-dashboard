@@ -43,6 +43,15 @@ const MIN_CALLS_48H_ = 10;
 // the earliest lead_assigned_at of those rows. Built by readLeadsTab_ and looked up per row; a row read any other way (tests,
 // a hand-built row) has no entry and falls back to its own counter and assignment time.
 let SLA_CALL_GROUP_BY_ROW_ = new WeakMap();
+// The customer's pooled calls and the target that applies now ({ total, target }), for the email text; null for an undatable row.
+function customerCallProgressGs_(row, colIndex, now) {
+  const created = parseSlaDateGs_(getVal_(row, colIndex, 'lead_assigned_at'));
+  if (!created) return null;
+  const own = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
+  const grp = SLA_CALL_GROUP_BY_ROW_.get(row) || { total: own, firstAssigned: created };
+  const ageH = (now.getTime() - (grp.firstAssigned || created).getTime()) / 36e5;
+  return { total: Math.max(grp.total, own), target: ageH <= 24 ? MIN_CALLS_24H_ : MIN_CALLS_48H_ };
+}
 function indexCustomerCallTotalsGs_(rows, colIndex) {
   const groups = {};
   const keyOf = function (row) {

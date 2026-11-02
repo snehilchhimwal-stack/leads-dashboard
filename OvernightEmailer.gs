@@ -1104,7 +1104,8 @@ function sendOvernightMorningEmails_(opts) {
     const baselineEntry = lastSnapshotMap[leadId]; // per LEAD, not per customer (email audit F18) - call_attempts is a per-lead counter
 
     candidateLeads.push({
-      identityKey: clientId || ('l:' + leadId), // same customer-identity rule buildMovementHistories (dashboard) and RmHierarchy.gs's CC lookups already use
+      // 2026-11-02 (user request): one copy per customer PER RM - each RM holding the customer is listed for their own TL/RH.
+      identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
       stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
       region: main, lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),

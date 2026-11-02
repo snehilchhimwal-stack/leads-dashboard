@@ -343,12 +343,19 @@ function sendAllIssuesEmails_(opts) {
     const baselineEntry = lastSnapshotMap[leadId]; // per LEAD, not per customer (email audit F18) - call_attempts is a per-lead counter
 
     candidateLeads.push({
-      identityKey: clientId || ('l:' + leadId),
+      // 2026-11-02 (user request): one copy per customer PER RM - a customer held by several RMs is listed for each of them
+      // (each RM's own TL/RH gets it), not collapsed to the furthest copy. The calls rule already pools all RMs (SlaEngine.gs).
+      identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
       stageRank: stageRank,
       region: main, lead_id: leadId, RM: RM, TL: TL,
       status: overnightStatusLabelGs_(stage),
       issueLabel: issue.label,
-      followup: overnightFollowupHintGs_(row, colIndex, now, baselineEntry),
+      followup: (function () {
+        const hint = overnightFollowupHintGs_(row, colIndex, now, baselineEntry);
+        if (issue.key !== 'underCalledToday') return hint;
+        const p = customerCallProgressGs_(row, colIndex, now); // 2026-11-02: the pooled count the rule judged
+        return p ? 'Customer calls so far (all RMs): ' + p.total + '/' + p.target + '. ' + hint : hint;
+      })(),
       staleSince: staleSinceOfRowGs_(row, colIndex, lastChangeMap, now),
     });
   });
