@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-03 against commit `(pending commit)` - weekly spot-check cycle 9: re-read against 426fa0f (2026-10-21, job-run planning + watchdog auto-recovery) and d01ff12 (2026-11-02, pooled cumulative calls rule + dropped transferred-lead rows); line count corrected 1567 -> 1620; every drifted `#Lnn` anchor re-grepped; FN-197/FN-332/FN-333 descriptions extended; FN-532/FN-533 added; `GS-012` added to Depends On |
+| **Last Verified** | 2026-11-03 against commit `d5a8ffa` - weekly spot-check cycle 9: re-read against 426fa0f (2026-10-21, job-run planning + watchdog auto-recovery) and d01ff12 (2026-11-02, pooled cumulative calls rule + dropped transferred-lead rows); line count corrected 1567 -> 1620; every drifted `#Lnn` anchor re-grepped; FN-197/FN-332/FN-333 descriptions extended; FN-532/FN-533 added; `GS-012` added to Depends On |
 
 ## Purpose / reason to exist
 

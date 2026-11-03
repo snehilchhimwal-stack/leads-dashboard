@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-03 against commit `(pending commit)` — weekly spot-check cycle 9: re-read against `2146e13` (2026-10-15, Audit D1 MT-01/MT-03 — the prune now protects a still-live lead's newest row past the 7-day cutoff, and runs under a script lock); `GS-021` (`StaleLeads.gs`) added as a `Used By` consumer (added 2026-10-10, a genuine omission, not new drift). `SNAPSHOT_COLUMNS_` `#L105` and `MOVEMENT_LOG_RETENTION_DAYS` `#L80` anchors re-checked — still exact |
+| **Last Verified** | 2026-11-03 against commit `d5a8ffa` — weekly spot-check cycle 9: re-read against `2146e13` (2026-10-15, Audit D1 MT-01/MT-03 — the prune now protects a still-live lead's newest row past the 7-day cutoff, and runs under a script lock); `GS-021` (`StaleLeads.gs`) added as a `Used By` consumer (added 2026-10-10, a genuine omission, not new drift). `SNAPSHOT_COLUMNS_` `#L105` and `MOVEMENT_LOG_RETENTION_DAYS` `#L80` anchors re-checked — still exact |
 
 ## Purpose / reason to exist
 

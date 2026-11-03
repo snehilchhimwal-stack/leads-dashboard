@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-03 against commit `(pending commit)` — weekly spot-check cycle 9: 3 of 4 `## Source of truth` line anchors re-grepped and fixed; added the content-hash dedup (`1c19d1a`, 2026-09-11), the append-time script lock + MT-01 live-lead prune exception (`2146e13`, 2026-10-15), and the `Movement_Log_Runs` unconditional-write nuance to the step list — all three pre-date this record's prior `58ab8e1` verification and were never previously captured here |
+| **Last Verified** | 2026-11-03 against commit `d5a8ffa` — weekly spot-check cycle 9: 3 of 4 `## Source of truth` line anchors re-grepped and fixed; added the content-hash dedup (`1c19d1a`, 2026-09-11), the append-time script lock + MT-01 live-lead prune exception (`2146e13`, 2026-10-15), and the `Movement_Log_Runs` unconditional-write nuance to the step list — all three pre-date this record's prior `58ab8e1` verification and were never previously captured here |
 
 ## Purpose / reason to exist
 

@@ -755,7 +755,10 @@ worth the extra check) — its large pre-existing `STALE`/`OVERDUE` lists
 are unrelated to this cycle (TTL-based watch-register items for records
 this cycle didn't touch); section F ("uncommitted code changes with no
 matching record edit") read 0. No `.gs`/`js/` source touched, so `node
-test/run-gs-tests.js` was not re-run. Pushed as `(pending commit)` (the
-fixes) + `(pending commit)` (the sha-swap housekeeping commit); GitHub
-Actions confirmed green on the sha-swap commit before this entry was
-finalized.
+test/run-gs-tests.js` was not re-run. Pushed as `d5a8ffa` (the fixes +
+this log entry), followed by a sha-swap housekeeping commit that
+replaced every `(pending commit)` placeholder left in `d5a8ffa` (the
+`Last Verified` fields on `GS-004`/`JS-006`/`SHEET-002`/`DATA-004`/
+`GS-012`/`GS-021` and their `docs/INDEX.md` rows) with `d5a8ffa` itself
+— the real sha was only known once that commit existed. GitHub Actions
+confirmed green on the sha-swap commit before this entry was finalized.
