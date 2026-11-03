@@ -860,6 +860,13 @@ const RMSYNC_PINNED_OVERRIDES_ = [
   { name: 'Riyan Jamadar', set: { tl: 'Mayuresh Jadhav', tm: '', rh: '', ch: 'Bipin More' }, was: ['Sanket Yadav'], since: '2026-10-19', why: 'TM Sanket Yadav left; reassigned to A1 Mayuresh Jadhav by the user' },
   { name: 'Tisha Valecha', set: { tl: 'Mayuresh Jadhav', tm: '', rh: '', ch: 'Bipin More' }, was: ['Sanket Yadav'], since: '2026-10-19', why: 'TM Sanket Yadav left; reassigned to A1 Mayuresh Jadhav by the user' },
   { name: 'Sanket Yadav', leaver: true, since: '2026-10-19', why: 'left - address bounced 2026-10-19' },
+  // 2026-11-03 (confirmed by the user, matches HR Live): Central A1 Sachin Rana left; the sync cannot place the tier on its own.
+  { name: 'Khushal Soni', set: { tl: '', tm: 'Sanket Patil', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to TM Sanket Patil (HR Live)' },
+  { name: 'Shubham Raj', set: { tl: '', tm: 'Sanket Patil', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to TM Sanket Patil (HR Live)' },
+  { name: 'Gurmohit Singh Sandhu', set: { tl: '', tm: 'Sanket Patil', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to TM Sanket Patil (HR Live)' },
+  { name: 'Mihir Jivani', set: { tl: 'Kumar Babu', tm: '', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to A1 Kumar Babu (HR Live)' },
+  { name: 'Zeya Shaikh', set: { tl: 'Kumar Babu', tm: '', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to A1 Kumar Babu (HR Live)' },
+  { name: 'Sachin Rana', leaver: true, since: '2026-11-03', why: 'left - not in HR Live, no leads' },
 ];
 // Indirection so the tests can supply their own pins (the real ones name live people).
 function rmSyncPinnedOverridesGs_() { return RMSYNC_PINNED_OVERRIDES_; }
