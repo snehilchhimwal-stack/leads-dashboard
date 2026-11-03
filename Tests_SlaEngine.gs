@@ -173,11 +173,15 @@ function runSlaEngineTests_() {
       const solo = mk({ lead_id: 'T2', RM: 'Old RM', lead_assigned_at: TestFixture_daysAgo_(now, 2) });
       const ci = old.colIndex;
       const names = function (rs) { return rs.map(function (r) { return r[ci.lead_id] + ':' + r[ci.RM]; }).join(','); };
-      TestAssertEqual_(names(dropTransferredLeadRowsGs_([old.row, cur.row, solo.row], ci)), 'T1:New RM,T2:Old RM', 'transfer: the old RM copy of a moved lead is dropped; a lead under one RM is kept');
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([old.row, cur.row, solo.row], ci)), 'T1:Old RM,T1:New RM,T2:Old RM', 'shared lead (2026-11-03): an older copy under an ACTIVE RM is kept - the lead is being worked by both');
+      const oldInactive = mk({ RM: 'Old RM', lead_assigned_at: TestFixture_daysAgo_(now, 2), rm_is_active: false });
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([oldInactive.row, cur.row, solo.row], ci)), 'T1:New RM,T2:Old RM', 'transfer: the older copy under an INACTIVE RM is dropped when an active RM holds it now');
+      const curInactive = mk({ RM: 'New RM', lead_assigned_at: TestFixture_hoursAgo_(now, 3), rm_is_active: false });
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([oldInactive.row, curInactive.row], ci)), 'T1:Old RM,T1:New RM', 'transfer: when the latest holder is inactive too, nothing is dropped');
       const tie = mk({ RM: 'Other RM', lead_assigned_at: cur.row[ci.lead_assigned_at] });
       TestAssertEqual_(names(dropTransferredLeadRowsGs_([cur.row, tie.row], ci)), 'T1:New RM,T1:Other RM', 'transfer: two RMs at the same latest time - cannot tell who holds it, both kept');
       const undated = mk({ RM: 'Undated RM', lead_assigned_at: '' });
-      TestAssertEqual_(names(dropTransferredLeadRowsGs_([old.row, cur.row, undated.row], ci)), 'T1:Old RM,T1:New RM,T1:Undated RM', 'transfer: an undatable copy - nothing dropped');
+      TestAssertEqual_(names(dropTransferredLeadRowsGs_([oldInactive.row, cur.row, undated.row], ci)), 'T1:Old RM,T1:New RM,T1:Undated RM', 'transfer: an undatable copy - nothing dropped');
       const dupSame = mk({ RM: 'New RM', lead_assigned_at: TestFixture_daysAgo_(now, 1) });
       TestAssertEqual_(names(dropTransferredLeadRowsGs_([cur.row, dupSame.row], ci)), 'T1:New RM,T1:New RM', 'transfer: two copies under the SAME RM are not a transfer - both kept');
     }

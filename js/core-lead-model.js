@@ -241,6 +241,8 @@ let _enrichingHistorical = false;
 // 2026-11-02 (user request), twin of EmailInfra.gs dropTransferredLeadRowsGs_: a lead moved to another RM keeps its lead_id and
 // the old RM's row stays in the sheet but stops updating. When one lead_id has rows under two or more RMs, only the rows of the
 // RM it was assigned to LAST are kept; a tie or an undatable row leaves the lead as it is.
+// 2026-11-03 NARROWED (most multi-RM leads are worked by all of them): an older copy goes ONLY when its RM is inactive
+// (rm_is_active false) and the latest copy's RM is active. Twin of EmailInfra.gs.
 function dropTransferredLeadRows(rows){
   const byId = new Map();
   rows.forEach((r, i) => { const id = String(r.lead_id || '').trim(); if (id) { if (!byId.has(id)) byId.set(id, []); byId.get(id).push(i); } });
@@ -252,7 +254,9 @@ function dropTransferredLeadRows(rows){
     const latest = Math.max(...idx.map(at));
     const latestRms = new Set(idx.filter(i => at(i) === latest).map(rmOf));
     if (latestRms.size !== 1) return;
-    idx.forEach(i => { if (!latestRms.has(rmOf(i))) drop.add(i); });
+    const inactive = i => ['false', 'no', 'inactive', '0', 'n'].includes(String(rows[i].rm_is_active).trim().toLowerCase());
+    if (idx.filter(i => latestRms.has(rmOf(i))).some(inactive)) return;
+    idx.forEach(i => { if (!latestRms.has(rmOf(i)) && inactive(i)) drop.add(i); });
   });
   return drop.size ? rows.filter((r, i) => !drop.has(i)) : rows;
 }

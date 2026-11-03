@@ -1417,11 +1417,11 @@
       assert("underCalledToday (2026-11-02): calls from every RM of the customer count together (1 own, 5 in total)", l.underCalledToday === false, 'got ' + l.underCalledToday);
       {
         const tr = [
-          { lead_id: 'T1', RM: 'Old RM', lead_assigned_at: at(48) }, { lead_id: 'T1', RM: 'New RM', lead_assigned_at: at(3) },
+          { lead_id: 'T1', RM: 'Old RM', lead_assigned_at: at(48), rm_is_active: false }, { lead_id: 'T1', RM: 'New RM', lead_assigned_at: at(3), rm_is_active: true }, { lead_id: 'T4', RM: 'Shared A', lead_assigned_at: at(48), rm_is_active: true }, { lead_id: 'T4', RM: 'Shared B', lead_assigned_at: at(3), rm_is_active: true },
           { lead_id: 'T2', RM: 'Old RM', lead_assigned_at: at(48) }, { lead_id: 'T3', RM: 'A', lead_assigned_at: at(3) }, { lead_id: 'T3', RM: 'B', lead_assigned_at: at(3) },
         ];
         const kept = dropTransferredLeadRows(tr).map(r => r.lead_id + ':' + r.RM).join(',');
-        assert('dropTransferredLeadRows (2026-11-02): the old RM copy of a moved lead goes; a lone lead and a same-time tie stay', kept === 'T1:New RM,T2:Old RM,T3:A,T3:B', kept);
+        assert('dropTransferredLeadRows (2026-11-03): only an INACTIVE older RM copy goes; a shared lead (both active), a lone lead and a same-time tie stay', kept === 'T1:New RM,T4:Shared A,T4:Shared B,T2:Old RM,T3:A,T3:B', kept);
       }
     } finally {
       _renderNow = savedRenderNow;

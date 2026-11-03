@@ -1482,6 +1482,9 @@ function readLeadsTab_(ss) {
 // stops updating - it kept showing up in the emails. When one lead_id has rows under two or more RMs, only the rows of the RM
 // it was assigned to LAST (latest lead_assigned_at) are kept. A lead_id under one RM, or whose latest assignment cannot be told
 // apart (a tie or an undatable row), is left exactly as it is. Pure apart from the log line.
+// 2026-11-03 NARROWED (user: a lead under several RMs is mostly being WORKED by all of them, not handed over - the first version
+// dropped 3,074 rows on its first run): an older copy is dropped ONLY when its RM is marked inactive on the sheet (rm_is_active
+// false/0/no) and a later copy under an active RM exists. Every copy held by an active RM is kept.
 function dropTransferredLeadRowsGs_(rows, colIndex) {
   if (colIndex.lead_id === undefined || colIndex.RM === undefined) return rows;
   const byId = {};
@@ -1501,9 +1504,11 @@ function dropTransferredLeadRowsGs_(rows, colIndex) {
     const latest = Math.max.apply(null, idx.map(at));
     const latestRms = new Set(idx.filter(function (i) { return at(i) === latest; }).map(rmOf));
     if (latestRms.size !== 1) return; // two RMs share the latest time: cannot tell who holds it now
-    idx.forEach(function (i) { if (!latestRms.has(rmOf(i))) { drop[i] = true; dropped++; } });
+    const inactive = function (i) { return ['false', 'no', 'inactive', '0', 'n'].indexOf(String(getVal_(rows[i], colIndex, 'rm_is_active')).trim().toLowerCase()) !== -1; };
+    if (idx.filter(function (i) { return latestRms.has(rmOf(i)); }).some(inactive)) return; // the latest holder is inactive too: keep all
+    idx.forEach(function (i) { if (!latestRms.has(rmOf(i)) && inactive(i)) { drop[i] = true; dropped++; } });
   });
-  if (dropped) Logger.log(dropped + ' leads-tab row(s) of leads since moved to another RM left out - the old RM copy no longer updates.');
+  if (dropped) Logger.log(dropped + ' leads-tab row(s) left out: an inactive RM copy of a lead now held by an active RM.');
   return dropped ? rows.filter(function (r, i) { return !drop[i]; }) : rows;
 }
 
