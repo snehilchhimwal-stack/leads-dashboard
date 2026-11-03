@@ -167,7 +167,6 @@ const RM_HIERARCHY_RAW_ = [
   // ch:'Mukesh Mishra' (his own manager) directly on their own rows, so
   // clearing their tl:'Krishna Murthy' reference is all that's needed --
   // they fall straight through to that existing ch value as the backup.
-  ['Central','A1','Sachin Rana','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Loan','City Lead','Mayur Panjari','','','',''],
   // Mukesh Yadav left the company, confirmed by the user 2026-09-21 (same
   // handling as Krishna Murthy, 2026-09-17) -- row removed. His direct
@@ -206,7 +205,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Loan','Executive','Siddhi Kate','Zahid Shaikh','','','Mayur Panjari'],
   ['Pune','S1','Santosh Khandare','','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Swapnil Waghmode','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
-  ['Central','S1','Khushal Soni','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Khushal Soni','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-11-03 HR Live: Sachin Rana left
   ['Pune','A1','Omkar Ghate','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Akshay More','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Loan','BDM','Yogesh Choudhari','','','','Mayur Panjari'],
@@ -246,7 +245,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Mohd Adnan Malik','Amit Upadhyay','','','Bipin More'],
   ['Pune','S1','Mahesh Mahore','','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Akash Gaikwad','Niraj Patil','','Swapnil Gowalkar','Bipin More'],
-  ['Central','S1','Shubham Raj','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Shubham Raj','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-11-03 HR Live: Sachin Rana left
   ['HNI','S1','Sahil Gupta','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Thane','S1','Mohit Manwani','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'], // 2026-10-19 (confirmed by the user): TM Sanket Yadav left -- now under A1 Ganesh Saroj (pinned in RMSYNC_PINNED_OVERRIDES_ until HR Live shows it)
   ['Thane','A1','Ganesh Saroj','','','Swapnil Gowalkar','Bipin More'],
@@ -278,13 +277,13 @@ const RM_HIERARCHY_RAW_ = [
   ['Loan','Manager','Aditya Gera','','','','Mayur Panjari'],
   ['Bangalore','S1','Zain Ahmed','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Souvik Biswas','','','Sachindra Wadane','Sourabh Sareen'],
-  ['Central','S1','Mihir Jivani','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Mihir Jivani','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-11-03 HR Live: Sachin Rana left
   ['Bangalore','S1','Divakar V','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Bangalore','A1','Mainuddin T','','','Romen Singh','Mukesh Mishra'],
   ['Western','S1','Saurabh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Pune','S1','Vishwanath Zalake','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Central','S1','Sumeet Pal','Akash A Ugale','','','Sanjyota Bhosale'],
-  ['Central','S1','Gurmohit Singh Sandhu','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'],
+  ['Central','S1','Gurmohit Singh Sandhu','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-11-03 HR Live: Sachin Rana left
   ['Bangalore','S1','Mahesh V','Rahan Khan','','Romen Singh','Mukesh Mishra'],
   ['Harbour','S1','Bisma Shah','Yash Sharma','','','Sanjyota Bhosale'],
   ['Bangalore','S1','Abdur Rahim','Mainuddin T','','Romen Singh','Mukesh Mishra'],
@@ -296,7 +295,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','S1','Eknidhi Chabra','','Minas Patel','','Rahul Gandhi'],
   ['Western','S1','Gajanan Jadhav','','Minas Patel','','Rahul Gandhi'],
   ['Western','TM','Minas Patel','','','','Rahul Gandhi'],
-  ['Central','S1','Zeya Shaikh','Sachin Rana','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left), set to Kumar Babu; 2026-10-13 HR Live: moved under Sachin Rana
+  ['Central','S1','Zeya Shaikh','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left), set to Kumar Babu; 2026-10-13 HR Live: moved under Sachin Rana; 2026-11-03 HR Live: Sachin Rana left
   ['Pune','S1','Gaurav Gunjal','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Arpita Varte','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Thane','S1','Aman Gupta','Amit Upadhyay','','','Bipin More'],
