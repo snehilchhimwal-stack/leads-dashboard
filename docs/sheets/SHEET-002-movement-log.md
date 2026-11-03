@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `7799e44` — email audit P16 (F23): the 7-day prune is now a prefix delete (`GS-008` FN-220); readers read single columns |
+| **Last Verified** | 2026-11-03 against commit `(pending commit)` — weekly spot-check cycle 9: re-read against `2146e13` (2026-10-15, Audit D1 MT-01/MT-03 — the prune now protects a still-live lead's newest row past the 7-day cutoff, and runs under a script lock); `GS-021` (`StaleLeads.gs`) added as a `Used By` consumer (added 2026-10-10, a genuine omission, not new drift). `SNAPSHOT_COLUMNS_` `#L105` and `MOVEMENT_LOG_RETENTION_DAYS` `#L80` anchors re-checked — still exact |
 
 ## Purpose / reason to exist
 
@@ -40,7 +40,8 @@ Written by **two independent writers with an identical schema**:
 `JS-021` (`fetchMovementLog` → `movementSnapshots`), and via that state:
 `JS-008` (RM performance), `JS-024` (cohorts), `JS-023` (RM Timeline),
 `JS-013` (PDF). Backend: `GS-008` `buildMovementLogMapsGs_` → `GS-001` /
-`GS-010` / `GS-003` (baselines + backfill).
+`GS-010` / `GS-003` (baselines + backfill) / `GS-021` (`lastChangeMap`,
+added 2026-10-10 — stale-lead judgment, `leadStaleStateGs_`).
 
 ## Columns / fields
 
@@ -77,6 +78,7 @@ Exact list: `MovementTracker.gs` `SNAPSHOT_COLUMNS_` `#L105` (+
 | `JS-024` | cohort computes (FN-163/164) | 0–48h + daily cohorts |
 | `GS-008` | `buildMovementLogMapsGs_` (FN-222) | baselines for the scheduled emails |
 | `GS-003` | `backfillDailyRmIssuesFromMovementLog_` (FN-189) | rebuild past `Daily_RM_Issues` days |
+| `GS-021` | `leadStaleStateGs_` / `staleSinceOfRowGs_` | stale-lead judgment, via `GS-008`'s `lastChangeMap` (added 2026-10-10) — not a direct read, same indirection as `GS-001`/`GS-010`/`GS-003` above |
 
 ## Automation / triggers touching it
 
@@ -98,10 +100,16 @@ Write: `snapshotOpenLeads_`, `pruneMovementLog_`, `ensureMovementLogSheet_`
   `MovementTracker.gs` `#L80`) — one of the two confirmed retention
   values in the system
 - **Enforced By:** `pruneMovementLog_` (`GS-008` FN-220) — runs after
-  every capture
+  every capture, under a script lock (contention SKIPS the run, not an
+  error — the next run does it, MT-03, 2026-10-13)
 - **Archive / Delete Behavior:** old rows deleted in place; the sheet's
   row allocation is **shrunk in the same run** (`deleteRows`) to stay
-  under the 10M-cell workbook ceiling
+  under the 10M-cell workbook ceiling. **Exception (MT-01, 2026-10-13):**
+  a lead's single newest row is kept past the 7-day cutoff for as long as
+  that `lead_id|RM` key is still present on the live `leads` tab — content-
+  hash dedup means an unchanging lead has only one row, and pruning it
+  unconditionally made the next capture re-append it as a fake "change,"
+  silently resetting the stale-lead clock (`GS-021`) every 7 days
 - **Sensitivity:** operational
 
 *(This section is complete — `Movement_Log` is one of the two tabs
@@ -142,6 +150,10 @@ captured.
 A capture failure shows as Failed in Executions. `pruneMovementLog_`
 uses a machine-clock-relative cutoff — the one date boundary in `GS-008`
 not built through `istDayKeyGs_` (`LOGIC_AUDIT.md` Part 1 §4d, EXC-074).
+Since 2026-10-15 (MT-03), the prune (and the append) hold a script lock;
+if another job already holds it, the prune is skipped for that run
+(returns `MOVEMENT_LOG_PRUNE_LOCK_BUSY_`) rather than erroring — it is
+idempotent, so the next scheduled run does it.
 
 ## Related documentation
 
@@ -154,7 +166,8 @@ Part 6 §6.3; `OPS_CHECKLIST.md` (freshness).
   — the snapshot source), `EXT-001`
 - **Used By:** `TAB-004`, `TAB-007`, `TAB-008`, `JS-006`, `JS-008`,
   `JS-013`, `JS-018`, `JS-021`, `JS-022`, `JS-023`, `JS-024`, `GS-001`,
-  `GS-003`, `GS-008`, `GS-009`, `GS-010`, `SHEET-003`, `SHEET-005`,
+  `GS-003`, `GS-008`, `GS-009`, `GS-010`, `GS-021` (via `GS-008`'s
+  `lastChangeMap`, added 2026-10-10), `SHEET-003`, `SHEET-005`,
   `SHEET-008`, `DATA-002`, `DATA-004`
 - **Related:** `SHEET-003` (backfillable from it)
 
@@ -182,6 +195,10 @@ Verified at `c82ec67`; record created by `DOC-032`.
 
 **2026-10-07** (`7799e44`, email audit P16 / F23): `pruneMovementLog_` no longer rewrites the whole tab on every run — it reads only `snapshot_at` and, when the expired rows are a contiguous prefix, archives them to Drive and deletes just them (`GS-008` FN-220); the full rewrite remains as the fallback for any other shape. The tab's readers (`_readMovementLogRowsGs_`, `_latestContentHashByKeyGs_`, `_readMovementLogHistoryRowsGs_`) read only the columns they use. The call baselines built from this tab are keyed by lead id (email audit F18). No column or retention changed.
 
+**2026-10-10** (`59db11b`): `GS-021` (`StaleLeads.gs`) starts reading this tab's history indirectly, through `GS-008`'s `buildMovementLogMapsGs_`/`lastChangeMap` — a lead's last real content change here is how staleness is judged. This record's `Used By`/readers were not updated at the time; fixed in this spot-check pass (2026-11-03).
+
+**2026-10-15** (`2146e13`, Audit D1, MT-01/MT-03): the retention exception and the script lock described in `## Data Lifecycle` and `## Exceptions & error handling` above — a still-live lead's single newest row survives the 7-day cutoff instead of being pruned unconditionally, and the prune (plus the append) now run under a script lock, skipping (not erroring) on contention. No column change. This record's lifecycle/exceptions sections were not updated at the time; fixed in this spot-check pass (2026-11-03).
+
 ## Revalidation trigger
 
 `SNAPSHOT_COLUMNS_` changes (must be appended, and matched on the
@@ -197,7 +214,9 @@ change must update `HANDOVER.md` §2 and both writers in the same commit.
 ## Lifecycle / retention
 
 **7 days**, enforced by `pruneMovementLog_` (`GS-008`). Confirmed, not
-`TBD`.
+`TBD`. **Exception since 2026-10-15 (MT-01):** a still-live lead's single
+newest row is kept past 7 days for as long as it stays on the live
+`leads` tab — see `## Data Lifecycle` above.
 
 ## Next action
 

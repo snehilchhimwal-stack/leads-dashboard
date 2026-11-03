@@ -6,8 +6,9 @@
 | **Location** | `StaleLeads.gs` |
 | **Owner** | Snehil |
 | **Component Status** | Active |
-| **Record Status** | Closed + Monitored |
+| **Record Status** | Validated |
 | **Last Verified** | 2026-10-15 against commit `1f51394` - stale-count tile (e8d33f8); audit 2026-10-13 fixes SL-01..03 (2146e13) |
+| **Scoped edit 2026-11-03** | weekly spot-check cycle 9, `SHEET-002`'s record: `## Relationships → Depends On` gained `SHEET-002` (the missing reciprocal of `SHEET-002`'s own `Used By` entry for this component) — scoped to that one field; the rest of this record was not re-verified this pass, hence `Validated` not `Closed + Monitored` |
 
 ## Purpose / reason to exist
 
@@ -96,7 +97,10 @@ Apps Script backend; a pure helper layer used by the three email jobs.
 
 ## Relationships
 
-- **Depends On:** `GS-002` (`Core.gs`), `GS-008` (`MovementTracker.gs`)
+- **Depends On:** `GS-002` (`Core.gs`), `GS-008` (`MovementTracker.gs`),
+  `SHEET-002` (`Movement_Log` — via `GS-008`'s `lastChangeMap`; added to
+  this record 2026-11-03, weekly spot-check cycle 9, matching the
+  reciprocal edge already recorded on `SHEET-002`'s own record)
 - **Used By:** `GS-001`, `GS-010`
 - **Related:** `GS-004`, `SHEET-002`
 

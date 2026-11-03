@@ -640,3 +640,122 @@ No `.gs`/`js/` source touched, so `node test/run-gs-tests.js` was not
 re-run. Pushed as `262c888` (the fixes) + `adddb65` (the sha-swap
 housekeeping commit); GitHub Actions confirmed green on `adddb65` before
 this entry was finalized.
+
+---
+
+## Cycle 9 — 2026-11-03 (run by Claude, scheduled cloud routine)
+
+Checked `GS-004` (`EmailInfra.gs`), `JS-006` (`core-lead-model.js`),
+`SHEET-002` (`Movement_Log`), `DATA-004` (the Movement snapshot
+pipeline) — none checked in cycles 1-8 (all four were never sampled by
+this routine before). Used 4 parallel investigation passes (one per
+record), then reconciled and applied fixes by hand. All 4 had real
+drift, two of them substantial (described-behavior gaps from code
+changes landed after — or, for `DATA-004`, well before — each record's
+own prior `Last Verified` point, not just line-anchor slippage).
+
+**`GS-004`** — real drift, fixed, the largest magnitude this cycle. Two
+commits since `94a90c4` (2026-10-19) — `426fa0f` (2026-10-21, watchdog
+auto-recovery) and `d01ff12` (2026-11-02, the pooled cumulative calls
+rule + dropped transferred-lead rows) — had shipped without updating
+this record at all: 14 distinct `#Lnn` `FN-XXX` anchors had drifted (all
+by a consistent `+23`/`+30`/`+1` depending on position, from the two
+commits' net `+53` lines), plus one older, unrelated drift (`FN-323`'s
+3 anchors, off by `+30`, pre-dating `94a90c4` and not explained by either
+commit — already stale before this cycle). Two wholly undocumented new
+functions: `dropTransferredLeadRowsGs_` (called from `readLeadsTab_`,
+FN-197) and `emailJobAutoRecoverGs_` (called from
+`checkEmailJobsCompletedGs_`, FN-333) — added as `FN-532`/`FN-533`.
+`FN-197`, `FN-332` (the schedule's new `recover` field) and `FN-333`
+(the new auto-recovery call) all understated what the real code now
+does. One missing dependency: `readLeadsTab_` now calls
+`indexCustomerCallTotalsGs_`, which lives in `SlaEngine.gs` (`GS-012`) —
+added as a new `Depends On` edge, reciprocated on `GS-012`'s own record
+(`Used By` gains `GS-004`; `GS-012`'s `Record Status` downgraded `Closed
++ Monitored` -> `Validated` since the rest of that record wasn't
+re-verified this pass, matching the precedent from cycle 2's `JS-008`).
+Header line count corrected 1567 -> 1620. All `CFG-XXX` anchors and
+literal values were already clean — this was purely an `FN-XXX`/behavior
+gap.
+
+**`JS-006`** — real drift, fixed, substantial. `d01ff12` (2026-11-02,
+same commit as `GS-004`'s fix above — this is the cross-runtime twin)
+rewrote `underCalledToday` (RULE-006) from a day-over-day call-count
+delta against a `_todayCallBaselineByKey`/`Movement_Log` baseline into
+an absolute, cumulative count pooled per CUSTOMER across every RM
+(`customerCallTotalAll`, stamped by new `indexCustomerCallTotals`)
+against `CONFIG.MIN_CALLS_24H`/`MIN_CALLS_48H` (5/10) — the record still
+described the old baseline-delta mechanism entirely. `EXC-011` (the
+baseline-fallback exception) is now obsolete — no fallback path remains,
+since `_todayCallBaselineByKey` feeds only the display-only
+`attemptsToday`. Two new functions, `dropTransferredLeadRows` and
+`indexCustomerCallTotals` (added as `FN-534`/`FN-535`), had no `FN-XXX`
+rows at all. `enrichLead`'s own anchor drifted `#L241` -> `#L284` (the
+two new functions, inserted above it, pushed it down). Header line count
+corrected 484 -> 535.
+
+**`SHEET-002`** — real drift, fixed, both items genuine omissions rather
+than anchor slippage (the record's own 2 line anchors, `SNAPSHOT_COLUMNS_`
+`#L105` and `MOVEMENT_LOG_RETENTION_DAYS` `#L80`, were already exact —
+this tab's prior spot-check-adjacent fixes on sibling records, e.g.
+cycles 2/6/7's `GS-008`/`SHEET-005`/`SHEET-008`/`FLOW-001`, had not
+touched this record's own two anchors, and they'd stayed correct by
+chance). (1) The `## Data Lifecycle`/`## Lifecycle / retention` sections
+stated a flat, exception-free 7-day retention; since `2146e13`
+(2026-10-15, Audit D1 "MT-01"), a still-live lead's single newest row is
+now kept past the cutoff for as long as its key remains on the live
+`leads` tab (content-hash dedup means an unchanging lead has only one
+row, so an unconditional prune was re-appending it as a fake "change"
+every 7 days). Added, along with the same commit's script-lock
+(`MT-03`) note in `## Exceptions & error handling`. (2) `GS-021`
+(`StaleLeads.gs`, added 2026-10-10) reads this tab's history indirectly
+via `GS-008`'s `lastChangeMap` for stale-lead judgment — a real consumer
+missing from `Used By`/the Readers table/`## Destination / consumers`.
+Fixed, and reciprocated on `GS-021`'s own record (`Depends On` gains
+`SHEET-002`; `Record Status` downgraded `Closed + Monitored` ->
+`Validated`, scoped-edit precedent as above).
+
+**`DATA-004`** — real drift, fixed, the same two omissions class as
+`SHEET-002` above (this flow traces through the same `Movement_Log`
+pipeline) plus 3 of its 4 `## Source of truth` line anchors drifted from
+ordinary file growth: `snapshotOpenLeads_` `#L365` -> real `#L703`,
+`browserSnapshotOpenLeads` `#L809` -> real `#L830`,
+`fetchMovementLog` `#L138` -> real `#L158` (`SNAPSHOT_COLUMNS_` `#L105`
+was already exact). Content-wise: the Transformation step list never
+mentioned the content-hash dedup (`1c19d1a`, 2026-09-11 — both writers
+skip an unchanged lead) or the append/prune script lock + MT-01 live-lead
+prune exception (`2146e13`, 2026-10-15) — both pre-date this record's
+prior `58ab8e1` (2026-10-07) verification and were never captured even
+then, so this wasn't new drift since the last check, it was a pre-existing
+gap this was the first cycle to actually look for. Also added the
+`Movement_Log_Runs` unconditional-write nuance (the run row is written
+immediately after core capture, always, even when zero leads changed).
+Tightened the wording conflating `SNAPSHOT_COLUMNS_` (written to
+`Movement_Log`) with `computeSlaFlags_`'s flag columns (written
+separately to `SLA_History`) into one step.
+
+Verified before push: `python3 test/check-catalog.py` — check A
+(reciprocity) initially failed on `GS-021`'s `Depends On` missing the
+new `SHEET-002` edge created by fixing `SHEET-002`'s `Used By`; fixed
+(see `SHEET-002`/`GS-021` above) and re-run clean on all blocking checks
+A-C, F-P (G confirms `FN-532`..`FN-535` are unique; P confirms all newly
+cited function names exist in real source); the only `D` notes are
+pre-existing drift unrelated to this cycle's edits (plus `JS-006`/`GS-004`
+themselves showing "no verifying commit sha found" until the sha-swap
+commit below lands), and the pre-existing `J` note on `LOGIC_AUDIT.md`'s
+immutability. `node test/check-docs-coverage.js` full coverage (25/25
+`js/`, 22/22 `.gs`; the `HANDOVER.md`-age WARN is pre-existing and
+unrelated — both code commits this cycle's drift traces to, `426fa0f`/
+`d01ff12`, already updated `HANDOVER.md` themselves per `CLAUDE.md`'s
+same-commit rule). `python3 test/check-staleness.py` run as an
+additional sanity pass (not required by `CLAUDE.md`'s own Testing
+section for a docs-only change, but this cycle touched two records,
+`GS-012`/`GS-021`, outside the original 4 via the reciprocity rule, so
+worth the extra check) — its large pre-existing `STALE`/`OVERDUE` lists
+are unrelated to this cycle (TTL-based watch-register items for records
+this cycle didn't touch); section F ("uncommitted code changes with no
+matching record edit") read 0. No `.gs`/`js/` source touched, so `node
+test/run-gs-tests.js` was not re-run. Pushed as `(pending commit)` (the
+fixes) + `(pending commit)` (the sha-swap housekeeping commit); GitHub
+Actions confirmed green on the sha-swap commit before this entry was
+finalized.

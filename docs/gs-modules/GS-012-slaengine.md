@@ -6,8 +6,9 @@
 | **Location** | `SlaEngine.gs` (366 lines) |
 | **Owner** | Snehil |
 | **Component Status** | Active |
-| **Record Status** | Closed + Monitored |
+| **Record Status** | Validated |
 | **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 357 -> 366 |
+| **Scoped edit 2026-11-03** | weekly spot-check cycle 9, `GS-004`'s record: `## Relationships → Used By` gained the new `GS-004` reverse dependency (`indexCustomerCallTotalsGs_`, since `d01ff12`/2026-11-02) — scoped to that one field; the rest of this record was not re-verified this pass, hence `Validated` not `Closed + Monitored` |
 
 ## Purpose / reason to exist
 
@@ -158,8 +159,12 @@ MEDIUM #2; `CLAUDE.md` (duplication gotcha).
   (`EmailInfra.gs` — `readLeadsTab_`, added 2026-09-23 for FN-270 —
   `computeSlaFlags_`/`primaryIssueGs_` still have no dependency on it)
 - **Used By:** `GS-001` (`AllIssuesEmailer.gs`), `GS-003`
-  (`DailyRmIssueLog.gs`), `GS-008` (`MovementTracker.gs`), `GS-010`
-  (`OvernightEmailer.gs`), `DATA-002`, `DATA-004`
+  (`DailyRmIssueLog.gs`), `GS-004` (`EmailInfra.gs` — `readLeadsTab_` also
+  calls `indexCustomerCallTotalsGs_` since 2026-11-02; a file-level
+  circular reference alongside FN-270's pre-existing `GS-004` dependency
+  above, harmless in Apps Script's single namespace), `GS-008`
+  (`MovementTracker.gs`), `GS-010` (`OvernightEmailer.gs`), `DATA-002`,
+  `DATA-004`
 - **Related:** `JS-006` (`core-lead-model.js` — `enrichLead`, the client
   twin), `JS-005` (`CONFIG` — the client threshold twins)
 

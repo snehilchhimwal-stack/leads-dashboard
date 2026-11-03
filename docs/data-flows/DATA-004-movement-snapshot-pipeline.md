@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-07 against commit `58ab8e1` - email audit P17: the step list names the comment prunes, failure alerting and `phase_s` |
+| **Last Verified** | 2026-11-03 against commit `(pending commit)` — weekly spot-check cycle 9: 3 of 4 `## Source of truth` line anchors re-grepped and fixed; added the content-hash dedup (`1c19d1a`, 2026-09-11), the append-time script lock + MT-01 live-lead prune exception (`2146e13`, 2026-10-15), and the `Movement_Log_Runs` unconditional-write nuance to the step list — all three pre-date this record's prior `58ab8e1` verification and were never previously captured here |
 
 ## Purpose / reason to exist
 
@@ -25,17 +25,36 @@ has moved on.
 1. Open-lead filter: `isOpenLead_` (`GS-002` FN-183) / `isLeadClosed`
    (`JS-006` FN-041).
 2. Per-lead field copy into the `SNAPSHOT_COLUMNS_` shape (`SHEET-002`
-   CFG-050) + `computeSlaFlags_` (`GS-012`) for the flag columns.
+   CFG-050) — written to `Movement_Log` itself. `computeSlaFlags_`
+   (`GS-012`) separately computes the flag columns, written to
+   `SLA_History` (`SHEET-005`) in the same capture, not into
+   `Movement_Log`'s own row.
 3. **Two independent writers, identical schema** (`LOGIC_AUDIT.md` Part 4
    §4.7): `snapshotOpenLeads_` (`GS-008` FN-218, 4×/day) and
    `browserSnapshotOpenLeads` (`JS-018` FN-121, on-demand `BTN-014`).
+   **Content-hash dedup (added `1c19d1a`, 2026-09-11):** both writers skip
+   a lead whose per-field content hash is unchanged since its last stored
+   row — a Movement_Log row only ever means "this lead's tracked content
+   actually changed," not "a capture ran." The append itself runs under a
+   script lock (`withMovementLogLockGs_`, added `2146e13`, 2026-10-15,
+   MT-03) so a concurrent prune's `deleteRows` cannot shift rows mid-write.
 4. Prune to 7 days + shrink allocation: `pruneMovementLog_` (`GS-008`
-   FN-220). The same scheduled run then prunes `Comment_History` and
-   `Unmatched_Comments_Log` to 30 days (`GS-006` / `GS-013`; archive-to-Drive
-   first, proved by `countCsvRecordsGs_`, `GS-002` FN-348). Any optional step
-   that throws is recorded in `Movement_Log_Runs.failed_phases` and emailed to
-   ops once a day (`GS-008` FN-349); `phase_s` shows where the run's time went
-   (email audit P17, 2026-10-07).
+   FN-220) — also under the script lock; on contention the prune is
+   SKIPPED for that run (idempotent, the next run does it), not an error.
+   **Live-lead exception (`2146e13`, 2026-10-15, MT-01):** because of the
+   dedup above, an unchanging lead now has only ONE row, so an
+   unconditional 7-day prune made the next capture re-append it as a fake
+   "change" — a still-live lead's single newest row is now kept past the
+   cutoff for as long as its key remains on the live `leads` tab. The same
+   scheduled run then prunes `Comment_History` and `Unmatched_Comments_Log`
+   to 30 days (`GS-006` / `GS-013`; archive-to-Drive first, proved by
+   `countCsvRecordsGs_`, `GS-002` FN-348). Any optional step that throws is
+   recorded in `Movement_Log_Runs.failed_phases` and emailed to ops once a
+   day (`GS-008` FN-349); `phase_s` shows where the run's time went (email
+   audit P17, 2026-10-07). The `Movement_Log_Runs` row itself is written
+   immediately after the core capture, and UNCONDITIONALLY — even when
+   zero leads changed — specifically so "a run happened" stays
+   distinguishable from "nothing changed."
 5. Browser read + history build: `fetchMovementLog` → `movementSnapshots`
    → `buildMovementHistories` / `enrichSnapshotCached` (`JS-021` FN-140/141).
 
@@ -124,9 +143,9 @@ write). `LOGIC_AUDIT.md` Part 1 §1 layers 3, 11, 17; Part 7 diagram G.
 
 ## Source of truth
 
-`MovementTracker.gs` `snapshotOpenLeads_` `#L365` + `SNAPSHOT_COLUMNS_`
-`#L105`; `js/sheets-writeback.js` `browserSnapshotOpenLeads` `#L809`;
-`js/tab-movement.js` `fetchMovementLog` `#L138`.
+`MovementTracker.gs` `snapshotOpenLeads_` `#L703` + `SNAPSHOT_COLUMNS_`
+`#L105`; `js/sheets-writeback.js` `browserSnapshotOpenLeads` `#L830`;
+`js/tab-movement.js` `fetchMovementLog` `#L158`.
 
 ## Validation
 
@@ -141,6 +160,10 @@ write). `LOGIC_AUDIT.md` Part 1 §1 layers 3, 11, 17; Part 7 diagram G.
 ## Version / change reference
 
 Verified at `c82ec67`; record created by `DOC-034`.
+
+**2026-09-11** (`1c19d1a`, Lead History & Versioning Review Phase 6): content-hash dedup — both writers now skip a lead whose content is unchanged since its last stored row (step 3 above). Never previously captured in this record; added in this spot-check pass (2026-11-03).
+
+**2026-10-15** (`2146e13`, Audit D1, MT-01/MT-03): the prune now keeps a still-live lead's single newest row past the 7-day cutoff (step 4), and the append + prune both run under a script lock (steps 3-4). Never previously captured in this record; added in this spot-check pass (2026-11-03).
 
 ## Revalidation trigger
 
