@@ -253,6 +253,7 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory, opts) {
   const pinInfo = rmSyncEvaluatePinsGs_(options.pins || [], options.pinsDone || {}, hr, rows);
   plan.pinPending = pinInfo.pending;
   plan.pinResolved = pinInfo.resolved;
+  plan.managersLeft = [];
   const leaverKeys = {};
   RMSYNC_CONFIRMED_LEAVERS_.concat(pinInfo.leaverNames).forEach(function (n) { leaverKeys[normPersonName_(n)] = true; });
   Object.keys(leaverKeys).forEach(function (k) { delete roleByKey[k]; });
@@ -364,6 +365,21 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory, opts) {
       plan.directoryAdds.push({ name: m.name, roles: Object.keys(m.roles).sort().join(', '), regions: Object.keys(m.regions).sort().join(', '), count: m.count, email: hrEmail(m.name) });
     });
   }
+  // 2026-11-03 (Sanket Yadav / Sachin Rana): a possible leaver who is still somebody's manager is the costly case - every lead
+  // of their team keeps routing to someone who has gone. It was listed once as a "possible leaver" and then only on Mondays,
+  // among ~50 other items, so it was missed twice. Each such person (with their team and HR's current chain) is now listed at
+  // the TOP of the report EVERY night until the team no longer points to them - never silenced by the "already reported" state.
+  plan.leavers.forEach(function (lv) {
+    const key = normPersonName_(lv.name);
+    const team = rows.filter(function (r) {
+      return !r.excluded && RMSYNC_FIELDS_.some(function (f) { return r[f] && normPersonName_(r[f]) === key; });
+    }).map(function (r) {
+      const person = people[normPersonName_(r.name)];
+      const hrChain = person ? person.chainNames.filter(Boolean).join(', ') : '';
+      return r.name + (hrChain ? ' (HR Live now: ' + hrChain + ')' : ' (not in the HR sheet either)');
+    });
+    if (team.length) plan.managersLeft.push({ name: lv.name, role: lv.role, team: lv.team, reason: lv.reason, members: team });
+  });
   return plan;
 }
 
@@ -477,6 +493,16 @@ function buildRmHierarchySyncReportGs_(info) {
     body.push.apply(body, rmSyncLinesGs_(items.map(function (i) { return i.line; })));
     body.push('');
   };
+  const managersLeft = plan.managersLeft || [];
+  if (managersLeft.length) {
+    body.push('ACTION NEEDED - A MANAGER HAS LEFT, their team still reports to them (listed every night until fixed) (' + managersLeft.length + '):');
+    managersLeft.forEach(function (m) {
+      body.push('  * ' + m.name + ' (' + m.team + ', ' + m.role + '): ' + m.reason + '. Still the manager of ' + m.members.length + ':');
+      m.members.forEach(function (line) { body.push('      - ' + line); });
+    });
+    body.push('    Tell Claude the new manager of each (or confirm the HR Live chain above); then the leaver can be removed.');
+    body.push('');
+  }
   section('NEEDS A PERSON - a manager field that no longer matches the HR sheet and could not be fixed safely', 'human');
   section('NEEDS A PERSON - new people the sync could not place safely', 'joiner');
   section('POSSIBLE LEAVERS - kept in RM_Hierarchy; tell Claude which to remove', 'leaver');
@@ -511,7 +537,7 @@ function buildRmHierarchySyncReportGs_(info) {
   }
   if (info.backupUrls.length) body.push('Backup of both tabs before this run: ' + info.backupUrls.join(' , '));
   const attention = info.newAttention.filter(function (i) { return i.kind !== 'alias'; }).length; // the old-spelling lines are information, not work
-  const subject = 'RM hierarchy sync ' + info.day + ' - ' + info.mode + ': ' + changeCount + ' change(s)' + (attention ? ', ' + attention + ' for a person to look at' : '') +
+  const subject = ((plan.managersLeft || []).length ? 'ACTION NEEDED (' + plan.managersLeft.length + ' manager(s) left) - ' : '') + 'RM hierarchy sync ' + info.day + ' - ' + info.mode + ': ' + changeCount + ' change(s)' + (attention ? ', ' + attention + ' for a person to look at' : '') +
     ((plan.pinPending || []).length ? ', ' + plan.pinPending.length + ' pending in HR Live' : '');
   return { subject: subject, body: body.join('\n') };
 }
@@ -668,7 +694,7 @@ function runRmHierarchySyncGs_(opts) {
 
   const recipients = rmSyncRecipientsGs_(hr);
   if (recipients.missing.length) warnings.push('no email address found for ' + recipients.missing.join(', ') + ' - they did not get this report.');
-  if (applyResult.problems.length || held || changeCount || plan.emailFills.length || plan.directoryAdds.length || newAttention.length || reminders.length || warnings.length || plan.pinPending.length || plan.pinResolved.length) {
+  if ((plan.managersLeft || []).length || applyResult.problems.length || held || changeCount || plan.emailFills.length || plan.directoryAdds.length || newAttention.length || reminders.length || warnings.length || plan.pinPending.length || plan.pinResolved.length) {
     const report = buildRmHierarchySyncReportGs_({
       day: day, mode: mode, peopleCount: hr.count, rowCount: rows.length, plan: plan, changeLines: rmSyncChangeLinesGs_(plan),
       newAttention: newAttention, reminders: reminders, applyProblems: applyResult.problems, warnings: warnings, backupUrls: applyResult.backupUrls,

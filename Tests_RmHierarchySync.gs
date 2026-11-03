@@ -174,6 +174,17 @@ function runRmHierarchySyncTests_() {
       TestAssertEqual_(classifyRmSyncJoinerGs_({ chainNames: ['Test A1b'] }, roles).fields, { tl: 'Test A1b' }, 'classifyRmSyncJoinerGs_: the role "TL" maps to the same field as "A1"');
     }
 
+    // ---- 2026-11-03: a leaver who is still somebody's manager is listed at the top, every night ----
+    {
+      const tabRows = rmSyncTestTabRows_().concat([['Pune', 'A1', 'Test A1 Old', '', 'Test TM Pune', 'Test RH Pune', 'Test CH Pune', false, '', '']]);
+      const world = rmSyncTestWorld_({ tabRows: tabRows });
+      const hr = parseHrRosterGs_(readHrRosterValuesGs_());
+      const plan = computeRmHierarchySyncPlanGs_(hr, readRmHierarchyRowsGs_(world.tab), readManagerDirectoryRowsGs_(world.dir));
+      TestAssertEqual_(plan.managersLeft.map(function (m) { return m.name + ':' + m.members.length; }).join(','), 'Test A1 Old:1', 'managers left: the leaver who still manages Test S1 Moved is listed; a leaver with no team is not');
+      TestAssertContains_(plan.managersLeft[0].members[0], 'Test S1 Moved (HR Live now:', 'managers left: each team member is named with the chain HR Live lists now');
+      const rep = buildRmHierarchySyncReportGs_({ day: '2026-11-03', mode: 'APPLIED', peopleCount: 1, rowCount: 1, plan: plan, changeLines: rmSyncChangeLinesGs_(plan), newAttention: [], reminders: [], applyProblems: [], warnings: [], backupUrls: [] });
+      TestAssert_(rep.subject.indexOf('ACTION NEEDED (1 manager(s) left)') === 0 && rep.body.indexOf('A MANAGER HAS LEFT') !== -1, 'managers left: the subject leads with ACTION NEEDED and the section is in the body even with nothing new tonight');
+    }
     // ================= computeRmHierarchySyncPlanGs_ =================
     {
       const world = rmSyncTestWorld_();
