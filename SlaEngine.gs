@@ -52,27 +52,37 @@ function customerCallProgressGs_(row, colIndex, now) {
   const ageH = (now.getTime() - (grp.firstAssigned || created).getTime()) / 36e5;
   return { total: Math.max(grp.total, own), target: ageH <= 24 ? MIN_CALLS_24H_ : MIN_CALLS_48H_ };
 }
+// N-4 (audit 2026-11-04, user decision): only the customer's CURRENT leads are pooled - OPEN rows (isOpenLead_) assigned no more
+// than LEAD_LIFECYCLE_HOURS_ before the customer's newest open assignment. A closed lead, or an older enquiry of the same customer,
+// no longer lends its lifetime call count or its old age to a new lead. A row left out of the pool gets no entry and falls back to
+// its own counter and assignment time. An undatable open row is pooled (its age cannot be judged). KEEP IN SYNC with
+// js/core-lead-model.js indexCustomerCallTotals.
 function indexCustomerCallTotalsGs_(rows, colIndex) {
-  const groups = {};
   const keyOf = function (row) {
     const c = String(getVal_(row, colIndex, 'client_id') || '').trim();
     return c || ('l:' + String(getVal_(row, colIndex, 'lead_id') || '').trim());
   };
+  const candidates = {}; // customer key -> [{ row, id, at }]
   rows.forEach(function (row) {
     const id = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!id) return;
-    const g = groups[keyOf(row)] = groups[keyOf(row)] || { byLead: {}, firstAssigned: null };
-    g.byLead[id] = Math.max(g.byLead[id] || 0, Number(getVal_(row, colIndex, 'call_attempts')) || 0);
-    const at = parseSlaDateGs_(getVal_(row, colIndex, 'lead_assigned_at'));
-    if (at && (!g.firstAssigned || at < g.firstAssigned)) g.firstAssigned = at;
+    if (!isOpenLead_(getVal_(row, colIndex, 'current_stage'), getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'))) return;
+    const k = keyOf(row);
+    (candidates[k] = candidates[k] || []).push({ row: row, id: id, at: parseSlaDateGs_(getVal_(row, colIndex, 'lead_assigned_at')) });
   });
-  Object.keys(groups).forEach(function (k) {
-    const g = groups[k];
-    g.total = Object.keys(g.byLead).reduce(function (s, id) { return s + g.byLead[id]; }, 0);
-  });
-  rows.forEach(function (row) {
-    const g = groups[keyOf(row)];
-    if (g) SLA_CALL_GROUP_BY_ROW_.set(row, { total: g.total, firstAssigned: g.firstAssigned });
+  Object.keys(candidates).forEach(function (k) {
+    const list = candidates[k];
+    const newest = list.reduce(function (m, c) { return c.at && (!m || c.at > m) ? c.at : m; }, null);
+    const cutoffMs = newest ? newest.getTime() - LEAD_LIFECYCLE_HOURS_ * 36e5 : -Infinity;
+    const pooled = list.filter(function (c) { return !c.at || c.at.getTime() >= cutoffMs; });
+    const byLead = {};
+    let firstAssigned = null;
+    pooled.forEach(function (c) {
+      byLead[c.id] = Math.max(byLead[c.id] || 0, Number(getVal_(c.row, colIndex, 'call_attempts')) || 0);
+      if (c.at && (!firstAssigned || c.at < firstAssigned)) firstAssigned = c.at;
+    });
+    const total = Object.keys(byLead).reduce(function (s, id) { return s + byLead[id]; }, 0);
+    pooled.forEach(function (c) { SLA_CALL_GROUP_BY_ROW_.set(c.row, { total: total, firstAssigned: firstAssigned }); });
   });
 }
 const FOLLOWUP_REVIEW_HOURS_ = 4;
@@ -284,20 +294,31 @@ function allIssuesCheckpointPriorWasActive_(entry) {
 // 3 Oct 13:00 run took 663 s), and every bucket — Section 1 and Section 2 of the same email — is judged against the SAME moment
 // of a sheet that is re-imported underneath the run. Omitted (or not a usable {colIndex, dataRows}), it reads the tab itself,
 // exactly as before.
+// N-3 (audit 2026-11-04): since a shared customer is emailed once PER RM (3b8f3cf), a logged entry must be re-evaluated on ITS
+// RM's row, not on whichever copy of the lead_id comes first. Returns entry -> row: the row with the same lead_id AND RM (trimmed,
+// case-insensitive) when there is one, else the first row with that lead_id (an RM renamed or moved since the entry was logged,
+// or an entry with no RM), else null. wantedIds (optional Set of lead_id strings) limits what is indexed.
+function leadRowFinderGs_(dataRows, colIndex, wantedIds) {
+  const byId = {}, byIdRm = {};
+  dataRows.forEach(function (row) {
+    const id = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!id || (wantedIds && !wantedIds.has(id))) return;
+    if (!byId[id]) byId[id] = row; // first match wins (a later duplicate never overwrites it)
+    const k = id + '|' + String(getVal_(row, colIndex, 'RM') || '').trim().toLowerCase();
+    if (!byIdRm[k]) byIdRm[k] = row;
+  });
+  return function (entry) {
+    const id = String(entry && entry.lead_id != null ? entry.lead_id : '').trim();
+    const rm = String((entry && entry.RM) || '').trim().toLowerCase();
+    return (rm && byIdRm[id + '|' + rm]) || byId[id] || null;
+  };
+}
+
 function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leadsData) {
   if (!priorEntries || !priorEntries.length) return [];
-  const wantedIds = new Set(priorEntries.map(function (e) { return e.lead_id; }));
+  const wantedIds = new Set(priorEntries.map(function (e) { return String(e.lead_id == null ? '' : e.lead_id).trim(); }));
   const { colIndex, dataRows } = (leadsData && leadsData.colIndex && leadsData.dataRows) ? leadsData : readLeadsTab_(ss);
-  const byLeadId = {};
-  dataRows.forEach(function (row) {
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    // First match wins -- same "don't let a duplicate customer row
-    // silently overwrite the one already found" caution the 17:00 job's
-    // own byIdentity dedupe already applies, just simpler here since a
-    // checkpoint only ever looks up a FIXED, already-known lead_id list
-    // rather than building a fresh candidate set.
-    if (leadId && wantedIds.has(leadId) && !byLeadId[leadId]) byLeadId[leadId] = row;
-  });
+  const rowFor = leadRowFinderGs_(dataRows, colIndex, wantedIds); // N-3: the entry's own RM row first
 
   const priorityIndexOf = function (label) {
     for (let i = 0; i < ISSUE_PRIORITY_GS_.length; i++) {
@@ -307,7 +328,7 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leads
   };
 
   return priorEntries.map(function (entry) {
-    const row = byLeadId[entry.lead_id];
+    const row = rowFor(entry);
     if (!row) return { lead_id: entry.lead_id, state: 'not_found', currentIssueLabel: null, currentStatus: null };
 
     const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
@@ -333,7 +354,19 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leads
     const escalated = wasRank !== -1 && isRank !== -1 && isRank < wasRank // lower index = higher priority
       && issue.label !== "Behind on Today's Calls";
     return { lead_id: entry.lead_id, state: escalated ? 'escalated' : 'category_changed', currentIssueLabel: issue.label, currentStatus: currentStatus };
+  }).map(function (result, i) {
+    // N-3: a result keeps its entry's RM, so the next checkpoint (which is fed these results) and the section builder
+    // (leadRmKeyGs_) match it to the same RM's copy of a shared lead.
+    const rm = priorEntries[i] && priorEntries[i].RM;
+    if (rm) result.RM = rm;
+    return result;
   });
+}
+
+// N-1/N-2/N-3 (audit 2026-11-04): a shared customer is emailed once PER RM, so "the same lead" means the same lead_id under the
+// same RM. Entries without an RM key on the lead_id alone, as before.
+function leadRmKeyGs_(e) {
+  return String(e && e.lead_id != null ? e.lead_id : '').trim() + '|' + String((e && e.RM) || '').trim().toLowerCase();
 }
 
 // Two-checkpoint email lifecycle redesign (Step 5/11 -- see the design

@@ -304,6 +304,8 @@ local `.gs` tests pass (+1 new).
 
 **2026-11-02** (`d01ff12`, user request): two changes, twin of the matching `SlaEngine.gs`/`js/core-lead-model.js` edits. (1) `readLeadsTab_` (FN-197) now also runs new `dropTransferredLeadRowsGs_` (FN-532) on every read — when one `lead_id` has rows under two or more RMs, only the rows of whichever RM holds the LATEST `lead_assigned_at` are kept, so a lead moved to another RM stops showing up under its old RM's rows in the scheduled emails. (2) `readLeadsTab_` also calls `indexCustomerCallTotalsGs_` (`GS-012`, new dependency — added to Relationships below), which stamps each row with its customer's pooled call total across every lead id/RM; this feeds the "Behind on Today's Calls" rule, now 5 calls within 24h of first assignment / 10 after, replacing the old per-RM 3-calls-today check. +30 lines (1590L -> 1620L). Both this commit and 426fa0f above shipped without updating this record's line anchors, FN table or Relationships — all re-grepped and corrected in this spot-check pass (2026-11-03) rather than at the time of the code change.
 
+**2026-11-04** (audit 2026-11-04 N-2): `dedupeByLeadIdGs_` dedupes on lead_id + RM (`leadRmKeyGs_`, `GS-012`), so a consolidated person's combined email keeps each RM's copy of a shared lead; entries with no RM dedupe on lead_id alone, as before.
+
 ## Revalidation trigger
 
 Any commit touching `EmailInfra.gs` or `Tests_EmailInfra.gs`;

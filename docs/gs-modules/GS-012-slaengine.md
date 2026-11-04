@@ -279,6 +279,8 @@ until pasted into the Sheet's Apps Script editor.
 
 **2026-10-19** (user request, SLA rule changes): Not Updated is now only "open, past the 3 h grace, stage `not updated`" - the never-connected-past-10-minutes branch and `FIRST_CONTACT_SLA_MINUTES_` are gone (RULE-089). `followupOverdue` is labelled "No follow up in last 4 hours" and counts from the later of the last comment and `last_connect_time` (no call-attempt timestamp column exists) (RULE-090). `MIN_CALLS_PER_DAY_` 5 -> 3 (CFG-059). Stored "Follow-up Overdue" labels are mapped to the new one for the checkpoints (`LEGACY_ISSUE_LABELS_GS_` / `canonicalIssueLabelGs_`, CFG-143 / FN-525, RULE-091). Twins changed in the same commit: `js/core-lead-model.js`, `js/core-foundation.js`, `js/core-rm-performance.js`, `DailyRmIssueLog.gs`. Live since 2026-10-19 ~13:53 IST (runAllTests 4165/0). Current rule reference: HANDOVER §4.3.10.
 
+**2026-11-04** (audit 2026-11-04 Stage 1, N-3/N-4, uncommitted at the time of writing): (N-4, user decision) `indexCustomerCallTotalsGs_` pools only the customer's CURRENT leads - open rows (`isOpenLead_`) assigned no more than `LEAD_LIFECYCLE_HOURS_` (48h) before the customer's newest open assignment; a closed lead or an older enquiry no longer lends its calls or age, and a row left out falls back to its own counter (twin: `JS-006` `indexCustomerCallTotals`). (N-3) New `leadRowFinderGs_` and `leadRmKeyGs_`: `computeAllIssuesCheckpointGs_` re-reads each logged entry on its OWN RM's copy of a shared lead (falls back to the first row of the lead_id), and each result now carries the entry's `RM`.
+
 ## Revalidation trigger
 
 Any commit touching `SlaEngine.gs` or `Tests_SlaEngine.gs`; **any of the

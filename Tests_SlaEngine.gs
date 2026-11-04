@@ -166,6 +166,40 @@ function runSlaEngineTests_() {
       TestAssertEqual_(computeSlaFlags_(r3.row, r1.colIndex, now, {}).underCalledToday, true, 'underCalledToday: the target follows the first assignment of the customer (30h ago -> 10), not the own assignment of this lead (6h)');
     }
     {
+      // N-4 (audit 2026-11-04, user decision): only the customer's CURRENT leads pool - not closed ones, not older enquiries.
+      const mk = function (o) { return TestSla_buildRow_(Object.assign({ client_id: 'C-N4', current_stage: 'Suspect' }, o)); };
+      const fresh = mk({ lead_id: 'N4-NEW', RM: 'RM A', lead_assigned_at: TestFixture_hoursAgo_(now, 5), call_attempts: 0 });
+      const closed = mk({ lead_id: 'N4-CLOSED', RM: 'RM B', lead_assigned_at: TestFixture_hoursAgo_(now, 10), call_attempts: 20, closing_reason: 'Not interested' });
+      const old = mk({ lead_id: 'N4-OLD', RM: 'RM C', lead_assigned_at: TestFixture_daysAgo_(now, 30), call_attempts: 15 });
+      const ci = fresh.colIndex;
+      indexCustomerCallTotalsGs_([fresh.row, closed.row, old.row], ci);
+      TestAssertEqual_(SLA_CALL_GROUP_BY_ROW_.get(fresh.row).total, 0, 'N-4: a closed lead and a 30-day-older enquiry of the same customer lend no calls to the new lead');
+      TestAssertEqual_(computeSlaFlags_(fresh.row, ci, now, {}).underCalledToday, true, 'N-4: a returning customer\'s new lead with 0 calls is behind (it no longer inherits the old lifetime count)');
+      TestAssertEqual_(SLA_CALL_GROUP_BY_ROW_.has(closed.row), false, 'N-4: a closed row is not pooled (no entry)');
+      TestAssertEqual_(SLA_CALL_GROUP_BY_ROW_.has(old.row), false, 'N-4: an open lead assigned more than 48h before the newest one is not pooled; it falls back to its own counter');
+      TestAssertEqual_(computeSlaFlags_(old.row, ci, now, {}).underCalledToday, false, 'N-4: the older open lead is judged on its own 15 calls (target 10)');
+      const near = mk({ lead_id: 'N4-NEAR', RM: 'RM D', lead_assigned_at: TestFixture_hoursAgo_(now, 40), call_attempts: 3 });
+      const undated = mk({ lead_id: 'N4-UNDATED', RM: 'RM E', lead_assigned_at: '', call_attempts: 1 });
+      indexCustomerCallTotalsGs_([fresh.row, closed.row, old.row, near.row, undated.row], ci);
+      TestAssertEqual_(SLA_CALL_GROUP_BY_ROW_.get(fresh.row).total, 4, 'N-4: an open lead within 48h of the newest pools (3), and an undatable open row pools (1)');
+      TestAssertEqual_(SLA_CALL_GROUP_BY_ROW_.get(fresh.row).firstAssigned.getTime(), near.row[ci.lead_assigned_at].getTime(), 'N-4: the customer age runs from the earliest POOLED assignment (40h ago), not the 30-day-old one');
+    }
+    {
+      // N-3 (audit 2026-11-04): a logged entry is re-read on its own RM's copy of a shared lead.
+      const a = TestSla_buildRow_({ lead_id: 'N3', RM: 'RM A', current_stage: 'Suspect' });
+      const b = TestSla_buildRow_({ lead_id: 'N3', RM: 'RM B', current_stage: 'Won' });
+      const ci = a.colIndex;
+      const rowFor = leadRowFinderGs_([a.row, b.row], ci);
+      TestAssert_(rowFor({ lead_id: 'N3', RM: 'rm b ' }) === b.row, 'leadRowFinderGs_: matches lead_id + RM (trimmed, case-insensitive), not the first copy');
+      TestAssert_(rowFor({ lead_id: 'N3', RM: 'RM A' }) === a.row, 'leadRowFinderGs_: RM A gets its own row');
+      TestAssert_(rowFor({ lead_id: 'N3' }) === a.row, 'leadRowFinderGs_: an entry with no RM falls back to the first row of the lead_id');
+      TestAssert_(rowFor({ lead_id: 'N3', RM: 'RM Moved' }) === a.row, 'leadRowFinderGs_: an unknown RM falls back to the first row of the lead_id');
+      TestAssert_(rowFor({ lead_id: 'NOPE', RM: 'RM A' }) === null, 'leadRowFinderGs_: an unknown lead is null');
+      TestAssert_(leadRowFinderGs_([a.row, b.row], ci, new Set(['OTHER']))({ lead_id: 'N3', RM: 'RM A' }) === null, 'leadRowFinderGs_: wantedIds limits what is indexed');
+      TestAssertEqual_(leadRmKeyGs_({ lead_id: ' 7 ', RM: ' RM X ' }), '7|rm x', 'leadRmKeyGs_: trimmed lead_id + lower-cased RM');
+      TestAssertEqual_(leadRmKeyGs_({ lead_id: 7 }), '7|', 'leadRmKeyGs_: no RM -> lead_id alone');
+    }
+    {
       // A lead moved to another RM: same lead_id, the old RM's row stays but stops updating -> dropped by readLeadsTab_.
       const mk = function (o) { return TestSla_buildRow_(Object.assign({ lead_id: 'T1', current_stage: 'Suspect' }, o)); };
       const old = mk({ RM: 'Old RM', lead_assigned_at: TestFixture_daysAgo_(now, 2) });

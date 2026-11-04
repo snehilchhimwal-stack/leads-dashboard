@@ -252,7 +252,9 @@ function emailLedgerSplitLeadsGs_(leads) {
   (leads || []).forEach(function (lead) {
     let reason = emailLedgerLeadDefectGs_(lead);
     if (!reason) {
-      const key = String(lead.lead_id).trim();
+      // N-1 (audit 2026-11-04): a duplicate is the same lead_id under the SAME RM. Since 3b8f3cf a shared customer is listed
+      // once per RM (each RM's own manager), so a second RM's copy is a different line and must not be dropped as "covered".
+      const key = leadRmKeyGs_(lead);
       if (seen[key]) reason = DUPLICATE_LEAD_REASON_; else seen[key] = true;
     }
     if (reason) defective.push({ lead: lead, reason: reason, covered: reason === DUPLICATE_LEAD_REASON_ }); else valid.push(lead);

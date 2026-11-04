@@ -532,7 +532,7 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
 
   const threadId = sentMessage.getThread().getId();
   const issueLog = [];
-  leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
+  leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, RM: l.RM, issueKey: l.issue.key, issueLabel: l.issue.label }); }); // RM: N-3, the 13:00 job re-reads this RM's row
   // appendRowOnceGs_ (EmailInfra.gs, email audit P7 / F10): a retry after a timeout that landed AFTER the row was written must
   // not append a second row — a duplicate row here means a duplicate 13:00 reply into the same thread.
   // OE-07 (audit 2026-10-13): writeUnlessTestModeGs_ — a TEST MODE run must not write a production row (the real 10:00 run
@@ -609,12 +609,18 @@ function allIssuesCheckpointStateLabelGs_(entry) {
 // complementary fields (design doc Part 7: the comparison engine itself
 // doesn't need to know about RM/TL, only the email-rendering layer does).
 function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, originalDateLabel, snapshotEntries, checkpointResults) {
-  const resultByLeadId = {};
-  checkpointResults.forEach(function (r) { resultByLeadId[r.lead_id] = r; });
+  // N-3 (audit 2026-11-04): match a result to its entry by lead_id + RM (leadRmKeyGs_, SlaEngine.gs), so two RMs' copies of a
+  // shared lead each get their own state; a result with no RM (stored before this change) still matches by lead_id alone.
+  const resultByKey = {}, resultByLeadId = {};
+  checkpointResults.forEach(function (r) {
+    if (r.RM) resultByKey[leadRmKeyGs_(r)] = r;
+    else resultByLeadId[String(r.lead_id).trim()] = r;
+  });
+  const resultFor = function (e) { return resultByKey[leadRmKeyGs_(e)] || resultByLeadId[String(e.lead_id).trim()]; };
 
   const byRM = {}; // RM -> { TL, rows: [] }
   snapshotEntries.forEach(function (entry) {
-    const result = resultByLeadId[entry.lead_id];
+    const result = resultFor(entry);
     if (!result) return; // computeAllIssuesCheckpointGs_ always returns one entry per input -- defensive only
     if (!allIssuesCheckpointIsActiveGs_(result)) return; // resolved / no longer found: never listed (2026-09-26)
     const rmKey = entry.RM || 'Unassigned';
@@ -624,7 +630,7 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
   const rmKeys = Object.keys(byRM).sort();
 
   // Only still-unresolved leads are listed or counted (2026-09-26) — resolved ones are never emailed.
-  const activeEntries = snapshotEntries.filter(function (e) { return allIssuesCheckpointIsActiveGs_(resultByLeadId[e.lead_id]); });
+  const activeEntries = snapshotEntries.filter(function (e) { return allIssuesCheckpointIsActiveGs_(resultFor(e)); });
   const stillActiveCount = activeEntries.length;
 
   const makeRmSection_ = function (rm, rmRows, tl) {
@@ -642,7 +648,7 @@ function buildAllIssuesCheckpointSectionOptsGs_(region, checkpointLabel, origina
       regionEntries.forEach(function (e) {
         const k = e.RM || 'Unassigned';
         if (!byRm[k]) byRm[k] = { TL: e.TL, rows: [] };
-        byRm[k].rows.push([e.lead_id, canonicalIssueLabelGs_(e.issueLabel), allIssuesCheckpointStateLabelGs_(resultByLeadId[e.lead_id])]);
+        byRm[k].rows.push([e.lead_id, canonicalIssueLabelGs_(e.issueLabel), allIssuesCheckpointStateLabelGs_(resultFor(e))]);
       });
       return Object.keys(byRm).sort().map(function (rm) { return makeRmSection_(rm, byRm[rm].rows, byRm[rm].TL); });
     })
@@ -909,7 +915,7 @@ function sendCombinedMorningEmail_(ss, overnightLogSheet, allIssuesLogSheet, reg
   // relies on).
   if (!sendFailureReason) {
     const issueLog = [];
-    section1Leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, issueKey: l.issue.key, issueLabel: l.issue.label }); });
+    section1Leads.forEach(function (l) { if (l.issue) issueLog.push({ lead_id: l.lead_id, RM: l.RM, issueKey: l.issue.key, issueLabel: l.issue.label }); }); // RM: N-3, the 13:00 job re-reads this RM's row
     const threadId = sentMessage.getThread().getId();
     // Step 9/11: wrapped in its own try/catch, matching
     // sendOneAllIssuesEmail_'s own established precedent for this exact
@@ -2124,11 +2130,7 @@ function sendOvernightFollowupEmails_(opts) {
   const baselineMap = movementMaps.baselineMap;
   const lastSnapshotMap = movementMaps.lastSnapshotMap;
   leadsData.lastChangeMap = movementMaps.lastChangeMap || {}; // for the stale-lead block (decision D8)
-  const byLeadId = {};
-  dataRows.forEach(function (row) {
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    if (leadId) byLeadId[leadId] = row;
-  });
+  const rowFor = leadRowFinderGs_(dataRows, colIndex); // N-3 (audit 2026-11-04): the logged entry's own RM row first (SlaEngine.gs)
   // Pass 1: classify every region's issue leads into resolved/unresolved
   // WITHOUT sending anything yet — every region's still-unresolved leads
   // get pushed to Lead_Followups and waited on together, once, below.
@@ -2195,7 +2197,7 @@ function sendOvernightFollowupEmails_(opts) {
     const resolvedRows = [];
     const unresolvedRows = [];
     issueLog.forEach(function (entry) {
-      const row = byLeadId[entry.lead_id];
+      const row = rowFor(entry);
       if (!row) { resolvedRows.push({ lead_id: entry.lead_id, RM: '', stage: '(not found)', detail: 'No longer in sheet' }); return; }
       const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
       const RM = String(getVal_(row, colIndex, 'RM') || '').trim();

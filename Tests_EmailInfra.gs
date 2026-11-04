@@ -343,6 +343,7 @@ function runEmailInfraTests_() {
     TestAssertEqual_(banded[1].regionBand, 'Pune — 2 leads', 'sectionsByRegionGs_: band counts the region\'s items (plural leads)');
     TestAssert_(banded[2].regionBand === undefined, 'sectionsByRegionGs_: only the FIRST section of a region carries the band');
     TestAssertEqual_(dedupeByLeadIdGs_([{ lead_id: 'A', v: 1 }, { lead_id: 'B' }, { lead_id: 'A', v: 2 }]).map(function (e) { return e.lead_id + (e.v || ''); }).join(','), 'A1,B', 'dedupeByLeadIdGs_: the first occurrence of each lead wins');
+    TestAssertEqual_(dedupeByLeadIdGs_([{ lead_id: 'A', RM: 'RM 1', v: 1 }, { lead_id: 'A', RM: 'RM 2', v: 2 }, { lead_id: 'A', RM: 'rm 1', v: 3 }]).map(function (e) { return e.lead_id + e.v; }).join(','), 'A1,A2', 'dedupeByLeadIdGs_ (N-2): two RMs\' copies of one lead both stay; a repeat under the same RM is dropped');
     const bandHtml = renderOvernightReportEmailHTML_({ title: 'T', region: 'Bangalore, Pune', regionLabel: 'Regions: Bangalore (1) · Pune (2)', subtitle: 's', kpis: [], action: '', footerNote: '', sections: [{ heading: 'RM X', columns: ['c'], rows: [['r']], regionBand: 'Bangalore — 1 lead' }] });
     TestAssertContains_(bandHtml, 'Regions: Bangalore (1) · Pune (2)', 'renderOvernightReportEmailHTML_: a custom regionLabel replaces the "Region:" line');
     TestAssertContains_(bandHtml, 'Bangalore — 1 lead', 'renderOvernightReportEmailHTML_: a section regionBand is drawn above the section');

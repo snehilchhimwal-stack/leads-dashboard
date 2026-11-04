@@ -1421,7 +1421,21 @@
           { lead_id: 'T2', RM: 'Old RM', lead_assigned_at: at(48) }, { lead_id: 'T3', RM: 'A', lead_assigned_at: at(3) }, { lead_id: 'T3', RM: 'B', lead_assigned_at: at(3) },
         ];
         const kept = dropTransferredLeadRows(tr).map(r => r.lead_id + ':' + r.RM).join(',');
-        assert('dropTransferredLeadRows (2026-11-03): only an INACTIVE older RM copy goes; a shared lead (both active), a lone lead and a same-time tie stay', kept === 'T1:New RM,T4:Shared A,T4:Shared B,T2:Old RM,T3:A,T3:B', kept);
+        {
+          // N-4 (audit 2026-11-04, twin of Tests_SlaEngine.gs): only the customer's CURRENT open leads pool their calls.
+          const cr = [
+            { lead_id: 'N4-NEW', client_id: 'C-N4', RM: 'A', current_stage: 'Suspect', lead_assigned_at: at(5), call_attempts: 0 },
+            { lead_id: 'N4-CLOSED', client_id: 'C-N4', RM: 'B', current_stage: 'Suspect', closing_reason: 'Not interested', lead_assigned_at: at(10), call_attempts: 20 },
+            { lead_id: 'N4-OLD', client_id: 'C-N4', RM: 'C', current_stage: 'Suspect', lead_assigned_at: at(24 * 30), call_attempts: 15 },
+            { lead_id: 'N4-NEAR', client_id: 'C-N4', RM: 'D', current_stage: 'Suspect', lead_assigned_at: at(40), call_attempts: 3 },
+            { lead_id: 'N4-UNDATED', client_id: 'C-N4', RM: 'E', current_stage: 'Suspect', lead_assigned_at: '', call_attempts: 1 },
+          ];
+          indexCustomerCallTotals(cr);
+          assert('indexCustomerCallTotals (N-4): a closed lead and a 30-day-older enquiry lend nothing; a 40h-old open lead (3) and an undatable one (1) pool', cr[0].customerCallTotalAll === 4, 'got ' + cr[0].customerCallTotalAll);
+          assert('indexCustomerCallTotals (N-4): the closed and the older rows get no stamp (they fall back to their own counter)', cr[1].customerCallTotalAll === undefined && cr[2].customerCallTotalAll === undefined, 'got ' + cr[1].customerCallTotalAll + '/' + cr[2].customerCallTotalAll);
+          assert('indexCustomerCallTotals (N-4): the customer age runs from the earliest POOLED assignment (40h)', cr[0].customerFirstAssignedMs === at(40).getTime(), 'got ' + cr[0].customerFirstAssignedMs);
+        }
+        assert('dropTransferredLeadRows (2026-11-03): only an INACTIVE older RM copy goes; a shared lead (both active), a lone lead and a same-time tie stay', kept ==='T1:New RM,T4:Shared A,T4:Shared B,T2:Old RM,T3:A,T3:B', kept);
       }
     } finally {
       _renderNow = savedRenderNow;

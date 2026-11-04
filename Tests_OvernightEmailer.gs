@@ -1892,6 +1892,23 @@ function runOvernightEmailerTests_() {
       ensureOvernightLogSheet_ = realEnsureOvernightLogSheet;
     }
 
+    {
+      // N-3 (audit 2026-11-04): two RMs' copies of one shared lead each show their OWN checkpoint state.
+      const snap = [
+        { lead_id: 'S1', RM: 'RM A', TL: 'TL', issueLabel: 'Not Updated' },
+        { lead_id: 'S1', RM: 'RM B', TL: 'TL', issueLabel: 'Not Updated' },
+      ];
+      const results = [
+        { lead_id: 'S1', RM: 'RM A', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
+        { lead_id: 'S1', RM: 'RM B', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' },
+      ];
+      const opts = buildAllIssuesCheckpointSectionOptsGs_('Pune', 'Checkpoint 1', '3 Nov 2026', snap, results);
+      TestAssertEqual_(opts.sections.map(function (s) { return s.heading + ':' + s.rows.length; }).join(','), 'RM B:1', 'checkpoint section (N-3): RM A\'s copy resolved, RM B\'s still open -> only RM B is listed');
+      TestAssertEqual_(opts.kpis[0].value, 1, 'checkpoint section (N-3): one lead still unresolved, not 0 or 2');
+      const legacy = buildAllIssuesCheckpointSectionOptsGs_('Pune', 'Checkpoint 1', '3 Nov 2026', snap.slice(0, 1), [{ lead_id: 'S1', state: 'still_open', currentIssueLabel: 'Not Updated', currentStatus: 'Suspect' }]);
+      TestAssertEqual_(legacy.kpis[0].value, 1, 'checkpoint section (N-3): a stored result without an RM still matches by lead_id');
+    }
+
     TestAssertOnlyTestEmails_();
   } finally {
     TestEnv_tearDown_();

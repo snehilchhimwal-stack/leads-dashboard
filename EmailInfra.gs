@@ -401,10 +401,18 @@ function sectionsByRegionGs_(items, sectionsForRegion) {
   return out;
 }
 
-// First occurrence of each lead_id wins — merged buckets must not repeat a lead.
+// First occurrence of each lead wins — merged buckets must not repeat a lead. N-2 (audit 2026-11-04): "the same lead" is the
+// same lead_id under the same RM (leadRmKeyGs_, SlaEngine.gs); two RMs' copies of a shared customer both stay, per the
+// one-copy-per-RM rule. Entries without an RM dedupe on lead_id alone, as before.
 function dedupeByLeadIdGs_(entries) {
   const seen = {};
-  return (entries || []).filter(function (e) { const id = e && e.lead_id; if (id === undefined || seen[id]) return false; seen[id] = true; return true; });
+  return (entries || []).filter(function (e) {
+    if (!e || e.lead_id === undefined) return false;
+    const k = leadRmKeyGs_(e);
+    if (seen[k]) return false;
+    seen[k] = true;
+    return true;
+  });
 }
 
 // Best-effort alert for a send that could not happen at all this run —

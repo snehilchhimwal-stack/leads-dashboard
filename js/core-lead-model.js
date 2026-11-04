@@ -264,24 +264,35 @@ function dropTransferredLeadRows(rows){
 // 2026-11-02, twin of SlaEngine.gs indexCustomerCallTotalsGs_: stamps every row with its customer's (client_id, else lead_id)
 // call total - each DISTINCT lead id once, its highest call_attempts - and the customer's earliest lead_assigned_at (ms).
 // mergeRowsIntoOneLead copies them from the primary row, so a merged unit carries them too.
+// N-4 (audit 2026-11-04, user decision): only the customer's CURRENT leads are pooled - open rows (not closed, not Opportunity+)
+// assigned no more than 48h before the customer's newest open assignment. A closed lead or an older enquiry no longer lends its
+// lifetime calls or its old age; a row left out gets no stamp and falls back to its own counter and age. An undatable open row is
+// pooled. KEEP IN SYNC with SlaEngine.gs indexCustomerCallTotalsGs_.
 function indexCustomerCallTotals(rows){
+  const POOL_WINDOW_MS = 48 * 36e5; // LEAD_LIFECYCLE_HOURS_ in SlaEngine.gs
   const groups = new Map();
   const keyOf = r => String(r.client_id || '').trim() || ('l:' + String(r.lead_id || '').trim());
   rows.forEach(r => {
     const id = String(r.lead_id || '').trim();
     if (!id) return;
+    if (isLeadClosed(r) || isOppOrAbove(r.current_stage, r.closing_reason, r.lead_closing_reason)) return;
     const k = keyOf(r);
-    if (!groups.has(k)) groups.set(k, { byLead: {}, first: null });
-    const g = groups.get(k);
-    g.byLead[id] = Math.max(g.byLead[id] || 0, Number(r.call_attempts) || 0);
+    if (!groups.has(k)) groups.set(k, []);
     const d = parseDate(r.lead_assigned_at);
-    if (d && (g.first === null || d.getTime() < g.first)) g.first = d.getTime();
+    groups.get(k).push({ r, id, at: d ? d.getTime() : null });
   });
-  rows.forEach(r => {
-    const g = groups.get(keyOf(r));
-    if (!g) return;
-    r.customerCallTotalAll = Object.keys(g.byLead).reduce((s, id) => s + g.byLead[id], 0);
-    r.customerFirstAssignedMs = g.first;
+  groups.forEach(list => {
+    const newest = list.reduce((m, c) => (c.at !== null && (m === null || c.at > m) ? c.at : m), null);
+    const cutoff = newest === null ? -Infinity : newest - POOL_WINDOW_MS;
+    const pooled = list.filter(c => c.at === null || c.at >= cutoff);
+    const byLead = {};
+    let first = null;
+    pooled.forEach(c => {
+      byLead[c.id] = Math.max(byLead[c.id] || 0, Number(c.r.call_attempts) || 0);
+      if (c.at !== null && (first === null || c.at < first)) first = c.at;
+    });
+    const total = Object.keys(byLead).reduce((s, id) => s + byLead[id], 0);
+    pooled.forEach(c => { c.r.customerCallTotalAll = total; c.r.customerFirstAssignedMs = first; });
   });
 }
 

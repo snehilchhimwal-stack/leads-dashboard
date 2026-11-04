@@ -90,6 +90,10 @@ function runEmailLedgerTests_() {
     const split = emailLedgerSplitLeadsGs_([{ lead_id: '1', issueLabel: 'a' }, { lead_id: '2', issueLabel: '' }, { lead_id: ' 1 ', issueLabel: 'a' }, { lead_id: '3', issueLabel: 'a' }]);
     TestAssertEqual_(split.valid.map(function (l) { return l.lead_id; }).join(','), '1,3', 'split: the valid leads keep their order');
     TestAssertEqual_(split.defective.map(function (d) { return d.lead.lead_id.trim() + ':' + (d.covered ? 'covered' : 'dropped'); }).join(','), '2:dropped,1:covered', 'split: a blank-label lead is dropped; a second copy of an id is "covered" (the first copy was sent)');
+    // N-1 (audit 2026-11-04): one copy per RM - a second RM's copy of a shared lead is valid, not a covered duplicate.
+    const splitRm = emailLedgerSplitLeadsGs_([{ lead_id: '9', RM: 'RM A', issueLabel: 'a' }, { lead_id: '9', RM: 'RM B', issueLabel: 'a' }, { lead_id: '9', RM: 'rm a ', issueLabel: 'a' }]);
+    TestAssertEqual_(splitRm.valid.map(function (l) { return l.RM; }).join(','), 'RM A,RM B', 'split (N-1): the same lead_id under two RMs is two valid lines');
+    TestAssertEqual_(splitRm.defective.map(function (d) { return d.reason === DUPLICATE_LEAD_REASON_ && d.covered; }).join(','), 'true', 'split (N-1): only a repeat under the SAME RM (case/space-insensitive) is a covered duplicate');
 
     TestAssertEqual_(emailLedgerStatusForErrorGs_(sendBlockedErrorGs_('x', ['p'])), 'BLOCKED', 'status: a gate refusal is BLOCKED');
     TestAssertEqual_(emailLedgerStatusForErrorGs_(new Error('Service timed out: Gmail')), 'UNCONFIRMED', 'status: a timeout (the message may have gone) is UNCONFIRMED, never FAILED');
