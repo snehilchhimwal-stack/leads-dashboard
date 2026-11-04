@@ -1639,6 +1639,7 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
   const prepared = prepareOutgoingEmailGs_({ to: to, cc: cc, subject: subject, plainBody: plainBody, htmlBody: htmlBody });
   if (prepared.problems.length) throw sendBlockedErrorGs_('threaded reply (' + threadId + ')', prepared.problems);
   to = prepared.msg.to; cc = prepared.msg.cc; subject = prepared.msg.subject;
+  emailSendBudgetTakeGs_('threaded reply (' + threadId + ')'); // S-3 (audit 2026-11-04): per-run cap + daily quota (EmailInfra.gs)
 
   const thread = withRetry_(function () {
     return Gmail.Users.Threads.get('me', threadId, { format: 'metadata', metadataHeaders: ['Message-ID'] });

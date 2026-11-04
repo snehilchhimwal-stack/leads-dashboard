@@ -723,10 +723,38 @@ function emailAddressListProblemsGs_(list, fieldName, required) {
   const parts = raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   if (!parts.length) return required ? [fieldName + ' is empty'] : [];
   const problems = [];
+  const allowed = (ALLOWED_RECIPIENT_DOMAINS_ || []).map(function (d) { return String(d).trim().toLowerCase(); }).filter(Boolean);
   parts.forEach(function (a) {
-    if (!EMAIL_ADDRESS_RE_.test(a)) problems.push(fieldName + ' has an invalid address "' + a.replace(/[\r\n]+/g, ' ') + '"');
+    if (!EMAIL_ADDRESS_RE_.test(a)) { problems.push(fieldName + ' has an invalid address "' + a.replace(/[\r\n]+/g, ' ') + '"'); return; }
+    const domain = a.slice(a.lastIndexOf('@') + 1).toLowerCase();
+    if (allowed.length && allowed.indexOf(domain) === -1) problems.push(fieldName + ' has an address outside the allowed domain (' + allowed.map(function (d) { return '@' + d; }).join(', ') + '): "' + a + '"');
   });
   return problems;
+}
+
+// S-2 (audit 2026-11-04, user decision "only @homesfy.in"): every report email - the 10:00/13:00/17:00 jobs, CH-level reports,
+// the cycle report, bounce re-sends, TEST MODE - may go ONLY to these domains (exact match, no subdomains, no exceptions).
+// Anything else blocks the whole email at the send gate (BLOCKED in Email_Ledger + the usual ops alert), the same as an invalid
+// address: correct the address in Manager_Directory / Region_Recipients / the private table, then run the recovery. Ops alerts
+// (notifyOpsAlertGs_) do not pass through the gate and are not affected. `let`: Tests_Mocks.gs turns it off (its synthetic
+// addresses are not company addresses); the tests that cover it turn it back on.
+let ALLOWED_RECIPIENT_DOMAINS_ = ['homesfy.in'];
+
+// S-3 (audit 2026-11-04): a ceiling on report emails per EXECUTION. A normal run sends well under 100 (about 45 managers across
+// 14 regions, plus CH-level and consolidated emails); a run that reaches the cap is almost certainly fanning out by mistake (a
+// hierarchy or routing error). The send that would exceed it is BLOCKED instead (recoverable later: the recovery is a new
+// execution). There is deliberately NO remaining-daily-quota pre-check: that needs the Mail service, which is not used anywhere else in this
+// project, so calling it would add an OAuth scope and the installed triggers could stop until the owner re-authorizes.
+// `let`: Tests_Mocks.gs sets null (off); the tests that cover it set their own.
+let MAX_REPORT_EMAILS_PER_RUN_ = 150;
+let EMAIL_REPORT_SENDS_THIS_RUN_ = 0;
+// Throws a send-gate refusal (BLOCKED) when this send would pass the per-run cap; otherwise counts the send. Called by both real
+// senders (sendGuardedEmailGs_, sendThreadedGmailReply_) right before Gmail is called.
+function emailSendBudgetTakeGs_(label) {
+  if (MAX_REPORT_EMAILS_PER_RUN_ && EMAIL_REPORT_SENDS_THIS_RUN_ >= MAX_REPORT_EMAILS_PER_RUN_) {
+    throw sendBlockedErrorGs_(label, ['the per-run cap of ' + MAX_REPORT_EMAILS_PER_RUN_ + ' report emails is reached - this run is sending far more than normal, so it was stopped (check the RM hierarchy / recipient routing, then run the recovery)']);
+  }
+  EMAIL_REPORT_SENDS_THIS_RUN_++;
 }
 
 // The text a reader would actually see in an HTML body — style/script/head blocks and tags removed, entities decoded,
@@ -820,6 +848,7 @@ function sendGuardedEmailGs_(msg, label) {
   const routed = typeof emailRerouteApplyGs_ === 'function' ? emailRerouteApplyGs_(msg) : msg;
   const prepared = prepareOutgoingEmailGs_(routed);
   if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems, prepared.missingLeadIds);
+  emailSendBudgetTakeGs_(label); // S-3: per-run cap + daily quota
   const m = prepared.msg;
   const options = { name: 'Homesfy Lead Ops' };
   if (m.cc) options.cc = m.cc;

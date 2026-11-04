@@ -657,6 +657,8 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
     FUTWORK_ROUTE_EMAIL_: FUTWORK_ROUTE_EMAIL_, REGION_PNL_HEAD_CC_: REGION_PNL_HEAD_CC_,
     CH_REPORT_NO_ROLE_EMAILS_: CH_REPORT_NO_ROLE_EMAILS_,
     CH_REPORT_NO_ROLE_NAMES_: CH_REPORT_NO_ROLE_NAMES_,
+    ALLOWED_RECIPIENT_DOMAINS_: ALLOWED_RECIPIENT_DOMAINS_,
+    MAX_REPORT_EMAILS_PER_RUN_: MAX_REPORT_EMAILS_PER_RUN_,
   };
 
   SpreadsheetApp = {
@@ -696,6 +698,9 @@ function TestEnv_setUp_(fileLabel, ss, gmailOpts, gmailAdvancedOpts, scriptAppTr
   ALWAYS_CC_EMAILS_ = []; // no extra real leadership Cc during tests — see TestAssertOnlyTestEmails_
   CH_REPORT_NO_ROLE_NAMES_ = [];
   CH_REPORT_NO_ROLE_EMAILS_ = []; // CH-level reports keep their role label in tests unless a test opts in (EmailInfra.gs)
+  ALLOWED_RECIPIENT_DOMAINS_ = null; // S-2: the synthetic test addresses are not company addresses; the S-2 tests turn it on
+  MAX_REPORT_EMAILS_PER_RUN_ = null; // S-3: a whole test file sends far more than one real run; the S-3 tests set their own cap
+  EMAIL_REPORT_SENDS_THIS_RUN_ = 0;
   LEADERSHIP_NAME_TO_EMAIL_ = { 'test ceo self': TEST_EMAIL_CH_ }; // synthetic — see TestFixture_rmHierarchyRows_' own comment on "Test Ceo Self"
 
   Logger.log('=== ' + fileLabel + ' ===');
@@ -715,6 +720,9 @@ function TestEnv_tearDown_() {
   FUTWORK_ROUTE_EMAIL_ = g.FUTWORK_ROUTE_EMAIL_; REGION_PNL_HEAD_CC_ = g.REGION_PNL_HEAD_CC_;
   CH_REPORT_NO_ROLE_EMAILS_ = g.CH_REPORT_NO_ROLE_EMAILS_;
   CH_REPORT_NO_ROLE_NAMES_ = g.CH_REPORT_NO_ROLE_NAMES_;
+  ALLOWED_RECIPIENT_DOMAINS_ = g.ALLOWED_RECIPIENT_DOMAINS_;
+  MAX_REPORT_EMAILS_PER_RUN_ = g.MAX_REPORT_EMAILS_PER_RUN_;
+  EMAIL_REPORT_SENDS_THIS_RUN_ = 0;
 
   const r = TestResults_;
   Logger.log(r.file + ': ' + r.pass + ' passed, ' + r.fail + ' failed' + (r.fail ? (' — ' + r.failures.join('; ')) : ''));

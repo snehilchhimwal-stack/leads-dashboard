@@ -437,6 +437,47 @@ function runEmailInfraTests_() {
     TestAssertEqual_(emailAddressListProblemsGs_('a@homesfy.in\r\nBcc: evil@x.com', 'To', true).length > 0, true, 'emailAddressListProblemsGs_: an address carrying a CR/LF header-injection payload is rejected');
     TestAssertEqual_(emailAddressListProblemsGs_(['a@homesfy.in', 'b@homesfy.in'], 'To', true).length, 0, 'emailAddressListProblemsGs_: accepts an array too');
 
+    // ---- S-2 / S-3 (audit 2026-11-04): @homesfy.in only, per-run cap, daily quota ----
+    {
+      TestAssertEqual_(JSON.stringify(TestEnv_realGlobals_.ALLOWED_RECIPIENT_DOMAINS_), '["homesfy.in"]', 'S-2: production allows ONLY @homesfy.in');
+      TestAssertEqual_(TestEnv_realGlobals_.MAX_REPORT_EMAILS_PER_RUN_, 150, 'S-3: production caps a run at 150 report emails');
+      ALLOWED_RECIPIENT_DOMAINS_ = ['homesfy.in'];
+      try {
+        TestAssertEqual_(emailAddressListProblemsGs_('a.b@homesfy.in, C@HOMESFY.IN', 'To', true).length, 0, 'S-2: company addresses pass (domain case-insensitive)');
+        const ext = emailAddressListProblemsGs_('a.b@homesfy.in, x@gmail.com', 'Cc', false);
+        TestAssert_(ext.length === 1 && ext[0].indexOf('outside the allowed domain (@homesfy.in)') !== -1, 'S-2: one external Cc is a problem that names the rule');
+        TestAssertEqual_(emailAddressListProblemsGs_('x@mail.homesfy.in', 'To', true).length, 1, 'S-2: exact domain only - a subdomain is outside');
+        TestAssertEqual_(emailAddressListProblemsGs_('x@homesfy.in.evil.com', 'To', true).length, 1, 'S-2: a look-alike domain is outside');
+        const before = TestGmailLog_.drafts.length + TestGmailLog_.sent.length;
+        let blocked = null;
+        try { sendGuardedEmailGs_({ to: 'x@gmail.com', subject: 'S', plainBody: 'p' }, 'S-2 test'); } catch (e) { blocked = e; }
+        TestAssert_(blocked && blocked.blockedByGuard === true, 'S-2: sendGuardedEmailGs_ refuses an external To (a BLOCKED gate error)');
+        TestAssertEqual_(TestGmailLog_.drafts.length + TestGmailLog_.sent.length, before, 'S-2: …and nothing is drafted or sent');
+      } finally { ALLOWED_RECIPIENT_DOMAINS_ = null; }
+
+      MAX_REPORT_EMAILS_PER_RUN_ = 2;
+      EMAIL_REPORT_SENDS_THIS_RUN_ = 0;
+      try {
+        emailSendBudgetTakeGs_('one'); emailSendBudgetTakeGs_('two');
+        let capErr = null;
+        try { emailSendBudgetTakeGs_('three'); } catch (e) { capErr = e; }
+        TestAssert_(capErr && capErr.blockedByGuard === true && String(capErr.message).indexOf('per-run cap of 2') !== -1, 'S-3: the send past the cap is BLOCKED, with the reason');
+        TestAssertEqual_(EMAIL_REPORT_SENDS_THIS_RUN_, 2, 'S-3: a blocked send is not counted');
+        const before3 = TestGmailLog_.drafts.length + TestGmailLog_.sent.length;
+        let capSend = null;
+        try { sendGuardedEmailGs_({ to: TEST_EMAIL_PRIMARY_, subject: 'S', plainBody: 'p' }, 'S-3 test'); } catch (e) { capSend = e; }
+        TestAssert_(capSend && capSend.blockedByGuard === true && TestGmailLog_.drafts.length + TestGmailLog_.sent.length === before3, 'S-3: sendGuardedEmailGs_ past the cap is BLOCKED and sends nothing');
+        MAX_REPORT_EMAILS_PER_RUN_ = null;
+        EMAIL_REPORT_SENDS_THIS_RUN_ = 5;
+        emailSendBudgetTakeGs_('off');
+        TestAssertEqual_(EMAIL_REPORT_SENDS_THIS_RUN_, 6, 'S-3: with the cap off (tests) every send is allowed');
+      } finally {
+        MAX_REPORT_EMAILS_PER_RUN_ = null;
+        EMAIL_REPORT_SENDS_THIS_RUN_ = 0;
+      }
+      TestAssert_(String(emailSendBudgetTakeGs_).indexOf('Mail' + 'App') === -1, 'S-3: no Mail-service call (it would add an OAuth scope and stop the triggers until re-authorized)');
+    }
+
     // ---- visibleTextOfHtmlGs_ ----
     TestAssertEqual_(visibleTextOfHtmlGs_('<div><table><tr><td> </td></tr></table></div>'), '', 'visibleTextOfHtmlGs_: markup with no text has no visible text');
     TestAssertEqual_(visibleTextOfHtmlGs_('<style>.a{color:red}</style><p>Hello&nbsp;<b>world</b> &amp; co</p>'), 'Hello world & co', 'visibleTextOfHtmlGs_: strips style blocks and tags, decodes entities, collapses whitespace');
