@@ -937,6 +937,31 @@ function runEmailInfraTests_() {
             const thr = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:06')); });
             TestAssertContains_(thr.alerts[1].body, 'recoverFailedMorningBucketsNow() failed: Error: lock busy', 'auto-recovery: a recovery that throws is reported, the watchdog carries on');
             TestAssertEqual_(emailJobAutoRecoverGs_('x', 'noSuchRecoveryFn') + '|' + emailJobAutoRecoverGs_('x', ''), 'null|null', 'auto-recovery: a missing or absent recovery function does nothing');
+            TestAssertContains_(thr.alerts[0].body, 'run recoverFailedMorningBucketsNow() (it re-sends only what is still unsent), not sendOvernightMorningEmailsNow()', 'N-9: a died run\'s alert points to the recovery, not a plain re-run');
+            // N-7 / N-8 (audit 2026-11-04): a recovery skipped for a busy lock is reported as skipped and retried next hour; the
+            // marker is written before the recovery runs.
+            delete globalThis.__arThrow;
+            PropertiesService = TestMockPropertiesService_();
+            auditsDone();
+            calls.length = 0;
+            const mKey = emailJobAlertedKeyGs_('sendOvernightMorningEmails');
+            let markerSeenDuringRecovery = null, busy = true;
+            globalThis.recoverFailedMorningBucketsNow = function () {
+              calls.push('m');
+              markerSeenDuringRecovery = PropertiesService.getScriptProperties().getProperty(mKey);
+              return busy ? false : true;
+            };
+            rec(M, { startedAt: iso('10:03'), status: 'running' });
+            const busyRun = alertsOf(function () { return checkEmailJobsCompletedGs_(at('11:06')); });
+            TestAssert_(!!markerSeenDuringRecovery, 'N-8: the once-per-day marker is already written when the recovery starts');
+            TestAssertContains_(busyRun.alerts[1].subject, 'automatic recovery skipped for sendOvernightMorningEmails', 'N-7: a lock-busy recovery is reported as SKIPPED, not "ran"');
+            TestAssertEqual_(PropertiesService.getScriptProperties().getProperty(mKey), null, 'N-7: after a skipped recovery the marker is put back (none before), so the next hour retries');
+            busy = false;
+            const retry = alertsOf(function () { return checkEmailJobsCompletedGs_(at('12:06')); });
+            TestAssertEqual_(calls.length, 2, 'N-7: the next hourly check runs the recovery again');
+            TestAssertContains_(retry.alerts[1].subject, 'automatic recovery ran for sendOvernightMorningEmails', 'N-7: …and this time it ran');
+            alertsOf(function () { return checkEmailJobsCompletedGs_(at('13:06')); });
+            TestAssertEqual_(calls.length, 2, 'N-7: once it ran, the marker stops further recoveries that day');
           } finally {
             delete globalThis.__arThrow;
             names.forEach(function (n, i) { globalThis[n] = saved[i]; });

@@ -283,8 +283,10 @@ function chLevelReportRealToGs_() {
 
 // 2026-10-17: the CH-level reports (10:00 notifyChLevelLeadsGs_, 17:00 notifyChLevelIssuesGs_) show NO role label (e.g.
 // "City Lead") when they go to one of these addresses - matched case-insensitively against the REAL recipients (in TEST MODE,
-// the address the report would have gone to before the override). Display only: the ledger id/primaryRole keep the role, and
-// every other recipient's CH-level report is unchanged. `let`: test override (Tests_Mocks.gs empties it; tests set their own).
+// the address the report would have gone to before the override). Display only: the ledger id/primaryRole keep the role.
+// N-6 (audit 2026-11-04): every CH-level report also goes to the ops address (chLevelReportRealToGs_), and the ops person is the
+// no-role name below, so in practice NO CH-level report carries a role label. That matches the request (no role on email to him);
+// a report that did not include him would keep its role. `let`: test override (Tests_Mocks.gs empties it; tests set their own).
 let CH_REPORT_NO_ROLE_EMAILS_ = ['snehil.chhimwal@gmail.com'];
 // 2026-10-19: also by NAME - the address is looked up in the private employee table (corporate addresses never live in this public
 // file), because his CH-level reports actually go to his work address. Same test-override convention as the list above.
@@ -1070,8 +1072,9 @@ function checkEmailJobsCompletedGs_(now) {
     const alertedKey = emailJobAlertedKeyGs_(p.job);
     const manual = (schedule[p.job] && schedule[p.job].manual) || p.job; // EI-6: the real by-hand function, never a made-up "<job>Now"
     const marker = p.marker || (day + '|' + p.kind);
+    const recoverName = schedule[p.job] && schedule[p.job].recover;
+    let already = null;
     if (p.kind !== 'unreadable') {
-      let already = null;
       try { already = PropertiesService.getScriptProperties().getProperty(alertedKey); } catch (e) { already = null; }
       if (already === marker) return;
     }
@@ -1083,12 +1086,27 @@ function checkEmailJobsCompletedGs_(now) {
       p.hint ? p.hint
         : p.kind === 'never_started' || p.kind === 'stuck'
           // EI-6 (audit 2026-10-13): no longer promises a re-run is "safe" — a run killed mid-send may not have recorded its last email.
-          ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, run ' + manual + '() by hand. Before you do, check today\'s Email_Ledger rows for this job: a row left ATTEMPTING or UNCONFIRMED may already have been delivered. The job\'s "already sent today" guards skip what was recorded as sent, but a run that died mid-send may not have recorded its last email.'
+          // N-9 (audit 2026-11-04): a plain re-run skips every region already logged today, so a combined (consolidated) email
+          // would go out WITHOUT those regions' leads; the recovery re-sends exactly the unfinished emails instead.
+          ? 'Check the Apps Script Executions list for ' + p.job + ' and the Triggers page. Once the cause is clear, ' + (p.kind === 'stuck' && recoverName ? 'run ' + recoverName + '() (it re-sends only what is still unsent), not ' + manual + '(): a plain re-run skips the regions already sent today, so a combined email would go out missing their leads. Before you do,' : 'run ' + manual + '() by hand. Before you do,')
+          + ' check today\'s Email_Ledger rows for this job: a row left ATTEMPTING or UNCONFIRMED may already have been delivered. The job\'s "already sent today" guards skip what was recorded as sent, but a run that died mid-send may not have recorded its last email.'
           : 'See the Executions list for the full error. This watchdog alerts once per day per job and problem.',
     ]);
-    if (p.kind === 'stuck' || p.kind === 'failed') emailJobAutoRecoverGs_(p.job, schedule[p.job] && schedule[p.job].recover);
+    // N-8 (audit 2026-11-04): the marker is written BEFORE the recovery, so a watchdog run killed during a long recovery does not
+    // alert and recover again next hour.
     if (p.kind !== 'unreadable') {
       try { PropertiesService.getScriptProperties().setProperty(alertedKey, marker); } catch (e2) { Logger.log('watchdog: could not record its alert for ' + p.job + ': ' + e2); }
+    }
+    if (p.kind === 'stuck' || p.kind === 'failed') {
+      const outcome = emailJobAutoRecoverGs_(p.job, recoverName);
+      // N-7: a recovery skipped because another email job held the lock did nothing - put the previous marker back so the next
+      // hourly run alerts and tries the recovery again (the recovery keeps its own late-send cutoff).
+      if (outcome && outcome.indexOf(EMAIL_AUTO_RECOVER_SKIPPED_) !== -1 && p.kind !== 'unreadable') {
+        try {
+          const props = PropertiesService.getScriptProperties();
+          if (already === null) props.deleteProperty(alertedKey); else props.setProperty(alertedKey, already);
+        } catch (e3) { Logger.log('watchdog: could not clear its alert marker for ' + p.job + ' after a skipped recovery: ' + e3); }
+      }
     }
   });
 
@@ -1118,19 +1136,25 @@ function checkEmailJobsCompletedGs_(now) {
 // emails, never an ATTEMPTING/UNCONFIRMED one, takes the job lock, and keeps its own late-send cutoff - so it cannot duplicate an
 // email or send one late. The hourly watchdog sees a 17:00/10:00/13:00 death at :06 of the next hour, inside each cutoff.
 // Never throws: its outcome goes to ops either way.
+// N-7 (audit 2026-11-04): the recover*Now wrappers return withEmailJobLockGs_'s result; `false` means another email job held the
+// lock and the recovery did NOT run. The outcome then contains EMAIL_AUTO_RECOVER_SKIPPED_, which the watchdog uses to retry next hour.
+const EMAIL_AUTO_RECOVER_SKIPPED_ = 'was SKIPPED';
 function emailJobAutoRecoverGs_(job, recoverName) {
   if (!recoverName) return null;
   const fn = typeof globalThis !== 'undefined' ? globalThis[recoverName] : null;
   if (typeof fn !== 'function') { Logger.log('watchdog: ' + recoverName + ' is not in this project - no automatic recovery for ' + job); return null; }
   let outcome;
   try {
-    fn();
-    outcome = recoverName + '() ran - it re-sent whatever ' + job + ' left PLANNED, FAILED or BLOCKED today (see its Executions log; past the cutoff it sends nothing).';
+    const ran = fn();
+    outcome = ran === false
+      ? recoverName + '() ' + EMAIL_AUTO_RECOVER_SKIPPED_ + ' - another email job held the lock, so nothing was re-sent. The watchdog will alert and try again next hour.'
+      : recoverName + '() ran - it re-sent whatever ' + job + ' left PLANNED, FAILED or BLOCKED today (see its Executions log; past the cutoff it sends nothing).';
   } catch (e) {
     outcome = recoverName + '() failed: ' + e;
   }
   Logger.log('watchdog: automatic recovery for ' + job + ': ' + outcome);
-  notifyOpsAlertGs_('WATCHDOG: automatic recovery ran for ' + job, [outcome, '', 'An email left ATTEMPTING or UNCONFIRMED is never re-sent automatically: check Gmail Sent for it.']);
+  const skipped = outcome.indexOf(EMAIL_AUTO_RECOVER_SKIPPED_) !== -1;
+  notifyOpsAlertGs_('WATCHDOG: automatic recovery ' + (skipped ? 'skipped' : 'ran') + ' for ' + job, [outcome, '', 'An email left ATTEMPTING or UNCONFIRMED is never re-sent automatically: check Gmail Sent for it.']);
   return outcome;
 }
 

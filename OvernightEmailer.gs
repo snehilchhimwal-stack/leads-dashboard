@@ -2514,19 +2514,19 @@ function recoverFailedFollowupBuckets_(opts) {
 }
 
 function recoverFailedMorningBucketsNow() {
-  withEmailJobLockGs_(EMAIL_RECOVERY_MORNING_JOB_, function () { recoverFailedMorningBuckets_({}); });
+  return withEmailJobLockGs_(EMAIL_RECOVERY_MORNING_JOB_, function () { recoverFailedMorningBuckets_({}); });
 }
 
 function recoverFailedMorningBucketsForceNow() {
-  withEmailJobLockGs_(EMAIL_RECOVERY_MORNING_JOB_, function () { recoverFailedMorningBuckets_({ force: true }); });
+  return withEmailJobLockGs_(EMAIL_RECOVERY_MORNING_JOB_, function () { recoverFailedMorningBuckets_({ force: true }); });
 }
 
 function recoverFailedFollowupBucketsNow() {
-  withEmailJobLockGs_(EMAIL_RECOVERY_FOLLOWUP_JOB_, function () { recoverFailedFollowupBuckets_({}); });
+  return withEmailJobLockGs_(EMAIL_RECOVERY_FOLLOWUP_JOB_, function () { recoverFailedFollowupBuckets_({}); });
 }
 
 function recoverFailedFollowupBucketsForceNow() {
-  withEmailJobLockGs_(EMAIL_RECOVERY_FOLLOWUP_JOB_, function () { recoverFailedFollowupBuckets_({ force: true }); });
+  return withEmailJobLockGs_(EMAIL_RECOVERY_FOLLOWUP_JOB_, function () { recoverFailedFollowupBuckets_({ force: true }); });
 }
 
 // ONE-OFF: backfills to/cc/subject into TODAY's Overnight_Log rows that

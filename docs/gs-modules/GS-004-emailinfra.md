@@ -306,6 +306,8 @@ local `.gs` tests pass (+1 new).
 
 **2026-11-04** (`5ed90a7`, audit 2026-11-04 N-2): `dedupeByLeadIdGs_` dedupes on lead_id + RM (`leadRmKeyGs_`, `GS-012`), so a consolidated person's combined email keeps each RM's copy of a shared lead; entries with no RM dedupe on lead_id alone, as before.
 
+**2026-11-04** (PENDING_SHA, audit 2026-11-04 Stage 2, N-6..N-9): the watchdog (`checkEmailJobsCompletedGs_`) writes its once-per-day marker BEFORE the automatic recovery (N-8). `emailJobAutoRecoverGs_` reads the `recover*Now` wrappers' return value (they now return `withEmailJobLockGs_`'s result in `AllIssuesEmailer.gs`/`OvernightEmailer.gs`): `false` = the lock was busy, reported as "automatic recovery skipped", and the marker is put back so the next hour alerts and retries (N-7, `EMAIL_AUTO_RECOVER_SKIPPED_`). A died ('stuck') run's alert now points to the recovery, not a plain re-run, because a re-run skips regions already sent and a consolidated email would miss their leads (N-9). N-6: comment only - every CH-level report includes the ops address, so the no-role rule hides the role on all of them, as requested.
+
 ## Revalidation trigger
 
 Any commit touching `EmailInfra.gs` or `Tests_EmailInfra.gs`;

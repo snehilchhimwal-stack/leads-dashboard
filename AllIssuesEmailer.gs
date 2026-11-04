@@ -929,11 +929,11 @@ function recoverFailedAllIssuesBuckets_(opts) {
 }
 
 function recoverFailedAllIssuesBucketsNow() {
-  withEmailJobLockGs_(EMAIL_RECOVERY_JOB_, function () { recoverFailedAllIssuesBuckets_({}); });
+  return withEmailJobLockGs_(EMAIL_RECOVERY_JOB_, function () { recoverFailedAllIssuesBuckets_({}); });
 }
 
 function recoverFailedAllIssuesBucketsForceNow() {
-  withEmailJobLockGs_(EMAIL_RECOVERY_JOB_, function () { recoverFailedAllIssuesBuckets_({ force: true }); });
+  return withEmailJobLockGs_(EMAIL_RECOVERY_JOB_, function () { recoverFailedAllIssuesBuckets_({ force: true }); });
 }
 
 // One-time setup — installs a single daily trigger at ALL_ISSUES_RUN_HOUR_
