@@ -314,41 +314,25 @@ function sendAllIssuesEmails_(opts) {
   // unrelated leads.
   const candidateLeads = [];
   dataRows.forEach(function (row) {
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    if (!leadId) return;
-
-    if (!passesGoogleNonUtmSearchGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'))) return;
-
-    const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
-    const created = createdRaw instanceof Date ? createdRaw : null;
-    if (!created || created < win.from || created > win.to) return; // not assigned in the last 3 calendar days (allIssuesWindowGs_)
-
-    const rawRegion = getVal_(row, colIndex, 'region');
-    const main = mainRegionForGs_(rawRegion);
-    if (!main) return; // not one of the 11 configured regions
-
-    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    const closingReason = getVal_(row, colIndex, 'closing_reason');
-    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed — no issue to report
+    // D-1 (audit 2026-11-04): the scope gate (Google Search / Non-UTM, assigned inside the window - here the last 3 calendar
+    // days, allIssuesWindowGs_ - one of the configured regions, open) is shared with the 10:00 job (EmailInfra.gs).
+    const base = emailCandidateBaseGs_(row, colIndex, win);
+    if (!base) return;
+    const leadId = base.leadId;
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // same priority order Operations' own combined view uses
     if (!issue) return; // open, in scope, but flagged for nothing right now
 
-    const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
-    const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
-    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
-    const stageRank = FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || '');
     const baselineEntry = lastSnapshotMap[leadId]; // per LEAD, not per customer (email audit F18) - call_attempts is a per-lead counter
 
     candidateLeads.push({
       // 2026-11-02 (user request): one copy per customer PER RM - a customer held by several RMs is listed for each of them
       // (each RM's own TL/RH gets it), not collapsed to the furthest copy. The calls rule already pools all RMs (SlaEngine.gs).
-      identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
-      stageRank: stageRank,
-      region: main, lead_id: leadId, RM: RM, TL: TL,
-      status: overnightStatusLabelGs_(stage),
+      identityKey: base.identityKey,
+      stageRank: base.stageRank,
+      region: base.main, lead_id: leadId, RM: base.RM, TL: base.TL,
+      status: overnightStatusLabelGs_(base.stage),
       issueLabel: issue.label,
       followup: (function () {
         const hint = overnightFollowupHintGs_(row, colIndex, now, baselineEntry);
@@ -360,27 +344,14 @@ function sendAllIssuesEmails_(opts) {
     });
   });
 
-  const byIdentity = new Map();
-  let dupedAwayCount = 0;
-  candidateLeads.forEach(function (l) {
-    const existing = byIdentity.get(l.identityKey);
-    if (!existing) { byIdentity.set(l.identityKey, l); return; }
-    dupedAwayCount++;
-    if (l.stageRank > existing.stageRank) byIdentity.set(l.identityKey, l);
-  });
+  const deduped = dedupeEmailCandidatesGs_(candidateLeads); // D-1: shared with the 10:00 job (EmailInfra.gs)
+  const dupedAwayCount = deduped.dupedAwayCount;
   if (dupedAwayCount) {
     Logger.log(dupedAwayCount + ' duplicate customer row(s) collapsed to a single copy each for this run — kept whichever had progressed furthest.');
   }
 
-  const byRegion = {}; // mainRegion -> flagged leads[]; Futwork RMs' leads from EVERY region share one 'Futwork' key (regionKeyForRmGs_)
-  byIdentity.forEach(function (l) {
-    const groupKey = regionKeyForRmGs_(l.RM, l.region);
-    if (!byRegion[groupKey]) byRegion[groupKey] = [];
-    byRegion[groupKey].push({
-      lead_id: l.lead_id, RM: l.RM, TL: l.TL, region: l.region,
-      status: l.status, issueLabel: l.issueLabel, followup: l.followup, staleSince: l.staleSince,
-    });
-  });
+  // mainRegion -> flagged leads[]; Futwork RMs' leads from EVERY region share one 'Futwork' key (regionKeyForRmGs_)
+  const byRegion = groupEmailLeadsByRegionGs_(deduped.leads, ['lead_id', 'RM', 'TL', 'region', 'status', 'issueLabel', 'followup', 'staleSince']);
 
   const logSheet = ensureAllIssuesLogSheet_(ss);
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');

@@ -276,6 +276,8 @@ narrative (all 3 changed files — this one, `OvernightEmailer.gs`,
 
 **2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `AllIssuesEmailer.gs`: header comment and the email's action line name the renamed check "No follow up in last 4 hours" (was "Follow-up Overdue"). The rules themselves live in `GS-012` (RULE-089..091).
 
+**2026-11-04** (PENDING_SHA, audit 2026-11-04 Stage 4, D-1, no behaviour change): `sendAllIssuesEmails_` builds its candidates with the shared `emailCandidateBaseGs_` / `dedupeEmailCandidatesGs_` / `groupEmailLeadsByRegionGs_` (`GS-004`) instead of its own copy of those steps.
+
 ## Revalidation trigger
 
 Any commit touching `AllIssuesEmailer.gs` or `Tests_AllIssuesEmailer.gs`;

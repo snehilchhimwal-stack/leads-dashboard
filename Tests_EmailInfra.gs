@@ -478,6 +478,28 @@ function runEmailInfraTests_() {
       TestAssert_(String(emailSendBudgetTakeGs_).indexOf('Mail' + 'App') === -1, 'S-3: no Mail-service call (it would add an OAuth scope and stop the triggers until re-authorized)');
     }
 
+    // ---- D-1 (audit 2026-11-04): lead selection shared by the 10:00 and 17:00 jobs ----
+    {
+      const t0 = new Date();
+      const win = { from: TestFixture_hoursAgo_(t0, 24), to: t0 };
+      const mk = function (o) { return TestSla_buildRow_(Object.assign({ region: 'Pune', lead_assigned_at: TestFixture_hoursAgo_(t0, 5) }, o)); };
+      const ok = mk({ lead_id: 'D1', client_id: 'C9', RM: ' RM X ', current_stage: 'Suspect' });
+      const b = emailCandidateBaseGs_(ok.row, ok.colIndex, win);
+      TestAssert_(b && b.leadId === 'D1' && b.main === 'Pune' && b.RM === 'RM X' && b.identityKey === 'C9|rm x', 'emailCandidateBaseGs_: an in-scope open lead -> its base fields (per-RM identity key)');
+      const out = function (o) { const r = mk(o); return emailCandidateBaseGs_(r.row, r.colIndex, win); };
+      TestAssertEqual_([
+        out({ lead_id: '' }), out({ group_source: 'facebook' }), out({ lead_assigned_at: TestFixture_hoursAgo_(t0, 30) }),
+        out({ lead_assigned_at: 'yesterday' }), out({ region: 'Nowhere' }), out({ closing_reason: 'Not interested' }), out({ current_stage: 'Won' }),
+      ].map(function (x) { return x === null; }).join(','), 'true,true,true,true,true,true,true', 'emailCandidateBaseGs_: no id / other source / outside the window / text date / unknown region / closed / Opportunity+ -> null');
+      TestAssertEqual_(out({ lead_id: 'D2', client_id: '', RM: '' }).identityKey, 'l:D2|unassigned', 'emailCandidateBaseGs_: no client_id -> keyed on the lead id; blank RM -> Unassigned');
+      const d = dedupeEmailCandidatesGs_([
+        { identityKey: 'a', stageRank: 1, n: 1 }, { identityKey: 'b', stageRank: 0, n: 2 }, { identityKey: 'a', stageRank: 3, n: 3 }, { identityKey: 'a', stageRank: 3, n: 4 },
+      ]);
+      TestAssertEqual_(d.leads.map(function (l) { return l.n; }).join(',') + '|' + d.dupedAwayCount, '3,2|2', 'dedupeEmailCandidatesGs_: the furthest copy wins (first on a tie), first-seen order kept, duplicates counted');
+      const g = groupEmailLeadsByRegionGs_([{ lead_id: '1', RM: 'A', region: 'Pune', extra: 'x', TL: 't' }], ['lead_id', 'RM', 'region']);
+      TestAssertEqual_(JSON.stringify(g), '{"Pune":[{"lead_id":"1","RM":"A","region":"Pune"}]}', 'groupEmailLeadsByRegionGs_: grouped by region key, only the listed fields, in that order');
+    }
+
     // ---- visibleTextOfHtmlGs_ ----
     TestAssertEqual_(visibleTextOfHtmlGs_('<div><table><tr><td> </td></tr></table></div>'), '', 'visibleTextOfHtmlGs_: markup with no text has no visible text');
     TestAssertEqual_(visibleTextOfHtmlGs_('<style>.a{color:red}</style><p>Hello&nbsp;<b>world</b> &amp; co</p>'), 'Hello world & co', 'visibleTextOfHtmlGs_: strips style blocks and tags, decodes entities, collapses whitespace');

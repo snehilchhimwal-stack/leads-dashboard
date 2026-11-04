@@ -1070,40 +1070,13 @@ function sendOvernightMorningEmails_(opts) {
   // no indication to either recipient that the other copy exists.
   const candidateLeads = [];
   dataRows.forEach(function (row) {
-    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
-    if (!leadId) return;
-    // Google + Sub-source gate, checked FIRST — before the window/region/
-    // stage checks below — per explicit request: this email is scoped to
-    // group_source="Google" AND source_bucket in {Non-UTM, Search} only
-    // (see the subject line, which says "Google Overnight Leads"), so a
-    // lead outside that scope is excluded before anything else runs on
-    // it, not filtered out later alongside the other criteria.
-    // Sub-source was NOT actually being checked here before — only
-    // group_source was — despite the dashboard's own generated-report
-    // subjects once claiming (falsely, until fixed — see reports.js's
-    // subjectScopeSuffix comment) a "Google Search & Non-UTM only" scope.
-    // This closes that real gap: passesGoogleNonUtmSearchGs_
-    // (EmailInfra.gs) is the single shared definition of the scope now,
-    // so this and the all-issues script can't drift apart on what
-    // "Google Non-UTM/Search" means.
-    if (!passesGoogleNonUtmSearchGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'))) return;
-    const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
-    const created = createdRaw instanceof Date ? createdRaw : null;
-    if (!created || created < win.from || created > win.to) return; // not an overnight lead
-
-    const rawRegion = getVal_(row, colIndex, 'region');
-    const main = mainRegionForGs_(rawRegion);
-    if (!main) return; // not one of the 11 configured regions
-
-    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    const closingReason = getVal_(row, colIndex, 'closing_reason');
-    const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-    if (isOppOrAbove_(stage, closingReason, leadClosingReason)) return; // already converted overnight — excluded, needs no follow-up
-    if (!isOpenLead_(stage, closingReason, leadClosingReason)) return; // closed overnight — excluded
-
-    const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
-    const TL = String(getVal_(row, colIndex, 'TL') || '').trim();
-    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    // D-1 (audit 2026-11-04): the scope gate is shared with the 17:00 job (emailCandidateBaseGs_, EmailInfra.gs) - Google +
+    // Sub-source checked FIRST (group_source="Google" AND source_bucket in {Non-UTM, Search}, the scope the subject line names),
+    // then assigned inside the overnight window, one of the configured regions, and open (isOpenLead_ also excludes a lead
+    // already at Opportunity+, which needs no follow-up).
+    const base = emailCandidateBaseGs_(row, colIndex, win);
+    if (!base) return;
+    const leadId = base.leadId;
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // kept on the lead for Overnight_Log — not shown in the email itself
@@ -1111,43 +1084,26 @@ function sendOvernightMorningEmails_(opts) {
 
     candidateLeads.push({
       // 2026-11-02 (user request): one copy per customer PER RM - each RM holding the customer is listed for their own TL/RH.
-      identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
-      stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
-      region: main, lead_id: leadId, RM: RM, TL: TL,
-      status: overnightStatusLabelGs_(stage),
+      identityKey: base.identityKey,
+      stageRank: base.stageRank,
+      region: base.main, lead_id: leadId, RM: base.RM, TL: base.TL,
+      status: overnightStatusLabelGs_(base.stage),
       followup: overnightFollowupHintGs_(row, colIndex, now, baselineEntry),
       issue: issue,
       staleSince: staleSinceOfRowGs_(row, colIndex, leadsData.lastChangeMap, now),
     });
   });
 
-  // Dedup by customer identity — keep whichever copy has progressed
-  // FURTHEST in the funnel, same "stage taken from whichever copy went
-  // furthest" preference the dashboard's own sibling collation uses.
-  // Deliberately narrower than that full collation (no comment/call
-  // merging across copies) — this only fixes double-counting/double-
-  // emailing, not full parity with the dashboard's richer merge.
-  const byIdentity = new Map();
-  let dupedAwayCount = 0;
-  candidateLeads.forEach(function (l) {
-    const existing = byIdentity.get(l.identityKey);
-    if (!existing) { byIdentity.set(l.identityKey, l); return; }
-    dupedAwayCount++;
-    if (l.stageRank > existing.stageRank) byIdentity.set(l.identityKey, l);
-  });
+  // Dedup by customer identity (per RM) — keep whichever copy has progressed FURTHEST in the funnel. Shared with the 17:00
+  // job (dedupeEmailCandidatesGs_, EmailInfra.gs). Deliberately narrower than the dashboard's full sibling collation.
+  const deduped = dedupeEmailCandidatesGs_(candidateLeads);
+  const dupedAwayCount = deduped.dupedAwayCount;
   if (dupedAwayCount) {
     Logger.log(dupedAwayCount + ' duplicate customer row(s) (same client_id held by more than one RM, possibly across different regions) collapsed to a single copy each for this run — kept whichever had progressed furthest.');
   }
 
-  const byRegion = {}; // mainRegion -> openLeads[] (each carries its own .issue); Futwork RMs' leads from EVERY region share one 'Futwork' key
-  byIdentity.forEach(function (l) {
-    const groupKey = regionKeyForRmGs_(l.RM, l.region);
-    if (!byRegion[groupKey]) byRegion[groupKey] = [];
-    byRegion[groupKey].push({
-      lead_id: l.lead_id, RM: l.RM, TL: l.TL, region: l.region,
-      status: l.status, followup: l.followup, issue: l.issue, staleSince: l.staleSince,
-    });
-  });
+  // mainRegion -> openLeads[] (each carries its own .issue); Futwork RMs' leads from EVERY region share one 'Futwork' key
+  const byRegion = groupEmailLeadsByRegionGs_(deduped.leads, ['lead_id', 'RM', 'TL', 'region', 'status', 'followup', 'issue', 'staleSince']);
 
   const logSheet = ensureOvernightLogSheet_(ss);
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');

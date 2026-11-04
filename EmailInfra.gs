@@ -417,6 +417,63 @@ function dedupeByLeadIdGs_(entries) {
   });
 }
 
+// ---- D-1 (audit 2026-11-04): lead selection shared by the 10:00 (OvernightEmailer.gs) and 17:00 (AllIssuesEmailer.gs) jobs ----
+// These three steps used to be two hand-kept copies; the jobs' own rules (which SLA issue, which window, what the email shows)
+// stay in each job.
+
+// The scope gate for one leads row: a lead id; Google Search / Non-UTM (passesGoogleNonUtmSearchGs_, checked first); assigned
+// (a real Date cell) inside [win.from, win.to]; one of the configured regions (mainRegionForGs_); and open (isOpenLead_, which
+// also excludes Opportunity+). Returns null when the row is out of scope, else the fields both jobs build on:
+// { leadId, main, stage, RM ('Unassigned' when blank), TL, identityKey (one copy per customer PER RM), stageRank }.
+function emailCandidateBaseGs_(row, colIndex, win) {
+  const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+  if (!leadId) return null;
+  if (!passesGoogleNonUtmSearchGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket'))) return null;
+  const createdRaw = getVal_(row, colIndex, 'lead_assigned_at');
+  const created = createdRaw instanceof Date ? createdRaw : null;
+  if (!created || created < win.from || created > win.to) return null;
+  const main = mainRegionForGs_(getVal_(row, colIndex, 'region'));
+  if (!main) return null;
+  const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+  if (!isOpenLead_(stage, getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'))) return null;
+  const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+  const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+  return {
+    leadId: leadId, main: main, stage: stage, RM: RM,
+    TL: String(getVal_(row, colIndex, 'TL') || '').trim(),
+    identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
+    stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
+  };
+}
+
+// Candidates with the same identityKey collapse to one: the copy furthest in the funnel (higher stageRank; the first seen on a
+// tie). Order is first-seen order. Returns { leads, dupedAwayCount }.
+function dedupeEmailCandidatesGs_(candidates) {
+  const byIdentity = new Map();
+  let dupedAwayCount = 0;
+  (candidates || []).forEach(function (l) {
+    const existing = byIdentity.get(l.identityKey);
+    if (!existing) { byIdentity.set(l.identityKey, l); return; }
+    dupedAwayCount++;
+    if (l.stageRank > existing.stageRank) byIdentity.set(l.identityKey, l);
+  });
+  return { leads: Array.from(byIdentity.values()), dupedAwayCount: dupedAwayCount };
+}
+
+// Region key (regionKeyForRmGs_: Futwork RMs' leads from every region share one key) -> leads, each reduced to `keys` in that
+// order (the order is kept because the entries are stored as JSON in AllIssues_Log / Overnight_Log).
+function groupEmailLeadsByRegionGs_(leads, keys) {
+  const byRegion = {};
+  (leads || []).forEach(function (l) {
+    const groupKey = regionKeyForRmGs_(l.RM, l.region);
+    if (!byRegion[groupKey]) byRegion[groupKey] = [];
+    const out = {};
+    keys.forEach(function (k) { out[k] = l[k]; });
+    byRegion[groupKey].push(out);
+  });
+  return byRegion;
+}
+
 // Best-effort alert for a send that could not happen at all this run —
 // wrapped in its own try/catch so a failure to send the ALERT itself can
 // never take down the real run it's reporting on. Kept deliberately

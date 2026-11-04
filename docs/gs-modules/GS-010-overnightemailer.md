@@ -572,6 +572,8 @@ ending the session.
 
 **2026-11-04** (`5ed90a7`, audit 2026-11-04 N-3): `buildAllIssuesCheckpointSectionOptsGs_` matches checkpoint results to snapshot entries by lead_id + RM (a stored result without an RM still matches by lead_id); the 13:00 job finds each Overnight_Log `issueLog` entry's row with `leadRowFinderGs_`, and new `issueLog` entries record the `RM`.
 
+**2026-11-04** (PENDING_SHA, audit 2026-11-04 Stage 4, D-1, no behaviour change): `sendOvernightMorningEmails_` builds its candidates with the shared `emailCandidateBaseGs_` / `dedupeEmailCandidatesGs_` / `groupEmailLeadsByRegionGs_` (`GS-004`); its separate Opportunity+ check was redundant (`isOpenLead_` already excludes Opportunity+).
+
 ## Revalidation trigger
 
 Any commit touching `OvernightEmailer.gs` or `Tests_OvernightEmailer.gs`;
