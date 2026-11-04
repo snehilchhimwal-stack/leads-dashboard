@@ -187,7 +187,7 @@ Apps Script backend; a library called from the 17:00 emailer. Part of the Email 
 
 **2026-10-16** (`da197cd`, email E2E defects D5/D6; live — deploy register: EmailLedger.gs confirmed at da197cd on 2026-10-16): new FN-487 `emailLedgerSentOrMaybeSentTodayGs_` - the 17:00 "already sent today" rule (AI-3) per email id, with each row's lead ids, for the 10:00 and 13:00 re-run guards (`GS-010`).
 
-**2026-11-04** (audit 2026-11-04 N-1): `emailLedgerSplitLeadsGs_` treats only a repeat of the same lead_id under the SAME RM as a covered duplicate (`leadRmKeyGs_`, `GS-012`). Before, the 17:00 job silently dropped a second RM's copy of a shared customer in the same region, contradicting the one-copy-per-RM rule (`3b8f3cf`).
+**2026-11-04** (`5ed90a7`, audit 2026-11-04 N-1): `emailLedgerSplitLeadsGs_` treats only a repeat of the same lead_id under the SAME RM as a covered duplicate (`leadRmKeyGs_`, `GS-012`). Before, the 17:00 job silently dropped a second RM's copy of a shared customer in the same region, contradicting the one-copy-per-RM rule (`3b8f3cf`).
 
 ## Revalidation trigger
 

@@ -570,7 +570,7 @@ ending the session.
 
 **2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `OvernightEmailer.gs`: the Checkpoint 1/2 section rows and the 13:00 Overnight follow-up rows show a stored issue label through `canonicalIssueLabelGs_` (`GS-012` FN-525), so a log row written before the rename shows "No follow up in last 4 hours" instead of "Follow-up Overdue". Matching is still by `issueKey` / the checkpoint state.
 
-**2026-11-04** (audit 2026-11-04 N-3): `buildAllIssuesCheckpointSectionOptsGs_` matches checkpoint results to snapshot entries by lead_id + RM (a stored result without an RM still matches by lead_id); the 13:00 job finds each Overnight_Log `issueLog` entry's row with `leadRowFinderGs_`, and new `issueLog` entries record the `RM`.
+**2026-11-04** (`5ed90a7`, audit 2026-11-04 N-3): `buildAllIssuesCheckpointSectionOptsGs_` matches checkpoint results to snapshot entries by lead_id + RM (a stored result without an RM still matches by lead_id); the 13:00 job finds each Overnight_Log `issueLog` entry's row with `leadRowFinderGs_`, and new `issueLog` entries record the `RM`.
 
 ## Revalidation trigger
 
