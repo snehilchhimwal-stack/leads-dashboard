@@ -45,6 +45,17 @@ jobs:
           DIFF_BASE: ${{ github.event.before || github.event.pull_request.base.sha }}
           DIFF_HEAD: ${{ github.sha }}
 
+      # D-2 (audit 2026-11-04): the emails (FollowupEngine.gs inferOutcomeGs_) and the
+      # dashboard (js/core-outcome-engine.js inferOutcome) must classify every comment
+      # the same way. Runs both real files on ~800 comments in headless Chrome (the
+      # runner's own Google Chrome; no browser download). BLOCKING. The self-test first
+      # proves the check still notices a deliberately broken copy.
+      - name: Email/dashboard comment classifier agree
+        run: |
+          python3 -m pip install --quiet playwright==1.47.0
+          python3 test/check-twin-behaviour.py --self-test
+          python3 test/check-twin-behaviour.py
+
   # Frontend render-pipeline harness (tests/frontend-harness.html) headless.
   # Forensic audit P2 item 13 (t-tf-5ad22d8e4c2e). Its own job on the
   # OFFICIAL Playwright container -- chromium + every system dependency +
