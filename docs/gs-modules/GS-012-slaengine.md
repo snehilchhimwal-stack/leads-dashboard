@@ -281,6 +281,8 @@ until pasted into the Sheet's Apps Script editor.
 
 **2026-11-04** (`5ed90a7`, audit 2026-11-04 Stage 1, N-3/N-4): (N-4, user decision) `indexCustomerCallTotalsGs_` pools only the customer's CURRENT leads - open rows (`isOpenLead_`) assigned no more than `LEAD_LIFECYCLE_HOURS_` (48h) before the customer's newest open assignment; a closed lead or an older enquiry no longer lends its calls or age, and a row left out falls back to its own counter (twin: `JS-006` `indexCustomerCallTotals`). (N-3) New `leadRowFinderGs_` and `leadRmKeyGs_`: `computeAllIssuesCheckpointGs_` re-reads each logged entry on its OWN RM's copy of a shared lead (falls back to the first row of the lead_id), and each result now carries the entry's `RM`.
 
+**2026-11-05** (PENDING_SHA, audit 2026-11-04 Stage 5, user request "13:00 should share the same path", no behaviour change): new `recheckLoggedLeadGs_` - the re-check of a lead an earlier email already reported (stage, RM, Opportunity+, open, current SLA flags) - used by `computeAllIssuesCheckpointGs_` and by the 13:00 job (`GS-010`), which used to keep their own copies. Verified like Stage 4: every email the full suite produces at a pinned 13:00 clock (749) is identical before and after.
+
 ## Revalidation trigger
 
 Any commit touching `SlaEngine.gs` or `Tests_SlaEngine.gs`; **any of the

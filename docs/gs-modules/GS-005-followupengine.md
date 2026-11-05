@@ -159,6 +159,8 @@ Verified at `c82ec67`; record created by DOC-029.
 
 **2026-10-19** (user request, SLA rule changes - see `GS-012` 2026-10-19): `FollowupEngine.gs`: comment only (the renamed "No follow up in last 4 hours" check). No behaviour change.
 
+**2026-11-05** (PENDING_SHA, audit 2026-11-04 D-2): new `test/check-twin-behaviour.py` runs `inferOutcomeGs_` and its dashboard twin `inferOutcome` (`js/core-outcome-engine.js`) on the same corpus (every signal phrase of both rule tables plus typo variants, ~800 comments) and lists every disagreement - the matching-code gap `test/check-runtime-parity.py` cannot see. First run: 812 comments, 0 mismatches; `--self-test` (a deliberately broken dashboard copy) reports 236.
+
 ## Revalidation trigger
 
 Any commit touching `FollowupEngine.gs` or `Tests_FollowupEngine.gs`;

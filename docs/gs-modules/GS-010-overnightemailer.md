@@ -574,6 +574,8 @@ ending the session.
 
 **2026-11-04** (`952e975`, audit 2026-11-04 Stage 4, D-1, no behaviour change): `sendOvernightMorningEmails_` builds its candidates with the shared `emailCandidateBaseGs_` / `dedupeEmailCandidatesGs_` / `groupEmailLeadsByRegionGs_` (`GS-004`); its separate Opportunity+ check was redundant (`isOpenLead_` already excludes Opportunity+).
 
+**2026-11-05** (PENDING_SHA, audit 2026-11-04 Stage 5, no behaviour change): the 13:00 job (`sendOvernightFollowupEmails_`) re-checks each logged lead with the shared `recheckLoggedLeadGs_` (`GS-012`), the same path the 17:00 checkpoints use, after finding its row with `leadRowFinderGs_`.
+
 ## Revalidation trigger
 
 Any commit touching `OvernightEmailer.gs` or `Tests_OvernightEmailer.gs`;

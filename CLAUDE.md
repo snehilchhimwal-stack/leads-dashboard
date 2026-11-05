@@ -92,6 +92,11 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   mismatch as a lead to verify, not an automatic bug — it can legitimately
   differ when one runtime genuinely doesn't need a field the other does
   (confirmed for real: `HEADER_ALIASES`'s 2 browser-only keys).
+  It cannot see the matching CODE, so after touching the comment
+  classifier also run **`python3 test/check-twin-behaviour.py`**
+  (2026-11-04): it runs `inferOutcomeGs_` and `inferOutcome` on the same
+  ~800 comments (every signal phrase plus typo variants) and lists every
+  disagreement; `--self-test` proves it still catches a deliberate break.
 - **Everything date/time-sensitive is pinned to IST explicitly, never to
   whatever timezone the browser or the machine running a script happens to
   be in.** The dashboard uses `istDateKey`/`IST_TZ`-style helpers

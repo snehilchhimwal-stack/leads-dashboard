@@ -2156,13 +2156,12 @@ function sendOvernightFollowupEmails_(opts) {
     issueLog.forEach(function (entry) {
       const row = rowFor(entry);
       if (!row) { resolvedRows.push({ lead_id: entry.lead_id, RM: '', stage: '(not found)', detail: 'No longer in sheet' }); return; }
-      const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-      const RM = String(getVal_(row, colIndex, 'RM') || '').trim();
-      const closingReason = getVal_(row, colIndex, 'closing_reason');
-      const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
-      if (isOppOrAbove_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Reached Opportunity+' }); return; }
-      if (!isOpenLead_(stage, closingReason, leadClosingReason)) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
-      const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
+      const recheck = recheckLoggedLeadGs_(row, colIndex, now, baselineMap); // D-1: the same re-check as the 17:00 checkpoints (SlaEngine.gs)
+      const stage = recheck.stage;
+      const RM = recheck.RM;
+      if (recheck.oppOrAbove) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Reached Opportunity+' }); return; }
+      if (!recheck.open) { resolvedRows.push({ lead_id: entry.lead_id, RM: RM, stage: stage, detail: 'Closed' }); return; }
+      const flags = recheck.flags;
       if (flags[entry.issueKey]) {
         const baselineEntry = lastSnapshotMap[String(entry.lead_id === null || entry.lead_id === undefined ? '' : entry.lead_id).trim()]; // per LEAD (email audit F18)
         // Real region of THIS lead (the log row's region can be the 'Futwork' pseudo-region) — used for the region bands

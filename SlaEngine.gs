@@ -314,6 +314,25 @@ function leadRowFinderGs_(dataRows, colIndex, wantedIds) {
   };
 }
 
+// D-1 (audit 2026-11-04, user request "13:00 should share the same path"): the re-check of a lead an earlier email already
+// reported, shared by the 17:00 checkpoints (computeAllIssuesCheckpointGs_, run at 10:00 and 13:00) and the 13:00 follow-up of
+// the 10:00 email (OvernightEmailer.gs). Find the row with leadRowFinderGs_ first; this reads its current state:
+// { stage (trimmed), RM (trimmed, '' when blank), oppOrAbove, open (isOpenLead_, false for Opportunity+ too), flags (the SLA
+// flags now, only computed for an open lead, else null) }.
+function recheckLoggedLeadGs_(row, colIndex, now, baselineMap) {
+  const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+  const closingReason = getVal_(row, colIndex, 'closing_reason');
+  const leadClosingReason = getVal_(row, colIndex, 'lead_closing_reason');
+  const open = isOpenLead_(stage, closingReason, leadClosingReason);
+  return {
+    stage: stage,
+    RM: String(getVal_(row, colIndex, 'RM') || '').trim(),
+    oppOrAbove: isOppOrAbove_(stage, closingReason, leadClosingReason),
+    open: open,
+    flags: open ? computeSlaFlags_(row, colIndex, now, baselineMap) : null,
+  };
+}
+
 function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leadsData) {
   if (!priorEntries || !priorEntries.length) return [];
   const wantedIds = new Set(priorEntries.map(function (e) { return String(e.lead_id == null ? '' : e.lead_id).trim(); }));
@@ -331,12 +350,12 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leads
     const row = rowFor(entry);
     if (!row) return { lead_id: entry.lead_id, state: 'not_found', currentIssueLabel: null, currentStatus: null };
 
-    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
-    const stillOpen = isOpenLead_(stage, getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'));
+    const recheck = recheckLoggedLeadGs_(row, colIndex, now, baselineMap); // shared with the 13:00 job (D-1)
+    const stage = recheck.stage;
     const currentStatus = overnightStatusLabelGs_(stage);
-    if (!stillOpen) return { lead_id: entry.lead_id, state: 'resolved', currentIssueLabel: null, currentStatus: currentStatus };
+    if (!recheck.open) return { lead_id: entry.lead_id, state: 'resolved', currentIssueLabel: null, currentStatus: currentStatus };
 
-    const issue = primaryIssueGs_(computeSlaFlags_(row, colIndex, now, baselineMap));
+    const issue = primaryIssueGs_(recheck.flags);
     if (!issue) return { lead_id: entry.lead_id, state: 'resolved', currentIssueLabel: null, currentStatus: currentStatus };
 
     if (!allIssuesCheckpointPriorWasActive_(entry)) {
