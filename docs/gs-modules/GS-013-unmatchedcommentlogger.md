@@ -187,7 +187,7 @@ Verified at `c82ec67`; record created by DOC-029.
 
 **2026-10-15** (`450565a`, audit 2026-10-13 UC-01, UC-02, UC-03): **UC-01** - clearing reviewed rows (or the 30-day prune) no longer brings the same comments back as unreviewed: `clearReviewedUnmatchedCommentsNow` records the cleared rows' keys in a new hidden tab `Unmatched_Comments_Cleared` (`SHEET-026`, FN-509, CFG-141, 30-day window) which the scan treats as already logged, and the scan skips comments older than the retention (`GS-006` FN-508). **UC-02** - the clear and dedupe tools write the kept rows first and clear only the tail (FN-510), with `withRetry_`. **UC-03** - `reviewed` and `logged_at` are compared normalised (the text `FALSE` no longer counts as reviewed). Also (IH-02): the dedup key delegates to `GS-006`'s helper and new `comment_at` cells are written as text. **Not live until pasted.**
 
-**2026-11-05** (PENDING_SHA, audit D-3): the one-line wrapper `unmatchedCommentDedupKeyGs_` (FN-251) was removed; `scanUnmatchedCommentsGs_` calls `commentHistoryDedupKeyGs_` (`GS-006` FN-213) directly. No behaviour change.
+**2026-11-05** (`3092603`, audit D-3): the one-line wrapper `unmatchedCommentDedupKeyGs_` (FN-251) was removed; `scanUnmatchedCommentsGs_` calls `commentHistoryDedupKeyGs_` (`GS-006` FN-213) directly. No behaviour change.
 
 ## Revalidation trigger
 
