@@ -217,6 +217,23 @@ function runFollowupEngineTests_() {
 
     f = buildRow({ internal_status_comments: '', stage_comments: '', last_comment: '' });
     TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'connect and log', 'overnightFollowupHintGs_: falls through to noCommentFollowUpGs_ when there is no comment at all');
+
+    // ---- P-5 (2026-11-05): only the returned comment is classified, and each text once per execution ----
+    {
+      const realUncached = inferOutcomeUncachedGs_;
+      let calls = 0;
+      inferOutcomeUncachedGs_ = function (c) { calls++; return realUncached(c); };
+      INFER_OUTCOME_CACHE_GS_.clear();
+      try {
+        const r = buildRow({ RM: 'Test RM One', stage_comments: '', last_comment: '', internal_status_comments:
+          'Test RM One: P5 first note - 2026-11-01 10:00 | Test RM One: P5 second note - 2026-11-02 10:00 | Test RM One: P5 busy call later - 2026-11-03 10:00' });
+        const latest = latestOutcomeGs_(r.row, r.colIndex);
+        TestAssertEqual_(latest.comment + ' -> ' + calls, 'P5 busy call later -> 1', 'P-5: of three history entries only the returned (newest) one is classified');
+        TestAssertEqual_(latest.outcome, realUncached('P5 busy call later'), 'P-5: …with the same outcome as before');
+        latestOutcomeGs_(r.row, r.colIndex);
+        TestAssertEqual_(calls, 1, 'P-5: the same comment text is classified once per execution (cache)');
+      } finally { inferOutcomeUncachedGs_ = realUncached; INFER_OUTCOME_CACHE_GS_.clear(); }
+    }
   } finally {
     TestEnv_tearDown_();
   }

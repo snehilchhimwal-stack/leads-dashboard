@@ -431,7 +431,20 @@ const OUTCOME_RULES_GS_ = [
     } },
 ];
 
+// P-5 (2026-11-05): results are cached by comment text for the execution (the same text always gets the same outcome; the
+// dashboard twin inferOutcome caches the same way). Many leads share identical comments ("RNR", "Busy", ...), and the fuzzy
+// matching against every signal is the most CPU-heavy step of the snapshot run.
+const INFER_OUTCOME_CACHE_GS_ = new Map();
 function inferOutcomeGs_(comment) {
+  const cacheKey = String(comment);
+  const cached = INFER_OUTCOME_CACHE_GS_.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const result = inferOutcomeUncachedGs_(comment);
+  if (INFER_OUTCOME_CACHE_GS_.size > 50000) INFER_OUTCOME_CACHE_GS_.clear(); // a bound, far above one run's distinct comments
+  INFER_OUTCOME_CACHE_GS_.set(cacheKey, result);
+  return result;
+}
+function inferOutcomeUncachedGs_(comment) {
   const c = String(comment).toLowerCase();
   if (/^[\s\-_./]+$/.test(c)) return 'No Real Update';
   const words = _wordsOfGs_(c);
@@ -733,7 +746,7 @@ function latestOutcomeGs_(row, colIndex) {
       const m = entry.match(/^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/);
       let loggedBy = '', comment = entry, ts = null;
       if (m) { loggedBy = m[1].trim(); comment = m[2].trim(); ts = m[3].trim(); }
-      allEntries.push({ loggedBy: loggedBy, comment: comment, ts: ts, outcome: inferOutcomeGs_(comment) });
+      allEntries.push({ loggedBy: loggedBy, comment: comment, ts: ts }); // outcome: only for the entry returned (P-5, below)
     });
   }
   const entries = ownerName ? allEntries.filter(function (e) {
@@ -764,6 +777,9 @@ function latestOutcomeGs_(row, colIndex) {
       const d = new Date(e.ts.replace(' ', 'T') + ':00+05:30');
       if (!isNaN(d.getTime()) && d.getTime() > newestMs) { newestMs = d.getTime(); latest = e; }
     });
+    // P-5 (2026-11-05): only the returned entry's outcome is ever read, so only it is classified. This used to classify every
+    // comment in the lead's whole history, on ~8,000 open leads per snapshot run (the Comment_History log / unmatched scan spikes).
+    latest.outcome = inferOutcomeGs_(latest.comment);
     return latest;
   }
   const lastComment = String(getVal_(row, colIndex, 'last_comment') || '').trim();
