@@ -50,6 +50,11 @@ jobs:
       # the same way. Runs both real files on ~800 comments in headless Chrome (the
       # runner's own Google Chrome; no browser download). BLOCKING. The self-test first
       # proves the check still notices a deliberately broken copy.
+      # Its own Python: newer Ubuntu runner images refuse `pip install` into the system
+      # Python (PEP 668, "externally-managed-environment").
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Email/dashboard comment classifier agree
         run: |
           python3 -m pip install --quiet playwright==1.47.0
