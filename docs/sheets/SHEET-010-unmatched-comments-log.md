@@ -78,7 +78,7 @@ Piggybacks on `MovementTracker.gs`'s 4×/day trigger via
 
 ## Apps Script functions touching it
 
-`scanUnmatchedCommentsGs_`, `unmatchedCommentDedupKeyGs_`,
+`scanUnmatchedCommentsGs_`, `commentHistoryDedupKeyGs_` (GS-006),
 `ensureUnmatchedCommentsLogSheet_`, `scanUnmatchedCommentsNow`,
 `clearReviewedUnmatchedCommentsNow`, `dedupeUnmatchedCommentsNow` (all
 `GS-013`).

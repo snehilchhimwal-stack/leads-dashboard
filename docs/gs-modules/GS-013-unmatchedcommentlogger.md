@@ -29,8 +29,8 @@ retention below for the real tradeoff this accepts.
 
 - `scanUnmatchedCommentsGs_` — find open leads with an unclassifiable
   latest comment and append them (de-duped).
-- `unmatchedCommentDedupKeyGs_` — the `(lead_id, comment_at-or-comment)`
-  dedup key.
+- the `(lead_id, comment_at-or-comment)` dedup key is `commentHistoryDedupKeyGs_`
+  (`GS-006` FN-213), called directly since 2026-11-05 (D-3).
 - `ensureUnmatchedCommentsLogSheet_` — create/repair the tab.
 - `scanUnmatchedCommentsNow` — a manual run.
 - `clearReviewedUnmatchedCommentsNow` — clear rows marked reviewed
@@ -60,7 +60,7 @@ Movement hub fire.
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-250 | `scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now)` `#L213` | open-lead rows + column index + now | appends one row per open lead with an unclassifiable latest comment (de-duped) | Sheets append (`comment_at` cells formatted as text first, IH-02); dedup read against existing rows (read back through `commentHistoryReadBackKeyGs_`, `GS-006` FN-507) **plus, since 2026-10-13, the keys of rows a human cleared (FN-509, UC-01); a comment older than the 30-day retention is skipped (`GS-006` FN-508, RULE-083)** - both used to come back as new, unreviewed rows | `latestOutcomeGs_` (`GS-005`), `unmatchedCommentDedupKeyGs_` (FN-251), FN-509, `GS-006` FN-507/FN-508 | `snapshotOpenLeads_` (`GS-008`), `scanUnmatchedCommentsNow` (FN-252) | specific |
-| FN-251 | `unmatchedCommentDedupKeyGs_(leadId, outcomeEntry)` `#L131` | lead id + a comment entry | a dedup key, de-duped by `(lead_id, comment_at-or-comment)` | none | since 2026-10-13 delegates to `commentHistoryDedupKeyGs_` (`GS-006` FN-213; they were byte-identical copies) | FN-250 | specific |
+| FN-251 | **RETIRED 2026-11-05** (D-3): `unmatchedCommentDedupKeyGs_` was a one-line wrapper of `commentHistoryDedupKeyGs_` (`GS-006` FN-213) and was removed; FN-250 calls that function directly | - | - | - | - | FN-250 | - |
 | FN-252 | `ensureUnmatchedCommentsLogSheet_(ss)` / `scanUnmatchedCommentsNow()` `#L107/#L306` | spreadsheet / — | ensures the tab / runs FN-250 once by hand | may create the tab / Sheets append | FN-250 | FN-250 / Apps Script editor | specific |
 | FN-253 | `clearReviewedUnmatchedCommentsNow()` `#L323` | — | removes rows flagged reviewed (a cell is reviewed when it is `true` or the text `TRUE`, UC-03); nothing reviewed = no-op | **since 2026-10-13: first records the cleared rows' keys in `Unmatched_Comments_Cleared` (FN-509, UC-01), then writes the kept rows FIRST and clears only the leftover tail (FN-510, UC-02; it used to clear everything first)**; all sheet calls through `withRetry_` | FN-509, FN-510, `commentHistoryReadBackKeyGs_` (`GS-006`) | Apps Script editor (manual, after a review pass) | specific |
 | FN-254 | `dedupeUnmatchedCommentsNow()` `#L381` | — | removes duplicate rows caused by the 2026-09-03 Date-coercion bug; since 2026-10-13 compares `reviewed` and `logged_at` normalised (FN-510, UC-03); no duplicates = no-op | Sheets delete - write-kept-then-clear-tail since 2026-10-13 (UC-02) | FN-510, `commentHistoryReadBackKeyGs_` (`GS-006`) | Apps Script editor (incident recovery) | specific — **a documented incident-recovery function** |
@@ -186,6 +186,8 @@ Verified at `c82ec67`; record created by DOC-029.
 **2026-10-14** (`c590758`): `scanUnmatchedCommentsGs_`'s dedup read and `dedupeUnmatchedCommentsNow`'s grouping format a Date-typed `comment_at` with `istFormatGs_` (`GS-002` FN-438) instead of one `Utilities.formatDate` service call per row; the key string is identical (`GS-008` change note, 2026-10-14). **Not live until pasted.**
 
 **2026-10-15** (`450565a`, audit 2026-10-13 UC-01, UC-02, UC-03): **UC-01** - clearing reviewed rows (or the 30-day prune) no longer brings the same comments back as unreviewed: `clearReviewedUnmatchedCommentsNow` records the cleared rows' keys in a new hidden tab `Unmatched_Comments_Cleared` (`SHEET-026`, FN-509, CFG-141, 30-day window) which the scan treats as already logged, and the scan skips comments older than the retention (`GS-006` FN-508). **UC-02** - the clear and dedupe tools write the kept rows first and clear only the tail (FN-510), with `withRetry_`. **UC-03** - `reviewed` and `logged_at` are compared normalised (the text `FALSE` no longer counts as reviewed). Also (IH-02): the dedup key delegates to `GS-006`'s helper and new `comment_at` cells are written as text. **Not live until pasted.**
+
+**2026-11-05** (PENDING_SHA, audit D-3): the one-line wrapper `unmatchedCommentDedupKeyGs_` (FN-251) was removed; `scanUnmatchedCommentsGs_` calls `commentHistoryDedupKeyGs_` (`GS-006` FN-213) directly. No behaviour change.
 
 ## Revalidation trigger
 

@@ -793,9 +793,9 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
           { ledger: ctx.ledger, emailId: ctx.emailId, dropped: ctx.dropped, isRetry: true });
       }
     }
-    // EI-5 (audit 2026-10-13): withSendRetry_ creates a NEW draft on every attempt, so after a failure up to 3 identical drafts
-    // may be waiting in Gmail Drafts. The texts below say so - sending more than one of them would duplicate the email.
-    const draftsNote = ' There may be up to 3 identical drafts (one per send attempt): send ONE and delete the rest.';
+    // EI-5 (2026-11-05): sendGuardedEmailGs_ deletes each failed attempt's draft before retrying, so normally ONE draft is left.
+    // A delete can itself fail, so the text still says to send only one - sending more would duplicate the email.
+    const draftsNote = ' Normally one draft is left (earlier attempts\' drafts are deleted); if you find more than one identical draft, send ONE and delete the rest.';
     // Same "operation not allowed" detection sendOneOvernightEmail_ uses —
     // createDraft(...).send() is two steps chained together, and a real
     // production case showed the DRAFT succeeds while the immediately-

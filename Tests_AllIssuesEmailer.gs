@@ -669,14 +669,19 @@ function runAllIssuesEmailerTests_() {
       {
         const realGmailEi5 = GmailApp;
         GmailApp = TestMockGmailApp_({});
-        GmailApp.createDraft = function () { return { send: function () { throw new Error('Exception: Not found'); } }; };
+        let draftsMade = 0, draftsDeleted = 0;
+        GmailApp.createDraft = function () {
+          draftsMade++;
+          return { send: function () { throw new Error('Exception: Not found'); }, deleteDraft: function () { draftsDeleted++; } };
+        };
         const before = TestGmailLog_.sent.length;
         let res = null;
         try {
           res = sendOneAllIssuesEmail_(ss, ensureAllIssuesLogSheet_(ss), 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Test A1 One', primaryRole: 'A1' },
             [{ lead_id: 'L-EI5', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
         } finally { GmailApp = realGmailEi5; }
-        TestAssertContains_(res ? res.reason : '', 'up to 3 identical drafts', 'EI-5: the failure reason says several drafts may exist (one per send attempt)');
+        TestAssertEqual_(draftsMade + ' made, ' + draftsDeleted + ' deleted', '3 made, 2 deleted', 'EI-5 (2026-11-05): each failed attempt\'s own draft is deleted before the retry - one draft is left');
+        TestAssertContains_(res ? res.reason : '', 'Normally one draft is left', 'EI-5: the failure reason says one draft is normally left');
         const alert = TestGmailLog_.sent.slice(before).filter(function (e) { return /All-issues email FAILED/.test(e.subject); })[0];
         TestAssert_(!!alert && /send ONE and delete the rest/.test(alert.body), 'EI-5: …and so does the ops alert');
         TestAssert_(!!alert && alert.body.indexOf('48h') === -1 && /3 calendar days/.test(alert.body), 'AI-4: the alert describes the 3-calendar-day window, not a "trailing 48h"');

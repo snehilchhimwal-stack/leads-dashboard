@@ -332,9 +332,11 @@ function runUnmatchedCommentLoggerTests_() {
       DriveApp = realDriveForPrune2_;
     }
 
-    // ---- unmatchedCommentDedupKeyGs_ delegates to commentHistoryDedupKeyGs_ (2026-10-13) ----
-    TestAssertEqual_(unmatchedCommentDedupKeyGs_('L-1', { ts: '2026-08-15  10:00', comment: 'x' }), commentHistoryDedupKeyGs_('L-1', { ts: '2026-08-15 10:00', comment: 'x' }),
-      'unmatchedCommentDedupKeyGs_: same key as commentHistoryDedupKeyGs_, ts whitespace normalised (IH-02)');
+    // ---- D-3 (2026-11-05): the wrapper is gone; this log keys on commentHistoryDedupKeyGs_ directly ----
+    TestAssertEqual_(typeof globalThis.unmatchedCommentDedupKeyGs_, 'undefined', 'D-3: unmatchedCommentDedupKeyGs_ (a one-line wrapper) no longer exists');
+    TestAssert_(String(scanUnmatchedCommentsGs_).indexOf('commentHistoryDedupKeyGs_(') !== -1, 'D-3: the unmatched-comment scan keys on commentHistoryDedupKeyGs_ directly');
+    TestAssertEqual_(commentHistoryDedupKeyGs_('L-1', { ts: '2026-08-15  10:00', comment: 'x' }), commentHistoryDedupKeyGs_('L-1', { ts: '2026-08-15 10:00', comment: 'x' }),
+      'commentHistoryDedupKeyGs_: ts whitespace normalised (IH-02), so both logs key the same comment identically');
 
     // ---- UC-03: reviewed / logged_at normalised before comparing ----
     TestAssert_(unmatchedCommentIsReviewedGs_(true) && unmatchedCommentIsReviewedGs_('TRUE') && unmatchedCommentIsReviewedGs_(' true '), 'unmatchedCommentIsReviewedGs_: true and the text TRUE are reviewed');

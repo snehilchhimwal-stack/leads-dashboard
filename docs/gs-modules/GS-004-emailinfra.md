@@ -312,6 +312,8 @@ local `.gs` tests pass (+1 new).
 
 **2026-11-04** (`952e975`, audit 2026-11-04 Stage 4, D-1, no behaviour change): three lead-selection steps the 10:00 and 17:00 jobs kept as two hand-made copies now live here: `emailCandidateBaseGs_` (scope gate: lead id, Google Search/Non-UTM, assigned inside the window as a Date cell, configured region, open; returns RM/TL/identityKey/stageRank), `dedupeEmailCandidatesGs_` (one copy per customer per RM, furthest stage wins, first on a tie) and `groupEmailLeadsByRegionGs_` (region key via `regionKeyForRmGs_`, fields in a fixed order because they are stored as JSON). Verified by capturing every email the full suite produces before and after (764 sends/drafts/replies): identical apart from random ids.
 
+**2026-11-05** (PENDING_SHA, audit follow-ups EI-5/EI-8, user decision): EI-5 - `sendGuardedEmailGs_` deletes the draft a failed attempt created (through the object it holds, never a lookup) before retrying, so a send that finally fails normally leaves ONE draft; a failed delete is ignored. EI-8 - new `regionRecipientsConfigProblemsGs_`, part of `emailConfigProblemsGs_` (the daily config watchdog): a Region_Recipients row whose region matches no region the emails use (a main region of `REGION_GROUP_MAP_` or Futwork, compared like `legacyRecipientForRegionGs_`) is reported, because its address is never used.
+
 ## Revalidation trigger
 
 Any commit touching `EmailInfra.gs` or `Tests_EmailInfra.gs`;

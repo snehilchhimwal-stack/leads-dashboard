@@ -97,7 +97,7 @@ function ensureCommentHistorySheet_(ss) {
   return sheet;
 }
 
-// Identical shape to UnmatchedCommentLogger.gs's unmatchedCommentDedupKeyGs_
+// Also the key UnmatchedCommentLogger.gs uses (it calls this directly since 2026-11-05, D-3)
 // — lead_id + the comment's own timestamp when the structured "Name:
 // Comment - yyyy-MM-dd HH:mm" log format gives one, else the raw comment
 // text (the last_comment-field fallback path in latestOutcomeGs_, which

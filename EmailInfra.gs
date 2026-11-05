@@ -141,7 +141,39 @@ function emailConfigProblemsGs_() {
     });
   }
   problems.push.apply(problems, pnlHeadConfigProblemsGs_());
+  problems.push.apply(problems, regionRecipientsConfigProblemsGs_());
   return problems;
+}
+
+// EI-8 (2026-11-05, user request): a Region_Recipients row is only ever used when its region matches - ignoring case, spacing
+// and -/_ (legacyRecipientForRegionGs_) - one of the region keys the emails group by: a main region of REGION_GROUP_MAP_
+// ('Pune', never 'Pune East') or 'Futwork'. A typo ("Navi Mumabi") or a sub-region name made that row's address silently unused;
+// the watchdog now names such a row once per day. Read-only: the tab is only read when it already exists (never created here),
+// and an unreadable tab is logged, not reported.
+function regionRecipientsConfigProblemsGs_() {
+  let rows;
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss || typeof ss.getSheetByName !== 'function') return [];
+    const sheet = ss.getSheetByName(REGION_RECIPIENTS_SHEET_);
+    if (!sheet) return [];
+    const lastRow = sheet.getLastRow();
+    rows = lastRow < 2 ? [] : sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  } catch (e) {
+    Logger.log('regionRecipientsConfigProblemsGs_: Region_Recipients could not be read - not checked: ' + e);
+    return [];
+  }
+  const known = {};
+  Object.keys(REGION_GROUP_MAP_).forEach(function (k) { known[normRegionKeyGs_(REGION_GROUP_MAP_[k])] = REGION_GROUP_MAP_[k]; });
+  known[normRegionKeyGs_('Futwork')] = 'Futwork';
+  const names = Object.keys(known).map(function (k) { return known[k]; }).sort();
+  return rows.filter(function (r) {
+    const region = String(r[0] || '').trim();
+    return region && String(r[1] || '').trim() && !known[normRegionKeyGs_(region)];
+  }).map(function (r) {
+    const region = String(r[0]).trim();
+    return { key: 'regionRecipients:' + normRegionKeyGs_(region), detail: 'Region_Recipients has a row for "' + region + '", which matches no region the emails use, so its address is never used. Rename it to one of: ' + names.join(', ') + '.' };
+  });
 }
 
 // EI-11 (audit 2026-10-13): a P&L head's address comes from Manager_Directory, not the private table, so a missing row dropped
@@ -725,9 +757,10 @@ function withRetry_(fn, label) {
 //     freshly-created draft isn't always instantly resolvable by that
 //     internal lookup) — exactly the kind of brief, transient condition a
 //     short retry clears, not a permission or logic problem.
-// EI-5 (audit 2026-10-13): each attempt creates its own draft, so a send that finally fails can leave up to 3 identical drafts.
-// They are NOT deleted here (after a "not found" race the draft cannot be looked up by id either, and deleting the wrong one
-// is worse than leaving one); instead the All-Issues failure alerts (AllIssuesEmailer.gs) say several drafts may exist and only one is to be sent.
+// EI-5 (2026-11-05): sendGuardedEmailGs_ now deletes the failed attempt's own draft before retrying, so at most ONE is left.
+// History (audit 2026-10-13): each attempt created its own draft, so a send that finally failed could leave up to 3 identical drafts.
+// They were left because deleting by id after a "not found" race could hit the wrong draft; deleting through the draft object
+// this run itself created (never a lookup) has no such risk. withSendRetry_ itself stays draft-agnostic.
 function withSendRetry_(fn, label) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -905,13 +938,24 @@ function sendGuardedEmailGs_(msg, label) {
   const routed = typeof emailRerouteApplyGs_ === 'function' ? emailRerouteApplyGs_(msg) : msg;
   const prepared = prepareOutgoingEmailGs_(routed);
   if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems, prepared.missingLeadIds);
-  emailSendBudgetTakeGs_(label); // S-3: per-run cap + daily quota
+  emailSendBudgetTakeGs_(label); // S-3: per-run cap
   const m = prepared.msg;
   const options = { name: 'Homesfy Lead Ops' };
   if (m.cc) options.cc = m.cc;
   if (m.htmlBody !== undefined) options.htmlBody = m.htmlBody;
+  // EI-5 (2026-11-05, user decision): before a retry, the draft the FAILED attempt created is deleted - through the object this
+  // run holds, never a lookup, so it cannot be anyone else's draft. A failed delete is ignored (the draft just stays, as before).
+  // So a send that finally fails leaves at most ONE draft.
+  let pendingDraft = null;
   return withSendRetry_(function () {
-    return GmailApp.createDraft(m.to, m.subject, m.plainBody, options).send();
+    if (pendingDraft) {
+      try { pendingDraft.deleteDraft(); } catch (e) { Logger.log((label || 'Gmail send') + ': could not delete the previous attempt\'s draft (' + e + ') - it stays in Drafts.'); }
+      pendingDraft = null;
+    }
+    pendingDraft = GmailApp.createDraft(m.to, m.subject, m.plainBody, options);
+    const sent = pendingDraft.send();
+    pendingDraft = null;
+    return sent;
   }, label);
 }
 

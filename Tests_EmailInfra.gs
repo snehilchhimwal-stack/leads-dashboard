@@ -1386,6 +1386,27 @@ function runEmailInfraTests_() {
         } finally { SpreadsheetApp = realSsEi11; }
       } finally { REGION_PNL_HEAD_CC_ = realPnl; }
 
+      // ---- EI-8 (2026-11-05): a Region_Recipients row that matches no region the emails use is reported ----
+      {
+        const realSsEi8 = SpreadsheetApp;
+        const rrSs = TestMockSpreadsheet_({});
+        const rrSheet = TestMockSheet_(REGION_RECIPIENTS_SHEET_, [
+          ['region', 'to', 'cc'],
+          ['navi  mumbai', 'a@x.test', ''], ['Pune East', 'b@x.test', ''], ['Navi Mumabi', 'c@x.test', ''], ['futwork', 'd@x.test', ''], ['Unused', '', ''],
+        ]);
+        const withRr = TestMockSpreadsheet_({ Region_Recipients: rrSheet });
+        SpreadsheetApp = { getActiveSpreadsheet: function () { return withRr; }, flush: function () {} };
+        try {
+          const rr = regionRecipientsConfigProblemsGs_();
+          TestAssertEqual_(rr.map(function (p) { return p.key; }).join(','), 'regionRecipients:pune east,regionRecipients:navi mumabi', 'EI-8: a sub-region name and a typo are reported; case/spacing variants, Futwork and a row with no address are not');
+          TestAssertContains_(rr[1].detail, 'Navi Mumbai', 'EI-8: the alert lists the region names that do work');
+          TestAssert_(emailConfigProblemsGs_().some(function (p) { return p.key === 'regionRecipients:navi mumabi'; }), 'EI-8: …and the daily config watchdog includes it');
+          SpreadsheetApp = { getActiveSpreadsheet: function () { return rrSs; }, flush: function () {} };
+          TestAssertEqual_(regionRecipientsConfigProblemsGs_().length, 0, 'EI-8: no Region_Recipients tab -> nothing to report');
+          TestAssertEqual_(rrSs.getSheetByName(REGION_RECIPIENTS_SHEET_), null, 'EI-8: …and the check created no tab (read-only)');
+        } finally { SpreadsheetApp = realSsEi8; }
+      }
+
       // ---- EI-6: the watchdog hint names a function that exists, and no longer promises "safe to re-run" ----
       const realPropsEi6 = PropertiesService;
       PropertiesService = TestMockPropertiesService_();

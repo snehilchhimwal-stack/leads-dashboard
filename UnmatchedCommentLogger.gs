@@ -38,7 +38,7 @@
  * recorded comment, to keep volume low"): every run reads the leads
  * that are ALREADY logged (by lead_id + the comment's own timestamp, or
  * the raw comment text when there's no timestamp — see
- * unmatchedCommentDedupKeyGs_) and skips anything already present. A
+ * commentHistoryDedupKeyGs_) and skips anything already present. A
  * lead's comment only produces a NEW row once, the first run that sees
  * it — an unchanged comment is never re-logged on a later run, so
  * steady-state volume stays low; only genuinely new unmatched comments
@@ -117,20 +117,10 @@ function ensureUnmatchedCommentsLogSheet_(ss) {
   return sheet;
 }
 
-// lead_id + the comment's own timestamp (when the structured "Name:
-// Comment - yyyy-MM-dd HH:mm" log format gives one — see
-// latestOutcomeGs_'s own `ts` field) is the natural de-dup key: a NEW
-// comment on the same lead always carries a new timestamp, so it always
-// produces a new key, while an already-seen comment (same lead, same
-// timestamp) never gets logged twice. Falls back to the raw comment TEXT
-// when there's no timestamp at all (the last_comment-field fallback path
-// in latestOutcomeGs_, which has no timestamp to key off).
-//
-// Delegates to InteractionHistoryLogger.gs's commentHistoryDedupKeyGs_ (2026-10-13 audit: the two were byte-identical copies), so
-// both logs normalise the ts the same way (IH-02).
-function unmatchedCommentDedupKeyGs_(leadId, outcomeEntry) {
-  return commentHistoryDedupKeyGs_(leadId, outcomeEntry);
-}
+// The de-dup key is InteractionHistoryLogger.gs's commentHistoryDedupKeyGs_: lead_id + the comment's own timestamp (a NEW
+// comment always carries a new timestamp, an already-seen one never gets logged twice), or the raw comment TEXT when there is
+// no timestamp (the last_comment fallback of latestOutcomeGs_). D-3 (2026-11-05): the one-line wrapper
+// unmatchedCommentDedupKeyGs_ that only called it was removed; both logs call it directly, so they normalise the ts the same way.
 
 // The `reviewed` cell as a real boolean (UC-03, 2026-10-13): a checkbox reads back true/false, but a pasted or typed cell can read
 // back as the TEXT "TRUE"/"FALSE", and !!"FALSE" is true - which would have cleared an unreviewed row.
@@ -215,14 +205,14 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
   const lastRow = sheet.getLastRow();
   const alreadyLogged = {};
   if (lastRow >= 2) {
-    // Reconstruct the SAME key unmatchedCommentDedupKeyGs_ builds at
+    // Reconstruct the SAME key commentHistoryDedupKeyGs_ builds at
     // write time (ts when present, else the raw comment text) — reading
     // back ONLY the comment_at column here would build a different key
     // for every row that was logged via the no-timestamp fallback
     // (comment_at blank), silently defeating de-dup for exactly those.
     //
     // 2026-09-03 fix — a real, confirmed production incident: comment_at
-    // is written as a plain "yyyy-MM-dd HH:mm" STRING (unmatchedCommentDedupKeyGs_'s
+    // is written as a plain "yyyy-MM-dd HH:mm" STRING (commentHistoryDedupKeyGs_'s
     // own `.ts` format, straight from latestOutcomeGs_'s regex match), but
     // that string is exactly the shape Sheets' own locale-aware type
     // detection recognizes as a real datetime — so the CELL silently
@@ -272,7 +262,7 @@ function scanUnmatchedCommentsGs_(ss, dataRows, colIndex, now) {
     // Older than the retention window: its row has been (or is about to be) pruned, so it is not new (UC-01).
     if (commentBeyondRetentionGs_(latest.ts, now, UNMATCHED_COMMENTS_LOG_RETENTION_DAYS_)) return;
 
-    const key = unmatchedCommentDedupKeyGs_(leadId, latest);
+    const key = commentHistoryDedupKeyGs_(leadId, latest);
     if (alreadyLogged[key]) return; // already logged this exact comment before — see this file's own volume-control note
     alreadyLogged[key] = true; // guard against the SAME lead appearing twice within this one run too (shouldn't normally happen, but stay defensive)
 
