@@ -671,8 +671,8 @@ Convention here: **leave finished one-offs as safe, guarded, idempotent no-ops r
 
 ### 18.9 Stale copies and loose artifacts — do not mistake them for the real thing
 
-- **`working files on 28th for automatic email/`** — untracked snapshot of five `.gs` files from mid-development (2026-08-28). **Not authoritative; contains older code including a hard-coded ops address** — never commit or publish it. Safe to delete (`HANDOVER.md` line 132, dead-code audit).
-- **`.claude/worktrees/serene-chaplygin-6a5170/`** — a complete stale copy of the repo inside the untracked `.claude/` folder (from a 2026-09 worktree session). Greps return hits from it; exclude it.
+- **`working files on 28th for automatic email/`** — untracked snapshot of five `.gs` files from mid-development (2026-08-28). **Not authoritative; contains older code including a hard-coded ops address** — never commit or publish it. **Moved out of the repo folder on 2026-11-05** (audit 2026-11-04 Stage 6) to the sibling folder `Leads Dashboard - old copies (not for Apps Script)\`.
+- **`.claude/worktrees/serene-chaplygin-6a5170/`** — a complete stale copy of the repo inside the untracked `.claude/` folder (from a 2026-09 worktree session). **Removed on 2026-11-05** with `git worktree remove` (it was clean; its commit `0e61863` is in history), so greps no longer hit it.
 - **Two same-named Apps Script projects under Snehil's own account** (ids starting `1dyTKj…` and `1PHcBS…`, last modified 2026-09-12) — byte-identical *old* copies, **not live**.
 - **`Debug_NoIssueLeads` tab** (26,000 cells) — created by `downloadNoIssueLeadsNow`; flagged 2026-09-28 as probably scratch; no deletion recorded [unknown whether still present].
 - **`docs/_archive/`** is an empty placeholder; `docs/changes/` holds one backfill record (no post-catalog code change has yet produced one).
