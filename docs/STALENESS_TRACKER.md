@@ -91,28 +91,28 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `3b8f3cf` | 2026-11-02 | verified by checksum in editor 2026-11-02: shared customer listed once per RM with the pooled call count; pasted, runAllTests 4247/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `Core.gs` | `a7d9e12` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `CycleReport.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `DailyChecklist.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `DailyRmIssueLog.gs` | `d01ff12` | 2026-11-02 | verified by checksum in editor 2026-11-02: calls rule 5 in 24h / 10 after, pooled per customer across RMs; old RM copy of moved leads dropped; pasted, runAllTests 4245/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `EmailInfra.gs` | `9b02f72` | 2026-11-03 | verified by checksum in editor 2026-11-03: moved-lead rule narrowed (an older RM copy dropped only when that RM is inactive; the first version dropped 3,074 rows at the 3 Nov 17:00 run); pasted, runAllTests 4253/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `EmailLedger.gs` | `da197cd` | 2026-10-16 | verified by checksum in editor 2026-10-16 (~17:24 IST): D5/D6 fix pasted, runAllTests 3999/0 across 24 test files; recorded by hand, not by `match-live-gs.py --apply` |
-| `EmailReroute.gs` | `7ef68d3` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `EmailSweep.gs` | `6ca53d2` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `FollowupEngine.gs` | `4b83dae` | 2026-10-19 | verified by checksum in editor 2026-10-19 (~13:53 IST): SLA rule changes (Not Updated stage-only; No follow up in last 4 hours; 3 calls/day) pasted, runAllTests 4165/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `FollowupTracker.gs` | `7ef68d3` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `InteractionHistoryLogger.gs` | `d94a417` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `MovementTracker.gs` | `d01ff12` | 2026-11-02 | verified by checksum in editor 2026-11-02: calls rule 5 in 24h / 10 after, pooled per customer across RMs; old RM copy of moved leads dropped; pasted, runAllTests 4245/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `OpsAudit.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `OpsChecklistRunner.gs` | `8ef279d` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
-| `OvernightEmailer.gs` | `3b8f3cf` | 2026-11-02 | verified by checksum in editor 2026-11-02: shared customer listed once per RM with the pooled call count; pasted, runAllTests 4247/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `RmHierarchy.gs` | `12d81c7` | 2026-11-03 | verified by checksum in editor 2026-11-03: Sachin Rana left (5 S1s to Sanket Patil / Kumar Babu per HR Live), confirmed leaver; pasted and saved, runAllTests run by the user (reported done; expected 4248/0); then syncRmHierarchyNightlyNow and removeRmHierarchyLeaversNow run by the user (logs not shared); recorded by hand, not by `match-live-gs.py --apply` |
-| `RmHierarchySync.gs` | `5c9f95e` | 2026-11-03 | verified by checksum in editor 2026-11-03: a leaver who still manages a team is listed at the top of every nightly sync email (ACTION NEEDED subject); pasted, runAllTests 4251/0 (24 files); recorded by hand, not by `match-live-gs.py --apply` |
-| `SlaEngine.gs` | `3b8f3cf` | 2026-11-02 | verified by checksum in editor 2026-11-02: shared customer listed once per RM with the pooled call count; pasted, runAllTests 4247/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `StaleLeads.gs` | `e6bdcb0` | 2026-10-21 | verified by checksum in editor 2026-10-21: stale block recounts the region band and drops the count from the stale copy; pasted, runAllTests 4245/0; recorded by hand, not by `match-live-gs.py --apply` |
-| `UnmatchedCommentLogger.gs` | `450565a` | 2026-10-16 | verified by checksum in editor 2026-10-16: the live project holds exactly the commit `6ca53d2` versions of every file (runAllTests 3985/0, 24 test files, ~17:07 IST); recorded by hand, not by `match-live-gs.py --apply` |
+| `AllIssuesEmailer.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `Core.gs` | `a7d9e12` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `CycleReport.gs` | `6ca53d2` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `DailyChecklist.gs` | `6ca53d2` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `DailyRmIssueLog.gs` | `d01ff12` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `EmailInfra.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `EmailLedger.gs` | `5ed90a7` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `EmailReroute.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `EmailSweep.gs` | `6ca53d2` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `FollowupEngine.gs` | `af92f5a` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `FollowupTracker.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `InteractionHistoryLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `MovementTracker.gs` | `d01ff12` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `OpsAudit.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `OvernightEmailer.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `RmHierarchy.gs` | `12d81c7` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `RmHierarchySync.gs` | `5c9f95e` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `SlaEngine.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `StaleLeads.gs` | `e6bdcb0` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 
 ### Known live-vs-repo differences
 
