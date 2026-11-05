@@ -161,7 +161,7 @@ Verified at `c82ec67`; record created by DOC-029.
 
 **2026-11-05** (`d290405`, audit 2026-11-04 D-2): new `test/check-twin-behaviour.py` runs `inferOutcomeGs_` and its dashboard twin `inferOutcome` (`js/core-outcome-engine.js`) on the same corpus (every signal phrase of both rule tables plus typo variants, ~800 comments) and lists every disagreement - the matching-code gap `test/check-runtime-parity.py` cannot see. First run: 812 comments, 0 mismatches; `--self-test` (a deliberately broken dashboard copy) reports 236.
 
-**2026-11-05** (PENDING_SHA, P-5, no behaviour change): `latestOutcomeGs_` classified EVERY comment in a lead's history (only the returned one is used), on ~8,000 open leads per snapshot run - the CPU behind the Comment_History log / unmatched scan spikes (30 s normally, 480-1,020 s on slow runs, 14-31 Oct, Movement_Log_Runs). Now only the returned entry is classified, and `inferOutcomeGs_` caches results by text per execution (`INFER_OUTCOME_CACHE_GS_`, like the dashboard twin; the uncached body is `inferOutcomeUncachedGs_`). Verified: 749 suite emails identical, twin check 0 mismatches.
+**2026-11-05** (`af92f5a`, P-5, no behaviour change): `latestOutcomeGs_` classified EVERY comment in a lead's history (only the returned one is used), on ~8,000 open leads per snapshot run - the CPU behind the Comment_History log / unmatched scan spikes (30 s normally, 480-1,020 s on slow runs, 14-31 Oct, Movement_Log_Runs). Now only the returned entry is classified, and `inferOutcomeGs_` caches results by text per execution (`INFER_OUTCOME_CACHE_GS_`, like the dashboard twin; the uncached body is `inferOutcomeUncachedGs_`). Verified: 749 suite emails identical, twin check 0 mismatches.
 
 ## Revalidation trigger
 
