@@ -671,7 +671,7 @@ function runRmHierarchySyncTests_() {
         const real = realPins();
         const byName = {};
         real.forEach(function (p) { byName[p.name] = p; });
-        TestAssertEqual_(Object.keys(byName).sort(), ['Gurmohit Singh Sandhu', 'Khushal Soni', 'Mihir Jivani', 'Mohit Manwani', 'Riyan Jamadar', 'Sachin Rana', 'Sanket Yadav', 'Shubham Raj', 'Tisha Valecha', 'Zeya Shaikh'], 'real pins: the 2026-10-19 entries + the 2026-11-03 Sachin Rana team');
+        TestAssertEqual_(Object.keys(byName).sort(), ['Aakash Dhole', 'Bhanu Singh', 'Bisma Shah', 'Danish Shaikh', 'Gurmohit Singh Sandhu', 'Joshi Dhairya', 'Kamlesh Tawale', 'Khushal Soni', 'Kishan Patel', 'Manan Bhatt', 'Mhd Haseebulla', 'Mihir Jivani', 'Mohit Manwani', 'Nitin Devariya', 'Praveen R', 'Rahul Singh', 'Reshma Shaikh', 'Riyan Jamadar', 'Sachin Rana', 'Sangam S', 'Sanket Yadav', 'Shreyang Chudasama', 'Shubham Raj', 'Sumeet Pal', 'Tisha Valecha', 'Zeya Shaikh'], 'real pins: 2026-10-19 + 2026-11-03 Sachin Rana team + 2026-11-11 HR Live reassignments');
         TestAssert_(byName['Sanket Yadav'].leaver === true, 'real pins: Sanket Yadav is a pinned leaver');
         const raw = {};
         RM_HIERARCHY_RAW_.forEach(function (r) { raw[normPersonName_(r[2])] = r; });

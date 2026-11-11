@@ -893,6 +893,23 @@ const RMSYNC_PINNED_OVERRIDES_ = [
   { name: 'Mihir Jivani', set: { tl: 'Kumar Babu', tm: '', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to A1 Kumar Babu (HR Live)' },
   { name: 'Zeya Shaikh', set: { tl: 'Kumar Babu', tm: '', rh: 'Rajkumar Ombase', ch: 'Sanjyota Bhosale' }, was: ['Sachin Rana'], since: '2026-11-03', why: 'A1 Sachin Rana left; moved to A1 Kumar Babu (HR Live)' },
   { name: 'Sachin Rana', leaver: true, since: '2026-11-03', why: 'left - not in HR Live, no leads' },
+  // 2026-11-11 (user: update as per HR Live): reassignments the sync cannot place by itself (HR Live's columns do not give the tier).
+  { name: 'Nitin Devariya', set: { tl: 'Yash Sharma', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'TM Akash A Ugale added (HR Live)' },
+  { name: 'Aakash Dhole', set: { tl: 'Yash Sharma', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'TM Akash A Ugale added (HR Live)' },
+  { name: 'Bisma Shah', set: { tl: 'Yash Sharma', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'TM Akash A Ugale added (HR Live)' },
+  { name: 'Manan Bhatt', set: { tl: 'Yash Sharma', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'TM Akash A Ugale added (HR Live)' },
+  { name: 'Kishan Patel', set: { tl: 'Prajwal Shetty', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'now under Prajwal Shetty (HR Live)' },
+  { name: 'Sumeet Pal', set: { tl: 'Prajwal Shetty', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'now under Prajwal Shetty (HR Live)' },
+  { name: 'Shreyang Chudasama', set: { tl: 'Prajwal Shetty', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'now under Prajwal Shetty (HR Live)' },
+  { name: 'Danish Shaikh', set: { tl: 'Prajwal Shetty', tm: 'Akash A Ugale', rh: '', ch: 'Sanjyota Bhosale' }, since: '2026-11-11', why: 'now under Prajwal Shetty (HR Live)' },
+  { name: 'Kamlesh Tawale', set: { tl: 'Niraj Patil', tm: '', rh: 'Swapnil Gowalkar', ch: 'Bipin More' }, since: '2026-11-11', why: 'now under A1 Niraj Patil (HR Live)' },
+  { name: 'Joshi Dhairya', set: { tl: 'Avinash Kumar', tm: '', rh: '', ch: 'Vidya Jadhav' }, since: '2026-11-11', why: 'now under A1 Avinash Kumar (HR Live)' },
+  { name: 'Bhanu Singh', set: { tl: 'Pritesh Shankhat', tm: '', rh: '', ch: 'Abhhijjit Gandhii' }, since: '2026-11-11', why: 'now under A1 Pritesh Shankhat (HR Live)' },
+  { name: 'Reshma Shaikh', set: { tl: 'Mayuresh Jadhav', tm: '', rh: '', ch: 'Bipin More' }, since: '2026-11-11', why: 'now under A1 Mayuresh Jadhav (HR Live)' },
+  { name: 'Sangam S', set: { tl: '', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'RH Romen Singh (HR Live); CH Mukesh Mishra kept (Bangalore effective CH)' },
+  { name: 'Praveen R', set: { tl: 'Sangam S', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'now under Sangam S (HR Live); CH Mukesh Mishra kept' },
+  { name: 'Rahul Singh', set: { tl: 'Sangam S', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'now under Sangam S (HR Live); CH Mukesh Mishra kept' },
+  { name: 'Mhd Haseebulla', set: { tl: 'Mainuddin T', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'now under A1 Mainuddin T (HR Live); CH Mukesh Mishra kept' },
 ];
 // Indirection so the tests can supply their own pins (the real ones name live people).
 function rmSyncPinnedOverridesGs_() { return RMSYNC_PINNED_OVERRIDES_; }

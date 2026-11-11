@@ -184,7 +184,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Navi Mumbai','S1','Ashish Kadam','Avinash Kumar','','','Vidya Jadhav'],
   ['Pune','City Lead','Sourabh Sareen','','','',''],
   ['Loan','Executive','Sachin Kadam','Zahid Shaikh','','','Mayur Panjari'],
-  ['Bangalore','S1','Sangam S','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
+  ['Bangalore','A1','Sangam S','','','Romen Singh','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra); 2026-11-11 HR Live: RH Romen Singh (HR Live); CH Mukesh Mishra kept (Bangalore effective CH)
   ['Bangalore','S1','Chandana N R','','','Romen Singh','Mukesh Mishra'],
   ['Loan','BDM','Swapnil B Bhosale','','','','Mayur Panjari'],
   ['Pune','RH','Sachindra Wadane','','','','Sourabh Sareen'],
@@ -234,7 +234,7 @@ const RM_HIERARCHY_RAW_ = [
   // top of this table). Same pattern as Vidya Jadhav/Bipin More -> Shitij
   // Kaushal above.
   ['Hyderabad','Cluster Head','Zoya Fathima','','','','Mukesh Mishra'],
-  ['Harbour','S1','Nitin Devariya','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Harbour','S1','Nitin Devariya','Yash Sharma','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: TM Akash A Ugale added (HR Live)
   ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh','Mukesh Mishra'],
   ['Loan','BDM','Angad Yadav','','','','Mayur Panjari'],
   ['Sourcing - Pune','S3','Nikhil Jadhav','','Yash Kalal','','Sourabh Sareen'],
@@ -252,27 +252,27 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Nagmma Mujnayak','Firoj Shaikh','','','Sourabh Sareen'], // 2026-10-13 HR Live: under Firoj Shaikh (was tm Ayaz Bagwan)
   ['Hyderabad','S1','Maagathoti Adilakshmi','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Navi Mumbai','S1','Jayesh Parab','Avinash Kumar','','','Vidya Jadhav'],
-  ['Bangalore','S1','Praveen R','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
+  ['Bangalore','S1','Praveen R','Sangam S','','Romen Singh','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra); 2026-11-11 HR Live: now under Sangam S (HR Live); CH Mukesh Mishra kept
   ['Western','A1','Prathmesh S Pandey','','','','Rahul Gandhi'],
   ['HNI','A1','Pritesh Shankhat','','','','Abhhijjit Gandhii'],
   ['Western','S1','Vijay Yadav','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Western','S1','Lovkesh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Bangalore','S1','Mhd Haseebulla','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
+  ['Bangalore','S1','Mhd Haseebulla','Mainuddin T','','Romen Singh','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra); 2026-11-11 HR Live: now under A1 Mainuddin T (HR Live); CH Mukesh Mishra kept
   ['Western','S1','Kundan Singh','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Hyderabad','S1','Vadlapudi Divya','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
   ['Thane','S1','Avinash Das','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Somanath Sangle','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Divya Rohela','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Arbaj Shaikh','','Rahul Poudel','','Sourabh Sareen'],
-  ['Thane','S1','Kamlesh Tawale','','','Swapnil Gowalkar','Bipin More'],
+  ['Thane','S1','Kamlesh Tawale','Niraj Patil','','Swapnil Gowalkar','Bipin More'], // 2026-11-11 HR Live: now under A1 Niraj Patil (HR Live)
   ['Thane','S1','Arbaaz Ansari','Amit Upadhyay','','','Bipin More'],
   ['Pune','S1','Ravi Pandey','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Vaibhav Bhadkumbe','','Ayaz Bagwan','','Sourabh Sareen'],
-  ['Central','S1','Kishan Patel','Akash A Ugale','','','Sanjyota Bhosale'],
-  ['Navi Mumbai','S1','Joshi Dhairya','','','','Vidya Jadhav'],
+  ['Central','S1','Kishan Patel','Prajwal Shetty','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: now under Prajwal Shetty (HR Live)
+  ['Navi Mumbai','S1','Joshi Dhairya','Avinash Kumar','','','Vidya Jadhav'], // 2026-11-11 HR Live: now under A1 Avinash Kumar (HR Live)
   ['Bangalore','RH','Romen Singh','','','','Mukesh Mishra'],
   ['Bangalore','S1','Sippal Khora','Chaithanya M','','Romen Singh','Mukesh Mishra'],
-  ['Harbour','S1','Aakash Dhole','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Harbour','S1','Aakash Dhole','Yash Sharma','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: TM Akash A Ugale added (HR Live)
   ['Western','S1','Yash Kandhare','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Loan','Manager','Aditya Gera','','','','Mayur Panjari'],
   ['Bangalore','S1','Zain Ahmed','Chaithanya M','','Romen Singh','Mukesh Mishra'],
@@ -282,10 +282,10 @@ const RM_HIERARCHY_RAW_ = [
   ['Bangalore','A1','Mainuddin T','','','Romen Singh','Mukesh Mishra'],
   ['Western','S1','Saurabh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Pune','S1','Vishwanath Zalake','','Ayaz Bagwan','','Sourabh Sareen'],
-  ['Central','S1','Sumeet Pal','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Central','S1','Sumeet Pal','Prajwal Shetty','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: now under Prajwal Shetty (HR Live)
   ['Central','S1','Gurmohit Singh Sandhu','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-11-03 HR Live: Sachin Rana left
   ['Bangalore','S1','Mahesh V','Rahan Khan','','Romen Singh','Mukesh Mishra'],
-  ['Harbour','S1','Bisma Shah','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Harbour','S1','Bisma Shah','Yash Sharma','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: TM Akash A Ugale added (HR Live)
   ['Bangalore','S1','Abdur Rahim','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Nagnath Dhotre','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Pune','S1','Aditya Tripathi','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'],
@@ -320,9 +320,9 @@ const RM_HIERARCHY_RAW_ = [
   ['Loan','A1','Zahid Shaikh','','','','Mayur Panjari'],
   ['Pune','S1','Aadesh Narwade','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
-  ['Harbour','S1','Manan Bhatt','Yash Sharma','','','Sanjyota Bhosale'],
+  ['Harbour','S1','Manan Bhatt','Yash Sharma','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: TM Akash A Ugale added (HR Live)
   ['Western','S1','Vijay Katheriya','','Minas Patel','','Rahul Gandhi'],
-  ['Bangalore','S1','Rahul Singh','','','','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra)
+  ['Bangalore','S1','Rahul Singh','Sangam S','','Romen Singh','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra); 2026-11-11 HR Live: now under Sangam S (HR Live); CH Mukesh Mishra kept
   ['Pune','S1','Aabid Khan','Firoj Shaikh','','','Sourabh Sareen'],
   ['HNI','S1','Mohammed Rafiq Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['Loan','BDM','Husen Shaikh','','','','Mayur Panjari'],
@@ -377,7 +377,7 @@ const RM_HIERARCHY_RAW_ = [
   // the Pre Sales team addition -- closes a gap before it has a chance to
   // cause a real "no recipient" miss, not in response to one yet.
   ['Loan','BDM','Mohd Ali Abdul Gaffar','','','','Mayur Panjari'],
-  ['Central','S1','Shreyang Chudasama','Akash A Ugale','','','Sanjyota Bhosale'],
+  ['Central','S1','Shreyang Chudasama','Prajwal Shetty','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: now under Prajwal Shetty (HR Live)
   ['Bangalore','S1','Kavya B R','Mainuddin T','','Romen Singh','Mukesh Mishra'],
   ['Pune','S1','Priyangshu Dey','','Ayaz Bagwan','','Sourabh Sareen'],
   ['Pune','S1','Vijay Kshirsagar','Hitesh Choudhary','Rahul Poudel','','Sourabh Sareen'], // 2026-10-13 HR Live: under new A1 Hitesh Choudhary (role change 2026-10-09)
@@ -478,16 +478,16 @@ const RM_HIERARCHY_RAW_ = [
   // AUTO-REFRESH 2026-10-13 from the live HR roster sheet: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Thane','S1','Asgar Sayyed','','','Swapnil Gowalkar','Bipin More'],
   ['Hyderabad','S1','Balamurali Sivakumar','','','','Zoya Fathima'],
-  ['HNI','S1','Bhanu Singh','','','','Abhhijjit Gandhii'],
+  ['HNI','S1','Bhanu Singh','Pritesh Shankhat','','','Abhhijjit Gandhii'], // 2026-11-11 HR Live: now under A1 Pritesh Shankhat (HR Live)
   ['HNI','S1','Bhargav Parghi','','','','Abhhijjit Gandhii'],
-  ['Central','S1','Danish Shaikh','','Akash A Ugale','','Sanjyota Bhosale'], // HR spells it "Akash A ugale"
+  ['Central','S1','Danish Shaikh','Prajwal Shetty','Akash A Ugale','','Sanjyota Bhosale'], // HR spells it "Akash A ugale"; 2026-11-11 HR Live: now under Prajwal Shetty (HR Live)
   ['Thane','S1','Diksha Bhosle','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','A1','Hitesh Choudhary','','Rahul Poudel','','Sourabh Sareen'],
   ['Pune','S1','Jay Renaviker','','Rahul Poudel','','Sourabh Sareen'], // HR Live's 2026-10-13 spelling -- same person as the "Jay Renavikar" row above, kept so either spelling resolves
   ['Pune','S1','Kanhaiya Kumar','Rohit Rathod','','','Sourabh Sareen'],
   ['Thane','A1','Mayuresh Jadhav','','','','Bipin More'],
   ['Bangalore','S1','Nikhil Bagri','Mainuddin T','','Romen Singh',''],
-  ['Thane','S1','Reshma Shaikh','','','','Bipin More'],
+  ['Thane','S1','Reshma Shaikh','Mayuresh Jadhav','','','Bipin More'], // 2026-11-11 HR Live: now under A1 Mayuresh Jadhav (HR Live)
   ['HNI','S1','Rishav Sharma','','','','Abhhijjit Gandhii'],
   ['Loan','BDM','Sanjay Verma','','','','Mayur Panjari'], // 2026-10-13: Loan team under Mayur Panjari (confirmed by the user; HR's team column said Thane)
   ['Central','TM','Sanket Patil','','','Rajkumar Ombase','Sanjyota Bhosale'],
