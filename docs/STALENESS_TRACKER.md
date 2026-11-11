@@ -99,7 +99,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `EmailInfra.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `EmailLedger.gs` | `5ed90a7` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `EmailReroute.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `EmailSweep.gs` | `6ca53d2` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `EmailSweep.gs` | `79ef725` | 2026-11-11 | verified by checksum in editor 2026-11-11: our own 13:00 follow-up (sent under the account name) is no longer counted as a reply; pasted, runAllTests 4311/0 (24 files); recorded by hand, not by `match-live-gs.py --apply` |
 | `FollowupEngine.gs` | `af92f5a` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `FollowupTracker.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `InteractionHistoryLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
