@@ -102,7 +102,9 @@ function runEmailSweepTests_() {
     ];
     const reps = emailSweepRepliesGs_(row(), msgs, '');
     TestAssertEqual_(reps.count + ',' + reps.latest.getTime(), '2,' + minutesAfter(90).getTime(), 'replies: only others\' messages after the send count, newest reported; our own and bounce notices do not');
-    TestAssertEqual_(emailSweepRepliesGs_(row(), [], '').count + ',' + emailSweepRepliesGs_(row(), [], '').latest, '0,null', 'replies: none');
+    TestAssertEqual_(emailSweepRepliesGs_(row(), [], '').count + ',' + emailSweepRepliesGs_(row(), [], '').latest, '0,null', 'replies: none');
+    // 2026-11-11: the 13:00 follow-up goes out under the account's own name, not "Homesfy Lead Ops" - same address as the thread's first message, so it is ours.
+    TestAssertEqual_(emailSweepRepliesGs_(row(), [msgs[0], { from: 'Snehil Chhimwal <ops@x.test>', date: minutesAfter(180) }, { from: 'Boss <boss@x.test>', date: minutesAfter(200) }], '').count, 1, 'replies: our 13:00 follow-up under another display name is not a reply (same address as the first message)');
 
     // ================= the sweep against a ledger =================
     const nowSweep = new Date();

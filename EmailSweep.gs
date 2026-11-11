@@ -154,11 +154,16 @@ function emailSweepIsBounceSenderGs_(from) { return /mailer-daemon|postmaster/i.
 // messages = [{ from, date }]. Returns { count, latest } (latest = the newest reply's Date or null).
 function emailSweepRepliesGs_(row, messages, ownAddress) {
   const finished = row.finished_at instanceof Date ? row.finished_at.getTime() : NaN;
+  // 2026-11-11: the 13:00 job's threaded follow-up goes out under the account's own name ("Snehil Chhimwal"), not "Homesfy Lead
+  // Ops", and the effective-user address is not always readable from a trigger - so every 13:00 follow-up was counted as a REPLY
+  // (8 Nov: 28 "replies", all at 13:05). The thread's first message is ours, so its sender address is ours too.
+  const first = (messages || [])[0];
+  const threadOwn = first ? ((String(first.from || '').match(/[^\s<>"]+@[^\s<>"]+/) || [''])[0]).toLowerCase() : '';
   let count = 0, latest = null;
   (messages || []).forEach(function (m) {
     const at = m.date instanceof Date ? m.date.getTime() : NaN;
     if (isNaN(finished) || isNaN(at) || at <= finished) return;
-    if (emailSweepIsOwnGs_(m.from, ownAddress) || emailSweepIsBounceSenderGs_(m.from)) return;
+    if (emailSweepIsOwnGs_(m.from, ownAddress) || (threadOwn && emailSweepIsOwnGs_(m.from, threadOwn)) || emailSweepIsBounceSenderGs_(m.from)) return;
     count++;
     if (!latest || at > latest.getTime()) latest = m.date;
   });
