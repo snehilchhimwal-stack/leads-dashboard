@@ -108,8 +108,8 @@ snippet text itself is the same every time — only the embedded payload changes
 | `OpsAudit.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `OvernightEmailer.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `RmHierarchy.gs` | `12d81c7` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `RmHierarchySync.gs` | `5c9f95e` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `RmHierarchy.gs` | `492de2d` | 2026-11-11 | verified by checksum in editor 2026-11-11: 16 HR Live reassignments pinned; pasted, runAllTests 4311/0 (24 files). applyRmHierarchyReassignmentsNow + syncRmHierarchyNightlyNow NOT yet run as of 13:15 (Executions shows only runAllTests) - the live RM_Hierarchy tab still has the old managers; recorded by hand, not by `match-live-gs.py --apply` |
+| `RmHierarchySync.gs` | `492de2d` | 2026-11-11 | verified by checksum in editor 2026-11-11: 16 HR Live reassignments pinned; pasted, runAllTests 4311/0 (24 files). applyRmHierarchyReassignmentsNow + syncRmHierarchyNightlyNow NOT yet run as of 13:15 (Executions shows only runAllTests) - the live RM_Hierarchy tab still has the old managers; recorded by hand, not by `match-live-gs.py --apply` |
 | `SlaEngine.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `StaleLeads.gs` | `e6bdcb0` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
