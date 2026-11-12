@@ -1451,7 +1451,8 @@ function runMovementTrackerTests_() {
       TestAssertEqual_(hashDiffs, 0, 'content hash: identical to the service-call reference for 300 varied leads (dates, blanks, string cells, a time-only 1899 cell)');
       // 2026-11-12: the plain-JavaScript SHA-256 equals the service digest (ASCII, Hindi, emoji, empty, block boundaries).
       const samples = ['', 'abc', 'a'.repeat(55), 'a'.repeat(56), 'a'.repeat(64), 'x'.repeat(1000), 'Rajesh\u0000Muni\u0000Suspect', 'राहुल पौडेल - कॉल', 'emoji \uD83D\uDE00 ok', 'lone \uD800 surrogate'];
-      TestAssertEqual_(samples.filter(function (t) { return _sha256HexJsGs_(t) !== _digestHexViaServiceGs_(t); }).length, 0, 'JS SHA-256: identical to Utilities.computeDigest for ASCII, multi-byte, emoji, empty and block-boundary texts');
+      const shaDiff = samples.map(function (t, k) { return _sha256HexJsGs_(t) !== _digestHexViaServiceGs_(t) ? 'sample ' + k + ' (' + JSON.stringify(t.slice(0, 20)) + ')' : ''; }).filter(String);
+      TestAssertEqual_(shaDiff.join('; '), '', 'JS SHA-256: identical to Utilities.computeDigest for ASCII, multi-byte, emoji, empty and block-boundary texts');
       // The self-check falls back to the service for the rest of the run when the two ever differ.
       const realJs = _sha256HexJsGs_;
       try {
