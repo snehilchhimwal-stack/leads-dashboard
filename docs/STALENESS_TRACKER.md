@@ -104,7 +104,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `FollowupTracker.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `InteractionHistoryLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `MovementTracker.gs` | `d01ff12` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `MovementTracker.gs` | `a2b904e` | 2026-11-12 | verified by checksum in editor 2026-11-12: snapshot content hash in plain-JS SHA-256 for ASCII text (non-ASCII stays on Utilities.computeDigest, which is not UTF-8 - found live), with a per-run self-check; pasted, runAllTests 4314/0 (24 files); recorded by hand, not by `match-live-gs.py --apply` |
 | `OpsAudit.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
 | `OvernightEmailer.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
