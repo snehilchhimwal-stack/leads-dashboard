@@ -182,18 +182,18 @@ function _leadContentHashGs_(getFieldValue) {
 // 2026-11-12 (hardening): one Utilities.computeDigest service call per lead was the snapshot's slowest step when the platform is
 // slow (12 Nov 12:44: 5,647 leads hashed in 638 s, ~113 ms per call, so the run skipped its maintenance steps). The same SHA-256 is
 // computed here in plain JavaScript (UTF-8, like the browser's TextEncoder + crypto.subtle - the digests must stay byte-identical
-// across writers). Self-check: the first 3 texts of a run, and the first non-ASCII one, are also digested by the service; any
-// difference switches the rest of the run back to the service (logged), so a wrong digest is never written.
+// across writers). 2026-11-12 live finding: Utilities.computeDigest(String) does NOT encode non-ASCII text as UTF-8 (Hindi, emoji
+// and a lone surrogate all differed in runAllTests), so the JS digest is used ONLY for pure-ASCII text, where it was proven
+// identical; any text with a non-ASCII character still goes to the service, so every stored digest stays exactly as before.
+// Self-check: the first 3 ASCII texts of a run are also digested by the service; a difference sends the rest of the run to the
+// service (logged), so a wrong digest is never written.
 let _snapshotHashModeGs_ = null; // null = still checking; 'js' | 'service'
 let _snapshotHashChecksLeftGs_ = 3;
-let _snapshotHashNonAsciiCheckedGs_ = false;
 function _sha256HexOfTextGs_(text) {
-  if (_snapshotHashModeGs_ === 'service') return _digestHexViaServiceGs_(text);
-  const nonAscii = /[^\u0000-\u007f]/.test(text);
-  if (_snapshotHashChecksLeftGs_ > 0 || (nonAscii && !_snapshotHashNonAsciiCheckedGs_)) {
+  if (_snapshotHashModeGs_ === 'service' || /[^\u0000-\u007f]/.test(text)) return _digestHexViaServiceGs_(text);
+  if (_snapshotHashChecksLeftGs_ > 0) {
+    _snapshotHashChecksLeftGs_--;
     const ref = _digestHexViaServiceGs_(text);
-    if (nonAscii) _snapshotHashNonAsciiCheckedGs_ = true;
-    _snapshotHashChecksLeftGs_ = Math.max(0, _snapshotHashChecksLeftGs_ - 1);
     if (_sha256HexJsGs_(text) !== ref) {
       _snapshotHashModeGs_ = 'service';
       Logger.log('content hash: the JavaScript SHA-256 differed from Utilities.computeDigest - using the service for the rest of this run.');

@@ -1449,19 +1449,22 @@ function runMovementTrackerTests_() {
         if (_leadContentHashGs_(hget) !== _leadContentHashViaServiceGs_(hget)) hashDiffs++;
       }
       TestAssertEqual_(hashDiffs, 0, 'content hash: identical to the service-call reference for 300 varied leads (dates, blanks, string cells, a time-only 1899 cell)');
-      // 2026-11-12: the plain-JavaScript SHA-256 equals the service digest (ASCII, Hindi, emoji, empty, block boundaries).
-      const samples = ['', 'abc', 'a'.repeat(55), 'a'.repeat(56), 'a'.repeat(64), 'x'.repeat(1000), 'Rajesh\u0000Muni\u0000Suspect', 'राहुल पौडेल - कॉल', 'emoji \uD83D\uDE00 ok', 'lone \uD800 surrogate'];
-      const shaDiff = samples.map(function (t, k) { return _sha256HexJsGs_(t) !== _digestHexViaServiceGs_(t) ? 'sample ' + k + ' (' + JSON.stringify(t.slice(0, 20)) + ')' : ''; }).filter(String);
-      TestAssertEqual_(shaDiff.join('; '), '', 'JS SHA-256: identical to Utilities.computeDigest for ASCII, multi-byte, emoji, empty and block-boundary texts');
+      // 2026-11-12: the plain-JavaScript SHA-256 equals the service digest for ASCII text (empty, block boundaries, NUL separators).
+      const samples = ['', 'abc', 'a'.repeat(55), 'a'.repeat(56), 'a'.repeat(64), 'x'.repeat(1000), 'Rajesh\u0000Muni\u0000Suspect'];
+      const shaDiff = samples.map(function (t, k) { return _sha256HexJsGs_(t) !== _digestHexViaServiceGs_(t) ? 'sample ' + k : ''; }).filter(String);
+      TestAssertEqual_(shaDiff.join('; '), '', 'JS SHA-256: identical to Utilities.computeDigest for ASCII texts');
+      // Non-ASCII text always goes to the service (its encoding is not UTF-8 - live finding), so its digest never changes.
+      const nonAscii = ['\u0930\u093e\u0939\u0941\u0932 - \u0915\u0949\u0932', 'emoji \uD83D\uDE00 ok', 'dash \u2014 ok'];
+      TestAssert_(nonAscii.every(function (t) { return _sha256HexOfTextGs_(t) === _digestHexViaServiceGs_(t); }), 'content hash: non-ASCII text is digested by the service, exactly as before');
       // The self-check falls back to the service for the rest of the run when the two ever differ.
       const realJs = _sha256HexJsGs_;
       try {
-        _snapshotHashModeGs_ = null; _snapshotHashChecksLeftGs_ = 3; _snapshotHashNonAsciiCheckedGs_ = false;
+        _snapshotHashModeGs_ = null; _snapshotHashChecksLeftGs_ = 3;
         _sha256HexJsGs_ = function () { return 'wrong'; };
         const got = ['a', 'b', 'c', 'd'].map(_sha256HexOfTextGs_);
         TestAssert_(got.every(function (h, k) { return h === _digestHexViaServiceGs_(['a', 'b', 'c', 'd'][k]); }) && _snapshotHashModeGs_ === 'service', 'JS SHA-256 self-check: a mismatch switches the run to the service; no wrong digest is returned');
       } finally {
-        _sha256HexJsGs_ = realJs; _snapshotHashModeGs_ = null; _snapshotHashChecksLeftGs_ = 3; _snapshotHashNonAsciiCheckedGs_ = false;
+        _sha256HexJsGs_ = realJs; _snapshotHashModeGs_ = null; _snapshotHashChecksLeftGs_ = 3;
       }
 
       // A prune that throws still fails the run - but only AFTER the run record is complete and the later phases have run.
