@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code |
+| **Last Verified** | 2026-11-13 against commit `49aaddc` - lead-check logic audit F1/F2: `CONFIG.MIN_CALLS_PER_DAY` (CFG-003) and `MIN_CALLS_AFTER_48H` removed; every SLA constant here now parity-checked (`test/check-runtime-parity.py`) |
 
 ## Purpose / reason to exist
 
@@ -52,7 +52,7 @@ mostly doesn't matter.
 
 | ID | Constant | Value | Meaning | Changing it affects |
 |---|---|---|---|---|
-| CFG-003 | `CONFIG.MIN_CALLS_PER_DAY` `#L32` | `3` (was `5` until 2026-10-19) | under-called-today threshold | `enrichLead` `underCalledToday` (`JS-006` RULE), `GS-012` `MIN_CALLS_PER_DAY_` twin |
+| CFG-003 | ~~`CONFIG.MIN_CALLS_PER_DAY`~~ | **removed 2026-11-13** (`49aaddc`, audit F1) - was `3`, no reader left after the alert cards stopped printing it; the rule is `MIN_CALLS_24H` 5 / `MIN_CALLS_48H` 10 (since 2026-11-02) | - | - |
 | CFG-004 | `CONFIG.LEAD_LIFECYCLE_HOURS` `#L34` | `48` | stuck-48h boundary | `enrichLead` `stageStuck48h`; `GS-012` `LEAD_LIFECYCLE_HOURS_` twin |
 | CFG-005 | `CONFIG.FIRST_CONTACT_SLA_MINUTES` `#L35` | `10` | first-contact breach window | `enrichLead` `firstContactBreach`; `GS-012` twin |
 | CFG-006 | `CONFIG.LEAD_GRACE_HOURS` `#L49` | `3` | grace before SLA flags apply | `enrichLead`; `GS-012` `LEAD_GRACE_HOURS_` twin |
@@ -132,6 +132,8 @@ None directly. `renderCardsByDay` output appears on `TAB-001` /
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-13** (`49aaddc`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F1/F2): `CONFIG.MIN_CALLS_PER_DAY` and the display-only `CONFIG.MIN_CALLS_AFTER_48H` removed (their last readers were `renderAlertCard`'s callers, which printed them against the lead's own counter and contradicted the pooled 5/10 flag). `STAGE_ALIASES`, `OPPORTUNITY_STAGE`, `CLOSED_STAGE_*`, the grace/lifecycle/follow-up/call/work-hour thresholds and `ISSUE_PRIORITY` (keys + order) are now compared with their `.gs` twins by `test/check-runtime-parity.py` (before: only `FUNNEL_ORDER`).
 
 Verified at `c82ec67`; record created by DOC-027.
 

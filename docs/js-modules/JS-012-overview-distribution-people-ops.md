@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 1595 -> 1571 |
+| **Last Verified** | 2026-11-13 against commit `684f225` - lead-check logic audit F1: the three `renderAlertCard` callers (approaching / stuck / Not Updated lists) no longer pass a call requirement; `renderDueTodayList`'s comment restated for the pooled 5/10 rule |
 
 ## Purpose / reason to exist
 
@@ -154,6 +154,8 @@ Part 5 §5.1 (KPI audit), Part 6 §6.1 rows 1/4.
   the 4 remaining tiles. See `TAB-002`'s own record for the full detail.
 
 ## Version / change reference
+
+**2026-11-13** (`49aaddc` + `684f225`, audit F1): the four People/Region "Call SLA" column tooltips restated for the pooled 5/10 rule (they said "fewer than 3 calls made today"); `renderApproachingDeadlineList`, `renderStuckList` and `renderNotUpdatedList` call `renderAlertCard(l, idx, prefix)` without the old `CONFIG.MIN_CALLS_AFTER_48H` / `MIN_CALLS_PER_DAY` argument (both constants removed, `JS-005` CFG-003); the card's chip is now the same pooled-calls figure `renderDueTodayList` already showed.
 
 Verified at `c82ec67`; record created by DOC-028. Revalidated 2026-09-18
 (`4bbb58c`) for the `TAB-009` `renderAll` call + filter-bar-hiding

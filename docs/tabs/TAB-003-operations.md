@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; Operations section titles/summaries |
+| **Last Verified** | 2026-11-13 against commit `684f225` - audit F1: the Not Updated / Approaching 48h / Stuck cards' call chip now reads `n/5` or `n/10 calls (all RMs)`, and the Behind on Today's Calls section summary (`dashboard.html`) describes the pooled 5/10 rule instead of "fewer than 3 call attempts made today" |
 
 ## Purpose / reason to exist
 

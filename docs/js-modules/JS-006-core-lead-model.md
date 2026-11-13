@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-03 against commit `d5a8ffa` - weekly spot-check cycle 9: re-read against `d01ff12` (2026-11-02, pooled cumulative calls rule + dropped transferred-lead rows); line count corrected 484 -> 535; FN-034 anchor re-grepped; RULE-006 rewritten (no longer a day-over-day baseline delta); EXC-011 removed (obsolete); FN-534/FN-535 added |
+| **Last Verified** | 2026-11-13 against commit `684f225` - comment-only edit in `684f225` (audit F1: a stale "3 calls" remark in enrichLead's New Today note); logic unchanged |
 
 ## Purpose / reason to exist
 

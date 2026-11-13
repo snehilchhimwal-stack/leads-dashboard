@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; this tab's own code unchanged |
+| **Last Verified** | 2026-11-13 against commit `684f225` - re-read after `684f225` (`dashboard.html` edit was the Operations call-rule summary only; Opp Monitor markup untouched) |
 
 ## Purpose / reason to exist
 

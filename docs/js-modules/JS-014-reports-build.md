@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 1283 -> 1281 |
+| **Last Verified** | 2026-11-13 against commit `684f225` - audit F1 follow-through: `ISSUE_REPORT_META.dueToday.intro` restated for the pooled 5/10 customer rule; no logic change |
 
 ## Purpose / reason to exist
 
@@ -144,6 +144,8 @@ Part 7 §18 HIGH.
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-13** (`684f225`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F1): the Behind on Today's Calls region-email intro said "fewer than 3 call attempts made today ... CRM-logged updates dated today" - the per-RM rule retired on 2026-11-02. It now describes the pooled customer rule (5 within 24 h of first assignment, 10 after) and points at the Attempts column (`attemptsTodayCell`, already `made/target`).
 
 Verified at `c82ec67`; record created by DOC-028.
 

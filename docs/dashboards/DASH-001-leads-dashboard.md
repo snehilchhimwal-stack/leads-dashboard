@@ -7,7 +7,7 @@
 | **Owner** | Snehil (default — see `../NAMING_CONVENTIONS.md`) |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; dashboard.html Operations copy only |
+| **Last Verified** | 2026-11-13 against commit `684f225` - audit F1 follow-through: the Operations "Behind on Today's Calls" `.filter-summary` text in `dashboard.html` now describes the pooled 5/10 customer rule (was the per-RM "fewer than 3 call attempts made TODAY" proxy wording) |
 
 ## Purpose / reason to exist
 

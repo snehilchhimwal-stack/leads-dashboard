@@ -5,7 +5,7 @@ open/closed/Opportunity+ classification they sit on, the per-customer call pooli
 drop, the comment-timestamp extraction they read, and the priority picker — on BOTH runtimes
 (`js/core-lead-model.js` `enrichLead` + helpers vs `SlaEngine.gs` `computeSlaFlags_` + `Core.gs` /
 `EmailInfra.gs` / `FollowupEngine.gs` helpers), plus every place the dashboard re-states a rule for
-display. Read at HEAD `3552b57`. **Audit only — no code changed.**
+display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F3-F8 open; the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
 
 **Mechanical checks run first (all green):**
 

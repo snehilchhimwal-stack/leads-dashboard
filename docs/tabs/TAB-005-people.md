@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; People tab Call SLA tooltip says fewer than 3 |
+| **Last Verified** | 2026-11-13 against commit `684f225` - audit F1 follow-through: the People tab's Call SLA column tooltip now states the pooled 5/10 customer rule (it said "fewer than 3 calls made today" until `684f225`) |
 
 ## Purpose / reason to exist
 

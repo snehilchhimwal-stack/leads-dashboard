@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - TTL re-read: js/core-ui.js unchanged since 1ea5152 (2026-09-02); function names, anchors and line count (159) re-checked |
+| **Last Verified** | 2026-11-13 against commit `49aaddc` - lead-check logic audit F1: `renderAlertCard(l, idx, prefix)` - the `requiredCalls` parameter is gone, the chip prints `customerCallTotal/callTarget calls (all RMs)` |
 
 ## Purpose / reason to exist
 
@@ -46,7 +46,7 @@ core-filters → …`). CLAUDE.md's documented list pair-swaps it with
 | FN-071 | `showLoadingOverlay(text, heavy)` / `hideLoadingOverlay(heavy)` `#L42/#L52` | text, a "heavy" flag | shows/hides `#loadingOverlay` | mutates `_loadingOverlayDepth` / `_loadingOverlayHeavyDepth` | — | `applyFiltersAndRender` (`JS-004`), `fetchAndRender` (`JS-003`), write paths (`JS-018`), `main.js` | reusable — depth-counted so nested callers are safe |
 | FN-072 | `toggleActionLog(logId)` `#L80` | a registry key | expands/collapses that lead's action log | reads `_logLeadRegistry`; DOM write | `parseActionLog` / `istStamp` (`JS-007`) | `.log-toggle` clicks on issue cards | reusable |
 | FN-073 | `logToggleMarkup(l, logId)` `#L92` | a lead + key | the `.log-toggle` control markup; registers the lead in `_logLeadRegistry` | writes `_logLeadRegistry` | — | `renderAlertCard` (FN-074), Operations card renderers (`JS-012`) | reusable |
-| FN-074 | `renderAlertCard(l, idx, prefix, requiredCalls)` `#L101` | a lead + context | one issue-card's HTML | none | `leadIdentityLine` (`JS-002`), `logToggleMarkup` (FN-073), `esc` (FN-070) | Operations issue lists (`JS-012`), Movement lists (`JS-021`) | reusable — the shared card template |
+| FN-074 | `renderAlertCard(l, idx, prefix)` `#L105` (was `(l, idx, prefix, requiredCalls)` until 2026-11-13) | a lead + context | one issue-card's HTML | none | `leadIdentityLine` (`JS-002`), `logToggleMarkup` (FN-073), `esc` (FN-070) | Operations issue lists (`JS-012`), Movement lists (`JS-021`) | reusable — the shared card template |
 | FN-075 | `toggleInlineDetail(btn)` / `initCollapsibleSectionInfo()` `#L127/#L143` | a button / — | toggles a section-info panel / wires all of them | DOM writes | — | `main.js` (`JS-011`) bootstrap; section-info clicks | reusable |
 | FN-076 | `truncationNotice(total, shown)` `#L73` | two counts | "N more not shown" HTML | none | — | list renderers hitting `MAX_CARDS` | reusable |
 
@@ -135,6 +135,8 @@ row 1 (`_logLeadRegistry` — does not reproduce).
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-13** (`49aaddc`, audit F1): the call chip now shows the customer's pooled calls against the live target (`l.customerCallTotal`/`l.callTarget`, both set by `enrichLead`), not the lead's own `call_attempts` against a per-day 3/10 passed in by each caller - the old chip contradicted the `underCalledToday` flag on the same card since the 2026-11-02 rule. Asserted in `tests/frontend-harness.html` (renderAlertCard 2026-11-13 block).
 
 Verified at `c82ec67`; record created by DOC-027.
 
