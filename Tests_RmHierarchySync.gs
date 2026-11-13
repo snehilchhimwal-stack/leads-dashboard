@@ -666,12 +666,72 @@ function runRmHierarchySyncTests_() {
         TestAssertEqual_(backups().length, 0, 'reassign test mode: no backup is written');
       }
 
+      // 2026-11-13 (Zoya Fathima -> Rahul Attada): a pin can add a missing row and move a person's team; a pinned CH is not required in
+      // HR when HR's CH/CL column is blank; a pinned team must agree with HR's Team before the pin counts as matching.
+      {
+        const people = rmSyncTestPeople_().concat([
+          { name: 'Pin New RH', role: 'RH', team: 'Pune', chain: [] },
+          { name: 'Pin S1 Ch', role: 'S1', team: 'Pune', chain: ['Pin New RH'] }, // HR's CH/CL column is blank for them
+          { name: 'Pin S1 Moved', role: 'S1', team: 'Pune', chain: ['Pin New RH'] },
+        ]);
+        const tab = rmSyncTestTabRows_().concat([
+          ['Pune', 'S1', 'Pin S1 Ch', '', '', 'Pin Old RH', 'Pin Old CH', false, '', ''],
+          ['Pune', 'S1', 'Pin S1 Moved', '', '', 'Pin Old RH', 'Pin Old CH', false, '', ''],
+        ]);
+        const p2 = [
+          { name: 'Pin New RH', add: true, team: 'Pune', role: 'RH', set: { tl: '', tm: '', rh: '', ch: CH }, since: '2026-11-13', why: 'new RH' },
+          { name: 'Pin S1 Ch', set: { tl: '', tm: '', rh: 'Pin New RH', ch: CH }, was: ['Pin Old RH'], since: '2026-11-13' },
+          { name: 'Pin S1 Moved', team: 'Bangalore', set: { tl: '', tm: '', rh: RH, ch: CH }, was: ['Pin New RH'], since: '2026-11-13' },
+          { name: 'Pin No Add', team: 'Pune', set: { tl: '', tm: '', rh: RH, ch: '' } }, // no add flag: reported, never created
+        ];
+        const world = rmSyncTestWorld_({ people: people, tabRows: tab });
+        const rowsBefore = rmSyncTestTabNames_(world.tab).length;
+        const res = applyRmHierarchyReassignmentsGs_(p2, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_(res.added, ['Pin New RH'], 'add pin: a pinned new joiner with no row is appended');
+        TestAssertEqual_(res.notFound, ['Pin No Add'], 'add pin: a pin without add:true is only reported as not found');
+        TestAssertEqual_(res.changed, ['Pin S1 Ch', 'Pin S1 Moved'], 'add pin: the two existing rows are reassigned');
+        TestAssertEqual_(res.problems, [], 'add pin: read-back is clean');
+        TestAssertEqual_(rmSyncTestTabNames_(world.tab).length, rowsBefore + 1, 'add pin: exactly one row is added');
+        const nr = rmSyncTestRow_(world.tab, 'Pin New RH');
+        TestAssertEqual_([nr.team, nr.role, nr.tl, nr.tm, nr.rh, nr.ch, nr.excluded], ['Pune', 'RH', '', '', '', CH, false], 'add pin: the new row holds team, role and the pinned managers');
+        TestAssertContains_(nr.note, 'added 2026-10-08 (user-confirmed): new RH', 'add pin: the new row carries a note');
+        const mv = rmSyncTestRow_(world.tab, 'Pin S1 Moved');
+        TestAssertEqual_([mv.team, mv.rh, mv.ch], ['Bangalore', RH, CH], 'team pin: the team and managers are both set');
+        TestAssertContains_(mv.note, 'team Pune -> Bangalore', 'team pin: the note records the team move');
+        TestAssertEqual_(rmSyncTestRow_(world.tab, 'Pin S1 Ch').team, 'Pune', 'team pin: a pin without team leaves the team alone');
+        TestAssertEqual_(backups().length, 1, 'add pin: one backup before writing');
+        const snap = JSON.stringify(world.tab._data);
+        const again = applyRmHierarchyReassignmentsGs_(p2, { now: RMSYNC_TEST_THU_ });
+        TestAssertEqual_([again.added, again.changed], [[], []], 'add pin: a re-run adds and changes nothing');
+        TestAssertEqual_(JSON.stringify(world.tab._data), snap, 'add pin: a re-run writes nothing (no duplicate row)');
+
+        const hr = parseHrRosterGs_(readHrRosterValuesGs_());
+        const ev = rmSyncEvaluatePinsGs_(p2, {}, hr, readRmHierarchyRowsGs_(world.tab));
+        TestAssertEqual_(rmSyncTestNames_(ev.resolved).filter(function (n) { return n !== 'Pin No Add'; }).sort(), ['Pin New RH', 'Pin S1 Ch'], 'ch pin: a pinned CH is not required in HR when HR\'s CH/CL is blank - the pin matches on the rest');
+        TestAssertEqual_(rmSyncTestNames_(ev.pending).filter(function (n) { return n !== 'Pin No Add'; }), ['Pin S1 Moved'], 'team pin: pending while HR\'s team and chain disagree');
+        TestAssertContains_(ev.pending.filter(function (p) { return p.name === 'Pin S1 Moved'; })[0].line, '(team Pune)', 'team pin: the pending line shows HR\'s team');
+        hrRow(world, 'Pin S1 Ch')[12] = 'Some Other CH';
+        const ev2 = rmSyncEvaluatePinsGs_(p2, {}, parseHrRosterGs_(readHrRosterValuesGs_()), readRmHierarchyRowsGs_(world.tab));
+        TestAssert_(rmSyncTestNames_(ev2.pending).indexOf('Pin S1 Ch') !== -1, 'ch pin: when HR does fill CH/CL with someone else, the pinned CH must match');
+        const mvHr = hrRow(world, 'Pin S1 Moved'); mvHr[15] = 'Bangalore'; mvHr[6] = RH; mvHr[8] = '-';
+        const ev3 = rmSyncEvaluatePinsGs_(p2, {}, parseHrRosterGs_(readHrRosterValuesGs_()), readRmHierarchyRowsGs_(world.tab));
+        TestAssert_(rmSyncTestNames_(ev3.resolved).indexOf('Pin S1 Moved') !== -1, 'team pin: matches once HR shows the new team and manager');
+      }
+
       // The real 2026-10-19 case: Sanket Yadav's three S1s, pinned with exactly the RM_HIERARCHY_RAW_ values, and Sanket as a leaver.
       {
         const real = realPins();
         const byName = {};
         real.forEach(function (p) { byName[p.name] = p; });
-        TestAssertEqual_(Object.keys(byName).sort(), ['Aakash Dhole', 'Bhanu Singh', 'Bisma Shah', 'Danish Shaikh', 'Gurmohit Singh Sandhu', 'Joshi Dhairya', 'Kamlesh Tawale', 'Khushal Soni', 'Kishan Patel', 'Manan Bhatt', 'Mhd Haseebulla', 'Mihir Jivani', 'Mohit Manwani', 'Nitin Devariya', 'Praveen R', 'Rahul Singh', 'Reshma Shaikh', 'Riyan Jamadar', 'Sachin Rana', 'Sangam S', 'Sanket Yadav', 'Shreyang Chudasama', 'Shubham Raj', 'Sumeet Pal', 'Tisha Valecha', 'Zeya Shaikh'], 'real pins: 2026-10-19 + 2026-11-03 Sachin Rana team + 2026-11-11 HR Live reassignments');
+        TestAssertEqual_(Object.keys(byName).sort(), ['Aakash Dhole', 'Angad Yadav', 'Balamurali Sivakumar', 'Bhanu Singh', 'Bisma Shah', 'Chandrababu Seenathur', 'Danish Shaikh', 'G Anand Kumar', 'G Kumar', 'Gurmohit Singh Sandhu', 'Joshi Dhairya', 'Kamlesh Tawale', 'Khushal Soni', 'Kishan Patel', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Manan Bhatt', 'Mihir Jivani', 'Mohit Manwani', 'Nitin Devariya', 'Parusharothu Vinay Varma', 'Peddapally Shivaji', 'Peddapally Veera Shivaji', 'Rahul Attada', 'Rajesh Gugulothu', 'Reshma Shaikh', 'Riyan Jamadar', 'Sachin Rana', 'Sanket Yadav', 'Shreyang Chudasama', 'Shubham Raj', 'Sumeet Pal', 'Tharun Chalumuri', 'Tisha Valecha', 'Vadlapudi Divya', 'Zeya Shaikh', 'Zoya Fathima'], 'real pins: 2026-10-19 + 2026-11-03 Sachin Rana team + 2026-11-11 HR Live reassignments + 2026-11-13 Zoya Fathima team / leavers (Bangalore four removed: HR matches)');
+        ['Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey'].forEach(function (n) { TestAssert_(byName[n].leaver === true && RMSYNC_CONFIRMED_LEAVERS_.indexOf(n) !== -1, 'real pins: ' + n + ' is a pinned, confirmed leaver'); });
+        TestAssert_(RM_HIERARCHY_RAW_.every(function (r) { return [r[3], r[4], r[5], r[6]].every(function (v) { return normPersonName_(v) !== 'zoya fathima'; }); }), 'real pins: nobody in RM_HIERARCHY_RAW_ still reports to Zoya Fathima');
+        TestAssertEqual_(byName['Rahul Attada'].add === true && byName['Rahul Attada'].team, 'Hyderabad', 'real pins: Rahul Attada is added as a Hyderabad row');
+        TestAssertEqual_(byName['Balamurali Sivakumar'].team, 'Bangalore', 'real pins: Balamurali Sivakumar moves to Bangalore');
+        ['Rahul Attada', 'Parusharothu Vinay Varma', 'Balamurali Sivakumar', 'G Kumar'].forEach(function (n) {
+          const rr = RM_HIERARCHY_RAW_.filter(function (r) { return normPersonName_(r[2]) === normPersonName_(n); })[0];
+          TestAssertEqual_([rr[0], rr[3], rr[4], rr[5], rr[6]], [byName[n].team || rr[0], byName[n].set.tl, byName[n].set.tm, byName[n].set.rh, byName[n].set.ch], 'real pins: ' + n + '\'s pin equals the RM_HIERARCHY_RAW_ row');
+        });
         TestAssert_(byName['Sanket Yadav'].leaver === true, 'real pins: Sanket Yadav is a pinned leaver');
         const raw = {};
         RM_HIERARCHY_RAW_.forEach(function (r) { raw[normPersonName_(r[2])] = r; });
@@ -824,7 +884,7 @@ function runRmHierarchySyncTests_() {
         TestAssertEqual_(rmSyncTestState_(), null, 'leavers test mode: no state is saved');
       }
 
-      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19) + Rahul Chauhan (2026-11-02) + Sachin Rana (2026-11-03)');
+      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana', 'Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19) + Rahul Chauhan (2026-11-02) + Sachin Rana (2026-11-03) + Zoya Fathima, Angad Yadav, Lovkesh Pandey (2026-11-13)');
       const rawNames = RM_HIERARCHY_RAW_.map(function (r) { return normPersonName_(r[2]); });
       RMSYNC_CONFIRMED_LEAVERS_.forEach(function (n) { TestAssert_(rawNames.indexOf(normPersonName_(n)) === -1, 'leavers: ' + n + ' is gone from RM_HIERARCHY_RAW_ too (a rebuild cannot restore them)'); });
     }

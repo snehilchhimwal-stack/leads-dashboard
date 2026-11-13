@@ -210,7 +210,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Akshay More','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Loan','BDM','Yogesh Choudhari','','','','Mayur Panjari'],
   ['Thane','S1','Avinash Khare','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
-  ['Hyderabad','S1','Parusharothu Vinay Varma','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Parusharothu Vinay Varma','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Sourcing - Pune','TM','Yash Kalal','','','','Sourabh Sareen'],
   ['Navi Mumbai','S1','Rutuja Daule','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Chandrakant Bhagat','','Sampada Pawar','','Vidya Jadhav'],
@@ -233,10 +233,12 @@ const RM_HIERARCHY_RAW_ = [
   // cluster already reports up through (see the ch override note near the
   // top of this table). Same pattern as Vidya Jadhav/Bipin More -> Shitij
   // Kaushal above.
-  ['Hyderabad','Cluster Head','Zoya Fathima','','','','Mukesh Mishra'],
+  // 2026-11-13: Zoya Fathima LEFT (user-confirmed; gone from HR Live) -- row removed, her team moved to new joiner
+  // RH Rahul Attada (H6608, HR Live: RH, Hyderabad); CH Mukesh Mishra kept as the effective Hyderabad CH.
+  ['Hyderabad','RH','Rahul Attada','','','','Mukesh Mishra'],
   ['Harbour','S1','Nitin Devariya','Yash Sharma','Akash A Ugale','','Sanjyota Bhosale'], // 2026-11-11 HR Live: TM Akash A Ugale added (HR Live)
   ['Bangalore','S1','Sahil Kumar S','Chaithanya M','','Romen Singh','Mukesh Mishra'],
-  ['Loan','BDM','Angad Yadav','','','','Mayur Panjari'],
+  // 2026-11-13: Angad Yadav (Loan BDM) left the company (user-confirmed; not in HR Live) -- row removed.
   ['Sourcing - Pune','S3','Nikhil Jadhav','','Yash Kalal','','Sourabh Sareen'],
   ['Western','S1','Arbaz Patel','Prathmesh S Pandey','','','Rahul Gandhi'],
   ['Western','Cluster Head','Rahul Gandhi','','','',''],
@@ -250,16 +252,16 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Mohit Manwani','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'], // 2026-10-19 (confirmed by the user): TM Sanket Yadav left -- now under A1 Ganesh Saroj (pinned in RMSYNC_PINNED_OVERRIDES_ until HR Live shows it)
   ['Thane','A1','Ganesh Saroj','','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Nagmma Mujnayak','Firoj Shaikh','','','Sourabh Sareen'], // 2026-10-13 HR Live: under Firoj Shaikh (was tm Ayaz Bagwan)
-  ['Hyderabad','S1','Maagathoti Adilakshmi','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Maagathoti Adilakshmi','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Navi Mumbai','S1','Jayesh Parab','Avinash Kumar','','','Vidya Jadhav'],
   ['Bangalore','S1','Praveen R','Sangam S','','Romen Singh','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra); 2026-11-11 HR Live: now under Sangam S (HR Live); CH Mukesh Mishra kept
   ['Western','A1','Prathmesh S Pandey','','','','Rahul Gandhi'],
   ['HNI','A1','Pritesh Shankhat','','','','Abhhijjit Gandhii'],
   ['Western','S1','Vijay Yadav','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Western','S1','Lovkesh Pandey','Prathmesh S Pandey','','','Rahul Gandhi'],
+  // 2026-11-13: Lovkesh Pandey (Western S1) left the company (user-confirmed; not in HR Live) -- row removed.
   ['Bangalore','S1','Mhd Haseebulla','Mainuddin T','','Romen Singh','Mukesh Mishra'], // 2026-09-17: tl Krishna Murthy left the company; falls through to ch (already Mukesh Mishra); 2026-11-11 HR Live: now under A1 Mainuddin T (HR Live); CH Mukesh Mishra kept
   ['Western','S1','Kundan Singh','Prathmesh S Pandey','','','Rahul Gandhi'],
-  ['Hyderabad','S1','Vadlapudi Divya','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Vadlapudi Divya','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Thane','S1','Avinash Das','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','S1','Somanath Sangle','Nishant Anand','','Sachindra Wadane','Sourabh Sareen'],
   ['Thane','S1','Divya Rohela','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
@@ -308,7 +310,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Western','S1','Riya Yadav','','Minas Patel','','Rahul Gandhi'],
   ['Central','S1','Mayuresh Chavan','Kumar Babu','','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-09-21: tl was stale 'Mukesh Yadav' (left); real current manager per HR export is Kumar Babu
   ['Sourcing - Pune','S3','Anagha Sangole','','Yash Kalal','','Sourabh Sareen'],
-  ['Hyderabad','S1','Peddapally Veera Shivaji','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Peddapally Veera Shivaji','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Thane','S1','Hitesh Jaiswar','Amit Upadhyay','','','Bipin More'],
   ['Navi Mumbai','S1','Kartik Shirsat','','Sampada Pawar','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Rinky Bidare','','Sampada Pawar','','Vidya Jadhav'],
@@ -316,7 +318,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Kishan Lohar','Amit Upadhyay','','','Bipin More'],
   ['Navi Mumbai','S1','Suman Pujari','Avinash Kumar','','','Vidya Jadhav'],
   ['Navi Mumbai','S1','Tejal Nikam','Avinash Kumar','','','Vidya Jadhav'],
-  ['Hyderabad','S1','G Anand Kumar','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','G Anand Kumar','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Loan','A1','Zahid Shaikh','','','','Mayur Panjari'],
   ['Pune','S1','Aadesh Narwade','','Rahul Poudel','','Sourabh Sareen'], // was under A1 Prathamesh A Pande — he left 2026-08-31, primary now falls through to his own senior, TM Rahul Poudel
   ['Pune','S1','Soyeb Akhtar','Firoj Shaikh','','','Sourabh Sareen'],
@@ -393,7 +395,7 @@ const RM_HIERARCHY_RAW_ = [
   // manager/Cc target, never himself a flagged RM with a blank chain to
   // self-alert on.
   ['Leadership','Leadership','Shitij Kaushal','','','',''],
-  ['Hyderabad','S1','G Kumar','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','G Kumar','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['HNI','S1','Mohammed Khan','Pritesh Shankhat','','','Abhhijjit Gandhii'],
   ['HNI','S1','Mohd Shaikh','','','','Abhhijjit Gandhii'], // confirmed by the user 2026-10-13 -- leads-sheet alias of "Mohd Faizan Shaikh"
   // 3 more alias rows, found 2026-08-31 via a real "Leads Not Sent" ops
@@ -402,7 +404,7 @@ const RM_HIERARCHY_RAW_ = [
   // previously known/reported until they actually caused a no-recipient
   // failure.
   ['Central','A1','Akash Ugale','','','','Sanjyota Bhosale'], // leads sheet drops the middle "A" — real row: "Akash A Ugale"
-  ['Hyderabad','S1','Peddapally Shivaji','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Peddapally Shivaji','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Pune','S1','Shaikh Wasim Shaikh Harun','Omkar Ghate','Ayaz Bagwan','','Sourabh Sareen'], // leads sheet uses the full "<given> <father's name>" form — real row: "Wasim Shaikh"
   // 2 more, found via auditUnresolvedRmsNow's first real run (2026-08-31).
   ['Pune','City Lead','Sourabh Sareen Pnl','','','',''], // leads sheet appends " Pnl" (P&L) — real row: "Sourabh Sareen"
@@ -425,7 +427,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Pune','S1','Jay Renavikar','','Rahul Poudel','','Sourabh Sareen'],
   ['Sourcing - Pune','S3','Pranali Dalavi','','Yash Kalal','','Sourabh Sareen'],
   // AUTO-REFRESH 2026-09-22 from HR Live  - Sheet1 (2).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
-  ['Hyderabad','S1','Chandrababu Seenathur','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Chandrababu Seenathur','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   // AUTO-REFRESH 2026-09-29 from HR Live  - Sheet1 (4).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Central','S1','Ajay Gupta','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-10-13 HR Live: under new TM Sanket Patil
   ['Thane','S1','Disha Singh','','','','Bipin More'],
@@ -477,7 +479,7 @@ const RM_HIERARCHY_RAW_ = [
   // (RmHierarchySync.gs). None was anyone's tl/tm/rh/ch.
   // AUTO-REFRESH 2026-10-13 from the live HR roster sheet: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Thane','S1','Asgar Sayyed','','','Swapnil Gowalkar','Bipin More'],
-  ['Hyderabad','S1','Balamurali Sivakumar','','','','Zoya Fathima'],
+  ['Bangalore','S1','Balamurali Sivakumar','','','Romen Singh','Mukesh Mishra'], // 2026-11-13 (user-confirmed): reports to RH Romen Singh, Bangalore (HR Live still shows Rahul Attada, Hyderabad)
   ['HNI','S1','Bhanu Singh','Pritesh Shankhat','','','Abhhijjit Gandhii'], // 2026-11-11 HR Live: now under A1 Pritesh Shankhat (HR Live)
   ['HNI','S1','Bhargav Parghi','','','','Abhhijjit Gandhii'],
   ['Central','S1','Danish Shaikh','Prajwal Shetty','Akash A Ugale','','Sanjyota Bhosale'], // HR spells it "Akash A ugale"; 2026-11-11 HR Live: now under Prajwal Shetty (HR Live)
@@ -493,7 +495,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','TM','Sanket Patil','','','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','S1','Suryapratap Singh','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Central','S1','Ajay Boharde','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'], // 2026-10-19 HR sync (H6585): new joiner, already added to the live tab by the nightly sync
-  ['Hyderabad','S1','Tharun Chalumuri','','','','Zoya Fathima'], // 2026-10-13: Vemula Ajay left (confirmed by the user) -- reports straight to Zoya Fathima now
+  ['Hyderabad','S1','Tharun Chalumuri','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
   ['Central','S1','Vishal Singh','','Sanket Patil','Rajkumar Ombase','Sanjyota Bhosale'],
   ['Pune','S1','Rushikesh Nigade','Hitesh Choudhary','Rahul Poudel','','Sourabh Sareen'], // 2026-10-13: added by hand -- the refresh script couldn't resolve tl until Hitesh Choudhary's own row existed
 ];

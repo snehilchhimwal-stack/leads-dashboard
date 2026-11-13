@@ -170,12 +170,14 @@ function parseHrRosterGs_(values) {
       email: emailCell.indexOf('@') !== -1 ? emailCell : '', // the sheet writes "-" or "NA" for no address
       chainNames: RMSYNC_HR_CHAIN_COLS_.map(function (c) { return rmSyncStr_(row[c]); }).filter(function (v) { return v && v !== '-'; }),
       exited: exitCell !== '' && exitCell !== '-',
+      hasCh: (function (v) { return v !== '' && v !== '-'; })(rmSyncStr_(row[RMSYNC_HR_CHAIN_COLS_[3]])),
     };
     const key = normPersonName_(rawName);
     const prior = out.people[key];
     if (prior) {
       prior.chainNames = rmSyncUnique_(prior.chainNames.concat(entry.chainNames));
       prior.exited = prior.exited || entry.exited;
+      prior.hasCh = prior.hasCh || entry.hasCh;
       if (!prior.email) prior.email = entry.email;
       if (!prior.code) prior.code = entry.code;
     } else {
@@ -726,7 +728,7 @@ function runRmHierarchySyncGs_(opts) {
 // Edit this list (and RM_HIERARCHY_RAW_) the next time a person confirms leavers; the 2026-10-16 batch is below.
 // 2026-10-19: Sanket Yadav (Thane TM; address bounced 2026-10-19) - run applyRmHierarchyReassignmentsNow first (his three S1s), then this.
 // A confirmed leaver is also never re-added by the nightly sync as a "new joiner" while HR Live still lists them (RULE-092).
-const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana']; // Rahul Chauhan: user-confirmed leaver 2026-11-02 (not in HR Live, no leads); Sachin Rana 2026-11-03 (team moved to Sanket Patil / Kumar Babu, no leads)
+const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana', 'Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey']; // Rahul Chauhan: user-confirmed leaver 2026-11-02 (not in HR Live, no leads); Sachin Rana 2026-11-03 (team moved to Sanket Patil / Kumar Babu, no leads); Zoya Fathima, Angad Yadav, Lovkesh Pandey 2026-11-13 (user-confirmed, not in HR Live)
 const RMSYNC_LEAVER_LEAD_ID_LOG_LIMIT_ = 200;
 
 // Open leads per normalised RM name, for the names given. All open leads count (not only Google ones): every open lead under a
@@ -880,6 +882,10 @@ function removeRmHierarchyLeaversForceNow() { return removeRmHierarchyLeaversGs_
 // Leaver pin: { name, leaver: true, since, why } - also list the name in RMSYNC_CONFIRMED_LEAVERS_ (removal) and take it out of
 //   RM_HIERARCHY_RAW_. Pending while HR Live still lists the person as current staff or as any current person's manager.
 // Future cases: add an entry here (and, for a manager pin, the same values in RM_HIERARCHY_RAW_).
+// 2026-11-13: a manager pin may also carry `team` (the row's team is set too, and HR "matches" only when HR's Team agrees) and
+//   `add: true` with `team` + `role` (applyRmHierarchyReassignmentsNow appends the row when the person has none - a new joiner whose own
+//   HR chain is blank, so the nightly sync cannot add them). A pinned CH is not required to appear in HR when HR's CH/CL column is blank
+//   for that person (HR Live leaves it blank for most S1s; our CH is the effective cluster head) - otherwise such a pin never resolves.
 const RMSYNC_PINNED_OVERRIDES_ = [
   // 2026-10-19 (confirmed by the user): Thane TM Sanket Yadav left - his address bounced on 2026-10-19 (Email_Reroutes sends his mail to Bipin More).
   { name: 'Mohit Manwani', set: { tl: 'Ganesh Saroj', tm: '', rh: 'Swapnil Gowalkar', ch: 'Bipin More' }, was: ['Sanket Yadav'], since: '2026-10-19', why: 'TM Sanket Yadav left; reassigned to A1 Ganesh Saroj by the user' },
@@ -906,10 +912,25 @@ const RMSYNC_PINNED_OVERRIDES_ = [
   { name: 'Joshi Dhairya', set: { tl: 'Avinash Kumar', tm: '', rh: '', ch: 'Vidya Jadhav' }, since: '2026-11-11', why: 'now under A1 Avinash Kumar (HR Live)' },
   { name: 'Bhanu Singh', set: { tl: 'Pritesh Shankhat', tm: '', rh: '', ch: 'Abhhijjit Gandhii' }, since: '2026-11-11', why: 'now under A1 Pritesh Shankhat (HR Live)' },
   { name: 'Reshma Shaikh', set: { tl: 'Mayuresh Jadhav', tm: '', rh: '', ch: 'Bipin More' }, since: '2026-11-11', why: 'now under A1 Mayuresh Jadhav (HR Live)' },
-  { name: 'Sangam S', set: { tl: '', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'RH Romen Singh (HR Live); CH Mukesh Mishra kept (Bangalore effective CH)' },
-  { name: 'Praveen R', set: { tl: 'Sangam S', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'now under Sangam S (HR Live); CH Mukesh Mishra kept' },
-  { name: 'Rahul Singh', set: { tl: 'Sangam S', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'now under Sangam S (HR Live); CH Mukesh Mishra kept' },
-  { name: 'Mhd Haseebulla', set: { tl: 'Mainuddin T', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, since: '2026-11-11', why: 'now under A1 Mainuddin T (HR Live); CH Mukesh Mishra kept' },
+  // 2026-11-13 (user-confirmed, checked against HR Live row by row): Hyderabad Cluster Head Zoya Fathima left; her team moved to
+  // new joiner RH Rahul Attada (H6608), CH Mukesh Mishra kept - except Balamurali Sivakumar, who reports to RH Romen Singh in Bangalore.
+  // Angad Yadav (Loan BDM) and Lovkesh Pandey (Western S1) left. Sangam S / Praveen R / Rahul Singh / Mhd Haseebulla's pins were
+  // removed: HR Live now lists exactly their TL/RH (Sangam S, Mainuddin T, Romen Singh); only our CH Mukesh Mishra is absent there.
+  { name: 'Rahul Attada', add: true, team: 'Hyderabad', role: 'RH', set: { tl: '', tm: '', rh: '', ch: 'Mukesh Mishra' }, since: '2026-11-13', why: 'new RH, Hyderabad (HR Live H6608) - takes over Zoya Fathima\'s team' },
+  { name: 'Parusharothu Vinay Varma', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Peddapally Veera Shivaji', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Chandrababu Seenathur', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Maagathoti Adilakshmi', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Vadlapudi Divya', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'G Anand Kumar', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'G Kumar', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Peddapally Shivaji', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Tharun Chalumuri', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Rajesh Gugulothu', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Balamurali Sivakumar', team: 'Bangalore', set: { tl: '', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima', 'Rahul Attada'], since: '2026-11-13', why: 'reports to RH Romen Singh, Bangalore (user); HR Live still shows Rahul Attada, Hyderabad' },
+  { name: 'Zoya Fathima', leaver: true, since: '2026-11-13', why: 'left - Hyderabad Cluster Head; gone from HR Live, mailbox bouncing since 2026-11-09' },
+  { name: 'Angad Yadav', leaver: true, since: '2026-11-13', why: 'left - Loan BDM; not in HR Live' },
+  { name: 'Lovkesh Pandey', leaver: true, since: '2026-11-13', why: 'left - Western S1; not in HR Live' },
 ];
 // Indirection so the tests can supply their own pins (the real ones name live people).
 function rmSyncPinnedOverridesGs_() { return RMSYNC_PINNED_OVERRIDES_; }
@@ -954,11 +975,11 @@ function rmSyncEvaluatePinsGs_(pins, pinsDone, hr, rows) {
       }
       return;
     }
-    const ours = rmSyncFieldsTextGs_(pin.set);
+    const ours = rmSyncFieldsTextGs_(pin.set) + (pin.team ? ', team ' + pin.team : '');
     const liveRows = rowsByKey[key] || [];
     let liveNote = '';
     if (!liveRows.length) liveNote = ' - NOTE: not in RM_Hierarchy';
-    else if (liveRows.some(function (r) { return RMSYNC_FIELDS_.some(function (f) { return normPersonName_(r[f]) !== normPersonName_((pin.set || {})[f] || ''); }); })) {
+    else if (liveRows.some(function (r) { return (pin.team && normPersonName_(r.team) !== normPersonName_(pin.team)) || RMSYNC_FIELDS_.some(function (f) { return normPersonName_(r[f]) !== normPersonName_((pin.set || {})[f] || ''); }); })) {
       liveNote = ' - NOTE: the live RM_Hierarchy row still has ' + rmSyncFieldsTextGs_(liveRows[0]) + ': run applyRmHierarchyReassignmentsNow';
     }
     if (!current) {
@@ -966,10 +987,11 @@ function rmSyncEvaluatePinsGs_(pins, pinsDone, hr, rows) {
       return;
     }
     const chainKeys = person.chainNames.map(normPersonName_);
-    const wanted = RMSYNC_FIELDS_.map(function (f) { return (pin.set || {})[f] || ''; }).filter(Boolean);
-    const matches = wanted.every(function (v) { return chainKeys.indexOf(normPersonName_(v)) !== -1; }) &&
+    const wanted = RMSYNC_FIELDS_.filter(function (f) { return f !== 'ch' || person.hasCh; }).map(function (f) { return (pin.set || {})[f] || ''; }).filter(Boolean);
+    const teamOk = !pin.team || normPersonName_(pin.team) === normPersonName_(person.team);
+    const matches = teamOk && wanted.every(function (v) { return chainKeys.indexOf(normPersonName_(v)) !== -1; }) &&
       (pin.was || []).every(function (w) { return chainKeys.indexOf(normPersonName_(w)) === -1; });
-    const hrText = person.chainNames.length ? person.chainNames.join(', ') : 'no manager';
+    const hrText = (person.chainNames.length ? person.chainNames.join(', ') : 'no manager') + (pin.team && !teamOk ? ' (team ' + (person.team || '?') + ')' : '');
     const who = pin.name + ' (' + [person.team, person.role].filter(Boolean).join(', ') + ')';
     if (matches) {
       out.resolved.push({ id: id, name: pin.name, line: '  * ' + who + ': HR Live now lists ' + hrText + ' - now matches HR (ours: ' + ours + ')' + liveNote });
@@ -998,18 +1020,27 @@ function applyRmHierarchyReassignmentsGs_(pins, opts) {
   if (tabHeader.join('|') !== RMSYNC_TAB_HEADER_.join('|')) throw new Error('RM_Hierarchy\'s header row is not "' + RMSYNC_TAB_HEADER_.join(', ') + '", so nothing was changed.');
   const rows = readRmHierarchyRowsGs_(sheet);
   const todo = [];
+  const adds = [];
+  result.added = [];
   managerPins.forEach(function (pin) {
     const key = normPersonName_(pin.name);
     const target = RMSYNC_FIELDS_.map(function (f) { return rmSyncStr_((pin.set || {})[f]); });
+    const team = rmSyncStr_(pin.team);
     const matches = rows.filter(function (r) { return normPersonName_(r.name) === key; });
-    if (!matches.length) { result.notFound.push(pin.name); return; }
+    if (!matches.length) {
+      if (pin.add && team && rmSyncStr_(pin.role)) adds.push({ pin: pin, values: [team, rmSyncStr_(pin.role), rmSyncStr_(pin.name)].concat(target) });
+      else result.notFound.push(pin.name);
+      return;
+    }
     matches.forEach(function (r) {
       const current = RMSYNC_FIELDS_.map(function (f) { return r[f]; });
-      if (current.join('|') === target.join('|')) { result.already.push(r.name); return; }
-      todo.push({ row: r, target: target, current: current });
+      const teamChange = team && rmSyncStr_(r.team) !== team ? team : '';
+      if (current.join('|') === target.join('|') && !teamChange) { result.already.push(r.name); return; }
+      todo.push({ row: r, target: target, current: current, team: teamChange });
     });
   });
-  result.wouldChange = todo.map(function (t) { return t.row.name + ': ' + rmSyncFieldsTextGs_(t.row) + ' -> ' + rmSyncFieldsTextGs_({ tl: t.target[0], tm: t.target[1], rh: t.target[2], ch: t.target[3] }); });
+  result.wouldChange = todo.map(function (t) { return t.row.name + ': ' + rmSyncFieldsTextGs_(t.row) + ' -> ' + rmSyncFieldsTextGs_({ tl: t.target[0], tm: t.target[1], rh: t.target[2], ch: t.target[3] }) + (t.team ? ', team ' + (t.row.team || '(blank)') + ' -> ' + t.team : ''); })
+    .concat(adds.map(function (a) { return a.values[2] + ': new row (' + a.values[0] + ', ' + a.values[1] + ', ' + rmSyncFieldsTextGs_({ tl: a.values[3], tm: a.values[4], rh: a.values[5], ch: a.values[6] }) + ')'; }));
 
   // Read-only: every pinned manager should have a Manager_Directory row with an email (only reported, never changed).
   const directorySheet = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
@@ -1030,7 +1061,7 @@ function applyRmHierarchyReassignmentsGs_(pins, opts) {
   if (result.notFound.length) Logger.log('Reassignment: not in RM_Hierarchy (nothing changed for them): ' + result.notFound.join(', ') + '.');
   if (result.already.length) Logger.log('Reassignment: already as confirmed (nothing to do): ' + result.already.join(', ') + '.');
   if (result.directoryNotes.length) Logger.log('Reassignment: Manager_Directory (not changed): ' + result.directoryNotes.join('; ') + '.');
-  if (!todo.length) { Logger.log('Reassignment: nothing to change.'); return result; }
+  if (!todo.length && !adds.length) { Logger.log('Reassignment: nothing to change.'); return result; }
   if (testMode) { Logger.log('Reassignment [TEST MODE]: would change ' + result.wouldChange.join('; ') + ' - nothing was written.'); return result; }
 
   // No backup, no write.
@@ -1044,22 +1075,34 @@ function applyRmHierarchyReassignmentsGs_(pins, opts) {
     const nameNow = rmSyncStr_(sheet.getRange(r.rowNumber, 3, 1, 1).getValue());
     if (normPersonName_(nameNow) !== normPersonName_(r.name)) { result.problems.push('skipped ' + r.name + ': row ' + r.rowNumber + ' changed since it was read (now "' + nameNow + '") - re-run'); return; }
     withRetry_(function () { sheet.getRange(r.rowNumber, RMSYNC_FIELD_COL_.tl, 1, 4).setValues([t.target]); }, 'reassign ' + r.name + ' in RM_Hierarchy');
-    const changes = RMSYNC_FIELDS_.map(function (f, i) {
+    if (t.team) withRetry_(function () { sheet.getRange(r.rowNumber, 1, 1, 1).setValue(t.team); }, 'team of ' + r.name + ' in RM_Hierarchy');
+    const changes = (t.team ? ['team ' + (r.team || '(blank)') + ' -> ' + t.team] : []).concat(RMSYNC_FIELDS_.map(function (f, i) {
       return t.current[i] === t.target[i] ? '' : f + ' ' + (t.current[i] || '(blank)') + ' -> ' + (t.target[i] || '(blank)');
-    }).filter(Boolean).join(', ');
+    })).filter(Boolean).join(', ');
     const noteNow = rmSyncStr_(sheet.getRange(r.rowNumber, 9, 1, 1).getValue());
     const addition = 'reassigned ' + day + ' (user-confirmed): ' + changes;
     withRetry_(function () { sheet.getRange(r.rowNumber, 9, 1, 1).setValue(noteNow ? noteNow + ' | ' + addition : addition); }, 'reassignment note for ' + r.name);
     result.changed.push(r.name);
   });
+  // 2026-11-13: pinned new rows (a new joiner the nightly sync cannot place), appended after the last row - never duplicated (a re-run
+  // finds the row and leaves it alone).
+  adds.forEach(function (a) {
+    const row = a.values.concat([false, 'added ' + day + ' (user-confirmed): ' + (a.pin.why || ''), '']);
+    withRetry_(function () { sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]); }, 'add ' + a.values[2] + ' to RM_Hierarchy');
+    result.added.push(a.values[2]);
+  });
   SpreadsheetApp.flush();
   const after = readRmHierarchyRowsGs_(sheet);
+  adds.forEach(function (a) {
+    const r = after.filter(function (x) { return normPersonName_(x.name) === normPersonName_(a.values[2]); });
+    if (r.length !== 1 || [r[0].team, r[0].role, r[0].name, r[0].tl, r[0].tm, r[0].rh, r[0].ch].join('|') !== a.values.join('|')) result.problems.push('read-back mismatch: new row ' + a.values[2]);
+  });
   todo.forEach(function (t) {
     if (result.changed.indexOf(t.row.name) === -1) return;
     const r = after.filter(function (a) { return a.rowNumber === t.row.rowNumber; })[0];
-    if (!r || RMSYNC_FIELDS_.map(function (f) { return r[f]; }).join('|') !== t.target.join('|')) result.problems.push('read-back mismatch: ' + t.row.name + ' is not ' + t.target.join(' / '));
+    if (!r || RMSYNC_FIELDS_.map(function (f) { return r[f]; }).join('|') !== t.target.join('|') || (t.team && r.team !== t.team)) result.problems.push('read-back mismatch: ' + t.row.name + ' is not ' + t.target.join(' / ') + (t.team ? ' (team ' + t.team + ')' : ''));
   });
-  Logger.log('Reassignment: changed ' + result.changed.length + ' row(s): ' + result.wouldChange.join('; ') + '. Backup: ' + result.backupUrl + (result.problems.length ? '. PROBLEMS: ' + result.problems.join('; ') : ''));
+  Logger.log('Reassignment: changed ' + result.changed.length + ' row(s), added ' + result.added.length + ': ' + result.wouldChange.join('; ') + '. Backup: ' + result.backupUrl + (result.problems.length ? '. PROBLEMS: ' + result.problems.join('; ') : ''));
   return result;
 }
 
