@@ -724,11 +724,11 @@ function runRmHierarchySyncTests_() {
         const byName = {};
         real.forEach(function (p) { byName[p.name] = p; });
         TestAssertEqual_(Object.keys(byName).sort(), ['Aakash Dhole', 'Angad Yadav', 'Balamurali Sivakumar', 'Bhanu Singh', 'Bisma Shah', 'Chandrababu Seenathur', 'Danish Shaikh', 'G Anand Kumar', 'G Kumar', 'Gurmohit Singh Sandhu', 'Joshi Dhairya', 'Kamlesh Tawale', 'Khushal Soni', 'Kishan Patel', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Manan Bhatt', 'Mihir Jivani', 'Mohit Manwani', 'Nitin Devariya', 'Parusharothu Vinay Varma', 'Peddapally Shivaji', 'Peddapally Veera Shivaji', 'Rahul Attada', 'Rajesh Gugulothu', 'Reshma Shaikh', 'Riyan Jamadar', 'Sachin Rana', 'Sanket Yadav', 'Shreyang Chudasama', 'Shubham Raj', 'Sumeet Pal', 'Tharun Chalumuri', 'Tisha Valecha', 'Vadlapudi Divya', 'Zeya Shaikh', 'Zoya Fathima'], 'real pins: 2026-10-19 + 2026-11-03 Sachin Rana team + 2026-11-11 HR Live reassignments + 2026-11-13 Zoya Fathima team / leavers (Bangalore four removed: HR matches)');
-        ['Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey'].forEach(function (n) { TestAssert_(byName[n].leaver === true && RMSYNC_CONFIRMED_LEAVERS_.indexOf(n) !== -1, 'real pins: ' + n + ' is a pinned, confirmed leaver'); });
+        ['Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Vadlapudi Divya', 'G Anand Kumar', 'G Kumar', 'Tharun Chalumuri', 'Rajesh Gugulothu'].forEach(function (n) { TestAssert_(byName[n].leaver === true && RMSYNC_CONFIRMED_LEAVERS_.indexOf(n) !== -1, 'real pins: ' + n + ' is a pinned, confirmed leaver'); });
         TestAssert_(RM_HIERARCHY_RAW_.every(function (r) { return [r[3], r[4], r[5], r[6]].every(function (v) { return normPersonName_(v) !== 'zoya fathima'; }); }), 'real pins: nobody in RM_HIERARCHY_RAW_ still reports to Zoya Fathima');
         TestAssertEqual_(byName['Rahul Attada'].add === true && byName['Rahul Attada'].team, 'Hyderabad', 'real pins: Rahul Attada is added as a Hyderabad row');
         TestAssertEqual_(byName['Balamurali Sivakumar'].team, 'Bangalore', 'real pins: Balamurali Sivakumar moves to Bangalore');
-        ['Rahul Attada', 'Parusharothu Vinay Varma', 'Balamurali Sivakumar', 'G Kumar'].forEach(function (n) {
+        ['Rahul Attada', 'Parusharothu Vinay Varma', 'Balamurali Sivakumar', 'Peddapally Shivaji'].forEach(function (n) {
           const rr = RM_HIERARCHY_RAW_.filter(function (r) { return normPersonName_(r[2]) === normPersonName_(n); })[0];
           TestAssertEqual_([rr[0], rr[3], rr[4], rr[5], rr[6]], [byName[n].team || rr[0], byName[n].set.tl, byName[n].set.tm, byName[n].set.rh, byName[n].set.ch], 'real pins: ' + n + '\'s pin equals the RM_HIERARCHY_RAW_ row');
         });
@@ -903,7 +903,7 @@ function runRmHierarchySyncTests_() {
         TestAssertEqual_(rmSyncTestState_(), null, 'leavers test mode: no state is saved');
       }
 
-      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana', 'Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19) + Rahul Chauhan (2026-11-02) + Sachin Rana (2026-11-03) + Zoya Fathima, Angad Yadav, Lovkesh Pandey (2026-11-13)');
+      TestAssertEqual_(RMSYNC_CONFIRMED_LEAVERS_, ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana', 'Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Vadlapudi Divya', 'G Anand Kumar', 'G Kumar', 'Tharun Chalumuri', 'Rajesh Gugulothu'], 'leavers: the 2026-10-16 confirmed list + Sanket Yadav (2026-10-19) + Rahul Chauhan (2026-11-02) + Sachin Rana (2026-11-03) + Zoya Fathima, Angad Yadav, Lovkesh Pandey and 6 Hyderabad S1s (2026-11-13)');
       const rawNames = RM_HIERARCHY_RAW_.map(function (r) { return normPersonName_(r[2]); });
       RMSYNC_CONFIRMED_LEAVERS_.forEach(function (n) { TestAssert_(rawNames.indexOf(normPersonName_(n)) === -1, 'leavers: ' + n + ' is gone from RM_HIERARCHY_RAW_ too (a rebuild cannot restore them)'); });
     }

@@ -728,7 +728,7 @@ function runRmHierarchySyncGs_(opts) {
 // Edit this list (and RM_HIERARCHY_RAW_) the next time a person confirms leavers; the 2026-10-16 batch is below.
 // 2026-10-19: Sanket Yadav (Thane TM; address bounced 2026-10-19) - run applyRmHierarchyReassignmentsNow first (his three S1s), then this.
 // A confirmed leaver is also never re-added by the nightly sync as a "new joiner" while HR Live still lists them (RULE-092).
-const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana', 'Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey']; // Rahul Chauhan: user-confirmed leaver 2026-11-02 (not in HR Live, no leads); Sachin Rana 2026-11-03 (team moved to Sanket Patil / Kumar Babu, no leads); Zoya Fathima, Angad Yadav, Lovkesh Pandey 2026-11-13 (user-confirmed, not in HR Live)
+const RMSYNC_CONFIRMED_LEAVERS_ = ['Jitendra Phulwaria', 'Atharva Belose', 'Atharva P Belose', 'Sanket Yadav', 'Rahul Chauhan', 'Sachin Rana', 'Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Vadlapudi Divya', 'G Anand Kumar', 'G Kumar', 'Tharun Chalumuri', 'Rajesh Gugulothu']; // Rahul Chauhan: user-confirmed leaver 2026-11-02 (not in HR Live, no leads); Sachin Rana 2026-11-03 (team moved to Sanket Patil / Kumar Babu, no leads); Zoya Fathima, Angad Yadav, Lovkesh Pandey 2026-11-13 (user-confirmed, not in HR Live)
 const RMSYNC_LEAVER_LEAD_ID_LOG_LIMIT_ = 200;
 
 // Open leads per normalised RM name, for the names given. All open leads count (not only Google ones): every open lead under a
@@ -920,13 +920,13 @@ const RMSYNC_PINNED_OVERRIDES_ = [
   { name: 'Parusharothu Vinay Varma', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
   { name: 'Peddapally Veera Shivaji', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
   { name: 'Chandrababu Seenathur', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
-  { name: 'Maagathoti Adilakshmi', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
-  { name: 'Vadlapudi Divya', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
-  { name: 'G Anand Kumar', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
-  { name: 'G Kumar', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Maagathoti Adilakshmi', leaver: true, since: '2026-11-13', why: 'left (user-confirmed) - not in HR Live, no leads' },
+  { name: 'Vadlapudi Divya', leaver: true, since: '2026-11-13', why: 'left (user-confirmed) - not in HR Live, no leads' },
+  { name: 'G Anand Kumar', leaver: true, since: '2026-11-13', why: 'left (user-confirmed) - not in HR Live, no leads' },
+  { name: 'G Kumar', leaver: true, since: '2026-11-13', why: 'left (user-confirmed) - not in HR Live, no leads' },
   { name: 'Peddapally Shivaji', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
-  { name: 'Tharun Chalumuri', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
-  { name: 'Rajesh Gugulothu', set: { tl: '', tm: '', rh: 'Rahul Attada', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima'], since: '2026-11-13', why: 'Zoya Fathima left; team moved to RH Rahul Attada' },
+  { name: 'Tharun Chalumuri', leaver: true, since: '2026-11-13', why: 'left (user-confirmed) - not in HR Live, no leads' },
+  { name: 'Rajesh Gugulothu', leaver: true, since: '2026-11-13', why: 'left (user-confirmed) - not in HR Live, no leads' },
   { name: 'Balamurali Sivakumar', team: 'Bangalore', set: { tl: '', tm: '', rh: 'Romen Singh', ch: 'Mukesh Mishra' }, was: ['Zoya Fathima', 'Rahul Attada'], since: '2026-11-13', why: 'reports to RH Romen Singh, Bangalore (user); HR Live still shows Rahul Attada, Hyderabad' },
   { name: 'Zoya Fathima', leaver: true, since: '2026-11-13', why: 'left - Hyderabad Cluster Head; gone from HR Live, mailbox bouncing since 2026-11-09' },
   { name: 'Angad Yadav', leaver: true, since: '2026-11-13', why: 'left - Loan BDM; not in HR Live' },
