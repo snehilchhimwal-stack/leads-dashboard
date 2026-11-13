@@ -1034,7 +1034,7 @@
 
     <section id="sec-duetoday">
       <div class="section-head"><div class="section-bar amber"></div><div class="section-title">Behind on Today's Calls</div><div class="section-count" id="dueTodayCount"></div></div>
-      <div class="filter-summary">Open leads (not closed, not Opportunity+) with fewer than 3 call attempts made TODAY (IST), past grace. For a lead assigned today, today's effort is the call_attempts column directly. For an older lead still open, there's no true per-day counter in the export, so this counts CRM-log entries timestamped today as the closest available proxy — undercounts if a real call wasn't logged as a comment.</div>
+      <div class="filter-summary">Open leads (not closed, not Opportunity+), past the 3-hour grace, whose customer is behind on calls: the call attempts of EVERY RM holding this customer count together (each lead id once), and must reach 5 within 24 hours of the customer's first assignment and 10 after that. Only the customer's current open leads are pooled (assigned within 48 hours of the newest one); a closed or older enquiry no longer lends its calls. The chip on each card shows calls so far against that target. (Until 2026-11-02 this was a per-RM "3 calls today" check.)</div>
       <div class="section-scroll"><div class="card-list" id="dueTodayList"></div></div>
     </section>
 

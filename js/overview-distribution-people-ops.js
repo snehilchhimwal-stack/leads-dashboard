@@ -881,7 +881,7 @@ function renderRegionTable(){
   const table = document.getElementById('regionTable');
   table.querySelector('thead').innerHTML = `<tr>
     <th>Region</th><th>Reports as</th><th style="text-align:right">Total</th>
-    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing the call-effort check (Behind on Today's Calls): the customer's calls from every RM together are under 5 within 24h of the first assignment, or under 10 after that (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right">Critical %</th>
     <th style="text-align:right">Not Conn. 10m</th><th style="text-align:right">No Attempts</th></tr>`;
 
@@ -925,7 +925,7 @@ function renderTLTable(){
   const table = document.getElementById('tlTable');
   table.querySelector('thead').innerHTML = `<tr>
     <th>TL</th><th style="text-align:right">RMs</th><th style="text-align:right">Total Leads</th>
-    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right">Opp+</th><th style="text-align:right" title="Leads failing the call-effort check (Behind on Today's Calls): the customer's calls from every RM together are under 5 within 24h of the first assignment, or under 10 after that (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -963,7 +963,7 @@ function renderProjectTable(){
   table.querySelector('thead').innerHTML = `<tr>
     <th>Project</th><th style="text-align:right">Leads</th>
     <th style="text-align:right">Opp+</th><th style="text-align:right">Opp %</th>
-    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
+    <th style="text-align:right" title="Leads failing the call-effort check (Behind on Today's Calls): the customer's calls from every RM together are under 5 within 24h of the first assignment, or under 10 after that (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th>
     <th style="text-align:right" title="Payment received, paperwork pending">Soft Bk</th><th style="text-align:right">Booking</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){
@@ -1039,7 +1039,7 @@ function renderRMTable(){
     <th style="text-align:right">Total</th><th style="text-align:right">Open</th>
     <th style="text-align:right" title="This RM's open-lead count vs the average open count across every RM carrying at least one open lead.">vs Avg (Open)</th>
     <th style="text-align:right">Opp+</th>
-    <th style="text-align:right" title="Leads failing today's call-effort check: fewer than 3 calls made today (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
+    <th style="text-align:right" title="Leads failing the call-effort check (Behind on Today's Calls): the customer's calls from every RM together are under 5 within 24h of the first assignment, or under 10 after that (any lead age — see Operations → Behind on Today's Calls). Does not include the 10-minute, follow-up, Not Updated or Stuck checks.">Call SLA</th><th style="text-align:right">Multi-Agent</th>
     <th style="text-align:right">Avg Attempts</th></tr>`;
   const tbody = table.querySelector('tbody');
   if (!rows.length){

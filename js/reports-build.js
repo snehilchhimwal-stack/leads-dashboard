@@ -231,7 +231,8 @@ const ISSUE_REPORT_META = {
   },
   dueToday: {
     flag: 'underCalledToday', label: "Behind on Today's Calls",
-    intro: 'Please find below the {SOURCE} leads with fewer than 3 call attempts made today. For a lead assigned today this is Call Count directly; for an older lead still open it is CRM-logged updates dated today, since there is no true per-day call counter.',
+    // 2026-11-13 (audit F1): restated for the 2026-11-02 pooled rule - it still described the per-day 3-call check.
+    intro: "Please find below the {SOURCE} leads behind on calls: the customer's call attempts from every RM together are under 5 within 24 hours of the first assignment, or under 10 after that. The Attempts column shows calls so far against that target.",
   },
   stuck: {
     flag: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)',

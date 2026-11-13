@@ -328,7 +328,7 @@ function enrichLead(l){
   const isUnder48h = ageHours !== null && ageHours <= CONFIG.LEAD_LIFECYCLE_HOURS;
 
   // New Today: assigned today AND in the system at least 3 hours, so a lead
-  // that just arrived isn't immediately flagged for not having its 3 calls yet.
+  // that just arrived isn't immediately flagged for not having its calls yet.
   const isCreatedToday = istSameDay(created, now);   // IST calendar day, not the browser's
   // Grace period from lead assignment. Applies to every check below EXCEPT
   // the 10-minute first-contact rule (firstContactBreach) and
