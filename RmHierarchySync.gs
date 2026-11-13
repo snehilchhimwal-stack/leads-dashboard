@@ -1109,6 +1109,32 @@ function applyRmHierarchyReassignmentsGs_(pins, opts) {
 // Run once from the editor (2026-10-19): applies the manager pins above to the live tab. Run it BEFORE removeRmHierarchyLeaversNow.
 function applyRmHierarchyReassignmentsNow() { return applyRmHierarchyReassignmentsGs_(rmSyncPinnedOverridesGs_(), {}); }
 
+// Dry run (2026-11-13): run this FIRST. Runs applyRmHierarchyReassignmentsNow + removeRmHierarchyLeaversNow in test mode - nothing is
+// written (no tab change, no backup, no state) - and logs exactly what each would do. The leaver part is read against the CURRENT tab,
+// so before the reassignment it still lists the team rows that name a leaver as manager (those go once the reassignment has run).
+function previewRmHierarchyChangesNow() {
+  const prior = TEST_MODE_OVERRIDE_EMAIL_;
+  TEST_MODE_OVERRIDE_EMAIL_ = TEST_MODE_OVERRIDE_EMAIL_ || 'dry-run (nothing is written)';
+  try {
+    const a = applyRmHierarchyReassignmentsGs_(rmSyncPinnedOverridesGs_(), {});
+    const r = removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, {});
+    const lines = [
+      'DRY RUN - nothing was written.',
+      'Reassignment would change/add ' + a.wouldChange.length + ': ' + (a.wouldChange.join('; ') || 'nothing'),
+      'Already as confirmed: ' + (a.already.join(', ') || 'none'),
+      'Pinned but not in RM_Hierarchy (not added): ' + (a.notFound.join(', ') || 'none'),
+      'Manager_Directory notes: ' + (a.directoryNotes.join('; ') || 'none'),
+      'Leaver removal would remove: ' + (r.wouldRemove.join(', ') || 'nobody'),
+      'Refused for open leads: ' + (r.blocked.map(function (b) { return b.name + ' (' + b.leadIds.length + ' open: ' + b.leadIds.slice(0, 10).join(', ') + ')'; }).join('; ') || 'nobody'),
+      'Rows still naming a leaver as manager (cleared by the reassignment): ' + (r.managerRefs.join('; ') || 'none'),
+    ];
+    Logger.log(lines.join(' | '));
+    return { reassign: a, leavers: r };
+  } finally {
+    TEST_MODE_OVERRIDE_EMAIL_ = prior;
+  }
+}
+
 // ==================== Entry points ====================
 
 // Trigger entry point (installed by setupRmHierarchySync). Same shape as the email jobs: the script-wide lock + run record

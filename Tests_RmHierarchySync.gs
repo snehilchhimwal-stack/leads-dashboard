@@ -767,6 +767,25 @@ function runRmHierarchySyncTests_() {
         world.ss._sheets['leads'] = TestMockSheet_('leads', [['banner'], ['lead_id', 'RM', 'current_stage', 'closing_reason', 'lead_closing_reason'], ['L-SY-1', 'Sanket Yadav', 'Won', '', '']]);
         const removed = removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, { now: RMSYNC_TEST_THU_ });
         TestAssertEqual_(removed.removed, ['Sanket Yadav'], 'real leaver: removed once no open lead is left');
+        // previewRmHierarchyChangesNow (2026-11-13): the real pins + leavers in test mode on a fresh tab - lists everything, writes nothing.
+        {
+          const pw = rmSyncTestWorld_({ tabRows: rmSyncTestTabRows_().concat([
+            ['Hyderabad', 'Cluster Head', 'Zoya Fathima', '', '', '', 'Mukesh Mishra', false, '', ''],
+            ['Hyderabad', 'S1', 'G Kumar', '', '', '', 'Zoya Fathima', false, '', ''],
+            ['Hyderabad', 'S1', 'Balamurali Sivakumar', '', '', '', 'Zoya Fathima', false, '', ''],
+          ]) });
+          pw.ss._sheets['leads'] = TestMockSheet_('leads', [['banner'], ['lead_id', 'RM', 'current_stage', 'closing_reason', 'lead_closing_reason'], ['L-ZF-1', 'Zoya Fathima', 'Suspect', '', '']]);
+          rmSyncPinnedOverridesGs_ = realPins;
+          const snap = JSON.stringify(pw.tab._data);
+          let pv;
+          try { pv = previewRmHierarchyChangesNow(); } finally { rmSyncPinnedOverridesGs_ = function () { return []; }; }
+          TestAssertEqual_(JSON.stringify(pw.tab._data), snap, 'preview: nothing is written to the tab');
+          TestAssertEqual_(TEST_MODE_OVERRIDE_EMAIL_, '', 'preview: test mode is switched back off afterwards');
+          TestAssert_(pv.reassign.testMode && pv.leavers.testMode, 'preview: both steps ran in test mode');
+          TestAssert_(pv.reassign.wouldChange.some(function (w) { return w.indexOf('Rahul Attada: new row (Hyderabad, RH') === 0; }), 'preview: the Rahul Attada row would be added');
+          TestAssert_(pv.reassign.wouldChange.some(function (w) { return w.indexOf('Balamurali Sivakumar:') === 0 && w.indexOf('team Hyderabad -> Bangalore') !== -1; }), 'preview: the Balamurali move to Bangalore is listed');
+          TestAssertEqual_(pv.leavers.blocked.map(function (x) { return x.name + ':' + x.leadIds.join(','); }), ['Zoya Fathima:L-ZF-1'], 'preview: a leaver with an open lead is listed as refused');
+        }
         TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Sanket Yadav') === -1, 'real leaver: gone from the tab');
       }
     }
