@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-13 against commit `e06e781` |
+| **Last Verified** | 2026-11-13 against commit `5acba65` - audit F4: both writers now count per lead copy (`5acba65`) |
 
 ## Purpose / reason to exist
 
@@ -106,6 +106,11 @@ its own.
 
 The two writers (`GS-008` + `JS-018`) share this schema and must be
 changed together (`LOGIC_AUDIT.md` Part 4 §4.7 confirms current parity).
+**Population parity (2026-11-13, `5acba65`, audit F4):** both writers count one
+unit per leads-tab row / distinct lead id. Rows with `source` = `Dashboard`
+written BEFORE 2026-11-13 counted merged customers instead (one per customer,
+earliest assignment across copies), so a trend that mixes those older Dashboard
+rows with AppsScript rows is not like-for-like; filter on `source` for that span.
 The `snapshot_at` upsert key is what makes backfill idempotent — moving
 or renaming it breaks re-runnability. `RAW` value-input is deliberate
 (stops Sheets date→serial coercion).

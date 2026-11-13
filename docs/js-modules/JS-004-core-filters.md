@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-09-30 against commit `d358cb9` — revalidated in this sweep (every function's line anchor, CFG-002, EXC-008/009 guards re-checked against source); file moved past the prior cited commit but no claim this record makes was affected
+| **Last Verified** | 2026-11-13 against commit `5acba65` - audit F4: `snapshotSlaHistory` (FN-024) now counts per lead copy (copySplits), matching `writeSlaHistorySnapshot_` (`GS-008`) |
 
 ## Purpose / reason to exist
 
@@ -137,6 +137,8 @@ generic template assumes), Part 7 §18 LOW #3.
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-13** (`5acba65`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F4, user decision): `snapshotSlaHistory` enriches one unit per distinct lead id (the same `copySplits` `applyFiltersAndRender` hands the issue cards) instead of the merged customer record, and skips a unit with no lead id. Before, a customer held by two RMs was one open lead here but two in `MovementTracker.gs`'s rows of the same `SLA_History` tab, and its age was the earliest assignment across copies, closed ones included. `tests/frontend-harness.html` "snapshotSlaHistory (F4)" block (upsert stubbed).
 
 Verified at `c82ec67`; record created by DOC-027.
 
