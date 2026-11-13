@@ -148,6 +148,17 @@ function _applyFiltersAndRenderImpl(){
 // filtered `leads` — otherwise browsing with a region filter active would
 // silently write a partial-data snapshot.
 //
+// Counted PER LEAD COPY, not per merged customer (2026-11-13, lead-check
+// logic audit F4, user decision): MovementTracker.gs writeSlaHistorySnapshot_
+// — the other writer of the SAME tab — judges every leads-tab row on its own,
+// so a customer held by two RMs is two open leads there. Until this change
+// the dashboard enriched the merged customer record instead (one lead, with
+// the EARLIEST assignment across copies, closed copies included), so its
+// rows and the AppsScript rows in SLA_History measured different populations.
+// Now both walk the same units the issue cards use (copySplits — one per
+// distinct lead id — see applyFiltersAndRender above), and a unit with no
+// lead id is skipped exactly as the .gs writer skips a row with none.
+//
 // asOf defaults to _renderNow (a plain refresh) but callers that need
 // their OWN precise moment — browserSnapshotOpenLeads, so its SLA_History
 // row lines up with the exact instant its Movement_Log write used, not
@@ -167,7 +178,11 @@ async function snapshotSlaHistory(asOf){
   _renderNow = at;
   let enriched;
   try {
-    enriched = allParsedLeads.map(enrichLead);
+    enriched = [];
+    allParsedLeads.forEach(l => {
+      const units = (l.copySplits && l.copySplits.length > 1) ? l.copySplits : [l];
+      units.forEach(u => { if (String(u.lead_id == null ? '' : u.lead_id).trim()) enriched.push(enrichLead(u)); });
+    });
   } finally {
     _renderNow = savedRenderNow;
   }

@@ -2413,6 +2413,49 @@
     assert('inferOutcome is loaded (FE-1..3 checks)', false, 'typeof inferOutcome = ' + typeof inferOutcome);
   }
 
+  // 2026-11-13 (lead-check logic audit F4, user decision): snapshotSlaHistory counts PER LEAD COPY, like
+  // MovementTracker.gs writeSlaHistorySnapshot_ (the other writer of the same tab), not per merged customer.
+  // upsertSlaHistoryRows is stubbed so nothing reaches a sheet; _currentSheetId is set only for this block.
+  await (async function () {
+    const savedLeads = allParsedLeads, savedSheet = _currentSheetId, savedUpsert = upsertSlaHistoryRows, savedNow = _renderNow;
+    const captured = [];
+    try {
+      upsertSlaHistoryRows = async function (entries) { captured.push(...entries); };
+      _currentSheetId = 'harness-f4';
+      _renderNow = new Date();
+      const at = h => new Date(_renderNow.getTime() - h * 3600000).toISOString();
+      const copy = (id, stage, ageH, extra) => Object.assign({
+        lead_id: id, client_id: 'C-F4', RM: 'RM ' + id, TL: 'T', project: 'P', region: 'R', client: 'K',
+        lead_assigned_at: at(ageH), group_source: 'Google', source_bucket: 'PPC', current_stage: stage,
+        last_connect: '', last_connect_time: '', last_comment: '', internal_status_comments: '', stage_comments: '',
+        closing_reason: '', lead_closing_reason: '', call_attempts: 0, call_count: 0, duration: 0, rm_is_active: true,
+        collatedFrom: 1, collatedLeadIds: [id], collatedRMs: ['RM ' + id], collatedRegions: ['R'],
+      }, extra || {});
+      // A merged customer: one copy still "Not Updated" (open), one copy closed by the other RM 60h ago.
+      // Merged record = the open copy's data but the EARLIEST assignment (60h) - the old per-customer tally
+      // would have counted it once and as 60h old (Stuck), never as Not Updated at 10h.
+      const open10h = copy('F4-OPEN', 'Not Updated', 10);
+      const closed60h = copy('F4-CLOSED', 'Suspect', 60, { closing_reason: 'Lost' });
+      const merged = Object.assign({}, open10h, { lead_assigned_at: at(60), collatedFrom: 2, collatedLeadIds: ['F4-OPEN', 'F4-CLOSED'],
+        callAttemptsByLeadId: { 'F4-OPEN': 0, 'F4-CLOSED': 0 }, copySplits: [open10h, closed60h] });
+      const single = copy('F4-SINGLE', 'Suspect', 10);
+      const noId = copy('', 'Suspect', 10);
+      allParsedLeads = [merged, single, noId];
+      await snapshotSlaHistory(_renderNow);
+      const row = captured[0];
+      assert('snapshotSlaHistory (F4): one SLA_History entry captured', captured.length === 1, 'got ' + captured.length);
+      assert('snapshotSlaHistory (F4): counts per lead copy - 2 open (the open copy + the single), the closed copy and the blank-id unit excluded',
+        row && row.openTotal === 2, 'openTotal ' + (row && row.openTotal));
+      assert('snapshotSlaHistory (F4): the open copy is judged on ITS OWN 10h assignment - Not Updated, not Stuck 48h+',
+        row && row.byCheck.isNotUpdated === 1 && row.byCheck.stageStuck48h === 0, row && JSON.stringify(row.byCheck));
+      assert('snapshotSlaHistory (F4): both open copies are behind on calls (0 < 5 past grace), breachedTotal 2',
+        row && row.byCheck.underCalledToday === 2 && row.breachedTotal === 2, row && JSON.stringify(row));
+      assert('snapshotSlaHistory (F4): source is Dashboard', row && row.source === 'Dashboard');
+    } finally {
+      allParsedLeads = savedLeads; _currentSheetId = savedSheet; upsertSlaHistoryRows = savedUpsert; _renderNow = savedNow;
+    }
+  })();
+
   statusEl.textContent = 'Done: ' + results.pass + ' passed, ' + results.fail + ' failed.';
   statusEl.style.color = results.fail ? '#ff5d5d' : '#4ade80';
   window.__harnessResults = results;
