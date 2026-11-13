@@ -1346,7 +1346,8 @@
         l.underCalledToday === false, 'expected cleared; got ' + l.underCalledToday);
 
       // Only 2 comments today — still under the daily minimum
-      // (CONFIG.MIN_CALLS_PER_DAY = 3 since 2026-10-19), so the fix must NOT
+      // (the per-day minimum was 3 at the time; since 2026-11-02 the pooled
+      // 5/10 customer rule decides - see the 2026-11-02 block), so the fix must NOT
       // over-correct into never flagging anything.
       const comments2 = [9, 10].map(h =>
         'Test RM: Not Reachable - 2026-09-09 ' + String(h).padStart(2, '0') + ':00').join(' | ');
@@ -1378,7 +1379,8 @@
     const stamp = h => { const d = new Date(at(h).getTime() + 5.5 * 3600000); return d.toISOString().slice(0, 16).replace('T', ' '); };
     const base = { lead_id: 'L-R19', client_id: 'C-R19', rm_is_active: true, call_attempts: 6 };
     try {
-      assert('2026-10-19 rule set: CONFIG.MIN_CALLS_PER_DAY is 3', CONFIG.MIN_CALLS_PER_DAY === 3, 'got ' + CONFIG.MIN_CALLS_PER_DAY);
+      assert('2026-11-13 (audit F1): the per-day MIN_CALLS_PER_DAY and display-only MIN_CALLS_AFTER_48H are gone from CONFIG',
+        !('MIN_CALLS_PER_DAY' in CONFIG) && !('MIN_CALLS_AFTER_48H' in CONFIG));
       assert('2026-10-19 rule set: ISSUE_PRIORITY labels followupOverdue "No follow up in last 4 hours"',
         ISSUE_PRIORITY.find(r => r.key === 'followupOverdue').label === 'No follow up in last 4 hours');
       let l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(1) }));
@@ -1415,6 +1417,15 @@
       assert("underCalledToday (2026-11-02): past 24h, 10 calls meets the target", l.underCalledToday === false, 'got ' + l.underCalledToday);
       l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(5), call_attempts: 1, customerCallTotalAll: 5, customerFirstAssignedMs: at(5).getTime() }));
       assert("underCalledToday (2026-11-02): calls from every RM of the customer count together (1 own, 5 in total)", l.underCalledToday === false, 'got ' + l.underCalledToday);
+      {
+        // 2026-11-13 (lead-check logic audit F1): the alert card's call chip must state what the flag judged - the customer's
+        // pooled calls against the live target - not the lead's own counter against the old per-day 3 / 10.
+        const card = renderAlertCard(enrichLead(Object.assign({}, base, { current_stage: 'Not Updated', region: 'R', project: 'P', lead_assigned_at: at(5), call_attempts: 2, customerCallTotalAll: 6, customerFirstAssignedMs: at(5).getTime() })), 0, 'hx');
+        assert('renderAlertCard (2026-11-13): chip shows the pooled customer calls against the 24h target ("6/5 calls (all RMs)")', card.indexOf('6/5 calls (all RMs)') !== -1, card);
+        assert('renderAlertCard (2026-11-13): chip no longer prints "<own>/3 attempts"', card.indexOf('/3 attempts') === -1 && card.indexOf('2/') === -1, card);
+        const card48 = renderAlertCard(enrichLead(Object.assign({}, base, { current_stage: 'Not Updated', region: 'R', project: 'P', lead_assigned_at: at(30), call_attempts: 7 })), 1, 'hx');
+        assert('renderAlertCard (2026-11-13): past 24h the chip shows the 10-call target ("7/10 calls (all RMs)")', card48.indexOf('7/10 calls (all RMs)') !== -1, card48);
+      }
       {
         const tr = [
           { lead_id: 'T1', RM: 'Old RM', lead_assigned_at: at(48), rm_is_active: false }, { lead_id: 'T1', RM: 'New RM', lead_assigned_at: at(3), rm_is_active: true }, { lead_id: 'T4', RM: 'Shared A', lead_assigned_at: at(48), rm_is_active: true }, { lead_id: 'T4', RM: 'Shared B', lead_assigned_at: at(3), rm_is_active: true },

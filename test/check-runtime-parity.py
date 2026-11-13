@@ -254,6 +254,20 @@ PLAIN_PAIRS = [
     ("FOLLOWUP_SUGGESTIONS", "js/core-outcome-engine.js", "FOLLOWUP_SUGGESTIONS", "FollowupEngine.gs", "FOLLOWUP_SUGGESTIONS_GS_"),
     ("REGION_GROUP_MAP", "js/reports-build.js", "REGION_GROUP_MAP", "EmailInfra.gs", "REGION_GROUP_MAP_"),
     ("FUNNEL_ORDER", "js/core-foundation.js", "FUNNEL_ORDER", "Core.gs", "FUNNEL_ORDER_"),
+    # Added 2026-11-13 (lead-check logic audit F2): the REST of HANDOVER.md section 6 row 2 ("Stage / SLA-flag config"),
+    # which until then was only FUNNEL_ORDER here -- the stage alias / closed-stage lists the open-lead test reads, and
+    # every threshold the five SLA rules use. The browser side lives as CONFIG.* properties (the prop_re form).
+    ("STAGE_ALIASES", "js/core-foundation.js", "STAGE_ALIASES", "Core.gs", "STAGE_ALIASES_"),
+    ("OPPORTUNITY_STAGE", "js/core-foundation.js", "OPPORTUNITY_STAGE", "Core.gs", "OPPORTUNITY_STAGE_"),
+    ("CLOSED_STAGE_EXACT", "js/core-foundation.js", "CLOSED_STAGE_EXACT", "Core.gs", "CLOSED_STAGE_EXACT_"),
+    ("CLOSED_STAGE_STEMS", "js/core-foundation.js", "CLOSED_STAGE_STEMS", "Core.gs", "CLOSED_STAGE_STEMS_"),
+    ("LEAD_GRACE_HOURS", "js/core-foundation.js", "LEAD_GRACE_HOURS", "SlaEngine.gs", "LEAD_GRACE_HOURS_"),
+    ("LEAD_LIFECYCLE_HOURS", "js/core-foundation.js", "LEAD_LIFECYCLE_HOURS", "SlaEngine.gs", "LEAD_LIFECYCLE_HOURS_"),
+    ("FOLLOWUP_REVIEW_HOURS", "js/core-foundation.js", "FOLLOWUP_REVIEW_HOURS", "SlaEngine.gs", "FOLLOWUP_REVIEW_HOURS_"),
+    ("MIN_CALLS_24H", "js/core-foundation.js", "MIN_CALLS_24H", "SlaEngine.gs", "MIN_CALLS_24H_"),
+    ("MIN_CALLS_48H", "js/core-foundation.js", "MIN_CALLS_48H", "SlaEngine.gs", "MIN_CALLS_48H_"),
+    ("WORK_START_HOUR", "js/core-foundation.js", "WORK_START_HOUR", "SlaEngine.gs", "WORK_START_HOUR_"),
+    ("WORK_END_HOUR", "js/core-foundation.js", "WORK_END_HOUR", "SlaEngine.gs", "WORK_END_HOUR_"),
     ("RM_PERF_RULE_WEIGHTS", "js/core-rm-performance.js", "RM_PERF_RULE_WEIGHTS", "DailyRmIssueLog.gs", "RM_PERF_RULE_WEIGHTS_GS_"),
     ("RM_PERF_SHRINKAGE_K", "js/core-rm-performance.js", "RM_PERF_SHRINKAGE_K", "DailyRmIssueLog.gs", "RM_PERF_SHRINKAGE_K_GS_"),
     ("RM_PERF_MIN_VOLUME_LEADS", "js/core-rm-performance.js", "RM_PERF_MIN_VOLUME_LEADS", "DailyRmIssueLog.gs", "RM_PERF_MIN_VOLUME_LEADS_GS_"),
@@ -304,6 +318,18 @@ RULESET_PAIRS = [
         "gs": ("DailyRmIssueLog.gs", "RM_PERF_RULES_GS_"),
         "key_field": "key",
         "compare_fields": ["label"],
+    },
+    # Added 2026-11-13 (lead-check logic audit F2): the five SLA checks and the ORDER they are picked in when a lead
+    # qualifies for several (primaryIssueGs_ / reportableIssueFor walk this array top to bottom). Keys and order only --
+    # the stageStuck48h label deliberately differs ("Leads Pending Beyond 48 Hours (Not Yet Opportunity)" on the
+    # dashboard, "Stuck 48h+" in the emails; audit F3), and no sheet compares a browser label with a .gs one.
+    {
+        "label": "ISSUE_PRIORITY (keys + priority order)",
+        "js": ("js/core-foundation.js", "ISSUE_PRIORITY"),
+        "gs": ("SlaEngine.gs", "ISSUE_PRIORITY_GS_"),
+        "key_field": "key",
+        "compare_fields": [],
+        "ordered": True,
     },
 ]
 
@@ -439,6 +465,10 @@ def report_ruleset_pair(spec, findings):
     only_js = set(js_by_key) - set(gs_by_key)
     only_gs = set(gs_by_key) - set(js_by_key)
     msg = []
+    if spec.get("ordered") and list(js_by_key) != list(gs_by_key):
+        # Positional order is part of the rule (first match wins), so a reordering is a real mismatch even when the
+        # key sets agree.
+        msg.append("    %s order differs -- js (%s): %r  gs (%s): %r" % (key_field, js_file, list(js_by_key), gs_file, list(gs_by_key)))
     if only_js:
         msg.append("    %s only in js (%s): %s" % (key_field, js_file, sorted(only_js, key=str)))
     if only_gs:

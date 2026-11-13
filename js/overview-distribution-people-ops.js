@@ -1068,7 +1068,7 @@ function renderRMTable(){
 }
 
 
-// Direct check #1: assigned today (calendar day), under 3 calls (CONFIG.MIN_CALLS_PER_DAY), open
+// Direct check #1: behind on calls (underCalledToday: the customer's pooled calls under 5 within 24h / 10 after), open
 // (not closed, not Opportunity+). Starts from isOpenLead as the foundation
 // — a closed or Opportunity+ lead can never appear here. Covers every open
 // lead regardless of assignment date: attemptsToday is call_attempts for a
@@ -1145,7 +1145,7 @@ function renderApproachingDeadlineList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing approaching the 48h deadline right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'approaching', CONFIG.MIN_CALLS_AFTER_48H));
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'approaching'));
 }
 
 // Pure stage check: open past 48hrs, still not Opportunity+, regardless of
@@ -1177,7 +1177,7 @@ function renderStuckList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing stuck past 48h right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'stuck', CONFIG.MIN_CALLS_AFTER_48H));
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'stuck'));
 }
 
 function renderInactiveRmList(){
@@ -1218,10 +1218,7 @@ function renderNotUpdatedList(){
     el.innerHTML = `<div class="empty-row" style="background:var(--surface); border-radius:8px; border:1px solid var(--border);">Nothing sitting in Not Updated right now</div>`;
     return;
   }
-  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => {
-    const req = l.past48h ? CONFIG.MIN_CALLS_AFTER_48H : CONFIG.MIN_CALLS_PER_DAY;
-    return renderAlertCard(l, idx, 'notupdated', req);
-  });
+  el.innerHTML = truncationNotice(group.length, MAX_CARDS) + renderCardsByDay(group, (l, idx) => renderAlertCard(l, idx, 'notupdated'));
 }
 
 

@@ -98,8 +98,14 @@ function logToggleMarkup(l, logId){
     + `<div class="action-log" id="${logId}"></div>`;
 }
 
-function renderAlertCard(l, idx, prefix, requiredCalls){
+// 2026-11-13 (lead-check logic audit F1): the call chip shows what the rule actually judges — the CUSTOMER's pooled calls
+// from every RM (enrichLead's customerCallTotal) against the target that applies now (callTarget: 5 within 24h of the
+// customer's first assignment, 10 after). It used to print the lead's own call_attempts against a per-day 3 / 10 passed in
+// by each caller, which contradicted the flag on the same card after the 2026-11-02 rule change.
+function renderAlertCard(l, idx, prefix){
   const logId = prefix + '_' + idx;
+  const callsSoFar = l.customerCallTotal != null ? l.customerCallTotal : (Number(l.call_attempts) || 0);
+  const callChip = l.callTarget != null ? `${callsSoFar}/${l.callTarget} calls (all RMs)` : `${callsSoFar} calls (all RMs)`;
   // Both timestamps matter: assignment says when the clock started, last
   // comment says whether anyone has touched it since. A relative figure
   // alone ("9.2h old") answers neither question usefully.
@@ -111,7 +117,7 @@ function renderAlertCard(l, idx, prefix, requiredCalls){
   return `<div class="alert-card${l.past48h ? '' : ' amber-left'}">
     <div class="alert-id">${leadIdentityLine(l)}</div>
     <div class="alert-age mono">assigned ${esc(istStamp(l.lead_assigned_at))}</div>
-    <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip amber">${l.call_attempts}/${requiredCalls} attempts</span> <span class="chip ${lastAt ? 'dim-chip' : 'amber'}">${esc(commentLabel)}</span></div>
+    <div class="alert-meta">${esc(l.region)} · ${esc(l.project)} · ${esc(l.current_stage)} — <span class="chip amber">${callChip}</span> <span class="chip ${lastAt ? 'dim-chip' : 'amber'}">${esc(commentLabel)}</span></div>
     ${l.last_comment ? `<div class="alert-comment">"${esc(l.last_comment)}"</div>` : ''}
     ${logToggleMarkup(l, logId)}
   </div>`;

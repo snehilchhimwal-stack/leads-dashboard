@@ -29,12 +29,13 @@
 // ============================================================
 
 const CONFIG = {
-  MIN_CALLS_PER_DAY: 3,   // 2026-10-19: was 5 (user request); twin of SlaEngine.gs MIN_CALLS_PER_DAY_. Not the issue rule since 2026-11-02.
   // 2026-11-02 (user request): "Behind on Today's Calls" = the customer's calls from EVERY RM together, at least 5 within 24h
-  // of the first assignment and 10 after. Twins of SlaEngine.gs MIN_CALLS_24H_ / MIN_CALLS_48H_.
+  // of the first assignment and 10 after. Twins of SlaEngine.gs MIN_CALLS_24H_ / MIN_CALLS_48H_ (parity-checked,
+  // test/check-runtime-parity.py). 2026-11-13: the old per-day MIN_CALLS_PER_DAY (3) and the display-only MIN_CALLS_AFTER_48H
+  // (10) were removed - their last readers were the alert cards, which printed them against the lead's own counter and so
+  // contradicted this rule (lead-check logic audit F1).
   MIN_CALLS_24H: 5,
   MIN_CALLS_48H: 10,
-  MIN_CALLS_AFTER_48H: 10,
   LEAD_LIFECYCLE_HOURS: 48,
   FIRST_CONTACT_SLA_MINUTES: 10,
   // Movement tab's Overnight Leads card — the after-hours window before

@@ -1041,7 +1041,7 @@ one-line fix in one file is complete:
 | Concept | Browser | Apps Script |
 |---|---|---|
 | Row parsing / header aliases | `HEADER_ALIASES` (`js/core-sheets-fetch.js`) | `HEADER_ALIASES_` (`Core.gs`) |
-| Stage / SLA-flag **config** (thresholds, `FUNNEL_ORDER`) | `CONFIG.*` (`js/core-foundation.js`) | `Core.gs` `FUNNEL_ORDER_` + `SlaEngine.gs` `*_` thresholds |
+| Stage / SLA-flag **config** (thresholds, `FUNNEL_ORDER`, stage aliases, closed-stage lists, `ISSUE_PRIORITY` order) | `CONFIG.*` + `ISSUE_PRIORITY` (`js/core-foundation.js`) | `Core.gs` `FUNNEL_ORDER_`/`STAGE_ALIASES_`/`CLOSED_STAGE_*_`/`OPPORTUNITY_STAGE_` + `SlaEngine.gs` `*_` thresholds and `ISSUE_PRIORITY_GS_` — all parity-checked since 2026-11-13 (before that only `FUNNEL_ORDER` was; audit F2) |
 | Stage / SLA-flag **logic** | `enrichLead()` (`js/core-lead-model.js`) | `computeSlaFlags_` (`SlaEngine.gs`) |
 | Comment classification | `OUTCOME_RULES` / `inferOutcome` (`js/core-outcome-engine.js`) | `OUTCOME_RULES_GS_` / `inferOutcomeGs_` (`FollowupEngine.gs`) |
 | Suggested follow-up text | `FOLLOWUP_SUGGESTIONS` (`js/core-outcome-engine.js`) | `FOLLOWUP_SUGGESTIONS_GS_` (`FollowupEngine.gs`) |
