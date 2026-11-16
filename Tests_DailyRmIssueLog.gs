@@ -954,6 +954,22 @@ function runDailyRmIssueLogTests_() {
     TestAssertEqual_(rmPerfAByName['Good'].classification, 'On Track', 'classifyRmPerformanceGs_: a fully-compliant group classifies On Track');
     TestAssert_(rmPerfAByName['Bad Broad'].composite > rmPerfAByName['Good'].composite, 'classifyRmPerformanceGs_: the violating group\'s composite score exceeds the compliant group\'s');
     TestAssertEqual_(rmPerformanceDrivenByGs_(rmPerfAByName['Good']).length, 0, 'rmPerformanceDrivenByGs_: an On Track group has nothing "driving" its score');
+
+    // 2026-11-16: Pre Sales ranked separately (own peer average); the sales ranking no longer contains them.
+    {
+      const hier = {
+        'manisha rathod': { team: 'Pre Sales', role: 'A1', tl: '', tm: '', rh: 'Snehil Chhimwal', ch: '' },
+        'bad broad': { team: 'Pre Sales', role: 'S1', tl: 'Manisha rathod', tm: '', rh: '', ch: '' },
+        'good': { team: 'Pune', role: 'S1', tl: '', tm: '', rh: '', ch: '' },
+        'aarya test': { team: 'Commercial', role: 'S3', tl: 'Manisha rathod', tm: '', rh: '', ch: '' },
+      };
+      TestAssert_(isPreSalesRmGs_(hier, 'Bad Broad') && isPreSalesRmGs_(hier, 'Aarya Test'), 'pre sales: a Pre Sales-team RM, and a Commercial RM whose TL is Pre Sales, are both Pre Sales');
+      TestAssert_(!isPreSalesRmGs_(hier, 'Good') && !isPreSalesRmGs_(hier, 'Nobody Known'), 'pre sales: a sales RM, and an RM with no hierarchy row, stay in the sales ranking');
+      const coh = computeRmPerformanceCohortsGs_(rmPerfA.ss, hier);
+      TestAssertEqual_(coh.sales.map(function (r) { return r.name; }), ['Good'], 'pre sales: the sales ranking excludes the Pre Sales RM');
+      TestAssertEqual_(coh.preSales.map(function (r) { return r.name; }), ['Bad Broad'], 'pre sales: the Pre Sales RM is in its own ranking');
+      TestAssert_(coh.sales[0].peerComposite < rmPerfAByName['Good'].peerComposite, 'pre sales: the sales peer average no longer includes the Pre Sales RM violations');
+    }
     const rmPerfASorted = sortRmPerformanceByPriorityGs_(rmPerfAResults);
     TestAssert_(rmPerfASorted.findIndex(function (r) { return r.name === 'Bad Broad'; }) < rmPerfASorted.findIndex(function (r) { return r.name === 'Good'; }), 'sortRmPerformanceByPriorityGs_: Below Expectations ranks ahead of On Track');
 

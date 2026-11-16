@@ -1046,6 +1046,7 @@ function loadRmHierarchyAndEmails_(ss) {
         const name = String(row[2] || '').trim();
         if (!name) return;
         byRmNameLower[name.toLowerCase()] = {
+          team: String(row[0] || '').trim(), // 2026-11-16: read by the RM-performance Pre Sales split (DailyRmIssueLog.gs)
           role: String(row[1] || '').trim(),
           tl: String(row[3] || '').trim(), tm: String(row[4] || '').trim(),
           rh: String(row[5] || '').trim(), ch: String(row[6] || '').trim(),

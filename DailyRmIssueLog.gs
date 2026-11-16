@@ -1729,6 +1729,30 @@ function computeRmPerformanceGs_(ss) {
   return classifyRmPerformanceGs_(byGroup);
 }
 
+// 2026-11-16 (user): Pre Sales RMs qualify leads and hand them on, so the call/follow-up rules hit them structurally (90-99% rates)
+// and they topped the sales ranking. They are now ranked SEPARATELY, each cohort against its own peer average. Pre Sales = an
+// RM_Hierarchy row whose team is "Pre Sales", or whose TL/TM/RH/CH is a Pre Sales-team person (e.g. Aarya Sadanam, Commercial,
+// reports to Manisha rathod). An RM with no RM_Hierarchy row stays in the sales cohort.
+const RM_PERF_PRESALES_TEAM_GS_ = 'pre sales';
+function isPreSalesRmGs_(byRmNameLower, rmName) {
+  const entry = lookupRmChain_(byRmNameLower || {}, rmName);
+  if (!entry) return false;
+  const isTeam = function (e) { return !!e && String(e.team || '').trim().toLowerCase() === RM_PERF_PRESALES_TEAM_GS_; };
+  if (isTeam(entry)) return true;
+  return ['tl', 'tm', 'rh', 'ch'].some(function (f) { return entry[f] && isTeam(lookupRmChain_(byRmNameLower, entry[f])); });
+}
+function splitRmPerformanceCohortsGs_(byGroup, byRmNameLower) {
+  const out = { sales: {}, preSales: {} };
+  Object.keys(byGroup).forEach(function (name) { (isPreSalesRmGs_(byRmNameLower, name) ? out.preSales : out.sales)[name] = byGroup[name]; });
+  return out;
+}
+// byRmNameLower: optional (tests pass their own); otherwise RM_Hierarchy is read once.
+function computeRmPerformanceCohortsGs_(ss, byRmNameLower) {
+  const byGroup = aggregateRmPerformanceGs_(reconstructRmPerformanceObservationsGs_(ss));
+  const cohorts = splitRmPerformanceCohortsGs_(byGroup, byRmNameLower || loadRmHierarchyAndEmails_(ss).byRmNameLower);
+  return { sales: classifyRmPerformanceGs_(cohorts.sales), preSales: classifyRmPerformanceGs_(cohorts.preSales) };
+}
+
 // The 1-2 scored rules actually pushing a classified result's score up,
 // worst first, filtered to rules with a REAL violation (not merely a
 // nonzero shrunkRate, which shrinkage gives every rule even at zero real
@@ -1762,14 +1786,19 @@ function sortRmPerformanceByPriorityGs_(list) {
 // engine already have.
 function reportRmPerformanceNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const results = computeRmPerformanceGs_(ss);
-  if (!results.length) {
+  const cohorts = computeRmPerformanceCohortsGs_(ss);
+  if (!cohorts.sales.length && !cohorts.preSales.length) {
     Logger.log('No Movement_Log data to compute from — needs at least one retained snapshot (Movement_Log keeps at most 7 days). Nothing to report yet.');
     return;
   }
+  [['SALES RMs (Pre Sales excluded)', cohorts.sales], ['PRE SALES RMs (ranked only against each other)', cohorts.preSales]].forEach(function (c) { logRmPerformanceRankingGs_(c[0], c[1]); });
+  Logger.log('Same workload-normalized methodology as the dashboard\'s Repeat Offenders section (see HANDOVER.md §9.7) — Score is a severity-weighted, small-sample-adjusted composite vs. the peer average OF THAT RANKING (sales and Pre Sales each have their own), not a raw violation count. "Insufficient Data" means fewer than ' + RM_PERF_MIN_VOLUME_LEADS_GS_ + ' distinct eligible leads — not enough evidence either way. RM-level only (no Region/A1-TM/RH rollups here — see those on the live dashboard).');
+}
 
+function logRmPerformanceRankingGs_(title, results) {
+  if (!results.length) { Logger.log(title + ': no RM with eligible lead-days.'); return; }
   const sorted = sortRmPerformanceByPriorityGs_(results);
-  Logger.log(sorted.length + ' RM(s) with at least one eligible lead-day in the retained Movement_Log history (up to 7 days), worst first:');
+  Logger.log(title + ': ' + sorted.length + ' RM(s) with at least one eligible lead-day in the retained Movement_Log history (up to 7 days), worst first:');
   sorted.slice(0, 40).forEach(function (r) {
     const drivenBy = rmPerformanceDrivenByGs_(r).map(function (d) {
       return d.label + ' (rate ' + Math.round(d.rawRate * 100) + '%, ' + d.distinctViolatedLeads + '/' + d.distinctEligibleLeads + ' lead(s)' + (d.concentrated ? ', concentrated' : '') + ')';
@@ -1779,5 +1808,4 @@ function reportRmPerformanceNow() {
       (r.routingIssueDays ? ', ' + r.routingIssueDays + ' inactive-RM routing day(s) (not scored)' : '') +
       (drivenBy ? ' — driven by: ' + drivenBy : ''));
   });
-  Logger.log('Same workload-normalized methodology as the dashboard\'s Repeat Offenders section (see HANDOVER.md §9.7) — Score is a severity-weighted, small-sample-adjusted composite vs. the peer average, not a raw violation count. "Insufficient Data" means fewer than ' + RM_PERF_MIN_VOLUME_LEADS_GS_ + ' distinct eligible leads — not enough evidence either way. RM-level only (no Region/A1-TM/RH rollups here — see those on the live dashboard).');
 }
