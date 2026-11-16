@@ -110,7 +110,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `OvernightEmailer.gs` | `d290405` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
 | `RmHierarchy.gs` | `abb3a87` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
 | `RmHierarchySync.gs` | `1c948e6` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
-| `SlaEngine.gs` | `3456be8` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `SlaEngine.gs` | `3456be8` | 2026-11-16 | read directly from the live editor by hash-match after the save (2026-11-16): audit F5 (checkpoint escalation no longer exempts Behind on Today's Calls); pasted via the browser pane with match-live-gs --push, user saved; live runAllTests 4368/0 (24 files, Tests_SlaEngine 115/0) |
 | `StaleLeads.gs` | `e6bdcb0` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
 | `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
 
