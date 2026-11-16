@@ -91,28 +91,28 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `Core.gs` | `a7d9e12` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `CycleReport.gs` | `6ca53d2` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `DailyChecklist.gs` | `6ca53d2` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `DailyRmIssueLog.gs` | `abb3a87` | 2026-11-16 | verified by checksum in editor 2026-11-16: RM performance ranks Pre Sales separately (team Pre Sales, or a Pre Sales person in the TL/TM/RH/CH chain - Aarya Sadanam included), each cohort against its own peer average; RM_Hierarchy entries carry `team`; saved, runAllTests 4368/0 (24 files); reportRmPerformanceNow run by the user: 179 sales RMs (peer 1.91) + 6 Pre Sales RMs (peer 2.61) = 185, no Pre Sales name in the sales ranking; recorded by hand, not by `match-live-gs.py --apply` |
-| `EmailInfra.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `EmailLedger.gs` | `5ed90a7` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `EmailReroute.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `EmailSweep.gs` | `79ef725` | 2026-11-11 | verified by checksum in editor 2026-11-11: our own 13:00 follow-up (sent under the account name) is no longer counted as a reply; pasted, runAllTests 4311/0 (24 files); recorded by hand, not by `match-live-gs.py --apply` |
-| `FollowupEngine.gs` | `af92f5a` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `FollowupTracker.gs` | `7ef68d3` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `InteractionHistoryLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `MovementTracker.gs` | `a2b904e` | 2026-11-12 | verified by checksum in editor 2026-11-12: snapshot content hash in plain-JS SHA-256 for ASCII text (non-ASCII stays on Utilities.computeDigest, which is not UTF-8 - found live), with a per-run self-check; pasted, runAllTests 4314/0 (24 files); recorded by hand, not by `match-live-gs.py --apply` |
-| `OpsAudit.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `OvernightEmailer.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `RmHierarchy.gs` | `abb3a87` | 2026-11-16 | verified by checksum in editor 2026-11-16: RM performance ranks Pre Sales separately (team Pre Sales, or a Pre Sales person in the TL/TM/RH/CH chain - Aarya Sadanam included), each cohort against its own peer average; RM_Hierarchy entries carry `team`; saved, runAllTests 4368/0 (24 files); reportRmPerformanceNow run by the user: 179 sales RMs (peer 1.91) + 6 Pre Sales RMs (peer 2.61) = 185, no Pre Sales name in the sales ranking; recorded by hand, not by `match-live-gs.py --apply` |
-| `RmHierarchySync.gs` | `1c948e6` | 2026-11-13 | verified by checksum in editor 2026-11-13: 5b17c00 (Zoya Fathima's team to new RH Rahul Attada, Balamurali Sivakumar to RH Romen Singh / Bangalore, Zoya Fathima / Angad Yadav / Lovkesh Pandey leavers, Bangalore four pins removed, previewRmHierarchyChangesNow dry run) + 1c948e6 (6 Hyderabad S1s confirmed leavers; Peddapally Shivaji kept - leads-sheet name of Peddapally Veera Shivaji); saved, runAllTests 4363/0 (24 files); dry runs checked, then applyRmHierarchyReassignmentsNow (11 changed, 1 added), removeRmHierarchyLeaversNow (Angad Yadav, Lovkesh Pandey; then the 6 S1s) and removeRmHierarchyLeaversForceNow (Zoya Fathima, lead 2274150 moved in the CRM) run by the user; live tab checked: 246 rows, no leaver left, Rahul Attada + 4 reports; recorded by hand, not by `match-live-gs.py --apply` |
-| `SlaEngine.gs` | `d290405` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `StaleLeads.gs` | `e6bdcb0` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
-| `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-05 | read directly from the live editor by hash-match (2026-11-05) |
+| `AllIssuesEmailer.gs` | `3092603` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `Core.gs` | `a7d9e12` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `CycleReport.gs` | `6ca53d2` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `DailyChecklist.gs` | `6ca53d2` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `DailyRmIssueLog.gs` | `abb3a87` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `EmailInfra.gs` | `3092603` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `EmailLedger.gs` | `5ed90a7` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `EmailReroute.gs` | `7ef68d3` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `EmailSweep.gs` | `79ef725` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `FollowupEngine.gs` | `af92f5a` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `FollowupTracker.gs` | `7ef68d3` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `InteractionHistoryLogger.gs` | `3092603` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `MovementTracker.gs` | `a2b904e` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `OpsAudit.gs` | `8ef279d` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `OvernightEmailer.gs` | `d290405` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `RmHierarchy.gs` | `abb3a87` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `RmHierarchySync.gs` | `1c948e6` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `SlaEngine.gs` | `3456be8` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `StaleLeads.gs` | `e6bdcb0` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
+| `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-16 | read directly from the live editor by hash-match (2026-11-16) |
 
 ### Known live-vs-repo differences
 
