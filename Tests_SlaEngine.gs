@@ -374,15 +374,16 @@ function runSlaEngineTests_() {
     const ckSecondPass = computeAllIssuesCheckpointGs_(ckSs, [ckByLeadId['L-CK-STILLOPEN']], now, ckBaselineMap);
     TestAssertEqual_(ckSecondPass[0].state, 'still_open', 'computeAllIssuesCheckpointGs_: reused verbatim on its own prior output (a checkpoint-shaped entry, not a raw snapshot entry) — proves the "reused for both checkpoints" design intent');
 
-    // SE-1 (2026-10-13, product decision): a move INTO "Behind on Today's Calls" at a checkpoint (it outranks Stuck 48h+) is
-    // category_changed, never escalated - the rule compares calls since midnight with a full-day minimum. A move into any
-    // other higher label is still escalated.
+    // 2026-11-13 (audit F5): the SE-1 exemption (2026-10-13: a move INTO "Behind on Today's Calls" was category_changed,
+    // never escalated, because that rule then counted calls since midnight) is gone - since 2026-11-02 the rule is
+    // cumulative from the customer's first assignment, so a move into Behind outranking Stuck 48h+ is escalated like any
+    // other move into a higher-priority label.
     const ckSe1 = computeAllIssuesCheckpointGs_(ckSs, [
       { lead_id: 'L-CK-STILLOPEN', issueLabel: 'Stuck 48h+' },
       { lead_id: 'L-CK-ESCALATE', issueLabel: "Behind on Today's Calls" },
     ], now, ckBaselineMap);
-    TestAssert_(ckSe1[0].currentIssueLabel === "Behind on Today's Calls" && ckSe1[0].state === 'category_changed', 'computeAllIssuesCheckpointGs_ (SE-1): Stuck 48h+ -> Behind on Today\'s Calls is category_changed, not escalated (got ' + ckSe1[0].state + ')');
-    TestAssert_(ckSe1[1].currentIssueLabel === 'Not Updated' && ckSe1[1].state === 'escalated', 'computeAllIssuesCheckpointGs_ (SE-1): Behind on Today\'s Calls -> Not Updated is still escalated');
+    TestAssert_(ckSe1[0].currentIssueLabel === "Behind on Today's Calls" && ckSe1[0].state === 'escalated', 'computeAllIssuesCheckpointGs_ (F5): Stuck 48h+ -> Behind on Today\'s Calls is escalated (the SE-1 exemption was removed 2026-11-13; got ' + ckSe1[0].state + ')');
+    TestAssert_(ckSe1[1].currentIssueLabel === 'Not Updated' && ckSe1[1].state === 'escalated', 'computeAllIssuesCheckpointGs_ (F5): Behind on Today\'s Calls -> Not Updated is still escalated');
 
     // ---- email audit P8 (F8): an optional `leadsData` snapshot replaces the per-call whole-sheet read ----
     {

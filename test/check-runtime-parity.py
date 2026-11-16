@@ -320,15 +320,14 @@ RULESET_PAIRS = [
         "compare_fields": ["label"],
     },
     # Added 2026-11-13 (lead-check logic audit F2): the five SLA checks and the ORDER they are picked in when a lead
-    # qualifies for several (primaryIssueGs_ / reportableIssueFor walk this array top to bottom). Keys and order only --
-    # the stageStuck48h label deliberately differs ("Leads Pending Beyond 48 Hours (Not Yet Opportunity)" on the
-    # dashboard, "Stuck 48h+" in the emails; audit F3), and no sheet compares a browser label with a .gs one.
+    # qualifies for several (primaryIssueGs_ / reportableIssueFor walk this array top to bottom). Labels compared too
+    # since audit F3 aligned the dashboard's stageStuck48h label to "Stuck 48h+" (same day).
     {
-        "label": "ISSUE_PRIORITY (keys + priority order)",
+        "label": "ISSUE_PRIORITY (keys, labels + priority order)",
         "js": ("js/core-foundation.js", "ISSUE_PRIORITY"),
         "gs": ("SlaEngine.gs", "ISSUE_PRIORITY_GS_"),
         "key_field": "key",
-        "compare_fields": [],
+        "compare_fields": ["label"],
         "ordered": True,
     },
 ]

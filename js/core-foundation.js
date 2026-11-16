@@ -123,7 +123,7 @@ const ISSUE_PRIORITY = [
   { key: 'isNotUpdated', label: 'Not Updated' },
   { key: 'followupOverdue', label: 'No follow up in last 4 hours' },   // was 'Follow-up Overdue (4h Post-Connect)' until 2026-10-19
   { key: 'underCalledToday', label: "Behind on Today's Calls" },
-  { key: 'stageStuck48h', label: 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)' },
+  { key: 'stageStuck48h', label: 'Stuck 48h+' },   // was 'Leads Pending Beyond 48 Hours (Not Yet Opportunity)' until 2026-11-13 (audit F3): now the same text as ISSUE_PRIORITY_GS_, RM_PERF_RULES and the Tracking/Overview short labels. The Operations section title and the email section heading (ISSUE_REPORT_META) keep the long wording.
 ];
 
 /* ========================= IST TIME CORE =========================

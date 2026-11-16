@@ -367,11 +367,13 @@ function computeAllIssuesCheckpointGs_(ss, priorEntries, now, baselineMap, leads
     }
     const wasRank = priorityIndexOf(priorLabel);
     const isRank = priorityIndexOf(issue.label);
-    // SE-1 (2026-10-13, product decision): "Behind on Today's Calls" counts calls since IST midnight against a FULL-day
-    // minimum, so at 10:00 / 13:00 most leads read as behind just because the day has started. A move INTO that label is
-    // therefore reported as category_changed, never escalated. (17:00 flags and computeSlaFlags_ itself are unchanged.)
-    const escalated = wasRank !== -1 && isRank !== -1 && isRank < wasRank // lower index = higher priority
-      && issue.label !== "Behind on Today's Calls";
+    // 2026-11-13 (lead-check logic audit F5): a move into ANY higher-priority label is escalated. The SE-1 exemption of
+    // 2026-10-13 ("a move INTO Behind on Today's Calls is never escalated") existed because that rule then counted calls
+    // since IST midnight against a full-day minimum, so at 10:00 / 13:00 most leads read as behind merely because the day
+    // had started. Since 2026-11-02 the rule is cumulative from the customer's first assignment (computeSlaFlags_), so a
+    // 10:00 "Behind" is a real deficit and the exemption had no rationale left (it could only ever soften Stuck 48h+ ->
+    // Behind, a move that now needs the customer's pooled calls to FALL, e.g. a sibling lead closing out of the pool).
+    const escalated = wasRank !== -1 && isRank !== -1 && isRank < wasRank; // lower index = higher priority
     return { lead_id: entry.lead_id, state: escalated ? 'escalated' : 'category_changed', currentIssueLabel: issue.label, currentStatus: currentStatus };
   }).map(function (result, i) {
     // N-3: a result keeps its entry's RM, so the next checkpoint (which is fed these results) and the section builder

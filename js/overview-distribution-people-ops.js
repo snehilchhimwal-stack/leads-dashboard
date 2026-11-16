@@ -1411,6 +1411,7 @@ const ISSUE_COLOR_MAP = {
   "Not Updated": 'var(--purple)',
   "No follow up in last 4 hours": 'var(--red)',
   "Behind on Today's Calls": 'var(--blue)',
+  "Stuck 48h+": 'var(--teal)',   // ISSUE_PRIORITY's label since 2026-11-13 (audit F3); the long form stays for anything still passing it
   "Leads Pending Beyond 48 Hours (Not Yet Opportunity)": 'var(--teal)',
   // Added for the Tracking tab's multi-series chart, the first place all
   // five ISSUE_PRIORITY checks are plotted together at once — without a

@@ -1383,6 +1383,9 @@
         !('MIN_CALLS_PER_DAY' in CONFIG) && !('MIN_CALLS_AFTER_48H' in CONFIG));
       assert('2026-10-19 rule set: ISSUE_PRIORITY labels followupOverdue "No follow up in last 4 hours"',
         ISSUE_PRIORITY.find(r => r.key === 'followupOverdue').label === 'No follow up in last 4 hours');
+      assert('2026-11-13 (audit F3): ISSUE_PRIORITY labels stageStuck48h "Stuck 48h+", the same text RM_PERF_RULES and the Apps Script list use',
+        ISSUE_PRIORITY.find(r => r.key === 'stageStuck48h').label === 'Stuck 48h+' && RM_PERF_RULES.find(r => r.key === 'stageStuck48h').label === 'Stuck 48h+');
+      assert('2026-11-13 (audit F3): colorForIssue knows the new label (no fallback hue collision)', colorForIssue('Stuck 48h+', 0) === 'var(--teal)');
       let l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(1) }));
       assert('isNotUpdated (2026-10-19): a never-connected "Suspect" lead 1h old is NOT Not Updated', l.isNotUpdated === false, 'got ' + l.isNotUpdated);
       l = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(10) }));
