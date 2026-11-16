@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-13 against commit `684f225` - lead-check logic audit F1: the three `renderAlertCard` callers (approaching / stuck / Not Updated lists) no longer pass a call requirement; `renderDueTodayList`'s comment restated for the pooled 5/10 rule |
+| **Last Verified** | 2026-11-16 against commit `3456be8` - audit F3: `ISSUE_COLOR_MAP` gained the "Stuck 48h+" key (teal), the long key kept for anything still passing it |
 
 ## Purpose / reason to exist
 

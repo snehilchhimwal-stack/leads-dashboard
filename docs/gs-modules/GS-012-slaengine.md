@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 4b83dae (SLA rule changes: Not Updated stage-only, "No follow up in last 4 hours", 3 calls a day); 2026-10-19 change note matches the code; line count corrected 357 -> 366 |
+| **Last Verified** | 2026-11-16 against commit `3456be8` - audit F5: the SE-1 checkpoint exemption (RULE-087) removed from `computeAllIssuesCheckpointGs_`; NOT LIVE until pasted (deploy register) |
 | **Scoped edit 2026-11-03** | weekly spot-check cycle 9, `GS-004`'s record: `## Relationships → Used By` gained the new `GS-004` reverse dependency (`indexCustomerCallTotalsGs_`, since `d01ff12`/2026-11-02) — scoped to that one field; the rest of this record was not re-verified this pass, hence `Validated` not `Closed + Monitored` |
 
 ## Purpose / reason to exist
@@ -88,7 +88,7 @@ gotcha).
 | RULE-090 | **No follow up in last 4 hours** (`followupOverdue`, label was "Follow-up Overdue" until 2026-10-19) = open, under 48 h, past grace, connected, and more than 4 h since the LATER of the last comment and the last call. The leads data has no last-call-attempt timestamp column, so `last_connect_time` is the call time. With neither, the clock runs from assignment | FN-248 | **Yes — `enrichLead` (`JS-006` RULE-005)** | user request 2026-10-19; gates (under 48 h, grace, connected) unchanged |
 | RULE-091 | Stored issue labels are read through `canonicalIssueLabelGs_` (FN-525), so a row written before a rename (yesterday's AllIssues_Log snapshot saying "Follow-up Overdue") compares equal to today's label: still `still_open`, ranks still work for `escalated`. Daily_RM_Issues keeps its old `issue_label` text; every reader keys on `issue_key` | FN-270, FN-525 | No - email-only (the dashboard keys history on rule keys) | added 2026-10-19 |
 | RULE-035 | `primaryIssueGs_` uses the shared `ISSUE_PRIORITY` order for the tie-break | FN-249 | shares the order with `CONFIG.ISSUE_PRIORITY` (`JS-005`) | subject-line + sort consistency |
-| RULE-087 | A checkpoint move INTO "Behind on Today's Calls" is reported as `category_changed`, never `escalated`, even when that label outranks the prior one | FN-270 (`escalated` computation) | No - checkpoint states are email-only | added 2026-10-15, audit 2026-10-13 SE-1 (product decision): the label counts calls since IST midnight against a full-day minimum, so at 10:00 / 13:00 most leads read as behind just because the day has started. `computeSlaFlags_` and the 17:00 flags are unchanged |
+| RULE-087 | **Retired 2026-11-16 (`3456be8`, audit F5).** Was: a checkpoint move INTO "Behind on Today's Calls" is `category_changed`, never `escalated` - a leftover of the pre-2026-11-02 since-midnight count. Now a move into ANY higher-priority label is `escalated` | FN-270 (`escalated` computation) | No - checkpoint states are email-only | added 2026-10-15, audit 2026-10-13 SE-1 (product decision): the label counts calls since IST midnight against a full-day minimum, so at 10:00 / 13:00 most leads read as behind just because the day has started. `computeSlaFlags_` and the 17:00 flags are unchanged |
 
 ## Exceptions — `EXC-XXX` sub-table
 
@@ -184,6 +184,8 @@ MEDIUM #2; `CLAUDE.md` (duplication gotcha).
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-16** (`3456be8`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F5): the SE-1 exemption in `computeAllIssuesCheckpointGs_` (RULE-087) removed - since 2026-11-02 "Behind on Today's Calls" is cumulative from the customer's first assignment, so a 10:00/13:00 move into it is a real deficit; the only move it could soften (Stuck 48h+ -> Behind) now needs the pooled calls to fall. `Tests_SlaEngine.gs`'s SE-1 case flipped to expect `escalated`; `HANDOVER.md` 4.3.10 restated. **Not live until pasted** (`docs/STALENESS_TRACKER.md` deploy register: confirmed-live `d290405`).
 
 Verified at `c82ec67`; record created by DOC-029.
 

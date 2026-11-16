@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-13 against commit `49aaddc` - lead-check logic audit F1/F2: `CONFIG.MIN_CALLS_PER_DAY` (CFG-003) and `MIN_CALLS_AFTER_48H` removed; every SLA constant here now parity-checked (`test/check-runtime-parity.py`) |
+| **Last Verified** | 2026-11-16 against commit `3456be8` - audit F3: `ISSUE_PRIORITY` stageStuck48h label is "Stuck 48h+" (was the long Operations wording); parity-checked against `ISSUE_PRIORITY_GS_` incl. labels |
 
 ## Purpose / reason to exist
 
@@ -132,6 +132,8 @@ None directly. `renderCardsByDay` output appears on `TAB-001` /
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-16** (`3456be8`, audit F3): `ISSUE_PRIORITY`'s `stageStuck48h` label "Leads Pending Beyond 48 Hours (Not Yet Opportunity)" -> "Stuck 48h+", the text `ISSUE_PRIORITY_GS_` (`GS-012`), `RM_PERF_RULES` (`JS-008`) and the Tracking/Overview short labels already used. The Operations section title (`dashboard.html`) and the email section heading (`ISSUE_REPORT_META`, `JS-014`) keep the long wording. Surfaces that print the rule's label (RM Timeline, the issues CSV, the combined region report's per-lead issue column, Tracking legends) now say "Stuck 48h+". `test/check-runtime-parity.py` compares the labels too.
 
 **2026-11-13** (`49aaddc`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F1/F2): `CONFIG.MIN_CALLS_PER_DAY` and the display-only `CONFIG.MIN_CALLS_AFTER_48H` removed (their last readers were `renderAlertCard`'s callers, which printed them against the lead's own counter and contradicted the pooled 5/10 flag). `STAGE_ALIASES`, `OPPORTUNITY_STAGE`, `CLOSED_STAGE_*`, the grace/lifecycle/follow-up/call/work-hour thresholds and `ISSUE_PRIORITY` (keys + order) are now compared with their `.gs` twins by `test/check-runtime-parity.py` (before: only `FUNNEL_ORDER`).
 
