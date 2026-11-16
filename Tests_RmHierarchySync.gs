@@ -723,7 +723,7 @@ function runRmHierarchySyncTests_() {
         const real = realPins();
         const byName = {};
         real.forEach(function (p) { byName[p.name] = p; });
-        TestAssertEqual_(Object.keys(byName).sort(), ['Aakash Dhole', 'Angad Yadav', 'Balamurali Sivakumar', 'Bhanu Singh', 'Bisma Shah', 'Chandrababu Seenathur', 'Danish Shaikh', 'G Anand Kumar', 'G Kumar', 'Gurmohit Singh Sandhu', 'Joshi Dhairya', 'Kamlesh Tawale', 'Khushal Soni', 'Kishan Patel', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Manan Bhatt', 'Mihir Jivani', 'Mohit Manwani', 'Nitin Devariya', 'Parusharothu Vinay Varma', 'Peddapally Shivaji', 'Peddapally Veera Shivaji', 'Rahul Attada', 'Rajesh Gugulothu', 'Reshma Shaikh', 'Riyan Jamadar', 'Sachin Rana', 'Sanket Yadav', 'Shreyang Chudasama', 'Shubham Raj', 'Sumeet Pal', 'Tharun Chalumuri', 'Tisha Valecha', 'Vadlapudi Divya', 'Zeya Shaikh', 'Zoya Fathima'], 'real pins: 2026-10-19 + 2026-11-03 Sachin Rana team + 2026-11-11 HR Live reassignments + 2026-11-13 Zoya Fathima team / leavers (Bangalore four removed: HR matches)');
+        TestAssertEqual_(Object.keys(byName).sort(), ['Aakash Dhole', 'Angad Yadav', 'Balamurali Sivakumar', 'Bhanu Singh', 'Bisma Shah', 'Chandrababu Seenathur', 'Danish Shaikh', 'G Anand Kumar', 'G Kumar', 'Gurmohit Singh Sandhu', 'Jay Renavikar', 'Jay Renaviker', 'Joshi Dhairya', 'Kamlesh Tawale', 'Khushal Soni', 'Kishan Patel', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Manan Bhatt', 'Mihir Jivani', 'Mohit Manwani', 'Nitin Devariya', 'Parusharothu Vinay Varma', 'Peddapally Shivaji', 'Peddapally Veera Shivaji', 'Rahul Attada', 'Rajesh Gugulothu', 'Reshma Shaikh', 'Riyan Jamadar', 'Sachin Rana', 'Sanket Yadav', 'Shreyang Chudasama', 'Shubham Raj', 'Sumeet Pal', 'Tharun Chalumuri', 'Tisha Valecha', 'Vadlapudi Divya', 'Zeya Shaikh', 'Zoya Fathima'], 'real pins: 2026-10-19 + 2026-11-03 Sachin Rana team + 2026-11-11 HR Live reassignments + 2026-11-13 Zoya Fathima team / leavers (Bangalore four removed: HR matches)');
         ['Zoya Fathima', 'Angad Yadav', 'Lovkesh Pandey', 'Maagathoti Adilakshmi', 'Vadlapudi Divya', 'G Anand Kumar', 'G Kumar', 'Tharun Chalumuri', 'Rajesh Gugulothu'].forEach(function (n) { TestAssert_(byName[n].leaver === true && RMSYNC_CONFIRMED_LEAVERS_.indexOf(n) !== -1, 'real pins: ' + n + ' is a pinned, confirmed leaver'); });
         TestAssert_(RM_HIERARCHY_RAW_.every(function (r) { return [r[3], r[4], r[5], r[6]].every(function (v) { return normPersonName_(v) !== 'zoya fathima'; }); }), 'real pins: nobody in RM_HIERARCHY_RAW_ still reports to Zoya Fathima');
         TestAssertEqual_(byName['Rahul Attada'].add === true && byName['Rahul Attada'].team, 'Hyderabad', 'real pins: Rahul Attada is added as a Hyderabad row');
@@ -788,6 +788,26 @@ function runRmHierarchySyncTests_() {
         }
         TestAssert_(rmSyncTestTabNames_(world.tab).indexOf('Sanket Yadav') === -1, 'real leaver: gone from the tab');
       }
+    }
+    // 2026-11-16: a blank tier is filled from HR Live when HR names a known manager of exactly that tier (Jay Renavikar / Nayan Pabale).
+    {
+      const people = rmSyncTestPeople_().concat([
+        { name: 'Fill S1', role: 'S1', team: 'Pune', chain: ['Test A1 Pune', 'Test RH Pune', 'Test CH Pune'] },
+        { name: 'Fill Unknown', role: 'S1', team: 'Pune', chain: ['Nobody Known Here', 'Test RH Pune'] },
+      ]);
+      const tab = rmSyncTestTabRows_().concat([
+        ['Pune', 'S1', 'Fill S1', '', '', 'Test RH Pune', 'Test CH Pune', false, '', ''],
+        ['Pune', 'S1', 'Fill Unknown', '', '', 'Test RH Pune', '', false, '', ''],
+      ]);
+      const world = rmSyncTestWorld_({ people: people, tabRows: tab });
+      const plan = computeRmHierarchySyncPlanGs_(parseHrRosterGs_(readHrRosterValuesGs_()), readRmHierarchyRowsGs_(world.tab), null);
+      const fill = plan.fixes.filter(function (f) { return f.name === 'Fill S1'; });
+      TestAssertEqual_(fill.map(function (f) { return f.field + ':' + f.oldValue + '->' + f.newValue; }), ['tl:->Test A1 Pune'], 'blank fill: a blank TL is filled with the A1 HR Live names');
+      TestAssert_(plan.fixes.every(function (f) { return f.name !== 'Fill Unknown'; }), 'blank fill: an HR name with no known role fills nothing');
+      rmSyncTestSetApply_(true);
+      runRmHierarchySyncGs_({ now: RMSYNC_TEST_THU_ });
+      TestAssertEqual_(rmSyncTestRow_(world.tab, 'Fill S1').tl, 'Test A1 Pune', 'blank fill: APPLY mode writes the filled TL');
+      rmSyncTestSetApply_(false);
     }
     // ================= removeRmHierarchyLeaversGs_ (2026-10-16) =================
     {

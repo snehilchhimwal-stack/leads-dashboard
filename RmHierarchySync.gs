@@ -297,6 +297,24 @@ function computeRmHierarchySyncPlanGs_(hr, rows, directory, opts) {
         plan.needsHuman.push({ name: row.name, code: person.code, team: row.team, role: row.role, field: field, oldValue: value, currentChain: person.chainNames.slice(), reason: why, suggestion: suggestion });
       }
     });
+    // 2026-11-16 (Jay Renavikar): a BLANK tier is filled from HR Live when HR's chain names a current manager we do not have on the row
+    // at all, whose role maps to exactly that tier (e.g. an A1 -> TL). Before this the sync only replaced a wrong value, so a TL left
+    // blank stayed blank even after HR Live named one. Skipped when two HR names would claim the same blank tier (ambiguous), for a
+    // confirmed leaver, or for the person themselves.
+    const oursKeys = RMSYNC_FIELDS_.map(function (f) { return normPersonName_(row[f]); }).filter(Boolean);
+    const fills = {};
+    person.chainNames.forEach(function (name) {
+      const k = normPersonName_(name);
+      if (!k || oursKeys.indexOf(k) !== -1 || leaverKeys[k] || k === normPersonName_(row.name)) return;
+      const field = RMSYNC_ROLE_TO_FIELD_[roleByKey[k] || ''];
+      if (!field || row[field]) return;
+      (fills[field] = fills[field] || []).push(canon(name));
+    });
+    Object.keys(fills).forEach(function (field) {
+      const names = rmSyncUnique_(fills[field].map(normPersonName_));
+      if (names.length !== 1) return;
+      plan.fixes.push({ rowNumber: row.rowNumber, name: row.name, code: person.code, team: row.team, role: row.role, field: field, oldValue: '', newValue: fills[field][0] });
+    });
   });
 
   // New joiners: people in the HR sheet, in scope, with no row yet. Passes repeat so a joiner who reports to another joiner resolves.
@@ -931,6 +949,10 @@ const RMSYNC_PINNED_OVERRIDES_ = [
   { name: 'Zoya Fathima', leaver: true, since: '2026-11-13', why: 'left - Hyderabad Cluster Head; gone from HR Live, mailbox bouncing since 2026-11-09' },
   { name: 'Angad Yadav', leaver: true, since: '2026-11-13', why: 'left - Loan BDM; not in HR Live' },
   { name: 'Lovkesh Pandey', leaver: true, since: '2026-11-13', why: 'left - Western S1; not in HR Live' },
+  // 2026-11-16 (user; HR Live updated the same day): Pune S1 Jay Renavikar now reports to A1 Nayan Pabale. Both spellings pinned so the
+  // alias row (not in HR Live by that spelling) is set too.
+  { name: 'Jay Renavikar', set: { tl: 'Nayan Pabale', tm: 'Rahul Poudel', rh: '', ch: 'Sourabh Sareen' }, since: '2026-11-16', why: 'A1 Nayan Pabale (CRM + HR Live)' },
+  { name: 'Jay Renaviker', set: { tl: 'Nayan Pabale', tm: 'Rahul Poudel', rh: '', ch: 'Sourabh Sareen' }, since: '2026-11-16', why: 'alias of Jay Renavikar - A1 Nayan Pabale' },
 ];
 // Indirection so the tests can supply their own pins (the real ones name live people).
 function rmSyncPinnedOverridesGs_() { return RMSYNC_PINNED_OVERRIDES_; }

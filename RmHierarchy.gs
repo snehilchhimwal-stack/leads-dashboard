@@ -423,7 +423,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Thane','S1','Ayesha Shaikh','','','Swapnil Gowalkar','Bipin More'],
   ['Thane','S1','Tisha Valecha','Mayuresh Jadhav','','','Bipin More'], // 2026-10-19 (confirmed by the user): TM Sanket Yadav left -- now under A1 Mayuresh Jadhav (pinned in RMSYNC_PINNED_OVERRIDES_ until HR Live shows it)
   // AUTO-REFRESH 2026-09-22 from HR Live  - Sheet1 (2).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
-  ['Pune','S1','Jay Renavikar','','Rahul Poudel','','Sourabh Sareen'],
+  ['Pune','S1','Jay Renavikar','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'], // 2026-11-16: A1 Nayan Pabale (CRM + HR Live)
   ['Sourcing - Pune','S3','Pranali Dalavi','','Yash Kalal','','Sourabh Sareen'],
   // AUTO-REFRESH 2026-09-22 from HR Live  - Sheet1 (2).csv: new joiners, single-manager resolution (see test/refresh-rm-hierarchy.py)
   ['Hyderabad','S1','Chandrababu Seenathur','','','Rahul Attada','Mukesh Mishra'], // 2026-11-13: Zoya Fathima left (user + HR Live) -- team moved to RH Rahul Attada; CH Mukesh Mishra
@@ -484,7 +484,7 @@ const RM_HIERARCHY_RAW_ = [
   ['Central','S1','Danish Shaikh','Prajwal Shetty','Akash A Ugale','','Sanjyota Bhosale'], // HR spells it "Akash A ugale"; 2026-11-11 HR Live: now under Prajwal Shetty (HR Live)
   ['Thane','S1','Diksha Bhosle','Ganesh Saroj','','Swapnil Gowalkar','Bipin More'],
   ['Pune','A1','Hitesh Choudhary','','Rahul Poudel','','Sourabh Sareen'],
-  ['Pune','S1','Jay Renaviker','','Rahul Poudel','','Sourabh Sareen'], // HR Live's 2026-10-13 spelling -- same person as the "Jay Renavikar" row above, kept so either spelling resolves
+  ['Pune','S1','Jay Renaviker','Nayan Pabale','Rahul Poudel','','Sourabh Sareen'], // HR Live's 2026-10-13 spelling -- same person as the "Jay Renavikar" row above, kept so either spelling resolves
   ['Pune','S1','Kanhaiya Kumar','Rohit Rathod','','','Sourabh Sareen'],
   ['Thane','A1','Mayuresh Jadhav','','','','Bipin More'],
   ['Bangalore','S1','Nikhil Bagri','Mainuddin T','','Romen Singh',''],
