@@ -887,6 +887,51 @@ function removeRmHierarchyLeaversNow() { return removeRmHierarchyLeaversGs_(RMSY
 // Same, but removes a person even when open leads are still assigned to them (the lead ids are still logged).
 function removeRmHierarchyLeaversForceNow() { return removeRmHierarchyLeaversGs_(RMSYNC_CONFIRMED_LEAVERS_, { force: true }); }
 
+// 2026-11-17 (user): Manager_Directory rows of people who have LEFT, to remove. Only a name listed here is touched; a row is refused while any
+// RM_Hierarchy row still names that person as TL/TM/RH/CH. Backup to Drive first (no backup, no write). TEST MODE writes nothing.
+const MANAGER_DIRECTORY_REMOVALS_ = ['Zoya Fathima'];
+function removeManagerDirectoryRowsGs_(names, opts) {
+  const options = opts || {};
+  const testMode = !!TEST_MODE_OVERRIDE_EMAIL_;
+  const day = istDayKeyGs_(options.now || new Date());
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const result = { removed: [], refused: [], notFound: [], wouldRemove: [], backupUrl: '', testMode: testMode };
+  const dir = ss.getSheetByName(MANAGER_DIRECTORY_SHEET_);
+  const tab = ss.getSheetByName(RM_HIERARCHY_SHEET_);
+  if (!dir || !tab) throw new Error('Manager_Directory or RM_Hierarchy is missing - nothing was changed.');
+  const rows = readManagerDirectoryRowsGs_(dir);
+  const hier = readRmHierarchyRowsGs_(tab);
+  const todo = [];
+  names.forEach(function (n) {
+    const key = normPersonName_(n);
+    const hits = rows.filter(function (r) { return normPersonName_(r.name) === key; });
+    if (!hits.length) { result.notFound.push(n); return; }
+    const refs = hier.filter(function (h) { return RMSYNC_FIELDS_.some(function (f) { return normPersonName_(h[f]) === key; }); }).map(function (h) { return h.name; });
+    if (refs.length) { result.refused.push(n + ' (still the manager of ' + refs.join(', ') + ')'); return; }
+    hits.forEach(function (h) { todo.push(h); });
+  });
+  result.wouldRemove = todo.map(function (t) { return t.name + ' (row ' + t.rowNumber + ')'; });
+  if (result.notFound.length) Logger.log('Manager_Directory removal: not found (already gone): ' + result.notFound.join(', ') + '.');
+  if (result.refused.length) Logger.log('Manager_Directory removal: REFUSED: ' + result.refused.join('; ') + '.');
+  if (!todo.length) { Logger.log('Manager_Directory removal: nothing to remove.'); return result; }
+  if (testMode) { Logger.log('Manager_Directory removal [TEST MODE]: would remove ' + result.wouldRemove.join(', ') + ' - nothing was written.'); return result; }
+  const backup = archiveRowsToDriveCsv_('Manager_Directory_sync_backup', ['manager_name', 'roles', 'regions', 'email', 'people_reporting_up_to_them', 'email_source'],
+    dir.getRange(2, 1, dir.getLastRow() - 1, 6).getValues(), 'before_directory_removal_' + day, { skipManifest: true });
+  if (!backup) throw new Error('The Drive backup of Manager_Directory could not be made, so nothing was changed.');
+  result.backupUrl = backup.getUrl();
+  todo.sort(function (a, b) { return b.rowNumber - a.rowNumber; }).forEach(function (t) {
+    const nameNow = rmSyncStr_(dir.getRange(t.rowNumber, 1, 1, 1).getValue());
+    if (normPersonName_(nameNow) !== normPersonName_(t.name)) { result.refused.push(t.name + ' (row ' + t.rowNumber + ' changed since it was read - re-run)'); return; }
+    withRetry_(function () { dir.deleteRows(t.rowNumber, 1); }, 'delete Manager_Directory row ' + t.rowNumber);
+    result.removed.push(t.name);
+  });
+  SpreadsheetApp.flush();
+  Logger.log('Manager_Directory removal: removed ' + result.removed.length + ' row(s): ' + result.removed.join(', ') + '. Backup: ' + result.backupUrl);
+  return result;
+}
+// Run from the editor: removes MANAGER_DIRECTORY_REMOVALS_ (today: Zoya Fathima) from Manager_Directory. Safe to re-run.
+function removeManagerDirectoryLeaversNow() { return removeManagerDirectoryRowsGs_(MANAGER_DIRECTORY_REMOVALS_, {}); }
+
 // ==================== Pinned, user-confirmed changes (2026-10-19) ====================
 // A change a person has confirmed BEFORE the HR roster sheet shows it. The nightly sync compares RM_Hierarchy with HR Live, so
 // without a pin it would "fix" such a row straight back to HR's old manager (apply mode) or nag about it as a mismatch. A pin:

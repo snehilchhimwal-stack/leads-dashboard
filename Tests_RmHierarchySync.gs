@@ -809,6 +809,27 @@ function runRmHierarchySyncTests_() {
       TestAssertEqual_(rmSyncTestRow_(world.tab, 'Fill S1').tl, 'Test A1 Pune', 'blank fill: APPLY mode writes the filled TL');
       rmSyncTestSetApply_(false);
     }
+    // 2026-11-17: removeManagerDirectoryRowsGs_ - removes a departed manager's directory row; refuses while someone still reports to them.
+    {
+      const dirRows = rmSyncTestDirRows_().concat([['Gone Manager', 'CH', 'Pune', 'gone@example.test', 0, 'manual']]);
+      const world = rmSyncTestWorld_({ dirRows: dirRows });
+      const n0 = readManagerDirectoryRowsGs_(world.dir).length;
+      const refused = removeManagerDirectoryRowsGs_(['Test CH Pune'], { now: RMSYNC_TEST_THU_ });
+      TestAssert_(refused.refused.length === 1 && refused.removed.length === 0, 'directory removal: refused while an RM_Hierarchy row still names the person');
+      TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_PRIMARY_;
+      let dry; try { dry = removeManagerDirectoryRowsGs_(['Gone Manager'], { now: RMSYNC_TEST_THU_ }); } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
+      TestAssertEqual_([dry.wouldRemove.length, readManagerDirectoryRowsGs_(world.dir).length], [1, n0], 'directory removal: TEST MODE lists the row and writes nothing');
+      const res = removeManagerDirectoryRowsGs_(['Gone Manager', 'Never There'], { now: RMSYNC_TEST_THU_ });
+      TestAssertEqual_(res.removed, ['Gone Manager'], 'directory removal: the departed manager row is removed');
+      TestAssertEqual_(res.notFound, ['Never There'], 'directory removal: an unknown name is reported, nothing else happens');
+      const after = readManagerDirectoryRowsGs_(world.dir);
+      TestAssertEqual_(after.length, n0 - 1, 'directory removal: exactly one row is gone');
+      TestAssert_(after.some(function (r) { return r.name === 'Test RH Pune' && r.email === 'old.rh@example.test'; }), 'directory removal: the other rows keep their data');
+      TestAssert_(!!res.backupUrl, 'directory removal: a Drive backup is made first');
+      const again = removeManagerDirectoryRowsGs_(['Gone Manager'], { now: RMSYNC_TEST_THU_ });
+      TestAssertEqual_([again.removed.length, again.notFound], [0, ['Gone Manager']], 'directory removal: a re-run removes nothing');
+      TestAssertEqual_(MANAGER_DIRECTORY_REMOVALS_, ['Zoya Fathima'], 'directory removal: the live list is Zoya Fathima only');
+    }
     // ================= removeRmHierarchyLeaversGs_ (2026-10-16) =================
     {
       const leaverTab = function () {
