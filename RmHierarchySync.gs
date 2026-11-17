@@ -889,7 +889,7 @@ function removeRmHierarchyLeaversForceNow() { return removeRmHierarchyLeaversGs_
 
 // 2026-11-17 (user): Manager_Directory rows of people who have LEFT, to remove. Only a name listed here is touched; a row is refused while any
 // RM_Hierarchy row still names that person as TL/TM/RH/CH. Backup to Drive first (no backup, no write). TEST MODE writes nothing.
-const MANAGER_DIRECTORY_REMOVALS_ = ['Zoya Fathima'];
+const MANAGER_DIRECTORY_REMOVALS_ = ['Zoya Fathima', 'Sanket Yadav', 'Sachin Rana']; // all three left and are confirmed leavers
 function removeManagerDirectoryRowsGs_(names, opts) {
   const options = opts || {};
   const testMode = !!TEST_MODE_OVERRIDE_EMAIL_;
@@ -929,7 +929,7 @@ function removeManagerDirectoryRowsGs_(names, opts) {
   Logger.log('Manager_Directory removal: removed ' + result.removed.length + ' row(s): ' + result.removed.join(', ') + '. Backup: ' + result.backupUrl);
   return result;
 }
-// Run from the editor: removes MANAGER_DIRECTORY_REMOVALS_ (today: Zoya Fathima) from Manager_Directory. Safe to re-run.
+// Run from the editor: removes MANAGER_DIRECTORY_REMOVALS_ (Zoya Fathima, Sanket Yadav, Sachin Rana) from Manager_Directory. Safe to re-run.
 function removeManagerDirectoryLeaversNow() { return removeManagerDirectoryRowsGs_(MANAGER_DIRECTORY_REMOVALS_, {}); }
 
 // ==================== Pinned, user-confirmed changes (2026-10-19) ====================

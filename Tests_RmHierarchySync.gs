@@ -828,7 +828,8 @@ function runRmHierarchySyncTests_() {
       TestAssert_(!!res.backupUrl, 'directory removal: a Drive backup is made first');
       const again = removeManagerDirectoryRowsGs_(['Gone Manager'], { now: RMSYNC_TEST_THU_ });
       TestAssertEqual_([again.removed.length, again.notFound], [0, ['Gone Manager']], 'directory removal: a re-run removes nothing');
-      TestAssertEqual_(MANAGER_DIRECTORY_REMOVALS_, ['Zoya Fathima'], 'directory removal: the live list is Zoya Fathima only');
+      TestAssertEqual_(MANAGER_DIRECTORY_REMOVALS_, ['Zoya Fathima', 'Sanket Yadav', 'Sachin Rana'], 'directory removal: the live list is the three confirmed leavers');
+      TestAssert_(MANAGER_DIRECTORY_REMOVALS_.every(function (n) { return RMSYNC_CONFIRMED_LEAVERS_.indexOf(n) !== -1; }), 'directory removal: every name is a confirmed leaver');
     }
     // ================= removeRmHierarchyLeaversGs_ (2026-10-16) =================
     {
