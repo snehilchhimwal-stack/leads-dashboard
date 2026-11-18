@@ -303,9 +303,9 @@ function runSlaEngineTests_() {
         call_attempts: 2, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5),
       }),
       // category_changed (non-escalation) — was No follow up in last 4 hours (rank 2; stored under its legacy label),
-      // now past 48h so only stageStuck48h (rank 4) can fire; a fixture
-      // baseline keeps underCalledToday from also firing and confounding
-      // which single issue wins.
+      // now past 48h so only stageStuck48h (rank 4) can fire; its own 15
+      // calls (10 needed past 24h) keep underCalledToday from also firing
+      // and confounding which single issue wins.
       TestAIE_leadRow_(ckHeader, { lead_id: 'L-CK-CATCHANGE', client_id: 'C-CK-CATCHANGE', lead_assigned_at: TestFixture_hoursAgo_(now, 50), call_attempts: 15 }),
       // escalated — currently flags isNotUpdated (rank 1); prior entry
       // (below) is a synthetic 'Stuck 48h+' (rank 4) to isolate the
@@ -338,7 +338,9 @@ function runSlaEngineTests_() {
       { lead_id: 'L-CK-REOPEN', state: 'resolved', currentIssueLabel: null, currentStatus: 'Won' },
       { lead_id: 'L-CK-GONE', RM: 'Test RM One', TL: 'Test A1 One', status: 'Suspect', issueLabel: 'Not Updated', followup: 'f' },
     ];
-    const ckBaselineMap = { 'L-CK-CATCHANGE': 10 }; // 15 - 10 = 5 today, clears MIN_CALLS_PER_DAY_ (3) so underCalledToday can't also fire on L-CK-CATCHANGE
+    // computeAllIssuesCheckpointGs_ still takes a baselineMap but has not read it since the 2026-11-02 cumulative call rule
+    // (this used to clear the old per-day minimum for L-CK-CATCHANGE; its own 15 calls do that now). Kept so the call shape stays real.
+    const ckBaselineMap = { 'L-CK-CATCHANGE': 10 };
     const ckResults = computeAllIssuesCheckpointGs_(ckSs, ckPriorEntries, now, ckBaselineMap);
     const ckByLeadId = {};
     ckResults.forEach(function (r) { ckByLeadId[r.lead_id] = r; });

@@ -56,23 +56,11 @@ function runAllIssuesEmailerTests_() {
     TestAIE_leadRow_(header, { lead_id: 'L-CLOSED', client_id: 'C-CLOSED', RM: 'Test RM One', current_stage: 'Won', lead_assigned_at: midWindow }),
     // Wrong source — excluded via passesGoogleNonUtmSearchGs_.
     TestAIE_leadRow_(header, { lead_id: 'L-WRONGSRC', client_id: 'C-WRONGSRC', RM: 'Test RM One', group_source: 'Facebook', lead_assigned_at: midWindow, rm_is_active: false }),
-    // In scope and open, but genuinely clean — no issue fires. A FIXED
-    // "N hours ago" offset (unlike L-INACTIVE/L-CH-ISSUE's `now`, right
-    // above) can NEVER be made robust against isCreatedToday's midnight
-    // boundary on its own — any offset >= LEAD_GRACE_HOURS_ (needed for
-    // pastGrace) will read as "yesterday" during the first few hours
-    // after IST midnight, whatever the offset. When that happens,
-    // underCalledToday's isCreatedToday=false branch stops trusting
-    // call_attempts at all and falls back to countTodayCommentEntries_ —
-    // which is 0 here (no comments), wrongly flagging this "clean" lead
-    // (real incident: failed for real at 00:01 IST, both live in Apps
-    // Script and in a local re-run at 00:09 IST, 2026-09-12). Fixed at
-    // the root, not by dodging the boundary: seed a same-key
-    // Movement_Log baseline row below (dated yesterday, call_attempts=0)
-    // so the isCreatedToday=false branch has a REAL baseline to compute
-    // attemptsToday from (6 - 0 = 6, still >= MIN_CALLS_PER_DAY_) instead
-    // of ever reaching the comment-count fallback — correct at every
-    // hour of the day, not just outside this one window.
+    // In scope and open, but genuinely clean — no issue fires: assigned 5 h ago (past the 3 h grace), connected 30 min ago,
+    // and 6 calls, which meets "Behind on Today's Calls"' cumulative target of 5 within the customer's first 24 h
+    // (2026-11-02) at any hour of the day. (Until 2026-11-02 the rule counted calls since IST midnight, and this lead was
+    // wrongly flagged just after midnight - real incident 2026-09-12; the Movement_Log baseline row below was that fix and
+    // no longer affects the call rule. Comment updated 2026-11-18, lead-check audit F6.)
     TestAIE_leadRow_(header, {
       lead_id: 'L-CLEAN', client_id: 'C-CLEAN', RM: 'Test RM One', lead_assigned_at: TestFixture_hoursAgo_(now, 5),
       call_attempts: 6, last_connect: 'Connected', last_connect_time: TestFixture_hoursAgo_(now, 0.5),
@@ -83,12 +71,9 @@ function runAllIssuesEmailerTests_() {
     TestAIE_leadRow_(header, { lead_id: 'L-CH-ISSUE', client_id: 'C-CH-ISSUE', RM: 'Test CH Self', lead_assigned_at: now, rm_is_active: false }),
   ];
 
-  // L-CLEAN's own baseline (see its fixture comment above) — a
-  // yesterday-dated Movement_Log row, so underCalledToday's
-  // isCreatedToday=false branch (which can trigger near IST midnight,
-  // regardless of what real hour this suite happens to run at) computes
-  // attemptsToday from a real baseline instead of falling back to
-  // countTodayCommentEntries_.
+  // L-CLEAN's yesterday-dated Movement_Log row - the 2026-09-12 fix for the since-midnight call count. computeSlaFlags_ has
+  // not read a call baseline since 2026-11-02, so it no longer changes any verdict; it stays so the fixture (and the 17:00
+  // job's Movement_Log read) are exercised exactly as before.
   const movementLogHeader = ['snapshot_at', 'snapshot_label'].concat(SNAPSHOT_COLUMNS_);
   const cleanBaselineRow = movementLogHeader.map(function (k) {
     if (k === 'snapshot_at') return TestFixture_daysAgo_(now, 1);
