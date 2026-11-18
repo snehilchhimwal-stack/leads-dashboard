@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-13 against commit `684f225` - audit F1 follow-through: the People tab's Call SLA column tooltip now states the pooled 5/10 customer rule (it said "fewer than 3 calls made today" until `684f225`) |
+| **Last Verified** | 2026-11-18 against commit `3456be8` - re-read after audit F3 (`3456be8`): RM Timeline (`js/tab-rmtimeline.js`, unchanged) lists `ISSUE_PRIORITY` labels, so it now shows "Stuck 48h+"; the Call SLA tooltip text from `684f225` unchanged |
 
 ## Purpose / reason to exist
 

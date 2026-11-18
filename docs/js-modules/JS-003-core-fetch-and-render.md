@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-12 against commit `2e33f8d` — `isDateColLabel` now includes `opp_at` (audit G-5); FN-016/017 anchors re-fixed; line count corrected |
+| **Last Verified** | 2026-11-18 against commit `08c69a2` - audit F4 (3): `mergeRowsIntoOneLead` (FN-016) sets the merged record's call-rule stamp from `customerCallStampForGroup` (`JS-006` FN-536) |
 
 ## Purpose / reason to exist
 
@@ -43,7 +43,7 @@ Seventh in the real order — after every core parsing/model file, before
 | ID | Function | Inputs | Outputs | Side effects | Calls | Called by | Reusable or feature-specific |
 |---|---|---|---|---|---|---|---|
 | FN-015 | `fetchAndRender()` `#L27` | reads `#sheetIdInput` / `#tabNameInput` | writes `allParsedLeads`; triggers `renderAll()` and dependent tab renders. Each parsed lead now also carries `opp_at` (added 2026-09-21, ISO string or `''` — mirrors `lead_assigned_at`'s `getDate()`/`toISOString()` pattern), read via `js/tab-oppmonitor.js`'s live same-day/48h Opp% computation. | Sheets read, DOM overlay, `_currentSheetId` set via callee, source-mix computation | `gateTokenValid` (`JS-001`), `sheetsApiValuesGet` (`JS-009`), `valuesToGvizShape` (`JS-009`), `enrichLead` (`JS-006`), `applyFiltersAndRender` (`JS-004`), `fetchMovementLog` (`JS-021`), `fetchRmHierarchyForRollup` (`JS-022`), `renderAll` (`JS-012`) | `handleGateSignInClick` (`JS-001`), `#refreshBtn` / `#changeSourceBtn` (`DASH-001`) | specific (the app entry pipeline) |
-| FN-016 | `mergeRowsIntoOneLead(rows)` `#L361` (internal) | array of raw rows for one family | one merged lead: `collatedFrom` (distinct `lead_id` count), `collatedRMs`, `collatedLeadIds`, `collatedRegions`, MAX'd counters, furthest stage | none (pure) | `canonicalStage` / `isClosedStage` (`JS-006`), region helpers | `fetchAndRender` (FN-015) only | specific |
+| FN-016 | `mergeRowsIntoOneLead(rows)` `#L361` (internal) | array of raw rows for one family | one merged lead: `collatedFrom` (distinct `lead_id` count), `collatedRMs`, `collatedLeadIds`, `collatedRegions`, MAX'd counters, furthest stage | none (pure) | `canonicalStage` / `isClosedStage` (`JS-006`), `customerCallStampForGroup` (`JS-006` FN-536, since 2026-11-18), region helpers | `fetchAndRender` (FN-015) only | specific |
 | FN-017 | `_ufFind(x)` / `_ufUnion(a,b)` `#L294/#L298` (internal) | row indices | union-find structure over rows sharing `lead_id` OR `client_id`+similar-region | none | — | `fetchAndRender` (FN-015) | specific |
 | FN-018 | `showError(html)` / `hideError()` `#L13/#L19` | HTML string | toggles `#errorBanner` | DOM write | — | `fetchAndRender` (FN-015), other modules on a caught error | reusable |
 | FN-019 | `setPulse(live)` `#L23` | bool | toggles the live-data pulse indicator | DOM write | — | `fetchAndRender` (FN-015) | reusable |
@@ -154,6 +154,8 @@ collation, refresh-after-mutation wiring).
   collation logic are unchanged.
 
 ## Version / change reference
+
+**2026-11-18** (`08c69a2`, audit F4 (3)): `mergeRowsIntoOneLead` now sets `customerCallTotalAll` / `customerFirstAssignedMs` on a merged record from `customerCallStampForGroup` (`JS-006` FN-536) - the newest pooled row's stamp, else the primary's own counter and assignment - instead of inheriting only the primary row's (none when the primary sat outside the pool). See `JS-006`'s entry for the full reasoning.
 
 Verified at `c82ec67`; record created by DOC-027. Revalidated 2026-09-18
 (`4bbb58c`) for the `TAB-009` fetch-kickoff addition.

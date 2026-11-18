@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-13 against commit `684f225` - audit F1: the Not Updated / Approaching 48h / Stuck cards' call chip now reads `n/5` or `n/10 calls (all RMs)`, and the Behind on Today's Calls section summary (`dashboard.html`) describes the pooled 5/10 rule instead of "fewer than 3 call attempts made today" |
+| **Last Verified** | 2026-11-18 against commit `3456be8` - re-read after audit F3 (`3456be8`): the Download Issues CSV (BTN-001) groups by `ISSUE_PRIORITY` label, so the 48h block is now titled "Stuck 48h+"; the Operations section title keeps "Leads Pending Beyond 48 Hours (Not Yet Opportunity)"; the F1 call chip / summary from `684f225` unchanged |
 
 ## Purpose / reason to exist
 

@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-11-13 against commit `684f225` - re-read after audit F1 (`js/overview-distribution-people-ops.js`): Overview strip untouched, only the Operations card callers changed |
+| **Last Verified** | 2026-11-18 against commit `3456be8` - re-read after audit F3 (`3456be8`): `js/overview-distribution-people-ops.js` only gained the "Stuck 48h+" key in `ISSUE_COLOR_MAP` (same teal as the long form); no Overview panel changed |
 
 ## Purpose / reason to exist
 

@@ -5,7 +5,7 @@ open/closed/Opportunity+ classification they sit on, the per-customer call pooli
 drop, the comment-timestamp extraction they read, and the priority picker — on BOTH runtimes
 (`js/core-lead-model.js` `enrichLead` + helpers vs `SlaEngine.gs` `computeSlaFlags_` + `Core.gs` /
 `EmailInfra.gs` / `FollowupEngine.gs` helpers), plus every place the dashboard re-states a rule for
-display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F4 (2) fixed in `5acba65` (the dashboard's SLA_History snapshot now counts per lead copy; user decision). F3 and F5 fixed in `3456be8` on 2026-11-16 (F5 is a `SlaEngine.gs` change - not live until pasted). F4 (3), F7, F8 open; the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
+display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F4 (2) fixed in `5acba65` (the dashboard's SLA_History snapshot now counts per lead copy; user decision). F3 and F5 fixed in `3456be8` on 2026-11-16 (F5 pasted live and verified, `780f81a`). F4 (3) fixed in `08c69a2` on 2026-11-18 (browser only). F7, F8 open; the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
 
 **Mechanical checks run first (all green):**
 
@@ -95,6 +95,11 @@ merged log) it will fail the `canonicalIssueLabelGs_` compare silently. Advisory
    `customerCallTotalAll` is undefined and `js/core-lead-model.js:445-448` falls back to summing
    `callAttemptsByLeadId` over **every** copy, closed ones included, with `customerAgeHours` falling
    to the merged (earliest) age. Row-level evaluation has no such path. Only customer-level views see it.
+   **Corrected 2026-11-18:** not only customer-level views. A group whose rows share ONE lead id (the same lead
+   under two RMs) gets no per-copy split, so its merged record is itself the issue unit and this reached the
+   Operations cards and `SLA_History` too. A second leak was found while fixing: `enrichLead` floored the
+   pool total with the merged `call_attempts` (max over every copy), so a closed copy's counter cleared the
+   customer even when the primary WAS pooled. Both fixed in `08c69a2` (`customerCallStampForGroup`).
 
 ### F5 — The checkpoint's "a move INTO Behind is never escalated" exemption rests on a rule that no longer exists  (LOW, product decision)
 
