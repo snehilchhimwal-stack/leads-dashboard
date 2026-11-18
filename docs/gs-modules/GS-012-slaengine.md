@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Validated |
-| **Last Verified** | 2026-11-16 against commit `3456be8` - audit F5: the SE-1 checkpoint exemption (RULE-087) removed from `computeAllIssuesCheckpointGs_`; NOT LIVE until pasted (deploy register) |
+| **Last Verified** | 2026-11-18 against commit `b7521f4` - audit F6: stale comments fixed (DR-10 note, call-rule note, checkpoint `baselineMap` note) and the dead `MIN_CALLS_PER_DAY_` (CFG-059) removed; no behaviour change; NOT LIVE until pasted |
 | **Scoped edit 2026-11-03** | weekly spot-check cycle 9, `GS-004`'s record: `## Relationships → Used By` gained the new `GS-004` reverse dependency (`indexCustomerCallTotalsGs_`, since `d01ff12`/2026-11-02) — scoped to that one field; the rest of this record was not re-verified this pass, hence `Validated` not `Closed + Monitored` |
 
 ## Purpose / reason to exist
@@ -72,7 +72,7 @@ gotcha).
 |---|---|---|---|---|
 | CFG-057 | `LEAD_GRACE_HOURS_` | `3` | grace before SLA flags apply | `computeSlaFlags_`; **twin `CONFIG.LEAD_GRACE_HOURS` (`JS-005` CFG-006)** |
 | CFG-058 | `LEAD_LIFECYCLE_HOURS_` | `48` | stuck-48h boundary | twin `CONFIG.LEAD_LIFECYCLE_HOURS` (`JS-005` CFG-004) |
-| CFG-059 | `MIN_CALLS_PER_DAY_` | `3` (was `5` until 2026-10-19) | under-called-today threshold | twin `CONFIG.MIN_CALLS_PER_DAY` (`JS-005` CFG-003) |
+| CFG-059 | ~~`MIN_CALLS_PER_DAY_`~~ | **removed 2026-11-18** (`b7521f4`, audit F6) - was `3` (`5` until 2026-10-19), the per-RM daily minimum; no reader since the 2026-11-02 cumulative rule (`MIN_CALLS_24H_` / `MIN_CALLS_48H_`) | - | twin `CONFIG.MIN_CALLS_PER_DAY` (`JS-005` CFG-003) removed 2026-11-13 |
 | CFG-060 | `FOLLOWUP_REVIEW_HOURS_` | `4` | "No follow up in last 4 hours" window (`followupOverdue`) | twin `CONFIG.FOLLOWUP_REVIEW_HOURS` (`JS-005` CFG-007) |
 | CFG-061 | ~~`FIRST_CONTACT_SLA_MINUTES_`~~ | removed 2026-10-19 | only served Not Updated's never-connected branch (RULE-089) | the client's `CONFIG.FIRST_CONTACT_SLA_MINUTES` (`JS-005` CFG-005) stays: the dashboard-only first-contact breach card still uses it |
 | CFG-143 | `LEGACY_ISSUE_LABELS_GS_` (added 2026-10-19) | `{'Follow-up Overdue': 'No follow up in last 4 hours'}` | renamed issue labels, old -> new | `canonicalIssueLabelGs_` (FN-525); add an entry whenever an `ISSUE_PRIORITY_GS_` label is renamed |
@@ -184,6 +184,8 @@ MEDIUM #2; `CLAUDE.md` (duplication gotcha).
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-18** (`b7521f4`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F6): comment-only fixes plus one dead constant. The DR-10 note no longer says `DailyRmIssueLog.gs` reads dates as Date cells only (it uses `parseSlaDateGs_` via `rmPerfDateCellGs_` since 2026-10-15); the `computeAllIssuesCheckpointGs_` note no longer describes the retired since-midnight `baselineMap` branch; `MIN_CALLS_PER_DAY_` (CFG-059) removed - nothing read it. Headless 4403/0. **Not live until pasted.**
 
 **2026-11-16** (`3456be8`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F5): the SE-1 exemption in `computeAllIssuesCheckpointGs_` (RULE-087) removed - since 2026-11-02 "Behind on Today's Calls" is cumulative from the customer's first assignment, so a 10:00/13:00 move into it is a real deficit; the only move it could soften (Stuck 48h+ -> Behind) now needs the pooled calls to fall. `Tests_SlaEngine.gs`'s SE-1 case flipped to expect `escalated`; `HANDOVER.md` 4.3.10 restated. **Not live until pasted** (`docs/STALENESS_TRACKER.md` deploy register: confirmed-live `d290405`).
 
