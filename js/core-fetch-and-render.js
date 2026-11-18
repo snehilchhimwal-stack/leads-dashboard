@@ -439,10 +439,15 @@ async function fetchAndRender(){
         const id = String(r.lead_id).trim();
         callAttemptsByLeadId[id] = Math.max(callAttemptsByLeadId[id] || 0, Number(r.call_attempts) || 0);
       });
+      // F4 (3) (2026-11-18): the call-rule stamp comes from the group's POOLED rows, not just the primary's (which may sit
+      // outside the pool and then has none) - see customerCallStampForGroup (core-lead-model.js).
+      const callStamp = customerCallStampForGroup(rows, primary);
       return Object.assign({}, primary, {
         internal_status_comments: mergedComments,
         stage_comments: mergedStageComments,
         callAttemptsByLeadId: callAttemptsByLeadId,
+        customerCallTotalAll: callStamp.customerCallTotalAll,
+        customerFirstAssignedMs: callStamp.customerFirstAssignedMs,
         call_attempts: Math.max(0, ...rows.map(r => Number(r.call_attempts) || 0)),
         call_count:    Math.max(0, ...rows.map(r => Number(r.call_count) || 0)),
         duration:      Math.max(0, ...rows.map(r => Number(r.duration) || 0)),

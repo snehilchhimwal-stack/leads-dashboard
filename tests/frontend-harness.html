@@ -1449,6 +1449,37 @@
           assert('indexCustomerCallTotals (N-4): the closed and the older rows get no stamp (they fall back to their own counter)', cr[1].customerCallTotalAll === undefined && cr[2].customerCallTotalAll === undefined, 'got ' + cr[1].customerCallTotalAll + '/' + cr[2].customerCallTotalAll);
           assert('indexCustomerCallTotals (N-4): the customer age runs from the earliest POOLED assignment (40h)', cr[0].customerFirstAssignedMs === at(40).getTime(), 'got ' + cr[0].customerFirstAssignedMs);
         }
+        {
+          // F4 (3) (lead-check logic audit, 2026-11-18): the call stamp a MERGED customer record is judged on, and the
+          // merged record's call_attempts (max over EVERY copy, closed ones too) no longer acting as a floor for its pool.
+          const helperLoaded = typeof customerCallStampForGroup === 'function';
+          assert('customerCallStampForGroup (F4 3) is loaded', helperLoaded, 'typeof = ' + typeof customerCallStampForGroup);
+          if (helperLoaded) {
+            const older = { lead_id: 'G-1', current_stage: 'Suspect', lead_assigned_at: at(70), call_attempts: 6 };
+            const newer = { lead_id: 'G-1', current_stage: 'Not Updated', lead_assigned_at: at(10), call_attempts: 6, customerCallTotalAll: 6, customerFirstAssignedMs: at(10).getTime() };
+            let st = customerCallStampForGroup([older, newer], older);
+            assert('customerCallStampForGroup (F4 3): a primary outside the pool takes the group\'s pooled stamp (6 calls, first assigned 10h ago)',
+              st.customerCallTotalAll === 6 && st.customerFirstAssignedMs === at(10).getTime(), JSON.stringify(st));
+            const p1 = { lead_id: 'G-2', lead_assigned_at: at(30), customerCallTotalAll: 9, customerFirstAssignedMs: at(30).getTime() };
+            const p2 = { lead_id: 'G-3', lead_assigned_at: at(4), customerCallTotalAll: 1, customerFirstAssignedMs: at(4).getTime() };
+            st = customerCallStampForGroup([p1, p2], p1);
+            assert('customerCallStampForGroup (F4 3): two pools in one group (inconsistent client ids) -> the pool of the newest current lead',
+              st.customerCallTotalAll === 1 && st.customerFirstAssignedMs === at(4).getTime(), JSON.stringify(st));
+            const lone = { lead_id: '', current_stage: 'Suspect', lead_assigned_at: at(12), call_attempts: 3 };
+            const closedCopy = { lead_id: 'G-4', current_stage: 'Suspect', closing_reason: 'Lost', lead_assigned_at: at(80), call_attempts: 40 };
+            st = customerCallStampForGroup([lone, closedCopy], lone);
+            assert('customerCallStampForGroup (F4 3): no pooled row -> the primary\'s OWN counter (3) and assignment (12h), never the closed copy\'s 40 or its older date',
+              st.customerCallTotalAll === 3 && st.customerFirstAssignedMs === at(12).getTime(), JSON.stringify(st));
+          }
+          const mrec = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(10), call_attempts: 30,
+            callAttemptsByLeadId: { 'M-OPEN': 2, 'M-CLOSED': 30 }, collatedLeadIds: ['M-OPEN', 'M-CLOSED'], collatedFrom: 2,
+            customerCallTotalAll: 2, customerFirstAssignedMs: at(10).getTime() }));
+          assert('enrichLead (F4 3): a merged record whose pool holds 2 calls is behind (2 of 5) although a closed copy made 30',
+            mrec.underCalledToday === true && mrec.customerCallTotal === 2 && mrec.callTarget === 5,
+            JSON.stringify({ u: mrec.underCalledToday, t: mrec.customerCallTotal, c: mrec.callTarget }));
+          const srec = enrichLead(Object.assign({}, base, { current_stage: 'Suspect', lead_assigned_at: at(10), call_attempts: 5 }));
+          assert('enrichLead (F4 3): a single unstamped row still uses its own counter (5 of 5, not behind)', srec.underCalledToday === false, 'got ' + srec.underCalledToday);
+        }
         assert('dropTransferredLeadRows (2026-11-03): only an INACTIVE older RM copy goes; a shared lead (both active), a lone lead and a same-time tie stay', kept ==='T1:New RM,T4:Shared A,T4:Shared B,T2:Old RM,T3:A,T3:B', kept);
       }
     } finally {
@@ -2279,6 +2310,18 @@
     // Before the fix opp_at wasn't in fetchAndRender's date-column list,
     // so the serial stayed a raw number and parsed to '' for every lead.
     const e2eOppSerial = serialAgo(30);
+    // F4 (3) rows (2026-11-18). Browser-only: a merged customer record has no Apps Script twin, so these ids are NOT part of
+    // the shared table above that Tests_EmailLifecycleFullCycle.gs also asserts.
+    //   C-F4A  open F4A1 (10h, 2 calls) + CLOSED F4A2 (60h, 30 calls): the customer is behind (2 of 5); the closed copy's
+    //          counter must not count, though it is the merged record's call_attempts (max over copies)
+    //   F4B1   one lead id under two RMs: the older copy (70h, Suspect) wins the merge but sits outside the 48h pool; the
+    //          newer copy (10h, Not Updated) is pooled -> 6 of 5, NOT behind. One lead id = no per-copy split, so this merged
+    //          record is itself the issue unit.
+    const f4Lead = (id, client, stage, createdH, attempts, extra) => row(Object.assign({
+      lead_id: id, RM: 'Ravi Kumar', TL: 'Priya Sharma', rm_is_active: true, project: 'Skyline Towers', region: 'North',
+      client: 'Client ' + id, lead_assigned_at: ago(createdH), group_source: 'Google', source_bucket: 'Organic', current_stage: stage,
+      client_id: client, last_connect_time: ago(0.5), call_attempts: attempts,
+    }, extra || {}));
     const withOpp = (r, opp) => r.concat([opp]);
     const e2eLeadValues = [headers.concat(['opp_at']),
       withOpp(e2eLead('E101', 'C-E1', 'Not Updated', 60, 13), ''),
@@ -2287,6 +2330,10 @@
       withOpp(e2eLead('E301', 'C-E3', 'Suspect', 60, 7), e2eOppSerial),
       withOpp(e2eLead('E401', 'C-E4', 'Suspect', 5, 6), ''),
       withOpp(e2eLead('E402', 'C-E5', 'Suspect', 5, 2), ''),
+      withOpp(f4Lead('F4A1', 'C-F4A', 'Suspect', 10, 2), ''),
+      withOpp(f4Lead('F4A2', 'C-F4A', 'Suspect', 60, 30, { closing_reason: 'Lost' }), ''),
+      withOpp(f4Lead('F4B1', 'C-F4B', 'Suspect', 70, 6), ''),
+      withOpp(f4Lead('F4B1', 'C-F4B', 'Not Updated', 10, 6, { RM: 'Second RM' }), ''),
     ];
     const mlHeader = MOVEMENT_LOG_COLUMNS.concat(['content_hash']);
     const mlRow = (atH, leadId, client, attempts) => mlHeader.map(key => {
@@ -2358,6 +2405,19 @@
       assert('E2E snapshot->render: the merged customer record for C-E1 carries both leads\' counters and is NOT behind (its best lead made 5 calls)',
         !!merged && merged.callAttemptsByLeadId && merged.callAttemptsByLeadId.E101 === 13 && merged.callAttemptsByLeadId.E102 === 9 && merged.underCalledToday === false,
         merged ? JSON.stringify({ c: merged.callAttemptsByLeadId, u: merged.underCalledToday }) : 'no merged record');
+
+      // F4 (3) (2026-11-18): merged records are judged on the customer's CURRENT pool, like each row is.
+      const f4a = leads.find(l => l.client_id === 'C-F4A');
+      assert('E2E F4 (3): the C-F4A customer record is behind - its open lead made 2 of 5; the CLOSED copy\'s 30 calls do not count',
+        !!f4a && f4a.underCalledToday === true && f4a.customerCallTotal === 2 && f4a.callTarget === 5,
+        f4a ? JSON.stringify({ u: f4a.underCalledToday, t: f4a.customerCallTotal, c: f4a.callTarget, a: f4a.call_attempts }) : 'no C-F4A record');
+      assert('E2E F4 (3): ...and agrees with its own issue unit F4A1 (behind)', !!byId['F4A1'] && byId['F4A1'].underCalledToday === true,
+        byId['F4A1'] ? String(byId['F4A1'].underCalledToday) : 'no F4A1 unit');
+      const f4b = byId['F4B1'];
+      assert('E2E F4 (3): F4B1 (one lead id, two RMs, older copy primary but outside the pool) uses the newer copy\'s pool - 6 of 5, NOT behind',
+        !!f4b && f4b.underCalledToday === false && f4b.customerCallTotal === 6 && f4b.callTarget === 5,
+        f4b ? JSON.stringify({ u: f4b.underCalledToday, t: f4b.customerCallTotal, c: f4b.callTarget, splits: f4b.copySplits ? f4b.copySplits.length : 0 }) : 'no F4B1 unit');
+      assert('E2E F4 (3): the rendered Behind list names F4A1 and not F4B1', dueText.indexOf('F4A1') !== -1 && dueText.indexOf('F4B1') === -1, dueText.slice(0, 300));
     }
   }
 

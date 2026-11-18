@@ -296,6 +296,30 @@ function indexCustomerCallTotals(rows){
   });
 }
 
+// F4 (3) (lead-check logic audit, 2026-11-18): the call stamp a MERGED customer record (fetchAndRender's
+// mergeRowsIntoOneLead, several rows of one customer) is judged on. indexCustomerCallTotals above stamps each pooled ROW;
+// the merge used to copy only its primary row's stamp, so a customer whose primary copy sat outside the pool - an older
+// open enquiry, or the older RM copy of the same lead id past the 48h window - lost it and fell back to summing EVERY copy
+// (closed ones included) against the EARLIEST assignment. Now:
+//   - any pooled row in the group: the stamp of the newest pooled row. Every pooled row of one customer key carries the
+//     same stamp, so this is the customer's current pool; when a group spans two keys (inconsistent client_id tagging
+//     across RM copies), the pool holding the customer's newest current lead wins.
+//   - no pooled row: the primary's OWN counter and assignment - exactly what an unpooled row gets on its own (the
+//     fallback in SlaEngine.gs computeSlaFlags_ / enrichLead).
+// Rows are the raw leads-tab rows indexCustomerCallTotals already ran over; primary is the copy the merge picked.
+function customerCallStampForGroup(rows, primary){
+  let pick = null, pickMs = -Infinity;
+  rows.forEach(r => {
+    if (r.customerCallTotalAll === undefined) return;
+    const d = parseDate(r.lead_assigned_at);
+    const ms = d ? d.getTime() : -Infinity;
+    if (pick === null || ms > pickMs) { pick = r; pickMs = ms; }
+  });
+  if (pick) return { customerCallTotalAll: pick.customerCallTotalAll, customerFirstAssignedMs: pick.customerFirstAssignedMs };
+  const own = parseDate(primary.lead_assigned_at);
+  return { customerCallTotalAll: Number(primary.call_attempts) || 0, customerFirstAssignedMs: own ? own.getTime() : null };
+}
+
 function enrichLead(l){
   const now = _renderNow;
   const created = parseDate(l.lead_assigned_at);
@@ -439,15 +463,20 @@ function enrichLead(l){
   } else {
     attemptsToday = loggedToday;
   }
-  // 2026-11-02 (user request): cumulative per customer - a merged unit's lead ids each count once (callAttemptsByLeadId), its
-  // lead_assigned_at is already the earliest of them (mergeRowsIntoOneLead) - against 5 within 24h, 10 after. Twin of
-  // SlaEngine.gs computeSlaFlags_. attemptsToday stays for display only.
+  // 2026-11-02 (user request): cumulative per customer - the customer's current pool (indexCustomerCallTotals) against 5
+  // within 24h of its first pooled assignment, 10 after. Twin of SlaEngine.gs computeSlaFlags_. attemptsToday stays for
+  // display only.
+  // F4 (3) (2026-11-18): a merged record always carries a stamp now (customerCallStampForGroup), and its call_attempts -
+  // the max over EVERY copy, closed and older ones too - is no longer a floor under the pool: a closed copy's counter used
+  // to clear the whole customer. A single row keeps its own counter as the floor (a no-op there: a pooled row's own counter
+  // is part of its pool total). The callAttemptsByLeadId sum below is only reached by a hand-built merged shape with no stamp.
   const customerCallTotal = l.customerCallTotalAll !== undefined ? l.customerCallTotalAll : (l.callAttemptsByLeadId
     ? Object.keys(l.callAttemptsByLeadId).reduce((s, id) => s + (Number(l.callAttemptsByLeadId[id]) || 0), 0)
     : (Number(l.call_attempts) || 0));
   const customerAgeHours = l.customerFirstAssignedMs ? (now - l.customerFirstAssignedMs) / 36e5 : ageHours;
   const callTarget = (customerAgeHours !== null && customerAgeHours > 24) ? CONFIG.MIN_CALLS_48H : CONFIG.MIN_CALLS_24H;
-  const underCalledToday = isOpenLead && pastGrace && Math.max(customerCallTotal, Number(l.call_attempts) || 0) < callTarget;
+  const ownCallFloor = l.callAttemptsByLeadId ? 0 : (Number(l.call_attempts) || 0);
+  const underCalledToday = isOpenLead && pastGrace && Math.max(customerCallTotal, ownCallFloor) < callTarget;
 
   // Stuck: open past 48hrs and still hasn't reached Opportunity — the one
   // check deliberately exempt from the isUnder48h scope, since being old is
