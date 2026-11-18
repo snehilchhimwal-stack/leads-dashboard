@@ -111,7 +111,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `OvernightEmailer.gs` | `d290405` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
 | `RmHierarchy.gs` | `4ec6f0f` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
 | `RmHierarchySync.gs` | `6b28fba` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
-| `SlaEngine.gs` | `3456be8` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
+| `SlaEngine.gs` | `b7521f4` | 2026-11-18 | read directly from the live editor by hash-match after the save (2026-11-18): audit F6 (stale comments fixed, dead `MIN_CALLS_PER_DAY_` removed; no behaviour change), pasted as a hash-checked line patch, user saved; F5 (`3456be8`) before it ran live runAllTests 4368/0. Recorded by hand, not by `match-live-gs.py --apply` (which resets every row's note) |
 | `StaleLeads.gs` | `e6bdcb0` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
 | `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
 
