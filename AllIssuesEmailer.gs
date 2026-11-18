@@ -13,6 +13,9 @@
  *     DAY — e.g. running at 5pm meant everything assigned before 5pm on
  *     the earliest day was excluded, even though that day was supposed
  *     to be fully in scope)
+ *   - PLUS, in the stale block at the bottom only (2026-11-18, audit F8): open leads assigned BEFORE that
+ *     window but within ALL_ISSUES_STALE_DAYS_BACK_ calendar days of today that are STALE (no update for
+ *     more than 24 h, StaleLeads.gs) - see ALL_ISSUES_STALE_DAYS_BACK_
  *
  * Content mirrors the dashboard's own Operations tab: same 5 checks, same
  * priority order when a lead qualifies for more than one (primaryIssueGs_,
@@ -71,6 +74,15 @@ const ALL_ISSUES_LOG_SHEET_ = 'AllIssues_Log';
 // out of scope, just because the window's start point happened to land
 // partway through that calendar day rather than at its midnight.
 const ALL_ISSUES_WINDOW_DAYS_BACK_ = 2;
+// 2026-11-18 (lead-check logic audit F8, user decision "extend the stale block"): the 17:00 email ALSO lists open in-scope leads
+// assigned BEFORE the window above but no more than ALL_ISSUES_STALE_DAYS_BACK_ full calendar days before today - days 4 to 7 of a
+// lead's life with these values - when they are STALE (no update for more than 24 h, leadStaleStateGs_ in StaleLeads.gs). They go in
+// the stale block at the bottom only: being stale is the reason they are listed at all. Until then an open lead's last email was the
+// day-4 13:00 re-check, although Email Ops decision D8 (2026-10-10) defines a stale lead "no matter when it was created or assigned".
+// 6 matches the leads tab's own horizon (it held exactly 7 calendar days when this was set), so a quiet lead is chased until the
+// export drops it, and the bound keeps the block small if the export ever grows. From selection on, such a lead is an ordinary member
+// of its bucket: routing, the send-safety gate, Email_Ledger, the AllIssues_Log snapshot and the next day's 10:00 / 13:00 re-check.
+const ALL_ISSUES_STALE_DAYS_BACK_ = 6;
 const ALL_ISSUES_RUN_HOUR_ = 17; // IST (5pm) — one run a day, see setupAllIssuesEmailTrigger below
 // Email Ops EO-9 / plan decision D5: a failed or blocked 17:00 bucket may be re-sent (recoverFailedAllIssuesBucketsNow) until 18:30 IST; after that it
 // stays failed and is NOT sent late (it is reported, and the next 17:00 run covers any lead that is still flagged).
@@ -156,6 +168,23 @@ function allIssuesWindowGs_(asOf) {
   const todayMidnight = new Date(todayKey + 'T00:00:00+05:30');
   const from = new Date(todayMidnight.getTime() - ALL_ISSUES_WINDOW_DAYS_BACK_ * 24 * 3600 * 1000);
   return { from: from, to: asOf };
+}
+
+// F8 (2026-11-18): the span (IST) the older stale leads come from - IST midnight ALL_ISSUES_STALE_DAYS_BACK_ days before today, up to
+// the instant before the main window starts. Derived from allIssuesWindowGs_'s own midnight in whole days, so it stays calendar-day
+// anchored (OPS_CHECKLIST Tier 1: never a rolling number of hours). Pure.
+function allIssuesOlderStaleWindowGs_(win) {
+  const extraDays = ALL_ISSUES_STALE_DAYS_BACK_ - ALL_ISSUES_WINDOW_DAYS_BACK_;
+  return { from: new Date(win.from.getTime() - extraDays * 24 * 3600 * 1000), to: new Date(win.from.getTime() - 1) };
+}
+
+// F8 (2026-11-18): the footer sentence an email gets when its stale block holds leads from before the main window; '' otherwise. Pure.
+function allIssuesOlderStaleNoteGs_(leads, win) {
+  if (!(leads || []).some(function (l) { return l && l.olderStale; })) return '';
+  const ow = allIssuesOlderStaleWindowGs_(win);
+  const fmt = function (d) { return Utilities.formatDate(d, 'Asia/Kolkata', 'd MMM'); };
+  return ' The stale block at the bottom also lists open leads assigned ' + fmt(ow.from) + ' to ' + fmt(ow.to) +
+    ' (before that window) that have had no update for more than ' + LEAD_STALE_HOURS_ + ' hours.';
 }
 
 // Subject-line date segment — e.g. run on the 28th, "(26-Aug-2026 to
@@ -313,12 +342,20 @@ function sendAllIssuesEmails_(opts) {
   // held by more than one RM at once must not be counted/emailed as two
   // unrelated leads.
   const candidateLeads = [];
+  // F8 (2026-11-18): open leads from before the window (allIssuesOlderStaleWindowGs_), kept only while they are stale.
+  const olderWin = allIssuesOlderStaleWindowGs_(win);
+  const olderStaleCandidates = [];
   dataRows.forEach(function (row) {
     // D-1 (audit 2026-11-04): the scope gate (Google Search / Non-UTM, assigned inside the window - here the last 3 calendar
     // days, allIssuesWindowGs_ - one of the configured regions, open) is shared with the 10:00 job (EmailInfra.gs).
-    const base = emailCandidateBaseGs_(row, colIndex, win);
+    let base = emailCandidateBaseGs_(row, colIndex, win);
+    let older = false;
+    if (!base) { base = emailCandidateBaseGs_(row, colIndex, olderWin); older = !!base; } // the same gate, the earlier span
     if (!base) return;
     const leadId = base.leadId;
+    // An older lead is listed only while it is stale, so its staleness is judged first (and only for the rows the gate let through).
+    const olderStaleSince = older ? staleSinceOfRowGs_(row, colIndex, lastChangeMap, now) : null;
+    if (older && !olderStaleSince) return;
 
     const flags = computeSlaFlags_(row, colIndex, now, baselineMap);
     const issue = primaryIssueGs_(flags); // same priority order Operations' own combined view uses
@@ -326,7 +363,7 @@ function sendAllIssuesEmails_(opts) {
 
     const baselineEntry = lastSnapshotMap[leadId]; // per LEAD, not per customer (email audit F18) - call_attempts is a per-lead counter
 
-    candidateLeads.push({
+    (older ? olderStaleCandidates : candidateLeads).push({
       // 2026-11-02 (user request): one copy per customer PER RM - a customer held by several RMs is listed for each of them
       // (each RM's own TL/RH gets it), not collapsed to the furthest copy. The calls rule already pools all RMs (SlaEngine.gs).
       identityKey: base.identityKey,
@@ -340,18 +377,29 @@ function sendAllIssuesEmails_(opts) {
         const p = customerCallProgressGs_(row, colIndex, now); // 2026-11-02: the pooled count the rule judged
         return p ? 'Customer calls so far (all RMs): ' + p.total + '/' + p.target + '. ' + hint : hint;
       })(),
-      staleSince: staleSinceOfRowGs_(row, colIndex, lastChangeMap, now),
+      staleSince: older ? olderStaleSince : staleSinceOfRowGs_(row, colIndex, lastChangeMap, now),
+      olderStale: older || undefined, // F8: only the older leads carry it (undefined is left out of the snapshot JSON)
     });
   });
 
   const deduped = dedupeEmailCandidatesGs_(candidateLeads); // D-1: shared with the 10:00 job (EmailInfra.gs)
-  const dupedAwayCount = deduped.dupedAwayCount;
+  // F8: older stale leads are deduped among themselves, and one whose customer the window already lists for the same RM is dropped -
+  // it must neither repeat that customer nor displace the window's copy (the shared dedupe keeps the furthest stage, which could be
+  // the older lead's).
+  const listedKeys = {};
+  deduped.leads.forEach(function (l) { listedKeys[l.identityKey] = true; });
+  const olderDeduped = dedupeEmailCandidatesGs_(olderStaleCandidates.filter(function (l) { return !listedKeys[l.identityKey]; }));
+  if (olderDeduped.leads.length) {
+    Logger.log(olderDeduped.leads.length + ' stale lead(s) assigned ' + istDayKeyGs_(olderWin.from) + ' to ' + istDayKeyGs_(olderWin.to) +
+      ' (before the window) added to the stale blocks (audit F8).');
+  }
+  const dupedAwayCount = deduped.dupedAwayCount + olderDeduped.dupedAwayCount;
   if (dupedAwayCount) {
     Logger.log(dupedAwayCount + ' duplicate customer row(s) collapsed to a single copy each for this run — kept whichever had progressed furthest.');
   }
 
   // mainRegion -> flagged leads[]; Futwork RMs' leads from EVERY region share one 'Futwork' key (regionKeyForRmGs_)
-  const byRegion = groupEmailLeadsByRegionGs_(deduped.leads, ['lead_id', 'RM', 'TL', 'region', 'status', 'issueLabel', 'followup', 'staleSince']);
+  const byRegion = groupEmailLeadsByRegionGs_(deduped.leads.concat(olderDeduped.leads), ['lead_id', 'RM', 'TL', 'region', 'status', 'issueLabel', 'followup', 'staleSince', 'olderStale']);
 
   const logSheet = ensureAllIssuesLogSheet_(ss);
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
@@ -561,7 +609,7 @@ function sendAllIssuesEmails_(opts) {
   notifyLeadSendFailuresGs_(failedLeadEntries, {
     emailLabel: '17:00 All-Issues',
     runLabel: recoverIds ? 'Recovery of failed 17:00 buckets' : '',
-    retryNote: 'the next 17:00 run lists a lead again only while it is still flagged and was assigned in the last 3 calendar days (IST).',
+    retryNote: 'the next 17:00 run lists a lead again only while it is still flagged and was assigned in the last 3 calendar days (IST) - or in the last ' + (ALL_ISSUES_STALE_DAYS_BACK_ + 1) + ' when it has had no update for more than ' + LEAD_STALE_HOURS_ + ' hours.',
   });
   pruneEmailLedgerGs_(ledger, now);
   emailLedgerFinishGs_(ledger, 'the 17:00 All-Issues run');
@@ -645,7 +693,7 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
           rows: byRM[rm].map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
         };
       }),
-      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).',
+      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).' + allIssuesOlderStaleNoteGs_(allLeads, win),
     };
     applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
     const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
@@ -760,7 +808,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
     ],
     action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, No follow up in last 4 hours, Behind on Today\'s Calls, Stuck 48h+).',
     sections: sections,
-    footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.',
+    footerNote: 'Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST). Status/flags reflect the CURRENT live sheet as of this run.' + allIssuesOlderStaleNoteGs_(leads, win),
   };
   applyStaleSplitGs_(reportOpts, staleSinceMapGs_(leads)); // stale leads (no update for more than 24 h) are held at the bottom, and the headline count says so
   const html = (testModeBanner ? testModeBanner.html : '') + renderOvernightReportEmailHTML_(reportOpts);
@@ -819,7 +867,7 @@ function sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
         'Leads affected (' + leads.length + '): ' + leads.map(function (l) { return l.lead_id; }).join(', '),
         '',
         // AI-4 (audit 2026-10-13): the window is 3 calendar days (allIssuesWindowGs_), not a trailing 48h.
-        'These leads got no automated email this run — this script covers leads assigned in the last 3 calendar days (IST), so tomorrow\'s run re-checks them only if they are still flagged and inside that window then.',
+        'These leads got no automated email this run — this script covers leads assigned in the last 3 calendar days (IST), plus stale ones from the last ' + (ALL_ISSUES_STALE_DAYS_BACK_ + 1) + ' (F8), so tomorrow\'s run re-checks them only if they are still flagged and inside that window then.',
         'Once the cause is fixed, run recoverFailedAllIssuesBucketsNow() before ' + ALL_ISSUES_LATE_CUTOFF_HOUR_ + ':' + pad2Gs_(ALL_ISSUES_LATE_CUTOFF_MINUTE_) + ' IST: it re-sends ONLY this bucket (its siblings are not repeated) and re-checks the leads first. After that time nothing is sent late.',
         guardBlocked
           ? 'The send-safety gate refused this payload before any draft was created: ' + e.guardProblems.join('; ') + '. Fix the underlying data (recipient address / content) and run the job by hand.'

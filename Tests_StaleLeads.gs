@@ -268,6 +268,71 @@ function runStaleLeadsTests_() {
       TestAssertEqual_(staleTail(emailWith(got, 'L-THANE')) === null, true, '17:00: the Thane email (nothing stale) has no stale block');
     }
     {
+      // F8 (2026-11-18, user decision "extend the stale block"): an open lead assigned BEFORE the 3-day window but within
+      // ALL_ISSUES_STALE_DAYS_BACK_ (6) calendar days of today is listed - in the stale block only - while it is stale.
+      // Assignment times are 10:00 IST on whole calendar days back, so the cases hold at any hour the suite runs.
+      const dayAt = function (n) { return new Date(istDayKeyGs_(new Date(Date.now() - n * 24 * 3600 * 1000)) + 'T10:00:00+05:30'); };
+      const ss = TestSL_world_([
+        { lead_id: 'L-D4', client_id: 'C-D4', lead_assigned_at: dayAt(3) },                          // day 4, stale -> stale block
+        { lead_id: 'L-D7', client_id: 'C-D7', lead_assigned_at: dayAt(6) },                          // day 7, stale -> stale block
+        { lead_id: 'L-D8', client_id: 'C-D8', lead_assigned_at: dayAt(7) },                          // day 8, stale -> past the bound
+        { lead_id: 'L-D4RECENT', client_id: 'C-D4R', lead_assigned_at: dayAt(3) },                   // day 4, last change 5 h ago
+        { lead_id: 'L-D4NOHIST', client_id: 'C-D4N', lead_assigned_at: dayAt(3) },                   // day 4, no Movement_Log history
+        { lead_id: 'L-D4CLOSED', client_id: 'C-D4C', lead_assigned_at: dayAt(3), closing_reason: 'Low Budget' }, // closed
+        { lead_id: 'L-D4SAMECUST', client_id: 'C-PUNE', lead_assigned_at: dayAt(3), current_stage: 'Suspect' },  // L-PUNE's customer + RM
+        { lead_id: 'L-D5HYD', client_id: 'C-D5HYD', region: 'Hyderabad', lead_assigned_at: dayAt(4) },          // its region's only lead
+      ]);
+      TestSL_movementLog_(ss, { 'L-PUNE': 30, 'L-THANE': 5, 'L-D4': 30, 'L-D7': 40, 'L-D8': 40, 'L-D4RECENT': 5, 'L-D4CLOSED': 30, 'L-D4SAMECUST': 30, 'L-D5HYD': 30 }, new Date());
+      TestEL_bind_(ss);
+      const got = capture(function () { sendAllIssuesEmails(); });
+      const allIds = [].concat.apply([], got.single.map(function (o) { return TestSL_ids_(o.sections); }));
+      TestAssertEqual_(TestGmailLog_.drafts.length, 3, 'F8 17:00: three bucket emails - Pune, Thane, and Hyderabad for its one older stale lead');
+
+      const pune = emailWith(got, 'L-PUNE');
+      const tail = staleTail(pune) || { fresh: [], stale: [] };
+      TestAssertEqual_(TestSL_ids_(tail.stale).sort().join(','), 'L-D4,L-D7,L-PUNE', 'F8 17:00: the Pune stale block holds the day-4 and day-7 stale leads next to the in-window stale one');
+      TestAssertEqual_(TestSL_ids_(tail.fresh).length, 0, 'F8 17:00: an older lead is never in the ordinary tables');
+      TestAssertEqual_(pune.kpis[0].value, 3, 'F8 17:00: the Pune flagged-leads count includes the two older stale leads');
+      ['L-D8', 'L-D4RECENT', 'L-D4NOHIST', 'L-D4CLOSED', 'L-D4SAMECUST'].forEach(function (id) {
+        TestAssert_(allIds.indexOf(id) === -1, 'F8 17:00: ' + id + ' is in no email (past day 7 / changed within 24 h / no history / closed / customer already listed for that RM)');
+      });
+      TestAssert_(allIds.indexOf('L-PUNE') !== -1, 'F8 17:00: L-PUNE keeps its place - an older lead of the same customer and RM never displaces it');
+      TestAssertContains_(pune.footerNote, 'also lists open leads assigned', 'F8 17:00: the Pune footer says the stale block reaches back before the window');
+      const thane = emailWith(got, 'L-THANE');
+      TestAssert_(String(thane.footerNote).indexOf('also lists open leads assigned') === -1, 'F8 17:00: the Thane email (no older lead) keeps its old footer');
+
+      const hyd = emailWith(got, 'L-D5HYD');
+      const hydTail = hyd ? staleTail(hyd) : null;
+      TestAssert_(!!hydTail && hydTail.fresh.length === 0 && TestSL_ids_(hydTail.stale).join(',') === 'L-D5HYD', 'F8 17:00: a bucket whose only lead is an older stale one gets an email holding just the stale block');
+      const hydDraft = TestGmailLog_.drafts.filter(function (x) { return x.htmlBody.indexOf('L-D5HYD') !== -1; })[0] || { subject: '', body: '' };
+      TestAssertContains_(hydDraft.subject, allIssuesDateRangeLabelGs_(allIssuesWindowGs_(new Date())), 'F8 17:00: the subject keeps the 3-day date range');
+      TestAssertContains_(hydDraft.body, 'L-D5HYD', 'F8 17:00: the older lead is in the plain text too (send-safety gate)');
+
+      const led = TestEL_objects_(ss.getSheetByName(EMAIL_LEDGER_SHEET_), EMAIL_LEDGER_HEADERS_);
+      TestAssertEqual_(led.length + ',' + led.every(function (r) { return r.status === 'ACCEPTED'; }) + ',' + led.reduce(function (n, r) { return n + Number(r.leads_sent); }, 0), '3,true,5', 'F8 17:00: three emails ACCEPTED, five leads counted as sent (L-PUNE, L-D4, L-D7, L-THANE, L-D5HYD)');
+      const logSheet = ss.getSheetByName(ALL_ISSUES_LOG_SHEET_);
+      const log = logSheet.getRange(1, 1, logSheet.getLastRow(), logSheet.getLastColumn()).getValues().slice(1);
+      const hydLog = log.filter(function (r) { return String(r[1]) === 'Hyderabad'; })[0];
+      const hydSnap = hydLog ? JSON.parse(hydLog[9]) : [];
+      TestAssert_(!!hydLog && Number(hydLog[6]) === 1 && hydSnap.length === 1 && hydSnap[0].lead_id === 'L-D5HYD' && hydSnap[0].olderStale === true,
+        'F8 17:00: the Hyderabad AllIssues_Log row counts its lead and snapshots it (marked olderStale), so the 10:00 / 13:00 re-check sees it like any 17:00 lead - got ' + JSON.stringify(hydLog && [hydLog[6], hydSnap]));
+      const puneLog = log.filter(function (r) { return String(r[1]) === 'Pune'; })[0];
+      const puneSnap = puneLog ? JSON.parse(puneLog[9]) : [];
+      TestAssert_(puneSnap.filter(function (e) { return e.olderStale; }).length === 2 && puneSnap.filter(function (e) { return e.lead_id === 'L-PUNE'; })[0].olderStale === undefined,
+        'F8 17:00: only the older leads carry olderStale in the snapshot - got ' + JSON.stringify(puneSnap.map(function (e) { return [e.lead_id, e.olderStale]; })));
+    }
+    {
+      // F8: the window helper - calendar-day anchored, directly before the main window, ALL_ISSUES_STALE_DAYS_BACK_ days back.
+      const nowT = new Date();
+      const w = allIssuesWindowGs_(nowT);
+      const ow = allIssuesOlderStaleWindowGs_(w);
+      const todayMidnight = new Date(istDayKeyGs_(nowT) + 'T00:00:00+05:30').getTime();
+      TestAssertEqual_(ow.from.getTime(), todayMidnight - ALL_ISSUES_STALE_DAYS_BACK_ * 24 * 3600 * 1000, 'F8 window: starts at IST midnight ' + ALL_ISSUES_STALE_DAYS_BACK_ + ' days before today');
+      TestAssertEqual_(ow.to.getTime(), w.from.getTime() - 1, 'F8 window: ends the instant before the main window starts (no overlap, no gap)');
+      TestAssertEqual_(allIssuesOlderStaleNoteGs_([{ lead_id: 'A' }], w), '', 'F8 footer: no note when no lead is an older one');
+      TestAssertContains_(allIssuesOlderStaleNoteGs_([{ lead_id: 'A' }, { lead_id: 'B', olderStale: true }], w), Utilities.formatDate(ow.from, 'Asia/Kolkata', 'd MMM'), 'F8 footer: the note names the first day of the older span');
+    }
+    {
       // updated since the snapshot -> not stale; a snapshot only 20 h old -> not stale; no history at all -> not stale
       const ss = TestSL_world_([{ lead_id: 'L-CHG', client_id: 'C-CHG' }, { lead_id: 'L-NEW', client_id: 'C-NEW' }]);
       TestSL_movementLog_(ss, { 'L-PUNE': 20, 'L-CHG': 30 }, new Date());
