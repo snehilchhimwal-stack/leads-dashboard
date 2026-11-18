@@ -92,7 +92,7 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `a2988a3` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
+| `AllIssuesEmailer.gs` | `a2988a3` | 2026-11-18 | read directly from the live editor by hash-match after the save (2026-11-18): audit F8 (the 17:00 stale block also lists stale open leads of days 4-7); pasted as a hash-checked line patch from the browser pane, user saved; live runAllTests 4403/0 (24 files; Tests_AllIssuesEmailer 151/0, Tests_StaleLeads 115/0) |
 | `Core.gs` | `a7d9e12` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
 | `CycleReport.gs` | `6ca53d2` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
 | `DailyChecklist.gs` | `6ca53d2` | 2026-11-18 | read directly from the live editor by hash-match (2026-11-18) |
