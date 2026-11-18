@@ -5,7 +5,7 @@ open/closed/Opportunity+ classification they sit on, the per-customer call pooli
 drop, the comment-timestamp extraction they read, and the priority picker — on BOTH runtimes
 (`js/core-lead-model.js` `enrichLead` + helpers vs `SlaEngine.gs` `computeSlaFlags_` + `Core.gs` /
 `EmailInfra.gs` / `FollowupEngine.gs` helpers), plus every place the dashboard re-states a rule for
-display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F4 (2) fixed in `5acba65` (the dashboard's SLA_History snapshot now counts per lead copy; user decision). F3 and F5 fixed in `3456be8` on 2026-11-16 (F5 pasted live and verified, `780f81a`). F4 (3) fixed in `08c69a2` on 2026-11-18 (browser only). F7, F8 open; the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
+display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F4 (2) fixed in `5acba65` (the dashboard's SLA_History snapshot now counts per lead copy; user decision). F3 and F5 fixed in `3456be8` on 2026-11-16 (F5 pasted live and verified, `780f81a`). F4 (3) fixed in `08c69a2` on 2026-11-18 (browser only). F7 checked live 2026-11-18: clear (`b33e7f1`). F8 investigated 2026-11-18: needs a product decision (options in F8). Open: the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
 
 **Mechanical checks run first (all green):**
 
@@ -170,12 +170,66 @@ csv.split('\n').forEach(line => { const m = line.match(/^"((?:[^"]|"")*)","((?:[
 // if canonicalStage misreads it, fix STAGE_ALIASES / the matcher in BOTH runtimes (Core.gs + js/core-foundation.js).
 ```
 
-### F8 — Stuck 48h+ reaches the email for about one day, the dashboard forever  (DESIGN, confirming)
+### F8 — An open lead stops being emailed after its fourth day; the dashboard keeps it until the export drops it  (INVESTIGATED 2026-11-18: needs a product decision)
 
 `AllIssuesEmailer.gs:73` `ALL_ISSUES_WINDOW_DAYS_BACK_ = 2` (today + 2 calendar days). A lead becomes
 Stuck after 48 h, so it is emailable only on roughly its third calendar day, then leaves the window
 while `stageStuck48h` stays true on the dashboard. `HANDOVER.md` §4.3.10 states the window; this is
 just confirming the asymmetry is designed, not a drift.
+
+**Investigated 2026-11-18.** Two corrections to the line above, then the facts.
+
+- *"The dashboard forever" is wrong.* The live `leads` tab holds exactly 7 calendar days of assignments (read
+  2026-11-18: rows assigned 12–18 Nov only, 6,610 leads). The dashboard and every email read only that tab, so a
+  lead disappears from BOTH once it is 7 days old. This horizon is not documented anywhere in the repo
+  (`docs/sheets/SHEET-001-leads.md`, `HANDOVER.md`); whether the export is always exactly 7 days was observed
+  once, not confirmed with whoever owns the export.
+- *It is not only Stuck.* The window drops an open lead whatever its issue.
+
+**When an open, flagged lead is emailed** (code: `allIssuesWindowGs_`, `computeAllIssuesCheckpointGs_` called from
+`OvernightEmailer.gs:801` and `:1837`, which re-check the previous 17:00 list with no age limit):
+
+| Lead's calendar day (IST) | 17:00 email | 10:00 / 13:00 next-day re-check | Dashboard |
+|---|---|---|---|
+| 1–3 | yes, every day | yes, for whatever the previous 17:00 email listed | yes |
+| 4 | no | yes: last email is the 13:00 re-check | yes |
+| 5–7 | no | no | yes |
+| 8+ | no | no | no (gone from the export) |
+
+"Stuck 48h+" itself can be a lead's label in the 17:00 email on one day only, day 3, and only when it was
+assigned before 17:00 on day 1 and nothing outranks it (stage not "Not Updated", and the customer's pooled calls
+at 10 or more; otherwise it is listed as Behind on Today's Calls).
+
+**Live picture, 2026-11-18** (email scope = Google Non-UTM/Search; open = stage Suspect or Not Updated with no
+closing reason; read-only grouped counts):
+
+| Assigned | Open leads | Last email |
+|---|---|---|
+| 16–18 Nov | 204 | still inside the 17:00 window |
+| 15 Nov | 50 | today's 10:00 / 13:00 re-check, then none |
+| 12–14 Nov | 118 | none; still flagged on the dashboard |
+
+The 168 open leads assigned 12–15 Nov sit with 79 different RMs. All are Suspect (no "Not Updated").
+
+**Why the window is 3 days.** It began as a rolling 48 h and was widened on 2026-08-28 (`ba2f8a9`) to "today plus
+the 2 days before" after a reported undercount; the two-checkpoint redesign kept it unchanged. Nothing records a
+decision about leads still open after the window. One recorded decision points the other way: Email Ops **D8**
+(2026-10-10) defines a stale lead (no update for more than 24 h) "no matter when it was created or assigned", and
+puts stale leads in a block at the bottom of every email, but `splitStaleSectionsGs_` only re-sorts leads already
+inside the email's scope, so a quiet lead on day 4–7 is never in any email.
+
+**Options (product decision; nothing changed):**
+
+1. **Keep as is and record it.** The emails are the 0–72 h tool; days 4–7 live on the dashboard (Operations,
+   Morning Brief's 48h failure rate, Repeat Offenders). Cost: a sentence in `HANDOVER.md` §4.3.10.
+2. **Extend only the stale block to days 4–7** (recommended). The 17:00 email's bottom block would also list open
+   in-scope leads assigned 3–6 days ago that are stale (no update for more than 24 h), to the same recipients; the
+   main tables keep the 3-day scope. This is what D8's wording describes, and it stops at the export's 7 days
+   anyway. Upper bound today: 168 leads (how many of them are stale was not counted: that needs the Movement_Log
+   comparison the emailer itself does). Cost: `AllIssuesEmailer.gs` + `StaleLeads.gs` change with tests, then a
+   live paste.
+3. **Widen the whole window to the export's 7 days.** Every older open lead returns to the main tables: about
+   372 leads instead of 204 today, mostly Stuck / Behind rows the RM has already seen for 3 days.
 
 ---
 
