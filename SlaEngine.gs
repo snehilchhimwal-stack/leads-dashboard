@@ -32,9 +32,10 @@
 
 const LEAD_GRACE_HOURS_ = 3;
 const LEAD_LIFECYCLE_HOURS_ = 48;
-const MIN_CALLS_PER_DAY_ = 3; // 2026-10-19: was 5 (user request). Since 2026-11-02 only the dashboard twin still uses a per-day count.
 // 2026-11-02 (user request): "Behind on Today's Calls" is cumulative per CUSTOMER - every RM's calls on the customer count
 // together - and must reach 5 within the first 24h after the customer's first assignment and 10 by 48h (and stay >= 10 after).
+// It replaced a per-RM daily minimum (MIN_CALLS_PER_DAY_, 3 since 2026-10-19, 5 before), removed 2026-11-18 (lead-check audit F6)
+// once nothing read it - its dashboard twin CONFIG.MIN_CALLS_PER_DAY went 2026-11-13 (F1).
 const MIN_CALLS_24H_ = 5;
 const MIN_CALLS_48H_ = 10;
 
@@ -112,8 +113,9 @@ function parseSlaDateGs_(v) {
 // the 5 rules), not the many other fields enrichLead also derives purely
 // for the dashboard's own UI (sibling pooling, multi-agent detection, etc.)
 // DR-10 (2026-10-13): KEEP IN SYNC with DailyRmIssueLog.gs computeRmPerfEligibilityGs_, which copies this function's
-// open / dated / grace / 48h eligibility - a change to those gates here must be made there too. (As of 2026-10-13 that copy
-// still reads lead_assigned_at / last_connect_time as Date cells only; it should use parseSlaDateGs_ like this one, SE-2.)
+// open / dated / grace / 48h eligibility - a change to those gates here must be made there too. Both read lead_assigned_at /
+// last_connect_time through parseSlaDateGs_ (that copy via rmPerfDateCellGs_ since 2026-10-15, SE-2), so a text date cell is
+// read the same way on both sides.
 function computeSlaFlags_(row, colIndex, now, baselineMap) {
   const stage = getVal_(row, colIndex, 'current_stage');
   const closingReason = getVal_(row, colIndex, 'closing_reason');
@@ -196,7 +198,7 @@ function computeSlaFlags_(row, colIndex, now, baselineMap) {
   // Behind on Today's Calls (key underCalledToday; label kept so stored rows still match).
   // 2026-11-02 (user request): cumulative per CUSTOMER - every RM's calls on the customer count together - against 5 within 24h
   // of the customer's first assignment and 10 after that (MIN_CALLS_24H_ / MIN_CALLS_48H_). It replaced the per-RM "3 calls
-  // today" check (MIN_CALLS_PER_DAY_; its baseline/comment-count logic of 2026-10-01 and F18 went with it). The customer totals
+  // today" check (whose since-midnight baseline/comment-count logic of 2026-10-01 and F18 went with it). The customer totals
   // come from readLeadsTab_ (indexCustomerCallTotalsGs_); a row read any other way falls back to its own counter and age.
   // baselineMap is no longer read by this function; the parameter stays so no caller has to change.
   const callAttempts = Number(getVal_(row, colIndex, 'call_attempts')) || 0;
@@ -278,11 +280,12 @@ function primaryIssueGs_(flags) {
 //                        stays in this ONE shared function rather than
 //                        being bolted on one level up at Checkpoint 2.
 //
-// `baselineMap` is threaded straight through to computeSlaFlags_ — same
-// Movement_Log-derived baseline the 17:00 job itself already built via
-// buildMovementLogMapsGs_, needed for underCalledToday's isCreatedToday
-// === false branch (true for nearly every lead by the time a checkpoint
-// runs, since the snapshot itself is never from earlier today).
+// `baselineMap` is passed straight through to computeSlaFlags_, which no
+// longer reads it: since 2026-11-02 "Behind on Today's Calls" is a
+// cumulative per-customer count, not a delta against a since-midnight
+// Movement_Log baseline. The parameter stays so the 10:00 / 13:00 callers
+// need not change (2026-11-18, lead-check audit F6: this comment still
+// described the retired baseline branch).
 function allIssuesCheckpointPriorLabel_(entry) {
   return canonicalIssueLabelGs_(entry.state !== undefined ? entry.currentIssueLabel : entry.issueLabel);
 }
