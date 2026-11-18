@@ -121,13 +121,54 @@ pool membership changes (a sibling closes and its calls leave the pool). Harmles
 | `CONFIG.MIN_CALLS_AFTER_48H` (`js/core-foundation.js:37`) | — | read only by F1's three wrong call sites |
 | `CONFIG.MIN_CALLS_PER_DAY`, `MIN_CALLS_PER_DAY_` | "only the dashboard twin still uses a per-day count" | after F1, no reader at all |
 
-### F7 — Substring stage matching is a latent trap on BOTH sides  (OBSERVATION, could not verify against live vocabulary)
+### F7 — Substring stage matching is a latent trap on BOTH sides  (CHECKED 2026-11-18 against the live sheet: nothing misreads today)
 
 `canonicalStage` / `canonicalStage_` match aliases with `indexOf`. 'visit' matches "Visit Not Done" /
 "No Visit"; 'booked' matches "Not Booked"; 'eoi' matches any word containing it. Such a stage would read
 Opportunity+ → `isOpenLead` false → **zero SLA flags on both runtimes** (consistent, and consistently
 wrong). `docs/sheets/SHEET-001-leads.md` does not list the real `current_stage` vocabulary, so this
 could not be checked from the repo. A one-off distinct-`current_stage` dump from the sheet settles it.
+
+**Checked 2026-11-18 against the live `leads` tab (6,610 leads; read-only, only grouped values and counts left the page).**
+
+| What the matcher reads | Live values | Result |
+|---|---|---|
+| `current_stage` | 5: Suspect 4206, Opportunity 991, Closed 990, Not Updated 418, Booked 5 | every value maps exactly (Booked -> booking via its own alias, Closed -> closed stem). No negating phrase, no unrecognised stage |
+| `lead_closing_reason` (the sheet's disposition) | 34 dropdown values (Not Enquired, Low Budget, Already Bought, Not interested, ...) | none contains a stage word; none maps to a funnel stage |
+| `closing_reason` (RM-entered) | 2,110 rows, each a log line "RM: reason - timestamp" whose reason part is the same dropdown | never used: every row that has one also has a disposition, which wins in `isOppOrAbove` / `isBookingLead`. Even if used, 0 of 2,110 would map |
+
+So no open lead loses its SLA flags to this, and bookings come only from the 5 "Booked" stages. Side observation: the
+CRM export carries only these 5 stages, so the dashboard funnel's Visit Booked / Visit / Pipeline / EOI / Soft Booking
+tiers are structurally empty (they read 0 because nothing feeds them, not because no lead got there).
+
+**The trap stays latent**: a new CRM stage such as "Visit Not Done" would still be read as a later funnel stage on both
+runtimes. No code change now; instead a 30-day watch row in `docs/STALENESS_TRACKER.md` ("Live stage vocabulary vs
+`STAGE_ALIASES`") re-runs this check with the snippet below.
+
+```js
+// F7 re-check: run with javascript_tool in a tab on the production Sheet (signed in). Read-only: one grouped
+// read of columns S (current_stage) and O (lead_closing_reason) of `leads`; only distinct values + counts
+// come back. Re-check the column letters first if the header (row 2) ever changes.
+const KNOWN_STAGES = ['booked', 'closed', 'not updated', 'opportunity', 'suspect'];
+const FUNNEL_ORDER = ['not updated','suspect','opportunity','visit booked','visit','pipeline','gross eoi application','soft booking','booking'];
+const STAGE_ALIASES = { 'not updated': ['not updated'], 'suspect': ['suspect'], 'opportunity': ['opportunity'],
+  'visit booked': ['visit booked', 'visit booking', 'visit scheduled'], 'visit': ['visit', 'revisit', 'hpop', 'video presentation', 'video call'],
+  'pipeline': ['pipeline'], 'gross eoi application': ['gross eoi application', 'gross eoi', 'eoi application', 'eoi'],
+  'soft booking': ['soft booking', 'soft book'], 'booking': ['booking', 'booked'] }; // copy of CONFIG (parity-checked)
+const canon = v => { const s = String(v).trim().toLowerCase(); if (!s) return null;
+  for (const c of FUNNEL_ORDER) if ((STAGE_ALIASES[c] || [c]).some(a => s === a || s.indexOf(a) !== -1)) return c; return null; };
+const id = '1QmYB1VqLMisiQXoed6-vSQqgA9nroGIMHsBInZafKGU';
+const csv = await (await fetch(`/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&sheet=leads&range=A3:AC&headers=0&tq=` +
+  encodeURIComponent('select S, O'), { credentials: 'include' })).text();
+const stages = {}, dispositions = {};
+csv.split('\n').forEach(line => { const m = line.match(/^"((?:[^"]|"")*)","((?:[^"]|"")*)"/); if (!m) return;
+  const st = m[1].trim(), dp = m[2].trim(); if (st) stages[st] = (stages[st] || 0) + 1; if (dp) dispositions[dp] = (dispositions[dp] || 0) + 1; });
+({ newStages: Object.keys(stages).filter(s => !KNOWN_STAGES.includes(s.toLowerCase())).map(s => [s, stages[s], canon(s)]),
+   dispositionsReadAsAStage: Object.keys(dispositions).filter(d => canon(d)).map(d => [d, dispositions[d], canon(d)]),
+   stages, dispositionCount: Object.keys(dispositions).length })
+// Clear when newStages and dispositionsReadAsAStage are both empty. Anything listed: read it as a person would, and
+// if canonicalStage misreads it, fix STAGE_ALIASES / the matcher in BOTH runtimes (Core.gs + js/core-foundation.js).
+```
 
 ### F8 — Stuck 48h+ reaches the email for about one day, the dashboard forever  (DESIGN, confirming)
 
@@ -177,7 +218,7 @@ just confirming the asymmetry is designed, not a drift.
 5. **F3 / F5** — product decisions; cheapest is to align the `ISSUE_PRIORITY` label to "Stuck 48h+"
    (it is only a display string; nothing persists it) and reword or remove the SE-1 exemption.
 6. **F7** — pull distinct `current_stage` values once and confirm none contain "visit"/"booked"/"eoi"
-   in a negating phrase.
+   in a negating phrase. **Done 2026-11-18: clear** (5 stages, 34 dispositions, nothing misreads); re-checked every 30 days via the watch register.
 
 Everything above that touches a `.gs` file is not live until pasted (deploy register in
 `docs/STALENESS_TRACKER.md`); F1/F2/F6 are browser- and tooling-only.
