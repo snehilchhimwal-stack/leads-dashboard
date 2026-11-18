@@ -313,7 +313,11 @@ function runEmailLifecycleFullCycleTests_() {
         // ==== next day 10:00: ONE combined email - Section 1 (overnight leads from three regions) FIRST, then Checkpoint 1 ====
         logC.getRange(2, 1, logC.getLastRow() - 1, 1).setValues(rows17.map(function () { return [TestFixture_daysAgo_(now, 1)]; }));
         const winN = overnightWindowGs_(new Date());
-        const midNight = new Date((winN.from.getTime() + winN.to.getTime()) / 2);
+        // Never younger than 3.5 h - the same guard as Tests_OvernightEmailer.gs's midWindow and Scenario 2 below. The window ends
+        // at 09:00 today, so between midnight and ~04:30 IST its midpoint (01:00) is in the future or inside the 3 h grace: the
+        // overnight leads were then not flagged, lead_ids_json came out empty and the 13:00 follow-up had nothing (found
+        // 2026-11-18 by run-gs-tests-headless.py --at 00:00:20 IST; the real 10:00 job runs after the window has closed).
+        const midNight = new Date(Math.min((winN.from.getTime() + winN.to.getTime()) / 2, Date.now() - 3.5 * 3600 * 1000));
         const nightRow = function (id, rm, region) {
           return TestEFC_leadRow_(header, { lead_id: id, client_id: 'C-' + id, RM: rm, region: region, current_stage: 'Not Updated', lead_assigned_at: midNight });
         };
@@ -462,7 +466,11 @@ function runEmailLifecycleFullCycleTests_() {
         // ==== next day 10:00 ====
         logS.getRange(2, 1, logS.getLastRow() - 1, 1).setValues(rows17.map(function () { return [TestFixture_daysAgo_(now, 1)]; }));
         const winN = overnightWindowGs_(new Date());
-        const midNight = new Date((winN.from.getTime() + winN.to.getTime()) / 2);
+        // Never younger than 3.5 h - the same guard as Tests_OvernightEmailer.gs's midWindow and Scenario 2 below. The window ends
+        // at 09:00 today, so between midnight and ~04:30 IST its midpoint (01:00) is in the future or inside the 3 h grace: the
+        // overnight leads were then not flagged, lead_ids_json came out empty and the 13:00 follow-up had nothing (found
+        // 2026-11-18 by run-gs-tests-headless.py --at 00:00:20 IST; the real 10:00 job runs after the window has closed).
+        const midNight = new Date(Math.min((winN.from.getTime() + winN.to.getTime()) / 2, Date.now() - 3.5 * 3600 * 1000));
         const nightRowS = function (id, rm, region) {
           return TestEFC_leadRow_(header, { lead_id: id, client_id: 'C-' + id, RM: rm, region: region, current_stage: 'Not Updated', lead_assigned_at: midNight });
         };

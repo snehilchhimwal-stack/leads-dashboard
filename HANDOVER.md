@@ -1147,6 +1147,11 @@ midnight and ~04:30, and a lead younger than the 3 h grace is not flagged, so a 
 job itself runs at 10:00, so production was never affected). It is now `min(middle of the window, now - 3.5 h)`. After the
 fix all 13 times and all 4 zones pass, and no assertion of the e2e reads the IST hour (every offset is >= 24 h, the leads are
 > 48 h old at any hour, and the watchdog assertions look only at `snapshotPeriodic` alerts).
+**Same bug, two more places (fixed 2026-11-18).** The consolidated-person and City-Lead blocks of
+`Tests_EmailLifecycleFullCycle.gs` (added after that sweep) planted their overnight leads at the bare window midpoint, so 4
+assertions failed between midnight and ~04:30 IST (seen at 00:00:20 and 02:30). Both now use the same
+`min(middle of the window, now - 3.5 h)`. **Any new fixture that plants an overnight lead must use this guard.**
+Swept clean at 00:00:20, 01:30, 02:30, 03:45, 04:40, 09:59:50 and 23:59:40 IST and in UTC.
 
 **The first live `runAllTests()` (2026-10-07, 17:54 IST, after the P15/P16 paste) - what it showed.** 14 suites ran
 clean on the real platform, including every new F18/F23 test (`Tests_MovementTracker.gs` 224/224, `Tests_SlaEngine.gs`,
