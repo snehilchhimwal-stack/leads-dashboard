@@ -977,7 +977,7 @@ a collaborator. **GitHub Pages source: "Deploy from a branch", `master` / `/`
 
 The ONE place that states the rules the emails and the dashboard apply today (code: `SlaEngine.gs` `computeSlaFlags_` / `ISSUE_PRIORITY_GS_`; twin `js/core-lead-model.js` `enrichLead` / `ISSUE_PRIORITY`; eligibility mirrors `DailyRmIssueLog.gs` `RM_PERF_RULES_GS_` and `js/core-rm-performance.js` `RM_PERF_RULES`). Change all of them together.
 
-**Scope:** `group_source` = `google` AND `source_bucket` = `Non-UTM` or `Search` (`passesGoogleNonUtmSearchGs_`); the lead is **open** (`isOpenLead_`) and has a parseable `lead_assigned_at`. The 17:00 email covers leads assigned in the last 3 calendar days.
+**Scope:** `group_source` = `google` AND `source_bucket` = `Non-UTM` or `Search` (`passesGoogleNonUtmSearchGs_`); the lead is **open** (`isOpenLead_`) and has a parseable `lead_assigned_at`. The 17:00 email covers leads assigned in the last 3 calendar days, plus (since 2026-11-18, audit F8) open leads of days 4-7 that are stale, in its stale block only (`ALL_ISSUES_STALE_DAYS_BACK_` = 6, RULE-093 in `GS-001`).
 
 **Constants:** grace `LEAD_GRACE_HOURS_` = 3 h; lifecycle `LEAD_LIFECYCLE_HOURS_` = 48 h; follow-up window `FOLLOWUP_REVIEW_HOURS_` = 4 h; call targets `MIN_CALLS_24H_` = 5 and `MIN_CALLS_48H_` = 10 (since 2026-11-02; `MIN_CALLS_PER_DAY_` = 3 is no longer the rule).
 

@@ -5,7 +5,7 @@ open/closed/Opportunity+ classification they sit on, the per-customer call pooli
 drop, the comment-timestamp extraction they read, and the priority picker — on BOTH runtimes
 (`js/core-lead-model.js` `enrichLead` + helpers vs `SlaEngine.gs` `computeSlaFlags_` + `Core.gs` /
 `EmailInfra.gs` / `FollowupEngine.gs` helpers), plus every place the dashboard re-states a rule for
-display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F4 (2) fixed in `5acba65` (the dashboard's SLA_History snapshot now counts per lead copy; user decision). F3 and F5 fixed in `3456be8` on 2026-11-16 (F5 pasted live and verified, `780f81a`). F4 (3) fixed in `08c69a2` on 2026-11-18 (browser only). F7 checked live 2026-11-18: clear (`b33e7f1`). F8 investigated 2026-11-18: needs a product decision (options in F8). Open: the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
+display. Read at HEAD `3552b57`. **Status 2026-11-13:** F1 and F2 fixed in `49aaddc`; the sweep that followed found the same stale rule text in four Call SLA tooltips, the Operations section summary and the Behind-on-calls email intro, fixed in `684f225` (all browser + tooling; no `.gs` file touched, nothing to paste). F4 (2) fixed in `5acba65` (the dashboard's SLA_History snapshot now counts per lead copy; user decision). F3 and F5 fixed in `3456be8` on 2026-11-16 (F5 pasted live and verified, `780f81a`). F4 (3) fixed in `08c69a2` on 2026-11-18 (browser only). F7 checked live 2026-11-18: clear (`b33e7f1`). F8 decided 2026-11-18: option 2, built in `a2988a3` (stale block reaches days 4-7; NOT live until pasted). Open: the `.gs`-side stale comments in F6 (`SlaEngine.gs:35,114-116,281-285`) are left for the next deploy that touches that file.
 
 **Mechanical checks run first (all green):**
 
@@ -218,7 +218,9 @@ decision about leads still open after the window. One recorded decision points t
 puts stale leads in a block at the bottom of every email, but `splitStaleSectionsGs_` only re-sorts leads already
 inside the email's scope, so a quiet lead on day 4–7 is never in any email.
 
-**Options (product decision; nothing changed):**
+**Decision 2026-11-18: option 2** (user), built in `a2988a3` - `GS-001` RULE-093. One refinement over the option text: an older stale lead becomes an ordinary member of its 17:00 bucket, so it also gets the next day's 10:00 / 13:00 re-check (the snapshot carries it); leaving it out would have left an older-only bucket with an empty snapshot, which the 10:00 job skips and the follow-up tracker would then call OVERDUE.
+
+**Options (as offered):**
 
 1. **Keep as is and record it.** The emails are the 0–72 h tool; days 4–7 live on the dashboard (Operations,
    Morning Brief's 48h failure rate, Repeat Offenders). Cost: a sentence in `HANDOVER.md` §4.3.10.

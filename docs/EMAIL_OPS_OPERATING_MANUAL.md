@@ -35,7 +35,7 @@ proof of delivery, and no report says so.
 | D5 | A failed 17:00 bucket can be re-sent until **18:30 IST**; after that it is not sent late |
 | D6 | *Withdrawn 2026-10-10* - a bottom "Data freshness notice" for a stale Leads tab rested on a misreading of "stale lead" (see D8) |
 | D7 | *Withdrawn 2026-10-10* - replaced by D8's definition of a stale lead |
-| D8 | A **stale lead** is one with **no update at all for more than 24 hours** (no stage change, no comment, no call-count increase), no matter when it was created or assigned. Every automatic email holds its stale leads in a separate red block **at the bottom**; they stay in the email and its counts |
+| D8 | A **stale lead** is one with **no update at all for more than 24 hours** (no stage change, no comment, no call-count increase), no matter when it was created or assigned. *2026-11-18 (audit F8):* the 17:00 email's stale block now also takes such open leads assigned up to 6 calendar days before today (days 4-7), not only those inside its 3-day window. Every automatic email holds its stale leads in a separate red block **at the bottom**; they stay in the email and its counts |
 | D9 | When an email **bounces**, it - and that bucket's later follow-ups - goes to **the person next in the hierarchy; if nobody is above, to Snehil**. Bounces are checked after every email: 10:30, 13:30, 15:30 and 17:30. The dashboard's manual "Generate region emails" flow is left as it is |
 
 Adapted from the specification (it was written for outbound email to leads): the "recipient" is a manager/RM bucket; "suppression" is the `excluded` flag in `RM_Hierarchy`; "follow-up" is

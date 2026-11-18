@@ -7,7 +7,7 @@
 | **Owner** | Snehil |
 | **Component Status** | Active |
 | **Record Status** | Closed + Monitored |
-| **Last Verified** | 2026-10-19 against commit `94a90c4` - re-read against 6ca53d2/da197cd (email E2E D1-D6), a21a10c/2572f79/f8fe0d0 (consolidated Rajesh Muni / Manisha rathod / Snehil Chhimwal), ce5c203/06a5084 (CH-level no-role) and 4b83dae (SLA label rename); line count corrected 902 -> 1020; consolidated-recipient helpers added to the FN/CFG tables (FN-526..528, CFG-144); '(uncommitted' change-note tag replaced by 6ca53d2 |
+| **Last Verified** | 2026-11-18 against commit `a2988a3` - audit F8 (user decision): open in-scope leads assigned on days 4-7 join the 17:00 stale block while stale (FN-537, RULE-093, CFG-148) |
 
 ## Purpose / reason to exist
 
@@ -25,6 +25,9 @@ scheduled counterpart of the Operations tab's on-demand region reports
 - `allIssuesWindowGs_` — the IST-midnight-anchored 3-calendar-day
   window (explicitly **not** rolling-hours — a documented undercount
   fix).
+- `allIssuesOlderStaleWindowGs_` / `allIssuesOlderStaleNoteGs_` — since
+  2026-11-18 (audit F8): the older span (days 4-7) whose STALE open leads also
+  go in the email, in the stale block only, and the footer line saying so.
 - `sendOneAllIssuesEmail_` — one region's email.
 - `notifyChLevelIssuesGs_` — the CH-level rollup for RMs whose chain is
   blank.
@@ -53,6 +56,7 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 |---|---|---|---|---|---|---|---|
 | FN-174 | `sendAllIssuesEmails()` / `sendAllIssuesEmails_()` `#L237/#L261` | `leads` tab, `Movement_Log` maps | one email per region | Gmail sends; `AllIssues_Log` rows; since 2026-10-13: an ops alert when the Leads tab has no data rows (EI-13, EXC-152); the "already sent today" guard also reads `Email_Ledger` (RULE-076, AI-3); a recovery run no longer adds the original run's exclusions to a second "Leads NOT sent" report (AI-1); the "Leads NOT sent" report carries 17:00 wording (`notifyLeadSendFailuresGs_` opts, EI-2/AI-4); the timing log counts attempted vs accepted bucket emails apart (AI-9) | `computeSlaFlags_` (`GS-012`), `buildMovementLogMapsGs_` (`GS-008`), `resolveRecipientEmailsForRegion_` (`GS-004`), `sendOneAllIssuesEmail_` (FN-176), `withSendRetry_` (`GS-004`) | the 17:00 trigger; `sendAllIssuesEmailsNow()` (manual) | specific — scheduled |
 | FN-175 | `allIssuesWindowGs_(asOf)` / `allIssuesDateRangeLabelGs_(win)` `#L154/#L164` | as-of date | `{start, end}` IST-midnight-anchored 3-calendar-day window + a label | none | `istDayKeyGs_` (`GS-002`) | FN-174 | specific — **not rolling-hours** (documented undercount fix) |
+| FN-537 | `allIssuesOlderStaleWindowGs_(win)` / `allIssuesOlderStaleNoteGs_(leads, win)` | the main window (+ a bucket's leads) | `{from, to}`: IST midnight `ALL_ISSUES_STALE_DAYS_BACK_` days before today up to the instant before the main window / the footer sentence ('' when the bucket has no older lead) | none | `istDayKeyGs_` via `win`, `LEAD_STALE_HOURS_` (`GS-021`) | FN-174 (selection), FN-176 and `notifyChLevelIssuesGs_` (footers) | specific — **added 2026-11-18** (`a2988a3`, audit F8) |
 | FN-176 | `sendOneAllIssuesEmail_(ss, logSheet, region, rec, leads, dateLabel, todayKey, now, win, ledgerCtx)` `#L717` | one region's data | that region's email (`null`, or `{reason}` on failure) | Gmail send; log row; stale leads split to the bottom and counted in a KPI tile (`applyStaleSplitGs_`, `GS-021`, since 2026-10-13); since 2026-10-13 (audit): the subject omits the role brackets when a bucket has no role (AI-6), a direct call without `ledgerCtx` gets its own `dropped` list (AI-5), and the failure alerts say up to 3 identical drafts may exist - send one (EI-5) and name the 3-calendar-day window, not 48h (AI-4) | `renderOvernightReportEmailHTML_` (`GS-004`), `withSendRetry_` (`GS-004`) | FN-174 | specific |
 | FN-177 | `notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger)` `#L591` | CH-level RMs + their leads | a CH-level rollup email | Gmail send; stale leads split and counted via `applyStaleSplitGs_` (`GS-021`); since 2026-10-13 (audit AI-2) EVERY send failure raises an ops alert (`... FAILED` or `... BLOCKED`) listing the lead ids and how to re-send by hand (EXC-153); subtitle says "last 3 calendar days" (AI-4) | `groupLeadsByRmAndFlatten_` (`GS-004`) | FN-174 | specific |
 | FN-178 | `ensureAllIssuesLogSheet_(ss)` `#L200` | spreadsheet | ensures `AllIssues_Log` exists (now 14 columns — see `## Version / change reference`) | may create the tab | — | FN-174 | specific |
@@ -71,6 +75,7 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 |---|---|---|---|
 | RULE-056 | A failed 17:00 bucket can be re-sent the same IST day, until 18:30 IST (decision D5), by `recoverFailedAllIssuesBucketsNow()`: only buckets the ledger shows FAILED, BLOCKED or still PLANNED (the run died before reaching them) (never ATTEMPTING or UNCONFIRMED - it may have been delivered; never ACCEPTED), everything re-checked from the CURRENT data, siblings in the region untouched; a bucket whose leads are resolved or whose routing changed is closed as SKIPPED with the reason; after 18:30 nothing is sent late (`...ForceNow` overrides on purpose) | FN-406, FN-407 | `docs/_planning/EMAIL_OPS_SYSTEM_AUDIT.md` D3, D5 |
 | RULE-076 | A 17:00 region counts as "already sent today" (and the run skips it) when `AllIssues_Log` has a row dated today for it **or** today's `Email_Ledger` has a 17:00 row for it whose status is ACCEPTED, ATTEMPTING or UNCONFIRMED (sent, or may have been sent). Not applied in TEST MODE or a recovery run; a ledger that cannot be read falls back to the log alone (EXC-154) - added 2026-10-13 (audit AI-3): the log row is written after the send, so a run that died in between, or whose append failed, used to be re-sent in full | FN-174 | the 10:00/13:00 jobs have their own guards (`GS-010`) |
+| RULE-093 | **Since 2026-11-18 (`a2988a3`, audit F8, user decision).** An open, in-scope lead assigned BEFORE the 3-day window but no more than `ALL_ISSUES_STALE_DAYS_BACK_` (6) calendar days before today - days 4-7 - is listed in the 17:00 email when it is STALE (`staleSinceOfRowGs_`, no update for more than 24 h), in the stale block only. It passes the same scope gate (`emailCandidateBaseGs_` with the older span) and SLA check; it is deduped among the older leads, and dropped when its customer is already listed for the same RM from the window (so it never displaces that copy). From there it is an ordinary bucket member: routing (incl. CH-level and consolidated), the send-safety gate, `Email_Ledger`, the `AllIssues_Log` snapshot (marked `olderStale: true`) and the next day's 10:00 / 13:00 re-check. A bucket whose only leads are older stale ones still gets its email. Before this an open lead's last email was the day-4 13:00 re-check, against Email Ops D8 ("no matter when it was created or assigned") | FN-174 / FN-537 | No |
 
 ## Config constants — `CFG-XXX` sub-table
 
@@ -78,6 +83,7 @@ on the next 17:00 fire automatically (`CLAUDE.md` gotcha).
 |---|---|---|---|---|
 | CFG-025 | `ALL_ISSUES_RUN_HOUR_` | `17` | the send hour | the trigger schedule — **requires `setupAllIssuesEmailTrigger()` re-run to take effect** |
 | CFG-026 | the 3-calendar-day window | 3 days, IST-midnight-anchored | which leads are in scope | `allIssuesWindowGs_` (FN-175) |
+| CFG-148 | `ALL_ISSUES_STALE_DAYS_BACK_` | `6` | how many full calendar days back (IST) the stale block reaches (RULE-093); 6 = the leads tab's own 7-day horizon as observed 2026-11-18 | which older stale leads are emailed; must stay > `ALL_ISSUES_WINDOW_DAYS_BACK_` (2) or the older span is empty |
 | CFG-116 | `ALL_ISSUES_LATE_CUTOFF_HOUR_`, `ALL_ISSUES_LATE_CUTOFF_MINUTE_`, `EMAIL_RECOVERY_JOB_` | `18`, `30`, `recoverAllIssuesBuckets` | the latest time a failed bucket is re-sent; the recovery job's name (its alerts are held like the three email jobs') | how late a recovery may send |
 | CFG-144 | `ALL_ISSUES_CONSOLIDATED_RECIPIENTS_` `#L93` / `ALL_ISSUES_CONSOLIDATED_CC_NAME_` `#L94` (+ test override `let ALL_ISSUES_CONSOLIDATED_CC_EMAIL_` `#L96`, blank in production) | `['rajesh muni', 'manisha rathod', 'snehil chhimwal']` / `'Snehil Chhimwal'` | people who get ONE email across regions (17:00 here; 10:00/13:00 in `GS-010`), keyed by `consolidatedRegionKeyGs_` (`GS-004`); the one Cc for those emails | who is consolidated and who is cc'd; the name is resolved through the private employee table, never a literal address |
 
@@ -184,6 +190,8 @@ The Apps Script backend half (peer of `DASH-001`, sharing only
 - **Status:** Validated 2026-09-10.
 
 ## Version / change reference
+
+**2026-11-18** (`a2988a3`, `docs/_planning/LEAD_CHECK_LOGIC_AUDIT_2026-11-13.md` F8, user decision "extend the stale block"): RULE-093 / FN-537 / CFG-148 - stale open leads of days 4-7 join the 17:00 stale block. Tests in `Tests_StaleLeads.gs` ("F8" cases: day 4 and day 7 in, day 8 / changed within 24 h / no history / closed / same customer+RM out, an older-only bucket still emailed, the snapshot marks `olderStale`); mutation-proved (span, stale-only rule and same-customer filter each broken in turn) and swept at 00:00:20 / 09:59:50 / 23:59:40 IST and in UTC. **Not live until pasted.**
 
 Verified at `c82ec67`; record created by DOC-029.
 

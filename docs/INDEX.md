@@ -241,7 +241,7 @@ Download Lead IDs (`#downloadLeadIdsBtn`) — live on the `DASH-001` record's
 
 | ID | Type | Name | Location | Record Status | Depends On | Used By | Last Verified |
 |---|---|---|---|---|---|---|---|
-| GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, GS-021, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-019, SHEET-020 | DATA-005, GS-010, GS-022, SHEET-013 | 2026-10-19 (`94a90c4`) |
+| GS-001 | GS- | AllIssuesEmailer | `AllIssuesEmailer.gs` | Closed + Monitored | DATA-002, DATA-004, EXT-002, GS-002, GS-004, GS-005, GS-008, GS-011, GS-012, GS-015, GS-021, SHEET-001, SHEET-002, SHEET-006, SHEET-007, SHEET-012, SHEET-013, SHEET-019, SHEET-020 | DATA-005, GS-010, GS-022, SHEET-013 | 2026-11-18 (`a2988a3`) |
 | GS-002 | GS- | Core | `Core.gs` | Closed + Monitored | EXT-001, GS-004 | DATA-002, DATA-003, DATA-004, GS-001, GS-003, GS-004, GS-005, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016, GS-017, GS-018, GS-019, GS-020, GS-021, GS-022 | 2026-10-15 (`1f51394`) |
 | GS-003 | GS- | DailyRmIssueLog | `DailyRmIssueLog.gs` | Closed + Monitored | GS-002, GS-004, GS-008, GS-012, SHEET-001, SHEET-002, SHEET-003 | DATA-002, GS-013, SHEET-003 | 2026-10-19 (`94a90c4`) |
 | GS-004 | GS- | EmailInfra | `EmailInfra.gs` | Closed + Monitored | EXT-002, GS-002, GS-011, GS-012, GS-014, GS-015, GS-016, GS-017, GS-018, GS-022, SHEET-001, SHEET-006, SHEET-007, SHEET-012 | DATA-002, EXT-002, GS-001, GS-002, GS-003, GS-006, GS-008, GS-009, GS-010, GS-011, GS-012, GS-013, GS-014, GS-015, GS-016, GS-017, GS-018, GS-019, GS-020, GS-022, SHEET-012 | 2026-11-03 (`d5a8ffa`) |
