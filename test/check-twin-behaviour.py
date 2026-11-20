@@ -73,6 +73,31 @@ def corpus_from(signals):
     return out
 
 
+HIST_POOL = [
+    "rnr", "switched off", "busy", "call declined", "whatsapp sent", "not interested", "wrong number",
+    "site visit done", "visit scheduled sunday", "interested in 2bhk", "budget 1.2 cr, needs 3bhk", "call back after 2 days",
+    "client still deciding", "details shared", "loan in process", "client happy with pricing", "-",
+]
+
+
+def history_corpus():
+    """Deterministic comment histories: 1-7 entries, mixed loggers and days, a few stage-change notes."""
+    out, seed = [], 7
+    for n in range(400):
+        seed = (seed * 1103515245 + 12345) % (2 ** 31)
+        length, parts, stage = 1 + seed % 7, [], []
+        for i in range(length):
+            seed = (seed * 1103515245 + 12345) % (2 ** 31)
+            who = "Test RM" if seed % 4 else "Other Caller"
+            ts = "2026-11-%02d %02d:%02d" % (10 + (seed >> 3) % 6, 9 + i, (seed >> 7) % 60)
+            parts.append("%s: %s - %s" % (who, HIST_POOL[(seed >> 11) % len(HIST_POOL)], ts))
+        if n % 5 == 0:
+            stage.append("Test RM: Suspect - 2026-11-10 08:00")
+            stage.append("Test RM: Opportunity / %s - 2026-11-12 08:00" % HIST_POOL[n % len(HIST_POOL)])
+        out.append([" | ".join(parts), " | ".join(stage)])
+    return out
+
+
 def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
@@ -113,9 +138,23 @@ def main() -> int:
         corpus = corpus_from(signals + gs_signals)
         gs = gs_page.evaluate("(c) => c.map(s => inferOutcomeGs_(s))", corpus)
         js = js_page.evaluate("(c) => c.map(s => inferOutcome(s))", corpus)
+        # 2026-11-20: the full-history follow-up twins (historyFollowUpGs_ / historyFollowUp) on the same generated
+        # comment histories. Intended differences are stubbed out on both sides first: the emails' preference clauses
+        # (detectFollowupModifiersGs_) and the two unmatched-comment wordings.
+        hist = history_corpus()
+        gs_page.evaluate("() => { detectFollowupModifiersGs_ = () => []; unmatchedFollowUpGs_ = (c) => 'UNMATCHED:' + c; }")
+        js_page.evaluate("() => { unmatchedFollowUp = (c) => 'UNMATCHED:' + c; }")
+        gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM'))", hist)
+        js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM'))", hist)
         browser.close()
+    hist_diffs = [(h, g, j) for h, g, j in zip(hist, gs_h, js_h) if g != j]
 
     diffs = [(c, g, j) for c, g, j in zip(corpus, gs, js) if g != j]
+    print("Full-history follow-up: compared %d generated comment histories." % len(hist))
+    for h, g, j in hist_diffs[:10]:
+        print("  HISTORY MISMATCH %s | emails=%s | dashboard=%s" % (json.dumps(h), g, j))
+    if hist_diffs and not self_test:
+        return 1
     if self_test:
         print("SELF-TEST: %d mismatch(es) found with the dashboard copy deliberately broken -> %s"
               % (len(diffs), "the check works" if diffs else "THE CHECK IS BLIND"))

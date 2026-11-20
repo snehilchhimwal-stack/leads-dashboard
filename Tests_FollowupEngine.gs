@@ -234,6 +234,55 @@ function runFollowupEngineTests_() {
         TestAssertEqual_(calls, 1, 'P-5: the same comment text is classified once per execution (cache)');
       } finally { inferOutcomeUncachedGs_ = realUncached; INFER_OUTCOME_CACHE_GS_.clear(); }
     }
+
+    // ---- 2026-11-20: full-history follow-up (historyFollowUpGs_) - every comment is read, not just the newest ----
+    // Rule 2: talked before, now only unanswered tries -> recap the conversation + the streak + best milestone.
+    f = buildRow({ internal_status_comments:
+      'Test RM One: Site visit done, liked 2bhk, budget 1.2 cr - 2026-11-10 12:00 | Test RM One: discussing with wife, call back - 2026-11-12 11:00 | ' +
+      'Test RM One: rnr - 2026-11-14 10:00 | Test RM One: switched off - 2026-11-15 10:00 | Test RM One: rnr - 2026-11-16 18:00' });
+    let h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'Last real conversation 12 Nov', 'history rule 2: names the date of the last real conversation');
+    TestAssertContains_(h, '3 unanswered attempts over 3 days', 'history rule 2: counts the unanswered streak since that conversation');
+    TestAssertContains_(h, 'site visit done', 'history rule 2: reminds of the best milestone reached earlier');
+    TestAssertContains_(h, 'History: 5 comments, 10 Nov to 16 Nov', 'history: always ends with the History line');
+
+    // Rule 1: a STOP with nothing real after it wins, even if no-reach tries follow.
+    f = buildRow({ internal_status_comments: 'Test RM One: interested in 3bhk - 2026-11-10 12:00 | Test RM One: not interested anymore - 2026-11-12 11:00 | Test RM One: rnr - 2026-11-13 10:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'no interest', 'history rule 1: STOP advice is used');
+    TestAssertContains_(h, 'Said 12 Nov: "not interested anymore"', 'history rule 1: quotes what was said and when');
+
+    // A later conversation overrides an old STOP (rule 4 + note).
+    f = buildRow({ internal_status_comments: 'Test RM One: not interested - 2026-11-10 12:00 | Test RM One: site visit scheduled sunday - 2026-11-12 11:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'site visit is arranged', 'history rule 4: a later conversation overrides an old STOP');
+    TestAssertContains_(h, 'but the conversation continued', 'history rule 4: the old STOP is still mentioned as a note');
+
+    // Rule 3: never reached, 6 tries over 3 days -> switch slot + WhatsApp + close as Not Contactable.
+    f = buildRow({ internal_status_comments: ['2026-11-10 10:00', '2026-11-10 17:00', '2026-11-11 10:00', '2026-11-11 17:00', '2026-11-12 10:00', '2026-11-12 17:00']
+      .map(function (t) { return 'Test RM One: rnr - ' + t; }).join(' | ') });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, '6 unanswered attempts over 3 days and the customer has never been reached', 'history rule 3: counts tries and days');
+    TestAssertContains_(h, 'Not Contactable', 'history rule 3: advises closing as Not Contactable after 2 more days');
+    TestAssertContains_(h, 'no real conversation yet', 'history rule 3: History line says there was never a conversation');
+
+    // Rule 4: requirement from an EARLIER comment is carried; preference clause from an earlier comment too.
+    f = buildRow({ internal_status_comments: 'Test RM One: looking for 2bhk under 90 lakh, call after 6pm - 2026-11-10 12:00 | Test RM One: client interested, wants pricing - 2026-11-12 11:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'Client showed interest', 'history rule 4: advice for the latest conversation');
+    TestAssertContains_(h, '2bhk under 90 lakh', 'history rule 4: requirement from an earlier comment is carried');
+    TestAssertContains_(h, 'after 6pm', 'history rule 4: preference clause from an earlier comment is carried');
+
+    // Someone other than the RM: shown with attribution, not dropped.
+    f = buildRow({ internal_status_comments: 'Other Caller: Interested, wants visit next week - 2026-11-10 12:00 | Test RM One: busy - 2026-11-12 11:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, '(by Other Caller)', 'history: a comment by someone other than the RM is read and attributed');
+
+    // Stage changes: a bare stage change is an event (ignored); a note typed with it is read.
+    TestAssertEqual_(historyEntriesGs_('', 'Test RM One: Suspect - 2026-11-10 12:00').length, 0, 'history: a bare stage change is not a comment');
+    const stageOnly = historyEntriesGs_('', 'Test RM One: Opportunity / visit fixed for saturday - 2026-11-10 12:00');
+    TestAssertEqual_(stageOnly.length + ':' + stageOnly[0].comment, '1:visit fixed for saturday', 'history: the note typed with a stage change is read');
+    TestAssertEqual_(historyFollowUpGs_(buildRow({ stage_comments: 'Test RM One: Suspect - 2026-11-10 12:00' }).row, f.colIndex), null, 'history: no worded comment -> null, so the old fallback path runs');
   } finally {
     TestEnv_tearDown_();
   }

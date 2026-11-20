@@ -843,7 +843,137 @@ function ownComments(row){
 //      closed without anything else logged.
 //   3. noCommentFollowUp below, once there's truly no usable comment or
 //      closing reason anywhere on this lead's own copy.
+// ===== FULL-HISTORY FOLLOW-UP (2026-11-20) - twin of FollowupEngine.gs historyFollowUpGs_; see that block's header for
+// the five rules. KEEP IN SYNC. Intended difference: the emails also append preference clauses
+// (detectFollowupModifiersGs_), which the dashboard has never had; everything else reads the same.
+const HISTORY_NOREACH = { 'Switched Off': true, 'Call Declined': true, 'Busy': true, 'RNR': true, 'Ringing / RNR': true,
+  'Disconnected': true, 'Voice Unclear': true, 'WhatsApp Sent': true, 'WhatsApp Unavailable': true, 'Follow-up Missed': true };
+const HISTORY_STOP = { 'Do Not Disturb': true, 'Wrong Number': true, 'Junk / Duplicate Lead': true, 'Booked Elsewhere': true,
+  'Not Interested': true, 'Resale / Rental (Out of Scope)': true, 'Channel Partner / Broker Lead': true, 'Already With Another RM/CP': true };
+const HISTORY_MILESTONE_RANK = { 'Visit Completed': 6, 'Visit Arranged': 5, 'Loan In Process': 5, 'Interested': 4, 'Details Shared': 3,
+  'Requirement Noted (No Status)': 3, 'Budget Concern': 2, 'Considering': 2 };
+const HISTORY_MILESTONE_LABEL = { 'Visit Completed': 'site visit done', 'Visit Arranged': 'visit arranged', 'Loan In Process': 'loan in process',
+  'Interested': 'showed interest', 'Details Shared': 'details shared', 'Requirement Noted (No Status)': 'requirement noted',
+  'Budget Concern': 'budget discussed', 'Considering': 'was considering' };
+const HISTORY_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const HISTORY_ENTRY_RE = /^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/;
+
+function historyShortDate(ts){
+  const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (Number(m[3]) + ' ' + HISTORY_MONTHS[Number(m[2]) - 1]) : '';
+}
+// Quote ~120 chars of a long comment centred on its requirement words (BHK / budget), so a long note does not
+// get cut before the part that matters.
+function historyQuoteRequirement(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  const m = t.match(/\d\s*bhk\b|\b\d+(\.\d+)?\s*(cr|crore|crores|lac|lacs|lakh|lakhs|l)\b/i);
+  if (t.length <= 120 || !m) return historyQuote(t);
+  const start = Math.max(0, Math.min(m.index - 50, t.length - 117));
+  return (start > 0 ? '...' : '') + t.slice(start, start + 114).trim() + '...';
+}
+function historyQuote(text){
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return t.length > 120 ? t.slice(0, 117) + '...' : t;
+}
+function historyEntries(internalComments, stageComments){
+  const out = [];
+  const take = (blob, isStage) => {
+    String(blob || '').split('|').forEach((part, i) => {
+      const m = part.trim().match(HISTORY_ENTRY_RE);
+      if (!m) return;
+      let comment = m[2].trim();
+      if (isStage) {
+        const slash = comment.indexOf(' / ');
+        if (slash === -1) return; // a bare stage change - an event, not a comment
+        comment = comment.slice(slash + 3).trim();
+        if (/^closing lead as \d+ users? closed this lead$/i.test(comment)) return; // CRM auto-note, nobody said it
+      }
+      if (!comment || /^[\s\-_./]+$/.test(comment)) return;
+      out.push({ loggedBy: m[1].trim(), comment, ts: m[3].trim(), order: (isStage ? 100000 : 0) + i });
+    });
+  };
+  take(internalComments, false);
+  take(stageComments, true);
+  out.sort((a, b) => a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.order - b.order);
+  out.forEach(e => { e.outcome = inferOutcome(e.comment); });
+  return out;
+}
+function historyKind(outcome){
+  if (HISTORY_STOP[outcome]) return 'stop';
+  if (HISTORY_NOREACH[outcome]) return 'noreach';
+  return 'conversation';
+}
+function historyDecide(entries, ownerName){
+  if (!entries || !entries.length) return null;
+  const owner = String(ownerName || '').trim().toLowerCase();
+  const by = e => {
+    const who = String(e.loggedBy || '').trim();
+    return (who && who.toLowerCase() !== owner) ? ' (by ' + who + ')' : '';
+  };
+  const said = e => historyShortDate(e.ts) + by(e) + ': "' + historyQuote(e.comment) + '"';
+  let lastConv = -1, lastStop = -1, bestMilestone = -1, lastRequirement = -1;
+  entries.forEach((e, i) => {
+    const kind = historyKind(e.outcome);
+    if (kind === 'conversation') lastConv = i;
+    if (kind === 'stop') lastStop = i;
+    const rank = HISTORY_MILESTONE_RANK[e.outcome] || 0;
+    if (rank && (bestMilestone === -1 || rank >= (HISTORY_MILESTONE_RANK[entries[bestMilestone].outcome] || 0))) bestMilestone = i;
+    if (/\d\s*bhk\b/i.test(e.comment) || /\b\d+(\.\d+)?\s*(cr|crore|crores|lac|lacs|lakh|lakhs|l)\b/i.test(e.comment)) lastRequirement = i;
+  });
+  const last = entries[entries.length - 1];
+  const lastKind = historyKind(last.outcome);
+  const parts = [];
+
+  if (lastStop > lastConv) {
+    parts.push((FOLLOWUP_SUGGESTIONS[entries[lastStop].outcome] || 'Customer gave a reason to stop') + ' Said ' + said(entries[lastStop]) + '.');
+  } else if (lastKind === 'noreach') {
+    const tries = entries.slice(lastConv + 1).filter(e => historyKind(e.outcome) === 'noreach');
+    const days = {};
+    tries.forEach(e => { days[e.ts.slice(0, 10)] = true; });
+    const n = tries.length, d = Object.keys(days).length;
+    const span = n + ' unanswered attempt' + (n === 1 ? '' : 's') + (d > 1 ? ' over ' + d + ' days' : '');
+    if (lastConv >= 0) {
+      parts.push('Last real conversation ' + said(entries[lastConv]) + '. Since then ' + span + ' (latest: ' + last.outcome + ').');
+      parts.push(FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.');
+      if (bestMilestone >= 0 && bestMilestone !== lastConv) {
+        parts.push('Earlier ' + HISTORY_MILESTONE_LABEL[entries[bestMilestone].outcome] + ' (' + said(entries[bestMilestone]) + ') - open the next call from there.');
+      }
+      if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
+        parts.push('Requirement on record ' + historyShortDate(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirement(entries[lastRequirement].comment) + '".');
+      }
+    } else if (n >= 6 && d >= 3) {
+      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached. Switch to a different time slot and send a WhatsApp message; if there is still no answer after 2 more days, close it as Not Contactable.');
+    } else {
+      parts.push('Not reached yet - ' + span + '. ' + (FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.'));
+    }
+  } else {
+    const conv = entries[lastConv];
+    parts.push(FOLLOWUP_SUGGESTIONS[conv.outcome] || unmatchedFollowUp(conv.comment, conv.loggedBy, conv.ts));
+    if (bestMilestone >= 0 && bestMilestone !== lastConv &&
+        (HISTORY_MILESTONE_RANK[entries[bestMilestone].outcome] || 0) > (HISTORY_MILESTONE_RANK[conv.outcome] || 0)) {
+      parts.push('Earlier ' + HISTORY_MILESTONE_LABEL[entries[bestMilestone].outcome] + ' (' + said(entries[bestMilestone]) + ').');
+    }
+    if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
+      parts.push('Requirement on record ' + historyShortDate(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirement(entries[lastRequirement].comment) + '".');
+    }
+    if (lastStop >= 0) parts.push('Note: earlier said ' + said(entries[lastStop]) + ', but the conversation continued after that.');
+  }
+
+  const first = entries[0];
+  parts.push('History: ' + entries.length + ' comment' + (entries.length === 1 ? '' : 's') +
+    (first.ts.slice(0, 10) !== last.ts.slice(0, 10) ? ', ' + historyShortDate(first.ts) + ' to ' + historyShortDate(last.ts) : ', ' + historyShortDate(last.ts)) +
+    (lastConv >= 0 ? '; last real conversation ' + historyShortDate(entries[lastConv].ts) : '; no real conversation yet') + '.');
+  return parts.join(' ');
+}
+function historyFollowUp(l){
+  return historyDecide(historyEntries(l.internal_status_comments, l.stage_comments), l.RM);
+}
+
 function suggestedFollowUp(l){
+  // 2026-11-20: read EVERY comment first (historyFollowUp above); the single-comment tiers below only run when the lead
+  // has no dated, worded comment at all.
+  const fromHistory = historyFollowUp(l);
+  if (fromHistory) return fromHistory;
   const latest = latestFamilyOutcome(l);
   if (latest && latest.comment) {
     return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);

@@ -679,6 +679,10 @@ function overnightStatusLabelGs_(stage) {
 //      comment text to scan.
 // now/baselineEntry feed tier 2 only — see noCommentFollowUpGs_.
 function overnightFollowupHintGs_(row, colIndex, now, baselineEntry) {
+  // 2026-11-20 (user request): read EVERY comment on the lead first, not just the newest one - see historyFollowUpGs_.
+  // Only when the lead has no dated, worded comment at all does this fall through to the single-comment path below.
+  const fromHistory = historyFollowUpGs_(row, colIndex);
+  if (fromHistory) return fromHistory;
   const latest = latestOutcomeGs_(row, colIndex);
   if (latest && latest.comment) {
     const base = FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
@@ -686,6 +690,164 @@ function overnightFollowupHintGs_(row, colIndex, now, baselineEntry) {
     return modifierClauses.length ? base + ' ' + modifierClauses.join(' ') : base;
   }
   return noCommentFollowUpGs_(row, colIndex, now, baselineEntry);
+}
+
+// ===== FULL-HISTORY FOLLOW-UP (2026-11-20, user request: "read all the comments and then decide on next action") =====
+// The single-comment path (latestOutcomeGs_) judged a lead on ONE note - the newest, or, when the comments could not be
+// dated, the last one in the list. This reads the lead's WHOLE comment history - internal_status_comments plus any note
+// typed on a stage change in stage_comments - from everyone who logged on this copy (who said it is shown when it was not
+// the lead's own RM), classifies every comment, and decides from the pattern (rules agreed with Snehil 2026-11-20):
+//   1. a STOP signal with no real conversation after it        -> that STOP's advice, quoting what was said and when
+//   2. latest is NO-REACH but there WAS a conversation before  -> recap that conversation + the unanswered streak since
+//   3. never a real conversation                                -> the try count; 6+ tries over 3+ days -> switch slot,
+//                                                                  WhatsApp, close as Not Contactable after 2 more days
+//   4. latest is a CONVERSATION                                 -> its advice + requirement/milestone/earlier STOP context
+//   + preference clauses (time / channel / budget / decision-maker) from ANY comment, newest first, and a "History:" line.
+// Stage changes themselves ("Name: Suspect - date") are events, not comments: only a note typed WITH the stage change
+// ("Name: Suspect / note - date") is read. Returns null when there is no dated comment with text - the caller then uses
+// the old single-comment / last_comment / no-comment path. KEEP IN SYNC with js/core-outcome-engine.js historyFollowUp.
+const HISTORY_NOREACH_GS_ = { 'Switched Off': true, 'Call Declined': true, 'Busy': true, 'RNR': true, 'Ringing / RNR': true,
+  'Disconnected': true, 'Voice Unclear': true, 'WhatsApp Sent': true, 'WhatsApp Unavailable': true, 'Follow-up Missed': true };
+const HISTORY_STOP_GS_ = { 'Do Not Disturb': true, 'Wrong Number': true, 'Junk / Duplicate Lead': true, 'Booked Elsewhere': true,
+  'Not Interested': true, 'Resale / Rental (Out of Scope)': true, 'Channel Partner / Broker Lead': true, 'Already With Another RM/CP': true };
+// Higher = further down the funnel. Used to remind the RM of the best point the conversation ever reached.
+const HISTORY_MILESTONE_RANK_GS_ = { 'Visit Completed': 6, 'Visit Arranged': 5, 'Loan In Process': 5, 'Interested': 4, 'Details Shared': 3,
+  'Requirement Noted (No Status)': 3, 'Budget Concern': 2, 'Considering': 2 };
+const HISTORY_MILESTONE_LABEL_GS_ = { 'Visit Completed': 'site visit done', 'Visit Arranged': 'visit arranged', 'Loan In Process': 'loan in process',
+  'Interested': 'showed interest', 'Details Shared': 'details shared', 'Requirement Noted (No Status)': 'requirement noted',
+  'Budget Concern': 'budget discussed', 'Considering': 'was considering' };
+const HISTORY_MONTHS_GS_ = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const HISTORY_ENTRY_RE_GS_ = /^(.*?):\s*(.*?)\s*-\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/;
+
+// "2026-11-19 12:40" -> "19 Nov". Pure string work - no Date, so no timezone can shift the day.
+function historyShortDateGs_(ts) {
+  const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (Number(m[3]) + ' ' + HISTORY_MONTHS_GS_[Number(m[2]) - 1]) : '';
+}
+// Quote ~120 chars of a long comment centred on its requirement words (BHK / budget), so a long note does not
+// get cut before the part that matters.
+function historyQuoteRequirementGs_(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  const m = t.match(/\d\s*bhk\b|\b\d+(\.\d+)?\s*(cr|crore|crores|lac|lacs|lakh|lakhs|l)\b/i);
+  if (t.length <= 120 || !m) return historyQuoteGs_(t);
+  const start = Math.max(0, Math.min(m.index - 50, t.length - 117));
+  return (start > 0 ? '...' : '') + t.slice(start, start + 114).trim() + '...';
+}
+function historyQuoteGs_(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return t.length > 120 ? t.slice(0, 117) + '...' : t;
+}
+// Every dated entry with text, oldest first. Status comments as they are; stage entries only when a note was typed with
+// the stage change ("Stage / note"), and then only the note.
+function historyEntriesGs_(internalComments, stageComments) {
+  const out = [];
+  const take = function (blob, isStage) {
+    String(blob || '').split('|').forEach(function (part, i) {
+      const m = part.trim().match(HISTORY_ENTRY_RE_GS_);
+      if (!m) return;
+      let comment = m[2].trim();
+      if (isStage) {
+        const slash = comment.indexOf(' / ');
+        if (slash === -1) return; // a bare stage change - an event, not a comment
+        comment = comment.slice(slash + 3).trim();
+        if (/^closing lead as \d+ users? closed this lead$/i.test(comment)) return; // CRM auto-note, nobody said it
+      }
+      if (!comment || /^[\s\-_./]+$/.test(comment)) return;
+      out.push({ loggedBy: m[1].trim(), comment: comment, ts: m[3].trim(), order: (isStage ? 100000 : 0) + i });
+    });
+  };
+  take(internalComments, false);
+  take(stageComments, true);
+  out.sort(function (a, b) { return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.order - b.order; });
+  out.forEach(function (e) { e.outcome = inferOutcomeGs_(e.comment); });
+  return out;
+}
+function historyKindGs_(outcome) {
+  if (HISTORY_STOP_GS_[outcome]) return 'stop';
+  if (HISTORY_NOREACH_GS_[outcome]) return 'noreach';
+  return 'conversation';
+}
+// Pure: entries (oldest first, from historyEntriesGs_) + the lead's own RM -> the follow-up text, or null for no entries.
+function historyDecideGs_(entries, ownerName) {
+  if (!entries || !entries.length) return null;
+  const owner = String(ownerName || '').trim().toLowerCase();
+  const by = function (e) {
+    const who = String(e.loggedBy || '').trim();
+    return (who && who.toLowerCase() !== owner) ? ' (by ' + who + ')' : '';
+  };
+  const said = function (e) { return historyShortDateGs_(e.ts) + by(e) + ': "' + historyQuoteGs_(e.comment) + '"'; };
+  let lastConv = -1, lastStop = -1, bestMilestone = -1, lastRequirement = -1;
+  entries.forEach(function (e, i) {
+    const kind = historyKindGs_(e.outcome);
+    if (kind === 'conversation') lastConv = i;
+    if (kind === 'stop') lastStop = i;
+    const rank = HISTORY_MILESTONE_RANK_GS_[e.outcome] || 0;
+    if (rank && (bestMilestone === -1 || rank >= (HISTORY_MILESTONE_RANK_GS_[entries[bestMilestone].outcome] || 0))) bestMilestone = i;
+    if (/\d\s*bhk\b/i.test(e.comment) || /\b\d+(\.\d+)?\s*(cr|crore|crores|lac|lacs|lakh|lakhs|l)\b/i.test(e.comment)) lastRequirement = i;
+  });
+  const last = entries[entries.length - 1];
+  const lastKind = historyKindGs_(last.outcome);
+  const parts = [];
+
+  if (lastStop > lastConv) {
+    // Rule 1 - the newest meaningful thing the customer said was a STOP.
+    parts.push((FOLLOWUP_SUGGESTIONS_GS_[entries[lastStop].outcome] || 'Customer gave a reason to stop') + ' Said ' + said(entries[lastStop]) + '.');
+  } else if (lastKind === 'noreach') {
+    const fromIdx = lastConv + 1;
+    const tries = entries.slice(fromIdx).filter(function (e) { return historyKindGs_(e.outcome) === 'noreach'; });
+    const days = {};
+    tries.forEach(function (e) { days[e.ts.slice(0, 10)] = true; });
+    const n = tries.length, d = Object.keys(days).length;
+    const span = n + ' unanswered attempt' + (n === 1 ? '' : 's') + (d > 1 ? ' over ' + d + ' days' : '');
+    if (lastConv >= 0) {
+      // Rule 2 - they did talk before; the RM should pick up where that left off.
+      parts.push('Last real conversation ' + said(entries[lastConv]) + '. Since then ' + span + ' (latest: ' + last.outcome + ').');
+      parts.push(FOLLOWUP_SUGGESTIONS_GS_[last.outcome] || 'Retry at a different time of day.');
+      if (bestMilestone >= 0 && bestMilestone !== lastConv) {
+        parts.push('Earlier ' + HISTORY_MILESTONE_LABEL_GS_[entries[bestMilestone].outcome] + ' (' + said(entries[bestMilestone]) + ') - open the next call from there.');
+      }
+      if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
+        parts.push('Requirement on record ' + historyShortDateGs_(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirementGs_(entries[lastRequirement].comment) + '".');
+      }
+    } else if (n >= 6 && d >= 3) {
+      // Rule 3 - never reached, and it has been going on.
+      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached. Switch to a different time slot and send a WhatsApp message; if there is still no answer after 2 more days, close it as Not Contactable.');
+    } else {
+      parts.push('Not reached yet - ' + span + '. ' + (FOLLOWUP_SUGGESTIONS_GS_[last.outcome] || 'Retry at a different time of day.'));
+    }
+  } else {
+    // Rule 4 - the newest meaningful comment is a real conversation.
+    const conv = entries[lastConv];
+    parts.push(FOLLOWUP_SUGGESTIONS_GS_[conv.outcome] || unmatchedFollowUpGs_(conv.comment, conv.loggedBy));
+    if (bestMilestone >= 0 && bestMilestone !== lastConv &&
+        (HISTORY_MILESTONE_RANK_GS_[entries[bestMilestone].outcome] || 0) > (HISTORY_MILESTONE_RANK_GS_[conv.outcome] || 0)) {
+      parts.push('Earlier ' + HISTORY_MILESTONE_LABEL_GS_[entries[bestMilestone].outcome] + ' (' + said(entries[bestMilestone]) + ').');
+    }
+    if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
+      parts.push('Requirement on record ' + historyShortDateGs_(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirementGs_(entries[lastRequirement].comment) + '".');
+    }
+    if (lastStop >= 0) parts.push('Note: earlier said ' + said(entries[lastStop]) + ', but the conversation continued after that.');
+  }
+
+  // Preference clauses from ANY comment, newest first, each kind once (the same modifiers the single-comment path used).
+  const seen = {};
+  const primaryOutcome = lastStop > lastConv ? entries[lastStop].outcome : (lastConv >= 0 && lastKind !== 'noreach' ? entries[lastConv].outcome : last.outcome);
+  for (let i = entries.length - 1; i >= 0; i--) {
+    detectFollowupModifiersGs_(entries[i].comment, primaryOutcome).forEach(function (clause) {
+      const key = clause.slice(0, 25);
+      if (!seen[key]) { seen[key] = true; parts.push(clause); }
+    });
+  }
+
+  const first = entries[0];
+  parts.push('History: ' + entries.length + ' comment' + (entries.length === 1 ? '' : 's') +
+    (first.ts.slice(0, 10) !== last.ts.slice(0, 10) ? ', ' + historyShortDateGs_(first.ts) + ' to ' + historyShortDateGs_(last.ts) : ', ' + historyShortDateGs_(last.ts)) +
+    (lastConv >= 0 ? '; last real conversation ' + historyShortDateGs_(entries[lastConv].ts) : '; no real conversation yet') + '.');
+  return parts.join(' ');
+}
+function historyFollowUpGs_(row, colIndex) {
+  const entries = historyEntriesGs_(getVal_(row, colIndex, 'internal_status_comments'), getVal_(row, colIndex, 'stage_comments'));
+  return historyDecideGs_(entries, getVal_(row, colIndex, 'RM'));
 }
 
 // Fallback for when the lead's own assigned RM hasn't logged any usable
