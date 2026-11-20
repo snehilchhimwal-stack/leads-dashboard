@@ -61,6 +61,8 @@ const HEADER_ALIASES = {
   call_attempts: ['call_attempts','call attempts','attempts'],
   call_count: ['call_count','call count'],
   duration: ['duration'],
+  // 2026-11-20: start of the dial-count day span in historyDecide (core-outcome-engine.js). Twin of Core.gs.
+  lead_created_at: ['lead_created_at','lead created at'],
 };
 
 // Runtime resilience check for HEADER_ALIASES (see the comment above it):

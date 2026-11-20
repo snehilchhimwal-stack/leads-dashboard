@@ -386,6 +386,25 @@ function runFollowupEngineTests_() {
     f = buildRow({ internal_status_comments: 'Test RM One: [Call Connected] interested - 2026-11-10 10:00 | Test RM One: [Ringing] - 2026-11-12 10:00', call_attempts: 9, call_count: 1 });
     h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
     TestAssert_(h.indexOf('dials') === -1 && h.indexOf('connected call') === -1, 'dials: not used once the customer was reached (got: ' + h + ')');
+
+    // ---- 2026-11-20: dial day span from lead creation; ignore very short connects; no closing while connects are unexplained ----
+    const e2276862 = historyEntriesGs_('Anagha Sangole: [Busy] - 2026-11-18 12:59 | Anagha Sangole: [Call Declined] - 2026-11-18 19:07 | Anagha Sangole: [Ringing] - 2026-11-19 10:43', '');
+    h = historyDecideGs_(e2276862, 'Anagha Sangole', 14, 4, 129, '2026-11-15 10:34:47');
+    TestAssertContains_(h, '14 dials since 15 Nov', 'span: the dial count runs from the lead creation date');
+    TestAssertContains_(h, '4 connected calls (2 min 9 s talk time)', 'span: connected calls flagged with their talk time');
+    TestAssert_(h.indexOf('Do not close it as Not Contactable') !== -1 && h.indexOf('close it as Not Contactable.') === -1,
+      'span: no close advice while connected calls are unexplained (got: ' + h + ')');
+    h = historyDecideGs_(e2276862, 'Anagha Sangole', 14, 0, 0, '2026-11-15 10:34:47');
+    TestAssertContains_(h, 'close it as Not Contactable', 'span: 14 dials over 5 days with no connects -> the 6+ tries rule fires');
+    h = historyDecideGs_(e2276862, 'Anagha Sangole', 14, 0, 0, new Date('2026-11-15T10:34:47+05:30'));
+    TestAssertContains_(h, '14 dials since 15 Nov', 'span: a Date creation value works too');
+    // 2279579: a 1-second connect is not flagged.
+    const e2279579 = historyEntriesGs_('Mamtaben Sosa: [Ringing] - 2026-11-19 10:11 | Mamtaben Sosa: [Ringing] Not available on wtsapp - 2026-11-19 17:31', '');
+    h = historyDecideGs_(e2279579, 'Mamtaben S 1 Account', 1, 1, 1, '2026-11-19 10:09:58');
+    TestAssert_(h.indexOf('connected call') === -1, 'short connect: a 1-second connected call is not flagged (got: ' + h + ')');
+    TestAssertContains_(historyDecideGs_(e2279579, 'Mamtaben S 1 Account', 3, 1, 12, '2026-11-19'), '1 connected call (12 s talk time)', 'short connect: 10 s or more is flagged');
+    TestAssertEqual_(historyTalkTimeGs_(129) + ' / ' + historyTalkTimeGs_(60) + ' / ' + historyTalkTimeGs_(9), '2 min 9 s / 1 min / 9 s', 'talk time formatting');
+    TestAssertEqual_(historyDayKeyGs_('11/5/2026 10:00:00') + ' ' + historyDaysBetweenGs_('2026-11-15', '2026-11-19'), '2026-11-05 5', 'day key from m/d/y and inclusive day count');
   } finally {
     TestEnv_tearDown_();
   }

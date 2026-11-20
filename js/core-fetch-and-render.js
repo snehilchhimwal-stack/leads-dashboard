@@ -200,6 +200,7 @@ async function fetchAndRender(){
           call_attempts: colIndex.call_attempts !== -1 ? (Number(getVal(c, 'call_attempts')) || 0) : (Number(getVal(c, 'call_count')) || 0),
           call_count: Number(getVal(c, 'call_count')) || 0,
           duration: Number(getVal(c, 'duration')) || 0,
+          lead_created_at: getVal(c, 'lead_created_at') || '',
           closing_reason: getVal(c, 'closing_reason') || '',
           lead_closing_reason: getVal(c, 'lead_closing_reason') || '',
           lead_closing_comment: getVal(c, 'lead_closing_comment') || '',

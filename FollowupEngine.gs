@@ -874,7 +874,32 @@ function historyNoReachAdviceGs_(outcome, whatsAppAlreadySent) {
 // dials / connectedCalls (optional, 2026-11-20): the lead's call_attempts and call_count columns - every CRM click-to-call
 // and phone dial, logged with a status or not. Used only while the customer has never been reached: the logged statuses
 // alone undercount the tries (lead 2278821: 4 logged, 11 dialled).
-function historyDecideGs_(entries, ownerName, dials, connectedCalls) {
+// talkSeconds / createdAt (optional, 2026-11-20): the duration and lead_created_at columns - talk time decides whether
+// connected calls are worth flagging (a 1-second connect is a pickup-and-drop), and the creation date is where the dial
+// count's day span starts (dials carry no dates in the sheet).
+// 2026-11-20: a date-ish value (Date, "2026-11-15 10:35:00", ISO, or "11/15/2026 ...") -> "2026-11-15" in IST, or ''.
+function historyDayKeyGs_(v) {
+  if (v && typeof v.getTime === 'function') {
+    const ms = v.getTime();
+    return isNaN(ms) ? '' : new Date(ms + 330 * 60000).toISOString().slice(0, 10);
+  }
+  const t = String(v || '');
+  let m = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  return m ? m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2) : '';
+}
+// Inclusive calendar days from one "YYYY-MM-DD" to another (0 if either is missing or they are out of order).
+function historyDaysBetweenGs_(fromKey, toKey) {
+  if (!fromKey || !toKey || fromKey > toKey) return 0;
+  const utc = function (k) { return Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, Number(k.slice(8, 10))); };
+  return Math.round((utc(toKey) - utc(fromKey)) / 864e5) + 1;
+}
+function historyTalkTimeGs_(seconds) {
+  const s = Math.round(Number(seconds) || 0), m = Math.floor(s / 60), r = s % 60;
+  return m ? m + ' min' + (r ? ' ' + r + ' s' : '') : r + ' s';
+}
+function historyDecideGs_(entries, ownerName, dials, connectedCalls, talkSeconds, createdAt) {
   if (!entries || !entries.length) return null;
   const owner = String(ownerName || '').trim().toLowerCase();
   const by = function (e) {
@@ -910,13 +935,21 @@ function historyDecideGs_(entries, ownerName, dials, connectedCalls) {
     const dialTotal = lastConv < 0 ? (Number(dials) || 0) : 0; // lifetime dials only mean something while never reached
     const useDials = dialTotal > n;
     const tryCount = useDials ? dialTotal : n;
+    // With dials, the day span runs from the lead's creation (dials have no dates in the sheet; logged days undercount).
+    const createdKey = useDials ? historyDayKeyGs_(createdAt) : '';
+    const spanDays = createdKey ? historyDaysBetweenGs_(createdKey, last.ts.slice(0, 10)) : 0;
+    const dayCount = Math.max(d, spanDays);
     const span = (useDials ? dialTotal + ' dial' + (dialTotal === 1 ? '' : 's') : n + ' unanswered attempt' + (n === 1 ? '' : 's')) +
-      (d > 1 ? ' over ' + d + ' days' : '');
+      (spanDays ? ' since ' + historyShortDateGs_(createdKey) : (d > 1 ? ' over ' + d + ' days' : ''));
     const tally = {}, order = [];
     tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
     const mix = (useDials ? n + ' logged: ' : '') + order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
-    const connectedNote = lastConv < 0 && (Number(connectedCalls) || 0) > 0 ? ' The call logs show ' + connectedCalls +
-      ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') + ' - check whether a conversation happened and was not logged.' : '';
+    // Connected calls with no conversation logged: flagged only with at least 10 s of talk time in total (or when the talk
+    // time is unknown) - a 1-second connect is a pickup-and-drop or an IVR, not a conversation.
+    const talk = Number(talkSeconds) || 0;
+    const connectedNote = lastConv < 0 && (Number(connectedCalls) || 0) > 0 && !(talk > 0 && talk < 10) ? ' The call logs show ' +
+      connectedCalls + ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') +
+      (talk ? ' (' + historyTalkTimeGs_(talk) + ' talk time)' : '') + ' - check with whoever made them whether a conversation happened, and log it. Do not close it as Not Contactable until then.' : '';
     const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
     const waSent = tries.filter(function (e) { return historyWhatsAppSentGs_(e); });
     const waLast = waSent.length ? waSent[waSent.length - 1] : null;
@@ -934,7 +967,7 @@ function historyDecideGs_(entries, ownerName, dials, connectedCalls) {
       if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
         parts.push('Requirement on record ' + historyShortDateGs_(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirementGs_(entries[lastRequirement].comment) + '".');
       }
-    } else if (tryCount >= 6 && d >= 3) {
+    } else if (tryCount >= 6 && dayCount >= 3 && !connectedNote) { // not while connected calls are unexplained
       // Rule 3 - never reached, and it has been going on.
       parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot' +
         (waLast ? ' (a WhatsApp message already went out on ' + historyShortDateGs_(waLast.ts) + ' with no reply)' : ' and send a WhatsApp message') +
@@ -975,7 +1008,8 @@ function historyDecideGs_(entries, ownerName, dials, connectedCalls) {
 function historyFollowUpGs_(row, colIndex) {
   const entries = historyEntriesGs_(getVal_(row, colIndex, 'internal_status_comments'), getVal_(row, colIndex, 'stage_comments'));
   return historyDecideGs_(entries, getVal_(row, colIndex, 'RM'),
-    Number(getVal_(row, colIndex, 'call_attempts')) || 0, Number(getVal_(row, colIndex, 'call_count')) || 0);
+    Number(getVal_(row, colIndex, 'call_attempts')) || 0, Number(getVal_(row, colIndex, 'call_count')) || 0,
+    Number(getVal_(row, colIndex, 'duration')) || 0, getVal_(row, colIndex, 'lead_created_at'));
 }
 
 // Fallback for when the lead's own assigned RM hasn't logged any usable

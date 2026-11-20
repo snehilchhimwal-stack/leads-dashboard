@@ -68,6 +68,8 @@ const HEADER_ALIASES_ = {
   call_attempts: ['call_attempts', 'call attempts', 'attempts'],
   call_count: ['call_count', 'call count'],
   duration: ['duration'],
+  // 2026-11-20: when the lead was created - the start of the dial-count day span in historyDecideGs_ (FollowupEngine.gs).
+  lead_created_at: ['lead_created_at', 'lead created at'],
 };
 
 // ---- Funnel / closed-stage classification, ported verbatim from

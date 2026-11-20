@@ -988,7 +988,30 @@ function historyNoReachAdvice(outcome, whatsAppAlreadySent) {
   return /whatsapp/i.test(advice) ? 'Retry at a different time of day.' : advice;
 }
 // dials / connectedCalls: twin of FollowupEngine.gs historyDecideGs_'s optional call_attempts / call_count.
-function historyDecide(entries, ownerName, dials, connectedCalls){
+// talkSeconds / createdAt: twin of historyDecideGs_'s optional duration / lead_created_at.
+// 2026-11-20: a date-ish value (Date, "2026-11-15 10:35:00", ISO, or "11/15/2026 ...") -> "2026-11-15" in IST, or ''.
+function historyDayKey(v) {
+  if (v && typeof v.getTime === 'function') {
+    const ms = v.getTime();
+    return isNaN(ms) ? '' : new Date(ms + 330 * 60000).toISOString().slice(0, 10);
+  }
+  const t = String(v || '');
+  let m = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  return m ? m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2) : '';
+}
+// Inclusive calendar days from one "YYYY-MM-DD" to another (0 if either is missing or they are out of order).
+function historyDaysBetween(fromKey, toKey) {
+  if (!fromKey || !toKey || fromKey > toKey) return 0;
+  const utc = function (k) { return Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, Number(k.slice(8, 10))); };
+  return Math.round((utc(toKey) - utc(fromKey)) / 864e5) + 1;
+}
+function historyTalkTime(seconds) {
+  const s = Math.round(Number(seconds) || 0), m = Math.floor(s / 60), r = s % 60;
+  return m ? m + ' min' + (r ? ' ' + r + ' s' : '') : r + ' s';
+}
+function historyDecide(entries, ownerName, dials, connectedCalls, talkSeconds, createdAt){
   if (!entries || !entries.length) return null;
   const owner = String(ownerName || '').trim().toLowerCase();
   const by = e => {
@@ -1020,13 +1043,21 @@ function historyDecide(entries, ownerName, dials, connectedCalls){
     const dialTotal = lastConv < 0 ? (Number(dials) || 0) : 0; // lifetime dials only mean something while never reached
     const useDials = dialTotal > n;
     const tryCount = useDials ? dialTotal : n;
+    // With dials, the day span runs from the lead's creation (dials have no dates in the sheet; logged days undercount).
+    const createdKey = useDials ? historyDayKey(createdAt) : '';
+    const spanDays = createdKey ? historyDaysBetween(createdKey, last.ts.slice(0, 10)) : 0;
+    const dayCount = Math.max(d, spanDays);
     const span = (useDials ? dialTotal + ' dial' + (dialTotal === 1 ? '' : 's') : n + ' unanswered attempt' + (n === 1 ? '' : 's')) +
-      (d > 1 ? ' over ' + d + ' days' : '');
+      (spanDays ? ' since ' + historyShortDate(createdKey) : (d > 1 ? ' over ' + d + ' days' : ''));
     const tally = {}, order = [];
     tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
     const mix = (useDials ? n + ' logged: ' : '') + order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
-    const connectedNote = lastConv < 0 && (Number(connectedCalls) || 0) > 0 ? ' The call logs show ' + connectedCalls +
-      ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') + ' - check whether a conversation happened and was not logged.' : '';
+    // Connected calls with no conversation logged: flagged only with at least 10 s of talk time in total (or when the talk
+    // time is unknown) - a 1-second connect is a pickup-and-drop or an IVR, not a conversation.
+    const talk = Number(talkSeconds) || 0;
+    const connectedNote = lastConv < 0 && (Number(connectedCalls) || 0) > 0 && !(talk > 0 && talk < 10) ? ' The call logs show ' +
+      connectedCalls + ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') +
+      (talk ? ' (' + historyTalkTime(talk) + ' talk time)' : '') + ' - check with whoever made them whether a conversation happened, and log it. Do not close it as Not Contactable until then.' : '';
     const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
     const waSent = tries.filter(function (e) { return historyWhatsAppSent(e); });
     const waLast = waSent.length ? waSent[waSent.length - 1] : null;
@@ -1043,7 +1074,7 @@ function historyDecide(entries, ownerName, dials, connectedCalls){
       if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
         parts.push('Requirement on record ' + historyShortDate(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirement(entries[lastRequirement].comment) + '".');
       }
-    } else if (tryCount >= 6 && d >= 3) {
+    } else if (tryCount >= 6 && dayCount >= 3 && !connectedNote) { // not while connected calls are unexplained
       parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot' +
         (waLast ? ' (a WhatsApp message already went out on ' + historyShortDate(waLast.ts) + ' with no reply)' : ' and send a WhatsApp message') +
         '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote + connectedNote);
@@ -1071,7 +1102,7 @@ function historyDecide(entries, ownerName, dials, connectedCalls){
 }
 function historyFollowUp(l){
   return historyDecide(historyEntries(l.internal_status_comments, l.stage_comments), l.RM,
-    Number(l.call_attempts) || 0, Number(l.call_count) || 0);
+    Number(l.call_attempts) || 0, Number(l.call_count) || 0, Number(l.duration) || 0, l.lead_created_at);
 }
 
 function hasDatedCommentEntries(l){
