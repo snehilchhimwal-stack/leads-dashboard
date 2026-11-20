@@ -25,8 +25,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Functions allowed to turn an outcome into follow-up text.
 TEXT_BUILDERS = {
-    "FollowupEngine.gs": {"historyDecideGs_", "legacySingleCommentFollowUpGs_"},
-    "js/core-outcome-engine.js": {"historyDecide", "legacySingleCommentFollowUp"},
+    "FollowupEngine.gs": {"historyDecideGs_", "legacySingleCommentFollowUpGs_", "historyNoReachAdviceGs_"},
+    "js/core-outcome-engine.js": {"historyDecide", "legacySingleCommentFollowUp", "historyNoReachAdvice"},
+}
+# Helpers in TEXT_BUILDERS that are only parts of the history decider: each may be called ONLY from there.
+DECIDER_ONLY_HELPERS = {
+    "FollowupEngine.gs": ("historyNoReachAdviceGs_", "historyDecideGs_"),
+    "js/core-outcome-engine.js": ("historyNoReachAdvice", "historyDecide"),
 }
 TEXT_PATTERNS = [r"FOLLOWUP_SUGGESTIONS(?:_GS_)?\[", r"\bunmatchedFollowUp(?:Gs_)?\("]
 
@@ -89,6 +94,15 @@ def check(files):
                 if fn not in allowed:
                     problems.append("%s: follow-up text built in %s() from a single outcome (%s) - only %s may do this"
                                     % (rel, fn, m.group(0), ", ".join(sorted(allowed))))
+    for rel, (helper, owner) in DECIDER_ONLY_HELPERS.items():
+        for frel, raw in files.items():
+            src = strip_comments(raw)
+            for m in re.finditer(r"\b%s\(" % re.escape(helper), src):
+                if re.match(r"function\s", src[max(0, m.start() - 9):m.start()]):
+                    continue
+                fn = enclosing_function(src, m.start())
+                if (frel, fn) != (rel, owner):
+                    problems.append("%s: %s() calls %s, which may only be used inside %s()" % (frel, fn, helper, owner))
     for rel, (entry, first) in ENTRY_POINTS.items():
         body = function_body(strip_comments(files[rel]), entry)
         if body is None:

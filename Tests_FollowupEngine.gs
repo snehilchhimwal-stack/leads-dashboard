@@ -341,6 +341,32 @@ function runFollowupEngineTests_() {
     TestAssertEqual_(inferOutcomeGs_('[Ringing]'), 'Ringing / RNR', 'call status: "[Ringing]" alone classifies as Ringing');
     TestAssertEqual_(inferOutcomeGs_('[Call Connected] not interested'), inferOutcomeGs_('not interested'), 'call status: the bracket does not change how the note is read');
     TestAssertEqual_(splitCallStatusGs_('[Some Other] text').status, '', 'call status: an unknown bracket stays part of the note');
+
+    // ---- 2026-11-20: a WhatsApp already sent in the unanswered streak - don't advise sending another (lead 2278821) ----
+    f = buildRow({ RM: 'Vijay Katheriya', internal_status_comments: 'Vijay Katheriya: [Busy] Talking to someone else - 2026-11-18 11:16 | ' +
+      'Vijay Katheriya: [Ringing] Not answering -- have texted on WhatsApp - 2026-11-19 12:40 | Vijay Katheriya: [Ringing] Not answering - 2026-11-20 12:56' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssert_(!/consider a WhatsApp|send a WhatsApp/i.test(h), 'whatsapp sent: no advice to send another WhatsApp (got: ' + h + ')');
+    TestAssertContains_(h, 'already went out on 19 Nov', 'whatsapp sent: says when the WhatsApp went out');
+    // Declined call + WhatsApp already sent: the declined note drops its WhatsApp step too.
+    f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] wtsapp msg dropped - 2026-11-10 10:00 | Test RM One: [Call Declined] - 2026-11-11 10:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'declined the call once - call at a different time', 'whatsapp sent: declined note without the WhatsApp step');
+    TestAssert_(h.indexOf('send a WhatsApp') === -1, 'whatsapp sent: misspelt "wtsapp msg dropped" also counts as sent (got: ' + h + ')');
+    // Rule 3 (6+ tries over 3+ days) with a WhatsApp already sent.
+    f = buildRow({ internal_status_comments: ['2026-11-10 10:00', '2026-11-10 17:00', '2026-11-11 10:00', '2026-11-11 17:00', '2026-11-12 10:00']
+      .map(function (t) { return 'Test RM One: [Ringing] - ' + t; }).join(' | ') + ' | Test RM One: [Ringing] whatsapp sent - 2026-11-12 17:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'a WhatsApp message already went out on 12 Nov with no reply', 'whatsapp sent: rule 3 wording');
+    TestAssertContains_(h, 'Not Contactable', 'whatsapp sent: rule 3 still advises closing after 2 more days');
+    // A WhatsApp sent BEFORE the last real conversation does not count, and "not on WhatsApp" is not a sent message.
+    f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] texted on whatsapp - 2026-11-10 10:00 | Test RM One: [Call Connected] interested, call tomorrow - 2026-11-11 10:00 | Test RM One: [Ringing] - 2026-11-12 10:00' });
+    TestAssert_(overnightFollowupHintGs_(f.row, f.colIndex, now, null).indexOf('already went out') === -1, 'whatsapp sent: one sent before the last conversation is not counted');
+    f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] Not available on wtsapp - 2026-11-12 10:00' });
+    TestAssert_(overnightFollowupHintGs_(f.row, f.colIndex, now, null).indexOf('already went out') === -1, 'whatsapp sent: "not available on WhatsApp" is not a sent message');
+    // Without a WhatsApp in the streak the advice is unchanged.
+    f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] - 2026-11-12 10:00' });
+    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'retry at a different time of day', 'whatsapp sent: no WhatsApp in the streak -> normal advice');
   } finally {
     TestEnv_tearDown_();
   }

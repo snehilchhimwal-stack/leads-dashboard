@@ -970,6 +970,23 @@ function historyKind(e) {
   if (HISTORY_NOREACH[e.outcome]) return 'noreach';
   return 'conversation';
 }
+// 2026-11-20 (user request): a WhatsApp message already sent during the current unanswered streak - don't advise sending
+// another. True for a 'WhatsApp Sent' note, or a note that mentions WhatsApp together with a sending word ("Not answering --
+// have texted on WhatsApp"), but not a note saying the customer is not on WhatsApp. KEEP IN SYNC with the twin.
+function historyWhatsAppSent(e) {
+  if (!e.comment || e.outcome === 'WhatsApp Unavailable') return false;
+  if (e.outcome === 'WhatsApp Sent') return true;
+  const t = fixSpelling(String(e.comment).toLowerCase());
+  return /\b(whatsapp|whats app|wp|wa)\b/.test(t) &&
+    /\b(text|texted|sent|send|msg|msgd|message|messaged|drop|dropped|ping|pinged|shared)\b/.test(t);
+}
+// The not-reached advice for an outcome, minus any "send a WhatsApp" step when one already went out with no reply.
+function historyNoReachAdvice(outcome, whatsAppAlreadySent) {
+  let advice = FOLLOWUP_SUGGESTIONS[outcome] || 'Retry at a different time of day.';
+  if (!whatsAppAlreadySent) return advice;
+  advice = advice.replace(/;\s*consider a WhatsApp follow-up\.?\s*$/i, '.');
+  return /whatsapp/i.test(advice) ? 'Retry at a different time of day.' : advice;
+}
 function historyDecide(entries, ownerName){
   if (!entries || !entries.length) return null;
   const owner = String(ownerName || '').trim().toLowerCase();
@@ -1004,11 +1021,15 @@ function historyDecide(entries, ownerName){
     tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
     const mix = order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
     const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
+    const waSent = tries.filter(function (e) { return historyWhatsAppSent(e); });
+    const waLast = waSent.length ? waSent[waSent.length - 1] : null;
+    const waNote = waLast ? ' A WhatsApp message already went out on ' + historyShortDate(waLast.ts) +
+      ' with no reply since - do not send another; call at a different time, or try an SMS.' : '';
     const declinedNote = declined ? ' The customer declined the call ' + (declined === 1 ? 'once' : declined + ' times') +
-      ' - send a WhatsApp message before the next call, and call at a different time.' : '';
+      (waLast ? ' - call at a different time.' : ' - send a WhatsApp message before the next call, and call at a different time.') : '';
     if (lastConv >= 0) {
       parts.push('Last real conversation ' + said(entries[lastConv]) + '. Since then ' + span + ' (' + mix + ').' + declinedNote);
-      parts.push(FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.');
+      parts.push(historyNoReachAdvice(last.outcome, !!waLast) + waNote);
       if (bestMilestone >= 0 && bestMilestone !== lastConv) {
         parts.push('Earlier ' + HISTORY_MILESTONE_LABEL[entries[bestMilestone].outcome] + ' (' + said(entries[bestMilestone]) + ') - open the next call from there.');
       }
@@ -1016,9 +1037,11 @@ function historyDecide(entries, ownerName){
         parts.push('Requirement on record ' + historyShortDate(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirement(entries[lastRequirement].comment) + '".');
       }
     } else if (n >= 6 && d >= 3) {
-      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot and send a WhatsApp message; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote);
+      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot' +
+        (waLast ? ' (a WhatsApp message already went out on ' + historyShortDate(waLast.ts) + ' with no reply)' : ' and send a WhatsApp message') +
+        '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote);
     } else {
-      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + (FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.'));
+      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + historyNoReachAdvice(last.outcome, !!waLast) + waNote);
     }
   } else {
     const conv = entries[lastConv];
