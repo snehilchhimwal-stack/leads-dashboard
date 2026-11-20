@@ -184,6 +184,41 @@ function _wordsMatch(word, target){
 // and the unapostrophed way people actually type on a phone keyboard
 // ("dont"/"didnt"/"cant") collapse to the same token — one canonical
 // signal covers both instead of needing each spelled out twice.
+// ===== SPELLING FIXES (2026-11-20, user request: "make a list of all wrong spelling so that you can identify even if
+// there is a wrong spelling") =====
+// The keyword matcher already forgives 1 typo in a 5-8 letter word and 2 in a longer one, but RMs' real misspellings go
+// further ("wtsapp", "tommorow", "dissus", "ringning" - and 'ringing' is exact-only, see _EXACT_ONLY_SIGNAL_WORDS). This list
+// was mined from every comment in the live sheet (leads + Movement_Log, 10,398 distinct comments) on 2026-11-20: each word
+// within 2-3 edits / same consonant skeleton of a classifier keyword, then checked by hand - real words that only LOOK close
+// (next/text, calls/call, pitched/picked, ready/already) were left out on purpose. Each comment is rewritten through this
+// list, whole words only, BEFORE any rule or modifier reads it. To add one: append it here AND in the twin, then run
+// python3 test/check-twin-behaviour.py (it feeds every entry through both copies).
+// KEEP IN SYNC with FollowupEngine.gs SPELLING_FIXES_GS_.
+const SPELLING_FIXES = {
+  watsup: 'whatsapp', wtsapp: 'whatsapp', wtsap: 'whatsapp', wattsapp: 'whatsapp', whtsap: 'whatsapp',
+  whtatsaap: 'whatsapp', whtsp: 'whatsapp', whtsup: 'whatsapp', whstsap: 'whatsapp', wtsp: 'whatsapp',
+  watsap: 'whatsapp', watsp: 'whatsapp', onwhatsapp: 'on whatsapp', ringning: 'ringing', ringgg: 'ringing',
+  ringg: 'ringing', ringign: 'ringing', ringingn: 'ringing', ringinga: 'ringing', ringinb: 'ringing',
+  ringinh: 'ringing', ringinv: 'ringing', ringin: 'ringing', runging: 'ringing', ringjng: 'ringing',
+  ringinjg: 'ringing', ringig: 'ringing', rignign: 'ringing', riniging: 'ringing', bussy: 'busy', buay: 'busy',
+  bsuy: 'busy', busyv: 'busy', nusy: 'busy', busyu: 'busy', busyt: 'busy', swkicth: 'switch', swcth: 'switch',
+  calll: 'call', ccall: 'call', xall: 'call', ansswerv: 'answer', hanged: 'hung', msgg: 'message', mssg: 'message',
+  masage: 'message', meesages: 'message', msged: 'texted', messeged: 'texted', messageed: 'texted', semt: 'sent',
+  sebt: 'sent', deop: 'drop', dropm: 'drop', dpped: 'dropped', tommorow: 'tomorrow', tommarow: 'tomorrow',
+  tomarow: 'tomorrow', tmrw: 'tomorrow', tmrow: 'tomorrow', evining: 'evening', dissus: 'discuss',
+  deatils: 'details', detailes: 'details', deails: 'details', detals: 'details', indetail: 'in detail',
+  broucher: 'brochure', brocher: 'brochure', brokeer: 'broker', brokerge: 'broker', projrcts: 'projects',
+  enequeir: 'enquiry', laon: 'loan', ivaild: 'invalid', dicided: 'decided', cnfrm: 'confirm', bujet: 'budget',
+  bget: 'budget', nmbr: 'number', nedd: 'need', newd: 'need', knpow: 'know', knkow: 'know', knoe: 'know',
+  wabt: 'want', wiht: 'with', withi: 'with', abck: 'back', bacj: 'back', nack: 'back', prefered: 'prefer',
+  wifes: 'wife', costumer: 'customer', plann: 'plan', alrdy: 'already', allredy: 'already', mistakely: 'mistake'
+};
+// Whole words only: each run of letters/digits is looked up as a unit, so "wtsapp" is fixed but "awtsapps" is not.
+function fixSpelling(lowerText) {
+  return String(lowerText).replace(/[a-z0-9]+/g, function (w) {
+    return Object.prototype.hasOwnProperty.call(SPELLING_FIXES, w) ? SPELLING_FIXES[w] : w;
+  });
+}
 function _wordsOf(text){
   return String(text).toLowerCase().replace(/'/g, '').match(/[a-z0-9]+/g) || [];
 }
@@ -602,7 +637,7 @@ function inferOutcome(comment){
   return result;
 }
 function _inferOutcomeUncached(comment){
-  const c = String(comment).toLowerCase();
+  const c = fixSpelling(String(comment).toLowerCase());
   // A placeholder with no real content — a bare "-", ".", "/", or similar
   // punctuation-only note some RMs log when there's nothing to report (by
   // a wide margin the single most common "unmatched" comment in practice —
@@ -969,15 +1004,28 @@ function historyFollowUp(l){
   return historyDecide(historyEntries(l.internal_status_comments, l.stage_comments), l.RM);
 }
 
+function hasDatedCommentEntries(l){
+  const dated = /\s-\s\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s*(\||$)/;
+  return dated.test(String(l.internal_status_comments || '')) || dated.test(String(l.stage_comments || ''));
+}
+// Twin of FollowupEngine.gs legacySingleCommentFollowUpGs_: undated, old-format data only.
+function legacySingleCommentFollowUp(l){
+  if (hasDatedCommentEntries(l)) return null;
+  const latest = latestFamilyOutcome(l);
+  if (!latest || !latest.comment) return null;
+  return (FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts)) +
+    ' History: comments are not dated, so only the last one could be read.';
+}
+
 function suggestedFollowUp(l){
   // 2026-11-20: read EVERY comment first (historyFollowUp above); the single-comment tiers below only run when the lead
   // has no dated, worded comment at all.
+  // 2nd pass (2026-11-20): the single-comment tier only runs for undated, old-format data - twin of
+  // FollowupEngine.gs overnightFollowupHintGs_. test/check-followup-single-path.py guards this order.
   const fromHistory = historyFollowUp(l);
   if (fromHistory) return fromHistory;
-  const latest = latestFamilyOutcome(l);
-  if (latest && latest.comment) {
-    return FOLLOWUP_SUGGESTIONS[latest.outcome] || unmatchedFollowUp(latest.comment, latest.loggedBy, latest.ts);
-  }
+  const legacy = legacySingleCommentFollowUp(l);
+  if (legacy) return legacy;
 
   // lead_closing_reason/lead_closing_comment (the sheet's own closing
   // disposition) preferred over the RM-entered closing_reason when

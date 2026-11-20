@@ -127,6 +127,41 @@ function _wordsMatchGs_(word, target) {
   if (!budget || Math.abs(word.length - target.length) > budget) return false;
   return _editDistanceGs_(word, target) <= budget;
 }
+// ===== SPELLING FIXES (2026-11-20, user request: "make a list of all wrong spelling so that you can identify even if
+// there is a wrong spelling") =====
+// The keyword matcher already forgives 1 typo in a 5-8 letter word and 2 in a longer one, but RMs' real misspellings go
+// further ("wtsapp", "tommorow", "dissus", "ringning" - and 'ringing' is exact-only, see _EXACT_ONLY_SIGNAL_WORDS). This list
+// was mined from every comment in the live sheet (leads + Movement_Log, 10,398 distinct comments) on 2026-11-20: each word
+// within 2-3 edits / same consonant skeleton of a classifier keyword, then checked by hand - real words that only LOOK close
+// (next/text, calls/call, pitched/picked, ready/already) were left out on purpose. Each comment is rewritten through this
+// list, whole words only, BEFORE any rule or modifier reads it. To add one: append it here AND in the twin, then run
+// python3 test/check-twin-behaviour.py (it feeds every entry through both copies).
+// KEEP IN SYNC with js/core-outcome-engine.js SPELLING_FIXES.
+const SPELLING_FIXES_GS_ = {
+  watsup: 'whatsapp', wtsapp: 'whatsapp', wtsap: 'whatsapp', wattsapp: 'whatsapp', whtsap: 'whatsapp',
+  whtatsaap: 'whatsapp', whtsp: 'whatsapp', whtsup: 'whatsapp', whstsap: 'whatsapp', wtsp: 'whatsapp',
+  watsap: 'whatsapp', watsp: 'whatsapp', onwhatsapp: 'on whatsapp', ringning: 'ringing', ringgg: 'ringing',
+  ringg: 'ringing', ringign: 'ringing', ringingn: 'ringing', ringinga: 'ringing', ringinb: 'ringing',
+  ringinh: 'ringing', ringinv: 'ringing', ringin: 'ringing', runging: 'ringing', ringjng: 'ringing',
+  ringinjg: 'ringing', ringig: 'ringing', rignign: 'ringing', riniging: 'ringing', bussy: 'busy', buay: 'busy',
+  bsuy: 'busy', busyv: 'busy', nusy: 'busy', busyu: 'busy', busyt: 'busy', swkicth: 'switch', swcth: 'switch',
+  calll: 'call', ccall: 'call', xall: 'call', ansswerv: 'answer', hanged: 'hung', msgg: 'message', mssg: 'message',
+  masage: 'message', meesages: 'message', msged: 'texted', messeged: 'texted', messageed: 'texted', semt: 'sent',
+  sebt: 'sent', deop: 'drop', dropm: 'drop', dpped: 'dropped', tommorow: 'tomorrow', tommarow: 'tomorrow',
+  tomarow: 'tomorrow', tmrw: 'tomorrow', tmrow: 'tomorrow', evining: 'evening', dissus: 'discuss',
+  deatils: 'details', detailes: 'details', deails: 'details', detals: 'details', indetail: 'in detail',
+  broucher: 'brochure', brocher: 'brochure', brokeer: 'broker', brokerge: 'broker', projrcts: 'projects',
+  enequeir: 'enquiry', laon: 'loan', ivaild: 'invalid', dicided: 'decided', cnfrm: 'confirm', bujet: 'budget',
+  bget: 'budget', nmbr: 'number', nedd: 'need', newd: 'need', knpow: 'know', knkow: 'know', knoe: 'know',
+  wabt: 'want', wiht: 'with', withi: 'with', abck: 'back', bacj: 'back', nack: 'back', prefered: 'prefer',
+  wifes: 'wife', costumer: 'customer', plann: 'plan', alrdy: 'already', allredy: 'already', mistakely: 'mistake'
+};
+// Whole words only: each run of letters/digits is looked up as a unit, so "wtsapp" is fixed but "awtsapps" is not.
+function fixSpellingGs_(lowerText) {
+  return String(lowerText).replace(/[a-z0-9]+/g, function (w) {
+    return Object.prototype.hasOwnProperty.call(SPELLING_FIXES_GS_, w) ? SPELLING_FIXES_GS_[w] : w;
+  });
+}
 function _wordsOfGs_(text) {
   return String(text).toLowerCase().replace(/'/g, '').match(/[a-z0-9]+/g) || [];
 }
@@ -445,7 +480,7 @@ function inferOutcomeGs_(comment) {
   return result;
 }
 function inferOutcomeUncachedGs_(comment) {
-  const c = String(comment).toLowerCase();
+  const c = fixSpellingGs_(String(comment).toLowerCase());
   if (/^[\s\-_./]+$/.test(c)) return 'No Real Update';
   const words = _wordsOfGs_(c);
   for (let i = 0; i < OUTCOME_RULES_GS_.length; i++) {
@@ -601,7 +636,7 @@ const FOLLOWUP_MODIFIERS_GS_ = [
 // `primaryOutcome` lets a modifier suppress itself when the primary
 // suggestion already covers the same ground (see budgetConcern's skipIf).
 function detectFollowupModifiersGs_(comment, primaryOutcome) {
-  const c = String(comment || '').toLowerCase();
+  const c = fixSpellingGs_(String(comment || '').toLowerCase());
   if (!c) return [];
   const words = _wordsOfGs_(c);
   const clauses = [];
@@ -681,15 +716,34 @@ function overnightStatusLabelGs_(stage) {
 function overnightFollowupHintGs_(row, colIndex, now, baselineEntry) {
   // 2026-11-20 (user request): read EVERY comment on the lead first, not just the newest one - see historyFollowUpGs_.
   // Only when the lead has no dated, worded comment at all does this fall through to the single-comment path below.
+  // 2026-11-20 (2nd pass): a lead with dated comments but none with words (blank check-ins, bare stage changes) used to fall
+  // through to the single-comment reader below, which quoted the stage name "Suspect" as the RM's latest note. Now the
+  // single-comment reader runs ONLY for old-format data with no dates at all (legacySingleCommentFollowUpGs_); otherwise
+  // the answer is the no-comment advice. test/check-followup-single-path.py fails the build if this order ever changes.
   const fromHistory = historyFollowUpGs_(row, colIndex);
   if (fromHistory) return fromHistory;
-  const latest = latestOutcomeGs_(row, colIndex);
-  if (latest && latest.comment) {
-    const base = FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
-    const modifierClauses = detectFollowupModifiersGs_(latest.comment, latest.outcome);
-    return modifierClauses.length ? base + ' ' + modifierClauses.join(' ') : base;
-  }
+  const legacy = legacySingleCommentFollowUpGs_(row, colIndex);
+  if (legacy) return legacy;
   return noCommentFollowUpGs_(row, colIndex, now, baselineEntry);
+}
+
+// True when the lead's comment columns are in the dated "Name: text - YYYY-MM-DD HH:MM" format (Coefficient query v2).
+// Then historyFollowUpGs_ has already read every comment, and finding nothing worded means there IS no comment.
+function hasDatedCommentEntriesGs_(row, colIndex) {
+  const dated = /\s-\s\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s*(\||$)/;
+  return dated.test(String(getVal_(row, colIndex, 'internal_status_comments') || '')) ||
+    dated.test(String(getVal_(row, colIndex, 'stage_comments') || ''));
+}
+// Only for undated, old-format data (e.g. after a rollback to query v1): there are no dates to order the comments by, so
+// the newest-looking comment is all that can be read, and the text says so. Returns null for dated data.
+function legacySingleCommentFollowUpGs_(row, colIndex) {
+  if (hasDatedCommentEntriesGs_(row, colIndex)) return null;
+  const latest = latestOutcomeGs_(row, colIndex);
+  if (!latest || !latest.comment) return null;
+  const base = FOLLOWUP_SUGGESTIONS_GS_[latest.outcome] || unmatchedFollowUpGs_(latest.comment, latest.loggedBy);
+  const modifierClauses = detectFollowupModifiersGs_(latest.comment, latest.outcome);
+  return (modifierClauses.length ? base + ' ' + modifierClauses.join(' ') : base) +
+    ' History: comments are not dated, so only the last one could be read.';
 }
 
 // ===== FULL-HISTORY FOLLOW-UP (2026-11-20, user request: "read all the comments and then decide on next action") =====

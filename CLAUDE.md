@@ -97,6 +97,13 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   (2026-11-04): it runs `inferOutcomeGs_` and `inferOutcome` on the same
   ~800 comments (every signal phrase plus typo variants) and lists every
   disagreement; `--self-test` proves it still catches a deliberate break.
+- **Follow-up advice is ALWAYS decided from the lead's WHOLE comment history, never from one comment** (user
+  rule, 2026-11-20, after it regressed twice). Emails: `overnightFollowupHintGs_` -> `historyFollowUpGs_` first;
+  dashboard: `suggestedFollowUp` -> `historyFollowUp` first. The newest-comment readers (`latestOutcomeGs_`,
+  `latestFamilyOutcome`) may only feed the undated-legacy fallback or non-advice logging. Bare stage changes
+  ("Suspect") are events, not comments. Any follow-up change must pass **`python3 test/check-followup-single-path.py`**
+  (static guard, in CI) and **`python3 test/check-twin-behaviour.py`** (checks every worded comment is counted).
+  Misspellings go in `SPELLING_FIXES_GS_` / `SPELLING_FIXES` (same entries in both), never as one-off rule edits.
 - **Everything date/time-sensitive is pinned to IST explicitly, never to
   whatever timezone the browser or the machine running a script happens to
   be in.** The dashboard uses `istDateKey`/`IST_TZ`-style helpers

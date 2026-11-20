@@ -110,6 +110,8 @@ def main() -> int:
     # `const` tables declared inside an indirect eval stay scoped to it, so each source exposes its rule table itself.
     gs_src += "\nwindow.__twinRules = OUTCOME_RULES_GS_;\n"
     js_src += "\nwindow.__twinRules = OUTCOME_RULES;\n"
+    gs_src += "\nwindow.__twinSpelling = SPELLING_FIXES_GS_;\n"
+    js_src += "\nwindow.__twinSpelling = SPELLING_FIXES;\n"
     self_test = "--self-test" in sys.argv
     if self_test:  # break the dashboard copy's typo matching on purpose: the check must then report mismatches
         js_src += "\n_wordsMatch = function (word, target) { return word === target; };\n"
@@ -136,6 +138,14 @@ def main() -> int:
         signals = js_page.evaluate(PAGE_JS_RULES)
         gs_signals = gs_page.evaluate("() => { const o = []; (window.__twinRules || []).forEach(r => (r.signals || []).forEach(s => o.push(s))); return o; }")
         corpus = corpus_from(signals + gs_signals)
+        # every spelling fix (both copies' lists) goes through both classifiers too, alone and inside sentences
+        js_spell_map = js_page.evaluate("() => window.__twinSpelling || {}")
+        gs_spell_map = gs_page.evaluate("() => window.__twinSpelling || {}")
+        spelling_diffs = sorted(k for k in set(js_spell_map) | set(gs_spell_map) if js_spell_map.get(k) != gs_spell_map.get(k))
+        for w in sorted(set(js_spell_map) | set(gs_spell_map)):
+            for t in (w, "client said " + w + " today", "not " + w):
+                if t not in corpus:
+                    corpus.append(t)
         gs = gs_page.evaluate("(c) => c.map(s => inferOutcomeGs_(s))", corpus)
         js = js_page.evaluate("(c) => c.map(s => inferOutcome(s))", corpus)
         # 2026-11-20: the full-history follow-up twins (historyFollowUpGs_ / historyFollowUp) on the same generated
@@ -146,11 +156,34 @@ def main() -> int:
         js_page.evaluate("() => { unmatchedFollowUp = (c) => 'UNMATCHED:' + c; }")
         gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM'))", hist)
         js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM'))", hist)
+        # Invariant: whenever a history has worded comments, the advice must say how many it read - i.e. it read them ALL.
+        counts = js_page.evaluate("(h) => h.map(x => historyEntries(x[0], x[1]).length)", hist)
+        # Invariant: a lead with only blank check-ins / bare stage changes must never get a stage name quoted as a note.
+        stage_only = js_page.evaluate("""() => { lastSnapshotForLead = () => null; _renderNow = new Date();
+            return suggestedFollowUp({ RM: 'Test RM', last_comment: '',
+              internal_status_comments: 'Test RM:  - 2026-11-18 12:59 | Test RM:  - 2026-11-19 10:43',
+              stage_comments: 'admin homesfy: Not Updated - 2026-11-15 10:35 | Test RM: Suspect - 2026-11-18 12:59' }); }""")
         browser.close()
     hist_diffs = [(h, g, j) for h, g, j in zip(hist, gs_h, js_h) if g != j]
 
     diffs = [(c, g, j) for c, g, j in zip(corpus, gs, js) if g != j]
     print("Full-history follow-up: compared %d generated comment histories." % len(hist))
+    invariant = []
+    for out, n in zip(js_h, counts):
+        if n and ("History: %d comment" % n) not in (out or ""):
+            invariant.append("read %d worded comments but the advice does not say so: %s" % (n, out))
+        if not n and out is not None:
+            invariant.append("no worded comment, yet history advice was produced: %s" % out)
+    if '"Suspect"' in str(stage_only) or '"Not Updated"' in str(stage_only):
+        invariant.append("stage-only lead got a stage name quoted as a note: %s" % stage_only)
+    if spelling_diffs:
+        invariant.append("SPELLING_FIXES differ between the copies for: " + ", ".join(spelling_diffs))
+    for line in invariant[:10]:
+        print("  INVARIANT BROKEN: " + line)
+    if invariant and not self_test:
+        return 1
+    print("Invariants hold: every worded comment counted; no stage name quoted; spelling lists identical (%d entries)."
+          % len(js_spell_map))
     for h, g, j in hist_diffs[:10]:
         print("  HISTORY MISMATCH %s | emails=%s | dashboard=%s" % (json.dumps(h), g, j))
     if hist_diffs and not self_test:

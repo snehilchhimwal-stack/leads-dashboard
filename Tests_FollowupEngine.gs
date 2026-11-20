@@ -283,6 +283,31 @@ function runFollowupEngineTests_() {
     const stageOnly = historyEntriesGs_('', 'Test RM One: Opportunity / visit fixed for saturday - 2026-11-10 12:00');
     TestAssertEqual_(stageOnly.length + ':' + stageOnly[0].comment, '1:visit fixed for saturday', 'history: the note typed with a stage change is read');
     TestAssertEqual_(historyFollowUpGs_(buildRow({ stage_comments: 'Test RM One: Suspect - 2026-11-10 12:00' }).row, f.colIndex), null, 'history: no worded comment -> null, so the old fallback path runs');
+
+    // ---- 2026-11-20 2nd pass: no single-comment reading of dated data (real case: lead 2276862 in the 17:00 email) ----
+    f = buildRow({ internal_status_comments: 'Test RM One:  - 2026-11-18 12:59 | Test RM One:  - 2026-11-19 10:43',
+      stage_comments: 'admin homesfy: Not Updated - 2026-11-15 10:35 | Test RM One: Suspect - 2026-11-18 12:59', last_comment: '' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssert_(h.indexOf('"Suspect"') === -1 && h.indexOf('"Not Updated"') === -1, 'single-path: a stage name is never quoted as a comment (got: ' + h + ')');
+    TestAssertContains_(h, 'No comment added', 'single-path: blank check-ins + stage changes only -> the no-comment advice');
+    f = buildRow({ internal_status_comments: '', stage_comments: '', last_comment: 'Client asked about pricing' });
+    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'only the last one could be read', 'single-path: undated old-format data says it could only read one comment');
+
+    // Real case: lead 2279579 - "Not available on wtsapp" is a no-reach, not a conversation.
+    f = buildRow({ RM: 'Mamtaben S 1 Account', internal_status_comments: 'Mamtaben Sosa:  - 2026-11-19 10:11 | Mamtaben Sosa: Not available on wtsapp - 2026-11-19 17:31' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'no real conversation yet', 'spelling: "wtsapp" is read as WhatsApp, so the note is a no-reach, not a conversation');
+    TestAssertEqual_(inferOutcomeGs_('Not available on wtsapp'), inferOutcomeGs_('Not available on whatsapp'), 'spelling: "wtsapp" classifies exactly like "whatsapp"');
+
+    // Every spelling fix: the misspelt comment must classify exactly like the correctly spelt one.
+    Object.keys(SPELLING_FIXES_GS_).forEach(function (bad) {
+      const good = SPELLING_FIXES_GS_[bad];
+      ['client ' + bad + ' today', 'not ' + bad, bad + ' call later'].forEach(function (t) {
+        TestAssertEqual_(inferOutcomeGs_(t), inferOutcomeGs_(t.replace(bad, good)), 'spelling fix "' + bad + '" -> "' + good + '" in "' + t + '"');
+      });
+    });
+    TestAssertEqual_(fixSpellingGs_('ringning, wtsapp sent tommorow'), 'ringing, whatsapp sent tomorrow', 'spelling: several fixes in one comment, punctuation kept');
+    TestAssertEqual_(fixSpellingGs_('awtsapps constructor'), 'awtsapps constructor', 'spelling: whole words only, and object keys like "constructor" are not touched');
   } finally {
     TestEnv_tearDown_();
   }

@@ -60,6 +60,8 @@ jobs:
           python3 -m pip install --quiet playwright==1.47.0
           python3 test/check-twin-behaviour.py --self-test
           python3 test/check-twin-behaviour.py
+          python3 test/check-followup-single-path.py --self-test
+          python3 test/check-followup-single-path.py
 
   # Frontend render-pipeline harness (tests/frontend-harness.html) headless.
   # Forensic audit P2 item 13 (t-tf-5ad22d8e4c2e). Its own job on the
