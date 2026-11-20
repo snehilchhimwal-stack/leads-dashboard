@@ -101,7 +101,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `EmailLedger.gs` | `5ed90a7` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
 | `EmailReroute.gs` | `7ef68d3` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
 | `EmailSweep.gs` | `79ef725` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
-| `FollowupEngine.gs` | `97e6171` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
+| `FollowupEngine.gs` | `68f0ed3` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
 | `FollowupTracker.gs` | `7ef68d3` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
 | `InteractionHistoryLogger.gs` | `3092603` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
 | `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-20 | read directly from the live editor by hash-match (2026-11-20) |
