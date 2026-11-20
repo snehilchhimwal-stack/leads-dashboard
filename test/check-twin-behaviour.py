@@ -80,17 +80,26 @@ HIST_POOL = [
 ]
 
 
+CALL_STATUSES = ["Ringing", "Busy", "Call Declined", "Not Reachable", "Followup Missed", "Invalid No", "Call Connected",
+                 "Connected On Whatsapp"]
+
+
 def history_corpus():
-    """Deterministic comment histories: 1-7 entries, mixed loggers and days, a few stage-change notes."""
+    """Deterministic comment histories: 1-7 entries, mixed loggers and days, a few stage-change notes. From n=200 on,
+    entries carry a query-v3 call status ("[Busy] note", or "[Ringing]" with no note) so both formats are compared."""
     out, seed = [], 7
-    for n in range(400):
+    for n in range(600):
         seed = (seed * 1103515245 + 12345) % (2 ** 31)
         length, parts, stage = 1 + seed % 7, [], []
         for i in range(length):
             seed = (seed * 1103515245 + 12345) % (2 ** 31)
             who = "Test RM" if seed % 4 else "Other Caller"
             ts = "2026-11-%02d %02d:%02d" % (10 + (seed >> 3) % 6, 9 + i, (seed >> 7) % 60)
-            parts.append("%s: %s - %s" % (who, HIST_POOL[(seed >> 11) % len(HIST_POOL)], ts))
+            note = HIST_POOL[(seed >> 11) % len(HIST_POOL)]
+            if n >= 200:
+                status = CALL_STATUSES[(seed >> 17) % len(CALL_STATUSES)]
+                note = "[%s]" % status if (seed >> 21) % 3 == 0 else "[%s] %s" % (status, note)
+            parts.append("%s: %s - %s" % (who, note, ts))
         if n % 5 == 0:
             stage.append("Test RM: Suspect - 2026-11-10 08:00")
             stage.append("Test RM: Opportunity / %s - 2026-11-12 08:00" % HIST_POOL[n % len(HIST_POOL)])
@@ -170,7 +179,7 @@ def main() -> int:
     print("Full-history follow-up: compared %d generated comment histories." % len(hist))
     invariant = []
     for out, n in zip(js_h, counts):
-        if n and ("History: %d comment" % n) not in (out or ""):
+        if n and ("History: %d call" % n) not in (out or ""):
             invariant.append("read %d worded comments but the advice does not say so: %s" % (n, out))
         if not n and out is not None:
             invariant.append("no worded comment, yet history advice was produced: %s" % out)

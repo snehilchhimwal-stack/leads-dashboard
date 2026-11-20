@@ -244,7 +244,7 @@ function runFollowupEngineTests_() {
     TestAssertContains_(h, 'Last real conversation 12 Nov', 'history rule 2: names the date of the last real conversation');
     TestAssertContains_(h, '3 unanswered attempts over 3 days', 'history rule 2: counts the unanswered streak since that conversation');
     TestAssertContains_(h, 'site visit done', 'history rule 2: reminds of the best milestone reached earlier');
-    TestAssertContains_(h, 'History: 5 comments, 10 Nov to 16 Nov', 'history: always ends with the History line');
+    TestAssertContains_(h, 'History: 5 calls/comments, 10 Nov to 16 Nov', 'history: always ends with the History line');
 
     // Rule 1: a STOP with nothing real after it wins, even if no-reach tries follow.
     f = buildRow({ internal_status_comments: 'Test RM One: interested in 3bhk - 2026-11-10 12:00 | Test RM One: not interested anymore - 2026-11-12 11:00 | Test RM One: rnr - 2026-11-13 10:00' });
@@ -264,7 +264,7 @@ function runFollowupEngineTests_() {
     h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
     TestAssertContains_(h, '6 unanswered attempts over 3 days and the customer has never been reached', 'history rule 3: counts tries and days');
     TestAssertContains_(h, 'Not Contactable', 'history rule 3: advises closing as Not Contactable after 2 more days');
-    TestAssertContains_(h, 'no real conversation yet', 'history rule 3: History line says there was never a conversation');
+    TestAssertContains_(h, 'customer never reached yet', 'history rule 3: History line says there was never a conversation');
 
     // Rule 4: requirement from an EARLIER comment is carried; preference clause from an earlier comment too.
     f = buildRow({ internal_status_comments: 'Test RM One: looking for 2bhk under 90 lakh, call after 6pm - 2026-11-10 12:00 | Test RM One: client interested, wants pricing - 2026-11-12 11:00' });
@@ -296,7 +296,7 @@ function runFollowupEngineTests_() {
     // Real case: lead 2279579 - "Not available on wtsapp" is a no-reach, not a conversation.
     f = buildRow({ RM: 'Mamtaben S 1 Account', internal_status_comments: 'Mamtaben Sosa:  - 2026-11-19 10:11 | Mamtaben Sosa: Not available on wtsapp - 2026-11-19 17:31' });
     h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
-    TestAssertContains_(h, 'no real conversation yet', 'spelling: "wtsapp" is read as WhatsApp, so the note is a no-reach, not a conversation');
+    TestAssertContains_(h, 'customer never reached yet', 'spelling: "wtsapp" is read as WhatsApp, so the note is a no-reach, not a conversation');
     TestAssertEqual_(inferOutcomeGs_('Not available on wtsapp'), inferOutcomeGs_('Not available on whatsapp'), 'spelling: "wtsapp" classifies exactly like "whatsapp"');
 
     // Every spelling fix: the misspelt comment must classify exactly like the correctly spelt one.
@@ -308,6 +308,39 @@ function runFollowupEngineTests_() {
     });
     TestAssertEqual_(fixSpellingGs_('ringning, wtsapp sent tommorow'), 'ringing, whatsapp sent tomorrow', 'spelling: several fixes in one comment, punctuation kept');
     TestAssertEqual_(fixSpellingGs_('awtsapps constructor'), 'awtsapps constructor', 'spelling: whole words only, and object keys like "constructor" are not touched');
+
+    // ---- 2026-11-20: CRM call status (query v3 "[Status] note") - the three leads checked against Metabase ----
+    // 2278821: "Talking to someone else" was logged under Busy - the customer was on another call, never reached.
+    f = buildRow({ RM: 'Vijay Katheriya', internal_status_comments: 'Vijay Katheriya: [Busy] Talking to someone else - 2026-11-18 11:16 | ' +
+      'Vijay Katheriya: [Ringing] Not answering -- have texted on WhatsApp - 2026-11-19 12:40 | Vijay Katheriya: [Ringing] Not answering - 2026-11-20 12:56' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssert_(h.indexOf('Last real conversation') === -1, 'call status: a note under [Busy] is not a conversation (got: ' + h + ')');
+    TestAssertContains_(h, '3 unanswered attempts over 3 days (Busy, Ringing x2)', 'call status: every call counted and listed by status');
+    TestAssertContains_(h, 'customer never reached yet', 'call status: History line says never reached');
+    // 2276862: three calls with no notes - Busy, Call Declined, Ringing.
+    f = buildRow({ RM: 'Anagha Sangole', internal_status_comments: 'Anagha Sangole: [Busy] - 2026-11-18 12:59 | Anagha Sangole: [Call Declined] - 2026-11-18 19:07 | Anagha Sangole: [Ringing] - 2026-11-19 10:43',
+      stage_comments: 'admin homesfy: Not Updated - 2026-11-15 10:35 | Anagha Sangole: Suspect - 2026-11-18 12:59' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, '3 unanswered attempts over 2 days (Busy, Call Declined, Ringing)', 'call status: calls with no note are still counted');
+    TestAssertContains_(h, 'declined the call once', 'call status: a declined call is called out');
+    TestAssert_(h.indexOf('No comment added') === -1 && h.indexOf('"Suspect"') === -1, 'call status: not treated as a lead with no activity (got: ' + h + ')');
+    // 2279579: two Ringing calls, the second noting no WhatsApp.
+    f = buildRow({ RM: 'Mamtaben S 1 Account', internal_status_comments: 'Mamtaben Sosa: [Ringing] - 2026-11-19 10:11 | Mamtaben Sosa: [Ringing] Not available on wtsapp - 2026-11-19 17:31' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, '2 unanswered attempts', 'call status: both Ringing calls counted');
+    TestAssertContains_(h, "isn't reachable on WhatsApp", 'call status: the more specific note (no WhatsApp) still drives the advice');
+    // A connected call is a conversation, and a STOP said on it wins; Invalid No is a stop.
+    f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] - 2026-11-10 10:00 | Test RM One: [Call Connected] wants 2bhk, call after 6pm - 2026-11-11 10:00' });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, 'last real conversation 11 Nov', 'call status: Call Connected is a real conversation');
+    f = buildRow({ internal_status_comments: 'Test RM One: [Call Connected] not interested - 2026-11-11 10:00' });
+    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'no interest', 'call status: a STOP said on a connected call is a STOP');
+    f = buildRow({ internal_status_comments: 'Test RM One: [Invalid No] - 2026-11-11 10:00' });
+    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'Number appears incorrect', 'call status: Invalid No is a stop');
+    // The classifier: a status with no note maps to the status; the note is classified without the bracket.
+    TestAssertEqual_(inferOutcomeGs_('[Ringing]'), 'Ringing / RNR', 'call status: "[Ringing]" alone classifies as Ringing');
+    TestAssertEqual_(inferOutcomeGs_('[Call Connected] not interested'), inferOutcomeGs_('not interested'), 'call status: the bracket does not change how the note is read');
+    TestAssertEqual_(splitCallStatusGs_('[Some Other] text').status, '', 'call status: an unknown bracket stays part of the note');
   } finally {
     TestEnv_tearDown_();
   }

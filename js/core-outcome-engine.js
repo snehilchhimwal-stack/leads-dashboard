@@ -184,6 +184,23 @@ function _wordsMatch(word, target){
 // and the unapostrophed way people actually type on a phone keyboard
 // ("dont"/"didnt"/"cant") collapse to the same token — one canonical
 // signal covers both instead of needing each spelled out twice.
+// ===== CRM CALL STATUS (query v3, 2026-11-20, user request after checking 3 leads against Metabase) =====
+// Every status entry the RM logs carries the call status they picked (Ringing, Busy, Call Declined, ...); query v3 puts it
+// in brackets before the note: "Name: [Busy] Talking to someone else - date", or "Name: [Ringing] - date" for a call logged
+// with no note (24% of entries). The STATUS decides whether the call reached the customer - "Talking to someone else" under
+// [Busy] is a customer on another call, not a conversation - and the note adds detail. An unknown bracket stays in the note.
+// Data without brackets (query v2) reads exactly as before. KEEP IN SYNC with the twin.
+const CALL_STATUS_KIND = { 'ringing': 'noreach', 'busy': 'noreach', 'call declined': 'noreach', 'not reachable': 'noreach',
+  'followup missed': 'noreach', 'invalid no': 'stop', 'call connected': 'conversation', 'connected on whatsapp': 'conversation' };
+const CALL_STATUS_OUTCOME = { 'ringing': 'Ringing / RNR', 'busy': 'Busy', 'call declined': 'Call Declined',
+  'not reachable': 'Switched Off', 'followup missed': 'Follow-up Missed', 'invalid no': 'Wrong Number' };
+function splitCallStatus(comment) {
+  const m = String(comment || '').match(/^\s*\[([^\]]{2,40})\]\s*(.*)$/);
+  if (m && Object.prototype.hasOwnProperty.call(CALL_STATUS_KIND, m[1].trim().toLowerCase())) {
+    return { status: m[1].trim(), key: m[1].trim().toLowerCase(), text: m[2].trim() };
+  }
+  return { status: '', key: '', text: String(comment || '').trim() };
+}
 // ===== SPELLING FIXES (2026-11-20, user request: "make a list of all wrong spelling so that you can identify even if
 // there is a wrong spelling") =====
 // The keyword matcher already forgives 1 typo in a 5-8 letter word and 2 in a longer one, but RMs' real misspellings go
@@ -637,7 +654,9 @@ function inferOutcome(comment){
   return result;
 }
 function _inferOutcomeUncached(comment){
-  const c = fixSpelling(String(comment).toLowerCase());
+  const call = splitCallStatus(comment);
+  if (call.key && (!call.text || /^[\s\-_./]+$/.test(call.text))) return CALL_STATUS_OUTCOME[call.key] || 'No Real Update';
+  const c = fixSpelling(call.text.toLowerCase());
   // A placeholder with no real content — a bare "-", ".", "/", or similar
   // punctuation-only note some RMs log when there's nothing to report (by
   // a wide margin the single most common "unmatched" comment in practice —
@@ -923,19 +942,32 @@ function historyEntries(internalComments, stageComments){
         comment = comment.slice(slash + 3).trim();
         if (/^closing lead as \d+ users? closed this lead$/i.test(comment)) return; // CRM auto-note, nobody said it
       }
-      if (!comment || /^[\s\-_./]+$/.test(comment)) return;
-      out.push({ loggedBy: m[1].trim(), comment, ts: m[3].trim(), order: (isStage ? 100000 : 0) + i });
+      const call = isStage ? { status: '', key: '', text: comment } : splitCallStatus(comment);
+      const note = /^[\s\-_./]+$/.test(call.text) ? '' : call.text;
+      if (!note && !call.key) return; // a blank check-in with no call status says nothing
+      out.push({ loggedBy: m[1].trim(), comment: note, status: call.status, statusKey: call.key,
+        statusKind: call.key ? CALL_STATUS_KIND[call.key] : '', ts: m[3].trim(), order: (isStage ? 100000 : 0) + i });
     });
   };
   take(internalComments, false);
   take(stageComments, true);
   out.sort((a, b) => a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.order - b.order);
-  out.forEach(e => { e.outcome = inferOutcome(e.comment); });
+  out.forEach(e => { e.outcome = historyEntryOutcome(e); });
   return out;
 }
-function historyKind(outcome){
-  if (HISTORY_STOP[outcome]) return 'stop';
-  if (HISTORY_NOREACH[outcome]) return 'noreach';
+// The outcome used for advice: the note's own outcome, except that a not-reached call status overrides a note that
+// does not itself say not-reached or stop ("[Busy] Talking to someone else" -> Busy).
+function historyEntryOutcome(e) {
+  const fromNote = e.comment ? inferOutcome(e.comment) : '';
+  const fromStatus = e.statusKey ? (CALL_STATUS_OUTCOME[e.statusKey] || '') : '';
+  if (!fromNote) return fromStatus || 'No Real Update';
+  if (e.statusKind === 'noreach' && fromStatus && !HISTORY_STOP[fromNote] && !HISTORY_NOREACH[fromNote]) return fromStatus;
+  return fromNote;
+}
+function historyKind(e) {
+  if (HISTORY_STOP[e.outcome]) return 'stop';
+  if (e.statusKind) return e.statusKind;
+  if (HISTORY_NOREACH[e.outcome]) return 'noreach';
   return 'conversation';
 }
 function historyDecide(entries, ownerName){
@@ -945,10 +977,11 @@ function historyDecide(entries, ownerName){
     const who = String(e.loggedBy || '').trim();
     return (who && who.toLowerCase() !== owner) ? ' (by ' + who + ')' : '';
   };
-  const said = e => historyShortDate(e.ts) + by(e) + ': "' + historyQuote(e.comment) + '"';
+  const said = e => historyShortDate(e.ts) + by(e) + (e.status ? ' [' + e.status + ']' : '') +
+    (e.comment ? ': "' + historyQuote(e.comment) + '"' : ' (no note)');
   let lastConv = -1, lastStop = -1, bestMilestone = -1, lastRequirement = -1;
   entries.forEach((e, i) => {
-    const kind = historyKind(e.outcome);
+    const kind = historyKind(e);
     if (kind === 'conversation') lastConv = i;
     if (kind === 'stop') lastStop = i;
     const rank = HISTORY_MILESTONE_RANK[e.outcome] || 0;
@@ -956,19 +989,25 @@ function historyDecide(entries, ownerName){
     if (/\d\s*bhk\b/i.test(e.comment) || /\b\d+(\.\d+)?\s*(cr|crore|crores|lac|lacs|lakh|lakhs|l)\b/i.test(e.comment)) lastRequirement = i;
   });
   const last = entries[entries.length - 1];
-  const lastKind = historyKind(last.outcome);
+  const lastKind = historyKind(last);
   const parts = [];
 
   if (lastStop > lastConv) {
     parts.push((FOLLOWUP_SUGGESTIONS[entries[lastStop].outcome] || 'Customer gave a reason to stop') + ' Said ' + said(entries[lastStop]) + '.');
   } else if (lastKind === 'noreach') {
-    const tries = entries.slice(lastConv + 1).filter(e => historyKind(e.outcome) === 'noreach');
+    const tries = entries.slice(lastConv + 1).filter(e => historyKind(e) === 'noreach');
     const days = {};
     tries.forEach(e => { days[e.ts.slice(0, 10)] = true; });
     const n = tries.length, d = Object.keys(days).length;
     const span = n + ' unanswered attempt' + (n === 1 ? '' : 's') + (d > 1 ? ' over ' + d + ' days' : '');
+    const tally = {}, order = [];
+    tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
+    const mix = order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
+    const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
+    const declinedNote = declined ? ' The customer declined the call ' + (declined === 1 ? 'once' : declined + ' times') +
+      ' - send a WhatsApp message before the next call, and call at a different time.' : '';
     if (lastConv >= 0) {
-      parts.push('Last real conversation ' + said(entries[lastConv]) + '. Since then ' + span + ' (latest: ' + last.outcome + ').');
+      parts.push('Last real conversation ' + said(entries[lastConv]) + '. Since then ' + span + ' (' + mix + ').' + declinedNote);
       parts.push(FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.');
       if (bestMilestone >= 0 && bestMilestone !== lastConv) {
         parts.push('Earlier ' + HISTORY_MILESTONE_LABEL[entries[bestMilestone].outcome] + ' (' + said(entries[bestMilestone]) + ') - open the next call from there.');
@@ -977,9 +1016,9 @@ function historyDecide(entries, ownerName){
         parts.push('Requirement on record ' + historyShortDate(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirement(entries[lastRequirement].comment) + '".');
       }
     } else if (n >= 6 && d >= 3) {
-      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached. Switch to a different time slot and send a WhatsApp message; if there is still no answer after 2 more days, close it as Not Contactable.');
+      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot and send a WhatsApp message; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote);
     } else {
-      parts.push('Not reached yet - ' + span + '. ' + (FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.'));
+      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + (FOLLOWUP_SUGGESTIONS[last.outcome] || 'Retry at a different time of day.'));
     }
   } else {
     const conv = entries[lastConv];
@@ -995,9 +1034,9 @@ function historyDecide(entries, ownerName){
   }
 
   const first = entries[0];
-  parts.push('History: ' + entries.length + ' comment' + (entries.length === 1 ? '' : 's') +
+  parts.push('History: ' + entries.length + (entries.length === 1 ? ' call/comment' : ' calls/comments') +
     (first.ts.slice(0, 10) !== last.ts.slice(0, 10) ? ', ' + historyShortDate(first.ts) + ' to ' + historyShortDate(last.ts) : ', ' + historyShortDate(last.ts)) +
-    (lastConv >= 0 ? '; last real conversation ' + historyShortDate(entries[lastConv].ts) : '; no real conversation yet') + '.');
+    (lastConv >= 0 ? '; last real conversation ' + historyShortDate(entries[lastConv].ts) : '; customer never reached yet') + '.');
   return parts.join(' ');
 }
 function historyFollowUp(l){
