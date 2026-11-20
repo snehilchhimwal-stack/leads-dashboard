@@ -987,7 +987,8 @@ function historyNoReachAdvice(outcome, whatsAppAlreadySent) {
   advice = advice.replace(/;\s*consider a WhatsApp follow-up\.?\s*$/i, '.');
   return /whatsapp/i.test(advice) ? 'Retry at a different time of day.' : advice;
 }
-function historyDecide(entries, ownerName){
+// dials / connectedCalls: twin of FollowupEngine.gs historyDecideGs_'s optional call_attempts / call_count.
+function historyDecide(entries, ownerName, dials, connectedCalls){
   if (!entries || !entries.length) return null;
   const owner = String(ownerName || '').trim().toLowerCase();
   const by = e => {
@@ -1016,10 +1017,16 @@ function historyDecide(entries, ownerName){
     const days = {};
     tries.forEach(e => { days[e.ts.slice(0, 10)] = true; });
     const n = tries.length, d = Object.keys(days).length;
-    const span = n + ' unanswered attempt' + (n === 1 ? '' : 's') + (d > 1 ? ' over ' + d + ' days' : '');
+    const dialTotal = lastConv < 0 ? (Number(dials) || 0) : 0; // lifetime dials only mean something while never reached
+    const useDials = dialTotal > n;
+    const tryCount = useDials ? dialTotal : n;
+    const span = (useDials ? dialTotal + ' dial' + (dialTotal === 1 ? '' : 's') : n + ' unanswered attempt' + (n === 1 ? '' : 's')) +
+      (d > 1 ? ' over ' + d + ' days' : '');
     const tally = {}, order = [];
     tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
-    const mix = order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
+    const mix = (useDials ? n + ' logged: ' : '') + order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
+    const connectedNote = lastConv < 0 && (Number(connectedCalls) || 0) > 0 ? ' The call logs show ' + connectedCalls +
+      ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') + ' - check whether a conversation happened and was not logged.' : '';
     const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
     const waSent = tries.filter(function (e) { return historyWhatsAppSent(e); });
     const waLast = waSent.length ? waSent[waSent.length - 1] : null;
@@ -1036,12 +1043,12 @@ function historyDecide(entries, ownerName){
       if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
         parts.push('Requirement on record ' + historyShortDate(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirement(entries[lastRequirement].comment) + '".');
       }
-    } else if (n >= 6 && d >= 3) {
+    } else if (tryCount >= 6 && d >= 3) {
       parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot' +
         (waLast ? ' (a WhatsApp message already went out on ' + historyShortDate(waLast.ts) + ' with no reply)' : ' and send a WhatsApp message') +
-        '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote);
+        '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote + connectedNote);
     } else {
-      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + historyNoReachAdvice(last.outcome, !!waLast) + waNote);
+      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + historyNoReachAdvice(last.outcome, !!waLast) + waNote + connectedNote);
     }
   } else {
     const conv = entries[lastConv];
@@ -1063,7 +1070,8 @@ function historyDecide(entries, ownerName){
   return parts.join(' ');
 }
 function historyFollowUp(l){
-  return historyDecide(historyEntries(l.internal_status_comments, l.stage_comments), l.RM);
+  return historyDecide(historyEntries(l.internal_status_comments, l.stage_comments), l.RM,
+    Number(l.call_attempts) || 0, Number(l.call_count) || 0);
 }
 
 function hasDatedCommentEntries(l){

@@ -871,7 +871,10 @@ function historyNoReachAdviceGs_(outcome, whatsAppAlreadySent) {
   advice = advice.replace(/;\s*consider a WhatsApp follow-up\.?\s*$/i, '.');
   return /whatsapp/i.test(advice) ? 'Retry at a different time of day.' : advice;
 }
-function historyDecideGs_(entries, ownerName) {
+// dials / connectedCalls (optional, 2026-11-20): the lead's call_attempts and call_count columns - every CRM click-to-call
+// and phone dial, logged with a status or not. Used only while the customer has never been reached: the logged statuses
+// alone undercount the tries (lead 2278821: 4 logged, 11 dialled).
+function historyDecideGs_(entries, ownerName, dials, connectedCalls) {
   if (!entries || !entries.length) return null;
   const owner = String(ownerName || '').trim().toLowerCase();
   const by = function (e) {
@@ -904,10 +907,16 @@ function historyDecideGs_(entries, ownerName) {
     const days = {};
     tries.forEach(function (e) { days[e.ts.slice(0, 10)] = true; });
     const n = tries.length, d = Object.keys(days).length;
-    const span = n + ' unanswered attempt' + (n === 1 ? '' : 's') + (d > 1 ? ' over ' + d + ' days' : '');
+    const dialTotal = lastConv < 0 ? (Number(dials) || 0) : 0; // lifetime dials only mean something while never reached
+    const useDials = dialTotal > n;
+    const tryCount = useDials ? dialTotal : n;
+    const span = (useDials ? dialTotal + ' dial' + (dialTotal === 1 ? '' : 's') : n + ' unanswered attempt' + (n === 1 ? '' : 's')) +
+      (d > 1 ? ' over ' + d + ' days' : '');
     const tally = {}, order = [];
     tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
-    const mix = order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
+    const mix = (useDials ? n + ' logged: ' : '') + order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
+    const connectedNote = lastConv < 0 && (Number(connectedCalls) || 0) > 0 ? ' The call logs show ' + connectedCalls +
+      ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') + ' - check whether a conversation happened and was not logged.' : '';
     const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
     const waSent = tries.filter(function (e) { return historyWhatsAppSentGs_(e); });
     const waLast = waSent.length ? waSent[waSent.length - 1] : null;
@@ -925,13 +934,13 @@ function historyDecideGs_(entries, ownerName) {
       if (lastRequirement >= 0 && lastRequirement !== lastConv && lastRequirement !== bestMilestone) {
         parts.push('Requirement on record ' + historyShortDateGs_(entries[lastRequirement].ts) + by(entries[lastRequirement]) + ': "' + historyQuoteRequirementGs_(entries[lastRequirement].comment) + '".');
       }
-    } else if (n >= 6 && d >= 3) {
+    } else if (tryCount >= 6 && d >= 3) {
       // Rule 3 - never reached, and it has been going on.
       parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot' +
         (waLast ? ' (a WhatsApp message already went out on ' + historyShortDateGs_(waLast.ts) + ' with no reply)' : ' and send a WhatsApp message') +
-        '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote);
+        '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote + connectedNote);
     } else {
-      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + historyNoReachAdviceGs_(last.outcome, !!waLast) + waNote);
+      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + historyNoReachAdviceGs_(last.outcome, !!waLast) + waNote + connectedNote);
     }
   } else {
     // Rule 4 - the newest meaningful comment is a real conversation.
@@ -965,7 +974,8 @@ function historyDecideGs_(entries, ownerName) {
 }
 function historyFollowUpGs_(row, colIndex) {
   const entries = historyEntriesGs_(getVal_(row, colIndex, 'internal_status_comments'), getVal_(row, colIndex, 'stage_comments'));
-  return historyDecideGs_(entries, getVal_(row, colIndex, 'RM'));
+  return historyDecideGs_(entries, getVal_(row, colIndex, 'RM'),
+    Number(getVal_(row, colIndex, 'call_attempts')) || 0, Number(getVal_(row, colIndex, 'call_count')) || 0);
 }
 
 // Fallback for when the lead's own assigned RM hasn't logged any usable

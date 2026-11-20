@@ -103,7 +103,7 @@ def history_corpus():
         if n % 5 == 0:
             stage.append("Test RM: Suspect - 2026-11-10 08:00")
             stage.append("Test RM: Opportunity / %s - 2026-11-12 08:00" % HIST_POOL[n % len(HIST_POOL)])
-        out.append([" | ".join(parts), " | ".join(stage)])
+        out.append([" | ".join(parts), " | ".join(stage), 0 if n % 4 == 0 else n % 13, 1 if n % 7 == 0 else 0])  # + call_attempts, call_count
     return out
 
 
@@ -163,8 +163,8 @@ def main() -> int:
         hist = history_corpus()
         gs_page.evaluate("() => { detectFollowupModifiersGs_ = () => []; unmatchedFollowUpGs_ = (c) => 'UNMATCHED:' + c; }")
         js_page.evaluate("() => { unmatchedFollowUp = (c) => 'UNMATCHED:' + c; }")
-        gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM'))", hist)
-        js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM'))", hist)
+        gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM', x[2], x[3]))", hist)
+        js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM', x[2], x[3]))", hist)
         # Invariant: whenever a history has worded comments, the advice must say how many it read - i.e. it read them ALL.
         counts = js_page.evaluate("(h) => h.map(x => historyEntries(x[0], x[1]).length)", hist)
         # Invariant: a lead with only blank check-ins / bare stage changes must never get a stage name quoted as a note.

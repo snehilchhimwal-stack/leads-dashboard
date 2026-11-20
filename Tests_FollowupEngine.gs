@@ -367,6 +367,25 @@ function runFollowupEngineTests_() {
     // Without a WhatsApp in the streak the advice is unchanged.
     f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] - 2026-11-12 10:00' });
     TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'retry at a different time of day', 'whatsapp sent: no WhatsApp in the streak -> normal advice');
+
+    // ---- 2026-11-20: count every dial (call_attempts), not only the calls logged with a status (lead 2278821: 4 logged, 11 dialled) ----
+    const lead2278821 = 'Vijay Katheriya: [Busy] Talking to someone else - 2026-11-18 11:16 | Vijay Katheriya: [Ringing] Not answering -- have texted on WhatsApp - 2026-11-19 12:40 | ' +
+      'Vijay Katheriya: [Ringing] Not answering - 2026-11-20 12:56 | Vijay Katheriya: [Ringing] Not answering - 2026-11-20 17:59';
+    f = buildRow({ RM: 'Vijay Katheriya', internal_status_comments: lead2278821, call_attempts: 11, call_count: 0 });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssertContains_(h, '11 dials over 3 days and the customer has never been reached (4 logged: Busy, Ringing x3)', 'dials: the dial total is used, with the logged statuses alongside');
+    TestAssertContains_(h, 'Not Contactable', 'dials: 11 dials over 3 days reaches the 6+ tries rule');
+    TestAssertContains_(h, 'already went out on 19 Nov', 'dials: the WhatsApp-already-sent note still applies');
+    // Fewer dials than logged tries (or no column): the logged count stands.
+    f = buildRow({ RM: 'Vijay Katheriya', internal_status_comments: lead2278821, call_attempts: 2 });
+    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), '4 unanswered attempts over 3 days', 'dials: never fewer than the logged tries');
+    // A connected call in the logs while no status says connected -> flag a possibly unlogged conversation.
+    f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] - 2026-11-12 10:00', call_attempts: 3, call_count: 1 });
+    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'call logs show 1 connected call', 'dials: connected call with no conversation logged is flagged');
+    // After a real conversation the lifetime dial count is not used (it can't be split before/after the conversation).
+    f = buildRow({ internal_status_comments: 'Test RM One: [Call Connected] interested - 2026-11-10 10:00 | Test RM One: [Ringing] - 2026-11-12 10:00', call_attempts: 9, call_count: 1 });
+    h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssert_(h.indexOf('dials') === -1 && h.indexOf('connected call') === -1, 'dials: not used once the customer was reached (got: ' + h + ')');
   } finally {
     TestEnv_tearDown_();
   }
