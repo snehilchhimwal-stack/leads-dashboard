@@ -143,9 +143,8 @@ function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger)
     // convention sendOneOvernightEmail_'s own normal-bucket subject
     // already uses for a non-A1 primary, just applied here too; this
     // subject previously showed no role indicator at all.
-    const shownChRole = chLevelReportRoleGs_(entry.chRole); // 2026-10-17: '' when the report goes to a no-role address (EmailInfra.gs)
-    const roleQualifier = shownChRole ? ' - ' + shownChRole : '';
-    const subject = '(' + chName + roleQualifier + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
+    // 2026-11-23 (user request): no role/designation in any subject - the person's name, then the region.
+    const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
 
     // Two genuinely different situations can both land a name in
     // chLevelRms (see resolveRecipientBucketsForRms_): an ordinary RM
@@ -445,8 +444,9 @@ function sendOneOvernightEmail_(ss, logSheet, region, rec, leads, dateLabel, tod
   const rmKeys = Object.keys(byRM).sort();
 
   const shownRole = emailRoleLabelGs_(rec.bucketLabel, rec.primaryRole); // 2026-10-17: no role for a consolidated person
-  const tierQualifier = (shownRole && shownRole !== 'A1') ? ' - ' + shownRole : '';
-  const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + tierQualifier + ') ' : '';
+  const tierQualifier = (shownRole && shownRole !== 'A1') ? ' - ' + shownRole : ''; // the plain-text body line below only
+  // 2026-11-23 (user request): no role/designation in any subject ("(Minas Patel) Western Google Overnight Leads - ...").
+  const subjectPrefix = rec.bucketLabel ? '(' + rec.bucketLabel + ') ' : '';
   // "Google" names the scope explicitly (every lead in this email passed
   // the group_source==="google" gate in sendOvernightMorningEmails, per
   // explicit request) — kept alongside the region rather than replacing
@@ -740,9 +740,8 @@ function loadYesterdaysAllIssuesBucketsGs_(ss, now, allIssuesLogSheet) {
 // The 10:00 combined email's subject — one definition, shared with backfillTodaysOvernightLogRecipientsNow (OE-08, audit
 // 2026-10-13: the backfill had kept the pre-2026-09-23 "Google Overnight Leads" format, so its rows named a subject no email had).
 function combinedMorningSubjectGs_(bucketLabel, primaryRole, regionDisplay, dateLabel) {
-  const shownRole = emailRoleLabelGs_(bucketLabel, primaryRole); // 2026-10-17: no role for a consolidated person (AllIssuesEmailer.gs)
-  const tierQualifier = (shownRole && shownRole !== 'A1') ? ' - ' + shownRole : '';
-  const subjectPrefix = bucketLabel ? '(' + bucketLabel + tierQualifier + ') ' : '';
+  // 2026-11-23 (user request): no role/designation in any subject. primaryRole is kept in the signature for the callers.
+  const subjectPrefix = bucketLabel ? '(' + bucketLabel + ') ' : '';
   return (TEST_MODE_OVERRIDE_EMAIL_ ? '[TEST MODE] ' : '') + subjectPrefix + regionDisplay + ' Google Overnight + Follow-up Digest - ' + dateLabel;
 }
 

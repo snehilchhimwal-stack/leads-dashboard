@@ -247,7 +247,7 @@ function runEmailLifecycleMatrixTests_() {
       // ---- D4 (FIXED 2026-10-16): the 17:00 ledger rows record the subject that was sent, so a bounce later than 15 minutes is attributed ----
       const bRow = rows.filter(function (r) { return r.region === 'Bangalore'; })[0];
       const bSubject = w.st.delivered.filter(function (d) { return d.key === 'Bangalore'; })[0].subject;
-      TestAssertEqual_(bRow.subject, 'Test A1 One (A1) google Leads With Issue ' + allIssuesDateRangeLabelGs_(allIssuesWindowGs_(bRow.planned_at)), 'D4 fixed: the 17:00 plan records the bucket subject in Email_Ledger');
+      TestAssertEqual_(bRow.subject, 'Test A1 One (Bangalore) Google Leads With Issue ' + allIssuesDateRangeLabelGs_(allIssuesWindowGs_(bRow.planned_at)), 'D4 fixed: the 17:00 plan records the bucket subject in Email_Ledger');
       TestAssertEqual_(bRow.subject, bSubject, 'D4 fixed: ...exactly the subject the provider received');
       TestAssert_(rows.every(function (r) { return r.subject === w.st.delivered.filter(function (d) { return d.key === r.region; })[0].subject; }), 'D4 fixed: every 17:00 row (ACCEPTED and UNCONFIRMED) holds its own sent subject');
       const bounceAt = function (min, subj) { return { at: new Date(bRow.finished_at.getTime() + min * 60000), subject: 'Delivery Status Notification (Failure)', body: 'Your message wasn\'t delivered to ' + TEST_EMAIL_PRIMARY_ + '\nSubject: ' + (subj === undefined ? bSubject : subj) }; };
@@ -420,8 +420,8 @@ function runEmailLifecycleMatrixTests_() {
       const ss = TestMockSpreadsheet_({});
       TestSW_bind_(ss);
       const h = emailLedgerOpenGs_(ss);
-      const subjA = 'LMA (A1) google Leads With Issue (14-Oct-2026 to 16-Oct-2026)';
-      const subjB = 'LMB (A1) google Leads With Issue (14-Oct-2026 to 16-Oct-2026)';
+      const subjA = 'LMA (A1) Google Leads With Issue (14-Oct-2026 to 16-Oct-2026)';
+      const subjB = 'LMB (A1) Google Leads With Issue (14-Oct-2026 to 16-Oct-2026)';
       const a = TestSW_ledgerRow_(ss, h, { bucket: 'LMA', to: TEST_EMAIL_PRIMARY_, subject: subjA, threadId: 't-lma', minutesAgo: 120 });
       const b = TestSW_ledgerRow_(ss, h, { bucket: 'LMB', to: TEST_EMAIL_SECONDARY_, subject: subjB, threadId: 't-lmb', minutesAgo: 60 });
       const daemon = 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>';

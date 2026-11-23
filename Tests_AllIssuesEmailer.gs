@@ -140,10 +140,12 @@ function runAllIssuesEmailerTests_() {
 
     TestAssertContains_(chDraft.htmlBody, 'L-CH-ISSUE', 'sendAllIssuesEmails: CH-level report lists the CH-held flagged lead');
     TestAssertContains_(chDraft.subject, 'Test CH Self', 'sendAllIssuesEmails: CH-level subject names the CH');
-    TestAssertContains_(chDraft.subject, 'google Leads With Issue', 'sendAllIssuesEmails: CH-level subject uses the documented format');
+    TestAssertContains_(chDraft.subject, 'Google Leads With Issue', 'sendAllIssuesEmails: CH-level subject uses the documented format');
 
-    // ---- normal bucket subject format: "<bucketLabel> (<primaryRole>) google Leads With Issue (<range>)" ----
-    TestAssertContains_(normalDraft.subject, 'Test A1 One (A1) google Leads With Issue', 'sendAllIssuesEmails: normal bucket subject matches the documented format exactly');
+    // ---- normal bucket subject format: "<bucketLabel> (<primaryRole>) Google Leads With Issue (<range>)" ----
+    // 2026-11-23: "<bucketLabel> (<region>) Google Leads With Issue (<range>)" - no role in the subject.
+    TestAssertContains_(normalDraft.subject, 'Test A1 One (Pune) Google Leads With Issue', 'sendAllIssuesEmails: normal bucket subject is name (region), no role');
+    TestAssert_(normalDraft.subject.indexOf('(A1)') === -1, 'sendAllIssuesEmails: the role never appears in the subject');
 
     // ---- issue_snapshot_json (col J, two-checkpoint email lifecycle
     // redesign Step 3) persists the bucket's exact reported population --
@@ -200,7 +202,7 @@ function runAllIssuesEmailerTests_() {
       const fwEmails = fwNew.filter(function (d) { return d.subject.indexOf('Futwork') === 0; });
       TestAssertEqual_(fwEmails.length, 1, 'Futwork: leads from two different regions arrive in exactly ONE Futwork email, not one per region');
       const fwEmail = fwEmails[0];
-      TestAssertContains_(fwEmail.subject, 'Futwork (Bangalore, Pune) google Leads With Issue', 'Futwork: the subject spells out every region');
+      TestAssertContains_(fwEmail.subject, 'Futwork (Bangalore, Pune) Google Leads With Issue', 'Futwork: the subject spells out every region');
       TestAssert_(fwEmail.subject.indexOf('()') === -1, 'Futwork: the subject has no empty brackets');
       TestAssertEqual_(fwEmail.to, FUTWORK_ROUTE_EMAIL_, 'Futwork: the single email goes to FUTWORK_ROUTE_EMAIL_');
       TestAssertEqual_(fwEmail.cc, '', 'Futwork: no Cc');
@@ -483,14 +485,14 @@ function runAllIssuesEmailerTests_() {
         CH_REPORT_NO_ROLE_EMAILS_ = [' ' + TEST_EMAIL_PRIMARY_.toUpperCase() + ' ']; // the ops address (To) - case/space-insensitive
         const a = both(1);
         TestAssertEqual_(a.length, 2, tag + 'both reports sent');
-        TestAssertEqual_(a[0].subject.indexOf('Test City Lead google Leads With Issue'), 0, tag + '17:00 subject: name, no "(City Lead)"');
+        TestAssertEqual_(a[0].subject.indexOf('Test City Lead (Pune) Google Leads With Issue'), 0, tag + '17:00 subject: name (region), no "(City Lead)"');
         TestAssertContains_(a[1].subject, '(Test City Lead) Pune Google Overnight Leads', tag + '10:00 subject: name, no " - City Lead"');
         TestAssert_(a.every(function (d) { return [d.subject, d.htmlBody, d.body].every(noRole); }), tag + 'no role label in subject, HTML or plain body of either report');
 
         CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_SECONDARY_]; // not a recipient -> unchanged
         const b = both(2);
-        TestAssertContains_(b[0].subject, 'Test City Lead (City Lead) google Leads With Issue', tag + 'other recipient: 17:00 role unchanged');
-        TestAssertContains_(b[1].subject, '(Test City Lead - City Lead) Pune', tag + 'other recipient: 10:00 role unchanged');
+        TestAssertContains_(b[0].subject, 'Test City Lead (Pune) Google Leads With Issue', tag + 'other recipient: 17:00 subject is name (region) too - no role in any subject');
+        TestAssertContains_(b[1].subject, '(Test City Lead) Pune', tag + 'other recipient: 10:00 subject has no role either');
 
         // TEST MODE: the REAL recipient decides, not the override address.
         TEST_MODE_OVERRIDE_EMAIL_ = TEST_EMAIL_SECONDARY_;
@@ -499,7 +501,7 @@ function runAllIssuesEmailerTests_() {
         TestAssert_(c.length === 2 && c.every(function (d) { return d.to === TEST_EMAIL_SECONDARY_ && noRole(d.subject); }), tag + 'TEST MODE: sent to the override, role hidden because the real recipient matches');
         CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_SECONDARY_];
         const d = both(4);
-        TestAssert_(d.length === 2 && d.every(function (x) { return !noRole(x.subject); }), tag + 'TEST MODE: the override address itself does not hide the role');
+        TestAssert_(d.length === 2 && d.every(function (x) { return noRole(x.subject); }), tag + 'TEST MODE: subjects never carry the role (2026-11-23)');
         TEST_MODE_OVERRIDE_EMAIL_ = '';
         CH_REPORT_NO_ROLE_EMAILS_ = [TEST_EMAIL_CH_]; // the CH-level address (second To) also matches
         TestAssertEqual_(chLevelReportRoleGs_('City Lead') + '|' + (CH_REPORT_NO_ROLE_EMAILS_ = [], chLevelReportRoleGs_('City Lead')), '|City Lead', tag + 'chLevelReportRoleGs_: any real To matches; empty list keeps the role');
@@ -678,7 +680,7 @@ function runAllIssuesEmailerTests_() {
         sendOneAllIssuesEmail_(ss, ensureAllIssuesLogSheet_(ss), 'Pune', { to: TEST_EMAIL_PRIMARY_, cc: '', bucketLabel: 'Unmatched RMs', primaryRole: '' },
           [{ lead_id: 'L-AI6', RM: 'Someone Unknown', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'x' }], '17 Aug 2026', istDayKeyGs_(now), now, win);
         const d = TestGmailLog_.drafts[TestGmailLog_.drafts.length - 1];
-        TestAssert_(TestGmailLog_.drafts.length === before + 1 && d.subject.indexOf('Unmatched RMs google Leads With Issue') === 0 && d.subject.indexOf('()') === -1, 'AI-6: an Unmatched-RMs bucket\'s subject reads "Unmatched RMs google Leads With Issue …", never "Unmatched RMs ()"');
+        TestAssert_(TestGmailLog_.drafts.length === before + 1 && d.subject.indexOf('Unmatched RMs (Pune) Google Leads With Issue') === 0 && d.subject.indexOf('()') === -1, 'AI-6: an Unmatched-RMs bucket\'s subject reads "Unmatched RMs Google Leads With Issue …", never "Unmatched RMs ()"');
       }
 
       // ---- AI-5: a direct call (no ledger context) whose send the gate objects to for ONE lead drops it and sends the rest ----

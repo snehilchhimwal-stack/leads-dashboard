@@ -291,7 +291,7 @@ function runEmailLifecycleFullCycleTests_() {
         TestAssert_(hasAllCons(cons17[0].htmlBody), tag + '17:00 that one email carries all three regions\' leads');
         TestAssertEqual_(cons17[0].to, TEST_EMAIL_PRIMARY_, tag + '17:00 To is the person');
         TestAssertEqual_(cons17[0].cc, TEST_EMAIL_SECONDARY_, tag + '17:00 Cc is ONLY the configured address - no P&L head / leadership / per-region Cc');
-        TestAssertContains_(cons17[0].subject, 'Test A1 One (Pune, Thane, Western) google Leads With Issue', tag + '17:00 the subject spells out the regions');
+        TestAssertContains_(cons17[0].subject, 'Test A1 One (Pune, Thane, Western) Google Leads With Issue', tag + '17:00 the subject spells out the regions');
         TestAssertContains_(cons17[0].htmlBody, 'Regions: Pune (1) · Thane (1) · Western (1)', tag + '17:00 the header names each region with its count');
         TestAssert_(cons17[0].htmlBody.indexOf('Pune — 1 lead') !== -1 && cons17[0].htmlBody.indexOf('Western — 1 lead') !== -1, tag + '17:00 each lead is shown under its own region band');
         TestAssert_(cons17[0].htmlBody.indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === -1, tag + '17:00 the pseudo-region key is never shown');
@@ -455,7 +455,7 @@ function runEmailLifecycleFullCycleTests_() {
         TestAssert_(hasAll(aIds, a17[0].htmlBody) && !has(clIds, a17[0].htmlBody), tag + '17:00 the A1\'s email has exactly hers (nothing sent twice)');
         TestAssertEqual_(cl17[0].to + '|' + cl17[0].cc, TEST_EMAIL_SECONDARY_ + '|', tag + '17:00 To = him, NO Cc (the configured Cc is himself - dropped, not duplicated)');
         TestAssertEqual_(a17[0].to + '|' + a17[0].cc, TEST_EMAIL_PRIMARY_ + '|' + TEST_EMAIL_SECONDARY_, tag + '17:00 the A1 is still Cc\'d to him');
-        TestAssertContains_(cl17[0].subject, 'Test City Lead (Pune, Thane) google Leads With Issue', tag + '17:00 his subject shows the regions');
+        TestAssertContains_(cl17[0].subject, 'Test City Lead (Pune, Thane) Google Leads With Issue', tag + '17:00 his subject shows the regions');
         TestAssert_([cl17[0].subject, cl17[0].htmlBody, cl17[0].body].every(noRole), tag + '17:00 no role label ("City Lead") in subject, HTML or plain body');
         TestAssert_(String(cl17[0].body).indexOf(CONSOLIDATED_REGION_KEY_PREFIX_) === -1, tag + '17:00 the plain body shows real regions, not the pseudo-region key');
         TestAssertEqual_(new17.filter(function (d) { return d.htmlBody.indexOf('L-OTHER-C') !== -1; }).length, 1, tag + '17:00 the other recipient is unaffected');

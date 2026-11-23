@@ -103,11 +103,14 @@ def history_corpus():
         if n % 5 == 0:
             stage.append("Test RM: Suspect - 2026-11-10 08:00")
             stage.append("Test RM: Opportunity / %s - 2026-11-12 08:00" % HIST_POOL[n % len(HIST_POOL)])
-        out.append([" | ".join(parts), " | ".join(stage), 0 if n % 4 == 0 else n % 13, 1 if n % 7 == 0 else 0, n % 40, "" if n % 3 == 0 else "2026-11-%02d 09:00:00" % (8 + n % 6)])  # + call_attempts, call_count, duration, lead_created_at
+        out.append([" | ".join(parts), " | ".join(stage), 0 if n % 4 == 0 else n % 13, 1 if n % 7 == 0 else 0, n % 40, "" if n % 3 == 0 else "2026-11-%02d 09:00:00" % (8 + n % 6),
+                    ["Suspect", "Not Updated", "Opportunity", ""][n % 4]])  # + call_attempts, call_count, duration, lead_created_at, stage
     return out
 
 
 def main() -> int:
+    if hasattr(sys.stdout, 'reconfigure'):  # advice text carries the rupee sign; a Windows console is not UTF-8 by default
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -163,10 +166,12 @@ def main() -> int:
         hist = history_corpus()
         gs_page.evaluate("() => { detectFollowupModifiersGs_ = () => []; unmatchedFollowUpGs_ = (c) => 'UNMATCHED:' + c; }")
         js_page.evaluate("() => { unmatchedFollowUp = (c) => 'UNMATCHED:' + c; }")
-        gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5]))", hist)
-        js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5]))", hist)
+        gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6]))", hist)
+        js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6]))", hist)
         # Invariant: whenever a history has worded comments, the advice must say how many it read - i.e. it read them ALL.
         counts = js_page.evaluate("(h) => h.map(x => historyEntries(x[0], x[1]).length)", hist)
+        # 2026-11-23: every comment is READ but none is quoted back - the worded comments of each history, to check the advice.
+        notes = js_page.evaluate("(h) => h.map(x => historyEntries(x[0], x[1]).map(e => e.comment).filter(c => c && c.length > 15))", hist)
         # Invariant: a lead with only blank check-ins / bare stage changes must never get a stage name quoted as a note.
         stage_only = js_page.evaluate("""() => { lastSnapshotForLead = () => null; _renderNow = new Date();
             return suggestedFollowUp({ RM: 'Test RM', last_comment: '',
@@ -178,6 +183,10 @@ def main() -> int:
     diffs = [(c, g, j) for c, g, j in zip(corpus, gs, js) if g != j]
     print("Full-history follow-up: compared %d generated comment histories." % len(hist))
     invariant = []
+    for out, ns in zip(js_h, notes):
+        for c in ns:
+            if c in (out or ""):
+                invariant.append("a comment was quoted back in the advice: %r in %s" % (c, out))
     for out, n in zip(js_h, counts):
         if n and ("History: %d call" % n) not in (out or ""):
             invariant.append("read %d worded comments but the advice does not say so: %s" % (n, out))

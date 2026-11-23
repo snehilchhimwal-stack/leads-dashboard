@@ -104,6 +104,9 @@ into it. Every `.gs` file shares ONE global namespace regardless of filename
   ("Suspect") are events, not comments. Any follow-up change must pass **`python3 test/check-followup-single-path.py`**
   (static guard, in CI) and **`python3 test/check-twin-behaviour.py`** (checks every worded comment is counted).
   Misspellings go in `SPELLING_FIXES_GS_` / `SPELLING_FIXES` (same entries in both), never as one-off rule edits.
+  Every comment is READ but none is QUOTED back in the advice (user rule, 2026-11-23): facts (BHK / budget / carpet via
+  `historyFacts*`) and plain-word outcomes only - `check-twin-behaviour.py` fails if a comment appears in the text. Email
+  subjects carry the person's name and REGION, never their role ("Niraj Patil (Thane) Google Leads With Issue ...").
 - **Everything date/time-sensitive is pinned to IST explicitly, never to
   whatever timezone the browser or the machine running a script happens to
   be in.** The dashboard uses `istDateKey`/`IST_TZ`-style helpers

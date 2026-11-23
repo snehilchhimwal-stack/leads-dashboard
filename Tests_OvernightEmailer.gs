@@ -1788,7 +1788,7 @@ function runOvernightEmailerTests_() {
           } finally { TEST_MODE_OVERRIDE_EMAIL_ = ''; }
           backfillTodaysOvernightLogRecipientsNow();
           TestAssertEqual_(String(logSh.getRange(2, 8, 1, 1).getValue()), '(Test A1 One) Pune Google Overnight + Follow-up Digest - ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy'), 'OE-08: the backfilled subject uses the current combined-email format');
-          TestAssertEqual_(combinedMorningSubjectGs_('Ayaz', 'TM', 'Pune', '1 Oct 2026'), '(Ayaz - TM) Pune Google Overnight + Follow-up Digest - 1 Oct 2026', 'OE-08: combinedMorningSubjectGs_ adds the tier qualifier for a non-A1 primary');
+          TestAssertEqual_(combinedMorningSubjectGs_('Ayaz', 'TM', 'Pune', '1 Oct 2026'), '(Ayaz) Pune Google Overnight + Follow-up Digest - 1 Oct 2026', 'OE-08 / 2026-11-23: combinedMorningSubjectGs_ shows no role, even for a non-A1 primary');
         }
 
         // ---- OE-10: a failed combined email reports only the still-unresolved Checkpoint 1 leads ----

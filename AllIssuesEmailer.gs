@@ -632,13 +632,9 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
 
   Object.keys(byCh).forEach(function (chName) {
     const entry = byCh[chName];
-    // Real recorded role (resolveRecipientBucketsForRms_ — "Cluster Head",
-    // "City Lead", "Commercial Head", or "Leadership" for someone with no
-    // RM_Hierarchy row at all), not a generic "CH" label — matches the
-    // same "Name (real role)" shape the normal-bucket subject uses.
-    // 2026-10-17: no role at all when the report goes to a no-role address (chLevelReportRoleGs_, EmailInfra.gs).
-    const shownChRole = chLevelReportRoleGs_(entry.chRole || 'CH');
-    const subject = chName + (shownChRole ? ' (' + shownChRole + ')' : '') + ' google Leads With Issue ' + dateRangeLabel;
+    // 2026-11-23 (user request): the subject names the REGION, not the role ("Snehil Chhimwal (Thane) Google Leads With Issue ..."),
+    // same as allIssuesSubjectGs_ below.
+    const subject = chName + (region ? ' (' + region + ')' : '') + ' Google Leads With Issue ' + dateRangeLabel;
 
     const split = splitSelfAndReportingRmNames_(chName, entry.rmNames);
     const selfRmNames = split.selfRmNames;
@@ -732,10 +728,13 @@ function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
 // The 17:00 bucket email's subject - one definition, shared with the Email_Ledger plan (D4, 2026-10-16: the plan recorded no subject, so
 // EmailSweep.gs could not attribute a bounce arriving more than 15 minutes after the send).
 // A Futwork email covers several regions, so its subject spells them out where other buckets show their role.
-// AI-6 (audit 2026-10-13): a bucket with no role (the Unmatched-RMs fallbacks) read "Unmatched RMs () google ..." - the empty brackets are omitted.
+// AI-6 (audit 2026-10-13): empty brackets are omitted.
+// 2026-11-23 (user request): the brackets hold the REGION, never the person's role/designation, and "Google" is capitalised:
+// "Niraj Patil (Thane) Google Leads With Issue (20-Nov-2026 to 22-Nov-2026)". A multi-region email (Futwork, a consolidated person)
+// still spells out all its regions.
 function allIssuesSubjectGs_(region, rec, leads, win) {
-  const subjectRole = isMultiRegionKeyGs_(region) ? regionHeaderOptsGs_(region, leads).region : emailRoleLabelGs_(rec.bucketLabel, rec.primaryRole);
-  return rec.bucketLabel + (subjectRole ? ' (' + subjectRole + ')' : '') + ' google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
+  const regionLabel = isMultiRegionKeyGs_(region) ? regionHeaderOptsGs_(region, leads).region : String(region || '').trim();
+  return rec.bucketLabel + (regionLabel ? ' (' + regionLabel + ')' : '') + ' Google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
 }
 
 // Builds and sends ONE all-issues email for a single resolved bucket

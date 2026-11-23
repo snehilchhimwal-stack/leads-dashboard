@@ -191,7 +191,10 @@ function runFollowupEngineTests_() {
     // "Update" by design (confirmed above).
     f = buildRow({ internal_status_comments: 'Test RM One: Client seemed happy with the pricing overall - 2026-08-15 10:00' });
     TestAssertEqual_(latestOutcomeGs_(f.row, f.colIndex).outcome, 'Update', 'sanity: this comment really does classify as the generic "Update" outcome');
-    TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'Client seemed happy with the pricing overall', 'overnightFollowupHintGs_: "Update" outcome falls through to quoting the real comment text, not a missing/undefined suggestion');
+    // 2026-11-23: comments are read, never quoted back - an unclassified note gets a plain "confirm and log" step instead.
+    const hUpdate = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
+    TestAssert_(hUpdate.indexOf('Client seemed happy with the pricing overall') === -1, 'no-quote: an "Update" comment is not quoted back (got: ' + hUpdate + ')');
+    TestAssertContains_(hUpdate, 'the note does not say what was agreed', 'no-quote: an "Update" comment gets a confirm-and-log step, not an undefined suggestion');
 
     // ---- noCommentFollowUpGs_: 3 tiers ----
     f = buildRow({ call_attempts: 3 });
@@ -241,7 +244,7 @@ function runFollowupEngineTests_() {
       'Test RM One: Site visit done, liked 2bhk, budget 1.2 cr - 2026-11-10 12:00 | Test RM One: discussing with wife, call back - 2026-11-12 11:00 | ' +
       'Test RM One: rnr - 2026-11-14 10:00 | Test RM One: switched off - 2026-11-15 10:00 | Test RM One: rnr - 2026-11-16 18:00' });
     let h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
-    TestAssertContains_(h, 'Last real conversation 12 Nov', 'history rule 2: names the date of the last real conversation');
+    TestAssertContains_(h, 'Last spoke on 12 Nov - asked for a callback', 'history rule 2: names the date and what the last conversation was about, without quoting it');
     TestAssertContains_(h, '3 unanswered attempts over 3 days', 'history rule 2: counts the unanswered streak since that conversation');
     TestAssertContains_(h, 'site visit done', 'history rule 2: reminds of the best milestone reached earlier');
     TestAssertContains_(h, 'History: 5 calls/comments, 10 Nov to 16 Nov', 'history: always ends with the History line');
@@ -250,7 +253,8 @@ function runFollowupEngineTests_() {
     f = buildRow({ internal_status_comments: 'Test RM One: interested in 3bhk - 2026-11-10 12:00 | Test RM One: not interested anymore - 2026-11-12 11:00 | Test RM One: rnr - 2026-11-13 10:00' });
     h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
     TestAssertContains_(h, 'no interest', 'history rule 1: STOP advice is used');
-    TestAssertContains_(h, 'Said 12 Nov: "not interested anymore"', 'history rule 1: quotes what was said and when');
+    TestAssertContains_(h, 'Logged 12 Nov: not interested / not looking', 'history rule 1: says what was said and when, in plain words');
+    TestAssert_(h.indexOf('not interested anymore') === -1, 'history rule 1: the comment itself is not quoted');
 
     // A later conversation overrides an old STOP (rule 4 + note).
     f = buildRow({ internal_status_comments: 'Test RM One: not interested - 2026-11-10 12:00 | Test RM One: site visit scheduled sunday - 2026-11-12 11:00' });
@@ -270,7 +274,7 @@ function runFollowupEngineTests_() {
     f = buildRow({ internal_status_comments: 'Test RM One: looking for 2bhk under 90 lakh, call after 6pm - 2026-11-10 12:00 | Test RM One: client interested, wants pricing - 2026-11-12 11:00' });
     h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
     TestAssertContains_(h, 'Client showed interest', 'history rule 4: advice for the latest conversation');
-    TestAssertContains_(h, '2bhk under 90 lakh', 'history rule 4: requirement from an earlier comment is carried');
+    TestAssertContains_(h, 'Requirement on record: 2 BHK, budget ₹90 L', 'history rule 4: requirement facts from an earlier comment are carried, not the comment');
     TestAssertContains_(h, 'after 6pm', 'history rule 4: preference clause from an earlier comment is carried');
 
     // Someone other than the RM: shown with attribution, not dropped.
@@ -332,7 +336,7 @@ function runFollowupEngineTests_() {
     // A connected call is a conversation, and a STOP said on it wins; Invalid No is a stop.
     f = buildRow({ internal_status_comments: 'Test RM One: [Ringing] - 2026-11-10 10:00 | Test RM One: [Call Connected] wants 2bhk, call after 6pm - 2026-11-11 10:00' });
     h = overnightFollowupHintGs_(f.row, f.colIndex, now, null);
-    TestAssertContains_(h, 'last real conversation 11 Nov', 'call status: Call Connected is a real conversation');
+    TestAssertContains_(h, 'last connected 11 Nov', 'call status: Call Connected is a real conversation');
     f = buildRow({ internal_status_comments: 'Test RM One: [Call Connected] not interested - 2026-11-11 10:00' });
     TestAssertContains_(overnightFollowupHintGs_(f.row, f.colIndex, now, null), 'no interest', 'call status: a STOP said on a connected call is a STOP');
     f = buildRow({ internal_status_comments: 'Test RM One: [Invalid No] - 2026-11-11 10:00' });
@@ -405,6 +409,34 @@ function runFollowupEngineTests_() {
     TestAssertContains_(historyDecideGs_(e2279579, 'Mamtaben S 1 Account', 3, 1, 12, '2026-11-19'), '1 connected call (12 s talk time)', 'short connect: 10 s or more is flagged');
     TestAssertEqual_(historyTalkTimeGs_(129) + ' / ' + historyTalkTimeGs_(60) + ' / ' + historyTalkTimeGs_(9), '2 min 9 s / 1 min / 9 s', 'talk time formatting');
     TestAssertEqual_(historyDayKeyGs_('11/5/2026 10:00:00') + ' ' + historyDaysBetweenGs_('2026-11-15', '2026-11-19'), '2026-11-05 5', 'day key from m/d/y and inclusive day count');
+
+    // ---- 2026-11-23: read every comment, quote none; requirement known but no Opportunity (real case: lead 2281814) ----
+    const e2281814 = historyEntriesGs_('Saurabh M S: [Call Connected] Looking for 1bhk low budget 75L 500 carpet - 2026-11-22 13:57 | ' +
+      'Akash Gaikwad: [Ringing] - 2026-11-22 15:04 | Akash Gaikwad: [Ringing] - 2026-11-23 10:15 | Avinash Khare: [Busy] Busy, message dropped - 2026-11-23 12:02', '');
+    h = historyDecideGs_(e2281814, 'Saurabh M S', 4, 1, 130, '2026-11-22 13:44:54', 'Suspect');
+    TestAssertContains_(h, 'shared the requirement (1 BHK, budget ₹75 L, 500 sq ft carpet), but the lead is still at Suspect - no Opportunity created', 'opportunity: requirement facts from the comments + the stage');
+    TestAssertContains_(h, 'move it to Opportunity', 'opportunity: the next step is to create the Opportunity');
+    TestAssertContains_(h, '3 calls unanswered since (Ringing x2, Busy, last 23 Nov)', 'opportunity: the unanswered calls since the conversation are counted');
+    TestAssert_(h.indexOf('Looking for 1bhk') === -1 && h.indexOf('confirm their actual range') === -1, 'opportunity: no comment quoted, no redundant budget clause (got: ' + h + ')');
+    TestAssertContains_(h, 'last connected 22 Nov', 'opportunity: History line says when the customer was last reached');
+    // Already an Opportunity (or later) -> the ordinary rules, with the requirement as a fact line.
+    h = historyDecideGs_(e2281814, 'Saurabh M S', 4, 1, 130, '2026-11-22', 'Opportunity');
+    TestAssert_(h.indexOf('no Opportunity created') === -1, 'opportunity: not raised once the lead is an Opportunity (got: ' + h + ')');
+    TestAssertContains_(h, 'Requirement on record: 1 BHK, budget ₹75 L, 500 sq ft carpet', 'opportunity: requirement still shown as facts');
+    // No stage known (old callers) -> the rule cannot fire.
+    TestAssert_(historyDecideGs_(e2281814, 'Saurabh M S').indexOf('no Opportunity created') === -1, 'opportunity: needs a known pre-Opportunity stage');
+    // Stop on a connected call counts as reached (real case: lead 2281664), and nothing is quoted.
+    const e2281664 = historyEntriesGs_('Kamlesh Tawale: [Call Connected] Not interested no requirements - 2026-11-22 11:14 | Kamlesh Tawale: [Ringing] - 2026-11-22 12:01 | ' +
+      'Sajid Mulani: [Call Connected] Broker - 2026-11-22 15:34 | Akash Gaikwad: [Call Connected] Not looking - 2026-11-22 18:49 | Kamlesh Tawale: [Ringing] - 2026-11-22 19:15', '');
+    h = historyDecideGs_(e2281664, 'Akash Gaikwad', 5, 2, 32, '2026-11-21 23:08:26', 'Suspect');
+    TestAssertContains_(h, 'Logged 22 Nov: not interested / not looking. Earlier also: a broker / channel partner.', 'stop: newest stop in plain words, earlier different stops listed');
+    TestAssertContains_(h, 'last connected 22 Nov', 'stop: a stop said on a connected call counts as reached (was "customer never reached yet")');
+    TestAssert_(h.indexOf('connected call') === -1, 'stop: no unlogged-connected-call warning once a connected call is logged');
+    // Requirement fact parsing: ranges, misspellings, newest mention wins.
+    const fx = historyFactsGs_(historyEntriesGs_('A: needs 2/3 bhk 1-1.2cr - 2026-11-10 10:00 | A: now says 3bhk, 1.5 crore, 950 sqft - 2026-11-11 10:00', ''));
+    TestAssertEqual_(fx.text, '3 BHK, budget ₹1.5 Cr, 950 sq ft carpet', 'facts: the newest mention of each fact wins');
+    TestAssertEqual_(historyFactsGs_(historyEntriesGs_('A: 2 or 3 bhk under 1-1.2cr - 2026-11-10 10:00', '')).text, '2 or 3 BHK, budget ₹1-1.2 Cr', 'facts: configuration and budget ranges');
+    TestAssertEqual_(historyFactsGs_(historyEntriesGs_('A: [Ringing] - 2026-11-10 10:00', '')).text, '', 'facts: none when no comment mentions them');
   } finally {
     TestEnv_tearDown_();
   }
