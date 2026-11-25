@@ -92,7 +92,7 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `34a1e23` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `AllIssuesEmailer.gs` | `91c9522` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `Core.gs` | `60832fe` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `CycleReport.gs` | `6ca53d2` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `DailyChecklist.gs` | `6ca53d2` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
@@ -108,7 +108,7 @@ snippet text itself is the same every time — only the embedded payload changes
 | `MovementTracker.gs` | `a2b904e` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `OpsAudit.gs` | `8ef279d` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
-| `OvernightEmailer.gs` | `23d32c7` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `OvernightEmailer.gs` | `91c9522` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `RmHierarchy.gs` | `4ec6f0f` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `RmHierarchySync.gs` | `6b28fba` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 | `SlaEngine.gs` | `b7521f4` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
