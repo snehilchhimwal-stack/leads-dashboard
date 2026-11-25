@@ -512,6 +512,65 @@ function runAllIssuesEmailerTests_() {
       }
     }
 
+    // ---- 2026-11-25 (user request): ONE CH-level report per person per run, all their regions in it ----
+    {
+      const tag = 'CH-level one email per person: ';
+      const chRms = [{ rmName: 'Test CH Multi', chName: 'Test CH Multi', chEmail: TEST_EMAIL_CH_, chRole: 'Cluster Head' }];
+      const flagged = function (id) { return { 'Test CH Multi': [{ lead_id: id, RM: 'Test CH Multi', TL: '', status: 'Suspect', issueLabel: 'Not Updated', followup: 'Assign it' }] }; };
+      const night = function (id) { return { 'Test CH Multi': [{ lead_id: id, RM: 'Test CH Multi', TL: '', status: 'Suspect', followup: 'Assign it' }] }; };
+      try {
+        // 17:00 issues report: two regions in one run -> one email
+        PropertiesService = TestMockPropertiesService_();
+        let d0 = TestGmailLog_.drafts.length;
+        chLevelBufferStartGs_();
+        notifyChLevelIssuesGs_('Bangalore', chRms, flagged('L-MR-B'), win);
+        notifyChLevelIssuesGs_('Hyderabad', chRms, flagged('L-MR-H'), win);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + 'nothing is sent while the run is still collecting');
+        chLevelBufferFlushGs_();
+        let sent = TestGmailLog_.drafts.slice(d0);
+        TestAssertEqual_(sent.length, 1, tag + '17:00: two regions -> ONE email');
+        TestAssertEqual_(sent[0].subject.indexOf('Test CH Multi (Bangalore, Hyderabad) Google Leads With Issue'), 0, tag + '17:00 subject lists both regions');
+        TestAssert_(sent[0].body.indexOf('L-MR-B') !== -1 && sent[0].body.indexOf('L-MR-H') !== -1, tag + '17:00: both regions\' leads are in the one email');
+        TestAssert_(sent[0].body.indexOf('Test CH Multi — Bangalore') !== -1 && sent[0].body.indexOf('Test CH Multi — Hyderabad') !== -1, tag + '17:00: leads grouped under their region');
+        TestAssert_(wasChReportSentTodayGs_(CH_REPORT_KINDS_.allIssues, 'Bangalore', 'Test CH Multi') && wasChReportSentTodayGs_(CH_REPORT_KINDS_.allIssues, 'Hyderabad', 'Test CH Multi'), tag + '17:00: both regions are marked sent for today');
+        // a second run the same day sends nothing again
+        d0 = TestGmailLog_.drafts.length;
+        chLevelBufferStartGs_();
+        notifyChLevelIssuesGs_('Bangalore', chRms, flagged('L-MR-B2'), win);
+        chLevelBufferFlushGs_();
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + '17:00: once a day per region still holds');
+
+        // one region only -> exactly the old single-region shape
+        PropertiesService = TestMockPropertiesService_();
+        d0 = TestGmailLog_.drafts.length;
+        chLevelBufferStartGs_();
+        notifyChLevelIssuesGs_('Thane', chRms, flagged('L-MR-T'), win);
+        chLevelBufferFlushGs_();
+        sent = TestGmailLog_.drafts.slice(d0);
+        TestAssert_(sent.length === 1 && sent[0].subject.indexOf('Test CH Multi (Thane) Google Leads With Issue') === 0 && sent[0].body.indexOf('— Thane') === -1, tag + 'one region: same subject and headings as before');
+
+        // 10:00 overnight report: two regions -> one email
+        PropertiesService = TestMockPropertiesService_();
+        d0 = TestGmailLog_.drafts.length;
+        chLevelBufferStartGs_();
+        notifyChLevelLeadsGs_('Bangalore', chRms, night('L-MO-B'), 'test date');
+        notifyChLevelLeadsGs_('Hyderabad', chRms, night('L-MO-H'), 'test date');
+        chLevelBufferFlushGs_();
+        sent = TestGmailLog_.drafts.slice(d0);
+        TestAssertEqual_(sent.length, 1, tag + '10:00: two regions -> ONE email');
+        TestAssertEqual_(sent[0].subject, '(Test CH Multi) Bangalore, Hyderabad Google Overnight Leads - test date', tag + '10:00 subject lists both regions');
+
+        // no open buffer (a direct call) -> sends at once, as before
+        PropertiesService = TestMockPropertiesService_();
+        d0 = TestGmailLog_.drafts.length;
+        notifyChLevelIssuesGs_('Pune', chRms, flagged('L-MR-P'), win);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0 + 1, tag + 'a direct call with no run open still sends straight away');
+      } finally {
+        CH_LEVEL_REPORT_BUFFER_ = null;
+        PropertiesService = TestMockPropertiesService_();
+      }
+    }
+
     // ---- email audit P10 (F11): the CH-level issues report goes once a day per region + CH ----
     {
       const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];

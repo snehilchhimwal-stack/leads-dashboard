@@ -397,6 +397,50 @@ function regionKeyForRmGs_(rmName, region) { return isFutworkRmNameGs_(rmName) ?
 // 2026-10-16: a person whose 17:00 buckets are combined across regions (ALL_ISSUES_CONSOLIDATED_RECIPIENTS_, AllIssuesEmailer.gs)
 // gets ONE email keyed by this pseudo-region, e.g. 'Multi-region: Rajesh Muni'. Like Futwork, each lead keeps its real region,
 // and the 10:00 Checkpoint 1 / 13:00 Checkpoint 2 follow that one row as one bucket (isMultiRegionKeyGs_).
+// ===== One CH-level (Ops) report per person per run (2026-11-25, user request) =====
+// CH-level reports used to go out once per REGION from inside each run's region loop, so a person holding leads in two regions
+// got two Ops emails. A run now opens this buffer before its region loop and flushes it after: every person's reports are merged
+// into ONE email per run (10:00 overnight, 17:00 issues), leads grouped by region, the regions listed in the subject
+// ("Mukesh Mishra Admin (Bangalore, Hyderabad) Google Leads With Issue ..."). A single-region report is exactly what it was.
+// Called with no open buffer (tests, a one-off console call), notifyChLevel*Gs_ still sends straight away.
+let CH_LEVEL_REPORT_BUFFER_ = null;
+function chLevelBufferStartGs_() { CH_LEVEL_REPORT_BUFFER_ = []; }
+function chLevelBufferFlushGs_() {
+  const buf = CH_LEVEL_REPORT_BUFFER_;
+  CH_LEVEL_REPORT_BUFFER_ = null;
+  if (!buf || !buf.length) return;
+  const groups = {}, order = [];
+  buf.forEach(function (item) {
+    const byCh = groupChLevelRmsByCh_(item.chLevelRms);
+    Object.keys(byCh).forEach(function (chName) {
+      const key = item.kind + '|' + chName;
+      if (!groups[key]) { groups[key] = { kind: item.kind, chName: chName, chRole: byCh[chName].chRole, extra: item.extra, ledger: item.ledger, parts: [] }; order.push(key); }
+      groups[key].parts.push({ region: item.region, rmNames: byCh[chName].rmNames, rmToLeads: item.rmToLeads });
+    });
+  });
+  order.forEach(function (key) {
+    const g = groups[key];
+    try {
+      if (g.kind === 'issues') sendChLevelIssuesReportGs_(g.chName, g.chRole, g.parts, g.extra.win, g.ledger);
+      else sendChLevelOvernightReportGs_(g.chName, g.chRole, g.parts, g.extra.dateLabel, g.ledger);
+    } catch (e) {
+      Logger.log('chLevelBufferFlushGs_: the ' + g.kind + ' CH-level report for ' + g.chName + ' failed: ' + e);
+    }
+  });
+}
+// The live parts of one person's report: each region's leads grouped by RM, regions with no leads or already reported today dropped.
+function chLevelLivePartsGs_(kind, chName, parts, logTag) {
+  const live = [];
+  (parts || []).forEach(function (p) {
+    const g = groupLeadsByRmAndFlatten_(p.rmNames, p.rmToLeads);
+    if (!g.allLeads.length) { Logger.log(logTag + ': no leads for the CH-level RM(s) ' + p.rmNames.join(', ') + ' (' + p.region + ') - not included.'); return; }
+    // Once per day per region + CH (email audit P10 / F11) - see wasChReportSentTodayGs_ (EmailInfra.gs).
+    if (wasChReportSentTodayGs_(kind, p.region, chName)) { Logger.log(logTag + ': ' + chName + ' (' + p.region + ') was already reported today - not re-sending.'); return; }
+    live.push({ region: p.region, rmNames: p.rmNames, g: g });
+  });
+  return live;
+}
+
 const CONSOLIDATED_REGION_KEY_PREFIX_ = 'Multi-region: ';
 function consolidatedRegionKeyGs_(personName) { return CONSOLIDATED_REGION_KEY_PREFIX_ + String(personName || '').trim(); }
 // True for a pseudo-region whose leads span several real regions (Futwork, or a consolidated person's key).

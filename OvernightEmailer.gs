@@ -133,136 +133,99 @@ const OVERNIGHT_LOG_SHEET_ = 'Overnight_Log';
 // omitted (empty leads, or a freshly-computed dateLabel).
 function notifyChLevelLeadsGs_(region, chLevelRms, rmToLeads, dateLabel, ledger) {
   if (!chLevelRms.length) return;
+  if (CH_LEVEL_REPORT_BUFFER_) { CH_LEVEL_REPORT_BUFFER_.push({ kind: 'overnight', region: region, chLevelRms: chLevelRms, rmToLeads: rmToLeads, extra: { dateLabel: dateLabel }, ledger: ledger }); return; }
   const byCh = groupChLevelRmsByCh_(chLevelRms); // chName -> { chEmail, chRole, rmNames: [] }
-  const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
   Object.keys(byCh).forEach(function (chName) {
-    const entry = byCh[chName];
-    // Real recorded role in parens (resolveRecipientBucketsForRms_ —
-    // "Cluster Head", "City Lead", "Commercial Head", or "Leadership" for
-    // someone with no RM_Hierarchy row at all) — same tierQualifier
-    // convention sendOneOvernightEmail_'s own normal-bucket subject
-    // already uses for a non-A1 primary, just applied here too; this
-    // subject previously showed no role indicator at all.
-    // 2026-11-23 (user request): no role/designation in any subject - the person's name, then the region.
-    const subject = '(' + chName + ') ' + region + ' Google Overnight Leads - ' + effectiveDateLabel;
+    sendChLevelOvernightReportGs_(chName, byCh[chName].chRole, [{ region: region, rmNames: byCh[chName].rmNames, rmToLeads: rmToLeads }], dateLabel, ledger);
+  });
+}
 
-    // Two genuinely different situations can both land a name in
-    // chLevelRms (see resolveRecipientBucketsForRms_): an ordinary RM
-    // whose chain resolves UP to this CH (reportingRmNames), or the CH
-    // THEMSELVES personally holding a lead with nobody below them
-    // (selfRmNames — rmName === chName). Using the same "no A1/TM/RH
-    // configured above X — chain resolves up to X" wording for the self
-    // case reads circularly ("...above Vidya Jadhav... up to Vidya
-    // Jadhav"), so each gets its own explanation; a region can have
-    // both in the same run, so both parts can appear together.
-    const split = splitSelfAndReportingRmNames_(chName, entry.rmNames);
-    const selfRmNames = split.selfRmNames;
-    const reportingRmNames = split.reportingRmNames;
-    const noteParts = [];
-    if (selfRmNames.length) {
-      noteParts.push(chName + ' is personally holding ' + (selfRmNames.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
-    }
-    if (reportingRmNames.length) {
-      noteParts.push('No A1, TM, or RH configured above ' + reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
-    }
-    const actionParts = [];
-    if (selfRmNames.length) {
-      actionParts.push('Decide whether ' + chName + ' will handle ' + (selfRmNames.length === 1 ? 'this' : 'these') + ' personally, or reassign to an RM under them.');
-    }
-    if (reportingRmNames.length) {
-      actionParts.push('Add a TL/TM/RH for ' + reportingRmNames.join(', ') + ' in RM_Hierarchy, or handle manually.');
-    }
+// ONE 10:00 CH-level overnight report for one person, covering every region in `parts` - see the buffer (EmailInfra.gs).
+// The self-held and reporting-up cases each get their own explanation (a region can have both in the same run).
+function sendChLevelOvernightReportGs_(chName, chRole, parts, dateLabel, ledger) {
+  const live = chLevelLivePartsGs_(CH_REPORT_KINDS_.overnight, chName, parts, 'notifyChLevelLeadsGs_');
+  if (!live.length) return;
+  const effectiveDateLabel = dateLabel || Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMM yyyy');
+  const multi = live.length > 1;
+  const regionLabel = live.map(function (x) { return x.region; }).join(', ');
+  // 2026-11-23 (user request): no role/designation in any subject - the person's name, then the region(s).
+  const subject = '(' + chName + ') ' + regionLabel + ' Google Overnight Leads - ' + effectiveDateLabel;
+  const rmNames = [];
+  live.forEach(function (x) { x.rmNames.forEach(function (n) { if (rmNames.indexOf(n) === -1) rmNames.push(n); }); });
+  const allLeads = [].concat.apply([], live.map(function (x) { return x.g.allLeads; }));
+  const rmCount = Array.from(new Set([].concat.apply([], live.map(function (x) { return x.g.rmKeys; })))).length;
+  const statusTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.status; }))).length;
 
-    // Same visual mechanism as sendOneOvernightEmail_'s TEST MODE
-    // banner — this one explains why the recipient isn't chName despite
-    // the subject naming them, since the report body below is otherwise
-    // identical to a real per-RM overnight email.
-    const noteBanner = {
-      html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
-        '<div style="font-weight:700; color:#92400e; font-size:13px;">Sent to Ops — not to ' + esc_(chName) + '</div>' +
-        '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">' + esc_(noteParts.join(' ')) + ' ' + esc_(actionParts.join(' ')) + '</div>' +
-        '</div>',
-      plain: 'NOTE: sent to Ops, not to ' + chName + ' — ' + noteParts.join(' ') + ' ' + actionParts.join(' ') + '\n\n',
-    };
-
-    // Group by whoever ACTUALLY holds each lead (the real RM — Sanket
-    // Yadav, say, not Bipin More, for a reporting-up case; the CH's own
-    // name for a self-held case) — same grouping sendOneOvernightEmail_
-    // uses, so who currently holds each lead is exactly as visible here
-    // as in every normal per-RM email.
-    const grouped = groupLeadsByRmAndFlatten_(entry.rmNames, rmToLeads);
-    const byRM = grouped.byRM;
-    const rmKeys = grouped.rmKeys;
-    const allLeads = grouped.allLeads;
-    const statusTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.status; }))).length;
-
-    // 2026-10-05 email audit (P1/F4): nothing in this function stopped a report with ZERO leads (the CH-level RM names
-    // resolved, but rmToLeads — optional — held none of their leads) from going out as an empty "0 Leads Assigned" email.
-    if (!allLeads.length) {
-      Logger.log('notifyChLevelLeadsGs_: no leads found for the CH-level RM(s) ' + entry.rmNames.join(', ') + ' (' + region + ') — report not sent.');
-      return;
-    }
-    // Once per day per region + CH (email audit P10 / F11) — see wasChReportSentTodayGs_ (EmailInfra.gs).
-    if (wasChReportSentTodayGs_(CH_REPORT_KINDS_.overnight, region, chName)) {
-      Logger.log('notifyChLevelLeadsGs_: the CH-level overnight report for ' + chName + ' (' + region + ') was already sent today — not re-sending.');
-      return;
-    }
-
-    const reportOpts = {
-      title: 'Overnight Leads',
-      region: region,
-      subtitle: 'CH-level — ' + chName,
-      kpis: [
-        { value: allLeads.length, label: allLeads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
-        { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
-        { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
-      ],
-      action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
-      sections: rmKeys.map(function (rm) {
+  const split = splitSelfAndReportingRmNames_(chName, rmNames);
+  const noteParts = [], actionParts = [];
+  if (split.selfRmNames.length) {
+    noteParts.push(chName + ' is personally holding ' + (allLeads.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
+    actionParts.push('Decide whether ' + chName + ' will handle ' + (allLeads.length === 1 ? 'this' : 'these') + ' personally, or reassign to an RM under them.');
+  }
+  if (split.reportingRmNames.length) {
+    noteParts.push('No A1, TM, or RH configured above ' + split.reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
+    actionParts.push('Add a TL/TM/RH for ' + split.reportingRmNames.join(', ') + ' in RM_Hierarchy, or handle manually.');
+  }
+  const noteBanner = {
+    html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
+      '<div style="font-weight:700; color:#92400e; font-size:13px;">Sent to Ops — not to ' + esc_(chName) + '</div>' +
+      '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">' + esc_(noteParts.join(' ')) + ' ' + esc_(actionParts.join(' ')) + '</div>' +
+      '</div>',
+    plain: 'NOTE: sent to Ops, not to ' + chName + ' — ' + noteParts.join(' ') + ' ' + actionParts.join(' ') + '\n\n',
+  };
+  const reportOpts = {
+    title: 'Overnight Leads',
+    region: regionLabel,
+    subtitle: 'CH-level — ' + chName,
+    kpis: [
+      { value: allLeads.length, label: allLeads.length === 1 ? 'Lead Assigned' : 'Leads Assigned', bg: '#dbeafe', fg: '#2563eb' },
+      { value: rmCount, label: rmCount === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+      { value: statusTypeCount, label: statusTypeCount === 1 ? 'Status Type' : 'Status Types', bg: '#fef3c7', fg: '#b45309' },
+    ],
+    action: "Review and prioritize follow-up on these leads before the rest of today's queue — they came in after hours and may still be waiting on first contact.",
+    sections: [].concat.apply([], live.map(function (x) {
+      return x.g.rmKeys.map(function (rm) {
         return {
-          heading: rm,
+          heading: rm + (multi ? ' — ' + x.region : ''),
           subheading: rm.toLowerCase() === chName.toLowerCase() ? 'Held directly by ' + chName : 'Reports up to ' + chName,
           columns: ['Lead ID', 'Status', 'Suggested Follow-up'],
-          rows: byRM[rm].map(function (l) { return [l.lead_id, l.status, l.followup]; }),
+          rows: x.g.byRM[rm].map(function (l) { return [l.lead_id, l.status, l.followup]; }),
         };
-      }),
-      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically.',
-    };
-    applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
-    const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
-    // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
-    const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
-
-    // Wrapped in its own try/catch, same reasoning as notifyOpsAlertGs_ —
-    // a failure to send THIS report must never take down the real
-    // morning-send loop it's reporting alongside.
-    try {
-      const chLeadIds = allLeads.map(function (l) { return l.lead_id; });
-      const chDay = istDayKeyGs_(new Date());
-      emailLedgerTrackSendGs_(ledger, {
-        emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_CH_OVERNIGHT_, chDay, region, entry.chRole || 'CH', chName), job: EMAIL_LEDGER_JOB_CH_OVERNIGHT_, dayKey: chDay,
-        region: region, bucketLabel: chName, primaryRole: entry.chRole || 'CH', to: chLevelReportToGs_(), cc: '', subject: subject, leadIds: chLeadIds.map(String),
-      }, function () {
-        return sendGuardedEmailGs_({
-          to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
-          leadIds: chLeadIds,
-        }, 'send CH-level report (' + chName + ', ' + region + ')');
       });
-      markChReportSentGs_(CH_REPORT_KINDS_.overnight, region, chName);
-    } catch (e) {
-      Logger.log('notifyChLevelLeadsGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
-      // OE-05 (audit 2026-10-13): EVERY caught failure alerts, not just a gate block. A CH-level report is not in "Leads NOT
-      // sent" and no recovery job re-sends it (recovery covers morning10/allIssues17 only), so this alert is the only signal.
-      const ambiguous = !(e && e.blockedByGuard) && isAmbiguousSendErrorGs_(e);
-      notifyOpsAlertGs_('CH-level overnight report ' + (e && e.blockedByGuard ? 'BLOCKED' : ambiguous ? 'UNCONFIRMED' : 'FAILED') + ' - ' + region + ' / ' + chName, [
-        String((e && e.message) || e),
-        'Leads (' + allLeads.length + '): ' + allLeads.map(function (l) { return l.lead_id; }).join(', '),
-        ambiguous
-          ? 'The send ended ambiguously - check Gmail Sent for "' + subject + '" before re-sending.'
-          : 'CH-level reports have no recovery job: re-send by hand (check Gmail Drafts for "' + subject + '" first).',
-      ]);
-    }
-  });
+    })),
+    footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically.',
+  };
+  applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
+  const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
+  // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
+  const plainBody = noteBanner.plain + 'RM(s): ' + rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
+
+  // Wrapped in its own try/catch - a failure to send THIS report must never take down the morning-send loop.
+  try {
+    const chLeadIds = allLeads.map(function (l) { return l.lead_id; });
+    const chDay = istDayKeyGs_(new Date());
+    emailLedgerTrackSendGs_(ledger, {
+      emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_CH_OVERNIGHT_, chDay, regionLabel, chRole || 'CH', chName), job: EMAIL_LEDGER_JOB_CH_OVERNIGHT_, dayKey: chDay,
+      region: regionLabel, bucketLabel: chName, primaryRole: chRole || 'CH', to: chLevelReportToGs_(), cc: '', subject: subject, leadIds: chLeadIds.map(String),
+    }, function () {
+      return sendGuardedEmailGs_({
+        to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
+        leadIds: chLeadIds,
+      }, 'send CH-level report (' + chName + ', ' + regionLabel + ')');
+    });
+    live.forEach(function (x) { markChReportSentGs_(CH_REPORT_KINDS_.overnight, x.region, chName); });
+  } catch (e) {
+    Logger.log('notifyChLevelLeadsGs_ failed to send its report for ' + chName + ' (' + regionLabel + '): ' + e);
+    // OE-05 (audit 2026-10-13): EVERY caught failure alerts. A CH-level report has no recovery job, so this alert is the only signal.
+    const ambiguous = !(e && e.blockedByGuard) && isAmbiguousSendErrorGs_(e);
+    notifyOpsAlertGs_('CH-level overnight report ' + (e && e.blockedByGuard ? 'BLOCKED' : ambiguous ? 'UNCONFIRMED' : 'FAILED') + ' - ' + regionLabel + ' / ' + chName, [
+      String((e && e.message) || e),
+      'Leads (' + allLeads.length + '): ' + allLeads.map(function (l) { return l.lead_id; }).join(', '),
+      ambiguous
+        ? 'The send ended ambiguously - check Gmail Sent for "' + subject + '" before re-sending.'
+        : 'CH-level reports have no recovery job: re-send by hand (check Gmail Drafts for "' + subject + '" first).',
+    ]);
+  }
 }
 
 // Yesterday 5 PM IST through today 9 AM IST, as real Date objects — matches
@@ -1022,6 +985,15 @@ function sendOvernightMorningEmails() {
 }
 
 function sendOvernightMorningEmails_(opts) {
+  // 2026-11-25: CH-level reports are collected across regions and sent ONE per person at the end of the run.
+  chLevelBufferStartGs_();
+  try {
+    return sendOvernightMorningEmailsBody_(opts);
+  } finally {
+    chLevelBufferFlushGs_();
+  }
+}
+function sendOvernightMorningEmailsBody_(opts) {
   // opts.onlyEmailIds / opts.onlyRegions (Email Ops EO-9b, recovery only): { ledgerEmailId: true } / { region: true } - re-send just those failed buckets. The
   // region "already sent today" guard is skipped for them, everything is recomputed from the CURRENT data (a lead resolved by now is simply not in the email),
   // and the original run's exclusion rows, CH-level reports and unresolved-recipient reports are not repeated.

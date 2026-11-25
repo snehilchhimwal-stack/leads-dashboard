@@ -1034,6 +1034,15 @@ overview.
 
 ---
 
+### CH-level (Ops) reports: one email per person per run (2026-11-25)
+
+`sendAllIssuesEmails_` (17:00) and `sendOvernightMorningEmails_` (10:00) open `chLevelBufferStartGs_()` (EmailInfra.gs) before
+their region loop and flush it after. `notifyChLevelIssuesGs_` / `notifyChLevelLeadsGs_` then only collect; the flush merges each
+person's regions into ONE report (`sendChLevelIssuesReportGs_` / `sendChLevelOvernightReportGs_`), leads grouped by region, the
+regions in the subject ("Mukesh Mishra Admin (Bangalore, Hyderabad) Google Leads With Issue ..."). Once-a-day guard and
+Email_Ledger still per region (a multi-region row's region is the joined label). A direct call with no open buffer sends at once.
+Paired with Coefficient query v4 (Admin-owned leads take the project's region) - see sql/ROLLBACK_2026-11-20.md.
+
 ## 6. Logic that's duplicated across the two runtimes
 
 Because the browser and Apps Script can't share code, these pairs must be

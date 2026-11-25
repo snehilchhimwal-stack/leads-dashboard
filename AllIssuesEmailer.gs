@@ -588,12 +588,17 @@ function sendAllIssuesEmails_(opts) {
   // ONE PLANNED write for the whole run, then the sends.
   emailLedgerPlanGs_(ledger, [].concat.apply([], prepared.map(function (p) { return planEntries_(p.region, p.buckets); })));
   Logger.log('[timing] all ' + prepared.reduce(function (n, p) { return n + p.buckets.length; }, 0) + ' bucket(s) planned at ' + elapsed_());
+  chLevelBufferStartGs_(); // 2026-11-25: CH-level reports are collected across regions and sent ONE per person after the loop
+  try {
   prepared.forEach(function (p) {
     const sendStart_ = Date.now();
     if (p.chLevel) notifyChLevelIssuesGs_(p.region, p.chLevel.chLevelRms, p.chLevel.rmToLeads, win, ledger);
     p.buckets.forEach(function (b) { sendBucket_(p.region, b); });
     Logger.log('[timing] ' + p.region + ' done at ' + elapsed_() + ' (' + p.buckets.length + ' bucket(s), ' + p.resolveSecs.toFixed(1) + 's resolving + ' + ((Date.now() - sendStart_) / 1000).toFixed(1) + 's sending)');
   });
+  } finally {
+    chLevelBufferFlushGs_();
+  }
   if (recoverIds) {
     // A targeted bucket that this run did not produce (its leads were resolved meanwhile, or the routing changed): it is closed with the reason, never left failed without one.
     Object.keys(recoverIds).forEach(function (id) {
@@ -627,102 +632,93 @@ function sendAllIssuesEmails_(opts) {
 // this script).
 function notifyChLevelIssuesGs_(region, chLevelRms, rmToLeads, win, ledger) {
   if (!chLevelRms.length) return;
+  if (CH_LEVEL_REPORT_BUFFER_) { CH_LEVEL_REPORT_BUFFER_.push({ kind: 'issues', region: region, chLevelRms: chLevelRms, rmToLeads: rmToLeads, extra: { win: win }, ledger: ledger }); return; }
   const byCh = groupChLevelRmsByCh_(chLevelRms);
-  const dateRangeLabel = allIssuesDateRangeLabelGs_(win);
-
   Object.keys(byCh).forEach(function (chName) {
-    const entry = byCh[chName];
-    // 2026-11-23 (user request): the subject names the REGION, not the role ("Snehil Chhimwal (Thane) Google Leads With Issue ..."),
-    // same as allIssuesSubjectGs_ below.
-    const subject = chName + (region ? ' (' + region + ')' : '') + ' Google Leads With Issue ' + dateRangeLabel;
+    sendChLevelIssuesReportGs_(chName, byCh[chName].chRole, [{ region: region, rmNames: byCh[chName].rmNames, rmToLeads: rmToLeads }], win, ledger);
+  });
+}
 
-    const split = splitSelfAndReportingRmNames_(chName, entry.rmNames);
-    const selfRmNames = split.selfRmNames;
-    const reportingRmNames = split.reportingRmNames;
-    const noteParts = [];
-    if (selfRmNames.length) {
-      noteParts.push(chName + ' is personally holding ' + (selfRmNames.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
-    }
-    if (reportingRmNames.length) {
-      noteParts.push('No A1, TM, or RH configured above ' + reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
-    }
-    const noteBanner = {
-      html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
-        '<div style="font-weight:700; color:#92400e; font-size:13px;">Sent to Ops — not to ' + esc_(chName) + '</div>' +
-        '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">' + esc_(noteParts.join(' ')) + '</div></div>',
-      plain: 'NOTE: sent to Ops, not to ' + chName + ' — ' + noteParts.join(' ') + '\n\n',
-    };
+// ONE 17:00 CH-level report for one person, covering every region in `parts` ([{ region, rmNames, rmToLeads }]) - see the buffer
+// above (EmailInfra.gs). Subject (2026-11-23/25): the person's name and their regions, no role.
+function sendChLevelIssuesReportGs_(chName, chRole, parts, win, ledger) {
+  const live = chLevelLivePartsGs_(CH_REPORT_KINDS_.allIssues, chName, parts, 'notifyChLevelIssuesGs_');
+  if (!live.length) return;
+  const multi = live.length > 1;
+  const regionLabel = live.map(function (x) { return x.region; }).join(', ');
+  const subject = chName + ' (' + regionLabel + ') Google Leads With Issue ' + allIssuesDateRangeLabelGs_(win);
+  const rmNames = [];
+  live.forEach(function (x) { x.rmNames.forEach(function (n) { if (rmNames.indexOf(n) === -1) rmNames.push(n); }); });
+  const allLeads = [].concat.apply([], live.map(function (x) { return x.g.allLeads; }));
+  const rmCount = Array.from(new Set([].concat.apply([], live.map(function (x) { return x.g.rmKeys; })))).length;
+  const issueTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.issueLabel; }))).length;
 
-    const grouped = groupLeadsByRmAndFlatten_(entry.rmNames, rmToLeads);
-    const byRM = grouped.byRM;
-    const rmKeys = grouped.rmKeys;
-    const allLeads = grouped.allLeads;
-    const issueTypeCount = Array.from(new Set(allLeads.map(function (l) { return l.issueLabel; }))).length;
-
-    // 2026-10-05 email audit (P1/F4): same hole as notifyChLevelLeadsGs_ — nothing stopped a "0 Leads Flagged" report from
-    // going out when the CH-level RM names resolved but rmToLeads held none of their leads.
-    if (!allLeads.length) {
-      Logger.log('notifyChLevelIssuesGs_: no flagged leads found for the CH-level RM(s) ' + entry.rmNames.join(', ') + ' (' + region + ') — report not sent.');
-      return;
-    }
-    // Once per day per region + CH (email audit P10 / F11) — see wasChReportSentTodayGs_ (EmailInfra.gs).
-    if (wasChReportSentTodayGs_(CH_REPORT_KINDS_.allIssues, region, chName)) {
-      Logger.log('notifyChLevelIssuesGs_: the CH-level issues report for ' + chName + ' (' + region + ') was already sent today — not re-sending.');
-      return;
-    }
-
-    const reportOpts = {
-      title: 'Leads With Issue',
-      region: region,
-      subtitle: 'CH-level — ' + chName + ' · Google, Non-UTM/Search · last 3 calendar days', // AI-4: was "last 48h", which contradicted the footer
-      kpis: [
-        { value: allLeads.length, label: allLeads.length === 1 ? 'Lead Flagged' : 'Leads Flagged', bg: '#dbeafe', fg: '#2563eb' },
-        { value: rmKeys.length, label: rmKeys.length === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
-        { value: issueTypeCount, label: issueTypeCount === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
-      ],
-      action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, No follow up in last 4 hours, Behind on Today\'s Calls, Stuck 48h+).',
-      sections: rmKeys.map(function (rm) {
+  const split = splitSelfAndReportingRmNames_(chName, rmNames);
+  const noteParts = [];
+  if (split.selfRmNames.length) {
+    noteParts.push(chName + ' is personally holding ' + (allLeads.length === 1 ? 'this lead' : 'these leads') + ' — there\'s nobody below to route it through automatically.');
+  }
+  if (split.reportingRmNames.length) {
+    noteParts.push('No A1, TM, or RH configured above ' + split.reportingRmNames.join(', ') + ' — chain resolves all the way up to ' + chName + '.');
+  }
+  const noteBanner = {
+    html: '<div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:14px; font-family:Arial,Helvetica,sans-serif;">' +
+      '<div style="font-weight:700; color:#92400e; font-size:13px;">Sent to Ops — not to ' + esc_(chName) + '</div>' +
+      '<div style="color:#78350f; font-size:12.5px; margin-top:4px;">' + esc_(noteParts.join(' ')) + '</div></div>',
+    plain: 'NOTE: sent to Ops, not to ' + chName + ' — ' + noteParts.join(' ') + '\n\n',
+  };
+  const reportOpts = {
+    title: 'Leads With Issue',
+    region: regionLabel,
+    subtitle: 'CH-level — ' + chName + ' · Google, Non-UTM/Search · last 3 calendar days', // AI-4: was "last 48h", which contradicted the footer
+    kpis: [
+      { value: allLeads.length, label: allLeads.length === 1 ? 'Lead Flagged' : 'Leads Flagged', bg: '#dbeafe', fg: '#2563eb' },
+      { value: rmCount, label: rmCount === 1 ? 'RM Affected' : 'RMs Affected', bg: '#e0e7ff', fg: '#4338ca' },
+      { value: issueTypeCount, label: issueTypeCount === 1 ? 'Issue Type' : 'Issue Types', bg: '#fef3c7', fg: '#b45309' },
+    ],
+    action: 'Review and clear these flags — each is one of the 5 Operations SLA checks (Inactive-RM Lead Added, Not Updated, No follow up in last 4 hours, Behind on Today\'s Calls, Stuck 48h+).',
+    sections: [].concat.apply([], live.map(function (x) {
+      return x.g.rmKeys.map(function (rm) {
         return {
-          heading: rm,
+          heading: rm + (multi ? ' — ' + x.region : ''),
           subheading: rm.toLowerCase() === chName.toLowerCase() ? 'Held directly by ' + chName : 'Reports up to ' + chName,
           columns: ['Lead ID', 'Issue', 'Status', 'Suggested Follow-up'],
-          rows: byRM[rm].map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
+          rows: x.g.byRM[rm].map(function (l) { return [l.lead_id, l.issueLabel, l.status, l.followup]; }),
         };
-      }),
-      footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).' + allIssuesOlderStaleNoteGs_(allLeads, win),
-    };
-    applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
-    const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
-    // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
-    const plainBody = noteBanner.plain + 'RM(s): ' + entry.rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
-
-    try {
-      const chLeadIds = allLeads.map(function (l) { return l.lead_id; });
-      const chDay = istDayKeyGs_(new Date());
-      emailLedgerTrackSendGs_(ledger, {
-        emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_CH_ISSUES_, chDay, region, entry.chRole || 'CH', chName), job: EMAIL_LEDGER_JOB_CH_ISSUES_, dayKey: chDay,
-        region: region, bucketLabel: chName, primaryRole: entry.chRole || 'CH', to: chLevelReportToGs_(), cc: '', subject: subject, leadIds: chLeadIds.map(String),
-      }, function () {
-        return sendGuardedEmailGs_({
-          to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
-          leadIds: chLeadIds,
-        }, 'send CH-level issues report (' + chName + ', ' + region + ')');
       });
-      markChReportSentGs_(CH_REPORT_KINDS_.allIssues, region, chName);
-    } catch (e) {
-      Logger.log('notifyChLevelIssuesGs_ failed to send its report for ' + chName + ' (' + region + '): ' + e);
-      // AI-2 (audit 2026-10-13): every failure is alerted, not only a gate block. A plain Gmail failure used to leave no trace a
-      // human would see, and these reports have no automatic recovery (recoverFailedAllIssuesBucketsNow only re-sends the
-      // allIssues17 buckets, never a chLevel17 report) - so the alert says how to re-send by hand.
-      notifyOpsAlertGs_('CH-level All-Issues report ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + region + ' / ' + chName, [
-        String((e && e.message) || e),
-        '',
-        'Leads in it (' + allLeads.length + '): ' + allLeads.map(function (l) { return l.lead_id; }).join(', '),
-        'CH-level reports are NOT covered by recoverFailedAllIssuesBucketsNow(). Re-send by hand: once the cause is fixed, the next sendAllIssuesEmailsNow() run sends this report again only if ' + region + ' has not been sent today (the region guard) - otherwise forward the leads above to ops/the CH yourself.' +
-          (e && e.blockedByGuard ? '' : ' Check Gmail Drafts first: createDraft() runs before send(), so one or more drafts of this report may already exist.'),
-      ]);
-    }
-  });
+    })),
+    footerNote: 'This report is normally addressed to the RM\'s own manager chain — sent here instead because ' + chName + ' has nobody below them to route it through automatically. Scope: Source=google, Sub-source=Non-UTM/Search, leads assigned in the last 3 calendar days (today plus the 2 days before it, IST).' + allIssuesOlderStaleNoteGs_(allLeads, win),
+  };
+  applyStaleSplitGs_(reportOpts, staleSinceMapGs_(allLeads)); // stale leads are held at the bottom, and the headline count says so
+  const html = noteBanner.html + renderOvernightReportEmailHTML_(reportOpts);
+  // The plain-text part lists the leads too (email audit P2) — rendered from the same opts as the HTML.
+  const plainBody = noteBanner.plain + 'RM(s): ' + rmNames.join(', ') + '\n\n' + plainTextReportGs_(reportOpts);
+
+  try {
+    const chLeadIds = allLeads.map(function (l) { return l.lead_id; });
+    const chDay = istDayKeyGs_(new Date());
+    emailLedgerTrackSendGs_(ledger, {
+      emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_CH_ISSUES_, chDay, regionLabel, chRole || 'CH', chName), job: EMAIL_LEDGER_JOB_CH_ISSUES_, dayKey: chDay,
+      region: regionLabel, bucketLabel: chName, primaryRole: chRole || 'CH', to: chLevelReportToGs_(), cc: '', subject: subject, leadIds: chLeadIds.map(String),
+    }, function () {
+      return sendGuardedEmailGs_({
+        to: chLevelReportToGs_(), subject: subject, plainBody: plainBody, htmlBody: html,
+        leadIds: chLeadIds,
+      }, 'send CH-level issues report (' + chName + ', ' + regionLabel + ')');
+    });
+    live.forEach(function (x) { markChReportSentGs_(CH_REPORT_KINDS_.allIssues, x.region, chName); });
+  } catch (e) {
+    Logger.log('notifyChLevelIssuesGs_ failed to send its report for ' + chName + ' (' + regionLabel + '): ' + e);
+    // AI-2 (audit 2026-10-13): every failure is alerted, not only a gate block. These reports have no automatic recovery
+    // (recoverFailedAllIssuesBucketsNow only re-sends the allIssues17 buckets, never a chLevel17 report).
+    notifyOpsAlertGs_('CH-level All-Issues report ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + regionLabel + ' / ' + chName, [
+      String((e && e.message) || e),
+      '',
+      'Leads in it (' + allLeads.length + '): ' + allLeads.map(function (l) { return l.lead_id; }).join(', '),
+      'CH-level reports are NOT covered by recoverFailedAllIssuesBucketsNow(). Re-send by hand: once the cause is fixed, the next sendAllIssuesEmailsNow() run sends this report again only for the region(s) not yet sent today (the region guard) - otherwise forward the leads above to ops/the CH yourself.' +
+        (e && e.blockedByGuard ? '' : ' Check Gmail Drafts first: createDraft() runs before send(), so one or more drafts of this report may already exist.'),
+    ]);
+  }
 }
 
 // The 17:00 bucket email's subject - one definition, shared with the Email_Ledger plan (D4, 2026-10-16: the plan recorded no subject, so
