@@ -310,6 +310,11 @@ function _hasToLetProperty(commentWords){
 // Kept in sync with FollowupEngine.gs's identical OUTCOME_RULES_GS_ —
 // mirror any future change there here too (and vice versa).
 const OUTCOME_RULES = [
+  // 2026-11-25 (Snehil, lead 2282154): "don't call again n again, I will check and let you know" asks for FEWER calls, not for
+  // no calls - it is still deciding, not Do Not Disturb. Checked BEFORE the DND rule. A plain "don't call again" stays DND.
+  { outcome: 'Considering', test: function (c) {
+      return /\b(do\s*not|don['\u2019]?t|dont|not to)\s+call\s+(me\s+)?(again\s*(n|and|&)\s*again|repeatedly|so\s+(many\s+times|much|often)|frequently|continuously|every\s*(day|time))\b/.test(c);
+    } },
   { outcome: 'Do Not Disturb', signals: ['do not call', 'dont call', 'not to call', 'stop calling', 'dnd'] },
   { outcome: 'Switched Off', signals: [
       'switch off', 'switched off', 'sw off', 'swoff', 'not reachable', 'unreachable', 'not contactable',
@@ -351,6 +356,8 @@ const OUTCOME_RULES = [
   { outcome: 'Junk / Duplicate Lead', signals: [
       'fake enquiry', 'fake inquiry', 'duplicate lead', 'inquiry by mistake', 'enquiry by mistake',
       'casual inquiry', 'casual enquiry',
+      // 2026-11-25 (Snehil, lead 2283431: "Seems like a fake lead"):
+      'fake lead', 'fake client', 'fake customer', 'not a genuine lead', 'not genuine', 'spam lead',
     ] },
   // Customer saw/heard the call and actively ended it — a different
   // signal from RNR (never picked up at all) or Disconnected below (a

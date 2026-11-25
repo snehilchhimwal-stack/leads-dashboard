@@ -451,6 +451,14 @@ function runFollowupEngineTests_() {
     h = historyDecideGs_(historyEntriesGs_('A: [Ringing] - 2026-11-23 10:00 | A: [Connected On Whatsapp] Details shared in WhatsApp waiting for the response - 2026-11-24 12:00', ''), 'A', 0, 0, 0, '', 'Suspect', at1005);
     TestAssertEqual_(h, 'Call before 12 pm. 2 calls since 23 Nov, none answered; last: only a WhatsApp sent (24 Nov). Not spoken to yet. WhatsApp sent 24 Nov, no reply.', 'whatsapp: Connected On Whatsapp is a WhatsApp sent, not a reply');
     TestAssertEqual_(inferOutcomeGs_('[Connected On Whatsapp] WhatsApp message shared'), 'WhatsApp Sent', 'whatsapp: Connected On Whatsapp classifies as WhatsApp Sent');
+    // 2026-11-25 (Snehil): "don't call again n again" asks for fewer calls (still deciding), not DND (lead 2282154); "fake lead" is junk (lead 2283431).
+    ['She said don\'t call again n again i will check details once I get free and let you know', 'dont call again and again', 'client said do not call me repeatedly', 'she said don\u2019t call so many times']
+      .forEach(function (s) { TestAssertEqual_(inferOutcomeGs_(s), 'Considering', 'classifier: "' + s + '" is still deciding, not DND'); });
+    ['don\'t call again', 'do not call', 'stop calling', 'dnd'].forEach(function (s) { TestAssertEqual_(inferOutcomeGs_(s), 'Do Not Disturb', 'classifier: "' + s + '" stays DND'); });
+    ['Seems like a fake lead', 'fake client', 'not genuine'].forEach(function (s) { TestAssertEqual_(inferOutcomeGs_(s), 'Junk / Duplicate Lead', 'classifier: "' + s + '" is junk'); });
+    h = historyDecideGs_(historyEntriesGs_('Shreyang Chudasama: [Ringing] WhatsApp message shared - 2026-11-24 17:37 | Shreyang Chudasama: [Ringing] - 2026-11-24 18:08 | ' +
+      'Danish Shaikh: [Ringing] Ring - 2026-11-24 18:26 | Shreyang Chudasama: [Connected On Whatsapp] Seems like a fake lead - 2026-11-25 12:14', ''), 'Danish Shaikh', 3, 0, 0, '2026-11-24 17:33:52', 'Suspect', new Date('2026-11-25T17:05:00+05:30'));
+    TestAssert_(h.indexOf('Check it quickly, then close it with the right reason.') === 0 && h.indexOf('not a genuine enquiry') !== -1, 'lead 2283431: "fake lead" -> check and close (got: ' + h + ')');
     // The email shows the action in bold; the rest stays escaped plain text.
     TestAssertEqual_(followupCellHtmlGs_('Call now. Reason <x>.'), '<b>Call now.</b> Reason &lt;x&gt;.', 'readable: the email cell bolds the action');
     TestAssertEqual_(followupCellHtmlGs_('No sentence break'), 'No sentence break', 'readable: no sentence break -> plain text');
