@@ -124,6 +124,7 @@ def main() -> int:
     js_src += "\nwindow.__twinRules = OUTCOME_RULES;\n"
     gs_src += "\nwindow.__twinSpelling = SPELLING_FIXES_GS_;\n"
     js_src += "\nwindow.__twinSpelling = SPELLING_FIXES;\n"
+    js_src += "\nwindow.__readCount = () => HISTORY_LAST_READ_COUNT;\n"  # a top-level let inside the eval is not a window property
     self_test = "--self-test" in sys.argv
     if self_test:  # break the dashboard copy's typo matching on purpose: the check must then report mismatches
         js_src += "\n_wordsMatch = function (word, target) { return word === target; };\n"
@@ -166,10 +167,14 @@ def main() -> int:
         hist = history_corpus()
         gs_page.evaluate("() => { detectFollowupModifiersGs_ = () => []; unmatchedFollowUpGs_ = (c) => 'UNMATCHED:' + c; }")
         js_page.evaluate("() => { unmatchedFollowUp = (c) => 'UNMATCHED:' + c; }")
-        gs_h = gs_page.evaluate("(h) => h.map(x => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6]))", hist)
-        js_h = js_page.evaluate("(h) => h.map(x => historyDecide(historyEntries(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6]))", hist)
-        # Invariant: whenever a history has worded comments, the advice must say how many it read - i.e. it read them ALL.
+        # 2026-11-25: the advice carries clock deadlines ("before 12 pm"), so both copies get the same fixed time - and a
+        # second, evening time, so both deadline branches are compared.
+        gs_h = gs_page.evaluate("(h) => h.map((x, i) => historyDecideGs_(historyEntriesGs_(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6], new Date(i % 2 ? '2026-11-25T18:30:00+05:30' : '2026-11-25T10:05:00+05:30')))", hist)
+        js_h = js_page.evaluate("(h) => h.map((x, i) => historyDecide(historyEntries(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6], new Date(i % 2 ? '2026-11-25T18:30:00+05:30' : '2026-11-25T10:05:00+05:30')))", hist)
+        # Invariant: whenever a history has worded comments, the advice must have read them ALL. 2026-11-25: the advice no
+        # longer prints a "History: N calls/comments" line, so the copy reports how many it read (HISTORY_LAST_READ_COUNT).
         counts = js_page.evaluate("(h) => h.map(x => historyEntries(x[0], x[1]).length)", hist)
+        read = js_page.evaluate("(h) => h.map(x => { historyDecide(historyEntries(x[0], x[1]), 'Test RM', x[2], x[3], x[4], x[5], x[6]); return window.__readCount(); })", hist)
         # 2026-11-23: every comment is READ but none is quoted back - the worded comments of each history, to check the advice.
         notes = js_page.evaluate("(h) => h.map(x => historyEntries(x[0], x[1]).map(e => e.comment).filter(c => c && c.length > 15))", hist)
         # Invariant: a lead with only blank check-ins / bare stage changes must never get a stage name quoted as a note.
@@ -187,9 +192,9 @@ def main() -> int:
         for c in ns:
             if c in (out or ""):
                 invariant.append("a comment was quoted back in the advice: %r in %s" % (c, out))
-    for out, n in zip(js_h, counts):
-        if n and ("History: %d call" % n) not in (out or ""):
-            invariant.append("read %d worded comments but the advice does not say so: %s" % (n, out))
+    for out, n, r in zip(js_h, counts, read):
+        if n and r != n:
+            invariant.append("%d worded comments, but the advice read %d: %s" % (n, r, out))
         if not n and out is not None:
             invariant.append("no worded comment, yet history advice was produced: %s" % out)
     if '"Suspect"' in str(stage_only) or '"Not Updated"' in str(stage_only):

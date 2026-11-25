@@ -2623,7 +2623,7 @@ function downloadNoIssueLeadsNow() {
 
     const baselineEntry = lastSnapshotMap[leadId]; // per LEAD (email audit F18)
     const hint = overnightFollowupHintGs_(row, colIndex, now, baselineEntry);
-    if (hint.indexOf('No comment added') !== 0) return; // only the leads landing on the no-usable-comment branch
+    if (hint.indexOf('No comment added') === -1) return; // only the leads landing on the no-usable-comment branch
 
     rows.push([
       leadId,

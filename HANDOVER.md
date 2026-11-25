@@ -1043,6 +1043,18 @@ regions in the subject ("Mukesh Mishra Admin (Bangalore, Hyderabad) Google Leads
 Email_Ledger still per region (a multi-region row's region is the joined label). A direct call with no open buffer sends at once.
 Paired with Coefficient query v4 (Admin-owned leads take the project's region) - see sql/ROLLBACK_2026-11-20.md.
 
+### Suggested Follow-up: action first, with a deadline and the WhatsApp step (2026-11-25)
+
+`historyDecideGs_` (FollowupEngine.gs) and its twin `historyDecide` (js/core-outcome-engine.js) now write the follow-up as
+ACTION FIRST, then one short reason, nothing repeated: "Call again before 12 pm + send WhatsApp. Line was busy on the only call
+(24 Nov). Not spoken to yet. No WhatsApp sent yet." The decision rules (stop / spoke-then-silent / never reached / conversation /
+requirement-but-no-Opportunity) are unchanged; only the wording is. Deadlines come from `now` in IST (`historySoonGs_` ~2 h
+ahead, `historyOtherSlotGs_` the other half of the day); without `now` they read "today". WhatsApp: "+ send WhatsApp" unless one
+already went out in the current unanswered streak ("WhatsApp sent 24 Nov, no reply.") or the customer is not on WhatsApp
+("use SMS"). The "History: N calls/comments" line is gone; test/check-twin-behaviour.py checks the read count through
+`HISTORY_LAST_READ_COUNT` instead. Emails bold the first sentence of a Suggested Follow-up cell (`followupCellHtmlGs_`, EmailInfra.gs).
+The no-comment advice (`noCommentFollowUpGs_`) follows the same shape and still contains "No comment added".
+
 ## 6. Logic that's duplicated across the two runtimes
 
 Because the browser and Apps Script can't share code, these pairs must be

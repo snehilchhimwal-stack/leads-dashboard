@@ -886,7 +886,7 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     TestAssertContains_(rowB, '5 more call attempts', 'E2E 17:00: E102\'s follow-up compares with its own last snapshot (4 -> 9)');
     const rowSolo = rowOf(html1, 'E201');
     TestAssertContains_(rowSolo, "Behind on Today's Calls", 'E2E 17:00: control - a lead with no calls today (2 -> 2) is still flagged behind');
-    TestAssertContains_(rowSolo, 'no new call attempts', 'E2E 17:00: control - …with the "no new call attempts" follow-up');
+    TestAssertContains_(rowSolo, 'No new calls in over 4 hours', 'E2E 17:00: control - …with the "no new call attempts" follow-up');
     const rowBusy = rowOf(html1, 'E301');
     TestAssertContains_(rowBusy, "Behind on Today's Calls", 'E2E 17:00 (2026-11-02): E301 has 7 calls in total, past 24h it needs 10 - behind, though 6 were today');
     TestAssertContains_(rowBusy, '6 more call attempts', 'E2E 17:00: control - …and its follow-up says 6 more attempts');
@@ -936,7 +936,7 @@ function TestEFC_runSnapshotChain_(now, header, banner, monthShort) {
     TestAssertEqual_(html2.indexOf('E101'), -1, 'E2E 10:00: the collapsed sibling is not listed');
     TestAssertContains_(rowOf(html2, 'E102'), '5 more call attempts', 'E2E 10:00: E102\'s follow-up uses its OWN snapshot from the real Movement_Log (4 -> 9)');
     TestAssertContains_(rowOf(html2, 'E301'), '6 more call attempts', 'E2E 10:00: control - E301 (1 -> 7)');
-    TestAssertContains_(rowOf(html2, 'E201'), 'no new call attempts', 'E2E 10:00: control - E201 (2 -> 2)');
+    TestAssertContains_(rowOf(html2, 'E201'), 'No new calls in over 4 hours', 'E2E 10:00: control - E201 (2 -> 2)');
 
     // ===== SCENARIO 3: the prune (F23) against rows the real snapshot wrote =====
     PropertiesService = TestMockPropertiesService_();

@@ -397,6 +397,14 @@ function regionKeyForRmGs_(rmName, region) { return isFutworkRmNameGs_(rmName) ?
 // 2026-10-16: a person whose 17:00 buckets are combined across regions (ALL_ISSUES_CONSOLIDATED_RECIPIENTS_, AllIssuesEmailer.gs)
 // gets ONE email keyed by this pseudo-region, e.g. 'Multi-region: Rajesh Muni'. Like Futwork, each lead keeps its real region,
 // and the 10:00 Checkpoint 1 / 13:00 Checkpoint 2 follow that one row as one bucket (isMultiRegionKeyGs_).
+// 2026-11-25 (user request: follow-up "more readable to sales team"): a Suggested Follow-up cell shows its first sentence -
+// the action ("Call again before 12 pm + send WhatsApp.") - in bold, the reason after it as plain text. Escaped like any cell.
+function followupCellHtmlGs_(text) {
+  const t = String(text == null ? '' : text);
+  const cut = t.indexOf('. ');
+  if (cut < 1 || cut > 200) return esc_(t);
+  return '<b>' + esc_(t.slice(0, cut + 1)) + '</b>' + esc_(t.slice(cut + 1));
+}
 // ===== One CH-level (Ops) report per person per run (2026-11-25, user request) =====
 // CH-level reports used to go out once per REGION from inside each run's region loop, so a person holding leads in two regions
 // got two Ops emails. A run now opens this buffer before its region loop and flushes it after: every person's reports are merged
@@ -1803,7 +1811,10 @@ function renderOvernightReportEmailHTML_(opts) {
     const bodyRows = sec.rows.map(function (row, i) {
       return '<tr style="' + (i > 0 ? 'border-top:1px solid #f0f0f0;' : '') + '">' +
         // esc_ already maps null/undefined to '' — String(cell) first turned a missing cell into the literal text "undefined".
-        row.map(function (cell) { return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + esc_(cell) + '</td>'; }).join('') +
+        row.map(function (cell, ci) {
+          const html = sec.columns && sec.columns[ci] === 'Suggested Follow-up' ? followupCellHtmlGs_(cell) : esc_(cell);
+          return '<td style="padding:6px 10px; color:#374151; ' + FONT + '">' + html + '</td>';
+        }).join('') +
         '</tr>';
     }).join('');
     const regionBandHtml = sec.regionBand

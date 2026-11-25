@@ -1045,25 +1045,85 @@ const HISTORY_CONV_PHRASE = { 'Interested': 'showed interest', 'Visit Arranged':
   'Details Shared': 'details shared', 'Loan In Process': 'loan in process', 'Out of Station': 'out of station',
   'Already Visited (Other Project)': 'had visited another project', 'Needs Cross-Team Routing': 'needs another team',
   'BPCL Not Shared': 'requirement not shared yet', 'Requirement Noted (No Status)': 'shared the requirement' };
+// Twin of FollowupEngine.gs historyDecideGs_ - KEEP IN SYNC. 2026-11-25 (user request: "make it more readable to sales team ... add whatsapp"): the follow-up reads ACTION FIRST, with a
+// clock deadline and the WhatsApp step, then one short reason - nothing said twice, no system words:
+//   "Call again before 12 pm + send WhatsApp. Line was busy on the only call (24 Nov). Not spoken to yet. No WhatsApp sent yet."
+// The emails show the first sentence (the action) in bold (followupCellHtmlGs_, EmailInfra.gs; the dashboard shows it as plain text). Every comment is still READ
+// and none is quoted back. now (optional Date): the time the advice is for - the deadlines ("before 12 pm") are counted
+// from it, in IST; without it they read "today".
+const HISTORY_NOREACH_PHRASE = { 'Busy': 'line was busy', 'Ringing / RNR': 'no answer', 'RNR': 'no answer',
+  'Switched Off': 'phone switched off / not reachable', 'Call Declined': 'customer cut the call', 'Disconnected': 'call dropped',
+  'Voice Unclear': 'voice not clear', 'Follow-up Missed': 'follow-up call was missed', 'WhatsApp Sent': 'only a WhatsApp sent' };
+// The CRM call status says what happened on the call more exactly than the note ("[Ringing] Not available on WhatsApp").
+const HISTORY_STATUS_PHRASE = { 'ringing': 'no answer', 'busy': 'line was busy', 'call declined': 'customer cut the call',
+  'not reachable': 'not reachable', 'followup missed': 'follow-up call was missed' };
+const HISTORY_STOP_ACTION = { 'Do Not Disturb': 'Confirm it is a real do-not-call request, then mark it DND',
+  'Wrong Number': 'Check the number with the source, then close it as Wrong Number',
+  'Junk / Duplicate Lead': 'Check it quickly, then close it with the right reason',
+  'Booked Elsewhere': 'Confirm it is final, then close it as Booked Elsewhere',
+  'Not Interested': 'Confirm it is final, then close it as Not Interested',
+  'Resale / Rental (Out of Scope)': 'Close it as Resale / Rental - we do not handle that',
+  'Channel Partner / Broker Lead': 'Route it through the channel-partner process',
+  'Already With Another RM/CP': 'Find out who owns this customer and remove the duplicate' };
+const HISTORY_CONV_ACTION = { 'Interested': 'Fix a site visit or the next step', 'Visit Arranged': 'Confirm the visit a day before',
+  'Visit Completed': 'Call for visit feedback today', 'Considering': 'Call again in 2-3 days',
+  'DNP': 'Call back at the time they asked', 'Budget Concern': 'Offer a better-fit option or payment plan',
+  'Details Shared': 'Call to check what they thought of the details', 'Loan In Process': 'Check the loan status and keep in touch',
+  'Out of Station': 'Call when they are back', 'Already Visited (Other Project)': 'Share 2 different project options',
+  'Needs Cross-Team Routing': 'Confirm the hand-off to the other team happened',
+  'BPCL Not Shared': 'Get budget, possession, size and location', 'Requirement Noted (No Status)': 'Call and log where this stands' };
+// The current hour in IST as a decimal (10.5 = 10:30), or -1 without a usable clock.
+function historyIstHour(now) {
+  if (!now || typeof now.getTime !== 'function' || isNaN(now.getTime())) return -1;
+  const d = new Date(now.getTime() + 330 * 60000);
+  return d.getUTCHours() + d.getUTCMinutes() / 60;
+}
+function historyClockLabel(h) { return (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? ' am' : ' pm'); }
+// Within ~2 hours: "before 12 pm" at 10:xx; after 6 pm it is tomorrow morning.
+function historySoon(now) {
+  const h = historyIstHour(now);
+  if (h < 0) return 'today';
+  if (h >= 18) return 'tomorrow before 11 am';
+  if (h < 8) return 'before 11 am';
+  return 'before ' + historyClockLabel(Math.floor(h) + 2);
+}
+// A different part of the day from now.
+function historyOtherSlot(now) {
+  const h = historyIstHour(now);
+  if (h < 0) return 'at a different time of day';
+  return h < 14 ? 'this evening, after 5 pm' : 'tomorrow morning, before 11 am';
+}
+// The call-again step for the newest not-reached outcome.
+function historyRetryAction(outcome, now) {
+  if (outcome === 'WhatsApp Sent' || outcome === 'Follow-up Missed') return 'Call ' + historySoon(now);
+  if (outcome === 'Busy' || outcome === 'Disconnected' || outcome === 'Voice Unclear') return 'Call again ' + historySoon(now);
+  return 'Call again ' + historyOtherSlot(now);
+}
+function historyCap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
+// How many comments the last historyDecide call read (test/check-twin-behaviour.py checks it read them all).
+let HISTORY_LAST_READ_COUNT = 0;
 // Pure: entries (oldest first, from historyEntries) + the lead's own RM -> the follow-up text, or null for no entries.
-// dials / connectedCalls / talkSeconds / createdAt / stage (all optional): the call_attempts, call_count, duration,
-// lead_created_at and current_stage columns. Every comment is READ; none is quoted back (2026-11-23).
-function historyDecide(entries, ownerName, dials, connectedCalls, talkSeconds, createdAt, stage) {
+// dials / connectedCalls / talkSeconds / createdAt / stage / now (all optional): the call_attempts, call_count, duration,
+// lead_created_at and current_stage columns, and the time the advice is for.
+function historyDecide(entries, ownerName, dials, connectedCalls, talkSeconds, createdAt, stage, now) {
   if (!entries || !entries.length) return null;
+  HISTORY_LAST_READ_COUNT = entries.length;
   const owner = String(ownerName || '').trim().toLowerCase();
   const by = function (e) {
     const who = String(e.loggedBy || '').trim();
-    return (who && who.toLowerCase() !== owner) ? ' (by ' + who + ')' : '';
+    return (who && who.toLowerCase() !== owner) ? ' by ' + who : '';
   };
-  const whenWho = function (e) { return historyShortDate(e.ts) + by(e); };
+  const day = function (e) { return historyShortDate(e.ts); };
+  const whenWho = function (e) { return day(e) + by(e); };
   // Reached = a real conversation, or a STOP the customer said on a call (not a wrong/invalid number, not a no-reach status).
   const reached = function (e, kind) {
     return kind === 'conversation' || (kind === 'stop' && e.statusKind !== 'noreach' && e.statusKey !== 'invalid no' && e.outcome !== 'Wrong Number');
   };
-  let lastConv = -1, lastStop = -1, bestMilestone = -1, lastReached = -1;
+  let lastConv = -1, lastStop = -1, bestMilestone = -1, lastReached = -1, everOnCall = false;
   entries.forEach(function (e, i) {
     const kind = historyKind(e);
     if (kind === 'conversation') lastConv = i;
+    if (kind === 'conversation' && e.statusKey !== 'connected on whatsapp') everOnCall = true;
     if (kind === 'stop') lastStop = i;
     if (reached(e, kind)) lastReached = i;
     const rank = HISTORY_MILESTONE_RANK[e.outcome] || 0;
@@ -1074,7 +1134,8 @@ function historyDecide(entries, ownerName, dials, connectedCalls, talkSeconds, c
   const preOpportunity = HISTORY_PRE_OPPORTUNITY_STAGES[stageText.toLowerCase()] === true;
   const last = entries[entries.length - 1];
   const lastKind = historyKind(last);
-  const parts = [];
+  let action = '';
+  const why = [];
 
   // The unanswered streak after the last real conversation (or since the start, if never reached).
   const tries = entries.slice(lastConv + 1).filter(function (e) { return historyKind(e) === 'noreach'; });
@@ -1088,96 +1149,117 @@ function historyDecide(entries, ownerName, dials, connectedCalls, talkSeconds, c
   const createdKey = useDials ? historyDayKey(createdAt) : '';
   const spanDays = createdKey ? historyDaysBetween(createdKey, last.ts.slice(0, 10)) : 0;
   const dayCount = Math.max(d, spanDays);
-  const span = (useDials ? dialTotal + ' dial' + (dialTotal === 1 ? '' : 's') : n + ' unanswered attempt' + (n === 1 ? '' : 's')) +
-    (spanDays ? ' since ' + historyShortDate(createdKey) : (d > 1 ? ' over ' + d + ' days' : ''));
-  const tally = {}, order = [];
-  tries.forEach(function (e) { const k = e.status || e.outcome; if (!tally[k]) { tally[k] = 0; order.push(k); } tally[k]++; });
-  const mix = (useDials ? n + ' logged: ' : '') + order.map(function (k) { return k + (tally[k] > 1 ? ' x' + tally[k] : ''); }).join(', ');
+  const lastNo = HISTORY_STATUS_PHRASE[last.statusKey] || HISTORY_NOREACH_PHRASE[last.outcome] || 'no answer';
   // Connected calls with no conversation logged: flagged only with at least 10 s of talk time in total (or when the talk
   // time is unknown) - a 1-second connect is a pickup-and-drop or an IVR, not a conversation.
   const talk = Number(talkSeconds) || 0;
-  const connectedNote = lastConv < 0 && lastReached < 0 && (Number(connectedCalls) || 0) > 0 && !(talk > 0 && talk < 10) ? ' The call logs show ' +
-    connectedCalls + ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') +
-    (talk ? ' (' + historyTalkTime(talk) + ' talk time)' : '') + ' - check with whoever made them whether a conversation happened, and log it. Do not close it as Not Contactable until then.' : '';
+  const connectedFlag = lastConv < 0 && lastReached < 0 && (Number(connectedCalls) || 0) > 0 && !(talk > 0 && talk < 10);
+  const connectedNote = connectedFlag ? 'Call logs show ' + connectedCalls + ' connected call' + (Number(connectedCalls) === 1 ? '' : 's') +
+    (talk ? ' (' + historyTalkTime(talk) + ' talk time)' : '') + ' - ask who spoke to the customer and log it; do not close it as Not Contactable yet.' : '';
   const declined = tries.filter(function (e) { return e.statusKey === 'call declined' || e.outcome === 'Call Declined'; }).length;
+  const declinedNote = declined && tryCount > 1 ? 'Customer cut the call ' + (declined === 1 ? 'once' : declined === 2 ? 'twice' : declined + ' times') + '.' : '';
+  // WhatsApp: sent during the current unanswered streak -> do not send another; not on WhatsApp -> SMS; else add the step.
   const waSent = tries.filter(function (e) { return historyWhatsAppSent(e); });
   const waLast = waSent.length ? waSent[waSent.length - 1] : null;
-  const waNote = waLast ? ' A WhatsApp message already went out on ' + historyShortDate(waLast.ts) +
-    ' with no reply since - do not send another; call at a different time, or try an SMS.' : '';
-  const declinedNote = declined ? ' The customer declined the call ' + (declined === 1 ? 'once' : declined + ' times') +
-    (waLast ? ' - call at a different time.' : ' - send a WhatsApp message before the next call, and call at a different time.') : '';
-  const milestoneLine = function (suffix) {
-    return 'Earlier ' + HISTORY_MILESTONE_LABEL[entries[bestMilestone].outcome] + ' (' + whenWho(entries[bestMilestone]) + ')' + suffix;
+  const waUnavailable = entries.some(function (e) { return e.outcome === 'WhatsApp Unavailable'; });
+  const waOpen = !waLast && !waUnavailable;
+  const waDone = waLast ? 'WhatsApp sent ' + day(waLast) + ', no reply.' : (waUnavailable ? 'Not on WhatsApp - use SMS.' : '');
+  // "3 calls since 23 Nov, none answered; last: no answer (25 Nov)." / "Line was busy on the only call (24 Nov)."
+  const streak = function (afterTalk) {
+    if (!tryCount) return '';
+    if (tryCount === 1 && last.outcome === 'WhatsApp Sent') return '';
+    if (afterTalk) {
+      return n === 1 ? 'Not answered since: ' + lastNo + ' (' + day(last) + ').'
+        : n + ' calls unanswered since; last: ' + lastNo + ' (' + day(last) + ').';
+    }
+    if (tryCount === 1) return historyCap(lastNo) + ' on the only call (' + day(last) + ').';
+    const oneDay = !spanDays && d <= 1;
+    const since = spanDays ? ' since ' + historyShortDate(createdKey) : (oneDay ? ' on ' + day(last) : ' since ' + day(tries[0]));
+    return tryCount + ' calls' + since + ', none answered; last: ' + lastNo + (oneDay ? '' : ' (' + day(last) + ')') + '.';
   };
+  const milestone = function (than) {
+    if (bestMilestone < 0 || bestMilestone === than) return '';
+    if ((HISTORY_MILESTONE_RANK[entries[bestMilestone].outcome] || 0) < 4) return ''; // only interest, a visit or a loan is worth recalling
+    if (than >= 0 && (HISTORY_MILESTONE_RANK[entries[bestMilestone].outcome] || 0) <= (HISTORY_MILESTONE_RANK[entries[than].outcome] || 0)) return '';
+    return 'Earlier: ' + HISTORY_MILESTONE_LABEL[entries[bestMilestone].outcome] + ' (' + whenWho(entries[bestMilestone]) + ') - continue from there.';
+  };
+  const spokeVia = function (e) { return e.statusKey === 'connected on whatsapp' ? 'Replied on WhatsApp ' : 'Last spoke '; };
 
   if (lastStop > lastConv) {
     // Rule 1 - the newest meaningful thing the customer said was a STOP.
     const stopE = entries[lastStop];
-    parts.push((FOLLOWUP_SUGGESTIONS[stopE.outcome] || 'Customer gave a reason to stop') + ' Logged ' + whenWho(stopE) + ': ' +
-      (HISTORY_STOP_PHRASE[stopE.outcome] || 'a reason to stop') + '.');
+    action = HISTORY_STOP_ACTION[stopE.outcome] || 'Confirm the reason, then close it';
+    why.push('Logged ' + whenWho(stopE) + ': ' + (HISTORY_STOP_PHRASE[stopE.outcome] || 'a reason to stop') + '.');
     const earlier = [];
     entries.slice(0, lastStop).forEach(function (e) {
       const p = historyKind(e) === 'stop' && HISTORY_STOP_PHRASE[e.outcome];
       if (p && p !== HISTORY_STOP_PHRASE[stopE.outcome] && earlier.indexOf(p) === -1) earlier.push(p);
     });
-    if (earlier.length) parts.push('Earlier also: ' + earlier.join('; ') + '.');
+    if (earlier.length) why.push('Earlier also: ' + earlier.join('; ') + '.');
   } else if (lastConv >= 0 && preOpportunity && (facts.config || facts.budget)) {
     // Rule 0 (2026-11-23) - they spoke, the requirement is known, and the lead never became an Opportunity.
-    parts.push('Customer spoke on ' + whenWho(entries[lastConv]) + ' and shared the requirement (' + facts.text + '), but the lead is still at ' +
-      stageText + ' - no Opportunity created. Shortlist 2-3 projects that fit, offer a site visit, and move it to Opportunity.');
-    if (lastKind === 'noreach' && n) {
-      parts.push(n + ' call' + (n === 1 ? '' : 's') + ' unanswered since (' + mix + ', last ' + historyShortDate(last.ts) + ') - call at a different time' +
-        (waLast ? '; a WhatsApp already went out on ' + historyShortDate(waLast.ts) + ' with no reply.' : ', and send the shortlist on WhatsApp.') +
-        (declined ? ' The customer declined the call ' + (declined === 1 ? 'once' : declined + ' times') + '.' : ''));
-    }
-    if (bestMilestone >= 0 && bestMilestone !== lastConv &&
-        (HISTORY_MILESTONE_RANK[entries[bestMilestone].outcome] || 0) > (HISTORY_MILESTONE_RANK[entries[lastConv].outcome] || 0)) {
-      parts.push(milestoneLine('.'));
-    }
+    const noAnswerSince = lastKind === 'noreach' && n > 0;
+    action = 'Shortlist 2-3 matching projects, offer a site visit and create the Opportunity' +
+      (waOpen ? ' + send the shortlist on WhatsApp' : '');
+    why.push(spokeVia(entries[lastConv]) + whenWho(entries[lastConv]) + '; wants ' + facts.text + '. Still at ' + stageText + ', no Opportunity yet.');
+    if (noAnswerSince) why.push(streak(true));
+    if (waDone) why.push(waDone);
+    why.push(milestone(lastConv));
+    if (noAnswerSince) why.push(declinedNote);
   } else if (lastKind === 'noreach') {
     if (lastConv >= 0) {
       // Rule 2 - they did talk before; the RM should pick up where that left off.
       const convE = entries[lastConv];
       const convPhrase = HISTORY_CONV_PHRASE[convE.outcome];
-      parts.push('Last spoke on ' + whenWho(convE) + (convPhrase ? ' - ' + convPhrase : '') + '. Since then ' + span + ' (' + mix + ').' + declinedNote);
-      parts.push(historyNoReachAdvice(last.outcome, !!waLast) + waNote);
-      if (bestMilestone >= 0 && bestMilestone !== lastConv) parts.push(milestoneLine(' - open the next call from there.'));
-      if (facts.text) parts.push('Requirement on record: ' + facts.text + '.');
-    } else if (tryCount >= 6 && dayCount >= 3 && !connectedNote) { // not while connected calls are unexplained
+      const about = [convPhrase, facts.text ? 'wants ' + facts.text : ''].filter(Boolean).join('; ');
+      action = historyRetryAction(last.outcome, now) + (waOpen ? ' + WhatsApp a reminder' : '');
+      why.push(spokeVia(convE) + whenWho(convE) + (about ? ' (' + about + ')' : '') + '.');
+      why.push(streak(true));
+      if (waDone) why.push(waDone);
+      why.push(milestone(lastConv));
+      why.push(declinedNote);
+    } else if (tryCount >= 6 && dayCount >= 3 && !connectedFlag) { // not while connected calls are unexplained
       // Rule 3 - never reached, and it has been going on.
-      parts.push(span.charAt(0).toUpperCase() + span.slice(1) + ' and the customer has never been reached (' + mix + '). Switch to a different time slot' +
-        (waLast ? ' (a WhatsApp message already went out on ' + historyShortDate(waLast.ts) + ' with no reply)' : ' and send a WhatsApp message') +
-        '; if there is still no answer after 2 more days, close it as Not Contactable.' + declinedNote + connectedNote);
+      action = 'Try a new time slot, ' + historyOtherSlot(now) + (waOpen ? ' + send WhatsApp' : '') +
+        '; if still no answer in 2 more days, close it as Not Contactable';
+      why.push(streak(false));
+      why.push('Never spoken to.');
+      if (waDone) why.push(waDone);
+      why.push(declinedNote);
     } else {
-      parts.push('Not reached yet - ' + span + ' (' + mix + ').' + declinedNote + ' ' + historyNoReachAdvice(last.outcome, !!waLast) + waNote + connectedNote);
+      // Never reached, early on.
+      if (declined && waOpen) action = 'Send WhatsApp first, then call ' + historyOtherSlot(now);
+      else if (declined) action = 'Call ' + historyOtherSlot(now);
+      else action = historyRetryAction(last.outcome, now) + (waOpen ? ' + send WhatsApp' : '');
+      why.push(streak(false));
+      why.push('Not spoken to yet.');
+      why.push(waDone || (waOpen ? 'No WhatsApp sent yet.' : ''));
+      why.push(declinedNote);
+      why.push(connectedNote);
     }
   } else {
     // Rule 4 - the newest meaningful comment is a real conversation.
     const conv = entries[lastConv];
-    parts.push(FOLLOWUP_SUGGESTIONS[conv.outcome] ||
-      ('Customer spoke on ' + whenWho(conv) + ', but the note does not say what was agreed - call, confirm the next step, and log it clearly.'));
-    if (bestMilestone >= 0 && bestMilestone !== lastConv &&
-        (HISTORY_MILESTONE_RANK[entries[bestMilestone].outcome] || 0) > (HISTORY_MILESTONE_RANK[conv.outcome] || 0)) {
-      parts.push(milestoneLine('.'));
-    }
-    if (facts.text) parts.push('Requirement on record: ' + facts.text + '.');
+    const convPhrase = HISTORY_CONV_PHRASE[conv.outcome];
+    action = HISTORY_CONV_ACTION[conv.outcome] || 'Call, confirm the next step and log it';
+    if (conv.statusKey === 'connected on whatsapp' && !everOnCall) action = 'Call ' + historySoon(now) + ' - they reply on WhatsApp';
+    why.push(spokeVia(conv) + whenWho(conv) + (convPhrase ? ' (' + convPhrase + ')' : '') + '.' +
+      (HISTORY_CONV_ACTION[conv.outcome] ? '' : ' The note does not say what was agreed.'));
+    if (facts.text) why.push('Wants ' + facts.text + '.');
+    why.push(milestone(lastConv));
     if (lastStop >= 0) {
-      parts.push('Note: earlier logged ' + whenWho(entries[lastStop]) + ': ' + (HISTORY_STOP_PHRASE[entries[lastStop].outcome] || 'a reason to stop') +
-        ', but the conversation continued after that.');
+      why.push('Earlier logged ' + whenWho(entries[lastStop]) + ': ' + (HISTORY_STOP_PHRASE[entries[lastStop].outcome] || 'a reason to stop') +
+        ', but the talk continued after that.');
     }
   }
-
-  // (The emails also append preference clauses here - detectFollowupModifiersGs_; the dashboard never had them.)
-
-  const first = entries[0];
-  parts.push('History: ' + entries.length + (entries.length === 1 ? ' call/comment' : ' calls/comments') +
-    (first.ts.slice(0, 10) !== last.ts.slice(0, 10) ? ', ' + historyShortDate(first.ts) + ' to ' + historyShortDate(last.ts) : ', ' + historyShortDate(last.ts)) +
-    (lastReached >= 0 ? '; last connected ' + historyShortDate(entries[lastReached].ts) : '; customer never reached yet') + '.');
+  const parts = [historyCap(action) + '.'].concat(why.filter(Boolean));
+  // (The emails also append preference clauses here - detectFollowupModifiers; the dashboard never had them.)
   return parts.join(' ');
 }
 function historyFollowUp(l){
   return historyDecide(historyEntries(l.internal_status_comments, l.stage_comments), l.RM,
-    Number(l.call_attempts) || 0, Number(l.call_count) || 0, Number(l.duration) || 0, l.lead_created_at, l.current_stage);
+    Number(l.call_attempts) || 0, Number(l.call_count) || 0, Number(l.duration) || 0, l.lead_created_at, l.current_stage,
+    typeof _renderNow !== 'undefined' && _renderNow ? _renderNow : new Date());
 }
 
 function hasDatedCommentEntries(l){
@@ -1235,14 +1317,14 @@ function suggestedFollowUp(l){
 function noCommentFollowUp(l){
   const baseline = lastSnapshotForLead(l); // per LEAD (email audit F18) - see core-lead-model.js
   if (!baseline || (_renderNow.getTime() - baseline.atMs) < 4 * 3600000) {
-    return 'No comment added — connect and log the outcome.';
+    return 'Call now and log what happened. No comment added yet.';
   }
   const currentAttempts = Number(l.call_attempts) || 0;
   if (currentAttempts <= baseline.call_attempts) {
-    return 'No comment added — no new call attempts in over 4 hours. Connect ASAP.';
+    return 'Call now. No new calls in over 4 hours. No comment added yet.';
   }
   const newAttempts = currentAttempts - baseline.call_attempts;
-  return `No comment added — ${newAttempts} more call attempt${newAttempts === 1 ? '' : 's'} made since the last check. Keep trying to connect, and also send a WhatsApp message.`;
+  return `Keep calling + send WhatsApp. ${newAttempts} more call attempt${newAttempts === 1 ? '' : 's'} since the last check. No comment added yet.`;
 }
 
 // Inner markup only — no wrapper div, so it can be injected into the
