@@ -1574,14 +1574,14 @@
         /5 more call attempts/.test(txt), txt);
       txt = noCommentFollowUp({ lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 4 });
       assert('F18 noCommentFollowUp: unchanged since its own snapshot -> "no new call attempts" (the sibling\'s higher counter must not change that)',
-        /no new call attempts/.test(txt), txt);
+        /No new calls in over 4 hours/.test(txt), txt);
       txt = noCommentFollowUp({ lead_id: 'L-A', client_id: 'C-SAME', call_attempts: 13, collatedLeadIds: ['L-A', 'L-B'] });
       assert('F18 noCommentFollowUp: a merged record compares against the snapshot of the lead with the highest counter (L-A 13)',
-        /no new call attempts/.test(txt), txt);
+        /No new calls in over 4 hours/.test(txt), txt);
       // …even when the record's primary lead is NOT the one with the highest counter (primary L-B 4; the merged call_attempts is L-A's 13).
       txt = noCommentFollowUp({ lead_id: 'L-B', client_id: 'C-SAME', call_attempts: 13, collatedLeadIds: ['L-B', 'L-A'] });
       assert('F18 noCommentFollowUp: …regardless of which of its leads is the record\'s primary (primary L-B has 4, but the record carries L-A\'s 13)',
-        /no new call attempts/.test(txt), txt);
+        /No new calls in over 4 hours/.test(txt), txt);
 
       // -- Stalled Leads: attempts are compared with THIS lead's own snapshot history --
       const stallBase = (over) => enrichLead(Object.assign({
