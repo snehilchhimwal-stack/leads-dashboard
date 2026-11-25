@@ -92,28 +92,28 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `21166fc` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `Core.gs` | `60832fe` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `CycleReport.gs` | `6ca53d2` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `DailyChecklist.gs` | `6ca53d2` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `DailyRmIssueLog.gs` | `abb3a87` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `EmailInfra.gs` | `3092603` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `EmailLedger.gs` | `5ed90a7` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `EmailReroute.gs` | `7ef68d3` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `EmailSweep.gs` | `79ef725` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `FollowupEngine.gs` | `21166fc` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `FollowupTracker.gs` | `7ef68d3` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `InteractionHistoryLogger.gs` | `3092603` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `MovementTracker.gs` | `a2b904e` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `OpsAudit.gs` | `8ef279d` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `OvernightEmailer.gs` | `21166fc` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `RmHierarchy.gs` | `4ec6f0f` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `RmHierarchySync.gs` | `6b28fba` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `SlaEngine.gs` | `b7521f4` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `StaleLeads.gs` | `e6bdcb0` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
-| `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-23 | read directly from the live editor by hash-match (2026-11-23) |
+| `AllIssuesEmailer.gs` | `34a1e23` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `Core.gs` | `60832fe` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `CycleReport.gs` | `6ca53d2` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `DailyChecklist.gs` | `6ca53d2` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `DailyRmIssueLog.gs` | `abb3a87` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `EmailInfra.gs` | `34a1e23` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `EmailLedger.gs` | `5ed90a7` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `EmailReroute.gs` | `7ef68d3` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `EmailSweep.gs` | `79ef725` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `FollowupEngine.gs` | `21166fc` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `FollowupTracker.gs` | `7ef68d3` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `InteractionHistoryLogger.gs` | `3092603` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `LeadFollowupsStaleness.gs` | `2146e13` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `MovementTracker.gs` | `a2b904e` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `OpsAudit.gs` | `8ef279d` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `OpsChecklistRunner.gs` | `8ef279d` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `OvernightEmailer.gs` | `34a1e23` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `RmHierarchy.gs` | `4ec6f0f` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `RmHierarchySync.gs` | `6b28fba` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `SlaEngine.gs` | `b7521f4` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `StaleLeads.gs` | `e6bdcb0` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
+| `UnmatchedCommentLogger.gs` | `3092603` | 2026-11-25 | read directly from the live editor by hash-match (2026-11-25) |
 
 ### Known live-vs-repo differences
 
