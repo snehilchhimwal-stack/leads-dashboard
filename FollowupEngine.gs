@@ -134,9 +134,13 @@ function _wordsMatchGs_(word, target) {
 // [Busy] is a customer on another call, not a conversation - and the note adds detail. An unknown bracket stays in the note.
 // Data without brackets (query v2) reads exactly as before. KEEP IN SYNC with the twin.
 const CALL_STATUS_KIND_GS_ = { 'ringing': 'noreach', 'busy': 'noreach', 'call declined': 'noreach', 'not reachable': 'noreach',
-  'followup missed': 'noreach', 'invalid no': 'stop', 'call connected': 'conversation', 'connected on whatsapp': 'conversation' };
+  'followup missed': 'noreach', 'invalid no': 'stop', 'call connected': 'conversation',
+  // 2026-11-25 (Snehil): "Connected On Whatsapp" means the RM messaged the client on WhatsApp - they still need to connect.
+  // It is a WhatsApp sent, not a conversation (it used to be read as the customer replying).
+  'connected on whatsapp': 'noreach' };
 const CALL_STATUS_OUTCOME_GS_ = { 'ringing': 'Ringing / RNR', 'busy': 'Busy', 'call declined': 'Call Declined',
-  'not reachable': 'Switched Off', 'followup missed': 'Follow-up Missed', 'invalid no': 'Wrong Number' };
+  'not reachable': 'Switched Off', 'followup missed': 'Follow-up Missed', 'invalid no': 'Wrong Number',
+  'connected on whatsapp': 'WhatsApp Sent' };
 function splitCallStatusGs_(comment) {
   const m = String(comment || '').match(/^\s*\[([^\]]{2,40})\]\s*(.*)$/);
   if (m && Object.prototype.hasOwnProperty.call(CALL_STATUS_KIND_GS_, m[1].trim().toLowerCase())) {
@@ -1007,11 +1011,10 @@ function historyDecideGs_(entries, ownerName, dials, connectedCalls, talkSeconds
   const reached = function (e, kind) {
     return kind === 'conversation' || (kind === 'stop' && e.statusKind !== 'noreach' && e.statusKey !== 'invalid no' && e.outcome !== 'Wrong Number');
   };
-  let lastConv = -1, lastStop = -1, bestMilestone = -1, lastReached = -1, everOnCall = false;
+  let lastConv = -1, lastStop = -1, bestMilestone = -1, lastReached = -1;
   entries.forEach(function (e, i) {
     const kind = historyKindGs_(e);
     if (kind === 'conversation') lastConv = i;
-    if (kind === 'conversation' && e.statusKey !== 'connected on whatsapp') everOnCall = true;
     if (kind === 'stop') lastStop = i;
     if (reached(e, kind)) lastReached = i;
     const rank = HISTORY_MILESTONE_RANK_GS_[e.outcome] || 0;
@@ -1071,7 +1074,7 @@ function historyDecideGs_(entries, ownerName, dials, connectedCalls, talkSeconds
     if (than >= 0 && (HISTORY_MILESTONE_RANK_GS_[entries[bestMilestone].outcome] || 0) <= (HISTORY_MILESTONE_RANK_GS_[entries[than].outcome] || 0)) return '';
     return 'Earlier: ' + HISTORY_MILESTONE_LABEL_GS_[entries[bestMilestone].outcome] + ' (' + whenWho(entries[bestMilestone]) + ') - continue from there.';
   };
-  const spokeVia = function (e) { return e.statusKey === 'connected on whatsapp' ? 'Replied on WhatsApp ' : 'Last spoke '; };
+  const spokeVia = function () { return 'Last spoke '; };
 
   if (lastStop > lastConv) {
     // Rule 1 - the newest meaningful thing the customer said was a STOP.
@@ -1130,7 +1133,6 @@ function historyDecideGs_(entries, ownerName, dials, connectedCalls, talkSeconds
     const conv = entries[lastConv];
     const convPhrase = HISTORY_CONV_PHRASE_GS_[conv.outcome];
     action = HISTORY_CONV_ACTION_GS_[conv.outcome] || 'Call, confirm the next step and log it';
-    if (conv.statusKey === 'connected on whatsapp' && !everOnCall) action = 'Call ' + historySoonGs_(now) + ' - they reply on WhatsApp';
     why.push(spokeVia(conv) + whenWho(conv) + (convPhrase ? ' (' + convPhrase + ')' : '') + '.' +
       (HISTORY_CONV_ACTION_GS_[conv.outcome] ? '' : ' The note does not say what was agreed.'));
     if (facts.text) why.push('Wants ' + facts.text + '.');

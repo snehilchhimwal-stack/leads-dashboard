@@ -447,9 +447,10 @@ function runFollowupEngineTests_() {
     // Real case: lead 2283515 in the 10:00 email of 25 Nov - one Busy call on 24 Nov.
     TestAssertEqual_(historyDecideGs_(historyEntriesGs_('Firoj Shaikh: [Busy] - 2026-11-24 18:40', ''), 'Firoj Shaikh', 1, 0, 0, '2026-11-24', 'Not Updated', at1005),
       'Call again before 12 pm + send WhatsApp. Line was busy on the only call (24 Nov). Not spoken to yet. No WhatsApp sent yet.', 'readable: lead 2283515');
-    // Customer replied on WhatsApp but never spoke on a call -> call them now.
-    h = historyDecideGs_(historyEntriesGs_('A: [Ringing] - 2026-11-23 10:00 | A: [Connected On Whatsapp] asked for floor plans - 2026-11-24 12:00', ''), 'A', 0, 0, 0, '', 'Suspect', at1005);
-    TestAssert_(h.indexOf('Call before 12 pm - they reply on WhatsApp. Replied on WhatsApp 24 Nov') === 0, 'readable: replied on WhatsApp -> call now (got: ' + h + ')');
+    // 2026-11-25 (Snehil): "Connected On Whatsapp" = the RM messaged the client on WhatsApp; they still need to connect.
+    h = historyDecideGs_(historyEntriesGs_('A: [Ringing] - 2026-11-23 10:00 | A: [Connected On Whatsapp] Details shared in WhatsApp waiting for the response - 2026-11-24 12:00', ''), 'A', 0, 0, 0, '', 'Suspect', at1005);
+    TestAssertEqual_(h, 'Call before 12 pm. 2 calls since 23 Nov, none answered; last: only a WhatsApp sent (24 Nov). Not spoken to yet. WhatsApp sent 24 Nov, no reply.', 'whatsapp: Connected On Whatsapp is a WhatsApp sent, not a reply');
+    TestAssertEqual_(inferOutcomeGs_('[Connected On Whatsapp] WhatsApp message shared'), 'WhatsApp Sent', 'whatsapp: Connected On Whatsapp classifies as WhatsApp Sent');
     // The email shows the action in bold; the rest stays escaped plain text.
     TestAssertEqual_(followupCellHtmlGs_('Call now. Reason <x>.'), '<b>Call now.</b> Reason &lt;x&gt;.', 'readable: the email cell bolds the action');
     TestAssertEqual_(followupCellHtmlGs_('No sentence break'), 'No sentence break', 'readable: no sentence break -> plain text');
