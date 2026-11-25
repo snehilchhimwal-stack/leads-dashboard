@@ -375,7 +375,8 @@ function sendAllIssuesEmails_(opts) {
         const hint = overnightFollowupHintGs_(row, colIndex, now, baselineEntry);
         if (issue.key !== 'underCalledToday') return hint;
         const p = customerCallProgressGs_(row, colIndex, now); // 2026-11-02: the pooled count the rule judged
-        return p ? 'Customer calls so far (all RMs): ' + p.total + '/' + p.target + '. ' + hint : hint;
+        // 2026-11-25: after the action, not before it - the email bolds the follow-up's first sentence (the action).
+        return p ? followupWithAfterActionGs_(hint, 'Customer calls so far (all RMs): ' + p.total + '/' + p.target + '.') : hint;
       })(),
       staleSince: older ? olderStaleSince : staleSinceOfRowGs_(row, colIndex, lastChangeMap, now),
       olderStale: older || undefined, // F8: only the older leads carry it (undefined is left out of the snapshot JSON)
@@ -1051,6 +1052,13 @@ function removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCoun
 
   sheet.deleteRows(startRow, count);
   Logger.log('Removed ' + count + ' ' + ALL_ISSUES_LOG_SHEET_ + ' rows (sheet rows ' + startRow + '-' + (startRow + count - 1) + '), archived first to ' + file.getUrl() + '. ' + ALL_ISSUES_LOG_SHEET_ + ' now has ' + (sheet.getLastRow() - 1) + ' data rows.');
+}
+
+// Puts `extra` right after the follow-up's first sentence (its action), so the action stays first. Pure.
+function followupWithAfterActionGs_(hint, extra) {
+  const h = String(hint || ''), cut = h.indexOf('. ');
+  if (cut < 1) return h ? h + ' ' + extra : extra;
+  return h.slice(0, cut + 1) + ' ' + extra + h.slice(cut + 1);
 }
 
 // ===== Team "other sources" report (2026-11-25, user request: Akash A Ugale ONLY - no other email changes) =====

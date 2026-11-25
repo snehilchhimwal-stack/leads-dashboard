@@ -571,6 +571,13 @@ function runAllIssuesEmailerTests_() {
       }
     }
 
+    // ---- 2026-11-25: the calls count goes AFTER the follow-up's action (the email bolds the first sentence) ----
+    TestAssertEqual_(followupWithAfterActionGs_('Call again in 2-3 days. Last spoke 25 Nov.', 'Customer calls so far (all RMs): 7/10.'),
+      'Call again in 2-3 days. Customer calls so far (all RMs): 7/10. Last spoke 25 Nov.', 'calls count: after the action');
+    TestAssertEqual_(followupWithAfterActionGs_('Call now', 'X.'), 'Call now X.', 'calls count: no sentence break -> appended');
+    TestAssertEqual_(followupCellHtmlGs_(followupWithAfterActionGs_('Call again before 7 pm. Reason.', 'Customer calls so far (all RMs): 3/5.')).indexOf('<b>Call again before 7 pm.</b>'), 0,
+      'calls count: the bold stays on the action');
+
     // ---- 2026-11-25 (user request, Akash A Ugale only): his team's other-source report, its own email ----
     {
       const tag = 'team other-source: ';
