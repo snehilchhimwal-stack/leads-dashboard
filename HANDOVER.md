@@ -1043,6 +1043,19 @@ regions in the subject ("Mukesh Mishra Admin (Bangalore, Hyderabad) Google Leads
 Email_Ledger still per region (a multi-region row's region is the joined label). A direct call with no open buffer sends at once.
 Paired with Coefficient query v4 (Admin-owned leads take the project's region) - see sql/ROLLBACK_2026-11-20.md.
 
+### Team other-source report - Akash A Ugale only (2026-11-25)
+
+`sendTeamOtherSourcesReportsGs_` (end of AllIssuesEmailer.gs) sends ONE extra email per person in `TEAM_OTHER_SOURCES_PEOPLE_GS_`
+(only 'Akash A Ugale'), To that person only, after the normal run: at 17:00 (`'issues'`, from `sendAllIssuesEmails_`) his team's
+leads with an SLA issue in the 3-day window, at 10:00 (`'overnight'`, from `sendOvernightMorningEmailsBody_`) his team's overnight
+leads. Team = the person + rows sharing his email + everyone whose TL/TM/RH chain reaches him (`teamOtherMembersGs_`). Sources =
+everything EXCEPT Google Search / Google Non-UTM (`isTeamOtherSourceGs_`). Ledger jobs `teamOther17` / `teamOther10`; once a day
+via the CH-report guard (kinds `teamother17` / `teamother10`). At 13:00 (`sendTeamOtherFollowupsGs_`, from
+`sendOvernightFollowupEmails_`) a reply goes into the 10:00 thread listing only the leads untouched since 10:00: the 10:00 send stores
+each lead's row fingerprint (`teamOtherRowHashGs_`) in script property `TEAM_OTHER_10_<name>`; a lead whose row changed, closed or
+reached Opportunity+ counts as handled. All handled -> no reply. Ledger job `teamOther13`. No other email changes. Not run by recovery runs. A person missing
+from RM_Hierarchy is skipped (logged); a send failure alerts ops.
+
 ### Suggested Follow-up: action first, with a deadline and the WhatsApp step (2026-11-25)
 
 `historyDecideGs_` (FollowupEngine.gs) and its twin `historyDecide` (js/core-outcome-engine.js) now write the follow-up as

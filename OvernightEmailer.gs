@@ -1376,6 +1376,8 @@ function sendOvernightMorningEmailsBody_(opts) {
       'recovery: no bucket with this id was produced - the flagged leads were resolved since the failure, so nothing was re-sent');
   }
   notifyLeadSendFailuresGs_(failedLeadEntries);
+  // 2026-11-25 (user request, Akash A Ugale only): his team's overnight other-source leads - its own email (AllIssuesEmailer.gs).
+  if (!recoverIds) sendTeamOtherSourcesReportsGs_('overnight', { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: hierarchyData, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
   emailLedgerFinishGs_(ledger, recoverIds ? 'the 10:00 recovery run' : 'the 10:00 morning run');
 }
 
@@ -2295,6 +2297,8 @@ function sendOvernightFollowupEmails_(opts) {
     closeUnmatchedRecoveryTargetsGs_(ledger, recoverIds, recoveredSeen, recoveredAs, recoveryLedgerToday, recoveryUnsentByRegion, '13:00',
       'recovery: no pending 13:00 reply with this id was found (it was already sent or its Overnight_Log row is gone), so nothing was re-sent');
   }
+  // 2026-11-25 (user request, Akash A Ugale only): the 13:00 reply to his team's other-source 10:00 email (AllIssuesEmailer.gs).
+  if (!recoverIds) sendTeamOtherFollowupsGs_({ dataRows: dataRows, colIndex: colIndex, now: now, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
   emailLedgerFinishGs_(ledger, recoverIds ? 'the 13:00 recovery run' : 'the 13:00 follow-up run');
 }
 

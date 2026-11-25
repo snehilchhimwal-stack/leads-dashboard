@@ -616,6 +616,8 @@ function sendAllIssuesEmails_(opts) {
     runLabel: recoverIds ? 'Recovery of failed 17:00 buckets' : '',
     retryNote: 'the next 17:00 run lists a lead again only while it is still flagged and was assigned in the last 3 calendar days (IST) - or in the last ' + (ALL_ISSUES_STALE_DAYS_BACK_ + 1) + ' when it has had no update for more than ' + LEAD_STALE_HOURS_ + ' hours.',
   });
+  // 2026-11-25 (user request, Akash A Ugale only): his team's other-source leads with an issue - its own email, after the normal ones.
+  if (!recoverIds) sendTeamOtherSourcesReportsGs_('issues', { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: hierarchyData, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
   pruneEmailLedgerGs_(ledger, now);
   emailLedgerFinishGs_(ledger, 'the 17:00 All-Issues run');
   Logger.log('[timing] sendAllIssuesEmails_ finished — total ' + elapsed_() + ', ' + bucketSentOkCount + ' of ' + bucketSendCount + ' bucket email(s) sent, ' + failedLeadEntries.length + ' lead(s) not sent');
@@ -1049,4 +1051,259 @@ function removeAllIssuesLogRowsInWindowGs_(ss, from, to, recipient, expectedCoun
 
   sheet.deleteRows(startRow, count);
   Logger.log('Removed ' + count + ' ' + ALL_ISSUES_LOG_SHEET_ + ' rows (sheet rows ' + startRow + '-' + (startRow + count - 1) + '), archived first to ' + file.getUrl() + '. ' + ALL_ISSUES_LOG_SHEET_ + ' now has ' + (sheet.getLastRow() - 1) + ' data rows.');
+}
+
+// ===== Team "other sources" report (2026-11-25, user request: Akash A Ugale ONLY - no other email changes) =====
+// "For Akash A Ugale I want a separate part where every lead under him, his A1 and S1 is checked on our SLA; all other leads except
+// Google Search and Non-UTM are added with issues and follow-up." Decided with Snehil 2026-11-25:
+//   - its OWN email, To the person only (nobody else sees the whole-team list); nothing else in any other email changes;
+//   - 17:00: the team's leads with an SLA issue, same checks and 3-day window as the "Leads With Issue" email;
+//   - 10:00: the team's overnight leads (same overnight window as the 10:00 digest), status + follow-up;
+//   - "other sources" = every source EXCEPT Google Search and Google Non-UTM (those are already in the normal emails) - so Google
+//     Discovery, Meta, Portal, Agency, SMS, Databank, ...
+// The team = everyone whose TL / TM / RH chain in RM_Hierarchy reaches the person, plus the person (and other rows with the same
+// email - Akash also has an "Akash Ugale" A1 row). Runs after the normal emails; a failure here only alerts ops.
+const TEAM_OTHER_SOURCES_PEOPLE_GS_ = ['Akash A Ugale'];
+const EMAIL_LEDGER_JOB_TEAM_OTHER_17_ = 'teamOther17';
+const EMAIL_LEDGER_JOB_TEAM_OTHER_10_ = 'teamOther10';
+const TEAM_OTHER_KINDS_ = { issues: 'teamother17', overnight: 'teamother10' }; // once-a-day guard keys (wasChReportSentTodayGs_)
+
+// Lower-cased names of the person's team (the person included), from loadRmHierarchyAndEmails_'s byRmNameLower. Pure.
+function teamOtherMembersGs_(byRmNameLower, personName) {
+  const person = String(personName || '').trim().toLowerCase();
+  const rows = byRmNameLower || {};
+  const team = {};
+  team[person] = true;
+  const personEmail = rows[person] && String(rows[person].email || '').trim().toLowerCase();
+  if (personEmail) Object.keys(rows).forEach(function (n) { if (String(rows[n].email || '').trim().toLowerCase() === personEmail) team[n] = true; });
+  // Everyone whose tl / tm / rh is already in the team, repeated until nothing new joins (a chain of any depth).
+  let grew = true;
+  while (grew) {
+    grew = false;
+    Object.keys(rows).forEach(function (n) {
+      if (team[n]) return;
+      const r = rows[n];
+      if ([r.tl, r.tm, r.rh].some(function (m) { return team[String(m || '').trim().toLowerCase()]; })) { team[n] = true; grew = true; }
+    });
+  }
+  return team;
+}
+
+// True for any source the normal emails do NOT cover (everything except Google Search / Google Non-UTM). Pure.
+function isTeamOtherSourceGs_(groupSourceRaw, sourceBucketRaw) {
+  return !passesGoogleNonUtmSearchGs_(groupSourceRaw, sourceBucketRaw);
+}
+// "Meta", "Google Discovery", "Portal", "SMS" ... Pure.
+function teamOtherSourceLabelGs_(groupSourceRaw, sourceBucketRaw) {
+  const g = String(groupSourceRaw || '').trim(), b = String(sourceBucketRaw || '').trim();
+  const cap = function (s) { return /^(sms|cp|nri)$/i.test(s) ? s.toUpperCase() : s.charAt(0).toUpperCase() + s.slice(1); };
+  if (!g) return 'Unknown';
+  return cap(g) + (b && b.toLowerCase() !== 'non-utm' ? ' ' + cap(b) : '');
+}
+
+// The person's team leads from other sources assigned inside `win`, open. kind 'issues' keeps only leads with an SLA issue.
+// ctx: { dataRows, colIndex, now, team, baselineMap, lastSnapshotMap }.
+function teamOtherLeadsGs_(kind, win, ctx) {
+  const out = [];
+  (ctx.dataRows || []).forEach(function (row) {
+    const colIndex = ctx.colIndex;
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const RM = String(getVal_(row, colIndex, 'RM') || '').trim();
+    if (!RM || !ctx.team[RM.toLowerCase()]) return;
+    const gs = getVal_(row, colIndex, 'group_source'), sb = getVal_(row, colIndex, 'source_bucket');
+    if (!isTeamOtherSourceGs_(gs, sb)) return;
+    const assigned = getVal_(row, colIndex, 'lead_assigned_at');
+    if (!(assigned instanceof Date) || assigned < win.from || assigned > win.to) return;
+    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+    if (!isOpenLead_(stage, getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'))) return;
+    let issueLabel = '';
+    if (kind === 'issues') {
+      const issue = primaryIssueGs_(computeSlaFlags_(row, colIndex, ctx.now, ctx.baselineMap));
+      if (!issue) return;
+      issueLabel = issue.label;
+    }
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    out.push({
+      identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
+      stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
+      lead_id: leadId, RM: RM, source: teamOtherSourceLabelGs_(gs, sb), issueLabel: issueLabel,
+      status: overnightStatusLabelGs_(stage),
+      followup: overnightFollowupHintGs_(row, colIndex, ctx.now, (ctx.lastSnapshotMap || {})[leadId]),
+      hash: kind === 'overnight' ? teamOtherRowHashGs_(row, colIndex) : '', // the 13:00 reply's "untouched since 10:00" check
+    });
+  });
+  return dedupeEmailCandidatesGs_(out).leads;
+}
+
+// Email options for one person's report. Pure.
+function teamOtherReportOptsGs_(kind, personName, leads, win, dateLabel) {
+  const byRm = {}, rms = [];
+  leads.forEach(function (l) { if (!byRm[l.RM]) { byRm[l.RM] = []; rms.push(l.RM); } byRm[l.RM].push(l); });
+  rms.sort(function (a, b) { return byRm[b].length - byRm[a].length || a.localeCompare(b); });
+  const issues = kind === 'issues';
+  const sources = Array.from(new Set(leads.map(function (l) { return l.source; }))).length;
+  return {
+    title: issues ? 'Team Leads With Issue - Other Sources' : 'Team Overnight Leads - Other Sources',
+    region: personName + ' - team',
+    subtitle: 'All sources except Google Search / Google Non-UTM · ' + (issues ? 'last 3 calendar days' : 'assigned overnight'),
+    kpis: [
+      { value: leads.length, label: issues ? (leads.length === 1 ? 'Lead Flagged' : 'Leads Flagged') : (leads.length === 1 ? 'Overnight Lead' : 'Overnight Leads'), bg: '#dbeafe', fg: '#2563eb' },
+      { value: rms.length, label: rms.length === 1 ? 'RM' : 'RMs', bg: '#e0e7ff', fg: '#4338ca' },
+      { value: sources, label: sources === 1 ? 'Source' : 'Sources', bg: '#fef3c7', fg: '#b45309' },
+    ],
+    action: issues ? 'Clear these flags with your team - each is one of the Operations SLA checks, the same ones the Google emails use.'
+      : 'Make sure each of these is called today and the outcome is logged.',
+    sections: rms.map(function (rm) {
+      return {
+        heading: rm, subheading: byRm[rm].length + (byRm[rm].length === 1 ? ' lead' : ' leads'),
+        columns: issues ? ['Lead ID', 'Source', 'Issue', 'Status', 'Suggested Follow-up'] : ['Lead ID', 'Source', 'Status', 'Suggested Follow-up'],
+        rows: byRm[rm].map(function (l) { return issues ? [l.lead_id, l.source, l.issueLabel, l.status, l.followup] : [l.lead_id, l.source, l.status, l.followup]; }),
+      };
+    }),
+    footerNote: 'Sent only to ' + personName + '. Covers everyone under ' + personName + ' in RM_Hierarchy (TL / TM / RH chain), every lead source except ' +
+      'Google Search and Google Non-UTM (those are in the usual Google emails). ' + (issues ? 'Leads assigned ' + allIssuesDateRangeLabelGs_(win).replace(/[()]/g, '') + ' (IST) that are open and flagged.'
+      : 'Leads assigned overnight (' + dateLabel + ' run), still open.'),
+  };
+}
+function teamOtherSubjectGs_(kind, personName, win, dateLabel) {
+  return kind === 'issues' ? personName + ' (Team) Other-Source Leads With Issue ' + allIssuesDateRangeLabelGs_(win)
+    : '(' + personName + ') Team Other-Source Overnight Leads - ' + dateLabel;
+}
+
+// Sends the report for every person in TEAM_OTHER_SOURCES_PEOPLE_GS_. Never throws: a failure is logged and ops are alerted - the
+// caller's own emails are already out. kind: 'issues' (17:00) or 'overnight' (10:00).
+// ctx: { dataRows, colIndex, now, win, hierarchyData, baselineMap, lastSnapshotMap, ledger }.
+function sendTeamOtherSourcesReportsGs_(kind, ctx) {
+  TEAM_OTHER_SOURCES_PEOPLE_GS_.forEach(function (personName) {
+    try {
+      const guardKind = TEAM_OTHER_KINDS_[kind];
+      if (wasChReportSentTodayGs_(guardKind, 'team', personName)) { Logger.log('Team other-source report (' + kind + ') for ' + personName + ' already sent today - not re-sending.'); return; }
+      const rows = (ctx.hierarchyData && ctx.hierarchyData.byRmNameLower) || {};
+      const me = rows[personName.toLowerCase()];
+      const realTo = me && String(me.email || '').trim();
+      // Not in RM_Hierarchy (left, renamed) - nothing to send; logged only, ops are not paged for a person who is gone.
+      if (!realTo) { Logger.log('Team other-source report (' + kind + '): ' + personName + ' has no RM_Hierarchy row with an email - skipped.'); return; }
+      const team = teamOtherMembersGs_(rows, personName);
+      const leads = teamOtherLeadsGs_(kind, ctx.win, { dataRows: ctx.dataRows, colIndex: ctx.colIndex, now: ctx.now, team: team, baselineMap: ctx.baselineMap, lastSnapshotMap: ctx.lastSnapshotMap });
+      if (!leads.length) { Logger.log('Team other-source report (' + kind + ') for ' + personName + ': no leads - nothing sent.'); return; }
+      const dateLabel = Utilities.formatDate(ctx.now, 'Asia/Kolkata', 'd MMM yyyy');
+      const opts = teamOtherReportOptsGs_(kind, personName, leads, ctx.win, dateLabel);
+      const subject = teamOtherSubjectGs_(kind, personName, ctx.win, dateLabel);
+      const to = TEST_MODE_OVERRIDE_EMAIL_ || realTo;
+      const job = kind === 'issues' ? EMAIL_LEDGER_JOB_TEAM_OTHER_17_ : EMAIL_LEDGER_JOB_TEAM_OTHER_10_;
+      const day = istDayKeyGs_(ctx.now);
+      const leadIds = leads.map(function (l) { return String(l.lead_id); });
+      const sent = emailLedgerTrackSendGs_(ctx.ledger, {
+        emailId: emailLedgerIdGs_(job, day, 'team', 'TM', personName, to), job: job, dayKey: day, region: 'team', bucketLabel: personName,
+        primaryRole: 'TM', to: to, cc: '', subject: subject, leadIds: leadIds,
+      }, function () {
+        return sendGuardedEmailGs_({ to: to, subject: subject, plainBody: plainTextReportGs_(opts), htmlBody: renderOvernightReportEmailHTML_(opts), leadIds: leadIds },
+          'send team other-source report (' + personName + ', ' + kind + ')');
+      });
+      if (kind === 'overnight') { // what the 13:00 reply needs: the thread, and each lead as it was at 10:00
+        teamOtherSaveMorningGs_(personName, { day: day, threadId: emailLedgerSentIdsGs_(sent).threadId, to: to, subject: subject,
+          leads: leads.map(function (l) { return { lead_id: l.lead_id, RM: l.RM, source: l.source, h: l.hash }; }) });
+      }
+      markChReportSentGs_(guardKind, 'team', personName);
+    } catch (e) {
+      Logger.log('Team other-source report (' + kind + ') for ' + personName + ' failed: ' + e);
+      notifyOpsAlertGs_('Team other-source report ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + personName + ' (' + kind + ')', [String((e && e.message) || e)]);
+    }
+  });
+}
+
+// ---- 13:00: a reply in the 10:00 email's thread with the overnight leads still UNTOUCHED (2026-11-25, user request) ----
+// The 10:00 send records its leads (id, RM, source, a fingerprint of the lead's row) in a script property. At 13:00 a lead counts as
+// handled when it is gone, closed, at Opportunity+, or its row changed at all since 10:00 (a new comment, call, stage...); the rest are
+// listed with a fresh follow-up. Nothing untouched -> no reply. Same once-a-day guard. Runs from sendOvernightFollowupEmails_.
+const EMAIL_LEDGER_JOB_TEAM_OTHER_13_ = 'teamOther13';
+const TEAM_OTHER_FOLLOWUP_KIND_ = 'teamother13';
+const TEAM_OTHER_MORNING_PROP_PREFIX_ = 'TEAM_OTHER_10_';
+function teamOtherRowHashGs_(row, colIndex) {
+  return _leadContentHashGs_(function (k) { return getVal_(row, colIndex, k); }).slice(0, 16);
+}
+function teamOtherSaveMorningGs_(personName, record) {
+  try { PropertiesService.getScriptProperties().setProperty(TEAM_OTHER_MORNING_PROP_PREFIX_ + String(personName).toLowerCase(), JSON.stringify(record)); }
+  catch (e) { Logger.log('Team other-source: could not record the 10:00 leads for ' + personName + ' (' + e + ') - no 13:00 reply today.'); }
+}
+function teamOtherReadMorningGs_(personName) {
+  try {
+    const v = PropertiesService.getScriptProperties().getProperty(TEAM_OTHER_MORNING_PROP_PREFIX_ + String(personName).toLowerCase());
+    return v ? JSON.parse(v) : null;
+  } catch (e) { return null; }
+}
+// Email options for the 13:00 reply. Pure.
+function teamOtherFollowupOptsGs_(personName, still, handled, total) {
+  const byRm = {}, rms = [];
+  still.forEach(function (l) { if (!byRm[l.RM]) { byRm[l.RM] = []; rms.push(l.RM); } byRm[l.RM].push(l); });
+  rms.sort(function (a, b) { return byRm[b].length - byRm[a].length || a.localeCompare(b); });
+  return {
+    title: 'Still Untouched at 1 pm - Other Sources',
+    region: personName + ' - team',
+    subtitle: 'Overnight leads from the 10 am email with no update since',
+    kpis: [
+      { value: still.length, label: still.length === 1 ? 'Still Untouched' : 'Still Untouched', bg: '#fee2e2', fg: '#b91c1c' },
+      { value: handled, label: 'Handled Since 10 am', bg: '#dcfce7', fg: '#15803d' },
+      { value: total, label: 'In the 10 am Email', bg: '#e0e7ff', fg: '#4338ca' },
+    ],
+    action: 'These had no update since the 10 am email - call them now and log the outcome.',
+    sections: rms.map(function (rm) {
+      return {
+        heading: rm, subheading: byRm[rm].length + (byRm[rm].length === 1 ? ' lead' : ' leads'),
+        columns: ['Lead ID', 'Source', 'Status', 'Suggested Follow-up'],
+        rows: byRm[rm].map(function (l) { return [l.lead_id, l.source, l.status, l.followup]; }),
+      };
+    }),
+    footerNote: 'Sent only to ' + personName + '. A lead counts as handled once anything on it changed after 10 am (a comment, a call, a stage), or it was closed or reached Opportunity.',
+  };
+}
+// ctx: { dataRows, colIndex, now, baselineMap, lastSnapshotMap, ledger }. Never throws.
+function sendTeamOtherFollowupsGs_(ctx) {
+  TEAM_OTHER_SOURCES_PEOPLE_GS_.forEach(function (personName) {
+    try {
+      if (wasChReportSentTodayGs_(TEAM_OTHER_FOLLOWUP_KIND_, 'team', personName)) { Logger.log('Team other-source 13:00 reply for ' + personName + ' already sent today.'); return; }
+      const day = istDayKeyGs_(ctx.now);
+      const morning = teamOtherReadMorningGs_(personName);
+      if (!morning || morning.day !== day || !(morning.leads || []).length) { Logger.log('Team other-source 13:00: no 10:00 email to ' + personName + ' today - nothing to follow up.'); return; }
+      const rowFor = leadRowFinderGs_(ctx.dataRows || [], ctx.colIndex);
+      const still = [];
+      let handled = 0;
+      morning.leads.forEach(function (e) {
+        const row = rowFor(e);
+        if (!row) { handled++; return; }
+        const re = recheckLoggedLeadGs_(row, ctx.colIndex, ctx.now, ctx.baselineMap);
+        if (!re.open || re.oppOrAbove || teamOtherRowHashGs_(row, ctx.colIndex) !== e.h) { handled++; return; }
+        still.push({ lead_id: e.lead_id, RM: re.RM || e.RM, source: e.source, status: overnightStatusLabelGs_(re.stage),
+          followup: overnightFollowupHintGs_(row, ctx.colIndex, ctx.now, (ctx.lastSnapshotMap || {})[String(e.lead_id)]) });
+      });
+      if (!still.length) {
+        Logger.log('Team other-source 13:00: all ' + morning.leads.length + ' of ' + personName + "'s 10:00 leads were handled - no reply.");
+        markChReportSentGs_(TEAM_OTHER_FOLLOWUP_KIND_, 'team', personName);
+        return;
+      }
+      const opts = teamOtherFollowupOptsGs_(personName, still, handled, morning.leads.length);
+      const to = TEST_MODE_OVERRIDE_EMAIL_ || morning.to;
+      const subject = morning.subject;
+      const leadIds = still.map(function (l) { return String(l.lead_id); });
+      emailLedgerTrackSendGs_(ctx.ledger, {
+        emailId: emailLedgerIdGs_(EMAIL_LEDGER_JOB_TEAM_OTHER_13_, day, 'team', 'TM', personName, to), job: EMAIL_LEDGER_JOB_TEAM_OTHER_13_, dayKey: day,
+        region: 'team', bucketLabel: personName, primaryRole: 'TM', to: to, cc: '', subject: subject, leadIds: leadIds,
+      }, function () {
+        const plain = plainTextReportGs_(opts), html = renderOvernightReportEmailHTML_(opts);
+        if (morning.threadId) {
+          try { return sendThreadedGmailReply_(morning.threadId, to, '', subject, plain, html); }
+          catch (err) {
+            if (err && err.blockedByGuard) throw err;
+            Logger.log('Team other-source 13:00: threaded reply failed (' + err + ') - sending it as a plain email instead.');
+          }
+        }
+        return sendGuardedEmailGs_({ to: to, subject: 'Re: ' + subject, plainBody: plain, htmlBody: html, leadIds: leadIds }, 'send team other-source 13:00 reply (' + personName + ')');
+      });
+      markChReportSentGs_(TEAM_OTHER_FOLLOWUP_KIND_, 'team', personName);
+    } catch (e) {
+      Logger.log('Team other-source 13:00 reply for ' + personName + ' failed: ' + e);
+      notifyOpsAlertGs_('Team other-source 13:00 reply ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + personName, [String((e && e.message) || e)]);
+    }
+  });
 }

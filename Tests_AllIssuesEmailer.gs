@@ -571,6 +571,115 @@ function runAllIssuesEmailerTests_() {
       }
     }
 
+    // ---- 2026-11-25 (user request, Akash A Ugale only): his team's other-source report, its own email ----
+    {
+      const tag = 'team other-source: ';
+      const savedPeople = TEAM_OTHER_SOURCES_PEOPLE_GS_.slice();
+      const savedIssue = primaryIssueGs_, savedFlags = computeSlaFlags_, savedTest = TEST_MODE_OVERRIDE_EMAIL_;
+      try {
+        // Team = the person, rows sharing their email, and everyone whose TL / TM / RH chain reaches them.
+        const rows = {
+          'test team lead': { role: 'TM', tl: '', tm: '', rh: '', email: TEST_EMAIL_PRIMARY_ },
+          'test team lead alias': { role: 'A1', tl: '', tm: '', rh: '', email: TEST_EMAIL_PRIMARY_ },
+          'test a1': { role: 'A1', tl: '', tm: 'Test Team Lead', rh: '', email: TEST_EMAIL_SECONDARY_ },
+          'test s1': { role: 'S1', tl: 'Test A1', tm: '', rh: '', email: '' },
+          'test outsider': { role: 'S1', tl: 'Someone Else', tm: '', rh: '', email: '' },
+        };
+        const team = teamOtherMembersGs_(rows, 'Test Team Lead');
+        TestAssertEqual_(Object.keys(team).sort().join(','), 'test a1,test s1,test team lead,test team lead alias', tag + 'team = person + same-email row + whole TL/TM chain');
+        TestAssert_(!isTeamOtherSourceGs_('google', 'Search') && !isTeamOtherSourceGs_('Google', 'Non-UTM') && isTeamOtherSourceGs_('google', 'Discovery') && isTeamOtherSourceGs_('meta', 'Non-UTM'),
+          tag + 'every source except Google Search / Google Non-UTM');
+        TestAssertEqual_([teamOtherSourceLabelGs_('google', 'Discovery'), teamOtherSourceLabelGs_('meta', 'Non-UTM'), teamOtherSourceLabelGs_('sms', 'Non-UTM')].join('|'),
+          'Google Discovery|Meta|SMS', tag + 'source labels');
+
+        // Whole send: only the team's open other-source leads in the window; one email a day; To the person only.
+        TEAM_OTHER_SOURCES_PEOPLE_GS_.length = 0; TEAM_OTHER_SOURCES_PEOPLE_GS_.push('Test Team Lead');
+        TEST_MODE_OVERRIDE_EMAIL_ = '';
+        PropertiesService = TestMockPropertiesService_();
+        const now = new Date();
+        const header = TestFixture_leadsHeader_();
+        const colIndex = buildColIndex_(header);
+        const mk = function (o) { return header.map(function (k) { return o[k] !== undefined ? o[k] : ''; }); };
+        const at = TestFixture_hoursAgo_(now, 2);
+        const dataRows = [
+          mk({ lead_id: 'L-TO-1', client_id: 'C-TO-1', RM: 'Test A1', lead_assigned_at: at, group_source: 'meta', source_bucket: 'Non-UTM', current_stage: 'Suspect' }),
+          mk({ lead_id: 'L-TO-2', client_id: 'C-TO-2', RM: 'Test A1', lead_assigned_at: at, group_source: 'google', source_bucket: 'Search', current_stage: 'Suspect' }),
+          mk({ lead_id: 'L-TO-3', client_id: 'C-TO-3', RM: 'Test Outsider', lead_assigned_at: at, group_source: 'meta', source_bucket: 'Non-UTM', current_stage: 'Suspect' }),
+          mk({ lead_id: 'L-TO-4', client_id: 'C-TO-4', RM: 'test s1', lead_assigned_at: at, group_source: 'portal', source_bucket: 'Non-UTM', current_stage: 'Suspect', closing_reason: 'Not Interested' }),
+          mk({ lead_id: 'L-TO-5', client_id: 'C-TO-5', RM: 'Test S1', lead_assigned_at: at, group_source: 'google', source_bucket: 'Discovery', current_stage: 'Not Updated' }),
+          mk({ lead_id: 'L-TO-6', client_id: 'C-TO-6', RM: 'Test S1', lead_assigned_at: TestFixture_daysAgo_(now, 9), group_source: 'meta', source_bucket: 'Non-UTM', current_stage: 'Suspect' }),
+        ];
+        const win = { from: TestFixture_hoursAgo_(now, 12), to: now };
+        const ctx = { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: { byRmNameLower: rows }, baselineMap: {}, lastSnapshotMap: {}, ledger: null };
+        let d0 = TestGmailLog_.drafts.length;
+        sendTeamOtherSourcesReportsGs_('overnight', ctx);
+        let sent = TestGmailLog_.drafts.slice(d0);
+        TestAssertEqual_(sent.length, 1, tag + '10:00: one email');
+        TestAssert_(sent.length === 1 && sent[0].subject.indexOf('(Test Team Lead) Team Other-Source Overnight Leads - ') === 0, tag + '10:00 subject (got: ' + (sent[0] && sent[0].subject) + ')');
+        TestAssert_(sent.length === 1 && String(sent[0].to).indexOf(TEST_EMAIL_PRIMARY_) !== -1 && !sent[0].cc, tag + 'To the person only, no Cc');
+        const body = sent.length ? sent[0].body : '';
+        TestAssert_(body.indexOf('L-TO-1') !== -1 && body.indexOf('L-TO-5') !== -1, tag + 'team Meta + Google Discovery leads are in');
+        TestAssert_(body.indexOf('L-TO-2') === -1 && body.indexOf('L-TO-3') === -1 && body.indexOf('L-TO-4') === -1 && body.indexOf('L-TO-6') === -1,
+          tag + 'Google Search, outsiders, closed leads and leads outside the window are left out');
+        d0 = TestGmailLog_.drafts.length;
+        sendTeamOtherSourcesReportsGs_('overnight', ctx);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + 'once a day');
+
+        // 13:00: a reply in the 10:00 thread with only the leads untouched since 10:00 (L-TO-1 got a comment; L-TO-5 did not).
+        const morningThread = sent.length ? sent[0]._threadId : '';
+        const savedGmail = typeof Gmail === 'undefined' ? undefined : Gmail;
+        Gmail = TestMockGmailAdvanced_();
+        try {
+          const touched = dataRows.map(function (r) { return r.slice(); });
+          touched[0][colIndex.internal_status_comments] = 'Test A1: [Call Connected] wants 2bhk - 2026-11-25 11:00';
+          const r0 = TestGmailLog_.threadReplies.length;
+          sendTeamOtherFollowupsGs_({ dataRows: touched, colIndex: colIndex, now: now, baselineMap: {}, lastSnapshotMap: {}, ledger: null });
+          const replies = TestGmailLog_.threadReplies.slice(r0);
+          TestAssertEqual_(replies.length, 1, tag + '13:00: one threaded reply');
+          TestAssert_(replies.length === 1 && replies[0].threadId === morningThread, tag + '13:00: in the 10:00 email\'s thread');
+          const mime = replies.length ? TestOE_decodeRawMime_(replies[0].raw) : '';
+          TestAssert_(mime.indexOf('L-TO-5') !== -1 && mime.indexOf('L-TO-1') === -1, tag + '13:00: only the untouched lead is listed');
+          const r1 = TestGmailLog_.threadReplies.length;
+          sendTeamOtherFollowupsGs_({ dataRows: touched, colIndex: colIndex, now: now, baselineMap: {}, lastSnapshotMap: {}, ledger: null });
+          TestAssertEqual_(TestGmailLog_.threadReplies.length, r1, tag + '13:00: once a day');
+          // everything handled -> no reply at all
+          PropertiesService = TestMockPropertiesService_();
+          teamOtherSaveMorningGs_('Test Team Lead', { day: istDayKeyGs_(now), threadId: morningThread, to: TEST_EMAIL_PRIMARY_, subject: 's',
+            leads: [{ lead_id: 'L-TO-1', RM: 'Test A1', source: 'Meta', h: 'old-fingerprint' }] });
+          const r2 = TestGmailLog_.threadReplies.length, d2 = TestGmailLog_.drafts.length;
+          sendTeamOtherFollowupsGs_({ dataRows: touched, colIndex: colIndex, now: now, baselineMap: {}, lastSnapshotMap: {}, ledger: null });
+          TestAssert_(TestGmailLog_.threadReplies.length === r2 && TestGmailLog_.drafts.length === d2, tag + '13:00: every lead handled -> no reply');
+          // no 10:00 email today -> nothing
+          PropertiesService = TestMockPropertiesService_();
+          sendTeamOtherFollowupsGs_({ dataRows: touched, colIndex: colIndex, now: now, baselineMap: {}, lastSnapshotMap: {}, ledger: null });
+          TestAssertEqual_(TestGmailLog_.threadReplies.length, r2, tag + '13:00: no 10:00 email today -> no reply');
+        } finally {
+          Gmail = savedGmail;
+          PropertiesService = TestMockPropertiesService_();
+        }
+
+        // 17:00: only leads with an SLA issue (the issue check is stubbed here: L-TO-5 flagged, L-TO-1 not).
+        computeSlaFlags_ = function (row, ci) { return { leadId: getVal_(row, ci, 'lead_id') }; };
+        primaryIssueGs_ = function (f) { return f.leadId === 'L-TO-5' ? { key: 'notUpdated', label: 'Not Updated' } : null; };
+        d0 = TestGmailLog_.drafts.length;
+        sendTeamOtherSourcesReportsGs_('issues', ctx);
+        sent = TestGmailLog_.drafts.slice(d0);
+        TestAssert_(sent.length === 1 && sent[0].subject.indexOf('Test Team Lead (Team) Other-Source Leads With Issue (') === 0, tag + '17:00: one email, its own subject');
+        TestAssert_(sent.length === 1 && sent[0].body.indexOf('L-TO-5') !== -1 && sent[0].body.indexOf('L-TO-1') === -1 && sent[0].body.indexOf('Not Updated') !== -1,
+          tag + '17:00: only the flagged lead, with its issue');
+        // nothing flagged -> no email at all
+        PropertiesService = TestMockPropertiesService_();
+        primaryIssueGs_ = function () { return null; };
+        d0 = TestGmailLog_.drafts.length;
+        sendTeamOtherSourcesReportsGs_('issues', ctx);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + '17:00: nothing flagged -> no email');
+      } finally {
+        TEAM_OTHER_SOURCES_PEOPLE_GS_.length = 0; savedPeople.forEach(function (p) { TEAM_OTHER_SOURCES_PEOPLE_GS_.push(p); });
+        primaryIssueGs_ = savedIssue; computeSlaFlags_ = savedFlags; TEST_MODE_OVERRIDE_EMAIL_ = savedTest;
+        PropertiesService = TestMockPropertiesService_();
+      }
+    }
+
     // ---- email audit P10 (F11): the CH-level issues report goes once a day per region + CH ----
     {
       const chRms = [{ rmName: 'Test CH Self', chName: 'Test CH Self', chEmail: TEST_EMAIL_CH_, chRole: 'Leadership' }];
