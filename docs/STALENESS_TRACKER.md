@@ -92,7 +92,7 @@ snippet text itself is the same every time — only the embedded payload changes
 
 | File | Confirmed-live sha | Confirmed on | Basis |
 |---|---|---|---|
-| `AllIssuesEmailer.gs` | `10858b4` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
+| `AllIssuesEmailer.gs` | `4d0507a` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `Core.gs` | `60832fe` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `CycleReport.gs` | `d9bb008` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `DailyChecklist.gs` | `6ca53d2` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
