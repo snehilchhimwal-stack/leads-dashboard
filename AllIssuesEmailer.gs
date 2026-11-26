@@ -1504,3 +1504,19 @@ function sendProjectFollowupsGs_(ctx) {
     }
   });
 }
+
+// Run by hand (Apps Script function dropdown, 2026-11-26 user request): sends ONLY the per-project 17:00 "Leads With Issue" emails, now -
+// no other email is sent or re-sent. The once-a-day guard still applies: a project already sent today is skipped, and one sent by this
+// is skipped by the next scheduled 17:00 run.
+function sendProjectReportsNow() {
+  withEmailJobLockGs_('sendProjectReportsNow', function () {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const now = new Date();
+    const leadsData = readLeadsTab_(ss);
+    const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
+    const ledger = emailLedgerOpenGs_(ss);
+    sendProjectReportsGs_('issues', { dataRows: leadsData.dataRows, colIndex: leadsData.colIndex, now: now, win: allIssuesWindowGs_(now),
+      baselineMap: movementMaps.baselineMap, lastSnapshotMap: movementMaps.lastSnapshotMap, ledger: ledger });
+    emailLedgerFinishGs_(ledger, 'sendProjectReportsNow');
+  });
+}
