@@ -97,7 +97,7 @@ function runCycleReportTests_() {
     // ================= the rendering (pure) =================
     const now = new Date('2026-10-09T16:35:00+05:30');
     const bad = cycleReportRenderGs_(data, now);
-    TestAssertEqual_(bad.subject, 'Email Ops cycle report 9 Oct 2026: 6 need attention (3 of 8 emails accepted by Gmail)', 'render: the subject counts the attention items plus serious incidents and states accepted of planned');
+    TestAssertEqual_(bad.subject, 'Email Ops cycle report 9 Oct 2026: 6 need attention (3 of 7 emails accepted by Gmail, 1 had nothing to send)', 'render: the subject counts the attention items plus serious incidents and states accepted of (planned minus skipped)');
     TestAssertContains_(bad.plainBody, 'Needs attention (4)', 'render: the attention table is present');
     TestAssertContains_(bad.plainBody, 'Incidents in this cycle (3)', 'render: the incident table is present');
     TestAssertContains_(bad.plainBody, 'Left out of emails', 'render: the exclusions table is present');
@@ -142,7 +142,7 @@ function runCycleReportTests_() {
     TestAssertContains_(bad.plainBody, '3 of 7 (43%) accepted by Gmail', 'render: the execution rate shows numerator and denominator');
     TestAssertContains_(bad.html, 'Daily Cycle Report', 'render: the HTML carries the title');
     const good = cycleReportRenderGs_(clean, now);
-    TestAssertEqual_(good.subject, 'Email Ops cycle report 9 Oct 2026: all clear (1 of 2 emails accepted by Gmail, 1 had nothing to send)', 'render: an all-clear subject says so and notes skipped emails');
+    TestAssertEqual_(good.subject, 'Email Ops cycle report 9 Oct 2026: all clear (1 of 1 emails accepted by Gmail, 1 had nothing to send)', 'render: an all-clear subject says so and notes skipped emails');
     TestAssert_(good.plainBody.indexOf('Needs attention') === -1, 'render: no attention table when there is nothing to attend to');
     const none = cycleReportRenderGs_(empty, now);
     TestAssertEqual_(none.subject, 'Email Ops cycle report 9 Oct 2026: no emails recorded in this cycle', 'render: an empty cycle is never called all clear');

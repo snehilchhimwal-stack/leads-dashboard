@@ -163,9 +163,12 @@ function cycleReportRenderGs_(data, now) {
   const fmt = function (d) { return Utilities.formatDate(d, 'Asia/Kolkata', 'd MMM HH:mm'); };
   const needs = data.attention.length + data.seriousIncidents;
   const dateLabel = Utilities.formatDate(now, 'Asia/Kolkata', 'd MMM yyyy');
+  // 2026-11-26 (user request): an email that was deliberately not sent (SKIPPED - e.g. a 13:00 reply with nothing left unresolved) is
+  // not counted against Gmail. "93 of 97 accepted" read as 4 failures; it is now "93 of 93 accepted, 4 had nothing to send".
+  const sentPart = t.accepted + ' of ' + data.attemptable + ' emails accepted by Gmail' + (t.skipped ? ', ' + t.skipped + ' had nothing to send' : '');
   const subject = 'Email Ops cycle report ' + dateLabel + ': ' + (data.empty ? 'no emails recorded in this cycle'
-    : data.allClear ? 'all clear (' + t.accepted + ' of ' + t.planned + ' emails accepted by Gmail' + (t.skipped ? ', ' + t.skipped + ' had nothing to send' : '') + ')'
-    : needs + ' need attention (' + t.accepted + ' of ' + t.planned + ' emails accepted by Gmail)');
+    : data.allClear ? 'all clear (' + sentPart + ')'
+    : needs + ' need attention (' + sentPart + ')');
 
   const sections = [];
   const jobRows = CYCLE_REPORT_JOB_ORDER_.concat(Object.keys(data.byJob).filter(function (j) { return CYCLE_REPORT_JOB_ORDER_.indexOf(j) === -1; }))
