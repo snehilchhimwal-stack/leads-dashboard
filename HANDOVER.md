@@ -1056,6 +1056,15 @@ each lead's row fingerprint (`teamOtherRowHashGs_`) in script property `TEAM_OTH
 reached Opportunity+ counts as handled. All handled -> no reply. Ledger job `teamOther13`. No other email changes. Not run by recovery runs. A person missing
 from RM_Hierarchy is skipped (logged); a send failure alerts ops.
 
+### Project reports - Danube Dubai Event, Vir Codename Opportunity (2026-11-26)
+
+`PROJECT_REPORTS_GS_` (end of AllIssuesEmailer.gs) lists projects with their own To/Cc. For each: 10:00 overnight leads
+(`sendProjectReportsGs_('overnight')`, from the 10:00 job), 13:00 reply in that thread with the leads untouched since 10:00
+(`sendProjectFollowupsGs_`, from the 13:00 job, same fingerprint check as the team report; morning record in script property
+`PROJECT_10_<project>`), 17:00 leads with an SLA issue in the 3-day window, flagged leads only (`sendProjectReportsGs_('issues')`).
+Every lead source; project matched case-insensitively on the `project` column. Ledger jobs `project10` / `project13` / `project17`;
+once a day via the CH-report guard (region 'project'). Not run by recovery runs. Add or change a project by editing the list.
+
 ### Suggested Follow-up: action first, with a deadline and the WhatsApp step (2026-11-25)
 
 `historyDecideGs_` (FollowupEngine.gs) and its twin `historyDecide` (js/core-outcome-engine.js) now write the follow-up as

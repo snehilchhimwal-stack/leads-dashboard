@@ -619,6 +619,8 @@ function sendAllIssuesEmails_(opts) {
   });
   // 2026-11-25 (user request, Akash A Ugale only): his team's other-source leads with an issue - its own email, after the normal ones.
   if (!recoverIds) sendTeamOtherSourcesReportsGs_('issues', { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: hierarchyData, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
+  // 2026-11-26 (user request): the per-project reports (Danube Dubai Event, Vir Codename Opportunity) - their own emails.
+  if (!recoverIds) sendProjectReportsGs_('issues', { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: hierarchyData, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
   pruneEmailLedgerGs_(ledger, now);
   emailLedgerFinishGs_(ledger, 'the 17:00 All-Issues run');
   Logger.log('[timing] sendAllIssuesEmails_ finished — total ' + elapsed_() + ', ' + bucketSentOkCount + ' of ' + bucketSendCount + ' bucket email(s) sent, ' + failedLeadEntries.length + ' lead(s) not sent');
@@ -1312,6 +1314,193 @@ function sendTeamOtherFollowupsGs_(ctx) {
     } catch (e) {
       Logger.log('Team other-source 13:00 reply for ' + personName + ' failed: ' + e);
       notifyOpsAlertGs_('Team other-source 13:00 reply ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + personName, [String((e && e.message) || e)]);
+    }
+  });
+}
+
+// ===== Project reports (2026-11-26, user request: Danube Dubai Event, Vir Codename Opportunity) =====
+// "All the leads under these projects must be checked for SLA, and those with issues must be highlighted." Decided with Snehil
+// 2026-11-26: one email per project at each step of the daily cycle, every lead source, fixed To/Cc per project:
+//   - 10:00: the project's overnight leads (same overnight window as the 10:00 digest), status + follow-up;
+//   - 13:00: a reply in that thread with the overnight leads still untouched since 10:00 (same check as the team report's);
+//   - 17:00: the project's leads with an SLA issue, assigned in the last 3 calendar days (same checks and window as the
+//     "Leads With Issue" email) - only the flagged leads are listed.
+// Runs after the normal emails; nothing else in any other email changes. A failure here only alerts ops.
+const PROJECT_REPORTS_GS_ = [
+  { project: 'Danube Dubai Event', to: 'shantanu.patil@homesfy.in',
+    cc: 'snehil.chhimwal@homesfy.in, mukesh.mishra@homesfy.in, saurabh.mishra@homesfy.in' },
+  { project: 'Vir Codename Opportunity', to: 'snehil.chhimwal@homesfy.in',
+    cc: 'manisha.r@homesfy.in, rajesh.muni@homesfy.in' },
+];
+const EMAIL_LEDGER_JOB_PROJECT_ = { issues: 'project17', overnight: 'project10', followup: 'project13' };
+const PROJECT_REPORT_KINDS_ = { issues: 'project17', overnight: 'project10', followup: 'project13' }; // once-a-day guard keys
+const PROJECT_MORNING_PROP_PREFIX_ = 'PROJECT_10_';
+
+// The project's open leads (any source) assigned inside `win`; kind 'issues' keeps only leads with an SLA issue. Pure apart from
+// the shared helpers. ctx: { dataRows, colIndex, now, baselineMap, lastSnapshotMap }.
+function projectReportLeadsGs_(kind, win, ctx, projectName) {
+  const want = String(projectName || '').trim().toLowerCase();
+  const out = [];
+  (ctx.dataRows || []).forEach(function (row) {
+    const colIndex = ctx.colIndex;
+    if (String(getVal_(row, colIndex, 'project') || '').trim().toLowerCase() !== want) return;
+    const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
+    if (!leadId) return;
+    const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+    const assigned = getVal_(row, colIndex, 'lead_assigned_at');
+    if (!(assigned instanceof Date) || assigned < win.from || assigned > win.to) return;
+    const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
+    if (!isOpenLead_(stage, getVal_(row, colIndex, 'closing_reason'), getVal_(row, colIndex, 'lead_closing_reason'))) return;
+    let issueLabel = '';
+    if (kind === 'issues') {
+      const issue = primaryIssueGs_(computeSlaFlags_(row, colIndex, ctx.now, ctx.baselineMap));
+      if (!issue) return;
+      issueLabel = issue.label;
+    }
+    const clientId = String(getVal_(row, colIndex, 'client_id') || '').trim();
+    out.push({
+      identityKey: (clientId || ('l:' + leadId)) + '|' + RM.toLowerCase(),
+      stageRank: FUNNEL_ORDER_.indexOf(canonicalStage_(stage) || ''),
+      lead_id: leadId, RM: RM, source: teamOtherSourceLabelGs_(getVal_(row, colIndex, 'group_source'), getVal_(row, colIndex, 'source_bucket')),
+      issueLabel: issueLabel, status: overnightStatusLabelGs_(stage),
+      followup: overnightFollowupHintGs_(row, colIndex, ctx.now, (ctx.lastSnapshotMap || {})[leadId]),
+      hash: kind === 'overnight' ? teamOtherRowHashGs_(row, colIndex) : '',
+    });
+  });
+  return dedupeEmailCandidatesGs_(out).leads;
+}
+
+// Email options for one project's 10:00 / 17:00 email. Pure.
+function projectReportOptsGs_(kind, projectName, leads, win, dateLabel) {
+  const byRm = {}, rms = [];
+  leads.forEach(function (l) { if (!byRm[l.RM]) { byRm[l.RM] = []; rms.push(l.RM); } byRm[l.RM].push(l); });
+  rms.sort(function (a, b) { return byRm[b].length - byRm[a].length || a.localeCompare(b); });
+  const issues = kind === 'issues';
+  const sources = Array.from(new Set(leads.map(function (l) { return l.source; }))).length;
+  return {
+    title: issues ? 'Project Leads With Issue' : 'Project Overnight Leads',
+    region: projectName,
+    subtitle: 'All lead sources · ' + (issues ? 'last 3 calendar days' : 'assigned overnight'),
+    kpis: [
+      { value: leads.length, label: issues ? (leads.length === 1 ? 'Lead Flagged' : 'Leads Flagged') : (leads.length === 1 ? 'Overnight Lead' : 'Overnight Leads'), bg: '#dbeafe', fg: '#2563eb' },
+      { value: rms.length, label: rms.length === 1 ? 'RM' : 'RMs', bg: '#e0e7ff', fg: '#4338ca' },
+      { value: sources, label: sources === 1 ? 'Source' : 'Sources', bg: '#fef3c7', fg: '#b45309' },
+    ],
+    action: issues ? 'Clear these flags - each is one of the Operations SLA checks (Inactive-RM Lead Added, Not Updated, No follow up in last 4 hours, Behind on Today\'s Calls, Stuck 48h+).'
+      : 'Make sure each of these is called today and the outcome is logged.',
+    sections: rms.map(function (rm) {
+      return {
+        heading: rm, subheading: byRm[rm].length + (byRm[rm].length === 1 ? ' lead' : ' leads'),
+        columns: issues ? ['Lead ID', 'Source', 'Issue', 'Status', 'Suggested Follow-up'] : ['Lead ID', 'Source', 'Status', 'Suggested Follow-up'],
+        rows: byRm[rm].map(function (l) { return issues ? [l.lead_id, l.source, l.issueLabel, l.status, l.followup] : [l.lead_id, l.source, l.status, l.followup]; }),
+      };
+    }),
+    footerNote: 'Covers every lead of the project ' + projectName + ', any source. ' + (issues ? 'Leads assigned ' + allIssuesDateRangeLabelGs_(win).replace(/[()]/g, '') +
+      ' (IST) that are open and flagged; leads with no issue are not listed.' : 'Leads assigned overnight (' + dateLabel + ' run), still open.'),
+  };
+}
+function projectReportSubjectGs_(kind, projectName, win, dateLabel) {
+  return kind === 'issues' ? projectName + ' - Leads With Issue ' + allIssuesDateRangeLabelGs_(win) : projectName + ' - Overnight Leads - ' + dateLabel;
+}
+function projectSaveMorningGs_(projectName, record) {
+  try { PropertiesService.getScriptProperties().setProperty(PROJECT_MORNING_PROP_PREFIX_ + String(projectName).toLowerCase(), JSON.stringify(record)); }
+  catch (e) { Logger.log('Project report: could not record the 10:00 leads for ' + projectName + ' (' + e + ') - no 13:00 reply today.'); }
+}
+function projectReadMorningGs_(projectName) {
+  try {
+    const v = PropertiesService.getScriptProperties().getProperty(PROJECT_MORNING_PROP_PREFIX_ + String(projectName).toLowerCase());
+    return v ? JSON.parse(v) : null;
+  } catch (e) { return null; }
+}
+
+// 10:00 ('overnight') and 17:00 ('issues'). Never throws. ctx: { dataRows, colIndex, now, win, baselineMap, lastSnapshotMap, ledger }.
+function sendProjectReportsGs_(kind, ctx) {
+  PROJECT_REPORTS_GS_.forEach(function (p) {
+    try {
+      const guardKind = PROJECT_REPORT_KINDS_[kind];
+      if (wasChReportSentTodayGs_(guardKind, 'project', p.project)) { Logger.log('Project report (' + kind + ') for ' + p.project + ' already sent today - not re-sending.'); return; }
+      const leads = projectReportLeadsGs_(kind, ctx.win, ctx, p.project);
+      if (!leads.length) { Logger.log('Project report (' + kind + ') for ' + p.project + ': no leads - nothing sent.'); return; }
+      const dateLabel = Utilities.formatDate(ctx.now, 'Asia/Kolkata', 'd MMM yyyy');
+      const opts = projectReportOptsGs_(kind, p.project, leads, ctx.win, dateLabel);
+      const subject = projectReportSubjectGs_(kind, p.project, ctx.win, dateLabel);
+      const to = TEST_MODE_OVERRIDE_EMAIL_ || p.to;
+      const cc = TEST_MODE_OVERRIDE_EMAIL_ ? '' : p.cc;
+      const job = EMAIL_LEDGER_JOB_PROJECT_[kind];
+      const day = istDayKeyGs_(ctx.now);
+      const leadIds = leads.map(function (l) { return String(l.lead_id); });
+      const sent = emailLedgerTrackSendGs_(ctx.ledger, {
+        emailId: emailLedgerIdGs_(job, day, 'project', 'Project', p.project, to), job: job, dayKey: day, region: 'project', bucketLabel: p.project,
+        primaryRole: 'Project', to: to, cc: cc, subject: subject, leadIds: leadIds,
+      }, function () {
+        return sendGuardedEmailGs_({ to: to, cc: cc, subject: subject, plainBody: plainTextReportGs_(opts), htmlBody: renderOvernightReportEmailHTML_(opts), leadIds: leadIds },
+          'send project report (' + p.project + ', ' + kind + ')');
+      });
+      if (kind === 'overnight') {
+        projectSaveMorningGs_(p.project, { day: day, threadId: emailLedgerSentIdsGs_(sent).threadId, to: to, cc: cc, subject: subject,
+          leads: leads.map(function (l) { return { lead_id: l.lead_id, RM: l.RM, source: l.source, h: l.hash }; }) });
+      }
+      markChReportSentGs_(guardKind, 'project', p.project);
+    } catch (e) {
+      Logger.log('Project report (' + kind + ') for ' + p.project + ' failed: ' + e);
+      notifyOpsAlertGs_('Project report ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + p.project + ' (' + kind + ')', [String((e && e.message) || e)]);
+    }
+  });
+}
+
+// 13:00: a reply in each project's 10:00 thread with its overnight leads still untouched. Never throws.
+// ctx: { dataRows, colIndex, now, baselineMap, lastSnapshotMap, ledger }.
+function sendProjectFollowupsGs_(ctx) {
+  PROJECT_REPORTS_GS_.forEach(function (p) {
+    try {
+      const guardKind = PROJECT_REPORT_KINDS_.followup;
+      if (wasChReportSentTodayGs_(guardKind, 'project', p.project)) { Logger.log('Project 13:00 reply for ' + p.project + ' already sent today.'); return; }
+      const day = istDayKeyGs_(ctx.now);
+      const morning = projectReadMorningGs_(p.project);
+      if (!morning || morning.day !== day || !(morning.leads || []).length) { Logger.log('Project 13:00: no 10:00 email for ' + p.project + ' today - nothing to follow up.'); return; }
+      const rowFor = leadRowFinderGs_(ctx.dataRows || [], ctx.colIndex);
+      const still = [];
+      let handled = 0;
+      morning.leads.forEach(function (e) {
+        const row = rowFor(e);
+        if (!row) { handled++; return; }
+        const re = recheckLoggedLeadGs_(row, ctx.colIndex, ctx.now, ctx.baselineMap);
+        if (!re.open || re.oppOrAbove || teamOtherRowHashGs_(row, ctx.colIndex) !== e.h) { handled++; return; }
+        still.push({ lead_id: e.lead_id, RM: re.RM || e.RM, source: e.source, status: overnightStatusLabelGs_(re.stage),
+          followup: overnightFollowupHintGs_(row, ctx.colIndex, ctx.now, (ctx.lastSnapshotMap || {})[String(e.lead_id)]) });
+      });
+      if (!still.length) {
+        Logger.log('Project 13:00: all ' + morning.leads.length + ' of ' + p.project + "'s 10:00 leads were handled - no reply.");
+        markChReportSentGs_(guardKind, 'project', p.project);
+        return;
+      }
+      const opts = teamOtherFollowupOptsGs_(p.project, still, handled, morning.leads.length);
+      opts.title = 'Still Untouched at 1 pm';
+      opts.region = p.project;
+      opts.footerNote = 'Project ' + p.project + ', any source. A lead counts as handled once anything on it changed after 10 am (a comment, a call, a stage), or it was closed or reached Opportunity.';
+      const to = TEST_MODE_OVERRIDE_EMAIL_ || morning.to;
+      const cc = TEST_MODE_OVERRIDE_EMAIL_ ? '' : (morning.cc || '');
+      const subject = morning.subject;
+      const leadIds = still.map(function (l) { return String(l.lead_id); });
+      const job = EMAIL_LEDGER_JOB_PROJECT_.followup;
+      emailLedgerTrackSendGs_(ctx.ledger, {
+        emailId: emailLedgerIdGs_(job, day, 'project', 'Project', p.project, to), job: job, dayKey: day, region: 'project', bucketLabel: p.project,
+        primaryRole: 'Project', to: to, cc: cc, subject: subject, leadIds: leadIds,
+      }, function () {
+        const plain = plainTextReportGs_(opts), html = renderOvernightReportEmailHTML_(opts);
+        if (morning.threadId) {
+          try { return sendThreadedGmailReply_(morning.threadId, to, cc, subject, plain, html); }
+          catch (err) {
+            if (err && err.blockedByGuard) throw err;
+            Logger.log('Project 13:00: threaded reply failed (' + err + ') - sending it as a plain email instead.');
+          }
+        }
+        return sendGuardedEmailGs_({ to: to, cc: cc, subject: 'Re: ' + subject, plainBody: plain, htmlBody: html, leadIds: leadIds }, 'send project 13:00 reply (' + p.project + ')');
+      });
+      markChReportSentGs_(guardKind, 'project', p.project);
+    } catch (e) {
+      Logger.log('Project 13:00 reply for ' + p.project + ' failed: ' + e);
+      notifyOpsAlertGs_('Project 13:00 reply ' + (e && e.blockedByGuard ? 'BLOCKED' : 'FAILED') + ' - ' + p.project, [String((e && e.message) || e)]);
     }
   });
 }

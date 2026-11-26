@@ -578,6 +578,82 @@ function runAllIssuesEmailerTests_() {
     TestAssertEqual_(followupCellHtmlGs_(followupWithAfterActionGs_('Call again before 7 pm. Reason.', 'Customer calls so far (all RMs): 3/5.')).indexOf('<b>Call again before 7 pm.</b>'), 0,
       'calls count: the bold stays on the action');
 
+    // ---- 2026-11-26 (user request): per-project reports (Danube Dubai Event, Vir Codename Opportunity) ----
+    {
+      const tag = 'project report: ';
+      const savedProjects = PROJECT_REPORTS_GS_.slice();
+      const savedIssue = primaryIssueGs_, savedFlags = computeSlaFlags_, savedTest = TEST_MODE_OVERRIDE_EMAIL_;
+      const savedGmail = typeof Gmail === 'undefined' ? undefined : Gmail;
+      try {
+        PROJECT_REPORTS_GS_.length = 0;
+        PROJECT_REPORTS_GS_.push({ project: 'Test Project One', to: TEST_EMAIL_PRIMARY_, cc: TEST_EMAIL_SECONDARY_ + ', ' + TEST_EMAIL_CH_ });
+        TEST_MODE_OVERRIDE_EMAIL_ = '';
+        PropertiesService = TestMockPropertiesService_();
+        Gmail = TestMockGmailAdvanced_();
+        const now = new Date();
+        const header = TestFixture_leadsHeader_();
+        const colIndex = buildColIndex_(header);
+        const mk = function (o) { return header.map(function (k) { return o[k] !== undefined ? o[k] : ''; }); };
+        const at = TestFixture_hoursAgo_(now, 2);
+        const dataRows = [
+          mk({ lead_id: 'L-PR-1', client_id: 'C-PR-1', RM: 'Any RM', project: 'Test Project One', lead_assigned_at: at, group_source: 'meta', source_bucket: 'Non-UTM', current_stage: 'Suspect' }),
+          mk({ lead_id: 'L-PR-2', client_id: 'C-PR-2', RM: 'Other RM', project: 'test project one ', lead_assigned_at: at, group_source: 'google', source_bucket: 'Search', current_stage: 'Suspect' }),
+          mk({ lead_id: 'L-PR-3', client_id: 'C-PR-3', RM: 'Any RM', project: 'Another Project', lead_assigned_at: at, group_source: 'meta', source_bucket: 'Non-UTM', current_stage: 'Suspect' }),
+          mk({ lead_id: 'L-PR-4', client_id: 'C-PR-4', RM: 'Any RM', project: 'Test Project One', lead_assigned_at: at, group_source: 'portal', source_bucket: 'Non-UTM', current_stage: 'Suspect', closing_reason: 'Not Interested' }),
+          mk({ lead_id: 'L-PR-5', client_id: 'C-PR-5', RM: 'Any RM', project: 'Test Project One', lead_assigned_at: TestFixture_daysAgo_(now, 9), group_source: 'meta', source_bucket: 'Non-UTM', current_stage: 'Suspect' }),
+        ];
+        const ctx = { dataRows: dataRows, colIndex: colIndex, now: now, win: { from: TestFixture_hoursAgo_(now, 12), to: now }, baselineMap: {}, lastSnapshotMap: {}, ledger: null };
+
+        // 10:00: one email per project, its own To/Cc, every source, only this project, open, in the window.
+        let d0 = TestGmailLog_.drafts.length;
+        sendProjectReportsGs_('overnight', ctx);
+        let sent = TestGmailLog_.drafts.slice(d0);
+        TestAssertEqual_(sent.length, 1, tag + '10:00: one email for the project');
+        TestAssert_(sent.length === 1 && sent[0].subject.indexOf('Test Project One - Overnight Leads - ') === 0, tag + '10:00 subject (got: ' + (sent[0] && sent[0].subject) + ')');
+        TestAssert_(sent.length === 1 && String(sent[0].to).indexOf(TEST_EMAIL_PRIMARY_) !== -1 && String(sent[0].cc).indexOf(TEST_EMAIL_SECONDARY_) !== -1 && String(sent[0].cc).indexOf(TEST_EMAIL_CH_) !== -1,
+          tag + 'To and Cc are the project\'s own');
+        const body = sent.length ? sent[0].body : '';
+        TestAssert_(body.indexOf('L-PR-1') !== -1 && body.indexOf('L-PR-2') !== -1, tag + 'every source of the project is in (Meta and Google Search), project name matched case-insensitively');
+        TestAssert_(body.indexOf('L-PR-3') === -1 && body.indexOf('L-PR-4') === -1 && body.indexOf('L-PR-5') === -1, tag + 'other projects, closed leads and leads outside the window are left out');
+        d0 = TestGmailLog_.drafts.length;
+        sendProjectReportsGs_('overnight', ctx);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + 'once a day');
+
+        // 13:00: reply in the 10:00 thread, only the untouched leads (L-PR-1 got a comment).
+        const touched = dataRows.map(function (r) { return r.slice(); });
+        touched[0][colIndex.internal_status_comments] = 'Any RM: [Call Connected] wants 2bhk - 2026-11-26 11:00';
+        const r0 = TestGmailLog_.threadReplies.length;
+        sendProjectFollowupsGs_({ dataRows: touched, colIndex: colIndex, now: now, baselineMap: {}, lastSnapshotMap: {}, ledger: null });
+        const replies = TestGmailLog_.threadReplies.slice(r0);
+        TestAssert_(replies.length === 1 && replies[0].threadId === sent[0]._threadId, tag + '13:00: one reply, in the 10:00 thread');
+        const mime = replies.length ? TestOE_decodeRawMime_(replies[0].raw) : '';
+        TestAssert_(mime.indexOf('L-PR-2') !== -1 && mime.indexOf('L-PR-1') === -1, tag + '13:00: only the untouched lead is listed');
+        TestAssert_(/\r\nCc: [^\r\n]*snehil\.chhimwal\+test2@gmail\.com/.test(mime), tag + '13:00: the reply keeps the project\'s Cc');
+
+        // 17:00: only flagged leads (stubbed: L-PR-2 flagged).
+        computeSlaFlags_ = function (row, ci) { return { leadId: getVal_(row, ci, 'lead_id') }; };
+        primaryIssueGs_ = function (f) { return f.leadId === 'L-PR-2' ? { key: 'notUpdated', label: 'Not Updated' } : null; };
+        d0 = TestGmailLog_.drafts.length;
+        sendProjectReportsGs_('issues', ctx);
+        sent = TestGmailLog_.drafts.slice(d0);
+        TestAssert_(sent.length === 1 && sent[0].subject.indexOf('Test Project One - Leads With Issue (') === 0, tag + '17:00: one email, its own subject');
+        TestAssert_(sent.length === 1 && sent[0].body.indexOf('L-PR-2') !== -1 && sent[0].body.indexOf('L-PR-1') === -1 && sent[0].body.indexOf('Not Updated') !== -1,
+          tag + '17:00: only the flagged lead, with its issue');
+        PropertiesService = TestMockPropertiesService_();
+        primaryIssueGs_ = function () { return null; };
+        d0 = TestGmailLog_.drafts.length;
+        sendProjectReportsGs_('issues', ctx);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + '17:00: nothing flagged -> no email');
+        // The real configuration: the two projects the user asked for, with their own recipients.
+        TestAssertEqual_(savedProjects.map(function (x) { return x.project + ' -> ' + x.to; }).join(' | '),
+          'Danube Dubai Event -> shantanu.patil@homesfy.in | Vir Codename Opportunity -> snehil.chhimwal@homesfy.in', tag + 'configured projects and recipients');
+      } finally {
+        PROJECT_REPORTS_GS_.length = 0; savedProjects.forEach(function (x) { PROJECT_REPORTS_GS_.push(x); });
+        primaryIssueGs_ = savedIssue; computeSlaFlags_ = savedFlags; TEST_MODE_OVERRIDE_EMAIL_ = savedTest; Gmail = savedGmail;
+        PropertiesService = TestMockPropertiesService_();
+      }
+    }
+
     // ---- 2026-11-25 (user request, Akash A Ugale only): his team's other-source report, its own email ----
     {
       const tag = 'team other-source: ';

@@ -1378,6 +1378,8 @@ function sendOvernightMorningEmailsBody_(opts) {
   notifyLeadSendFailuresGs_(failedLeadEntries);
   // 2026-11-25 (user request, Akash A Ugale only): his team's overnight other-source leads - its own email (AllIssuesEmailer.gs).
   if (!recoverIds) sendTeamOtherSourcesReportsGs_('overnight', { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: hierarchyData, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
+  // 2026-11-26 (user request): the per-project 10:00 reports (AllIssuesEmailer.gs).
+  if (!recoverIds) sendProjectReportsGs_('overnight', { dataRows: dataRows, colIndex: colIndex, now: now, win: win, hierarchyData: hierarchyData, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
   emailLedgerFinishGs_(ledger, recoverIds ? 'the 10:00 recovery run' : 'the 10:00 morning run');
 }
 
@@ -2303,6 +2305,8 @@ function sendOvernightFollowupEmails_(opts) {
   }
   // 2026-11-25 (user request, Akash A Ugale only): the 13:00 reply to his team's other-source 10:00 email (AllIssuesEmailer.gs).
   if (!recoverIds) sendTeamOtherFollowupsGs_({ dataRows: dataRows, colIndex: colIndex, now: now, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
+  // 2026-11-26 (user request): the per-project 13:00 replies (AllIssuesEmailer.gs).
+  if (!recoverIds) sendProjectFollowupsGs_({ dataRows: dataRows, colIndex: colIndex, now: now, baselineMap: baselineMap, lastSnapshotMap: lastSnapshotMap, ledger: ledger });
   emailLedgerFinishGs_(ledger, recoverIds ? 'the 13:00 recovery run' : 'the 13:00 follow-up run');
 }
 
