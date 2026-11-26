@@ -1329,16 +1329,19 @@ function sendTeamOtherFollowupsGs_(ctx) {
 const PROJECT_REPORTS_GS_ = [
   { project: 'Danube Dubai Event', to: 'shantanu.patil@homesfy.in',
     cc: 'snehil.chhimwal@homesfy.in, mukesh.mishra@homesfy.in, saurabh.mishra@homesfy.in' },
+  // 2026-11-26 (user): Vir - only the Pre Sales team's leads, not the other RMs' (isPreSalesRmGs_, DailyRmIssueLog.gs: RM_Hierarchy team
+  // "Pre Sales", or a TL/TM/RH/CH on that team).
   { project: 'Vir Codename Opportunity', to: 'snehil.chhimwal@homesfy.in',
-    cc: 'manisha.r@homesfy.in, rajesh.muni@homesfy.in' },
+    cc: 'manisha.r@homesfy.in, rajesh.muni@homesfy.in', preSalesOnly: true },
 ];
 const EMAIL_LEDGER_JOB_PROJECT_ = { issues: 'project17', overnight: 'project10', followup: 'project13' };
 const PROJECT_REPORT_KINDS_ = { issues: 'project17', overnight: 'project10', followup: 'project13' }; // once-a-day guard keys
 const PROJECT_MORNING_PROP_PREFIX_ = 'PROJECT_10_';
 
 // The project's open leads (any source) assigned inside `win`; kind 'issues' keeps only leads with an SLA issue. Pure apart from
-// the shared helpers. ctx: { dataRows, colIndex, now, baselineMap, lastSnapshotMap }.
-function projectReportLeadsGs_(kind, win, ctx, projectName) {
+// the shared helpers. ctx: { dataRows, colIndex, now, baselineMap, lastSnapshotMap, hierarchyData }. rmFilter (optional): RM name ->
+// keep?, e.g. the Pre Sales team only.
+function projectReportLeadsGs_(kind, win, ctx, projectName, rmFilter) {
   const want = String(projectName || '').trim().toLowerCase();
   const out = [];
   (ctx.dataRows || []).forEach(function (row) {
@@ -1347,6 +1350,7 @@ function projectReportLeadsGs_(kind, win, ctx, projectName) {
     const leadId = String(getVal_(row, colIndex, 'lead_id') || '').trim();
     if (!leadId) return;
     const RM = String(getVal_(row, colIndex, 'RM') || '').trim() || 'Unassigned';
+    if (rmFilter && !rmFilter(RM)) return;
     const assigned = getVal_(row, colIndex, 'lead_assigned_at');
     if (!(assigned instanceof Date) || assigned < win.from || assigned > win.to) return;
     const stage = String(getVal_(row, colIndex, 'current_stage') || '').trim();
@@ -1419,10 +1423,18 @@ function sendProjectReportsGs_(kind, ctx) {
     try {
       const guardKind = PROJECT_REPORT_KINDS_[kind];
       if (wasChReportSentTodayGs_(guardKind, 'project', p.project)) { Logger.log('Project report (' + kind + ') for ' + p.project + ' already sent today - not re-sending.'); return; }
-      const leads = projectReportLeadsGs_(kind, ctx.win, ctx, p.project);
+      let rmFilter = null;
+      if (p.preSalesOnly) {
+        const byRm = ctx.hierarchyData && ctx.hierarchyData.byRmNameLower;
+        // Without RM_Hierarchy the team cannot be told apart - send nothing rather than every RM's leads.
+        if (!byRm) { Logger.log('Project report (' + kind + ') for ' + p.project + ': RM_Hierarchy not loaded, cannot limit to Pre Sales - skipped.'); return; }
+        rmFilter = function (rm) { return isPreSalesRmGs_(byRm, rm); };
+      }
+      const leads = projectReportLeadsGs_(kind, ctx.win, ctx, p.project, rmFilter);
       if (!leads.length) { Logger.log('Project report (' + kind + ') for ' + p.project + ': no leads - nothing sent.'); return; }
       const dateLabel = Utilities.formatDate(ctx.now, 'Asia/Kolkata', 'd MMM yyyy');
       const opts = projectReportOptsGs_(kind, p.project, leads, ctx.win, dateLabel);
+      if (p.preSalesOnly) { opts.subtitle = 'Pre Sales team only · ' + opts.subtitle; opts.footerNote = opts.footerNote.replace(', any source.', ', any source, Pre Sales team RMs only.'); }
       const subject = projectReportSubjectGs_(kind, p.project, ctx.win, dateLabel);
       const to = TEST_MODE_OVERRIDE_EMAIL_ || p.to;
       const cc = TEST_MODE_OVERRIDE_EMAIL_ ? '' : p.cc;
@@ -1515,8 +1527,9 @@ function sendProjectReportsNow() {
     const leadsData = readLeadsTab_(ss);
     const movementMaps = withRetry_(function () { return buildMovementLogMapsGs_(ss, now); }, 'buildMovementLogMapsGs_');
     const ledger = emailLedgerOpenGs_(ss);
+    const hierarchyData = withRetry_(function () { return loadRmHierarchyAndEmails_(ss); }, 'loadRmHierarchyAndEmails_');
     sendProjectReportsGs_('issues', { dataRows: leadsData.dataRows, colIndex: leadsData.colIndex, now: now, win: allIssuesWindowGs_(now),
-      baselineMap: movementMaps.baselineMap, lastSnapshotMap: movementMaps.lastSnapshotMap, ledger: ledger });
+      hierarchyData: hierarchyData, baselineMap: movementMaps.baselineMap, lastSnapshotMap: movementMaps.lastSnapshotMap, ledger: ledger });
     emailLedgerFinishGs_(ledger, 'sendProjectReportsNow');
   });
 }

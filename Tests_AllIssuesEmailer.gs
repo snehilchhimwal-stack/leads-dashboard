@@ -644,6 +644,24 @@ function runAllIssuesEmailerTests_() {
         d0 = TestGmailLog_.drafts.length;
         sendProjectReportsGs_('issues', ctx);
         TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + '17:00: nothing flagged -> no email');
+        // Pre Sales only (Vir): leads of RMs outside the Pre Sales team are left out; without RM_Hierarchy nothing is sent.
+        PropertiesService = TestMockPropertiesService_();
+        PROJECT_REPORTS_GS_[0].preSalesOnly = true;
+        const hier = { byRmNameLower: {
+          'any rm': { team: 'Pre Sales', role: 'S1', tl: '', tm: '', rh: '', ch: '', email: '' },
+          'other rm': { team: 'Western', role: 'S1', tl: '', tm: '', rh: '', ch: '', email: '' } } };
+        primaryIssueGs_ = function () { return { key: 'notUpdated', label: 'Not Updated' }; };
+        d0 = TestGmailLog_.drafts.length;
+        sendProjectReportsGs_('issues', Object.assign({}, ctx, { hierarchyData: hier }));
+        sent = TestGmailLog_.drafts.slice(d0);
+        TestAssert_(sent.length === 1 && sent[0].body.indexOf('L-PR-1') !== -1 && sent[0].body.indexOf('L-PR-2') === -1 && sent[0].body.indexOf('Pre Sales team only') !== -1,
+          tag + 'Pre Sales only: the Western RM\'s lead is left out');
+        PropertiesService = TestMockPropertiesService_();
+        d0 = TestGmailLog_.drafts.length;
+        sendProjectReportsGs_('issues', ctx);
+        TestAssertEqual_(TestGmailLog_.drafts.length, d0, tag + 'Pre Sales only without RM_Hierarchy -> nothing sent (never every RM)');
+        TestAssert_(savedProjects.some(function (x) { return x.project === 'Vir Codename Opportunity' && x.preSalesOnly === true; }) &&
+          savedProjects.some(function (x) { return x.project === 'Danube Dubai Event' && !x.preSalesOnly; }), tag + 'Vir is Pre Sales only, Danube is every RM');
         // The real configuration: the two projects the user asked for, with their own recipients.
         TestAssertEqual_(savedProjects.map(function (x) { return x.project + ' -> ' + x.to; }).join(' | '),
           'Danube Dubai Event -> shantanu.patil@homesfy.in | Vir Codename Opportunity -> snehil.chhimwal@homesfy.in', tag + 'configured projects and recipients');
