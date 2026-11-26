@@ -558,6 +558,14 @@ function runEmailLifecycleMatrixTests_() {
       const head = mime.split('\r\n\r\n')[0].split('\r\n');
       TestAssert_(!head.some(function (l) { return /^bcc:/i.test(l); }), 'M10: the raw threaded reply has no Bcc header');
       TestAssertEqual_(head.filter(function (l) { return /^subject:/i.test(l); }).length + ',' + head.filter(function (l) { return /^to:/i.test(l); }).join(''), '1,To: ' + TEST_EMAIL_PRIMARY_, 'M10: exactly one Subject header and To is only the recipient');
+      // 2026-11-25: the threaded reply carries the same sender name as every other automated email.
+      const savedSession = typeof Session === 'undefined' ? undefined : Session;
+      Session = { getEffectiveUser: function () { return { getEmail: function () { return 'ops-account@example.com'; } }; } };
+      try {
+        sendThreadedGmailReply_('t-from', TEST_EMAIL_PRIMARY_, '', 'Re: Y', 'L-2 plain', '<p>L-2</p>');
+        const head2 = TestOE_decodeRawMime_(TestGmailLog_.threadReplies[TestGmailLog_.threadReplies.length - 1].raw).split('\r\n\r\n')[0].split('\r\n');
+        TestAssertEqual_(head2.filter(function (l) { return /^from:/i.test(l); }).join('|'), 'From: "Homesfy Lead Ops" <ops-account@example.com>', 'sender: the 13:00 threaded reply is sent as Homesfy Lead Ops');
+      } finally { Session = savedSession; }
     }
 
     // ================= M11: IST day boundaries =================

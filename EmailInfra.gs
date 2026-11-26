@@ -984,6 +984,9 @@ function sendBlockedErrorGs_(label, problems, missingLeadIds) {
 
 // THE single sender for every report email: validate the exact payload, then draft+send it with the retry rules in
 // withSendRetry_. Throws (never sends) when the payload fails validation.
+// The display name every automated email is sent under ("Homesfy Lead Ops <the script account>"). 2026-11-25: one definition, also used
+// by the hand-built 13:00 threaded replies (sendThreadedGmailReply_), which showed the account owner's own name instead.
+const EMAIL_SENDER_NAME_GS_ = 'Homesfy Lead Ops';
 function sendGuardedEmailGs_(msg, label) {
   // Email Ops EO-13 (decision D9, EmailReroute.gs): a recipient whose address bounced is swapped for the person next in the hierarchy (or the ops address) BEFORE the gate,
   // so the gate validates the payload that is really sent. Returns the message untouched when no re-route applies or anything goes wrong.
@@ -992,7 +995,7 @@ function sendGuardedEmailGs_(msg, label) {
   if (prepared.problems.length) throw sendBlockedErrorGs_(label, prepared.problems, prepared.missingLeadIds);
   emailSendBudgetTakeGs_(label); // S-3: per-run cap
   const m = prepared.msg;
-  const options = { name: 'Homesfy Lead Ops' };
+  const options = { name: EMAIL_SENDER_NAME_GS_ };
   if (m.cc) options.cc = m.cc;
   if (m.htmlBody !== undefined) options.htmlBody = m.htmlBody;
   // EI-5 (2026-11-05, user decision): before a retry, the draft the FAILED attempt created is deleted - through the object this

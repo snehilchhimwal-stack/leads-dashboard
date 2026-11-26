@@ -1581,7 +1581,11 @@ function sendThreadedGmailReply_(threadId, to, cc, subject, plainBody, htmlBody)
   const originalMessageId = messageIdHeader ? messageIdHeader.value : null;
 
   const boundary = 'homesfy_' + Utilities.getUuid().replace(/-/g, '');
+  // 2026-11-25 (user report): without a From header Gmail shows the account owner's own name on the 13:00 reply, while the 10:00
+  // email (GmailApp, options.name) shows "Homesfy Lead Ops". Same sender name here; the address is the script account itself.
+  const ownAddress = emailSweepOwnAddressGs_();
   const headerLines = [
+    ownAddress ? 'From: "' + EMAIL_SENDER_NAME_GS_ + '" <' + ownAddress + '>' : null,
     'To: ' + to,
     cc ? 'Cc: ' + cc : null,
     'Subject: ' + mimeSubjectHeaderValueGs_(subject), // OE-13: RFC 2047 when non-ASCII
