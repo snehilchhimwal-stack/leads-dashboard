@@ -94,7 +94,7 @@ snippet text itself is the same every time — only the embedded payload changes
 |---|---|---|---|
 | `AllIssuesEmailer.gs` | `ddc86aa` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `Core.gs` | `60832fe` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
-| `CycleReport.gs` | `6ca53d2` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
+| `CycleReport.gs` | `d9bb008` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `DailyChecklist.gs` | `6ca53d2` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `DailyRmIssueLog.gs` | `abb3a87` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
 | `EmailInfra.gs` | `7fbe2d0` | 2026-11-26 | read directly from the live editor by hash-match (2026-11-26) |
